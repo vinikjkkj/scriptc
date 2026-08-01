@@ -1109,11 +1109,18 @@ function backEdgeUseOffence7(
  *    the closing edge's bindings are used only in deferred positions.
  * Tarjan SCCs (lazy, rooted at each queried importer) and cluster
  * verdicts are memoized across calls, so `edgesOf` must answer the same
- * edges for the same file every time. */
+ * edges for the same file every time.
+ *
+ * `stack` is the caller's live DFS path (roots first). ES-module bodies
+ * evaluate in DFS POSTORDER, so the cluster's shallowest member on that
+ * path — the module the walk ENTERED the cluster through — is the last
+ * of them to run, with every other member already done. Its top level
+ * therefore cannot observe a partial initialization, and it is exempt
+ * from the inert-top-level bar the other members must meet. */
 export function makeCycleAdmission(
   program: ts.Program,
   edgesOf: (sf: ts.SourceFile) => readonly CycleEdge[],
-): (importer: ts.SourceFile, e: CycleEdge) => string | null {
+): (importer: ts.SourceFile, e: CycleEdge, stack: readonly ts.SourceFile[]) => string | null {
   // Tarjan over the same edges the order walk uses (self-edges skipped —
   // Node's self-reference rule makes those benign before admission is
   // ever asked). State persists across lazily-added roots: a later
@@ -1160,7 +1167,7 @@ export function makeCycleAdmission(
   // reason the cluster's cycles stay fenced, or null when its every
   // member passes the inert-top-level bar.
   const sccVerdict = new Map<ts.SourceFile[], string | null>();
-  return (importer: ts.SourceFile, e: CycleEdge): string | null => {
+  return (importer: ts.SourceFile, e: CycleEdge, stack: readonly ts.SourceFile[]): string | null => {
     if (e.stmt === undefined) return "the cycle closes through a require() edge";
     // Cheap per-edge admission: nothing readable binds through the edge.
     if (ts.isImportDeclaration(e.stmt)) {
@@ -1181,12 +1188,20 @@ export function makeCycleAdmission(
       return "the cycle's module cluster could not be analyzed";
     }
     if (!sccVerdict.has(comp)) {
+      // The cluster member the walk entered through: the shallowest one on
+      // the live DFS path. Postorder evaluation runs it LAST among the
+      // cluster, so nothing is mid-initialization when its body executes
+      // and its top level need not be inert. Every back edge of one
+      // cluster is discovered while that same module sits on the path, so
+      // the exemption is stable across the memoized verdict.
+      const entered = stack.find((m) => comp.includes(m)) ?? null;
       let reason: string | null = null;
       for (const m of comp) {
         if (isCjsJsFile7(m)) {
           reason = `${m.fileName} is a CommonJS module — admission covers ES-module cycles only`;
           break;
         }
+        if (m === entered) continue;
         const off = nonInertTopLevel7(program, m);
         if (off !== null) {
           reason = `top-level code at ${lineOf(off)} can run user code during the cycle's init window — only declaration-only module bodies are admitted`;
@@ -2108,9 +2123,13 @@ function preflight7(load: LoadResult): {
   const order: ts.SourceFile[] = [];
   const state = new Map<ts.SourceFile, "visiting" | "done">();
   const stack: string[] = [];
+  /** The same live path as `stack`, as SourceFiles — the cycle admission
+   * reads it to find which cluster member the walk entered through. */
+  const sfStack: ts.SourceFile[] = [];
   const visit = (sf: ts.SourceFile): void => {
     state.set(sf, "visiting");
     stack.push(sf.fileName);
+    sfStack.push(sf);
     for (const e of edges.get(sf) ?? []) {
       if (e.dep === sf) continue; // self-import: a Node cache hit, not a cycle
       const s = state.get(e.dep);
@@ -2120,7 +2139,7 @@ function preflight7(load: LoadResult): {
         // already evaluating) — benign exactly when nothing can observe
         // the partial initialization through this edge's bindings, by the
         // cheap per-edge rule or the declaration-only init window rule.
-        const reason = cycleAdmissionReason(sf, e);
+        const reason = cycleAdmissionReason(sf, e, sfStack);
         if (reason !== null) {
           const cycleStart = stack.indexOf(e.dep.fileName);
           const cycle = [...stack.slice(cycleStart), e.dep.fileName].join(" → ");
@@ -2137,6 +2156,7 @@ function preflight7(load: LoadResult): {
       visit(e.dep);
     }
     stack.pop();
+    sfStack.pop();
     state.set(sf, "done");
     order.push(sf);
   };

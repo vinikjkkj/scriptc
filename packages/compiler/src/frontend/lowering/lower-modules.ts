@@ -139,17 +139,21 @@ export interface FileParts {
           : [],
       );
     const cycleAdmissionReason = makeCycleAdmission(program, staticEdgesOf);
+    /** The same live path as `stack`, as SourceFiles — the cycle
+     * admission reads it to find the entered cluster member. */
+    const sfStack: ts.SourceFile[] = [];
     const visit = (sf: ts.SourceFile): void => {
       if (state.get(sf) !== undefined) return;
       state.set(sf, "visiting");
       stack.push(sf.fileName);
+      sfStack.push(sf);
       for (const e of staticEdgesOf(sf)) {
         const s = state.get(e.dep);
         if (s === "done") continue;
         if (s === "visiting") {
           // A back edge: Node answers it from the cache. Same admission
           // question as preflight's static walk, same fence when refused.
-          const reason = cycleAdmissionReason(sf, e);
+          const reason = cycleAdmissionReason(sf, e, sfStack);
           if (reason !== null) {
             const cycleStart = stack.indexOf(e.dep.fileName);
             onCycle([...stack.slice(cycleStart), e.dep.fileName].join(" → "), reason);
@@ -159,6 +163,7 @@ export interface FileParts {
         visit(e.dep);
       }
       stack.pop();
+      sfStack.pop();
       state.set(sf, "done");
       added.push(sf);
     };
