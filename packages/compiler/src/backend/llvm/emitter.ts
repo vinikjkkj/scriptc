@@ -367,6 +367,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "crypto.randomBytes": "scr_crypto_random_bytes",
   "crypto.randomInt": "scr_crypto_random_int",
   "crypto.randomIntAsync": "scr_crypto_random_int_async",
+  "crypto.pbkdf2Sha256": "scr_crypto_pbkdf2_sha256",
+  "crypto.pbkdf2Sha256Async": "scr_crypto_pbkdf2_sha256_async",
   "crypto.randomBytesToString": "scr_crypto_random_string",
   "crypto.randomUUID": "scr_crypto_random_uuid",
   "crypto.hashDigestStr": "scr_crypto_hash_digest_str",

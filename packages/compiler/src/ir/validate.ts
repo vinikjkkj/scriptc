@@ -695,6 +695,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "crypto.randomBytes": { argTypes: [F64], result: BYTES_U8 },
   "crypto.randomInt": { argTypes: [F64, F64], result: F64 },
   "crypto.randomIntAsync": { argTypes: [F64, F64], result: { kind: "promise", inner: F64 } },
+  "crypto.pbkdf2Sha256": { argTypes: [BYTES_U8, BYTES_U8, F64, F64], result: BYTES_U8 },
+  "crypto.pbkdf2Sha256Async": { argTypes: [BYTES_U8, BYTES_U8, F64, F64], result: { kind: "promise", inner: BYTES_U8 } },
   "crypto.hashDigestStr": { argTypes: [STRING, STRING, STRING], result: STRING },
   "crypto.hashDigestBytes": { argTypes: [STRING, BYTES_U8, STRING], result: STRING },
   // The Buffer statics and the fs/zlib Buffer forms: fixed always-u8
