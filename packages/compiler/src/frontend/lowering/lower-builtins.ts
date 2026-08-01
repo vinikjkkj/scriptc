@@ -2446,7 +2446,18 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * initializers, so the ordinary declaration paths apply. */
   export function isPromisifyCall(L: Lowerer, init: ts.Expression): ts.CallExpression | null {
     let e: ts.Expression = init;
-    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    // The type-level wrappers peel too: `promisify(randomInt) as (min:
+    // number, max: number) => Promise<number>` is the shape a promisified
+    // binding takes whenever the overload's inferred signature needs
+    // pinning, and it is a cast around the SAME call.
+    while (
+      ts.isParenthesizedExpression(e) ||
+      ts.isAsExpression(e) ||
+      ts.isSatisfiesExpression(e) ||
+      ts.isTypeAssertion(e)
+    ) {
+      e = e.expression;
+    }
     if (!ts.isCallExpression(e) || e.questionDotToken) return null;
     if (!ts.isIdentifier(e.expression)) return null;
     const bi = L.builtinImportOf(e.expression);
@@ -2495,25 +2506,38 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * the targets whose work is a synchronous lowering behind a settled
    * promise. Each entry's result type is `promise<bytes<u8>>`; a target
    * with a different shape wants its own arm at the call site. */
-  const PROMISIFY_SETTLED: Record<string, IrLibFn | undefined> = {
-    "zlib.deflate": "zlib.deflateAsync",
-    "zlib.unzip": "zlib.unzipAsync",
+  export interface PromisifiedTarget {
+    fn: IrLibFn;
+    /** The lowered parameter types, in order — the call must pass exactly
+     * these (Node's callback form takes an options argument too; passing
+     * one fences rather than dropping settings that change the result). */
+    params: IrType[];
+    /** The promise's payload type. */
+    inner: IrType;
+  }
+
+  const PROMISIFY_SETTLED: Record<string, PromisifiedTarget | undefined> = {
+    "zlib.deflate": { fn: "zlib.deflateAsync", params: [BYTES_U8], inner: BYTES_U8 },
+    "zlib.unzip": { fn: "zlib.unzipAsync", params: [BYTES_U8], inner: BYTES_U8 },
+    "crypto.randomInt": { fn: "crypto.randomIntAsync", params: [F64, F64], inner: F64 },
   };
 
   /** A call THROUGH a settled-promise promisified binding: one libCall of
    * the mapped fn over the single bytes argument. Node's callback form
    * takes an options object too; a call that passes one fences rather
    * than dropping settings that change the output. */
-  export function lowerPromisifiedSettledCall(L: Lowerer, expr: ts.CallExpression, fn: IrLibFn, loc: SrcLoc): IrExpr {
-    if (expr.arguments.length !== 1 || expr.arguments.some(ts.isSpreadElement)) {
+  export function lowerPromisifiedSettledCall(L: Lowerer, expr: ts.CallExpression, target: PromisifiedTarget, loc: SrcLoc): IrExpr {
+    const name = target.fn.replace(/^[a-z]+\./, "").replace(/Async$/, "");
+    if (expr.arguments.length !== target.params.length || expr.arguments.some(ts.isSpreadElement)) {
       L.noLowering(
-        `the promisified ${fn.slice("zlib.".length).replace(/Async$/, "")} with this argument shape`,
+        `the promisified ${name} with this argument shape`,
         expr,
-        "the supported form passes just the buffer — an options argument would change the output",
+        `the supported form passes exactly ${target.params.length} argument${target.params.length === 1 ? "" : "s"} — ` +
+          "Node's trailing options would change the result",
       );
     }
-    const data = L.lowerExprExpecting(expr.arguments[0]!, BYTES_U8);
-    return { kind: "libCall", fn, args: [data], type: { kind: "promise", inner: BYTES_U8 }, loc };
+    const args = target.params.map((p, i) => L.lowerExprExpecting(expr.arguments[i]!, p));
+    return { kind: "libCall", fn: target.fn, args, type: { kind: "promise", inner: target.inner }, loc };
   }
 
 /** A call THROUGH a promisified-execFile binding:
