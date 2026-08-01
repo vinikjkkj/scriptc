@@ -2465,16 +2465,55 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     if (!e) return false;
     const argNode = e.arguments.length === 1 ? e.arguments[0]! : null;
     const target = argNode && ts.isIdentifier(argNode) ? L.builtinImportOf(argNode) : null;
-    if (!target || target.module !== "child_process" || target.member !== "execFile") {
+    const symbol = L.checker.getSymbolAtLocation(nameNode);
+    if (target && target.module === "child_process" && target.member === "execFile") {
+      if (symbol) L.promisifiedExecFile.add(symbol);
+      return true;
+    }
+    // The SETTLED-PROMISE targets: a callback-style builtin whose work is
+    // already a synchronous lowering. Node runs these on the threadpool;
+    // a compiled binary has none, so the call runs the same code and
+    // answers an already-settled promise — the fs/promises stance
+    // (divergence 23). The await still yields to the microtask queue, so
+    // ordering against other promise work is unchanged.
+    const settled = target ? own(PROMISIFY_SETTLED, `${target.module}.${target.member}`) : undefined;
+    if (settled !== undefined) {
+      if (symbol) L.promisifiedSettled.set(symbol, settled);
+      return true;
+    }
+    L.noLowering(
+      "util.promisify of this target",
+      argNode ?? e,
+      "the promisifiable targets are child_process.execFile and the callback builtins with a synchronous lowering (" +
+        Object.keys(PROMISIFY_SETTLED).join(", ") +
+        ")",
+    );
+    return true;
+  }
+
+  /** `promisify(<module>.<member>)` → the lib fn its call lowers to, for
+   * the targets whose work is a synchronous lowering behind a settled
+   * promise. Each entry's result type is `promise<bytes<u8>>`; a target
+   * with a different shape wants its own arm at the call site. */
+  const PROMISIFY_SETTLED: Record<string, IrLibFn | undefined> = {
+    "zlib.deflate": "zlib.deflateAsync",
+    "zlib.unzip": "zlib.unzipAsync",
+  };
+
+  /** A call THROUGH a settled-promise promisified binding: one libCall of
+   * the mapped fn over the single bytes argument. Node's callback form
+   * takes an options object too; a call that passes one fences rather
+   * than dropping settings that change the output. */
+  export function lowerPromisifiedSettledCall(L: Lowerer, expr: ts.CallExpression, fn: IrLibFn, loc: SrcLoc): IrExpr {
+    if (expr.arguments.length !== 1 || expr.arguments.some(ts.isSpreadElement)) {
       L.noLowering(
-        "util.promisify of this target",
-        argNode ?? e,
-        "child_process.execFile is the one promisifiable target: const execFileAsync = promisify(execFile)",
+        `the promisified ${fn.slice("zlib.".length).replace(/Async$/, "")} with this argument shape`,
+        expr,
+        "the supported form passes just the buffer — an options argument would change the output",
       );
     }
-    const symbol = L.checker.getSymbolAtLocation(nameNode);
-    if (symbol) L.promisifiedExecFile.add(symbol);
-    return true;
+    const data = L.lowerExprExpecting(expr.arguments[0]!, BYTES_U8);
+    return { kind: "libCall", fn, args: [data], type: { kind: "promise", inner: BYTES_U8 }, loc };
   }
 
 /** A call THROUGH a promisified-execFile binding:
