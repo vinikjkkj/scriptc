@@ -7243,8 +7243,20 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       ) {
         inner = inner.expression;
       }
-      const value = L.lowerExpr(argNode);
-      if (ts.isObjectLiteralExpression(inner) || ts.isArrayLiteralExpression(inner)) {
+      const isLiteral = ts.isObjectLiteralExpression(inner) || ts.isArrayLiteralExpression(inner);
+      // Freeze is IDENTITY over a literal, so the literal belongs to the
+      // slot the CALL flows into -- but the generic signature swallows
+      // that: `const t: readonly string[] = Object.freeze([])` types the
+      // argument through T, leaving an empty literal with no element
+      // information (never[], which represents as number[] and then does
+      // not flow into string[]). Build it at the call's contextual type
+      // instead, which is the slot's.
+      const ctxTs = isLiteral ? L.checker.getContextualType(call) : undefined;
+      const ctxIr = ctxTs !== undefined ? L.mapTypeOf(ctxTs) : null;
+      const value = isLiteral && ctxIr !== null
+        ? L.lowerExprExpecting(argNode, ctxIr)
+        : L.lowerExpr(argNode);
+      if (isLiteral) {
         return value; // fresh — freeze is identity here, honestly
       }
       // A stdlib CONSTRUCTION is fresh for the same reason a literal is:
