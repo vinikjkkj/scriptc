@@ -2524,7 +2524,10 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
   const PROMISIFY_SETTLED: Record<string, PromisifiedTarget | undefined> = {
     "zlib.deflate": { fn: "zlib.deflateAsync", params: [BYTES_U8], inner: BYTES_U8 },
     "zlib.unzip": { fn: "zlib.unzipAsync", params: [BYTES_U8], inner: BYTES_U8 },
+    "zlib.deflateRaw": { fn: "zlib.deflateRawAsync", params: [BYTES_U8], inner: BYTES_U8 },
+    "zlib.inflateRaw": { fn: "zlib.inflateRawAsync", params: [BYTES_U8], inner: BYTES_U8 },
     "crypto.randomInt": { fn: "crypto.randomIntAsync", params: [F64, F64], inner: F64 },
+    "crypto.randomBytes": { fn: "crypto.randomBytesAsync", params: [F64], inner: BYTES_U8 },
     // pbkdf2's callback form takes the digest name as its fifth argument;
     // the lowering derives with sha256, so a different name would have to
     // fence here the way pbkdf2Sync's does. Until the table can express

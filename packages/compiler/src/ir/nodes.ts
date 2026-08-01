@@ -2762,6 +2762,8 @@ export type IrLibFn =
   /** util.promisify(randomInt): the same draw behind an ALREADY SETTLED
    * promise (the fs/promises stance). A range error REJECTS. */
   | "crypto.randomIntAsync"
+  /** util.promisify(randomBytes): the draw behind a settled promise. */
+  | "crypto.randomBytesAsync"
   /** PBKDF2-HMAC-SHA256 (RFC 8018). Throws Node's range errors on a bad
    * iteration count or key length; the Async twin rejects instead. */
   | "crypto.pbkdf2Sha256"
@@ -2867,6 +2869,12 @@ export type IrLibFn =
    * fs/promises stance (divergence 23). */
   | "zlib.deflateAsync"
   | "zlib.unzipAsync"
+  /** The RAW twins: headerless DEFLATE, for framing layers that carry
+   * their own length and checksum. */
+  | "zlib.deflateRawSync"
+  | "zlib.inflateRawSync"
+  | "zlib.deflateRawAsync"
+  | "zlib.inflateRawAsync"
   /** The Buffer overloads of the raw stream writes — same promptly
    * submitted streams as process.stdoutWrite/stderrWrite, constantly true. */
   | "process.stdoutWriteBytes"
@@ -6850,6 +6858,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // accepts either and refuses the rest).
   "zlib.gunzipSync",
   "zlib.unzipSync",
+  "zlib.inflateRawSync",
   "date.toISOString",
   "fs.mkdirRecursiveSync",
   "fs.rmOptsSync",

@@ -666,6 +666,8 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
     gzipSync: { fn: "zlib.gzipSync", params: [BYTES_U8], result: BYTES_U8 },
     gunzipSync: { fn: "zlib.gunzipSync", params: [BYTES_U8], result: BYTES_U8 },
     unzipSync: { fn: "zlib.unzipSync", params: [BYTES_U8], result: BYTES_U8 },
+    deflateRawSync: { fn: "zlib.deflateRawSync", params: [BYTES_U8], result: BYTES_U8 },
+    inflateRawSync: { fn: "zlib.inflateRawSync", params: [BYTES_U8], result: BYTES_U8 },
   },
   url: {
     // fileURLToPath accepts a URL value OR a string — the call lowering

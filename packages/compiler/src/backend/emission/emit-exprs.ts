@@ -4672,6 +4672,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_crypto_random_string(${arg(0)}, ${arg(1)})`);
           case "crypto.randomInt":
             return finish(`scr_crypto_random_int(${arg(0)}, ${arg(1)})`);
+          case "crypto.randomBytesAsync":
+            return finish(`scr_crypto_random_bytes_async(${arg(0)})`);
           case "crypto.randomIntAsync":
             return finish(`scr_crypto_random_int_async(${arg(0)}, ${arg(1)})`);
           case "crypto.pbkdf2Sha256":
@@ -4788,6 +4790,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_zlib_deflate_async(${arg(0)})`);
           case "zlib.unzipAsync":
             return finish(`scr_zlib_unzip_async(${arg(0)})`);
+          case "zlib.deflateRawSync":
+            return finish(`scr_zlib_deflate_raw(${arg(0)})`);
+          case "zlib.inflateRawSync":
+            return finish(`scr_zlib_inflate_raw(${arg(0)})`);
+          case "zlib.deflateRawAsync":
+            return finish(`scr_zlib_deflate_raw_async(${arg(0)})`);
+          case "zlib.inflateRawAsync":
+            return finish(`scr_zlib_inflate_raw_async(${arg(0)})`);
           case "process.stdoutWriteBytes":
             return finish(`scr_process_stdout_write_bytes(${arg(0)})`);
           case "process.stderrWriteBytes":

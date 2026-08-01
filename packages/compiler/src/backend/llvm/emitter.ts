@@ -359,6 +359,10 @@ const LIB_FN_SYMS: Record<string, string> = {
   "zlib.unzipSync": "scr_zlib_unzip",
   "zlib.deflateAsync": "scr_zlib_deflate_async",
   "zlib.unzipAsync": "scr_zlib_unzip_async",
+  "zlib.deflateRawSync": "scr_zlib_deflate_raw",
+  "zlib.inflateRawSync": "scr_zlib_inflate_raw",
+  "zlib.deflateRawAsync": "scr_zlib_deflate_raw_async",
+  "zlib.inflateRawAsync": "scr_zlib_inflate_raw_async",
   // The CA-store unit. get/set throw (an unknown type name, a
   // certificate-free set) and take the generic path's pending check.
   "tlsca.root": "scr_tls_ca_root",
@@ -367,6 +371,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "crypto.randomBytes": "scr_crypto_random_bytes",
   "crypto.randomInt": "scr_crypto_random_int",
   "crypto.randomIntAsync": "scr_crypto_random_int_async",
+  "crypto.randomBytesAsync": "scr_crypto_random_bytes_async",
   "crypto.pbkdf2Sha256": "scr_crypto_pbkdf2_sha256",
   "crypto.pbkdf2Sha256Async": "scr_crypto_pbkdf2_sha256_async",
   "crypto.randomBytesToString": "scr_crypto_random_string",
