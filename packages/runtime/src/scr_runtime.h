@@ -4357,6 +4357,7 @@ typedef enum ScrBytesElem {
   SCR_BYTES_F32, /* Float32Array */
   SCR_BYTES_I32, /* Int32Array (reads sign-extend; writes ToInt32-wrap) */
   SCR_BYTES_F64, /* Float64Array (element IS the double — no coercion) */
+  SCR_BYTES_I8,  /* Int8Array (reads sign-extend; writes ToInt8-wrap) */
 } ScrBytesElem;
 
 typedef struct ScrBytes {

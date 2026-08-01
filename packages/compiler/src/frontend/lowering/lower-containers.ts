@@ -5149,6 +5149,7 @@ const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
   Int32Array: "i32",
   Float32Array: "f32",
   Float64Array: "f64",
+  Int8Array: "i8",
 };
 
 /** `new Uint8Array(...)` / `new Uint32Array(...)` / `new Float32Array(...)`

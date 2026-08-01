@@ -546,6 +546,7 @@ export function bytesElemKindC(elem: IrBytesElem): string {
     case "i32": return "SCR_BYTES_I32";
     case "f32": return "SCR_BYTES_F32";
     case "f64": return "SCR_BYTES_F64";
+    case "i8": return "SCR_BYTES_I8";
   }
 }
 

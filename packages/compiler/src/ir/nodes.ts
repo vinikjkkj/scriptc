@@ -27,7 +27,7 @@ export interface SrcLoc {
  * the constructors real CLI code reaches (Uint8Array/Buffer, Uint32Array,
  * Int32Array — the Atomics.wait sleep idiom's array — Float32Array). The
  * other TypedArray flavors stay frontend-fenced. */
-export type IrBytesElem = "u8" | "u32" | "i32" | "f32" | "f64";
+export type IrBytesElem = "u8" | "u32" | "i32" | "f32" | "f64" | "i8";
 
 export type IrType =
   | { kind: "f64" }
