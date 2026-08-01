@@ -4329,8 +4329,14 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // keeps the contextual fallback (a bare-null field whose satisfies
     // target names the wider slot type).
     {
+      // The walk skips `as const` too: it is the spelling the idiom
+      // almost always takes (`{...} as const satisfies T`), and it leaves
+      // the literal's OWN type in place — narrower, never the target's
+      // shape — so the reasoning above is unchanged by it.
       let p: ts.Node = expr.parent;
-      while (ts.isParenthesizedExpression(p)) p = p.parent;
+      while (ts.isParenthesizedExpression(p) || ts.isAsExpression(p) || ts.isTypeAssertion(p)) {
+        p = p.parent;
+      }
       if (ts.isSatisfiesExpression(p)) {
         const own = L.typeOf(expr);
         if (L.mapTypeOf(own)?.kind === "record") tsType = own;
