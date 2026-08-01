@@ -89,6 +89,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import ts from "typescript5";
 import { cjsLexedExportsOf } from "./cjs-lexer.js";
+import { tsgoPath } from "./shared.js";
 
 export type EmbeddedFormat = "esm" | "cjs" | "json";
 
@@ -443,10 +444,12 @@ const realHost: Host = {
   isFile: (path) => ts.sys.fileExists(path),
   isDirectory: (path) => ts.sys.directoryExists(path),
   realpath: (path) => {
+    // Slash-normalized on Windows (tsgoPath): realpaths are the island's
+    // module KEYS and are compared against tsgo program file names.
     try {
-      return realpathSync(path);
+      return tsgoPath(realpathSync(path));
     } catch {
-      return path;
+      return tsgoPath(path);
     }
   },
 };

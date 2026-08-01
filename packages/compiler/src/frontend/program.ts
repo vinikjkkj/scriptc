@@ -52,7 +52,7 @@ import {
 import { isNodeModulesPath, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareModule, resolveProjectImport, resolveRelativeModule, resolveTypeDirective, setProjectRealm } from "./resolve.js";
 import { probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
 import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
-import { provenanceEntryFor, provenancePaths } from "./provenance-registry.js";
+import { isProvenanceSpecifier, provenancePaths } from "./provenance-registry.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 import {
   ADOPTED_OPTIONS,
@@ -409,6 +409,95 @@ function purePrefixStmt7(s: ts.Statement): boolean {
   return false;
 }
 
+/** A literal token in the exports-preamble positions below: the values
+ * tsc's descriptor objects and void-0 chains carry. */
+function preambleLiteral7(e: ts.Expression): boolean {
+  return (
+    ts.isStringLiteralLike(e) ||
+    ts.isNumericLiteral(e) ||
+    e.kind === ts.SyntaxKind.TrueKeyword ||
+    e.kind === ts.SyntaxKind.FalseKeyword ||
+    e.kind === ts.SyntaxKind.NullKeyword
+  );
+}
+
+/** The tsc CommonJS PREAMBLE statements — purePrefixStmt7's exports-
+ * plumbing arm, the emit every compiled ES module opens with before its
+ * requires:
+ *
+ *   Object.defineProperty(exports, "__esModule", { value: true });
+ *   exports.a = exports.b = void 0;
+ *   exports.f = f;                                   // hoisted function
+ *   Object.defineProperty(exports, "x", { enumerable: true, get: ... });
+ *
+ * All are property writes/definitions on `exports`: they RUN, but they
+ * cannot CALL user code and cannot read a require binding themselves — so
+ * a require below only-these-shape statements can never have its bindings
+ * observed early (the intra-file channel requireTdzRisk7 guards;
+ * cross-module cycle reads are the order walk's business). Guardrails
+ * that keep the recognition sound rather than syntactic:
+ *  - an assignment RHS may be a bare identifier ONLY when it names a
+ *    top-level function DECLARATION (hoisted-initialized — a class or
+ *    later const would be Node's own TDZ crash at this very statement);
+ *  - defineProperty descriptors admit literal and function-expression
+ *    property values only (nothing runs while DEFINING an accessor);
+ *  - a name defineProperty ever DEFINED is poisoned for later
+ *    assignment-form statements (a getter-only or non-writable target
+ *    turns a later `exports.x = ...` write into a strict-mode throw). */
+function exportsPreambleStmt7(
+  stmt: ts.Statement,
+  hoistedFns: ReadonlySet<string>,
+  definedProps: Set<string>,
+): boolean {
+  if (!ts.isExpressionStatement(stmt)) return false;
+  let e: ts.Expression = stmt.expression;
+  if (ts.isCallExpression(e)) {
+    // Object.defineProperty(exports, "name", { literal/function values })
+    if (
+      !ts.isPropertyAccessExpression(e.expression) ||
+      !ts.isIdentifier(e.expression.expression) ||
+      e.expression.expression.text !== "Object" ||
+      e.expression.name.text !== "defineProperty" ||
+      e.arguments.length !== 3
+    ) {
+      return false;
+    }
+    const [target, name, desc] = e.arguments;
+    if (target === undefined || !ts.isIdentifier(target) || target.text !== "exports") return false;
+    if (name === undefined || !ts.isStringLiteral(name)) return false;
+    if (desc === undefined || !ts.isObjectLiteralExpression(desc)) return false;
+    const ok = desc.properties.every((p) => {
+      if (ts.isGetAccessorDeclaration(p) || ts.isSetAccessorDeclaration(p)) return true;
+      if (!ts.isPropertyAssignment(p) || ts.isComputedPropertyName(p.name)) return false;
+      const v = p.initializer;
+      return preambleLiteral7(v) || ts.isFunctionExpression(v) || ts.isArrowFunction(v);
+    });
+    if (!ok) return false;
+    definedProps.add(name.text);
+    return true;
+  }
+  // exports.a = (exports.b = ...)* <void 0 | literal | hoisted fn name>
+  const targets: string[] = [];
+  while (
+    ts.isBinaryExpression(e) &&
+    e.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+    ts.isPropertyAccessExpression(e.left) &&
+    ts.isIdentifier(e.left.expression) &&
+    e.left.expression.text === "exports" &&
+    ts.isIdentifier(e.left.name)
+  ) {
+    targets.push(e.left.name.text);
+    e = e.right;
+  }
+  if (targets.length === 0) return false;
+  if (targets.some((t) => definedProps.has(t))) return false;
+  return (
+    (ts.isVoidExpression(e) && ts.isNumericLiteral(e.expression)) ||
+    preambleLiteral7(e) ||
+    (ts.isIdentifier(e) && hoistedFns.has(e.text))
+  );
+}
+
 /** Can code that runs BEFORE the require statement at index `k` reach one
  * of the require's bindings? Node initializes them AT the require (TDZ —
  * earlier access is a ReferenceError), but the lowering aliases reads
@@ -429,6 +518,15 @@ function requireTdzRisk7(
   sf: ts.SourceFile,
   k: number,
   decl: ts.VariableDeclaration,
+  /** The recognized exports-preamble statements (exportsPreambleStmt7):
+   * skipped by the scan below. Every shape in that set only STORES onto
+   * the exports object — `exports.f = f` hands over a hoisted function
+   * VALUE without calling it, and a re-export accessor's body runs when
+   * the property is READ, which is after this module body finishes.
+   * Neither is an early read of the require's binding. (A cycle partner
+   * calling back in during init is the order walk's channel — sccVerdict
+   * / backEdgeUseOffence7 — not this one.) */
+  preamble: ReadonlySet<ts.Statement>,
 ): string | null {
   const checker = program.getTypeChecker();
   const bound: ts.Identifier[] = [];
@@ -478,7 +576,7 @@ function requireTdzRisk7(
   };
   for (let i = 0; i < k && hit === null; i++) {
     const s = stmts[i]!;
-    if (ts.isFunctionDeclaration(s)) continue;
+    if (ts.isFunctionDeclaration(s) || preamble.has(s)) continue;
     scan(s);
   }
   while (hit === null && work.length > 0) {
@@ -1132,7 +1230,9 @@ function resolveNpmImport7(
   // --provenance-sources: a registered specifier is NOT an npm import —
   // its attested source compiles as program modules (resolveProjectImport
   // answers the entry), so no island embed and no .d.ts type surface.
-  if (provenanceEntryFor(specifier) !== null) return null;
+  // A source tree's own path alias counts: it names source in the tree,
+  // and nothing by that name is installed to resolve against anyway.
+  if (isProvenanceSpecifier(specifier)) return null;
   const resolved = resolveBareModule(fromFileName, specifier);
   if (!resolved) return null;
   if (!isNodeModulesPath(resolved.typesFile)) {
@@ -1562,7 +1662,15 @@ function preflight7(load: LoadResult): {
         if (stmt.isTypeOnly || erasedTypeOnlyReexport(stmt)) continue;
         if (!stmt.moduleSpecifier) continue;
         const fromSpec = ts.isStringLiteral(stmt.moduleSpecifier) ? stmt.moduleSpecifier.text : "";
-        if (!isRelativeSpecifier(fromSpec)) {
+        // A PROJECT-INTERNAL specifier that resolves to one of the
+        // program's own sources — `#alias`, a self-name reference, or a
+        // provenance source tree's own tsconfig path alias ("@client") —
+        // is an ordinary user-module edge: bare-LOOKING, but the checker
+        // bound it to a program file, so it re-exports like a relative
+        // specifier rather than meeting the package fence below.
+        const projReSpec =
+          !isRelativeSpecifier(fromSpec) && resolveProjectImport(sf.fileName, fromSpec) !== null;
+        if (!isRelativeSpecifier(fromSpec) && !projReSpec) {
           // NAMED re-exports from a SUPPORTED builtin pass (`export { ok }
           // from "node:assert"` — a universal re-export facade facade): the
           // statement binds nothing locally and evaluates nothing (builtins
@@ -1599,7 +1707,12 @@ function preflight7(load: LoadResult): {
           diags.push(unsupportedDiag("SC1014", locOf7(stmt), "re-exports from packages or builtin modules"));
           continue;
         }
-        const reDep = resolveImport7(program, sf, fromSpec);
+        const reDep = projReSpec
+          ? (() => {
+              const p = resolveProjectImport(sf.fileName, fromSpec);
+              return p !== null ? (program.getSourceFile(p) ?? null) : null;
+            })()
+          : resolveImport7(program, sf, fromSpec);
         // `export * as ns from "./m"` re-exports the module NAMESPACE
         // object under a name: importers' `x.ns.member` reads resolve
         // statically through the same alias machinery as `import * as ns`
@@ -1848,8 +1961,18 @@ function preflight7(load: LoadResult): {
     }
     if (isJsSourceFileName(sf.fileName)) {
       const stmts = sf.statements;
+      const hoistedFns = new Set<string>();
+      for (const s of stmts) {
+        if (ts.isFunctionDeclaration(s) && s.name !== undefined) hoistedFns.add(s.name.text);
+      }
+      const definedProps = new Set<string>();
+      const preamble = new Set<ts.Statement>();
       let firstRunnable = -1;
       stmts.forEach((s, i) => {
+        if (exportsPreambleStmt7(s, hoistedFns, definedProps)) {
+          preamble.add(s);
+          return;
+        }
         if (firstRunnable < 0 && !purePrefixStmt7(s)) firstRunnable = i;
       });
       for (let k = 0; k < stmts.length; k++) {
@@ -1915,7 +2038,7 @@ function preflight7(load: LoadResult): {
           }
           const tdzName =
             firstRunnable >= 0 && firstRunnable < k && req.decl
-              ? requireTdzRisk7(program, sf, k, req.decl)
+              ? requireTdzRisk7(program, sf, k, req.decl, preamble)
               : null;
           if (tdzName !== null) {
             diags.push(

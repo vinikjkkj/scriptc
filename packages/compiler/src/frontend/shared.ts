@@ -209,7 +209,7 @@ export function isRelativeSpecifier(spec: string): boolean {
  * node_modules segment answer their registered workspace package (the
  * realpath'd home of a symlinked workspace install), else null. */
 export function npmPackageNameOf(file: string): string | null {
-  const parts = file.split("/");
+  const parts = tsgoPath(file).split("/");
   const i = parts.lastIndexOf("node_modules");
   if (i < 0 || i + 1 >= parts.length) return workspacePackageOfPath(file);
   const first = parts[i + 1]!;
