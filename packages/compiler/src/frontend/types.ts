@@ -1154,6 +1154,34 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     checker.declarationsOf(psym).some(
       (d) => ts.isInterfaceDeclaration(d) && ctx.isStdlibFile(d.getSourceFile()),
     );
+  // `Readonly<Uint8Array>` and friends: the homomorphic mapped type erases
+  // the interface identity into an anonymous index signature, so every
+  // named-interface test below misses and the value reports as an
+  // unsupported index shape. A typed array's readonly-ness is a
+  // COMPILE-TIME modifier over a runtime representation that carries no
+  // per-element mutability of its own -- `Readonly<T>` IS a T at runtime --
+  // so the alias unwraps to the same bytes kind. Deliberately narrow: only
+  // the stdlib alias (provenance-checked, never a user's shadowing
+  // `Readonly`), only over an argument that maps to bytes. Record and
+  // type-parameter arguments keep their existing paths
+  // (mapGenericUtilityAlias, the mapped-shape branch), so nothing that
+  // mapped before changes.
+  {
+    const alias = widened.getAliasSymbol();
+    const aliasArgs = widened.getAliasTypeArguments() ?? [];
+    const inner = aliasArgs[0];
+    if (
+      alias?.name === "Readonly" &&
+      aliasArgs.length === 1 &&
+      inner !== undefined &&
+      checker.declarationsOf(alias).some(
+        (d) => ts.isTypeAliasDeclaration(d) && ctx.isStdlibFile(d.getSourceFile()),
+      )
+    ) {
+      const mapped = mapType(inner, ctx);
+      if (mapped?.kind === "bytes") return mapped;
+    }
+  }
   // The builtin Error classes: references to the LIB's Error/TypeError/
   // RangeError/SyntaxError interfaces map to the runtime-provided class
   // hierarchy (provenance, not the name — a user's own `class Error`
