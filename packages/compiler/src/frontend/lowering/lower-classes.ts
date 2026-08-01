@@ -5055,20 +5055,11 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           loc,
         };
       }
-      // TextEncoder is STATELESS, so an instance IS its constant
-      // `encoding` (types.ts maps the type to string) and lowerBytesNew
-      // builds it — storing one and calling encode() off it later is the
-      // shape real code uses. TextDecoder keeps the composed-form rule:
-      // its constructor takes options that change decode behavior, so a
-      // stored instance would have to carry them.
-      if (symbol && symbol.name === "TextDecoder" && L.isStdlibSymbol(symbol)) {
-        L.noLowering(
-          "new TextDecoder",
-          expr,
-          "TextDecoder values have no representation — the composed form compiles: new TextDecoder().decode(bytes)",
-          symbol,
-        );
-      }
+      // Both text codecs are STATELESS once their constructor is fenced to
+      // the default utf-8 form: an instance IS its constant `encoding`
+      // (types.ts maps the types to string) and lowerBytesNew builds it.
+      // Storing one at module scope and calling encode/decode off it later
+      // is the shape real code uses.
       // `new Uint8Array(...)` / `new Uint32Array(...)` / `new
       // Float32Array(...)`: the typed-array constructors with a runtime
       // representation (stdlib provenance — see lowerBytesNew for the
