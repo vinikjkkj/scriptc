@@ -655,6 +655,7 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
     // first and the Buffer never materializes there); this entry covers
     // the bare calls and non-composed uses.
     randomBytes: { fn: "crypto.randomBytes", params: [F64], result: BYTES_U8 },
+    randomInt: { fn: "crypto.randomInt", params: [F64, F64], result: F64 },
   },
   zlib: {
     // Buffer in, Buffer out, Node's default options; string inputs fence

@@ -365,6 +365,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "tlsca.get": "scr_tls_ca_get",
   "tlsca.set": "scr_tls_ca_set_default",
   "crypto.randomBytes": "scr_crypto_random_bytes",
+  "crypto.randomInt": "scr_crypto_random_int",
   "crypto.randomBytesToString": "scr_crypto_random_string",
   "crypto.randomUUID": "scr_crypto_random_uuid",
   "crypto.hashDigestStr": "scr_crypto_hash_digest_str",

@@ -4723,7 +4723,10 @@ ScrPromise *scr_fsp_read_file_bytes(ScrStr *path); /* +1 */
 
 /* crypto.randomBytes(n) → a real u8 Buffer. Out-of-range n THROWS Node's
  * RangeError catchably (same check as scr_crypto_random_string). */
-ScrBytes *scr_crypto_random_bytes(double n); /* +1 */
+ScrBytes *scr_crypto_random_bytes(double n);
+/* crypto.randomInt(min, max): a uniform integer in [min, max) by
+ * rejection sampling; Node's range errors verbatim. */
+double scr_crypto_random_int(double min, double max); /* +1 */
 
 /* process.stdout/stderr.write(buf): the raw byte writes' Buffer overloads
  * (same streams and buffering as the string forms). Constantly true. */
