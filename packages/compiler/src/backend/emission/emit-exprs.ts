@@ -865,6 +865,15 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               ? E.newTemp(e.type, `scr_arr_push_${acc}(${r.name}, ${last.name})`)
               : E.newTemp(e.type, `scr_arr_len(${r.name})`);
           }
+          case "fill": {
+            // In-place write over the clamped range; answers the receiver
+            // (+1) for chaining. The value is BORROWED (the ref form takes
+            // its own +1 per slot). Same index defaults as slice.
+            const v = E.emitExpr(e.args[0]!);
+            const from = e.args[1] ? E.emitExpr(e.args[1]).name : "0";
+            const to = e.args[2] ? E.emitExpr(e.args[2]).name : "INFINITY";
+            return E.newTemp(e.type, `scr_arr_fill_${acc}(${r.name}, ${v.name}, ${from}, ${to})`);
+          }
           case "pushSpread": {
             // `a.push(...src)`: append src's elements in order. The source
             // is BORROWED; the count snapshots before the loop so

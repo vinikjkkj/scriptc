@@ -270,6 +270,7 @@ function lowerOptionalDefaultArg(
     // lower both declared forms (with and without an initial value).
     const arity = {
       push: [0, Number.MAX_SAFE_INTEGER], pop: [0, 0], indexOf: [1, 1], includes: [1, 1], join: [1, 1],
+      fill: [1, 3],
       concat: [0, Number.MAX_SAFE_INTEGER],
       slice: [0, 2], shift: [0, 0], splice: [1, 2], at: [1, 1],
       map: [1, 1], filter: [1, 1], forEach: [1, 1], find: [1, 1], findIndex: [1, 1], some: [1, 1],
@@ -277,7 +278,7 @@ function lowerOptionalDefaultArg(
       every: [1, 1], flatMap: [1, 1], reduce: [1, 2], reduceRight: [1, 2],
     }[
       name as
-        | "push" | "pop" | "concat" | "indexOf" | "includes" | "join" | "slice" | "shift" | "splice" | "at" | "map" | "filter"
+        | "push" | "pop" | "concat" | "indexOf" | "includes" | "join" | "slice" | "shift" | "splice" | "at" | "map" | "filter" | "fill"
         | "forEach" | "find" | "findIndex" | "findLast" | "findLastIndex" | "some" | "every" | "flatMap" | "reduce" | "reduceRight"
     ];
     if (call.arguments.length < arity[0]! || call.arguments.length > arity[1]!) {
@@ -336,6 +337,18 @@ function lowerOptionalDefaultArg(
         type: name === "push" ? F64 : elem,
         loc,
       };
+    }
+    if (name === "fill") {
+      // Array.prototype.fill(value[, start[, end]]): the value coerces to
+      // the element type and every slot in the clamped range takes it,
+      // then the receiver comes back for chaining. Unlike indexOf's
+      // identity search this needs no stable identity, so union elements
+      // ride it — filling `(T | null)[]` with null is the whole point of
+      // the `new Array(n).fill(null)` shape.
+      const receiver = L.lowerExpr(access.expression);
+      const v = L.lowerExprExpecting(call.arguments[0]!, elem);
+      const idx = call.arguments.slice(1).map((a) => L.lowerExprExpecting(a, F64));
+      return { kind: "arrIntrinsic", method: "fill", receiver, args: [v, ...idx], type: receiver.type, loc };
     }
     if (name === "indexOf" || name === "includes") {
       // Union elements are fenced: the runtime compares ref elements by

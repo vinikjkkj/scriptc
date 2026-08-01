@@ -8757,6 +8757,18 @@ class LlEmitter {
         B.line(`${t} = call double @scr_arr_len(ptr ${r.name})`);
         return { name: t, type: e.type };
       }
+      case "fill": {
+        // In-place write over the clamped range; answers the receiver (+1)
+        // for chaining. The value is BORROWED — the ref form takes its own
+        // +1 per slot — so no moveTemp here. Same index defaults as slice.
+        const v = this.emitExpr(e.args[0]!);
+        const from = e.args[1] ? this.emitExpr(e.args[1]).name : f64Lit(0);
+        const to = e.args[2] ? this.emitExpr(e.args[2]).name : F64_INF;
+        this.declare(`declare ptr @scr_arr_fill_${acc}(ptr, ${accArg}, double, double)`);
+        const t = B.tmp();
+        B.line(`${t} = call ptr @scr_arr_fill_${acc}(ptr ${r.name}, ${accArg} ${v.name}, double ${from}, double ${to})`);
+        return this.own({ name: t, type: e.type });
+      }
       case "pushSpread": {
         // `a.push(...src)`: append src's elements in order (borrowed src,
         // count snapshotted). Result: the new length.

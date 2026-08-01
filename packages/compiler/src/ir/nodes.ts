@@ -1283,6 +1283,12 @@ export type IrStmt =
  * the fresh array. */
 export type IrArrIntrinsicMethod =
   | "length"
+  /** `fill(value[, start[, end]])`: writes the value over the slice
+   * family's clamped range IN PLACE, then answers the receiver (+1) for
+   * chaining, exactly like JS. Each write releases the slot it replaces,
+   * so filling an array of ABSENT slots (the new Array(n) shape) is as
+   * safe as filling one already holding values. */
+  | "fill"
   | "push"
   | "pushSpread"
   | "pop"

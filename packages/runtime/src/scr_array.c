@@ -480,3 +480,60 @@ ScrStr *scr_str_raw(ScrArr *raw, ScrArr *subs) {
   free(buf);
   return out;
 }
+
+/* ── fill(value[, start[, end]]) ──────────────────────────────────────────
+ * Writes `v` into every slot of [start, end), then answers the RECEIVER
+ * (+1 — the caller owns a reference, like every other returning method).
+ * Index handling is the slice family's: relative from the end when
+ * negative, clamped to [0, len]; an end at or before start writes
+ * nothing. Writes go through scr_arr_set_*, so each one releases the slot
+ * it replaces — which is what makes fill safe over an array of ABSENT
+ * slots (the new Array(n) shape) and over one already holding values.
+ *
+ * The ref form BORROWS `v` and takes its own +1 per slot: the array owns
+ * every element it holds, and one incoming reference cannot cover n of
+ * them. */
+ScrArr *scr_arr_fill_f64(ScrArr *a, double v, double start, double end) {
+  double len = (double)a->len;
+  double s = start < 0 ? start + len : start;
+  double e = end < 0 ? end + len : end;
+  if (!(s >= 0)) s = 0; /* NaN and negatives past the start clamp */
+  if (s > len) s = len;
+  if (!(e >= 0)) e = 0;
+  if (e > len) e = len;
+  for (double i = s; i < e; i += 1) scr_arr_set_f64(a, i, v);
+  return scr_arr_retain(a);
+}
+
+ScrArr *scr_arr_fill_bool(ScrArr *a, bool v, double start, double end) {
+  double len = (double)a->len;
+  double s = start < 0 ? start + len : start;
+  double e = end < 0 ? end + len : end;
+  if (!(s >= 0)) s = 0;
+  if (s > len) s = len;
+  if (!(e >= 0)) e = 0;
+  if (e > len) e = len;
+  for (double i = s; i < e; i += 1) scr_arr_set_bool(a, i, v);
+  return scr_arr_retain(a);
+}
+
+ScrArr *scr_arr_fill_ref(ScrArr *a, void *v, double start, double end) {
+  double len = (double)a->len;
+  double s = start < 0 ? start + len : start;
+  double e = end < 0 ? end + len : end;
+  if (!(s >= 0)) s = 0;
+  if (s > len) s = len;
+  if (!(e >= 0)) e = 0;
+  if (e > len) e = len;
+  for (double i = s; i < e; i += 1) {
+    void *p = v;
+    if (p != NULL) {
+      if (a->elem == SCR_ELEM_STR) scr_str_retain((ScrStr *)p);
+      else if (a->elem == SCR_ELEM_BYTES) scr_bytes_retain((ScrBytes *)p);
+      else if (a->elem == SCR_ELEM_REF) p = a->elem_retain(p);
+      else scr_arr_retain((ScrArr *)p);
+    }
+    scr_arr_set_ref(a, i, p);
+  }
+  return scr_arr_retain(a);
+}
