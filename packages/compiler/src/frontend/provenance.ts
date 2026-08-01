@@ -30,14 +30,15 @@
 
 import { execFile } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
-import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { builtinModules } from "node:module";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import ts from "typescript5";
 import { resolveExports } from "./npm.js";
-import { resolveRelativeModule } from "./resolve.js";
+import { resolveBareModule, resolveRelativeModule } from "./resolve.js";
+import { tsgoPath } from "./shared.js";
 import type { ProvenancePackageSource, ProvenanceSources } from "./provenance-registry.js";
 
 const execFileAsync = promisify(execFile);
@@ -113,9 +114,64 @@ function moduleSpecifiersLite(source: string, fileName: string): { spec: string;
   return out;
 }
 
+/** The TypeScript file an alias target pattern points at, probing the
+ * extensions and the directory index — the source-tree twin of
+ * mapEntryToSource's candidate walk. Null when nothing exists there. */
+function resolveAliasTarget(target: string): string | null {
+  if (/\.(ts|tsx|mts|cts)$/.test(target) && isFile(target)) return target;
+  for (const ext of [".ts", ".tsx", ".mts", ".cts"]) {
+    if (isFile(target + ext)) return target + ext;
+  }
+  for (const idx of ["index.ts", "index.tsx", "index.mts", "index.cts"]) {
+    const p = join(target, idx);
+    if (isFile(p)) return p;
+  }
+  return null;
+}
+
 /** Every bare (non-relative, non-builtin, non-"#") VALUE specifier the
- * relative closure of `roots` imports, in first-encounter order. */
-function bareImportsOf(roots: readonly string[]): string[] {
+ * relative closure of `roots` imports, in first-encounter order.
+ *
+ * `aliases` (a source tree's own tsconfig paths, absolute) keeps the walk
+ * INSIDE the tree: a matching specifier resolves to its source file and
+ * joins the closure instead of being reported as a package the driver
+ * never installed. */
+function bareImportsOf(
+  roots: readonly string[],
+  aliases?: Record<string, string[]>,
+): string[] {
+  const aliasEntries = Object.entries(aliases ?? {}).sort(
+    (a, b) => b[0].replace(/\*.*$/, "").length - a[0].replace(/\*.*$/, "").length,
+  );
+  const viaAlias = (spec: string): string | null => {
+    for (const [key, targets] of aliasEntries) {
+      const star = key.indexOf("*");
+      let subbed: string[];
+      if (star < 0) {
+        if (spec !== key) continue;
+        subbed = targets;
+      } else {
+        const prefix = key.slice(0, star);
+        const suffix = key.slice(star + 1);
+        if (spec.length < prefix.length + suffix.length) continue;
+        if (!spec.startsWith(prefix) || !spec.endsWith(suffix)) continue;
+        const wildcard = spec.slice(prefix.length, spec.length - suffix.length);
+        subbed = targets.map((t) => t.split("*").join(wildcard));
+      }
+      for (const t of subbed) {
+        const file = resolveAliasTarget(t);
+        if (file !== null) return file;
+      }
+    }
+    return null;
+  };
+  return bareImportsWalk(roots, viaAlias);
+}
+
+function bareImportsWalk(
+  roots: readonly string[],
+  viaAlias: (spec: string) => string | null,
+): string[] {
   const seenFiles = new Set<string>();
   const bare: string[] = [];
   const bareSeen = new Set<string>();
@@ -139,6 +195,11 @@ function bareImportsOf(roots: readonly string[]): string[] {
       }
       if (spec.startsWith("#") || spec.startsWith("node:")) continue;
       if (NODE_BUILTINS.has(packageNameOf(spec))) continue;
+      const aliased = viaAlias(spec);
+      if (aliased !== null) {
+        queue.push(aliased);
+        continue;
+      }
       if (!bareSeen.has(spec)) {
         bareSeen.add(spec);
         bare.push(spec);
@@ -234,12 +295,35 @@ async function fetchSourceTree(repo: string, commit: string): Promise<string> {
     await writeFile(tarball, bytes);
     const extractDir = join(tmp, "tree");
     await mkdir(extractDir);
-    await execFileAsync("tar", ["-xzf", tarball, "-C", extractDir, "--strip-components=1"]);
+    // On Windows both halves of the path spelling matter to GNU tar: the
+    // drive-letter colon parses as a remote host:path ("Cannot connect to
+    // G: resolve failed") without --force-local, and backslashes come out
+    // mangled through its argument handling, so the paths go in
+    // slash-normalized. bsdtar (macOS) rejects unknown options, so the
+    // flag only rides on the platform whose tar needs it.
+    const win = process.platform === "win32";
+    const tarPath = (p: string): string => (win ? p.replaceAll("\\", "/") : p);
+    await execFileAsync("tar", [
+      ...(win ? ["--force-local"] : []),
+      "-xzf", tarPath(tarball),
+      "-C", tarPath(extractDir),
+      "--strip-components=1",
+    ]);
     try {
       await rename(extractDir, dest);
     } catch {
       // A parallel compile won the rename — its tree is the same content.
-      if (!isDirectory(dest)) throw new Error("source cache rename failed");
+      if (!isDirectory(dest)) {
+        // Or the publish crossed a filesystem boundary (EXDEV): TMPDIR and
+        // the provenance cache need not share a volume — they do not when
+        // either is redirected, which on Windows is the norm (a G: scratch
+        // dir against the profile's C: cache). Copy instead; the temp tree
+        // is removed by the finally below either way. Still atomic enough
+        // for the racing-compiles story: a loser's copy lands on the
+        // winner's identical content.
+        await cp(extractDir, dest, { recursive: true, force: true });
+        if (!isDirectory(dest)) throw new Error("source cache publish failed");
+      }
     }
   } finally {
     await rm(tmp, { recursive: true, force: true });
@@ -332,6 +416,68 @@ function mapEntryToSource(pkgDir: string, target: string, subpath: string): stri
     if (isFile(abs)) return abs;
   }
   return null;
+}
+
+/** The tsconfig files a source tree's alias table may live in, in the
+ * order a build would consult them. The root tsconfig.json is the norm;
+ * the build-flavored siblings are the fallback for trees whose root
+ * config only "references" projects. */
+const TSCONFIG_NAMES = ["tsconfig.json", "tsconfig.build.json", "tsconfig.base.json"];
+
+/** A source tree's OWN path aliases, baseUrl-resolved to absolute targets.
+ *
+ * A package built with tsconfig "paths" imports its internals through
+ * BARE-LOOKING specifiers ("@client", "@protocol/constants"): nothing in
+ * the specifier says "internal", so without the table they read as
+ * uninstalled npm packages and the whole tree falls back to the island.
+ * Reading the table here is what the package's own build does.
+ *
+ * Only the "extends" chain's compilerOptions.paths/baseUrl are consulted
+ * (JSONC comments tolerated), and targets stay RELATIVE-to-baseUrl
+ * patterns resolved against the package dir — no file probing here, so a
+ * pattern that resolves to nothing simply never matches later. */
+function sourceAliasesOf(pkgDir: string): Record<string, string[]> | undefined {
+  const seen = new Set<string>();
+  let baseUrl: string | undefined;
+  let paths: Record<string, unknown> | undefined;
+  const load = (file: string): void => {
+    const abs = resolve(file);
+    if (seen.has(abs) || !isFile(abs)) return;
+    seen.add(abs);
+    const json = readJson(abs);
+    if (json === null) return;
+    const opts = json["compilerOptions"];
+    if (opts !== null && typeof opts === "object") {
+      const o = opts as Record<string, unknown>;
+      // The NEAREST config in the chain wins for each field (a child's
+      // value overrides what it extends), so only fill what is unset.
+      if (baseUrl === undefined && typeof o["baseUrl"] === "string") baseUrl = o["baseUrl"];
+      if (paths === undefined && o["paths"] !== null && typeof o["paths"] === "object") {
+        paths = o["paths"] as Record<string, unknown>;
+      }
+    }
+    const ext = json["extends"];
+    for (const e of typeof ext === "string" ? [ext] : Array.isArray(ext) ? ext : []) {
+      // Only RELATIVE extends targets: a package-name extends would want
+      // the source tree's own node_modules, which is not installed here.
+      if (typeof e === "string" && (e.startsWith("./") || e.startsWith("../"))) {
+        load(join(dirname(abs), e.endsWith(".json") ? e : `${e}.json`));
+      }
+    }
+  };
+  for (const name of TSCONFIG_NAMES) {
+    load(join(pkgDir, name));
+    if (paths !== undefined) break;
+  }
+  if (paths === undefined) return undefined;
+  const base = join(pkgDir, baseUrl ?? ".");
+  const out: Record<string, string[]> = {};
+  for (const [key, raw] of Object.entries(paths)) {
+    if (!Array.isArray(raw)) continue;
+    const targets = raw.filter((t): t is string => typeof t === "string").map((t) => join(base, t));
+    if (targets.length > 0) out[key] = targets;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /* ── the pipeline ─────────────────────────────────────────────────────── */
@@ -443,6 +589,16 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
       if (Object.keys(entries).length === 0) return;
       const srcPkg = readJson(join(dir, "package.json"));
       const sourceVersion = typeof srcPkg?.["version"] === "string" ? srcPkg["version"] : undefined;
+      const aliases = sourceAliasesOf(dir);
+      // The tree's remaining bare imports resolve against the DRIVER's
+      // installed tree: the checkout in the source cache has no
+      // node_modules, so nothing resolves from where these files sit.
+      const treeBare = bareImportsOf(Object.values(entries), aliases);
+      const external: Record<string, string> = {};
+      for (const spec of treeBare) {
+        const r = resolveBareModule(entry, spec);
+        if (r !== null) external[spec] = tsgoPath(r.typesFile);
+      }
       const pkg: ProvenancePackageSource = {
         name: installed.name,
         version: installed.version,
@@ -451,6 +607,8 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
         commit,
         dir,
         entries,
+        ...(aliases !== undefined ? { aliases } : {}),
+        ...(Object.keys(external).length > 0 ? { external } : {}),
       };
       if (pkg.sourceVersion !== undefined) {
         notes.push(
@@ -462,7 +620,7 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
       // One transitive round: the mapped source's own bare imports try
       // the pipeline too (versions resolve from the DRIVER's tree — a
       // prototype heuristic; production wants the package's lockfile).
-      const inner = enqueue(bareImportsOf(Object.values(entries)));
+      const inner = enqueue(treeBare);
       for (const n of inner) await mapOne(n);
     } catch (e) {
       notes.push(`${name}@${installed.version}: ${e instanceof Error ? e.message : String(e)}; island path used`);

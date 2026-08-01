@@ -63,22 +63,27 @@ static const char web_prelude[] =
     "   * timer keeps the process alive), FIFO-ordered against static\n"
     "   * timers on one heap, Node's <1ms clamp. Returns a Timeout-shaped\n"
     "   * object (ref/unref/refresh/close, numeric via toPrimitive) that\n"
-    "   * clearTimeout/clearInterval accept alongside plain ids; unref is\n"
-    "   * accepted but not honored (the entry stays ref'd — a documented\n"
-    "   * approximation). */\n"
+    "   * clearTimeout/clearInterval accept alongside plain ids; ref/unref\n"
+    "   * ride the heap's own liveness bookkeeping (host.refTimer — an\n"
+    "   * unref'd timer still fires while the loop runs but no longer\n"
+    "   * keeps it alive, Node's semantics: npm code arms periodic cache\n"
+    "   * sweeps as `setInterval(...).unref()` and expects the process to\n"
+    "   * exit). refresh() re-arms and PRESERVES the unref'd state. */\n"
     "  class Timeout {\n"
     "    constructor(fn, delay, repeat) {\n"
     "      this._fn = fn;\n"
     "      this._delay = delay;\n"
     "      this._repeat = repeat;\n"
+    "      this._reffed = true;\n"
     "      this._id = host.setTimer(fn, delay, repeat);\n"
     "    }\n"
-    "    ref() { return this; }\n"
-    "    unref() { return this; }\n"
-    "    hasRef() { return true; }\n"
+    "    ref() { this._reffed = true; host.refTimer(this._id, true); return this; }\n"
+    "    unref() { this._reffed = false; host.refTimer(this._id, false); return this; }\n"
+    "    hasRef() { return host.timerHasRef(this._id); }\n"
     "    refresh() {\n"
     "      host.clearTimer(this._id);\n"
     "      this._id = host.setTimer(this._fn, this._delay, this._repeat);\n"
+    "      if (!this._reffed) host.refTimer(this._id, false);\n"
     "      return this;\n"
     "    }\n"
     "    close() { host.clearTimer(this._id); return this; }\n"
@@ -1587,6 +1592,37 @@ static JSValue web_host_clear_timer(JSContext *ctx, JSValueConst this_val,
   return JS_UNDEFINED;
 }
 
+/* Timeout.ref()/unref() over the static heap's own bookkeeping
+ * (scr_timer_ref/scr_timer_unref — Node semantics: an unref'd island
+ * timer still fires while the loop runs but no longer keeps it alive by
+ * itself; npm code leans on this, e.g. periodic cache sweeps armed as
+ * `setInterval(...).unref()`). */
+static JSValue web_host_ref_timer(JSContext *ctx, JSValueConst this_val,
+                                  int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc;
+  double id = 0;
+  if (JS_ToFloat64(ctx, &id, argv[0])) return JS_EXCEPTION;
+  if (JS_ToBool(ctx, argv[1]) > 0) {
+    scr_timer_ref(id);
+  } else {
+    scr_timer_unref(id);
+  }
+  return JS_UNDEFINED;
+}
+
+/* Timeout.hasRef(): live-and-reffed, from the heap's own answer (a fired
+ * one-shot is gone from the heap and answers false, like Node's destroyed
+ * Timeout). */
+static JSValue web_host_timer_has_ref(JSContext *ctx, JSValueConst this_val,
+                                      int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc;
+  double id = 0;
+  if (JS_ToFloat64(ctx, &id, argv[0])) return JS_EXCEPTION;
+  return JS_NewBool(ctx, scr_timer_has_ref(id));
+}
+
 static JSValue web_host_timer(JSContext *ctx, JSValueConst this_val, int argc,
                               JSValueConst *argv) {
   (void)this_val;
@@ -1763,6 +1799,8 @@ void scr_island_web_boot(void *jsctx) {
   JS_SetPropertyStr(ctx, host, "timer", JS_NewCFunction(ctx, web_host_timer, "timer", 2));
   JS_SetPropertyStr(ctx, host, "setTimer", JS_NewCFunction(ctx, web_host_set_timer, "setTimer", 3));
   JS_SetPropertyStr(ctx, host, "clearTimer", JS_NewCFunction(ctx, web_host_clear_timer, "clearTimer", 1));
+  JS_SetPropertyStr(ctx, host, "refTimer", JS_NewCFunction(ctx, web_host_ref_timer, "refTimer", 2));
+  JS_SetPropertyStr(ctx, host, "timerHasRef", JS_NewCFunction(ctx, web_host_timer_has_ref, "timerHasRef", 1));
   JSValue r = JS_Call(ctx, fn, JS_UNDEFINED, 1, (JSValueConst *)&host);
   JS_FreeValue(ctx, host);
   JS_FreeValue(ctx, fn);

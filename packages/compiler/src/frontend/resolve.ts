@@ -17,7 +17,8 @@
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { isNpmStaticPackage, npmStaticPackageOfPath, npmStaticTransformPkgJson } from "./npm-static.js";
-import { provenanceEntryFor } from "./provenance-registry.js";
+import { isProvenanceSourceFile, provenanceAliasTargets, provenanceEntryFor } from "./provenance-registry.js";
+import { tsgoPath } from "./shared.js";
 
 function isFile(path: string): boolean {
   try {
@@ -35,11 +36,14 @@ function isDirectory(path: string): boolean {
   }
 }
 
+/** Answers are slash-normalized on Windows (tsgoPath): resolver output is
+ * compared against tsgo SourceFile names and path-keyed tables everywhere
+ * downstream, and those hold slash-normalized names. */
 function realpathOr(path: string): string {
   try {
-    return realpathSync(path);
+    return tsgoPath(realpathSync(path));
   } catch {
-    return path;
+    return tsgoPath(path);
   }
 }
 
@@ -270,9 +274,17 @@ function loadAsDirectory(base: string): string | null {
  * declarations ARE the consumer surface (the npm story), so twins hide
  * only under the same package.json as the entry. */
 let projectRealmPkgJson: string | null = null;
+/** The DRIVER entry's directory — the node_modules anchor for bare
+ * specifiers imported from a provenance source tree (see
+ * resolveBareModule): that tree lives in the content-addressed source
+ * cache, where no node_modules exists at all, and the prototype's stated
+ * contract is that its dependency versions come from the driver's
+ * installed tree. */
+let projectRealmDir: string | null = null;
 
 export function setProjectRealm(entryPath: string): void {
   projectRealmPkgJson = nearestPkgJsonPath(entryPath);
+  projectRealmDir = dirname(resolve(entryPath));
 }
 
 export function projectDtsRuntimeSibling(path: string): string | null {
@@ -280,7 +292,7 @@ export function projectDtsRuntimeSibling(path: string): string | null {
   if (!path.endsWith(".d.ts")) return null;
   if (projectRealmPkgJson === null || nearestPkgJsonPath(path) !== projectRealmPkgJson) return null;
   const sibling = path.slice(0, -".d.ts".length) + ".js";
-  return isFile(sibling) ? sibling : null;
+  return isFile(sibling) ? tsgoPath(sibling) : null;
 }
 
 /** Resolves a RELATIVE import specifier from `fromFile` the way 5.9.3's
@@ -294,7 +306,8 @@ export function resolveRelativeModule(fromFile: string, specifier: string): stri
   // claim, the JS is the code that compiles (npm-static.ts — the tsgo
   // host hides the same files, so both worlds answer the JS).
   if (npmStaticPackageOfPath(resolve(fromFile)) !== null) {
-    return loadAsJsFile(base) ?? loadAsJsDirectory(base);
+    const jsAnswer = loadAsJsFile(base) ?? loadAsJsDirectory(base);
+    return jsAnswer === null ? null : tsgoPath(jsAnswer);
   }
   const answer = loadAsFile(base) ?? loadAsDirectory(base);
   // A project declaration TWIN answers its runtime sibling (see
@@ -303,7 +316,7 @@ export function resolveRelativeModule(fromFile: string, specifier: string): stri
     const sibling = projectDtsRuntimeSibling(answer);
     if (sibling !== null) return sibling;
   }
-  return answer;
+  return answer === null ? null : tsgoPath(answer);
 }
 
 /** The JS-only twin of loadAsFile for --npm-static package internals:
@@ -474,7 +487,7 @@ function resolveImportsField(imports: unknown, specifier: string): string | null
  * (ERR_PACKAGE_IMPORT_NOT_DEFINED carries it). Null outside any scope. */
 export function nearestPkgJsonPath(fromFile: string): string | null {
   const dir = nearestPkgDir(dirname(resolve(fromFile)));
-  return dir === null ? null : join(dir, "package.json");
+  return dir === null ? null : tsgoPath(join(dir, "package.json"));
 }
 
 /** Resolves a PROJECT-INTERNAL package.json-mediated specifier from
@@ -490,7 +503,16 @@ export function resolveProjectImport(fromFile: string, specifier: string): strin
   // order, and the CJS link check all agree the package compiles as
   // program modules instead of island-embedding its published dist.
   const provenance = provenanceEntryFor(specifier);
-  if (provenance !== null) return provenance;
+  if (provenance !== null) return tsgoPath(provenance);
+  // ...and a source tree's OWN tsconfig path alias ("@client/plugins"):
+  // bare-looking, but it names source inside the registered tree, so it
+  // resolves here rather than reaching npm resolution. Extension/index
+  // probing is this resolver's (loadAsFile/loadAsDirectory), so the two
+  // worlds keep answering one file.
+  for (const target of provenanceAliasTargets(specifier)) {
+    const answer = loadAsFile(target) ?? loadAsDirectory(target);
+    if (answer !== null) return tsgoPath(answer);
+  }
   const pkgDir = nearestPkgDir(dirname(resolve(fromFile)));
   if (pkgDir === null) return null;
   const pkg = pkgJsonOf(pkgDir) as (PkgJson & { imports?: unknown; exports?: unknown; type?: string }) | null;
@@ -522,7 +544,8 @@ export function resolveProjectImport(fromFile: string, specifier: string): strin
   }
   if (target === null) return null;
   const path = join(pkgDir, target);
-  return loadAsFile(path) ?? (isFile(path) ? path : null);
+  const answer = loadAsFile(path) ?? (isFile(path) ? path : null);
+  return answer === null ? null : tsgoPath(answer);
 }
 
 /* 5.9.3 with allowJs resolves node_modules in TWO FULL PASSES (probed): the
@@ -743,8 +766,17 @@ export function resolveBareModule(
     return withWorkspace(packageAnswer(answerDir, name, file));
   };
 
+  // A provenance source tree has no node_modules of its own (it is a
+  // bare git checkout in the content-addressed cache), so its bare
+  // imports resolve from the DRIVER's installed tree — the prototype's
+  // documented dependency-version contract.
+  const anchor =
+    projectRealmDir !== null && isProvenanceSourceFile(tsgoPath(resolve(fromFile)))
+      ? projectRealmDir
+      : dirname(resolve(fromFile));
+
   const passOnce = (pass: NmPass): BareResolution | null => {
-    for (let dir = dirname(resolve(fromFile)); ; ) {
+    for (let dir = anchor; ; ) {
       const nm = join(dir, "node_modules");
       if (isDirectory(nm)) {
         // 1. The package directory.
@@ -816,5 +848,5 @@ export function clearResolveCaches(): void {
 /** True when `path` is under a node_modules directory (the
  * isExternalLibraryImport test 5.9.3 answers on resolutions). */
 export function isNodeModulesPath(path: string): boolean {
-  return isAbsolute(path) && path.split("/").includes("node_modules");
+  return isAbsolute(path) && tsgoPath(path).split("/").includes("node_modules");
 }

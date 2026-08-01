@@ -38,6 +38,20 @@ export interface ProvenancePackageSource {
   dir: string;
   /** specifier → absolute mapped source file ("cookie" → …/src/index.ts). */
   entries: Record<string, string>;
+  /** The source tree's OWN tsconfig "paths", baseUrl-resolved to absolute
+   * targets ("@client/*" → ["…/src/client/*"]). A package built with path
+   * aliases imports its internals through them, and those specifiers are
+   * bare-looking — without this they read as uninstalled npm packages and
+   * the whole tree falls back. Absent for packages with no alias table. */
+  aliases?: Record<string, string[]>;
+  /** Bare specifiers the source tree imports that stay ordinary npm
+   * packages, mapped to their types file AS RESOLVED IN THE DRIVER'S
+   * installed tree. The source tree is a bare git checkout in the
+   * content-addressed cache with no node_modules of its own, so nothing
+   * resolves from where those files sit; the prototype's stated contract
+   * is that these versions come from the driver's tree. Feeds the
+   * tsconfig "paths" tsgo resolves with (provenancePaths). */
+  external?: Record<string, string>;
 }
 
 export interface ProvenanceSources {
@@ -50,8 +64,22 @@ export interface ProvenanceSources {
   notes: string[];
 }
 
+/** One tsconfig path-alias pattern, pre-split around its single '*'
+ * (tsc allows at most one). A key with no '*' is an exact alias: `suffix`
+ * is null and `prefix` is the whole key. */
+interface AliasPattern {
+  prefix: string;
+  suffix: string | null;
+  targets: string[];
+}
+
 interface RegistryState {
   bySpecifier: Map<string, string>;
+  /** Longest-prefix-first, so the tsc "most specific pattern wins" rule is
+   * a linear scan. */
+  aliases: AliasPattern[];
+  aliasPaths: Record<string, string[]>;
+  externalPaths: Record<string, string[]>;
   packageDirs: string[];
   sources: ProvenanceSources;
 }
@@ -65,18 +93,57 @@ export function setProvenanceSources(sources: ProvenanceSources | null): void {
     state =
       sources === null
         ? null
-        : { bySpecifier: new Map(), packageDirs: [], sources };
+        : { bySpecifier: new Map(), aliases: [], aliasPaths: {}, externalPaths: {}, packageDirs: [], sources };
     return;
   }
   const bySpecifier = new Map<string, string>();
   const packageDirs: string[] = [];
+  const aliases: AliasPattern[] = [];
+  const aliasPaths: Record<string, string[]> = {};
+  const externalPaths: Record<string, string[]> = {};
   for (const pkg of sources.packages) {
+    for (const [spec, file] of Object.entries(pkg.external ?? {})) externalPaths[spec] = [file];
     packageDirs.push(pkg.dir.endsWith("/") ? pkg.dir : `${pkg.dir}/`);
     for (const [spec, file] of Object.entries(pkg.entries)) {
       bySpecifier.set(spec, file);
     }
+    for (const [key, targets] of Object.entries(pkg.aliases ?? {})) {
+      if (targets.length === 0) continue;
+      const star = key.indexOf("*");
+      aliases.push(
+        star < 0
+          ? { prefix: key, suffix: null, targets }
+          : { prefix: key.slice(0, star), suffix: key.slice(star + 1), targets },
+      );
+      aliasPaths[key] = targets;
+    }
   }
-  state = { bySpecifier, packageDirs, sources };
+  // tsc's rule: among matching patterns the longest literal prefix wins.
+  aliases.sort((a, b) => b.prefix.length - a.prefix.length);
+  state = { bySpecifier, aliases, aliasPaths, externalPaths, packageDirs, sources };
+}
+
+/** The candidate absolute targets an alias pattern maps `specifier` to,
+ * substituted, in declaration order — or an empty array when nothing
+ * matches. File resolution (extension/index probing) is the caller's:
+ * only it knows which extensions its world admits. */
+export function provenanceAliasTargets(specifier: string): string[] {
+  if (state === null) return [];
+  for (const a of state.aliases) {
+    if (a.suffix === null) {
+      if (specifier === a.prefix) return a.targets;
+      continue;
+    }
+    if (
+      specifier.length >= a.prefix.length + a.suffix.length &&
+      specifier.startsWith(a.prefix) &&
+      specifier.endsWith(a.suffix)
+    ) {
+      const wildcard = specifier.slice(a.prefix.length, specifier.length - a.suffix.length);
+      return a.targets.map((t) => t.split("*").join(wildcard));
+    }
+  }
+  return [];
 }
 
 /** The active sources (for reports), or null when the flag is off. */
@@ -92,6 +159,14 @@ export function provenanceEntryFor(specifier: string): string | null {
 /** True when any provenance package is registered. */
 export function provenanceActive(): boolean {
   return state !== null && state.bySpecifier.size > 0;
+}
+
+/** True when `specifier` is a registered package entry or matches one of
+ * the alias patterns — i.e. it names provenance source, not an npm
+ * package the driver would have to have installed. */
+export function isProvenanceSpecifier(specifier: string): boolean {
+  if (state === null) return false;
+  return state.bySpecifier.has(specifier) || provenanceAliasTargets(specifier).length > 0;
 }
 
 /** True when `fileName` lives inside a registered package's source tree —
@@ -119,7 +194,11 @@ export function provenancePackageOfFile(fileName: string): ProvenancePackageSour
  * source files the preflight resolver answers. */
 export function provenancePaths(): Record<string, string[]> | null {
   if (state === null || state.bySpecifier.size === 0) return null;
-  const paths: Record<string, string[]> = {};
+  // Driver-resolved externals first, then the source trees' own alias
+  // patterns, so a package ENTRY spelling always wins over an alias that
+  // happens to cover it, and an alias wins over an external of the same
+  // name (the tree's own code is what the alias was written for).
+  const paths: Record<string, string[]> = { ...state.externalPaths, ...state.aliasPaths };
   for (const [spec, file] of state.bySpecifier) paths[spec] = [file];
   return paths;
 }
