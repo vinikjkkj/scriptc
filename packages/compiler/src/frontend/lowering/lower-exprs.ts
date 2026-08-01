@@ -12,7 +12,7 @@ import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReaso
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import { UNSUPPORTED, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncNameOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
-import { IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, strCharsCall } from "./lower-containers.js";
+import { arrayAtOf, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, strCharsCall } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../shared.js";
 import { fenceEnumObjectValue, lowerEnumAccess } from "./lower-enums.js";
@@ -3073,8 +3073,45 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
    * other receivers (the generic property-access rejection applies). Both
    * the receiver type AND the ambient-file provenance of the member are
    * verified — the name alone proves nothing. */
+  /** `<mapIterCall>.next().value` → the drained array's `.at(0)`. Null for
+   * every other property access, so callers just try it first. */
+  function lowerIterFirstValue(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+    if (expr.name.text !== "value" || expr.questionDotToken) return null;
+    const nextCall = expr.expression;
+    if (!ts.isCallExpression(nextCall) || nextCall.arguments.length !== 0) return null;
+    const nextAccess = nextCall.expression;
+    if (!ts.isPropertyAccessExpression(nextAccess) || nextAccess.name.text !== "next") return null;
+    // The receiver must be a Map/Set iterator CALL (never a stored one):
+    // its lowering is the drained array.
+    const iterCall = nextAccess.expression;
+    if (!ts.isCallExpression(iterCall) || !ts.isPropertyAccessExpression(iterCall.expression)) return null;
+    const iterName = iterCall.expression.name.text;
+    if (iterName !== "entries" && iterName !== "keys" && iterName !== "values") return null;
+    const recvKind = L.mapTypeOf(L.typeOf(iterCall.expression.expression))?.kind;
+    if (recvKind !== "map" && recvKind !== "set") return null;
+    const drained = L.lowerExpr(iterCall);
+    if (drained.type.kind !== "array") return null;
+    const resultT = L.irTypeOf(expr);
+    if (resultT.kind !== "union") return null; // `T | undefined` always maps to a union
+    const loc = locOf(expr);
+    const zero: IrExpr = { kind: "numLit", value: 0, type: F64, loc };
+    return arrayAtOf(L, drained, zero, drained.type.elem, resultT, expr, loc);
+  }
+
   export function lowerIntrinsicProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     if (L.chainBlocked(expr)) return null;
+    // `m.entries().next().value` — the take-the-first-entry idiom. The
+    // iterator is never STORED here, so no iterator object has to exist:
+    // entries()/keys()/values() already lower to a drained array of the
+    // map's live entries in insertion order, and stepping a FRESH
+    // iterator once is exactly that array's first element (or undefined
+    // when the map is empty), which is what `.at(0)` answers. A stored
+    // iterator, `.done`, or a second `.next()` keeps the fence — those
+    // need real iterator state.
+    {
+      const viaFirst = lowerIterFirstValue(L, expr);
+      if (viaFirst) return viaFirst;
+    }
     // A never-tainted JS receiver type lowered checked-dynamic
     // (neverTaintedJsType — `cmd.length` on `const cmd = ['pwd', []]`):
     // stand down so the dyn keyed read below the chain answers, instead
