@@ -1004,6 +1004,30 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // part must be a plain object refinement — no call/construct signatures,
   // no class identity of its own.
   if (widened.isIntersectionType()) {
+    // `string & {}` — the literal-union-with-autocomplete idiom
+    // (`'NONE' | 'CAPPED' | (string & {})`, written so editors still
+    // suggest the named members while any string is accepted). The empty
+    // object type only removes null/undefined, which the primitive
+    // already excludes, so the intersection IS the primitive: no runtime
+    // distinction exists to model. Deliberately narrow -- every non-
+    // primitive part must be EMPTY, so a branded `string & { tag: 'x' }`
+    // keeps whatever the rules below decide for it.
+    {
+      const parts = widened.getTypes();
+      const PRIM =
+        ts.TypeFlags.StringLike | ts.TypeFlags.NumberLike |
+        ts.TypeFlags.BooleanLike | ts.TypeFlags.BigIntLike;
+      const prims = parts.filter((p) => (p.flags & PRIM) !== 0);
+      const emptyShape = (t: ts.Type): boolean =>
+        (t.flags & ts.TypeFlags.Object) !== 0 &&
+        checker.getPropertiesOfType(t).length === 0 &&
+        checker.getCallSignatures(t).length === 0 &&
+        checker.getConstructSignatures(t).length === 0 &&
+        checker.getIndexInfosOfType(t).length === 0;
+      if (prims.length === 1 && parts.every((p) => p === prims[0] || emptyShape(p))) {
+        return mapType(prims[0]!, ctx);
+      }
+    }
     const HANDLE_KINDS = new Set([
       "netServer", "netSocket", "httpReq", "httpRes", "httpClientReq", "dgramSocket",
       // process.stdout's own type IS the refined intersection
