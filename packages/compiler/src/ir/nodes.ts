@@ -2755,6 +2755,10 @@ export type IrLibFn =
    * randomBytesToString (which keeps its one-libCall lowering — the two
    * coexist: the composed form never materializes the Buffer). */
   | "crypto.randomBytes"
+  /** crypto.randomInt(min, max): a uniform integer in [min, max) by
+   * rejection sampling. Throws Node's range errors (safe-integer bounds,
+   * max > min, a range at or under 2^48). */
+  | "crypto.randomInt"
   /** The Buffer statics with fixed (always-u8) signatures. fromStr is
    * `Buffer.from(string, enc)` — the frontend completes an omitted
    * encoding to "utf8" and fences non-literal/unsupported ones; hex and
@@ -6803,6 +6807,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.statSync",
   "crypto.randomBytesToString",
   "crypto.randomBytes",
+  "crypto.randomInt",
   "buffer.concatLen",
   // The checked-dynamic compare/equals validators: Node's argument
   // ladders throw ERR_INVALID_ARG_TYPE / ERR_OUT_OF_RANGE catchably.

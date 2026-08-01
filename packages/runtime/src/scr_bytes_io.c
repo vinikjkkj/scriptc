@@ -663,3 +663,68 @@ void scr_fs_stream_opts_chk(const ScrDyn *path, const ScrDyn *opts, const ScrStr
   }
   scr_throw_lowering_fence(fence);
 }
+
+/* ── crypto.randomInt(min, max) ───────────────────────────────────────────
+ * A uniform integer in [min, max). Node's contract: both bounds must be
+ * safe integers, max must exceed min, and the RANGE is capped at 2^48 --
+ * the errors below carry its exact messages and codes.
+ *
+ * Uniformity comes from REJECTION SAMPLING, not modulo: `random % range`
+ * over-weights the low residues whenever range does not divide the draw
+ * space. Six bytes (the 2^48 cap) are drawn per attempt and the draw is
+ * discarded when it lands past the largest exact multiple of range,
+ * which leaves every value equally likely. Expected attempts stay under
+ * two for any admissible range. */
+double scr_crypto_random_int(double min, double max) {
+  const double SAFE = 9007199254740991.0; /* 2^53 - 1 */
+  char num[32];
+  char msg[192];
+  if (!(min >= -SAFE && min <= SAFE && min == (double)(long long)min)) {
+    size_t numlen = scr_f64_to_str(min, num);
+    int mlen = snprintf(msg, sizeof msg,
+                        "The value of \"min\" is out of range. It must be a safe integer. Received %.*s",
+                        (int)numlen, num);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)mlen, "ERR_OUT_OF_RANGE");
+    return 0;
+  }
+  if (!(max >= -SAFE && max <= SAFE && max == (double)(long long)max)) {
+    size_t numlen = scr_f64_to_str(max, num);
+    int mlen = snprintf(msg, sizeof msg,
+                        "The value of \"max\" is out of range. It must be a safe integer. Received %.*s",
+                        (int)numlen, num);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)mlen, "ERR_OUT_OF_RANGE");
+    return 0;
+  }
+  if (!(max > min)) {
+    size_t numlen = scr_f64_to_str(max, num);
+    char minbuf[32];
+    size_t minlen = scr_f64_to_str(min, minbuf);
+    int mlen = snprintf(
+        msg, sizeof msg,
+        "The value of \"max\" is out of range. It must be greater than the value of \"min\" (%.*s). Received %.*s",
+        (int)minlen, minbuf, (int)numlen, num);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)mlen, "ERR_OUT_OF_RANGE");
+    return 0;
+  }
+  double range = max - min;
+  if (range > 281474976710655.0) { /* 2^48 - 1, Node's cap on max - min */
+    size_t numlen = scr_f64_to_str(range, num);
+    int mlen = snprintf(msg, sizeof msg,
+                        "The value of \"max - min\" is out of range. It must be <= 281474976710655. Received %.*s",
+                        (int)numlen, num);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)mlen, "ERR_OUT_OF_RANGE");
+    return 0;
+  }
+  uint64_t r = (uint64_t)range;
+  /* The largest multiple of r that fits in 2^48; draws at or past it are
+   * discarded so no residue is favored. */
+  const uint64_t SPACE = (uint64_t)1 << 48;
+  uint64_t limit = SPACE - (SPACE % r);
+  for (;;) {
+    uint8_t buf[6];
+    arc4random_buf(buf, sizeof buf);
+    uint64_t draw = 0;
+    for (size_t i = 0; i < sizeof buf; i++) draw = (draw << 8) | buf[i];
+    if (draw < limit) return min + (double)(draw % r);
+  }
+}

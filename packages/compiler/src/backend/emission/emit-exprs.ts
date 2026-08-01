@@ -4670,6 +4670,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "crypto.randomBytesToString":
             // May throw Node's RangeError (may-throw seed set).
             return finish(`scr_crypto_random_string(${arg(0)}, ${arg(1)})`);
+          case "crypto.randomInt":
+            return finish(`scr_crypto_random_int(${arg(0)}, ${arg(1)})`);
           case "crypto.randomBytes":
             // A real u8 Buffer (+1); same RangeError as the composed form.
             return finish(`scr_crypto_random_bytes(${arg(0)})`);
