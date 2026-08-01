@@ -1468,6 +1468,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // Float64Array: the element IS the runtime's own double, so reads and
   // writes are exact — no coercion step, unlike every other kind.
   if (isStdlibInterface("Float64Array")) return bytesOf("f64");
+  // Int8Array: the signed 8-bit kind — reads sign-extend, writes ToInt8-wrap.
+  if (isStdlibInterface("Int8Array")) return bytesOf("i8");
   // DataView: the ONE view kind — a u8 bytes value whose runtime
   // representation borrows (aliases) its owner's storage, so reads through
   // it see writes to the source exactly like JS. The checker keeps the
