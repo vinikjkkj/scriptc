@@ -728,3 +728,13 @@ double scr_crypto_random_int(double min, double max) {
     if (draw < limit) return min + (double)(draw % r);
   }
 }
+
+/* util.promisify(randomInt): the same draw behind an already-settled
+ * promise (the fs/promises stance -- Node runs it on the threadpool, a
+ * compiled binary has none). A range error rejects rather than throwing
+ * out of the call: scr_promise_settled_f64 moves the pending exception
+ * into the promise, which is what `await` then observes. */
+ScrPromise *scr_crypto_random_int_async(double min, double max) {
+  double v = scr_crypto_random_int(min, max);
+  return scr_promise_settled_f64(v);
+}

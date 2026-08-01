@@ -3488,6 +3488,7 @@ void scr_promise_reject_pending(ScrPromise *p);
  * cell resets — callers' pending checks see it clean) and the payload is
  * dropped; otherwise the payload fulfills. The fs/promises bridge. */
 ScrPromise *scr_promise_settled_str(ScrStr *v); /* moves v in */
+ScrPromise *scr_promise_settled_f64(double v);
 ScrPromise *scr_promise_settled_void(void);
 ScrPromise *scr_promise_settled_ref(void *v, void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace);
 
@@ -4726,7 +4727,8 @@ ScrPromise *scr_fsp_read_file_bytes(ScrStr *path); /* +1 */
 ScrBytes *scr_crypto_random_bytes(double n);
 /* crypto.randomInt(min, max): a uniform integer in [min, max) by
  * rejection sampling; Node's range errors verbatim. */
-double scr_crypto_random_int(double min, double max); /* +1 */
+double scr_crypto_random_int(double min, double max);
+ScrPromise *scr_crypto_random_int_async(double min, double max); /* +1 */
 
 /* process.stdout/stderr.write(buf): the raw byte writes' Buffer overloads
  * (same streams and buffering as the string forms). Constantly true. */

@@ -1403,6 +1403,14 @@ ScrPromise *scr_promise_settled_str(ScrStr *v) {
   return p;
 }
 
+ScrPromise *scr_promise_settled_f64(double v) {
+  ScrPromise *rejected = scr_promise_settled_common();
+  if (rejected) return rejected; /* the op threw; the payload is moot */
+  ScrPromise *p = scr_promise_new();
+  scr_promise_fulfill_f64(p, v);
+  return p;
+}
+
 ScrPromise *scr_promise_settled_void(void) {
   ScrPromise *rejected = scr_promise_settled_common();
   if (rejected) return rejected;

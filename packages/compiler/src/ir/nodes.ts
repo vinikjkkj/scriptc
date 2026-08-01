@@ -2759,6 +2759,9 @@ export type IrLibFn =
    * rejection sampling. Throws Node's range errors (safe-integer bounds,
    * max > min, a range at or under 2^48). */
   | "crypto.randomInt"
+  /** util.promisify(randomInt): the same draw behind an ALREADY SETTLED
+   * promise (the fs/promises stance). A range error REJECTS. */
+  | "crypto.randomIntAsync"
   /** The Buffer statics with fixed (always-u8) signatures. fromStr is
    * `Buffer.from(string, enc)` — the frontend completes an omitted
    * encoding to "utf8" and fences non-literal/unsupported ones; hex and
