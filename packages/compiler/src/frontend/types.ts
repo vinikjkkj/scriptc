@@ -1439,6 +1439,25 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // the same numeric-handle story over the check-phase queue — its own id
   // space, so clearTimeout of an Immediate no-ops like Node.
   if (isStdlibInterface("Immediate")) return F64;
+  // TextEncoder is STATELESS — its only observable state is the constant
+  // `encoding` ("utf-8"); encode() is a pure string→bytes transform. So it
+  // maps to that encoding STRING, the Timeout-handle idiom (an opaque
+  // stdlib object represented by the one value it carries). The checker
+  // keeps the surfaces apart, so nothing can do string operations on a
+  // TextEncoder; `encoding` reads the value itself and encode() ignores
+  // the receiver. Divergence: inspecting one prints "utf-8" rather than
+  // `TextEncoder {}`.
+  // (@types/node declares it as a CLASS, so this one checks both forms.)
+  if (
+    psym?.name === "TextEncoder" &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+        ctx.isStdlibFile(d.getSourceFile()),
+    )
+  ) {
+    return STRING;
+  }
   if (isStdlibInterface("Uint8Array")) return bytesOf("u8");
   if (isStdlibInterface("Uint32Array")) return bytesOf("u32");
   // Int32Array: the signed 32-bit kind (element reads sign-extend, writes

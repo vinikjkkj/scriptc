@@ -5166,6 +5166,15 @@ const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
     if (symbol && symbol.name === "DataView" && L.isStdlibSymbol(symbol)) {
       return lowerDataViewNew(L, expr);
     }
+    // `new TextEncoder()`: STATELESS, so the instance IS its constant
+    // `encoding` (types.ts maps the type to string — the Timeout-handle
+    // idiom). Storing one in a const and calling encode() off it later is
+    // the shape real code uses; the encode lowering reads nothing from the
+    // receiver. Arguments are a fence: the constructor takes none.
+    if (symbol && symbol.name === "TextEncoder" && L.isStdlibSymbol(symbol)) {
+      if ((expr.arguments ?? []).length > 0) L.noLowering("new TextEncoder with arguments", expr);
+      return { kind: "strLit", value: "utf-8", type: STRING, loc: locOf(expr) };
+    }
     const elem = symbol ? own(BYTES_CTORS, symbol.name) : undefined;
     if (!elem || !symbol || !L.isStdlibSymbol(symbol)) return null;
     const name = symbol.name;
