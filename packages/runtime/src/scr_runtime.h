@@ -4356,6 +4356,7 @@ typedef enum ScrBytesElem {
   SCR_BYTES_U32, /* Uint32Array */
   SCR_BYTES_F32, /* Float32Array */
   SCR_BYTES_I32, /* Int32Array (reads sign-extend; writes ToInt32-wrap) */
+  SCR_BYTES_F64, /* Float64Array (element IS the double — no coercion) */
 } ScrBytesElem;
 
 typedef struct ScrBytes {
@@ -4370,7 +4371,7 @@ typedef struct ScrBytes {
   struct ScrBytes *backing;
 } ScrBytes;
 
-size_t scr_bytes_elem_size(ScrBytesElem elem); /* 1, 4, 4 */
+size_t scr_bytes_elem_size(ScrBytesElem elem); /* 1, 4, 4, 4, 8 */
 
 /* node:string_decoder's StringDecoder (scr_bytes.c, beside the decoders
  * it shares): the decoder value is a record holding the CANONICAL

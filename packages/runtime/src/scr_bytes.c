@@ -23,7 +23,8 @@ static void scr_bytes_oom(void) {
 }
 
 size_t scr_bytes_elem_size(ScrBytesElem elem) {
-  return elem == SCR_BYTES_U8 ? 1 : 4;
+  if (elem == SCR_BYTES_U8) return 1;
+  return elem == SCR_BYTES_F64 ? 8 : 4;
 }
 
 /* ── lifecycle ─────────────────────────────────────────────────────────── */
@@ -135,6 +136,11 @@ double scr_bytes_get(const ScrBytes *b, double i) {
       memcpy(&v, b->data + idx * 4, 4);
       return (double)v;
     }
+    case SCR_BYTES_F64: {
+      double v;
+      memcpy(&v, b->data + idx * 8, 8);
+      return v;
+    }
   }
   return 0; /* unreachable */
 }
@@ -155,6 +161,11 @@ void scr_bytes_set(ScrBytes *b, double i, double v) {
       memcpy(b->data + idx * 4, &f, 4);
       break;
     }
+    case SCR_BYTES_F64:
+      /* The element IS the double the runtime already carries: no
+       * coercion, no rounding — a Float64Array store is exact. */
+      memcpy(b->data + idx * 8, &v, 8);
+      break;
     case SCR_BYTES_I32: {
       /* ToInt32 is ToUint32 reinterpreted signed (same 2^32 residue). */
       uint32_t u = scr_bytes_to_u32(v);
@@ -949,6 +960,9 @@ ScrBytes *scr_bytes_from_arr(ScrBytesElem elem, const ScrArr *arr) {
         memcpy(b->data + i * 4, &f, 4);
         break;
       }
+      case SCR_BYTES_F64:
+        memcpy(b->data + i * 8, &v, 8);
+        break;
       case SCR_BYTES_I32: {
         uint32_t u = scr_bytes_to_u32(v);
         memcpy(b->data + i * 4, &u, 4); /* same residue reinterpreted */

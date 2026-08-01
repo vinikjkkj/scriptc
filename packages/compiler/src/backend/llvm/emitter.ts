@@ -61,6 +61,7 @@
  * the island surface (jsval/jsExit — the engine bridge).
  */
 import type {
+  IrBytesElem,
   IrExpr,
   IrFfiImport,
   IrFunction,
@@ -789,8 +790,8 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
   "timers.queueMicrotaskDyn", "timers.setImmediateFnValue", "timers.immediatePromise",
 ]);
 
-/** ScrBytesElem (scr_runtime.h): U8, U32, F32, I32. */
-const BYTES_ELEM_NUM: Record<"u8" | "u32" | "f32" | "i32", number> = { u8: 0, u32: 1, f32: 2, i32: 3 };
+/** ScrBytesElem (scr_runtime.h): U8, U32, F32, I32, F64. */
+const BYTES_ELEM_NUM: Record<IrBytesElem, number> = { u8: 0, u32: 1, f32: 2, i32: 3, f64: 4 };
 
 /** ScrBytesNumKind + littleEndian per readNum/writeNum kind token —
  * emit-types.ts's BYTES_NUM_KIND_C with the enum values spelled out
