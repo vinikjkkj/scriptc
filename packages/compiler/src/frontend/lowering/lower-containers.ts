@@ -2245,6 +2245,20 @@ function lowerOptionalDefaultArg(
     const index = L.lowerExprExpecting(call.arguments[0]!, F64);
     const resultT = L.irTypeOf(call);
     if (resultT.kind !== "union") L.badType(call, L.typeOf(call)); // defensive: T | undefined always maps to a union
+    return arrayAtOf(L, receiver, index, elem, resultT, call, loc);
+  }
+
+  /** The interned `.at` helper over an already-lowered receiver/index —
+   * lowerArrayAtCall's body, split out so other surfaces whose meaning IS
+   * an indexed read answering `T | undefined` can reuse it instead of
+   * minting their own. `blame` is the node a re-tag refusal points at. */
+  export function arrayAtOf(L: Lowerer, receiver: IrExpr,
+    index: IrExpr,
+    elem: IrType,
+    resultT: IrType & { kind: "union" },
+    blame: ts.Node,
+    loc: SrcLoc,): IrExpr {
+    const call = blame as ts.CallExpression;
     const undefTag = L.armTag(resultT.unionId, UNDEFINED_T);
     if (undefTag < 0) L.badType(call, L.typeOf(call));
     let foundTag: number | null = null;
@@ -2687,11 +2701,23 @@ const MAP_ITER_METHODS = new Set(["keys", "values", "entries"]);
     const loc = locOf(call);
     const inArraySpread =
       ts.isSpreadElement(call.parent) && ts.isArrayLiteralExpression(call.parent.parent);
-    if (!inArraySpread) {
+    // `.next().value` is the other IMMEDIATE drain: the iterator is
+    // stepped once where it is made and never stored, so the snapshot
+    // this builds is exactly what that step observes (its caller takes
+    // the first element). Same reasoning as the spread — no user code
+    // runs mid-drain, so no compaction can shift indices.
+    const inFirstStep =
+      ts.isPropertyAccessExpression(call.parent) &&
+      call.parent.name.text === "next" &&
+      ts.isCallExpression(call.parent.parent) &&
+      call.parent.parent.expression === call.parent &&
+      ts.isPropertyAccessExpression(call.parent.parent.parent) &&
+      call.parent.parent.parent.name.text === "value";
+    if (!inArraySpread && !inFirstStep) {
       L.noLowering(
         `.${method}() outside an immediate array spread`,
         call,
-        `iterator objects have no lowering — drain it into an array where it is made: [...m.${method}()]`,
+        `iterator objects have no lowering — drain it into an array where it is made ([...m.${method}()]), or step a fresh one once (m.${method}().next().value)`,
       );
     }
     // The pushed element type. For entries the checker's own element type —
