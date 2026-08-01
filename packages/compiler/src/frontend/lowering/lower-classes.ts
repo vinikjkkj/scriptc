@@ -5,7 +5,7 @@
  * hierarchy registration. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, DYN, F64, bytesOf, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isSupportedMapKey, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, bytesOf, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { MAX_GENERIC_INSTANCES, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
 import { isGenericCallableMemberType, typeKey } from "../types.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeTypesPath, locOf } from "../program.js";
@@ -5129,11 +5129,35 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           L.noLowering("new Array with spread arguments", expr, "write the array literal: [...xs]");
         }
         if (args.length === 1 && L.mapTypeOf(L.typeOf(args[0]!))?.kind === "f64") {
-          L.noLowering(
-            "new Array(count)",
-            expr,
-            "the one-number form allocates HOLES (reads answer undefined, which the element type cannot carry) — build and push, or use the elements form: new Array(a, b)",
-          );
+          // `new Array(n)` allocates HOLES and is written to be filled by
+          // index before anything reads it -- the same shape mapper-less
+          // `Array.from({ length: n })` already lowers to (arrayNewLen).
+          // Reuse it, and with it the ratified stance: a union element
+          // with an undefined arm holds the interned undefined (JS-exact),
+          // every other refcounted element holds an absent slot that TRAPS
+          // if read before assignment (SEMANTICS.md 46) rather than
+          // answering a value Node never would.
+          const n = L.lowerExprExpecting(args[0]!, F64);
+          let arrT = L.mapTypeOf(L.typeOf(expr));
+          if (arrT?.kind !== "array") {
+            const ctx = L.checker.getContextualType(expr);
+            const ctxMapped = ctx ? L.mapTypeOf(ctx) : null;
+            if (ctxMapped?.kind === "array") arrT = ctxMapped;
+          }
+          if (arrT?.kind !== "array") L.badType(expr, L.typeOf(expr));
+          const elem = arrT.elem;
+          const absent = elem.kind === "union" ? L.wrappedUndefined(elem, loc) !== null : isRefCounted(elem);
+          if (!absent) {
+            // Scalars have no absent value that isn't a LIE on read (0
+            // where Node says undefined) -- the Array.from fence's wording.
+            L.noLowering(
+              `new Array(count) with '${L.fmt(elem)}' elements`,
+              expr,
+              "scalar slots would read 0/false/\"\" where Node reads undefined — " +
+                "build and push, or use the elements form: new Array(a, b)",
+            );
+          }
+          return { kind: "arrayNewLen", length: n, type: arrT, loc };
         }
         let t = L.mapTypeOf(L.typeOf(expr));
         // JS's `new Array()` types any[]; the contextual type carries the
