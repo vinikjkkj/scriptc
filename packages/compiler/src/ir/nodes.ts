@@ -1283,6 +1283,14 @@ export type IrStmt =
  * the fresh array. */
 export type IrArrIntrinsicMethod =
   | "length"
+  /** `a.length = n` — JS's two-in-one: shrinking DROPS the tail
+   * (refcounted elements release), growing appends ABSENT slots, n equal
+   * to the current length is a no-op. Which one happens is a RUNTIME
+   * fact, so both arms emit; the absent value is arrayNewLen's (the
+   * interned undefined arm for unions carrying one, NULL otherwise), and
+   * scalar elements have none, so the frontend fences those. Yields
+   * nothing. */
+  | "setLength"
   /** `fill(value[, start[, end]])`: writes the value over the slice
    * family's clamped range IN PLACE, then answers the receiver (+1) for
    * chaining, exactly like JS. Each write releases the slot it replaces,

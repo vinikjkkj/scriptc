@@ -874,6 +874,30 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             const to = e.args[2] ? E.emitExpr(e.args[2]).name : "INFINITY";
             return E.newTemp(e.type, `scr_arr_fill_${acc}(${r.name}, ${v.name}, ${from}, ${to})`);
           }
+          case "setLength": {
+            // `a.length = n`: shrink drops the tail (the runtime releases
+            // refcounted elements), grow appends the ABSENT slot -- the
+            // same value arrayNewLen fills with (the interned undefined
+            // arm for unions carrying one, NULL otherwise; scalars have
+            // none and are fenced in the frontend). Which arm runs is a
+            // runtime fact, so both are emitted.
+            const want = E.emitExpr(e.args[0]!);
+            const elemT = e.receiver.type.elem;
+            let fill = "NULL";
+            if (elemT.kind === "union") {
+              const def = E.unionsById.get(elemT.unionId);
+              const tag = def ? def.arms.findIndex((a) => a.kind === "undefinedT") : -1;
+              if (tag >= 0) fill = E.unitInstanceRef(elemT.unionId, tag);
+            }
+            E.line(`scr_arr_truncate(${r.name}, ${want.name});`);
+            const g = `sc_i${E.tempCounter++}`;
+            E.line(`for (double ${g} = scr_arr_len(${r.name}); ${g} <= ${want.name} - 1; ${g} += 1) {`);
+            E.indent++;
+            E.line(`scr_arr_push_${acc}(${r.name}, ${fill});`);
+            E.indent--;
+            E.line(`}`);
+            return { name: "", type: e.type };
+          }
           case "pushSpread": {
             // `a.push(...src)`: append src's elements in order. The source
             // is BORROWED; the count snapshots before the loop so
