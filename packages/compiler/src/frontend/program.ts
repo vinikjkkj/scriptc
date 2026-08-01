@@ -845,7 +845,18 @@ function inTypePosition7(node: ts.Node): boolean {
  * conservative — anything that could CALL user code (directly, through a
  * callback-invoking builtin, a getter, an iterator, or an implicit
  * coercion of a user object) disqualifies the module's cycles. */
-function nonInertTopLevel7(program: ts.Program, sf: ts.SourceFile): ts.Node | null {
+function nonInertTopLevel7(
+  program: ts.Program,
+  sf: ts.SourceFile,
+  /** Cycle admission only: true for modules the caller's walk has already
+   * finished evaluating. A read rooted in one of those is as safe as a
+   * read of a declaration-file global — the storage is initialized and
+   * cannot be observed mid-init — which is what lets a cluster member
+   * whose top level reads an ALREADY-EVALUATED module still be admitted.
+   * Absent (the default) nothing is considered evaluated, so every caller
+   * that does not track evaluation keeps the strict bar. */
+  evaluated?: (f: ts.SourceFile) => boolean,
+): ts.Node | null {
   const checker = program.getTypeChecker();
   const PRIM =
     ts.TypeFlags.StringLike |
@@ -868,7 +879,15 @@ function nonInertTopLevel7(program: ts.Program, sf: ts.SourceFile): ts.Node | nu
   /** The identifier's symbol lives entirely in declaration files — a
    * global builtin (process, WeakSet, Object, …) whose property reads and
    * calls are runtime-implemented, never user code. */
-  const dtsRooted = (e: ts.Expression): boolean => {
+  const dtsRooted = (
+    e: ts.Expression,
+    /** READ positions only (property/element access, a computed key):
+     * a root declared EARLIER IN THIS SAME MODULE is initialized by the
+     * time the read runs -- reading it observes no other module's init
+     * window. Call positions pass false: invoking a same-module function
+     * runs user code, which could reach a partner mid-init. */
+     sameFileOk = false,
+  ): boolean => {
     let root: ts.Expression = e;
     while (ts.isPropertyAccessExpression(root) || ts.isElementAccessExpression(root)) root = root.expression;
     if (ts.isMetaProperty(root)) return true; // import.meta
@@ -877,7 +896,33 @@ function nonInertTopLevel7(program: ts.Program, sf: ts.SourceFile): ts.Node | nu
     if (sym === undefined) return false;
     if (sym.flags & ts.SymbolFlags.Alias) sym = checker.getAliasedSymbol(sym);
     const decls = checker.declarationsOf(sym);
-    return decls.length > 0 && decls.every((d) => d.getSourceFile().isDeclarationFile);
+    if (decls.length === 0) return false;
+    const useStart = root.getStart(sf);
+    // The alias resolved to the DECLARING module, so a re-export barrel in
+    // the middle is transparent here exactly as it is to Node: the read
+    // observes the original declaration's storage, not the barrel's.
+    return decls.every(
+      (d) =>
+        d.getSourceFile().isDeclarationFile ||
+        (evaluated?.(d.getSourceFile()) ?? false) ||
+        (sameFileOk && d.getSourceFile() === sf && d.getStart() < useStart),
+    );
+  };
+  /** The lib containers whose iteration is runtime-implemented. */
+  const STDLIB_ITERABLES = new Set(["Array", "ReadonlyArray", "Set", "ReadonlySet", "Map", "ReadonlyMap"]);
+  /** Spreading RUNS the operand's iterator. For the lib containers (and
+   * strings) that iterator is runtime-provided, so no user code executes
+   * and the spread is as inert as the operand; a user iterable's own
+   * Symbol.iterator IS user code and keeps the refusal. */
+  const stdlibIterable = (e: ts.Expression): boolean => {
+    const t = checker.getTypeAtLocation(e);
+    const parts = t.isUnionType() ? t.getTypes() : [t];
+    return parts.every((p) => {
+      if ((p.flags & ts.TypeFlags.StringLike) !== 0) return true;
+      const s = p.getSymbol();
+      if (s === undefined || !STDLIB_ITERABLES.has(s.name)) return false;
+      return checker.declarationsOf(s).some((d) => d.getSourceFile().isDeclarationFile);
+    });
   };
   const hasDecorator = (n: ts.Node): boolean =>
     ((n as { modifiers?: readonly ts.Node[] }).modifiers ?? []).some((m) => m.kind === ts.SyntaxKind.Decorator);
@@ -948,9 +993,9 @@ function nonInertTopLevel7(program: ts.Program, sf: ts.SourceFile): ts.Node | nu
     if (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isSatisfiesExpression(e) || ts.isNonNullExpression(e)) {
       return inert(e.expression);
     }
-    if (ts.isPropertyAccessExpression(e)) return dtsRooted(e);
+    if (ts.isPropertyAccessExpression(e)) return dtsRooted(e, true);
     if (ts.isElementAccessExpression(e)) {
-      return dtsRooted(e) && inert(e.argumentExpression) && primitiveTyped(e.argumentExpression);
+      return dtsRooted(e, true) && inert(e.argumentExpression) && primitiveTyped(e.argumentExpression);
     }
     if (ts.isTemplateExpression(e)) {
       return e.templateSpans.every((s) => inert(s.expression) && primitiveTyped(s.expression));
@@ -973,11 +1018,25 @@ function nonInertTopLevel7(program: ts.Program, sf: ts.SourceFile): ts.Node | nu
       return primitiveTyped(e.left) && primitiveTyped(e.right);
     }
     if (ts.isConditionalExpression(e)) return inert(e.condition) && inert(e.whenTrue) && inert(e.whenFalse);
-    if (ts.isArrayLiteralExpression(e)) return e.elements.every((el) => !ts.isSpreadElement(el) && inert(el));
+    if (ts.isArrayLiteralExpression(e)) {
+      return e.elements.every((el) =>
+        ts.isSpreadElement(el)
+          ? inert(el.expression) && stdlibIterable(el.expression)
+          : inert(el),
+      );
+    }
     if (ts.isObjectLiteralExpression(e)) {
       return e.properties.every((p) => {
         if (ts.isShorthandPropertyAssignment(p)) return true;
-        if (!ts.isPropertyAssignment(p) || ts.isComputedPropertyName(p.name)) return false;
+        if (!ts.isPropertyAssignment(p)) return false;
+        // A COMPUTED key is a key expression plus a ToPropertyKey coercion,
+        // both inert when the expression is — the bar inertClass already
+        // applies to computed member names, mirrored here (the object
+        // literal arm refused every computed key outright, which no
+        // constant table built from named ids could ever pass).
+        if (ts.isComputedPropertyName(p.name)) {
+          if (!inert(p.name.expression) || !primitiveTyped(p.name.expression)) return false;
+        }
         return inert(p.initializer);
       });
     }
@@ -1116,11 +1175,27 @@ function backEdgeUseOffence7(
  * path — the module the walk ENTERED the cluster through — is the last
  * of them to run, with every other member already done. Its top level
  * therefore cannot observe a partial initialization, and it is exempt
- * from the inert-top-level bar the other members must meet. */
+ * from the inert-top-level bar the other members must meet.
+ *
+ * `evaluated` answers whether the walk has already FINISHED a module. A
+ * module that is done stays done, so a top-level read rooted in one is
+ * safe for every member's body — including bodies that have not run yet.
+ * That is what admits the barrel shape real libraries are built from: a
+ * cluster member reading `WA_DEFAULTS` through a re-export barrel reads
+ * the DECLARING module's storage (aliases resolve past the barrel, as in
+ * Node), and when that module was evaluated earlier in the walk the read
+ * cannot observe a partial initialization. Conservative by construction:
+ * a module not yet done is treated as unsafe even if it would in fact
+ * finish first. */
 export function makeCycleAdmission(
   program: ts.Program,
   edgesOf: (sf: ts.SourceFile) => readonly CycleEdge[],
-): (importer: ts.SourceFile, e: CycleEdge, stack: readonly ts.SourceFile[]) => string | null {
+): (
+  importer: ts.SourceFile,
+  e: CycleEdge,
+  stack: readonly ts.SourceFile[],
+  evaluated: (f: ts.SourceFile) => boolean,
+) => string | null {
   // Tarjan over the same edges the order walk uses (self-edges skipped —
   // Node's self-reference rule makes those benign before admission is
   // ever asked). State persists across lazily-added roots: a later
@@ -1167,7 +1242,12 @@ export function makeCycleAdmission(
   // reason the cluster's cycles stay fenced, or null when its every
   // member passes the inert-top-level bar.
   const sccVerdict = new Map<ts.SourceFile[], string | null>();
-  return (importer: ts.SourceFile, e: CycleEdge, stack: readonly ts.SourceFile[]): string | null => {
+  return (
+    importer: ts.SourceFile,
+    e: CycleEdge,
+    stack: readonly ts.SourceFile[],
+    evaluated: (f: ts.SourceFile) => boolean,
+  ): string | null => {
     if (e.stmt === undefined) return "the cycle closes through a require() edge";
     // Cheap per-edge admission: nothing readable binds through the edge.
     if (ts.isImportDeclaration(e.stmt)) {
@@ -1202,7 +1282,7 @@ export function makeCycleAdmission(
           break;
         }
         if (m === entered) continue;
-        const off = nonInertTopLevel7(program, m);
+        const off = nonInertTopLevel7(program, m, evaluated);
         if (off !== null) {
           reason = `top-level code at ${lineOf(off)} can run user code during the cycle's init window — only declaration-only module bodies are admitted`;
           break;
@@ -2139,7 +2219,7 @@ function preflight7(load: LoadResult): {
         // already evaluating) — benign exactly when nothing can observe
         // the partial initialization through this edge's bindings, by the
         // cheap per-edge rule or the declaration-only init window rule.
-        const reason = cycleAdmissionReason(sf, e, sfStack);
+        const reason = cycleAdmissionReason(sf, e, sfStack, (f) => state.get(f) === "done");
         if (reason !== null) {
           const cycleStart = stack.indexOf(e.dep.fileName);
           const cycle = [...stack.slice(cycleStart), e.dep.fileName].join(" → ");

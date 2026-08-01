@@ -153,7 +153,7 @@ export interface FileParts {
         if (s === "visiting") {
           // A back edge: Node answers it from the cache. Same admission
           // question as preflight's static walk, same fence when refused.
-          const reason = cycleAdmissionReason(sf, e, sfStack);
+          const reason = cycleAdmissionReason(sf, e, sfStack, (f) => state.get(f) === "done");
           if (reason !== null) {
             const cycleStart = stack.indexOf(e.dep.fileName);
             onCycle([...stack.slice(cycleStart), e.dep.fileName].join(" → "), reason);
