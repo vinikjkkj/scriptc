@@ -5279,6 +5279,18 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             const seed: IrExpr = { kind: "arrayLit", elems, type: arrayOf(mapped.elem), loc };
             return { kind: "setNew", seed, type: mapped, loc };
           }
+          // A seed literal carrying SPREADS (`new Set([...other, extra])` —
+          // the union-of-sets idiom): the ordinary array-literal lowering
+          // already composes them, draining a spread Set through toArray
+          // exactly as `[...set]` does. Expect the seed's array type so a
+          // literal that lowers to anything else falls through to the
+          // named fence instead of reaching the validator mistyped.
+          if (ts.isArrayLiteralExpression(argNode)) {
+            const seed = L.lowerExprExpecting(argNode, arrayOf(mapped.elem));
+            if (typeEquals(seed.type, arrayOf(mapped.elem))) {
+              return { kind: "setNew", seed, type: mapped, loc };
+            }
+          }
           if (!ts.isSpreadElement(argNode)) {
             const argIr = L.mapTypeOf(L.typeOf(argNode));
             if (argIr?.kind === "array" && typeEquals(argIr.elem, mapped.elem)) {
