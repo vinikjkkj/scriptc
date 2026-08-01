@@ -5306,6 +5306,38 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
               return { kind: "setNew", seed, type: mapped, loc };
             }
           }
+          // A readonly TUPLE seed — `Object.freeze([...] as const)`, the
+          // shape a frozen constant table always has: `as const` makes a
+          // tuple, not an array, so the array arm below never matches it.
+          // Its length is known, so a lifted helper reads each position
+          // off the record ONCE (the receiver is a parameter, so the
+          // source evaluates a single time) and pushes into a fresh
+          // array, which then seeds the Set exactly like an array value.
+          if (!ts.isSpreadElement(argNode)) {
+            const tupIr = L.mapTypeOf(L.typeOf(argNode));
+            const tupShape = tupIr?.kind === "record" ? L.shapes.get(tupIr.shapeId) : null;
+            if (
+              tupIr?.kind === "record" && tupShape?.tuple === true &&
+              tupShape.fields.length > 0 &&
+              tupShape.fields.every((f) => typeEquals(f.type, mapped.elem))
+            ) {
+              const key = `tupleToArr:${typeKey(tupIr)}:${typeKey(mapped.elem)}`;
+              let helper = L.mapHofHelpers.get(key);
+              if (!helper) {
+                helper = `%tuple.toArray.${L.mapHofHelpers.size}`;
+                L.mapHofHelpers.set(key, helper);
+                L.liftedFns.push(buildTupleToArrayFn(L, helper, tupIr, tupShape.fields.length, mapped.elem, loc));
+              }
+              const seed: IrExpr = {
+                kind: "call",
+                callee: helper,
+                args: [L.lowerExpr(argNode)],
+                type: arrayOf(mapped.elem),
+                loc,
+              };
+              return { kind: "setNew", seed, type: mapped, loc };
+            }
+          }
           if (!ts.isSpreadElement(argNode)) {
             const argIr = L.mapTypeOf(L.typeOf(argNode));
             if (argIr?.kind === "array" && typeEquals(argIr.elem, mapped.elem)) {
@@ -5688,6 +5720,50 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
       }
     }
     L.unsupported("SC1090", expr, "constructing values other than classes declared in the program");
+  }
+
+/** `(t: <tuple record>) => elem[]` — each tuple position read off the
+   * parameter (so the SOURCE evaluates once at the call) and pushed into
+   * a fresh array, in position order. Interned per (tuple, element) pair
+   * like the map drain helpers. */
+  function buildTupleToArrayFn(L: Lowerer, name: string,
+    tupleT: IrType & { kind: "record" },
+    arity: number,
+    elemT: IrType,
+    loc: SrcLoc,): IrFunction {
+    const outT = arrayOf(elemT);
+    const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
+    const body: IrStmt[] = [
+      { kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: outT, loc }, loc },
+    ];
+    for (let i = 0; i < arity; i++) {
+      const read: IrExpr = {
+        kind: "recordGet",
+        obj: ref("t.0", tupleT),
+        shapeId: tupleT.shapeId,
+        field: String(i),
+        type: elemT,
+        loc,
+      };
+      body.push({
+        kind: "exprStmt",
+        expr: { kind: "arrIntrinsic", method: "push", receiver: ref("out.0", outT), args: [read], type: F64, loc },
+        loc,
+      });
+    }
+    body.push({ kind: "return", value: ref("out.0", outT), loc });
+    void L;
+    return {
+      name,
+      params: [{ localId: "t.0", name: "t", type: tupleT }],
+      returnType: outT,
+      locals: [
+        { id: "t.0", name: "t", type: tupleT, mutable: true },
+        { id: "out.0", name: "out", type: outT, mutable: false },
+      ],
+      body,
+      loc,
+    };
   }
 
 /** A getter/setter invocation over an accessor target's receiver — the
