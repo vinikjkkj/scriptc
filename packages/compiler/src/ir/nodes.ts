@@ -2762,6 +2762,10 @@ export type IrLibFn =
   /** util.promisify(randomInt): the same draw behind an ALREADY SETTLED
    * promise (the fs/promises stance). A range error REJECTS. */
   | "crypto.randomIntAsync"
+  /** PBKDF2-HMAC-SHA256 (RFC 8018). Throws Node's range errors on a bad
+   * iteration count or key length; the Async twin rejects instead. */
+  | "crypto.pbkdf2Sha256"
+  | "crypto.pbkdf2Sha256Async"
   /** The Buffer statics with fixed (always-u8) signatures. fromStr is
    * `Buffer.from(string, enc)` — the frontend completes an omitted
    * encoding to "utf8" and fences non-literal/unsupported ones; hex and
@@ -6811,6 +6815,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "crypto.randomBytesToString",
   "crypto.randomBytes",
   "crypto.randomInt",
+  "crypto.pbkdf2Sha256",
   "buffer.concatLen",
   // The checked-dynamic compare/equals validators: Node's argument
   // ladders throw ERR_INVALID_ARG_TYPE / ERR_OUT_OF_RANGE catchably.

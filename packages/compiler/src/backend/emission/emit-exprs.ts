@@ -4674,6 +4674,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_crypto_random_int(${arg(0)}, ${arg(1)})`);
           case "crypto.randomIntAsync":
             return finish(`scr_crypto_random_int_async(${arg(0)}, ${arg(1)})`);
+          case "crypto.pbkdf2Sha256":
+            return finish(`scr_crypto_pbkdf2_sha256(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
+          case "crypto.pbkdf2Sha256Async":
+            return finish(`scr_crypto_pbkdf2_sha256_async(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "crypto.randomBytes":
             // A real u8 Buffer (+1); same RangeError as the composed form.
             return finish(`scr_crypto_random_bytes(${arg(0)})`);

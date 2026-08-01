@@ -4728,7 +4728,13 @@ ScrBytes *scr_crypto_random_bytes(double n);
 /* crypto.randomInt(min, max): a uniform integer in [min, max) by
  * rejection sampling; Node's range errors verbatim. */
 double scr_crypto_random_int(double min, double max);
-ScrPromise *scr_crypto_random_int_async(double min, double max); /* +1 */
+ScrPromise *scr_crypto_random_int_async(double min, double max);
+/* PBKDF2-HMAC-SHA256 (RFC 8018) over scr_crypto_hmac_raw. Borrowed
+ * inputs; +1 result. Throws Node's range errors. */
+ScrBytes *scr_crypto_pbkdf2_sha256(const ScrBytes *password, const ScrBytes *salt,
+                                   double iterations, double keylen);
+ScrPromise *scr_crypto_pbkdf2_sha256_async(const ScrBytes *password, const ScrBytes *salt,
+                                           double iterations, double keylen); /* +1 */
 
 /* process.stdout/stderr.write(buf): the raw byte writes' Buffer overloads
  * (same streams and buffering as the string forms). Constantly true. */

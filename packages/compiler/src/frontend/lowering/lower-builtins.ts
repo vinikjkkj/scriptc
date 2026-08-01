@@ -2514,12 +2514,28 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     params: IrType[];
     /** The promise's payload type. */
     inner: IrType;
+    /** An argument the CALL must spell as this exact string literal and
+     * which the lib fn does not take — pbkdf2's digest name, where the
+     * lowering derives with one PRF and any other name would silently
+     * derive a different key. */
+    literalArg?: { index: number; value: string };
   }
 
   const PROMISIFY_SETTLED: Record<string, PromisifiedTarget | undefined> = {
     "zlib.deflate": { fn: "zlib.deflateAsync", params: [BYTES_U8], inner: BYTES_U8 },
     "zlib.unzip": { fn: "zlib.unzipAsync", params: [BYTES_U8], inner: BYTES_U8 },
     "crypto.randomInt": { fn: "crypto.randomIntAsync", params: [F64, F64], inner: F64 },
+    // pbkdf2's callback form takes the digest name as its fifth argument;
+    // the lowering derives with sha256, so a different name would have to
+    // fence here the way pbkdf2Sync's does. Until the table can express
+    // that, only the four leading arguments are accepted and the digest
+    // stays the sync path's business.
+    "crypto.pbkdf2": {
+      fn: "crypto.pbkdf2Sha256Async",
+      params: [BYTES_U8, BYTES_U8, F64, F64, STRING],
+      inner: BYTES_U8,
+      literalArg: { index: 4, value: "sha256" },
+    },
   };
 
   /** A call THROUGH a settled-promise promisified binding: one libCall of
@@ -2536,7 +2552,20 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
           "Node's trailing options would change the result",
       );
     }
-    const args = target.params.map((p, i) => L.lowerExprExpecting(expr.arguments[i]!, p));
+    if (target.literalArg !== undefined) {
+      const { index, value } = target.literalArg;
+      const t = L.typeOf(expr.arguments[index]!);
+      if (!t.isStringLiteralType() || t.value !== value) {
+        L.noLowering(
+          `the promisified ${name} with this digest`,
+          expr.arguments[index]!,
+          `${value} is the derived PRF — pass it as a literal (another digest would derive a different key)`,
+        );
+      }
+    }
+    const args = target.params
+      .map((p, i) => (i === target.literalArg?.index ? null : L.lowerExprExpecting(expr.arguments[i]!, p)))
+      .filter((a): a is IrExpr => a !== null);
     return { kind: "libCall", fn: target.fn, args, type: { kind: "promise", inner: target.inner }, loc };
   }
 
@@ -3740,6 +3769,40 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     bi: { module: string; member: string },
     loc: SrcLoc,): IrExpr | null {
     if (bi.module !== "crypto") return null;
+    // `pbkdf2Sync(password, salt, iterations, keylen, digest)` — the
+    // SHA-256 derivation. The digest name must be a literal and must
+    // spell sha256: deriving with a different PRF silently produces a
+    // different key, so anything else fences rather than lowering to the
+    // wrong function. The callback form (pbkdf2) rides util.promisify.
+    if (bi.member === "pbkdf2Sync") {
+      if (expr.arguments.length !== 5 || expr.arguments.some(ts.isSpreadElement)) {
+        L.noLowering(
+          `crypto.pbkdf2Sync with ${expr.arguments.length} arguments`,
+          expr,
+          "the supported form is pbkdf2Sync(password, salt, iterations, keylen, 'sha256')",
+        );
+      }
+      const digestT = L.typeOf(expr.arguments[4]!);
+      if (!digestT.isStringLiteralType() || digestT.value !== "sha256") {
+        L.noLowering(
+          "crypto.pbkdf2Sync with this digest",
+          expr.arguments[4]!,
+          "sha256 is the derived PRF — pass it as a literal (another digest would derive a different key)",
+        );
+      }
+      return {
+        kind: "libCall",
+        fn: "crypto.pbkdf2Sha256",
+        args: [
+          L.lowerExprExpecting(expr.arguments[0]!, BYTES_U8),
+          L.lowerExprExpecting(expr.arguments[1]!, BYTES_U8),
+          L.lowerExprExpecting(expr.arguments[2]!, F64),
+          L.lowerExprExpecting(expr.arguments[3]!, F64),
+        ],
+        type: BYTES_U8,
+        loc,
+      };
+    }
     const LISTS: Record<string, readonly string[] | undefined> = {
       getCiphers: CRYPTO_CIPHERS,
       getHashes: CRYPTO_HASHES,

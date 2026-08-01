@@ -1252,10 +1252,10 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       ]),
     ),
     ...Object.fromEntries(
-      ["pbkdf2", "pbkdf2Sync", "scrypt", "scryptSync", "hkdf", "hkdfSync"].map((m) => [
+      ["scrypt", "scryptSync", "hkdf", "hkdfSync"].map((m) => [
         m,
-        "key-derivation functions have no lowering yet — the lowered crypto surface is " +
-          "hashing, randomness, and the introspection statics",
+        "this key-derivation function has no lowering yet — PBKDF2 with sha256 is the " +
+          "derived surface, alongside hashing, randomness, and the introspection statics",
       ]),
     ),
     setFips:

@@ -738,3 +738,88 @@ ScrPromise *scr_crypto_random_int_async(double min, double max) {
   double v = scr_crypto_random_int(min, max);
   return scr_promise_settled_f64(v);
 }
+
+/* ── crypto.pbkdf2 (HMAC-SHA256 only) ─────────────────────────────────────
+ * PBKDF2 per RFC 8018 over the one-shot HMAC the island bridge already
+ * provides:
+ *
+ *   DK   = T(1) || T(2) || ... , truncated to keylen
+ *   T(i) = U(1) ^ U(2) ^ ... ^ U(c)
+ *   U(1) = HMAC(password, salt || INT32BE(i))
+ *   U(j) = HMAC(password, U(j-1))
+ *
+ * The block counter is one-based and big-endian, which is what makes a
+ * derivation reproducible across implementations -- get either wrong and
+ * the output is still random-looking, so the differential test against
+ * Node is the real check here.
+ *
+ * sha256 only: it is the digest zapo-shaped callers ask for, and the
+ * frontend fences every other name rather than silently deriving with
+ * the wrong PRF. Node's argument errors (negative or over-large keylen,
+ * non-positive iterations) throw catchably. */
+ScrBytes *scr_crypto_pbkdf2_sha256(const ScrBytes *password, const ScrBytes *salt,
+                                   double iterations, double keylen) {
+  char num[32];
+  char msg[160];
+  if (!(iterations >= 1) || iterations > 2147483647.0 || iterations != (double)(long long)iterations) {
+    size_t numlen = scr_f64_to_str(iterations, num);
+    int mlen = snprintf(msg, sizeof msg,
+                        "The value of \"iterations\" is out of range. It must be >= 1 && <= 2147483647. Received %.*s",
+                        (int)numlen, num);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)mlen, "ERR_OUT_OF_RANGE");
+    return NULL;
+  }
+  /* Node (OpenSSL) refuses a ZERO key length outright -- not a range
+   * error but a bare "Deriving bits failed" -- so the empty-derivation
+   * case throws rather than answering an empty buffer. */
+  if (keylen == 0) {
+    static const char zmsg[] = "Deriving bits failed";
+    scr_throw_error_msg(SCR_ERR_ERROR, zmsg, sizeof zmsg - 1);
+    return NULL;
+  }
+  if (!(keylen >= 0) || keylen > 2147483647.0 || keylen != (double)(long long)keylen) {
+    size_t numlen = scr_f64_to_str(keylen, num);
+    int mlen = snprintf(msg, sizeof msg,
+                        "The value of \"keylen\" is out of range. It must be >= 0 && <= 2147483647. Received %.*s",
+                        (int)numlen, num);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)mlen, "ERR_OUT_OF_RANGE");
+    return NULL;
+  }
+  const size_t HLEN = 32;
+  size_t want = (size_t)keylen;
+  unsigned long iters = (unsigned long)iterations;
+  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, keylen);
+  /* salt || INT32BE(block) — reused across blocks, the counter rewritten. */
+  size_t saltlen = salt->len;
+  unsigned char *block = malloc(saltlen + 4);
+  if (!block) scr_bytes_io_oom();
+  memcpy(block, salt->data, saltlen);
+  unsigned char u[32];
+  unsigned char t[32];
+  size_t done = 0;
+  for (uint32_t i = 1; done < want; i++) {
+    block[saltlen] = (unsigned char)(i >> 24);
+    block[saltlen + 1] = (unsigned char)(i >> 16);
+    block[saltlen + 2] = (unsigned char)(i >> 8);
+    block[saltlen + 3] = (unsigned char)i;
+    scr_crypto_hmac_raw("sha256", password->data, password->len, block, saltlen + 4, u);
+    memcpy(t, u, HLEN);
+    for (unsigned long j = 1; j < iters; j++) {
+      scr_crypto_hmac_raw("sha256", password->data, password->len, u, HLEN, u);
+      for (size_t k = 0; k < HLEN; k++) t[k] ^= u[k];
+    }
+    size_t take = want - done < HLEN ? want - done : HLEN;
+    memcpy(out->data + done, t, take);
+    done += take;
+  }
+  free(block);
+  return out;
+}
+
+/* util.promisify(pbkdf2): the derivation behind an already-settled
+ * promise (the fs/promises stance). A range error rejects. */
+ScrPromise *scr_crypto_pbkdf2_sha256_async(const ScrBytes *password, const ScrBytes *salt,
+                                           double iterations, double keylen) {
+  ScrBytes *b = scr_crypto_pbkdf2_sha256(password, salt, iterations, keylen);
+  return scr_promise_settled_ref(b, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
+}
