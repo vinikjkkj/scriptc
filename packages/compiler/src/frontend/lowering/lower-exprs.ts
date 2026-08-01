@@ -3091,8 +3091,14 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     if (recvKind !== "map" && recvKind !== "set") return null;
     const drained = L.lowerExpr(iterCall);
     if (drained.type.kind !== "array") return null;
-    const resultT = L.irTypeOf(expr);
-    if (resultT.kind !== "union") return null; // `T | undefined` always maps to a union
+    // The result type is built FROM the drained element, not read off the
+    // checker at this node: inside a generic method the node's checker
+    // type is the same for every monomorphization, so taking it here
+    // would hand one instantiation's shape to another. The drained array
+    // came from the receiver's own lowered map type, which is already
+    // substituted, so `elem | undefined` is instantiation-correct.
+    const resultT = L.withUndefinedArmOf(drained.type.elem);
+    if (resultT === null || resultT.kind !== "union") return null;
     const loc = locOf(expr);
     const zero: IrExpr = { kind: "numLit", value: 0, type: F64, loc };
     return arrayAtOf(L, drained, zero, drained.type.elem, resultT, expr, loc);
