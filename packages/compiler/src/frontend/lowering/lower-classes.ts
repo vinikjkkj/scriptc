@@ -5137,7 +5137,22 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           }
           if (arrT?.kind !== "array") L.badType(expr, L.typeOf(expr));
           const elem = arrT.elem;
-          const absent = elem.kind === "union" ? L.wrappedUndefined(elem, loc) !== null : isRefCounted(elem);
+          // `new Array(n).fill(v)` is a COMPOSED form: the whole-range
+          // fill writes every slot before anything can read one, so a
+          // union WITHOUT an undefined arm (`(T | null)[]`, the shape this
+          // idiom is written for) needs no readable absent value. Only the
+          // range-less fill qualifies — a start/end narrows the write and
+          // would leave slots unwritten. Scalars stay fenced regardless:
+          // arrayNewLen itself is only defined over refcounted elements.
+          const filledWhole =
+            isRefCounted(elem) &&
+            ts.isPropertyAccessExpression(expr.parent) &&
+            expr.parent.name.text === "fill" &&
+            ts.isCallExpression(expr.parent.parent) &&
+            expr.parent.parent.expression === expr.parent &&
+            expr.parent.parent.arguments.length === 1;
+          const absent =
+            filledWhole || (elem.kind === "union" ? L.wrappedUndefined(elem, loc) !== null : isRefCounted(elem));
           if (!absent) {
             // Scalars have no absent value that isn't a LIE on read (0
             // where Node says undefined) -- the Array.from fence's wording.

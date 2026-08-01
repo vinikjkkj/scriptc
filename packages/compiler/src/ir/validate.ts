@@ -2311,6 +2311,8 @@ function validateFunction(
         const sig =
           e.method === "push"
             ? { argTypes: e.args.map(() => elem), result: F64 }
+            : e.method === "fill"
+              ? { argTypes: [elem, F64, F64], result: e.receiver.type }
             : e.method === "pushSpread"
               ? { argTypes: [e.receiver.type], result: F64 }
               : e.method === "pop"
@@ -2369,10 +2371,11 @@ function validateFunction(
             err("arrIntrinsic shift result must be the elem|undefined union", e.loc);
           }
         }
-        // slice's indices and splice's count are optional (omitted args
-        // omitted from the IR — backends fill the defaults); everything
-        // else is exact.
-        const minArgs = e.method === "slice" ? 0 : e.method === "splice" ? 1 : sig.argTypes.length;
+        // slice's indices, splice's count, and fill's range are optional
+        // (omitted args omitted from the IR — backends fill the defaults);
+        // everything else is exact.
+        const minArgs =
+          e.method === "slice" ? 0 : e.method === "splice" || e.method === "fill" ? 1 : sig.argTypes.length;
         if (e.args.length < minArgs || e.args.length > sig.argTypes.length) {
           err(`arrIntrinsic ${e.method}: ${e.args.length} args, expected ${sig.argTypes.length}`, e.loc);
         }

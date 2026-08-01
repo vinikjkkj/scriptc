@@ -262,6 +262,7 @@ export const READLINE_DOCUMENTED_OPTIONS: ReadonlySet<string> = new Set([
  * standard library (isStdlibMember); lib-declared array methods outside
  * this set hit the SC2020 fence. */
 export const ARRAY_METHODS = new Set([
+  "fill",
   "push",
   "pop",
   "concat",

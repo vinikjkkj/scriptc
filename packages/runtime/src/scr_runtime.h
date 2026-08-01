@@ -816,6 +816,12 @@ void *scr_arr_get_ref(ScrArr *a, double i);  /* trap OOB; returns +1 */
 void scr_arr_set_f64(ScrArr *a, double i, double v);
 void scr_arr_set_bool(ScrArr *a, double i, bool v);
 void scr_arr_set_ref(ScrArr *a, double i, void *v);
+/* fill(value[, start[, end]]): writes the value over the clamped range
+ * and answers the receiver (+1). The ref form borrows  and takes its
+ * own +1 per slot. */
+ScrArr *scr_arr_fill_f64(ScrArr *a, double v, double start, double end);
+ScrArr *scr_arr_fill_bool(ScrArr *a, bool v, double start, double end);
+ScrArr *scr_arr_fill_ref(ScrArr *a, void *v, double start, double end);
 
 /* slice(start?, end?): a fresh +1 shallow copy of the index range —
  * ToIntegerOrInfinity indices, negatives from the end, clamping; ref
