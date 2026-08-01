@@ -5358,6 +5358,18 @@ const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
    * variable-width read/writeUIntLE quartet — BUF_NUM_METHODS). Everything
    * else the lib declares (fill, indexOf, reverse, ...) falls through to
    * the SC2020 member fence. Null when this isn't a bytes method call. */
+  /** True when a bytes member resolves to BUFFER's declaration rather than
+   * the typed array's. Node's Buffer adds richer forms to some inherited
+   * names (fill's string patterns and throwing offset validation, slice's
+   * view-not-copy aliasing), so the two surfaces lower differently and the
+   * declaration site is what tells them apart. */
+  function bytesMemberDeclaredOnBuffer(L: Lowerer, access: ts.PropertyAccessExpression): boolean {
+    const nameSym = L.checker.getSymbolAtLocation(access.name);
+    return nameSym !== undefined && L.checker.declarationsOf(nameSym).some(
+      (d) => ts.isInterfaceDeclaration(d.parent) && d.parent.name.text === "Buffer",
+    );
+  }
+
   export function lowerBytesMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(access, call)) return null;
@@ -5436,22 +5448,18 @@ const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
       // Buffer's slice() is subarray's deprecated Node alias — resolved by
       // where the member is declared, the toString discipline below. Only
       // the plain typed arrays' slice() copies (JS-exact).
-      const declaredOnBuffer =
-        name === "slice" &&
-        (() => {
-          const nameSym = L.checker.getSymbolAtLocation(access.name);
-          return nameSym !== undefined && L.checker.declarationsOf(nameSym).some(
-            (d) => ts.isInterfaceDeclaration(d.parent) && d.parent.name.text === "Buffer",
-          );
-        })();
+      const declaredOnBuffer = name === "slice" && bytesMemberDeclaredOnBuffer(L, access);
       const method = name === "subarray" || declaredOnBuffer ? "subarray" : "slice";
       return { kind: "bytesIntrinsic", method, receiver, args, type: receiverIr, loc };
     }
-    if (name === "fill" && receiverIr.elem !== "u8") {
-      // TypedArray.prototype.fill on the non-u8 kinds: per-element value
-      // coercion, slice-clamped relative indices, never throws. u8
-      // receivers keep the Buffer fill family (string patterns, throwing
-      // offset validation) — lowerBufferInstanceMethod's surface.
+    if (name === "fill" && (receiverIr.elem !== "u8" || !bytesMemberDeclaredOnBuffer(L, access))) {
+      // TypedArray.prototype.fill: per-element value coercion,
+      // slice-clamped relative indices, never throws. A u8 receiver rides
+      // it too when the member resolves to the TYPED ARRAY's declaration
+      // — a plain Uint8Array has none of Buffer's extra fill surface. Only
+      // fill declared on Buffer (string patterns, throwing offset
+      // validation) stays with lowerBufferInstanceMethod, resolved by
+      // where the member is declared: the slice/subarray discipline.
       if (nArgs < 1 || nArgs > 3) {
         L.noLowering(`.fill with ${nArgs} arguments on typed arrays`, call);
       }
