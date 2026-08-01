@@ -4739,6 +4739,11 @@ ScrBytes *scr_zlib_inflate(const ScrBytes *data);
  * engine's node:zlib shim. */
 ScrBytes *scr_zlib_deflate_mode(const ScrBytes *data, double mode, double level);
 ScrBytes *scr_zlib_inflate_mode(const ScrBytes *data, double mode);
+/* node:zlib's gzip-container twins over the same codec (mode wrappers, so
+ * each is ONE symbol taking just the data — the shape both backends map). */
+ScrBytes *scr_zlib_gzip(const ScrBytes *data);
+ScrBytes *scr_zlib_gunzip(const ScrBytes *data);
+ScrBytes *scr_zlib_unzip(const ScrBytes *data);
 void scr_zlib_island_install(void);
 
 /* ── node:net (scr_net.c — compiled and linked ONLY when the program
