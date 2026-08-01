@@ -7235,10 +7235,25 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       }
       const argNode = call.arguments[0]!;
       let inner: ts.Expression = argNode;
-      while (ts.isParenthesizedExpression(inner) || ts.isAsExpression(inner)) inner = inner.expression;
+      while (
+        ts.isParenthesizedExpression(inner) ||
+        ts.isAsExpression(inner) ||
+        ts.isSatisfiesExpression(inner) ||
+        ts.isTypeAssertion(inner)
+      ) {
+        inner = inner.expression;
+      }
       const value = L.lowerExpr(argNode);
       if (ts.isObjectLiteralExpression(inner) || ts.isArrayLiteralExpression(inner)) {
         return value; // fresh — freeze is identity here, honestly
+      }
+      // A stdlib CONSTRUCTION is fresh for the same reason a literal is:
+      // the allocation is this expression's, so nothing else can hold a
+      // reference to write through. (Stdlib only — a user constructor may
+      // `return` an object that already existed.)
+      if (ts.isNewExpression(inner) && ts.isIdentifier(inner.expression)) {
+        const ctorSym = L.resolveValueSymbol(inner.expression);
+        if (ctorSym && L.isStdlibSymbol(ctorSym)) return value;
       }
       if (
         value.type.kind === "string" || value.type.kind === "f64" ||
