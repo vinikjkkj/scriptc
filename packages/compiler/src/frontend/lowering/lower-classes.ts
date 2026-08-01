@@ -5055,16 +5055,17 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           loc,
         };
       }
-      // Encoder objects likewise exist only inside the composed forms
-      // (lowerTextCodecCall claims those before the receiver lowers).
-      if (symbol && (symbol.name === "TextDecoder" || symbol.name === "TextEncoder") && L.isStdlibSymbol(symbol)) {
+      // TextEncoder is STATELESS, so an instance IS its constant
+      // `encoding` (types.ts maps the type to string) and lowerBytesNew
+      // builds it — storing one and calling encode() off it later is the
+      // shape real code uses. TextDecoder keeps the composed-form rule:
+      // its constructor takes options that change decode behavior, so a
+      // stored instance would have to carry them.
+      if (symbol && symbol.name === "TextDecoder" && L.isStdlibSymbol(symbol)) {
         L.noLowering(
-          `new ${symbol.name}`,
+          "new TextDecoder",
           expr,
-          `${symbol.name} values have no representation — the composed form compiles: ` +
-            (symbol.name === "TextDecoder"
-              ? "new TextDecoder().decode(bytes)"
-              : "new TextEncoder().encode(s)"),
+          "TextDecoder values have no representation — the composed form compiles: new TextDecoder().decode(bytes)",
           symbol,
         );
       }

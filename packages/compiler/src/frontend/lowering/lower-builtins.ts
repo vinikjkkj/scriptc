@@ -4168,6 +4168,15 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       if (receiver.type.kind !== "record") L.badType(expr.expression, L.typeOf(expr.expression));
       return { kind: "recordGet", obj: receiver, shapeId: receiver.type.shapeId, field: "%enc", type: STRING, loc: locOf(expr) };
     }
+    // encoder.encoding on a TextEncoder: the instance IS that constant
+    // string (types.ts), so the read is the receiver itself.
+    if (
+      expr.name.text === "encoding" &&
+      isStdlibInstanceOf(L, expr.expression, "TextEncoder") &&
+      L.isStdlibMember(expr)
+    ) {
+      return L.lowerExprExpecting(expr.expression, STRING);
+    }
     const kind = L.mapTypeOf(L.typeOf(expr.expression))?.kind;
     if (kind !== "stats" && kind !== "spawnRes" && kind !== "child") return null;
     if (kind === "child" ? !isChildSurfaceMember(L, expr) : !L.isStdlibMember(expr)) return null;
@@ -6139,21 +6148,48 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
    * ScrStr storage is well-formed UTF-8, so the bytes are identical (lone
    * surrogates became U+FFFD at string construction, exactly what the
    * spec's encoder emits). Null when this is neither composed form. */
+  /** True when `node`'s checker type is the STDLIB interface `name` —
+   * provenance, not the name, so a user's own same-named interface never
+   * matches (isTimerHandleTyped's technique, for a stored instance whose
+   * IR type alone cannot discriminate it). */
+  function isStdlibInstanceOf(L: Lowerer, node: ts.Expression, name: string): boolean {
+    const t = L.checker.getTypeAtLocation(node);
+    const sym = t.getAliasSymbol() ?? t.getSymbol();
+    if (sym?.name !== name) return false;
+    return L.checker.declarationsOf(sym).some(
+      (d) => (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) && L.isStdlibFile(d.getSourceFile()),
+    );
+  }
+
   export function lowerTextCodecCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken || access.questionDotToken) return null;
     const member = access.name.text;
     if (member !== "decode" && member !== "encode") return null;
     const recv = access.expression;
-    if (!ts.isNewExpression(recv) || !ts.isIdentifier(recv.expression)) return null;
-    const sym = L.resolveValueSymbol(recv.expression);
-    const cls = sym?.name;
-    if (!sym || !L.isStdlibSymbol(sym)) return null;
+    let cls: string | undefined;
+    /** The `new TextEncoder()` node when the receiver IS the construction
+     * (`new TextEncoder().encode(s)`); absent when the instance was STORED
+     * first, the shape real code uses — one module-level encoder reused
+     * everywhere. A stored TextEncoder is safe to serve: it is STATELESS
+     * (types.ts maps it to its constant `encoding`), so the call needs
+     * nothing from the receiver but its existence. TextDecoder keeps the
+     * inline-only rule: its constructor takes options that change decode
+     * behavior, and a stored instance's options are not in reach here. */
+    let ctorNode: ts.NewExpression | null = null;
+    if (ts.isNewExpression(recv) && ts.isIdentifier(recv.expression)) {
+      const sym = L.resolveValueSymbol(recv.expression);
+      if (!sym || !L.isStdlibSymbol(sym)) return null;
+      cls = sym.name;
+      ctorNode = recv;
+    } else if (member === "encode" && isStdlibInstanceOf(L, recv, "TextEncoder")) {
+      cls = "TextEncoder";
+    }
     if (!(cls === "TextDecoder" && member === "decode") && !(cls === "TextEncoder" && member === "encode")) {
       return null;
     }
     const loc = locOf(call);
-    const ctorArgs = recv.arguments ?? [];
+    const ctorArgs = ctorNode?.arguments ?? [];
     if (cls === "TextDecoder") {
       // The constructor may spell the default label; anything else (other
       // labels, { fatal }/{ ignoreBOM } options) changes behavior the
