@@ -661,6 +661,9 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
     // cc.ts links libz only when these appear on the IR.
     deflateSync: { fn: "zlib.deflateSync", params: [BYTES_U8], result: BYTES_U8 },
     inflateSync: { fn: "zlib.inflateSync", params: [BYTES_U8], result: BYTES_U8 },
+    gzipSync: { fn: "zlib.gzipSync", params: [BYTES_U8], result: BYTES_U8 },
+    gunzipSync: { fn: "zlib.gunzipSync", params: [BYTES_U8], result: BYTES_U8 },
+    unzipSync: { fn: "zlib.unzipSync", params: [BYTES_U8], result: BYTES_U8 },
   },
   url: {
     // fileURLToPath accepts a URL value OR a string — the call lowering
@@ -1142,7 +1145,7 @@ export function builtinModulesArrayLit(loc: { file: string; start: number; end: 
  * no lowering. deflateSync/inflateSync lower now (Buffers are real);
  * the rest of the zlib surface points at the lowered pair. */
 export const ZLIB_HINT =
-  "deflateSync and inflateSync are the lowered zlib surface";
+  "deflateSync/inflateSync and the gzip twins (gzipSync, gunzipSync, unzipSync) are the lowered zlib surface";
 
 /** The loose-equality quartet's shared hint: == coercion has no lowering
  * anywhere in this compiler, and Node itself points at the strict forms. */
@@ -1261,9 +1264,6 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       "randomBytes, and the createHash chain",
   },
   zlib: {
-    gzipSync: ZLIB_HINT,
-    gunzipSync: ZLIB_HINT,
-    unzipSync: ZLIB_HINT,
     brotliCompressSync: ZLIB_HINT,
     brotliDecompressSync: ZLIB_HINT,
   },

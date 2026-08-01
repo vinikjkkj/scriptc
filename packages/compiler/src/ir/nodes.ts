@@ -2831,6 +2831,12 @@ export type IrLibFn =
    * catchably. */
   | "zlib.deflateSync"
   | "zlib.inflateSync"
+  /** The gzip-container twins over the same codec — gunzip demands the
+   * gzip header, unzip auto-detects zlib vs gzip (Node's unzip), and both
+   * throw catchably on input the header check rejects. */
+  | "zlib.gzipSync"
+  | "zlib.gunzipSync"
+  | "zlib.unzipSync"
   /** The Buffer overloads of the raw stream writes — same promptly
    * submitted streams as process.stdoutWrite/stderrWrite, constantly true. */
   | "process.stdoutWriteBytes"
@@ -6807,6 +6813,11 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.readFileSyncBytes",
   "fs.writeFileSyncBytes",
   "zlib.inflateSync",
+  // Both decompressors reject input their header check refuses, the same
+  // catchable throw inflate raises (gunzip demands gzip framing; unzip
+  // accepts either and refuses the rest).
+  "zlib.gunzipSync",
+  "zlib.unzipSync",
   "date.toISOString",
   "fs.mkdirRecursiveSync",
   "fs.rmOptsSync",

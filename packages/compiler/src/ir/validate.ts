@@ -729,6 +729,12 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "fsp.readFileBytes": { argTypes: [STRING], result: { kind: "promise", inner: BYTES_U8 } },
   "zlib.deflateSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
   "zlib.inflateSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
+  // The gzip-container twins over the SAME codec: the runtime's mode
+  // argument picks the header (2 = gzip, 3 = inflate's auto-detect,
+  // which is exactly what Node's unzip does).
+  "zlib.gzipSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
+  "zlib.gunzipSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
+  "zlib.unzipSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
   "process.stdoutWriteBytes": { argTypes: [BYTES_U8], result: BOOL },
   "process.stderrWriteBytes": { argTypes: [BYTES_U8], result: BOOL },
   "fsp.readFile": { argTypes: [STRING, STRING], result: { kind: "promise", inner: STRING } },

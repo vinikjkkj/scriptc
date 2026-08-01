@@ -194,3 +194,23 @@ bool scr_zlib_inflate_exact(const unsigned char *src, size_t src_len,
   inflateEnd(&zs);
   return ok;
 }
+
+/* ── the gzip-container twins (node:zlib's gzipSync/gunzipSync/unzipSync)
+ * The codec is the same one deflate/inflate already run; only the header
+ * differs, which is exactly what the mode argument selects. Thin wrappers
+ * rather than mode arguments on the lib-call itself: both backends map a
+ * lib fn to ONE symbol taking the IR's own arguments, so a constant mode
+ * belongs on this side of the boundary. Node's unzip auto-detects zlib vs
+ * gzip framing (mode 3); gunzip demands the gzip header (mode 2) and
+ * throws catchably on anything else, like inflate. */
+ScrBytes *scr_zlib_gzip(const ScrBytes *data) {
+  return scr_zlib_deflate_mode(data, 2, -1);
+}
+
+ScrBytes *scr_zlib_gunzip(const ScrBytes *data) {
+  return scr_zlib_inflate_mode(data, 2);
+}
+
+ScrBytes *scr_zlib_unzip(const ScrBytes *data) {
+  return scr_zlib_inflate_mode(data, 3);
+}
