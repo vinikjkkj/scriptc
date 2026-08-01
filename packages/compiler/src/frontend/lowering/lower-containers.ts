@@ -5167,13 +5167,25 @@ const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
     if (symbol && symbol.name === "DataView" && L.isStdlibSymbol(symbol)) {
       return lowerDataViewNew(L, expr);
     }
-    // `new TextEncoder()`: STATELESS, so the instance IS its constant
-    // `encoding` (types.ts maps the type to string — the Timeout-handle
-    // idiom). Storing one in a const and calling encode() off it later is
-    // the shape real code uses; the encode lowering reads nothing from the
-    // receiver. Arguments are a fence: the constructor takes none.
-    if (symbol && symbol.name === "TextEncoder" && L.isStdlibSymbol(symbol)) {
-      if ((expr.arguments ?? []).length > 0) L.noLowering("new TextEncoder with arguments", expr);
+    // `new TextEncoder()` / `new TextDecoder()`: STATELESS, so the
+    // instance IS its constant `encoding` (types.ts maps the types to
+    // string — the Timeout-handle idiom). Storing one in a const and
+    // calling encode/decode off it later is the shape real code uses; the
+    // codec lowerings read nothing from the receiver. Arguments are a
+    // fence for BOTH -- the encoder takes none, and the decoder's label
+    // and { fatal, ignoreBOM } options would give an instance state this
+    // representation cannot carry, so only the default utf-8 decoder
+    // constructs.
+    if (symbol && (symbol.name === "TextEncoder" || symbol.name === "TextDecoder") && L.isStdlibSymbol(symbol)) {
+      if ((expr.arguments ?? []).length > 0) {
+        L.noLowering(
+          `new ${symbol.name} with arguments`,
+          expr,
+          symbol.name === "TextDecoder"
+            ? "utf-8 with default options is the supported decoder: new TextDecoder()"
+            : undefined,
+        );
+      }
       return { kind: "strLit", value: "utf-8", type: STRING, loc: locOf(expr) };
     }
     const elem = symbol ? own(BYTES_CTORS, symbol.name) : undefined;

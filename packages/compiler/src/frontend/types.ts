@@ -1447,9 +1447,14 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // TextEncoder; `encoding` reads the value itself and encode() ignores
   // the receiver. Divergence: inspecting one prints "utf-8" rather than
   // `TextEncoder {}`.
-  // (@types/node declares it as a CLASS, so this one checks both forms.)
+  // TextDecoder joins it on the SAME footing, because the constructor
+  // fences on every argument: the options that would give an instance
+  // state of its own (fatal, ignoreBOM) cannot be spelled, and the only
+  // constructible decoder is the default utf-8 one. So it too carries
+  // nothing but its `encoding`.
+  // (@types/node declares them as CLASSES, so this one checks both forms.)
   if (
-    psym?.name === "TextEncoder" &&
+    (psym?.name === "TextEncoder" || psym?.name === "TextDecoder") &&
     checker.declarationsOf(psym).some(
       (d) =>
         (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&

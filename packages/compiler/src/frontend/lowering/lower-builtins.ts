@@ -4168,11 +4168,12 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       if (receiver.type.kind !== "record") L.badType(expr.expression, L.typeOf(expr.expression));
       return { kind: "recordGet", obj: receiver, shapeId: receiver.type.shapeId, field: "%enc", type: STRING, loc: locOf(expr) };
     }
-    // encoder.encoding on a TextEncoder: the instance IS that constant
-    // string (types.ts), so the read is the receiver itself.
+    // codec.encoding on a TextEncoder/TextDecoder: the instance IS that
+    // constant string (types.ts), so the read is the receiver itself.
     if (
       expr.name.text === "encoding" &&
-      isStdlibInstanceOf(L, expr.expression, "TextEncoder") &&
+      (isStdlibInstanceOf(L, expr.expression, "TextEncoder") ||
+        isStdlibInstanceOf(L, expr.expression, "TextDecoder")) &&
       L.isStdlibMember(expr)
     ) {
       return L.lowerExprExpecting(expr.expression, STRING);
@@ -6170,12 +6171,11 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     let cls: string | undefined;
     /** The `new TextEncoder()` node when the receiver IS the construction
      * (`new TextEncoder().encode(s)`); absent when the instance was STORED
-     * first, the shape real code uses — one module-level encoder reused
-     * everywhere. A stored TextEncoder is safe to serve: it is STATELESS
-     * (types.ts maps it to its constant `encoding`), so the call needs
-     * nothing from the receiver but its existence. TextDecoder keeps the
-     * inline-only rule: its constructor takes options that change decode
-     * behavior, and a stored instance's options are not in reach here. */
+     * first, the shape real code uses — one module-level codec reused
+     * everywhere. A stored codec is safe to serve: both are STATELESS
+     * (types.ts maps them to their constant `encoding`) because the
+     * constructor fences every argument, so the call needs nothing from
+     * the receiver but its existence. */
     let ctorNode: ts.NewExpression | null = null;
     if (ts.isNewExpression(recv) && ts.isIdentifier(recv.expression)) {
       const sym = L.resolveValueSymbol(recv.expression);
@@ -6184,6 +6184,8 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       ctorNode = recv;
     } else if (member === "encode" && isStdlibInstanceOf(L, recv, "TextEncoder")) {
       cls = "TextEncoder";
+    } else if (member === "decode" && isStdlibInstanceOf(L, recv, "TextDecoder")) {
+      cls = "TextDecoder";
     }
     if (!(cls === "TextDecoder" && member === "decode") && !(cls === "TextEncoder" && member === "encode")) {
       return null;
