@@ -735,6 +735,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "zlib.gzipSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
   "zlib.gunzipSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
   "zlib.unzipSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
+  "zlib.deflateAsync": { argTypes: [BYTES_U8], result: { kind: "promise", inner: BYTES_U8 } },
+  "zlib.unzipAsync": { argTypes: [BYTES_U8], result: { kind: "promise", inner: BYTES_U8 } },
   "process.stdoutWriteBytes": { argTypes: [BYTES_U8], result: BOOL },
   "process.stderrWriteBytes": { argTypes: [BYTES_U8], result: BOOL },
   "fsp.readFile": { argTypes: [STRING, STRING], result: { kind: "promise", inner: STRING } },

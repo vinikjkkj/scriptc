@@ -4743,6 +4743,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_zlib_gunzip(${arg(0)})`);
           case "zlib.unzipSync":
             return finish(`scr_zlib_unzip(${arg(0)})`);
+          case "zlib.deflateAsync":
+            return finish(`scr_zlib_deflate_async(${arg(0)})`);
+          case "zlib.unzipAsync":
+            return finish(`scr_zlib_unzip_async(${arg(0)})`);
           case "process.stdoutWriteBytes":
             return finish(`scr_process_stdout_write_bytes(${arg(0)})`);
           case "process.stderrWriteBytes":

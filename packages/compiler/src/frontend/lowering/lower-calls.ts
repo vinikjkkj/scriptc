@@ -3348,6 +3348,12 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         if (sym && L.promisifiedExecFile.has(sym)) {
           return L.lowerExecFileAsyncCall(expr, loc);
         }
+        // The settled-promise promisified bindings (zlib's deflate/unzip):
+        // the synchronous codec behind an already-settled promise.
+        const settledFn = sym ? L.promisifiedSettled.get(sym) : undefined;
+        if (settledFn !== undefined) {
+          return L.lowerPromisifiedSettledCall(expr, settledFn, loc);
+        }
         // A call through a `const requestFn = tls ? https.request :
         // http.request` binding (the client-function ternary): the http
         // client lowering with the RUNTIME-secure dial.

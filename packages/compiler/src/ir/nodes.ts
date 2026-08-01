@@ -2837,6 +2837,11 @@ export type IrLibFn =
   | "zlib.gzipSync"
   | "zlib.gunzipSync"
   | "zlib.unzipSync"
+  /** The promisified twins (util.promisify(deflate) / (unzip)): the codec
+   * runs synchronously and answers an ALREADY SETTLED promise — the
+   * fs/promises stance (divergence 23). */
+  | "zlib.deflateAsync"
+  | "zlib.unzipAsync"
   /** The Buffer overloads of the raw stream writes — same promptly
    * submitted streams as process.stdoutWrite/stderrWrite, constantly true. */
   | "process.stdoutWriteBytes"

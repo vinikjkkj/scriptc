@@ -214,3 +214,23 @@ ScrBytes *scr_zlib_gunzip(const ScrBytes *data) {
 ScrBytes *scr_zlib_unzip(const ScrBytes *data) {
   return scr_zlib_inflate_mode(data, 3);
 }
+
+/* ── the promisified twins (util.promisify(deflate) / (unzip)) ──────────
+ * Node runs these on the threadpool; a compiled binary has none, so the
+ * codec runs synchronously and the result comes back as an ALREADY
+ * SETTLED promise -- the fs/promises stance (SEMANTICS.md divergence 23).
+ * The await still yields to the microtask queue, so ordering against
+ * other promise work is unchanged; only the parallelism is absent, and
+ * there was never any to observe in a single-threaded loop. A throw from
+ * the codec propagates out of the call rather than rejecting the promise
+ * -- the same shape the sync forms already have, and what the settled-
+ * promise helper's callers rely on. */
+ScrPromise *scr_zlib_deflate_async(const ScrBytes *data) {
+  ScrBytes *b = scr_zlib_deflate(data);
+  return scr_promise_settled_ref(b, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
+}
+
+ScrPromise *scr_zlib_unzip_async(const ScrBytes *data) {
+  ScrBytes *b = scr_zlib_unzip(data);
+  return scr_promise_settled_ref(b, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
+}

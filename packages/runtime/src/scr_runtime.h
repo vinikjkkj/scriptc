@@ -4744,6 +4744,10 @@ ScrBytes *scr_zlib_inflate_mode(const ScrBytes *data, double mode);
 ScrBytes *scr_zlib_gzip(const ScrBytes *data);
 ScrBytes *scr_zlib_gunzip(const ScrBytes *data);
 ScrBytes *scr_zlib_unzip(const ScrBytes *data);
+/* The promisified twins (util.promisify): the codec runs synchronously
+ * and answers an already-settled promise (the fs/promises stance). */
+ScrPromise *scr_zlib_deflate_async(const ScrBytes *data);
+ScrPromise *scr_zlib_unzip_async(const ScrBytes *data);
 void scr_zlib_island_install(void);
 
 /* ── node:net (scr_net.c — compiled and linked ONLY when the program
