@@ -2742,7 +2742,15 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
         out.push({ kind: "assign", localId: g.id, value: L.coerceInto(name, value, g.type), loc: bindLoc });
         return;
       }
-      if (symbol && hostVariableDeclarationOf(name) !== null && isVarDeclared(name)) {
+      // The var test reads the HOST declaration, not the name: inside a
+      // binding pattern the identifier carries no block-scope flag of its
+      // own, so asking it classifies every `const`/`let` pattern binding as
+      // a `var` and routes it through hoistVarBinding -- which caches by
+      // SYMBOL. Across monomorphizations of one generic body the symbol is
+      // the same node, so the second instantiation would reuse the first
+      // instantiation's local, carrying the first's IR type.
+      const varHost = hostVariableDeclarationOf(name);
+      if (symbol && varHost !== null && isVarDeclared(varHost)) {
         const hoisted = hoistVarBinding(L, symbol, name);
         out.push({ kind: "assign", localId: hoisted.id, value: L.coerceInto(name, value, hoisted.type), loc: bindLoc });
         return;
@@ -2783,7 +2791,15 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
       // VariableDeclaration hosts only: parameter patterns (also routed
       // here by declareParams) carry no block-scope flag either, but their
       // bindings are the parameters' own.
-      if (symbol && hostVariableDeclarationOf(name) !== null && isVarDeclared(name)) {
+      // The var test reads the HOST declaration, not the name: inside a
+      // binding pattern the identifier carries no block-scope flag of its
+      // own, so asking it classifies every `const`/`let` pattern binding as
+      // a `var` and routes it through hoistVarBinding -- which caches by
+      // SYMBOL. Across monomorphizations of one generic body the symbol is
+      // the same node, so the second instantiation would reuse the first
+      // instantiation's local, carrying the first's IR type.
+      const varHost = hostVariableDeclarationOf(name);
+      if (symbol && varHost !== null && isVarDeclared(varHost)) {
         const hoisted = hoistVarBinding(L, symbol, name);
         out.push({ kind: "assign", localId: hoisted.id, value: L.coerceInto(name, value, hoisted.type), loc });
         return;
