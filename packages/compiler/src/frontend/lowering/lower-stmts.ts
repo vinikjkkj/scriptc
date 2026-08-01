@@ -4166,6 +4166,32 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         }
         if (ts.isElementAccessExpression(expr.left)) return L.lowerElementWrite(expr);
         if (ts.isPropertyAccessExpression(expr.left)) {
+          // `a.length = 0` — the in-place array CLEAR idiom. A general
+          // length write is two operations in one spelling: shrinking
+          // truncates (dropped elements release), growing appends HOLES,
+          // and holes have no representation for scalar elements. Only
+          // the zero form is unambiguous, and it is what the idiom is
+          // ever written for — it lowers to the removal splice already
+          // in the surface (start 0, count to the end), whose removed
+          // array the statement discards.
+          if (
+            !expr.left.questionDotToken &&
+            expr.left.name.text === "length" &&
+            ts.isNumericLiteral(expr.right) &&
+            expr.right.text === "0"
+          ) {
+            const recvT = L.mapTypeOf(L.typeOf(expr.left.expression));
+            if (recvT?.kind === "array") {
+              const loc = locOf(expr);
+              const receiver = L.lowerExpr(expr.left.expression);
+              const zero: IrExpr = { kind: "numLit", value: 0, type: F64, loc };
+              return {
+                kind: "exprStmt",
+                expr: { kind: "arrIntrinsic", method: "splice", receiver, args: [zero], type: receiver.type, loc },
+                loc,
+              };
+            }
+          }
           // `process.env.NAME = v` — setenv(3): later env reads and spawned
           // children observe the write, exactly Node. Values are strings
           // (Node stringifies everything; a non-string RHS fences instead
