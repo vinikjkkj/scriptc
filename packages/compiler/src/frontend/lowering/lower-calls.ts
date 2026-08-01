@@ -8535,11 +8535,21 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     // callValue (func fields) or the dynCall boundary (checked-dynamic
     // fields: implicit-any ctor params, validated at the call like every
     // dyn callee). Every other field type falls through to the fences.
+    //
+    // A UNION field joins them when tsc NARROWED it here: an OPTIONAL
+    // callback field is declared `func | undefined`, and the guarded call
+    // (`if (!this.onError) return; this.onError(...)`) is the shape every
+    // optional-hook class uses. The declared type alone cannot answer —
+    // maybeNarrow reads the checker's narrowed type at this very access
+    // and bridges to the arm, the same trusted unionNarrow a narrowed
+    // LOCAL of the same type already lowers through. An un-narrowed union
+    // stays union-typed and falls through to the fences below.
     if (info && !found) {
       const fieldType = info.fields.get(access.name.text);
-      if (fieldType && (fieldType.kind === "func" || fieldType.kind === "dyn")) {
+      if (fieldType && (fieldType.kind === "func" || fieldType.kind === "dyn" || fieldType.kind === "union")) {
         const target = L.fieldTarget(access);
-        const callee = target ? L.fieldGetExpr(target, locOf(access), access) : null;
+        const read = target ? L.fieldGetExpr(target, locOf(access), access) : null;
+        const callee = read !== null && read.type.kind === "union" ? L.maybeNarrow(read, access) : read;
         if (callee?.type.kind === "func") {
           const params = callee.type.params;
           const args = call.arguments.map((a, i) => L.lowerExprExpecting(a, params[i]));
