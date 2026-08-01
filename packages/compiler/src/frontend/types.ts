@@ -1418,6 +1418,9 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // SharedArrayBuffer, and the i32 semantics hold for every other use.
   if (isStdlibInterface("Int32Array")) return bytesOf("i32");
   if (isStdlibInterface("Float32Array")) return bytesOf("f32");
+  // Float64Array: the element IS the runtime's own double, so reads and
+  // writes are exact — no coercion step, unlike every other kind.
+  if (isStdlibInterface("Float64Array")) return bytesOf("f64");
   // DataView: the ONE view kind — a u8 bytes value whose runtime
   // representation borrows (aliases) its owner's storage, so reads through
   // it see writes to the source exactly like JS. The checker keeps the

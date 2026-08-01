@@ -3,7 +3,7 @@
  * array element kinds, map key/value kinds), plus C literal spelling. Pure
  * functions of IrType/values — every emission module leans on these, so they
  * live in ONE place with no emitter state. */
-import type { IrType } from "../../ir/nodes.js";
+import type { IrBytesElem, IrType } from "../../ir/nodes.js";
 import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES } from "../../ir/nodes.js";
 import {
   mangleClassRelease,
@@ -539,8 +539,14 @@ export function elemKindC(elem: IrType): string {
 }
 
 /** The runtime's element-kind tag for a bytes (typed array) type. */
-export function bytesElemKindC(elem: "u8" | "u32" | "i32" | "f32"): string {
-  return elem === "u8" ? "SCR_BYTES_U8" : elem === "u32" ? "SCR_BYTES_U32" : elem === "i32" ? "SCR_BYTES_I32" : "SCR_BYTES_F32";
+export function bytesElemKindC(elem: IrBytesElem): string {
+  switch (elem) {
+    case "u8": return "SCR_BYTES_U8";
+    case "u32": return "SCR_BYTES_U32";
+    case "i32": return "SCR_BYTES_I32";
+    case "f32": return "SCR_BYTES_F32";
+    case "f64": return "SCR_BYTES_F64";
+  }
 }
 
 /** The runtime's ScrBytesNumKind tag + littleEndian flag per readNum/

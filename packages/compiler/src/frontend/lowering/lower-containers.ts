@@ -5141,13 +5141,14 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
 /* ── typed arrays / Buffer ─────────────────────────────────────────────── */
 
 /** The typed-array constructors with a runtime representation, by lib
- * interface name. The other TypedArray flavors (Int8Array, Float64Array,
+ * interface name. The other TypedArray flavors (Int8Array, Uint16Array,
  * DataView, ...) fall through to the generic stdlib-constructor fence. */
 const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
   Uint8Array: "u8",
   Uint32Array: "u32",
   Int32Array: "i32",
   Float32Array: "f32",
+  Float64Array: "f64",
 };
 
 /** `new Uint8Array(...)` / `new Uint32Array(...)` / `new Float32Array(...)`
