@@ -816,6 +816,9 @@ void *scr_arr_get_ref(ScrArr *a, double i);  /* trap OOB; returns +1 */
 void scr_arr_set_f64(ScrArr *a, double i, double v);
 void scr_arr_set_bool(ScrArr *a, double i, bool v);
 void scr_arr_set_ref(ScrArr *a, double i, void *v);
+/* length = n, shrink half: drops elements from index n on, releasing
+ * refcounted ones. Growing is the emitter's (it knows the absent value). */
+void scr_arr_truncate(ScrArr *a, double n);
 /* fill(value[, start[, end]]): writes the value over the clamped range
  * and answers the receiver (+1). The ref form borrows  and takes its
  * own +1 per slot. */

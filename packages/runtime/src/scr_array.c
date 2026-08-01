@@ -537,3 +537,22 @@ ScrArr *scr_arr_fill_ref(ScrArr *a, void *v, double start, double end) {
   }
   return scr_arr_retain(a);
 }
+
+/* ── length = n, the SHRINK half ──────────────────────────────────────────
+ * Drops every element from index n on, releasing refcounted ones (the
+ * unlink-then-release discipline scr_arr_set_slot uses: the slot is gone
+ * from the array before its count is given up, so a cycle collection
+ * triggered by the release can never see a heap edge whose count was
+ * already surrendered). n at or past the current length is a no-op --
+ * GROWING is the emitter's half, since only it knows the element kind's
+ * absent value. Index coercion is ToLength's: a fraction truncates, a
+ * negative or NaN empties the array. */
+void scr_arr_truncate(ScrArr *a, double n) {
+  double want = n;
+  if (!(want >= 0)) want = 0; /* NaN and negatives empty it */
+  size_t target = want >= (double)a->len ? a->len : (size_t)want;
+  while (a->len > target) {
+    uint64_t slot = a->data[--a->len];
+    if (scr_elem_is_ref(a->elem)) scr_elem_release(a, slot);
+  }
+}

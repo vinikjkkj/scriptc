@@ -5,7 +5,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators.js";
-import { BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrJsOp, IrLocal, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { BOOL, isRefCounted, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrJsOp, IrLocal, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, isCjsJsFile, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
@@ -4190,20 +4190,40 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
           // ever written for — it lowers to the removal splice already
           // in the surface (start 0, count to the end), whose removed
           // array the statement discards.
-          if (
-            !expr.left.questionDotToken &&
-            expr.left.name.text === "length" &&
-            ts.isNumericLiteral(expr.right) &&
-            expr.right.text === "0"
-          ) {
+          if (!expr.left.questionDotToken && expr.left.name.text === "length") {
             const recvT = L.mapTypeOf(L.typeOf(expr.left.expression));
             if (recvT?.kind === "array") {
               const loc = locOf(expr);
               const receiver = L.lowerExpr(expr.left.expression);
-              const zero: IrExpr = { kind: "numLit", value: 0, type: F64, loc };
+              // `= 0` is the pure CLEAR: the removal splice already in the
+              // surface says it with no new machinery.
+              if (ts.isNumericLiteral(expr.right) && expr.right.text === "0") {
+                const zero: IrExpr = { kind: "numLit", value: 0, type: F64, loc };
+                return {
+                  kind: "exprStmt",
+                  expr: { kind: "arrIntrinsic", method: "splice", receiver, args: [zero], type: receiver.type, loc },
+                  loc,
+                };
+              }
+              // Any other length: shrink or grow is a RUNTIME fact, so the
+              // intrinsic emits both arms. Growing appends the element
+              // kind's absent value, and a SCALAR element has none that is
+              // not a lie on read (0/false/"" where Node reads undefined)
+              // -- the arrayNewLen / new Array(count) rule, same wording.
+              const elem = recvT.elem;
+              const growable = elem.kind === "union" ? L.wrappedUndefined(elem, loc) !== null : isRefCounted(elem);
+              if (!growable) {
+                L.noLowering(
+                  `assigning '.length' on '${L.fmt(elem)}'-element arrays`,
+                  expr.left,
+                  "a length that GROWS would read 0/false/empty where Node reads undefined — " +
+                    "assign 0 to clear, or rebuild the array",
+                );
+              }
+              const want = L.lowerExprExpecting(expr.right, F64);
               return {
                 kind: "exprStmt",
-                expr: { kind: "arrIntrinsic", method: "splice", receiver, args: [zero], type: receiver.type, loc },
+                expr: { kind: "arrIntrinsic", method: "setLength", receiver, args: [want], type: VOID, loc },
                 loc,
               };
             }

@@ -8769,6 +8769,48 @@ class LlEmitter {
         B.line(`${t} = call ptr @scr_arr_fill_${acc}(ptr ${r.name}, ${accArg} ${v.name}, double ${from}, double ${to})`);
         return this.own({ name: t, type: e.type });
       }
+      case "setLength": {
+        // `a.length = n`: shrink drops the tail (the runtime releases
+        // refcounted elements), grow appends the ABSENT slot -- the same
+        // value arrayNewLen fills with. Which arm runs is a runtime fact,
+        // so both are emitted: truncate first, then the grow loop, whose
+        // bound is already satisfied when the truncate did the work.
+        const want = this.emitExpr(e.args[0]!);
+        const elemT = e.receiver.type.elem;
+        let fill = acc === "f64" ? f64Lit(0) : acc === "bool" ? "false" : "null";
+        if (elemT.kind === "union") {
+          const utag = this.undefinedArmTag(elemT);
+          if (utag >= 0) fill = this.unitInstanceRef(elemT.unionId, utag);
+        }
+        this.declare(`declare void @scr_arr_truncate(ptr, double)`);
+        B.line(`call void @scr_arr_truncate(ptr ${r.name}, double ${want.name})`);
+        this.declare(`declare double @scr_arr_len(ptr)`);
+        const lenNow = B.tmp();
+        B.line(`${lenNow} = call double @scr_arr_len(ptr ${r.name})`);
+        const iSlot = B.slot();
+        B.entryAllocas.push(`${iSlot} = alloca double`);
+        B.line(`store double ${lenNow}, ptr ${iSlot}`);
+        const lc = B.newLabel("asl.c");
+        const lb = B.newLabel("asl.b");
+        const le = B.newLabel("asl.e");
+        const bound = B.tmp();
+        B.line(`${bound} = fsub double ${want.name}, ${f64Lit(1)}`);
+        B.br(lc);
+        B.startBlock(lc);
+        const i = B.tmp();
+        const cont = B.tmp();
+        B.line(`${i} = load double, ptr ${iSlot}`);
+        B.line(`${cont} = fcmp ole double ${i}, ${bound}`);
+        B.condBr(cont, lb, le);
+        B.startBlock(lb);
+        this.arrPush(r.name, acc, fill);
+        const i2 = B.tmp();
+        B.line(`${i2} = fadd double ${i}, ${f64Lit(1)}`);
+        B.line(`store double ${i2}, ptr ${iSlot}`);
+        B.br(lc);
+        B.startBlock(le);
+        return { name: "", type: e.type };
+      }
       case "pushSpread": {
         // `a.push(...src)`: append src's elements in order (borrowed src,
         // count snapshotted). Result: the new length.
