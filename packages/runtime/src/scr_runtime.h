@@ -4725,6 +4725,7 @@ ScrPromise *scr_fsp_read_file_bytes(ScrStr *path); /* +1 */
 /* crypto.randomBytes(n) → a real u8 Buffer. Out-of-range n THROWS Node's
  * RangeError catchably (same check as scr_crypto_random_string). */
 ScrBytes *scr_crypto_random_bytes(double n);
+ScrPromise *scr_crypto_random_bytes_async(double n);
 /* crypto.randomInt(min, max): a uniform integer in [min, max) by
  * rejection sampling; Node's range errors verbatim. */
 double scr_crypto_random_int(double min, double max);
@@ -4768,6 +4769,11 @@ ScrBytes *scr_zlib_unzip(const ScrBytes *data);
  * and answers an already-settled promise (the fs/promises stance). */
 ScrPromise *scr_zlib_deflate_async(const ScrBytes *data);
 ScrPromise *scr_zlib_unzip_async(const ScrBytes *data);
+/* The RAW twins: headerless DEFLATE (mode 1). */
+ScrBytes *scr_zlib_deflate_raw(const ScrBytes *data);
+ScrBytes *scr_zlib_inflate_raw(const ScrBytes *data);
+ScrPromise *scr_zlib_deflate_raw_async(const ScrBytes *data);
+ScrPromise *scr_zlib_inflate_raw_async(const ScrBytes *data);
 void scr_zlib_island_install(void);
 
 /* ── node:net (scr_net.c — compiled and linked ONLY when the program

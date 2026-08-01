@@ -823,3 +823,10 @@ ScrPromise *scr_crypto_pbkdf2_sha256_async(const ScrBytes *password, const ScrBy
   ScrBytes *b = scr_crypto_pbkdf2_sha256(password, salt, iterations, keylen);
   return scr_promise_settled_ref(b, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
 }
+
+/* util.promisify(randomBytes): the same draw behind an already-settled
+ * promise. A size range error rejects. */
+ScrPromise *scr_crypto_random_bytes_async(double n) {
+  ScrBytes *b = scr_crypto_random_bytes(n);
+  return scr_promise_settled_ref(b, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
+}

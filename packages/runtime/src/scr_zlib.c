@@ -234,3 +234,26 @@ ScrPromise *scr_zlib_unzip_async(const ScrBytes *data) {
   ScrBytes *b = scr_zlib_unzip(data);
   return scr_promise_settled_ref(b, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
 }
+
+/* ── the RAW twins (node:zlib's deflateRaw/inflateRaw) ───────────────────
+ * Headerless DEFLATE (mode 1, windowBits -15): the same codec with no
+ * zlib or gzip wrapper, which is what a framing layer that carries its
+ * own length and checksum uses. inflateRaw throws catchably on input the
+ * stream rejects, like every other decompressor here. */
+ScrBytes *scr_zlib_deflate_raw(const ScrBytes *data) {
+  return scr_zlib_deflate_mode(data, 1, -1);
+}
+
+ScrBytes *scr_zlib_inflate_raw(const ScrBytes *data) {
+  return scr_zlib_inflate_mode(data, 1);
+}
+
+ScrPromise *scr_zlib_deflate_raw_async(const ScrBytes *data) {
+  ScrBytes *b = scr_zlib_deflate_raw(data);
+  return scr_promise_settled_ref(b, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
+}
+
+ScrPromise *scr_zlib_inflate_raw_async(const ScrBytes *data) {
+  ScrBytes *b = scr_zlib_inflate_raw(data);
+  return scr_promise_settled_ref(b, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
+}
