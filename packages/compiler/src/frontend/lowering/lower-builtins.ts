@@ -2520,7 +2520,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
      * derive a different key. */
     literalArg?: { index: number; value: string };
     /** An argument the CALL must spell as the literal `null` and which the
-     * lib fn does not take — sign/verify's algorithm slot, where Ed25519
+     * lib fn does not take â€” sign/verify's algorithm slot, where Ed25519
      * prescribes its own hash and Node rejects a named digest. */
     nullArg?: number;
     /** generateKeyPair: the payload is the two-KeyObject RECORD, which no
@@ -2538,7 +2538,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     "crypto.randomInt": { fn: "crypto.randomIntAsync", params: [F64, F64], inner: F64 },
     // The asymmetric trio. sign/verify take Node's algorithm slot as the
     // literal null (nullArg) and drop it: Ed25519 prescribes SHA-512.
-    // fn/inner are placeholders here — the pairGen branch reads the call
+    // fn/inner are placeholders here â€” the pairGen branch reads the call
     // type and builds the record itself (see lowerPromisifiedSettledCall).
     "crypto.generateKeyPair": {
       fn: "key.genAsync",
@@ -2603,7 +2603,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         L.noLowering(
           "the promisified generateKeyPair for this key type",
           expr.arguments[0] ?? expr,
-          "x25519 and ed25519 are the compiled curves — pass one as a literal",
+          "x25519 and ed25519 are the compiled curves â€” pass one as a literal",
         );
       }
       const resultT = L.mapTypeOf(L.typeOf(expr));
@@ -2643,7 +2643,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         L.noLowering(
           `the promisified ${name} with a named digest`,
           nullSlot,
-          "Ed25519 prescribes its own hash — pass null, exactly as Node requires here",
+          "Ed25519 prescribes its own hash â€” pass null, exactly as Node requires here",
         );
       }
     }

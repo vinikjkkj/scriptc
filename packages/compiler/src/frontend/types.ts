@@ -547,7 +547,7 @@ export interface TypeMapperCtx {
    * callers fence them like any other unsupported type. */
   isProgramFile: (sf: ts.SourceFile) => boolean;
   /** True when a DECLARATION file's values come from a module this build
-   * COMPILED — the `.js` beside it is in the lowered set. Resolution hands a
+   * COMPILED â€” the `.js` beside it is in the lowered set. Resolution hands a
    * compiler the `.d.ts` (the type surface) and leaves the body behind; when
    * the body was picked up too, the declaration is a trustworthy face for
    * values that DO exist in the binary. */
@@ -1426,7 +1426,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // WeakMap rides the ordinary identity-keyed Map. The two differ only in
   // whether an entry keeps its key ALIVE, and a compiled program cannot
   // observe that difference: there is no finalizer, no WeakRef surface, and
-  // WeakMap has no iteration by design. What changes is MEMORY — entries are
+  // WeakMap has no iteration by design. What changes is MEMORY â€” entries are
   // retained until the map dies rather than until the key does. A documented
   // divergence in footprint, not in behaviour.
   if (

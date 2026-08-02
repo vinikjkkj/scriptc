@@ -557,7 +557,7 @@ export interface FileParts {
 
 /** The CJS twin of collectJsonImports: `const { a, b } = require("./x.json")`
  * and `const j = require("./x.json")`. Node hands back the parsed document
- * either way, so the bake is the one the ESM default import already does — the
+ * either way, so the bake is the one the ESM default import already does â€” the
  * difference is the BINDING: a pattern names its fields, so each element bakes
  * the value at its key instead of the whole document.
  *
@@ -615,7 +615,7 @@ export function collectJsonRequires(L: Lowerer, parts: FileParts[]): void {
           // Object pattern only. A whole-document binding
           // (`const j = require("./x.json")`) needs the global to carry the
           // record itself, and the member reads off it do not resolve to the
-          // baked global today — it fences in program.ts rather than
+          // baked global today â€” it fences in program.ts rather than
           // compiling to something that misses.
           if (ts.isObjectBindingPattern(decl.name)) {
             const doc = parsed as Record<string, unknown> | null;
