@@ -2886,6 +2886,19 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
     return lowered;
   }
 
+/** `arrT` when the DECLARED type is a tuple whose every field is the array's
+ * element type — the promise combinators' shape, where the checker's tuple
+ * overload describes a value the lowering builds as an array. Null for a
+ * heterogeneous tuple (the elements genuinely differ, and the array would
+ * lose that) and for anything that is not a tuple at all. */
+function uniformTupleAsArray(L: Lowerer, declaredTs: ts.Type, arrT: IrType & { kind: "array" }): IrType | null {
+  const declared = L.mapTypeOf(declaredTs);
+  if (declared?.kind !== "record") return null;
+  const shape = L.shapes.get(declared.shapeId);
+  if (!shape?.tuple || shape.fields.length === 0) return null;
+  return shape.fields.every((f) => typeEquals(f.type, arrT.elem)) ? arrT : null;
+}
+
 export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: boolean): IrStmt | null {
     // --provenance-sources: an elided pure-annotated dead const emits
     // nothing (collectGlobals registered no global by the same test —
@@ -3204,6 +3217,21 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
         ? (L.mapTypeOf(L.typeOf(decl.name))?.kind === "record"
             ? init.type
             : null)
+        : null) ??
+      // A binding whose INITIALIZER is an ARRAY while the checker spells a
+      // UNIFORM TUPLE of the same element: `const rs = await
+      // Promise.allSettled([p, q])`, where the tuple overload types the
+      // literal but the combinator builds a real array — with one shared
+      // element type the tuple IS an array, which is the equivalence the
+      // combinators' own lowering already rests on. Keeping the tuple would
+      // demand a record the value never had (the shape check is what
+      // fenced these bindings, while `const [a, b] = ...` always worked
+      // because destructuring never materializes the tuple). The array
+      // reads give the same elements — an indexed read answers the element
+      // type, not an optional — plus length, iteration and the array
+      // methods the tuple has no lowering for.
+      (!bindingTainted && init.type.kind === "array"
+        ? uniformTupleAsArray(L, L.typeOf(decl.name), init.type)
         : null) ??
       (bindingTainted ? null : L.mapTypeOf(L.typeOf(decl.name))) ??
       (init.type.kind === "dyn" ? DYN : null) ??

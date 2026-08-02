@@ -5770,6 +5770,22 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         // read rides engine ops, exiting at the declared per-index type
         // like the array path.
         if (obj.type.kind === "jsval") return islandElementRead(L, expr, obj);
+        // A tuple-typed receiver whose VALUE is a static ARRAY: the
+        // uniform-tuple bindings the promise combinators produce (their
+        // lowering builds a real array, and with one shared element type
+        // the two describe the same value). Dispatch follows the value —
+        // the jsval rule above, one world over — so the read rides the
+        // ordinary array path instead of asking a record for a field the
+        // value has no slot for.
+        if (obj.type.kind === "array") {
+          const index = L.lowerExpr(expr.argumentExpression);
+          if (index.type.kind === "f64") {
+            return L.maybeNarrow(
+              { kind: "arrayGet", arr: obj, index, type: obj.type.elem, loc: locOf(expr) },
+              expr,
+            );
+          }
+        }
         const idx = tupleLiteralIndex(expr.argumentExpression);
         if (idx === null) {
           L.unsupported(
