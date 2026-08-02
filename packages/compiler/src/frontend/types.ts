@@ -3029,7 +3029,11 @@ function isMappedShape(t: ts.Type): boolean {
  * field walk instead; an intersection passes when every part is itself an
  * ordinary provenance-passing object type (class parts keep their nominal
  * identity and never flatten into a struct). */
-function recordProvenanceOk(t: ts.Type, checker: ts.TypeChecker): boolean {
+function recordProvenanceOk(
+  t: ts.Type,
+  checker: ts.TypeChecker,
+  ctx?: TypeMapperCtx,
+): boolean {
   if (t.isIntersectionType()) {
     return t.getTypes().every(
       (part) => {
@@ -3038,7 +3042,7 @@ function recordProvenanceOk(t: ts.Type, checker: ts.TypeChecker): boolean {
           !(partSym && partSym.flags & ts.SymbolFlags.Class) &&
           checker.getCallSignatures(part).length === 0 &&
           checker.getConstructSignatures(part).length === 0 &&
-          recordProvenanceOk(part, checker);
+          recordProvenanceOk(part, checker, ctx);
       },
     );
   }
@@ -3046,7 +3050,14 @@ function recordProvenanceOk(t: ts.Type, checker: ts.TypeChecker): boolean {
   const tSym = t.getSymbol();
   const decls = tSym ? checker.declarationsOf(tSym) : undefined;
   if (!decls || decls.length === 0) return false;
-  return !decls.some((d) => d.getSourceFile().isDeclarationFile);
+  // A declaration file is normally the wrong half of a module — types with no
+  // body behind them — which is why a record declared there cannot be built.
+  // When the implementation twin WAS compiled (declTwinOf put it into module
+  // order), the shape does have code behind it and the record is buildable.
+  return !decls.some((d) => {
+    const sf = d.getSourceFile();
+    return sf.isDeclarationFile && !(ctx?.declFileHasCompiledImpl?.(sf) ?? false);
+  });
 }
 
 /** A GENERIC-callable member type (`m<T>(x: T): T` / `f: <T>(x: T) => T` in
@@ -3246,7 +3257,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
     !widened.isIntersectionType() &&
     indexValue === undefined &&
     checker.getPropertiesOfType(widened).length === 0;
-  if (!recordProvenanceOk(widened, checker) && !pureIndexShape && !anonymousEmpty) return null;
+  if (!recordProvenanceOk(widened, checker, ctx) && !pureIndexShape && !anonymousEmpty) return null;
   // Checker-computed shapes (no user declaration) need two extra fences in
   // the member walk below; see the comments there.
   const computed = widened.isIntersectionType() || isMappedShape(widened);
