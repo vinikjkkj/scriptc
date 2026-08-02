@@ -638,6 +638,7 @@ export function mapKeyAccess(key: IrType): "f64" | "str" | "ref" {
   if (key.kind === "string") return "str";
   // Handle-kind SET elements (identity hashing — isSupportedSetElem);
   // Map keys proper stay f64/string.
+  if (key.kind === "object") return "ref";
   if (key.kind === "netServer" || key.kind === "symbol") return "ref";
   throw new Error(`emitter bug: map key of ${key.kind} (frontend rejects these)`);
 }

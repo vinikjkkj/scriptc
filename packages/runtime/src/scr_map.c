@@ -392,6 +392,53 @@ void scr_map_set_ref_f64(ScrMap *m, void *key, double v) {
   scr_map_set(m, scr_map_fnv1a((const unsigned char *)&k, 8), k, scr_map_slot_from_f64(v));
 }
 
+/* REF-KEY maps: the key is a refcounted pointer hashed and compared by
+ * IDENTITY (SCR_MAP_KEY_REF), which is exactly JS object-key semantics —
+ * SameValueZero on references. Sets have used the kind since it existed;
+ * these are the Map half, mirroring the _str_ family one for one. */
+static void scr_map_set_ref_key(ScrMap *m, void *key, uint64_t val) {
+  uint64_t k = scr_map_slot_from_ptr(key);
+  scr_map_set(m, scr_map_fnv1a((const unsigned char *)&k, 8), k, val);
+}
+
+void scr_map_set_ref_bool(ScrMap *m, void *key, bool v) {
+  scr_map_set_ref_key(m, key, (uint64_t)(v ? 1 : 0));
+}
+
+void scr_map_set_ref_ref(ScrMap *m, void *key, void *v) {
+  scr_map_set_ref_key(m, key, scr_map_slot_from_ptr(v));
+}
+
+bool scr_map_get_ref_f64(const ScrMap *m, const void *key, double *out) {
+  size_t e = scr_map_find_ref(m, key);
+  if (e == SCR_MAP_EMPTY) return false;
+  *out = scr_map_slot_to_f64(m->entries[e].val);
+  return true;
+}
+
+bool scr_map_get_ref_bool(const ScrMap *m, const void *key, bool *out) {
+  size_t e = scr_map_find_ref(m, key);
+  if (e == SCR_MAP_EMPTY) return false;
+  *out = m->entries[e].val != 0;
+  return true;
+}
+
+void *scr_map_get_ref_ref(const ScrMap *m, const void *key) {
+  size_t e = scr_map_find_ref(m, key);
+  if (e == SCR_MAP_EMPTY) return NULL;
+  return m->val_retain(scr_map_slot_to_ptr(m->entries[e].val)); /* +1 */
+}
+
+/* The ref-key constructor: scr_set_new_ref's twin with a real VALUE side. */
+ScrMap *scr_map_new_ref(ScrMapValKind val_kind, void *(*key_retain)(void *),
+                        void (*key_release)(void *), void *(*val_retain)(void *),
+                        void (*val_release)(void *), ScrTraceFn val_trace) {
+  ScrMap *m = scr_map_new(SCR_MAP_KEY_REF, val_kind, val_retain, val_release, val_trace);
+  m->key_retain = key_retain;
+  m->key_release = key_release;
+  return m;
+}
+
 ScrMap *scr_set_new_ref(void *(*elem_retain)(void *), void (*elem_release)(void *)) {
   ScrMap *m = scr_map_new(SCR_MAP_KEY_REF, SCR_MAP_VAL_F64, NULL, NULL, NULL);
   m->key_retain = elem_retain;

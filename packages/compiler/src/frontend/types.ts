@@ -1412,7 +1412,17 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // readonly-ness is a checker-only view (no mutating members on the
   // interface), so both map to the identical IR kinds and the read-side
   // method lowerings (.has/.get/.size/iteration) dispatch unchanged.
-  if (isStdlibInterface("Map") || isStdlibInterface("ReadonlyMap")) {
+  // WeakMap rides the ordinary identity-keyed Map. The two differ only in
+  // whether an entry keeps its key ALIVE, and a compiled program cannot
+  // observe that difference: there is no finalizer, no WeakRef surface, and
+  // WeakMap has no iteration by design. What changes is MEMORY — entries are
+  // retained until the map dies rather than until the key does. A documented
+  // divergence in footprint, not in behaviour.
+  if (
+    isStdlibInterface("Map") ||
+    isStdlibInterface("ReadonlyMap") ||
+    isStdlibInterface("WeakMap")
+  ) {
     const args = checker.getTypeArguments(widened as ts.TypeReference);
     if (args.length !== 2) return null;
     const key = mapType(args[0]!, ctx);

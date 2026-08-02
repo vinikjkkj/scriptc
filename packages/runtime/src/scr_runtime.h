@@ -1062,6 +1062,16 @@ void scr_map_set_str_f64(ScrMap *m, ScrStr *key, double v);
 void scr_map_set_str_bool(ScrMap *m, ScrStr *key, bool v);
 void scr_map_set_str_ref(ScrMap *m, ScrStr *key, void *v);
 void scr_map_set_ref_f64(ScrMap *m, void *key, double v); /* REF-key sets */
+void scr_map_set_ref_bool(ScrMap *m, void *key, bool v);
+void scr_map_set_ref_ref(ScrMap *m, void *key, void *v);
+bool scr_map_get_ref_f64(const ScrMap *m, const void *key, double *out);
+bool scr_map_get_ref_bool(const ScrMap *m, const void *key, bool *out);
+void *scr_map_get_ref_ref(const ScrMap *m, const void *key);
+/* A Map whose KEYS are refcounted pointers compared by identity — JS object
+ * keys. scr_set_new_ref's twin, with a real value side. */
+ScrMap *scr_map_new_ref(ScrMapValKind val_kind, void *(*key_retain)(void *),
+                        void (*key_release)(void *), void *(*val_retain)(void *),
+                        void (*val_release)(void *), ScrTraceFn val_trace);
 
 /* get: scalar variants fill *out and return the found flag; ref variants
  * return +1 or NULL (values are never NULL, so NULL means "absent"). The
