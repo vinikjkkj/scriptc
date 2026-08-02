@@ -5884,6 +5884,137 @@ const inliningPredicates = new Set<ts.Symbol>();
     }
   }
 
+/** `p.then(onFulfilled, onRejected)`.
+ *
+ * NOT `.then(f).catch(r)`: there r would also see whatever f threw, while the
+ * spec routes only the RECEIVER's rejection to it. So only the await sits in
+ * the try, and the fulfillment handler runs after it:
+ *
+ *   async (p, cb, rb) => {
+ *     let v;
+ *     try { v = await p; }
+ *     catch (e) { return coerce(rb(caughtToDyn(e))); }   // rb's own throw propagates
+ *     return coerce(cb(v));                              // cb's throw propagates too
+ *   }
+ *
+ * The rejection reason arrives as a checked-dynamic value — that is what a
+ * caught value IS, and narrowing it to a declared parameter type would be a
+ * cast nobody wrote. A handler wanting anything else answers null and the
+ * caller fences. Both handlers' results coerce into the call's own promise
+ * payload, so a handler returning a promise flattens like `return p` in any
+ * async body. */
+  function thenTwoHandlerDesugar(L: Lowerer, call: ts.CallExpression,
+    receiver: IrExpr,
+    promT: IrType & { kind: "promise" },
+    inner: IrType,
+    loc: SrcLoc,): IrExpr | null {
+    const cb = L.lowerExpr(call.arguments[0]!);
+    const rb = L.lowerExpr(call.arguments[1]!);
+    if (cb.type.kind !== "func" || rb.type.kind !== "func") return null;
+    if (cb.type.params.length > 1 || rb.type.params.length > 1) return null;
+    const cbParam = cb.type.params[0];
+    if (cbParam !== undefined && !typeEquals(cbParam, inner)) return null;
+    const rbParam = rb.type.params[0];
+    if (rbParam !== undefined && rbParam.kind !== "dyn") return null;
+    const resultT = L.mapTypeOf(L.typeOf(call));
+    if (resultT?.kind !== "promise") return null;
+    const R = resultT.inner;
+
+    const fnName = `%fn${L.lambdaCounter++}_then2`;
+    const funcType: IrType & { kind: "func" } = {
+      kind: "func",
+      params: [promT, cb.type, rb.type],
+      ret: resultT,
+    };
+    const fnCtx = newFnCtx(true, null, funcType, R);
+    fnCtx.isAsync = true;
+    L.fnStack.push(fnCtx);
+    try {
+      const pLocal = L.declareHiddenLocal("p", promT);
+      const cbLocal = L.declareHiddenLocal("cb", cb.type);
+      const rbLocal = L.declareHiddenLocal("rb", rb.type);
+      const eLocal = L.declareHiddenLocal("e", CAUGHT);
+      const awaitE: IrExpr = {
+        kind: "awaitExpr",
+        value: { kind: "varRef", localId: pLocal.id, type: promT, loc },
+        type: inner,
+        loc,
+      };
+      // The settled value outlives the try (the fulfillment handler runs
+      // after it), so the slot is declared outside and ASSIGNED inside.
+      const vLocal =
+        cbParam !== undefined && inner.kind !== "void" ? L.declareHiddenLocal("v", inner) : null;
+      // Assigned inside the try, read after it: a mutable slot, unlike the
+      // single-handler desugar's const (there the handler runs in the try).
+      if (vLocal) vLocal.mutable = true;
+      const tryBody: IrStmt[] = vLocal
+        ? [{ kind: "assign", localId: vLocal.id, value: awaitE, loc }]
+        : [{ kind: "exprStmt", expr: awaitE, loc }];
+
+      const handlerReturn = (callee: IrLocal, args: IrExpr[], fnT: IrType & { kind: "func" }): IrStmt => {
+        const hCall: IrExpr = {
+          kind: "callValue",
+          callee: { kind: "varRef", localId: callee.id, type: fnT, loc },
+          args,
+          type: fnT.ret,
+          loc,
+        };
+        if (R.kind === "void") {
+          const drop: IrStmt =
+            hCall.type.kind === "promise"
+              ? { kind: "exprStmt", expr: { kind: "awaitExpr", value: hCall, type: hCall.type.inner, loc }, loc }
+              : { kind: "exprStmt", expr: hCall, loc };
+          return { kind: "block", body: [drop, { kind: "return", value: null, loc }], loc };
+        }
+        const value =
+          hCall.type.kind === "promise" && R.kind !== "promise"
+            ? L.coerceInto(call, { kind: "awaitExpr", value: hCall, type: hCall.type.inner, loc }, R)
+            : L.coerceInto(call, hCall, R);
+        return { kind: "return", value, loc };
+      };
+
+      const catchBody: IrStmt[] = [
+        handlerReturn(
+          rbLocal,
+          rbParam === undefined
+            ? []
+            : [{ kind: "caughtToDyn", value: { kind: "varRef", localId: eLocal.id, type: CAUGHT, loc }, type: DYN, loc }],
+          rb.type,
+        ),
+      ];
+      const body: IrStmt[] = [];
+      if (vLocal) body.push({ kind: "varDecl", localId: vLocal.id, init: null, loc });
+      body.push({ kind: "tryCatch", tryBody, catchBody, catchLocalId: eLocal.id, finallyBody: null, loc });
+      body.push(
+        handlerReturn(
+          cbLocal,
+          vLocal ? [{ kind: "varRef", localId: vLocal.id, type: inner, loc }] : [],
+          cb.type,
+        ),
+      );
+
+      const ctx = L.ctx;
+      L.liftedFns.push({
+        name: fnName,
+        params: [
+          { localId: pLocal.id, name: pLocal.name, type: promT },
+          { localId: cbLocal.id, name: cbLocal.name, type: cb.type },
+          { localId: rbLocal.id, name: rbLocal.name, type: rb.type },
+        ],
+        returnType: R,
+        locals: ctx.locals,
+        captures: ctx.captures!,
+        body,
+        loc,
+        async: true,
+      });
+      const closure: IrExpr = { kind: "closure", fnName, captures: ctx.captureSources, type: funcType, loc };
+      return { kind: "callValue", callee: closure, args: [receiver, cb, rb], type: resultT, loc };
+    } finally {
+      L.fnStack.pop();
+    }
+  }
+
 export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken || access.questionDotToken) return null;
@@ -5917,12 +6048,17 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     const passthrough =
       call.arguments.length === 0 ||
       (call.arguments.length === 1 && isAbsentHandler(call.arguments[0]));
-    if (call.arguments.length !== 1 && !passthrough) {
+    // `then` also takes the two-handler form. It is NOT `.then(f).catch(r)`:
+    // there r would also see whatever f threw, while the spec routes only
+    // the RECEIVER's rejection to it (thenTwoHandlerDesugar keeps f outside
+    // the try for exactly that reason).
+    const twoHandlerThen = member === "then" && call.arguments.length === 2;
+    if (call.arguments.length !== 1 && !passthrough && !twoHandlerThen) {
       L.noLowering(
         `${member} with ${call.arguments.length} arguments`,
         call,
         member === "then"
-          ? "the supported form takes exactly one fulfillment handler — chain .catch(...) for the rejection half"
+          ? "the supported forms take one fulfillment handler, or that handler and a rejection handler"
           : `the supported form takes exactly one ${member === "catch" ? "inline handler" : "callback"}`,
       );
     }
@@ -5994,6 +6130,16 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       } finally {
         L.fnStack.pop();
       }
+    }
+
+    if (twoHandlerThen) {
+      const built = thenTwoHandlerDesugar(L, call, receiver, promT, inner, loc);
+      if (built) return built;
+      L.noLowering(
+        "then with a rejection handler of this shape",
+        call,
+        "the rejection handler takes the reason as a checked-dynamic value, or no parameter at all",
+      );
     }
 
     if (member === "then") {
