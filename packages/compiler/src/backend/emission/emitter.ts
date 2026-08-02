@@ -1645,6 +1645,8 @@ export class CEmitter {
       case "bigint":
         return `scr_big_truthy(${t.name})`;
       case "keyobj":
+      // A signal handle is an object: always truthy when present.
+      case "abortSignal":
         return `${t.name} != NULL`;
       case "void":
         throw new Error("emitter bug: truthiness of void");

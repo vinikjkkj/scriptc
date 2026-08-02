@@ -71,6 +71,8 @@ export function cType(t: IrType): string {
       return "ScrHttpClientReq *";
     case "secureCtx":
       return "ScrSecureCtx *";
+    case "abortSignal":
+      return "ScrAbortSignal *";
     case "fsWatcher":
       return "ScrWatcher *";
     case "childStream":
@@ -113,6 +115,8 @@ export function cType(t: IrType): string {
       return "ScrGen *";
     case "void":
       return "void";
+    case "abortSignal":
+      return "ScrAbortSignal *";
     case "undefinedT":
     case "nullT":
       // Unit kinds have no C value form: they exist only as union arms
@@ -177,6 +181,8 @@ export function retainCallC(type: IrType, expr: string): string {
       return `scr_http_client_retain(${expr})`;
     case "secureCtx":
       return `scr_secure_ctx_retain(${expr})`;
+    case "abortSignal":
+      return `scr_abort_signal_retain(${expr})`;
     case "fsWatcher":
       return `scr_watcher_retain(${expr})`;
     case "childStream":
@@ -260,6 +266,8 @@ export function releaseCallC(type: IrType, expr: string): string {
       return `scr_http_client_release(${expr})`;
     case "secureCtx":
       return `scr_secure_ctx_release(${expr})`;
+    case "abortSignal":
+      return `scr_abort_signal_release(${expr})`;
     case "fsWatcher":
       return `scr_watcher_release(${expr})`;
     case "childStream":
@@ -352,6 +360,9 @@ export function boxKindC(t: IrType): string {
     case "undefinedT":
     case "nullT":
     case "caught":
+    // A signal is fenced out of union arms in the frontend, like the
+    // other opaque handles.
+    case "abortSignal":
       // unit kinds never stand alone (and catch bindings never box), so
       // nothing to box
       throw new Error(`emitter bug: box of ${t.kind}`);
@@ -420,6 +431,8 @@ export function vAdapters(t: IrType): { retain: string; release: string } {
       return { retain: "scr_http_client_retain_v", release: "scr_http_client_release_v" };
     case "secureCtx":
       return { retain: "scr_secure_ctx_retain_v", release: "scr_secure_ctx_release_v" };
+    case "abortSignal":
+      return { retain: "scr_abort_signal_retain_v", release: "scr_abort_signal_release_v" };
     case "fsWatcher":
       return { retain: "scr_watcher_retain_v", release: "scr_watcher_release_v" };
     case "childStream":
@@ -547,6 +560,7 @@ export function elemKindC(elem: IrType): string {
     case "generator":
     case "undefinedT":
     case "nullT":
+    case "abortSignal":
       throw new Error(`emitter bug: array of ${elem.kind} (frontend rejects these)`);
     case "void":
       throw new Error("emitter bug: array of void");

@@ -365,6 +365,8 @@ export function formatIrType(t: IrType, shapes: ShapeRegistry, unions: UnionRegi
       return "bigint";
     case "keyobj":
       return "KeyObject";
+    case "abortSignal":
+      return "AbortSignal";
     case "promise":
       return `Promise<${formatIrType(t.inner, shapes, unions, seen)}>`;
     case "generator":
@@ -757,33 +759,41 @@ function interfaceRetypingClassInstance(
   ctx: TypeMapperCtx,
 ): ts.Type | null {
   if (!sym) return null;
+  // SCRIPTC_RETYPE_TRACE: one line per refusal, naming the condition. The
+  // shape has many ways to not-quite-match and the diagnostic only says
+  // "record", so the reason has to be observable.
+  const trace = process.env["SCRIPTC_RETYPE_TRACE"] ? (why: string) => {
+    process.stderr.write(`RETYPE ${checker.typeToString(iface)}: ${why}\n`);
+    return null;
+  } : () => null;
+  if (process.env["SCRIPTC_RETYPE_TRACE"]) process.stderr.write(`RETYPE-IN ${checker.typeToString(iface)}\n`);
   const decls = checker.declarationsOf(sym);
   // A CLASS merged under the name means the type already IS a class type —
   // the ordinary class path below owns that, and must not be pre-empted.
-  if (decls.some((d) => ts.isClassDeclaration(d) || ts.isClassExpression(d))) return null;
+  if (decls.some((d) => ts.isClassDeclaration(d) || ts.isClassExpression(d))) return trace("merged class");
   // The published shape merges the interface with the `const C = Impl as
   // unknown as CCtor` VALUE declaration. Only the interface declarations
   // matter here: in TYPE position the name always means the interface (a
   // const contributes a type only through `typeof`), so the value side
   // cannot change what this type maps to.
   const ifaces = decls.filter((d) => ts.isInterfaceDeclaration(d));
-  if (ifaces.length === 0) return null;
+  if (ifaces.length === 0) return trace("no interface declaration");
 
   let baseSym: ts.Symbol | undefined;
   for (const d of ifaces) {
     const clauses = d.heritageClauses ?? [];
-    if (clauses.length !== 1) return null;
+    if (clauses.length !== 1) return trace(`heritage clauses = ${clauses.length}`);
     const clause = clauses[0]!;
-    if (clause.token !== ts.SyntaxKind.ExtendsKeyword || clause.types.length !== 1) return null;
+    if (clause.token !== ts.SyntaxKind.ExtendsKeyword || clause.types.length !== 1) return trace("not a single extends");
     const ref = clause.types[0]!;
-    if (ref.typeArguments !== undefined) return null;
-    if (!ts.isIdentifier(ref.expression)) return null;
+    if (ref.typeArguments !== undefined) return trace("base has type arguments");
+    if (!ts.isIdentifier(ref.expression)) return trace("base is not a bare identifier");
     const s = checker.getSymbolAtLocation(ref.expression);
-    if (!s) return null;
-    if (baseSym !== undefined && baseSym !== s) return null;
+    if (!s) return trace("base identifier has no symbol");
+    if (baseSym !== undefined && baseSym !== s) return trace("declarations disagree on base");
     baseSym = s;
   }
-  if (baseSym === undefined) return null;
+  if (baseSym === undefined) return trace("no base symbol");
 
   const baseDecl = checker.valueDeclarationOf(baseSym);
   if (
@@ -800,14 +810,24 @@ function interfaceRetypingClassInstance(
   // the instantiated interface is what is being mapped, and inherited
   // members trivially pass (they came from the class), so anything the
   // check rejects is genuinely ADDED.
+  // Both sides enumerated the SAME way, and compared as name sets. A
+  // by-name getPropertyOfType lookup would work for ordinary members and
+  // silently fail for SYMBOL-keyed ones (they enumerate under a mangled
+  // `__@sym@id` name that no lookup resolves), so a class inheriting one —
+  // every EventEmitter subclass inherits captureRejectionSymbol — would
+  // look like it were being widened by an interface that adds nothing.
+  const baseNames = new Set(checker.getPropertiesOfType(baseInstance).map((p) => p.name));
   for (const p of checker.getPropertiesOfType(iface)) {
-    if (checker.getPropertyOfType(baseInstance, p.name) === undefined) return null;
+    if (!baseNames.has(p.name)) return trace(`added member ${p.name}`);
   }
   if (checker.getCallSignatures(iface).length > checker.getCallSignatures(baseInstance).length) return null;
   if (checker.getConstructSignatures(iface).length > checker.getConstructSignatures(baseInstance).length) {
     return null;
   }
   if (checker.getIndexInfosOfType(iface).length > checker.getIndexInfosOfType(baseInstance).length) return null;
+  if (process.env["SCRIPTC_RETYPE_TRACE"]) {
+    process.stderr.write(`RETYPE-OK ${checker.typeToString(iface)} -> ${checker.typeToString(baseInstance)}\n`);
+  }
   return baseInstance;
 }
 
