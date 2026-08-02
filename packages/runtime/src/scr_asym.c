@@ -288,3 +288,22 @@ bool scr_key_is_priv(const ScrKeyObject *key) { return key->is_private; }
 ScrStr *scr_key_crv(const ScrKeyObject *key) {
   return key->curve == SCR_CURVE_ED25519 ? scr_str_new("Ed25519", 7) : scr_str_new("X25519", 6);
 }
+
+/* The promisified twins. All three are synchronous work behind an
+ * already-settled promise — the crypto is microseconds and the callback
+ * forms Node exposes only exist to keep it off the event loop, which a
+ * compiled program has no thread pool to use anyway. */
+ScrPromise *scr_key_sign_async(const ScrBytes *msg, const ScrKeyObject *key) {
+  ScrBytes *sig = scr_key_sign(msg, key);
+  return scr_promise_settled_ref(sig, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
+}
+
+ScrPromise *scr_key_verify_async(const ScrBytes *msg, const ScrKeyObject *key,
+                                 const ScrBytes *sig) {
+  return scr_promise_settled_bool(scr_key_verify(msg, key, sig));
+}
+
+ScrPromise *scr_key_gen_async(double curve, bool want_private) {
+  ScrKeyObject *k = scr_key_gen(curve, want_private);
+  return scr_promise_settled_ref(k, &scr_keyobj_retain_v, &scr_keyobj_release_v, NULL);
+}

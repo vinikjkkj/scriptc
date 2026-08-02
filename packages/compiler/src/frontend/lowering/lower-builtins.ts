@@ -2519,6 +2519,10 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
      * lowering derives with one PRF and any other name would silently
      * derive a different key. */
     literalArg?: { index: number; value: string };
+    /** An argument the CALL must spell as the literal `null` and which the
+     * lib fn does not take — sign/verify's algorithm slot, where Ed25519
+     * prescribes its own hash and Node rejects a named digest. */
+    nullArg?: number;
   }
 
   const PROMISIFY_SETTLED: Record<string, PromisifiedTarget | undefined> = {
@@ -2527,6 +2531,20 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     "zlib.deflateRaw": { fn: "zlib.deflateRawAsync", params: [BYTES_U8], inner: BYTES_U8 },
     "zlib.inflateRaw": { fn: "zlib.inflateRawAsync", params: [BYTES_U8], inner: BYTES_U8 },
     "crypto.randomInt": { fn: "crypto.randomIntAsync", params: [F64, F64], inner: F64 },
+    // The asymmetric trio. sign/verify take Node's algorithm slot as the
+    // literal null (nullArg) and drop it: Ed25519 prescribes SHA-512.
+    "crypto.sign": {
+      fn: "key.signAsync",
+      params: [BYTES_U8, BYTES_U8, KEYOBJ],
+      inner: BYTES_U8,
+      nullArg: 0,
+    },
+    "crypto.verify": {
+      fn: "key.verifyAsync",
+      params: [BYTES_U8, BYTES_U8, KEYOBJ, BYTES_U8],
+      inner: BOOL,
+      nullArg: 0,
+    },
     "crypto.randomBytes": { fn: "crypto.randomBytesAsync", params: [F64], inner: BYTES_U8 },
     // pbkdf2's callback form takes the digest name as its fifth argument;
     // the lowering derives with sha256, so a different name would have to
@@ -2566,8 +2584,18 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         );
       }
     }
+    if (target.nullArg !== undefined) {
+      const nullSlot = expr.arguments[target.nullArg]!;
+      if (nullSlot.kind !== ts.SyntaxKind.NullKeyword) {
+        L.noLowering(
+          `the promisified ${name} with a named digest`,
+          nullSlot,
+          "Ed25519 prescribes its own hash — pass null, exactly as Node requires here",
+        );
+      }
+    }
     const args = target.params
-      .map((p, i) => (i === target.literalArg?.index ? null : L.lowerExprExpecting(expr.arguments[i]!, p)))
+      .map((p, i) => (i === target.literalArg?.index || i === target.nullArg ? null : L.lowerExprExpecting(expr.arguments[i]!, p)))
       .filter((a): a is IrExpr => a !== null);
     return { kind: "libCall", fn: target.fn, args, type: { kind: "promise", inner: target.inner }, loc };
   }
