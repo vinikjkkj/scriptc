@@ -734,6 +734,83 @@ function classExprNeverRegisters(decl: ts.ClassLikeDeclaration): boolean {
   return false;
 }
 
+/** The INSTANCE type of the program class an interface merely RE-TYPES, or
+ * null. See the call site for the shape and why it is the class.
+ *
+ * Deliberately narrow, because each condition is what keeps the answer
+ * sound rather than merely convenient:
+ *
+ *  - every declaration of the symbol is an interface (a merged VALUE would
+ *    make the name mean something else too),
+ *  - they agree on ONE `extends`, naming a program class by bare identifier
+ *    with NO type arguments (`extends Base<T>` would need the instantiated
+ *    base, not the declared one, and the interface's own type parameters
+ *    could then reach the runtime shape),
+ *  - the interface adds no call/construct/index signature, and
+ *  - EVERY member it declares already exists on the class. A member the
+ *    class does not have would be a real widening: the published type
+ *    would promise something no instance carries. */
+function interfaceRetypingClassInstance(
+  checker: TypeMapperCtx["checker"],
+  iface: ts.Type,
+  sym: ts.Symbol | undefined,
+  ctx: TypeMapperCtx,
+): ts.Type | null {
+  if (!sym) return null;
+  const decls = checker.declarationsOf(sym);
+  // A CLASS merged under the name means the type already IS a class type —
+  // the ordinary class path below owns that, and must not be pre-empted.
+  if (decls.some((d) => ts.isClassDeclaration(d) || ts.isClassExpression(d))) return null;
+  // The published shape merges the interface with the `const C = Impl as
+  // unknown as CCtor` VALUE declaration. Only the interface declarations
+  // matter here: in TYPE position the name always means the interface (a
+  // const contributes a type only through `typeof`), so the value side
+  // cannot change what this type maps to.
+  const ifaces = decls.filter((d) => ts.isInterfaceDeclaration(d));
+  if (ifaces.length === 0) return null;
+
+  let baseSym: ts.Symbol | undefined;
+  for (const d of ifaces) {
+    const clauses = d.heritageClauses ?? [];
+    if (clauses.length !== 1) return null;
+    const clause = clauses[0]!;
+    if (clause.token !== ts.SyntaxKind.ExtendsKeyword || clause.types.length !== 1) return null;
+    const ref = clause.types[0]!;
+    if (ref.typeArguments !== undefined) return null;
+    if (!ts.isIdentifier(ref.expression)) return null;
+    const s = checker.getSymbolAtLocation(ref.expression);
+    if (!s) return null;
+    if (baseSym !== undefined && baseSym !== s) return null;
+    baseSym = s;
+  }
+  if (baseSym === undefined) return null;
+
+  const baseDecl = checker.valueDeclarationOf(baseSym);
+  if (
+    baseDecl === undefined ||
+    !(ts.isClassDeclaration(baseDecl) || ts.isClassExpression(baseDecl)) ||
+    baseDecl.getSourceFile().isDeclarationFile ||
+    !ctx.isProgramFile(baseDecl.getSourceFile())
+  ) {
+    return null;
+  }
+
+  const baseInstance = checker.getDeclaredTypeOfSymbol(baseSym);
+  // Compared on the TYPE side rather than by walking declaration members:
+  // the instantiated interface is what is being mapped, and inherited
+  // members trivially pass (they came from the class), so anything the
+  // check rejects is genuinely ADDED.
+  for (const p of checker.getPropertiesOfType(iface)) {
+    if (checker.getPropertyOfType(baseInstance, p.name) === undefined) return null;
+  }
+  if (checker.getCallSignatures(iface).length > checker.getCallSignatures(baseInstance).length) return null;
+  if (checker.getConstructSignatures(iface).length > checker.getConstructSignatures(baseInstance).length) {
+    return null;
+  }
+  if (checker.getIndexInfosOfType(iface).length > checker.getIndexInfosOfType(baseInstance).length) return null;
+  return baseInstance;
+}
+
 function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   const { checker, unions, classNamer, resolveTypeParam } = ctx;
   if (resolveTypeParam && type.flags & ts.TypeFlags.TypeParameter) {
@@ -1160,6 +1237,26 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // symbol, but with construct signatures — that is the STATIC side, and
   // it maps to classval below.
   const widenedSym = widened.getSymbol();
+  // An interface that EXTENDS a program class and whose OWN members all
+  // SHADOW members the class already declares is a pure RE-TYPING of it:
+  // nothing new exists at runtime, so an instance of that interface IS an
+  // instance of the class. This is the shape a package uses to publish a
+  // class behind an interface --
+  //
+  //     class Impl extends EventEmitter { … }        // unexported
+  //     export interface C<E = {}> extends Impl {
+  //       on<K extends keyof E>(event: K, l: E[K]): this   // re-typed
+  //     }
+  //     export const C = Impl as unknown as CCtor
+  //
+  // -- typically to give `on`/`emit` event-map-typed overloads the class
+  // itself cannot express. Mapping the interface STRUCTURALLY instead
+  // would make the published type a record that no instance of the class
+  // can satisfy, so every use of the published surface fences.
+  {
+    const viaRetyping = interfaceRetypingClassInstance(checker, widened, widenedSym, ctx);
+    if (viaRetyping) return mapType(viaRetyping, ctx);
+  }
   const classDecl = widenedSym ? checker.valueDeclarationOf(widenedSym) : undefined;
   if (
     classDecl &&

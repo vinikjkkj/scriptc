@@ -3171,12 +3171,27 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
    * class the reference names.
    *
    * Deliberately narrow: `const` only (a `let` could later name an
-   * unrelated class), a single declaration, and an initializer that peels
-   * to a bare identifier. A conditional or computed initializer names no
-   * single class and keeps the fence. */
+   * unrelated class), a single VALUE declaration, and an initializer that
+   * peels to a bare identifier. A conditional or computed initializer
+   * names no single class and keeps the fence.
+   *
+   * Type-only declarations MERGED under the same name do not count against
+   * that single-declaration rule. The full published shape is
+   *
+   *     class Impl { … }                       // unexported
+   *     export interface C extends Impl {}     // the instance type
+   *     export const C = Impl as unknown as CCtor
+   *
+   * where the interface is what makes the pattern work at all (it names
+   * the instance side while the const names the static side). An interface
+   * or type alias contributes NO value, so it cannot make the binding name
+   * a different class — only the value declarations can, and there must
+   * still be exactly one of those. */
   export function castAliasedClassInfoOf(L: Lowerer, symbol: ts.Symbol | null | undefined): ClassInfo | null {
     if (!symbol) return null;
-    const decls = L.checker.declarationsOf(symbol);
+    const decls = L.checker
+      .declarationsOf(symbol)
+      .filter((d) => !ts.isInterfaceDeclaration(d) && !ts.isTypeAliasDeclaration(d));
     if (decls.length !== 1) return null;
     const decl = decls[0];
     if (decl === undefined || !ts.isVariableDeclaration(decl) || decl.initializer === undefined) return null;
