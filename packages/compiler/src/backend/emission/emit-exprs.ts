@@ -1295,9 +1295,16 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         if (e.type.kind !== "map") throw new Error("emitter bug: mapNew of non-map type");
         const value = e.type.value;
         const rc = isRefCounted(value) ? vAdapters(value) : null;
+        // Object KEYS carry their own RC adapters at construction (the map
+        // retains each key), so they take the ref-key constructor.
+        const kRc = mapKeyAccess(e.type.key) === "ref" ? vAdapters(e.type.key) : null;
         const m = E.newTemp(
           e.type,
-          `scr_map_new(${mapKeyKindC(e.type.key)}, ${mapValKindC(value)}, ` +
+          kRc
+            ? `scr_map_new_ref(${mapValKindC(value)}, &${kRc.retain}, &${kRc.release}, ` +
+              `${rc ? `&${rc.retain}` : "NULL"}, ${rc ? `&${rc.release}` : "NULL"}, ` +
+              `${E.traceArgC(value)})`
+            : `scr_map_new(${mapKeyKindC(e.type.key)}, ${mapValKindC(value)}, ` +
             `${rc ? `&${rc.retain}` : "NULL"}, ${rc ? `&${rc.release}` : "NULL"}, ${E.traceArgC(value)})`,
         );
         // Seeded construction: set() each pair in source order — exactly

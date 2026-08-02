@@ -387,7 +387,11 @@ export function setOf(elem: IrType): IrType {
  * fence: a set is hashed storage of its elements exactly as a map is of
  * its keys (isSupportedSetElem is this predicate under its own name). */
 export function isSupportedMapKey(t: IrType): boolean {
-  return t.kind === "f64" || t.kind === "string";
+  // Class INSTANCES key by reference identity (SCR_MAP_KEY_REF), which is
+  // exactly JS object-key semantics — SameValueZero on references, never a
+  // structural compare. The runtime has hashed identity storage; the map
+  // retains its keys like any other refcounted slot.
+  return t.kind === "f64" || t.kind === "string" || t.kind === "object";
 }
 
 /** The Set ELEMENT fence — Map's key fence plus the refcounted HANDLE

@@ -5258,7 +5258,7 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         const elems = args.map((a) => L.lowerExprExpecting(a, t.elem));
         return { kind: "arrayLit", elems, type: t, loc };
       }
-      if (symbol?.name === "Map" && L.isStdlibSymbol(symbol)) {
+      if ((symbol?.name === "Map" || symbol?.name === "WeakMap") && L.isStdlibSymbol(symbol)) {
         const seedArg = (expr.arguments?.length ?? 0) === 1 ? expr.arguments![0]! : null;
         const isPairLit = (el: ts.Expression): el is ts.ArrayLiteralExpression =>
           ts.isArrayLiteralExpression(el) && el.elements.length === 2 &&
@@ -5327,7 +5327,9 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             "SC1090",
             expr,
             `Map keys of type '${L.checker.typeToString(targs[0])}' ` +
-              `(Map keys must be string or number)`,
+              `(Map keys must be a string, a number, or a CLASS INSTANCE - those `+
+                `key by reference identity. A record/interface type cannot: a width `+
+                `coercion copies it, and a copy would miss its own entry)`,
           );
         }
         if (targs[1]) {
