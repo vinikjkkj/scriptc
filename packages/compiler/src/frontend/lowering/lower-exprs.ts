@@ -3824,29 +3824,6 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
    * smuggle a wider/narrower literal past tsc's freshness check), which the
    * exact-shape checks below reject with SC2002. Fields lower IN SOURCE
    * ORDER: JS evaluates property values in source order. */
-  /** The dropped-field names of the PromiseSettledResult honest subset
-   * (SEMANTICS.md 46): when the literal's target type is (a union
-   * containing) the lib's PromiseFulfilledResult / PromiseRejectedResult,
-   * the record mapping kept only `status` — `value` and `reason` evaluate
-   * for effect and are not stored. Null for every other target. */
-  function settledDropNames(L: Lowerer, tsType: ts.Type): Set<string> | null {
-    let names: Set<string> | null = null;
-    const parts: readonly ts.Type[] = tsType.isUnionType() ? tsType.getTypes() : [tsType];
-    for (const part of parts) {
-      const sym = part.getSymbol();
-      if (
-        !sym ||
-        !L.checker.declarationsOf(sym).some(
-          (d) => ts.isInterfaceDeclaration(d) && L.isStdlibFile(d.getSourceFile()),
-        )
-      ) {
-        continue;
-      }
-      if (sym.name === "PromiseFulfilledResult") (names ??= new Set()).add("value");
-      if (sym.name === "PromiseRejectedResult") (names ??= new Set()).add("reason");
-    }
-    return names;
-  }
 
   /** `{ [KEY]: v }` where KEY is a compile-time-known string or number:
    * the key folds into an ordinary (spelled) property name — the record
@@ -5222,29 +5199,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           continue;
         }
       }
-      if (!fieldType && !shape.indexValue) {
-        if (settledDropNames(L, tsType)?.has(name)) {
-          // Identifier and shorthand initializers are effect-free reads —
-          // skipped outright. The caught `reason` MUST skip: lowering the
-          // read would hit the catch-binding narrowness fence, and the
-          // snapshot it names needs no evaluation.
-          if (ts.isPropertyAssignment(prop) && !ts.isIdentifier(prop.initializer)) {
-            const v = L.lowerExpr(prop.initializer);
-            // Effect-free lowerings (literals, plain reads) drop at
-            // compile time; anything else — the awaited mapper — runs
-            // (and may throw into the enclosing catch) with its result
-            // released by the statement frame.
-            if (
-              v.kind !== "unitLit" && v.kind !== "numLit" && v.kind !== "strLit" &&
-              v.kind !== "boolLit" && v.kind !== "varRef" && v.kind !== "closure"
-            ) {
-              fields.push({ name, value: v, drop: true });
-            }
-          }
-          continue;
-        }
-        throw shapeMismatch(prop);
-      }
+      if (!fieldType && !shape.indexValue) throw shapeMismatch(prop);
 
       let value: IrExpr;
       let valueNode: ts.Node = prop;

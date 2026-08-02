@@ -2350,13 +2350,42 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       ]),
     };
   }
-  if (
-    isStdlibInterface("PromiseFulfilledResult") ||
-    isStdlibInterface("PromiseRejectedResult")
-  ) {
+  // PromiseSettledResult<T>'s two parts, mapped WHOLE. They used to intern
+  // one shared `{ status: string }` — the honest subset — because `value`
+  // and `reason` had no field representation: a `void` value has no slot,
+  // and an `any` reason would have absorbed the record as an island handle.
+  // Neither still holds in the static tier: `any` is dyn there and dyn
+  // FIELDS map (the record walk's own rule), and a void value is the unit
+  // it actually is at runtime — `undefined` — which rides the unit-only
+  // union exactly like a `{ v: undefined }` field.
+  //
+  // Keeping them apart is what makes the union a real discriminated pair
+  // (`r.status === "fulfilled"` narrows to the arm carrying `value`), which
+  // is the whole point of Promise.allSettled's result.
+  if (isStdlibInterface("PromiseFulfilledResult")) {
+    const targ = checker.getTypeArguments(widened as ts.TypeReference)[0];
+    const mapped = targ ? mapType(targ, ctx) : null;
+    const valueT = mapped?.kind === "void" ? unitOnlyUnion(unions) : mapped;
+    if (!valueT) return null;
     return {
       kind: "record",
-      shapeId: ctx.shapes.intern([{ name: "status", type: STRING }], false, undefined, ["status"]),
+      shapeId: ctx.shapes.intern(
+        [{ name: "status", type: STRING }, { name: "value", type: valueT }],
+        false,
+        undefined,
+        ["status", "value"],
+      ),
+    };
+  }
+  if (isStdlibInterface("PromiseRejectedResult")) {
+    return {
+      kind: "record",
+      shapeId: ctx.shapes.intern(
+        [{ name: "reason", type: DYN }, { name: "status", type: STRING }],
+        false,
+        undefined,
+        ["status", "reason"],
+      ),
     };
   }
   // Function types: exactly one call signature, no generics, and every

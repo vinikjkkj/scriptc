@@ -7,7 +7,7 @@ import { builtinModules } from "node:module";
 import { dirname, resolve } from "node:path";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { PoisonError, dynUndefinedExpr, ladderFenceExpr, nodeThrowExpr, own } from "./lowerer.js";
+import { PoisonError, dynUndefinedExpr, ladderFenceExpr, newFnCtx, nodeThrowExpr, own } from "./lowerer.js";
 import { canonicalBuiltinModule, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
 import { isRelativeSpecifier } from "../shared.js";
 import { probeNodeRequireRefusal } from "../npm.js";
@@ -31,7 +31,7 @@ import { HTTP2_CONSTANTS } from "./http2-constants.js";
 import { CRYPTO_CIPHERS, CRYPTO_CONSTANTS, CRYPTO_CURVES, CRYPTO_HASHES } from "./crypto-tables.js";
 import { timerStyleCallback } from "./lower-calls.js";
 import { registerHttpClientFnBinding } from "./lower-server.js";
-import { KEYOBJ, BOOL, BYTES_U8, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
+import { KEYOBJ, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
 
 
 
@@ -6703,6 +6703,142 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
    * Promise.all/allSettled/any fence with the sequential-await hint;
    * resolve/reject and the rest fall to the member fence. Null for
    * non-Promise receivers. */
+/** The settled-result element behind an allSettled call, read off the
+   * CHECKER's own result type: `Promise<R[]>` for an array argument, or
+   * `Promise<[R, R, ...]>` for the tuple overload an array literal selects —
+   * with one shared R the tuple IS an array, the same equivalence
+   * Promise.all already relies on. Null for any other shape. */
+  function allSettledElemType(L: Lowerer, call: ts.CallExpression): IrType | null {
+    const t = L.mapTypeOf(L.typeOf(call));
+    if (t?.kind !== "promise") return null;
+    const payload = t.inner;
+    if (payload.kind === "array") return payload.elem;
+    if (payload.kind !== "record") return null;
+    const shape = L.shapes.get(payload.shapeId);
+    if (!shape?.tuple || shape.fields.length === 0) return null;
+    const first = shape.fields[0]!.type;
+    return shape.fields.every((f) => typeEquals(f.type, first)) ? first : null;
+  }
+
+/** `Promise<T>` into a promise of its SETTLED description — the helper that
+   * makes allSettled's entries unable to reject:
+   *
+   *   async (p) => { try { return {status:"fulfilled", value: await p}; }
+   *                  catch (e) { return {status:"rejected", reason: e}; } }
+   *
+   * Both arms come from the checker's own PromiseSettledResult mapping, so
+   * the field names and the reason's checked-dynamic type are its, not a
+   * shape invented here. Null when that mapping is not the expected pair of
+   * a value-carrying and a reason-carrying record — the caller then fences
+   * instead of guessing which arm is which. */
+  function settledWrapAdapter(L: Lowerer, promT: IrType & { kind: "promise" },
+    settledT: IrType,
+    loc: SrcLoc,): string | null {
+    if (settledT.kind !== "union") return null;
+    const def = L.unions.get(settledT.unionId);
+    if (!def || def.arms.length !== 2) return null;
+    const armOf = (field: string): { tag: number; shapeId: string } | null => {
+      for (const [i, arm] of def.arms.entries()) {
+        if (arm.kind !== "record") continue;
+        if (L.shapes.get(arm.shapeId)?.fields.some((f) => f.name === field)) {
+          return { tag: i, shapeId: arm.shapeId };
+        }
+      }
+      return null;
+    };
+    const okArm = armOf("value");
+    const errArm = armOf("reason");
+    if (!okArm || !errArm || okArm.tag === errArm.tag) return null;
+    const okShape = L.shapes.get(okArm.shapeId);
+    const errShape = L.shapes.get(errArm.shapeId);
+    if (!okShape || !errShape) return null;
+    if (errShape.fields.find((f) => f.name === "reason")?.type.kind !== "dyn") return null;
+
+    const key = `settledwrap:${typeKey(promT)}:${typeKey(settledT)}`;
+    const existing = L.retagHelpers.get(key);
+    if (existing) return existing;
+    const name = `%promise.settled.${L.retagHelpers.size}`;
+    L.retagHelpers.set(key, name);
+
+    const funcType: IrType & { kind: "func" } = {
+      kind: "func", params: [promT], ret: { kind: "promise", inner: settledT },
+    };
+    const fnCtx = newFnCtx(true, null, funcType, settledT);
+    fnCtx.isAsync = true;
+    L.fnStack.push(fnCtx);
+    try {
+      const pLocal = L.declareHiddenLocal("p", promT);
+      const eLocal = L.declareHiddenLocal("e", CAUGHT);
+      const awaited: IrExpr = {
+        kind: "awaitExpr",
+        value: { kind: "varRef", localId: pLocal.id, type: promT, loc },
+        type: promT.inner,
+        loc,
+      };
+      // A record literal presents its fields exactly as the interned shape
+      // declares them, so both arms are built from the shape's own list.
+      const litFor = (shapeId: string, fields: { name: string; type: IrType }[],
+        supply: (f: { name: string; type: IrType }) => IrExpr | null): IrExpr | null => {
+        const out: { name: string; value: IrExpr }[] = [];
+        for (const f of fields) {
+          const v = supply(f);
+          if (!v) return null;
+          out.push({ name: f.name, value: v });
+        }
+        return { kind: "recordLit", fields: out, type: { kind: "record", shapeId }, loc };
+      };
+      const statusLit = (s: string): IrExpr => ({ kind: "strLit", value: s, type: STRING, loc });
+      // A void-settling entry carries the unit it actually settles with.
+      const okLit = litFor(okArm.shapeId, okShape.fields, (f) =>
+        f.name === "status" ? statusLit("fulfilled")
+          : f.name === "value"
+            ? L.coerceToExpected(
+                promT.inner.kind === "void"
+                  ? { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }
+                  : awaited,
+                f.type,
+              )
+            : null);
+      const errLit = litFor(errArm.shapeId, errShape.fields, (f) =>
+        f.name === "status" ? statusLit("rejected")
+          : f.name === "reason"
+            ? { kind: "caughtToDyn", value: { kind: "varRef", localId: eLocal.id, type: CAUGHT, loc }, type: DYN, loc }
+            : null);
+      if (!okLit || !errLit) {
+        L.retagHelpers.delete(key);
+        return null;
+      }
+      const tryBody: IrStmt[] = [];
+      // A void entry still has to AWAIT before it can answer.
+      if (promT.inner.kind === "void") tryBody.push({ kind: "exprStmt", expr: awaited, loc });
+      tryBody.push({
+        kind: "return",
+        value: { kind: "unionWrap", unionId: settledT.unionId, tag: okArm.tag, value: okLit, type: settledT, loc },
+        loc,
+      });
+      const catchBody: IrStmt[] = [{
+        kind: "return",
+        value: { kind: "unionWrap", unionId: settledT.unionId, tag: errArm.tag, value: errLit, type: settledT, loc },
+        loc,
+      }];
+      const ctx = L.ctx;
+      L.liftedFns.push({
+        name,
+        params: [{ localId: pLocal.id, name: pLocal.name, type: promT }],
+        returnType: settledT,
+        locals: ctx.locals,
+        // No captures: the promise arrives as a PARAMETER, so this is a
+        // plain module function every site calls directly.
+        body: [{ kind: "tryCatch", tryBody, catchBody, catchLocalId: eLocal.id, finallyBody: null, loc }],
+        loc,
+        async: true,
+      });
+      return name;
+    } finally {
+      L.fnStack.pop();
+    }
+  }
+
   export function lowerPromiseStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken) return null;
@@ -6920,7 +7056,51 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       }
       return { kind: "intrinsic", name: "promise.all", args: [entries], type: resultT, loc };
     }
-    if (member === "allSettled" || member === "any") {
+    // `Promise.allSettled([...])` over a UNIFORM array literal: each entry is
+    // WRAPPED first — synchronously — into a promise that cannot reject, and
+    // only then does the existing all-combinator run over them.
+    //
+    // Wrapping first is the point, not a detail. Awaiting the entries in
+    // sequence would build the same array, but an entry rejecting while an
+    // earlier one is still pending would sit UNHANDLED until its turn, and
+    // Node reports that. The wrapper call attaches its handler immediately,
+    // so no entry is ever unobserved, and `all` over promises that cannot
+    // reject settles exactly when the last one does.
+    if (member === "allSettled") {
+      const argNode = call.arguments.length === 1 ? call.arguments[0]! : null;
+      const settledElem = allSettledElemType(L, call);
+      if (
+        argNode &&
+        settledElem &&
+        ts.isArrayLiteralExpression(argNode) &&
+        !argNode.elements.some(ts.isSpreadElement) &&
+        argNode.elements.length > 0
+      ) {
+        const elems = argNode.elements.map((el) => L.lowerExpr(el));
+        const first = elems[0]!.type;
+        if (
+          first.kind === "promise" &&
+          elems.every((e) => e.type.kind === "promise" && typeEquals(e.type, first))
+        ) {
+          const wrapper = settledWrapAdapter(L, first, settledElem, loc);
+          if (wrapper) {
+            const wrappedT: IrType = { kind: "promise", inner: settledElem };
+            const wrapped = elems.map((e): IrExpr => ({
+              kind: "call", callee: wrapper, args: [e], type: wrappedT, loc,
+            }));
+            const entriesArr: IrExpr = { kind: "arrayLit", elems: wrapped, type: arrayOf(wrappedT), loc };
+            const resultT: IrType = { kind: "promise", inner: arrayOf(settledElem) };
+            return { kind: "intrinsic", name: "promise.all", args: [entriesArr], type: resultT, loc };
+          }
+        }
+      }
+      L.noLowering(
+        "Promise.allSettled over this argument shape",
+        call,
+        "a non-empty array LITERAL whose entries share ONE promise type is the supported form",
+      );
+    }
+    if (member === "any") {
       L.noLowering(
         `Promise.${member}`,
         call,
