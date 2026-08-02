@@ -2623,12 +2623,19 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         arms.some(
           (a) =>
             a.kind === "void" || a.kind === "union" ||
-            // Map/Set arms stay out (like func against data arms: no
-            // narrowing test — no discriminant fields on them). REGEX
-            // arms map: `x instanceof RegExp` is their narrowing test
-            // (the skip-utility `string | RegExp` shape), and the arm
-            // rides the ref machinery like array regex elements.
-            a.kind === "map" || a.kind === "set" || a.kind === "dyn" ||
+            // Map/Set arms have no narrowing test against DATA siblings
+            // (no discriminant fields, and typeof answers "object" like
+            // the rest) — but against units there is nothing to narrow:
+            // the unit TAG test is the whole story, which is the
+            // container-or-absent shape a Map lookup returns
+            // (`Map<string, Set<T>>.get(k)`). Beside any data sibling they
+            // stay out. REGEX arms map anywhere: `x instanceof RegExp` is
+            // their narrowing test (the skip-utility `string | RegExp`
+            // shape), and the arm rides the ref machinery like array regex
+            // elements.
+            ((a.kind === "map" || a.kind === "set") &&
+              !arms.every((c) => c === a || isUnitType(c))) ||
+            a.kind === "dyn" ||
             // Generator arms follow the map/set rule: no narrowing test.
             a.kind === "generator" ||
             // Func arms map beside ANY sibling: `typeof x === "function"`
@@ -3655,12 +3662,16 @@ function armHasUnionHome(arm: IrType, siblingCount: number): boolean {
   switch (arm.kind) {
     case "void":
     case "union":
-    case "map":
-    case "set":
     case "regex":
     case "generator":
     case "dyn":
       return false;
+    // Map/Set arms: only beside units (the container-or-absent shape a Map
+    // lookup returns). Against a data sibling there is no narrowing test —
+    // see mapTypeInner's union rule.
+    case "map":
+    case "set":
+      return siblingCount === 0;
     // Promise arms map beside unit siblings (the promise-or-absent shape)
     // and beside exactly ONE data sibling that IS their payload (the
     // settle-or-value contract `T | Promise<T>`, whose only consumer is

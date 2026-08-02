@@ -462,6 +462,16 @@ export function isSupportedMapValue(t: IrType): boolean {
     // references, so there is nothing to trace and no cycle to reach.
     case "bytes":
       return true;
+    // A nested CONTAINER (Map<string, Set<T>> — a per-key membership
+    // table; Map<string, Map<K, V>> likewise). The overflow store of an
+    // index-signature record has carried exactly these since it existed
+    // (isSupportedIndexValue below), through the same scr_map adapters and
+    // the same trace fixpoint that propagates the inner container's own
+    // cycle capability — so a user Map holding one is the identical
+    // storage under a different spelling.
+    case "map":
+    case "set":
+      return true;
     default:
       return false;
   }
@@ -505,7 +515,7 @@ export function funcOf(params: IrType[], ret: IrType): IrType {
  * against data arms). */
 export function unionFuncSetArmsOk(arms: IrType[]): boolean {
   return arms.every(
-    (a, i) => a.kind !== "set" || arms.every((b, j) => j === i || isUnitType(b)),
+    (a, i) => (a.kind !== "set" && a.kind !== "map") || arms.every((b, j) => j === i || isUnitType(b)),
   );
 }
 
