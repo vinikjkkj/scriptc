@@ -15,6 +15,7 @@ import { pureReemittable } from "./lower-exprs.js";
 import { lowerSearchParamsNew } from "./lower-builtins.js";
 import { requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { STREAM_API_MEMBERS, STREAM_PROP_MEMBERS, UNDERSCORE_METHODS, lowerStreamNew, lowerStreamSuperCall, streamCtorShape } from "./lower-stream.js";
+import { superDelegationReason } from "./lower-emitter.js";
 import { emitOverrideShapeReason, emitSpecSuperForward, emitterRooted, lowerEmitterSuperCall, type EmitOverrideRec } from "./lower-emitter.js";
 import { declSymbolOf } from "./lower-modules.js";
 import { uniqueSymbolKeyOf } from "./lower-exprs.js";
@@ -1351,6 +1352,26 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
               memberName,
               `overriding EventEmitter's 'emit' outside the forwarding shape (${reason ?? "its parameters do not resolve statically"}; the compiled form is \`emit(event: string, ...args: unknown[]): boolean\`)`,
             );
+          }
+          // A TYPE-ONLY override: the class re-declares an inherited
+          // member purely to narrow its TypeScript signature, and the
+          // body forwards verbatim to super. Nothing happens at runtime,
+          // so the declaration is ERASED and the member goes on
+          // dispatching into the runtime surface that owns it.
+          //
+          // Overload SIGNATURES (no body) are erased with it: they
+          // declare nothing at runtime either, and whether they are
+          // erasable is decided entirely by the implementation they
+          // belong to — which is the declaration that would run.
+          if (ts.isMethodDeclaration(member)) {
+            const impl = member.body
+              ? member
+              : decl.members.find(
+                  (m): m is ts.MethodDeclaration =>
+                    ts.isMethodDeclaration(m) && m.body !== undefined &&
+                    m.name !== undefined && ts.isIdentifier(m.name) && m.name.text === memberName.text,
+                );
+            if (impl && superDelegationReason(impl, memberName.text) === null) continue;
           }
           L.unsupported(
             "SC1090",
