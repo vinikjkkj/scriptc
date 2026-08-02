@@ -2432,6 +2432,21 @@ function lowerOptionalDefaultArg(
     if (args.length === 1 && !ts.isObjectLiteralExpression(args[0]!)) {
       const src = L.lowerExpr(args[0]!);
       if (src.type.kind === "string") return strCharsCall(L, src, loc);
+      // `Array.from(a)` on an ARRAY is the shallow copy `a.slice()` — and
+      // the drained Map/Set iterators land here too, since their immediate
+      // drain already built a fresh array (lowerMapIterDrainCall counts
+      // this call as one of its immediate-drain contexts).
+      if (src.type.kind === "array") {
+        return { kind: "arrIntrinsic", method: "slice", receiver: src, args: [], type: src.type, loc };
+      }
+      // `Array.from(s)` on a SET is its insertion-order drain, the same
+      // snapshot `[...s]` takes.
+      if (src.type.kind === "set") {
+        return {
+          kind: "setIntrinsic", method: "toArray", receiver: src, args: [],
+          type: arrayOf(src.type.elem), loc,
+        };
+      }
       L.noLowering(
         "Array.from with this argument shape",
         call,
@@ -2723,7 +2738,19 @@ const MAP_ITER_METHODS = new Set(["keys", "values", "entries"]);
       call.parent.parent.expression === call.parent &&
       ts.isPropertyAccessExpression(call.parent.parent.parent) &&
       call.parent.parent.parent.name.text === "value";
-    if (!inArraySpread && !inFirstStep) {
+    // `Array.from(m.values())` is the same immediate drain in another
+    // spelling: the iterator is made and consumed in one expression with no
+    // user code between. ONE argument only — `Array.from(it, f)` runs `f`
+    // per element DURING the drain, which can mutate the map and shift the
+    // very indices the snapshot walks.
+    const inArrayFrom =
+      ts.isCallExpression(call.parent) &&
+      call.parent.arguments.length === 1 &&
+      call.parent.arguments[0] === call &&
+      ts.isPropertyAccessExpression(call.parent.expression) &&
+      call.parent.expression.name.text === "from" &&
+      L.isStdlibGlobal(call.parent.expression.expression, "Array");
+    if (!inArraySpread && !inFirstStep && !inArrayFrom) {
       L.noLowering(
         `.${method}() outside an immediate array spread`,
         call,
