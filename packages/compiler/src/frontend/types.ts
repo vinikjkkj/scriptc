@@ -263,7 +263,7 @@ export function formatIrType(t: IrType, shapes: ShapeRegistry, unions: UnionRegi
     case "bytes":
       // The u8 kind reads as Uint8Array (Buffer maps here too — one
       // runtime representation; the message stays honest either way).
-      return t.elem === "u8" ? "Uint8Array" : t.elem === "u32" ? "Uint32Array" : t.elem === "i32" ? "Int32Array" : "Float32Array";
+      return t.elem === "u8" ? "Uint8Array" : t.elem === "u32" ? "Uint32Array" : t.elem === "i32" ? "Int32Array" : t.elem === "buf" ? "ArrayBuffer" : "Float32Array";
     case "map":
       return `Map<${formatIrType(t.key, shapes, unions, seen)}, ${formatIrType(t.value, shapes, unions, seen)}>`;
     case "set":
@@ -1585,6 +1585,15 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   ) {
     return STRING;
   }
+  // ArrayBuffer: the OPAQUE bytes flavor. It rides the same ScrBytes
+  // representation as the typed arrays -- which is what makes the VIEW
+  // relationship work for free: `new Uint8Array(buf)` is the ordinary
+  // backing alias DataView/subarray/Buffer.slice already use (chain depth
+  // 1), and `.buffer` hands back the owner. It is a DISTINCT IR type from
+  // bytes<u8> so that `x instanceof Uint8Array` can still discriminate an
+  // `ArrayBuffer | Uint8Array` arm -- the test that rules out mapping the
+  // two to one type. Members lower per-member like any stdlib surface.
+  if (isStdlibInterface("ArrayBuffer")) return bytesOf("buf");
   if (isStdlibInterface("Uint8Array")) return bytesOf("u8");
   if (isStdlibInterface("Uint32Array")) return bytesOf("u32");
   // Int32Array: the signed 32-bit kind (element reads sign-extend, writes
