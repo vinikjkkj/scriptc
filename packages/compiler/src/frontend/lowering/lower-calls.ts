@@ -1082,7 +1082,12 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
       ? implicitCallInstance(L, expr, info)
       : genericCallInstance(L, expr, info);
     const args = L.completeArgs(expr.arguments, instance.params, loc, expr);
-    return { kind: "call", callee: instance.name, args, type: instance.returnType, loc };
+    // The instance carries the IMPLEMENTATION's return type when the call
+    // selected an overload signature; reconcileOverloadReturn bridges it
+    // back to what tsc told every downstream site (and is inert otherwise).
+    return reconcileOverloadReturn(L, expr, {
+      kind: "call", callee: instance.name, args, type: instance.returnType, loc,
+    });
   }
 
 /** The instance a CALL of a generic function-like names: resolved
@@ -1091,21 +1096,78 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
    * prepends the receiver), and object-literal generic-method calls. */
   export function genericCallInstance(L: Lowerer, expr: ts.CallExpression, info: GenericFnInfo): GenericInstance {
     const rsig = L.checker.getResolvedSignature(expr);
-    // A GENERIC function with overload signatures: the call resolved to a
-    // signature that is not the implementation's, so the per-instantiation
-    // body lowering would type the body against parameter/return types it
-    // was never checked under. Named fence until generic overloads get an
-    // honest story (monomorphize per implementation signature with the
-    // reconcile bridge, like the non-generic path).
-    {
-      const rdecl = rsig ? L.checker.signatureDeclaration(rsig) : undefined;
-      if (rdecl && (ts.isFunctionDeclaration(rdecl) || ts.isMethodDeclaration(rdecl)) && !rdecl.body) {
-        L.unsupported("SC1090", expr, `calls selecting an overload signature of a generic ${ts.isMethodDeclaration(rdecl) ? "method" : "function"} (only the implementation signature monomorphizes)`);
+    // A GENERIC function with overload signatures: tsc resolved the call
+    // against a signature that is NOT the implementation's, so the resolved
+    // param/return types describe a body nothing ever checked under them
+    // (and need not even be arity- or optionality-parallel to it). The
+    // instance therefore takes the IMPLEMENTATION's own signature — the one
+    // tsc did check — with every type parameter bound to its CONSTRAINT:
+    // one instance for the one compiled body, widened only as far as the
+    // body already tolerates (it type-checks for EVERY type satisfying the
+    // constraint, so the constraint itself is always among them). Arguments
+    // coerce into those params here and the RETURN reconciles back to the
+    // resolved overload's type at the call site — the same bridge the
+    // non-generic overload path rides.
+    const rdecl = rsig ? L.checker.signatureDeclaration(rsig) : undefined;
+    const viaOverload =
+      rdecl !== undefined &&
+      (ts.isFunctionDeclaration(rdecl) || ts.isMethodDeclaration(rdecl)) &&
+      !rdecl.body;
+    let overloadBindings: Map<ts.Symbol, IrType> | null = null;
+    let sig = rsig;
+    if (viaOverload) {
+      overloadBindings = constraintTypeParamBindings(L, info);
+      const implSig = overloadBindings ? L.checker.getSignatureFromDeclaration(info.decl) : undefined;
+      // A type parameter with no constraint (or one that does not map) has
+      // no widest honest binding to compile the single body under.
+      if (!overloadBindings || !implSig) {
+        L.unsupported("SC1090", expr, `calls selecting an overload signature of a generic ${ts.isMethodDeclaration(rdecl) ? "method" : "function"} whose type parameters have no mappable constraint`);
       }
+      sig = implSig;
     }
-    if (!rsig || rsig.getParameters().length !== info.decl.parameters.length) {
+    if (!sig || sig.getParameters().length !== info.decl.parameters.length) {
       L.unsupported("SC1090", expr, "this call form");
     }
+    // The implementation's parameter types MENTION the type parameters, so
+    // the constraint bindings must already be live while they map.
+    const savedBindings = L.typeParamBindings;
+    if (overloadBindings) L.typeParamBindings = overloadBindings;
+    try {
+      return genericCallInstanceWith(L, expr, info, sig, overloadBindings);
+    } finally {
+      L.typeParamBindings = savedBindings;
+    }
+  }
+
+/** Every type parameter bound to its declared CONSTRAINT (its default when
+   * it has no constraint), mapped. Null when any parameter has neither, or
+   * the type does not map: there is then no single widest instantiation to
+   * compile the shared body under, and the caller fences. */
+  function constraintTypeParamBindings(L: Lowerer, info: GenericFnInfo): Map<ts.Symbol, IrType> | null {
+    const bindings = new Map<ts.Symbol, IrType>();
+    const decls = info.decl.typeParameters;
+    if (!decls) return bindings;
+    for (const [i, tpDecl] of decls.entries()) {
+      const sym = info.typeParams[i];
+      const src = tpDecl.constraint ?? tpDecl.defaultType;
+      if (!sym || !src) return null;
+      const mapped = L.mapTypeOf(L.checker.getTypeFromTypeNode(src));
+      if (!mapped || mapped.kind === "void") return null;
+      bindings.set(sym, mapped);
+    }
+    return bindings;
+  }
+
+/** The body of genericCallInstance once the ABI signature is settled:
+   * `sig` is the resolved signature for an ordinary generic call and the
+   * IMPLEMENTATION's for an overload-selected one, and `overloadBindings`
+   * is non-null only in the latter case (where it also IS the instance's
+   * bindings — nothing is left to infer). */
+  function genericCallInstanceWith(L: Lowerer, expr: ts.CallExpression,
+    info: GenericFnInfo,
+    sig: ts.Signature,
+    overloadBindings: Map<ts.Symbol, IrType> | null,): GenericInstance {
+    const rsig = sig;
     // Per-param shapes from the RESOLVED signature (types substituted) plus
     // the declaration's modes: rest stays the resolved array, a default's
     // ABI union is synthesized over the resolved body type — exactly the
@@ -1151,6 +1213,11 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
     // different fields). Non-literal bindings (a key union, plain string)
     // share one runtime-keyed instance per IR signature, exactly the
     // widened discipline.
+    // Overload-selected: the bindings ARE the constraints, already used to
+    // map the params above. Nothing to infer, and no literal to key on.
+    if (overloadBindings) {
+      return internGenericInstance(L, expr, info, params, returnType, () => overloadBindings);
+    }
     const keyofTps = keyofConstrainedTypeParams(info);
     if (keyofTps.size > 0) {
       const tsBindings = new Map<ts.Symbol, ts.Type>();
