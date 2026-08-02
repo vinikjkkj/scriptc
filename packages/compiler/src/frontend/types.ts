@@ -644,11 +644,77 @@ let mapTypeDepth = 0;
  * stay fenced instead of interning a per-context-wrong shape). */
 let contextResolutions = 0;
 
+/** Context sensitivity the MEMO must see but the recursive-shape fencing must
+ * not. Two answers depend on the current instantiation without contextResolutions
+ * moving, and both were measured leaking wrong cache hits (a generic class
+ * instantiated at two record types compiled its second instantiation against the
+ * first one's fields):
+ *
+ *   - a type PARAMETER whose binding is absent. The bump below lives inside
+ *     `if (bound)`, so "no binding yet" — collection running before the
+ *     instantiation exists — records `null` as if it were context-free, and the
+ *     later bound answer never displaces it.
+ *   - a generic class's INSTANCE type, which genericClassInstance resolves to
+ *     whichever instantiation is current (monomorphization by flow).
+ *
+ * Kept apart from contextResolutions on purpose: that counter also drives the
+ * recursive-shape fence, where an extra bump means an extra FENCE — a new
+ * blocker, not a slower cache. This one only ever costs a cache miss. */
+let memoSensitivity = 0;
+
+/** Context-FREE mapping results, keyed by checker-type identity.
+ *
+ * The checker is a separate process: every property read, signature query and
+ * declaration walk mapType performs is a round trip. The same ts.Type is mapped
+ * again at every site that mentions it, so a large dependency turns into
+ * millions of redundant crossings — measured at ~29 CPU-minutes across the two
+ * processes for one entry file, with neither side saturated (each waiting on
+ * the other).
+ *
+ * Only context-FREE results are cached, and a frame qualifies only when BOTH
+ * sensitivity counters stand still across it: contextResolutions (already
+ * tracked for the recursive-shape fence) plus memoSensitivity (the two answers
+ * above it, which move with the instantiation without moving that fence).
+ * A frame neither counter moved for produced an answer depending on nothing but
+ * the type, which is exactly the condition for reusing it. The registries are
+ * per-run, so the cache is too.
+ *
+ * SCRIPTC_MEMO_AUDIT recomputes on every hit and reports answers that differ —
+ * the check that found both leaks. It compares the mapped ANSWER, not the
+ * type's rendering: a type parameter renders identically under every
+ * instantiation, so a typeToString probe is blind to precisely this bug.
+ * SCRIPTC_NO_MEMO bypasses the cache entirely, for A/B against it. */
+const mapTypeMemo = new WeakMap<ts.Type, { ctx: TypeMapperCtx; result: IrType | null }>();
+
 export function mapType(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (mapTypeDepth >= MAP_TYPE_MAX_DEPTH) return null;
+  const hit = process.env.SCRIPTC_NO_MEMO ? undefined : mapTypeMemo.get(type);
+  // Same run, same registries: a cached answer belongs to this ctx only.
+  if (hit !== undefined && hit.ctx === ctx) {
+    if (process.env.SCRIPTC_MEMO_AUDIT) {
+      // Recompute and compare the ANSWER, not the type's rendering: a type
+      // parameter renders the same under every instantiation, so comparing
+      // typeToString cannot see the unsoundness we are hunting.
+      mapTypeDepth++;
+      let fresh: IrType | null = null;
+      try { fresh = mapTypeInner(type, ctx); } finally { mapTypeDepth--; }
+      const a = hit.result ? typeKey(hit.result) : "<null>";
+      const b = fresh ? typeKey(fresh) : "<null>";
+      if (a !== b) {
+        console.error(`MEMOBAD ${ctx.checker.typeToString(type)} cached=${a.slice(0, 70)} fresh=${b.slice(0, 70)}`);
+      }
+    }
+    return hit.result;
+  }
   mapTypeDepth++;
+  const sensitivityAtEntry = contextResolutions;
+  const memoSensitivityAtEntry = memoSensitivity;
   try {
-    return mapTypeInner(type, ctx);
+    const result = mapTypeInner(type, ctx);
+    if (contextResolutions === sensitivityAtEntry && memoSensitivity === memoSensitivityAtEntry) {
+      mapTypeMemo.set(type, { ctx, result });
+    }
+    return result;
   } finally {
     mapTypeDepth--;
   }
@@ -672,6 +738,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   const { checker, unions, classNamer, resolveTypeParam } = ctx;
   if (resolveTypeParam && type.flags & ts.TypeFlags.TypeParameter) {
     const bound = resolveTypeParam(type);
+    // Consulting the bindings is itself context-dependent, bound or not.
+    memoSensitivity++;
     if (bound) {
       contextResolutions++;
       return bound;
@@ -1125,6 +1193,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // INSTANTIATION's class (`Box%0`), registered on demand — the Lowerer
     // hook owns the instance table (monomorphization by flow).
     if (classDecl.typeParameters) {
+      memoSensitivity++;
       return ctx.genericClassInstance ? ctx.genericClassInstance(classDecl, widened) : null;
     }
     return { kind: "object", className: classNamer(classDecl) };
