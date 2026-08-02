@@ -244,7 +244,14 @@ ScrBytes *scr_key_raw(const ScrKeyObject *key) {
 
 /* generateKeyPair's two halves come from one draw: the caller asks for the
  * private side first and the public side second, both off the same fresh
- * scalar, so the pair must be generated ONCE and cached. */
+ * scalar, so the pair is generated ONCE and cached.
+ *
+ * The invariant this rests on: the two calls are the two FIELDS of a single
+ * record literal, emitted back to back with no suspension point between them
+ * (an await can only appear at a statement boundary, and neither call awaits).
+ * Nothing else can draw a pair in between, so the public half always belongs
+ * to the private half beside it. A lowering that ever split them across a
+ * possible suspension would have to thread the private key through instead. */
 static int scr_key_gen_curve = -1;
 static unsigned char scr_key_gen_priv[32];
 static unsigned char scr_key_gen_pub[32];
