@@ -2436,7 +2436,10 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         if (!armed) return null;
         pt = armed;
       }
-      if (!pt) return null;
+      if (!pt) {
+        mapTrace(`FNPARAM ${checker.typeToString(type).slice(0, 46)} . ${p.name} : ${checker.typeToString(checker.getTypeOfSymbol(p)).slice(0, 60)}`);
+        return null;
+      }
       // `(value: void) => void` (Promise<void>'s resolve) is callable with
       // no arguments — a void param is dropped, not a mapping failure.
       if (pt.kind === "void") continue;
@@ -2447,7 +2450,10 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // `() => void` and its calls never produce a value — map the return
     // like declaredReturnType does for declarations.
     const ret = retT.flags & ts.TypeFlags.Never ? VOID : mapType(retT, ctx);
-    if (!ret) return null;
+    if (!ret) {
+      mapTrace(`FNRET ${checker.typeToString(type).slice(0, 46)} -> ${checker.typeToString(retT).slice(0, 60)}`);
+      return null;
+    }
     return funcOf(params, ret);
   }
   // Records: object types whose members are all data properties (shorthand
@@ -3206,6 +3212,84 @@ function mapRecordType(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
   }
 }
 
+/** Why a composite REFUSED, one line per level, under SCRIPTC_MAP_TRACE.
+ *
+ * A diagnostic names the outermost type that failed and the member it blames,
+ * and stops there — the member's own reason is another mapType frame, and the
+ * chain behind a real dependency runs deep (a client option to a store to a
+ * sub-store to one method's callback return). Tracing it by hand cost whole
+ * rounds; the trace prints the whole chain from one build, and reading it
+ * bottom-up lands on the LEAF, which is the only level worth fixing.
+ *
+ * Diagnostics stay silent about it: this is a compiler-development facility,
+ * not something to widen a user-facing message with. */
+function mapTrace(message: string): void {
+  if (process.env.SCRIPTC_MAP_TRACE) console.error(`MAPFAIL ${message}`);
+}
+
+/** A mapped-type alias the checker kept SYMBOLIC because a type parameter
+ * inside it is still abstract: `Record<B, V>` under an open `B` publishes no
+ * index signature and no properties, so the ordinary record walk sees an
+ * empty object and refuses. Inside a monomorphized body the binding says
+ * what B is, but substitution lives in the checker and its API exposes no
+ * way to perform it (getBaseConstraintOfType widens a bare parameter, not a
+ * reference CARRYING one) — so the shape is read off the ALIAS instead.
+ *
+ * Only two aliases, both stdlib, both erasure at the IR level:
+ *   - `Readonly<T>` — readonly-ness has no IR, so this is T.
+ *   - `Record<K, V>` with K bound to string or number — exactly the
+ *     index-signature domain the hybrid shape already compiles.
+ * Anything else answers undefined and takes the ordinary path.
+ *
+ * Gated on the object being symbolic (no properties, no index infos, no
+ * signatures): a RESOLVED `Record<"a", V>` still walks its real members, so
+ * this never displaces an answer the checker was able to give. */
+function mapSymbolicMappedAlias(
+  widened: ts.Type,
+  ctx: TypeMapperCtx,
+): IrType | null | undefined {
+  const { checker } = ctx;
+  if (!ctx.resolveTypeParam) return undefined;
+  const alias = widened.getAliasSymbol();
+  if (!alias) return undefined;
+  const aliasDecls = checker.declarationsOf(alias);
+  if (aliasDecls.length === 0 || !aliasDecls.every((d) => ctx.isStdlibFile(d.getSourceFile()))) {
+    return undefined;
+  }
+  if (
+    checker.getPropertiesOfType(widened).length > 0 ||
+    checker.getIndexInfosOfType(widened).length > 0 ||
+    checker.getCallSignatures(widened).length > 0 ||
+    checker.getConstructSignatures(widened).length > 0
+  ) {
+    return undefined;
+  }
+  const args = widened.getAliasTypeArguments();
+  if (alias.name === "Readonly" && args.length === 1 && args[0]) {
+    return mapType(args[0], ctx);
+  }
+  if (alias.name !== "Record" || args.length !== 2) return undefined;
+  const [keyT, valueT] = args;
+  if (!keyT || !valueT || (keyT.flags & ts.TypeFlags.TypeParameter) === 0) return undefined;
+  // The binding must be the BROAD domain, read at the checker level. An IR
+  // binding is not enough: mapType widens a literal to string, but a
+  // literal-bound instantiation is one the checker resolves on its own —
+  // `Record<"sqlite", V>` is a record with a `sqlite` FIELD, and the caller's
+  // ABI carries exactly that. Answering an index shape there would hand the
+  // body a receiver shaped unlike its own slot.
+  const keyTs = ctx.resolveTypeParamTs?.(keyT);
+  if (!keyTs || (keyTs.flags & (ts.TypeFlags.String | ts.TypeFlags.Number)) === 0) return undefined;
+  const keyIr = ctx.resolveTypeParam(keyT);
+  if (!keyIr || (keyIr.kind !== "string" && keyIr.kind !== "f64")) return undefined;
+  const indexValue = mapType(valueT, ctx);
+  if (indexValue?.kind === "jsval") return JSVAL;
+  if (!indexValue || !isSupportedIndexValue(indexValue)) {
+    mapTrace(`INDEXVALUE ${checker.typeToString(valueT).slice(0, 60)}`);
+    return null;
+  }
+  return { kind: "record", shapeId: ctx.shapes.intern([], false, indexValue) };
+}
+
 function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | RecordShapeParts | null {
   const { checker, shapes } = ctx;
   if (checker.getConstructSignatures(widened).length > 0) return null;
@@ -3218,6 +3302,10 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
   // names the construct.
   const widenedSym = widened.getSymbol();
   if (widenedSym !== undefined && (widenedSym.flags & ts.SymbolFlags.Enum) !== 0) return null;
+  {
+    const viaSymbolicAlias = mapSymbolicMappedAlias(widened, ctx);
+    if (viaSymbolicAlias !== undefined) return viaSymbolicAlias;
+  }
   // An index signature maps to a hybrid shape: declared fields keep
   // struct slots, undeclared keys ride the shape's overflow map, valued
   // uniformly by the signature's value type (`unknown` → dyn — a model-pricing table's
@@ -3453,7 +3541,10 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // overflow entry — same RC adapters, same dynFrom conversion on the
       // way in, same checked casts on the way out. (JSON.stringify of a
       // dyn-field-bearing shape keeps its fence: jsonSafe stays false.)
-      if (!pt || pt.kind === "void") return null;
+      if (!pt || pt.kind === "void") {
+        mapTrace(`MEMBER ${checker.typeToString(widened).slice(0, 46)} . ${p.name} : ${checker.typeToString(fieldTs).slice(0, 60)}`);
+        return null;
+      }
       // A DATA property spelled like a reserved accessor slot (`{ "%get:x":
       // v }` — a string-literal key): mapping it would collide with the
       // accessor dispatch, so the shape stays unmapped.

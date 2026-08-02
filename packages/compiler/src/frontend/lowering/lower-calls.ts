@@ -1115,8 +1115,9 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
       !rdecl.body;
     let overloadBindings: Map<ts.Symbol, IrType> | null = null;
     let sig = rsig;
+    const overloadTsBindings = new Map<ts.Symbol, ts.Type>();
     if (viaOverload) {
-      overloadBindings = constraintTypeParamBindings(L, info);
+      overloadBindings = constraintTypeParamBindings(L, info, overloadTsBindings);
       const implSig = overloadBindings ? L.checker.getSignatureFromDeclaration(info.decl) : undefined;
       // A type parameter with no constraint (or one that does not map) has
       // no widest honest binding to compile the single body under.
@@ -1131,11 +1132,16 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
     // The implementation's parameter types MENTION the type parameters, so
     // the constraint bindings must already be live while they map.
     const savedBindings = L.typeParamBindings;
-    if (overloadBindings) L.typeParamBindings = overloadBindings;
+    const savedTsBindings = L.typeParamTsBindings;
+    if (overloadBindings) {
+      L.typeParamBindings = overloadBindings;
+      L.typeParamTsBindings = overloadTsBindings;
+    }
     try {
-      return genericCallInstanceWith(L, expr, info, sig, overloadBindings);
+      return genericCallInstanceWith(L, expr, info, sig, overloadBindings, overloadTsBindings);
     } finally {
       L.typeParamBindings = savedBindings;
+      L.typeParamTsBindings = savedTsBindings;
     }
   }
 
@@ -1143,7 +1149,8 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
    * it has no constraint), mapped. Null when any parameter has neither, or
    * the type does not map: there is then no single widest instantiation to
    * compile the shared body under, and the caller fences. */
-  function constraintTypeParamBindings(L: Lowerer, info: GenericFnInfo): Map<ts.Symbol, IrType> | null {
+  function constraintTypeParamBindings(L: Lowerer, info: GenericFnInfo,
+    tsBindings?: Map<ts.Symbol, ts.Type>,): Map<ts.Symbol, IrType> | null {
     const bindings = new Map<ts.Symbol, IrType>();
     const decls = info.decl.typeParameters;
     if (!decls) return bindings;
@@ -1151,9 +1158,14 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
       const sym = info.typeParams[i];
       const src = tpDecl.constraint ?? tpDecl.defaultType;
       if (!sym || !src) return null;
-      const mapped = L.mapTypeOf(L.checker.getTypeFromTypeNode(src));
+      const srcT = L.checker.getTypeFromTypeNode(src);
+      const mapped = L.mapTypeOf(srcT);
       if (!mapped || mapped.kind === "void") return null;
       bindings.set(sym, mapped);
+      // The checker-level twin matters on its own: a mapped type carrying
+      // the parameter (`Record<B, V>`) reads the BROAD domain off this to
+      // tell a widened instantiation from a literal-keyed one.
+      tsBindings?.set(sym, srcT);
     }
     return bindings;
   }
@@ -1166,7 +1178,8 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
   function genericCallInstanceWith(L: Lowerer, expr: ts.CallExpression,
     info: GenericFnInfo,
     sig: ts.Signature,
-    overloadBindings: Map<ts.Symbol, IrType> | null,): GenericInstance {
+    overloadBindings: Map<ts.Symbol, IrType> | null,
+    overloadTsBindings: Map<ts.Symbol, ts.Type>,): GenericInstance {
     const rsig = sig;
     // Per-param shapes from the RESOLVED signature (types substituted) plus
     // the declaration's modes: rest stays the resolved array, a default's
@@ -1216,7 +1229,9 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
     // Overload-selected: the bindings ARE the constraints, already used to
     // map the params above. Nothing to infer, and no literal to key on.
     if (overloadBindings) {
-      return internGenericInstance(L, expr, info, params, returnType, () => overloadBindings);
+      return internGenericInstance(L, expr, info, params, returnType, () => overloadBindings, {
+        tsBindings: overloadTsBindings,
+      });
     }
     const keyofTps = keyofConstrainedTypeParams(info);
     if (keyofTps.size > 0) {
