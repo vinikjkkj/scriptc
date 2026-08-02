@@ -546,6 +546,12 @@ export interface TypeMapperCtx {
    * would ICE the validator. Such instance types stay unmapped (null):
    * callers fence them like any other unsupported type. */
   isProgramFile: (sf: ts.SourceFile) => boolean;
+  /** True when a DECLARATION file's values come from a module this build
+   * COMPILED — the `.js` beside it is in the lowered set. Resolution hands a
+   * compiler the `.d.ts` (the type surface) and leaves the body behind; when
+   * the body was picked up too, the declaration is a trustworthy face for
+   * values that DO exist in the binary. */
+  declFileHasCompiledImpl?: (sf: ts.SourceFile) => boolean;
 }
 
 
@@ -849,7 +855,12 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     npmDecls.length > 0 &&
     npmDecls.every((d) => {
       const sf = d.getSourceFile();
-      return sf.isDeclarationFile && !ctx.isStdlibFile(sf);
+      return (
+        sf.isDeclarationFile &&
+        !ctx.isStdlibFile(sf) &&
+        // ... unless its implementation twin was compiled into this build.
+        !(ctx.declFileHasCompiledImpl?.(sf) ?? false)
+      );
     })
   ) {
     return ctx.dynamic ? JSVAL : null;
