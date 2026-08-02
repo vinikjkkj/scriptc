@@ -1583,6 +1583,52 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   }
   // child_process.ChildProcess: @types/node's class or the fallback
   // declarations' interface. Provenance-checked like Stats.
+  // generateKeyPair(Sync)'s result pair — two KeyObjects, nothing else.
+  if (
+    psym?.name === "KeyPairKeyObjectResult" &&
+    checker.declarationsOf(psym).some(
+      (d) => ts.isInterfaceDeclaration(d) && ctx.isStdlibFile(d.getSourceFile()),
+    )
+  ) {
+    return {
+      kind: "record",
+      shapeId: ctx.shapes.intern([
+        { name: "privateKey", type: { kind: "keyobj" } },
+        { name: "publicKey", type: { kind: "keyobj" } },
+      ]),
+    };
+  }
+
+  // The JWK of an X25519/Ed25519 key. @types/node spells JsonWebKey as
+  // every JWK member across every algorithm plus a string index signature;
+  // for these two curves Node fills exactly kty, crv, x, and (private only)
+  // d. Mapping to that fixed shape lets the export compile; a read of any
+  // OTHER member — an RSA n/e, an EC y — fences at the read instead of
+  // answering undefined, which is the honest failure for a key that could
+  // never carry one.
+  if (
+    psym?.name === "JsonWebKey" &&
+    checker.declarationsOf(psym).some(
+      (d) => ts.isInterfaceDeclaration(d) && ctx.isStdlibFile(d.getSourceFile()),
+    )
+  ) {
+    const optStr = withUndefinedArm(STRING, ctx.unions);
+    if (!optStr) return null;
+    return {
+      kind: "record",
+      // Every member keeps the undefined arm @types/node declares: only `d`
+      // is genuinely absent for a public key, but a shape that promised
+      // `string` where the checker says `string | undefined` would disagree
+      // with tsc at every read.
+      shapeId: ctx.shapes.intern([
+        { name: "crv", type: optStr },
+        { name: "d", type: optStr },
+        { name: "kty", type: optStr },
+        { name: "x", type: optStr },
+      ]),
+    };
+  }
+
   // node:crypto KeyObject — the opaque handle createPrivateKey/
   // createPublicKey/generateKeyPair produce and diffieHellman/sign/verify
   // consume. Only X25519 and Ed25519 keys can live in one here; the runtime

@@ -619,6 +619,58 @@ export interface GenericInstance {
     return out;
   }
 
+  /** `keyObject.export({ format: "jwk" })`. Any other option shape (der,
+   * pem, a type/cipher/passphrase) keeps the stdlib fence: those need PEM
+   * framing and key encryption, neither of which this runtime has. */
+  function lowerKeyObjectJwkExport(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,): IrExpr | null {
+    const recv = L.lowerExpr(access.expression);
+    if (recv.type.kind !== "keyobj") return null;
+    const opt = call.arguments[0];
+    if (!opt || !ts.isObjectLiteralExpression(opt) || opt.properties.length !== 1) return null;
+    const only = opt.properties[0];
+    if (
+      !only || !ts.isPropertyAssignment(only) || !ts.isIdentifier(only.name) ||
+      only.name.text !== "format" || !ts.isStringLiteral(only.initializer) ||
+      only.initializer.text !== "jwk"
+    ) {
+      return null;
+    }
+    const loc = locOf(call);
+    const mapped = L.mapTypeOf(L.typeOf(call));
+    if (mapped?.kind !== "record") return null;
+    const shape = L.shapes.get(mapped.shapeId);
+    const dField = shape?.fields.find((f) => f.name === "d");
+    if (!dField) return null;
+    const dStr: IrExpr = { kind: "libCall", fn: "key.jwkD", args: [recv], type: STRING, loc };
+    const absent = L.wrappedUndefined(dField.type, loc);
+    if (!absent) return null;
+    const dWrapped = L.coerceInto(call, dStr, dField.type);
+    const d: IrExpr = {
+      kind: "ternary",
+      cond: { kind: "libCall", fn: "key.isPriv", args: [recv], type: BOOL, loc },
+      then: dWrapped,
+      else_: absent,
+      type: dField.type,
+      loc,
+    };
+    const armed = (name: string, v: IrExpr): { name: string; value: IrExpr } => {
+      const f = shape?.fields.find((x) => x.name === name);
+      return { name, value: f ? L.coerceInto(call, v, f.type) : v };
+    };
+    return {
+      kind: "recordLit",
+      fields: [
+        armed("crv", { kind: "libCall", fn: "key.crv", args: [recv], type: STRING, loc }),
+        { name: "d", value: d },
+        armed("kty", { kind: "strLit", value: "OKP", type: STRING, loc }),
+        armed("x", { kind: "libCall", fn: "key.jwkX", args: [recv], type: STRING, loc }),
+      ],
+      type: mapped,
+      loc,
+    };
+  }
+
   export function requireExactArityValue(L: Lowerer, blame: ts.Node,
     contextual: ts.Expression | null,
     shapes: readonly ParamShape[],
@@ -4104,6 +4156,19 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       // catchable ReferenceError at the ROOT read before the member, the
       // arguments, or the call — the whole call lowers to that throw,
       // typed by the use site (or its context; never observed).
+      // `key.export({ format: "jwk" })` — the only KeyObject export form
+      // lowered. Node fills exactly kty/crv/x for these curves, plus d on a
+      // private key; the mapped JsonWebKey shape (types.ts) is that set, and
+      // `d` carries the undefined arm because whether the key is private is
+      // a RUNTIME fact.
+      if (
+        ts.isPropertyAccessExpression(expr.expression) &&
+        expr.expression.name.text === "export" &&
+        expr.arguments.length === 1
+      ) {
+        const jwk = lowerKeyObjectJwkExport(L, expr, expr.expression);
+        if (jwk) return jwk;
+      }
       {
         const ambientRoot = ambientUndefVarRootOf(L, expr.expression);
         if (ambientRoot !== null) {

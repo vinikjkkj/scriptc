@@ -3768,6 +3768,18 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * that probes the list and then constructs a cipher fences at the
    * construction site, never here. Null for other members (the dispatch
    * keeps trying). */
+/** The curve a generateKeyPair call names, as the runtime's SCR_CURVE_*
+   * number. Only the two Edwards/Montgomery curves this runtime implements
+   * are lowered; RSA and the NIST curves keep their fence. */
+  function asymCurveOf(L: Lowerer, expr: ts.CallExpression): number | null {
+    const first = expr.arguments[0];
+    if (!first || !ts.isStringLiteral(first)) return null;
+    if (first.text === "x25519") return 0;
+    if (first.text === "ed25519") return 1;
+    void L;
+    return null;
+  }
+
   export function lowerCryptoModuleCall(L: Lowerer, expr: ts.CallExpression,
     bi: { module: string; member: string },
     loc: SrcLoc,): IrExpr | null {
@@ -3806,6 +3818,46 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         fn: isPriv ? "key.fromPkcs8" : "key.fromSpki",
         args: [der],
         type: KEYOBJ,
+        loc,
+      };
+    }
+    // generateKeyPairSync(curve) — the { publicKey, privateKey } pair. Both
+    // halves come off ONE draw: key.gen with want_private true generates and
+    // caches, false reads the public side of that same pair back.
+    if (bi.member === "generateKeyPairSync") {
+      const curve = asymCurveOf(L, expr);
+      if (curve === null) return null;
+      const priv: IrExpr = {
+        kind: "libCall",
+        fn: "key.gen",
+        args: [
+          { kind: "numLit", value: curve, type: F64, loc },
+          { kind: "boolLit", value: true, type: BOOL, loc },
+        ],
+        type: KEYOBJ,
+        loc,
+      };
+      const pub: IrExpr = {
+        kind: "libCall",
+        fn: "key.gen",
+        args: [
+          { kind: "numLit", value: curve, type: F64, loc },
+          { kind: "boolLit", value: false, type: BOOL, loc },
+        ],
+        type: KEYOBJ,
+        loc,
+      };
+      const shapeId = L.shapes.intern([
+        { name: "privateKey", type: KEYOBJ },
+        { name: "publicKey", type: KEYOBJ },
+      ]);
+      return {
+        kind: "recordLit",
+        fields: [
+          { name: "privateKey", value: priv },
+          { name: "publicKey", value: pub },
+        ],
+        type: { kind: "record", shapeId },
         loc,
       };
     }

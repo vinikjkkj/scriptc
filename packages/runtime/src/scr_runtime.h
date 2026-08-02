@@ -2393,6 +2393,10 @@ bool scr_key_verify(const ScrBytes *msg, const ScrKeyObject *key, const ScrBytes
 ScrBytes *scr_key_pub_raw(const ScrKeyObject *key);
 ScrBytes *scr_key_raw(const ScrKeyObject *key);
 ScrKeyObject *scr_key_gen(double curve, bool want_private);
+ScrStr *scr_key_jwk_x(const ScrKeyObject *key);
+ScrStr *scr_key_jwk_d(const ScrKeyObject *key);
+bool scr_key_is_priv(const ScrKeyObject *key);
+ScrStr *scr_key_crv(const ScrKeyObject *key);
 ScrStr *scr_crypto_random_string(double n, ScrStr *enc); /* +1, or throws */
 /* The composed createHash(alg).update(data).digest(enc) chain, fused by
  * the compiler (no Hash handle exists). alg is "sha256" | "sha1" and enc

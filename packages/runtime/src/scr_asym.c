@@ -258,3 +258,33 @@ ScrKeyObject *scr_key_gen(double curve, bool want_private) {
   return scr_keyobj_new(c, want_private,
                         want_private ? scr_key_gen_priv : scr_key_gen_pub);
 }
+
+/* The JWK halves. Node renders both as base64url WITHOUT padding, which is
+ * exactly what scr_bytes_to_str's "base64url" produces. `d` is the 32-byte
+ * seed and only exists on a private key; the caller picks between this and
+ * undefined with scr_key_is_priv. */
+ScrStr *scr_key_jwk_x(const ScrKeyObject *key) {
+  unsigned char pub[32];
+  scr_asym_public_of(pub, key);
+  ScrBytes *b = scr_asym_bytes(pub, 32);
+  ScrStr *enc = scr_str_new("base64url", 9);
+  ScrStr *s = scr_bytes_to_str(b, enc);
+  scr_str_release(enc);
+  scr_bytes_release(b);
+  return s;
+}
+
+ScrStr *scr_key_jwk_d(const ScrKeyObject *key) {
+  ScrBytes *b = scr_asym_bytes(key->raw, 32);
+  ScrStr *enc = scr_str_new("base64url", 9);
+  ScrStr *s = scr_bytes_to_str(b, enc);
+  scr_str_release(enc);
+  scr_bytes_release(b);
+  return s;
+}
+
+bool scr_key_is_priv(const ScrKeyObject *key) { return key->is_private; }
+
+ScrStr *scr_key_crv(const ScrKeyObject *key) {
+  return key->curve == SCR_CURVE_ED25519 ? scr_str_new("Ed25519", 7) : scr_str_new("X25519", 6);
+}
