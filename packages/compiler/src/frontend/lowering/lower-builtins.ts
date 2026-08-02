@@ -31,7 +31,7 @@ import { HTTP2_CONSTANTS } from "./http2-constants.js";
 import { CRYPTO_CIPHERS, CRYPTO_CONSTANTS, CRYPTO_CURVES, CRYPTO_HASHES } from "./crypto-tables.js";
 import { timerStyleCallback } from "./lower-calls.js";
 import { registerHttpClientFnBinding } from "./lower-server.js";
-import { BOOL, BYTES_U8, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
+import { KEYOBJ, BOOL, BYTES_U8, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
 
 
 
@@ -3777,6 +3777,85 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     // spell sha256: deriving with a different PRF silently produces a
     // different key, so anything else fences rather than lowering to the
     // wrong function. The callback form (pbkdf2) rides util.promisify.
+    // createPrivateKey / createPublicKey over the DER option object. Only
+    // the raw-DER form is lowered: PEM would need a base64+header reader,
+    // and every caller that reaches here builds the DER itself.
+    if (bi.member === "createPrivateKey" || bi.member === "createPublicKey") {
+      const isPriv = bi.member === "createPrivateKey";
+      const optNode = expr.arguments[0];
+      if (expr.arguments.length !== 1 || !optNode || !ts.isObjectLiteralExpression(optNode)) {
+        return null;
+      }
+      let keyNode: ts.Expression | undefined;
+      let format: string | undefined;
+      let type: string | undefined;
+      for (const prop of optNode.properties) {
+        if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) return null;
+        const n = prop.name.text;
+        if (n === "key") keyNode = prop.initializer;
+        else if (n === "format" && ts.isStringLiteral(prop.initializer)) format = prop.initializer.text;
+        else if (n === "type" && ts.isStringLiteral(prop.initializer)) type = prop.initializer.text;
+        else return null;
+      }
+      if (!keyNode || format !== "der") return null;
+      if (type !== (isPriv ? "pkcs8" : "spki")) return null;
+      const der = L.lowerExprExpecting(keyNode, { kind: "bytes", elem: "u8" });
+      if (der.type.kind !== "bytes") return null;
+      return {
+        kind: "libCall",
+        fn: isPriv ? "key.fromPkcs8" : "key.fromSpki",
+        args: [der],
+        type: KEYOBJ,
+        loc,
+      };
+    }
+    // sign(null, message, key) / verify(null, message, key, signature) — the
+    // Ed25519 forms. The algorithm argument must be the literal `null`:
+    // Ed25519 prescribes its own hash (SHA-512), and Node itself rejects a
+    // named digest for these keys.
+    if (bi.member === "sign" || bi.member === "verify") {
+      const isSign = bi.member === "sign";
+      const want = isSign ? 3 : 4;
+      if (expr.arguments.length !== want) return null;
+      const algo = expr.arguments[0]!;
+      if (algo.kind !== ts.SyntaxKind.NullKeyword) return null;
+      const bytesT: IrType = { kind: "bytes", elem: "u8" };
+      const msg = L.lowerExprExpecting(expr.arguments[1]!, bytesT);
+      const key = L.lowerExpr(expr.arguments[2]!);
+      if (msg.type.kind !== "bytes" || key.type.kind !== "keyobj") return null;
+      if (isSign) {
+        return { kind: "libCall", fn: "key.sign", args: [msg, key], type: bytesT, loc };
+      }
+      const sig = L.lowerExprExpecting(expr.arguments[3]!, bytesT);
+      if (sig.type.kind !== "bytes") return null;
+      return { kind: "libCall", fn: "key.verify", args: [msg, key, sig], type: BOOL, loc };
+    }
+    // diffieHellman({ privateKey, publicKey }) — the X25519 agreement.
+    if (bi.member === "diffieHellman") {
+      const optNode = expr.arguments[0];
+      if (expr.arguments.length !== 1 || !optNode || !ts.isObjectLiteralExpression(optNode)) {
+        return null;
+      }
+      let privNode: ts.Expression | undefined;
+      let pubNode: ts.Expression | undefined;
+      for (const prop of optNode.properties) {
+        if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) return null;
+        if (prop.name.text === "privateKey") privNode = prop.initializer;
+        else if (prop.name.text === "publicKey") pubNode = prop.initializer;
+        else return null;
+      }
+      if (!privNode || !pubNode) return null;
+      const priv = L.lowerExpr(privNode);
+      const pub = L.lowerExpr(pubNode);
+      if (priv.type.kind !== "keyobj" || pub.type.kind !== "keyobj") return null;
+      return {
+        kind: "libCall",
+        fn: "key.dh",
+        args: [priv, pub],
+        type: { kind: "bytes", elem: "u8" },
+        loc,
+      };
+    }
     if (bi.member === "pbkdf2Sync") {
       if (expr.arguments.length !== 5 || expr.arguments.some(ts.isSpreadElement)) {
         L.noLowering(

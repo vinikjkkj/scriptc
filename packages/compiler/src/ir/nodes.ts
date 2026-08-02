@@ -210,6 +210,9 @@ export type IrType =
    * implicitly convertible with f64: JS itself refuses to mix them in
    * arithmetic, so the fence is the language's, not ours. */
   | { kind: "bigint" }
+  /* A node:crypto KeyObject over X25519/Ed25519 (ScrKeyObject) — heap,
+   * refcounted, secret wiped on the last release. */
+  | { kind: "keyobj" }
   | { kind: "object"; className: string } // heap, refcounted class instance
   /** The class STATIC side as a value — `typeof C`, the type of the class
    * name itself and of `new (…) => T` constructor-typed slots. Runtime
@@ -326,6 +329,7 @@ export const STRING: IrType = { kind: "string" };
 export const BOOL: IrType = { kind: "bool" };
 export const REGEX: IrType = { kind: "regex" };
 export const BIGINT: IrType = { kind: "bigint" };
+export const KEYOBJ: IrType = { kind: "keyobj" };
 export const URL_T: IrType = { kind: "url" };
 export const SEARCH_PARAMS_T: IrType = { kind: "searchParams" };
 export const SYMBOL_T: IrType = { kind: "symbol" };
@@ -553,6 +557,8 @@ export function typeKey(t: IrType): string {
       return `record:${t.shapeId}`;
     case "bigint":
       return "bigint";
+    case "keyobj":
+      return "keyobj";
     case "union":
       return `union:${t.unionId}`;
     case "promise":
@@ -3588,6 +3594,14 @@ export type IrLibFn =
   | "insp.dyn"
   | "insp.dynS"
   | "big.str"
+  | "key.fromPkcs8"
+  | "key.fromSpki"
+  | "key.dh"
+  | "key.sign"
+  | "key.verify"
+  | "key.pubRaw"
+  | "key.raw"
+  | "key.gen"
   | "big.add"
   | "big.sub"
   | "big.mul"
@@ -5185,6 +5199,8 @@ function isJsonSafeAt(
     // JSON.stringify THROWS on a bigint ("Do not know how to serialize"),
     // so no JSON surface may carry one.
     case "bigint":
+    // A KeyObject has no JSON form either (Node stringifies it to {}).
+    case "keyobj":
       return false;
     default: {
       const _exhaustive: never = t;
@@ -5882,6 +5898,34 @@ export function moduleUsesBigInt(mod: IrModule): boolean {
       return;
     }
     if ((v as { kind?: unknown }).kind === "bigint") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
+/** True when the module reaches an asymmetric-key surface — a KeyObject
+ * value or any key.* libCall — the link switch that pulls scr_asym.c and the
+ * vendored Monocypher in (cc.ts). Both are probed: a program can hold a
+ * KeyObject without calling one of the operations, and generateKeyPair
+ * produces one without a spelled KeyObject type anywhere. */
+export function moduleUsesAsym(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "keyobj") {
+      found = true;
+      return;
+    }
+    if (node.kind === "libCall" && typeof node.fn === "string" && node.fn.startsWith("key.")) {
       found = true;
       return;
     }

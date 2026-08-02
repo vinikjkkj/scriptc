@@ -8,6 +8,24 @@
 
 The double-to-shortest-decimal core of Ryū (d2s and its headers only — the float and fixed/exponent variants are not vendored). scr_number.c textually `#include`s d2s.c and calls its internal `d2d` digit generator; ECMA-262 digit *placement* stays in scr_number.c. The only modification to upstream files: `#include "ryu/x.h"` flattened to `#include "x.h"` in d2s.c and d2s_intrinsics.h so the directory is self-contained. To update, re-fetch the listed files at the new commit and re-apply that include flattening.
 
+## monocypher/
+
+- Project: https://github.com/LoupVaillant/Monocypher
+- Version: 4.0.2
+- License: BSD-2-Clause OR CC0-1.0, used under CC0-1.0 (see monocypher/LICENCE.md)
+
+X25519 key agreement and RFC 8032 Ed25519 signatures, with the SHA-512 the
+latter is defined over. Four files: `monocypher.{c,h}` and the optional
+`monocypher-ed25519.{c,h}` — the SHA-512 flavour of Ed25519, which is the one
+Node exposes (Monocypher's built-in EdDSA uses BLAKE2b and is NOT
+interoperable). Unmodified from upstream.
+
+Chosen over hand-rolling: the field arithmetic is radix-2^51 over 64-bit
+limbs with a comb for the base point, several times faster than the
+TweetNaCl shape a from-scratch version would reach, and it is audited code
+rather than freshly written crypto. Chosen over mbedTLS (already vendored)
+because mbedTLS has no Ed25519 at all.
+
 ## quickjs-ng/
 
 - Project: https://github.com/quickjs-ng/quickjs

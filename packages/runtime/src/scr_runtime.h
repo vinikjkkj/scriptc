@@ -2348,6 +2348,51 @@ bool scr_children_wait(double max_wait_ms);
  * "hex" or "base64" (compiler-fenced). random_string THROWS Node's
  * RangeError on out-of-range sizes; both draw from arc4random_buf. */
 ScrStr *scr_crypto_random_uuid(void);
+/* ── asymmetric keys (X25519 / Ed25519) ─────────────── */
+/* Node's KeyObject for these curves is one 32-byte scalar or point plus
+ * which of the two it is; the PEM/DER framing is derived at the export
+ * surfaces. Refcounted, and the secret is wiped on the last release.
+ * Primitives come from the vendored Monocypher (scr_asym.c). */
+#define SCR_CURVE_X25519 0
+#define SCR_CURVE_ED25519 1
+
+typedef struct ScrKeyObject {
+  size_t rc;
+  int curve;
+  bool is_private;
+  unsigned char raw[32];
+} ScrKeyObject;
+
+ScrKeyObject *scr_keyobj_new(int curve, bool is_private, const unsigned char raw[32]);
+ScrKeyObject *scr_keyobj_retain(ScrKeyObject *k);
+void scr_keyobj_release(ScrKeyObject *k);
+/* The FIXED-LENGTH PKCS#8 (48 byte) and SPKI (44 byte) framings these two
+ * curves use; anything else throws Node's TypeError. */
+ScrKeyObject *scr_keyobj_from_pkcs8(const unsigned char *der, size_t len);
+ScrKeyObject *scr_keyobj_from_spki(const unsigned char *der, size_t len);
+void scr_asym_keypair(int curve, unsigned char priv[32], unsigned char pub[32]);
+/* False when the peer sent a low-order point (an all-zero secret) — Node
+ * throws for that. */
+bool scr_asym_dh(unsigned char out[32], const ScrKeyObject *priv, const ScrKeyObject *pub);
+void scr_asym_sign(unsigned char sig[64], const ScrKeyObject *key, const unsigned char *msg,
+                   size_t n);
+bool scr_asym_verify(const unsigned char sig[64], const ScrKeyObject *key,
+                     const unsigned char *msg, size_t n);
+void scr_asym_public_of(unsigned char pub[32], const ScrKeyObject *key);
+void scr_asym_raw_of(unsigned char raw[32], const ScrKeyObject *key);
+int scr_asym_curve_of(const ScrKeyObject *key);
+bool scr_asym_is_private(const ScrKeyObject *key);
+void *scr_keyobj_retain_v(void *k);
+void scr_keyobj_release_v(void *k);
+/* The scriptc-value layer (libCall targets): borrowed in, +1 out. */
+ScrKeyObject *scr_key_from_pkcs8(const ScrBytes *der);
+ScrKeyObject *scr_key_from_spki(const ScrBytes *der);
+ScrBytes *scr_key_dh(const ScrKeyObject *priv, const ScrKeyObject *pub);
+ScrBytes *scr_key_sign(const ScrBytes *msg, const ScrKeyObject *key);
+bool scr_key_verify(const ScrBytes *msg, const ScrKeyObject *key, const ScrBytes *sig);
+ScrBytes *scr_key_pub_raw(const ScrKeyObject *key);
+ScrBytes *scr_key_raw(const ScrKeyObject *key);
+ScrKeyObject *scr_key_gen(double curve, bool want_private);
 ScrStr *scr_crypto_random_string(double n, ScrStr *enc); /* +1, or throws */
 /* The composed createHash(alg).update(data).digest(enc) chain, fused by
  * the compiler (no Hash handle exists). alg is "sha256" | "sha1" and enc
@@ -4696,6 +4741,8 @@ ScrBigInt *scr_big_not(const ScrBigInt *a);
 int scr_big_cmp(const ScrBigInt *a, const ScrBigInt *b);
 bool scr_big_eq(const ScrBigInt *a, const ScrBigInt *b);
 bool scr_big_truthy(const ScrBigInt *a);
+void *scr_big_retain_v(void *b);
+void scr_big_release_v(void *b);
 /* The RUNTIME-arity twin for console.log(...args): space-joins the
  * checked-dynamic rest array through scr_insp_dyn_s at depth 2. */
 ScrStr *scr_insp_dyn_spread(ScrDyn *arr);

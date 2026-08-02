@@ -87,6 +87,7 @@ export interface CcOptions {
    * output. */
   zlib?: boolean;
   bigint?: boolean;
+  asym?: boolean;
   /** The program uses node:assert (index.ts detects assert.* libCalls on
    * the IR): compiles scr_assert.c — the zlib gating precedent, so
    * assert-free binaries keep their exact size class. scr_regex.c calls
@@ -638,6 +639,14 @@ async function ensureCurlStub(driver: CcDriver): Promise<string> {
   return cacheDir;
 }
 
+/* Monocypher: X25519 + RFC 8032 Ed25519, two translation units, no build
+ * system — compiled straight into the program like the runtime's own
+ * sources rather than staged into a cached archive (the zlib/mbedTLS
+ * shape) because there is nothing to configure. */
+function vendorMonocypherDir(): string {
+  return join(runtimeSrcDir(), "..", "vendor", "monocypher");
+}
+
 function vendorTlsDir(): string {
   return join(runtimeSrcDir(), "..", "vendor", "mbedtls");
 }
@@ -743,6 +752,7 @@ export interface LibArchiveOptions {
   emitter?: boolean;
   zlib?: boolean;
   bigint?: boolean;
+  asym?: boolean;
   copying?: boolean;
 }
 
@@ -772,6 +782,7 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     ...(opts.emitter ? ["scr_events_emitter.c", "scr_dyn_handle.c"] : []),
     ...(opts.zlib ? ["scr_zlib.c"] : []),
     ...(opts.bigint ? ["scr_bigint.c"] : []),
+    ...(opts.asym ? ["scr_asym.c"] : []),
     ...(opts.copying ? ["scr_copying.c"] : []),
   ];
   const cflags = [
@@ -1119,6 +1130,14 @@ export async function compileC(opts: CcOptions): Promise<void> {
       ? ["-I", vendorEngineDir(), rt(join(rtDir, "scr_regex.c")), ...lreObjects]
       : []),
     ...(opts.bigint ? [rt(join(rtDir, "scr_bigint.c"))] : []),
+    ...(opts.asym
+      ? [
+          "-I", vendorMonocypherDir(),
+          rt(join(rtDir, "scr_asym.c")),
+          rt(join(vendorMonocypherDir(), "monocypher.c")),
+          rt(join(vendorMonocypherDir(), "monocypher-ed25519.c")),
+        ]
+      : []),
     ...(opts.assert || regex || opts.symbol ? [rt(join(rtDir, "scr_assert.c"))] : []),
     ...(opts.inspect ? [rt(join(rtDir, "scr_inspect.c"))] : []),
     ...(opts.dynInvoke ? [rt(join(rtDir, "scr_dyn_invoke.c"))] : []),

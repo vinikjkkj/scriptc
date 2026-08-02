@@ -1,0 +1,260 @@
+/* Asymmetric keys: X25519 key agreement and Ed25519 signatures, the pair
+ * Node exposes through generateKeyPair/diffieHellman/sign/verify and the
+ * KeyObject value that carries them. Compiled only when the program reaches
+ * one of those surfaces (cc.ts gates it like scr_regex.c/scr_zlib.c).
+ *
+ * The primitives come from the vendored Monocypher (see
+ * vendor/README.md) — audited, radix-2^51 field arithmetic, no allocations,
+ * no secret-dependent branches. This file is only the adapter: scriptc value
+ * shapes in, raw 32/64-byte buffers out.
+ *
+ * Ed25519 here is the SHA-512 flavour (RFC 8032), from Monocypher's optional
+ * unit. Monocypher's DEFAULT EdDSA is BLAKE2b-based and would produce
+ * signatures Node rejects — the two must never be mixed up. */
+#include "scr_runtime.h"
+
+#include <stdlib.h>
+#include <string.h>
+
+#include "monocypher.h"
+#include "monocypher-ed25519.h"
+
+/* ── KeyObject ────────────────────────────────────────────────────────── */
+
+/* Node's KeyObject for these curves carries exactly one 32-byte scalar (a
+ * private seed) or one 32-byte point (a public key), plus which of the two it
+ * is and which curve. Everything else Node keeps in one — PEM/DER framing,
+ * OIDs — is derived on demand at the export surfaces. */
+ScrKeyObject *scr_keyobj_new(int curve, bool is_private, const unsigned char raw[32]) {
+  ScrKeyObject *k = malloc(sizeof(ScrKeyObject));
+  if (!k) scr_trap("scriptc: out of memory\n");
+  k->rc = 1;
+  k->curve = curve;
+  k->is_private = is_private;
+  memcpy(k->raw, raw, 32);
+  return k;
+}
+
+ScrKeyObject *scr_keyobj_retain(ScrKeyObject *k) {
+  if (k && k->rc != SIZE_MAX) k->rc++;
+  return k;
+}
+
+void scr_keyobj_release(ScrKeyObject *k) {
+  if (!k || k->rc == SIZE_MAX) return;
+  if (--k->rc == 0) {
+    crypto_wipe(k->raw, 32);
+    free(k);
+  }
+}
+
+/* ── DER framing ──────────────────────────────────────────────────────── */
+
+/* The PKCS#8 and SPKI wrappers for these two curves are FIXED-LENGTH: a
+ * 16-byte prefix over a 32-byte private seed, a 12-byte prefix over a 32-byte
+ * public point. Callers (Node's own createPrivateKey/createPublicKey) accept
+ * only these shapes for X25519/Ed25519, so the parse is a prefix check and a
+ * tail copy rather than a general DER reader — and a general reader here
+ * would be a liability, not a feature. */
+static const unsigned char pkcs8_x25519[16] = { 0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06,
+                                                0x03, 0x2b, 0x65, 0x6e, 0x04, 0x22, 0x04, 0x20 };
+static const unsigned char pkcs8_ed25519[16] = { 0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06,
+                                                 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20 };
+static const unsigned char spki_x25519[12] = { 0x30, 0x2a, 0x30, 0x05, 0x06, 0x03,
+                                               0x2b, 0x65, 0x6e, 0x03, 0x21, 0x00 };
+static const unsigned char spki_ed25519[12] = { 0x30, 0x2a, 0x30, 0x05, 0x06, 0x03,
+                                                0x2b, 0x65, 0x70, 0x03, 0x21, 0x00 };
+
+static void scr_asym_throw(const char *msg) {
+  scr_throw_error_msg(SCR_ERR_TYPE, msg, strlen(msg));
+}
+
+ScrKeyObject *scr_keyobj_from_pkcs8(const unsigned char *der, size_t len) {
+  if (len == 48 && memcmp(der, pkcs8_ed25519, 16) == 0) {
+    return scr_keyobj_new(SCR_CURVE_ED25519, true, der + 16);
+  }
+  if (len == 48 && memcmp(der, pkcs8_x25519, 16) == 0) {
+    return scr_keyobj_new(SCR_CURVE_X25519, true, der + 16);
+  }
+  scr_asym_throw("Invalid PKCS#8 key: only X25519 and Ed25519 private keys are supported");
+  return NULL;
+}
+
+ScrKeyObject *scr_keyobj_from_spki(const unsigned char *der, size_t len) {
+  if (len == 44 && memcmp(der, spki_ed25519, 12) == 0) {
+    return scr_keyobj_new(SCR_CURVE_ED25519, false, der + 12);
+  }
+  if (len == 44 && memcmp(der, spki_x25519, 12) == 0) {
+    return scr_keyobj_new(SCR_CURVE_X25519, false, der + 12);
+  }
+  scr_asym_throw("Invalid SPKI key: only X25519 and Ed25519 public keys are supported");
+  return NULL;
+}
+
+/* ── the operations ───────────────────────────────────────────────────── */
+
+void scr_asym_keypair(int curve, unsigned char priv[32], unsigned char pub[32]) {
+  arc4random_buf(priv, 32);
+  if (curve == SCR_CURVE_ED25519) {
+    unsigned char sk[64];
+    crypto_ed25519_key_pair(sk, pub, priv);
+    /* crypto_ed25519_key_pair WIPES the seed it was handed and returns the
+     * 64-byte expanded form; Node's jwk `d` is the 32-byte SEED, which is
+     * that form's first half. */
+    memcpy(priv, sk, 32);
+    crypto_wipe(sk, 64);
+    return;
+  }
+  crypto_x25519_public_key(pub, priv);
+}
+
+/* The X25519 shared secret. An all-zero result means the peer sent a
+ * low-order point — Node throws for that, so the caller gets false and
+ * raises. */
+bool scr_asym_dh(unsigned char out[32], const ScrKeyObject *priv, const ScrKeyObject *pub) {
+  if (priv->curve != SCR_CURVE_X25519 || pub->curve != SCR_CURVE_X25519) {
+    scr_asym_throw("diffieHellman requires two X25519 keys");
+    return false;
+  }
+  if (!priv->is_private || pub->is_private) {
+    scr_asym_throw("diffieHellman needs a private key and a public key");
+    return false;
+  }
+  crypto_x25519(out, priv->raw, pub->raw);
+  unsigned char acc = 0;
+  for (int i = 0; i < 32; i++) acc |= out[i];
+  return acc != 0;
+}
+
+void scr_asym_sign(unsigned char sig[64], const ScrKeyObject *key, const unsigned char *msg,
+                   size_t n) {
+  if (key->curve != SCR_CURVE_ED25519 || !key->is_private) {
+    scr_asym_throw("sign requires an Ed25519 private key");
+    return;
+  }
+  /* Monocypher signs with the EXPANDED 64-byte secret (scalar || public
+   * point); the KeyObject holds the 32-byte SEED, which is what Node's jwk
+   * `d` carries. Expanding here keeps the stored form the interoperable one.
+   * crypto_ed25519_key_pair wipes the seed buffer it is handed, so it gets a
+   * copy, never key->raw. */
+  unsigned char seed[32], sk[64], pk[32];
+  memcpy(seed, key->raw, 32);
+  crypto_ed25519_key_pair(sk, pk, seed);
+  crypto_ed25519_sign(sig, sk, msg, n);
+  crypto_wipe(sk, 64);
+  crypto_wipe(seed, 32);
+}
+
+bool scr_asym_verify(const unsigned char sig[64], const ScrKeyObject *key,
+                     const unsigned char *msg, size_t n) {
+  if (key->curve != SCR_CURVE_ED25519 || key->is_private) {
+    scr_asym_throw("verify requires an Ed25519 public key");
+    return false;
+  }
+  return crypto_ed25519_check(sig, key->raw, msg, n) == 0;
+}
+
+/* The public point for a private KeyObject — what `export({format:'jwk'}).x`
+ * answers, and what createPublicKey(privateKeyObject) derives. */
+void scr_asym_public_of(unsigned char pub[32], const ScrKeyObject *key) {
+  if (!key->is_private) {
+    memcpy(pub, key->raw, 32);
+    return;
+  }
+  if (key->curve == SCR_CURVE_ED25519) {
+    unsigned char seed[32], sk[64];
+    memcpy(seed, key->raw, 32);
+    crypto_ed25519_key_pair(sk, pub, seed);
+    crypto_wipe(sk, 64);
+    crypto_wipe(seed, 32);
+    return;
+  }
+  crypto_x25519_public_key(pub, key->raw);
+}
+
+void scr_asym_raw_of(unsigned char raw[32], const ScrKeyObject *key) {
+  memcpy(raw, key->raw, 32);
+}
+
+int scr_asym_curve_of(const ScrKeyObject *key) {
+  return key->curve;
+}
+
+bool scr_asym_is_private(const ScrKeyObject *key) {
+  return key->is_private;
+}
+
+/* The void* adapters ScrArr/ScrMap element tables call through. */
+void *scr_keyobj_retain_v(void *k) { return scr_keyobj_retain((ScrKeyObject *)k); }
+void scr_keyobj_release_v(void *k) { scr_keyobj_release((ScrKeyObject *)k); }
+
+/* ------------------------------------------------------------------ */
+/* The scriptc-value layer: ScrBytes in, ScrBytes/ScrKeyObject out. All
+ * arguments BORROWED, every result +1 (the libCall convention). */
+
+ScrKeyObject *scr_key_from_pkcs8(const ScrBytes *der) {
+  return scr_keyobj_from_pkcs8(der->data, der->len);
+}
+
+ScrKeyObject *scr_key_from_spki(const ScrBytes *der) {
+  return scr_keyobj_from_spki(der->data, der->len);
+}
+
+static ScrBytes *scr_asym_bytes(const unsigned char *src, size_t n) {
+  ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)n);
+  memcpy(b->data, src, n);
+  return b;
+}
+
+ScrBytes *scr_key_dh(const ScrKeyObject *priv, const ScrKeyObject *pub) {
+  unsigned char out[32];
+  if (!scr_asym_dh(out, priv, pub)) {
+    if (!scr_exc_pending()) {
+      const char *m = "Unable to compute the shared secret";
+      scr_throw_error_msg(SCR_ERR_TYPE, m, strlen(m));
+    }
+    return scr_bytes_new(SCR_BYTES_U8, 0);
+  }
+  return scr_asym_bytes(out, 32);
+}
+
+ScrBytes *scr_key_sign(const ScrBytes *msg, const ScrKeyObject *key) {
+  unsigned char sig[64];
+  scr_asym_sign(sig, key, msg->data, msg->len);
+  if (scr_exc_pending()) return scr_bytes_new(SCR_BYTES_U8, 0);
+  return scr_asym_bytes(sig, 64);
+}
+
+bool scr_key_verify(const ScrBytes *msg, const ScrKeyObject *key, const ScrBytes *sig) {
+  if (sig->len != 64) return false;
+  return scr_asym_verify(sig->data, key, msg->data, msg->len);
+}
+
+ScrBytes *scr_key_pub_raw(const ScrKeyObject *key) {
+  unsigned char pub[32];
+  scr_asym_public_of(pub, key);
+  return scr_asym_bytes(pub, 32);
+}
+
+ScrBytes *scr_key_raw(const ScrKeyObject *key) {
+  unsigned char raw[32];
+  scr_asym_raw_of(raw, key);
+  return scr_asym_bytes(raw, 32);
+}
+
+/* generateKeyPair's two halves come from one draw: the caller asks for the
+ * private side first and the public side second, both off the same fresh
+ * scalar, so the pair must be generated ONCE and cached. */
+static int scr_key_gen_curve = -1;
+static unsigned char scr_key_gen_priv[32];
+static unsigned char scr_key_gen_pub[32];
+
+ScrKeyObject *scr_key_gen(double curve, bool want_private) {
+  int c = (int)curve;
+  if (want_private || scr_key_gen_curve != c) {
+    scr_asym_keypair(c, scr_key_gen_priv, scr_key_gen_pub);
+    scr_key_gen_curve = c;
+  }
+  return scr_keyobj_new(c, want_private,
+                        want_private ? scr_key_gen_priv : scr_key_gen_pub);
+}
