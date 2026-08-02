@@ -5233,7 +5233,8 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             expr.parent.parent.expression === expr.parent &&
             expr.parent.parent.arguments.length === 1;
           const absent =
-            filledWhole || (elem.kind === "union" ? L.wrappedUndefined(elem, loc) !== null : isRefCounted(elem));
+            filledWhole || fullFillLoopFollows(expr) ||
+            (elem.kind === "union" ? L.wrappedUndefined(elem, loc) !== null : isRefCounted(elem));
           if (!absent) {
             // Scalars have no absent value that isn't a LIE on read (0
             // where Node says undefined) -- the Array.from fence's wording.
@@ -5902,6 +5903,126 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
  * `time = async <T>(...) => {...}` or `= function g<T>(...) {...}`
  * (parens stripped): bindingGenericFnNodeOf's shape rule, member form.
  * Null when the field isn't that shape. */
+/** True when `new Array<T>(n)` initializes a binding whose very next
+ * statement is a counting loop that writes EVERY index — the spelling the
+ * `.fill(v)` exception already admits, written as a loop:
+ *
+ *   const t = new Array<number>(256)
+ *   for (let i = 0; i < 256; i += 1) { ...; t[i] = c }
+ *
+ * Then no slot is readable before it is written, which is the whole reason
+ * scalars are otherwise refused (their absent value would read 0 where Node
+ * reads undefined). Everything the proof needs is checked, and anything
+ * outside it declines:
+ *
+ *   - the loop runs 0..n-1 by ones, over the SAME length expression (compared
+ *     by source text, so `addresses.length` matches `addresses.length` and
+ *     nothing else);
+ *   - the body assigns `a[i]` at its TOP level, so no branch can skip it;
+ *   - the body mentions `a` nowhere else — no read before the write, and no
+ *     second write under a condition;
+ *   - the body has no break/continue/return, which could leave the tail
+ *     unwritten with the array still reachable. */
+function fullFillLoopFollows(expr: ts.NewExpression): boolean {
+  const lenArg = expr.arguments?.[0];
+  if (!lenArg) return false;
+  const decl = expr.parent;
+  if (!ts.isVariableDeclaration(decl) || !ts.isIdentifier(decl.name)) return false;
+  const list = decl.parent;
+  if (!ts.isVariableDeclarationList(list) || list.declarations.length !== 1) return false;
+  const stmt = list.parent;
+  if (!ts.isVariableStatement(stmt)) return false;
+  const owner = stmt.parent as ts.Node & { statements?: readonly ts.Statement[] };
+  const stmts = owner.statements;
+  if (!stmts) return false;
+  const at = stmts.indexOf(stmt);
+  const loop = at >= 0 ? stmts[at + 1] : undefined;
+  if (!loop || !ts.isForStatement(loop)) return false;
+
+  // for (let i = 0; i < <same length>; i += 1 | i++)
+  const init = loop.initializer;
+  if (!init || !ts.isVariableDeclarationList(init) || init.declarations.length !== 1) return false;
+  const iDecl = init.declarations[0]!;
+  if (!ts.isIdentifier(iDecl.name) || !iDecl.initializer) return false;
+  if (iDecl.initializer.kind !== ts.SyntaxKind.NumericLiteral || iDecl.initializer.getText() !== "0") return false;
+  const iName = iDecl.name.text;
+  const cond = loop.condition;
+  if (!cond || !ts.isBinaryExpression(cond) ||
+      cond.operatorToken.kind !== ts.SyntaxKind.LessThanToken ||
+      !ts.isIdentifier(cond.left) || cond.left.text !== iName ||
+      cond.right.getText() !== lenArg.getText()) {
+    return false;
+  }
+  const inc = loop.incrementor;
+  if (!inc) return false;
+  const byOne =
+    (ts.isPostfixUnaryExpression(inc) && inc.operator === ts.SyntaxKind.PlusPlusToken &&
+      ts.isIdentifier(inc.operand) && inc.operand.text === iName) ||
+    (ts.isBinaryExpression(inc) && inc.operatorToken.kind === ts.SyntaxKind.PlusEqualsToken &&
+      ts.isIdentifier(inc.left) && inc.left.text === iName && inc.right.getText() === "1");
+  if (!byOne) return false;
+
+  // The body: exactly one TOP-LEVEL `a[i] = ...`, no other mention of `a`,
+  // and no jump that could cut the loop short.
+  const body = loop.statement;
+  const bodyStmts: readonly ts.Statement[] = ts.isBlock(body) ? body.statements : [body];
+  const aName = decl.name.text;
+  let topLevelWrites = 0;
+  for (const s of bodyStmts) {
+    if (
+      ts.isExpressionStatement(s) && ts.isBinaryExpression(s.expression) &&
+      s.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isElementAccessExpression(s.expression.left) &&
+      ts.isIdentifier(s.expression.left.expression) &&
+      s.expression.left.expression.text === aName &&
+      ts.isIdentifier(s.expression.left.argumentExpression) &&
+      s.expression.left.argumentExpression.text === iName
+    ) {
+      topLevelWrites++;
+      // The right-hand side must not read the array back.
+      if (mentionsIdentifier(s.expression.right, aName)) return false;
+      continue;
+    }
+    if (mentionsIdentifier(s, aName)) return false;
+    if (hasLoopJump(s)) return false;
+  }
+  return topLevelWrites === 1;
+}
+
+/** Any reference to `name` anywhere under `node`. */
+function mentionsIdentifier(node: ts.Node, name: string): boolean {
+  let found = false;
+  const walk = (n: ts.Node): void => {
+    if (found) return;
+    if (ts.isIdentifier(n) && n.text === name) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(n, walk);
+  };
+  walk(node);
+  return found;
+}
+
+/** A break/continue/return that could leave the counting loop's tail
+ * unwritten. Nested functions are their own control flow and do not count;
+ * a nested LOOP's own break does not escape it, but distinguishing that
+ * costs more than declining. */
+function hasLoopJump(node: ts.Node): boolean {
+  let found = false;
+  const walk = (n: ts.Node): void => {
+    if (found) return;
+    if (ts.isFunctionLike(n)) return;
+    if (ts.isBreakStatement(n) || ts.isContinueStatement(n) || ts.isReturnStatement(n)) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(n, walk);
+  };
+  walk(node);
+  return found;
+}
+
 export function genericFieldFnNodeOf(member: ts.PropertyDeclaration): ts.FunctionExpression | ts.ArrowFunction | null {
   if (member.initializer === undefined) return null;
   let init: ts.Expression = member.initializer;

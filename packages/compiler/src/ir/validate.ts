@@ -2187,14 +2187,21 @@ function validateFunction(
         break;
       }
       case "arrayNewLen": {
-        // Mapper-less Array.from({length: n}): absent-slot fill exists
-        // only for refcounted element kinds (frontend fences scalars).
+        // Mapper-less Array.from({length: n}). Refcounted elements carry a
+        // readable absent value (the interned undefined arm, or NULL for a
+        // slot that must be written first). SCALARS carry only their zero,
+        // which would read 0/false where Node reads undefined — so the
+        // frontend builds this node for them ONLY where it has proven every
+        // slot is written before any read (the whole-range fill and the
+        // counting-loop fill), and the zero is never observed. The element
+        // kinds outside both stories stay out.
         if (e.type.kind !== "array") {
           err(`arrayNewLen must be array-typed, got ${e.type.kind}`, e.loc);
           break;
         }
-        if (!isRefCounted(e.type.elem)) {
-          err(`arrayNewLen with non-refcounted ${e.type.elem.kind} elements (no absent value)`, e.loc);
+        const nlElem = e.type.elem;
+        if (!isRefCounted(nlElem) && nlElem.kind !== "f64" && nlElem.kind !== "bool") {
+          err(`arrayNewLen with ${nlElem.kind} elements (no absent value)`, e.loc);
         }
         checkExpr(e.length);
         expectType(e.length, F64, "arrayNewLen length");
