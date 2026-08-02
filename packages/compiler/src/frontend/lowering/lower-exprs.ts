@@ -1159,59 +1159,15 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           }
           return { kind: "awaitUnionExpr", value, promiseTag, type, loc };
         }
-        // The SETTLE-OR-VALUE contract, `T | Promise<T>`: a callback slot
-        // that accepts the value or a promise of it. `await` is the only
-        // consumer such a union has — no `typeof`/`instanceof` test splits
-        // two object-flavored arms — and it needs no test: the union's own
-        // TAG picks the branch. The result is a plain T, not a union, which
-        // is why this cannot ride awaitUnionExpr (whose contract is the
-        // promise-or-absent shape, result void or a union of inner+units).
-        //
-        // Built from existing nodes, so neither backend learns anything:
-        // bind the operand once, then tag-test — the promise arm awaits
-        // (parks, re-throws rejections), the data arm takes JS's one
-        // microtask hop for a non-thenable await and yields itself.
-        if (def && promiseTag >= 0 && def.arms.length === 2) {
-          const promiseArm = def.arms[promiseTag]!;
-          const dataTag = promiseTag === 0 ? 1 : 0;
-          const dataArm = def.arms[dataTag]!;
-          if (
-            promiseArm.kind === "promise" &&
-            !isUnitType(dataArm) &&
-            typeEquals(promiseArm.inner, dataArm)
-          ) {
-            const inner = dataArm;
-            const unionId = value.type.unionId;
-            const vLocal = L.declareHiddenLocal("%awaited", value.type);
-            const uRef: IrExpr = { kind: "varRef", localId: vLocal.id, type: value.type, loc };
-            return {
-              kind: "seqExpr",
-              stmts: [{ kind: "varDecl", localId: vLocal.id, init: value, loc }],
-              result: {
-                kind: "ternary",
-                cond: { kind: "unionIsTag", unionId, tag: promiseTag, negated: false, value: uRef, type: BOOL, loc },
-                then: {
-                  kind: "awaitExpr",
-                  value: { kind: "unionNarrow", unionId, tag: promiseTag, value: uRef, type: promiseArm, loc },
-                  type: inner,
-                  loc,
-                },
-                else_: {
-                  kind: "seqExpr",
-                  stmts: [
-                    { kind: "exprStmt", expr: { kind: "libCall", fn: "async.hop", args: [], type: VOID, loc }, loc },
-                  ],
-                  result: { kind: "unionNarrow", unionId, tag: dataTag, value: uRef, type: inner, loc },
-                  type: inner,
-                  loc,
-                },
-                type: inner,
-                loc,
-              },
-              type: inner,
-              loc,
-            };
-          }
+        // The SETTLE-OR-VALUE contract — `Promise<T> | T`, and the
+        // union-payload form `Promise<T | null> | T | null`. `await` is the
+        // only consumer such a union has, and it needs no narrowing test:
+        // the union's own TAG picks the branch. The builder lives on the
+        // Lowerer because promiseCoerceAdapter needs the same shape for a
+        // payload that is itself one of these unions.
+        {
+          const settled = L.settleOrValueAwait(value, loc);
+          if (settled) return settled;
         }
       }
       if (value.type.kind !== "promise") {

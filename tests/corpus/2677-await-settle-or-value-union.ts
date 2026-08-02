@@ -47,4 +47,32 @@ async function main(): Promise<void> {
   console.log(order.join(">"));
 }
 
-void main();
+// The payload may itself be a UNION -- `Promise<T | null> | T | null`, the
+// shape a persistence hook takes. Same contract: the non-promise arms are
+// exactly the payload's arms, so awaiting still yields the payload and the
+// data branch just re-tags whichever arm it holds.
+type State = { readonly epoch: number };
+interface Persistence {
+  readonly load: () => Promise<State | null> | State | null;
+}
+
+async function epochOf(p: Persistence): Promise<number> {
+  const s = await p.load();
+  return s === null ? -1 : s.epoch;
+}
+
+async function payloadUnion(): Promise<void> {
+  // Each arm of the payload, through both the sync and the async spelling.
+  console.log(await epochOf({ load: () => ({ epoch: 1 }) }));
+  console.log(await epochOf({ load: () => null }));
+  console.log(await epochOf({ load: async () => ({ epoch: 2 }) }));
+  console.log(await epochOf({ load: async () => null }));
+  console.log(await epochOf({ load: () => Promise.resolve({ epoch: 3 }) }));
+}
+
+async function all(): Promise<void> {
+  await main();
+  await payloadUnion();
+}
+
+void all();
