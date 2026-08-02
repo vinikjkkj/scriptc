@@ -24,6 +24,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const sym = E.internLiteral(e.value);
         return E.newTemp(e.type, retainCallC(e.type, `(ScrStr *)&${sym}`));
       }
+      case "bigLit": {
+        const spelling = Buffer.from(e.text, "utf8");
+        return E.newTemp(
+          e.type,
+          `scr_big_parse(${cStringLiteral(spelling)}, ${spelling.length})`,
+        );
+      }
       case "unitLit":
         // unitLits are consumed inline by the unionWrap case (a unit arm is
         // tag-only); one reaching the generic dispatch escaped its wrap.
@@ -5901,6 +5908,42 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_insp_dyn(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "insp.dynS":
             return finish(`scr_insp_dyn_s(${arg(0)}, ${arg(1)})`);
+          case "big.str":
+            return finish(`scr_big_to_str(${arg(0)}, ${arg(1)})`);
+          case "big.add":
+            return finish(`scr_big_add(${arg(0)}, ${arg(1)})`);
+          case "big.sub":
+            return finish(`scr_big_sub(${arg(0)}, ${arg(1)})`);
+          case "big.mul":
+            return finish(`scr_big_mul(${arg(0)}, ${arg(1)})`);
+          case "big.div":
+            return finish(`scr_big_div(${arg(0)}, ${arg(1)})`);
+          case "big.rem":
+            return finish(`scr_big_rem(${arg(0)}, ${arg(1)})`);
+          case "big.pow":
+            return finish(`scr_big_pow(${arg(0)}, ${arg(1)})`);
+          case "big.shl":
+            return finish(`scr_big_shl(${arg(0)}, ${arg(1)})`);
+          case "big.shr":
+            return finish(`scr_big_shr(${arg(0)}, ${arg(1)})`);
+          case "big.and":
+            return finish(`scr_big_and(${arg(0)}, ${arg(1)})`);
+          case "big.or":
+            return finish(`scr_big_or(${arg(0)}, ${arg(1)})`);
+          case "big.xor":
+            return finish(`scr_big_xor(${arg(0)}, ${arg(1)})`);
+          case "big.neg":
+            return finish(`scr_big_neg(${arg(0)})`);
+          case "big.not":
+            return finish(`scr_big_not(${arg(0)})`);
+          case "big.cmp":
+            return finish(`(double)scr_big_cmp(${arg(0)}, ${arg(1)})`);
+          case "big.eq":
+            return finish(`scr_big_eq(${arg(0)}, ${arg(1)})`);
+          case "big.fromF64":
+            return finish(`scr_big_from_f64(${arg(0)})`);
+          case "big.toF64":
+            return finish(`scr_big_to_f64(${arg(0)})`);
           case "insp.dynSpread":
             return finish(`scr_insp_dyn_spread(${arg(0)})`);
           case "insp.jsval":

@@ -31,6 +31,8 @@ export function cType(t: IrType): string {
       return "ScrMap *";
     case "regex":
       return "ScrRegex *";
+    case "bigint":
+      return "ScrBigInt *";
     case "bytes":
       // One struct for every element kind (the runtime dispatches on the
       // stored elem tag) — exactly the ScrArr pattern.
@@ -135,6 +137,8 @@ export function retainCallC(type: IrType, expr: string): string {
       return `scr_map_retain(${expr})`;
     case "regex":
       return `scr_regex_retain(${expr})`;
+    case "bigint":
+      return `scr_big_retain(${expr})`;
     case "bytes":
       return `scr_bytes_retain(${expr})`;
     case "url":
@@ -214,6 +218,8 @@ export function releaseCallC(type: IrType, expr: string): string {
       return `scr_map_release(${expr})`;
     case "regex":
       return `scr_regex_release(${expr})`;
+    case "bigint":
+      return `scr_big_release(${expr})`;
     case "bytes":
       return `scr_bytes_release(${expr})`;
     case "url":
@@ -300,6 +306,7 @@ export function boxKindC(t: IrType): string {
     case "map":
     case "set":
     case "regex":
+    case "bigint":
     case "url":
     case "searchParams":
     case "symbol":
@@ -368,6 +375,8 @@ export function vAdapters(t: IrType): { retain: string; release: string } {
       return { retain: "scr_map_retain_v", release: "scr_map_release_v" };
     case "regex":
       return { retain: "scr_regex_retain_v", release: "scr_regex_release_v" };
+    case "bigint":
+      return { retain: "scr_big_retain_v", release: "scr_big_release_v" };
     case "bytes":
       return { retain: "scr_bytes_retain_v", release: "scr_bytes_release_v" };
     case "url":
@@ -505,6 +514,7 @@ export function elemKindC(elem: IrType): string {
     case "map":
     case "set":
     case "regex":
+    case "bigint":
     case "url":
     case "searchParams":
     case "stats":

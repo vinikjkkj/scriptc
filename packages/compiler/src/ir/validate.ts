@@ -75,6 +75,8 @@ export const REGEX_INTRINSIC_SIGS: Record<
   split: { receiver: STRING, argTypes: [REGEX], result: arrayOf(STRING) },
 };
 
+const BIGINT_T: IrType = { kind: "bigint" };
+
 /** Closed-union signature table for `libCall` (mirrors ambient/scriptc.d.ts).
  * All argument positions are required — the surface has no optionals.
  * readFileSync's second argument is the (always-"utf8") encoding: it is
@@ -986,6 +988,24 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "insp.error": { argTypes: [null, F64, F64], result: STRING },
   "insp.dyn": { argTypes: [DYN, F64, F64], result: STRING },
   "insp.dynS": { argTypes: [DYN, F64], result: STRING },
+  "big.str": { argTypes: [BIGINT_T, F64], result: STRING },
+  "big.add": { argTypes: [BIGINT_T, BIGINT_T], result: BIGINT_T },
+  "big.sub": { argTypes: [BIGINT_T, BIGINT_T], result: BIGINT_T },
+  "big.mul": { argTypes: [BIGINT_T, BIGINT_T], result: BIGINT_T },
+  "big.div": { argTypes: [BIGINT_T, BIGINT_T], result: BIGINT_T },
+  "big.rem": { argTypes: [BIGINT_T, BIGINT_T], result: BIGINT_T },
+  "big.pow": { argTypes: [BIGINT_T, BIGINT_T], result: BIGINT_T },
+  "big.shl": { argTypes: [BIGINT_T, BIGINT_T], result: BIGINT_T },
+  "big.shr": { argTypes: [BIGINT_T, BIGINT_T], result: BIGINT_T },
+  "big.and": { argTypes: [BIGINT_T, BIGINT_T], result: BIGINT_T },
+  "big.or": { argTypes: [BIGINT_T, BIGINT_T], result: BIGINT_T },
+  "big.xor": { argTypes: [BIGINT_T, BIGINT_T], result: BIGINT_T },
+  "big.neg": { argTypes: [BIGINT_T], result: BIGINT_T },
+  "big.not": { argTypes: [BIGINT_T], result: BIGINT_T },
+  "big.cmp": { argTypes: [BIGINT_T, BIGINT_T], result: F64 },
+  "big.eq": { argTypes: [BIGINT_T, BIGINT_T], result: BOOL },
+  "big.fromF64": { argTypes: [F64], result: BIGINT_T },
+  "big.toF64": { argTypes: [BIGINT_T], result: F64 },
   "insp.dynSpread": { argTypes: [DYN], result: STRING },
   "insp.jsval": { argTypes: [JSVAL, F64, F64], result: STRING },
   "insp.begin": { argTypes: [F64], result: VOID },
@@ -1647,6 +1667,9 @@ function validateFunction(
         break;
       case "strLit":
         if (e.type.kind !== "string") err("strLit must be string", e.loc);
+        break;
+      case "bigLit":
+        if (e.type.kind !== "bigint") err("bigLit must be bigint", e.loc);
         break;
       case "boolLit":
         if (e.type.kind !== "bool") err("boolLit must be bool", e.loc);

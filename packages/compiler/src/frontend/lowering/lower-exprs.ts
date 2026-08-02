@@ -7,7 +7,7 @@
 import * as ts from "../ts7/adapter.js";
 import { dirname } from "node:path";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, CAUGHT, DYN, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
+import { BIGINT, BOOL, CAUGHT, DYN, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import { UNSUPPORTED, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
@@ -120,6 +120,12 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     const chainRecv = L.chainRecvByNode.get(expr);
     if (chainRecv) return { ...chainRecv, loc };
 
+    if (ts.isBigIntLiteral(expr)) {
+      // The scanner's text keeps the `n` suffix and any numeric separators;
+      // the runtime parser wants neither (it reads decimal or 0x/0o/0b).
+      const text = expr.text.replace(/_/g, "").replace(/n$/, "");
+      return { kind: "bigLit", text, type: BIGINT, loc };
+    }
     if (ts.isNumericLiteral(expr)) {
       const value = Number(expr.text.replace(/_/g, ""));
       // Ask 4's representability input: a DECIMAL INTEGER source spelling
@@ -6838,6 +6844,9 @@ export function lowerPrefixUnary(L: Lowerer, expr: ts.PrefixUnaryExpression): Ir
     switch (expr.operator) {
       case ts.SyntaxKind.MinusToken: {
         const operand = L.lowerExpr(expr.operand);
+        if (operand.type.kind === "bigint") {
+          return { kind: "libCall", fn: "big.neg", args: [operand], type: BIGINT, loc };
+        }
         if (operand.type.kind === "jsval") {
           return { kind: "jsOp", op: "neg", args: [operand], type: JSVAL, loc };
         }
@@ -6867,6 +6876,10 @@ export function lowerPrefixUnary(L: Lowerer, expr: ts.PrefixUnaryExpression): Ir
       case ts.SyntaxKind.TildeToken: {
         // `~x`: ToInt32, complement, back to f64 (JS-exact, incl. NaN → -1).
         const operand = L.lowerExpr(expr.operand);
+        // `~x` on a bigint is -x-1 over the infinite representation.
+        if (operand.type.kind === "bigint") {
+          return { kind: "libCall", fn: "big.not", args: [operand], type: BIGINT, loc };
+        }
         if (operand.type.kind !== "f64") L.unsupported("SC1043", expr);
         return { kind: "unary", op: "~", operand, type: F64, loc };
       }
@@ -7490,6 +7503,51 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         args: [L.jsvalIn(left, expr.left), L.jsvalIn(right, expr.right)],
         type, loc,
       };
+    }
+    // BIGINT operands: JS refuses to mix bigint with number in arithmetic,
+    // so tsc has already proved BOTH sides are bigint wherever one is — no
+    // coercion can be needed, and every operator maps to one runtime call.
+    if (left.type.kind === "bigint" && right.type.kind === "bigint") {
+      const arith: Partial<Record<ts.SyntaxKind, IrLibFn>> = {
+        [ts.SyntaxKind.PlusToken]: "big.add",
+        [ts.SyntaxKind.MinusToken]: "big.sub",
+        [ts.SyntaxKind.AsteriskToken]: "big.mul",
+        [ts.SyntaxKind.SlashToken]: "big.div",
+        [ts.SyntaxKind.PercentToken]: "big.rem",
+        [ts.SyntaxKind.AsteriskAsteriskToken]: "big.pow",
+        [ts.SyntaxKind.LessThanLessThanToken]: "big.shl",
+        [ts.SyntaxKind.GreaterThanGreaterThanToken]: "big.shr",
+        [ts.SyntaxKind.AmpersandToken]: "big.and",
+        [ts.SyntaxKind.BarToken]: "big.or",
+        [ts.SyntaxKind.CaretToken]: "big.xor",
+      };
+      const fn = arith[op];
+      if (fn) return { kind: "libCall", fn, args: [left, right], type: BIGINT, loc };
+      const rel: Partial<Record<ts.SyntaxKind, IrNumBinOp>> = {
+        [ts.SyntaxKind.LessThanToken]: "<",
+        [ts.SyntaxKind.GreaterThanToken]: ">",
+        [ts.SyntaxKind.LessThanEqualsToken]: "<=",
+        [ts.SyntaxKind.GreaterThanEqualsToken]: ">=",
+      };
+      const cmp = rel[op];
+      if (cmp) {
+        return {
+          kind: "bin",
+          op: cmp,
+          left: { kind: "libCall", fn: "big.cmp", args: [left, right], type: F64, loc },
+          right: { kind: "numLit", value: 0, type: F64, loc },
+          type: BOOL,
+          loc,
+        };
+      }
+      if (
+        op === ts.SyntaxKind.EqualsEqualsEqualsToken ||
+        op === ts.SyntaxKind.ExclamationEqualsEqualsToken
+      ) {
+        const eq: IrExpr = { kind: "libCall", fn: "big.eq", args: [left, right], type: BOOL, loc };
+        const negated = op === ts.SyntaxKind.ExclamationEqualsEqualsToken;
+        return negated ? { kind: "unary", op: "!", operand: eq, type: BOOL, loc } : eq;
+      }
     }
     const bothNum = left.type.kind === "f64" && right.type.kind === "f64";
     const bothStr = left.type.kind === "string" && right.type.kind === "string";

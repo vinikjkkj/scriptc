@@ -21,7 +21,7 @@ import {
 import { validateSidecar } from "./library/sidecar-validate.js";
 import { entryFunctionExports, type EntryExportInfo } from "./frontend/lib-exports.js";
 import { entryContractFacts, type ContractFacts } from "./frontend/lib-contract.js";
-import { moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsBuiltin, moduleEmbedsCompressedNpm, moduleUsesAssert, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesStream, moduleUsesSymbol, moduleUsesTls, moduleUsesTlsCa, moduleUsesZlib, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc } from "./ir/nodes.js";
+import { moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsBuiltin, moduleEmbedsCompressedNpm, moduleUsesAssert, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesStream, moduleUsesSymbol, moduleUsesTls, moduleUsesTlsCa, moduleUsesBigInt, moduleUsesZlib, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc } from "./ir/nodes.js";
 import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
 import { canonicalBuiltinModule, checkPreflight, isNodeTypesPath, loadProgram, locOf, requiresOf, resolveNpmImport, type LoadResult } from "./frontend/program.js";
@@ -748,6 +748,7 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
       // node:zlib in the embedded graph, or COMPRESSED embedded module text
       // (emit-island.ts stores big npm sources as raw DEFLATE; the emitted
       // main installs scr_zlib_inflate_exact on the same predicate).
+      bigint: moduleUsesBigInt(lowered.module),
       zlib: moduleUsesZlib(lowered.module) || moduleEmbedsCompressedNpm(lowered.module),
       // The link switch for scr_assert.c: assert.* libCalls on the IR (the
       // regex switch also pulls it — scr_regex.c calls the assert helpers).
@@ -1446,6 +1447,7 @@ export async function compileLibrary(opts: CompileLibraryOptions): Promise<Compi
     symbol: moduleUsesSymbol(mod),
     searchParams: moduleUsesSearchParams(mod),
     emitter: moduleUsesEmitter(mod),
+    bigint: moduleUsesBigInt(mod),
     zlib: moduleUsesZlib(mod),
     copying: moduleUsesCopying(mod),
   });

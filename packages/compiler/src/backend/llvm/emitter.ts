@@ -504,6 +504,24 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.this": "scr_dyn_this_get",
   "insp.dyn": "scr_insp_dyn",
   "insp.dynS": "scr_insp_dyn_s",
+  "big.str": "scr_big_to_str",
+  "big.add": "scr_big_add",
+  "big.sub": "scr_big_sub",
+  "big.mul": "scr_big_mul",
+  "big.div": "scr_big_div",
+  "big.rem": "scr_big_rem",
+  "big.pow": "scr_big_pow",
+  "big.shl": "scr_big_shl",
+  "big.shr": "scr_big_shr",
+  "big.and": "scr_big_and",
+  "big.or": "scr_big_or",
+  "big.xor": "scr_big_xor",
+  "big.neg": "scr_big_neg",
+  "big.not": "scr_big_not",
+  "big.cmp": "scr_big_cmp",
+  "big.eq": "scr_big_eq",
+  "big.fromF64": "scr_big_from_f64",
+  "big.toF64": "scr_big_to_f64",
   "insp.dynSpread": "scr_insp_dyn_spread",
   "fs.readFileSyncDyn": "scr_fs_read_file_sync_dyn",
   // Loose generic-shaped stragglers the burn-down surfaced alongside the
@@ -6550,6 +6568,10 @@ class LlEmitter {
         this.emitPendingCheck();
         return out;
       }
+      // bigint is C-backend only for now: the LLVM tier has no ScrBigInt
+      // ABI yet, so it refuses loudly (SC3001) instead of miscompiling.
+      case "bigLit":
+        throw new LlvmUnsupportedError("bigint literals");
       case "promiseVoidWiden": {
         // One ScrPromise* either way — ownership transfers, type-only
         // (the C emitter's rule).

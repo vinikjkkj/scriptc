@@ -86,6 +86,7 @@ export interface CcOptions {
    * compares round-trips and fixed-blob inflation, never raw deflate
    * output. */
   zlib?: boolean;
+  bigint?: boolean;
   /** The program uses node:assert (index.ts detects assert.* libCalls on
    * the IR): compiles scr_assert.c — the zlib gating precedent, so
    * assert-free binaries keep their exact size class. scr_regex.c calls
@@ -741,6 +742,7 @@ export interface LibArchiveOptions {
   searchParams?: boolean;
   emitter?: boolean;
   zlib?: boolean;
+  bigint?: boolean;
   copying?: boolean;
 }
 
@@ -769,6 +771,7 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     ...(opts.searchParams ? ["scr_url_params.c"] : []),
     ...(opts.emitter ? ["scr_events_emitter.c", "scr_dyn_handle.c"] : []),
     ...(opts.zlib ? ["scr_zlib.c"] : []),
+    ...(opts.bigint ? ["scr_bigint.c"] : []),
     ...(opts.copying ? ["scr_copying.c"] : []),
   ];
   const cflags = [
@@ -1115,6 +1118,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(regex
       ? ["-I", vendorEngineDir(), rt(join(rtDir, "scr_regex.c")), ...lreObjects]
       : []),
+    ...(opts.bigint ? [rt(join(rtDir, "scr_bigint.c"))] : []),
     ...(opts.assert || regex || opts.symbol ? [rt(join(rtDir, "scr_assert.c"))] : []),
     ...(opts.inspect ? [rt(join(rtDir, "scr_inspect.c"))] : []),
     ...(opts.dynInvoke ? [rt(join(rtDir, "scr_dyn_invoke.c"))] : []),

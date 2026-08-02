@@ -128,6 +128,7 @@ function inspectSupport(L: Lowerer, t: IrType, visiting: Set<string>, out: { rec
     case "bool":
     case "undefinedT":
     case "nullT":
+    case "bigint":
     case "regex":
     case "symbol":
     case "dyn":
@@ -269,6 +270,23 @@ function inspectExpr(
       return str("null", loc);
     case "regex":
       return { kind: "libCall", fn: "insp.regex", args: [value], type: STRING, loc };
+    // Node renders a bigint with its `n` suffix at every depth ("1n",
+    // "{ a: 1n }") — the suffix is part of the inspect form, not of
+    // String(1n), so it is concatenated here and not inside big.str.
+    case "bigint":
+      return {
+        kind: "strConcat",
+        left: {
+          kind: "libCall",
+          fn: "big.str",
+          args: [value, { kind: "numLit", value: 10, type: F64, loc }],
+          type: STRING,
+          loc,
+        },
+        right: str("n", loc),
+        type: STRING,
+        loc,
+      };
     case "symbol":
       // inspect(sym) IS Symbol.prototype.toString's text ("Symbol(foo)")
       // — Node prints it unquoted at every depth.

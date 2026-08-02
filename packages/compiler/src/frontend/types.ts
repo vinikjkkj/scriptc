@@ -1,6 +1,6 @@
 import * as ts from "./ts7/adapter.js";
 import type { IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
-import { arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
+import { BIGINT, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile, isNodeTypesPath } from "./program.js";
 import { accessorSlotProp } from "../ir/nodes.js";
@@ -361,6 +361,8 @@ export function formatIrType(t: IrType, shapes: ShapeRegistry, unions: UnionRegi
       return "Readable";
     case "procStream":
       return "WriteStream";
+    case "bigint":
+      return "bigint";
     case "promise":
       return `Promise<${formatIrType(t.inner, shapes, unions, seen)}>`;
     case "generator":
@@ -773,6 +775,10 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (flags & ts.TypeFlags.Never) return F64;
   // `unknown` is a VALUE with a runtime representation (the dyn JSON dyn —
   // JSON.parse results and unknown-typed locals/params/returns).
+  // `bigint` and bigint LITERAL types: one compiled kind (ScrBigInt), never
+  // interchangeable with f64 — JS itself refuses to mix them in arithmetic,
+  // so no implicit conversion can be right.
+  if (flags & ts.TypeFlags.BigIntLike) return BIGINT;
   if (flags & ts.TypeFlags.Unknown) return DYN;
   // `object` (the NonPrimitive intrinsic) is a TOP type over non-primitive
   // values — tsc admits every record, array, function, or class instance
