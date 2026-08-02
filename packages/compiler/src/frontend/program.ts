@@ -49,6 +49,7 @@ import {
   tscPassthroughDiag,
   unsupportedDiag,
 } from "../diagnostics/diagnostic.js";
+import { provenanceDeclSiblings } from "./provenance-registry.js";
 import { isNodeModulesPath, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareModule, resolveProjectImport, resolveRelativeModule, resolveTypeDirective, setProjectRealm } from "./resolve.js";
 import { probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
 import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
@@ -230,7 +231,11 @@ function loadProgram7(host: ts.Ts7Host, entryPath: string): LoadResult & { dispo
   const paths = provenancePaths();
   if (paths !== null) options = { ...options, paths };
   const coreRoots = [entryPath, ambientDtsPath(), nodeTypes ?? fallbackDtsPath()];
-  const program = ts.createProgram([...coreRoots, overridesDtsPath()], options, host);
+  const program = ts.createProgram(
+    [...coreRoots, overridesDtsPath(), ...provenanceDeclSiblings()],
+    options,
+    host,
+  );
   const entry = program.getSourceFile(entryPath);
   if (!entry) throw new Error(`could not load ${entryPath}`);
   let projectWorld: ts.Program | null = null;
@@ -307,9 +312,37 @@ export function loadProgram(
  * module evaluation order: fills load.moduleOrder (the SourceFiles
  * themselves — the lowering consumes them directly) and returns the
  * preflight diagnostics. The lowerer runs only on programs that pass. */
+/** A declaration module's IMPLEMENTATION twin: `index.d.ts` beside `index.js`.
+ *
+ * Resolution hands a compiler the `.d.ts`, because that is what a type checker
+ * wants — and it is the wrong half for us: the module then has a known type
+ * surface and an EMPTY body, so every value it exports refuses (the
+ * declaration-file rule in types.ts). The `.js` beside it IS the body.
+ * Lowering both — the declaration keeping module identity for the checker, the
+ * implementation supplying the code — is the only shape that hands a compiler
+ * both halves of one module.
+ *
+ * The twin goes BEFORE its declaration in evaluation order: its top-level
+ * statements must have run before anything reads the values. */
+function declTwinOf(program: ts.Program, sf: ts.SourceFile): ts.SourceFile | undefined {
+  if (!sf.fileName.endsWith(".d.ts")) return undefined;
+  const stem = sf.fileName.slice(0, -".d.ts".length);
+  for (const ext of [".js", ".mjs", ".cjs"]) {
+    const twin = program.getSourceFile(stem + ext);
+    if (twin !== undefined) return twin;
+  }
+  return undefined;
+}
+
 export function checkPreflight(load: LoadResult): ScrDiagnostic[] {
   const { diags, moduleOrder, startupCrash } = preflight7(load);
-  load.moduleOrder = moduleOrder;
+  const withTwins: ts.SourceFile[] = [];
+  for (const sf of moduleOrder) {
+    const twin = declTwinOf(load.program, sf);
+    if (twin !== undefined && !withTwins.includes(twin)) withTwins.push(twin);
+    withTwins.push(sf);
+  }
+  load.moduleOrder = withTwins;
   load.startupCrash = startupCrash;
   return diags;
 }

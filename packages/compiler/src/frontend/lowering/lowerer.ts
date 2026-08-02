@@ -1256,6 +1256,7 @@ export class Lowerer {
       // fileTag is filled just below; the hook is only ever CALLED during
       // lowering, long after the constructor completes.
       isProgramFile: (sf) => this.fileTag.has(sf),
+      declFileHasCompiledImpl: (sf) => this.declTwinCompiled(sf),
     };
     // --dynamic: modules reachable only through dynamic import() joined
     // moduleOrder BEFORE any pass constructed — lowerToIr runs
@@ -7084,6 +7085,30 @@ export class Lowerer {
    * members by name + this provenance, and everything else those files
    * declare hits the SC2020-family fence). The file half of every
    * supported-surface provenance check. */
+  /** The `.d.ts` whose implementation twin this build lowered (declTwinOf in
+   * program.ts put it into module order). Cached: the answer is fixed once
+   * fileTag is filled. */
+  private readonly twinCache = new Map<string, boolean>();
+
+  declTwinCompiled(sf: ts.SourceFile): boolean {
+    const name = sf.fileName;
+    const hit = this.twinCache.get(name);
+    if (hit !== undefined) return hit;
+    let found = false;
+    if (name.endsWith(".d.ts")) {
+      const stem = name.slice(0, -".d.ts".length);
+      for (const compiled of this.fileTag.keys()) {
+        const f = compiled.fileName;
+        if (f === `${stem}.js` || f === `${stem}.mjs` || f === `${stem}.cjs`) {
+          found = true;
+          break;
+        }
+      }
+    }
+    this.twinCache.set(name, found);
+    return found;
+  }
+
   readonly isStdlibFile = (sf: ts.SourceFile): boolean =>
     sf.fileName === this.ambient ||
     sf.fileName === this.overridesAmbient ||

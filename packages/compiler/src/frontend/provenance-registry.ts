@@ -1,3 +1,5 @@
+import { readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 /* The provenance-sources registry — the flag-gated state `--provenance-
  * sources` compiles against (EXPERIMENTAL prototype).
  *
@@ -147,6 +149,31 @@ export function provenanceAliasTargets(specifier: string): string[] {
 }
 
 /** The active sources (for reports), or null when the flag is off. */
+/** The `.js` implementations sitting beside a `.d.ts` inside a provenance
+ * package — the bodies whose declarations resolution picks instead. Added as
+ * program roots so the checker has them; declTwinOf (program.ts) then puts
+ * each one into module order ahead of its declaration. */
+export function provenanceDeclSiblings(): string[] {
+  if (state === null) return [];
+  const out: string[] = [];
+  const walk = (dir: string, depth: number): void => {
+    if (depth > 3) return;
+    let ents: string[] = [];
+    try { ents = readdirSync(dir); } catch { return; }
+    for (const e of ents) {
+      const full = join(dir, e);
+      let st;
+      try { st = statSync(full); } catch { continue; }
+      if (st.isDirectory()) { if (e !== "node_modules") walk(full, depth + 1); continue; }
+      if (!e.endsWith(".d.ts")) continue;
+      const impl = full.slice(0, -5) + ".js";
+      try { if (statSync(impl).isFile()) out.push(impl); } catch { /* none */ }
+    }
+  };
+  for (const d of state.packageDirs) walk(join(d, "spec"), 0);
+  return out;
+}
+
 export function provenanceSources(): ProvenanceSources | null {
   return state?.sources ?? null;
 }
