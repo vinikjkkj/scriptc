@@ -2646,13 +2646,20 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
             // arm. `typeof` supplies one whenever the sibling answers
             // something other than "object" — `typeof v === "string"` splits
             // `string | Promise<string>` exactly, which is the shape a
-            // resolver option takes (`T | (() => T | Promise<T>)`). Against
-            // another "object" answer (a record, an array, a second promise)
-            // no test exists, and that stays refused.
+            // resolver option takes (`T | (() => T | Promise<T>)`).
+            //
+            // Against another "object" answer `typeof` gives nothing, and
+            // exactly one shape survives that: the SETTLE-OR-VALUE contract
+            // `T | Promise<T>`, whose sole consumer is `await` — which needs
+            // no test, because the union's own TAG picks the branch
+            // (lower-exprs' await lowering). Any other object-flavored
+            // sibling, and a second promise arm, stay refused: there the
+            // value would have to be told apart to be used at all.
             (a.kind === "promise" &&
               !arms.every(
                 (c) => c === a || isUnitType(c) || typeofSplitsFromObject(c),
-              )),
+              ) &&
+              !(arms.length === 2 && arms.every((c) => c === a || typeEquals(c, a.inner)))),
         )
       ) {
         return null;
@@ -3654,10 +3661,13 @@ function armHasUnionHome(arm: IrType, siblingCount: number): boolean {
     case "generator":
     case "dyn":
       return false;
-    // Promise arms map only beside unit siblings (the promise-or-absent
-    // shape); a data sibling has no narrowing test against them.
+    // Promise arms map beside unit siblings (the promise-or-absent shape)
+    // and beside exactly ONE data sibling that IS their payload (the
+    // settle-or-value contract `T | Promise<T>`, whose only consumer is
+    // `await` — see mapTypeInner's union rule). Anything else has no
+    // narrowing test against them.
     case "promise":
-      return siblingCount === 0;
+      return siblingCount <= 1;
     default:
       return true;
   }
