@@ -73,7 +73,7 @@ import {
   resolveImport,
   workspacePackageOfPath,
 } from "../program.js";
-import {
+import { settleOrValueArms,
   containsRecord,
   containsUnion,
   describeComponentBlocker,
@@ -4467,7 +4467,15 @@ export class Lowerer {
       if (src.kind === "promise") {
         const arms = this.unions.get(dst.unionId)?.arms.filter((a) => a.kind === "promise") ?? [];
         const arm = arms.length === 1 ? arms[0] : undefined;
-        return arm !== undefined && arm.kind === "promise" && this.coercibleValue(src.inner, arm.inner);
+        if (arm === undefined || arm.kind !== "promise") return false;
+        // The payload converts, or awaiting it yields the arm's payload — an
+        // async callback written against a settle-or-value slot nests one
+        // level (contextual typing puts the slot's whole union inside the
+        // promise), and the adapter's double await unwraps exactly that.
+        return (
+          this.coercibleValue(src.inner, arm.inner) ||
+          (src.inner.kind === "union" && this.settleOrValueAwaitYields(src.inner, arm.inner))
+        );
       }
       return false;
     }
@@ -4506,6 +4514,103 @@ export class Lowerer {
    * either side decline (the pack shapes don't line up mechanically).
    * Null when any piece is outside coercibleValue — the exactness fences
    * stay. */
+  /** True when awaiting `u` (a settle-or-value union) yields exactly `want` —
+   * the test promiseCoerceAdapter needs before it commits to the double
+   * await, with no IR built. */
+  settleOrValueAwaitYields(u: IrType & { kind: "union" }, want: IrType): boolean {
+    const def = this.unions.get(u.unionId);
+    const promiseArm = def?.arms.find((a) => a.kind === "promise");
+    if (!def || !promiseArm || promiseArm.kind !== "promise") return false;
+    return settleOrValueArms(promiseArm, def.arms, this.unions) && typeEquals(promiseArm.inner, want);
+  }
+
+  /** Awaiting a SETTLE-OR-VALUE union — `Promise<T> | T`, and the union-payload
+   * form `Promise<T | null> | T | null` a persistence hook takes. The
+   * non-promise arms are exactly the promise's payload arms, so the result is
+   * that payload and nothing has to be told apart: the union's own TAG picks
+   * the branch.
+   *
+   * Built from existing nodes, so neither backend learns anything. The promise
+   * arm awaits (parks, re-throws rejections); the data arm takes JS's one
+   * microtask hop for a non-thenable await and re-tags itself into the
+   * payload. A UNIT arm has no payload to extract — it IS its value, so the
+   * literal stands in.
+   *
+   * Shared on purpose: `await x` reaches it from the expression lowering, and
+   * promiseCoerceAdapter reaches it for a payload that is itself one of these
+   * unions. `awaitExpr` over a union is not valid IR, so a second copy of the
+   * ternary is the only alternative. Null when the union is not that shape. */
+  settleOrValueAwait(value: IrExpr, loc: SrcLoc): IrExpr | null {
+    if (value.type.kind !== "union") return null;
+    const unionId = value.type.unionId;
+    const def = this.unions.get(unionId);
+    if (!def) return null;
+    const promiseTag = def.arms.findIndex((a) => a.kind === "promise");
+    const promiseArm = promiseTag >= 0 ? def.arms[promiseTag] : undefined;
+    if (!promiseArm || promiseArm.kind !== "promise") return null;
+    if (!settleOrValueArms(promiseArm, def.arms, this.unions)) return null;
+    const inner = promiseArm.inner;
+    const dataTags = def.arms.map((_, i) => i).filter((i) => i !== promiseTag);
+    if (dataTags.length === 0) return null;
+
+    const vLocal = this.declareHiddenLocal("%awaited", value.type);
+    const uRef: IrExpr = { kind: "varRef", localId: vLocal.id, type: value.type, loc };
+    const extract = (tag: number): IrExpr => {
+      const arm = def.arms[tag]!;
+      if (isUnitType(arm)) {
+        const lit: IrExpr = {
+          kind: "unitLit",
+          unit: arm.kind === "undefinedT" ? "undefined" : "null",
+          type: arm,
+          loc,
+        };
+        return this.coerceToExpected(lit, inner);
+      }
+      const got: IrExpr = { kind: "unionNarrow", unionId, tag, value: uRef, type: arm, loc };
+      if (inner.kind !== "union") return got;
+      const innerDef = this.unions.get(inner.unionId);
+      const innerTag = innerDef ? innerDef.arms.findIndex((a) => typeEquals(a, arm)) : -1;
+      if (innerTag < 0) return got;
+      return { kind: "unionWrap", unionId: inner.unionId, tag: innerTag, value: got, type: inner, loc };
+    };
+    let dataBranch = extract(dataTags[dataTags.length - 1]!);
+    for (let k = dataTags.length - 2; k >= 0; k--) {
+      dataBranch = {
+        kind: "ternary",
+        cond: { kind: "unionIsTag", unionId, tag: dataTags[k]!, negated: false, value: uRef, type: BOOL, loc },
+        then: extract(dataTags[k]!),
+        else_: dataBranch,
+        type: inner,
+        loc,
+      };
+    }
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "varDecl", localId: vLocal.id, init: value, loc }],
+      result: {
+        kind: "ternary",
+        cond: { kind: "unionIsTag", unionId, tag: promiseTag, negated: false, value: uRef, type: BOOL, loc },
+        then: {
+          kind: "awaitExpr",
+          value: { kind: "unionNarrow", unionId, tag: promiseTag, value: uRef, type: promiseArm, loc },
+          type: inner,
+          loc,
+        },
+        else_: {
+          kind: "seqExpr",
+          stmts: [{ kind: "exprStmt", expr: { kind: "libCall", fn: "async.hop", args: [], type: VOID, loc }, loc }],
+          result: dataBranch,
+          type: inner,
+          loc,
+        },
+        type: inner,
+        loc,
+      },
+      type: inner,
+      loc,
+    };
+  }
+
   /** `Promise<U>` into a `Promise<T>` slot, when the PAYLOAD converts:
    * an async helper that awaits the source and coerces what comes out
    * (`async (p) => coerce(await p)`), so the slot receives a promise whose
@@ -4523,30 +4628,51 @@ export class Lowerer {
     toT: IrType & { kind: "promise" },
     loc: SrcLoc,
   ): string | null {
-    if (!this.coercibleValue(fromT.inner, toT.inner)) return null;
-    const key = `promiseadapt:${typeKey(fromT)}:${typeKey(toT)}`;
+    // The payload converts, or it is a SETTLE-OR-VALUE union whose await
+    // yields the target payload — the shape contextual typing hands an async
+    // callback written against `Promise<T> | T` (its own return nests one
+    // level deeper). The helper then awaits twice instead of coercing.
+    const viaSettle =
+      !this.coercibleValue(fromT.inner, toT.inner) &&
+      fromT.inner.kind === "union" &&
+      this.settleOrValueAwaitYields(fromT.inner, toT.inner);
+    if (!viaSettle && !this.coercibleValue(fromT.inner, toT.inner)) return null;
+    const key = `promiseadapt:${viaSettle ? "sv:" : ""}${typeKey(fromT)}:${typeKey(toT)}`;
     const existing = this.retagHelpers.get(key);
     if (existing) return existing;
     const name = `%promise.adapt.${this.retagHelpers.size}`;
     this.retagHelpers.set(key, name);
-    const pRef: IrExpr = { kind: "varRef", localId: "p.0", type: fromT, loc };
-    const awaited: IrExpr = { kind: "awaitExpr", value: pRef, type: fromT.inner, loc };
-    const result = this.coerceToExpected(awaited, toT.inner);
-    if (!typeEquals(result.type, toT.inner)) {
-      throw new Error("lowerer bug: probed promise-adapter payload stopped coercing");
+    // A real function context: the settle-or-value builder declares a hidden
+    // local, and it has to land in THIS helper rather than in whatever
+    // function happened to be lowering when the coercion was demanded.
+    const funcType: IrType & { kind: "func" } = { kind: "func", params: [fromT], ret: toT };
+    const fnCtx = newFnCtx(true, null, funcType, toT.inner);
+    fnCtx.isAsync = true;
+    this.fnStack.push(fnCtx);
+    try {
+      const pLocal = this.declareHiddenLocal("p", fromT);
+      const pRef: IrExpr = { kind: "varRef", localId: pLocal.id, type: fromT, loc };
+      const awaited: IrExpr = { kind: "awaitExpr", value: pRef, type: fromT.inner, loc };
+      const settled = viaSettle ? this.settleOrValueAwait(awaited, loc) : null;
+      const result = this.coerceToExpected(settled ?? awaited, toT.inner);
+      if (!typeEquals(result.type, toT.inner)) {
+        throw new Error("lowerer bug: probed promise-adapter payload stopped coercing");
+      }
+      // An async IrFunction's returnType is the INNER type: `return v`
+      // fulfills with v and call sites receive Promise<T>.
+      this.liftedFns.push({
+        name,
+        params: [{ localId: pLocal.id, name: pLocal.name, type: fromT }],
+        returnType: toT.inner,
+        async: true,
+        locals: this.ctx.locals,
+        body: [{ kind: "return", value: result, loc }],
+        loc,
+      });
+      return name;
+    } finally {
+      this.fnStack.pop();
     }
-    // An async IrFunction's returnType is the INNER type: `return v`
-    // fulfills with v and call sites receive Promise<T>.
-    this.liftedFns.push({
-      name,
-      params: [{ localId: "p.0", name: "p", type: fromT }],
-      returnType: toT.inner,
-      async: true,
-      locals: [{ id: "p.0", name: "p", type: fromT, mutable: false }],
-      body: [{ kind: "return", value: result, loc }],
-      loc,
-    });
-    return name;
   }
 
   funcCoerceAdapter(fromT: IrType & { kind: "func" }, toT: IrType & { kind: "func" }, loc: SrcLoc): string | null {

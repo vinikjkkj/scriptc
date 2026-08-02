@@ -2695,7 +2695,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
               !arms.every(
                 (c) => c === a || isUnitType(c) || typeofSplitsFromObject(c),
               ) &&
-              !(arms.length === 2 && arms.every((c) => c === a || typeEquals(c, a.inner)))),
+              !settleOrValueArms(a, arms, unions)),
         )
       ) {
         return null;
@@ -2725,6 +2725,32 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
  * pattern matches but cannot map (unbound parameter, nothing left), and
  * undefined when the type is not this pattern at all (the caller falls
  * through to the ordinary mapping). */
+/** The SETTLE-OR-VALUE union around a promise arm: every other arm is one of
+ * the promise's own PAYLOAD arms, and together they are exactly that payload.
+ * `Promise<T> | T` is the two-arm case; `Promise<T | null> | T | null` — what
+ * a persistence hook takes — is the same contract with a union payload.
+ *
+ * `await` is the only consumer such a union has, and it needs no narrowing
+ * test: the union's tag picks the branch, and the data branch re-tags its arm
+ * into the payload (the Lowerer's settleOrValueAwait). Nothing else can tell
+ * the arms apart, which is why the shape must match EXACTLY rather than merely
+ * overlap. */
+export function settleOrValueArms(
+  promiseArm: IrType & { kind: "promise" },
+  arms: readonly IrType[],
+  unions: UnionRegistry,
+): boolean {
+  const payload = promiseArm.inner;
+  const payloadArms =
+    payload.kind === "union" ? (unions.get(payload.unionId)?.arms ?? []) : [payload];
+  const others = arms.filter((c) => c !== promiseArm);
+  return (
+    payloadArms.length > 0 &&
+    others.length === payloadArms.length &&
+    others.every((c) => payloadArms.some((q) => typeEquals(q, c)))
+  );
+}
+
 function mapNarrowedTypeParam(type: ts.Type, ctx: TypeMapperCtx): IrType | null | undefined {
   const { checker, unions, resolveTypeParam } = ctx;
   if (!resolveTypeParam) return undefined;
@@ -3706,8 +3732,11 @@ function armHasUnionHome(arm: IrType, siblingCount: number): boolean {
     // settle-or-value contract `T | Promise<T>`, whose only consumer is
     // `await` — see mapTypeInner's union rule). Anything else has no
     // narrowing test against them.
+    // Promise arms: the mapper's union rule checked the settle-or-value
+    // shape exactly, and the explainer cannot see the payload from here, so
+    // it defers — an arm that reached this point already passed that rule.
     case "promise":
-      return siblingCount <= 1;
+      return true;
     default:
       return true;
   }
