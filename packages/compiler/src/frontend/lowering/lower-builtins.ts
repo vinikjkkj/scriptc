@@ -2523,6 +2523,11 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
      * lib fn does not take — sign/verify's algorithm slot, where Ed25519
      * prescribes its own hash and Node rejects a named digest. */
     nullArg?: number;
+    /** generateKeyPair: the payload is the two-KeyObject RECORD, which no
+     * libCall can return (a record is an emitted struct, not a runtime
+     * value). This branch builds the pair in the IR instead and wraps it
+     * with promise.resolve, so `fn` and `inner` are unused for it. */
+    pairGen?: true;
   }
 
   const PROMISIFY_SETTLED: Record<string, PromisifiedTarget | undefined> = {
@@ -2533,6 +2538,14 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     "crypto.randomInt": { fn: "crypto.randomIntAsync", params: [F64, F64], inner: F64 },
     // The asymmetric trio. sign/verify take Node's algorithm slot as the
     // literal null (nullArg) and drop it: Ed25519 prescribes SHA-512.
+    // fn/inner are placeholders here — the pairGen branch reads the call
+    // type and builds the record itself (see lowerPromisifiedSettledCall).
+    "crypto.generateKeyPair": {
+      fn: "key.genAsync",
+      params: [STRING],
+      inner: KEYOBJ,
+      pairGen: true,
+    },
     "crypto.sign": {
       fn: "key.signAsync",
       params: [BYTES_U8, BYTES_U8, KEYOBJ],
@@ -2583,6 +2596,46 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
           `${value} is the derived PRF â€” pass it as a literal (another digest would derive a different key)`,
         );
       }
+    }
+    if (target.pairGen === true) {
+      const curve = asymCurveOf(L, expr);
+      if (curve === null) {
+        L.noLowering(
+          "the promisified generateKeyPair for this key type",
+          expr.arguments[0] ?? expr,
+          "x25519 and ed25519 are the compiled curves — pass one as a literal",
+        );
+      }
+      const resultT = L.mapTypeOf(L.typeOf(expr));
+      if (resultT?.kind !== "promise" || resultT.inner.kind !== "record") {
+        L.noLowering("the promisified generateKeyPair at this type", expr);
+      }
+      const gen = (wantPrivate: boolean): IrExpr => ({
+        kind: "libCall",
+        fn: "key.gen",
+        args: [
+          { kind: "numLit", value: curve, type: F64, loc: locOf(expr) },
+          { kind: "boolLit", value: wantPrivate, type: BOOL, loc: locOf(expr) },
+        ],
+        type: KEYOBJ,
+        loc: locOf(expr),
+      });
+      const pair: IrExpr = {
+        kind: "recordLit",
+        fields: [
+          { name: "privateKey", value: gen(true) },
+          { name: "publicKey", value: gen(false) },
+        ],
+        type: resultT.inner,
+        loc: locOf(expr),
+      };
+      return {
+        kind: "intrinsic",
+        name: "promise.resolve",
+        args: [pair],
+        type: resultT,
+        loc: locOf(expr),
+      };
     }
     if (target.nullArg !== undefined) {
       const nullSlot = expr.arguments[target.nullArg]!;
