@@ -8171,6 +8171,18 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
       return { kind: "callValue", callee, args: packedRest, type: callee.type.ret, loc: locOf(call) };
     }
     const args = call.arguments.map((a, i) => L.lowerExprExpecting(a, params[i]));
+    // Trailing OPTIONAL parameters the call omits complete with the
+    // undefined arm, exactly as every other call-through-a-value path does
+    // (`logger.child({ scope })` against `child(b, extra?)`). Without this
+    // the node reached the lib boundary one argument short and fenced on
+    // its own arity.
+    for (let i = args.length; i < params.length; i++) {
+      const absent = omittedArgFor(L, params[i]!, locOf(call));
+      if (!absent) {
+        L.unsupported("SC1090", call, "calls omitting a non-optional parameter of the callee's type");
+      }
+      args.push(absent);
+    }
     return { kind: "callValue", callee, args, type: callee.type.ret, loc: locOf(call) };
   }
 
