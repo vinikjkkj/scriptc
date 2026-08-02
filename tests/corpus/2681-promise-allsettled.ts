@@ -37,6 +37,18 @@ async function main(): Promise<void> {
   // The wrapper is interned per type pair, so a second site reuses it.
   const [again] = await Promise.allSettled([ok(9)]);
   console.log(again.status === "fulfilled" ? again.value : -1);
+
+  // Over an ARRAY EXPRESSION: one helper wraps every entry in a loop that
+  // finishes before the first await, so an entry rejecting early is observed
+  // rather than left pending until its turn.
+  const pending: Promise<number>[] = [ok(1), bad("late"), ok(2)];
+  const rs = await Promise.allSettled(pending);
+  const parts: string[] = [];
+  for (const r of rs) parts.push(r.status === "fulfilled" ? `f${r.value}` : "r");
+  console.log(parts.join(","), rs.length);
+
+  const empty: Promise<number>[] = [];
+  console.log((await Promise.allSettled(empty)).length);
 }
 
 void main();

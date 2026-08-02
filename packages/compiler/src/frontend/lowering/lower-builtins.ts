@@ -6703,6 +6703,112 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
    * Promise.all/allSettled/any fence with the sequential-await hint;
    * resolve/reject and the rest fall to the member fence. Null for
    * non-Promise receivers. */
+/** `Promise.allSettled(ps)` over an array EXPRESSION: a lifted async helper
+   * that wraps every entry into a cannot-reject promise, then combines.
+   *
+   *   async (ps) => {
+   *     const wrapped = [];
+   *     let i = 0;
+   *     while (i < ps.length) { wrapped.push(wrap(ps[i])); i = i + 1; }
+   *     return await all(wrapped);
+   *   }
+   *
+   * The wrapping loop finishes before the first await, so every entry has
+   * its handler attached while they are all still in flight — an entry
+   * rejecting early is observed, not left pending until its turn. Null when
+   * the entry type has no wrapper, and the caller fences. */
+  function allSettledOverArray(L: Lowerer, entries: IrExpr,
+    entryT: IrType & { kind: "promise" },
+    settledElem: IrType,
+    loc: SrcLoc,): IrExpr | null {
+    const wrapper = settledWrapAdapter(L, entryT, settledElem, loc);
+    if (!wrapper) return null;
+    const wrappedT: IrType = { kind: "promise", inner: settledElem };
+    const listT = arrayOf(wrappedT);
+    const outT = arrayOf(settledElem);
+    const psT = arrayOf(entryT);
+
+    const key = `allsettled:${typeKey(psT)}:${typeKey(settledElem)}`;
+    const existing = L.retagHelpers.get(key);
+    if (existing) {
+      return { kind: "call", callee: existing, args: [entries], type: { kind: "promise", inner: outT }, loc };
+    }
+    const name = `%promise.allsettled.${L.retagHelpers.size}`;
+    L.retagHelpers.set(key, name);
+
+    const funcType: IrType & { kind: "func" } = {
+      kind: "func", params: [psT], ret: { kind: "promise", inner: outT },
+    };
+    const fnCtx = newFnCtx(true, null, funcType, outT);
+    fnCtx.isAsync = true;
+    L.fnStack.push(fnCtx);
+    try {
+      const psLocal = L.declareHiddenLocal("ps", psT);
+      const listLocal = L.declareHiddenLocal("wrapped", listT);
+      const iLocal = L.declareHiddenLocal("i", F64);
+      iLocal.mutable = true;
+      const psRef: IrExpr = { kind: "varRef", localId: psLocal.id, type: psT, loc };
+      const listRef: IrExpr = { kind: "varRef", localId: listLocal.id, type: listT, loc };
+      const iRef: IrExpr = { kind: "varRef", localId: iLocal.id, type: F64, loc };
+      const wrapCall: IrExpr = {
+        kind: "call",
+        callee: wrapper,
+        args: [{ kind: "arrayGet", arr: psRef, index: iRef, type: entryT, loc }],
+        type: wrappedT,
+        loc,
+      };
+      const body: IrStmt[] = [
+        { kind: "varDecl", localId: listLocal.id, init: { kind: "arrayLit", elems: [], type: listT, loc }, loc },
+        { kind: "varDecl", localId: iLocal.id, init: { kind: "numLit", value: 0, type: F64, loc }, loc },
+        {
+          kind: "while",
+          cond: {
+            kind: "bin", op: "<", left: iRef,
+            right: { kind: "arrIntrinsic", method: "length", receiver: psRef, args: [], type: F64, loc },
+            type: BOOL, loc,
+          },
+          body: [
+            {
+              kind: "exprStmt",
+              expr: { kind: "arrIntrinsic", method: "push", receiver: listRef, args: [wrapCall], type: F64, loc },
+              loc,
+            },
+            {
+              kind: "assign",
+              localId: iLocal.id,
+              value: { kind: "bin", op: "+", left: iRef, right: { kind: "numLit", value: 1, type: F64, loc }, type: F64, loc },
+              loc,
+            },
+          ],
+          loc,
+        },
+        {
+          kind: "return",
+          value: {
+            kind: "awaitExpr",
+            value: { kind: "intrinsic", name: "promise.all", args: [listRef], type: { kind: "promise", inner: outT }, loc },
+            type: outT,
+            loc,
+          },
+          loc,
+        },
+      ];
+      const ctx = L.ctx;
+      L.liftedFns.push({
+        name,
+        params: [{ localId: psLocal.id, name: psLocal.name, type: psT }],
+        returnType: outT,
+        locals: ctx.locals,
+        body,
+        loc,
+        async: true,
+      });
+      return { kind: "call", callee: name, args: [entries], type: { kind: "promise", inner: outT }, loc };
+    } finally {
+      L.fnStack.pop();
+    }
+  }
+
 /** The settled-result element behind an allSettled call, read off the
    * CHECKER's own result type: `Promise<R[]>` for an array argument, or
    * `Promise<[R, R, ...]>` for the tuple overload an array literal selects —
@@ -7094,10 +7200,23 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
           }
         }
       }
+      // The same over an ARRAY EXPRESSION (`Promise.allSettled(pending)`):
+      // one lifted helper wraps every entry FIRST, in a plain loop, and only
+      // then hands the wrapped array to the combinator. The wrapping loop
+      // runs to completion before a single await, so no entry's rejection is
+      // ever unobserved — the same reason the literal form wraps before it
+      // combines.
+      if (argNode && settledElem) {
+        const entries = L.lowerExpr(argNode);
+        if (entries.type.kind === "array" && entries.type.elem.kind === "promise") {
+          const built = allSettledOverArray(L, entries, entries.type.elem, settledElem, loc);
+          if (built) return built;
+        }
+      }
       L.noLowering(
         "Promise.allSettled over this argument shape",
         call,
-        "a non-empty array LITERAL whose entries share ONE promise type is the supported form",
+        "an array of promises sharing ONE type is the supported form",
       );
     }
     if (member === "any") {
