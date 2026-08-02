@@ -1410,6 +1410,15 @@ ScrPromise *scr_promise_settled_f64(double v) {
   scr_promise_fulfill_f64(p, v);
   return p;
 }
+/* The bool twin (promisified verify): the settled tier has one slot per
+ * payload kind and bool had no caller until now. */
+ScrPromise *scr_promise_settled_bool(bool v) {
+  ScrPromise *rejected = scr_promise_settled_common();
+  if (rejected) return rejected;
+  ScrPromise *p = scr_promise_new();
+  scr_promise_fulfill_bool(p, v);
+  return p;
+}
 
 ScrPromise *scr_promise_settled_void(void) {
   ScrPromise *rejected = scr_promise_settled_common();

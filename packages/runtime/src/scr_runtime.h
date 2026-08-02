@@ -2397,6 +2397,10 @@ ScrStr *scr_key_jwk_x(const ScrKeyObject *key);
 ScrStr *scr_key_jwk_d(const ScrKeyObject *key);
 bool scr_key_is_priv(const ScrKeyObject *key);
 ScrStr *scr_key_crv(const ScrKeyObject *key);
+ScrPromise *scr_key_sign_async(const ScrBytes *msg, const ScrKeyObject *key);
+ScrPromise *scr_key_verify_async(const ScrBytes *msg, const ScrKeyObject *key,
+                                 const ScrBytes *sig);
+ScrPromise *scr_key_gen_async(double curve, bool want_private);
 ScrStr *scr_crypto_random_string(double n, ScrStr *enc); /* +1, or throws */
 /* The composed createHash(alg).update(data).digest(enc) chain, fused by
  * the compiler (no Hash handle exists). alg is "sha256" | "sha1" and enc
@@ -3538,6 +3542,7 @@ void scr_promise_reject_pending(ScrPromise *p);
  * dropped; otherwise the payload fulfills. The fs/promises bridge. */
 ScrPromise *scr_promise_settled_str(ScrStr *v); /* moves v in */
 ScrPromise *scr_promise_settled_f64(double v);
+ScrPromise *scr_promise_settled_bool(bool v);
 ScrPromise *scr_promise_settled_void(void);
 ScrPromise *scr_promise_settled_ref(void *v, void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace);
 

@@ -5934,6 +5934,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_key_is_priv(${arg(0)})`);
           case "key.crv":
             return finish(`scr_key_crv(${arg(0)})`);
+          case "key.signAsync":
+            return finish(`scr_key_sign_async(${arg(0)}, ${arg(1)})`);
+          case "key.verifyAsync":
+            return finish(`scr_key_verify_async(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "key.genAsync":
+            return finish(`scr_key_gen_async(${arg(0)}, ${arg(1)})`);
           case "big.add":
             return finish(`scr_big_add(${arg(0)}, ${arg(1)})`);
           case "big.sub":
