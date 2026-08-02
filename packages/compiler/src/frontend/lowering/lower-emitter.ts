@@ -1309,3 +1309,76 @@ function emitDispatchExpr(
   }
   return { kind: "call", callee: helper, args: [receiver, ...payload], type: BOOL, loc };
 }
+
+/** Why a subclass member that shadows a RUNTIME-OWNED one is not a pure
+ * super-delegation, or null when it is.
+ *
+ * The shape is a TYPE-ONLY override: a class re-declares an inherited
+ * member for no reason but to give it a narrower TypeScript signature,
+ * and the body forwards verbatim --
+ *
+ *     public on<K extends keyof EventMap>(event: K, l: EventMap[K]): this
+ *     public on(event: string | symbol, l: (...a: unknown[]) => void): this
+ *     public on(event: string | symbol, l: (...a: unknown[]) => void): this {
+ *       return super.on(event, l)
+ *     }
+ *
+ * -- which is the standard way to publish typed events over EventEmitter.
+ * At runtime the wrapper does nothing: the call it makes is the call it
+ * received. So the declaration is ERASED and the member keeps dispatching
+ * into the runtime surface that owns it, which is exactly what the plain
+ * inherited member would have done.
+ *
+ * Every condition below exists because breaking it would make the wrapper
+ * observable: a different callee, reordered or synthesized arguments, an
+ * async or generator wrapper (which changes the return value), or a
+ * decorator (which can replace the method outright). */
+export function superDelegationReason(member: ts.MethodDeclaration, name: string): string | null {
+  if (!member.body) return "the declaration has no body";
+  if (member.asteriskToken !== undefined) return "a generator wrapper does not forward the return value";
+  for (const m of member.modifiers ?? []) {
+    if (m.kind === ts.SyntaxKind.AsyncKeyword) return "an async wrapper answers a Promise, not the forwarded value";
+    if (m.kind === ts.SyntaxKind.StaticKeyword) return "a static member shadows nothing on the instance";
+    if (m.kind === ts.SyntaxKind.AbstractKeyword) return "abstract declarations have no body to forward";
+    if (m.kind === ts.SyntaxKind.Decorator) return "a decorator can replace the method outright";
+  }
+  const stmts = member.body.statements;
+  if (stmts.length !== 1) return "the body must be exactly `return super.<name>(...)`";
+  const only = stmts[0]!;
+  if (!ts.isReturnStatement(only) || only.expression === undefined) {
+    return "the body must be exactly `return super.<name>(...)`";
+  }
+  const call = only.expression;
+  if (!ts.isCallExpression(call)) return "the body must be exactly `return super.<name>(...)`";
+  const callee = call.expression;
+  if (
+    !ts.isPropertyAccessExpression(callee) ||
+    callee.expression.kind !== ts.SyntaxKind.SuperKeyword ||
+    !ts.isIdentifier(callee.name)
+  ) {
+    return "the body must call through `super`";
+  }
+  // A wrapper that forwards to a DIFFERENT member is not a re-typing of
+  // this one -- it is real behaviour.
+  if (callee.name.text !== name) return `it forwards to 'super.${callee.name.text}', not 'super.${name}'`;
+  if (call.arguments.length !== member.parameters.length) {
+    return "the arguments must be the parameters, all of them, in order";
+  }
+  for (let i = 0; i < member.parameters.length; i++) {
+    const p = member.parameters[i]!;
+    const a = call.arguments[i]!;
+    if (!ts.isIdentifier(p.name) || p.initializer !== undefined || (p.modifiers?.length ?? 0) > 0) {
+      return "each parameter must be a plain identifier with no default and no modifier";
+    }
+    // A rest parameter has to be forwarded as a spread, and a plain one
+    // as itself -- crossing the two changes the argument list.
+    if (p.dotDotDotToken !== undefined) {
+      if (!ts.isSpreadElement(a) || !ts.isIdentifier(a.expression) || a.expression.text !== p.name.text) {
+        return "a rest parameter must be forwarded as `...` of itself";
+      }
+    } else if (!ts.isIdentifier(a) || a.text !== p.name.text) {
+      return "the arguments must be the parameters, all of them, in order";
+    }
+  }
+  return null;
+}
