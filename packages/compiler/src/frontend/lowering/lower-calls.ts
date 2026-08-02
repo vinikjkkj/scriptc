@@ -6748,13 +6748,16 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
           `(only an inline callback whose predicate the checker inferred can re-tag — ${annotateEscape})`,
       );
     }
+    let writtenPredicate = false;
     if (argNode.type) {
-      L.unsupported(
-        "SC1090",
-        argNode,
-        `narrowing '.filter' with a hand-written type predicate ` +
-          `(a written 'x is T' is an unchecked assertion nothing validates at runtime — ${annotateEscape})`,
-      );
+      // A WRITTEN `x is T` is the program's claim, not the checker's — it
+      // proves nothing at runtime, which is why the re-tag cannot be the
+      // unchecked one an INFERRED predicate earns. It rides the CHECKED
+      // extraction instead: each kept element is verified against the arm,
+      // and a lying predicate throws the catchable TypeError rather than
+      // handing back another arm's payload. Same stance as `x!` and as an
+      // overload whose return the implementation never honoured.
+      writtenPredicate = true;
     }
     // The receiver evaluates FIRST, in the enclosing function, like JS.
     const receiver = L.lowerExpr(access.expression);
@@ -6767,7 +6770,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     ) {
       L.badType(argNode, L.typeOf(argNode));
     }
-    const helper = filterNarrowHelper(L, "callback", elem, outElem!, tag, loc);
+    const helper = filterNarrowHelper(L, "callback", elem, outElem!, tag, loc, writtenPredicate);
     return { kind: "call", callee: helper, args: [receiver, fnArg], type: arrayOf(outElem!), loc };
   }
 
@@ -6783,12 +6786,26 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
    * The re-tag is sound exactly because the test just PASSED for v: an
    * inferred predicate proved the arm dynamically, and a truthy value is
    * never the undefined/null arm. */
+/** The CHECKED extraction of one union arm — `x!`'s machinery. Used where
+   * the claim that an element belongs to the arm is the PROGRAM's, not the
+   * checker's: a lying claim throws the catchable TypeError instead of
+   * reading another arm's payload. Falls back to the unchecked narrow only
+   * when no helper exists for the pair, which the caller has already ruled
+   * out by finding the arm. */
+  function checkedArmExtract(L: Lowerer, unionId: string, arm: IrType, value: IrExpr, loc: SrcLoc): IrExpr {
+    const helper = L.narrowedArmHelper(unionId, arm, loc);
+    return helper
+      ? { kind: "call", callee: helper, args: [value], type: arm, loc }
+      : { kind: "unionNarrow", unionId, tag: 0, value, type: arm, loc };
+  }
+
   function filterNarrowHelper(L: Lowerer, test: "callback" | "truthy",
     elem: IrType,
     outElem: IrType,
     tag: number | null,
-    loc: SrcLoc,): string {
-    const key = `filterNarrow:${test}:${typeKey(elem)}:${typeKey(outElem)}`;
+    loc: SrcLoc,
+    checked = false,): string {
+    const key = `filterNarrow:${test}:${checked ? "ck:" : ""}${typeKey(elem)}:${typeKey(outElem)}`;
     const existing = L.arrHofHelpers.get(key);
     if (existing) return existing;
     const name = `%arr.filterNarrow.${L.arrHofHelpers.size}`;
@@ -6818,7 +6835,9 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         : { kind: "toBool", operand: v, type: BOOL, loc };
     const kept: IrExpr =
       tag !== null && elem.kind === "union"
-        ? { kind: "unionNarrow", unionId: elem.unionId, tag, value: v, type: outElem, loc }
+        ? (checked
+            ? checkedArmExtract(L, elem.unionId, outElem, v, loc)
+            : { kind: "unionNarrow", unionId: elem.unionId, tag, value: v, type: outElem, loc })
         : v;
     const body: IrStmt[] = [
       { kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: outT, loc }, loc },
