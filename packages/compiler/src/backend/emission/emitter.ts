@@ -207,6 +207,9 @@ export class CEmitter {
    * and dynCheck adapters (sc_dfa_*), each per func typeKey. */
   readonly dynFuncThunks = new Map<string, string>();
   readonly dynFuncBoxes = new Map<string, string>();
+  /** Stranded box builders: a carried function field whose signature has no
+   * dyn call thunk (emit-walkers' strandedDynFuncBoxHelper). */
+  readonly strandedDynFuncBoxes = new Map<string, string>();
   readonly dynFuncAdapters = new Map<string, string>();
   /** dyn-promise settle adapters (sc_pda_*), per INNER typeKey: convert a
    * typed fulfillment payload into the boxed destination's dyn payload

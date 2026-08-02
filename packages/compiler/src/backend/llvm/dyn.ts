@@ -1,4 +1,4 @@
-/* The dyn (ScrDyn dyn) helper EMITTERS for the LLVM backend — the .ll
+/* The  canBoxFuncIntoDyn,dyn (ScrDyn dyn) helper EMITTERS for the LLVM backend — the .ll
  * mirror of emit-walkers.ts's dyn slice: per-type match predicates
  * (dynMatchHelper), checked builders (dynCheckHelper), static→dyn
  * converters (toDynHelper), the type-independent singletons (String
@@ -22,7 +22,7 @@
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrType } from "../../ir/nodes.js";
-import { DYN_HANDLE_KINDS, isRefCounted, typeKey } from "../../ir/nodes.js";
+import { canBoxFuncIntoDyn, DYN_HANDLE_KINDS, isRefCounted, typeKey } from "../../ir/nodes.js";
 import { mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
 import { arrNewCall, elemAccess, llFieldType, releaseSym, traceAdapter, traceArg, vAdapters } from "./shapes.js";
@@ -78,6 +78,7 @@ export class LlDyn {
   private readonly toDynFns = new Map<string, string>();
   private readonly dynFuncThunks = new Map<string, string>();
   private readonly dynFuncBoxes = new Map<string, string>();
+  private readonly strandedDynFuncBoxes = new Map<string, string>();
   private readonly dynFuncAdapters = new Map<string, string>();
   private readonly promiseDynAdapters = new Map<string, string>();
   private dynToStrFn: string | null = null;
@@ -1062,7 +1063,17 @@ export class LlDyn {
           for (const f of byIndex) {
             const fv = loadFieldOf(f.name, f.type);
             const conv = B.tmp();
+            // A FUNCTION field boxes through the closure path — stranded when
+          // its signature has no dyn call thunk — since the per-type
+          // converter has no case for a closure.
+          if (f.type.kind === "func") {
+            const fbox = canBoxFuncIntoDyn(f.type, (id: string) => this.host.recordsById.get(id), (id: string) => this.host.unionsById.get(id))
+              ? this.dynFuncBoxHelper(f.type)
+              : this.strandedDynFuncBoxHelper(f.type);
+            B.line(`${conv} = call ptr @${fbox}(ptr ${fv}, ptr null)`);
+          } else {
             B.line(`${conv} = call ptr @${this.toDynHelper(f.type)}(${this.valTy(f.type)} ${fv})`);
+          }
             B.line(`call void @scr_dyn_arr_push(ptr ${d}, ptr ${conv})`);
           }
           if (cyclicRec) B.line(`call void @scr_dyn_from_leave()`);
@@ -1085,7 +1096,17 @@ export class LlDyn {
           const klen = Buffer.byteLength(f.name, "utf8");
           const fv = loadFieldOf(f.name, f.type);
           const conv = B.tmp();
-          B.line(`${conv} = call ptr @${this.toDynHelper(f.type)}(${this.valTy(f.type)} ${fv})`);
+          // Same rule as the ordered pass above: a FUNCTION field boxes
+          // through the closure path, stranded when its signature has no
+          // dyn call thunk.
+          if (f.type.kind === "func") {
+            const fbox = canBoxFuncIntoDyn(f.type, (id: string) => this.host.recordsById.get(id), (id: string) => this.host.unionsById.get(id))
+              ? this.dynFuncBoxHelper(f.type)
+              : this.strandedDynFuncBoxHelper(f.type);
+            B.line(`${conv} = call ptr @${fbox}(ptr ${fv}, ptr null)`);
+          } else {
+            B.line(`${conv} = call ptr @${this.toDynHelper(f.type)}(${this.valTy(f.type)} ${fv})`);
+          }
           B.line(`call void @scr_dyn_obj_set(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
         }
         if (shape.indexValue) {
@@ -2733,6 +2754,45 @@ export class LlDyn {
   }
 
   /** The box builder dynFrom emits for one closure signature. */
+  /** The box builder for a CARRIED function field whose signature has no dyn
+   * call thunk — the LLVM twin of emit-walkers' stranded box. The field is
+   * still boxed, so the object keeps the key and `"m" in v` answers what Node
+   * answers; only CALLING it through the dyn side throws. Record fields only:
+   * a bare function or a union arm keeps the compile-time fence. */
+  strandedDynFuncBoxHelper(t: IrType & { kind: "func" }): string {
+    const key = typeKey(t);
+    const existing = this.strandedDynFuncBoxes.get(key);
+    if (existing) return existing;
+    const name = `sc_dfs_${this.strandedDynFuncBoxes.size}`;
+    this.strandedDynFuncBoxes.set(key, name);
+    const host = this.host;
+    const thunk = `${name}_thunk`;
+    const msg = `a '${key}' function carried into 'unknown' cannot be called through it (its parameters have no checked-dynamic form)`;
+    const msgLit = host.cstr(msg);
+    host.declare(`declare void @scr_throw_error_msg(i32, ptr, i64)`);
+    host.declare(`declare ptr @scr_closure_retain_v(ptr)`);
+    host.declare(`declare ptr @scr_dyn_new_func(ptr, ptr, i32, ptr, ptr)`);
+    this.defs.push(
+      `define internal ptr @${thunk}(ptr %c, ptr %args, i64 %argc) ${FN_ATTRS} { ; stranded dyn call thunk for ${key}`,
+      `entry:`,
+      `  call void @scr_throw_error_msg(i32 1, ptr ${msgLit}, i64 ${Buffer.byteLength(msg, "utf8")})`,
+      `  ret ptr null`,
+      `}`,
+      ``,
+    );
+    const sigLit = host.cstr(key);
+    this.defs.push(
+      `define internal ptr @${name}(ptr %v, ptr %fname) ${FN_ATTRS} { ; box ${key} into dyn (uncallable)`,
+      `entry:`,
+      `  %c = call ptr @scr_closure_retain_v(ptr %v)`,
+      `  %r = call ptr @scr_dyn_new_func(ptr %c, ptr @${thunk}, i32 ${t.params.length}, ptr ${sigLit}, ptr %fname)`,
+      `  ret ptr %r`,
+      `}`,
+      ``,
+    );
+    return name;
+  }
+
   dynFuncBoxHelper(t: IrType & { kind: "func" }): string {
     const key = typeKey(t);
     const existing = this.dynFuncBoxes.get(key);

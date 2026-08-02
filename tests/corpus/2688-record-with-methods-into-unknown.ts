@@ -41,10 +41,25 @@ const withDestroy = {
   name: "teardown",
 };
 
+// A carried function whose PARAMETER has no checked-dynamic form (a record
+// holding bytes cannot be validated back out of a dyn). The field is still
+// boxed, so the object keeps the key -- only calling it through the dyn side
+// throws, which is the stranded stance a function adapter already takes.
+type Blob = { readonly bytes: Uint8Array };
+const withUnvalidatable = {
+  save: async (_b: Blob): Promise<void> => {},
+  destroy: async (): Promise<void> => {
+    torn += 1;
+  },
+  count: 3,
+  name: "bytes",
+};
+
 async function main(): Promise<void> {
   await destroyIfSupported(plain);
   await destroyIfSupported(withDestroy);
-  console.log(torn, plain.name, withDestroy.count);
+  await destroyIfSupported(withUnvalidatable);
+  console.log(torn, plain.name, withDestroy.count, withUnvalidatable.name);
 
   // The boxed value keeps its data fields readable through the dyn side.
   const asUnknown: unknown = plain;
