@@ -8286,7 +8286,14 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     // observability (instanceof Error / .message / String() — the checked-dynamic tree's
     // error encoding); other object payloads are type-erased at runtime and
     // convert to the "[object Object]" approximation — SEMANTICS.md 67.
-    if (narrowed?.kind === "dyn") {
+    // `any` is the same un-narrowed use wearing the other spelling, and it
+    // is the one the REJECTION handlers wear: the lib types
+    // `.catch(onrejected)` as `(reason: any) => …`, so the payload of
+    // `p.catch((e) => report(e))` arrives as `any` where the payload of
+    // `try { … } catch (e)` arrives as `unknown`. Neither has been
+    // narrowed, and the conversion is the same one, so refusing the second
+    // spelling only refuses the rejection half of the same idiom.
+    if (narrowed?.kind === "dyn" || (L.typeOf(node).flags & ts.TypeFlags.Any) !== 0) {
       return { kind: "caughtToDyn", value: ref, type: DYN, loc };
     }
     L.unsupported("SC1063", node);
