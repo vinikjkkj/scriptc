@@ -830,6 +830,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           const tag = def ? def.arms.findIndex((a) => a.kind === "undefinedT") : -1;
           if (tag >= 0) fill = E.unitInstanceRef(elem.unionId, tag);
         }
+        // SCALAR slots take their zero. They have no absent value that
+        // isn't a lie on read, so the frontend only builds this node for
+        // them when it has PROVEN every slot is written before any read
+        // (the whole-range fill and the counting-loop fill) — the zero is
+        // never observed.
+        if (elem.kind === "f64") fill = "0";
+        else if (elem.kind === "bool") fill = "false";
         const i = `sc_i${E.tempCounter++}`;
         E.line(`for (double ${i} = 0; ${i} <= ${n.name} - 1; ${i} += 1) {`);
         E.indent++;
