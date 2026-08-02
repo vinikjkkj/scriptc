@@ -8947,6 +8947,31 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
       // function value can follow. Before the stdlib decline: these ARE
       // stdlib members (CallableFunction), but the pointed message is
       // the honest one.
+      // `f.bind(thisArg)` on a function VALUE is ERASURE here, and the
+      // reason is the very one the fence gives: a compiled function value
+      // carries no runtime `this` to re-route, so binding one cannot change
+      // what a call does. The receiver IS the answer; the argument still
+      // evaluates for its effects. Extra arguments are partial application,
+      // which is not erasure and keeps the fence.
+      if (
+        name === "bind" &&
+        call.arguments.length === 1 &&
+        !call.arguments.some((a) => ts.isSpreadElement(a)) &&
+        L.checker.getCallSignatures(recvT).length > 0
+      ) {
+        const fn = L.lowerExpr(access.expression);
+        if (fn.type.kind === "func") {
+          const thisArg = L.lowerExpr(call.arguments[0]!);
+          if (droppableStatic(thisArg)) return fn;
+          return {
+            kind: "seqExpr",
+            stmts: [{ kind: "exprStmt", expr: thisArg, loc: locOf(call) }],
+            result: fn,
+            type: fn.type,
+            loc: locOf(call),
+          };
+        }
+      }
       if (
         (name === "apply" || name === "call" || name === "bind") &&
         L.checker.getCallSignatures(recvT).length > 0
