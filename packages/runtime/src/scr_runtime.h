@@ -4655,6 +4655,9 @@ ScrStr *scr_insp_error(ScrError *e, double recurse, double depth);
 ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth);
 /* format's %s / rest-args twin: dyn strings pass verbatim. */
 ScrStr *scr_insp_dyn_s(ScrDyn *d, double depth);
+/* The RUNTIME-arity twin for console.log(...args): space-joins the
+ * checked-dynamic rest array through scr_insp_dyn_s at depth 2. */
+ScrStr *scr_insp_dyn_spread(ScrDyn *arr);
 #ifdef SCR_DYNAMIC
 /* Island `any` (scr_inspect_island.c — linked when a --dynamic build's
  * IR carries insp.* libCalls): the scalar kinds render exactly (typeof

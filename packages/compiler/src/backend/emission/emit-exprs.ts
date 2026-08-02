@@ -5901,6 +5901,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_insp_dyn(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "insp.dynS":
             return finish(`scr_insp_dyn_s(${arg(0)}, ${arg(1)})`);
+          case "insp.dynSpread":
+            return finish(`scr_insp_dyn_spread(${arg(0)})`);
           case "insp.jsval":
             return finish(`scr_insp_jsval(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "insp.begin":

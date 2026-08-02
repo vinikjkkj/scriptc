@@ -906,3 +906,33 @@ ScrStr *scr_insp_dyn_s(ScrDyn *d, double depth) {
   if (d->kind == SCR_DYN_STR) return scr_str_retain(d->v.str);
   return scr_insp_dyn(d, 0, depth);
 }
+
+/* console.log(...args) where `args` is the checked-dynamic rest array:
+ * the spread's arity is a RUNTIME length, so the space-join happens here
+ * rather than at the call site. Each element goes through scr_insp_dyn_s
+ * at the rest-arg depth (2) — the SAME per-argument conversion the
+ * fixed-arity form lowers to, so the two renderings cannot drift apart.
+ * Borrows arr; returns +1. */
+ScrStr *scr_insp_dyn_spread(ScrDyn *arr) {
+  ScrStr *out = scr_str_new("", 0);
+  ScrStr *sep = scr_str_new(" ", 1);
+  double n = scr_dyn_arr_len(arr);
+  for (double i = 0; i < n; i += 1) {
+    if (i > 0) {
+      /* concat BORROWS both sides and returns +1 (the in-place path
+       * leaves the left at rc 2), so the accumulator is released here. */
+      ScrStr *joined = scr_str_concat(out, sep);
+      scr_str_release(out);
+      out = joined;
+    }
+    ScrDyn *el = scr_dyn_arr_at(arr, i);
+    ScrStr *s = scr_insp_dyn_s(el, 2);
+    scr_dyn_release(el);
+    ScrStr *joined = scr_str_concat(out, s);
+    scr_str_release(out);
+    scr_str_release(s);
+    out = joined;
+  }
+  scr_str_release(sep);
+  return out;
+}

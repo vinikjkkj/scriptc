@@ -504,6 +504,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.this": "scr_dyn_this_get",
   "insp.dyn": "scr_insp_dyn",
   "insp.dynS": "scr_insp_dyn_s",
+  "insp.dynSpread": "scr_insp_dyn_spread",
   "fs.readFileSyncDyn": "scr_fs_read_file_sync_dyn",
   // Loose generic-shaped stragglers the burn-down surfaced alongside the
   // dyn head: the x509 PEM walks and stdin raw-mode throw catchably (the

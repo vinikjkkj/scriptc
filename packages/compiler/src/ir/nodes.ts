@@ -3580,6 +3580,7 @@ export type IrLibFn =
   | "insp.error"
   | "insp.dyn"
   | "insp.dynS"
+  | "insp.dynSpread"
   | "insp.jsval"
   | "insp.begin"
   | "insp.entry"

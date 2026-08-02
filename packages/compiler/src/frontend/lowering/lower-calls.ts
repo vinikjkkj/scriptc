@@ -2959,6 +2959,29 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           loc,
         };
       }
+      // `console.log(...args)` where args is the checked-dynamic rest
+      // array (the logger-forwarding idiom): the arity is a RUNTIME
+      // length, so the space-join moves into the runtime, each element
+      // through the SAME per-argument conversion the fixed-arity form
+      // uses (insp.dynS at the rest-arg depth). Only a SOLE spread
+      // qualifies — a mixed call would need the fixed args rendered and
+      // concatenated here, which no source shape asks for yet.
+      if (
+        expr.arguments.length === 1 &&
+        expr.arguments[0] !== undefined &&
+        ts.isSpreadElement(expr.arguments[0])
+      ) {
+        const src = L.lowerExpr(expr.arguments[0].expression);
+        if (src.type.kind === "dyn") {
+          return {
+            kind: "intrinsic",
+            name: stdoutMember ? "console.log" : "console.error",
+            args: [{ kind: "libCall", fn: "insp.dynSpread", args: [src], type: STRING, loc }],
+            type: VOID,
+            loc,
+          };
+        }
+      }
       const args = expr.arguments.map((a) => {
         const lowered = L.lowerExpr(a);
         if (lowered.type.kind === "jsval") {
