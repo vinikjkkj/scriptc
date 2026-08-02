@@ -1641,6 +1641,8 @@ export class CEmitter {
         throw new Error(`emitter bug: truthiness of ${t.type.kind}`);
       case "bigint":
         return `scr_big_truthy(${t.name})`;
+      case "keyobj":
+        return `${t.name} != NULL`;
       case "void":
         throw new Error("emitter bug: truthiness of void");
       default: {

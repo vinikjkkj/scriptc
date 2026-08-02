@@ -5910,6 +5910,22 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_insp_dyn_s(${arg(0)}, ${arg(1)})`);
           case "big.str":
             return finish(`scr_big_to_str(${arg(0)}, ${arg(1)})`);
+          case "key.fromPkcs8":
+            return finish(`scr_key_from_pkcs8(${arg(0)})`);
+          case "key.fromSpki":
+            return finish(`scr_key_from_spki(${arg(0)})`);
+          case "key.dh":
+            return finish(`scr_key_dh(${arg(0)}, ${arg(1)})`);
+          case "key.sign":
+            return finish(`scr_key_sign(${arg(0)}, ${arg(1)})`);
+          case "key.verify":
+            return finish(`scr_key_verify(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "key.pubRaw":
+            return finish(`scr_key_pub_raw(${arg(0)})`);
+          case "key.raw":
+            return finish(`scr_key_raw(${arg(0)})`);
+          case "key.gen":
+            return finish(`scr_key_gen(${arg(0)}, ${arg(1)})`);
           case "big.add":
             return finish(`scr_big_add(${arg(0)}, ${arg(1)})`);
           case "big.sub":

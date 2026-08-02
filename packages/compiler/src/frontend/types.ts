@@ -363,6 +363,8 @@ export function formatIrType(t: IrType, shapes: ShapeRegistry, unions: UnionRegi
       return "WriteStream";
     case "bigint":
       return "bigint";
+    case "keyobj":
+      return "KeyObject";
     case "promise":
       return `Promise<${formatIrType(t.inner, shapes, unions, seen)}>`;
     case "generator":
@@ -1581,6 +1583,21 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   }
   // child_process.ChildProcess: @types/node's class or the fallback
   // declarations' interface. Provenance-checked like Stats.
+  // node:crypto KeyObject — the opaque handle createPrivateKey/
+  // createPublicKey/generateKeyPair produce and diffieHellman/sign/verify
+  // consume. Only X25519 and Ed25519 keys can live in one here; the runtime
+  // refuses any other DER framing at construction.
+  if (
+    psym?.name === "KeyObject" &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+        ctx.isStdlibFile(d.getSourceFile()),
+    )
+  ) {
+    return { kind: "keyobj" };
+  }
+
   if (
     psym?.name === "ChildProcess" &&
     checker.declarationsOf(psym).some(

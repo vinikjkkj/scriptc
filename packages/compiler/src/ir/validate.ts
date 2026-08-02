@@ -76,6 +76,8 @@ export const REGEX_INTRINSIC_SIGS: Record<
 };
 
 const BIGINT_T: IrType = { kind: "bigint" };
+const KEYOBJ_T: IrType = { kind: "keyobj" };
+const BYTES_U8_T: IrType = { kind: "bytes", elem: "u8" };
 
 /** Closed-union signature table for `libCall` (mirrors ambient/scriptc.d.ts).
  * All argument positions are required — the surface has no optionals.
@@ -989,6 +991,14 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "insp.dyn": { argTypes: [DYN, F64, F64], result: STRING },
   "insp.dynS": { argTypes: [DYN, F64], result: STRING },
   "big.str": { argTypes: [BIGINT_T, F64], result: STRING },
+  "key.fromPkcs8": { argTypes: [BYTES_U8_T], result: KEYOBJ_T },
+  "key.fromSpki": { argTypes: [BYTES_U8_T], result: KEYOBJ_T },
+  "key.dh": { argTypes: [KEYOBJ_T, KEYOBJ_T], result: BYTES_U8_T },
+  "key.sign": { argTypes: [BYTES_U8_T, KEYOBJ_T], result: BYTES_U8_T },
+  "key.verify": { argTypes: [BYTES_U8_T, KEYOBJ_T, BYTES_U8_T], result: BOOL },
+  "key.pubRaw": { argTypes: [KEYOBJ_T], result: BYTES_U8_T },
+  "key.raw": { argTypes: [KEYOBJ_T], result: BYTES_U8_T },
+  "key.gen": { argTypes: [F64, BOOL], result: KEYOBJ_T },
   "big.add": { argTypes: [BIGINT_T, BIGINT_T], result: BIGINT_T },
   "big.sub": { argTypes: [BIGINT_T, BIGINT_T], result: BIGINT_T },
   "big.mul": { argTypes: [BIGINT_T, BIGINT_T], result: BIGINT_T },

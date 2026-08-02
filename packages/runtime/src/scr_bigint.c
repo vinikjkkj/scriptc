@@ -638,3 +638,7 @@ ScrStr *scr_big_to_str(const ScrBigInt *a, double radix) {
   free(work);
   return s;
 }
+
+/* The void* adapters ScrArr/ScrMap element tables call through. */
+void *scr_big_retain_v(void *b) { return scr_big_retain((ScrBigInt *)b); }
+void scr_big_release_v(void *b) { scr_big_release((ScrBigInt *)b); }
