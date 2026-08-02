@@ -3180,6 +3180,13 @@ export class Lowerer {
         return { kind: "call", callee: adapter, args: [expr], type: expected, loc: expr.loc };
       }
     }
+    // The same story one container in: a promise whose PAYLOAD converts.
+    if (expected.kind === "promise" && expr.type.kind === "promise" && !typeEquals(expr.type, expected)) {
+      const adapter = this.promiseCoerceAdapter(expr.type, expected, expr.loc);
+      if (adapter) {
+        return { kind: "call", callee: adapter, args: [expr], type: expected, loc: expr.loc };
+      }
+    }
     // Derived-into-base widening: a legal implicit upcast (prefix layout —
     // a pointer reinterpret). Exactness stays required in every other
     // direction; there is never an implicit DOWNcast.
@@ -3294,6 +3301,25 @@ export class Lowerer {
             if (!sub || !this.ctorAbiEquals(sub, c)) break;
             const widened: IrExpr = { kind: "upcast", value: expr, type: { kind: "classval", className: c.def.name }, loc: expr.loc };
             return { kind: "unionWrap", unionId: expected.unionId, tag: baseTag, value: widened, type: expected, loc: expr.loc };
+          }
+        }
+      }
+      // A PROMISE against a union carrying a promise arm whose payload the
+      // source's payload converts into (`Promise<T | Promise<T>>` — what an
+      // async callback's contextual return type widens to — landing in the
+      // `T | Promise<T>` slot it was written for): adapt the payload, then
+      // wrap like any arm value. ONE promise arm only, the same ambiguity
+      // stance widthLiftPlan takes: two would make the target a guess.
+      if (expr.type.kind === "promise") {
+        const def = this.unions.get(expected.unionId);
+        const promiseArms = def?.arms.filter((a) => a.kind === "promise") ?? [];
+        const arm = promiseArms.length === 1 ? promiseArms[0] : undefined;
+        if (arm !== undefined && arm.kind === "promise") {
+          const armIdx = this.armTag(expected.unionId, arm);
+          const adapter = this.promiseCoerceAdapter(expr.type, arm, expr.loc);
+          if (armIdx >= 0 && adapter) {
+            const adapted: IrExpr = { kind: "call", callee: adapter, args: [expr], type: arm, loc: expr.loc };
+            return { kind: "unionWrap", unionId: expected.unionId, tag: armIdx, value: adapted, type: expected, loc: expr.loc };
           }
         }
       }
@@ -4425,10 +4451,25 @@ export class Lowerer {
         (dst.kind === "func" && canAdaptDynFuncTo(dst, (id) => this.shapes.get(id), (id) => this.unions.get(id)))
       );
     }
+    // Promise PAYLOADS convert through promiseCoerceAdapter's async helper
+    // (the settle-or-value contract's other half: `Promise<null>` into a
+    // `Promise<null | T>` slot, and an async callback whose contextual
+    // return widened its own payload).
+    if (dst.kind === "promise" && src.kind === "promise") {
+      return this.coercibleValue(src.inner, dst.inner);
+    }
     if (dst.kind === "union") {
       if (src.kind === "union") return this.unionRetagMappable(src.unionId, dst.unionId);
       if (src.kind === "void") return this.armTag(dst.unionId, UNDEFINED_T) >= 0;
-      return !isUnitType(src) && this.armTag(dst.unionId, src) >= 0;
+      if (!isUnitType(src) && this.armTag(dst.unionId, src) >= 0) return true;
+      // A promise whose payload converts into the union's ONE promise arm
+      // (coerceToExpected's adapt-then-wrap; the ambiguity stance is its).
+      if (src.kind === "promise") {
+        const arms = this.unions.get(dst.unionId)?.arms.filter((a) => a.kind === "promise") ?? [];
+        const arm = arms.length === 1 ? arms[0] : undefined;
+        return arm !== undefined && arm.kind === "promise" && this.coercibleValue(src.inner, arm.inner);
+      }
+      return false;
     }
     if (src.kind === "union") {
       return !isUnitType(dst) && dst.kind !== "void" && this.armTag(src.unionId, dst) >= 0;
@@ -4465,6 +4506,49 @@ export class Lowerer {
    * either side decline (the pack shapes don't line up mechanically).
    * Null when any piece is outside coercibleValue — the exactness fences
    * stay. */
+  /** `Promise<U>` into a `Promise<T>` slot, when the PAYLOAD converts:
+   * an async helper that awaits the source and coerces what comes out
+   * (`async (p) => coerce(await p)`), so the slot receives a promise whose
+   * payload slot really is T. A promise's payload slot is typed per kind —
+   * there is no reinterpret that would make one stand in for the other, and
+   * a bridge that pretended otherwise read the wrong slot and returned a
+   * wrong ANSWER rather than failing (the settled_bool-through-the-f64-twin
+   * bug). Null when the payload does not convert: the exactness fences stay.
+   *
+   * Rejection passes through untouched — the helper awaits, so a rejected
+   * source rethrows inside it and rejects the adapted promise with the same
+   * value, which is what Node does. */
+  promiseCoerceAdapter(
+    fromT: IrType & { kind: "promise" },
+    toT: IrType & { kind: "promise" },
+    loc: SrcLoc,
+  ): string | null {
+    if (!this.coercibleValue(fromT.inner, toT.inner)) return null;
+    const key = `promiseadapt:${typeKey(fromT)}:${typeKey(toT)}`;
+    const existing = this.retagHelpers.get(key);
+    if (existing) return existing;
+    const name = `%promise.adapt.${this.retagHelpers.size}`;
+    this.retagHelpers.set(key, name);
+    const pRef: IrExpr = { kind: "varRef", localId: "p.0", type: fromT, loc };
+    const awaited: IrExpr = { kind: "awaitExpr", value: pRef, type: fromT.inner, loc };
+    const result = this.coerceToExpected(awaited, toT.inner);
+    if (!typeEquals(result.type, toT.inner)) {
+      throw new Error("lowerer bug: probed promise-adapter payload stopped coercing");
+    }
+    // An async IrFunction's returnType is the INNER type: `return v`
+    // fulfills with v and call sites receive Promise<T>.
+    this.liftedFns.push({
+      name,
+      params: [{ localId: "p.0", name: "p", type: fromT }],
+      returnType: toT.inner,
+      async: true,
+      locals: [{ id: "p.0", name: "p", type: fromT, mutable: false }],
+      body: [{ kind: "return", value: result, loc }],
+      loc,
+    });
+    return name;
+  }
+
   funcCoerceAdapter(fromT: IrType & { kind: "func" }, toT: IrType & { kind: "func" }, loc: SrcLoc): string | null {
     if (fromT.rest === true || toT.rest === true) return null;
     if (fromT.params.length > toT.params.length) return null;
