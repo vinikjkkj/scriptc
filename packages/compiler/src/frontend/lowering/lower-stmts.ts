@@ -4573,7 +4573,15 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
           if (symbolFieldInfo(L, expr.left)) {
             return L.lowerFieldCompound(expr.left, compound, expr.right, locOf(expr));
           }
-          L.unsupported("SC1090", expr.left, "compound array-element assignment (a[i] += v)");
+          {
+            const elem = lowerElemCompound(L, expr, compound);
+            if (elem) return elem;
+          }
+          L.unsupported(
+            "SC1090",
+            expr.left,
+            "compound array-element assignment through this target (supported: a numeric array or typed array, a bare identifier receiver, and an index that can be evaluated twice — a literal, an identifier, or arithmetic over those)",
+          );
         }
         if (ts.isPropertyAccessExpression(expr.left)) {
           // `N.x += v` — the namespace-qualified spelling of a module-
@@ -4731,6 +4739,72 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
    * desugared to `x = x op e` (x read before e, like JS). Serves the bare-
    * identifier form and the namespace-qualified spelling (`N.x += v`),
    * whose target is the member's module global. */
+  /** An index expression that can be evaluated TWICE with the same result
+   * and no effect in between: a literal, a plain identifier read, or
+   * arithmetic over those. JS evaluates a compound target's receiver and
+   * index exactly once, so re-lowering them is only faithful when they are
+   * repeatable -- `a[i++] += v` and `a[next()] += v` must keep the fence,
+   * not silently step twice. */
+  function repeatableIndexExpr(e: ts.Expression): boolean {
+    if (ts.isParenthesizedExpression(e)) return repeatableIndexExpr(e.expression);
+    if (ts.isNumericLiteral(e) || ts.isStringLiteral(e)) return true;
+    // A bare identifier is a local/global READ -- no getter can run.
+    if (ts.isIdentifier(e)) return true;
+    if (ts.isPrefixUnaryExpression(e)) {
+      return (
+        (e.operator === ts.SyntaxKind.MinusToken || e.operator === ts.SyntaxKind.PlusToken ||
+          e.operator === ts.SyntaxKind.TildeToken) &&
+        repeatableIndexExpr(e.operand)
+      );
+    }
+    if (ts.isBinaryExpression(e)) {
+      const OPS = new Set<number>([
+        ts.SyntaxKind.PlusToken, ts.SyntaxKind.MinusToken, ts.SyntaxKind.AsteriskToken,
+        ts.SyntaxKind.SlashToken, ts.SyntaxKind.PercentToken, ts.SyntaxKind.AmpersandToken,
+        ts.SyntaxKind.BarToken, ts.SyntaxKind.CaretToken, ts.SyntaxKind.LessThanLessThanToken,
+        ts.SyntaxKind.GreaterThanGreaterThanToken, ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken,
+      ]);
+      return (
+        OPS.has(e.operatorToken.kind) &&
+        repeatableIndexExpr(e.left) && repeatableIndexExpr(e.right)
+      );
+    }
+    return false;
+  }
+
+  /** `a[i] op= v` over an array of numbers or a typed array: read the
+   * element, combine, write it back.
+   *
+   * Admitted only when the receiver is a bare identifier (or `this`) and
+   * the index is repeatable, because the read and the write each lower
+   * their own copy of both. Under that rule the double evaluation is
+   * unobservable, which is the same bargain lowerFieldCompound already
+   * strikes for `o.f += v`. Anything else keeps the fence.
+   *
+   * Numeric elements only: the combined value is the f64 arithmetic the
+   * variable path uses, and a typed array's store coerces it to the
+   * element kind exactly as a plain `b[i] = v` would. */
+  function lowerElemCompound(L: Lowerer, expr: ts.BinaryExpression, compound: CompoundOp): IrStmt | null {
+    const target = expr.left as ts.ElementAccessExpression;
+    if (target.questionDotToken !== undefined) return null;
+    const recvNode = target.expression;
+    if (!ts.isIdentifier(recvNode) && recvNode.kind !== ts.SyntaxKind.ThisKeyword) return null;
+    if (!repeatableIndexExpr(target.argumentExpression)) return null;
+    const recv = L.lowerExpr(recvNode);
+    const numericArray = recv.type.kind === "array" && recv.type.elem.kind === "f64";
+    // bytes<buf> is an ArrayBuffer: opaque, no elements to index.
+    const typedArray = recv.type.kind === "bytes" && recv.type.elem !== "buf";
+    if (!numericArray && !typedArray) return null;
+    const read = L.lowerExpr(target);
+    const rhs = L.lowerExpr(expr.right);
+    if (read.type.kind !== "f64" || rhs.type.kind !== "f64") return null;
+    const loc = locOf(expr);
+    const value: IrExpr = { kind: "bin", op: compound, left: read, right: rhs, type: F64, loc };
+    const index = L.lowerExpr(target.argumentExpression);
+    return typedArray
+      ? { kind: "bytesSet", arr: recv, index, value, loc }
+      : { kind: "arraySet", arr: recv, index, value, loc };
+  }
   function lowerCompoundToTarget(L: Lowerer, expr: ts.BinaryExpression, compound: CompoundOp,
     target: { id: string; type: IrType },): IrStmt {
     const loc = locOf(expr);
