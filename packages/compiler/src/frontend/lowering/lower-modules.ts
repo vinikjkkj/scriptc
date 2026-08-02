@@ -202,6 +202,7 @@ export interface FileParts {
         for (const fp of parts) L.collectGlobals(fp.sf, fp.topStmts);
         L.collectNpmImports(parts);
         L.collectJsonImports(parts);
+        L.collectJsonRequires(parts);
       } finally {
         L.diagSink = null;
       }
@@ -209,6 +210,7 @@ export interface FileParts {
       for (const fp of parts) L.collectGlobals(fp.sf, fp.topStmts);
       L.collectNpmImports(parts);
       L.collectJsonImports(parts);
+        L.collectJsonRequires(parts);
     }
   }
 
@@ -553,6 +555,88 @@ export interface FileParts {
     }
   }
 
+/** The CJS twin of collectJsonImports: `const { a, b } = require("./x.json")`
+ * and `const j = require("./x.json")`. Node hands back the parsed document
+ * either way, so the bake is the one the ESM default import already does — the
+ * difference is the BINDING: a pattern names its fields, so each element bakes
+ * the value at its key instead of the whole document.
+ *
+ * A JSON module has no compiled body to import from, which is why the generic
+ * require path cannot serve it: the value is materialised from the file text at
+ * compile time or not at all. */
+export function collectJsonRequires(L: Lowerer, parts: FileParts[]): void {
+  for (const fp of parts) {
+    for (const stmt of fp.sf.statements) {
+      if (!ts.isVariableStatement(stmt)) continue;
+      for (const decl of stmt.declarationList.declarations) {
+        const init = decl.initializer;
+        if (!init || !ts.isCallExpression(init)) continue;
+        if (!ts.isIdentifier(init.expression) || init.expression.text !== "require") continue;
+        const arg = init.arguments[0];
+        if (init.arguments.length !== 1 || !arg || !ts.isStringLiteral(arg)) continue;
+        const t = L.typeOf(init);
+        const jsym = t.getSymbol() ?? t.getAliasSymbol();
+        const jsonSf = jsym ? L.checker.declarationsOf(jsym)[0]?.getSourceFile() : undefined;
+        if (!jsonSf || !jsonSf.fileName.endsWith(".json")) continue;
+        try {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(jsonSf.text);
+          } catch (e) {
+            L.pushDiag(invalidJsonModuleDiag(
+              jsonSf.fileName,
+              e instanceof Error ? e.message : String(e),
+              locOf(stmt),
+            ));
+            throw new PoisonError();
+          }
+          const bind = (nameNode: ts.Identifier, value: unknown): void => {
+            const sym = L.checker.getSymbolAtLocation(nameNode);
+            if (!sym) return;
+            const tsType = L.typeOf(nameNode);
+            const mapped = L.mapTypeOf(tsType);
+            if (!mapped || !L.comptimeBakeable(mapped)) L.badType(nameNode, tsType);
+            const ir = L.comptimeValueToIr(value, mapped, "$", nameNode);
+            let g = L.globalsBySymbol.get(sym);
+            if (!g) {
+              g = {
+                id: `%g.jsonreq.${L.globalsList.length}`,
+                name: nameNode.text,
+                type: mapped,
+                mutable: false,
+              };
+              L.globalsBySymbol.set(sym, g);
+              L.globalsList.push(g);
+            }
+            const actions = L.jsonInitActions.get(fp.sf) ?? [];
+            L.jsonInitActions.set(fp.sf, actions);
+            actions.push({ kind: "assign", localId: g.id, value: ir, loc: locOf(stmt) });
+          };
+          // Object pattern only. A whole-document binding
+          // (`const j = require("./x.json")`) needs the global to carry the
+          // record itself, and the member reads off it do not resolve to the
+          // baked global today — it fences in program.ts rather than
+          // compiling to something that misses.
+          if (ts.isObjectBindingPattern(decl.name)) {
+            const doc = parsed as Record<string, unknown> | null;
+            for (const el of decl.name.elements) {
+              const elName = el.name;
+              if (el.dotDotDotToken || elName === undefined || !ts.isIdentifier(elName)) continue;
+              // RENAMED elements (`{ a: b }`) stay out: the symbol at the
+              // local name resolves to the property, not the binding, so the
+              // global would be keyed wrong. The bakeable predicate in
+              // program.ts refuses the same shape, so it fences instead.
+              if (el.propertyName !== undefined) continue;
+              bind(elName, doc?.[elName.text]);
+            }
+          }
+        } catch (e) {
+          if (!(e instanceof PoisonError)) throw e;
+        }
+      }
+    }
+  }
+}
 /** The classes, records, and unions the emitted module carries: exactly
    * what the lowered functions and globals reference, closed transitively
    * over record fields, union arms, class field types, base chains, and

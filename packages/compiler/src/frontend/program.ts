@@ -361,6 +361,27 @@ function requireSpecOf7(node: ts.Node): string | null {
  * (every declarator a require), and the bare side-effect `require("s");`.
  * These lower to NOTHING — the bindings are alias plumbing (tsc models
  * them as import aliases) and the module edge lives in the order walk. */
+/** True when a JSON require has a shape collectJsonRequires can bake: every
+ * declaration binds an identifier or an object pattern (no array pattern, no
+ * rest) over a literal specifier. */
+function jsonRequireBakeable(stmt: ts.Statement): boolean {
+  if (!ts.isVariableStatement(stmt)) return false;
+  return stmt.declarationList.declarations.every((d) => {
+    const init = d.initializer;
+    if (!init || !ts.isCallExpression(init) || init.arguments.length !== 1) return false;
+    const a = init.arguments[0];
+    if (!a || !ts.isStringLiteral(a)) return false;
+    if (!ts.isObjectBindingPattern(d.name)) return false;
+    return d.name.elements.every(
+      (el) =>
+        el.dotDotDotToken === undefined &&
+        el.propertyName === undefined &&
+        el.name !== undefined &&
+        ts.isIdentifier(el.name),
+    );
+  });
+}
+
 function isRequireStatement7(stmt: ts.Statement): boolean {
   if (ts.isExpressionStatement(stmt)) return requireSpecOf7(stmt.expression) !== null;
   if (!ts.isVariableStatement(stmt)) return false;
@@ -2128,7 +2149,14 @@ function preflight7(load: LoadResult): {
             dep = resolveImport7(program, sf, req.spec);
           }
           if (dep && dep.fileName.endsWith(".json")) {
-            diags.push(unsupportedDiag("SC1012", loc, "require() of JSON modules"));
+            // A JSON require BAKES at compile time (collectJsonRequires), the
+            // same as the ESM default import — both forms hand back the parsed
+            // document, and neither has a body to import from. Only a form the
+            // bake cannot reach keeps the fence: a non-literal specifier, or a
+            // binding that is neither an identifier nor an object pattern.
+            if (!jsonRequireBakeable(stmt)) {
+              diags.push(unsupportedDiag("SC1012", loc, "require() of JSON modules"));
+            }
             continue;
           }
           const tdzName =
@@ -2172,6 +2200,8 @@ function preflight7(load: LoadResult): {
           }
           const dep = resolveImport7(program, sf, spec);
           if (dep && dep.fileName.endsWith(".json")) {
+            // Nested requires are not top-level statements, so the bake never
+            // sees them: a JSON require inside a function keeps the fence.
             diags.push(unsupportedDiag("SC1012", loc, "require() of JSON modules"));
             continue;
           }
