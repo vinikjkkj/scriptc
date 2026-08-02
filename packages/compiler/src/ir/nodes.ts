@@ -456,6 +456,12 @@ export function isSupportedMapValue(t: IrType): boolean {
     // a regex holds no references), map form.
     case "regex":
       return true;
+    // A byte buffer (Map<string, Uint8Array> — an appstate collection's
+    // index-value table): the regex story exactly. Refcounted through
+    // scr_bytes_retain_v/scr_bytes_release_v, and a buffer holds no
+    // references, so there is nothing to trace and no cycle to reach.
+    case "bytes":
+      return true;
     default:
       return false;
   }
