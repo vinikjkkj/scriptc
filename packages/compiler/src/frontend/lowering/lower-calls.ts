@@ -1349,7 +1349,14 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
       if (!tp) return;
       const taT = L.checker.getTypeFromTypeNode(ta);
       const mapped = L.mapTypeOf(taT);
-      if (mapped && mapped.kind !== "void") {
+      // VOID binds like any other argument. A `T` instantiated at void is
+      // the ordinary "task that just does work" shape (`run<void>(async () =>
+      // {})`), and everything the body does with T then reads void: the
+      // return flows, `Promise<T>` is `Promise<void>`, and a VALUE position
+      // meets the same void fence it would with the type spelled out.
+      // Skipping it left T unbound instead, which fenced the whole body on a
+      // `T` nothing could resolve.
+      if (mapped) {
         bindings.set(tp, mapped);
         tsBindings?.set(tp, taT);
       }
@@ -1372,7 +1379,7 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
       if (!tp || bindings.has(tp) || !tpDecl.defaultType) return;
       const defT = L.checker.getTypeFromTypeNode(tpDecl.defaultType);
       const mapped = L.mapTypeOf(defT);
-      if (mapped && mapped.kind !== "void") {
+      if (mapped) {
         bindings.set(tp, mapped);
         tsBindings?.set(tp, defT);
       }
@@ -1418,7 +1425,7 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
           }
           if (!bindings.has(sym)) {
             const mapped = L.mapTypeOf(inst);
-            if (mapped && mapped.kind !== "void") bindings.set(sym, mapped);
+            if (mapped) bindings.set(sym, mapped);
           }
         }
         return;
