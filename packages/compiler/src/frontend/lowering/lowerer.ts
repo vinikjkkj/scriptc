@@ -51,7 +51,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { arrayOf, BOOL, canAdaptDynFuncTo, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, RUNTIME_ERROR_CLASSES, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { arrayOf, BOOL, canAdaptDynFuncTo, funcOf, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, RUNTIME_ERROR_CLASSES, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -5682,8 +5682,119 @@ export class Lowerer {
       }
       return e;
     }
+    // A freshly CONSTRUCTED class instance flowing into the interface
+    // record it satisfies (`useMem ? new MemStore() : NOOP_STORE`, whose
+    // two arms are a nominal object and a record — one common type, two
+    // representations). The instance becomes a WITNESS record of closures
+    // bound to its methods.
+    if (expected.kind === "record" && e.type.kind === "object") {
+      const witness = this.classWitnessRecord(node, e as IrExpr & { type: IrType & { kind: "object" } }, expected);
+      if (witness) return witness;
+    }
     this.requireExactShape(node, e.type, expected);
     return e;
+  }
+
+  /** The interface record a freshly constructed class instance satisfies,
+   * as a record of closures bound to the instance's methods.
+   *
+   * FRESHNESS is the soundness gate, not a convenience. Records carry
+   * reference identity here exactly as in Node, so witnessing an instance
+   * that also travels in its own nominal form would hand `===` two
+   * different values for one object. An instance built AT the coercion has
+   * no other form: the witness is its only shape from birth, so identity
+   * cannot diverge. State stays shared — every closure calls the method on
+   * the captured instance, so mutation through the witness is visible to
+   * anything else holding it.
+   *
+   * Methods only, matched exactly. A data property would need an accessor
+   * pair the record has no slot for, and a signature that merely coerces
+   * would put an adapter between the interface and the method it names. */
+  classWitnessRecord(
+    node: ts.Node,
+    instance: IrExpr & { type: IrType & { kind: "object" } },
+    target: IrType & { kind: "record" },
+  ): IrExpr | null {
+    let n: ts.Node = node;
+    while (ts.isParenthesizedExpression(n) || ts.isAsExpression(n)) n = n.expression;
+    if (!ts.isNewExpression(n)) return null;
+    const shape = this.shapes.get(target.shapeId);
+    if (!shape || shape.tuple || shape.indexValue || shape.fields.length === 0) return null;
+    const info = this.classes.get(instance.type.className);
+    if (!info) return null;
+    const loc = instance.loc;
+
+    const key = `witness:${instance.type.className}:${target.shapeId}`;
+    const existing = this.retagHelpers.get(key);
+    if (existing) {
+      return { kind: "call", callee: existing, args: [instance], type: target, loc };
+    }
+
+    // Probe every method BEFORE interning: a partial witness must not be
+    // left half-built in the helper tables.
+    const plan: { name: string; fnT: IrType & { kind: "func" }; callee: string; virtual: boolean; ret: IrType }[] = [];
+    for (const f of shape.fields) {
+      if (f.type.kind !== "func" || f.type.rest === true) return null;
+      const found = findMethodOn(this, info, f.name);
+      if (!found || found.sig.abstract === true || found.sig.gen !== undefined) return null;
+      if (found.sig.params.some((p) => p.mode === "rest")) return null;
+      const methodT = funcOf(found.sig.params.map((p) => p.type), found.sig.ret);
+      if (!typeEquals(methodT, f.type)) return null;
+      plan.push({
+        name: f.name,
+        fnT: f.type,
+        callee: `%${found.declarer.def.name}.${f.name}`,
+        virtual: this.overrideBelow(info, f.name),
+        ret: found.sig.ret,
+      });
+    }
+
+    const builder = `%witness.${this.retagHelpers.size}`;
+    this.retagHelpers.set(key, builder);
+    const instT = instance.type;
+    const fields: { name: string; value: IrExpr }[] = [];
+    for (const [i, m] of plan.entries()) {
+      if (m.virtual) this.noteVirtualEdge(info, m.name); else this.noteEdge(m.callee);
+      const implName = `${builder}.${i}`;
+      const params: IrParam[] = m.fnT.params.map((t, k) => ({ localId: `a.${k}`, name: `a${k}`, type: t }));
+      const self: IrExpr = { kind: "varRef", localId: "self.0", type: instT, loc };
+      const args: IrExpr[] = [
+        m.virtual ? this.upcastTo(self, info.def.name) : self,
+        ...m.fnT.params.map((t, k): IrExpr => ({ kind: "varRef", localId: `a.${k}`, type: t, loc })),
+      ];
+      const callE: IrExpr = m.virtual
+        ? { kind: "virtualCall", className: info.def.name, method: m.name, args, type: m.ret, loc }
+        : { kind: "call", callee: m.callee, args, type: m.ret, loc };
+      this.liftedFns.push({
+        name: implName,
+        params,
+        returnType: m.ret,
+        captures: [{ localId: "self.0", name: "self", type: instT }],
+        locals: [
+          { id: "self.0", name: "self", type: instT, mutable: false, boxed: true },
+          ...m.fnT.params.map((t, k) => ({ id: `a.${k}`, name: `a${k}`, type: t, mutable: false })),
+        ],
+        body: m.ret.kind === "void"
+          ? [{ kind: "exprStmt", expr: callE, loc }, { kind: "return", value: null, loc }]
+          : [{ kind: "return", value: callE, loc }],
+        loc,
+      });
+      fields.push({
+        name: m.name,
+        value: { kind: "closure", fnName: implName, captures: ["self.0"], type: m.fnT, loc },
+      });
+    }
+    // The builder takes the instance as a PARAMETER, so every closure
+    // captures the one object the call site just constructed.
+    this.liftedFns.push({
+      name: builder,
+      params: [{ localId: "self.0", name: "self", type: instT }],
+      returnType: target,
+      locals: [{ id: "self.0", name: "self", type: instT, mutable: false, boxed: true }],
+      body: [{ kind: "return", value: { kind: "recordLit", fields, type: target, loc }, loc }],
+      loc,
+    });
+    return { kind: "call", callee: builder, args: [instance], type: target, loc };
   }
 
   /** The unit an 'any' expression PROVABLY holds on every run, or null
