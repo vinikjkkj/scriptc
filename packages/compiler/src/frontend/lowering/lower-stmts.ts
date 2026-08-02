@@ -5,7 +5,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators.js";
-import { BOOL, isRefCounted, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrJsOp, IrLocal, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { BIGINT, type IrLibFn, BOOL, isRefCounted, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrJsOp, IrLocal, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, isCjsJsFile, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
@@ -4719,6 +4719,25 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         type: JSVAL, loc,
       };
       value = L.coerceInto(expr, wrapped, target.type);
+    } else if (target.type.kind === "bigint" && rhs.type.kind === "bigint") {
+      // `n >>= 16n` and friends: the same operator family as the binary
+      // form (lowerBinary's bigint branch), read-modify-write on the slot.
+      const BIG_COMPOUND: Partial<Record<CompoundOp, IrLibFn>> = {
+        "+": "big.add",
+        "-": "big.sub",
+        "*": "big.mul",
+        "/": "big.div",
+        "%": "big.rem",
+        "**": "big.pow",
+        "&": "big.and",
+        "|": "big.or",
+        "^": "big.xor",
+        "<<": "big.shl",
+        ">>": "big.shr",
+      };
+      const fn = BIG_COMPOUND[compound];
+      if (fn === undefined) L.unsupported("SC1043", expr);
+      value = { kind: "libCall", fn, args: [read, rhs], type: BIGINT, loc };
     } else if (compound === "+" && target.type.kind === "string") {
       value = { kind: "strConcat", left: read, right: L.ensureString(rhs, expr.right), type: STRING, loc };
     } else if (target.type.kind === "f64" && rhs.type.kind === "f64") {
