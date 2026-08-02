@@ -1382,3 +1382,27 @@ export function superDelegationReason(member: ts.MethodDeclaration, name: string
   }
   return null;
 }
+
+/** Whether a class member that shadows a runtime-owned one can be ERASED:
+ * it is a method, and the IMPLEMENTATION it belongs to is a pure
+ * super-delegation (superDelegationReason).
+ *
+ * Overload SIGNATURES arrive here too and carry no body of their own. They
+ * declare nothing at runtime, so what decides them is the implementation —
+ * the declaration that would actually run — which is why this looks that
+ * one up instead of answering "no body". */
+export function erasableSuperDelegation(
+  decl: ts.ClassLikeDeclaration,
+  member: ts.ClassElement,
+  name: string,
+): boolean {
+  if (!ts.isMethodDeclaration(member)) return false;
+  const impl = member.body
+    ? member
+    : decl.members.find(
+        (m): m is ts.MethodDeclaration =>
+          ts.isMethodDeclaration(m) && m.body !== undefined &&
+          m.name !== undefined && ts.isIdentifier(m.name) && m.name.text === name,
+      );
+  return impl !== undefined && superDelegationReason(impl, name) === null;
+}
