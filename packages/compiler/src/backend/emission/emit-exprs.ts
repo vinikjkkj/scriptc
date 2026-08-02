@@ -5926,6 +5926,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_key_raw(${arg(0)})`);
           case "key.gen":
             return finish(`scr_key_gen(${arg(0)}, ${arg(1)})`);
+          case "key.jwkX":
+            return finish(`scr_key_jwk_x(${arg(0)})`);
+          case "key.jwkD":
+            return finish(`scr_key_jwk_d(${arg(0)})`);
+          case "key.isPriv":
+            return finish(`scr_key_is_priv(${arg(0)})`);
+          case "key.crv":
+            return finish(`scr_key_crv(${arg(0)})`);
           case "big.add":
             return finish(`scr_big_add(${arg(0)}, ${arg(1)})`);
           case "big.sub":
