@@ -23,7 +23,7 @@ static void scr_bytes_oom(void) {
 }
 
 size_t scr_bytes_elem_size(ScrBytesElem elem) {
-  if (elem == SCR_BYTES_U8 || elem == SCR_BYTES_I8) return 1;
+  if (elem == SCR_BYTES_U8 || elem == SCR_BYTES_I8 || elem == SCR_BYTES_BUF) return 1;
   return elem == SCR_BYTES_F64 ? 8 : 4;
 }
 

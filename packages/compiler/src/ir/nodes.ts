@@ -27,7 +27,14 @@ export interface SrcLoc {
  * the constructors real CLI code reaches (Uint8Array/Buffer, Uint32Array,
  * Int32Array — the Atomics.wait sleep idiom's array — Float32Array). The
  * other TypedArray flavors stay frontend-fenced. */
-export type IrBytesElem = "u8" | "u32" | "i32" | "f32" | "f64" | "i8";
+/** `"buf"` is ArrayBuffer: the OPAQUE flavor. It shares the ScrBytes
+ * representation (so `new Uint8Array(buf)` is the existing view/backing
+ * alias, chain depth 1, and `.buffer` hands back the owner), but it is a
+ * DISTINCT IR type from `bytes<u8>` — which is what lets `x instanceof
+ * Uint8Array` discriminate an `ArrayBuffer | Uint8Array` union arm. It has
+ * no elements: element size is 1 byte and indexing is refused (TS gives
+ * ArrayBuffer no index signature, so the checker refuses it first). */
+export type IrBytesElem = "u8" | "u32" | "i32" | "f32" | "f64" | "i8" | "buf";
 
 export type IrType =
   | { kind: "f64" }

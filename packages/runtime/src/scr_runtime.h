@@ -4432,6 +4432,13 @@ typedef enum ScrBytesElem {
   SCR_BYTES_I32, /* Int32Array (reads sign-extend; writes ToInt32-wrap) */
   SCR_BYTES_F64, /* Float64Array (element IS the double — no coercion) */
   SCR_BYTES_I8,  /* Int8Array (reads sign-extend; writes ToInt8-wrap) */
+  /* ArrayBuffer: the OPAQUE flavor. Same ScrBytes representation, so a
+   * Uint8Array over it is the ordinary backing alias (chain depth 1) and
+   * `.buffer` hands back the owner. `len` counts BYTES here, because the
+   * element size is 1 and there are no elements to count -- an ArrayBuffer
+   * has no index signature, so nothing reads through it. It exists as a
+   * separate tag so `instanceof Uint8Array` can tell the two apart. */
+  SCR_BYTES_BUF,
 } ScrBytesElem;
 
 typedef struct ScrBytes {
