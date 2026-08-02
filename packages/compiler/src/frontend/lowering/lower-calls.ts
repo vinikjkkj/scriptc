@@ -8536,7 +8536,18 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
   export function lowerObjectMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(access, call)) return null;
-    const receiverIr = L.mapTypeOf(L.typeOf(access.expression));
+    let receiverIr = L.mapTypeOf(L.typeOf(access.expression));
+    // An INTERFACE-typed receiver whose binding KEPT the class (`const c =
+    // new WaClient(...)` through a construct-signature alias, or an
+    // explicit `const x: Iface = new Impl()`): the checker spells the
+    // annotation, which maps to a record, but the slot holds the
+    // instance. The const+new discipline (exactInstanceClassOf) proves the
+    // exact class, so the call dispatches like any class receiver — the
+    // generic-method path reads the same rule.
+    if (receiverIr?.kind === "record") {
+      const kept = exactInstanceClassOf(L, access.expression);
+      if (kept) receiverIr = { kind: "object", className: kept.def.name };
+    }
     if (receiverIr?.kind !== "object") return null;
     const info = L.classes.get(receiverIr.className);
     if (!info) L.flushDeferredClass(receiverIr.className);

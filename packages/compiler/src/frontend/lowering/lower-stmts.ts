@@ -3193,8 +3193,30 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       // handles dyn (validated exits, routed engine ops for wrapped
       // island members).
       (L.dynamic && init.type.kind === "dyn" && jsvalFlavoredType(L.mapTypeOf(L.typeOf(decl.name)) ?? DYN) ? DYN : null) ??
+      // A CONST holding a freshly constructed class instance whose
+      // DECLARED type is the interface the class implements (`const x:
+      // Iface = new Impl()`, and the same through a construct-signature
+      // alias). tsc already proved the instance satisfies the interface,
+      // so the interface is erasure over a nominal value: keeping the
+      // instance type reads members as the class's own methods instead
+      // of demanding a record shape the value never had.
+      (!isLet && init.type.kind === "object" && !bindingTainted
+        ? (L.mapTypeOf(L.typeOf(decl.name))?.kind === "record"
+            ? init.type
+            : null)
+        : null) ??
       (bindingTainted ? null : L.mapTypeOf(L.typeOf(decl.name))) ??
-      (init.type.kind === "dyn" ? DYN : null);
+      (init.type.kind === "dyn" ? DYN : null) ??
+      // A CONST holding a class reference whose DECLARED type is a
+      // construct-signature interface: `export const C = Impl as unknown
+      // as CCtor`, the shape a package uses to publish a class while
+      // keeping its implementation unexported. The cast is erasure, so
+      // the initializer already lowered to the class's static side; the
+      // interface is a compile-time claim with no runtime content, and
+      // adopting it would lose the only thing that can be constructed.
+      // `let` keeps the declared type: a later assignment could name an
+      // unrelated class.
+      (!isLet && init.type.kind === "classval" ? init.type : null);
     // A JS `let x = {}`: TS's empty-object-literal type admits ANY later
     // non-nullish assignment (`envs = {}`, later `envs =
     // Object.fromEntries(...)` — tsc accepts every such write, since

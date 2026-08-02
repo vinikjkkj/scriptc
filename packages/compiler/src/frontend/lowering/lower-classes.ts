@@ -3163,6 +3163,79 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
    * fence names it. Collection is on demand and idempotent
    * (lowerClassExpressionInfo), so resolution order between files and
    * passes never matters. */
+  /** A CONST whose initializer, with the type-level wrappers peeled, is a
+   * reference to a class declared in the program: `export const C = Impl
+   * as unknown as CCtor`, the shape a package uses to publish a class
+   * while keeping its implementation unexported. The casts are erasure —
+   * the value IS the class's static side — so `new C()` constructs the
+   * class the reference names.
+   *
+   * Deliberately narrow: `const` only (a `let` could later name an
+   * unrelated class), a single declaration, and an initializer that peels
+   * to a bare identifier. A conditional or computed initializer names no
+   * single class and keeps the fence. */
+  export function castAliasedClassInfoOf(L: Lowerer, symbol: ts.Symbol | null | undefined): ClassInfo | null {
+    if (!symbol) return null;
+    const decls = L.checker.declarationsOf(symbol);
+    if (decls.length !== 1) return null;
+    const decl = decls[0];
+    if (decl === undefined || !ts.isVariableDeclaration(decl) || decl.initializer === undefined) return null;
+    if ((ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) === 0) return null;
+    let init: ts.Expression = decl.initializer;
+    while (
+      ts.isParenthesizedExpression(init) ||
+      ts.isAsExpression(init) ||
+      ts.isSatisfiesExpression(init) ||
+      ts.isTypeAssertion(init)
+    ) {
+      init = init.expression;
+    }
+    if (!ts.isIdentifier(init)) return null;
+    const classSym = L.resolveValueSymbol(init);
+    return (classSym ? L.classBySymbol.get(classSym) : undefined) ?? null;
+  }
+
+  /** The class a `new` expression CONSTRUCTS, resolved through the callee
+   * rather than the checker's result type: `new C()` where C is published
+   * behind a construct-signature interface types the result as the
+   * INTERFACE, so the mapped-type read (exactInstanceClassOf's classOfNew)
+   * answers a record and loses the class. Mirrors lowerNew's own
+   * resolution chain so both agree on which class a `new` names. */
+  export function constructedClassInfoOf(L: Lowerer, expr: ts.Expression | undefined): ClassInfo | null {
+    if (expr === undefined) return null;
+    let e: ts.Expression = expr;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    if (!ts.isNewExpression(e) || !ts.isIdentifier(e.expression)) return null;
+    const symbol = L.resolveValueSymbol(e.expression);
+    return (
+      (symbol ? L.classBySymbol.get(symbol) : undefined) ??
+      propertyAssignedClassInfoOf(L, symbol) ??
+      castAliasedClassInfoOf(L, symbol) ??
+      null
+    );
+  }
+
+  /** The class a CONST binding's initializer names directly, with the
+   * type-level wrappers peeled — the declaration-site face of
+   * castAliasedClassInfoOf, for callers that hold the declaration rather
+   * than its symbol. */
+  export function castAliasedClassRefOf(L: Lowerer, decl: ts.VariableDeclaration): ClassInfo | null {
+    if (decl.initializer === undefined) return null;
+    if ((ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) === 0) return null;
+    let init: ts.Expression = decl.initializer;
+    while (
+      ts.isParenthesizedExpression(init) ||
+      ts.isAsExpression(init) ||
+      ts.isSatisfiesExpression(init) ||
+      ts.isTypeAssertion(init)
+    ) {
+      init = init.expression;
+    }
+    if (!ts.isIdentifier(init)) return null;
+    const sym = L.resolveValueSymbol(init);
+    return (sym ? L.classBySymbol.get(sym) : undefined) ?? null;
+  }
+
   export function propertyAssignedClassInfoOf(
     L: Lowerer,
     symbol: ts.Symbol | null | undefined,
@@ -3554,7 +3627,12 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     const classOfNew = (n: ts.Expression): ClassInfo | null => {
       if (!ts.isNewExpression(n)) return null;
       const t = L.mapTypeOf(L.typeOf(n));
-      return t?.kind === "object" ? (L.classes.get(t.className) ?? null) : null;
+      // A construct signature that returns an INTERFACE types the result
+      // as that interface, so the mapped read answers a record: resolve
+      // through the callee, exactly as lowerNew does.
+      return t?.kind === "object"
+        ? (L.classes.get(t.className) ?? null)
+        : constructedClassInfoOf(L, n);
     };
     const direct = classOfNew(e);
     if (direct) return direct;
@@ -5073,6 +5151,9 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         // class {…}`: the binding aliases the expression's own symbol —
         // the declaration story, collected on demand.
         propertyAssignedClassInfoOf(L, symbol) ??
+        // `const C = Impl as unknown as CCtor; new C()` — the published-
+        // class-behind-an-interface shape (see castAliasedClassInfoOf).
+        castAliasedClassInfoOf(L, symbol) ??
         undefined;
       // A rebindable decorated name constructs through its VALUE (the
       // classval-typed path below — newValue through the decoration
