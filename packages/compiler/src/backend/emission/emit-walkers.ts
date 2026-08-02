@@ -1414,7 +1414,11 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           for (const f of dynFields) {
             const keyLit = cStringLiteral(Buffer.from(f.name, "utf8"));
             const keyLen = Buffer.byteLength(f.name, "utf8");
-            d.push(`  scr_dyn_obj_set(d, ${keyLit}, ${keyLen}, ${E.toDynHelper(f.type)}(v->${mangleField(f.name)}));`);
+            // toDynExprC, not the converter directly: a FUNCTION field boxes
+            // through the closure path (anonymous — the static name is gone
+            // by the time a field flows through here), which the per-type
+            // converter has no case for.
+            d.push(`  scr_dyn_obj_set(d, ${keyLit}, ${keyLen}, ${toDynExprC(E, f.type, `v->${mangleField(f.name)}`)});`);
           }
         }
         if (shape.indexValue) {

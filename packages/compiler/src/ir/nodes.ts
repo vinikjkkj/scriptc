@@ -5423,6 +5423,7 @@ export function canConvertToDyn(
   t: IrType,
   getRecord: (shapeId: string) => IrRecordShape | undefined,
   getUnion: (unionId: string) => IrUnionDef | undefined,
+  visiting: Set<string> = new Set(),
 ): boolean {
   if (isJsonSafeType(t, getRecord, getUnion)) return true;
   // bytes<u8> is a dyn kind the walker boxes ANYWHERE (payload copied),
@@ -5462,6 +5463,25 @@ export function canConvertToDyn(
       a.kind === "undefinedT" || isJsonSafeType(a, getRecord, getUnion) ||
       (a.kind === "func" && canBoxFuncIntoDyn(a, getRecord, getUnion)),
     );
+  }
+  // A RECORD carrying FUNCTION fields — a store bundle handed to an
+  // `unknown` parameter. The walker boxes each field by its own kind, so a
+  // boxable func field is exactly the union-arm rule above, one container
+  // over. Index-signature shapes stay out: the overflow store's values have
+  // no per-key kind to box against. `visiting` breaks recursive shapes (a
+  // field whose type reaches its own record) the way the bytes walker does.
+  if (t.kind === "record") {
+    const shape = getRecord(t.shapeId);
+    if (!shape || shape.indexValue !== undefined) return false;
+    if (visiting.has(t.shapeId)) return true;
+    visiting.add(t.shapeId);
+    try {
+      return shape.fields.every((f) =>
+        (f.type.kind === "func" && canBoxFuncIntoDyn(f.type, getRecord, getUnion)) ||
+        canConvertToDyn(f.type, getRecord, getUnion, visiting));
+    } finally {
+      visiting.delete(t.shapeId);
+    }
   }
   return false;
 }
