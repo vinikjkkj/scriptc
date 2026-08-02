@@ -5262,6 +5262,21 @@ ScrSecureCtx *scr_tls_create_secure_context_dyn(const ScrDyn *opts);
 /* tls.getCACertificates(type): validateString + the documented name set,
  * then the compiler-rendered fence — always leaves an exception pending. */
 void scr_tls_ca_certs_chk(const ScrDyn *type, const ScrStr *fence);
+/* ── AbortSignal ──────────────────────────────────────────────────────
+ * The fetch-cancellation slice's handle. Present so that a signal has a
+ * TYPE: it is almost always an optional field on an options record the
+ * program never reads, and without a representation those records (and
+ * every class holding one) cannot compile at all.
+ *
+ * The value surface is not lowered yet -- the statics, the instance
+ * members and AbortController all fence in the frontend -- so nothing
+ * constructs one and these entry points exist for the ownership
+ * bookkeeping a record field needs, nothing more. */
+typedef struct ScrAbortSignal ScrAbortSignal;
+ScrAbortSignal *scr_abort_signal_retain(ScrAbortSignal *s);
+void scr_abort_signal_release(ScrAbortSignal *s);
+void *scr_abort_signal_retain_v(void *p);
+void scr_abort_signal_release_v(void *p);
 ScrSecureCtx *scr_secure_ctx_retain(ScrSecureCtx *c);
 void scr_secure_ctx_release(ScrSecureCtx *c);
 void *scr_secure_ctx_retain_v(void *p);

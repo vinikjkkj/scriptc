@@ -1,6 +1,6 @@
 import * as ts from "./ts7/adapter.js";
 import type { IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
-import { BIGINT, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
+import { ABORTSIGNAL_T, BIGINT, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile, isNodeTypesPath } from "./program.js";
 import { accessorSlotProp } from "../ir/nodes.js";
@@ -1594,6 +1594,24 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // for a bare value of the type).
   // Interface OR class declarations (the shipped fallback declares
   // interfaces; @types/node's undici-types declares Response as a class).
+  // AbortSignal has a STATIC representation of its own (the abortSignal
+  // handle), so it leaves the island group before the check below sends
+  // the rest of that group to jsval-or-nothing. It is overwhelmingly an
+  // optional field on an options record that the program never touches,
+  // and having no type at all is what stops those records — and every
+  // class holding one — from compiling. The value surface (the statics,
+  // the instance members, AbortController) is not lowered yet and fences
+  // per site, so nothing can build or observe a signal from here.
+  if (
+    psym?.name === "AbortSignal" &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+        ctx.isStdlibFile(d.getSourceFile()),
+    )
+  ) {
+    return ctx.dynamic ? JSVAL : ABORTSIGNAL_T;
+  }
   if (
     psym &&
     (ISLAND_AMBIENT_TYPES as readonly string[]).includes(psym.name) &&
