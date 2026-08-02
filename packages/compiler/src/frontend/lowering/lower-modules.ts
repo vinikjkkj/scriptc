@@ -22,7 +22,7 @@ import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-name
 import { collectExpandoMembers } from "./lower-expando.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import type { ClassInfo } from "./lower-classes.js";
-import { decoratorNodesOf, genericIfaceBindingKeepsClass, guaranteedDecorationThrow } from "./lower-classes.js";
+import { decoratorNodesOf, genericIfaceBindingKeepsClass, guaranteedDecorationThrow, castAliasedClassRefOf, constructedClassInfoOf} from "./lower-classes.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 
 /** One file's declarations, split for collection and init-body lowering. */
@@ -1399,7 +1399,21 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
                   // exactly the local rule (uncheckedOverloadHandleCall).
                   (uncheckedOverloadHandleCall(L, decl.initializer) ? JSVAL : null))
                 : null;
-            let type = handleT ?? L.irTypeOf(nameNode);
+            // `export const C = Impl as unknown as CCtor` — a class
+            // published behind a construct-signature interface. The
+            // binding's DECLARED type is that interface, which maps
+            // nowhere; the VALUE is the class's static side, exactly what
+            // `const Alias = Impl` stores. The cast is erasure, so the
+            // global slot takes the class value and `new C()` resolves
+            // (constructedClassInfoOf) like any declared class.
+            const castClass =
+              ts.isIdentifier(decl.name) && nameNode === decl.name
+                ? castAliasedClassRefOf(L, decl)
+                : null;
+            let type =
+              handleT ??
+              (castClass ? ({ kind: "classval", className: castClass.def.name } as IrType) : null) ??
+              L.irTypeOf(nameNode);
             // An evolving-`any` array's DERIVED file-scope binding under
             // --dynamic (`const kept = fns.filter(...)` where `fns`
             // registered array<jsval> at its `any[]` declaration): the
@@ -1429,6 +1443,21 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             ) {
               const initT = L.mapTypeOf(L.typeOf(decl.initializer!));
               if (initT?.kind === "object") type = initT;
+            }
+            // The same reasoning with the members SPELLED OUT (`const c =
+            // new WaClient(...)` where the construct signature returns the
+            // interface, or an explicit `const x: Iface = new Impl()`): a
+            // class instance has no record representation to width-coerce
+            // INTO — the assignment fences today — and in JS the binding
+            // simply IS the instance. tsc proved the instance satisfies
+            // the annotation, so the slot keeps the class and member reads
+            // resolve as the class's own.
+            if (
+              type.kind === "record" && ts.isIdentifier(decl.name) && nameNode === decl.name &&
+              (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) !== 0
+            ) {
+              const built = constructedClassInfoOf(L, decl.initializer);
+              if (built) type = { kind: "object", className: built.def.name };
             }
             // A file-scope PATTERN over an ISLAND-bound source (`export
             // let { toString } = 1;` — the engine reads the wrapper's
