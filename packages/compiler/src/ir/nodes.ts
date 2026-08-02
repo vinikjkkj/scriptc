@@ -203,6 +203,15 @@ export type IrType =
    * as a Map VALUE (the per-hostname context cache) like child; fenced out
    * of array elements and JSON like the other opaque handles. */
   | { kind: "secureCtx" }
+  /** AbortSignal — the fetch-cancellation slice. A refcounted handle like
+   * secureCtx: immutable identity, no cycles reachable from it (the
+   * abort reason is the only payload). It exists as a TYPE first: a
+   * signal is overwhelmingly an optional field on an options record that
+   * the program never reads, and mapping it is what lets those records
+   * compile. Every value operation (the statics, the instance members,
+   * AbortController) fences until the runtime lands, so no signal value
+   * can be built or observed while only the type is here. */
+  | { kind: "abortSignal" }
   /** Heap, refcounted closure. `rest` marks a VARIADIC JS function (a
    * `...args` rest parameter, or a zero-param function body reading
    * `arguments` — test/common's mustCall wrapper): the lifted function
@@ -323,7 +332,7 @@ export const REF_TRUTHY_KINDS: ReadonlySet<string> = new Set([
   "symbol",
   "array", "map", "set", "regex", "url", "searchParams", "stats", "spawnRes", "child",
   "netServer", "netSocket", "http2Session", "http2Stream", "dgramSocket", "testCtx", "httpReq", "httpRes", "httpClientReq",
-  "secureCtx", "fsWatcher", "childStream", "procStream", "bytes", "func", "object", "record", "promise",
+  "secureCtx", "abortSignal", "fsWatcher", "childStream", "procStream", "bytes", "func", "object", "record", "promise",
   // A generator object is a JS object: always truthy.
   "generator",
   // A class object is a JS object (constructors are functions): always truthy.
@@ -353,6 +362,7 @@ export const HTTPREQ_T: IrType = { kind: "httpReq" };
 export const HTTPRES_T: IrType = { kind: "httpRes" };
 export const HTTPCLIENTREQ_T: IrType = { kind: "httpClientReq" };
 export const SECURECTX_T: IrType = { kind: "secureCtx" };
+export const ABORTSIGNAL_T: IrType = { kind: "abortSignal" };
 export const FSWATCHER_T: IrType = { kind: "fsWatcher" };
 export const CHILDSTREAM_T: IrType = { kind: "childStream" };
 export const PROCSTREAM_T: IrType = { kind: "procStream" };
@@ -592,6 +602,8 @@ export function typeKey(t: IrType): string {
       return `promise<${typeKey(t.inner)}>`;
     case "generator":
       return `generator<${typeKey(t.yieldT)},${typeKey(t.retT)},${typeKey(t.nextT)}>`;
+    case "abortSignal":
+      return "abortSignal";
     default: {
       const _exhaustive: never = t;
       void _exhaustive;
@@ -680,6 +692,7 @@ export function isRefCounted(t: IrType): boolean {
     // SecureContext handles are refcounted like url/stats (immutable, no
     // cycles — parsed cert/key material inside only).
     t.kind === "secureCtx" ||
+    t.kind === "abortSignal" ||
     // FSWatcher handles are refcounted like child (listeners drop at
     // close, so lean allocation — see the IrType comment).
     t.kind === "fsWatcher" ||
@@ -5235,6 +5248,9 @@ function isJsonSafeAt(
     case "bigint":
     // A KeyObject has no JSON form either (Node stringifies it to {}).
     case "keyobj":
+    // An AbortSignal is an object with no own enumerable properties, so
+    // Node stringifies it to {} — no honest JSON surface either.
+    case "abortSignal":
       return false;
     default: {
       const _exhaustive: never = t;
@@ -6557,6 +6573,7 @@ const LIB_MODE_REFUSED_KINDS: ReadonlyMap<string, string> = new Map([
   ["httpRes", "the node:http surface"],
   ["httpClientReq", "the node:http surface"],
   ["secureCtx", "the node:tls surface"],
+  ["abortSignal", "the AbortSignal surface"],
   ["dynInvoke", "checked-dynamic prototype dispatch"],
 ]);
 
