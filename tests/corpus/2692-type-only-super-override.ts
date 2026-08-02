@@ -45,6 +45,15 @@ class Bus extends EventEmitter {
   once(event: string, listener: (...args: any[]) => void): this {
     return super.once(event, listener);
   }
+  // `emit` too, with the rest parameter forwarded as a spread. This one
+  // is NOT the specializable forwarding shape the emit path knows -- it
+  // still erases, because a body that observes nothing never needed to be
+  // specialized.
+  emit<K extends keyof EvMap & string>(event: K, payload: string): boolean;
+  emit(event: string, ...args: unknown[]): boolean;
+  emit(event: string, ...args: unknown[]): boolean {
+    return super.emit(event, ...args);
+  }
 }
 
 const bus = new Bus("main");

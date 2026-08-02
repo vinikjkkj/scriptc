@@ -15,7 +15,7 @@ import { pureReemittable } from "./lower-exprs.js";
 import { lowerSearchParamsNew } from "./lower-builtins.js";
 import { requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { STREAM_API_MEMBERS, STREAM_PROP_MEMBERS, UNDERSCORE_METHODS, lowerStreamNew, lowerStreamSuperCall, streamCtorShape } from "./lower-stream.js";
-import { superDelegationReason } from "./lower-emitter.js";
+import { erasableSuperDelegation } from "./lower-emitter.js";
 import { emitOverrideShapeReason, emitSpecSuperForward, emitterRooted, lowerEmitterSuperCall, type EmitOverrideRec } from "./lower-emitter.js";
 import { declSymbolOf } from "./lower-modules.js";
 import { uniqueSymbolKeyOf } from "./lower-exprs.js";
@@ -1347,6 +1347,15 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
                 continue;
               }
             }
+            // A pure super-delegation is erasable even when it is not the
+            // SPECIALIZABLE forwarding shape: `emit(event: string |
+            // symbol, ...args)` cannot be specialized per event (the
+            // event parameter is not a string), but a body that is
+            // nothing but `return super.emit(event, ...args)` does not
+            // need to be — it observes nothing, so dropping it leaves the
+            // runtime's own emit in place. Checked after the
+            // specialization path so a conforming shape still takes it.
+            if (erasableSuperDelegation(decl, member, "emit")) continue;
             L.unsupported(
               "SC1090",
               memberName,
@@ -1363,16 +1372,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           // declare nothing at runtime either, and whether they are
           // erasable is decided entirely by the implementation they
           // belong to — which is the declaration that would run.
-          if (ts.isMethodDeclaration(member)) {
-            const impl = member.body
-              ? member
-              : decl.members.find(
-                  (m): m is ts.MethodDeclaration =>
-                    ts.isMethodDeclaration(m) && m.body !== undefined &&
-                    m.name !== undefined && ts.isIdentifier(m.name) && m.name.text === memberName.text,
-                );
-            if (impl && superDelegationReason(impl, memberName.text) === null) continue;
-          }
+          if (erasableSuperDelegation(decl, member, memberName.text)) continue;
           L.unsupported(
             "SC1090",
             memberName,
