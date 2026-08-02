@@ -5,7 +5,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerGenMethodCall } from "./lower-generators.js";
-import { BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import type { IrFfiImport } from "../../ir/nodes.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { isGenericCallableMemberType, typeKey } from "../types.js";
@@ -3221,6 +3221,21 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // Provenance-checked like setTimeout; zero-arg forms are the JS
     // constants ("", false, 0). `new String(...)` (wrapper objects) stays
     // on the SC2020 fence.
+    // BigInt(x) over a NUMBER: integral doubles only — the runtime throws
+    // Node's RangeError otherwise. A bigint argument is the identity, and
+    // the string form keeps its fence (no parse surface exists yet).
+    if (
+      ts.isIdentifier(expr.expression) &&
+      expr.expression.text === "BigInt" &&
+      expr.arguments.length === 1 &&
+      L.isStdlibSymbol(L.resolveValueSymbol(expr.expression) ?? undefined)
+    ) {
+      const arg = L.lowerExpr(expr.arguments[0]!);
+      if (arg.type.kind === "bigint") return arg;
+      if (arg.type.kind === "f64") {
+        return { kind: "libCall", fn: "big.fromF64", args: [arg], type: BIGINT, loc };
+      }
+    }
     if (
       ts.isIdentifier(expr.expression) &&
       (expr.expression.text === "String" ||
@@ -3233,6 +3248,22 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         L.noLowering(`${name} with ${expr.arguments.length} arguments`, expr);
       }
       const argNode = expr.arguments[0];
+      if (argNode !== undefined && name !== "Boolean") {
+        const pre = L.lowerExpr(argNode);
+        if (pre.type.kind === "bigint") {
+          // Number(1n) is the nearest double; String(1n) is the DIGITS with
+          // no `n` suffix (the suffix belongs to inspect, not to String).
+          return name === "Number"
+            ? { kind: "libCall", fn: "big.toF64", args: [pre], type: F64, loc }
+            : {
+                kind: "libCall",
+                fn: "big.str",
+                args: [pre, { kind: "numLit", value: 10, type: F64, loc }],
+                type: STRING,
+                loc,
+              };
+        }
+      }
       if (!argNode) {
         if (name === "String") return { kind: "strLit", value: "", type: STRING, loc };
         if (name === "Boolean") return { kind: "boolLit", value: false, type: BOOL, loc };
@@ -4705,8 +4736,19 @@ const inliningPredicates = new Set<ts.Symbol>();
   export function lowerNumberToStringCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(call, access)) return null;
-    if (access.name.text !== "toString" || call.arguments.length !== 0) return null;
+    if (access.name.text !== "toString" || call.arguments.length > 1) return null;
     const recvKind = L.mapTypeOf(L.typeOf(access.expression))?.kind;
+    // `b.toString()` / `b.toString(16)` on a bigint: the DIGITS, no `n`
+    // suffix (that belongs to inspect). A non-literal radix is fine — the
+    // runtime takes it as a value.
+    if (recvKind === "bigint" && L.isStdlibMember(access)) {
+      const recvBig = L.lowerExpr(access.expression);
+      const radix = call.arguments[0]
+        ? L.lowerExprExpecting(call.arguments[0], F64)
+        : ({ kind: "numLit", value: 10, type: F64, loc: locOf(call) } as IrExpr);
+      return { kind: "libCall", fn: "big.str", args: [recvBig, radix], type: STRING, loc: locOf(call) };
+    }
+    if (call.arguments.length !== 0) return null;
     if (recvKind !== "f64" && recvKind !== "bool" && recvKind !== "string") return null;
     if (!L.isStdlibMember(access)) return null;
     const operand = L.lowerExpr(access.expression);

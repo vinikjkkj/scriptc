@@ -206,6 +206,10 @@ export type IrType =
    * through the dyn boundary (boxed thunks); direct static calls box
    * first (lower-calls). */
   | { kind: "func"; params: IrType[]; ret: IrType; rest?: true; restAbi?: "jsval" }
+  /* Arbitrary-precision integer (ScrBigInt) — heap, refcounted. Never
+   * implicitly convertible with f64: JS itself refuses to mix them in
+   * arithmetic, so the fence is the language's, not ours. */
+  | { kind: "bigint" }
   | { kind: "object"; className: string } // heap, refcounted class instance
   /** The class STATIC side as a value — `typeof C`, the type of the class
    * name itself and of `new (…) => T` constructor-typed slots. Runtime
@@ -321,6 +325,7 @@ export const BYTES_U8: IrType = { kind: "bytes", elem: "u8" };
 export const STRING: IrType = { kind: "string" };
 export const BOOL: IrType = { kind: "bool" };
 export const REGEX: IrType = { kind: "regex" };
+export const BIGINT: IrType = { kind: "bigint" };
 export const URL_T: IrType = { kind: "url" };
 export const SEARCH_PARAMS_T: IrType = { kind: "searchParams" };
 export const SYMBOL_T: IrType = { kind: "symbol" };
@@ -546,6 +551,8 @@ export function typeKey(t: IrType): string {
       return `classval:${t.className}`;
     case "record":
       return `record:${t.shapeId}`;
+    case "bigint":
+      return "bigint";
     case "union":
       return `union:${t.unionId}`;
     case "promise":
@@ -3580,6 +3587,24 @@ export type IrLibFn =
   | "insp.error"
   | "insp.dyn"
   | "insp.dynS"
+  | "big.str"
+  | "big.add"
+  | "big.sub"
+  | "big.mul"
+  | "big.div"
+  | "big.rem"
+  | "big.pow"
+  | "big.shl"
+  | "big.shr"
+  | "big.and"
+  | "big.or"
+  | "big.xor"
+  | "big.neg"
+  | "big.not"
+  | "big.cmp"
+  | "big.eq"
+  | "big.fromF64"
+  | "big.toF64"
   | "insp.dynSpread"
   | "insp.jsval"
   | "insp.begin"
@@ -3980,6 +4005,10 @@ export type IrExpr =
    * for every program that held its numbers. */
   | { kind: "numLit"; value: number; spelling?: string; type: IrType; loc: SrcLoc }
   | { kind: "strLit"; value: string; type: IrType; loc: SrcLoc }
+  /* A bigint literal, carrying its own SPELLING (decimal or 0x/0o/0b, `n`
+   * suffix and numeric separators already stripped). The value is built at
+   * runtime: a 253-bit constant has no host slot to fold into. */
+  | { kind: "bigLit"; text: string; type: IrType; loc: SrcLoc }
   | { kind: "boolLit"; value: boolean; type: IrType; loc: SrcLoc }
   /** An `undefined` or `null` literal; `type` is the matching unit kind.
    * Valid ONLY as the immediate value of a `unionWrap` (the frontend's slot
@@ -5153,6 +5182,10 @@ function isJsonSafeAt(
     // validate (a JSON null matches exactly the nullT arm).
     case "nullT":
       return true;
+    // JSON.stringify THROWS on a bigint ("Do not know how to serialize"),
+    // so no JSON surface may carry one.
+    case "bigint":
+      return false;
     default: {
       const _exhaustive: never = t;
       void _exhaustive;
@@ -5826,6 +5859,29 @@ export function moduleUsesZlib(mod: IrModule): boolean {
     }
     const node = v as { kind?: unknown; fn?: unknown };
     if (node.kind === "libCall" && typeof node.fn === "string" && node.fn.startsWith("zlib.")) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
+/** True when any value in the module is a bigint — the link switch that
+ * pulls scr_bigint.c in (cc.ts), the zlib/regex gating precedent, so
+ * bigint-free binaries keep their exact size class. Types are what is
+ * probed, not calls: a bigint reaches the runtime through operators and
+ * literals, not through one named surface. */
+export function moduleUsesBigInt(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    if ((v as { kind?: unknown }).kind === "bigint") {
       found = true;
       return;
     }

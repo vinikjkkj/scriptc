@@ -4655,6 +4655,47 @@ ScrStr *scr_insp_error(ScrError *e, double recurse, double depth);
 ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth);
 /* format's %s / rest-args twin: dyn strings pass verbatim. */
 ScrStr *scr_insp_dyn_s(ScrDyn *d, double depth);
+/* ── BigInt ────────────────────── */
+/* Arbitrary-precision integers, sign-magnitude over base-2^32 limbs (little
+ * endian, no leading zero limbs, sign 0 iff n == 0). Refcounted like every
+ * heap value; scr_bigint.c is compiled only for programs that use bigint.
+ * Every producer returns +1 and BORROWS its operands. */
+typedef struct ScrBigInt {
+  size_t rc;
+  int sign;
+  size_t n;
+  size_t cap;
+  uint32_t limbs[];
+} ScrBigInt;
+
+ScrBigInt *scr_big_retain(ScrBigInt *b);
+void scr_big_release(ScrBigInt *b);
+ScrBigInt *scr_big_zero(void);
+/* The literal's own spelling without the `n` suffix (decimal or 0x/0o/0b). */
+ScrBigInt *scr_big_parse(const char *s, size_t len);
+/* BigInt(number) — integral doubles only, RangeError otherwise. */
+ScrBigInt *scr_big_from_f64(double v);
+double scr_big_to_f64(const ScrBigInt *a);
+ScrStr *scr_big_to_str(const ScrBigInt *a, double radix);
+ScrBigInt *scr_big_add(const ScrBigInt *a, const ScrBigInt *b);
+ScrBigInt *scr_big_sub(const ScrBigInt *a, const ScrBigInt *b);
+ScrBigInt *scr_big_mul(const ScrBigInt *a, const ScrBigInt *b);
+/* `/` and `%` TRUNCATE toward zero; both throw RangeError on a zero divisor. */
+ScrBigInt *scr_big_div(const ScrBigInt *a, const ScrBigInt *b);
+ScrBigInt *scr_big_rem(const ScrBigInt *a, const ScrBigInt *b);
+ScrBigInt *scr_big_pow(const ScrBigInt *a, const ScrBigInt *b);
+ScrBigInt *scr_big_neg(const ScrBigInt *a);
+/* Shifts and bitwise act on the INFINITE two's-complement representation:
+ * `>>` floors, `~x == -x - 1`, and negative operands are defined. */
+ScrBigInt *scr_big_shl(const ScrBigInt *a, const ScrBigInt *b);
+ScrBigInt *scr_big_shr(const ScrBigInt *a, const ScrBigInt *b);
+ScrBigInt *scr_big_and(const ScrBigInt *a, const ScrBigInt *b);
+ScrBigInt *scr_big_or(const ScrBigInt *a, const ScrBigInt *b);
+ScrBigInt *scr_big_xor(const ScrBigInt *a, const ScrBigInt *b);
+ScrBigInt *scr_big_not(const ScrBigInt *a);
+int scr_big_cmp(const ScrBigInt *a, const ScrBigInt *b);
+bool scr_big_eq(const ScrBigInt *a, const ScrBigInt *b);
+bool scr_big_truthy(const ScrBigInt *a);
 /* The RUNTIME-arity twin for console.log(...args): space-joins the
  * checked-dynamic rest array through scr_insp_dyn_s at depth 2. */
 ScrStr *scr_insp_dyn_spread(ScrDyn *arr);
