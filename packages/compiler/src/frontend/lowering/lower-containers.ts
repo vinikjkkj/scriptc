@@ -121,6 +121,16 @@ function lowerOptionalDefaultArg(
         probedUntyped = true;
       }
     }
+    // A UNIFORM-TUPLE receiver whose VALUE is a static array: the promise
+    // combinators' plain bindings (their lowering builds a real array, and
+    // with one shared element type the tuple describes the same value —
+    // lowerVarDecl's rule). Same probe as above, one receiver kind over:
+    // dispatch follows the value, so the array tables answer instead of the
+    // tuple's "no lowering for this method".
+    if (receiverIr?.kind === "record" && L.shapes.get(receiverIr.shapeId)?.tuple) {
+      const probe = L.lowerExpr(access.expression);
+      if (probe.type.kind === "array") receiverIr = probe.type;
+    }
     if (receiverIr?.kind !== "array") return null;
     if (!probedUntyped && !L.isStdlibMember(access)) return null;
     let elem = receiverIr.elem;
