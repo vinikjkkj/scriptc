@@ -7511,7 +7511,13 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       const helper = recordHasOwnHelper(L, receiver.type.shapeId, loc);
       return { kind: "call", callee: helper, args: [receiver, key], type: BOOL, loc };
     }
-    if (member !== "keys" && member !== "values" && member !== "entries") return null;
+    // getOwnPropertyNames answers the same list as keys for every value this
+    // compiles: a record has no non-enumerable own members and no symbol
+    // keys, so "own property names" and "own enumerable keys" coincide. The
+    // esbuild CJS preamble reaches it (`Object.getOwnPropertyNames(mods)[0]`),
+    // which is how a bundled dependency finds its single module factory.
+    const objMember = member === "getOwnPropertyNames" ? "keys" : member;
+    if (objMember !== "keys" && objMember !== "values" && objMember !== "entries") return null;
     if (call.arguments.length !== 1 || ts.isSpreadElement(call.arguments[0]!)) return null;
     const argNode = call.arguments[0]!;
     // A CHECKED-DYNAMIC argument — the checker may still spell a record
@@ -7526,7 +7532,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       // walk: it throws Node's catchable TypeError.
       const isUnit = probed !== null && probed !== undefined && isUnitType(probed.type);
       if (isDyn || isUnit) {
-        const fn = member === "keys" ? "dyn.objKeys" : member === "values" ? "dyn.objValues" : "dyn.objEntries";
+        const fn = objMember === "keys" ? "dyn.objKeys" : objMember === "values" ? "dyn.objValues" : "dyn.objEntries";
         let v = L.lowerExpr(argNode);
         if (v.type.kind !== "dyn") v = { kind: "dynFrom", value: v, type: DYN, loc: locOf(call) };
         return { kind: "libCall", fn, args: [v], type: DYN, loc: locOf(call) };
@@ -7551,20 +7557,20 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       L.unsupported(
         "SC1090",
         call,
-        `Object.${member} over a shape carrying get/set accessor properties (Node lists the accessor names${member === "keys" ? "" : " and invokes the getters"} — the static key walk cannot; read the properties explicitly)`,
+        `Object.${member} over a shape carrying get/set accessor properties (Node lists the accessor names${objMember === "keys" ? "" : " and invokes the getters"} — the static key walk cannot; read the properties explicitly)`,
       );
     }
     if (shape.indexValue) {
       // Index-signature (overflow-carrying) shapes: the runtime walk —
       // declared fields first, then the overflow in JS own-key order
       // (lowerObjectIterOverIndexShape in lower-containers).
-      return lowerObjectIterOverIndexShape(L, call, member, argIr, shape);
+      return lowerObjectIterOverIndexShape(L, call, objMember, argIr, shape);
     }
     const loc = locOf(call);
     const resultT = L.irTypeOf(call);
     if (resultT.kind !== "array") L.badType(call, L.typeOf(call)); // defensive
     const receiver = L.lowerExpr(argNode);
-    if (member === "keys") {
+    if (objMember === "keys") {
       // The keys walk is shared with for-in (which iterates exactly the
       // keys Object.keys answers — one construction, one intern key).
       return recordKeysArrayCall(L, receiver, argIr, shape, loc);
@@ -7575,8 +7581,8 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     // "1" field for entries.
     let valueT: IrType | null = null;
     let tupleT: (IrType & { kind: "record" }) | null = null;
-    if (member === "values") valueT = resultT.elem;
-    if (member === "entries") {
+    if (objMember === "values") valueT = resultT.elem;
+    if (objMember === "entries") {
       if (resultT.elem.kind !== "record") L.badType(call, L.typeOf(call));
       tupleT = resultT.elem;
       const tupleShape = L.shapes.get(resultT.elem.shapeId);
@@ -7666,7 +7672,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
           );
         }
         const pushed: IrExpr =
-          member === "values"
+          objMember === "values"
             ? coerced
             : {
                 kind: "recordLit",
