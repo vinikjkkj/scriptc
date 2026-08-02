@@ -6,7 +6,7 @@
  * interning ORDER is part of the emitted C, so the registries stay on
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
-import { DYN_HANDLE_KINDS, IrType, isRefCounted, typeEquals, typeKey } from "../../ir/nodes.js";
+import { canBoxFuncIntoDyn, DYN_HANDLE_KINDS, IrType, isRefCounted, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { OVERFLOW_MEMBER } from "./emit-shapes.js";
@@ -1418,7 +1418,10 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             // through the closure path (anonymous — the static name is gone
             // by the time a field flows through here), which the per-type
             // converter has no case for.
-            d.push(`  scr_dyn_obj_set(d, ${keyLit}, ${keyLen}, ${toDynExprC(E, f.type, `v->${mangleField(f.name)}`)});`);
+            const fv = f.type.kind === "func"
+              ? dynFuncFieldBoxC(E, f.type, `v->${mangleField(f.name)}`)
+              : toDynExprC(E, f.type, `v->${mangleField(f.name)}`);
+            d.push(`  scr_dyn_obj_set(d, ${keyLit}, ${keyLen}, ${fv});`);
           }
         }
         if (shape.indexValue) {
@@ -1690,6 +1693,55 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`}`, ``);
     E.walkerDefs.push(...d);
     return name;
+  }
+
+/** The box builder for a CARRIED function field whose signature has no dyn
+   * call thunk — a parameter the checked-dynamic side cannot validate back
+   * (a record holding bytes, say). The field is still boxed, so the object
+   * keeps the key and `"m" in v` answers what Node answers; only CALLING it
+   * through the dyn side throws, which is the stranded stance
+   * funcCoerceAdapter already takes for a slot whose pieces cannot convert.
+   *
+   * Only reachable from the record walker. A bare function, or a union arm,
+   * keeps the compile-time fence: there the value exists to be called, and a
+   * runtime trap would be a worse answer than a named refusal. */
+  function strandedDynFuncBoxHelper(E: CEmitter, t: IrType & { kind: "func" }): string {
+    const key = typeKey(t);
+    const existing = E.strandedDynFuncBoxes.get(key);
+    if (existing) return existing;
+    const name = `sc_dfs_${E.strandedDynFuncBoxes.size}`;
+    E.strandedDynFuncBoxes.set(key, name);
+    const thunkName = `${name}_thunk`;
+    const thunkSig = `static ScrDyn *${thunkName}(ScrClosure *c, ScrDyn *const *args, size_t argc)`;
+    const msg = `a '${key}' function carried into 'unknown' cannot be called through it (its parameters have no checked-dynamic form)`;
+    const msgLit = cStringLiteral(Buffer.from(msg, "utf8"));
+    E.walkerProtos.push(`${thunkSig}; /* stranded dyn call thunk for ${key} */`);
+    E.walkerDefs.push(
+      `${thunkSig} { /* stranded dyn call thunk for ${key} */`,
+      `  (void)c; (void)args; (void)argc;`,
+      `  scr_throw_error_msg(SCR_ERR_TYPE, ${msgLit}, ${Buffer.byteLength(msg, "utf8")});`,
+      `  return NULL;`,
+      `}`,
+      ``,
+    );
+    const sig = `static ScrDyn *${name}(ScrClosure *v, const char *fname)`;
+    E.walkerProtos.push(`${sig}; /* box ${key} into dyn (uncallable) */`);
+    const sigLit = cStringLiteral(Buffer.from(key, "utf8"));
+    E.walkerDefs.push(
+      `${sig} { /* box ${key} into dyn (uncallable) */`,
+      `  return scr_dyn_new_func(scr_closure_retain(v), &${thunkName}, ${t.params.length}, ${sigLit}, fname);`,
+      `}`,
+      ``,
+    );
+    return name;
+  }
+
+/** How a record FIELD of function type boxes: the ordinary thunk when the
+   * signature has one, the stranded box otherwise. */
+  export function dynFuncFieldBoxC(E: CEmitter, t: IrType & { kind: "func" }, expr: string): string {
+    const boxable = canBoxFuncIntoDyn(t, (id: string) => E.recordsById.get(id), (id: string) => E.unionsById.get(id));
+    const helper = boxable ? E.dynFuncBoxHelper(t) : strandedDynFuncBoxHelper(E, t);
+    return `${helper}(${expr}, NULL)`;
   }
 
 /** The box builder dynFrom emits for one closure signature. */

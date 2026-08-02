@@ -5476,9 +5476,16 @@ export function canConvertToDyn(
     if (visiting.has(t.shapeId)) return true;
     visiting.add(t.shapeId);
     try {
+      // A FUNCTION field boxes either way: with its dyn call thunk when the
+      // signature has one, and STRANDED — present, uncallable through the
+      // dyn side — when it does not. The record is being CARRIED here (an
+      // `unknown` parameter that probes for one method and ignores the
+      // rest), so refusing the whole value because one field it never calls
+      // has an unvalidatable parameter would be the wrong trade. A bare
+      // function and a union arm keep the compile-time fence: there the
+      // value exists to be called.
       return shape.fields.every((f) =>
-        (f.type.kind === "func" && canBoxFuncIntoDyn(f.type, getRecord, getUnion)) ||
-        canConvertToDyn(f.type, getRecord, getUnion, visiting));
+        f.type.kind === "func" || canConvertToDyn(f.type, getRecord, getUnion, visiting));
     } finally {
       visiting.delete(t.shapeId);
     }
