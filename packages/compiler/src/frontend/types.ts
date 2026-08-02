@@ -2556,7 +2556,17 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
             // against sibling data arms): only the promise-or-absent shape
             // maps — `Promise<T> | undefined`, and `Promise<T> | void`
             // return types whose void part became the undefined arm above.
-            (a.kind === "promise" && !arms.every((b) => b === a || isUnitType(b))),
+            // Promise arms need a narrowing test against every sibling DATA
+            // arm. `typeof` supplies one whenever the sibling answers
+            // something other than "object" — `typeof v === "string"` splits
+            // `string | Promise<string>` exactly, which is the shape a
+            // resolver option takes (`T | (() => T | Promise<T>)`). Against
+            // another "object" answer (a record, an array, a second promise)
+            // no test exists, and that stays refused.
+            (a.kind === "promise" &&
+              !arms.every(
+                (c) => c === a || isUnitType(c) || typeofSplitsFromObject(c),
+              )),
         )
       ) {
         return null;
@@ -3427,6 +3437,24 @@ export function dynSubsumableUnionArm(arm: IrType, ctx: TypeMapperCtx): boolean 
     case "record":
     case "array":
       return canConvertToDyn(arm, (id) => ctx.shapes.get(id), (id) => ctx.unions.get(id));
+    default:
+      return false;
+  }
+}
+
+/** True when `typeof` on this arm answers something OTHER than "object", so a
+ * `typeof` test tells it apart from a promise sibling (typeofAnswer in
+ * lower-exprs is the authority on the answers; this is the object/non-object
+ * split it induces). */
+function typeofSplitsFromObject(arm: IrType): boolean {
+  switch (arm.kind) {
+    case "f64":
+    case "string":
+    case "bool":
+    case "func":
+    case "symbol":
+    case "bigint":
+      return true;
     default:
       return false;
   }
