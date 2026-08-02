@@ -2253,7 +2253,16 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     for (const p of sig.getParameters()) {
       const decl = checker.valueDeclarationOf(p);
       if (decl && ts.isParameter(decl) && decl.dotDotDotToken) {
-        return null;
+        // The TRAILING rest slot IS an array in the compiled calling
+        // convention — a declared `function f(...xs: T[])` already takes
+        // one (ParamShape's "rest" mode). Spelling it here lets the
+        // SIGNATURE map too, so a rest function can flow as a value;
+        // callers pack the surplus arguments (restPackArity). A rest bound
+        // to a TUPLE has no single element type and keeps the fence.
+        const restT = mapType(checker.getTypeOfSymbol(p), ctx);
+        if (!restT || (restT.kind !== "array" && restT.kind !== "dyn")) return null;
+        params.push(restT);
+        continue;
       }
       const optional =
         decl !== undefined &&

@@ -199,7 +199,12 @@ export interface GenericInstance {
         // machinery (declareParams → lowerBindingPattern).
         const type = L.irTypeOf(param.name);
         const tupleRest = type.kind === "record" && L.shapes.get(type.shapeId)?.tuple === true;
-        if (type.kind !== "array" && !tupleRest) L.badType(param.name, L.typeOf(param.name));
+        // `...args: unknown[]` maps to the checked-dynamic ARRAY (a dyn
+        // element makes the whole array dyn — mapType's rule), so the rest
+        // slot is a dyn value that callers fill with a dynArrLit.
+        if (type.kind !== "array" && type.kind !== "dyn" && !tupleRest) {
+          L.badType(param.name, L.typeOf(param.name));
+        }
         return { type, mode: "rest" };
       }
       if (param.initializer) {
@@ -251,7 +256,7 @@ export interface GenericInstance {
       const type = L.irTypeOf(param.name);
       // Tuple-typed rest params don't map to an array; generic rest is the
       // generic path's business. Anything non-array here is unmappable.
-      if (type.kind !== "array") L.badType(param.name, L.typeOf(param.name));
+      if (type.kind !== "array" && type.kind !== "dyn") L.badType(param.name, L.typeOf(param.name));
       return { type, mode: "rest" };
     }
     if (param.initializer) {
@@ -422,6 +427,18 @@ export interface GenericInstance {
         return L.lowerExprExpecting(a, DYN);
       });
       out.push({ kind: "dynArrLit", elems, type: DYN, loc });
+    } else if (restAt >= 0 && shapes[restAt]!.type.kind === "dyn") {
+      // A SPELLED `...args: unknown[]`: the slot is the checked-dynamic
+      // array (dynRest's literal, but a real declared parameter — the
+      // callee reads length/index through the same keyed-dyn paths).
+      const elems = sources.slice(restAt).map((a): IrExpr => {
+        if (isIr(a)) return L.coerceInto(blame, a.ir, DYN);
+        if (ts.isSpreadElement(a)) {
+          L.unsupported("SC1090", a, "spread arguments into a dynamic rest parameter");
+        }
+        return L.lowerExprExpecting(a, DYN);
+      });
+      out.push({ kind: "dynArrLit", elems, type: DYN, loc });
     } else if (restAt >= 0) {
       const restType = shapes[restAt]!.type;
       // A TUPLE-typed rest (`(...[x, y]: [number, number])` — the pattern
@@ -567,6 +584,41 @@ export interface GenericInstance {
    * parameters (`x?: T` / `x: T = e` params appear as literal `T | undefined`
    * unions; a rest signature is never spellable without `...`, which func
    * types reject). Direct calls get the full feature. */
+  /** Arguments for a call THROUGH A VALUE whose signature ends in a rest
+   * parameter: the compiled slot is one array (mapType's rest mapping), so
+   * the surplus arguments pack into an array literal at the call site —
+   * the same reshaping a direct call performs, moved to the caller because
+   * a value call has no declaration to read. Returns null when the
+   * resolved signature has no rest slot, when a spread argument makes the
+   * count run-time, or when the callee's own type never spelled the array
+   * (an island or dyn-tier slot keeps its existing story). */
+  function restPackedArgs(L: Lowerer, expr: ts.CallExpression, params: readonly IrType[],
+    loc: SrcLoc,): IrExpr[] | null {
+    if (params.length === 0) return null;
+    const restT = params[params.length - 1]!;
+    if (restT.kind !== "array" && restT.kind !== "dyn") return null;
+    const sig = L.checker.getResolvedSignature(expr);
+    if (!sig) return null;
+    const sigParams = sig.getParameters();
+    if (sigParams.length !== params.length) return null;
+    const restDecl = L.checker.valueDeclarationOf(sigParams[sigParams.length - 1]!);
+    if (!restDecl || !ts.isParameter(restDecl) || restDecl.dotDotDotToken === undefined) return null;
+    const fixed = params.length - 1;
+    if (expr.arguments.length < fixed) return null;
+    if (expr.arguments.some((a) => ts.isSpreadElement(a))) return null;
+    const out = expr.arguments
+      .slice(0, fixed)
+      .map((a, i) => L.lowerExprExpecting(a, params[i]));
+    if (restT.kind === "dyn") {
+      const dynElems = expr.arguments.slice(fixed).map((a) => L.lowerExprExpecting(a, DYN));
+      out.push({ kind: "dynArrLit", elems: dynElems, type: DYN, loc });
+      return out;
+    }
+    const elems = expr.arguments.slice(fixed).map((a) => L.lowerExprExpecting(a, restT.elem));
+    out.push({ kind: "arrayLit", elems, type: restT, loc });
+    return out;
+  }
+
   export function requireExactArityValue(L: Lowerer, blame: ts.Node,
     contextual: ts.Expression | null,
     shapes: readonly ParamShape[],
@@ -584,6 +636,10 @@ export interface GenericInstance {
           s.mode === "required" ||
           s.mode === "dynRest" ||
           s.mode === "islandRest" ||
+          // A STATIC rest slot is an ordinary required array parameter in
+          // the compiled ABI, and func types now spell it (mapType's rest
+          // mapping) — so the value form is exact.
+          s.mode === "rest" ||
           (s.mode === "omittable" && (s.type.kind === "dyn" || s.type.kind === "jsval")),
       )
     ) {
@@ -1009,7 +1065,7 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
       const mapped = L.mapTypeOf(pt);
       if (!mapped || mapped.kind === "void") L.badType(expr.arguments[i] ?? expr, pt);
       if (declParam.dotDotDotToken) {
-        if (mapped.kind !== "array") L.badType(expr.arguments[i] ?? expr, pt);
+        if (mapped.kind !== "array" && mapped.kind !== "dyn") L.badType(expr.arguments[i] ?? expr, pt);
         params.push({ type: mapped, mode: "rest" });
       } else if (declParam.initializer) {
         if (mapped.kind === "dyn" || mapped.kind === "jsval") {
@@ -1696,7 +1752,7 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
         const mapped = L.mapTypeOf(pt);
         if (!mapped || mapped.kind === "void") L.badType(declParam.name, pt);
         if (declParam.dotDotDotToken) {
-          if (mapped.kind !== "array") L.badType(declParam.name, pt);
+          if (mapped.kind !== "array" && mapped.kind !== "dyn") L.badType(declParam.name, pt);
           params.push({ type: mapped, mode: "rest" });
         } else if (declParam.initializer) {
           if (mapped.kind === "dyn" || mapped.kind === "jsval") {
@@ -4157,6 +4213,8 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       return { kind: "dynCall", callee: boxed, calleeName, args, type: DYN, loc };
     }
     const params = callee.type.params;
+    const packed = restPackedArgs(L, expr, params, loc);
+    if (packed) return { kind: "callValue", callee, args: packed, type: callee.type.ret, loc };
     const args = expr.arguments.map((a, i) => L.lowerExprExpecting(a, params[i]));
     // Optional-param func TYPES map their `x?: T` slots as `T | undefined`
     // ABI unions, and tsc admits calls that omit the optional suffix —
@@ -7737,6 +7795,10 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     if (callee.type.kind === "record") callee = L.hybridCallUnwrap(callee);
     if (callee.type.kind !== "func") L.badType(access, L.typeOf(access));
     const params = callee.type.params;
+    const packedRest = restPackedArgs(L, call, params, locOf(call));
+    if (packedRest) {
+      return { kind: "callValue", callee, args: packedRest, type: callee.type.ret, loc: locOf(call) };
+    }
     const args = call.arguments.map((a, i) => L.lowerExprExpecting(a, params[i]));
     return { kind: "callValue", callee, args, type: callee.type.ret, loc: locOf(call) };
   }
@@ -8596,6 +8658,12 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
         const callee = read !== null && read.type.kind === "union" ? L.maybeNarrow(read, access) : read;
         if (callee?.type.kind === "func") {
           const params = callee.type.params;
+          const packedField = restPackedArgs(L, call, params, locOf(call));
+          if (packedField) {
+            return {
+              kind: "callValue", callee, args: packedField, type: callee.type.ret, loc: locOf(call),
+            };
+          }
           const args = call.arguments.map((a, i) => L.lowerExprExpecting(a, params[i]));
           for (let i = args.length; i < params.length; i++) {
             const absent = omittedArgFor(L, params[i]!, locOf(call));
