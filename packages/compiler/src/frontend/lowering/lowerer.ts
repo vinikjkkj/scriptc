@@ -7967,8 +7967,17 @@ export class Lowerer {
     const hit = this.twinCache.get(name);
     if (hit !== undefined) return hit;
     let found = false;
-    if (name.endsWith(".d.ts")) {
-      const stem = name.slice(0, -".d.ts".length);
+    // All three declaration extensions, each with the runtime extension it
+    // pairs with: a generated module ships `.d.cts` beside `.cjs` and
+    // `.d.mts` beside `.mjs` exactly as it ships `.d.ts` beside `.js`.
+    // Matching only the last of those left the other two looking like
+    // declarations nothing defines.
+    const stem =
+      name.endsWith(".d.ts") ? name.slice(0, -".d.ts".length)
+      : name.endsWith(".d.cts") ? name.slice(0, -".d.cts".length)
+      : name.endsWith(".d.mts") ? name.slice(0, -".d.mts".length)
+      : null;
+    if (stem !== null) {
       for (const compiled of this.fileTag.keys()) {
         const f = compiled.fileName;
         if (f === `${stem}.js` || f === `${stem}.mjs` || f === `${stem}.cjs`) {
