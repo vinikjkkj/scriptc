@@ -3658,7 +3658,15 @@ function isDataOnlyObjectType(t: ts.Type, checker: ts.TypeChecker): boolean {
  * member is a function the key walk would name). */
 export function isGenericCallableMemberType(t: ts.Type, checker: ts.TypeChecker): boolean {
   const sigs = checker.getCallSignatures(t);
-  if (sigs.length === 0 || !sigs.every((s) => s.getTypeParameters().length > 0)) return false;
+  // ANY generic signature disqualifies the slot, not only an all-generic
+  // overload set: an emitter subclass declaring `emit<K extends keyof M>`
+  // over a base declaring `emit(name: string | symbol, ...args: any[])`
+  // merges to two signatures, one generic and one not, and no single
+  // closure slot holds that either. Such members already failed — mapType
+  // fences an overload set, taking the whole enclosing shape down with it
+  // — so treating them as excluded members is strictly more permissive,
+  // and reading one AS a value still fences (SC1090).
+  if (sigs.length === 0 || !sigs.some((s) => s.getTypeParameters().length > 0)) return false;
   return (
     checker.getConstructSignatures(t).length === 0 &&
     checker.getPropertiesOfType(t).length === 0 &&
