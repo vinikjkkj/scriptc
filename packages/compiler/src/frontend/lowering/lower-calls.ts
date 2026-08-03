@@ -7827,6 +7827,15 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       ) {
         return value; // ES2015: freeze of a primitive is the primitive
       }
+      // A BUILDER binding: a file-scope const filled by preceding
+      // top-level statements and handed to freeze, with no other use. No
+      // reference to it exists after this call and none of the earlier
+      // ones let it escape, so nothing can write through it later and the
+      // frozen bit is as unobservable as it is over a fresh literal --
+      // which is the rule this fence already grants.
+      if (ts.isIdentifier(inner) && freezeBuilderBinding(L, inner, call)) {
+        return value;
+      }
       L.noLowering(
         "Object.freeze of a possibly-aliased value",
         call,
@@ -9281,3 +9290,65 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
       loc: locOf(call),
     });
   }
+/** True for the builder idiom `const b = {}; ...b[k] = v...;
+ * Object.freeze(b)` -- the one aliased-looking freeze whose frozen-ness is
+ * provably unobservable.
+ *
+ * The proof needs three things, and each one is doing work: the binding is
+ * a NON-EXPORTED file-scope const, so every reference to it lives in this
+ * file; every reference other than the freeze argument is the TARGET of a
+ * write (`b[k] = v` / `b.p = v`), so the value never escaped into anything
+ * that could hold it; and every one of those writes sits in a top-level
+ * statement positioned before the freeze, so none of them can run after
+ * (a write inside a function body could be called later, which is why
+ * top-level is required rather than merely earlier).
+ */
+function freezeBuilderBinding(L: Lowerer, ident: ts.Identifier, call: ts.CallExpression): boolean {
+  const sym = L.resolveValueSymbol(ident);
+  if (!sym) return false;
+  const decl = L.checker.valueDeclarationOf(sym);
+  if (!decl || !ts.isVariableDeclaration(decl) || !ts.isIdentifier(decl.name)) return false;
+  const list = decl.parent;
+  if (!ts.isVariableDeclarationList(list) || (list.flags & ts.NodeFlags.Const) === 0) return false;
+  const stmt = list.parent;
+  if (!ts.isVariableStatement(stmt) || !ts.isSourceFile(stmt.parent)) return false;
+  if (ts.getCombinedModifierFlags(decl) & ts.ModifierFlags.Export) return false;
+  const sf = stmt.parent;
+  const freezeAt = call.getStart();
+
+  /** The top-level statement `n` sits in, or null when it is inside one of
+   * this file's function-like bodies (whose run time we cannot bound). */
+  const topStmtOf = (n: ts.Node): ts.Node | null => {
+    let cur: ts.Node = n;
+    while (cur.parent && !ts.isSourceFile(cur.parent)) {
+      if (ts.isFunctionLike(cur)) return null;
+      cur = cur.parent;
+    }
+    return cur.parent && ts.isSourceFile(cur.parent) ? cur : null;
+  };
+
+  let ok = true;
+  const visit = (n: ts.Node): void => {
+    if (!ok) return;
+    if (ts.isIdentifier(n) && n.text === decl.name.getText() && n !== decl.name) {
+      if (L.resolveValueSymbol(n) === sym) {
+        if (n !== ident) {
+          const p = n.parent;
+          const isWriteTarget =
+            p !== undefined &&
+            (ts.isElementAccessExpression(p) || ts.isPropertyAccessExpression(p)) &&
+            p.expression === n &&
+            p.parent !== undefined &&
+            ts.isBinaryExpression(p.parent) &&
+            p.parent.left === p &&
+            p.parent.operatorToken.kind === ts.SyntaxKind.EqualsToken;
+          const top = topStmtOf(n);
+          if (!isWriteTarget || top === null || top.getStart() >= freezeAt) ok = false;
+        }
+      }
+    }
+    if (ok) ts.forEachChild(n, visit);
+  };
+  ts.forEachChild(sf, visit);
+  return ok;
+}
