@@ -127,6 +127,22 @@ function lowerEnumMemberRead(
     // `declare const __VERSION__` stance: ReferenceError at the access.
     const sf = enumDecl.getSourceFile();
     if (L.isStdlibFile(sf) || (L.dynamic && L.isNpmFile(sf))) return null;
+    // An ambient enum whose declaration file has a real runtime JS twin in
+    // this program IS defined at runtime — protobufjs emits the enum OBJECT
+    // beside its `.d.ts`, and Node loads that module and reads the member.
+    // The `.d.ts` initializers are generated from the same source, so they
+    // match the object; fold to the constant (the value Node produces)
+    // instead of the ReferenceError stance below, which is correct only for
+    // a bare `declare enum` with NO backing runtime. Folding also frees the
+    // static binary from needing the (uncompilable, trapped) enum object.
+    if (L.declTwinCompiled(sf)) {
+      const twinValue = L.checker.getConstantValue(member);
+      if (twinValue !== undefined && !(typeof twinValue === "number" && Number.isNaN(twinValue))) {
+        return typeof twinValue === "string"
+          ? { kind: "strLit", value: twinValue, type: STRING, loc }
+          : { kind: "numLit", value: twinValue, type: F64, loc };
+      }
+    }
     const declared = L.mapTypeOf(L.typeOf(expr));
     if (!declared || declared.kind === "void") return null;
     return {
