@@ -1940,51 +1940,8 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
     // A pinning signature that itself keeps type parameters (`let g: <T>(x:
     // T) => T = identity` — storing the generic signature as such) binds
     // nothing: mapType answers null for an unsubstituted parameter.
-    // ...unless every one of them has a mappable CONSTRAINT. The value
-    // still needs exactly one compiled body, and the call path already
-    // settled what that body is: each type parameter bound to its
-    // constraint (genericCallInstance's overload rule — the body
-    // type-checks for EVERY type satisfying the constraint, so the
-    // constraint itself is always among them). This is the pinning half
-    // of the constraint-erased VALUE slot a record keeps for a generic
-    // member (mapTypeInner's rule): the slot's own type is that same
-    // instantiation, so producer and slot agree by construction. An
-    // UNCONSTRAINED parameter (`<T>(x: T) => T`) still has no widest
-    // honest binding: fence.
-    let pinnedByConstraint = false;
-    const constraintTs = new Map<ts.Symbol, ts.Type>();
-    if (info.typeParams.some((tp) => !bindings.get(tp)) && target.getTypeParameters().length > 0) {
-      const byConstraint = constraintTypeParamBindings(L, info, constraintTs);
-      if (byConstraint) {
-        for (const tp of info.typeParams) {
-          const c = bindings.get(tp) ?? byConstraint.get(tp);
-          if (c) bindings.set(tp, c);
-        }
-        pinnedByConstraint = true;
-      }
-    }
     if (info.typeParams.some((tp) => !bindings.get(tp))) fenceUnpinned();
-    // A CONSTRAINT-erased instance maps its declared parameter types with
-    // the parameters bound to key unions, so `M[K]` there means the union
-    // of the payload types (mapBoundIndexedAccess's indexUnionOk rule) —
-    // the same widening the slot's own type already took. A per-call-site
-    // instance keeps the strict one-key rule.
-    const prevIndexUnion = L.typeCtx.indexUnionOk;
-    const prevTsBindings = L.typeParamTsBindings;
-    if (pinnedByConstraint) {
-      L.typeCtx.indexUnionOk = true;
-      // The ts-level twin is what resolves `M[K]` at all: without it the
-      // indexed access has no object/index type to read at all
-      // (mapBoundIndexedAccess bails before the union rule).
-      L.typeParamTsBindings = constraintTs;
-    }
-    let inst: GenericInstance;
-    try {
-      inst = genericValueInstance(L, ref, info, bindings);
-    } finally {
-      L.typeCtx.indexUnionOk = prevIndexUnion;
-      L.typeParamTsBindings = prevTsBindings;
-    }
+    const inst = genericValueInstance(L, ref, info, bindings);
     // The value's type is the completed ABI signature — exact-arity, the
     // declared-function value rule (dynRest slots stay out of the param
     // list; the rest marker carries the trailing dyn-array ABI).
@@ -9095,19 +9052,6 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     const propSym = L.checker.getPropertyOfType(recvT, name);
     if (!propSym) return null;
     if (!isGenericCallableMemberType(L.checker.getTypeOfSymbol(propSym), L.checker)) return null;
-    // A member that earned a real closure SLOT — its signature mapped at
-    // the constraint instantiation, so the shape kept the field — is an
-    // ORDINARY field call: decline here and let the record path read the
-    // slot. Only a member the shape dropped needs static monomorphization.
-    {
-      const recvIr = L.mapTypeOf(recvT);
-      if (
-        recvIr?.kind === "record" &&
-        L.shapes.get(recvIr.shapeId)?.fields.some((f) => f.name === name) === true
-      ) {
-        return null;
-      }
-    }
     // CLASS members belong to the class path (lowerClassGenericMethodCall
     // claimed compilable ones; a class that failed collection keeps its
     // own diagnostics and the generic method-call fence downstream).
