@@ -1928,17 +1928,22 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           return E.newTemp(e.type, E.unitInstanceRef(e.unionId, e.tag));
         }
         const v = E.emitExpr(e.value);
-        if (isRefCounted(arm)) {
-          E.moveTemp(v);
-          const rc = vAdapters(arm);
-          return E.newTemp(
-            e.type,
-            `scr_union_new_ref(${e.tag}, ${v.name}, &${rc.retain}, &${rc.release}, ${E.traceArgC(arm)})`,
-          );
-        }
+        // f64 and bool are the only unboxed scalar payloads; every other
+        // arm (past the unit/void cases above) is a heap pointer stored by
+        // REFERENCE — this mirrors unionNarrow, which peeks-and-retains any
+        // non-scalar arm through the generic ref path. Gating on the
+        // isRefCounted LIST left the refcounted-but-unlisted families
+        // (bigint's ScrBigInt*, keyobj's ScrKeyObject*) falling through to
+        // the throw; vAdapters is the single RC-adapter registry that
+        // answers for all of them.
         if (arm.kind === "f64") return E.newTemp(e.type, `scr_union_new_f64(${e.tag}, ${v.name})`);
         if (arm.kind === "bool") return E.newTemp(e.type, `scr_union_new_bool(${e.tag}, ${v.name})`);
-        throw new Error(`emitter bug: unionWrap of ${arm.kind}`);
+        E.moveTemp(v);
+        const rc = vAdapters(arm);
+        return E.newTemp(
+          e.type,
+          `scr_union_new_ref(${e.tag}, ${v.name}, &${rc.retain}, &${rc.release}, ${E.traceArgC(arm)})`,
+        );
       }
       case "unionNarrow": {
         // Tag-UNCHECKED payload extraction: the frontend emits this only
