@@ -6029,6 +6029,114 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
    * fields outside that stay fenced. Declared-only shapes support reads
    * whose key type proves membership (tsc's keyof check): all fields must
    * share the result type, and a smuggled miss traps. */
+  /** `r[k]` where k's checker type is a UNION of string literals, each
+   * naming a declared field of a signature-free shape whose field types
+   * DIFFER (the provider-registry shape — `backend[kind]` with kind typed
+   * 'stores' | 'caches'): the access's checker type is the union of the
+   * named fields' types, and the read lowers to an interned equality-
+   * dispatch helper `(record, key) -> union` — one string test per named
+   * field, each arm the plain field read wrapped into its union arm, and
+   * a trailing throw for a key smuggled past the proof (the stranded
+   * stance). Null when the shape doesn't hold: a non-literal-union key, a
+   * name with no declared field, or a field type the result union has no
+   * arm for. */
+  function literalUnionKeyDispatch(
+    L: Lowerer,
+    expr: ts.ElementAccessExpression,
+    obj: IrExpr,
+    shapeId: string,
+    shape: IrRecordShape,
+    key: IrExpr,
+    keyNode: ts.Expression,
+    loc: SrcLoc,
+  ): IrExpr | null {
+    if (shape.indexValue !== undefined || shape.tuple) return null;
+    const keyT = L.typeOf(keyNode);
+    const parts = keyT.isUnionType() ? keyT.getTypes() : [keyT];
+    if (parts.length < 2) return null;
+    const names: string[] = [];
+    for (const p of parts) {
+      if (!p.isStringLiteralType()) return null;
+      if (!names.includes(p.value)) names.push(p.value);
+    }
+    if (names.length < 2) return null;
+    const fields = names.map((n) => shape.fields.find((f) => f.name === n));
+    if (fields.some((f) => f === undefined)) return null;
+    const resultT = L.mapTypeOf(L.typeOf(expr));
+    if (resultT === null || resultT.kind !== "union") return null;
+    const tags = fields.map((f) => L.armTag(resultT.unionId, f!.type));
+    if (tags.some((t) => t < 0)) return null;
+    const helperKey = `keydisp:${shapeId}:${resultT.unionId}:${names.join(",")}`;
+    let name = L.retagHelpers.get(helperKey);
+    if (!name) {
+      name = `%rec.keydisp.${L.retagHelpers.size}`;
+      L.retagHelpers.set(helperKey, name);
+      const objT: IrType = { kind: "record", shapeId };
+      const oRef: IrExpr = { kind: "varRef", localId: "o.0", type: objT, loc };
+      const kRef: IrExpr = { kind: "varRef", localId: "k.0", type: STRING, loc };
+      const body: IrStmt[] = names.map((n, i) => ({
+        kind: "if",
+        cond: {
+          kind: "strEq",
+          negated: false,
+          left: kRef,
+          right: { kind: "strLit", value: n, type: STRING, loc },
+          type: BOOL,
+          loc,
+        },
+        then: [
+          {
+            kind: "return",
+            value: {
+              kind: "unionWrap",
+              unionId: resultT.unionId,
+              tag: tags[i]!,
+              value: { kind: "recordGet", obj: oRef, shapeId, field: n, type: fields[i]!.type, loc },
+              type: resultT,
+              loc,
+            },
+            loc,
+          },
+        ],
+        else_: null,
+        loc,
+      }));
+      body.push({
+        kind: "throw",
+        value: {
+          kind: "libCall",
+          fn: "error.new",
+          args: [
+            {
+              kind: "strLit",
+              value: `a keyed read proven to '${names.join("' | '")}' received a different key (a value narrowed or asserted past the key's type still held it)`,
+              type: STRING,
+              loc,
+            },
+          ],
+          type: { kind: "object", className: "%TypeError" },
+          loc,
+        },
+        loc,
+      });
+      L.liftedFns.push({
+        name,
+        params: [
+          { localId: "o.0", name: "o", type: objT },
+          { localId: "k.0", name: "k", type: STRING },
+        ],
+        returnType: resultT,
+        locals: [
+          { id: "o.0", name: "o", type: objT, mutable: false },
+          { id: "k.0", name: "k", type: STRING, mutable: false },
+        ],
+        body,
+        loc,
+      });
+    }
+    return { kind: "call", callee: name, args: [obj, key], type: resultT, loc };
+  }
+
   export function lowerRecordKeyRead(L: Lowerer, expr: ts.ElementAccessExpression, shapeId: string, shape: IrRecordShape,): IrExpr {
     const loc = locOf(expr);
     const keyNode = expr.argumentExpression;
@@ -6107,6 +6215,17 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       declared = shape.fields[0]!.type;
     }
     if (!declared) {
+      // A key whose CHECKER type is a union of string LITERALS, each
+      // naming a declared field (`backend[kind]` with kind typed
+      // 'stores' | 'caches' — the provider-registry shape): tsc's keyof
+      // check proved membership and typed the ACCESS as the union of
+      // exactly those fields' types. The read lowers as an equality
+      // DISPATCH through an interned helper — one string test per named
+      // field, each arm the plain field read wrapped into its union arm;
+      // a smuggled miss (a lying assertion holding some other string)
+      // throws the proven-impossible TypeError, the stranded stance.
+      const dispatched = literalUnionKeyDispatch(L, expr, obj, shapeId, shape, key, keyNode, loc);
+      if (dispatched !== null) return L.maybeNarrow(dispatched, expr);
       L.unsupported(
         "SC1090",
         expr,
