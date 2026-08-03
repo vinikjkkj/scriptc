@@ -1853,6 +1853,19 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (isStdlibInterface("Float64Array")) return bytesOf("f64");
   // Int8Array: the signed 8-bit kind — reads sign-extend, writes ToInt8-wrap.
   if (isStdlibInterface("Int8Array")) return bytesOf("i8");
+  // ArrayBufferView: the ABSTRACT byte-view base ({ buffer, byteLength,
+  // byteOffset } — no index signature). Every typed array and DataView
+  // satisfies it, and it appears only as an opaque "some byte view" handle
+  // (e.g. a `ArrayBufferView | Uint8Array` field that is a Uint8Array at
+  // every value). It rides the u8 view representation like DataView: the
+  // abstract type exposes no elements (no index signature), so a concrete
+  // flavor is only ever observed after an `instanceof` narrow, which
+  // re-establishes it. `.buffer` hands back the owner; `.byteLength`/
+  // `.byteOffset` are the numeric extents. Distinct from bytes<buf>
+  // (ArrayBuffer) so `instanceof Uint8Array` still discriminates the
+  // `ArrayBuffer | ArrayBufferView | Uint8Array` union into its two
+  // representations, and the two u8-view arms collapse (same IR type).
+  if (isStdlibInterface("ArrayBufferView")) return bytesOf("u8");
   // DataView: the ONE view kind — a u8 bytes value whose runtime
   // representation borrows (aliases) its owner's storage, so reads through
   // it see writes to the source exactly like JS. The checker keeps the
@@ -2872,6 +2885,10 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
           for (const rest of widened.getTypes()) {
             if (mapType(rest, ctx)?.kind === "jsval") return JSVAL;
           }
+          mapTrace(
+            `UNIONARM ${checker.typeToString(widened).slice(0, 60)} . arm ` +
+              `${checker.typeToString(part).slice(0, 90)}`,
+          );
           return null;
         }
         byKey.set(typeKey(mapped), mapped);
