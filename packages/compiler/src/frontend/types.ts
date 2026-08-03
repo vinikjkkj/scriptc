@@ -1212,6 +1212,29 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     if (tupleShape.elementFlags.some((f) => !(f & ts.ElementFlags.Required))) {
       return ctx.dynamic ? JSVAL : null;
     }
+    // A UNIFORM readonly tuple — every position the SAME mapped element
+    // type, the `as const` const-table idiom (SINGLE_BYTE_TOKENS, the
+    // ~600-string binary token dictionaries) — rides the ARRAY
+    // representation rather than a fixed positional record. A runtime index
+    // (`TOKENS[i]` in a loop), `.length`, and a same-type function parameter
+    // (`dicts.map(d => …)`, where `d` is one dictionary) all want an array;
+    // literal-index reads and destructuring work over an array too. tsc's
+    // `readonly` marks the idiom, and the array aliases as the one `as const`
+    // object does in JS. Mixed-type tuples keep the positional record below.
+    const roA = (tupleShape as { readonly?: boolean }).readonly === true;
+    const roB = ((ref.getTarget?.() as { readonly?: boolean } | undefined)?.readonly) === true;
+    if ((roA || roB) && args.length > 0) {
+      const elem0 = mapType(args[0]!, ctx);
+      if (
+        elem0 !== null && elem0.kind !== "void" && elem0.kind !== "jsval" && elem0.kind !== "dyn" &&
+        args.every((a) => {
+          const e = mapType(a, ctx);
+          return e !== null && typeEquals(e, elem0);
+        })
+      ) {
+        return arrayOf(elem0);
+      }
+    }
     const fields: { name: string; type: IrType }[] = [];
     for (let i = 0; i < args.length; i++) {
       let et = mapType(args[i]!, ctx);
