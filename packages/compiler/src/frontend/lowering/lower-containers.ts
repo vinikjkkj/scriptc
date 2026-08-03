@@ -621,7 +621,11 @@ function lowerOptionalDefaultArg(
     }
     if (
       method === "map" &&
-      (fnRet.kind === "map" || fnRet.kind === "set" || fnRet.kind === "url" ||
+      // map/set are NOT here: ScrArr stores them by reference like any
+      // other refcounted element (the nested-container storage a Map
+      // VALUE and an index-signature overflow already use), and an array
+      // of them builds fine through push. The exclusion outlived that.
+      (fnRet.kind === "url" ||
         fnRet.kind === "searchParams" || fnRet.kind === "generator" || fnRet.kind === "caught" ||
         fnRet.kind === "stats" || fnRet.kind === "spawnRes" || fnRet.kind === "netSocket" ||
         fnRet.kind === "dgramSocket" || fnRet.kind === "testCtx" || fnRet.kind === "httpReq" ||
