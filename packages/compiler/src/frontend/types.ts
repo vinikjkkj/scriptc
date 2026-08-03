@@ -2798,6 +2798,17 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // completes — the ShapeRegistry knot, mirrored (identity per checker
   // type; context-sensitive frames stay fenced).
   if (widened.isUnionType()) {
+    // Every arm a TUPLE over one element type: the union is an ARRAY of
+    // that type. A table of fixed-length literal rows is what this is in
+    // practice, and the only thing the arms disagree on is LENGTH, which
+    // the array representation carries at runtime anyway. Each arm maps
+    // on its own already; without this the union of them had none, so
+    // reading a row out of such a table fenced on a value whose every
+    // possible shape was compilable.
+    {
+      const rows = uniformTupleUnionElem(widened, ctx);
+      if (rows !== null) return arrayOf(rows);
+    }
     const knownRecursive = unions.recursiveUnionFor(widened);
     if (knownRecursive !== undefined) return { kind: "union", unionId: knownRecursive };
     if (unions.inProgress.has(widened)) {
@@ -4247,4 +4258,26 @@ export function describeRecordMemberBlocker(widened: ts.Type, ctx: TypeMapperCtx
     }
   }
   return null;
+}
+/** The shared element type of a union whose every arm is a tuple, or null.
+ * Only spelled when the arms are ALL tuples and every element maps to the
+ * same IR type -- a literal row table. Anything heterogeneous keeps the
+ * ordinary union treatment, where the arms carry their own shapes. */
+function uniformTupleUnionElem(t: ts.UnionType, ctx: TypeMapperCtx): IrType | null {
+  const parts = t.getTypes();
+  if (parts.length < 2) return null;
+  const checker = ctx.checker;
+  let elem: IrType | null = null;
+  for (const part of parts) {
+    if (!checker.isTupleType(part)) return null;
+    const args = checker.getTypeArguments(part as ts.TypeReference);
+    if (args.length === 0) return null;
+    for (const a of args) {
+      const mapped = mapType(a, ctx);
+      if (mapped === null || mapped.kind === "void") return null;
+      if (elem === null) elem = mapped;
+      else if (typeKey(elem) !== typeKey(mapped)) return null;
+    }
+  }
+  return elem;
 }
