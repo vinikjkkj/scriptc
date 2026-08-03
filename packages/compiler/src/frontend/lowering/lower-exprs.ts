@@ -1000,7 +1000,8 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           decl !== undefined &&
           ts.isVariableDeclaration(decl) &&
           decl.initializer === undefined &&
-          ts.getCombinedModifierFlags(decl) & ts.ModifierFlags.Ambient
+          ts.getCombinedModifierFlags(decl) & ts.ModifierFlags.Ambient &&
+          !L.declTwinCompiled(decl.getSourceFile())
         ) {
           const declared = L.mapTypeOf(L.typeOf(expr));
           if (declared && declared.kind !== "void") {
