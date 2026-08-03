@@ -489,6 +489,17 @@ export function isSupportedMapValue(t: IrType): boolean {
     case "map":
     case "set":
       return true;
+    // An `unknown` value (Map<string, unknown> — a per-key bag of
+    // opaque payloads). The overflow store of an index-signature
+    // record IS a string-keyed map and has carried dyn values since
+    // it existed (isSupportedIndexValue below), through the same
+    // ScrMap adapters and the same trace fixpoint — so a user Map
+    // holding one is the identical storage under a different
+    // spelling, exactly the argument the nested-container case
+    // makes. Reads surface an ordinary dyn, validated by the usual
+    // checked casts.
+    case "dyn":
+      return true;
     default:
       return false;
   }
