@@ -38,6 +38,10 @@ Options:
       --emit-ir      also write the IR as JSON next to the executable
       --sanitize     build with ASan + runtime RC audit
       --dynamic      embed the dynamic engine (adds ~620KB; static stays the default)
+      --best-effort  a statement with no static lowering becomes a runtime throw
+                     instead of a build error, so the binary builds as long as
+                     every statement it RUNS compiles (unreached paths throw only
+                     if executed); ICEs and type fences stay build errors
       --ffi <file>   bind signature-only TypeScript declarations to native
                      C symbols and link the manifest's archives/libraries
       --npm-static <pkg[,pkg…]|auto>
@@ -112,6 +116,7 @@ const CLI_OPTIONS = {
   "emit-ir": { type: "boolean", default: false },
   sanitize: { type: "boolean", default: false },
   dynamic: { type: "boolean", default: false },
+  "best-effort": { type: "boolean", default: false },
   ffi: { type: "string" },
   "npm-static": { type: "string", multiple: true },
   "provenance-sources": { type: "boolean", default: false },
@@ -266,6 +271,7 @@ async function main(): Promise<number> {
       emitIr: values["emit-ir"],
       sanitize: values.sanitize,
       dynamic: values.dynamic,
+      bestEffort: values["best-effort"],
       ...(backend !== undefined ? { backend } : {}),
       ...(npmStatic !== undefined ? { npmStatic } : {}),
       ...(ffiProfilePath !== undefined ? { ffiProfilePath } : {}),
