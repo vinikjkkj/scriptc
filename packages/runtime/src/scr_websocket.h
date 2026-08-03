@@ -108,4 +108,55 @@ size_t scr_ws_build_request(char *out, size_t cap, const char *host,
 int scr_ws_check_handshake(const uint8_t *resp, size_t len,
                            const char *expected_accept, size_t *header_len);
 
+/* ── connection state machine ─────────────────────────────────────────────
+ * The PURE driver of a client connection: it consumes received socket
+ * bytes and produces events (open / message / close / error) plus outbound
+ * byte requests (the masked frames to write, and auto-pong replies),
+ * entirely through the callback table — no socket, no event loop, no
+ * runtime dependency. The transport layer wires `recv` to the socket's
+ * native reader and `want_write` to the socket write, so this core stays
+ * exhaustively testable offline by feeding bytes and asserting callbacks. */
+typedef struct ScrWsConn ScrWsConn;
+
+typedef struct {
+  void (*on_open)(void *user);
+  /* `data`/`len` is one complete message (fragments reassembled); is_text
+   * distinguishes text (opcode 0x1) from binary (0x2). Borrowed. */
+  void (*on_message)(void *user, const uint8_t *data, size_t len, bool is_text);
+  /* A close was received or the stream ended. code is the peer's close
+   * code (1005 when none was sent). */
+  void (*on_close)(void *user, uint16_t code, const uint8_t *reason, size_t reason_len);
+  void (*on_error)(void *user, const char *msg);
+  /* Bytes the connection needs written to the socket (the outbound frames
+   * scr_ws_conn_send builds, and auto-pong / close-echo replies). */
+  void (*want_write)(void *user, const uint8_t *data, size_t len);
+} ScrWsCallbacks;
+
+/* Create a client connection driver. `expected_accept` is the value
+ * scr_ws_accept_key produced for the sent key (the driver copies it);
+ * `mask_seed` is 4 bytes of randomness the driver rotates for per-frame
+ * masking (the caller supplies it — the codec chooses no randomness). The
+ * callbacks and `user` are borrowed for the driver's lifetime. */
+ScrWsConn *scr_ws_conn_new(const char *expected_accept,
+                           const ScrWsCallbacks *cb, void *user,
+                           const uint8_t mask_seed[4]);
+
+/* Feed received socket bytes. Drives the handshake, then frame parsing,
+ * emitting events through the callbacks. Returns false after a protocol
+ * error (on_error already fired); the caller should close the socket. */
+bool scr_ws_conn_recv(ScrWsConn *c, const uint8_t *data, size_t len);
+
+/* Build a masked data frame for `data` and hand it to want_write. */
+void scr_ws_conn_send(ScrWsConn *c, const uint8_t *data, size_t len, bool is_text);
+
+/* Build a masked close frame (code + optional reason) and hand it to
+ * want_write; the connection moves to closing. */
+void scr_ws_conn_close(ScrWsConn *c, uint16_t code, const uint8_t *reason, size_t reason_len);
+
+/* The stream ended (socket EOF/close): fire on_close(1006) if the peer
+ * never sent a close frame. */
+void scr_ws_conn_eof(ScrWsConn *c);
+
+void scr_ws_conn_free(ScrWsConn *c);
+
 #endif /* SCR_WEBSOCKET_H */

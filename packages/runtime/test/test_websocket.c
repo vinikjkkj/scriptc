@@ -5,6 +5,7 @@
 #include "../src/scr_websocket.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int total = 0, passed = 0;
@@ -13,6 +14,182 @@ static void check(int cond, const char *what) {
   total++;
   if (cond) passed++;
   else fprintf(stdout, "FAIL: %s\n", what);
+}
+
+/* ── connection state-machine harness ─────────────────────────────────── */
+
+typedef struct {
+  int opens, closes, errors;
+  uint16_t close_code;
+  char last_msg[4096];
+  size_t last_msg_len;
+  int last_is_text;
+  int msg_count;
+  uint8_t out[65536];
+  size_t out_len;
+} Cap;
+
+static void h_open(void *u) { ((Cap *)u)->opens++; }
+static void h_msg(void *u, const uint8_t *d, size_t n, bool text) {
+  Cap *c = (Cap *)u;
+  c->msg_count++;
+  c->last_msg_len = n < sizeof c->last_msg ? n : sizeof c->last_msg;
+  memcpy(c->last_msg, d, c->last_msg_len);
+  c->last_is_text = text;
+}
+static void h_close(void *u, uint16_t code, const uint8_t *r, size_t rn) {
+  Cap *c = (Cap *)u; c->closes++; c->close_code = code; (void)r; (void)rn;
+}
+static void h_err(void *u, const char *m) { ((Cap *)u)->errors++; (void)m; }
+static void h_write(void *u, const uint8_t *d, size_t n) {
+  Cap *c = (Cap *)u;
+  if (c->out_len + n <= sizeof c->out) { memcpy(c->out + c->out_len, d, n); c->out_len += n; }
+}
+
+static ScrWsConn *sm_mk(Cap *cap, const char *accept, const uint8_t seed[4]) {
+  ScrWsCallbacks cb = { h_open, h_msg, h_close, h_err, h_write };
+  return scr_ws_conn_new(accept, &cb, cap, seed);
+}
+
+/* Build an unmasked server frame (server->client is never masked). */
+static size_t sm_server_frame(uint8_t *out, uint8_t opcode, const uint8_t *pay, size_t len) {
+  size_t p = 0;
+  out[p++] = (uint8_t)(0x80 | opcode);
+  if (len > 65535) { out[p++] = 127; for (int i = 7; i >= 0; i--) out[p++] = (uint8_t)((uint64_t)len >> (i * 8)); }
+  else if (len >= 126) { out[p++] = 126; out[p++] = (uint8_t)(len >> 8); out[p++] = (uint8_t)(len & 0xff); }
+  else out[p++] = (uint8_t)len;
+  if (len) memcpy(out + p, pay, len);
+  return p + len;
+}
+
+/* Drive the whole connection lifecycle purely by feeding bytes. */
+static void run_state_machine_tests(void) {
+  const uint8_t seed[4] = {0x12, 0x34, 0x56, 0x78};
+  const char *key = "dGhlIHNhbXBsZSBub25jZQ==";
+  char accept[29];
+  scr_ws_accept_key(key, strlen(key), accept);
+  const char *hs =
+      "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+      "Connection: Upgrade\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n";
+
+  /* Handshake fed one byte at a time, then a text message split mid-header. */
+  {
+    Cap cap; memset(&cap, 0, sizeof cap);
+    ScrWsConn *c = sm_mk(&cap, accept, seed);
+    for (size_t i = 0; i < strlen(hs); i++) scr_ws_conn_recv(c, (const uint8_t *)hs + i, 1);
+    check(cap.opens == 1, "sm: on_open after full handshake");
+    check(cap.errors == 0, "sm: no error on valid handshake");
+    uint8_t frame[64];
+    size_t fn = sm_server_frame(frame, SCR_WS_OP_TEXT, (const uint8_t *)"hello world", 11);
+    scr_ws_conn_recv(c, frame, 3);
+    scr_ws_conn_recv(c, frame + 3, fn - 3);
+    check(cap.msg_count == 1 && cap.last_is_text && cap.last_msg_len == 11 &&
+          memcmp(cap.last_msg, "hello world", 11) == 0, "sm: split text message");
+    scr_ws_conn_free(c);
+  }
+
+  /* Fragmented binary: FIN=0 binary + FIN=1 continuation. */
+  {
+    Cap cap; memset(&cap, 0, sizeof cap);
+    ScrWsConn *c = sm_mk(&cap, accept, seed);
+    scr_ws_conn_recv(c, (const uint8_t *)hs, strlen(hs));
+    uint8_t f1[4] = {0x02, 2, 'A', 'B'}, f2[4] = {0x80, 2, 'C', 'D'};
+    scr_ws_conn_recv(c, f1, 4);
+    check(cap.msg_count == 0, "sm: no message until FIN");
+    scr_ws_conn_recv(c, f2, 4);
+    check(cap.msg_count == 1 && !cap.last_is_text && cap.last_msg_len == 4 &&
+          memcmp(cap.last_msg, "ABCD", 4) == 0, "sm: reassembled fragmented binary");
+    scr_ws_conn_free(c);
+  }
+
+  /* Ping -> auto-pong echoing the payload. */
+  {
+    Cap cap; memset(&cap, 0, sizeof cap);
+    ScrWsConn *c = sm_mk(&cap, accept, seed);
+    scr_ws_conn_recv(c, (const uint8_t *)hs, strlen(hs));
+    cap.out_len = 0;
+    uint8_t ping[16];
+    size_t pn = sm_server_frame(ping, SCR_WS_OP_PING, (const uint8_t *)"pp", 2);
+    scr_ws_conn_recv(c, ping, pn);
+    ScrWsHeader ph;
+    check(cap.out_len > 0 && scr_ws_parse_header(cap.out, cap.out_len, &ph) &&
+          ph.opcode == SCR_WS_OP_PONG && ph.masked && ph.payload_len == 2, "sm: masked PONG written");
+    uint8_t pbody[2]; memcpy(pbody, cap.out + ph.payload_offset, 2);
+    scr_ws_mask(pbody, 2, ph.mask_key);
+    check(memcmp(pbody, "pp", 2) == 0, "sm: pong echoes ping payload");
+    scr_ws_conn_free(c);
+  }
+
+  /* send() gated on OPEN; after OPEN it writes a masked frame. */
+  {
+    Cap cap; memset(&cap, 0, sizeof cap);
+    ScrWsConn *c = sm_mk(&cap, accept, seed);
+    scr_ws_conn_send(c, (const uint8_t *)"x", 1, true);
+    check(cap.out_len == 0, "sm: send before open is a no-op");
+    scr_ws_conn_recv(c, (const uint8_t *)hs, strlen(hs));
+    cap.out_len = 0;
+    scr_ws_conn_send(c, (const uint8_t *)"payload!", 8, true);
+    ScrWsHeader h;
+    check(scr_ws_parse_header(cap.out, cap.out_len, &h) && h.opcode == SCR_WS_OP_TEXT &&
+          h.masked && h.payload_len == 8, "sm: sent masked TEXT frame");
+    uint8_t body[8]; memcpy(body, cap.out + h.payload_offset, 8);
+    scr_ws_mask(body, 8, h.mask_key);
+    check(memcmp(body, "payload!", 8) == 0, "sm: sent payload round-trips");
+    scr_ws_conn_free(c);
+  }
+
+  /* Server close frame -> on_close(code) and a close echo. */
+  {
+    Cap cap; memset(&cap, 0, sizeof cap);
+    ScrWsConn *c = sm_mk(&cap, accept, seed);
+    scr_ws_conn_recv(c, (const uint8_t *)hs, strlen(hs));
+    cap.out_len = 0;
+    uint8_t body[2] = {0x03, 0xe8}; /* 1000 */
+    uint8_t cf[16]; size_t cn = sm_server_frame(cf, SCR_WS_OP_CLOSE, body, 2);
+    scr_ws_conn_recv(c, cf, cn);
+    ScrWsHeader h;
+    check(cap.closes == 1 && cap.close_code == 1000, "sm: on_close code 1000");
+    check(scr_ws_parse_header(cap.out, cap.out_len, &h) && h.opcode == SCR_WS_OP_CLOSE,
+          "sm: close echo written");
+    scr_ws_conn_free(c);
+  }
+
+  /* Bad Sec-WebSocket-Accept -> on_error, no open. */
+  {
+    Cap cap; memset(&cap, 0, sizeof cap);
+    ScrWsConn *c = sm_mk(&cap, "WRONGACCEPTVALUEHEREXXXXXXXX=", seed);
+    scr_ws_conn_recv(c, (const uint8_t *)hs, strlen(hs));
+    check(cap.errors == 1 && cap.opens == 0, "sm: bad accept -> on_error");
+    scr_ws_conn_free(c);
+  }
+
+  /* EOF before a close frame -> 1006. */
+  {
+    Cap cap; memset(&cap, 0, sizeof cap);
+    ScrWsConn *c = sm_mk(&cap, accept, seed);
+    scr_ws_conn_recv(c, (const uint8_t *)hs, strlen(hs));
+    scr_ws_conn_eof(c);
+    check(cap.closes == 1 && cap.close_code == 1006, "sm: EOF -> on_close 1006");
+    scr_ws_conn_free(c);
+  }
+
+  /* A 1000-byte (16-bit length) message reassembled from 64-byte chunks. */
+  {
+    Cap cap; memset(&cap, 0, sizeof cap);
+    ScrWsConn *c = sm_mk(&cap, accept, seed);
+    scr_ws_conn_recv(c, (const uint8_t *)hs, strlen(hs));
+    static uint8_t big[1000];
+    for (int i = 0; i < 1000; i++) big[i] = (uint8_t)(i * 3 + 7);
+    static uint8_t frame[1100];
+    size_t fn = sm_server_frame(frame, SCR_WS_OP_BINARY, big, 1000);
+    for (size_t i = 0; i < fn; i += 64) {
+      size_t chunk = fn - i < 64 ? fn - i : 64;
+      scr_ws_conn_recv(c, frame + i, chunk);
+    }
+    check(cap.msg_count == 1 && cap.last_msg_len == 1000 &&
+          memcmp(cap.last_msg, big, 1000) == 0, "sm: 1000-byte binary reassembled");
+    scr_ws_conn_free(c);
+  }
 }
 
 int main(void) {
@@ -214,6 +391,8 @@ int main(void) {
     check(scr_ws_check_handshake((const uint8_t *)partial, strlen(partial), accept, &hlen)
               == SCR_WS_HS_INCOMPLETE, "incomplete response waits");
   }
+
+  run_state_machine_tests();
 
   fprintf(stderr, "%d/%d cases passed\n", passed, total);
   return passed == total ? 0 : 1;

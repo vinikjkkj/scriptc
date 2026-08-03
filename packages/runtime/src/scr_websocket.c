@@ -8,6 +8,7 @@
  * crypto runtime) build on these functions in later slices. */
 #include "scr_websocket.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 void scr_ws_mask(uint8_t *payload, size_t len, const uint8_t mask[4]) {
@@ -304,4 +305,219 @@ bool scr_ws_parse_header(const uint8_t *in, size_t in_len, ScrWsHeader *out) {
   }
   out->payload_offset = p;
   return true;
+}
+
+/* ── connection state machine (see scr_websocket.h) ────────────────────── */
+
+enum { SCR_WS_ST_HANDSHAKE, SCR_WS_ST_OPEN, SCR_WS_ST_CLOSING, SCR_WS_ST_CLOSED };
+
+struct ScrWsConn {
+  int state;
+  ScrWsCallbacks cb;
+  void *user;
+  char accept[29];
+  uint32_t mask_state; /* rotated per frame for masking keys */
+
+  uint8_t *buf; /* reassembly buffer of received-but-unconsumed bytes */
+  size_t buf_len, buf_cap;
+
+  /* Fragmented-message accumulation (opcode of the first fragment). */
+  uint8_t *msg; /* payload accumulated across CONT frames */
+  size_t msg_len, msg_cap;
+  uint8_t msg_opcode; /* 0x1 or 0x2; 0 = no fragment in progress */
+};
+
+static bool scr_ws_buf_reserve(uint8_t **b, size_t *cap, size_t need) {
+  if (need <= *cap) return true;
+  size_t nc = *cap ? *cap : 256;
+  while (nc < need) nc *= 2;
+  uint8_t *nb = (uint8_t *)realloc(*b, nc);
+  if (!nb) return false;
+  *b = nb;
+  *cap = nc;
+  return true;
+}
+
+/* A small deterministic PRNG for masking keys. Masking is anti-proxy-cache
+ * hygiene, not security (RFC 6455 §10.3), so a rotated xorshift over the
+ * caller's seed suffices and keeps the module free of a crypto-RNG dep. */
+static void scr_ws_next_mask(ScrWsConn *c, uint8_t out[4]) {
+  uint32_t x = c->mask_state;
+  x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+  c->mask_state = x;
+  out[0] = (uint8_t)(x); out[1] = (uint8_t)(x >> 8);
+  out[2] = (uint8_t)(x >> 16); out[3] = (uint8_t)(x >> 24);
+}
+
+ScrWsConn *scr_ws_conn_new(const char *expected_accept,
+                           const ScrWsCallbacks *cb, void *user,
+                           const uint8_t mask_seed[4]) {
+  ScrWsConn *c = (ScrWsConn *)calloc(1, sizeof *c);
+  if (!c) return NULL;
+  c->state = SCR_WS_ST_HANDSHAKE;
+  c->cb = *cb;
+  c->user = user;
+  size_t n = strlen(expected_accept);
+  if (n > 28) n = 28;
+  memcpy(c->accept, expected_accept, n);
+  c->accept[n] = '\0';
+  c->mask_state = ((uint32_t)mask_seed[0]) | ((uint32_t)mask_seed[1] << 8) |
+                  ((uint32_t)mask_seed[2] << 16) | ((uint32_t)mask_seed[3] << 24);
+  if (c->mask_state == 0) c->mask_state = 0x9e3779b9u; /* xorshift must not start at 0 */
+  return c;
+}
+
+void scr_ws_conn_free(ScrWsConn *c) {
+  if (!c) return;
+  free(c->buf);
+  free(c->msg);
+  free(c);
+}
+
+static void scr_ws_emit_error(ScrWsConn *c, const char *msg) {
+  c->state = SCR_WS_ST_CLOSED;
+  if (c->cb.on_error) c->cb.on_error(c->user, msg);
+}
+
+/* Send a control or data frame with a fresh mask. */
+static void scr_ws_write_frame(ScrWsConn *c, uint8_t opcode,
+                               const uint8_t *payload, size_t len) {
+  uint8_t mask[4];
+  scr_ws_next_mask(c, mask);
+  size_t need = scr_ws_frame_size(len);
+  uint8_t *frame = (uint8_t *)malloc(need);
+  if (!frame) return;
+  size_t n = scr_ws_build_client_frame(frame, opcode, payload, len, mask);
+  if (c->cb.want_write) c->cb.want_write(c->user, frame, n);
+  free(frame);
+}
+
+void scr_ws_conn_send(ScrWsConn *c, const uint8_t *data, size_t len, bool is_text) {
+  if (c->state != SCR_WS_ST_OPEN) return;
+  scr_ws_write_frame(c, is_text ? SCR_WS_OP_TEXT : SCR_WS_OP_BINARY, data, len);
+}
+
+void scr_ws_conn_close(ScrWsConn *c, uint16_t code, const uint8_t *reason, size_t reason_len) {
+  if (c->state == SCR_WS_ST_CLOSING || c->state == SCR_WS_ST_CLOSED) return;
+  uint8_t body[125];
+  size_t n = 0;
+  if (code != 0) {
+    body[n++] = (uint8_t)(code >> 8);
+    body[n++] = (uint8_t)(code & 0xff);
+    if (reason && reason_len > 0) {
+      size_t rn = reason_len > 123 ? 123 : reason_len;
+      memcpy(body + n, reason, rn);
+      n += rn;
+    }
+  }
+  scr_ws_write_frame(c, SCR_WS_OP_CLOSE, body, n);
+  c->state = SCR_WS_ST_CLOSING;
+}
+
+void scr_ws_conn_eof(ScrWsConn *c) {
+  if (c->state == SCR_WS_ST_CLOSED) return;
+  int was = c->state;
+  c->state = SCR_WS_ST_CLOSED;
+  if (was == SCR_WS_ST_OPEN && c->cb.on_close) {
+    /* 1006: abnormal closure, no close frame received. */
+    c->cb.on_close(c->user, 1006, NULL, 0);
+  }
+}
+
+/* Process complete frames at the front of the buffer. Returns false on a
+ * protocol error (error already emitted). */
+static bool scr_ws_drain_frames(ScrWsConn *c) {
+  for (;;) {
+    if (c->buf_len < 2) return true;
+    ScrWsHeader h;
+    if (!scr_ws_parse_header(c->buf, c->buf_len, &h)) return true; /* need more */
+    if (h.payload_len > (uint64_t)(SIZE_MAX - h.payload_offset)) {
+      scr_ws_emit_error(c, "websocket frame length overflow");
+      return false;
+    }
+    size_t total = h.payload_offset + (size_t)h.payload_len;
+    if (c->buf_len < total) return true; /* full payload not here yet */
+
+    uint8_t *pay = c->buf + h.payload_offset;
+    size_t plen = (size_t)h.payload_len;
+    /* Servers never mask (RFC 6455 §5.1), but unmask defensively if set. */
+    if (h.masked) scr_ws_mask(pay, plen, h.mask_key);
+
+    if (h.opcode == SCR_WS_OP_CLOSE) {
+      uint16_t code = 1005;
+      const uint8_t *reason = NULL;
+      size_t rlen = 0;
+      if (plen >= 2) {
+        code = (uint16_t)((pay[0] << 8) | pay[1]);
+        reason = pay + 2;
+        rlen = plen - 2;
+      }
+      if (c->state == SCR_WS_ST_OPEN) scr_ws_write_frame(c, SCR_WS_OP_CLOSE, pay, plen); /* echo */
+      int was = c->state;
+      c->state = SCR_WS_ST_CLOSED;
+      if (was != SCR_WS_ST_CLOSED && c->cb.on_close) c->cb.on_close(c->user, code, reason, rlen);
+      memmove(c->buf, c->buf + total, c->buf_len - total);
+      c->buf_len -= total;
+      return true; /* nothing after a close matters */
+    } else if (h.opcode == SCR_WS_OP_PING) {
+      scr_ws_write_frame(c, SCR_WS_OP_PONG, pay, plen);
+    } else if (h.opcode == SCR_WS_OP_PONG) {
+      /* keepalive acknowledged */
+    } else if (h.opcode == SCR_WS_OP_TEXT || h.opcode == SCR_WS_OP_BINARY ||
+               h.opcode == SCR_WS_OP_CONT) {
+      uint8_t op = h.opcode;
+      if (op == SCR_WS_OP_CONT) {
+        if (c->msg_opcode == 0) { scr_ws_emit_error(c, "unexpected continuation frame"); return false; }
+      } else {
+        if (c->msg_opcode != 0) { scr_ws_emit_error(c, "new data frame before completion"); return false; }
+        c->msg_opcode = op;
+      }
+      if (!scr_ws_buf_reserve(&c->msg, &c->msg_cap, c->msg_len + plen)) {
+        scr_ws_emit_error(c, "websocket message allocation failed");
+        return false;
+      }
+      memcpy(c->msg + c->msg_len, pay, plen);
+      c->msg_len += plen;
+      if (h.fin) {
+        bool is_text = c->msg_opcode == SCR_WS_OP_TEXT;
+        if (c->cb.on_message) c->cb.on_message(c->user, c->msg, c->msg_len, is_text);
+        c->msg_len = 0;
+        c->msg_opcode = 0;
+      }
+    } else {
+      scr_ws_emit_error(c, "unsupported websocket opcode");
+      return false;
+    }
+
+    memmove(c->buf, c->buf + total, c->buf_len - total);
+    c->buf_len -= total;
+  }
+}
+
+bool scr_ws_conn_recv(ScrWsConn *c, const uint8_t *data, size_t len) {
+  if (c->state == SCR_WS_ST_CLOSED) return true;
+  if (!scr_ws_buf_reserve(&c->buf, &c->buf_cap, c->buf_len + len)) {
+    scr_ws_emit_error(c, "websocket receive buffer allocation failed");
+    return false;
+  }
+  memcpy(c->buf + c->buf_len, data, len);
+  c->buf_len += len;
+
+  if (c->state == SCR_WS_ST_HANDSHAKE) {
+    size_t header_len = 0;
+    int r = scr_ws_check_handshake(c->buf, c->buf_len, c->accept, &header_len);
+    if (r == SCR_WS_HS_INCOMPLETE) return true;
+    if (r != SCR_WS_HS_OK) {
+      scr_ws_emit_error(c, r == SCR_WS_HS_BAD_STATUS ? "websocket handshake: unexpected status"
+                        : r == SCR_WS_HS_BAD_UPGRADE ? "websocket handshake: bad Upgrade/Connection"
+                        : "websocket handshake: invalid Sec-WebSocket-Accept");
+      return false;
+    }
+    memmove(c->buf, c->buf + header_len, c->buf_len - header_len);
+    c->buf_len -= header_len;
+    c->state = SCR_WS_ST_OPEN;
+    if (c->cb.on_open) c->cb.on_open(c->user);
+  }
+
+  return scr_ws_drain_frames(c);
 }
