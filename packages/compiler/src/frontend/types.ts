@@ -243,8 +243,23 @@ export class UnionRegistry {
 /** Human-readable rendering of an IrType for diagnostics (records expand to
  * their canonical field list, unions to their arms; `checker.typeToString`
  * can't — it never sees IR types). `seen` breaks recursive shapes/unions:
- * a back-reference renders as "..." instead of expanding forever. */
+ * a back-reference renders as "..." instead of expanding forever.
+ *
+ * BUDGETED. Recursion is not the only way a spelling runs away: a wide
+ * shape whose fields are themselves wide expands multiplicatively without
+ * ever repeating a shape, and a generated protobuf message did exactly
+ * that -- 19.5 MB in ONE diagnostic, which no reader can use and which
+ * made the coverage report unprintable. Past the budget the rest of the
+ * spelling collapses to "…", so the head a reader actually reads survives
+ * intact. */
+const FORMAT_BUDGET = 4000;
+
 export function formatIrType(t: IrType, shapes: ShapeRegistry, unions: UnionRegistry, seen: Set<string> = new Set()): string {
+  const s = formatIrTypeInner(t, shapes, unions, seen);
+  return s.length > FORMAT_BUDGET ? s.slice(0, FORMAT_BUDGET) + "…" : s;
+}
+
+function formatIrTypeInner(t: IrType, shapes: ShapeRegistry, unions: UnionRegistry, seen: Set<string> = new Set()): string {
   switch (t.kind) {
     case "f64":
       return "number";

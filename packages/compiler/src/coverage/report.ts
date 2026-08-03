@@ -86,6 +86,24 @@ interface Blocker {
   count: number;
 }
 
+/** The alignment column for a set of messages, and the cap that keeps ONE
+ * message from stretching every other line.
+ *
+ * A blocker's text carries a full type spelling, and a deeply-expanded one
+ * runs to megabytes. Padding every row to the widest then multiplies that
+ * across the whole report -- the zapo graph produced an 8.4 GB report of
+ * which almost all was padding spaces. Past the cap the long row simply
+ * runs on, which is what an over-wide column does anyway. */
+const WIDEST_COLUMN = 100;
+function alignWidth(lengths: readonly number[]): number {
+  let w = 0;
+  for (const n of lengths) {
+    if (n > w) w = n;
+    if (w >= WIDEST_COLUMN) return WIDEST_COLUMN;
+  }
+  return w;
+}
+
 /** The report as ONE string. Kept for callers that want it whole — but a
  * report over a large dependency graph joins past V8's maximum string
  * length, so anything that only WRITES it should take the lines and stream
@@ -134,7 +152,7 @@ export function renderCoverageLines(input: CoverageInput, opts: { color?: boolea
         `the module graph must load before statements can be counted`,
     );
     const blockers = groupBlockers(input.diagnostics);
-    const widest = Math.max(...blockers.map((b) => b.what.length));
+    const widest = alignWidth(blockers.map((b) => b.what.length));
     for (const b of blockers) {
       out.push(
         `    ${c(RED, `×${b.count}`.padStart(4))}  ${b.what.padEnd(widest)}  ${c(DIM, b.code)}`,
@@ -286,7 +304,7 @@ export function renderCoverageLines(input: CoverageInput, opts: { color?: boolea
   const fences = input.runtimeFences ?? [];
   if (fences.length > 0) {
     const grouped = groupBlockers(fences);
-    const widestF = Math.max(...grouped.map((b) => b.what.length));
+    const widestF = alignWidth(grouped.map((b) => b.what.length));
     out.push(
       `  ${c(YELLOW, "deferred to runtime")}   ${fences.length} site${fences.length === 1 ? "" : "s"} ${c(DIM, "(JS statements that throw their fence if executed)")}`,
     );
@@ -317,7 +335,7 @@ export function renderCoverageLines(input: CoverageInput, opts: { color?: boolea
   const unreachedBlockers = groupBlockers(unreachedDiags);
   const dynamic = blockers.filter((b) => DYNAMIC_CAPABLE.has(b.code));
   const rejected = blockers.filter((b) => !DYNAMIC_CAPABLE.has(b.code));
-  const widest = Math.max(...[...blockers, ...unreachedBlockers].map((b) => b.what.length));
+  const widest = alignWidth([...blockers, ...unreachedBlockers].map((b) => b.what.length));
   const renderGroup = (group: Blocker[], dim = false) => {
     for (const b of group) {
       const what = b.what.padEnd(widest);
