@@ -178,19 +178,35 @@ static void scr_map_release_val(ScrMap *m, uint64_t val) {
 
 /* ── lifecycle ─────────────────────────────────────────────────────────── */
 
+/* Headered iff SOME side is cycle-capable: values (a Map of records) or
+ * keys (a Set of them). Every collector hook keys off this, and it has to
+ * be the same answer scr_cyc_alloc was given at construction. */
+static inline bool scr_map_headered(const ScrMap *m) {
+  return m->val_trace != NULL || m->key_trace != NULL;
+}
+
 static void scr_map_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrMap *m = (ScrMap *)o;
   for (size_t e = 0; e < m->nentries; e++) {
-    if (m->entries[e].live) visit(scr_map_slot_to_ptr(m->entries[e].val), ctx);
+    if (!m->entries[e].live) continue;
+    /* Values only when the VALUE side is cycle-capable: a set's values are
+     * bools, and slot_to_ptr over one is not a pointer. */
+    if (m->val_trace) visit(scr_map_slot_to_ptr(m->entries[e].val), ctx);
+    /* Keys when the KEY side is: a Set stores its elements here. */
+    if (m->key_trace) visit(scr_map_slot_to_ptr(m->entries[e].key), ctx);
   }
 }
 
-/* Collector teardown: the trace visits every live VALUE (traced edges were
- * already accounted), so the complement released here is the keys. */
+/* Collector teardown: the trace already accounted every edge it visited,
+ * so what this releases is the COMPLEMENT of the trace. Keys are in it
+ * only while key_trace is NULL -- once the trace visits them, releasing
+ * here would free them a second time. */
 static void scr_map_gcfree(void *o) {
   ScrMap *m = (ScrMap *)o;
-  for (size_t e = 0; e < m->nentries; e++) {
-    if (m->entries[e].live) scr_map_release_key(m, m->entries[e].key);
+  if (!m->key_trace) {
+    for (size_t e = 0; e < m->nentries; e++) {
+      if (m->entries[e].live) scr_map_release_key(m, m->entries[e].key);
+    }
   }
   free(m->entries);
   free(m->buckets);
@@ -226,7 +242,7 @@ ScrMap *scr_map_new(ScrMapKeyKind key_kind, ScrMapValKind val_kind,
 ScrMap *scr_map_retain(ScrMap *m) {
   if (m->rc != SIZE_MAX) {
     m->rc++;
-    if (m->val_trace) scr_cyc_mark_live(m);
+    if (scr_map_headered(m)) scr_cyc_mark_live(m);
   }
   return m;
 }
@@ -234,7 +250,7 @@ ScrMap *scr_map_retain(ScrMap *m) {
 void scr_map_release(ScrMap *m) {
   if (!m || m->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
   if (--m->rc == 0) {
-    if (m->val_trace) scr_cyc_on_dead(m);
+    if (scr_map_headered(m)) scr_cyc_on_dead(m);
     for (size_t e = 0; e < m->nentries; e++) {
       if (!m->entries[e].live) continue;
       scr_map_release_key(m, m->entries[e].key);
@@ -245,9 +261,9 @@ void scr_map_release(ScrMap *m) {
 #ifdef SCR_RC_AUDIT
     scr_live_maps--;
 #endif
-    if (m->val_trace) scr_cyc_free(m);
+    if (scr_map_headered(m)) scr_cyc_free(m);
     else free(m);
-  } else if (m->val_trace) {
+  } else if (scr_map_headered(m)) {
     scr_cyc_on_release(m); /* possible cycle root; may collect — m is done */
   }
 }
@@ -443,6 +459,23 @@ ScrMap *scr_set_new_ref(void *(*elem_retain)(void *), void (*elem_release)(void 
   ScrMap *m = scr_map_new(SCR_MAP_KEY_REF, SCR_MAP_VAL_F64, NULL, NULL, NULL);
   m->key_retain = elem_retain;
   m->key_release = elem_release;
+  return m;
+}
+
+ScrMap *scr_set_new_ref_traced(void *(*elem_retain)(void *), void (*elem_release)(void *),
+                               ScrTraceFn elem_trace) {
+  /* Headered allocation: scr_map_new keys that off val_trace, and a set has
+   * no value side, so the header is taken here and the trace hooked after. */
+  ScrMap *m = scr_cyc_alloc(sizeof *m, &scr_map_trace, &scr_map_gcfree);
+  m->rc = 1;
+  m->key_kind = SCR_MAP_KEY_REF;
+  m->val_kind = SCR_MAP_VAL_F64;
+  m->key_retain = elem_retain;
+  m->key_release = elem_release;
+  m->key_trace = elem_trace;
+#ifdef SCR_RC_AUDIT
+  scr_live_maps++;
+#endif
   return m;
 }
 
