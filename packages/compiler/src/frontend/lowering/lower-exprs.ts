@@ -3227,7 +3227,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     const tupleLengthOnArray =
       kind === "array" &&
       expr.name.text === "length" &&
-      L.checker.isTupleType(L.checker.getBaseTypeOfLiteralType(L.typeOf(expr.expression)));
+      everyArmIsTuple(L, L.checker.getBaseTypeOfLiteralType(L.typeOf(expr.expression)));
     if (kind === "child" ? !isChildSurfaceMember(L, expr) : !tupleLengthOnArray && !L.isStdlibMember(expr)) return null;
     const name = expr.name.text;
     if (kind === "child") {
@@ -10763,4 +10763,15 @@ export function primitiveCtorClosure(
     L.liftedFns.push(fn);
   }
   return { kind: "closure", fnName, captures: [], type: fnT, loc };
+}
+/** A tuple, or a union whose every arm is one. Both ride the ARRAY
+ * representation -- a union of same-element tuples collapses to an array
+ * in types.ts -- and in both the `length` member is the tuple's own
+ * synthesized property rather than Array.prototype's, so provenance alone
+ * would refuse a read that the representation supports. */
+function everyArmIsTuple(L: Lowerer, t: ts.Type): boolean {
+  if (L.checker.isTupleType(t)) return true;
+  if (!t.isUnionType()) return false;
+  const parts = t.getTypes();
+  return parts.length > 0 && parts.every((p) => L.checker.isTupleType(p));
 }
