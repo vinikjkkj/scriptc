@@ -917,6 +917,19 @@ export interface GenericInstance {
     // `() => void`), and throw-only callbacks are ordinary code
     // (`.action(() => { throw ... })`). `never` VALUES stay unmapped.
     if (retTsType.flags & ts.TypeFlags.Never) return VOID;
+    // `void | undefined` — the inferred return of `x => obj?.voidMethod()`
+    // (an optional-chain call of a void method): both arms are the no-value
+    // unit and the union has no data representation, yet it IS a void return
+    // (the call yields undefined either way). Map it to VOID like `never`, so
+    // the signature compiles and the result is discarded — Node's own
+    // fire-and-forget behavior. Only the all-void/undefined UNION rides this;
+    // a bare `void`/`undefined` keeps its existing path.
+    if (
+      retTsType.isUnionType() &&
+      retTsType.getTypes().every((p) => (p.flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined)) !== 0)
+    ) {
+      return VOID;
+    }
     // A JS function whose UNANNOTATED return infers a FUNCTION type
     // (test/common's mustCall — tsc infers `() => any` from the wrapper
     // it returns): the inferred arity is the wrapper's spelling, not a
