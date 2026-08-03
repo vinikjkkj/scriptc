@@ -432,7 +432,17 @@ export function isSupportedMapKey(t: IrType): boolean {
  * sentinel-registry idiom) is the same honest hashed storage with no
  * cycle risk at all (symbols hold only strings). */
 export function isSupportedSetElem(t: IrType): boolean {
-  return isSupportedMapKey(t) || t.kind === "netServer" || t.kind === "symbol";
+  return (
+    isSupportedMapKey(t) ||
+    t.kind === "netServer" ||
+    t.kind === "symbol" ||
+    // Promises key by reference identity like every other heap value, and
+    // the pending-task idiom (`set.add(p); p.finally(() => set.delete(p))`)
+    // is what asks for it. That closure captures BOTH, so the pair is a
+    // cycle through the set's element -- which the collector sees now that
+    // a traced set visits its keys (scr_set_new_ref_traced).
+    t.kind === "promise"
+  );
 }
 
 /** The Map VALUE fence: scalars plus every refcounted kind EXCEPT

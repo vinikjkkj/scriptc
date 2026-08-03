@@ -1442,7 +1442,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const s = E.newTemp(
           e.type,
           rcAdapters
-            ? `scr_set_new_ref(&${rcAdapters.retain}, &${rcAdapters.release})`
+            ? // A cycle-capable ELEMENT can hold the set back, and a Set
+              // keeps its elements on the KEY side -- so the set needs the
+              // header and the key-visiting trace, not the plain form.
+              (E.traceAdapterC(e.type.elem) !== null
+                ? `scr_set_new_ref_traced(&${rcAdapters.retain}, &${rcAdapters.release}, &${E.traceAdapterC(e.type.elem)})`
+                : `scr_set_new_ref(&${rcAdapters.retain}, &${rcAdapters.release})`)
             : `scr_map_new(${mapKeyKindC(e.type.elem)}, SCR_MAP_VAL_F64, NULL, NULL, NULL)`,
         );
         // Seeded construction (`new Set(values)`): one borrowed T[] whose
