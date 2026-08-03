@@ -624,6 +624,11 @@ export function mapKeyAccess(key: IrType): "f64" | "str" | "ref" {
   if (key.kind === "string") return "str";
   if (key.kind === "symbol") return "ref";
   if (key.kind === "netServer") return "ref"; // handle identity (Set<Server>)
+  // Reference-identity keys (class instances, records) are NOT here on
+  // purpose. Adding the suffix alone makes them compile and then
+  // SEGFAULT -- this side needs more than the accessor name, and a
+  // clean tier refusal (the default build falls back to C) beats a
+  // binary that crashes.
   throw new LlvmUnsupportedError(`mapKey:${key.kind}`);
 }
 
