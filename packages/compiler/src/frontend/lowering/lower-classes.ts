@@ -5441,21 +5441,34 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
               tupShape.fields.length > 0 &&
               tupShape.fields.every((f) => typeEquals(f.type, mapped.elem))
             ) {
-              const key = `tupleToArr:${typeKey(tupIr)}:${typeKey(mapped.elem)}`;
-              let helper = L.mapHofHelpers.get(key);
-              if (!helper) {
-                helper = `%tuple.toArray.${L.mapHofHelpers.size}`;
-                L.mapHofHelpers.set(key, helper);
-                L.liftedFns.push(buildTupleToArrayFn(L, helper, tupIr, tupShape.fields.length, mapped.elem, loc));
+              const lowered = L.lowerExpr(argNode);
+              // A uniform `as const` tuple often LOWERS as an array already
+              // (the const-lookup-table binding gives a computed read its
+              // slot), even though its CHECKER type is a tuple record. When
+              // the VALUE is that array, it seeds the Set directly — the
+              // tuple→array helper (which reads fields off a RECORD) is only
+              // for a value that really lowered a record, and calling it on
+              // an array is the shape the validator rejects.
+              if (lowered.type.kind === "array" && typeEquals(lowered.type.elem, mapped.elem)) {
+                return { kind: "setNew", seed: lowered, type: mapped, loc };
               }
-              const seed: IrExpr = {
-                kind: "call",
-                callee: helper,
-                args: [L.lowerExpr(argNode)],
-                type: arrayOf(mapped.elem),
-                loc,
-              };
-              return { kind: "setNew", seed, type: mapped, loc };
+              if (lowered.type.kind === "record") {
+                const key = `tupleToArr:${typeKey(tupIr)}:${typeKey(mapped.elem)}`;
+                let helper = L.mapHofHelpers.get(key);
+                if (!helper) {
+                  helper = `%tuple.toArray.${L.mapHofHelpers.size}`;
+                  L.mapHofHelpers.set(key, helper);
+                  L.liftedFns.push(buildTupleToArrayFn(L, helper, tupIr, tupShape.fields.length, mapped.elem, loc));
+                }
+                const seed: IrExpr = {
+                  kind: "call",
+                  callee: helper,
+                  args: [lowered],
+                  type: arrayOf(mapped.elem),
+                  loc,
+                };
+                return { kind: "setNew", seed, type: mapped, loc };
+              }
             }
           }
           if (!ts.isSpreadElement(argNode)) {
