@@ -2944,7 +2944,26 @@ export function uniformTupleArrayExpectation(L: Lowerer, decl: ts.VariableDeclar
   if (!shape?.tuple || shape.fields.length === 0) return null;
   if (shape.fields.length !== init.elements.length) return null;
   const elem = shape.fields[0]!.type;
-  return shape.fields.every((f) => typeEquals(f.type, elem)) ? arrayOf(elem) : null;
+  return shape.fields.every((f) => typeEquals(f.type, elem)) ? arrayOf(tableElemType(L, elem)) : null;
+}
+
+/** A table's element type, with NESTED uniform tuples answered as arrays
+ * too: `const DICTS = [D0, D1, D2] as const` over tables that are
+ * themselves `as const`.
+ *
+ * The declared type's fields are the inner TUPLE types, so without this
+ * the outer table would be an array of RECORDS while the inner tables are
+ * already arrays -- a mismatch the positional copy would paper over,
+ * silently turning each inner array back into a record that a computed
+ * index cannot read. Recursing keeps the two levels agreeing, and the
+ * inner values then fit their slot with no copy at all. */
+function tableElemType(L: Lowerer, t: IrType): IrType {
+  if (t.kind !== "record") return t;
+  const shape = L.shapes.get(t.shapeId);
+  if (!shape?.tuple || shape.fields.length === 0 || shape.indexValue) return t;
+  const first = shape.fields[0]!.type;
+  if (!shape.fields.every((f) => typeEquals(f.type, first))) return t;
+  return arrayOf(tableElemType(L, first));
 }
 export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: boolean): IrStmt | null {
     // --provenance-sources: an elided pure-annotated dead const emits
