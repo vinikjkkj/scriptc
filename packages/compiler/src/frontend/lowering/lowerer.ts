@@ -3445,21 +3445,8 @@ export class Lowerer {
     // same field-projecting copy, each target field read off the instance.
     if (expected.kind === "record" && expr.type.kind === "object") {
       const helper = this.objRecordWidthHelper(expr.type.className, expected.shapeId, expr.loc);
-      if (helper) {
-        return { kind: "call", callee: helper, args: [expr], type: expected, loc: expr.loc };
-      }
-      // The field-projecting plan declines a target field the class
-      // satisfies through a METHOD, because a bound method reference is
-      // not plain storage to copy. It is still projectable — the
-      // ctor-witness projection builds exactly those thunks, each
-      // capturing the instance — and a logger passed as its structural
-      // interface (`{ debug(msg, meta?), child(...), level }` satisfied by
-      // a ConsoleLogger) is the shape that needs it.
-      const proj = this.ctorWitnessProjection(expr.type.className, expected, expr.loc);
-      if (proj) {
-        return { kind: "call", callee: proj, args: [expr], type: expected, loc: expr.loc };
-      }
-      return null;
+      if (!helper) return null;
+      return { kind: "call", callee: helper, args: [expr], type: expected, loc: expr.loc };
     }
     // A RECORD flowing into a class-instance slot (`{x: 0, y: 0}` into
     // `A.Point` — the parameter-property data-class pattern): construction
