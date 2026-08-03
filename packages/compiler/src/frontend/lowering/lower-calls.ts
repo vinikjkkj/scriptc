@@ -9088,6 +9088,26 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
         !call.arguments.some((a) => ts.isSpreadElement(a)) &&
         L.checker.getCallSignatures(recvT).length > 0
       ) {
+        // `obj.method.bind(receiver)` on a CLASS METHOD (the coordinator
+        // `.bind(this)` idiom): the method reference has no plain value, but
+        // binding it to its OWN receiver IS a bound closure — capture the
+        // receiver, call the method. Only when the bind argument names the
+        // same receiver as the method access (both `this`, or the same
+        // binding), so the closure's `this` is what .bind requests.
+        if (ts.isPropertyAccessExpression(access.expression)) {
+          const methodAccess = access.expression;
+          const recvNode = methodAccess.expression;
+          const bindArg = call.arguments[0]!;
+          const sameReceiver =
+            (recvNode.kind === ts.SyntaxKind.ThisKeyword && bindArg.kind === ts.SyntaxKind.ThisKeyword) ||
+            (ts.isIdentifier(recvNode) &&
+              ts.isIdentifier(bindArg) &&
+              L.resolveValueSymbol(recvNode) === L.resolveValueSymbol(bindArg));
+          if (sameReceiver) {
+            const bound = L.boundMethodValue(methodAccess, locOf(call));
+            if (bound) return bound;
+          }
+        }
         const fn = L.lowerExpr(access.expression);
         if (fn.type.kind === "func") {
           const thisArg = L.lowerExpr(call.arguments[0]!);

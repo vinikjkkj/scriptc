@@ -4592,7 +4592,7 @@ export class Lowerer {
    * the method with the slot's own arguments. Interned per (receiver,
    * declarer, method, slot signature) and captures the width helper's `o.0`
    * instance param (boxed there so the capture can retain it). */
-  boundMethodClosure(recvClass: string, proj: BoundMethodProj, loc: SrcLoc): IrExpr {
+  boundMethodClosure(recvClass: string, proj: BoundMethodProj, loc: SrcLoc, captureLocalId = "o.0"): IrExpr {
     const key = `boundmeth:${recvClass}:${proj.declarer}:${proj.name}:${typeKey(proj.func)}`;
     const existing = this.widthHelpers.get(key);
     const name = existing ?? `%boundmeth.${this.widthHelpers.size}`;
@@ -4637,7 +4637,41 @@ export class Lowerer {
         loc,
       });
     }
-    return { kind: "closure", fnName: name, captures: ["o.0"], type: proj.func, loc };
+    return { kind: "closure", fnName: name, captures: [captureLocalId], type: proj.func, loc };
+  }
+
+  /** A class METHOD taken as a BOUND VALUE — `obj.m` / `obj.m.bind(obj)`,
+   * the coordinator `.bind(this)` idiom — becomes a closure that captures
+   * the receiver and calls the method. The receiver is bound into a fresh
+   * BOXED hidden local (so the capture can retain it) initialized to the
+   * lowered receiver; the value is a seqExpr of that declaration and the
+   * closure over it. Null when the member is not a plain (non-generic)
+   * bindable class method, or its signature has no plain-closure form. */
+  boundMethodValue(access: ts.PropertyAccessExpression, loc: SrcLoc): IrExpr | null {
+    const recvIr = this.mapTypeOf(this.typeOf(access.expression));
+    if (recvIr?.kind !== "object") return null;
+    const info = this.classes.get(recvIr.className);
+    if (!info) return null;
+    const meth = findMethodOn(this, info, access.name.text);
+    if (!meth || findGenericMethodOn(this, info, access.name.text)) return null;
+    const fnT = funcOf(meth.sig.params.map((p) => p.type), meth.sig.ret);
+    const proj = this.boundMethodPlan(info, access.name.text, fnT, meth.declarer.def.name, meth.sig);
+    if (!proj) return null;
+    const recv = this.lowerExpr(access.expression);
+    if (recv.type.kind !== "object") return null;
+    const ctx = this.ctx;
+    const count = ctx.localCounters.get("%bmrecv") ?? 0;
+    ctx.localCounters.set("%bmrecv", count + 1);
+    const recvId = `%bmrecv.${count}`;
+    ctx.locals.push({ id: recvId, name: "%bmrecv", type: recv.type, mutable: false, boxed: true });
+    const closure = this.boundMethodClosure(recvIr.className, proj.method, loc, recvId);
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "varDecl", localId: recvId, init: recv, loc }],
+      result: closure,
+      type: fnT,
+      loc,
+    };
   }
 
   /** Interned `%obj.width.<n>(o)` — builds a record from a class
