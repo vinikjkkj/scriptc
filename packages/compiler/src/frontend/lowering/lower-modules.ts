@@ -1617,23 +1617,13 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
               const asTable = isLet ? null : uniformTupleArrayExpectation(L, decl);
               if (asTable && type.kind === "record") type = asTable;
             }
-            // This file is the runtime TWIN of a declaration file naming
-            // the same export. Consumers type the binding from the
-            // DECLARATION, so the value must be built in that shape or the
-            // two describe different layouts of one storage. Deciding it
-            // here is what makes the initializer lower into it, like the
-            // lookup-table case above. The declaration is the more precise
-            // of the pair (a generated .d.ts spells tuples where the JS
-            // literal infers arrays), so this narrows; what the initializer
-            // cannot build at that type fences there.
-            if (!isLet && isJsSourceFile(sf)) {
-              const declSf = L.declSiblingOf(sf);
-              const declSym = declSf
-                ? L.checker.getSymbolAtLocation(declSf)?.getExports().get(nameNode.text as ts.__String)
-                : undefined;
-              const declared = declSym ? L.mapTypeOf(L.checker.getTypeOfSymbol(declSym)) : null;
-              if (declared && declared.kind !== "void") type = declared;
-            }
+            // A `.d.ts`/`.js` twin keeps the `.js` value at its OWN inferred
+            // shape here (the generated `.d.ts` spells tuples where the JS
+            // literal infers arrays, so forcing the declared shape fences the
+            // initializer). Consumers reading the binding through the
+            // declaration reconcile at the use site instead: globalOf bridges
+            // the read to this global, and the value-shape-dispatch surfaces
+            // (Object.keys, keyed reads) walk the shape the value carries.
             const symbol = L.checker.getSymbolAtLocation(nameNode);
             // Merged `var` redeclarations (`var y = 1; ...; var y = 2;` —
             // one symbol) register exactly one global; later declarations
@@ -1862,6 +1852,23 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
    * inline in the body. JSON-import bindings (pure data) load next; then
    * the body. Top-level var statements assign the pre-registered globals
    * instead of declaring locals. */
+  /** True when an import STATEMENT binds at least one value that resolves
+   * to a static (non-island) global — the signal that its `.d.ts` twin's
+   * runtime must be initialized here (a spec table read at init). A
+   * namespace/island binding (the minified proto) resolves to no static
+   * global, so its trap-only twin init stays orphaned. */
+  function importBindsStaticTwinGlobal(L: Lowerer, stmt: ts.Statement): boolean {
+    if (!ts.isImportDeclaration(stmt) || stmt.importClause === undefined) return false;
+    const nb = stmt.importClause.namedBindings;
+    if (nb === undefined || !ts.isNamedImports(nb)) return false;
+    for (const el of nb.elements) {
+      if (el.isTypeOnly) continue;
+      const g = L.globalOf(el.name);
+      if (g && g.type.kind !== "jsval") return true;
+    }
+    return false;
+  }
+
   export function lowerFileInit(L: Lowerer, sf: ts.SourceFile, stmts: ts.Statement[], name: string): IrFunction {
     const isAsync = L.asyncInitFiles.has(sf);
     const ctx = newFnCtx(false, null, null, VOID);
@@ -1904,14 +1911,15 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
           // its %init never runs, leaving its globals as storage nothing
           // assigns -- a read of one is then a null dereference, not a
           // diagnostic.
-          // Only redirect to a twin that actually DEFINES a static global:
-          // an uncompilable island twin (the minified proto) has a trap-only
-          // init, and naming it here fires the first trap at module load
-          // instead of leaving it orphaned (its method calls trap on use, as
-          // before). A spec table (WA_APPSTATE_SCHEMAS in a static record
-          // global) is the case this redirect is for.
+          // Only redirect when THIS import binds a value that resolves to a
+          // static (non-island) global the twin defines — a spec table read
+          // at init (WA_APPSTATE_SCHEMAS). An uncompilable island twin (the
+          // minified proto) binds an island handle, not a static global, and
+          // its init is trap-only, so naming it here would fire the first
+          // trap at module load; leave it orphaned (its method calls trap on
+          // use, as before) by taking the declaration file's own empty init.
           const depTwin = dep.isDeclarationFile ? L.declTwinSourceOf(dep) : null;
-          const depRt = depTwin !== null && L.moduleHasStaticGlobal(depTwin) ? depTwin : dep;
+          const depRt = depTwin !== null && importBindsStaticTwinGlobal(L, stmt) ? depTwin : dep;
           const depInit = L.initNameOf.get(depRt);
           if (depInit !== undefined) {
             const loc = locOf(stmt);

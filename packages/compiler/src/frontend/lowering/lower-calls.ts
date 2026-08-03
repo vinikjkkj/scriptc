@@ -7904,12 +7904,21 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       }
     }
     let argIr = L.mapTypeOf(L.typeOf(argNode));
-    // JS: an unmappable CHECKER type over a value that lowered to a real
-    // record (the narrowed export-table literal) — the lowered value's
-    // shape is the honest dispatch key, exactly the identity-Set stance.
-    if (argIr === null && isJsSourceFile(argNode.getSourceFile())) {
+    // The LOWERED value's record shape is the honest dispatch key whenever it
+    // diverges from the CHECKER type — Object.keys walks the fields the value
+    // actually holds at runtime. Two cases: a JS unmappable-checker export
+    // table (argIr null), and a `.d.ts`/`.js` twin whose DECLARED type (a
+    // generic interface) maps to a different shape than the `.js` literal the
+    // value carries (the WA spec tables: the checker says r_dts, the value is
+    // r_js). Both take the value's shape.
+    {
       const probed = probeLower(L, argNode);
-      if (probed?.type.kind === "record") argIr = probed.type;
+      if (
+        probed?.type.kind === "record" &&
+        (argIr === null || (argIr.kind === "record" && argIr.shapeId !== probed.type.shapeId))
+      ) {
+        argIr = probed.type;
+      }
     }
     if (argIr?.kind !== "record") return null; // Maps, classes, arrays → the SC2020 fence
     const shape = L.shapes.get(argIr.shapeId);
