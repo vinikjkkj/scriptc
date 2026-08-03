@@ -7071,6 +7071,13 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
           return inner;
         }
       }
+      // A composite that is not JSON-safe only because a CHECKABLE
+      // non-JSON leaf sits inside it (a Uint8Array field). The walker
+      // emits a check per type and calls the per-field one for each
+      // field, and that leaf is one it already knows standing alone.
+      if (canDynCheckTo(target, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
+        return { kind: "dynCheck", value: inner, type: target, loc: locOf(expr) };
+      }
       L.unsupported(
         "SC1090",
         expr,
