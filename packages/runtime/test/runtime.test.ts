@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { ccCompile, exeSuffix, testBin } from "./cc.js";
 import { expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
@@ -18,8 +19,8 @@ const RUNTIME_SOURCES = ["scr_number.c", "scr_string.c", "scr_array.c", "scr_byt
 test("runtime smoke.c: output exact, ASan and RC audit clean", async () => {
   const buildDir = join(testDir, "build");
   await mkdir(buildDir, { recursive: true });
-  const bin = join(buildDir, "smoke");
-  await execFileAsync("clang", [
+  const bin = join(buildDir, "smoke" + exeSuffix);
+  await ccCompile([
     "-std=c11", "-O1", "-Wall", "-Wextra",
     "-fsanitize=address", "-DSCR_RC_AUDIT",
     ...(process.platform === "linux" ? ["-D_GNU_SOURCE"] : []),

@@ -2,18 +2,19 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { ccCompile, expectAbort, exeSuffix, testBin } from "./cc.js";
 import { beforeAll, expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const testDir = import.meta.dirname;
-const bin = join(testDir, "build", "test_array");
+const bin = join(testDir, "build", "test_array" + exeSuffix);
 
 // Compiled once with ASan + the RC audit: the assertions in test_array.c
 // include recursive-release checks (array of strings, array of arrays), and
 // the sanitized run proves no leak/double-free across all of them.
 beforeAll(async () => {
   await mkdir(join(testDir, "build"), { recursive: true });
-  await execFileAsync("clang", [
+  await ccCompile([
     "-std=c11", "-O1", "-Wall", "-Wextra",
     "-fsanitize=address", "-DSCR_RC_AUDIT",
     "-o", bin,
@@ -49,6 +50,6 @@ test.each([
     },
     (e: Error & { signal?: string; stderr?: string }) => e,
   );
-  expect(err.signal).toBe("SIGABRT");
+  expectAbort(err);
   expect(err.stderr).toContain(`scriptc: RangeError: ${message}`);
 });

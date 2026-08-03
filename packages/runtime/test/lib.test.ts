@@ -3,11 +3,12 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { ccCompile, exeSuffix, testBin } from "./cc.js";
 import { afterAll, beforeAll, expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const testDir = import.meta.dirname;
-const bin = join(testDir, "build", "test_lib");
+const bin = join(testDir, "build", "test_lib" + exeSuffix);
 let scratch: string;
 
 // Built with ASan + the RC audit: a clean exit also proves the library's
@@ -15,7 +16,7 @@ let scratch: string;
 // released by the atexit cleanup before the audit runs).
 beforeAll(async () => {
   await mkdir(join(testDir, "build"), { recursive: true });
-  await execFileAsync("clang", [
+  await ccCompile([
     "-std=c11", "-O1", "-Wall", "-Wextra",
     "-fsanitize=address", "-DSCR_RC_AUDIT",
     ...(process.platform === "linux" ? ["-D_GNU_SOURCE"] : []),
