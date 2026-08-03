@@ -1052,7 +1052,32 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       );
     })
   ) {
-    return ctx.dynamic ? JSVAL : null;
+    // A PURE-DATA interface/type-literal from the .d.ts is the EXCEPTION:
+    // the values behind an ordinary declaration-file type live in the
+    // engine, BUT a data-only shape (a protobuf message — `interface
+    // IADVSignedDeviceIdentity extends $Properties` whose members are all
+    // Uint8Array/number/nested-data, no methods) is one the PROGRAM builds
+    // from its own decoded bytes, and the only way to get a value FROM the
+    // uncompiled module — a value read / method call like
+    // `proto.X.decode(...)` — fences at its own value-import gate. So the
+    // STRUCTURAL shape maps (falling through to the record path below);
+    // only the module's VALUES are refused, exactly where they cross. A
+    // method-bearing type (an engine object's surface) keeps the fence:
+    // a call signature needs a body the .d.ts lacks. Classes keep their
+    // nominal fence too — only interfaces/type-literals fall through.
+    // STATIC builds only: the soundness rests on the value-import gate
+    // fencing every value that would cross FROM the uncompiled module
+    // (`proto.X.decode(...)` → SC1090). Under --dynamic that import does
+    // NOT fence — it becomes a jsval island handle — so a data-only shape
+    // must stay JSVAL there too, or a program-built record and an
+    // island-imported handle would disagree on representation.
+    const dataInterface =
+      !ctx.dynamic &&
+      npmDecls.every(
+        (d) => ts.isInterfaceDeclaration(d) || ts.isTypeLiteralNode(d) || ts.isTypeAliasDeclaration(d),
+      ) &&
+      isDataOnlyObjectType(widened, checker);
+    if (!dataInterface) return ctx.dynamic ? JSVAL : null;
   }
   // NOTE on module NAMESPACE types (`typeof import("./x.mjs")` — what a
   // dynamic import resolves to): non-stdlib ones fall under the rule
@@ -3400,10 +3425,45 @@ function recordProvenanceOk(
   // body behind them — which is why a record declared there cannot be built.
   // When the implementation twin WAS compiled (declTwinOf put it into module
   // order), the shape does have code behind it and the record is buildable.
-  return !decls.some((d) => {
+  const declFileNoImpl = decls.some((d) => {
     const sf = d.getSourceFile();
     return sf.isDeclarationFile && !(ctx?.declFileHasCompiledImpl?.(sf) ?? false);
   });
+  if (!declFileNoImpl) return true;
+  // A PURE-DATA interface declared in a .d.ts (a protobuf message shape —
+  // `interface IADVSignedDeviceIdentity extends $Properties` whose members
+  // are all Uint8Array/number/nested-data, no methods) IS buildable: the
+  // program constructs the value from its OWN decoded bytes, and the ONE
+  // way to obtain a value FROM the declaration-only module — a value read
+  // or method call like `proto.X.decode(...)` — fences separately (its own
+  // value-import gate). So mapping the STRUCTURAL shape is sound; only the
+  // uncompiled module's VALUES are refused, exactly where they cross.
+  // A method-bearing declaration (an engine object's surface — DOM, a Node
+  // handle) keeps the fence: a call signature needs a body the .d.ts lacks.
+  // Interface/type-literal declarations only (a decl-file CLASS keeps its
+  // nominal fence — the intersection rule above already refuses class parts).
+  const isInterfaceLike = decls.every(
+    (d) => ts.isInterfaceDeclaration(d) || ts.isTypeLiteralNode(d) || ts.isTypeAliasDeclaration(d),
+  );
+  return isInterfaceLike && isDataOnlyObjectType(t, checker);
+}
+
+/** Every property of an object type is a DATA slot — its type carries no
+ * call or construct signature (a method / constructor a .d.ts declares but
+ * cannot supply a body for). Nested object-typed fields are NOT walked here
+ * (the record field walk recurses through recordProvenanceOk for each), so
+ * this is a single-level method check; index signatures count as data. */
+function isDataOnlyObjectType(t: ts.Type, checker: ts.TypeChecker): boolean {
+  const props = checker.getPropertiesOfType(t);
+  for (const p of props) {
+    const pt = checker.getTypeOfSymbol(p);
+    // A property whose type is itself callable/constructable is a method or
+    // a callback slot whose behavior a declaration file cannot back.
+    if (checker.getCallSignatures(pt).length > 0 || checker.getConstructSignatures(pt).length > 0) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** A GENERIC-callable member type (`m<T>(x: T): T` / `f: <T>(x: T) => T` in
