@@ -5206,7 +5206,19 @@ export class Lowerer {
     }
     let voidRet: "dyn" | "jsval" | "strand" | null = null;
     let strandRet = false;
-    if (toT.ret.kind !== "void" && !this.coercibleValue(fromT.ret, toT.ret)) {
+    // A factory returning a CLASS INSTANCE into a slot that spells the
+    // instance's shape as a record -- `() => new Store()` passed where the
+    // parameter is typed by the store INTERFACE. The instance satisfies
+    // that interface, and the constructor-witness path already knows how
+    // to project one into the record (bound methods, lifted fields), so
+    // this is the same conversion one call deeper. Probed here rather than
+    // widened into coercibleValue: that predicate answers for every
+    // coercion site, and a class is NOT a record anywhere else.
+    const classRetProj =
+      toT.ret.kind === "record" && fromT.ret.kind === "object"
+        ? this.ctorWitnessProjection(fromT.ret.className, toT.ret, loc)
+        : null;
+    if (toT.ret.kind !== "void" && !this.coercibleValue(fromT.ret, toT.ret) && classRetProj === null) {
       if (fromT.ret.kind !== "void") {
         // A RESULT that cannot convert — the strandParams stance, result
         // side (the production/development function-choice ternary: the
@@ -5288,7 +5300,10 @@ export class Lowerer {
           ),
         ];
       } else {
-        const result = this.coerceToExpected(call, toT.ret);
+        const result =
+          classRetProj !== null
+            ? { kind: "call" as const, callee: classRetProj, args: [call], type: toT.ret, loc }
+            : this.coerceToExpected(call, toT.ret);
         if (!typeEquals(result.type, toT.ret)) throw new Error("lowerer bug: probed fn-adapter return stopped coercing");
         body = [{ kind: "return", value: result, loc }];
       }
