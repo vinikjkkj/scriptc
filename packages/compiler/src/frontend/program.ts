@@ -52,7 +52,7 @@ import {
 import { provenanceDeclSiblings } from "./provenance-registry.js";
 import { isNodeModulesPath, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareModule, resolveProjectImport, resolveRelativeModule, resolveTypeDirective, setProjectRealm } from "./resolve.js";
 import { probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
-import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
+import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, npmStaticPackages, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
 import { isProvenanceSpecifier, provenancePaths } from "./provenance-registry.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 import {
@@ -231,11 +231,30 @@ function loadProgram7(host: ts.Ts7Host, entryPath: string): LoadResult & { dispo
   const paths = provenancePaths();
   if (paths !== null) options = { ...options, paths };
   const coreRoots = [entryPath, ambientDtsPath(), nodeTypes ?? fallbackDtsPath()];
+  // --npm-static: an explicitly-named package joins the program even when
+  // no static import statement names it — the optional-dependency shape
+  // (`const WS = 'ws'; await import(WS)`): the specifier appears only at
+  // a dynamic site tsgo does not chase, yet the static lowering needs the
+  // package's inferred surface in the program. The entry rides as an
+  // extra root; unresolvable names skip (their import sites report).
+  const npmStaticRoots: string[] = [];
+  for (const pkg of npmStaticPackages()) {
+    const npm = resolveNpmImport7(entryPath, pkg);
+    if (process.env["SCRIPTC_DYNNS_TRACE"]) {
+      console.error(`[dynns] root probe '${pkg}' -> ${npm === null ? "null" : npm.typesFile}`);
+    }
+    if (npm !== null && isJsSourceFileName(npm.typesFile)) npmStaticRoots.push(npm.typesFile);
+  }
   const program = ts.createProgram(
-    [...coreRoots, overridesDtsPath(), ...provenanceDeclSiblings()],
+    [...coreRoots, overridesDtsPath(), ...provenanceDeclSiblings(), ...npmStaticRoots],
     options,
     host,
   );
+  if (process.env["SCRIPTC_DYNNS_TRACE"]) {
+    for (const r of npmStaticRoots) {
+      console.error(`[dynns] root in program: ${r} -> ${program.getSourceFile(r) !== undefined}`);
+    }
+  }
   const entry = program.getSourceFile(entryPath);
   if (!entry) throw new Error(`could not load ${entryPath}`);
   let projectWorld: ts.Program | null = null;
@@ -2304,6 +2323,50 @@ function preflight7(load: LoadResult): {
     order.push(sf);
   };
   visit(entry);
+
+  // Dynamic `import()` of an opted-in --npm-static package (the
+  // optional-dependency shape — `const WS = 'ws'; await import(WS)`): the
+  // package is a PROGRAM-MODULE dependency reached only at the import()
+  // site, so no static edge above ever walked it. Its subgraph joins the
+  // order here — same edges map, same cycle admission — spliced BEFORE
+  // the entry (which stays last). Nothing calls the appended modules'
+  // %init at startup; the import() site's lowering runs the guarded init.
+  if (npmStaticActive()) {
+    const checker = program.getTypeChecker();
+    const dynDeps: ts.SourceFile[] = [];
+    for (const sf of userFiles) {
+      ts.walkPreorder(sf, (n) => {
+        if (
+          ts.isCallExpression(n) &&
+          n.expression.kind === ts.SyntaxKind.ImportKeyword &&
+          n.arguments[0] !== undefined
+        ) {
+          const spec = dynamicImportSpecOf(checker, n.arguments[0]);
+          if (
+            spec !== null &&
+            !isRelativeSpecifier(spec) &&
+            !spec.startsWith("#") &&
+            !spec.startsWith("node:")
+          ) {
+            const npm = resolveNpmImport7(sf.fileName, spec);
+            if (npm !== null && isNpmStaticPackage(npm.packageName)) {
+              const dep = npmStaticProgramDep(program, npm.packageName, npm.typesFile);
+              if (dep !== null && state.get(dep) === undefined && !dynDeps.includes(dep)) {
+                dynDeps.push(dep);
+              }
+            }
+          }
+        }
+        return undefined;
+      });
+    }
+    if (dynDeps.length > 0) {
+      const before = order.length; // entry sits at before-1
+      for (const dep of dynDeps) if (state.get(dep) === undefined) visit(dep);
+      const added = order.splice(before);
+      order.splice(before - 1, 0, ...added);
+    }
+  }
 
   // The startup crash Node's RESOLUTION phase reports: modules resolve
   // their request specifiers in source order, children linking depth-first
