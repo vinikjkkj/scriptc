@@ -6171,19 +6171,37 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       }
       return L.maybeNarrow({ kind: "dynKeyGet", key: dk, value: obj, type: DYN, loc }, expr);
     }
-    // The receiver's CHECKER type maps to this record shape, but its VALUE
-    // lowered a UNION — a `union as unknown as T` assertion (`backend[kind]`
-    // with kind `'stores' | 'caches'`, two differently-shaped fields,
-    // re-typed to one record). The assertion changes the type tsc sees, not
-    // the runtime value, so a single record shape to key off does not exist.
-    // Fence rather than emit a recordKeyGet over a union receiver (the IR
-    // invariant the validator would ICE on) — a JS source defers this to a
-    // runtime trap, so a path that never runs still compiles.
-    if (obj.type.kind === "union") {
+    // The receiver's CHECKER shape and the shape its VALUE lowered disagree:
+    // an assertion retyped the value without reshaping it. Two idioms reach
+    // here — `union as unknown as T` (`backend[kind]` with two differently-
+    // shaped fields, the value a union of arms) and `x as Record<string,
+    // unknown>` (a concrete record read for arbitrary runtime keys, the
+    // `Object.keys(o)` iteration). Neither has one static record shape to
+    // key off. When the value can cross into the checked-dynamic tree, read
+    // the key there (a missing key answers undefined, exactly JS — and the
+    // `unknown` value type is what the cast promised); otherwise fence (a JS
+    // source or --best-effort defers to a runtime trap, so a path that never
+    // runs still compiles). A value that already IS this shape falls through
+    // to the ordinary reads below.
+    if (obj.type.kind !== "record" || obj.type.shapeId !== shapeId) {
+      if (L.dynConvertible(obj.type)) {
+        let dk =
+          litKey !== null
+            ? ({ kind: "strLit", value: litKey, type: STRING, loc: locOf(keyNode) } satisfies IrExpr)
+            : L.lowerExpr(keyNode);
+        if (dk.type.kind === "f64" || dk.type.kind === "dyn") dk = L.ensureString(dk, keyNode);
+        if (dk.type.kind !== "string") {
+          L.unsupported("SC1090", keyNode, "indexing records with non-string or non-number keys");
+        }
+        return L.maybeNarrow(
+          { kind: "dynKeyGet", key: dk, value: { kind: "dynFrom", value: obj, type: DYN, loc }, type: DYN, loc },
+          expr,
+        );
+      }
       L.unsupported(
         "SC1090",
         expr,
-        "computed keyed reads through a receiver whose value is a union of shapes (a '… as unknown as T' assertion retypes but does not reshape the value — index a single concrete record, or read the field on each arm)",
+        "computed keyed reads through a receiver whose value shape differs from its asserted type (a '… as T' cast retypes but does not reshape the value — index a single concrete record, or read the field on each arm)",
       );
     }
     if (litKey !== null) {
