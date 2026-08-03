@@ -1494,11 +1494,14 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           // the ordinary undefined-armed union machinery.
           const type = L.irTypeOf(member.name);
           if (type.kind === "void") L.badType(member.name, L.typeOf(member.name));
-          // dyn stays out of class fields (KEEP NARROW; record
-          // fields and array elements are unmappable via mapType already).
-          if (type.kind === "dyn") {
-            L.unsupported("SC1090", member.name, "'unknown'-typed class fields");
-          }
+          // A dyn (`unknown`-typed) class field stores a boxed dyn value,
+          // exactly like a dyn local: the named slot holds a ScrDyn,
+          // construction writes it, reads hand it back, reassignment and
+          // destruction refcount it (verified byte-identical to Node,
+          // refcounted values and reassignment included). Record fields and
+          // array elements still reject dyn — those are anonymous positions
+          // mapType cannot slot — so a dyn-field class projected to a record
+          // still fences at the projection, as it should.
           if (fields.has(member.name.text)) {
             // REDECLARING an inherited field: Node [[Define]]s the OWN
             // property again when THIS class's field initializers run
@@ -1609,10 +1612,8 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             const shape = L.paramShape(p);
             const type = shape.bodyType ?? shape.type;
             if (type.kind === "void") L.badType(p.name, L.typeOf(p.name));
-            // The class-field dyn rule verbatim (KEEP NARROW).
-            if (type.kind === "dyn") {
-              L.unsupported("SC1090", p.name, "'unknown'-typed class fields");
-            }
+            // The class-field dyn rule verbatim: a dyn parameter property is
+            // a boxed dyn slot, like a dyn declared field.
             // `override x` (and any same-named inherited member) would
             // redeclare a base slot — the declared-field rule verbatim.
             if (fields.has(name)) {
