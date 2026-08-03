@@ -12,7 +12,7 @@ import { isJsSourceFileName, isRelativeSpecifier } from "../shared.js";
 import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
 import type { CycleEdge } from "../program.js";
 import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
-import { BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/nodes.js";
+import { BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrLocal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/nodes.js";
 import { ENTRY_NAME, PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, newFnCtx, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, isPromisifyCall } from "./lower-builtins.js";
 import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, nullishGenericBindingUnitOf } from "./lower-calls.js";
@@ -1617,6 +1617,23 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
               const asTable = isLet ? null : uniformTupleArrayExpectation(L, decl);
               if (asTable && type.kind === "record") type = asTable;
             }
+            // This file is the runtime TWIN of a declaration file naming
+            // the same export. Consumers type the binding from the
+            // DECLARATION, so the value must be built in that shape or the
+            // two describe different layouts of one storage. Deciding it
+            // here is what makes the initializer lower into it, like the
+            // lookup-table case above. The declaration is the more precise
+            // of the pair (a generated .d.ts spells tuples where the JS
+            // literal infers arrays), so this narrows; what the initializer
+            // cannot build at that type fences there.
+            if (!isLet && isJsSourceFile(sf)) {
+              const declSf = L.declSiblingOf(sf);
+              const declSym = declSf
+                ? L.checker.getSymbolAtLocation(declSf)?.getExports().get(nameNode.text as ts.__String)
+                : undefined;
+              const declared = declSym ? L.mapTypeOf(L.checker.getTypeOfSymbol(declSym)) : null;
+              if (declared && declared.kind !== "void") type = declared;
+            }
             const symbol = L.checker.getSymbolAtLocation(nameNode);
             // Merged `var` redeclarations (`var y = 1; ...; var y = 2;` —
             // one symbol) register exactly one global; later declarations
@@ -2135,3 +2152,38 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
       loc,
     };
   }
+/** The compiled twin's storage behind a declaration-file binding.
+ *
+ * A generated module ships types in `X.d.ts` and values in `X.js`. The
+ * import resolves to the DECLARATION, which owns no storage, while the
+ * twin holds it -- in the declared shape, since the twin takes its type
+ * from this very declaration, and initialized, since the import header
+ * names the twin. Same export of the same module, one storage.
+ */
+export function declTwinGlobalOf(L: Lowerer, sym: ts.Symbol): IrLocal | undefined {
+  const decl = L.checker.declarationsOf(sym)[0];
+  if (!decl) return undefined;
+  const sf = decl.getSourceFile();
+  if (!sf.isDeclarationFile) return undefined;
+  const twin = L.declTwinSourceOf(sf);
+  if (twin === null) return undefined;
+  const name = sym.name;
+  const modSym = L.checker.getSymbolAtLocation(twin);
+  const exported = modSym?.getExports().get(name as ts.__String);
+  const viaExport = exported ? L.globalsBySymbol.get(exported) : undefined;
+  if (viaExport) return viaExport;
+  // A CommonJS twin exporting SHORTHAND (`module.exports = { A, B }`)
+  // registers no export storage -- those properties are alias plumbing and
+  // the value lives in the file-scope const they name, which is the
+  // generated-data-module spelling.
+  for (const stmt of twin.statements) {
+    if (!ts.isVariableStatement(stmt)) continue;
+    for (const d of stmt.declarationList.declarations) {
+      if (!ts.isIdentifier(d.name) || d.name.text !== name) continue;
+      const local = L.checker.getSymbolAtLocation(d.name);
+      const g = local ? L.globalsBySymbol.get(local) : undefined;
+      if (g) return g;
+    }
+  }
+  return undefined;
+}

@@ -15,6 +15,7 @@ import { PoisonError, dynUndefinedExpr, jsFuncNameOf, neverTaintedJsType, nodeTh
 import { arrayAtOf, BYTES_CTORS, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, strCharsCall } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../shared.js";
+import { declTwinGlobalOf } from "./lower-modules.js";
 import { fenceEnumObjectValue, lowerEnumAccess } from "./lower-enums.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, lowerNsIdentifierValue, nsMemberIdentOf, nsUndefRead, nsWritableTarget } from "./lower-namespaces.js";
 import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
@@ -1099,6 +1100,15 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // Preflight guarantees no unresolved identifiers; anything else here
       // is a blocked declaration's binding (the SC2004 cascade) or a
       // binding form we don't model yet.
+      // A binding declared in a `.d.ts` whose runtime twin is compiled
+      // here: the import resolved to the DECLARATION, which owns no
+      // storage, while the twin holds it initialized and in the shape
+      // this declaration gave it.
+      {
+        const twinSym = L.resolveValueSymbol(expr);
+        const twinG = twinSym ? declTwinGlobalOf(L, twinSym) : undefined;
+        if (twinG) return { kind: "varRef", localId: twinG.id, type: twinG.type, loc };
+      }
       L.rejectUnresolved(expr, `the reference to '${expr.text}' (a binding form with no lowering)`);
     }
     if (ts.isArrowFunction(expr) || ts.isFunctionExpression(expr)) {
