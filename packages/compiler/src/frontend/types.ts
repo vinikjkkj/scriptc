@@ -3412,18 +3412,6 @@ function recordProvenanceOk(
   ctx?: TypeMapperCtx,
 ): boolean {
   if (t.isIntersectionType()) {
-    const trace = process.env["SCRIPTC_PROV_TRACE"] && checker.typeToString(t).includes("ADVSignedDeviceIdentity");
-    if (trace) {
-      for (const part of t.getTypes()) {
-        const ps = part.getSymbol();
-        process.stderr.write(
-          `[prov-int] part='${checker.typeToString(part)}' isClass=${!!(ps && ps.flags & ts.SymbolFlags.Class)} ` +
-            `obj=${(part.flags & ts.TypeFlags.Object) !== 0} callSigs=${checker.getCallSignatures(part).length} ` +
-            `dataOnlyClass=${isDataOnlyDeclFileClassInstance(part, checker, ctx)} ` +
-            `provOk=${recordProvenanceOk(part, checker, ctx)}\n`,
-        );
-      }
-    }
     return t.getTypes().every(
       (part) => {
         const partSym = part.getSymbol();
