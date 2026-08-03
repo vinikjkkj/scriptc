@@ -3696,7 +3696,7 @@ export class Lowerer {
     // Probe every field BEFORE interning — a partial projection must not
     // be left half-built in the helper tables.
     type Plan =
-      | { how: "method"; name: string; fnT: IrType & { kind: "func" }; callee: string; virtual: boolean; wrap: { unionId: string; tag: number } | undefined; fieldT: IrType; ret: IrType }
+      | { how: "method"; name: string; fnT: IrType & { kind: "func" }; callee: string; virtual: boolean; wrap: { unionId: string; tag: number } | undefined; fieldT: IrType; ret: IrType; extraParams: IrType[] }
       | { how: "lift"; name: string; src: IrType; lift: WidthLift; fieldT: IrType }
       | { how: "absent"; name: string; utag: number; fieldT: IrType };
     const plan: Plan[] = [];
@@ -3727,8 +3727,27 @@ export class Lowerer {
         if (fnT.kind !== "func" || fnT.rest === true) return null;
         if (found.sig.abstract === true || found.sig.gen !== undefined) return null;
         if (found.sig.params.some((p) => p.mode === "rest")) return null;
-        const methodT = funcOf(found.sig.params.map((p) => p.type), found.sig.ret);
-        if (!typeEquals(methodT, fnT)) return null;
+        const methodParamTypes = found.sig.params.map((p) => p.type);
+        const methodT = funcOf(methodParamTypes, found.sig.ret);
+        // The class method may carry EXTRA TRAILING OPTIONAL parameters
+        // beyond the interface field's arity — `query(node, ms, options?)`
+        // satisfies a `(node, ms) => R` field: a call through the field
+        // passes the missing optionals as undefined, exactly what Node does.
+        // Match the field params positionally against the method's, require
+        // equal returns, and require every extra method param to be optional
+        // (undefined-armed, so undefined is a legal value the builder feeds).
+        let extraParams: IrType[] = [];
+        if (!typeEquals(methodT, fnT)) {
+          const optionalParam = (t: IrType): boolean =>
+            t.kind === "union" && (this.unions.get(t.unionId)?.arms.some((a) => a.kind === "undefinedT") ?? false);
+          const compatible =
+            methodParamTypes.length >= fnT.params.length &&
+            typeEquals(found.sig.ret, fnT.ret) &&
+            fnT.params.every((fp, i) => typeEquals(fp, methodParamTypes[i]!)) &&
+            methodParamTypes.slice(fnT.params.length).every(optionalParam);
+          if (!compatible) return null;
+          extraParams = methodParamTypes.slice(fnT.params.length);
+        }
         plan.push({
           how: "method",
           name: f.name,
@@ -3738,6 +3757,7 @@ export class Lowerer {
           callee: `%${found.declarer.def.name}.${f.name}`,
           virtual: this.overrideBelow(info, f.name),
           ret: found.sig.ret,
+          extraParams,
         });
         continue;
       }
@@ -3786,6 +3806,21 @@ export class Lowerer {
       const args: IrExpr[] = [
         m.virtual ? this.upcastTo(self, info.def.name) : self,
         ...m.fnT.params.map((t, k): IrExpr => ({ kind: "varRef", localId: `a.${k}`, type: t, loc })),
+        // Extra trailing optional method params the field's arity omits: feed
+        // undefined (wrapped into the param's own undefined-armed union),
+        // exactly the value an omitted optional argument takes.
+        ...m.extraParams.map((t): IrExpr => {
+          const u = t as IrType & { kind: "union" };
+          const tag = this.unions.get(u.unionId)!.arms.findIndex((a) => a.kind === "undefinedT");
+          return {
+            kind: "unionWrap",
+            unionId: u.unionId,
+            tag,
+            value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc },
+            type: t,
+            loc,
+          };
+        }),
       ];
       const callE: IrExpr = m.virtual
         ? { kind: "virtualCall", className: info.def.name, method: m.name, args, type: m.ret, loc }
