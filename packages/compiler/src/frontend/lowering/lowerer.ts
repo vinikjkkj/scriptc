@@ -3402,6 +3402,26 @@ export class Lowerer {
       if (!helper) return null;
       return { kind: "call", callee: helper, args: [expr], type: expected, loc: expr.loc };
     }
+    // A UNION flowing into a RECORD slot: `const n = cond ? { tag, attrs }
+    // : { tag, attrs, content }; return n` -- a ternary of literals bound
+    // without an annotation types as the union of the two, and the slot
+    // that receives it wants the one shape. Every arm has to reach that
+    // shape on its own (identity, or the field-copying width coercion an
+    // optional member's absence already rides), and the helper picks per
+    // tag.
+    //
+    // Planned purely first, so a failing arm never leaves an interned
+    // helper behind. Unit arms decline: `null` carries no fields to copy
+    // into a record.
+    if (expected.kind === "record" && expr.type.kind === "union") {
+      const helper = this.unionRecordCollapseHelper(expr.type.unionId, expected.shapeId, expr.loc);
+      // Declining FALLS THROUGH rather than answering null: a later
+      // rule may still own this pair, and short-circuiting here
+      // would silently take it away.
+      if (helper) {
+        return { kind: "call", callee: helper, args: [expr], type: expected, loc: expr.loc };
+      }
+    }
     // A CLASS INSTANCE flowing into a record slot (`new Point(0, 0)` into
     // `{ x: number; y: number }` — tsc's structural view of classes): the
     // same field-projecting copy, each target field read off the instance.
@@ -5051,6 +5071,61 @@ export class Lowerer {
    * TypeError instead of smuggling an unrepresentable arm. Null when the
    * site type isn't a genuine sub-union of the source (the SC2003 fence
    * stays). */
+  /** Collapses a UNION into ONE record shape: per source arm, the narrowed
+   * payload reaches the destination by identity or by the field-copying
+   * width coercion, and the helper dispatches on the tag.
+   *
+   * Every arm must reach it. A unit arm (`null`, `undefined`) has no
+   * fields and declines the whole form, which is right: a slot that can
+   * hold the absent case spells a union, and this conversion is for the
+   * slot that spells one shape. */
+  unionRecordCollapseHelper(fromId: string, toShapeId: string, loc: SrcLoc): string | null {
+    const from = this.unions.get(fromId);
+    const to = this.shapes.get(toShapeId);
+    if (!from || !to || from.arms.length === 0) return null;
+    const toT: IrType = { kind: "record", shapeId: toShapeId };
+    // Plan every arm BEFORE interning anything.
+    const plans: (IrExpr | null)[] = from.arms.map((arm, i) => {
+      if (isUnitType(arm) || arm.kind !== "record") return null;
+      const probe: IrExpr = { kind: "unionNarrow", unionId: fromId, tag: i, value: { kind: "varRef", localId: "u.0", type: { kind: "union", unionId: fromId }, loc }, type: arm, loc };
+      if (typeEquals(arm, toT)) return probe;
+      return this.widthCoerce(probe, toT);
+    });
+    if (plans.some((p) => p === null || !typeEquals(p.type, toT))) return null;
+
+    const key = `ucollapse:${fromId}:${toShapeId}`;
+    const existing = this.widthHelpers.get(key);
+    if (existing) return existing;
+    const name = `%union.record.${this.widthHelpers.size}`;
+    this.widthHelpers.set(key, name);
+    const fromT: IrType = { kind: "union", unionId: fromId };
+    const u: IrExpr = { kind: "varRef", localId: "u.0", type: fromT, loc };
+    const body: IrStmt[] = [];
+    from.arms.forEach((_, i) => {
+      body.push({
+        kind: "if",
+        cond: { kind: "unionIsTag", unionId: fromId, tag: i, negated: false, value: u, type: BOOL, loc },
+        then: [{ kind: "return", value: plans[i]!, loc }],
+        else_: null,
+        loc,
+      });
+    });
+    body.push({
+      kind: "throw",
+      value: { kind: "strLit", value: "scriptc: internal error: invalid union tag", type: STRING, loc },
+      loc,
+    });
+    this.liftedFns.push({
+      name,
+      params: [{ localId: "u.0", name: "u", type: fromT }],
+      returnType: toT,
+      locals: [{ id: "u.0", name: "u", type: fromT, mutable: true }],
+      body,
+      loc,
+    });
+    return name;
+  }
+
   narrowedRetagHelper(node: ts.Node, fromId: string, toId: string, loc: SrcLoc): string | null {
     const from = this.unions.get(fromId);
     if (!from || !this.unions.get(toId)) return null;
