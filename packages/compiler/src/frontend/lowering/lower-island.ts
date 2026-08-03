@@ -7,7 +7,8 @@ import type { Lowerer } from "./lowerer.js";
 import { F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, canMarshalTypedFuncIntoIsland, islandPromisePayloadTag, isUnitType } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
-import { isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf } from "../program.js";
+import { dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf } from "../program.js";
+import { dynamicImportProgramTargetOf } from "./lower-modules.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { PoisonError, newFnCtx, own } from "./lowerer.js";
 
@@ -285,25 +286,30 @@ import { PoisonError, newFnCtx, own } from "./lowerer.js";
     L.requireDynamicApi("'import()'", call);
     const loc = locOf(call);
     const arg = call.arguments[0];
-    if (arg === undefined || !ts.isStringLiteralLike(arg)) {
+    // Literals and const-propagated string-LITERAL types both name the
+    // module (dynamicImportSpecOf — the named-constant idiom); genuinely
+    // computed specifiers keep the fence.
+    const spec = arg === undefined ? null : dynamicImportSpecOf(L.checker, arg);
+    if (arg === undefined || spec === null) {
       L.unsupported(
         "SC1090",
         call,
         "dynamic import() of computed specifiers (the module graph embeds at " +
-          "build time — the specifier must be a string literal)",
+          "build time — the specifier must be a string literal or a constant " +
+          "whose type pins one)",
       );
     }
     if (call.arguments.length !== 1) {
       L.unsupported("SC1090", call, "dynamic import() with import attributes");
     }
-    const res = L.dynImports.get(`${call.getSourceFile().fileName}\u0000${arg.text}`);
+    const res = L.dynImports.get(`${call.getSourceFile().fileName}\u0000${spec}`);
     if (!res) {
       // Collection walks every file before bodies lower, so a missing
       // entry is a lowerer bug, not user error.
-      throw new Error(`lowerer bug: unresolved dynamic import '${arg.text}'`);
+      throw new Error(`lowerer bug: unresolved dynamic import '${spec}'`);
     }
     if (res.kind === "program-module") {
-      return lowerOwnModuleImport(L, call, arg);
+      return lowerOwnModuleImport(L, call, spec, ts.isStringLiteralLike(arg) ? arg : null);
     }
     if (res.kind !== "module") {
       throw new PoisonError(); // resolution failed — collection reported it
@@ -334,21 +340,27 @@ import { PoisonError, newFnCtx, own } from "./lowerer.js";
    * signatures) cross as trap functions that throw a pointed TypeError
    * when USED — the namespace still builds, exactly like Node still
    * resolves it. */
-  function lowerOwnModuleImport(L: Lowerer, call: ts.CallExpression, arg: ts.StringLiteralLike): IrExpr {
+  function lowerOwnModuleImport(L: Lowerer, call: ts.CallExpression, spec: string, litArg: ts.StringLiteralLike | null): IrExpr {
     const loc = locOf(call);
     let dep: ts.SourceFile | null = null;
-    const modSym = L.checker.getSymbolAtLocation(arg);
+    // Literal specifiers resolve through the checker's module symbol (the
+    // historic route, self-name/#alias answers included); folded constants
+    // have no module symbol at the argument, so the resolver answers.
+    const modSym = litArg !== null ? L.checker.getSymbolAtLocation(litArg) : undefined;
     for (const d of (modSym ? L.checker.declarationsOf(modSym) : [])) {
       if (ts.isSourceFile(d) && !d.isDeclarationFile) {
         dep = d;
         break;
       }
     }
+    if (dep === null) {
+      dep = dynamicImportProgramTargetOf(L.program, call.getSourceFile(), spec);
+    }
     if (dep !== null && (dep.fileName.endsWith(".cts") || isCjsJsFile(dep))) {
       L.unsupported(
         "SC1090",
         call,
-        `dynamic import of the program's own CommonJS module '${arg.text}' ` +
+        `dynamic import of the program's own CommonJS module '${spec}' ` +
           "(its namespace comes from module.exports through Node's CJS lexer, " +
           "which has no compiled story — require it, or import it statically)",
       );
@@ -358,7 +370,7 @@ import { PoisonError, newFnCtx, own } from "./lowerer.js";
       L.unsupported(
         "SC1090",
         call,
-        `dynamic import of the program's own module '${arg.text}' ` +
+        `dynamic import of the program's own module '${spec}' ` +
           "(this module is not part of the compiled module graph — import it statically)",
       );
     }

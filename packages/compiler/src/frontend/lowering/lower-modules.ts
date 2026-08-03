@@ -9,7 +9,7 @@ import { dirname as dirnamePath, resolve as resolvePath } from "node:path";
 import { NpmGraphBuilder, packageNameOfPath, probeNodeImportRefusal, probeNodeRequireRefusal } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
 import { isJsSourceFileName, isRelativeSpecifier } from "../shared.js";
-import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsJsFile, isJsSourceFile, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
+import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
 import type { CycleEdge } from "../program.js";
 import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
 import { BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/nodes.js";
@@ -90,14 +90,18 @@ export interface FileParts {
   function dynamicProgramImportsOf(program: ts.Program, sf: ts.SourceFile): ts.SourceFile[] {
     const out: ts.SourceFile[] = [];
     const seen = new Set<ts.SourceFile>();
+    // The fold must agree with collection/lowering (dynamicImportSpecOf):
+    // a folded own-module specifier the order never appended would fence
+    // at its site as "not part of the compiled module graph".
+    const checker = program.getTypeChecker();
     ts.walkPreorder(sf, (node) => {
       if (
         ts.isCallExpression(node) &&
         node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-        node.arguments[0] !== undefined &&
-        ts.isStringLiteralLike(node.arguments[0])
+        node.arguments[0] !== undefined
       ) {
-        const dep = dynamicImportProgramTargetOf(program, sf, node.arguments[0].text);
+        const spec = dynamicImportSpecOf(checker, node.arguments[0]);
+        const dep = spec !== null ? dynamicImportProgramTargetOf(program, sf, spec) : null;
         if (dep && !seen.has(dep)) {
           seen.add(dep);
           out.push(dep);
@@ -402,14 +406,18 @@ export interface FileParts {
    * runtime-computed name). */
   function collectDynamicImports(L: Lowerer, builder: NpmGraphBuilder, sf: ts.SourceFile): void {
     const visit = (node: ts.Node): void => {
-      if (
+      const argNode =
         ts.isCallExpression(node) &&
         node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-        node.arguments.length >= 1 &&
-        node.arguments[0] !== undefined &&
-        ts.isStringLiteralLike(node.arguments[0])
-      ) {
-        const spec = node.arguments[0].text;
+        node.arguments.length >= 1
+          ? node.arguments[0]
+          : undefined;
+      // Literals and const-propagated string-LITERAL types both register
+      // (dynamicImportSpecOf — the folded key is the one the lowering
+      // looks up); computed specifiers stay out, the lowering's fence.
+      const foldedSpec = argNode !== undefined ? dynamicImportSpecOf(L.checker, argNode) : null;
+      if (argNode !== undefined && foldedSpec !== null) {
+        const spec = foldedSpec;
         const mapKey = `${sf.fileName}\u0000${spec}`;
         if (!L.dynImports.has(mapKey)) {
           // The program's OWN modules first, by the checker's resolution
@@ -417,10 +425,13 @@ export interface FileParts {
           // module has no runtime namespace object — the per-site fence
           // says so. Only non-declaration source files count; a sibling
           // .d.mts typing shipped JS is the EMBED case, not this one.
-          const modSym = L.checker.getSymbolAtLocation(node.arguments[0]);
-          const ownModule = modSym !== undefined && L.checker.declarationsOf(modSym).some(
+          // Folded constants have no module symbol at the argument, so
+          // the resolver answers for them (the same route the lowering's
+          // own-module path takes).
+          const modSym = ts.isStringLiteralLike(argNode) ? L.checker.getSymbolAtLocation(argNode) : undefined;
+          const ownModule = (modSym !== undefined && L.checker.declarationsOf(modSym).some(
             (d) => ts.isSourceFile(d) && !d.isDeclarationFile,
-          );
+          )) || dynamicImportProgramTargetOf(L.program, sf, spec) !== null;
           const res = ownModule
             ? ({ kind: "program-module" } as const)
             : builder.addDynamicImport(sf.fileName, spec);
