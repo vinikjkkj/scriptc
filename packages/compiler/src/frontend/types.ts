@@ -72,6 +72,8 @@ export class ShapeRegistry {
       this.shapes.push(shape);
       this.recIds.set(t, id);
       this.pendingRec.add(id);
+      if (process.env["SCRIPTC_REC_TRACE"]) process.stderr.write(`REC mint ${id}
+`);
     }
     return id;
   }
@@ -104,6 +106,13 @@ export class ShapeRegistry {
       if (declaredOrder) shape.declaredOrder = declaredOrder;
       this.pendingRec.delete(id);
       const key = this.keyOf(fields, false, indexValue);
+      if (process.env["SCRIPTC_REC_TRACE"]) {
+        const owner = this.byKey.get(key);
+        process.stderr.write(
+          `REC final ${id} key=${key.slice(0, 90)} ${owner === undefined ? "CLAIMS" : `LOSES-TO ${owner}`}
+`,
+        );
+      }
       if (!this.byKey.has(key)) this.byKey.set(key, id);
     }
     return id;
