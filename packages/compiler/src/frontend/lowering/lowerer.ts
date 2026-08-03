@@ -3382,6 +3382,24 @@ export class Lowerer {
           }
         }
       }
+      // A FUNCTION value against a union carrying a func arm it adapts into
+      // — `(a, b, opts?) => R` flowing into a `((a, b) => R) | undefined`
+      // slot: funcCoerceAdapter builds the arity/param bridge (extra trailing
+      // optionals fed undefined), then wrap like any arm value. ONE func arm
+      // only, the promise-arm ambiguity stance.
+      if (expr.type.kind === "func") {
+        const def = this.unions.get(expected.unionId);
+        const funcArms = def?.arms.filter((a) => a.kind === "func") ?? [];
+        const arm = funcArms.length === 1 ? funcArms[0] : undefined;
+        if (arm !== undefined && arm.kind === "func") {
+          const armIdx = this.armTag(expected.unionId, arm);
+          const adapter = this.funcCoerceAdapter(expr.type, arm, expr.loc);
+          if (armIdx >= 0 && adapter) {
+            const adapted: IrExpr = { kind: "call", callee: adapter, args: [expr], type: arm, loc: expr.loc };
+            return { kind: "unionWrap", unionId: expected.unionId, tag: armIdx, value: adapted, type: expected, loc: expr.loc };
+          }
+        }
+      }
       // A width-coercible value against a union: coerce into the SINGLE
       // width-liftable arm, then wrap like any arm value (widthLiftPlan's
       // liftWrap — several candidate arms are ambiguous and decline).
@@ -5324,7 +5342,18 @@ export class Lowerer {
 
   funcCoerceAdapter(fromT: IrType & { kind: "func" }, toT: IrType & { kind: "func" }, loc: SrcLoc): string | null {
     if (fromT.rest === true || toT.rest === true) return null;
-    if (fromT.params.length > toT.params.length) return null;
+    // The source may carry EXTRA trailing parameters the slot omits
+    // (`(a, b, opts?) => R` assigned where `(a, b) => R` is wanted — the
+    // checker admits it): sound only when each extra is OPTIONAL
+    // (undefined-armed), and the adapter feeds them undefined, exactly what
+    // an omitted optional argument takes.
+    const optionalIr = (p: IrType): boolean =>
+      p.kind === "union" && (this.unions.get(p.unionId)?.arms.some((a) => a.kind === "undefinedT") ?? false);
+    if (fromT.params.length > toT.params.length) {
+      for (let i = toT.params.length; i < fromT.params.length; i++) {
+        if (!optionalIr(fromT.params[i]!)) return null;
+      }
+    }
     // Piece dispositions beyond coercibleValue, all CHECKER-APPROVED
     // function compatibilities (bivariant method params under the suite's
     // non-strict settings, `() => never` throwers displayed as void by
@@ -5339,7 +5368,7 @@ export class Lowerer {
     //   value — the call runs (a `never` thrower never comes back, so the
     //   trap is unreachable there), then the stranded TypeError.
     let strandParams = false;
-    for (let i = 0; i < fromT.params.length; i++) {
+    for (let i = 0; i < Math.min(fromT.params.length, toT.params.length); i++) {
       if (!this.coercibleValue(toT.params[i]!, fromT.params[i]!)) strandParams = true;
     }
     let voidRet: "dyn" | "jsval" | "strand" | null = null;
@@ -5395,7 +5424,14 @@ export class Lowerer {
         ),
       ];
     } else {
-      const args = fromT.params.map((pt, i) => {
+      const args = fromT.params.map((pt, i): IrExpr => {
+        if (i >= toT.params.length) {
+          // An extra trailing optional param the slot omits: feed undefined,
+          // wrapped into the param's own undefined-armed union.
+          const u = pt as IrType & { kind: "union" };
+          const tag = this.unions.get(u.unionId)!.arms.findIndex((a) => a.kind === "undefinedT");
+          return { kind: "unionWrap", unionId: u.unionId, tag, value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, type: pt, loc };
+        }
         const aRef: IrExpr = { kind: "varRef", localId: `a.${i}`, type: toT.params[i]!, loc };
         const converted = this.coerceToExpected(aRef, pt);
         if (!typeEquals(converted.type, pt)) throw new Error("lowerer bug: probed fn-adapter param stopped coercing");
