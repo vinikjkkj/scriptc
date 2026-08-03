@@ -5605,30 +5605,37 @@ export function canDynCheckTo(
       return true;
     }
   }
-  // Containers of checkable things are checkable. The walker builds a
-  // check per type and calls the per-field one for each field, so a leaf
-  // it already knows standing alone -- a Uint8Array -- is one it can check
-  // nested too. Without this recursion a single byte field made a whole
-  // composite cast unspellable, though every part of it was checkable.
+  // Containers whose every leaf is JSON-safe OR a bytes<u8> -- the one
+  // non-JSON leaf the walkers know. The recursion stops there on purpose:
+  // canDynCheckTo also grants funcs and runtime handles STANDING ALONE,
+  // and those the nested walkers cannot emit (dynMatch throws on them), so
+  // admitting them here would trade a fence for an emitter crash.
   //
   // `seen` guards the walk: a self-referential shape would recurse
   // forever. A shape already on the stack answers TRUE, since the check
   // being built for it is the one that will validate it.
-  if (seen.has(t)) return true;
-  const inner = new Set(seen).add(t);
-  const ok = (x: IrType): boolean => canDynCheckTo(x, getRecord, getUnion, inner);
-  if (t.kind === "array") return ok(t.elem);
-  if (t.kind === "record") {
-    const shape = getRecord(t.shapeId);
-    if (!shape || shape.tuple) return false;
-    return (
-      shape.fields.every((f) => ok(f.type)) &&
-      (shape.indexValue === undefined || ok(shape.indexValue))
-    );
-  }
-  if (t.kind === "union") {
-    const def = getUnion(t.unionId);
-    return !!def && def.arms.every((a) => a.kind === "undefinedT" || ok(a));
+  const nestedOk = (x: IrType, stack: ReadonlySet<IrType>): boolean => {
+    if (isJsonSafeType(x, getRecord, getUnion)) return true;
+    if (x.kind === "bytes" && x.elem === "u8") return true;
+    if (stack.has(x)) return true;
+    const deeper = new Set(stack).add(x);
+    if (x.kind === "array") return nestedOk(x.elem, deeper);
+    if (x.kind === "record") {
+      const shape = getRecord(x.shapeId);
+      if (!shape || shape.tuple) return false;
+      return (
+        shape.fields.every((f) => nestedOk(f.type, deeper)) &&
+        (shape.indexValue === undefined || nestedOk(shape.indexValue, deeper))
+      );
+    }
+    if (x.kind === "union") {
+      const def = getUnion(x.unionId);
+      return !!def && def.arms.every((a) => a.kind === "undefinedT" || nestedOk(a, deeper));
+    }
+    return false;
+  };
+  if ((t.kind === "array" || t.kind === "record" || t.kind === "union") && nestedOk(t, seen)) {
+    return true;
   }
   return false;
 }
