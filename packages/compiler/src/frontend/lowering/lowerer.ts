@@ -1643,6 +1643,25 @@ export class Lowerer {
       const byDecl = this.globalsByDeclNode.get(d);
       if (byDecl) return byDecl;
     }
+    // A `.d.ts`-declared binding whose RUNTIME lives in a compiled `.js`
+    // twin (the WA spec tables: `export declare const WA_APPSTATE_SCHEMAS`
+    // beside the `.js` that assigns it). The value resolved to the ambient
+    // declaration, so neither lookup above hit — but the twin module
+    // compiled the real global. Bridge by the export name to the twin's own
+    // top-level binding.
+    for (const d of this.checker.declarationsOf(symbol)) {
+      const twin = this.declTwinSourceOf(d.getSourceFile());
+      if (twin === null) continue;
+      for (const stmt of twin.statements) {
+        if (!ts.isVariableStatement(stmt)) continue;
+        for (const vd of stmt.declarationList.declarations) {
+          if (!ts.isIdentifier(vd.name) || vd.name.text !== symbol.name) continue;
+          const twinSym = this.checker.getSymbolAtLocation(vd.name);
+          const tg = (twinSym && this.globalsBySymbol.get(twinSym)) ?? this.globalsByDeclNode.get(vd);
+          if (tg) return tg;
+        }
+      }
+    }
     return null;
   }
 
@@ -7960,18 +7979,23 @@ export class Lowerer {
   /** The `.d.ts` whose implementation twin this build lowered (declTwinOf in
    * program.ts put it into module order). Cached: the answer is fixed once
    * fileTag is filled. */
-  private readonly twinCache = new Map<string, boolean>();
+  private readonly twinSourceCache = new Map<string, ts.SourceFile | null>();
 
   declTwinCompiled(sf: ts.SourceFile): boolean {
+    return this.declTwinSourceOf(sf) !== null;
+  }
+
+  /** The compiled runtime `.js`/`.mjs`/`.cjs` twin of a declaration file
+   * (a hand-written / generated `.d.ts` shadowing a real module — the WA
+   * spec tables), or null. Cached once fileTag is filled. */
+  declTwinSourceOf(sf: ts.SourceFile): ts.SourceFile | null {
     const name = sf.fileName;
-    const hit = this.twinCache.get(name);
+    const hit = this.twinSourceCache.get(name);
     if (hit !== undefined) return hit;
-    let found = false;
+    let found: ts.SourceFile | null = null;
     // All three declaration extensions, each with the runtime extension it
     // pairs with: a generated module ships `.d.cts` beside `.cjs` and
     // `.d.mts` beside `.mjs` exactly as it ships `.d.ts` beside `.js`.
-    // Matching only the last of those left the other two looking like
-    // declarations nothing defines.
     const stem =
       name.endsWith(".d.ts") ? name.slice(0, -".d.ts".length)
       : name.endsWith(".d.cts") ? name.slice(0, -".d.cts".length)
@@ -7981,13 +8005,31 @@ export class Lowerer {
       for (const compiled of this.fileTag.keys()) {
         const f = compiled.fileName;
         if (f === `${stem}.js` || f === `${stem}.mjs` || f === `${stem}.cjs`) {
-          found = true;
+          found = compiled;
           break;
         }
       }
     }
-    this.twinCache.set(name, found);
+    this.twinSourceCache.set(name, found);
     return found;
+  }
+
+  /** True when `sf` (a compiled runtime module) defines at least one
+   * ordinary static global — a real record/array/scalar export, not the
+   * `%loaded` guard and not an island (jsval) handle. Distinguishes a spec
+   * table (WA_APPSTATE_SCHEMAS lives in a static record global) from an
+   * uncompilable island twin (the minified proto, whose init is trap-only
+   * and whose exports are jsval), so the twin-init redirect skips the
+   * latter — forcing its init would fire the first trap. */
+  moduleHasStaticGlobal(sf: ts.SourceFile): boolean {
+    const tagged = this.fileTag.get(sf);
+    if (tagged === undefined) return false;
+    const prefix = `%g.${tagged.replace(/^%/, "").replace(/\.$/, "")}`;
+    for (const g of this.globalsList) {
+      if (g.name === "%loaded" || g.type.kind === "jsval") continue;
+      if (g.id.startsWith(prefix) || g.id.startsWith(tagged)) return true;
+    }
+    return false;
   }
 
   readonly isStdlibFile = (sf: ts.SourceFile): boolean =>
