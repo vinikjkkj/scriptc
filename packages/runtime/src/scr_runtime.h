@@ -2432,6 +2432,8 @@ ScrStr *scr_crypto_random_string(double n, ScrStr *enc); /* +1, or throws */
  * Never throw. */
 ScrStr *scr_crypto_hash_digest_str(ScrStr *alg, ScrStr *data, ScrStr *enc);
 ScrStr *scr_crypto_hash_digest_bytes(ScrStr *alg, ScrBytes *data, ScrStr *enc);
+ScrBytes *scr_crypto_hash_digest_str_raw(ScrStr *alg, ScrStr *data);
+ScrBytes *scr_crypto_hash_digest_bytes_raw(ScrStr *alg, ScrBytes *data);
 /* One-shot raw digest/HMAC by algorithm name ("md5" | "sha1" | "sha256")
  * — the island crypto shim's bridge (scr_island.c host hooks). Digest
  * bytes into out (≥32); returns the digest length, 0 for an unknown

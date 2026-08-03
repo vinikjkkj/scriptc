@@ -3806,12 +3806,16 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         "one string or Buffer argument is the lowered update (input encodings have no lowering)",
       );
     }
+    // A BARE `.digest()` (no argument) is Node's raw-Buffer digest — the
+    // encoded forms take "hex"/"base64". Both lower; only other encodings
+    // fence.
+    const bare = call.arguments.length === 0;
     const encT = call.arguments.length === 1 ? L.typeOf(call.arguments[0]!) : undefined;
-    if (!encT?.isStringLiteralType() || (encT.value !== "hex" && encT.value !== "base64")) {
+    if (!bare && (!encT?.isStringLiteralType() || (encT.value !== "hex" && encT.value !== "base64"))) {
       L.noLowering(
         "Hash.digest with this encoding",
         call,
-        'hex and base64 are the lowered digests: .digest("hex") (the bare Buffer digest has no lowering)',
+        'hex and base64 are the lowered digests: .digest("hex"), or a bare .digest() for the raw Buffer',
       );
     }
     // alg and enc are proven literals (fenced above), so lowering them
@@ -3825,11 +3829,13 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     const dataIr = L.mapTypeOf(L.typeOf(dataNode));
     if (dataIr?.kind === "bytes") {
       const data = L.lowerExpr(dataNode);
+      if (bare) return { kind: "libCall", fn: "crypto.hashDigestBytesRaw", args: [alg, data], type: BYTES_U8, loc };
       const enc = L.lowerExprExpecting(call.arguments[0]!, STRING);
       return { kind: "libCall", fn: "crypto.hashDigestBytes", args: [alg, data, enc], type: STRING, loc };
     }
     if (dataIr?.kind === "string") {
       const data = L.lowerExprExpecting(dataNode, STRING);
+      if (bare) return { kind: "libCall", fn: "crypto.hashDigestStrRaw", args: [alg, data], type: BYTES_U8, loc };
       const enc = L.lowerExprExpecting(call.arguments[0]!, STRING);
       return { kind: "libCall", fn: "crypto.hashDigestStr", args: [alg, data, enc], type: STRING, loc };
     }

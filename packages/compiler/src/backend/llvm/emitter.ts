@@ -379,6 +379,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "crypto.randomUUID": "scr_crypto_random_uuid",
   "crypto.hashDigestStr": "scr_crypto_hash_digest_str",
   "crypto.hashDigestBytes": "scr_crypto_hash_digest_bytes",
+  "crypto.hashDigestStrRaw": "scr_crypto_hash_digest_str_raw",
+  "crypto.hashDigestBytesRaw": "scr_crypto_hash_digest_bytes_raw",
   "process.stdoutWriteBytes": "scr_process_stdout_write_bytes",
   "process.stderrWriteBytes": "scr_process_stderr_write_bytes",
   "insp.buffer": "scr_insp_buffer",

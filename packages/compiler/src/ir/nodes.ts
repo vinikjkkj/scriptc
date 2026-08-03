@@ -2835,6 +2835,10 @@ export type IrLibFn =
    * Buffer/typed array's bytes. Pure; never throw. */
   | "crypto.hashDigestStr"
   | "crypto.hashDigestBytes"
+  /** The bare `.digest()` (no encoding): the raw digest as a u8 Buffer
+   * (+1), rather than the hex/base64 string the encoded forms give. */
+  | "crypto.hashDigestStrRaw"
+  | "crypto.hashDigestBytesRaw"
   /** crypto.randomBytes(n) → a real u8 Buffer (+1). THROWS Node's
    * RangeError on out-of-range sizes, exactly like the composed
    * randomBytesToString (which keeps its one-libCall lowering — the two

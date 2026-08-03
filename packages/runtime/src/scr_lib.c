@@ -2862,6 +2862,28 @@ ScrStr *scr_crypto_hash_digest_bytes(ScrStr *alg, ScrBytes *data, ScrStr *enc) {
   return scr_hash_digest_raw(alg, data->data, data->len * scr_bytes_elem_size(data->elem), enc);
 }
 
+/* Bare `.digest()` (no encoding): Node hands back the raw digest as a Buffer.
+ * Same two algorithms the compiler admits; the bytes are copied into a fresh
+ * u8 ScrBytes instead of being hex/base64-encoded. */
+static ScrBytes *scr_hash_digest_raw_bytes(const ScrStr *alg, const unsigned char *data,
+                                           size_t len) {
+  unsigned char d[32];
+  size_t n = (alg->len == 4 && memcmp(alg->data, "sha1", 4) == 0)
+                 ? scr_sha1_digest(data, len, d)
+                 : scr_sha256_digest(data, len, d);
+  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)n);
+  if (n > 0) memcpy(out->data, d, n);
+  return out;
+}
+
+ScrBytes *scr_crypto_hash_digest_str_raw(ScrStr *alg, ScrStr *data) {
+  return scr_hash_digest_raw_bytes(alg, (const unsigned char *)data->data, data->len);
+}
+
+ScrBytes *scr_crypto_hash_digest_bytes_raw(ScrStr *alg, ScrBytes *data) {
+  return scr_hash_digest_raw_bytes(alg, data->data, data->len * scr_bytes_elem_size(data->elem));
+}
+
 /* The composed `new crypto.X509Certificate(data).fingerprint` read, fused
  * by the compiler (no certificate handle exists). Node's .fingerprint IS
  * the SHA-1 of the certificate's DER bytes, uppercase colon-separated —
