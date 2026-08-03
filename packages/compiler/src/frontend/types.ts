@@ -1331,6 +1331,39 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         return viaMixin;
       }
     }
+    // A PRIMITIVE intersected with an object that has real members, and
+    // nothing above claimed it: `number & { low: number; high: number;
+    // unsigned: boolean }` -- how protobuf typings spell "a number, or the
+    // Long object this becomes past 2^53". The value really is one or the
+    // other at runtime, so the checked-dynamic tree is what represents it:
+    // members read through the dyn, arithmetic exits through a dynCheck,
+    // and a lying value throws instead of being misread.
+    //
+    // Mapping it to the PRIMITIVE instead would be simpler and wrong -- a
+    // Long object read as an f64 is garbage, silently. Last resort on
+    // purpose: the empty-object refinement above still answers first, so a
+    // branded `string & { tag }` keeps whatever the rules there decide.
+    {
+      const parts = widened.getTypes();
+      const PRIM2 =
+        ts.TypeFlags.StringLike | ts.TypeFlags.NumberLike |
+        ts.TypeFlags.BooleanLike | ts.TypeFlags.BigIntLike;
+      const prims = parts.filter((p) => (p.flags & PRIM2) !== 0);
+      const objs = parts.filter((p) => (p.flags & ts.TypeFlags.Object) !== 0);
+      if (
+        prims.length === 1 &&
+        objs.length === parts.length - 1 &&
+        objs.length > 0 &&
+        objs.every(
+          (o) =>
+            checker.getPropertiesOfType(o).length > 0 &&
+            checker.getCallSignatures(o).length === 0 &&
+            checker.getConstructSignatures(o).length === 0,
+        )
+      ) {
+        return DYN;
+      }
+    }
   }
   // symbol, but with construct signatures — that is the STATIC side, and
   // it maps to classval below.
