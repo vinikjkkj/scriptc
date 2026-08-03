@@ -4722,6 +4722,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_crypto_hash_digest_str(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "crypto.hashDigestBytes":
             return finish(`scr_crypto_hash_digest_bytes(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "crypto.hashDigestStrRaw":
+            return finish(`scr_crypto_hash_digest_str_raw(${arg(0)}, ${arg(1)})`);
+          case "crypto.hashDigestBytesRaw":
+            return finish(`scr_crypto_hash_digest_bytes_raw(${arg(0)}, ${arg(1)})`);
           // The Buffer statics (scr_bytes.c): fromStr decodes Node-
           // leniently (never throws), concat copies its borrowed list.
           case "buffer.fromStr":
