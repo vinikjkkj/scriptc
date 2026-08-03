@@ -8581,7 +8581,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           L.unsupported(
             "SC1090",
             expr,
-            `'instanceof ${rSym!.name}' on this operand (a union carrying the flavor as an arm, or a bound value of a bytes type)`,
+            `'instanceof ${rSym!.name}' on this operand (supported: a union carrying the flavor as an arm, or a bound value of a bytes type — an 'unknown' operand needs a runtime flavor test the checked-dynamic tree does not carry yet: it tags bytes as one kind, and only Uint8Array reads that tag)`,
           );
         }
       }
