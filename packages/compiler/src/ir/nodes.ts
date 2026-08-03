@@ -408,7 +408,17 @@ export function isSupportedMapKey(t: IrType): boolean {
   // exactly JS object-key semantics — SameValueZero on references, never a
   // structural compare. The runtime has hashed identity storage; the map
   // retains its keys like any other refcounted slot.
-  return t.kind === "f64" || t.kind === "string" || t.kind === "object";
+  // A RECORD keys the same way. Records are heap pointers whose identity
+  // is ALREADY observable and JS-exact: `a === b` is false for two
+  // literals with equal fields, true through a binding or a parameter, and
+  // indexOf finds a value by reference and misses an equal-looking one --
+  // all verified against Node. So hashing them by reference adds no
+  // divergence that === does not already have; the copy a width coercion
+  // makes is the same documented one, and it changes identity in `===`
+  // exactly as it would here.
+  return (
+    t.kind === "f64" || t.kind === "string" || t.kind === "object" || t.kind === "record"
+  );
 }
 
 /** The Set ELEMENT fence — Map's key fence plus the refcounted HANDLE
