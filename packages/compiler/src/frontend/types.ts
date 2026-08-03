@@ -1378,6 +1378,40 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       ) {
         return { kind: "classval", className: inst.className };
       }
+      // A constructable whose instance type is an INTERFACE rather
+      // than a program class (`new (url: string) => RawWebSocket` —
+      // the injection point a transport keeps for its socket
+      // implementation). There is no class to name, but a
+      // constructor IS a callable producing the instance, so the
+      // slot maps to that function type: records holding one
+      // compile, which is what an OPTIONAL injection point needs,
+      // and it is almost always optional and unset.
+      //
+      // The VALUE side is not opened by this: assigning a class to
+      // the slot needs a classval-to-thunk conversion, and `new`
+      // through the slot needs the construct path — both keep
+      // their fences, so nothing can be built or called through it
+      // while only the type is here.
+      if (inst?.kind === "record") {
+        const sigDecl = checker.signatureDeclaration(ctorSigs[0]!);
+        // Both spellings: `interface C { new (…): T }` gives a construct
+        // SIGNATURE, `type C = new (…) => T` a constructor TYPE node.
+        const sigParams =
+          sigDecl !== undefined &&
+          (ts.isConstructSignatureDeclaration(sigDecl) || ts.isConstructorTypeNode(sigDecl))
+            ? sigDecl.parameters
+            : undefined;
+        if (sigParams !== undefined) {
+          const params: IrType[] = [];
+          let ok = true;
+          for (const prm of sigParams) {
+            const pt = mapType(checker.getTypeAtLocation(prm.name), ctx);
+            if (!pt) { ok = false; break; }
+            params.push(pt);
+          }
+          if (ok) return funcOf(params, inst);
+        }
+      }
     }
   }
   // Map<K, V>: a reference to the standard library's Map interface —
