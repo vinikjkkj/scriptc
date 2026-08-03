@@ -135,6 +135,27 @@ export type WidthLift =
   | { how: "upcast" }
   | { how: "funcAdapt" };
 
+/** A class METHOD projected into a func-typed record slot: the field
+ * becomes a BOUND closure — the instance captured, the method called with
+ * the slot's own arguments. `virtual` picks vtable dispatch when an
+ * override can exist below the receiver's static class; a direct call to
+ * `%declarer.name` otherwise. `func` is the slot's exact signature (the
+ * closure's shape), reconciled equal to the method's in boundMethodPlan. */
+export interface BoundMethodProj {
+  declarer: string;
+  name: string;
+  virtual: boolean;
+  func: IrType & { kind: "func" };
+}
+
+/** How one target field of a class-instance→record projection is filled:
+ * a plain instance field copied under a width lift, an absent optional
+ * completing to its undefined arm, or a method bound into a closure. */
+export type ObjFieldProj =
+  | { src: IrType; lift: WidthLift }
+  | { absent: true; utag: number }
+  | { method: BoundMethodProj };
+
 export class PoisonError extends Error {}
 
 /** Own-property lookup for the surface tables. They are plain object
@@ -4396,7 +4417,7 @@ export class Lowerer {
    * no lowering; the plan declines instead of projecting a lie). Builtin
    * runtime layouts (the Error/EventEmitter/stream chains) decline: their
    * fields aren't plain emitted storage. */
-  objToRecordPlan(className: string, toId: string): Map<string, { src: IrType; lift: WidthLift } | { absent: true; utag: number }> | null {
+  objToRecordPlan(className: string, toId: string): Map<string, ObjFieldProj> | null {
     const info = this.classes.get(className);
     const to = this.shapes.get(toId);
     if (!info || !to || to.indexValue || to.tuple) return null;
@@ -4410,12 +4431,21 @@ export class Lowerer {
     if (this.widthPlanning.has(key)) return new Map();
     this.widthPlanning.add(key);
     try {
-      const plan = new Map<string, { src: IrType; lift: WidthLift } | { absent: true; utag: number }>();
+      const plan = new Map<string, ObjFieldProj>();
       for (const tf of to.fields) {
-        // A method/accessor satisfying the checker has no projectable
-        // value — decline the whole plan, field or not.
+        // A plain METHOD satisfying a func-typed target field projects as a
+        // BOUND closure (capture the instance, call the method) — the slot
+        // gets a callable that carries `this`. A getter (no single
+        // projectable value), a generic method (no one concrete signature),
+        // or a signature the slot cannot mirror declines the whole plan.
+        const meth = findMethodOn(this, info, tf.name);
+        if (meth && !findGenericMethodOn(this, info, tf.name)) {
+          const bm = this.boundMethodPlan(info, tf.name, tf.type, meth.declarer.def.name, meth.sig);
+          if (!bm) return null;
+          plan.set(tf.name, bm);
+          continue;
+        }
         if (
-          findMethodOn(this, info, tf.name) ||
           findMethodOn(this, info, `get:${tf.name}`) ||
           findGenericMethodOn(this, info, tf.name)
         ) {
@@ -4438,6 +4468,93 @@ export class Lowerer {
     } finally {
       this.widthPlanning.delete(key);
     }
+  }
+
+  /** How a METHOD `name` on `info` fills a func-typed target field: bound
+   * into a closure only when the slot mirrors the method's signature
+   * EXACTLY — same arity, each parameter type equal, the return type equal.
+   * A generator, an async method, a rest parameter, or an abstract method
+   * with no concrete override below the receiver has no plain-closure form
+   * and declines (the whole projection then falls back to the exact-shape
+   * fence). Equality is strict on purpose: a mismatch would need an
+   * adapting trampoline the record slot cannot describe, so the honest
+   * answer is to decline rather than project a coerced call. */
+  boundMethodPlan(
+    info: ClassInfo,
+    name: string,
+    fieldType: IrType,
+    declarer: string,
+    sig: { params: ParamShape[]; ret: IrType; abstract?: true; async?: true; gen?: { yieldT: IrType; nextT: IrType } },
+  ): { method: BoundMethodProj } | null {
+    if (fieldType.kind !== "func" || fieldType.rest === true) return null;
+    if (sig.async === true || sig.gen !== undefined) return null;
+    if (sig.params.length !== fieldType.params.length) return null;
+    for (let i = 0; i < sig.params.length; i++) {
+      const p = sig.params[i]!;
+      if (p.mode !== "required" && p.mode !== "omittable") return null;
+      if (!typeEquals(p.type, fieldType.params[i]!)) return null;
+    }
+    if (!typeEquals(sig.ret, fieldType.ret)) return null;
+    // An override can exist below the receiver's static class ⇒ the bound
+    // call must dispatch dynamically; otherwise the declarer's body is the
+    // single implementation and the call is direct. An abstract nearest
+    // declaration with no override below has no body to bind — decline.
+    const virtual = this.overrideBelow(info, name);
+    if (sig.abstract === true && !virtual) return null;
+    return { method: { declarer, name, virtual, func: fieldType } };
+  }
+
+  /** The BOUND-METHOD closure a projected method field becomes: a closure
+   * over an interned `%boundmeth.<n>` that captures the instance and calls
+   * the method with the slot's own arguments. Interned per (receiver,
+   * declarer, method, slot signature) and captures the width helper's `o.0`
+   * instance param (boxed there so the capture can retain it). */
+  boundMethodClosure(recvClass: string, proj: BoundMethodProj, loc: SrcLoc): IrExpr {
+    const key = `boundmeth:${recvClass}:${proj.declarer}:${proj.name}:${typeKey(proj.func)}`;
+    const existing = this.widthHelpers.get(key);
+    const name = existing ?? `%boundmeth.${this.widthHelpers.size}`;
+    if (!existing) {
+      this.widthHelpers.set(key, name);
+      const recvT: IrType = { kind: "object", className: recvClass };
+      const self: IrExpr = { kind: "varRef", localId: "self.0", type: recvT, loc };
+      const params = proj.func.params.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t }));
+      const argRefs: IrExpr[] = proj.func.params.map((t, i) => ({ kind: "varRef", localId: `p.${i}`, type: t, loc }));
+      if (proj.virtual) this.noteVirtualEdge(this.classes.get(recvClass)!, proj.name);
+      else this.noteEdge(`%${proj.declarer}.${proj.name}`);
+      const call: IrExpr = proj.virtual
+        ? {
+            kind: "virtualCall",
+            className: recvClass,
+            method: proj.name,
+            args: [this.upcastTo(self, recvClass), ...argRefs],
+            type: proj.func.ret,
+            loc,
+          }
+        : {
+            kind: "call",
+            callee: `%${proj.declarer}.${proj.name}`,
+            args: [this.upcastTo(self, proj.declarer), ...argRefs],
+            type: proj.func.ret,
+            loc,
+          };
+      const body: IrStmt[] =
+        proj.func.ret.kind === "void"
+          ? [{ kind: "exprStmt", expr: call, loc }]
+          : [{ kind: "return", value: call, loc }];
+      this.liftedFns.push({
+        name,
+        params,
+        returnType: proj.func.ret,
+        captures: [{ localId: "self.0", name: "self", type: recvT }],
+        locals: [
+          { id: "self.0", name: "self", type: recvT, mutable: false, boxed: true },
+          ...params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+        ],
+        body,
+        loc,
+      });
+    }
+    return { kind: "closure", fnName: name, captures: ["o.0"], type: proj.func, loc };
   }
 
   /** Interned `%obj.width.<n>(o)` — builds a record from a class
@@ -4513,11 +4630,15 @@ export class Lowerer {
     const fromT: IrType = { kind: "object", className };
     const toT: IrType = { kind: "record", shapeId: toId };
     const o: IrExpr = { kind: "varRef", localId: "o.0", type: fromT, loc };
+    // A method field binds the instance into a closure (boundMethodClosure
+    // captures `o.0`); the capture retains it, so the instance param must
+    // be a boxed local. Plain data-class projections keep the raw pointer.
+    const hasMethodField = to.fields.some((f) => "method" in plan.get(f.name)!);
     this.liftedFns.push({
       name,
       params: [{ localId: "o.0", name: "o", type: fromT }],
       returnType: toT,
-      locals: [{ id: "o.0", name: "o", type: fromT, mutable: true }],
+      locals: [{ id: "o.0", name: "o", type: fromT, mutable: true, ...(hasMethodField ? { boxed: true } : {}) }],
       body: [
         {
           kind: "return",
@@ -4525,6 +4646,9 @@ export class Lowerer {
             kind: "recordLit",
             fields: to.fields.map((f) => {
               const lift = plan.get(f.name)!;
+              if ("method" in lift) {
+                return { name: f.name, value: this.boundMethodClosure(className, lift.method, loc) };
+              }
               if ("absent" in lift) {
                 if (f.type.kind !== "union") throw new Error("lowerer bug: absent lift against a non-union field");
                 return {
