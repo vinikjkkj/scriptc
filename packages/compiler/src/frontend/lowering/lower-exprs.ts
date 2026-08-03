@@ -5218,8 +5218,24 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
             // materialized copy, so freezing the REFERENCE into the data slot
             // is unobservable. A computed or effectful getter body keeps the
             // fence (it would freeze a value Node recomputes).
+            // The base binding must be one that can never be REASSIGNED.
+            // Materializing freezes the reference the getter names, which
+            // is unobservable while that reference keeps pointing at the
+            // same object -- mutation reaches it either way. It stops
+            // being unobservable the moment the BINDING is repointed: a
+            // `let store = build()` reassigned by a reset leaves the
+            // materialized field on the old object, which the live getter
+            // would have stopped returning. That is a silent wrong read,
+            // and on a torn-down resource a use-after-free.
+            const stableBase = (e: ts.Identifier): boolean => {
+              const sym = L.resolveValueSymbol(e);
+              const decl = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+              return sym !== null && decl !== undefined && bindingNeverReassigned(L, sym, decl);
+            };
             const pureRef = (e: ts.Expression): boolean =>
-              ts.isIdentifier(e) || e.kind === ts.SyntaxKind.ThisKeyword
+              ts.isIdentifier(e)
+                ? stableBase(e)
+                : e.kind === ts.SyntaxKind.ThisKeyword
                 ? true
                 : ts.isPropertyAccessExpression(e) || ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e)
                   ? pureRef(e.expression)
