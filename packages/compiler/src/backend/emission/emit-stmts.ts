@@ -578,8 +578,16 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
           // finally copy; its tail dispatches further out or returns.
           if (s.value) {
             const v = E.emitExpr(s.value);
-            E.moveTemp(v); // ownership parks in the slot until the dispatch returns it
-            E.line(`sc_pret = ${v.name};${E.srcComment(s.loc)}`);
+            // A VOID return value (`return await task()` in a void function —
+            // the exclusive-runner idiom) evaluates for its effect but has no
+            // slot: the sc_pret pending-return cell is declared only for a
+            // non-void function (see the fn prologue), so assigning it here
+            // would name an undeclared identifier. The bare goto below runs
+            // the finally and returns void, exactly Node's order.
+            if (s.value.type.kind !== "void") {
+              E.moveTemp(v); // ownership parks in the slot until the dispatch returns it
+              E.line(`sc_pret = ${v.name};${E.srcComment(s.loc)}`);
+            }
           }
           fin.used = true;
           E.releaseForJump(fin.frameDepth, fin.scopeDepth);
