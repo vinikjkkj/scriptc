@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { promisify } from "node:util";
 import { ccCompile, exeSuffix, testBin } from "./cc.js";
 import { afterAll, beforeAll, expect, test } from "vitest";
@@ -55,16 +55,21 @@ afterAll(async () => {
 // these lines pin OUR uncaught rendering.
 test("process + fs library: checks pass, error messages match Node's shape", async () => {
   const { stdout, stderr } = await execFileAsync(bin, [scratch]);
-  expect(stdout).toMatch(/^(\d+)\/\1 checks passed\n$/);
-  expect(stderr).toBe(
+  // The Windows CRT ends text-mode lines with CRLF, and the runtime renders
+  // paths the way Node does on the host -- backslash-separated there. Both
+  // are correct output; only these expectations assumed POSIX.
+  const eol = (s: string): string => s.split("\r\n").join("\n");
+  const at = (...parts: string[]): string => [scratch, ...parts].join(sep);
+  expect(eol(stdout)).toMatch(/^(\d+)\/\1 checks passed\n$/);
+  expect(eol(stderr)).toBe(
     [
-      `Uncaught Error: ENOENT: no such file or directory, open '${scratch}/missing.txt'`,
-      `Uncaught Error: ENOENT: no such file or directory, lstat '${scratch}/missing.txt'`,
-      `Uncaught Error: ENOENT: no such file or directory, rmdir '${scratch}/missing.txt'`,
-      `Uncaught Error: ENOENT: no such file or directory, scandir '${scratch}/missing.txt'`,
-      `Uncaught Error: EEXIST: file already exists, mkdir '${scratch}/sub'`,
-      `Uncaught Error: ENOENT: no such file or directory, mkdir '${scratch}/nope/deep'`,
-      `Uncaught Error: EISDIR: illegal operation on a directory, rm '${scratch}/sub'`,
+      `Uncaught Error: ENOENT: no such file or directory, open '${at("missing.txt")}'`,
+      `Uncaught Error: ENOENT: no such file or directory, lstat '${at("missing.txt")}'`,
+      `Uncaught Error: ENOENT: no such file or directory, rmdir '${at("missing.txt")}'`,
+      `Uncaught Error: ENOENT: no such file or directory, scandir '${at("missing.txt")}'`,
+      `Uncaught Error: EEXIST: file already exists, mkdir '${at("sub")}'`,
+      `Uncaught Error: ENOENT: no such file or directory, mkdir '${at("nope", "deep")}'`,
+      `Uncaught Error: EISDIR: illegal operation on a directory, rm '${at("sub")}'`,
       ``,
     ].join("\n"),
   );

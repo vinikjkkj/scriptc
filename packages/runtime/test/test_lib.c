@@ -80,12 +80,22 @@ int main(int argc, char **argv) {
 
   /* process.cwd: fresh absolute path. */
   t = scr_process_cwd();
+  /* "absolute" is drive-rooted on Windows and slash-rooted elsewhere. */
+#ifdef _WIN32
+  check(t->len > 2 && t->data[1] == ':', "cwd is absolute");
+#else
   check(t->len > 0 && t->data[0] == '/', "cwd is absolute");
+#endif
   scr_str_release(t);
 
   /* process.env: +1 fresh string when set, NULL when absent, never a
    * throw (the compiler builds the string|undefined union from this). */
+  /* setenv is POSIX; the Windows CRT spells it _putenv_s. */
+#ifdef _WIN32
+  _putenv_s("SCR_TEST_ENV_VAR", "libtest");
+#else
   setenv("SCR_TEST_ENV_VAR", "libtest", 1);
+#endif
   p = S("SCR_TEST_ENV_VAR");
   t = scr_env_get(p);
   check(str_is(t, "libtest"), "env get returns the set value");
