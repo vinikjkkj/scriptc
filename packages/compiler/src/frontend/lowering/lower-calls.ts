@@ -347,6 +347,84 @@ export interface GenericInstance {
     }
   }
 
+/** A method call on a value from an UNCOMPILABLE declaration-only module —
+   * a `.d.ts` (workspace or npm) with no compiled implementation twin, the
+   * protobufjs `proto.X.decode(...)` shape — lowered to a RUNTIME TRAP
+   * instead of a build error. The module ships no compilable body, so the
+   * call cannot run statically; but the value-side rule mirrors the TYPE
+   * rule (types.ts maps declaration-file data shapes) — an external
+   * dependency's uncompiled method compiles to a throw that fires only if
+   * REACHED, so a program that never calls it (the QR path never runs the
+   * pairing flow's proto decode) builds and runs. The arguments still
+   * evaluate for their effects (Node's order), then the trap throws a
+   * catchable Error naming the member.
+   *
+   * Null (the caller keeps the ordinary fence) unless EVERY declaration of
+   * the called member is in a NON-stdlib declaration file with no compiled
+   * twin: the stdlib's own gaps are real scriptc gaps (compile errors),
+   * and a member with any compiled declaration has a real body to call.
+   * STATIC builds only — under --dynamic the island executes the call. */
+  export function uncompilableExternMethodTrap(
+    L: Lowerer,
+    call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,
+  ): IrExpr | null {
+    if (L.dynamic) return null;
+    const methodSym = L.checker.getSymbolAtLocation(access.name);
+    const decls = methodSym ? L.checker.declarationsOf(methodSym) : [];
+    if (decls.length === 0) return null;
+    // Reaching this fallthrough already means NO lowering resolved a
+    // compilable body for the method — so a declaration-file twin being in
+    // the module graph (a minified bundle whose per-method lazy factories
+    // never resolve, like spec/proto) does not help. The signal is simply:
+    // every declaration is in a NON-stdlib declaration file. The stdlib's
+    // own unlowered members stay compile errors (real scriptc gaps); an
+    // external declared method with no resolved body is the uncompilable-
+    // dependency case that traps.
+    const uncompilable = decls.every((d) => {
+      const sf = d.getSourceFile();
+      return sf.isDeclarationFile && !L.isStdlibFile(sf);
+    });
+    if (!uncompilable) return null;
+    // The result type is the mapped call type where it maps (the data-shape
+    // rule maps proto return records now), else the checked-dynamic tree
+    // (a Writer/handle result: the trap throws before the value is ever
+    // read, so its representation is nominal — DYN accepts any downstream
+    // use, including a chained `.finish()` that traps in turn).
+    const resultT = L.mapTypeOf(L.typeOf(call)) ?? DYN;
+    const loc = locOf(call);
+    // The trap throws unconditionally, so the arguments are NOT lowered:
+    // an argument that itself cannot compile (an object literal of another
+    // uncompiled shape) must not sink the whole trap, and on the only path
+    // that reaches a trap — one the program should never take — the
+    // divergence from Node's evaluate-args-then-throw order is
+    // unobservable (both end in the same thrown error). Code the QR path
+    // never runs (the pairing flow's proto calls) builds; code that DOES
+    // reach it throws the catchable "no compiled implementation" error.
+    const member = access.getText();
+    const modFile = decls[0]!.getSourceFile().fileName;
+    const name = `%extern.trap.${L.lambdaCounter++}`;
+    L.liftedFns.push({
+      name,
+      params: [],
+      returnType: resultT,
+      locals: [],
+      body: [
+        {
+          kind: "runtimeFence",
+          code: "SC1090",
+          message:
+            `'${member}' has no compiled implementation (its module ` +
+            `'${modFile}' ships only a declaration file) — this call cannot ` +
+            `run in a static build`,
+          loc,
+        },
+      ],
+      loc,
+    });
+    return { kind: "call", callee: name, args: [], type: resultT, loc };
+  }
+
 /** CALL-SITE COMPLETION — the frontend half of the one-signature contract
    * (docs/ir.md): every call lowers to exactly the callee's full ABI
    * parameter list, so backends and the validator stay count-exact and no
@@ -4264,6 +4342,22 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           const t = ambientUndefReadType(L, expr) ?? contextualUndefReadType(L, expr);
           if (t) return nsUndefRead(L, ambientRoot.text, expr, t);
         }
+      }
+      // A method call on a value from an UNCOMPILABLE declaration-only
+      // module (a workspace/npm `.d.ts` with no compiled twin — the
+      // protobufjs `proto.X.decode(...)` shape): the module ships no
+      // compilable body, so the call cannot execute statically. Refusing
+      // the whole BUILD for an external dependency's method that may never
+      // run is too strict — the value-side analog of the declaration-file
+      // TYPE rule (types.ts maps such shapes; the VALUES trap). It lowers
+      // to a runtime trap that throws a catchable error naming the member
+      // if it is ever REACHED, exactly where the uncompiled code would
+      // have run. STATIC builds only (under --dynamic the island runs it),
+      // and never the stdlib (its gaps are real scriptc gaps — compile
+      // errors) — see uncompilableExternMethodTrap.
+      {
+        const trap = uncompilableExternMethodTrap(L, expr, expr.expression);
+        if (trap) return trap;
       }
       // The lib fence's METHOD-CALL chokepoint: a stdlib-declared member
       // that every lowering above declined — an unlowered member
