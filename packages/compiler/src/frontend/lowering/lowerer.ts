@@ -3679,22 +3679,45 @@ export class Lowerer {
     // Probe every field BEFORE interning — a partial projection must not
     // be left half-built in the helper tables.
     type Plan =
-      | { how: "method"; name: string; fnT: IrType & { kind: "func" }; callee: string; virtual: boolean; ret: IrType }
+      | { how: "method"; name: string; fnT: IrType & { kind: "func" }; callee: string; virtual: boolean; wrap: { unionId: string; tag: number } | undefined; fieldT: IrType; ret: IrType }
       | { how: "lift"; name: string; src: IrType; lift: WidthLift; fieldT: IrType }
       | { how: "absent"; name: string; utag: number; fieldT: IrType };
     const plan: Plan[] = [];
     for (const f of shape.fields) {
       const found = findMethodOn(this, info, f.name);
       if (found) {
-        if (f.type.kind !== "func" || f.type.rest === true) return null;
+        // An OPTIONAL method: the interface spells `destroy?: () => void`,
+        // so the field is a union of the signature and undefined while the
+        // class implements the method outright. Project the method and
+        // wrap it into the arm -- refusing here would throw away a whole
+        // class over a member it does have.
+        let fnT: IrType = f.type;
+        let wrap: { unionId: string; tag: number } | undefined;
+        if (f.type.kind === "union") {
+          const udef = this.unions.get(f.type.unionId);
+          const armIdx = udef ? udef.arms.findIndex((a) => a.kind === "func") : -1;
+          if (
+            !udef ||
+            udef.arms.length !== 2 ||
+            armIdx < 0 ||
+            !udef.arms.some((a) => a.kind === "undefinedT")
+          ) {
+            return null;
+          }
+          fnT = udef.arms[armIdx]!;
+          wrap = { unionId: f.type.unionId, tag: armIdx };
+        }
+        if (fnT.kind !== "func" || fnT.rest === true) return null;
         if (found.sig.abstract === true || found.sig.gen !== undefined) return null;
         if (found.sig.params.some((p) => p.mode === "rest")) return null;
         const methodT = funcOf(found.sig.params.map((p) => p.type), found.sig.ret);
-        if (!typeEquals(methodT, f.type)) return null;
+        if (!typeEquals(methodT, fnT)) return null;
         plan.push({
           how: "method",
           name: f.name,
-          fnT: f.type,
+          fnT,
+          wrap,
+          fieldT: f.type,
           callee: `%${found.declarer.def.name}.${f.name}`,
           virtual: this.overrideBelow(info, f.name),
           ret: found.sig.ret,
@@ -3764,9 +3787,22 @@ export class Lowerer {
           : [{ kind: "return", value: callE, loc }],
         loc,
       });
+      const clo: IrExpr = {
+        kind: "closure", fnName: implName, captures: ["self.0"], type: m.fnT, loc,
+      };
       fields.push({
         name: m.name,
-        value: { kind: "closure", fnName: implName, captures: ["self.0"], type: m.fnT, loc },
+        value:
+          m.wrap === undefined
+            ? clo
+            : {
+                kind: "unionWrap",
+                unionId: m.wrap.unionId,
+                tag: m.wrap.tag,
+                value: clo,
+                type: m.fieldT,
+                loc,
+              },
       });
     }
     this.liftedFns.push({
@@ -5218,6 +5254,9 @@ export class Lowerer {
       toT.ret.kind === "record" && fromT.ret.kind === "object"
         ? this.ctorWitnessProjection(fromT.ret.className, toT.ret, loc)
         : null;
+    if (process.env["SCRIPTC_WITNESS_TRACE"] && (this.fmt(fromT).includes("WaAuth") || this.fmt(toT).includes("clear"))) {
+      console.error(`[fnadapt] from.ret=${fromT.ret.kind}${fromT.ret.kind === "object" ? "(" + fromT.ret.className + ")" : ""} to.ret=${toT.ret.kind} classRetProj=${classRetProj !== null} coercible=${this.coercibleValue(fromT.ret, toT.ret)}`);
+    }
     if (toT.ret.kind !== "void" && !this.coercibleValue(fromT.ret, toT.ret) && classRetProj === null) {
       if (fromT.ret.kind !== "void") {
         // A RESULT that cannot convert — the strandParams stance, result
