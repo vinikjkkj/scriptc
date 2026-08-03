@@ -110,7 +110,12 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     // position — instead of failing the whole build). TypeScript keeps
     // compile fences. ICEs (SC9001) always stay compile errors.
     const sf = stmts[0]?.getSourceFile();
-    const deferFences = sf !== undefined && isJsSourceFile(sf);
+    // --best-effort opens the JS-source deferral to TypeScript too: a
+    // statement whose construct has no static lowering compiles to a
+    // runtime fence instead of failing the build, so a program builds as
+    // long as every statement it RUNS lowers (the reachable-but-never-run
+    // teardown/plugin/pairing paths never throw). ICEs stay compile errors.
+    const deferFences = (sf !== undefined && isJsSourceFile(sf)) || L.bestEffort;
     // Register this list as open for the forward-capture machinery: a
     // nested function lowering mid-list may pre-declare a LATER const of
     // this list as a TDZ box (predeclareForwardCapture), pushing the
@@ -245,6 +250,13 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     // The h2 handles — `const client = http2.connect(url, mustCall(() =>
     // ...client...))` is the suite's canonical self-capturing const.
     "http2Session", "http2Stream",
+    // A PROMISE: heap, refcounted, pointer-backed like the handles above,
+    // so the NULL sentinel works unchanged. The self-deregistering shape
+    // is the canonical one — `const p = work().finally(() => { if (cur ===
+    // p) cur = null })`, where the reaction reads the const it is part of
+    // initializing, and the read is a TDZ read until the assign completes
+    // exactly as in JS.
+    "promise",
   ]);
 
 /** The hoisted-handler shape: a function declared BEFORE a const it

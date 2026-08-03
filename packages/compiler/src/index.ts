@@ -113,6 +113,15 @@ export interface CompileOptions {
    * island constructs are diagnostics and nothing about codegen or linking
    * changes. */
   dynamic?: boolean;
+  /** --best-effort: a TypeScript STATEMENT whose construct has no static
+   * lowering compiles to a runtime fence (a catchable throw at the
+   * statement) instead of failing the build — the JS-input deferral rule,
+   * opened to TypeScript on request. The build succeeds as long as every
+   * statement the program RUNS lowers; a reachable-but-never-run path (a
+   * plugin install, a teardown the entry never takes) throws only if
+   * executed. ICEs and declaration/type fences stay compile errors. Off by
+   * default — nothing changes without the flag. */
+  bestEffort?: boolean;
   /** Code generator for the program TU. Unset (the release default): the
    * LLVM backend emits LLVM IR text (.ll) that rides the SAME clang
    * command line in the program-TU seat, and a program outside the LLVM
@@ -655,6 +664,7 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
     try {
       lowered = fe.lower({
         dynamic: opts.dynamic ?? false,
+        bestEffort: opts.bestEffort ?? false,
         targetPlatform: buildTargetPlatform(),
         ...(ffi !== null ? { ffiImports: ffi.functions } : {}),
       });
