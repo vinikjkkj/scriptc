@@ -1021,6 +1021,12 @@ typedef struct ScrMap {
   /* SCR_MAP_KEY_REF only (scr_set_new_ref); NULL otherwise. */
   void *(*key_retain)(void *);
   void (*key_release)(void *);
+  /* SCR_MAP_KEY_REF with CYCLE-CAPABLE elements: a Set stores elements as
+   * keys, so an element that can point back at the set closes a cycle the
+   * value-only trace cannot see. Non-NULL makes the map headered (like
+   * val_trace does) and moves its keys from the teardown's release list
+   * into the trace -- the two must agree or the keys are freed twice. */
+  ScrTraceFn key_trace;
   size_t nentries; /* dense entries used, tombstones included */
   size_t nlive;    /* live entries (Map.size) */
   size_t ecap;     /* entries capacity */
@@ -1116,6 +1122,11 @@ ScrArr *scr_set_to_arr_ref(const ScrMap *s);
  * pointers under identity hashing (see SCR_MAP_KEY_REF above). The element
  * type's `_v` adapters arrive once, the scr_arr_new_ref technique. */
 ScrMap *scr_set_new_ref(void *(*elem_retain)(void *), void (*elem_release)(void *));
+/* The CYCLE-CAPABLE twin: elements that carry a collector header (arrays,
+ * records, closures, promises) can hold the set right back, so the set
+ * has to be headered too and its trace has to visit the elements. */
+ScrMap *scr_set_new_ref_traced(void *(*elem_retain)(void *), void (*elem_release)(void *),
+                               ScrTraceFn elem_trace);
 
 /* The live STRING keys of a map in JS OWN-KEY ORDER (Object.keys/values/
  * entries over an index-signature record's overflow): canonical array
