@@ -2673,6 +2673,20 @@ export function npmStaticDepSf7(program: ts.Program, sf: ts.SourceFile, spec: st
   return program.getSourceFile(npm.typesFile) ?? null;
 }
 
+/** The specifier a dynamic `import()` argument provably names: a string
+ * literal's text, or — the named-constant idiom (`const WS_MODULE = 'ws';
+ * await import(WS_MODULE)`) — the value of the argument's string LITERAL
+ * checker type. The module graph stays a build-time artifact: the fold
+ * accepts exactly the arguments whose one runtime value the checker
+ * already pinned; genuinely computed specifiers answer null and keep the
+ * per-site fence. Collection and lowering must fold through the SAME
+ * helper — the dynImports table is keyed by the folded text. */
+export function dynamicImportSpecOf(checker: ts.TypeChecker, arg: ts.Expression): string | null {
+  if (ts.isStringLiteralLike(arg)) return arg.text;
+  const t = checker.getTypeAtLocation(arg);
+  return t.isStringLiteralType() ? t.value : null;
+}
+
 /** resolveProjectImport lifted to SourceFile answers: the program's file
  * for a `#alias`/self-name resolution, or null (unresolved, or resolved
  * outside the program — declaration files included; callers that admit
