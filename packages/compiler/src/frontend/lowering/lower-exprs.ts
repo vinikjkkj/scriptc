@@ -5207,7 +5207,34 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           // (`const p: { x: number } = { get x() {...} }` — tsc lets a
           // live accessor satisfy a data member): the slot would freeze
           // one getter answer where Node keeps the accessor live.
-          if (fieldTypes.has(name)) {
+          const ft = fieldTypes.get(name);
+          if (ft !== undefined) {
+            // A getter whose body is a single `return <pure reference>` --
+            // the store-bundle idiom `get retry() { return caches.retry }`,
+            // where every step is a plain read -- satisfies the data property
+            // by MATERIALIZING that reference here. The read is effect-free
+            // and yields a stable heap reference: the object it names mutates
+            // identically whether reached through the live accessor or the
+            // materialized copy, so freezing the REFERENCE into the data slot
+            // is unobservable. A computed or effectful getter body keeps the
+            // fence (it would freeze a value Node recomputes).
+            const pureRef = (e: ts.Expression): boolean =>
+              ts.isIdentifier(e) || e.kind === ts.SyntaxKind.ThisKeyword
+                ? true
+                : ts.isPropertyAccessExpression(e) || ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e)
+                  ? pureRef(e.expression)
+                  : false;
+            const only =
+              ts.isGetAccessorDeclaration(prop) && prop.body?.statements.length === 1
+                ? prop.body.statements[0]
+                : undefined;
+            if (only && ts.isReturnStatement(only) && only.expression && pureRef(only.expression)) {
+              const value = L.coerceInto(only.expression, L.lowerExpr(only.expression), ft);
+              const at2 = fields.findIndex((x) => x.name === name);
+              if (at2 >= 0) fields[at2] = { name, value };
+              else fields.push({ name, value });
+              continue;
+            }
             L.unsupported(
               "SC1090",
               prop,
