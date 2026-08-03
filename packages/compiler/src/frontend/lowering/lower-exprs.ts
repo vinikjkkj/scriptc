@@ -4702,6 +4702,12 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     };
 
     const fields: { name: string; value: IrExpr; overflow?: true; drop?: true }[] = [];
+    // Hoisted spread sources, in source order. A COMPUTED source (a call,
+    // an await, an indexed read) is re-emitted once per field it
+    // contributes, so it must be evaluated exactly ONCE first and the
+    // copies must read the slot. See the hoist below for why it is only
+    // safe while every earlier contributor is pure.
+    const prelude: IrStmt[] = [];
     // Field names introduced by conditional spreads: their ternary carries
     // the spread's whole evaluation (cond once, value lazily), so a LATER
     // contributor overriding one would silently drop that evaluation —
@@ -4794,7 +4800,24 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         }
         let srcNode: ts.Expression = prop.expression;
         while (ts.isParenthesizedExpression(srcNode)) srcNode = srcNode.expression;
-        const srcLowered = ts.isIdentifier(srcNode) ? null : L.lowerExpr(srcNode);
+        let srcLowered = ts.isIdentifier(srcNode) ? null : L.lowerExpr(srcNode);
+        // Evaluate a computed source ONCE into a hidden slot, so the
+        // per-field copies read the slot instead of re-running it —
+        // `{ ...makeBase(node), kind: 'x' }` must call makeBase once.
+        //
+        // The slot is filled in the PRELUDE, ahead of every field, which
+        // moves the source's evaluation ahead of earlier contributors.
+        // That is unobservable only while those are pure, so the hoist is
+        // allowed exactly until the first impure contributor lands; after
+        // that the fence stands, because reordering two effects is a wrong
+        // answer, not a missing feature.
+        if (srcLowered && !pureReemittable(srcLowered)) {
+          if (fields.every((f) => pureReemittable(f.value))) {
+            const slot = L.declareHiddenLocal("%spread", srcLowered.type);
+            prelude.push({ kind: "varDecl", localId: slot.id, init: srcLowered, loc: locOf(srcNode) });
+            srcLowered = { kind: "varRef", localId: slot.id, type: srcLowered.type, loc: locOf(srcNode) };
+          }
+        }
         const srcType = srcLowered ? srcLowered.type : L.mapTypeOf(L.typeOf(srcNode));
         // `...options.installConfig` — a spread of `Partial<X> | undefined`
         // (the optional-options merge idiom `{ ...DEFAULTS, ...overrides }`):
@@ -5266,7 +5289,8 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         fields.push({ name: f.name, value: absent });
       }
     }
-    return { kind: "recordLit", fields, type, loc };
+    const lit: IrExpr = { kind: "recordLit", fields, type, loc };
+    return prelude.length === 0 ? lit : { kind: "seqExpr", stmts: prelude, result: lit, type, loc };
   }
 
 /** A conditional spread's carrier property: `name: value` or shorthand,
