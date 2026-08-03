@@ -3774,7 +3774,14 @@ export class Lowerer {
           (src.kind === "record" && arm.kind === "record") ||
           (src.kind === "array" && arm.kind === "array") ||
           (src.kind === "object" && arm.kind === "record") ||
-          (src.kind === "record" && arm.kind === "object");
+          (src.kind === "record" && arm.kind === "object") ||
+          // A FUNCTION arm: `socket.onopen = () => {…}` against
+          // `((e: Event) => void) | null`, where JS simply does not pass
+          // the argument the callback ignores. The adapter that makes the
+          // signatures meet already exists (funcAdapt); it just had no
+          // family here, so an EXACT-signature callback reached the arm
+          // and an arity-adapted one did not.
+          (src.kind === "func" && arm.kind === "func")
         if (sameFamily && this.widthLiftPlan(src, arm) !== null) candidates.push({ tag: i, arm });
       });
       if (candidates.length !== 1) return null;
