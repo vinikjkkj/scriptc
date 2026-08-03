@@ -5816,6 +5816,38 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           );
         }
       }
+      // `new v(...)` through a CONSTRUCT-SIGNATURE func value (`new (…)
+      // => Iface` slots — types.ts maps them to func types; the
+      // classval-to-thunk coercion mints the values): the thunk call IS
+      // the construction. Only the mapped shape takes this arm — exactly
+      // one construct signature and no call signature on the callee's
+      // checker type — so a plain function value in a JS `new` keeps the
+      // fence below ([[Construct]] on an ordinary closure is a different
+      // semantics the thunk does not model).
+      if (calleeT?.kind === "func") {
+        const calleeTs = L.typeOf(expr.expression);
+        if (
+          L.checker.getConstructSignatures(calleeTs).length === 1 &&
+          L.checker.getCallSignatures(calleeTs).length === 0
+        ) {
+          const callee = L.lowerExpr(expr.expression);
+          if (callee.type.kind === "func" && callee.type.rest !== true) {
+            const params = callee.type.params;
+            if ((expr.arguments ?? []).length > params.length) {
+              L.unsupported("SC1090", expr, "constructing with more arguments than the slot's construct signature declares");
+            }
+            const args = (expr.arguments ?? []).map((a, i) => L.lowerExprExpecting(a, params[i]));
+            for (let i = args.length; i < params.length; i++) {
+              const absent = omittedArgFor(L, params[i]!, loc);
+              if (!absent) {
+                L.unsupported("SC1090", expr, "constructing while omitting a non-optional parameter of the slot's construct signature");
+              }
+              args.push(absent);
+            }
+            return { kind: "callValue", callee, args, type: callee.type.ret, loc };
+          }
+        }
+      }
     }
     // Declared-but-unlowered stdlib classes (fallback surface: the
     // http/https Agent): the fence points at the lowered shapes instead
