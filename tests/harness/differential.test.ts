@@ -344,7 +344,10 @@ async function compileAndRun(file: string): Promise<RunResult> {
   const outDir = join(cacheDir, key);
   mkdirSync(outDir, { recursive: true });
   const result = await compile(file, {
-    outPath: join(outDir, "program"),
+    // Windows will not exec an extensionless file, and the driver writes
+    // exactly the name it is given -- the CLI adds the suffix itself, so
+    // asking for it here is what makes the produced binary runnable.
+    outPath: join(outDir, `program${process.platform === "win32" ? ".exe" : ""}`),
     outDir,
     sanitize,
     dynamic,
