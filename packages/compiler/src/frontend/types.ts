@@ -3409,8 +3409,17 @@ function recordProvenanceOk(
     return t.getTypes().every(
       (part) => {
         const partSym = part.getSymbol();
+        // Class parts normally keep their nominal identity and never
+        // flatten into a struct — EXCEPT a data-only class INSTANCE
+        // declared in a .d.ts (a protobufjs message: encode/decode are
+        // static, instances are all data), which flattens soundly in a
+        // static build exactly like the data-only interface rule below
+        // (`ADVSignedDeviceIdentity & $Shape` from a decode return type).
+        const classPartOk =
+          !(partSym && partSym.flags & ts.SymbolFlags.Class) ||
+          isDataOnlyDeclFileClassInstance(part, checker, ctx);
         return (part.flags & ts.TypeFlags.Object) !== 0 &&
-          !(partSym && partSym.flags & ts.SymbolFlags.Class) &&
+          classPartOk &&
           checker.getCallSignatures(part).length === 0 &&
           checker.getConstructSignatures(part).length === 0 &&
           recordProvenanceOk(part, checker, ctx);
@@ -3440,12 +3449,48 @@ function recordProvenanceOk(
   // uncompiled module's VALUES are refused, exactly where they cross.
   // A method-bearing declaration (an engine object's surface — DOM, a Node
   // handle) keeps the fence: a call signature needs a body the .d.ts lacks.
-  // Interface/type-literal declarations only (a decl-file CLASS keeps its
-  // nominal fence — the intersection rule above already refuses class parts).
+  // STATIC builds only: under --dynamic that module import is a jsval
+  // island handle rather than a fence, so a data-only shape must stay
+  // JSVAL there (a program-built record and an island handle would
+  // disagree on representation).
+  if (ctx?.dynamic) return false;
   const isInterfaceLike = decls.every(
     (d) => ts.isInterfaceDeclaration(d) || ts.isTypeLiteralNode(d) || ts.isTypeAliasDeclaration(d),
   );
-  return isInterfaceLike && isDataOnlyObjectType(t, checker);
+  return (
+    (isInterfaceLike && isDataOnlyObjectType(t, checker)) ||
+    isDataOnlyDeclFileClassInstance(t, checker, ctx)
+  );
+}
+
+/** A protobufjs-style message CLASS instance whose members are all data
+ * (no instance methods — encode/decode are STATIC, on `typeof Class`, not
+ * the instance): the instance IS a struct the program builds. Its
+ * construction (`new C(...)` on a non-program class) and its from-module
+ * values (`C.decode(...)`) fence at their own gates, so flattening the
+ * instance to a record is sound in a STATIC build — the data-only
+ * interface rule, one declaration kind over. */
+function isDataOnlyDeclFileClassInstance(
+  t: ts.Type,
+  checker: ts.TypeChecker,
+  ctx?: TypeMapperCtx,
+): boolean {
+  if (ctx?.dynamic) return false;
+  const sym = t.getSymbol();
+  if (!sym || !(sym.flags & ts.SymbolFlags.Class)) return false;
+  const decls = checker.declarationsOf(sym);
+  if (decls.length === 0) return false;
+  const declFileNoImpl = decls.every((d) => {
+    const sf = d.getSourceFile();
+    return sf.isDeclarationFile && !(ctx?.declFileHasCompiledImpl?.(sf) ?? false);
+  });
+  // No instance call signatures either (a callable class instance is not
+  // the pure-data message shape).
+  return (
+    declFileNoImpl &&
+    checker.getCallSignatures(t).length === 0 &&
+    isDataOnlyObjectType(t, checker)
+  );
 }
 
 /** Every property of an object type is a DATA slot — its type carries no
@@ -3841,9 +3886,20 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // Computed shapes carry provenance per MEMBER: a utility type over a
       // lib interface (`Readonly<Date>`) is still the lib's type world, not
       // a data shape. Synthesized members (a literal-key Record's) have no
-      // declarations and pass.
+      // declarations and pass. EXCEPT a pure-DATA member from a .d.ts (a
+      // protobuf message's `details?: Uint8Array | null`) in a STATIC
+      // build: it is buildable exactly like the data-only interface rule,
+      // one member down — the intersection `ADVSignedDeviceIdentity &
+      // $Shape` reaches here per field. A member whose type is callable
+      // (a method / engine surface like `Readonly<Date>`'s getTime) keeps
+      // the fence; --dynamic keeps the island-handle representation.
       if (computed && checker.declarationsOf(p).some((d) => d.getSourceFile().isDeclarationFile)) {
-        return null;
+        const memberTs = checker.getTypeOfSymbol(p);
+        const dataMember =
+          ctx.dynamic !== true &&
+          checker.getCallSignatures(memberTs).length === 0 &&
+          checker.getConstructSignatures(memberTs).length === 0;
+        if (!dataMember) return null;
       }
       const fieldTs = checker.getTypeOfSymbol(p);
       // GENERIC-callable members leave the shape (no single closure slot
