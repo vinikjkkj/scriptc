@@ -1296,6 +1296,7 @@ export class Lowerer {
       // lowering, long after the constructor completes.
       isProgramFile: (sf) => this.fileTag.has(sf),
       declFileHasCompiledImpl: (sf) => this.declTwinCompiled(sf),
+      accessorProducerProp: (sym) => this.accessorProducerProp(sym),
     };
     // --dynamic: modules reachable only through dynamic import() joined
     // moduleOrder BEFORE any pass constructed — lowerToIr runs
@@ -8196,6 +8197,75 @@ export class Lowerer {
   }
 
   private readonly declSiblingCache = new Map<string, ts.SourceFile | null>();
+
+  /** Data properties that SOME object literal in this program satisfies
+   * with a getter.
+   *
+   * A shape is interned from the TYPE, long before any producer is seen,
+   * so a field can only carry an accessor slot if the decision is made
+   * here -- over the whole program, once. Two values of one interface must
+   * share a layout, so if any producer needs the slot, the field has it
+   * and plain data producers fill it with a constant closure.
+   *
+   * Computed on first ask rather than in the constructor: by then every
+   * file is in fileTag, and shape interning has not begun. */
+  private accessorProducerCache: Set<ts.Symbol> | null = null;
+
+  accessorProducerProp(sym: ts.Symbol): boolean {
+    this.accessorProducerCache ??= this.scanAccessorProducers();
+    return this.accessorProducerCache.has(sym);
+  }
+
+  private scanAccessorProducers(): Set<ts.Symbol> {
+    const out = new Set<ts.Symbol>();
+    const dataFilled = new Set<ts.Symbol>();
+    const visit = (n: ts.Node): void => {
+      if (ts.isObjectLiteralExpression(n)) {
+        // A property some literal fills with DATA can never carry an
+        // accessor slot: that literal would have nothing to put in it, and
+        // synthesizing a constant closure there is plumbing this does not
+        // need yet. Recording them first means the slot is only taken when
+        // EVERY literal in the program agrees to fill it.
+        const ctData = this.checker.getContextualType(n);
+        if (ctData !== undefined) {
+          for (const pr of n.properties) {
+            if (ts.isGetAccessorDeclaration(pr) || ts.isSetAccessorDeclaration(pr)) continue;
+            // A SPREAD carries no name, and whatever it brings could fill
+            // anything -- treat the literal as data-filling nothing rather
+            // than guessing, since the marking below only narrows.
+            if (ts.isSpreadAssignment(pr)) continue;
+            const nm = pr.name;
+            if (!ts.isIdentifier(nm) && !ts.isStringLiteral(nm)) continue;
+            const t = this.checker.getPropertyOfType(ctData, nm.text);
+            if (t !== undefined) dataFilled.add(t);
+          }
+        }
+        const accs = n.properties.filter((pr) => ts.isGetAccessorDeclaration(pr));
+        if (accs.length > 0) {
+          const ct = this.checker.getContextualType(n);
+          if (ct !== undefined) {
+            for (const a of accs) {
+              if (!ts.isIdentifier(a.name) && !ts.isStringLiteral(a.name)) continue;
+              const target = this.checker.getPropertyOfType(ct, a.name.text);
+              if (
+                target !== undefined &&
+                (target.flags & (ts.SymbolFlags.GetAccessor | ts.SymbolFlags.SetAccessor)) === 0
+              ) {
+                out.add(target);
+              }
+            }
+          }
+        }
+      }
+      ts.forEachChild(n, visit);
+    };
+    for (const sf of this.fileTag.keys()) {
+      if (sf.isDeclarationFile) continue;
+      ts.forEachChild(sf, visit);
+    }
+    for (const d of dataFilled) out.delete(d);
+    return out;
+  }
 
   readonly isStdlibFile = (sf: ts.SourceFile): boolean =>
     sf.fileName === this.ambient ||
