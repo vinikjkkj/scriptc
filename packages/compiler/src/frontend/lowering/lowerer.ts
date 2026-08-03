@@ -8032,6 +8032,30 @@ export class Lowerer {
     return false;
   }
 
+  /** The DECLARATION file a compiled runtime file is the twin of -- the
+   * reverse of declTwinSourceOf's question. */
+  declSiblingOf(sf: ts.SourceFile): ts.SourceFile | null {
+    const name = sf.fileName;
+    const hit = this.declSiblingCache.get(name);
+    if (hit !== undefined) return hit;
+    let found: ts.SourceFile | null = null;
+    const m = /[.](js|mjs|cjs)$/.exec(name);
+    if (m !== null) {
+      const stem = name.slice(0, name.length - m[0].length);
+      for (const other of this.fileTag.keys()) {
+        const f = other.fileName;
+        if (f === `${stem}.d.ts` || f === `${stem}.d.cts` || f === `${stem}.d.mts`) {
+          found = other;
+          break;
+        }
+      }
+    }
+    this.declSiblingCache.set(name, found);
+    return found;
+  }
+
+  private readonly declSiblingCache = new Map<string, ts.SourceFile | null>();
+
   readonly isStdlibFile = (sf: ts.SourceFile): boolean =>
     sf.fileName === this.ambient ||
     sf.fileName === this.overridesAmbient ||
