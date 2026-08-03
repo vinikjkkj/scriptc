@@ -4,13 +4,14 @@
  * package boundary fences for node_modules-declared symbols. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, canMarshalTypedFuncIntoIsland, islandPromisePayloadTag, isUnitType } from "../../ir/nodes.js";
+import { DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, islandPromisePayloadTag, isUnitType } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
-import { dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf } from "../program.js";
+import { canonicalBuiltinModule, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf, npmStaticDepSf7 } from "../program.js";
+import { isRelativeSpecifier } from "../shared.js";
 import { dynamicImportProgramTargetOf } from "./lower-modules.js";
 import { pureReemittable } from "./lower-exprs.js";
-import { PoisonError, newFnCtx, own } from "./lowerer.js";
+import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
 
 /** True iff the checker's type for this node maps to jsval ('any') —
    * the island test in front of every engine-op lowering (receivers,
@@ -283,13 +284,73 @@ import { PoisonError, newFnCtx, own } from "./lowerer.js";
    * SC2012. Null for anything that isn't `import(...)`. */
   export function lowerDynamicImportCall(L: Lowerer, call: ts.CallExpression): IrExpr | null {
     if (call.expression.kind !== ts.SyntaxKind.ImportKeyword) return null;
-    L.requireDynamicApi("'import()'", call);
     const loc = locOf(call);
     const arg = call.arguments[0];
     // Literals and const-propagated string-LITERAL types both name the
     // module (dynamicImportSpecOf — the named-constant idiom); genuinely
     // computed specifiers keep the fence.
     const spec = arg === undefined ? null : dynamicImportSpecOf(L.checker, arg);
+    // STATIC tier, --npm-static: `import()` of an opted-in package is a
+    // PROGRAM-MODULE load — no engine anywhere. The guarded %init runs AT
+    // the site (a numbered-divergence-style snapshot: Node evaluates on
+    // the microtask after the importer's synchronous code; here the
+    // argument of the resolved promise evaluates synchronously), and the
+    // namespace is a checked-dynamic OBJECT of the module's exports,
+    // delivered through an already-resolved static promise. Exports with
+    // no dyn crossing ride as trap functions that throw when USED — the
+    // namespace still builds, exactly the island path's stance.
+    if (!L.dynamic && spec !== null && call.arguments.length === 1) {
+      const dep = npmStaticDepSf7(L.program, call.getSourceFile(), spec);
+      const builder = dep !== null ? staticDynNsBuilderOf(L, dep, loc) : null;
+      if (process.env["SCRIPTC_DYNNS_TRACE"]) {
+        console.error(
+          `[dynns] spec='${spec}' dep=${dep?.fileName ?? "null"} ` +
+            `inOrder=${dep !== null && L.initNameOf.has(dep)} builder=${builder ?? "null"}`,
+        );
+      }
+      if (builder !== null) {
+        const ns: IrExpr = { kind: "call", callee: builder, args: [], type: DYN, loc };
+        return { kind: "intrinsic", name: "promise.resolve", args: [ns], type: { kind: "promise", inner: DYN }, loc };
+      }
+      // A bare npm specifier with NO static compilation in this build
+      // (not opted in through --npm-static, or the opt-in fell back to
+      // the island): the load has no compiled story, and import()'s
+      // failure channel is IN-BAND — the site compiles to a REJECTED
+      // promise carrying the pointed fence error, catchable at the await
+      // exactly where Node surfaces load failures (the optional-
+      // dependency try/import pattern is built on that channel). A
+      // numbered-divergence-style honesty note: Node with the package
+      // installed would LOAD it — this build answers the same failure it
+      // would give for a missing loader, never a silent wrong value.
+      // Own modules, builtins, '#' project aliases, and relative
+      // specifiers keep their compile fences.
+      const litModSym = arg !== undefined && ts.isStringLiteralLike(arg) ? L.checker.getSymbolAtLocation(arg) : undefined;
+      const ownModule =
+        (litModSym !== undefined &&
+          L.checker.declarationsOf(litModSym).some((d) => ts.isSourceFile(d) && !d.isDeclarationFile)) ||
+        dynamicImportProgramTargetOf(L.program, call.getSourceFile(), spec) !== null;
+      if (
+        !ownModule &&
+        !isRelativeSpecifier(spec) &&
+        !spec.startsWith("#") &&
+        !spec.startsWith("/") &&
+        canonicalBuiltinModule(spec) === null
+      ) {
+        const msg =
+          `Cannot load module '${spec}': dynamic import() of npm packages runs in the ` +
+          `embedded dynamic engine, which this build does not include ` +
+          `(compile it statically with --npm-static ${spec}, or build with --dynamic)`;
+        const err: IrExpr = {
+          kind: "libCall",
+          fn: "error.new",
+          args: [{ kind: "strLit", value: msg, type: STRING, loc }],
+          type: { kind: "object", className: "%Error" },
+          loc,
+        };
+        return { kind: "intrinsic", name: "promise.reject", args: [err], type: { kind: "promise", inner: DYN }, loc };
+      }
+    }
+    L.requireDynamicApi("'import()'", call);
     if (arg === undefined || spec === null) {
       L.unsupported(
         "SC1090",
@@ -591,6 +652,173 @@ import { PoisonError, newFnCtx, own } from "./lowerer.js";
         { kind: "jsMarshal", value: { kind: "strLit", value: code, type: STRING, loc }, type: JSVAL, loc },
       ],
       type: JSVAL,
+      loc,
+    };
+  }
+
+/** The STATIC tier's namespace builder for an --npm-static package
+   * reached through dynamic `import()` (`%dynnsd.<tag>`): the module's
+   * guarded %init, then `return { <sorted exports> }` as a CHECKED-DYNAMIC
+   * object — dynNsBuilderOf's shape with the engine replaced by the dyn
+   * tree. Interned per module (the dynNsBuilders map serves both tiers —
+   * a build is one tier). Null when the module never joined the compiled
+   * graph, or when its init is async (top-level await in a package — the
+   * island path's business). */
+  function staticDynNsBuilderOf(L: Lowerer, dep: ts.SourceFile, loc: IrExpr["loc"]): string | null {
+    const cached = L.dynNsBuilders.get(dep);
+    if (cached !== undefined) return cached;
+    const initName = L.initNameOf.get(dep);
+    if (initName === undefined) return null;
+    if (L.asyncInitFiles.has(dep)) return null;
+    const rawTag = L.fileTag.get(dep) ?? "";
+    const name = `%dynnsd.${rawTag === "" ? "e." : rawTag.replace(/^%/, "")}`;
+    L.dynNsBuilders.set(dep, name);
+    const fnCtx = newFnCtx(true, null, null, DYN);
+    L.fnStack.push(fnCtx);
+    try {
+      const body: IrStmt[] = [];
+      L.noteEdge(initName);
+      body.push({
+        kind: "exprStmt",
+        expr: { kind: "call", callee: initName, args: [], type: VOID, loc },
+        loc,
+      });
+      // Node sorts module-namespace keys (code-unit order); type-only
+      // exports erase. A CommonJS `export=` becomes the namespace's
+      // `default`, exactly Node's CJS-to-ESM view.
+      const entries: [string, ts.Symbol][] = [];
+      const modSym = L.checker.getSymbolAtLocation(dep);
+      modSym?.getExports().forEach((sym: ts.Symbol, key: ts.__String) => {
+        const n = String(key);
+        if (n === "export=") {
+          if (!entries.some(([k]) => k === "default")) entries.push(["default", sym]);
+          return;
+        }
+        if (!n.startsWith("__")) entries.push([n, sym]);
+      });
+      entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+      const fields: { key: IrExpr; value: IrExpr }[] = [];
+      for (const [exportName, sym] of entries) {
+        const value = exportDynValue(L, exportName, sym, loc);
+        if (value === null) continue;
+        fields.push({
+          key: { kind: "strLit", value: exportName, type: STRING, loc },
+          value,
+        });
+      }
+      body.push({ kind: "return", value: { kind: "dynObjLit", fields, type: DYN, loc }, loc });
+      const ctx = L.ctx;
+      L.liftedFns.push({
+        name,
+        params: [],
+        returnType: DYN,
+        locals: ctx.locals,
+        captures: ctx.captures ?? [],
+        body,
+        loc,
+      });
+    } finally {
+      L.fnStack.pop();
+    }
+    return name;
+  }
+
+/** One export's checked-dynamic value for the static namespace object —
+   * the dyn boxing set (dyn globals by reference, convertible values
+   * through dynFrom's deep copy, boxable closures through the function
+   * boundary), with every un-boxable export crossing as a TRAP function
+   * that throws its pointed fence when CALLED — the namespace still
+   * builds (the island path's stance: Node resolves it; only the USE has
+   * no compiled story). Null for exports that do not exist at runtime
+   * (type-only). */
+  function exportDynValue(L: Lowerer, name: string, sym: ts.Symbol, loc: IrExpr["loc"]): IrExpr | null {
+    const trap = (what: string): IrExpr =>
+      dynTrapFnValue(
+        L,
+        `the '${name}' export is ${what} of the compiled program, which cannot cross into 'unknown' yet`,
+        loc,
+      );
+    let resolved = sym;
+    if (sym.flags & ts.SymbolFlags.Alias) {
+      for (const d of L.checker.declarationsOf(sym)) {
+        if (ts.isExportSpecifier(d)) {
+          const exportDecl = d.parent.parent;
+          if (d.isTypeOnly || (ts.isExportDeclaration(exportDecl) && exportDecl.isTypeOnly)) return null;
+        }
+        if (ts.isImportSpecifier(d)) {
+          const clause = d.parent.parent;
+          if (d.isTypeOnly || (ts.isImportClause(clause) && clause.phaseModifier === ts.SyntaxKind.TypeKeyword)) return null;
+        }
+      }
+      resolved = L.checker.getAliasedSymbol(sym);
+    }
+    if (!(resolved.flags & ts.SymbolFlags.Value)) return null; // pure type surface
+    const g = L.globalsBySymbol.get(resolved);
+    if (g) {
+      const ref: IrExpr = { kind: "varRef", localId: g.id, type: g.type, loc };
+      if (g.type.kind === "dyn") return ref;
+      if (g.type.kind === "undefinedT") return dynUndefinedExpr(loc);
+      if (g.type.kind === "func") {
+        return canBoxFuncIntoDyn(g.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))
+          ? { kind: "dynFrom", value: ref, type: DYN, loc }
+          : trap(`a function value of type '${L.fmt(g.type)}'`);
+      }
+      if (L.dynConvertible(g.type)) return { kind: "dynFrom", value: ref, type: DYN, loc };
+      return trap(`a value of type '${L.fmt(g.type)}'`);
+    }
+    const sig = L.fnSigsBySymbol.get(resolved);
+    const decl0 = L.checker.declarationsOf(resolved).find(
+      (d) => ts.isFunctionDeclaration(d) && (ts.isSourceFile(d.parent) || L.nsBlocks.get(d.parent) === "flattened"),
+    );
+    if (sig && decl0) {
+      if (!sig.params.every((p) => p.mode === "required")) {
+        return trap("a function with optional, default, or rest parameters");
+      }
+      const funcType: IrType & { kind: "func" } = {
+        kind: "func",
+        params: sig.params.map((p) => p.type),
+        ret: sig.returnType,
+      };
+      if (!canBoxFuncIntoDyn(funcType, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
+        return trap(`a function of type '${L.fmt(funcType)}'`);
+      }
+      L.noteEdge(sig.name);
+      return {
+        kind: "dynFrom",
+        value: { kind: "closure", fnName: sig.name, captures: [], type: funcType, loc },
+        type: DYN,
+        loc,
+      };
+    }
+    if (L.genericFnsBySymbol.has(resolved)) return trap("a generic function");
+    const flags = resolved.flags;
+    if (flags & ts.SymbolFlags.Class) return trap("a class");
+    if (flags & ts.SymbolFlags.Enum) return trap("an enum object");
+    if (flags & ts.SymbolFlags.ValueModule || flags & ts.SymbolFlags.NamespaceModule) {
+      return trap("a namespace object");
+    }
+    return trap("a binding");
+  }
+
+/** A checked-dynamic value whose any CALL throws the pointed fence: a
+   * boxed zero-param closure whose body is the runtime fence — `typeof`
+   * answers "function", property probes answer like a function's, and
+   * only invoking it throws (the island trap's stance, one tier over). */
+  function dynTrapFnValue(L: Lowerer, message: string, loc: IrExpr["loc"]): IrExpr {
+    const fnName = `%fn${L.lambdaCounter++}_dyntrap`;
+    L.liftedFns.push({
+      name: fnName,
+      params: [],
+      returnType: VOID,
+      locals: [],
+      captures: [],
+      body: [{ kind: "runtimeFence", code: "SC1090", message, loc }],
+      loc,
+    });
+    return {
+      kind: "dynFrom",
+      value: { kind: "closure", fnName, captures: [], type: { kind: "func", params: [], ret: VOID }, loc },
+      type: DYN,
       loc,
     };
   }
