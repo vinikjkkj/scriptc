@@ -7,8 +7,8 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { UNSUPPORTED } from "../../diagnostics/diagnostic.js";
-import { BOOL, BYTES_U8, CHILD_T, DYN, F64, IrExpr, IrLibFn, IrStrIntrinsicMethod, IrType, RUNTIME_ERROR_CLASSES, SPAWNRES_T, STATS_T, STRING, URL_T, VOID, arrayOf } from "../../ir/nodes.js";
-import { isNodeTypesPath, requireSpecOf } from "../program.js";
+import { BOOL, BYTES_U8, CHILD_T, DYN, F64, IrExpr, IrLibFn, IrStrIntrinsicMethod, IrType, RUNTIME_ERROR_CLASSES, SPAWNRES_T, STATS_T, STRING, URL_T, VOID, arrayOf, funcOf, } from "../../ir/nodes.js";
+import { isNodeTypesPath, locOf, requireSpecOf } from "../program.js";
 
 /** Statement-level constructs rejected wholesale, keyed by syntax kind. */
 export const UNSUPPORTED_STMT: Partial<Record<ts.SyntaxKind, { code: keyof typeof UNSUPPORTED; feature?: string }>> = {
@@ -1593,4 +1593,68 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       else if (L.isStdlibFile(sf)) return false;
     }
     return viaNode;
+  }
+
+/** `diffieHellman` taken as a VALUE rather than called.
+   *
+   * A builtin function normally has no closure representation -- it lowers
+   * to a libCall at its call sites, so the bare identifier fences. One
+   * consumer shape needs the value itself: the runtime PROBE that asks
+   * whether this Node exposes a callback-taking diffieHellman, which binds
+   * the function at module scope and only calls it later, inside a try.
+   * Fencing the BINDING turns a probe the program is prepared to lose into
+   * a throw at import time, which is not what Node does -- there the bind
+   * succeeds and the probe answers.
+   *
+   * The lift is the perf.now.bind(performance) story: a real function over
+   * the same libCall, memoized per program. Only the single-signature
+   * options form spells, which is the only form that lowers as a call. */
+  export function diffieHellmanFnValueOf(L: Lowerer, expr: ts.Identifier): IrExpr | null {
+    const loc = locOf(expr);
+    const sigs = L.checker.getCallSignatures(L.typeOf(expr));
+    if (sigs.length !== 1) return null;
+    const params = sigs[0]!.getParameters();
+    if (params.length !== 1) return null;
+    const optT = L.mapTypeOf(L.checker.getTypeOfSymbol(params[0]!));
+    if (optT === null || optT === undefined || optT.kind !== "record") return null;
+    const shape = L.shapes.get(optT.shapeId);
+    const priv = shape?.fields.find((f) => f.name === "privateKey");
+    const pub = shape?.fields.find((f) => f.name === "publicKey");
+    if (!shape || !priv || !pub) return null;
+    if (priv.type.kind !== "keyobj" || pub.type.kind !== "keyobj") return null;
+
+    const bytesT: IrType = { kind: "bytes", elem: "u8" };
+    const name = "%crypto.diffieHellman.value";
+    if (!L.liftedFns.some((f) => f.name === name)) {
+      const optsId = "opts.0";
+      const read = (field: string, t: IrType): IrExpr => ({
+        kind: "recordGet",
+        obj: { kind: "varRef", localId: optsId, type: optT, loc },
+        shapeId: optT.shapeId,
+        field,
+        type: t,
+        loc,
+      });
+      L.liftedFns.push({
+        name,
+        params: [{ localId: optsId, name: "opts", type: optT }],
+        returnType: bytesT,
+        locals: [{ id: optsId, name: "opts", type: optT, mutable: false }],
+        body: [
+          {
+            kind: "return",
+            value: {
+              kind: "libCall",
+              fn: "key.dh",
+              args: [read("privateKey", priv.type), read("publicKey", pub.type)],
+              type: bytesT,
+              loc,
+            },
+            loc,
+          },
+        ],
+        loc,
+      });
+    }
+    return { kind: "closure", fnName: name, captures: [], type: funcOf([optT], bytesT), loc };
   }
