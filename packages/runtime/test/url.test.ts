@@ -2,17 +2,18 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { ccCompile, exeSuffix, testBin } from "./cc.js";
 import { beforeAll, expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const testDir = import.meta.dirname;
-const bin = join(testDir, "build", "test_url");
+const bin = join(testDir, "build", "test_url" + exeSuffix);
 
 // Compiled once with ASan + the RC audit (leak/double-free coverage over
 // every bridge call, thrown TypeErrors included).
 beforeAll(async () => {
   await mkdir(join(testDir, "build"), { recursive: true });
-  await execFileAsync("clang", [
+  await ccCompile([
     "-std=c11", "-O1", "-Wall", "-Wextra",
     "-fsanitize=address", "-DSCR_RC_AUDIT",
     ...(process.platform === "linux" ? ["-D_GNU_SOURCE"] : []),

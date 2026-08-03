@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { ccCompile, testBin } from "./cc.js";
 import { expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
@@ -11,8 +12,8 @@ const srcDir = join(testDir, "../src");
 test("closure/box runtime: RC cascades clean under ASan + audit", async () => {
   const buildDir = join(testDir, "build");
   await mkdir(buildDir, { recursive: true });
-  const bin = join(buildDir, "test_closure");
-  await execFileAsync("clang", [
+  const bin = testBin(buildDir, "test_closure");
+  await ccCompile([
     "-std=c11", "-O1", "-Wall", "-Wextra",
     "-fsanitize=address", "-DSCR_RC_AUDIT",
     "-o", bin,

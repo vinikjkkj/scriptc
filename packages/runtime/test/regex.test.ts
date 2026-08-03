@@ -2,11 +2,12 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { ccCompile, expectAbort, exeSuffix, testBin } from "./cc.js";
 import { beforeAll, expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const testDir = import.meta.dirname;
-const bin = join(testDir, "build", "test_regex");
+const bin = join(testDir, "build", "test_regex" + exeSuffix);
 const vendorDir = join(testDir, "../vendor/quickjs-ng");
 
 // Compiled once with ASan + the RC audit: test_regex.c asserts the C-level
@@ -16,7 +17,7 @@ const vendorDir = join(testDir, "../vendor/quickjs-ng");
 // binaries link.
 beforeAll(async () => {
   await mkdir(join(testDir, "build"), { recursive: true });
-  await execFileAsync("clang", [
+  await ccCompile([
     // no -Wall/-Wextra: the vendored libunicode.c is not warning-clean
     "-std=c11", "-O1",
     "-fsanitize=address", "-DSCR_RC_AUDIT",
@@ -59,7 +60,7 @@ test("test() on a g-flagged regex aborts with the statefulness fence", async () 
     },
     (e: Error & { signal?: string; stderr?: string }) => e,
   );
-  expect(err.signal).toBe("SIGABRT");
+  expectAbort(err);
   expect(err.stderr).toContain(
     "scriptc: test() on a regex with the 'g' or 'y' flag is not supported",
   );

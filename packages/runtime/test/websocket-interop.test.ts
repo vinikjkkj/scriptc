@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { ccCompile, testBin } from "./cc.js";
 import { expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
@@ -33,10 +34,11 @@ const enabled = process.env.RUN_WS_INTEROP === "1" && wsResolvable();
 test.skipIf(!enabled)("scr_ws_conn interoperates with a real ws echo server", async () => {
   const buildDir = join(testDir, "build");
   await mkdir(buildDir, { recursive: true });
-  const bin = join(buildDir, "test_websocket_interop");
+  const bin = testBin(buildDir, "test_websocket_interop");
   const socketLib = process.platform === "win32" ? ["-lws2_32"] : [];
-  await execFileAsync("clang", [
+  await ccCompile([
     "-std=c11", "-O2",
+    "-I", join(testDir, "../src"),
     "-o", bin,
     join(testDir, "test_websocket_interop.c"),
     join(testDir, "../src/scr_websocket.c"),

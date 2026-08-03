@@ -2,18 +2,19 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { ccCompile, exeSuffix, testBin } from "./cc.js";
 import { beforeAll, expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const testDir = import.meta.dirname;
-const bin = join(testDir, "build", "test_inspect");
+const bin = join(testDir, "build", "test_inspect" + exeSuffix);
 
 // Compiles the C-side oracle test once. Built with ASan + the RC audit so
 // the run also proves the inspect engine neither leaks nor double-frees
 // across every rendered frame.
 beforeAll(async () => {
   await mkdir(join(testDir, "build"), { recursive: true });
-  await execFileAsync("clang", [
+  await ccCompile([
     "-std=c11", "-O1", "-Wall", "-Wextra",
     "-fsanitize=address", "-DSCR_RC_AUDIT",
     "-o", bin,

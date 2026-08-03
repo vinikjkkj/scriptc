@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { ccCompile, testBin } from "./cc.js";
 import { expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
@@ -20,8 +21,8 @@ const testDir = import.meta.dirname;
 test("scr_string_to_number matches Node Number(s) on committed oracle cases", async () => {
   const buildDir = join(testDir, "build");
   await mkdir(buildDir, { recursive: true });
-  const bin = join(buildDir, "test_tonumber");
-  await execFileAsync("clang", [
+  const bin = testBin(buildDir, "test_tonumber");
+  await ccCompile([
     "-std=c11", "-O1", "-Wall", "-Wextra",
     "-fsanitize=address", "-DSCR_RC_AUDIT",
     ...(process.platform === "linux" ? ["-D_GNU_SOURCE"] : []),

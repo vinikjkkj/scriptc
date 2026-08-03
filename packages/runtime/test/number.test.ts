@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { ccCompile, testBin } from "./cc.js";
 import { expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
@@ -13,8 +14,8 @@ const testDir = import.meta.dirname;
 test("scr_f64_to_str matches Node String(x) on committed oracle cases", async () => {
   const buildDir = join(testDir, "build");
   await mkdir(buildDir, { recursive: true });
-  const bin = join(buildDir, "test_number");
-  await execFileAsync("clang", [
+  const bin = testBin(buildDir, "test_number");
+  await ccCompile([
     "-std=c11", "-O2", "-Wall", "-Wextra",
     ...(process.platform === "linux" ? ["-D_GNU_SOURCE"] : []),
     "-o", bin,

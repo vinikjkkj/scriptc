@@ -2,18 +2,19 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { ccCompile, exeSuffix, testBin } from "./cc.js";
 import { beforeAll, expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const testDir = import.meta.dirname;
-const bin = join(testDir, "build", "test_json");
+const bin = join(testDir, "build", "test_json" + exeSuffix);
 
 // Built with ASan + the RC audit: a clean exit also proves the checked-dynamic tree's
 // recursive ownership — including trees abandoned mid-parse by syntax
 // errors — leaks nothing and frees nothing twice.
 beforeAll(async () => {
   await mkdir(join(testDir, "build"), { recursive: true });
-  await execFileAsync("clang", [
+  await ccCompile([
     "-std=c11", "-O1", "-Wall", "-Wextra",
     "-fsanitize=address", "-DSCR_RC_AUDIT",
     "-I", join(testDir, "../src"),

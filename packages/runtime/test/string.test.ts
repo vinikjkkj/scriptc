@@ -2,18 +2,19 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { ccCompile, expectAbort, exeSuffix, testBin } from "./cc.js";
 import { beforeAll, expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const testDir = import.meta.dirname;
-const bin = join(testDir, "build", "test_string");
+const bin = join(testDir, "build", "test_string" + exeSuffix);
 
 // Compiles the C-side oracle test once for both tests below. Built with
 // ASan + the RC audit so the oracle run also proves the new string
 // functions neither leak nor double-free across ~26k calls.
 beforeAll(async () => {
   await mkdir(join(testDir, "build"), { recursive: true });
-  await execFileAsync("clang", [
+  await ccCompile([
     "-std=c11", "-O1", "-Wall", "-Wextra",
     "-fsanitize=address", "-DSCR_RC_AUDIT",
     ...(process.platform === "linux" ? ["-D_GNU_SOURCE"] : []),
@@ -100,7 +101,7 @@ test.each(["--crash-repeat", "--crash-repeat-inf"])(
       },
       (e: Error & { signal?: string; stderr?: string }) => e,
     );
-    expect(err.signal).toBe("SIGABRT");
+    expectAbort(err);
     expect(err.stderr).toContain("scriptc: RangeError: Invalid count value");
   },
 );
