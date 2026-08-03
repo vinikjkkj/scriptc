@@ -40,7 +40,7 @@ export { compileC, runtimeSrcDir, type CcOptions } from "./backend/cc.js";
 export { emitModule } from "./backend/emission/emitter.js";
 export type { ScrDiagnostic } from "./diagnostics/diagnostic.js";
 export { renderAll, renderDiagnostic } from "./diagnostics/render.js";
-export { renderCoverage, type CoverageInput } from "./coverage/report.js";
+export { renderCoverage, renderCoverageLines, type CoverageInput } from "./coverage/report.js";
 export {
   generateSurfaceManifest,
   renderSurfaceManifest,

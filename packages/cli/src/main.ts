@@ -4,7 +4,7 @@ import { readFileSync, rmSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { analyze, compile, compileC, compileLibrary, renderAll, renderCoverage, resolveProvenanceSources, setProvenanceSources } from "@scriptc/compiler";
+import { analyze, compile, compileC, compileLibrary, renderAll, renderCoverage, renderCoverageLines, resolveProvenanceSources, setProvenanceSources } from "@scriptc/compiler";
 import { defaultExecutableName } from "./paths.js";
 
 const USAGE = `scriptc — TypeScript/JavaScript to native executables (experimental)
@@ -221,7 +221,30 @@ async function main(): Promise<number> {
       ...(ffiProfilePath !== undefined ? { ffiProfilePath } : {}),
     });
     const color = process.stdout.isTTY ?? false;
-    process.stdout.write(renderCoverage(coverage, { color, sourceTexts }) + "\n");
+    // Streamed. A report over a large dependency graph joins into a string
+    // past V8's maximum length, and the command then dies with RangeError
+    // after doing every bit of the work.
+    //
+    // Bounded by CHARACTERS, not by line count: the long lines here are
+    // type spellings, and a fixed number of them is no bound at all — a
+    // 2048-line chunk of those overflowed just the same.
+    const covLines = renderCoverageLines(coverage, { color, sourceTexts });
+    const COV_CHUNK_CHARS = 1 << 20;
+    let pending = "";
+    for (const line of covLines) {
+      if (pending.length + line.length + 1 > COV_CHUNK_CHARS && pending.length > 0) {
+        process.stdout.write(pending);
+        pending = "";
+      }
+      // A single line past the bound goes out on its own rather than
+      // growing the buffer to hold it.
+      if (line.length + 1 > COV_CHUNK_CHARS) {
+        process.stdout.write(line + "\n");
+        continue;
+      }
+      pending += line + "\n";
+    }
+    if (pending.length > 0) process.stdout.write(pending);
     return coverage.preflightFailed ? 1 : 0;
   }
 
