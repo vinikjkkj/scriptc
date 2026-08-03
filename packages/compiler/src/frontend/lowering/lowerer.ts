@@ -3448,6 +3448,18 @@ export class Lowerer {
     if (expected.kind === "record" && expr.type.kind === "classval" && expr.kind === "classRef") {
       return this.classStaticsProjection(expr.type.className, expected.shapeId, expr.loc);
     }
+    // A CLASS VALUE flowing into a CONSTRUCT-SIGNATURE slot (`new (…) =>
+    // Iface` — types.ts maps single-construct-signature constructables
+    // over interface instances to func types): the value enters as a
+    // construct THUNK — a zero-capture closure of the slot's exact
+    // signature whose body constructs the class and projects the instance
+    // into the slot's return shape. Direct classRef sources only: the
+    // thunk names the class statically, so the runtime value must BE that
+    // class (a classval-typed expression could hold a widened subclass).
+    if (expected.kind === "func" && expr.type.kind === "classval" && expr.kind === "classRef") {
+      const thunk = this.classCtorThunk(expr.type.className, expected, expr.loc);
+      if (thunk) return thunk;
+    }
     if (expected.kind === "array" && expr.type.kind === "array" && expected.elem.kind !== "jsval") {
       const helper = this.arrayWidthHelper(expr.type, expected, expr.loc);
       if (helper) return { kind: "call", callee: helper, args: [expr], type: expected, loc: expr.loc };
@@ -3481,6 +3493,233 @@ export class Lowerer {
       return { kind: "call", callee: helper, args: [expr], type: expected, loc: expr.loc };
     }
     return null;
+  }
+
+  /** The construct THUNK a class value becomes in a construct-signature
+   * func slot (`rawWebSocketConstructor: new (url) => RawWebSocket` fed a
+   * class): a closure of the slot's signature whose body is `new C(...)`
+   * with each ctor param filled from the same-position slot param (exact,
+   * arm-wrap, dyn conversion, or width) or its omitted completion, and
+   * the instance projected into the slot's return shape (the objRecord
+   * width copy — the same structural view every instance-into-record flow
+   * rides). Interned per (class, signature) and ZERO-CAPTURE, so backends
+   * intern the closure: one runtime value per class and slot shape, `===`
+   * stable across coercion sites. `new` through the slot is the thunk
+   * call (lowerNew's func arm). Null declines to the exact-shape fences:
+   * a generic class, a rest-marked signature, a slot param the ctor param
+   * cannot receive, a required ctor param the slot omits, or an instance
+   * the return shape cannot project. */
+  classCtorThunk(className: string, expected: IrType & { kind: "func" }, loc: SrcLoc): IrExpr | null {
+    if (expected.rest === true) return null;
+    const info = this.classes.get(className);
+    if (!info || info.generic || info.def.abstract) return null;
+    const inst: IrType = { kind: "object", className };
+    // Return side first — planned before anything interns.
+    let retConv: ((e: IrExpr) => IrExpr) | null = null;
+    if (typeEquals(expected.ret, inst)) {
+      retConv = (e) => e;
+    } else if (
+      expected.ret.kind === "object" &&
+      this.isSubclassOf(className, expected.ret.className)
+    ) {
+      const retT = expected.ret;
+      retConv = (e) => ({ kind: "upcast", value: e, type: retT, loc });
+    } else if (expected.ret.kind === "record") {
+      const proj = this.ctorWitnessProjection(className, expected.ret, loc);
+      if (!proj) return null;
+      const retT = expected.ret;
+      retConv = (e) => ({ kind: "call", callee: proj, args: [e], type: retT, loc });
+    } else {
+      return null;
+    }
+    // Argument side: positional ctor params only — a rest pack has no
+    // adapter shape.
+    if (info.ctorParams.some((p) => p.mode === "rest" || p.mode === "dynRest" || p.mode === "islandRest")) {
+      return null;
+    }
+    const args: IrExpr[] = [];
+    for (let i = 0; i < info.ctorParams.length; i++) {
+      const shape = info.ctorParams[i]!;
+      const src = i < expected.params.length ? expected.params[i]! : null;
+      if (src === null) {
+        // The slot's signature omits this ctor param: only an omittable
+        // one completes (tsc's assignability says required ones cannot
+        // reach here, but decline rather than trust).
+        const absent =
+          shape.type.kind === "dyn"
+            ? dynUndefinedExpr(loc)
+            : shape.type.kind === "jsval"
+              ? ({ kind: "jsOp", op: "undefLit", args: [], type: JSVAL, loc } as IrExpr)
+              : this.wrappedUndefined(shape.type, loc);
+        if (shape.mode !== "omittable" || !absent) return null;
+        args.push(absent);
+        continue;
+      }
+      const ref: IrExpr = { kind: "varRef", localId: `p.${i}`, type: src, loc };
+      if (typeEquals(src, shape.type)) {
+        args.push(ref);
+        continue;
+      }
+      if (shape.type.kind === "union" && this.armTag(shape.type.unionId, src) >= 0) {
+        args.push({ kind: "unionWrap", unionId: shape.type.unionId, tag: this.armTag(shape.type.unionId, src), value: ref, type: shape.type, loc });
+        continue;
+      }
+      if (shape.type.kind === "dyn" && this.dynConvertible(src)) {
+        args.push({ kind: "dynFrom", value: ref, type: DYN, loc });
+        continue;
+      }
+      const w = this.widthCoerce(ref, shape.type);
+      if (!w) return null;
+      args.push(w);
+    }
+    const key = `ctorthunk:${className}:${typeKey(expected)}`;
+    const existing = this.widthHelpers.get(key);
+    const name = existing ?? `%ctorthunk.${this.widthHelpers.size}`;
+    if (!existing) {
+      this.widthHelpers.set(key, name);
+      this.noteEdge(`%${className}.constructor`);
+      this.liftedFns.push({
+        name,
+        params: expected.params.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t })),
+        returnType: expected.ret,
+        locals: expected.params.map((t, i) => ({ id: `p.${i}`, name: `p${i}`, type: t, mutable: false })),
+        body: [
+          {
+            kind: "return",
+            value: retConv({ kind: "new", className, args, type: inst, loc }),
+            loc,
+          },
+        ],
+        loc,
+      });
+    }
+    return { kind: "closure", fnName: name, captures: [], type: expected, loc };
+  }
+
+  /** The record a THUNK-constructed instance projects into (the return
+   * side of classCtorThunk): method-named fields become closures bound to
+   * the instance — the classWitnessRecord stance, sound here because the
+   * thunk's instance is born inside it and never escapes nominally —
+   * data fields ride the width-lift copy (the established width stance:
+   * later mutations of the source field don't alias), and missing
+   * optional-flavored fields complete to their undefined arm. Interned
+   * per (class, shape). Null declines to the exact-shape fences: an
+   * accessor- or generic-method-satisfied field, an abstract/rest/
+   * inexact method signature, a builtin runtime layout, or a field that
+   * doesn't lift. */
+  ctorWitnessProjection(className: string, target: IrType & { kind: "record" }, loc: SrcLoc): string | null {
+    const shape = this.shapes.get(target.shapeId);
+    const info = this.classes.get(className);
+    if (!shape || !info || shape.tuple || shape.indexValue !== undefined || shape.fields.length === 0) return null;
+    if (shape.fields.some((f) => f.name.startsWith("%"))) return null;
+    for (let c: ClassInfo | null = info; c; c = c.base) {
+      if (c.builtinError || c.builtinEmitter || c.builtinStream !== undefined || c.def.runtime) return null;
+    }
+    const key = `ctorwitness:${className}:${target.shapeId}`;
+    const existing = this.retagHelpers.get(key);
+    if (existing) return existing;
+    // Probe every field BEFORE interning — a partial projection must not
+    // be left half-built in the helper tables.
+    type Plan =
+      | { how: "method"; name: string; fnT: IrType & { kind: "func" }; callee: string; virtual: boolean; ret: IrType }
+      | { how: "lift"; name: string; src: IrType; lift: WidthLift; fieldT: IrType }
+      | { how: "absent"; name: string; utag: number; fieldT: IrType };
+    const plan: Plan[] = [];
+    for (const f of shape.fields) {
+      const found = findMethodOn(this, info, f.name);
+      if (found) {
+        if (f.type.kind !== "func" || f.type.rest === true) return null;
+        if (found.sig.abstract === true || found.sig.gen !== undefined) return null;
+        if (found.sig.params.some((p) => p.mode === "rest")) return null;
+        const methodT = funcOf(found.sig.params.map((p) => p.type), found.sig.ret);
+        if (!typeEquals(methodT, f.type)) return null;
+        plan.push({
+          how: "method",
+          name: f.name,
+          fnT: f.type,
+          callee: `%${found.declarer.def.name}.${f.name}`,
+          virtual: this.overrideBelow(info, f.name),
+          ret: found.sig.ret,
+        });
+        continue;
+      }
+      if (findMethodOn(this, info, `get:${f.name}`) || findGenericMethodOn(this, info, f.name)) return null;
+      const ft = info.fields.get(f.name);
+      if (ft === undefined) {
+        if (f.type.kind !== "union") return null;
+        const def = this.unions.get(f.type.unionId);
+        const utag = def ? def.arms.findIndex((a) => a.kind === "undefinedT") : -1;
+        if (utag < 0) return null;
+        plan.push({ how: "absent", name: f.name, utag, fieldT: f.type });
+        continue;
+      }
+      const lift = this.widthLiftPlan(ft, f.type);
+      if (!lift) return null;
+      plan.push({ how: "lift", name: f.name, src: ft, lift, fieldT: f.type });
+    }
+    const builder = `%ctorwitness.${this.retagHelpers.size}`;
+    this.retagHelpers.set(key, builder);
+    const instT: IrType = { kind: "object", className };
+    const fields: { name: string; value: IrExpr }[] = [];
+    for (const [i, m] of plan.entries()) {
+      if (m.how === "absent") {
+        fields.push({
+          name: m.name,
+          value: {
+            kind: "unionWrap",
+            unionId: (m.fieldT as IrType & { kind: "union" }).unionId,
+            tag: m.utag,
+            value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc },
+            type: m.fieldT,
+            loc,
+          },
+        });
+        continue;
+      }
+      const self: IrExpr = { kind: "varRef", localId: "self.0", type: instT, loc };
+      if (m.how === "lift") {
+        const get: IrExpr = { kind: "fieldGet", obj: self, className, field: m.name, type: m.src, loc };
+        fields.push({ name: m.name, value: this.applyWidthLift(m.lift, get, m.fieldT, loc) });
+        continue;
+      }
+      if (m.virtual) this.noteVirtualEdge(info, m.name); else this.noteEdge(m.callee);
+      const implName = `${builder}.${i}`;
+      const params: IrParam[] = m.fnT.params.map((t, k) => ({ localId: `a.${k}`, name: `a${k}`, type: t }));
+      const args: IrExpr[] = [
+        m.virtual ? this.upcastTo(self, info.def.name) : self,
+        ...m.fnT.params.map((t, k): IrExpr => ({ kind: "varRef", localId: `a.${k}`, type: t, loc })),
+      ];
+      const callE: IrExpr = m.virtual
+        ? { kind: "virtualCall", className: info.def.name, method: m.name, args, type: m.ret, loc }
+        : { kind: "call", callee: m.callee, args, type: m.ret, loc };
+      this.liftedFns.push({
+        name: implName,
+        params,
+        returnType: m.ret,
+        captures: [{ localId: "self.0", name: "self", type: instT }],
+        locals: [
+          { id: "self.0", name: "self", type: instT, mutable: false, boxed: true },
+          ...m.fnT.params.map((t, k) => ({ id: `a.${k}`, name: `a${k}`, type: t, mutable: false })),
+        ],
+        body: m.ret.kind === "void"
+          ? [{ kind: "exprStmt", expr: callE, loc }, { kind: "return", value: null, loc }]
+          : [{ kind: "return", value: callE, loc }],
+        loc,
+      });
+      fields.push({
+        name: m.name,
+        value: { kind: "closure", fnName: implName, captures: ["self.0"], type: m.fnT, loc },
+      });
+    }
+    this.liftedFns.push({
+      name: builder,
+      params: [{ localId: "self.0", name: "self", type: instT }],
+      returnType: target,
+      locals: [{ id: "self.0", name: "self", type: instT, mutable: false, boxed: true }],
+      body: [{ kind: "return", value: { kind: "recordLit", fields, type: target, loc }, loc }],
+      loc,
+    });
+    return builder;
   }
 
   /** One step of the recursive width-lift relation: how a `src`-typed

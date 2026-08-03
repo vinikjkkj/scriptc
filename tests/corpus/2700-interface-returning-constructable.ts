@@ -13,10 +13,10 @@
 // constructor TYPE node, `interface C { new (…): T }` a construct
 // SIGNATURE.
 //
-// The VALUE side stays shut, and deliberately: `new c(url)` through such a
-// slot still fences with "constructing values other than classes declared
-// in the program". This opens the type so the records compile, not the
-// construction.
+// The VALUE side opened later (2706): a class enters the slot as an
+// interned construct THUNK, and `new` through the slot calls it. This
+// case pins the TYPE half on its own — an optional constructable member
+// nothing sets must not take its record down.
 
 interface Sock { readonly readyState: number; close(): void }
 type SockCtor = new (url: string) => Sock;
