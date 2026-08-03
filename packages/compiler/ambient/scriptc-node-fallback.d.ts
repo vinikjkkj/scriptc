@@ -1224,6 +1224,42 @@ declare module "crypto" {
     digest(encoding: "hex" | "base64"): string;
   }
   export function createHash(algorithm: string): Hash;
+  /* The asymmetric key-object slice, all of it lowered: an OPAQUE handle
+   * with no members of its own -- it only flows into the calls below --
+   * plus the two ways to make one, the X25519 agreement, and the Ed25519
+   * signature pair. `diffieHellman` also spells as a function VALUE (the
+   * probe idiom binds it before calling it). Curves are x25519 and
+   * ed25519; anything else fences by name. */
+  export interface KeyObject {}
+  export function generateKeyPairSync(type: "x25519" | "ed25519"): {
+    publicKey: KeyObject;
+    privateKey: KeyObject;
+  };
+  export function generateKeyPair(
+    type: "x25519" | "ed25519",
+    callback: (err: Error | null, publicKey: KeyObject, privateKey: KeyObject) => void,
+  ): void;
+  export function createPrivateKey(options: {
+    key: Uint8Array | string;
+    format: "der" | "pem";
+    type?: "pkcs8";
+  }): KeyObject;
+  export function createPublicKey(options: {
+    key: Uint8Array | string;
+    format: "der" | "pem";
+    type?: "spki";
+  }): KeyObject;
+  export function diffieHellman(options: {
+    privateKey: KeyObject;
+    publicKey: KeyObject;
+  }): Buffer;
+  export function sign(algorithm: null, data: Uint8Array, key: KeyObject): Buffer;
+  export function verify(
+    algorithm: null,
+    data: Uint8Array,
+    key: KeyObject,
+    signature: Uint8Array,
+  ): boolean;
   /* The lowered X509Certificate surface is the data-record slice:
    * fingerprint (the SHA-1 of the DER, uppercase colon-separated) and
    * the validFrom/validTo validity window (Node's ASN1_TIME_print
