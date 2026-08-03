@@ -3451,6 +3451,22 @@ export class Lowerer {
       if (!helper) return null;
       return { kind: "call", callee: helper, args: [expr], type: expected, loc: expr.loc };
     }
+    // A CLASS INSTANCE flowing into the record an interface maps to. The
+    // instance satisfies the interface -- that is why the checker admitted
+    // it -- and the constructor-witness projection already knows how to
+    // read one out: bound methods, lifted fields, the undefined arm for a
+    // member the class omits.
+    //
+    // The projection declines whatever it cannot see through (accessors,
+    // generics, a builtin base, a field it cannot lift), so this widens
+    // only to the classes it can actually witness. Where it declines, the
+    // caller's own refusal stands exactly as before.
+    if (expected.kind === "record" && expr.type.kind === "object") {
+      const proj = this.ctorWitnessProjection(expr.type.className, expected, expr.loc);
+      if (proj !== null) {
+        return { kind: "call", callee: proj, args: [expr], type: expected, loc: expr.loc };
+      }
+    }
     // An ARRAY flowing into a UNIFORM TUPLE slot — the other side of the
     // const-lookup-table rule: the table binds as an array so a computed
     // read has a slot, and a parameter spelling the tuple still wants the
@@ -3923,7 +3939,15 @@ export class Lowerer {
       return this.recordWidthPlan(src.shapeId, dst.shapeId) !== null ? { how: "width" } : null;
     }
     if (dst.kind === "record" && src.kind === "object") {
-      return this.objToRecordPlan(src.className, dst.shapeId) !== null ? { how: "objWidth" } : null;
+      if (this.objToRecordPlan(src.className, dst.shapeId) !== null) return { how: "objWidth" };
+      // The constructor-witness projection is more capable — async and
+      // OPTIONAL methods (the store interfaces: `destroy?: () => Promise<
+      // void>`), which the plain plan declines — so a class→record width
+      // lift falls back to it. Interned by (class, shape), so the synthetic
+      // loc here is harmless; the build reuses the same helper.
+      const synthLoc: SrcLoc = { file: "<width>", start: 0, end: 0 };
+      if (this.ctorWitnessProjection(src.className, dst, synthLoc) !== null) return { how: "objWidth" };
+      return null;
     }
     if (dst.kind === "object" && src.kind === "record") {
       return this.recordToClassPlan(src.shapeId, dst.className) !== null ? { how: "clsWidth" } : null;
@@ -4542,7 +4566,11 @@ export class Lowerer {
     sig: { params: ParamShape[]; ret: IrType; abstract?: true; async?: true; gen?: { yieldT: IrType; nextT: IrType } },
   ): { method: BoundMethodProj } | null {
     if (fieldType.kind !== "func" || fieldType.rest === true) return null;
-    if (sig.async === true || sig.gen !== undefined) return null;
+    // An async method binds fine: the closure `() => this.m()` is SYNC and
+    // returns the method's promise, and sig.ret is already the call-site
+    // Promise<inner> (the field spells the same). A generator has no
+    // plain-closure form. (ctorWitnessProjection admits async the same way.)
+    if (sig.gen !== undefined) return null;
     if (sig.params.length !== fieldType.params.length) return null;
     for (let i = 0; i < sig.params.length; i++) {
       const p = sig.params[i]!;
@@ -4676,7 +4704,11 @@ export class Lowerer {
     const to = this.shapes.get(toId);
     if (!to) return null;
     const plan = this.objToRecordPlan(className, toId);
-    if (!plan) return null;
+    // The plain plan declines async/optional-method targets (the store
+    // interfaces); the constructor-witness projection handles them, and its
+    // helper has the same shape (one instance param → the record), so the
+    // width lift delegates to it.
+    if (!plan) return this.ctorWitnessProjection(className, { kind: "record", shapeId: toId }, loc);
     const key = `obj:${className}:${toId}`;
     const existing = this.widthHelpers.get(key);
     if (existing) return existing;
