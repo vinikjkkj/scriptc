@@ -561,6 +561,9 @@ export interface TypeMapperCtx {
    * under --dynamic: the package's implementation runs in the embedded
    * engine, so its values are island handles. */
   isNpmFile: (sf: ts.SourceFile) => boolean;
+  /** True for a DATA property some literal satisfies with a getter: the
+   * field carries an accessor slot so both producers share one layout. */
+  accessorProducerProp?: (sym: ts.Symbol) => boolean;
   /** --dynamic: `any` maps to the island handle type (jsval). Off, `any`
    * stays unmapped and the requires-dynamic diagnostic fires per site. */
   dynamic: boolean;
@@ -3973,7 +3976,14 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
     }
     const fields: { name: string; type: IrType }[] = [];
     for (const p of props) {
-      if (p.flags & (ts.SymbolFlags.GetAccessor | ts.SymbolFlags.SetAccessor)) {
+      // ...or a DATA property that some literal in this program satisfies
+      // with a getter. One layout has to serve both producers, so the slot
+      // is decided over the whole program (accessorProducerProp) rather
+      // than from this declaration alone.
+      const producerAccessor =
+        (p.flags & (ts.SymbolFlags.GetAccessor | ts.SymbolFlags.SetAccessor)) === 0 &&
+        ctx.accessorProducerProp?.(p) === true;
+      if (p.flags & (ts.SymbolFlags.GetAccessor | ts.SymbolFlags.SetAccessor) || producerAccessor) {
         // OBJECT-LITERAL get/set accessors (TS sources): the property has
         // no data slot — the shape carries reserved closure fields instead
         // (`%get:x` invoked per read, `%set:x` per write; see
@@ -4001,7 +4011,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
               !d.getSourceFile().isDeclarationFile &&
               !isJsSourceFile(d.getSourceFile()),
           );
-        if (!accessorOwned || (!getDecl && !setDecl)) return null;
+        if (!producerAccessor && (!accessorOwned || (!getDecl && !setDecl))) return null;
         // Symbol-keyed accessors have no foldable literal name to fill at
         // the literal — no slot to make.
         if (p.name.startsWith("__@")) return null;
@@ -4010,7 +4020,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
         // Node dispatches the getter) — those shapes stay unmapped.
         if (indexValue !== undefined) return null;
         let readT: IrType | null = null;
-        if (getDecl) {
+        if (getDecl || producerAccessor) {
           readT = mapType(checker.getTypeOfSymbol(p), ctx);
           if (readT === null || readT.kind === "jsval") return null;
         }
