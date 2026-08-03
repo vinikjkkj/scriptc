@@ -532,6 +532,11 @@ export interface TypeMapperCtx {
    * only where literal identity matters — indexed accesses (`T[K]`) inside
    * generic bodies whose K is bound to a literal key. */
   resolveTypeParamTs?: TypeParamTsResolver;
+  /** Constraint-erased VALUE mapping: an indexed access whose index is a
+   * UNION of literal keys answers the UNION of those property types. Set
+   * only by constraintErasedCtx — a monomorphized body keeps the stricter
+   * one-key rule. */
+  indexUnionOk?: boolean | undefined;
   /** GENERIC program classes (monomorphization by flow): the mapping of a
    * concrete instantiation reference (`Box<number>`) — the Lowerer
    * registers/reuses the instantiation (`Box%0`) and answers its object
@@ -2722,7 +2727,22 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   const callSigs = checker.getCallSignatures(widened);
   if (callSigs.length === 1) {
     const sig = callSigs[0]!;
-    if (sig.getTypeParameters().length) return null;
+    // A GENERIC signature has no single calling convention of its own, but
+    // one instantiation is always honest: every type parameter bound to
+    // its CONSTRAINT. The body type-checks for every type satisfying the
+    // constraint, so the constraint itself is among them — the rule
+    // genericCallInstance already applies to an overload-selected call.
+    // That makes the emitter idiom (`<K extends keyof M>(e: K, p: M[K])
+    // => void` held in a record slot and called through it) a concrete
+    // func type. Both resolvers are installed: the ts-level twin is what
+    // lets an indexed access `M[K]` resolve (see TypeParamTsResolver).
+    // An UNCONSTRAINED parameter has no widest honest binding — unmapped,
+    // exactly as before.
+    if (sig.getTypeParameters().length) {
+      const erased = constraintErasedCtx(sig, ctx);
+      if (!erased) return null;
+      ctx = erased;
+    }
     // A SYNTHESIZED rest param (tsc's JS inference for a function body
     // reading `arguments` — `(...args: any[]) => any` whose args symbol
     // has no declaration): the dotDotDot check below can't see it, and a
@@ -3183,7 +3203,26 @@ function mapBoundIndexedAccess(type: ts.Type, ctx: TypeMapperCtx): IrType | null
     : idxT.isNumberLiteralType()
       ? String(idxT.value)
       : null;
-  if (key === null) return null;
+  if (key === null) {
+    // A CONSTRAINT-ERASED value slot indexes by the whole key union
+    // (`M[K]` with K bound to `keyof M`): the parameter's honest type is
+    // the UNION of the named property types — what a caller may pass. A
+    // monomorphized BODY keeps the stricter one-key rule above, where a
+    // single read must name a single field.
+    if (ctx.indexUnionOk !== true || !idxT.isUnionType()) return null;
+    const arms: IrType[] = [];
+    for (const k of idxT.getTypes()) {
+      const kn = k.isStringLiteralType() ? k.value : k.isNumberLiteralType() ? String(k.value) : null;
+      if (kn === null) return null;
+      const kprop = checker.getPropertyOfType(objT, kn);
+      if (!kprop) return null;
+      const armT = mapType(checker.getTypeOfSymbol(kprop), ctx);
+      if (!armT || armT.kind === "void") return null;
+      arms.push(armT);
+    }
+    if (arms.length === 0) return null;
+    return arms.length === 1 ? arms[0]! : { kind: "union", unionId: ctx.unions.intern(arms) };
+  }
   const prop = checker.getPropertyOfType(objT, key);
   if (!prop) return null;
   return mapType(checker.getTypeOfSymbol(prop), ctx);
@@ -3656,6 +3695,42 @@ function isDataOnlyObjectType(t: ts.Type, checker: ts.TypeChecker): boolean {
  * function-valued properties, so serialization of the shape stays exact;
  * Object.keys over such a shape omits the member (a pin — every excluded
  * member is a function the key walk would name). */
+/** A mapper context whose type-parameter resolvers bind every parameter of
+ * `sig` to its CONSTRAINT — the one instantiation a generic signature can
+ * honestly wear as a value. Null when any parameter is unconstrained or
+ * its constraint does not map, which keeps the signature unmapped. The
+ * outer resolvers stay reachable so a parameter of an ENCLOSING
+ * instantiation still resolves through them. */
+function constraintErasedCtx(sig: ts.Signature, ctx: TypeMapperCtx): TypeMapperCtx | null {
+  const tps = sig.getTypeParameters();
+  if (!tps || tps.length === 0) return null;
+  // The constraint is read off the DECLARATION (the idiom
+  // constraintTypeParamBindings uses): a base-constraint query widens a
+  // bare parameter instead of answering that it has none.
+  const sigDecl = ctx.checker.signatureDeclaration(sig);
+  const tpDecls = sigDecl !== undefined && ts.isFunctionLike(sigDecl) ? sigDecl.typeParameters : undefined;
+  if (tpDecls === undefined || tpDecls.length !== tps.length) return null;
+  const irByTp = new Map<ts.Type, IrType>();
+  const tsByTp = new Map<ts.Type, ts.Type>();
+  for (const [i, tp] of tps.entries()) {
+    const src = tpDecls[i]?.constraint ?? tpDecls[i]?.defaultType;
+    if (!src) return null;
+    const constraint = ctx.checker.getTypeFromTypeNode(src);
+    const mapped = mapType(constraint, ctx);
+    if (!mapped || mapped.kind === "void") return null;
+    irByTp.set(tp, mapped);
+    tsByTp.set(tp, constraint);
+  }
+  const outerIr = ctx.resolveTypeParam;
+  const outerTs = ctx.resolveTypeParamTs;
+  return {
+    ...ctx,
+    resolveTypeParam: (t) => irByTp.get(t) ?? outerIr?.(t) ?? null,
+    resolveTypeParamTs: (t) => tsByTp.get(t) ?? outerTs?.(t) ?? null,
+    indexUnionOk: true,
+  };
+}
+
 export function isGenericCallableMemberType(t: ts.Type, checker: ts.TypeChecker): boolean {
   const sigs = checker.getCallSignatures(t);
   // ANY generic signature disqualifies the slot, not only an all-generic
@@ -4070,8 +4145,11 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // can hold them — see isGenericCallableMemberType): the shape keeps
       // its data fields, and calls of the member monomorphize per call
       // site against the defining object literal's declaration.
-      if (isGenericCallableMemberType(fieldTs, checker)) continue;
+      // ...unless the signature maps at its CONSTRAINT instantiation, which
+      // gives it an ordinary closure slot (mapTypeInner's generic-value
+      // rule). Only a member that still fails to map leaves the shape.
       let pt = mapType(fieldTs, ctx);
+      if (pt === null && isGenericCallableMemberType(fieldTs, checker)) continue;
       // tsgo PANICS computing `readonly []` through the symbol-type query
       // (the TupleType conversion — the facade's panic fence answers
       // `any`), which would absorb the whole shape into the dynamic tier.
