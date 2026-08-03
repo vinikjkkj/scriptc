@@ -60,4 +60,23 @@ typedef struct {
  * yet (the caller reads more and retries). Never reads past `in_len`. */
 bool scr_ws_parse_header(const uint8_t *in, size_t in_len, ScrWsHeader *out);
 
+/* ── opening handshake (RFC 6455 §4) ──────────────────────────────────── */
+
+/* The magic GUID appended to a client key before hashing (RFC 6455 §1.3). */
+#define SCR_WS_GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+/* Compute the Sec-WebSocket-Accept for a client's Sec-WebSocket-Key:
+ * base64(SHA-1(key ++ GUID)). Writes 28 base64 chars + NUL into `out`
+ * (>= 29 bytes). `key`/`key_len` is the client key string as sent (the
+ * base64 nonce, not decoded). Self-contained (its own SHA-1/base64 —
+ * see the .c note) so the transport module needs no crypto link. */
+void scr_ws_accept_key(const char *key, size_t key_len, char out[29]);
+
+/* Fill `out` (16 bytes) with the raw Sec-WebSocket-Key nonce from `seed`
+ * bytes (the caller supplies randomness — the codec does not choose it),
+ * then base64-encode into `b64` (>= 25 bytes: 24 chars + NUL). The two
+ * halves are the request's Sec-WebSocket-Key value and the input to
+ * scr_ws_accept_key for validating the server's reply. */
+void scr_ws_key_b64(const uint8_t seed[16], char b64[25]);
+
 #endif /* SCR_WEBSOCKET_H */

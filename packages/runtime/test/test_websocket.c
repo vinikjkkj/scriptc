@@ -99,6 +99,32 @@ int main(void) {
     check(!scr_ws_parse_header(one, 1, &h), "single byte waits");
   }
 
+  /* RFC 6455 §1.3 worked handshake example: the client key
+   * "dGhlIHNhbXBsZSBub25jZQ==" yields Sec-WebSocket-Accept
+   * "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=". */
+  {
+    const char *key = "dGhlIHNhbXBsZSBub25jZQ==";
+    char accept[29];
+    scr_ws_accept_key(key, strlen(key), accept);
+    check(strcmp(accept, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=") == 0, "RFC 6455 accept-key vector");
+  }
+
+  /* base64 of the raw 16-byte key nonce (all-zero seed → known string). */
+  {
+    const uint8_t seed[16] = {0};
+    char b64[25];
+    scr_ws_key_b64(seed, b64);
+    check(strcmp(b64, "AAAAAAAAAAAAAAAAAAAAAA==") == 0, "zero-nonce key base64");
+  }
+  {
+    /* 0x00..0x0f seed. */
+    uint8_t seed[16];
+    for (int i = 0; i < 16; i++) seed[i] = (uint8_t)i;
+    char b64[25];
+    scr_ws_key_b64(seed, b64);
+    check(strcmp(b64, "AAECAwQFBgcICQoLDA0ODw==") == 0, "sequential-nonce key base64");
+  }
+
   fprintf(stderr, "%d/%d cases passed\n", passed, total);
   return passed == total ? 0 : 1;
 }
