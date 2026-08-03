@@ -6,7 +6,7 @@
  * interning ORDER is part of the emitted C, so the registries stay on
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
-import { canBoxFuncIntoDyn, DYN_HANDLE_KINDS, IrType, isRefCounted, typeEquals, typeKey } from "../../ir/nodes.js";
+import { canAdaptDynFuncTo, canBoxFuncIntoDyn, DYN_HANDLE_KINDS, IrType, isRefCounted, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { OVERFLOW_MEMBER } from "./emit-shapes.js";
@@ -1295,16 +1295,25 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // wrapper, retained); anything else wraps in the per-target
         // adapter closure, whose caps[0] obj-box owns the dyn value
         // (untraced — cycles through dyn never collect, SEMANTICS.md).
-        const adapter = dynFuncAdapterHelper(E, t);
+        // NON-adaptable targets have no adapter to wrap in: exact unwrap
+        // or the path-annotated TypeError (the frontend's unwrap-only
+        // cast semantics — only a value boxed from the slot's own type
+        // can honestly fill it).
         const sigLit = cStringLiteral(Buffer.from(key, "utf8"));
         d.push(`  if (d->kind != SCR_DYN_FUNC) { scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
         d.push(`  if (strcmp(d->v.fn.sig, ${sigLit}) == 0) return scr_closure_retain(d->v.fn.clo);`);
-        d.push(`  {`);
-        d.push(`    ScrClosure *a = scr_closure_new((void *)&${adapter}, 1);`);
-        d.push(`    a->caps[0] = scr_box_new_obj(&scr_dyn_retain_v, &scr_dyn_release_v, NULL);`);
-        d.push(`    scr_box_set_ref(a->caps[0], scr_dyn_retain((ScrDyn *)d));`);
-        d.push(`    return a;`);
-        d.push(`  }`);
+        if (canAdaptDynFuncTo(t, (id) => E.recordsById.get(id), (id) => E.unionsById.get(id))) {
+          const adapter = dynFuncAdapterHelper(E, t);
+          d.push(`  {`);
+          d.push(`    ScrClosure *a = scr_closure_new((void *)&${adapter}, 1);`);
+          d.push(`    a->caps[0] = scr_box_new_obj(&scr_dyn_retain_v, &scr_dyn_release_v, NULL);`);
+          d.push(`    scr_box_set_ref(a->caps[0], scr_dyn_retain((ScrDyn *)d));`);
+          d.push(`    return a;`);
+          d.push(`  }`);
+        } else {
+          d.push(`  scr_dyn_check_fail(path, ${want}, d);`);
+          d.push(`  return NULL;`);
+        }
         break;
       }
       default: {
