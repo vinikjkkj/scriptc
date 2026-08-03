@@ -5254,9 +5254,6 @@ export class Lowerer {
       toT.ret.kind === "record" && fromT.ret.kind === "object"
         ? this.ctorWitnessProjection(fromT.ret.className, toT.ret, loc)
         : null;
-    if (process.env["SCRIPTC_WITNESS_TRACE"] && (this.fmt(fromT).includes("WaAuth") || this.fmt(toT).includes("clear"))) {
-      console.error(`[fnadapt] from.ret=${fromT.ret.kind}${fromT.ret.kind === "object" ? "(" + fromT.ret.className + ")" : ""} to.ret=${toT.ret.kind} classRetProj=${classRetProj !== null} coercible=${this.coercibleValue(fromT.ret, toT.ret)}`);
-    }
     if (toT.ret.kind !== "void" && !this.coercibleValue(fromT.ret, toT.ret) && classRetProj === null) {
       if (fromT.ret.kind !== "void") {
         // A RESULT that cannot convert — the strandParams stance, result
