@@ -2765,6 +2765,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_num_to_fixed0(${arg(0)})`);
           case "num.toFixed":
             return finish(`scr_num_to_fixed(${arg(0)}, ${arg(1)})`);
+          // Number.prototype.toString(radix) (scr_number.c). +1 string; an
+          // out-of-range radix raises the JS RangeError.
+          case "num.toStringRadix":
+            return finish(`scr_num_to_str_radix(${arg(0)}, ${arg(1)})`);
           // Object.is over two numbers — SameValue on doubles. No throw.
           case "num.sameValue":
             return finish(`scr_num_same_value(${arg(0)}, ${arg(1)})`);

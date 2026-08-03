@@ -4320,6 +4320,12 @@ void scr_jsval_cast_fail(ScrJsval *v, const ScrStr *target);
  */
 size_t scr_f64_to_str(double x, char *buf);
 
+/* Number.prototype.toString(radix) for any radix (ECMA-262 §21.1.3.6):
+ * radix 10 delegates to scr_f64_to_str; 2..36 use the integer/fraction
+ * digit generation (V8's DoubleToRadixCString); outside 2..36 raises the
+ * JS RangeError. Returns a +1 string. */
+ScrStr *scr_num_to_str_radix(double x, double radix);
+
 /* The Ryū digit core (scr_number.c), shared with the Intl en-US number
  * formatter: the shortest round-tripping digits of a POSITIVE finite
  * double — value = 0.digits × 10^n, no trailing zeros, NUL-terminated.

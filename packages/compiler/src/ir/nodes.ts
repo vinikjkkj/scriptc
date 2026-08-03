@@ -1970,6 +1970,7 @@ export type IrLibFn =
   | "num.toExponential"
   | "num.toFixed0"
   | "num.toFixed"
+  | "num.toStringRadix"
   /** Object.is over two numbers — the spec's SameValue on doubles: NaN
    * equals NaN, +0 differs from -0, everything else is `===`. Plain bool
    * result; never throws. (Union-armed operands take unionEq's sameValue
@@ -6759,6 +6760,7 @@ export function moduleLibNondeterministicSurface(mod: IrModule): string | null {
  * failure / promise rejection). */
 export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "num.toFixed",
+  "num.toStringRadix",
   "insp.jsonDyn",
   // diagnostics_channel: publish runs subscribers synchronously (a throw
   // propagates — the documented divergence from triggerUncaughtException);
