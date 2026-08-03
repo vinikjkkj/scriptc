@@ -4522,11 +4522,11 @@ function validateFunction(
         // The %Error root extracts the checked-dynamic tree's error encoding (the "%error"
         // marker object caughtToDyn builds) as a fresh runtime error.
         const errorOk = e.type.kind === "object" && e.type.className === "%Error";
-        // ADAPTABLE function targets unwrap or wrap the checked-dynamic tree's function
-        // kind (the checked-dynamic function boundary, nodes.ts).
-        const funcOk =
-          e.type.kind === "func" &&
-          canAdaptDynFuncTo(e.type, (id) => records.get(id), (id) => unions.get(id));
+        // FUNCTION targets unwrap the checked-dynamic tree's function
+        // kind — adaptable ones may also wrap in the per-target adapter;
+        // non-adaptable ones are EXACT-UNWRAP-ONLY (any other function
+        // value throws — the emitters skip the adapter branch).
+        const funcOk = e.type.kind === "func";
         // Runtime HANDLE targets unwrap the checked-dynamic tree's handle kind by tag (a
         // retained reference, no copy — DYN_HANDLE_KINDS).
         const handleOk = DYN_HANDLE_KINDS.has(e.type.kind);

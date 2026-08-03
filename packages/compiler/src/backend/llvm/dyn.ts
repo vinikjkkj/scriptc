@@ -22,7 +22,7 @@
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrType } from "../../ir/nodes.js";
-import { canBoxFuncIntoDyn, DYN_HANDLE_KINDS, isRefCounted, typeKey } from "../../ir/nodes.js";
+import { canAdaptDynFuncTo, canBoxFuncIntoDyn, DYN_HANDLE_KINDS, isRefCounted, typeKey } from "../../ir/nodes.js";
 import { mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
 import { arrNewCall, elemAccess, llFieldType, releaseSym, traceAdapter, traceArg, vAdapters } from "./shapes.js";
@@ -902,8 +902,9 @@ export class LlDyn {
         // The checked-dynamic function boundary, OUT direction: an
         // IDENTICAL boxed signature unwraps the closure directly;
         // anything else wraps in the per-target adapter closure whose
-        // caps[0] obj-box owns the dyn value (untraced).
-        const adapter = this.dynFuncAdapterHelper(t);
+        // caps[0] obj-box owns the dyn value (untraced). NON-adaptable
+        // targets have no adapter: exact unwrap or the path-annotated
+        // TypeError (the frontend's unwrap-only cast semantics).
         const sigLit = host.cstr(key);
         requireKind(DK.FUNC, "dcf");
         host.declare(`declare i32 @strcmp(ptr, ptr)`);
@@ -928,6 +929,12 @@ export class LlDyn {
         B.line(`${r} = call ptr @scr_closure_retain_v(ptr ${clo})`);
         B.terminate(`ret ptr ${r}`);
         B.startBlock(lWrap);
+        if (!canAdaptDynFuncTo(t, (id: string) => host.recordsById.get(id), (id: string) => host.unionsById.get(id))) {
+          B.line(`call void @scr_dyn_check_fail(ptr %path, ptr ${want}, ptr %d)`);
+          B.terminate(`ret ptr null`);
+          break;
+        }
+        const adapter = this.dynFuncAdapterHelper(t);
         host.declare(`declare ptr @scr_closure_new(ptr, i64)`);
         host.declare(`declare ptr @scr_box_new_obj(ptr, ptr, ptr)`);
         host.declare(`declare void @scr_box_set_ref(ptr, ptr)`);

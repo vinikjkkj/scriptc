@@ -6817,14 +6817,17 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
       if (target.kind === "bytes" && target.elem === "u8") {
         return { kind: "dynCheck", value: inner, type: target, loc: locOf(expr) };
       }
-      // ADAPTABLE function targets (`u as (x: number) => number` — the
-      // checked-dynamic function boundary): kind check, then exact unwrap
-      // or the per-target adapter shim. Non-adaptable signatures keep the
-      // fence below.
-      if (
-        target.kind === "func" &&
-        canAdaptDynFuncTo(target, (id) => L.shapes.get(id), (id) => L.unions.get(id))
-      ) {
+      // FUNCTION targets (`u as (x: number) => number` — the checked-
+      // dynamic function boundary): kind check, then exact unwrap or the
+      // per-target adapter shim. NON-adaptable signatures (a construct-
+      // signature interface whose return record carries function fields —
+      // the RawWebSocketConstructor shape) cast too, with EXACT-UNWRAP-
+      // ONLY semantics: the only dyn value that can honestly fill such a
+      // slot is one boxed FROM the slot's own type, so an identical boxed
+      // signature unwraps by identity and every other function value
+      // throws the path-annotated TypeError (trust-but-verify — the
+      // emitters skip the adapter branch for these targets).
+      if (target.kind === "func") {
         return { kind: "dynCheck", value: inner, type: target, loc: locOf(expr) };
       }
       // Runtime HANDLE targets (`u as IncomingMessage` — a boxed handle
