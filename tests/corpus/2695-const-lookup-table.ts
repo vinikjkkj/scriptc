@@ -58,3 +58,27 @@ console.log(sumTuple(WEIGHTS));
 // array to be, and the literal index reads the field as before.
 const PAIR = ["count", 7] as const;
 console.log(PAIR[0], PAIR[1]);
+
+// NESTED tables: a table OF tables, each one `as const` too. The outer
+// type's fields are the inner TUPLE types, so without recursing the outer
+// would be an array of RECORDS while the inner tables are already arrays --
+// and the positional copy would paper over the mismatch, turning each inner
+// array back into a record a computed index cannot read. Both levels answer
+// arrays, so the inner values fit their slot with no copy at all.
+const DICT_A = ["aa", "ab", "ac"] as const;
+const DICT_B = ["ba", "bb", "bc"] as const;
+const DICTS = Object.freeze([DICT_A, DICT_B] as const);
+
+function lookup(which: number, at: number): string {
+  const dict = DICTS[which];
+  if (!dict || at >= dict.length) return "?";
+  return dict[at];
+}
+console.log(lookup(0, 1), lookup(1, 2), lookup(1, 9), DICTS.length);
+
+// Inner tables of DIFFERENT arity are not uniform, so the outer keeps its
+// record -- and a literal index still reads it.
+const SHORT = ["s0"] as const;
+const LONG = ["l0", "l1"] as const;
+const MIXED = [SHORT, LONG] as const;
+console.log(MIXED[0][0], MIXED[1][1]);
