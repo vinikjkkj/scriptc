@@ -6384,6 +6384,30 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
         return { kind: "jsExit", value: raw, type: BOOL, loc };
       }
       if (arg.type.kind !== "f64") {
+        // A `number | undefined` argument (`Number.isFinite(value)` over an
+        // optional): the statics never coerce, so the undefined arm is
+        // constantly false while a present number answers exactly. Replace
+        // ONLY the undefined arm (`?? sentinel`, which keeps a real NaN — it
+        // is not nullish) with a value the predicate reads as false, then run
+        // the f64 static. isNaN's sentinel is 0 (isNaN(0) === false); the
+        // others take NaN (non-finite, non-integer).
+        const u = arg.type.kind === "union" ? L.unions.get(arg.type.unionId) : undefined;
+        if (
+          u !== undefined &&
+          u.arms.length === 2 &&
+          u.arms.some((a) => a.kind === "undefinedT") &&
+          u.arms.some((a) => a.kind === "f64")
+        ) {
+          const sentinel = member === "isNaN" ? 0 : NaN;
+          const coerced: IrExpr = {
+            kind: "nullish",
+            left: arg,
+            right: { kind: "numLit", value: sentinel, type: F64, loc },
+            type: F64,
+            loc,
+          };
+          return { kind: "libCall", fn, args: [coerced], type: BOOL, loc };
+        }
         L.noLowering(
           `Number.${member} of '${L.fmt(arg.type)}' values`,
           argNode,
