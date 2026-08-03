@@ -6561,6 +6561,30 @@ export class Lowerer {
    * API answers nothing (binding-element defaults: `{ json = [] }`) and
    * the literal's own never[] would build the f64 representation. */
   lowerExprExpecting(node: ts.Expression, expected: IrType | undefined): IrExpr {
+    // `Object.freeze(<literal>)` in a slot with a known type. Freeze is
+    // IDENTITY over a fresh literal -- the call lowering says so and
+    // returns the literal untouched -- but it rebuilds that literal at the
+    // CHECKER's contextual type, which throws away the type the caller is
+    // asking for. Where the two differ, the literal is then built one way
+    // and coerced into another, and a shape the coercion cannot bridge
+    // (an array literal against a declared tuple) fails at the store
+    // instead of simply being built right. Ask for it directly.
+    if (expected !== undefined) {
+      let x: ts.Expression = node;
+      while (ts.isParenthesizedExpression(x)) x = x.expression;
+      if (
+        ts.isCallExpression(x) &&
+        x.arguments.length === 1 &&
+        ts.isPropertyAccessExpression(x.expression) &&
+        x.expression.name.text === "freeze" &&
+        this.isStdlibGlobal(x.expression.expression, "Object")
+      ) {
+        const arg = x.arguments[0]!;
+        if (ts.isObjectLiteralExpression(arg) || ts.isArrayLiteralExpression(arg)) {
+          return this.coerceInto(node, this.lowerExprExpecting(arg, expected), expected);
+        }
+      }
+    }
     if (expected?.kind === "array") {
       let x: ts.Expression = node;
       while (ts.isParenthesizedExpression(x)) x = x.expression;
