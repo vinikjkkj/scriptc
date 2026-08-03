@@ -26,7 +26,7 @@ import {
   fenceOrDropOptionKey,
   isChildSurfaceMember,
 } from "./surfaces.js";
-import { conditionalSpreadOf, lowerDynObjectLiteral } from "./lower-exprs.js";
+import { conditionalSpreadOf, lowerDynObjectLiteral, probeLower } from "./lower-exprs.js";
 import { HTTP2_CONSTANTS } from "./http2-constants.js";
 import { CRYPTO_CIPHERS, CRYPTO_CONSTANTS, CRYPTO_CURVES, CRYPTO_HASHES } from "./crypto-tables.js";
 import { timerStyleCallback } from "./lower-calls.js";
@@ -6367,6 +6367,28 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
           call,
           member === "parseInt" ? "pass an explicit radix: Number.parseInt(s, 10)" : undefined,
         );
+      }
+      // The spec ALIASES these to the global parsers, and the globals
+      // have a static lowering over exactly-typed arguments (num.parseInt
+      // / num.parseFloat in scr_string.c). Same function, so the same
+      // lowering -- routing only the namespaced spelling to the engine
+      // made `Number.parseInt(s, 10)` need --dynamic while a bare
+      // `parseInt(s, 10)` beside it compiled.
+      //
+      // Probed, not forced: the ToNumber/ToString coercions over
+      // arbitrary values stay engine territory, exactly as they do for
+      // the globals, so a non-string argument still falls through.
+      {
+        const sProbe = probeLower(L, call.arguments[0]!);
+        if (sProbe?.type.kind === "string") {
+          if (member === "parseFloat") {
+            return { kind: "libCall", fn: "num.parseFloat", args: [sProbe], type: F64, loc };
+          }
+          const radix = probeLower(L, call.arguments[1]!);
+          if (radix?.type.kind === "f64") {
+            return { kind: "libCall", fn: "num.parseInt", args: [sProbe, radix], type: F64, loc };
+          }
+        }
       }
       L.requireDynamicApi(`'Number.${member}'`, call);
       const callee: IrExpr = { kind: "jsOp", op: "globalGet", name: member, args: [], type: JSVAL, loc };
