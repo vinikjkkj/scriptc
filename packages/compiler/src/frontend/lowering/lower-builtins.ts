@@ -3966,8 +3966,33 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     // diffieHellman({ privateKey, publicKey }) — the X25519 agreement.
     if (bi.member === "diffieHellman") {
       const optNode = expr.arguments[0];
-      if (expr.arguments.length !== 1 || !optNode || !ts.isObjectLiteralExpression(optNode)) {
-        return null;
+      if (expr.arguments.length !== 1 || !optNode) return null;
+      // The options as a BOUND record rather than a literal at the call:
+      // `const opts = { privateKey, publicKey }; diffieHellman(opts)`, which
+      // is what a caller writes when the same options also feed a
+      // promisified path. The two keys read off the record; a bare
+      // identifier read is pure, so reading it twice is unobservable (the
+      // repeatability rule the compound-assignment and spread paths use).
+      if (!ts.isObjectLiteralExpression(optNode)) {
+        if (!ts.isIdentifier(optNode)) return null;
+        const rec = L.lowerExpr(optNode);
+        if (rec.type.kind !== "record") return null;
+        const shapeId = rec.type.shapeId;
+        const shape = L.shapes.get(shapeId);
+        const privF = shape?.fields.find((f) => f.name === "privateKey");
+        const pubF = shape?.fields.find((f) => f.name === "publicKey");
+        if (!shape || shape.fields.length !== 2 || !privF || !pubF) return null;
+        if (privF.type.kind !== "keyobj" || pubF.type.kind !== "keyobj") return null;
+        const readF = (name: string, t: IrType): IrExpr => ({
+          kind: "recordGet", obj: L.lowerExpr(optNode), shapeId, field: name, type: t, loc,
+        });
+        return {
+          kind: "libCall",
+          fn: "key.dh",
+          args: [readF("privateKey", privF.type), readF("publicKey", pubF.type)],
+          type: { kind: "bytes", elem: "u8" },
+          loc,
+        };
       }
       let privNode: ts.Expression | undefined;
       let pubNode: ts.Expression | undefined;
