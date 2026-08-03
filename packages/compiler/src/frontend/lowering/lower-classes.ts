@@ -2902,9 +2902,9 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       );
     }
     if (
-      L.inheritsBuiltinErrorCtor(info) || L.inheritsBuiltinEmitterCtor(info) ||
+      L.inheritsBuiltinErrorCtor(info) ||
       inheritsBuiltinStreamCtor(L, info) ||
-      (() => { for (let c = info.base; c; c = c.base) if (c.builtinError || c.builtinEmitter || c.builtinStream !== undefined) return true; return false; })()
+      (() => { for (let c = info.base; c; c = c.base) if (c.builtinError || c.builtinStream !== undefined) return true; return false; })()
     ) {
       L.unsupported(
         "SC1090",
