@@ -5163,6 +5163,12 @@ export class Lowerer {
     // nullary (unit-typed ABI params have no representation); ref sources
     // pass through so the operand still evaluates, exactly JS.
     const takesOperand = !isUnitType(src);
+    if (process.env["SCRIPTC_STRAND_TRACE"]) {
+      const arms = (this.unions.get(expected.unionId)?.arms ?? []).map((a) => this.fmt(a)).join(" | ");
+      process.stderr.write(`STRAND value=${this.fmt(src)}
+       arms=${arms}
+`);
+    }
     const key = `strand:${expected.unionId}:${typeKey(src)}`;
     let name = this.retagHelpers.get(key);
     if (!name) {
