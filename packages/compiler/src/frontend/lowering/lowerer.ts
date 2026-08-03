@@ -94,7 +94,7 @@ import { FileParts, splitFiles, collectProgram, collectNpmImports, collectJsonIm
 import { ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerClassValueProperty, lowerStaticMethod, throwingSetterFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall } from "./lower-classes.js";
 import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } from "./lower-mixins.js";
 import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bindingNeverReassigned, bodyReadsArguments, isThisParameter, paramShape, paramShapes, checkDefaultParamBodyType, completeArgs, wrappedUndefined, undefinedArgFor, requireExactArityValue, bodyReturnType, declaredReturnType, collectSignature, collectSignatureInner, collectGenericSignature, genericFnOf, lowerGenericCall, lowerGenericFnValue, inferTypeParamBindings, lowerGenericInstance, lowerCall, lowerFfiCall, lowerTimersMemberCall, lowerPromiseMethodCall, lowerFilterNarrowCall, isTopLevelFnSymbol, lowerNestedFunctionDecl, lambdaSignature, lowerLambda, lowerFunction, validateFfiImports } from "./lower-calls.js";
-import { lowerArrayMethodCall, lowerBufferStaticCall, lowerBytesMethodCall, lowerBytesNew, lowerMapMethodCall, lowerMapForEachCall, buildMapForEachFn, lowerRecordOvfCaptureHelper, lowerEnvToPairsHelper, lowerSetMethodCall, lowerSetForEachCall, buildSetForEachFn, lowerRegexMethodCall, lowerStringMethodCall } from "./lower-containers.js";
+import { lowerArrayMethodCall, lowerBufferStaticCall, lowerBytesMethodCall, lowerBytesNew, lowerMapMethodCall, lowerMapForEachCall, buildMapForEachFn, lowerRecordOvfCaptureHelper, ovfCapturePlannable, lowerEnvToPairsHelper, lowerSetMethodCall, lowerSetForEachCall, buildSetForEachFn, lowerRegexMethodCall, lowerStringMethodCall } from "./lower-containers.js";
 import { lowerStreamModuleCall } from "./lower-stream.js";
 import { lowerEmitOverrideSpec, type EmitSpecCtx, type EmitSpecRequest } from "./lower-emitter.js";
 import { builtinImportOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, stripTypeCasts, lowerBuiltinModuleCall, lowerFsToUnixTimestampCall, lowerFsLadderCall, lowerChildArgsArg, lowerSpawnSyncCall, lowerSpawnCall, lowerExecSyncCall, recordToEnvPairs, lowerJsonMethodCall, fencedBuiltinImportOf, lowerCryptoComposedCall, lowerUrlMethodCall, lowerSearchParamsMethodCall, lowerStatsMethodCall, lowerChildMethodCall, lowerAtomicsCall, lowerBuiltinExtraProperty, promisifiedExecFileDecl, lowerPromisifiedSettledCall, type PromisifiedTarget, lowerExecFileAsyncCall, execFileAsyncHelper, lowerStringDecoderMethodCall, strdecHelper, lowerReadlineMethodCall, lowerDcChannelMethodCall, lowerDcChannelProperty, lowerAlsMethodCall, lowerDcTracingChannelMethodCall, lowerDcTracingChannelProperty, lowerJsonProperty, lowerErrorCodeProperty, lowerProcessProperty, isProcessEnv, envValueType, lowerProcessEnvGet, lowerProcessMethodCall, lowerProcessOptionalMethodCall, lowerTimeoutMethodCall, envSnapshotHelper, isConsoleLog, consoleCallMember, lowerNumberStaticCall, lowerNumberStaticProperty, lowerDateCall, lowerTextCodecCall, lowerCryptoModuleCall, lowerFsConstantsProperty, lowerBuiltinConstantsProperty, builtinConstantBindingOf, builtinConstantsDestructureDecl, lowerProcessStreamProperty, lowerStringStaticCall, lowerStringLastIndexOfCall, lowerPromiseStaticCall } from "./lower-builtins.js";
@@ -124,6 +124,7 @@ export type WidthLift =
   | { how: "retag" }
   | { how: "liftWrap"; tag: number; arm: IrType }
   | { how: "width" }
+  | { how: "ovfCapture" }
   | { how: "arr" }
   | { how: "tupleArr" }
   | { how: "emptyArr" }
@@ -3808,6 +3809,17 @@ export class Lowerer {
       return { how: "funcAdapt" };
     }
     if (dst.kind === "record" && src.kind === "record") {
+      // An INDEX-SIGNATURE target is the overflow-CAPTURE flow, not the
+      // field-list width copy (recordWidthPlan refuses it): a source
+      // record's declared fields become keyed writes into a fresh hybrid
+      // (`attrs: {}` into `{ [key: string]: string }` — an empty source
+      // captures to an empty map; a `{ a: 1 }` source writes its fields
+      // through). widthCoerce owns this at top level; nesting it here
+      // lets a FIELD of an outer width copy carry an index-signature
+      // record too (the BinaryNode `attrs` field).
+      if (this.shapes.get(dst.shapeId)?.indexValue !== undefined) {
+        return ovfCapturePlannable(this, src.shapeId, dst.shapeId) ? { how: "ovfCapture" } : null;
+      }
       return this.recordWidthPlan(src.shapeId, dst.shapeId) !== null ? { how: "width" } : null;
     }
     if (dst.kind === "record" && src.kind === "object") {
@@ -3879,6 +3891,12 @@ export class Lowerer {
         if (dst.kind !== "record" || value.type.kind !== "record") throw new Error("lowerer bug: width lift shape");
         const helper = this.recordWidthHelper(value.type.shapeId, dst.shapeId, loc);
         if (!helper) throw new Error("lowerer bug: planned width lift failed to intern");
+        return { kind: "call", callee: helper, args: [value], type: dst, loc };
+      }
+      case "ovfCapture": {
+        if (dst.kind !== "record" || value.type.kind !== "record") throw new Error("lowerer bug: ovfCapture lift shape");
+        const helper = lowerRecordOvfCaptureHelper(this, value.type.shapeId, dst.shapeId, loc);
+        if (!helper) throw new Error("lowerer bug: planned ovfCapture lift failed to intern");
         return { kind: "call", callee: helper, args: [value], type: dst, loc };
       }
       case "arr": {

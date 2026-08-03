@@ -6721,6 +6721,49 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
    * a same-named source declared field (the rule that admits REQUIRED
    * declared members) or be optional-flavored (the fresh record's
    * default) and writable at runtime. */
+  /** The PURE gate of lowerRecordOvfCaptureHelper — whether a source
+   * record captures into an index-signature target — with no interning,
+   * so widthLiftPlan can validate a nested ovfCapture before any helper
+   * exists (the recordWidthPlan/recordWidthHelper split, one flow over).
+   * MUST stay in sync with the helper's own return-null gates below; the
+   * describeRecordWidthBlocker precedent mirrors gate logic the same way. */
+  export function ovfCapturePlannable(L: Lowerer, fromId: string, toId: string): boolean {
+    const from = L.shapes.get(fromId);
+    const to = L.shapes.get(toId);
+    if (!from || !to?.indexValue || from.tuple || to.tuple) return false;
+    const fIv = from.indexValue ?? null;
+    const tIv = to.indexValue;
+    const slotOk = (t: IrType): boolean =>
+      typeEquals(t, tIv) ||
+      (tIv.kind === "dyn" && (t.kind === "dyn" || L.dynConvertible(t))) ||
+      L.widthLiftPlan(t, tIv) !== null;
+    if (fIv && !slotOk(fIv)) return false;
+    const consumed = new Set<string>();
+    for (const tf of to.fields) {
+      const sf = from.fields.find((f) => f.name === tf.name);
+      if (sf && L.widthLiftPlan(sf.type, tf.type) !== null) {
+        consumed.add(tf.name);
+        continue;
+      }
+      if (tf.type.kind !== "union") return false;
+      if (L.armTag(tf.type.unionId, UNDEFINED_T) < 0) return false;
+      if (tIv.kind === "dyn" ? !L.dynConvertible(tf.type) : !typeEquals(tf.type, tIv)) return false;
+    }
+    for (const ff of from.fields) {
+      if (consumed.has(ff.name)) continue;
+      if (!slotOk(ff.type)) return false;
+    }
+    const dispatchWrites =
+      fIv !== null ||
+      from.fields.some((ff) => !consumed.has(ff.name) && to.fields.some((f) => f.name === ff.name));
+    if (dispatchWrites) {
+      if (tIv.kind === "dyn" ? !to.fields.every((f) => L.dynConvertible(f.type)) : !to.fields.every((f) => typeEquals(f.type, tIv))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   export function lowerRecordOvfCaptureHelper(L: Lowerer, fromId: string, toId: string, loc: SrcLoc,): string | null {
     const from = L.shapes.get(fromId);
     const to = L.shapes.get(toId);
