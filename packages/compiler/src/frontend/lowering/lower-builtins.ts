@@ -7085,6 +7085,10 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
             L.diags.splice(diagsBefore);
           }
         }
+        {
+          const hetero = heterogeneousAll(L, call, elems, loc);
+          if (hetero) return hetero;
+        }
         L.noLowering(
           "Promise.all over this argument shape",
           argNode,
@@ -7608,3 +7612,182 @@ export function isConsoleLog(L: Lowerer, call: ts.CallExpression): boolean {
     if (name !== "log" && name !== "info" && name !== "debug" && name !== "error" && name !== "warn") return null;
     return L.isStdlibGlobal(access.expression, "console") ? name : null;
   }
+
+  /** `Promise.all([a(), b(), c()])` over promises with DIFFERENT payloads:
+   * the checker's tuple overload types the literal as a TUPLE of promises
+   * and the result as a tuple of their payloads.
+   *
+   * Awaiting the entries in sequence would build the same tuple and get
+   * the REJECTION wrong -- Promise.all rejects with whichever entry
+   * rejected first in TIME, a sequence with whichever rejects first in
+   * POSITION. So the existing combinator runs unchanged over a UNIFORM
+   * array: every payload widens into one union U (the flattened arms of
+   * all of them), and each position narrows back out of it afterwards.
+   *
+   * The narrow is a re-tag with the arms U has and the position does not
+   * marked trappable -- the trust-the-checker stance every narrowing
+   * takes, and tsc proved position i's type when it picked the overload.
+   *
+   * Only the literal-at-the-call-site form: the entries are read off the
+   * lowered literal, so nothing is evaluated twice. A tuple VALUE from
+   * elsewhere keeps the fence. */
+  function heterogeneousAll(
+    L: Lowerer,
+    call: ts.CallExpression,
+    parts: readonly IrExpr[],
+    loc: SrcLoc,
+  ): IrExpr | null {
+    const no = (why: string): null => {
+      if (process.env["SCRIPTC_PALL_TRACE"]) process.stderr.write(`PALL declina: ${why}
+`);
+      return no("the shape registry lost the tuple");
+    };
+    if (parts.length === 0 || parts.some((e) => e.type.kind !== "promise")) return no("an entry is not a promise");
+
+    const payloads = parts.map((e) => (e.type as IrType & { kind: "promise" }).inner);
+    if (payloads.some((t) => t.kind === "void" || t.kind === "jsval" || t.kind === "dyn")) return no("a payload is void or lives in the island");
+    // A uniform tuple is the ordinary array path's business.
+    if (payloads.every((t) => typeEquals(t, payloads[0]!))) return no("the payloads are uniform (the array path owns it)");
+
+    const arms: IrType[] = [];
+    for (const t of payloads) {
+      if (t.kind === "union") {
+        const def = L.unions.get(t.unionId);
+        if (!def) return no("a payload union is not registered");
+        arms.push(...def.arms);
+      } else {
+        arms.push(t);
+      }
+    }
+    // The payloads OVERLAP in practice — three of four carrying `null`
+    // is the ordinary shape — and identical arms are an invalid union.
+    const seen = new Set<string>();
+    const uniqueArms = arms.filter((a) => {
+      const k = typeKey(a);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    if (uniqueArms.length < 2) return no("the flattened arms collapse to fewer than two");
+    const uT: IrType = { kind: "union", unionId: L.unions.intern(uniqueArms) };
+
+    const resultT = L.mapTypeOf(L.typeOf(call));
+    if (resultT?.kind !== "promise" || resultT.inner.kind !== "record") return no("the call does not type as a promise of a record");
+    const outShape = L.shapes.get(resultT.inner.shapeId);
+    if (!outShape?.tuple || outShape.fields.length !== payloads.length) return no("the result tuple does not match the entry count");
+    for (let i = 0; i < payloads.length; i++) {
+      if (!typeEquals(outShape.fields.find((f) => f.name === String(i))?.type ?? VOID, payloads[i]!)) return no("a result position does not match its payload");
+    }
+
+    // Each entry widens into promise<U> through the ordinary payload
+    // adapter; if any declines, so does the whole form.
+    const wrapT: IrType = { kind: "promise", inner: uT };
+    const wrapped: IrExpr[] = [];
+    for (const e of parts) {
+      const w = L.coerceToExpected(e, wrapT);
+      if (!typeEquals(w.type, wrapT)) return no("an entry does not widen into the shared union");
+      wrapped.push(w);
+    }
+
+    // Per position: U back down to the payload. A union payload re-tags
+    // with the surplus arms trappable; a single-type payload extracts its
+    // arm directly.
+    const extract: ((rs: IrExpr, i: number) => IrExpr | null)[] = payloads.map((t) => {
+      if (t.kind === "union") {
+        const def = L.unions.get(t.unionId);
+        const uDef = L.unions.get(uT.unionId);
+        if (!def || !uDef) return () => null;
+        const trappable = new Set<number>();
+        uDef.arms.forEach((a, i) => {
+          if (L.armTag(t.unionId, a) < 0) trappable.add(i);
+        });
+        const helper = L.unionRetagHelper(uT.unionId, t.unionId, loc, trappable.size > 0 ? trappable : undefined);
+        if (!helper) return () => null;
+        return (rs, i) => ({
+          kind: "call",
+          callee: helper,
+          args: [{ kind: "arrayGet", arr: rs, index: { kind: "numLit", value: i, type: F64, loc }, type: uT, loc }],
+          type: t,
+          loc,
+        });
+      }
+      const tag = L.armTag(uT.unionId, t);
+      if (tag < 0) return () => null;
+      return (rs, i) => ({
+        kind: "unionNarrow",
+        unionId: uT.unionId,
+        tag,
+        value: { kind: "arrayGet", arr: rs, index: { kind: "numLit", value: i, type: F64, loc }, type: uT, loc },
+        type: t,
+        loc,
+      });
+    });
+
+    const listT = arrayOf(wrapT);
+    const rowsT = arrayOf(uT);
+    const outT: IrType = { kind: "record", shapeId: resultT.inner.shapeId };
+    const key = `pall.hetero:${typeKey(listT)}:${resultT.inner.shapeId}`;
+    let name = L.retagHelpers.get(key);
+    if (name === undefined) {
+      name = `%promise.all.tuple.${L.retagHelpers.size}`;
+      L.retagHelpers.set(key, name);
+      const funcType: IrType & { kind: "func" } = {
+        kind: "func",
+        params: [listT],
+        ret: { kind: "promise", inner: outT },
+      };
+      const fnCtx = newFnCtx(true, null, funcType, outT);
+      fnCtx.isAsync = true;
+      L.fnStack.push(fnCtx);
+      try {
+        const psLocal = L.declareHiddenLocal("ps", listT);
+        const rsLocal = L.declareHiddenLocal("rs", rowsT);
+        const psRef: IrExpr = { kind: "varRef", localId: psLocal.id, type: listT, loc };
+        const rsRef: IrExpr = { kind: "varRef", localId: rsLocal.id, type: rowsT, loc };
+        const fields: { name: string; value: IrExpr }[] = [];
+        for (let i = 0; i < payloads.length; i++) {
+          const v = extract[i]!(rsRef, i);
+          if (v === null) {
+            L.fnStack.pop();
+            L.retagHelpers.delete(key);
+            return no("a position cannot narrow back out of the shared union");
+          }
+          fields.push({ name: String(i), value: v });
+        }
+        const body: IrStmt[] = [
+          {
+            kind: "varDecl",
+            localId: rsLocal.id,
+            init: {
+              kind: "awaitExpr",
+              value: { kind: "intrinsic", name: "promise.all", args: [psRef], type: { kind: "promise", inner: rowsT }, loc },
+              type: rowsT,
+              loc,
+            },
+            loc,
+          },
+          { kind: "return", value: { kind: "recordLit", fields, type: outT, loc }, loc },
+        ];
+        const ctx = L.fnStack[L.fnStack.length - 1]!;
+        L.liftedFns.push({
+          name,
+          params: [{ localId: psLocal.id, name: psLocal.name, type: listT }],
+          returnType: outT,
+          locals: ctx.locals,
+          body,
+          async: true,
+          loc,
+        });
+      } finally {
+        L.fnStack.pop();
+      }
+    }
+    return {
+      kind: "call",
+      callee: name,
+      args: [{ kind: "arrayLit", elems: wrapped, type: listT, loc }],
+      type: { kind: "promise", inner: outT },
+      loc,
+    };
+  }
+
