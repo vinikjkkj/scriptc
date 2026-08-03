@@ -86,7 +86,16 @@ interface Blocker {
   count: number;
 }
 
+/** The report as ONE string. Kept for callers that want it whole — but a
+ * report over a large dependency graph joins past V8's maximum string
+ * length, so anything that only WRITES it should take the lines and stream
+ * them instead. */
 export function renderCoverage(input: CoverageInput, opts: { color?: boolean; sourceTexts?: Map<string, string> } = {}): string {
+  return renderCoverageLines(input, opts).join("\n");
+}
+
+/** The report as its LINES, unjoined. */
+export function renderCoverageLines(input: CoverageInput, opts: { color?: boolean; sourceTexts?: Map<string, string> } = {}): string[] {
   const c = (code: string, s: string) => (opts.color ? code + s + RESET : s);
   const out: string[] = [];
   out.push(`${c(BOLD, "scriptc coverage")} ${DIMPath(input.file, opts.color ?? false)}`);
@@ -102,7 +111,7 @@ export function renderCoverage(input: CoverageInput, opts: { color?: boolean; so
     const config = input.diagnostics.filter((d) => d.code === "SC0002");
     if (config.length > 0) {
       out.push(`  ${c(RED, "not analyzable")}: ${config[0]!.message}`);
-      return out.join("\n");
+      return out;
     }
     const tsc = input.diagnostics.filter((d) => d.code === "SC0001");
     if (tsc.length > 0) {
@@ -117,7 +126,7 @@ export function renderCoverage(input: CoverageInput, opts: { color?: boolean; so
         out.push("");
         out.push(renderAll(tsc, opts.sourceTexts, { color: opts.color ?? false }));
       }
-      return out.join("\n");
+      return out;
     }
     const n = input.diagnostics.length;
     out.push(
@@ -135,7 +144,7 @@ export function renderCoverage(input: CoverageInput, opts: { color?: boolean; so
       out.push("");
       out.push(renderAll(input.diagnostics, opts.sourceTexts, { color: opts.color ?? false }));
     }
-    return out.join("\n");
+    return out;
   }
 
   // Top-line numbers stay whole-program: reached statements plus the
@@ -296,7 +305,7 @@ export function renderCoverage(input: CoverageInput, opts: { color?: boolean; so
         ? `  ${c(GREEN, "builds with --dynamic")} — no remaining blockers (the island sites above run in the embedded engine).`
         : `  ${c(GREEN, "fully static")} — this program has no dynamic remainder.`,
     );
-    return out.join("\n");
+    return out;
   }
 
   // Ordered by internal scheduling (soonest first), then by frequency —
@@ -336,7 +345,7 @@ export function renderCoverage(input: CoverageInput, opts: { color?: boolean; so
     out.push(`  ${c(DIM, "in unreached code")}   ${c(DIM, "(never lowered — cannot fail a build)")}`);
     renderGroup(unreachedBlockers, true);
   }
-  return out.join("\n");
+  return out;
 }
 
 function DIMPath(file: string, color: boolean): string {
