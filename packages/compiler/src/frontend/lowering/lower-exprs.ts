@@ -6171,6 +6171,21 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       }
       return L.maybeNarrow({ kind: "dynKeyGet", key: dk, value: obj, type: DYN, loc }, expr);
     }
+    // The receiver's CHECKER type maps to this record shape, but its VALUE
+    // lowered a UNION — a `union as unknown as T` assertion (`backend[kind]`
+    // with kind `'stores' | 'caches'`, two differently-shaped fields,
+    // re-typed to one record). The assertion changes the type tsc sees, not
+    // the runtime value, so a single record shape to key off does not exist.
+    // Fence rather than emit a recordKeyGet over a union receiver (the IR
+    // invariant the validator would ICE on) — a JS source defers this to a
+    // runtime trap, so a path that never runs still compiles.
+    if (obj.type.kind === "union") {
+      L.unsupported(
+        "SC1090",
+        expr,
+        "computed keyed reads through a receiver whose value is a union of shapes (a '… as unknown as T' assertion retypes but does not reshape the value — index a single concrete record, or read the field on each arm)",
+      );
+    }
     if (litKey !== null) {
       const field = shape.fields.find((f) => f.name === litKey);
       if (field) {
