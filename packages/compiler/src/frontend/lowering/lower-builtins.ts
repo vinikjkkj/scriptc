@@ -7662,7 +7662,7 @@ export function isConsoleLog(L: Lowerer, call: ts.CallExpression): boolean {
     const no = (why: string): null => {
       if (process.env["SCRIPTC_PALL_TRACE"]) process.stderr.write(`PALL declina: ${why}
 `);
-      return no("the shape registry lost the tuple");
+      return null;
     };
     if (parts.length === 0 || parts.some((e) => e.type.kind !== "promise")) return no("an entry is not a promise");
 
