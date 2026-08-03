@@ -18,7 +18,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "./nodes.js";
-import { arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DYN, DYN_HANDLE_KINDS, F64, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, STATS_T, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID } from "./nodes.js";
+import { arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DYN, DYN_HANDLE_KINDS, F64, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, STATS_T, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID } from "./nodes.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is how many may be omitted
@@ -4531,7 +4531,11 @@ function validateFunction(
         // Runtime HANDLE targets unwrap the checked-dynamic tree's handle kind by tag (a
         // retained reference, no copy — DYN_HANDLE_KINDS).
         const handleOk = DYN_HANDLE_KINDS.has(e.type.kind);
-        if (!jsonOk(e.type) && !undefArmedOk && !bytesOk && !errorOk && !funcOk && !handleOk) {
+        // Composites whose every leaf is checkable ride the same walker,
+        // one check per field -- a byte field is no less checkable for
+        // having a record around it.
+        const nestedOk = canDynCheckTo(e.type, (id) => records.get(id), (id) => unions.get(id));
+        if (!jsonOk(e.type) && !undefArmedOk && !bytesOk && !errorOk && !funcOk && !handleOk && !nestedOk) {
           err(`dynCheck against non-JSON-representable type ${e.type.kind}`, e.loc);
         }
         break;

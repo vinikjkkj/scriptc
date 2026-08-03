@@ -5592,6 +5592,7 @@ export function canDynCheckTo(
   t: IrType,
   getRecord: (shapeId: string) => IrRecordShape | undefined,
   getUnion: (unionId: string) => IrUnionDef | undefined,
+  seen: ReadonlySet<IrType> = new Set(),
 ): boolean {
   if (isJsonSafeType(t, getRecord, getUnion)) return true;
   if (t.kind === "bytes" && t.elem === "u8") return true;
@@ -5600,7 +5601,34 @@ export function canDynCheckTo(
   if (DYN_HANDLE_KINDS.has(t.kind)) return true;
   if (t.kind === "union") {
     const def = getUnion(t.unionId);
-    return !!def && def.arms.every((a) => a.kind === "undefinedT" || isJsonSafeType(a, getRecord, getUnion));
+    if (!!def && def.arms.every((a) => a.kind === "undefinedT" || isJsonSafeType(a, getRecord, getUnion))) {
+      return true;
+    }
+  }
+  // Containers of checkable things are checkable. The walker builds a
+  // check per type and calls the per-field one for each field, so a leaf
+  // it already knows standing alone -- a Uint8Array -- is one it can check
+  // nested too. Without this recursion a single byte field made a whole
+  // composite cast unspellable, though every part of it was checkable.
+  //
+  // `seen` guards the walk: a self-referential shape would recurse
+  // forever. A shape already on the stack answers TRUE, since the check
+  // being built for it is the one that will validate it.
+  if (seen.has(t)) return true;
+  const inner = new Set(seen).add(t);
+  const ok = (x: IrType): boolean => canDynCheckTo(x, getRecord, getUnion, inner);
+  if (t.kind === "array") return ok(t.elem);
+  if (t.kind === "record") {
+    const shape = getRecord(t.shapeId);
+    if (!shape || shape.tuple) return false;
+    return (
+      shape.fields.every((f) => ok(f.type)) &&
+      (shape.indexValue === undefined || ok(shape.indexValue))
+    );
+  }
+  if (t.kind === "union") {
+    const def = getUnion(t.unionId);
+    return !!def && def.arms.every((a) => a.kind === "undefinedT" || ok(a));
   }
   return false;
 }
