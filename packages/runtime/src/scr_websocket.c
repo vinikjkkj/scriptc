@@ -152,6 +152,129 @@ void scr_ws_key_b64(const uint8_t seed[16], char b64[25]) {
   b64[w] = '\0';
 }
 
+/* ── HTTP Upgrade request / response (RFC 6455 §4.1) ───────────────────── */
+
+/* Append `s` to out[*p] within `cap`, returning false on overflow. */
+static bool scr_ws_append(char *out, size_t cap, size_t *p, const char *s) {
+  size_t n = strlen(s);
+  if (*p + n > cap) return false;
+  memcpy(out + *p, s, n);
+  *p += n;
+  return true;
+}
+
+size_t scr_ws_build_request(char *out, size_t cap, const char *host,
+                            const char *path, const char *key_b64,
+                            const char *protocols) {
+  size_t p = 0;
+  bool ok = scr_ws_append(out, cap, &p, "GET ") &&
+            scr_ws_append(out, cap, &p, path) &&
+            scr_ws_append(out, cap, &p, " HTTP/1.1\r\nHost: ") &&
+            scr_ws_append(out, cap, &p, host) &&
+            scr_ws_append(out, cap, &p,
+                          "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                          "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: ") &&
+            scr_ws_append(out, cap, &p, key_b64) &&
+            scr_ws_append(out, cap, &p, "\r\n");
+  if (ok && protocols != NULL && protocols[0] != '\0') {
+    ok = scr_ws_append(out, cap, &p, "Sec-WebSocket-Protocol: ") &&
+         scr_ws_append(out, cap, &p, protocols) &&
+         scr_ws_append(out, cap, &p, "\r\n");
+  }
+  if (ok) ok = scr_ws_append(out, cap, &p, "\r\n");
+  if (!ok) return 0;
+  return p;
+}
+
+/* ASCII lowercase. */
+static char scr_ws_lc(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; }
+
+/* Case-insensitive compare of `n` bytes of `a` against the NUL-terminated
+ * lowercase literal `lit` (which must be `n` chars). */
+static bool scr_ws_ci_eq(const char *a, const char *lit, size_t n) {
+  for (size_t i = 0; i < n; i++)
+    if (scr_ws_lc(a[i]) != lit[i]) return false;
+  return true;
+}
+
+/* True when the header VALUE [v, v+vlen) contains `token` as a
+ * comma/space-delimited, case-insensitive token (Connection: keep-alive,
+ * Upgrade). */
+static bool scr_ws_value_has_token(const char *v, size_t vlen, const char *token) {
+  size_t tlen = strlen(token);
+  size_t i = 0;
+  while (i < vlen) {
+    while (i < vlen && (v[i] == ' ' || v[i] == ',' || v[i] == '\t')) i++;
+    size_t start = i;
+    while (i < vlen && v[i] != ',' ) i++;
+    size_t end = i;
+    while (end > start && (v[end - 1] == ' ' || v[end - 1] == '\t')) end--;
+    if (end - start == tlen && scr_ws_ci_eq(v + start, token, tlen)) return true;
+  }
+  return false;
+}
+
+int scr_ws_check_handshake(const uint8_t *resp, size_t len,
+                           const char *expected_accept, size_t *header_len) {
+  const char *s = (const char *)resp;
+  /* Find the header terminator "\r\n\r\n". */
+  size_t end = 0;
+  bool found = false;
+  for (size_t i = 0; i + 3 < len; i++) {
+    if (s[i] == '\r' && s[i + 1] == '\n' && s[i + 2] == '\r' && s[i + 3] == '\n') {
+      end = i + 4;
+      found = true;
+      break;
+    }
+  }
+  if (!found) return SCR_WS_HS_INCOMPLETE;
+  *header_len = end;
+
+  /* Status line: "HTTP/1.1 101" (any reason phrase). */
+  {
+    size_t i = 0;
+    while (i < end && s[i] != ' ') i++; /* past "HTTP/1.1" */
+    while (i < end && s[i] == ' ') i++;
+    if (i + 3 > end || s[i] != '1' || s[i + 1] != '0' || s[i + 2] != '1') {
+      return SCR_WS_HS_BAD_STATUS;
+    }
+  }
+
+  /* Walk the header lines, matching Upgrade / Connection / Accept. */
+  bool up_ok = false, conn_ok = false, accept_seen = false, accept_ok = false;
+  size_t i = 0;
+  /* skip the status line */
+  while (i < end && !(s[i] == '\r' && s[i + 1] == '\n')) i++;
+  i += 2;
+  while (i < end) {
+    if (s[i] == '\r' && i + 1 < end && s[i + 1] == '\n') break; /* end of headers */
+    size_t ls = i;
+    while (i < end && s[i] != '\r') i++;
+    size_t le = i; /* [ls, le) is one header line */
+    i += 2;        /* past CRLF */
+    /* Split at the first ':'. */
+    size_t colon = ls;
+    while (colon < le && s[colon] != ':') colon++;
+    if (colon >= le) continue;
+    size_t nlen = colon - ls;
+    size_t vs = colon + 1;
+    while (vs < le && (s[vs] == ' ' || s[vs] == '\t')) vs++;
+    size_t vlen = le - vs;
+    if (nlen == 7 && scr_ws_ci_eq(s + ls, "upgrade", 7)) {
+      up_ok = scr_ws_value_has_token(s + vs, vlen, "websocket");
+    } else if (nlen == 10 && scr_ws_ci_eq(s + ls, "connection", 10)) {
+      conn_ok = scr_ws_value_has_token(s + vs, vlen, "upgrade");
+    } else if (nlen == 20 && scr_ws_ci_eq(s + ls, "sec-websocket-accept", 20)) {
+      accept_seen = true;
+      size_t elen = strlen(expected_accept);
+      accept_ok = vlen == elen && memcmp(s + vs, expected_accept, elen) == 0;
+    }
+  }
+  if (!up_ok || !conn_ok) return SCR_WS_HS_BAD_UPGRADE;
+  if (!accept_seen || !accept_ok) return SCR_WS_HS_BAD_ACCEPT;
+  return SCR_WS_HS_OK;
+}
+
 bool scr_ws_parse_header(const uint8_t *in, size_t in_len, ScrWsHeader *out) {
   if (in_len < 2) return false;
   out->fin = (in[0] & 0x80) != 0;
