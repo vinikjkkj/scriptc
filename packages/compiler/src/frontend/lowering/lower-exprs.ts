@@ -5289,7 +5289,36 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
             if (!ts.isPropertyAssignment(prop)) return false;
             let init: ts.Expression = prop.initializer;
             while (ts.isParenthesizedExpression(init)) init = init.expression;
-            return ts.isArrowFunction(init) || ts.isFunctionExpression(init) || ts.isIdentifier(init);
+            if (ts.isArrowFunction(init) || ts.isFunctionExpression(init) || ts.isIdentifier(init)) return true;
+            // `<this|id>.method.bind(<this|id>)` — the emitter idiom
+            // `this.emit.bind(this)` binding a generic method. Binding a
+            // METHOD (never an accessor, whose read would be the side effect
+            // the drop must not skip) over pure references creates a closure
+            // with no side effects, exactly like the arrow form above, so
+            // dropping the unslotted field's evaluation stays unobservable.
+            if (ts.isCallExpression(init) && init.arguments.length === 1) {
+              const callee = init.expression;
+              if (
+                ts.isPropertyAccessExpression(callee) &&
+                callee.name.text === "bind" &&
+                ts.isPropertyAccessExpression(callee.expression)
+              ) {
+                const methodAccess = callee.expression;
+                const pureRef = (x: ts.Expression): boolean =>
+                  x.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(x);
+                if (pureRef(methodAccess.expression) && pureRef(init.arguments[0]!)) {
+                  const sym = L.checker.getSymbolAtLocation(methodAccess.name);
+                  const decls = sym ? L.checker.declarationsOf(sym) : [];
+                  if (
+                    decls.length > 0 &&
+                    !decls.some((d) => ts.isGetAccessorDeclaration(d) || ts.isSetAccessorDeclaration(d))
+                  ) {
+                    return true;
+                  }
+                }
+              }
+            }
+            return false;
           })();
           if (!pureInit) {
             L.unsupported(
