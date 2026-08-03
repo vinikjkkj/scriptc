@@ -1131,8 +1131,14 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     if (
       !elem ||
       elem.kind === "void" ||
-      elem.kind === "map" ||
-      elem.kind === "set" ||
+    // Map/Set elements ride REF like every other refcounted element
+    // (scr_map_retain_v/release_v — the SAME adapters a Map VALUE and an
+    // index-signature overflow value already use, and ScrArr stores every
+    // non-scalar element as a ref). The trace fixpoint that propagates an
+    // inner container's cycle capability is the one the nested-container
+    // Map value rides; an array holding them is the identical storage
+    // under a different spelling — the argument isSupportedMapValue makes
+    // for `Map<string, Set<T>>`, one container out.
       elem.kind === "url" ||
       elem.kind === "searchParams" ||
       elem.kind === "stats" ||
@@ -3406,6 +3412,18 @@ function recordProvenanceOk(
   ctx?: TypeMapperCtx,
 ): boolean {
   if (t.isIntersectionType()) {
+    const trace = process.env["SCRIPTC_PROV_TRACE"] && checker.typeToString(t).includes("ADVSignedDeviceIdentity");
+    if (trace) {
+      for (const part of t.getTypes()) {
+        const ps = part.getSymbol();
+        process.stderr.write(
+          `[prov-int] part='${checker.typeToString(part)}' isClass=${!!(ps && ps.flags & ts.SymbolFlags.Class)} ` +
+            `obj=${(part.flags & ts.TypeFlags.Object) !== 0} callSigs=${checker.getCallSignatures(part).length} ` +
+            `dataOnlyClass=${isDataOnlyDeclFileClassInstance(part, checker, ctx)} ` +
+            `provOk=${recordProvenanceOk(part, checker, ctx)}\n`,
+        );
+      }
+    }
     return t.getTypes().every(
       (part) => {
         const partSym = part.getSymbol();

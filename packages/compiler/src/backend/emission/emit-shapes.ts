@@ -730,6 +730,11 @@ export interface ClassMeta {
       // machinery as record/object/union elements.
       elem.kind === "promise" ||
       elem.kind === "jsval" || // island handles: scr_jsval_* adapters, no trace
+      // Map/Set elements: scr_map_* adapters, and scr_map_trace_v exactly
+      // when the inner container is itself cycle-capable (traceAdapterC's
+      // map rule) — the same pair a Map VALUE holding a container uses.
+      elem.kind === "map" ||
+      elem.kind === "set" ||
       elem.kind === "regex" || // RegExp values: scr_regex_* adapters, no trace (no refs inside)
       elem.kind === "child" || // spawned child handles: scr_child_* adapters, no trace
       elem.kind === "netServer" || // server handles: scr_net_server_* adapters, no trace

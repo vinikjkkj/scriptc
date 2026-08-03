@@ -532,9 +532,12 @@ export function elemKindC(elem: IrType): string {
     // Identity semantics (indexOf/includes/===) are the REF kind's
     // pointer identity — exactly JS function identity.
     case "func":
-      return "SCR_ELEM_REF";
+    // Map/Set elements: the ordinary refcounted ref, the same
+    // storage a Map VALUE and an index-signature overflow already
+    // use for a nested container.
     case "map":
     case "set":
+      return "SCR_ELEM_REF";
     case "regex":
     case "bigint":
     case "keyobj":
