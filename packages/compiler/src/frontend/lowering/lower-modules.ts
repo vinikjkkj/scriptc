@@ -1882,10 +1882,23 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
           // to the importing module): Node answers it from the module
           // cache mid-evaluation — no re-evaluation, nothing to call (and
           // the ENTRY has no run-once guard, so a self-call would recurse).
-          const depInit = L.initNameOf.get(dep);
+          // A declaration file resolves for TYPES; what Node actually
+          // evaluates is its compiled runtime twin. Name the twin here or
+          // its %init never runs, leaving its globals as storage nothing
+          // assigns -- a read of one is then a null dereference, not a
+          // diagnostic.
+          // Only redirect to a twin that actually DEFINES a static global:
+          // an uncompilable island twin (the minified proto) has a trap-only
+          // init, and naming it here fires the first trap at module load
+          // instead of leaving it orphaned (its method calls trap on use, as
+          // before). A spec table (WA_APPSTATE_SCHEMAS in a static record
+          // global) is the case this redirect is for.
+          const depTwin = dep.isDeclarationFile ? L.declTwinSourceOf(dep) : null;
+          const depRt = depTwin !== null && L.moduleHasStaticGlobal(depTwin) ? depTwin : dep;
+          const depInit = L.initNameOf.get(depRt);
           if (depInit !== undefined) {
             const loc = locOf(stmt);
-            const depAsync = L.asyncInitFiles.has(dep);
+            const depAsync = L.asyncInitFiles.has(depRt);
             if (depAsync && !isAsync) {
               L.unsupported(
                 "SC1090",
