@@ -5089,6 +5089,23 @@ const inliningPredicates = new Set<ts.Symbol>();
       if (operand.type.kind !== "f64" && operand.type.kind !== "bool") return null;
       return { kind: "toString", operand, type: STRING, loc };
     }
+    // `n.toString(radix)` on a NUMBER: the ECMA-262 §21.1.3.6 radix
+    // conversion (scr_num_to_str_radix — V8's DoubleToRadixCString). radix
+    // 10 delegates to the plain formatter inside the runtime; an
+    // out-of-range radix raises the JS RangeError there, so a computed
+    // radix lowers too (the runtime owns the range check). A literal 10
+    // still folds to the effect-free `toString` node when the argument is
+    // side-effect-free — keeping the common case allocator-free.
+    if (name === "toString" && recvKind === "f64" && call.arguments.length === 1) {
+      const operand = L.lowerExpr(recv);
+      if (operand.type.kind !== "f64") return null;
+      const radix = L.lowerExprExpecting(call.arguments[0]!, F64);
+      if (radix.type.kind !== "f64") return null;
+      if (radix.kind === "numLit" && radix.value === 10) {
+        return { kind: "toString", operand, type: STRING, loc };
+      }
+      return { kind: "libCall", fn: "num.toStringRadix", args: [operand, radix], type: STRING, loc };
+    }
     if ((name === "toExponential" || name === "toFixed") && recvKind === "f64" &&
         call.arguments.length === 0) {
       const operand = L.lowerExpr(recv);

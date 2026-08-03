@@ -64,6 +64,122 @@ int scr_f64_digits(double x, char digits[18], int *n_out) {
   return k;
 }
 
+/* Number.prototype.toString(radix) for radix != 10 (ECMA-262 §21.1.3.6).
+ *
+ * A faithful port of V8's DoubleToRadixCString: the value splits into an
+ * integer part (digits generated high-to-low into the front of a buffer,
+ * dividing by radix, padding zero digits while the double's binary
+ * exponent proves the units place unrepresentable) and a fractional part
+ * (digits generated low-to-high, multiplying by radix, with round-to-even
+ * and carry back-propagation bounded by the input double's own ULP, so
+ * exactly as many fractional digits as the value's precision warrants).
+ * Radix 10 is the caller's job (scr_f64_to_str); a radix outside 2..36 is
+ * the RangeError JS raises. Byte-exactness vs Node is the fuzz gate's job
+ * (radix cross-product in gen-number-cases.mjs). */
+ScrStr *scr_num_to_str_radix(double x, double radix_d) {
+  int radix = (int)radix_d;
+  if (radix < 2 || radix > 36 || (double)radix != radix_d) {
+    scr_throw_error_named(scr_str_new("RangeError", 10),
+                          scr_str_new("toRadix() radix must be an integer at least 2 and no greater than 36", 68));
+    return NULL;
+  }
+  if (radix == 10) {
+    char b[32];
+    size_t n = scr_f64_to_str(x, b);
+    return scr_str_new(b, n);
+  }
+  if (isnan(x)) return scr_str_new("NaN", 3);
+  if (isinf(x)) return x < 0 ? scr_str_new("-Infinity", 9) : scr_str_new("Infinity", 8);
+  if (x == 0) return scr_str_new("0", 1); /* covers -0 */
+
+  static const char kChars[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+  /* Integer part up to 2^1024 (radix 2) needs ~1024 digits; the fraction,
+   * bounded by the double's ULP, needs at most ~1100 for radix 2. */
+  enum { INT_CAP = 1100, FRAC_CAP = 1100 };
+  char int_buf[INT_CAP + 1];
+  char frac_buf[FRAC_CAP];
+
+  bool negative = x < 0;
+  if (negative) x = -x;
+
+  double integer = floor(x);
+  double fraction = x - integer;
+  /* delta = half the gap to the next representable double, floored at the
+   * smallest positive double — the precision past which fractional digits
+   * are noise. */
+  double next = nextafter(x, INFINITY);
+  double delta = 0.5 * (next - x);
+  double tiny = nextafter(0.0, INFINITY);
+  if (delta < tiny) delta = tiny;
+
+  int frac_len = 0;
+  if (fraction >= delta) {
+    do {
+      fraction *= radix;
+      delta *= radix;
+      int digit = (int)fraction;
+      frac_buf[frac_len++] = kChars[digit];
+      fraction -= digit;
+      /* Round to even, propagating a carry that can reach the integer. */
+      if (fraction > 0.5 || (fraction == 0.5 && (digit & 1))) {
+        if (fraction + delta > 1) {
+          for (;;) {
+            frac_len--;
+            if (frac_len < 0) {
+              integer += 1; /* carry into the integer part */
+              break;
+            }
+            char c = frac_buf[frac_len];
+            int d = (c > '9') ? (c - 'a' + 10) : (c - '0');
+            if (d + 1 < radix) {
+              frac_buf[frac_len++] = kChars[d + 1];
+              break;
+            }
+          }
+          break;
+        }
+      }
+    } while (fraction >= delta && frac_len < FRAC_CAP - 1);
+  }
+
+  /* Integer digits, high-to-low, filling the buffer from the back. Very
+   * large integers (binary exponent past the 52-bit significand) have a
+   * zero units digit that fmod could not recover — pad and divide down. */
+  int cursor = INT_CAP;
+  {
+    uint64_t bits;
+    double it = integer;
+    while (it != 0) {
+      memcpy(&bits, &it, sizeof bits);
+      int exp = (int)((bits >> 52) & 0x7ff) - 1075;
+      if (exp <= 0) break;
+      int_buf[--cursor] = '0';
+      it /= radix;
+      it = floor(it);
+    }
+    do {
+      double rem = fmod(it, radix);
+      int_buf[--cursor] = kChars[(int)rem];
+      it = floor((it - rem) / radix);
+    } while (it > 0 && cursor > 0);
+  }
+
+  size_t int_len = (size_t)(INT_CAP - cursor);
+  size_t total = (negative ? 1u : 0u) + int_len + (frac_len > 0 ? 1u + (size_t)frac_len : 0u);
+  ScrStr *out = scr_str_alloc_raw(total, total);
+  char *w = out->data;
+  if (negative) *w++ = '-';
+  memcpy(w, int_buf + cursor, int_len);
+  w += int_len;
+  if (frac_len > 0) {
+    *w++ = '.';
+    memcpy(w, frac_buf, (size_t)frac_len);
+    w += frac_len;
+  }
+  *w = '\0';
+  return out;
+}
+
 size_t scr_f64_to_str(double x, char *buf) {
   if (isnan(x)) return (size_t)(stpcpy(buf, "NaN") - buf);
   if (x == 0) return (size_t)(stpcpy(buf, "0") - buf); /* covers -0 */
