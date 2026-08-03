@@ -2454,6 +2454,38 @@ function lowerOptionalDefaultArg(
           "forms — copy arrays with [...a] and drain Map/Set iterators where they are made",
       );
     }
+    // `Array.from(iterable, (v, i) => ...)` — the two-argument MAP form
+    // over a real iterable (Set/Array/String), which is `[...iterable]
+    // .map(mapfn)`: build the base array (the same drains the one-arg
+    // form uses), then the ordinary array map machinery over it — the
+    // mapper receives the ELEMENT (not the counted form's dyn undefined)
+    // and the index. `{ length: n }` sources keep the counted-generation
+    // path below (their "element" is undefined, not a real value).
+    if (args.length === 2 && !ts.isObjectLiteralExpression(args[0]!)) {
+      const src = L.lowerExpr(args[0]!);
+      let base: IrExpr | null = null;
+      if (src.type.kind === "string") base = strCharsCall(L, src, loc);
+      else if (src.type.kind === "array") base = src; // map reads fresh and builds fresh
+      else if (src.type.kind === "set") {
+        base = { kind: "setIntrinsic", method: "toArray", receiver: src, args: [], type: arrayOf(src.type.elem), loc };
+      }
+      if (base !== null && base.type.kind === "array") {
+        const elem = base.type.elem;
+        const { fnArg, arity } = hofCallbackArg(L, args[1]!, [elem], base.type);
+        const fnRet = fnArg.type.ret;
+        if (fnRet.kind === "void" || fnRet.kind === "func" || fnRet.kind === "dyn" || isUnitType(fnRet)) {
+          L.badType(call, L.typeOf(call));
+        }
+        const helper = arrayHofHelper(L, "map", elem, fnRet, arity, loc);
+        return { kind: "call", callee: helper, args: [base, fnArg], type: arrayOf(fnRet), loc };
+      }
+      L.noLowering(
+        "Array.from with this argument shape",
+        call,
+        "Array.from({ length: n }, (v, i) => ...) and Array.from(iterable, (v, i) => ...) " +
+          "over an array, string, or Set are the lowered map forms",
+      );
+    }
     const n =
       args.length === 2 && ts.isObjectLiteralExpression(args[0]!) && args[0]!.properties.length === 1
         ? lowerLengthProp(L, args[0]!.properties[0]!)
