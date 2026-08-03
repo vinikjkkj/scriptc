@@ -2853,8 +2853,44 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     unions.inProgress.add(widened);
     const sensitivityAtEntry = contextResolutions;
     try {
+      // The unit-literal value a type pins, or null if it is not one. Two
+      // arms that pin DIFFERENT unit values are mutually exclusive — the
+      // discriminant witness an uninhabited intersection turns on.
+      const unitValue = (t: ts.Type): string | null =>
+        t.isStringLiteralType() ? `s:${t.value}` : t.isNumberLiteralType() ? `n:${t.value}` : null;
+      // An intersection is UNINHABITED when two of its object constituents
+      // require the same property at disjoint unit-literal types — the
+      // classic `DiscriminatedUnion & { kind: 'x' }` after distribution,
+      // where the non-matching members become `{ kind: 'a' } & { kind: 'x'
+      // }`. The checker keeps that as an Intersection (not a `never` flag)
+      // and drops the contradictory key, so getPropertiesOfType is empty
+      // and only the constituents carry the witness. REQUIRED occurrences
+      // only: an optional side can be satisfied by omission. Conservative —
+      // it never reports an inhabited type uninhabited, so a miss just
+      // keeps the existing fence.
+      const intersectionUninhabited = (part: ts.Type): boolean => {
+        if (!part.isIntersectionType()) return false;
+        const pinned = new Map<string, string>();
+        for (const member of part.getTypes()) {
+          for (const p of checker.getPropertiesOfType(member)) {
+            if (p.flags & ts.SymbolFlags.Optional) continue;
+            const v = unitValue(checker.getTypeOfSymbol(p));
+            if (v === null) continue;
+            const prev = pinned.get(p.name);
+            if (prev !== undefined && prev !== v) return true;
+            pinned.set(p.name, v);
+          }
+        }
+        return false;
+      };
       const byKey = new Map<string, IrType>();
       for (const part of widened.getTypes()) {
+        // An UNINHABITED arm contributes no runtime value — `T | never ≡ T`
+        // — so elide it rather than fence (or, for a bare `never`, rather
+        // than pollute the union with never's f64 placeholder slot).
+        if (part.flags & ts.TypeFlags.Never || intersectionUninhabited(part)) {
+          continue;
+        }
         // A `void` PART is inhabited only by undefined (`Promise<void> |
         // void` return types, `string | void`): it becomes the undefinedT
         // unit arm, exactly like an undefined part — the value either
@@ -2894,6 +2930,11 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         byKey.set(typeKey(mapped), mapped);
       }
       const arms = [...byKey.values()];
+      // Every arm elided as uninhabited: the union itself is `never`. It has
+      // no reachable value (the checker would have flagged a spelled-out
+      // never before this), so the f64 placeholder — never's standalone
+      // slot — stands in for the unobservable value.
+      if (arms.length === 0) return F64;
       // A single surviving UNIT arm cannot stand alone (degenerate — the
       // checker collapsed everything else away); anything else single is
       // just that type. A single arm UNDER A MINTED PLACEHOLDER cannot
@@ -3859,7 +3900,22 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
     // degenerate empties (`Partial<{}>`, `Omit<C, keyof C>`) go with it.
     // An INDEX-SIGNATURE shape is exempt: `Record<string, T>` legitimately
     // has zero declared members — the signature is the shape.
-    if (computed && props.length === 0 && !indexValue) return null;
+    // ...unless the shape is fully INSTANTIATED. The danger above is a
+    // generic BODY, where `keyof T` is not known yet and the emptiness is
+    // an artifact of not having the argument. Once every type argument is
+    // a concrete type, an empty result is the answer, not a gap:
+    // `WaAppstateIndexArgs<"TimeFormat">` has no index parts because that
+    // schema declares none. Refusing it there fails the whole intersection
+    // it sits in, and with it every union arm, field and class above.
+    const mentionsTypeParam = (t: ts.Type, depth: number): boolean => {
+      if (depth > 4) return true; // give up conservatively: keep the refusal
+      if (t.flags & ts.TypeFlags.TypeParameter) return true;
+      const args: readonly ts.Type[] = t.getAliasTypeArguments() ?? [];
+      return args.some((a) => mentionsTypeParam(a, depth + 1));
+    };
+    if (computed && props.length === 0 && !indexValue && mentionsTypeParam(widened, 0)) {
+      return null;
+    }
     // A DECLARED empty object type — `{}` (spelled or the checker's shared
     // intrinsic), `interface Empty {}` — is tsc's TOP type over non-nullish
     // values: every number, string, record, array, function, or class
