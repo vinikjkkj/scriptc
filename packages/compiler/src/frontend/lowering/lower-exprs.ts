@@ -7,12 +7,12 @@
 import * as ts from "../ts7/adapter.js";
 import { dirname } from "node:path";
 import type { Lowerer } from "./lowerer.js";
-import { BIGINT, BOOL, CAUGHT, DYN, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
+import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import { UNSUPPORTED, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncNameOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
-import { arrayAtOf, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, strCharsCall } from "./lower-containers.js";
+import { arrayAtOf, BYTES_CTORS, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, strCharsCall } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../shared.js";
 import { fenceEnumObjectValue, lowerEnumAccess } from "./lower-enums.js";
@@ -8524,6 +8524,66 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           expr,
           "statically-decided 'instanceof' on computed operands (bind the values to variables first)",
         );
+      }
+      // `x instanceof Uint8Array` / `instanceof ArrayBuffer` -- the test
+      // that DISCRIMINATES a `string | ArrayBuffer | Uint8Array` slot, and
+      // the reason those map to distinct bytes flavors in the first place.
+      //
+      // The runtime answer is the union TAG: each flavor is its own arm, so
+      // the test is which arm the value carries. A non-union operand
+      // decides statically -- its type IS the answer -- and folds only for
+      // an operand whose evaluation can be dropped, the same rule the
+      // class-target fold uses.
+      {
+        const rSym = ts.isIdentifier(expr.right) ? L.resolveValueSymbol(expr.right) : null;
+        const want =
+          rSym && L.isStdlibSymbol(rSym)
+            ? rSym.name === "ArrayBuffer"
+              ? ("buf" as const)
+              : own(BYTES_CTORS, rSym.name)
+            : undefined;
+        if (want !== undefined) {
+          const left = L.lowerExpr(expr.left);
+          if (left.type.kind === "union") {
+            const def = L.unions.get(left.type.unionId);
+            const tag = (def?.arms ?? []).findIndex(
+              (a) => a.kind === "bytes" && a.elem === want,
+            );
+            if (tag >= 0) {
+              return {
+                kind: "unionIsTag",
+                unionId: left.type.unionId,
+                tag,
+                negated: false,
+                value: left,
+                type: BOOL,
+                loc,
+              };
+            }
+            // No such arm: the checker already knows the answer is false,
+            // and the operand still has to evaluate.
+            L.unsupported(
+              "SC1090",
+              expr,
+              `'instanceof ${rSym!.name}' on a union with no ${rSym!.name} arm (the answer is constantly false — drop the test)`,
+            );
+          }
+          // A NARROWED operand is a unionNarrow wrapping the read, not a
+          // bare varRef -- `data instanceof ArrayBuffer` after the other
+          // arms are ruled out is exactly that. Both are pure reads, so
+          // folding drops no evaluation.
+          const pureRead =
+            left.kind === "varRef" ||
+            (left.kind === "unionNarrow" && left.value.kind === "varRef");
+          if (left.type.kind === "bytes" && pureRead) {
+            return { kind: "boolLit", value: left.type.elem === want, type: BOOL, loc };
+          }
+          L.unsupported(
+            "SC1090",
+            expr,
+            `'instanceof ${rSym!.name}' on this operand (a union carrying the flavor as an arm, or a bound value of a bytes type)`,
+          );
+        }
       }
       L.unsupported(
         "SC1090",
