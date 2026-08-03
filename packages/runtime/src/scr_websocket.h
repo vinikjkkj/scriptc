@@ -79,4 +79,33 @@ void scr_ws_accept_key(const char *key, size_t key_len, char out[29]);
  * scr_ws_accept_key for validating the server's reply. */
 void scr_ws_key_b64(const uint8_t seed[16], char b64[25]);
 
+/* Build the client's HTTP Upgrade request (RFC 6455 §4.1) into `out`
+ * (capacity `cap`). `host` is the Host header value (host, or host:port
+ * when non-default), `path` the request target (at least "/"), `key_b64`
+ * the Sec-WebSocket-Key. `protocols` (nullable) becomes the
+ * Sec-WebSocket-Protocol value verbatim. Returns the request length, or 0
+ * if it would not fit in `cap`. */
+size_t scr_ws_build_request(char *out, size_t cap, const char *host,
+                            const char *path, const char *key_b64,
+                            const char *protocols);
+
+/* Handshake-response outcomes (scr_ws_check_handshake). */
+#define SCR_WS_HS_OK 0
+#define SCR_WS_HS_INCOMPLETE 1 /* header terminator not received yet */
+#define SCR_WS_HS_BAD_STATUS 2 /* status line is not "HTTP/1.1 101" */
+#define SCR_WS_HS_BAD_UPGRADE 3 /* Upgrade/Connection headers wrong/absent */
+#define SCR_WS_HS_BAD_ACCEPT 4 /* Sec-WebSocket-Accept missing or mismatched */
+
+/* Validate a server's handshake response (RFC 6455 §4.1). `resp`/`len` is
+ * the received bytes. `expected_accept` is scr_ws_accept_key's output for
+ * the key that was sent. On SCR_WS_HS_OK, *header_len is set to the byte
+ * offset just past the "\r\n\r\n" (where any buffered frame data begins).
+ * Returns SCR_WS_HS_INCOMPLETE when the header terminator is not present
+ * yet (the caller reads more and retries); otherwise a specific failure.
+ * Header-name matching is case-insensitive (RFC 7230); Upgrade must name
+ * "websocket" and Connection must name "upgrade" (token search, so a
+ * multi-valued Connection header is accepted). */
+int scr_ws_check_handshake(const uint8_t *resp, size_t len,
+                           const char *expected_accept, size_t *header_len);
+
 #endif /* SCR_WEBSOCKET_H */

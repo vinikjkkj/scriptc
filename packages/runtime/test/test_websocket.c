@@ -125,6 +125,96 @@ int main(void) {
     check(strcmp(b64, "AAECAwQFBgcICQoLDA0ODw==") == 0, "sequential-nonce key base64");
   }
 
+  /* HTTP Upgrade request construction. */
+  {
+    char req[512];
+    size_t n = scr_ws_build_request(req, sizeof req, "example.com:443", "/chat",
+                                    "dGhlIHNhbXBsZSBub25jZQ==", NULL);
+    const char *expect =
+        "GET /chat HTTP/1.1\r\n"
+        "Host: example.com:443\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        "Sec-WebSocket-Version: 13\r\n"
+        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+        "\r\n";
+    check(n == strlen(expect) && memcmp(req, expect, n) == 0, "upgrade request bytes");
+  }
+  {
+    char req[512];
+    size_t n = scr_ws_build_request(req, sizeof req, "h", "/", "KKKK", "chat,superchat");
+    check(n > 0 && strstr(req, "Sec-WebSocket-Protocol: chat,superchat\r\n") != NULL,
+          "upgrade request protocol header");
+  }
+  {
+    char tiny[16];
+    check(scr_ws_build_request(tiny, sizeof tiny, "host", "/", "KEY", NULL) == 0,
+          "upgrade request overflow returns 0");
+  }
+
+  /* Response validation. The accept for key "x3JJHMbDL1EzLkh9GBhXDw==" is
+   * "HSmrc0sMlYUkAGmm5OPpG2HaGWk=" (RFC 6455 §1.2 example). */
+  {
+    const char *key = "x3JJHMbDL1EzLkh9GBhXDw==";
+    char accept[29];
+    scr_ws_accept_key(key, strlen(key), accept);
+    check(strcmp(accept, "HSmrc0sMlYUkAGmm5OPpG2HaGWk=") == 0, "RFC 6455 §1.2 accept vector");
+
+    /* A well-formed 101 response — exactly the headers, no trailing data. */
+    const char *ok_resp =
+        "HTTP/1.1 101 Switching Protocols\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        "Sec-WebSocket-Accept: HSmrc0sMlYUkAGmm5OPpG2HaGWk=\r\n"
+        "\r\n";
+    size_t hlen = 0;
+    check(scr_ws_check_handshake((const uint8_t *)ok_resp, strlen(ok_resp), accept, &hlen)
+              == SCR_WS_HS_OK, "valid handshake OK");
+    check(hlen == strlen(ok_resp), "valid handshake header_len at end");
+
+    /* Case-insensitive names, multi-valued Connection, and a trailing
+     * frame appended after the header terminator. */
+    const uint8_t framed[] = {
+      'H','T','T','P','/','1','.','1',' ','1','0','1',' ','x','\r','\n',
+      'u','p','g','r','a','d','e',':',' ','W','e','b','S','o','c','k','e','t','\r','\n',
+      'C','O','N','N','E','C','T','I','O','N',':',' ','k','e','e','p','-','a','l','i','v','e',',',' ','U','p','g','r','a','d','e','\r','\n',
+      's','e','c','-','w','e','b','s','o','c','k','e','t','-','a','c','c','e','p','t',':',' ',
+      'H','S','m','r','c','0','s','M','l','Y','U','k','A','G','m','m','5','O','P','p','G','2','H','a','G','W','k','=','\r','\n',
+      '\r','\n',
+      0x81, 0x02, 'h', 'i' /* a trailing text frame */
+    };
+    size_t hlen2 = 0;
+    check(scr_ws_check_handshake(framed, sizeof framed, accept, &hlen2) == SCR_WS_HS_OK,
+          "case-insensitive multi-valued handshake OK");
+    check(hlen2 == sizeof framed - 4, "header_len points at trailing frame");
+
+    /* Wrong accept. */
+    const char *bad_accept =
+        "HTTP/1.1 101 x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+        "Sec-WebSocket-Accept: WRONGWRONGWRONGWRONGWRONGWR=\r\n\r\n";
+    check(scr_ws_check_handshake((const uint8_t *)bad_accept, strlen(bad_accept), accept, &hlen)
+              == SCR_WS_HS_BAD_ACCEPT, "bad accept rejected");
+
+    /* Wrong status. */
+    const char *bad_status =
+        "HTTP/1.1 200 OK\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+        "Sec-WebSocket-Accept: HSmrc0sMlYUkAGmm5OPpG2HaGWk=\r\n\r\n";
+    check(scr_ws_check_handshake((const uint8_t *)bad_status, strlen(bad_status), accept, &hlen)
+              == SCR_WS_HS_BAD_STATUS, "non-101 status rejected");
+
+    /* Missing Upgrade header. */
+    const char *no_up =
+        "HTTP/1.1 101 x\r\nConnection: Upgrade\r\n"
+        "Sec-WebSocket-Accept: HSmrc0sMlYUkAGmm5OPpG2HaGWk=\r\n\r\n";
+    check(scr_ws_check_handshake((const uint8_t *)no_up, strlen(no_up), accept, &hlen)
+              == SCR_WS_HS_BAD_UPGRADE, "missing upgrade rejected");
+
+    /* Incomplete: no header terminator yet. */
+    const char *partial = "HTTP/1.1 101 x\r\nUpgrade: websocket\r\n";
+    check(scr_ws_check_handshake((const uint8_t *)partial, strlen(partial), accept, &hlen)
+              == SCR_WS_HS_INCOMPLETE, "incomplete response waits");
+  }
+
   fprintf(stderr, "%d/%d cases passed\n", passed, total);
   return passed == total ? 0 : 1;
 }
