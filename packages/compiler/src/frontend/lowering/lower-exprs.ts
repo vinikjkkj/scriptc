@@ -3544,7 +3544,23 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
           // own type decides nothing either — nor does an island ('any')
           // residue under a STATIC union slot.
           mapped.kind === "union" || mapped.kind === "jsval" ||
-          (mapped.kind === "array" && nonUnitElems && L.unitOnlyElem(mapped.elem));
+          (mapped.kind === "array" && nonUnitElems && L.unitOnlyElem(mapped.elem)) ||
+          // An own ARRAY type looks helpful and need not be: it is the type
+          // the ELEMENTS infer on their own, and for a recursive slot that
+          // is the narrow one-level unfolding each literal spells
+          // (`kids: undefined` infers `kids: null | undefined`, and two
+          // differently-shaped siblings infer a UNION of their two
+          // shapes). The slot's arm is what the elements must become, and
+          // contextual typing says so. One array arm means no ambiguity;
+          // an identical arm makes the choice moot.
+          ((): boolean => {
+            if (mapped?.kind !== "array") return false;
+            const ownElem = mapped.elem;
+            const arrayArms = (L.unions.get(ctxUnion.unionId)?.arms ?? []).filter(
+              (a) => a.kind === "array",
+            );
+            return arrayArms.length === 1 && !typeEquals(arrayArms[0]!.elem, ownElem);
+          })();
         if (ownUnhelpful) {
           const def = L.unions.get(ctxUnion.unionId);
           const arms = (def?.arms ?? []).filter(
