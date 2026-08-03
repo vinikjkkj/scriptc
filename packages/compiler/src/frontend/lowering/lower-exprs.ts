@@ -7,9 +7,9 @@
 import * as ts from "../ts7/adapter.js";
 import { dirname } from "node:path";
 import type { Lowerer } from "./lowerer.js";
-import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
+import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
-import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
+import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, diffieHellmanFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import { UNSUPPORTED, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncNameOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { arrayAtOf, BYTES_CTORS, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, strCharsCall } from "./lower-containers.js";
@@ -98,6 +98,42 @@ export function abstractPropertyDeclOf(L: Lowerer, expr: ts.PropertyAccessExpres
         ts.isPropertyDeclaration(d) &&
         ts.getModifiers(d)?.some((m) => m.kind === ts.SyntaxKind.AbstractKeyword) === true,
     );
+}
+
+/** The `() => bytes` value behind a bare `diffieHellman` reference: a
+ * memoized lifted closure `(opts) => key.dh(opts.privateKey, opts.publicKey)`
+ * over the interned `{ privateKey: keyobj; publicKey: keyobj }` options
+ * record — the same synchronous X25519 agreement the CALL form lowers to,
+ * so a value that IS invoked (rather than only bound) computes the right
+ * secret. Zero-capture, so every reference is the one interned closure. */
+function diffieHellmanFnValue(L: Lowerer, loc: SrcLoc): IrExpr {
+  const name = "%crypto.dh.value";
+  const optsShape = L.shapes.intern([
+    { name: "privateKey", type: KEYOBJ },
+    { name: "publicKey", type: KEYOBJ },
+  ]);
+  const optsT: IrType = { kind: "record", shapeId: optsShape };
+  const bytesT: IrType = { kind: "bytes", elem: "u8" };
+  const fnT = funcOf([optsT], bytesT);
+  if (!L.liftedFns.some((f) => f.name === name)) {
+    const opts: IrExpr = { kind: "varRef", localId: "opts.0", type: optsT, loc };
+    const read = (field: string): IrExpr => ({ kind: "recordGet", obj: opts, shapeId: optsShape, field, type: KEYOBJ, loc });
+    L.liftedFns.push({
+      name,
+      params: [{ localId: "opts.0", name: "opts", type: optsT }],
+      returnType: bytesT,
+      locals: [{ id: "opts.0", name: "opts", type: optsT, mutable: false }],
+      body: [
+        {
+          kind: "return",
+          value: { kind: "libCall", fn: "key.dh", args: [read("privateKey"), read("publicKey")], type: bytesT, loc },
+          loc,
+        },
+      ],
+      loc,
+    });
+  }
+  return { kind: "closure", fnName: name, captures: [], type: fnT, loc };
 }
 
 export function lowerExpr(L: Lowerer, expr: ts.Expression): IrExpr {
@@ -804,11 +840,28 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             const roots = lowerTlsRootCertificates(L, bi, loc);
             if (roots) return roots;
           }
+          // crypto.diffieHellman taken as a VALUE (`const dhWithCb =
+          // diffieHellman as ...` — the callback-probe binding in the X25519
+          // module): a lifted closure over the same key.dh agreement the
+          // CALL form lowers to. It is only bound and fed to promisify in a
+          // branch a synchronous DH never takes, but the binding runs at
+          // module init, so the value needs a representation.
+          if (bi.module === "crypto" && bi.member === "diffieHellman") {
+            return diffieHellmanFnValue(L, loc);
+          }
           // JavaScript sources: a builtin member taken as a bare VALUE is
           // the same identity-token story as stdlib globals above (the
           // harness adds worker_threads.Worker to its identity Set).
           if (isJsSourceFile(expr.getSourceFile())) {
             return { kind: "strLit", value: `[builtin ${bi.module}.${bi.member}]`, type: STRING, loc };
+          }
+          // The one builtin function with a lifted VALUE: a consumer binds
+          // diffieHellman at module scope to probe for a callback form it
+          // is prepared not to find. Node's bind succeeds there, so fencing
+          // it would throw at import time over a probe.
+          if (bi.module === "crypto" && bi.member === "diffieHellman") {
+            const lifted = diffieHellmanFnValueOf(L, expr);
+            if (lifted) return lifted;
           }
           if (builtinModuleFnOf(L, bi.module, bi.member)) {
             L.unsupported(
