@@ -5219,7 +5219,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
 /** The typed-array constructors with a runtime representation, by lib
  * interface name. The other TypedArray flavors (Int8Array, Uint16Array,
  * DataView, ...) fall through to the generic stdlib-constructor fence. */
-const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
+export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
   Uint8Array: "u8",
   Uint32Array: "u32",
   Int32Array: "i32",
