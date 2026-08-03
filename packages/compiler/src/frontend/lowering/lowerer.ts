@@ -3393,6 +3393,15 @@ export class Lowerer {
       if (!helper) return null;
       return { kind: "call", callee: helper, args: [expr], type: expected, loc: expr.loc };
     }
+    // An ARRAY flowing into a UNIFORM TUPLE slot — the other side of the
+    // const-lookup-table rule: the table binds as an array so a computed
+    // read has a slot, and a parameter spelling the tuple still wants the
+    // record. Positional copy (arrayTupleWidthHelper).
+    if (expected.kind === "record" && expr.type.kind === "array") {
+      const helper = this.arrayTupleWidthHelper(expr.type, expected.shapeId, expr.loc);
+      if (!helper) return null;
+      return { kind: "call", callee: helper, args: [expr], type: expected, loc: expr.loc };
+    }
     // A CLASS INSTANCE flowing into a record slot (`new Point(0, 0)` into
     // `{ x: number; y: number }` — tsc's structural view of classes): the
     // same field-projecting copy, each target field read off the instance.
@@ -4134,6 +4143,62 @@ export class Lowerer {
    * instance's fields under objToRecordPlan: the width-copy stance
    * (divergence 305 — a fresh record, mutations don't alias, extra class
    * members drop). */
+  /** An ARRAY flowing into a UNIFORM TUPLE slot: the positional copy.
+   *
+   * A const lookup table (`const T = ['a', 'b'] as const`) binds as an
+   * array, because a computed read has to have a slot to read from; a
+   * parameter that spells the tuple maps to a record. Same values, same
+   * order, so the projection is position 0..n-1 read off the array.
+   *
+   * Through a helper because each position reads the source again and the
+   * source must be evaluated ONCE — the parameter is what makes that
+   * true, exactly as the other width helpers do it.
+   *
+   * Uniform targets only: every field must already hold the array's
+   * element type, so no position can need a conversion of its own. The
+   * arity is the shape's, and tsc proved the source has it. */
+  arrayTupleWidthHelper(from: IrType & { kind: "array" }, toId: string, loc: SrcLoc): string | null {
+    const to = this.shapes.get(toId);
+    if (!to?.tuple || to.fields.length === 0 || to.indexValue) return null;
+    if (!to.fields.every((f) => typeEquals(f.type, from.elem))) return null;
+    const key = `arrtuple:${typeKey(from)}:${toId}`;
+    const existing = this.widthHelpers.get(key);
+    if (existing) return existing;
+    const name = `%arr.tuple.${this.widthHelpers.size}`;
+    this.widthHelpers.set(key, name);
+    const toT: IrType = { kind: "record", shapeId: toId };
+    const a: IrExpr = { kind: "varRef", localId: "a.0", type: from, loc };
+    this.liftedFns.push({
+      name,
+      params: [{ localId: "a.0", name: "a", type: from }],
+      returnType: toT,
+      locals: [{ id: "a.0", name: "a", type: from, mutable: true }],
+      body: [
+        {
+          kind: "return",
+          value: {
+            kind: "recordLit",
+            fields: to.fields.map((f, i) => ({
+              name: f.name,
+              value: {
+                kind: "arrayGet",
+                arr: a,
+                index: { kind: "numLit", value: i, type: F64, loc },
+                type: f.type,
+                loc,
+              } satisfies IrExpr,
+            })),
+            type: toT,
+            loc,
+          },
+          loc,
+        },
+      ],
+      loc,
+    });
+    return name;
+  }
+
   objRecordWidthHelper(className: string, toId: string, loc: SrcLoc): string | null {
     const to = this.shapes.get(toId);
     if (!to) return null;

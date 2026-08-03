@@ -4,6 +4,7 @@
  * the module artifacts (globals, embedded npm tables) the IR module carries. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
+import { uniformTupleArrayExpectation } from "./lower-stmts.js";
 import { dirname as dirnamePath, resolve as resolvePath } from "node:path";
 import { NpmGraphBuilder, packageNameOfPath, probeNodeImportRefusal, probeNodeRequireRefusal } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
@@ -1592,6 +1593,18 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             if (isLet && type.kind === "record" && isJsSourceFile(sf)) {
               const shape = L.shapes.get(type.shapeId);
               if (shape && shape.fields.length === 0 && !shape.indexValue && !shape.tuple) type = DYN;
+            }
+            // A const LOOKUP TABLE: `export const T = ['a', 'b'] as const`
+            // (an Object.freeze wrapper included). The declared type is a
+            // uniform tuple, so the global would hold a fixed-shape record
+            // and `T[i]` with a computed index would have no slot to read —
+            // but the value IS an array, and with one shared element type
+            // the two describe the same thing. Deciding it HERE is what
+            // makes the initializer lower as an array: the statement path
+            // lowers the initializer against the global's registered type.
+            {
+              const asTable = isLet ? null : uniformTupleArrayExpectation(L, decl);
+              if (asTable && type.kind === "record") type = asTable;
             }
             const symbol = L.checker.getSymbolAtLocation(nameNode);
             // Merged `var` redeclarations (`var y = 1; ...; var y = 2;` —

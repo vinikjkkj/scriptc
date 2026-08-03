@@ -2899,6 +2899,53 @@ function uniformTupleAsArray(L: Lowerer, declaredTs: ts.Type, arrT: IrType & { k
   return shape.fields.every((f) => typeEquals(f.type, arrT.elem)) ? arrT : null;
 }
 
+/** The ARRAY expectation for an initializer whose declared type is a
+ * UNIFORM tuple and whose value is an array LITERAL: `const T = ['a', 'b',
+ * 'c'] as const`, the shape a lookup table is written in.
+ *
+ * uniformTupleAsArray already binds a uniform tuple as an array when the
+ * initializer LOWERED to one -- but a const-asserted literal lowers to the
+ * tuple's record, so the rule never saw an array to adopt. Lowering the
+ * literal against the array expectation is what produces one, and it is
+ * honest at the value level: `as const` is a type-level assertion, and the
+ * thing it asserts over is an array at runtime either way.
+ *
+ * Scoped to the DECLARATION deliberately. The literal lowering itself must
+ * keep building the record, because a uniform tuple still has to satisfy a
+ * slot that spells one -- `f(t)` where `f(x: readonly [1, 2])` maps its
+ * parameter to a record, and answering an array there would fence a call
+ * that compiles today. */
+export function uniformTupleArrayExpectation(L: Lowerer, decl: ts.VariableDeclaration): IrType | null {
+  if (decl.initializer === undefined || !ts.isIdentifier(decl.name)) return null;
+  let init: ts.Expression = decl.initializer;
+  for (;;) {
+    if (ts.isParenthesizedExpression(init) || ts.isAsExpression(init) || ts.isTypeAssertion(init)) {
+      init = init.expression;
+      continue;
+    }
+    // `Object.freeze([...] as const)` is the same table wearing the
+    // runtime no-op the source uses to say `readonly` out loud.
+    if (
+      ts.isCallExpression(init) && init.arguments.length === 1 &&
+      ts.isPropertyAccessExpression(init.expression) &&
+      ts.isIdentifier(init.expression.expression) && init.expression.expression.text === "Object" &&
+      ts.isIdentifier(init.expression.name) && init.expression.name.text === "freeze"
+    ) {
+      init = init.arguments[0]!;
+      continue;
+    }
+    break;
+  }
+  if (!ts.isArrayLiteralExpression(init) || init.elements.length === 0) return null;
+  if (init.elements.some(ts.isSpreadElement)) return null;
+  const declared = L.mapTypeOf(L.typeOf(decl.name));
+  if (declared?.kind !== "record") return null;
+  const shape = L.shapes.get(declared.shapeId);
+  if (!shape?.tuple || shape.fields.length === 0) return null;
+  if (shape.fields.length !== init.elements.length) return null;
+  const elem = shape.fields[0]!.type;
+  return shape.fields.every((f) => typeEquals(f.type, elem)) ? arrayOf(elem) : null;
+}
 export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: boolean): IrStmt | null {
     // --provenance-sources: an elided pure-annotated dead const emits
     // nothing (collectGlobals registered no global by the same test —
@@ -3162,7 +3209,14 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // later references to this name don't produce cascading errors.
     let init: IrExpr;
     try {
-      init = L.lowerExpr(decl.initializer);
+      const tableExpect = isLet ? null : uniformTupleArrayExpectation(L, decl);
+      init = tableExpect
+        ? L.lowerExprExpecting(decl.initializer, tableExpect)
+        : L.lowerExpr(decl.initializer);
+      if (process.env["SCRIPTC_TABLE_TRACE"] && ts.isIdentifier(decl.name)) {
+        process.stderr.write(`TABLE ${decl.name.text}: expect=${tableExpect ? L.fmt(tableExpect) : "-"} got=${init.type.kind}
+`);
+      }
     } catch (e) {
       if (e instanceof PoisonError) {
         const salvaged = L.mapTypeOf(L.typeOf(decl.name));
