@@ -10092,6 +10092,19 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         // all-unknown-fields cast — `(err as { code?: unknown }).code`):
         // decline, and the dyn keyed-read fallback answers.
         if (obj.type.kind !== "record") return null;
+        // A user type-guard narrowing to `T & { f: … }` refines the
+        // receiver's CHECKER shape to a SIBLING record (same fields, a
+        // tighter member type — `exposeAs?: string` → `exposeAs: string`)
+        // while the VALUE keeps its declared shape AND slot layout. Read the
+        // field off the shape the VALUE actually has — its slot is what
+        // exists at runtime — and let lowerFieldRead's maybeNarrow refine
+        // the result to the narrowed occurrence type. Decline only if that
+        // shape lacks the field (a genuinely different record).
+        if (obj.type.shapeId !== receiverIr.shapeId) {
+          const vField = L.shapes.get(obj.type.shapeId)?.fields.find((f) => f.name === access.name.text)?.type;
+          if (!vField) return null;
+          return { container: "record", obj, shapeId: obj.type.shapeId, field: access.name.text, fieldType: vField };
+        }
         return { container: "record", obj, shapeId: receiverIr.shapeId, field: access.name.text, fieldType };
       }
       // A RECORD accessor property: either slot present makes the name an
