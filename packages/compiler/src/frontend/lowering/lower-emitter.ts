@@ -43,6 +43,7 @@ import type { ClassInfo } from "./lower-classes.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { arrayOf, BOOL, canBoxFuncIntoDyn, canConvertToDyn, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, isUnitType, STRING, SrcLoc, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { streamForcedTuple, streamSidesOf } from "./lower-stream.js";
+import { handlerFnTypeNodeOf } from "../types.js";
 
 /** True when the class descends from (or is) the runtime emitter. */
 export function emitterRooted(L: Lowerer, info: ClassInfo | undefined | null): boolean {
@@ -1474,4 +1475,254 @@ export function erasableSuperDelegation(
           m.name !== undefined && ts.isIdentifier(m.name) && m.name.text === name,
       );
   return impl !== undefined && superDelegationReason(impl, name) === null;
+}
+
+/* ══ THE BOUND-EMIT DISPATCHER ═══════════════════════════════════════════
+ *
+ * `emitEvent: this.emit.bind(this)` inside an object literal — the
+ * coordinator idiom that hands a class's emit to a collaborator through a
+ * generic key-map field:
+ *
+ *     interface Runtime {
+ *       emitEvent: <K extends keyof EvMap>(e: K, ...a: Parameters<EvMap[K]>) => void
+ *     }
+ *
+ * The member read alone has no answer (lower-exprs' EventEmitter-as-a-VALUE
+ * fence says why): each event carries its OWN payload tuple, so no single
+ * function value exists to take the address of. What DOES exist is a
+ * function that names the events itself. This builds it: one arm per event
+ * the slot can reach, each arm emitting with a STATIC name, so every event
+ * keeps its own tuple and the name dispatch lives in the generated switch.
+ *
+ * TWO FACTS DECIDE WHETHER THE FALLTHROUGH IS EXACT.
+ *
+ * (1) WHICH NAMES CAN REACH THIS SLOT. The event table is program-global —
+ *     every emitter class shares the %EventEmitter root — so it also holds
+ *     events of OTHER emitters (a transport's frame_in/node_in), which this
+ *     slot can never name. Asking the table alone would fence the whole
+ *     dispatcher over them. The slot's own signature answers precisely: the
+ *     literals of `K`'s CONSTRAINT are exactly the names a caller may pass.
+ *
+ * (2) WHAT A NAME WITHOUT AN ARM DOES. A key in that set with no table
+ *     entry is named by no emit and no listener anywhere in the program, so
+ *     emitting it is a runtime no-op — Node's exact semantics, and the
+ *     fallthrough's. Every key that IS in the table must get an arm, or the
+ *     dispatcher would swallow an observed event; a key that cannot be
+ *     compiled into one therefore fences the WHOLE dispatcher, and the read
+ *     keeps its existing diagnostic.
+ *
+ * The payload conversion is what a slot costs: the field's rest parameter
+ * maps to `array<U>` where U is the FLATTENED union of every handler's
+ * every position (mapParametersAliasOverBoundKey — an element that is
+ * itself a union contributes its arms, not itself). So a position whose
+ * event tuple is one of U's arms extracts with a plain `unionNarrow`, and a
+ * position whose tuple type is itself a UNION is absent from U and needs a
+ * nested convert. Only the first is built here; the second fences, which is
+ * why the whole thing is arm-by-arm gated rather than best-effort. */
+
+/** The event names a bound-emit slot can ever be handed, plus the key map
+ * they index — read from the type parameter's constraint in the slot's own
+ * signature (`<K extends keyof EvMap>`). This is NOT a second walk of
+ * `Parameters<M[K]>`: it enumerates the literals of `keyof EvMap`, which is
+ * the set of names the caller is allowed to pass. Null for any other
+ * spelling (a constraint that is not `keyof <named type>`, a non-literal
+ * key, more than one type parameter), which declines the dispatcher. */
+function boundEmitKeySet(L: Lowerer, ctxTs: ts.Type): { keys: string[]; map: ts.Type } | null {
+  const sigs = L.checker.getCallSignatures(ctxTs);
+  if (sigs.length !== 1) return null;
+  const decl = L.checker.signatureDeclaration(sigs[0]!);
+  if (decl === undefined || !ts.isFunctionLike(decl)) return null;
+  const tps = decl.typeParameters;
+  if (tps === undefined || tps.length !== 1) return null;
+  const constraint = tps[0]!.constraint;
+  if (constraint === undefined || !ts.isTypeOperatorNode(constraint)) return null;
+  if (constraint.operator !== ts.SyntaxKind.KeyOfKeyword) return null;
+  let keysT: ts.Type;
+  let map: ts.Type;
+  try {
+    keysT = L.checker.getTypeFromTypeNode(constraint);
+    map = L.checker.getTypeFromTypeNode(constraint.type);
+  } catch {
+    return null;
+  }
+  const keys: string[] = [];
+  for (const k of keysT.isUnionType() ? keysT.getTypes() : [keysT]) {
+    if (!k.isStringLiteralType()) return null;
+    keys.push(k.value);
+  }
+  return keys.length > 0 ? { keys, map } : null;
+}
+
+/** How many arguments the key map declares for `key`, SYNTACTICALLY — one
+ * symbol lookup and a walk of named aliases, never a signature query (that
+ * pulls the whole payload across the facade's synchronous channel, which on
+ * a wide event map kills the sidecar: the same discipline
+ * mapParametersAliasOverBoundKey keeps).
+ *
+ * The dispatcher needs it because the slot hands the arms ONE array, built
+ * by the caller from `Parameters<EvMap[K]>` — so the map's arity is the
+ * array's length, and an event tuple longer than that would index past its
+ * end. Every armed event must match it exactly. */
+function keyMapArity(L: Lowerer, map: ts.Type, key: string): number | null {
+  const prop = L.checker.getPropertyOfType(map, key);
+  if (prop === undefined) return null;
+  const decl = L.checker.valueDeclarationOf(prop);
+  if (decl === undefined || !ts.isPropertySignature(decl)) return null;
+  const fn = handlerFnTypeNodeOf(decl.type, L.checker);
+  if (fn === null || fn.parameters.some((p) => p.dotDotDotToken !== undefined)) return null;
+  return fn.parameters.length;
+}
+
+/** `X.emit.bind(X)` against a generic key-map slot: the dispatcher, or null
+ * when any part of the shape above does not hold (the caller then keeps the
+ * existing member-as-a-value diagnostic, which names the real gap). */
+export function boundEmitDispatcher(
+  L: Lowerer,
+  call: ts.CallExpression,
+  methodAccess: ts.PropertyAccessExpression,
+): IrExpr | null {
+  const why = (r: string): null => {
+    if (process.env["SCRIPTC_BEMIT_WHY"] !== undefined) console.error(`[bemit] ${r}`);
+    return null;
+  };
+  if (methodAccess.name.text !== "emit") return null;
+  let recvIr: IrType | null;
+  try {
+    recvIr = L.mapTypeOf(L.typeOf(methodAccess.expression));
+  } catch {
+    return why("the receiver's type does not resolve");
+  }
+  if (recvIr?.kind !== "object") return why(`the receiver maps to '${recvIr ? L.fmt(recvIr) : "nothing"}'`);
+  const info = L.classes.get(recvIr.className);
+  if (!info || !emitterRooted(L, info)) return why("the receiver is not emitter-rooted");
+  const ctxTs = L.checker.getContextualType(call);
+  if (ctxTs === undefined) return why("the bind site has no contextual type");
+  const slot = L.mapTypeOf(ctxTs);
+  if (slot?.kind !== "func") return why(`the slot maps to '${slot ? L.fmt(slot) : "nothing"}'`);
+  // The one shape a key-map slot wears once its type parameter is erased to
+  // its constraint: (name, payload array) → void.
+  if (slot.rest === true || slot.params.length !== 2) return why(`the slot takes ${slot.params.length} parameters`);
+  const nameT = slot.params[0]!;
+  const argsT = slot.params[1]!;
+  if (nameT.kind !== "string") return why(`the slot's event parameter is '${L.fmt(nameT)}'`);
+  if (argsT.kind !== "array") return why(`the slot's payload parameter is '${L.fmt(argsT)}'`);
+  if (slot.ret.kind !== "void") return why(`the slot returns '${L.fmt(slot.ret)}'`);
+  const keySet = boundEmitKeySet(L, ctxTs);
+  if (keySet === null) return why("the slot's type parameter has no enumerable keyof constraint");
+  const elem = argsT.elem;
+  const table = emitterEvents(L);
+  const loc = locOf(call);
+
+  /** One position's extraction from the payload array. */
+  const convert = (want: IrType, i: number): IrExpr | null => {
+    const read: IrExpr = {
+      kind: "arrayGet",
+      arr: { kind: "varRef", localId: "args.0", type: argsT, loc },
+      index: { kind: "numLit", value: i, type: F64, loc },
+      type: elem,
+      loc,
+    };
+    if (typeEquals(elem, want)) return read;
+    if (elem.kind === "union") {
+      const tag = L.armTag(elem.unionId, want);
+      // A tuple type that is itself a UNION is never one of the element
+      // union's arms — the slot's mapping flattened it away — so it lands
+      // here and fences. That is the nested-convert case, not this one.
+      if (tag >= 0) return { kind: "unionNarrow", unionId: elem.unionId, tag, value: read, type: want, loc };
+    }
+    return null;
+  };
+
+  const arms: { name: string; tuple: IrType[]; payload: IrExpr[] }[] = [];
+  for (const key of keySet.keys) {
+    const sig = table.get(key);
+    // Named by no emit and no listener in the whole program: emitting it is
+    // a no-op, which is exactly what the fallthrough does.
+    if (!sig) continue;
+    // 'error' THROWS its payload when unobserved, and the meta events are
+    // fired by the runtime itself — neither is a plain per-name emit.
+    if (key === "error" || META_EVENTS.has(key)) return why(`'${key}' carries a forced tuple`);
+    if (sig.conflict) return why(`'${key}' has conflicting argument types`);
+    // A dyn-flavored listener registered through the boxing adapter; its
+    // bucket has no one static tuple to build an arm against.
+    if (sig.dynListener) return why(`'${key}' has a dyn-flavored listener`);
+    if (streamForcedTuple(L, info, key) !== null) return why(`'${key}' is a stream event`);
+    const arity = keyMapArity(L, keySet.map, key);
+    if (arity === null) return why(`the key map does not spell '${key}' plainly`);
+    if (arity !== sig.tuple.length) {
+      return why(`'${key}' unifies to ${sig.tuple.length} arguments where the key map declares ${arity}`);
+    }
+    const payload: IrExpr[] = [];
+    for (let i = 0; i < sig.tuple.length; i++) {
+      const c = convert(sig.tuple[i]!, i);
+      if (c === null) return why(`'${key}' position ${i} is '${L.fmt(sig.tuple[i]!)}', not an arm of the slot's payload`);
+      payload.push(c);
+    }
+    arms.push({ name: key, tuple: sig.tuple, payload });
+  }
+  if (arms.length === 0) return why("no reachable event has a listener");
+
+  // INTERNED per (receiver class, slot signature): the same field filled
+  // from two constructors is one function.
+  const ikey = `emitbound:${recvIr.className}:${typeKey(slot)}`;
+  let fname = L.widthHelpers.get(ikey);
+  if (fname === undefined) {
+    fname = `%emit.bound.${L.widthHelpers.size}`;
+    L.widthHelpers.set(ikey, fname);
+    const selfT: IrType = { kind: "object", className: recvIr.className };
+    const body: IrStmt[] = [];
+    for (const arm of arms) {
+      const self: IrExpr = { kind: "varRef", localId: "self.0", type: selfT, loc };
+      const dispatch = emitDispatchExpr(L, info, arm.name, arm.tuple, self, arm.payload, undefined, loc);
+      body.push({
+        kind: "if",
+        cond: {
+          kind: "strEq",
+          negated: false,
+          left: { kind: "varRef", localId: "ev.0", type: STRING, loc },
+          right: strLit(arm.name, loc),
+          type: BOOL,
+          loc,
+        },
+        then: [{ kind: "exprStmt", expr: dispatch, loc }, { kind: "return", value: null, loc }],
+        else_: null,
+        loc,
+      });
+    }
+    L.liftedFns.push({
+      name: fname,
+      params: [
+        { localId: "ev.0", name: "ev", type: STRING },
+        { localId: "args.0", name: "args", type: argsT },
+      ],
+      returnType: VOID,
+      captures: [{ localId: "self.0", name: "self", type: selfT }],
+      locals: [
+        { id: "self.0", name: "self", type: selfT, mutable: false, boxed: true },
+        { id: "ev.0", name: "ev", type: STRING, mutable: false },
+        { id: "args.0", name: "args", type: argsT, mutable: false },
+      ],
+      body,
+      loc,
+    });
+  }
+  // The receiver lives in a fresh BOXED local so the capture can retain it
+  // — the boundMethodValue mould, for the same reason.
+  const recv = L.lowerExpr(methodAccess.expression);
+  if (recv.type.kind !== "object") return why(`the lowered receiver is '${L.fmt(recv.type)}'`);
+  const ctx = L.ctx;
+  const count = ctx.localCounters.get("%bmrecv") ?? 0;
+  ctx.localCounters.set("%bmrecv", count + 1);
+  const recvId = `%bmrecv.${count}`;
+  ctx.locals.push({ id: recvId, name: "%bmrecv", type: recv.type, mutable: false, boxed: true });
+  if (process.env["SCRIPTC_BEMIT_WHY"] !== undefined) {
+    console.error(`[bemit] BUILT ${fname} for ${recvIr.className}: ${arms.map((a) => a.name).join(",")}`);
+  }
+  return {
+    kind: "seqExpr",
+    stmts: [{ kind: "varDecl", localId: recvId, init: recv, loc }],
+    result: { kind: "closure", fnName: fname, captures: [recvId], type: slot, loc },
+    type: slot,
+    loc,
+  };
 }
