@@ -318,6 +318,56 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     return false;
   }
 
+/** SCRIPTC_BIND_WHY=1 — one stderr line per identifier that reached the
+   * "binding form with no lowering" fence, naming the DECLARATION form and
+   * the first gate of predeclareForwardCapture that refused it. Measurement
+   * only: without the variable nothing is written and no IR changes. */
+  export function probeBindWhy(L: Lowerer, symbol: ts.Symbol | null, name: string, node: ts.Node): void {
+    if (!process.env["SCRIPTC_BIND_WHY"]) return;
+    const parts: string[] = [];
+    const decl = symbol ? L.checker.valueDeclarationOf(symbol) : undefined;
+    const sf = node.getSourceFile();
+    const pos = ts.getLineAndCharacterOfPosition(sf, node.getStart(sf));
+    parts.push(`BINDWHY ${name} ${sf.fileName}:${pos.line + 1}`);
+    if (!symbol) { parts.push("sym=none"); console.error(parts.join(" ")); return; }
+    if (!decl) { parts.push("decl=none"); console.error(parts.join(" ")); return; }
+    parts.push(`decl=${ts.SyntaxKind[decl.kind]}`);
+    if (!ts.isVariableDeclaration(decl) || !ts.isIdentifier(decl.name)) {
+      console.error(parts.join(" "));
+      return;
+    }
+    const flags = ts.getCombinedNodeFlags(decl);
+    const kw = (flags & ts.NodeFlags.Const) !== 0 ? "const" : (flags & ts.NodeFlags.BlockScoped) !== 0 ? "let" : "var";
+    const dsf = decl.getSourceFile();
+    const dpos = ts.getLineAndCharacterOfPosition(dsf, decl.getStart(dsf));
+    parts.push(`kw=${kw}`, `init=${decl.initializer ? "y" : "n"}`);
+    parts.push(`bang=${decl.exclamationToken ? "y" : "n"}`);
+    parts.push(`declAt=${dpos.line + 1}`);
+    parts.push(`global=${L.globalsBySymbol.has(symbol) ? "y" : "n"}`);
+    parts.push(`predeclared=${L.tdzPredeclared.has(symbol) ? "y" : "n"}`);
+    const varStmt = decl.parent.parent;
+    let where = "notInAnyOpenList";
+    if (ts.isVariableStatement(varStmt)) {
+      for (let i = L.activeStmtLists.length - 1; i >= 0; i--) {
+        const entry = L.activeStmtLists[i]!;
+        const idx = entry.stmts.indexOf(varStmt);
+        if (idx < 0) continue;
+        where = idx < entry.index ? "alreadyLowered" : entry.ctx === L.ctx ? "forwardSameCtx" : "forwardNestedCtx";
+        break;
+      }
+    } else {
+      where = "notAVariableStatement";
+    }
+    parts.push(`where=${where}`);
+    try {
+      const t = L.irTypeOf(decl.name);
+      parts.push(`type=${t.kind}`, `tdzOk=${TDZ_KINDS.has(t.kind) && !isUnitType(t) ? "y" : "n"}`);
+    } catch {
+      parts.push("type=<throw>");
+    }
+    console.error(parts.join(" "));
+  }
+
 /** The FUNCTION-DECLARATION twin of predeclareForwardCapture: JS hoists a
    * nested `function f() {}` to scope entry — the binding is LIVE from the
    * first statement, so a reference lexically above the declaration in the
