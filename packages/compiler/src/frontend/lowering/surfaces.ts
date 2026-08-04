@@ -1247,10 +1247,10 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       ]),
     ),
     ...Object.fromEntries(
-      ["createCipheriv", "createDecipheriv", "getCipherInfo"].map((m) => [
+      ["getCipherInfo"].map((m) => [
         m,
-        "symmetric ciphers need a cipher stack the static runtime does not vendor — " +
-          "the lowered crypto surface is hashing, randomness, and the introspection statics",
+        "the cipher introspection record has no lowering — the ciphers themselves do: " +
+          "aes-256-gcm, aes-256-cbc and aes-256-ctr through createCipheriv/createDecipheriv",
       ]),
     ),
     ...Object.fromEntries(

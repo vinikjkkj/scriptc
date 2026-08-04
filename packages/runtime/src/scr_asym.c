@@ -114,6 +114,19 @@ double scr_key_secret_size(const ScrKeyObject *k) {
  * exactly when this call can be emitted. scr_hmac_new_raw comes the other
  * way, out of the always-linked scr_lib.c. Only a SECRET key carries
  * material; an asymmetric one gets Node's TypeError. */
+/* createCipheriv/createDecipheriv keyed by a KeyObject — here for the
+ * same reason as scr_hmac_new_key below it. */
+ScrCipher *scr_cipher_new_key(ScrStr *alg, ScrKeyObject *key, ScrBytes *iv, bool decrypt) {
+  if (!scr_keyobj_is_secret(key)) {
+    scr_asym_throw("Invalid key object type private, expected secret");
+    return NULL;
+  }
+  size_t len = 0;
+  const unsigned char *secret = scr_keyobj_secret(key, &len);
+  return scr_cipher_new_raw(alg, secret, len, iv->data, iv->len * scr_bytes_elem_size(iv->elem),
+                            decrypt);
+}
+
 ScrHmac *scr_hmac_new_key(ScrStr *alg, ScrKeyObject *key) {
   if (!scr_keyobj_is_secret(key)) {
     scr_asym_throw("Invalid key object type private, expected secret");

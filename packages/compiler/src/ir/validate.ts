@@ -79,6 +79,8 @@ const BIGINT_T: IrType = { kind: "bigint" };
 const KEYOBJ_T: IrType = { kind: "keyobj" };
 const HASH_T: IrType = { kind: "hash" };
 const HMAC_T: IrType = { kind: "hmac" };
+const CIPHER_T: IrType = { kind: "cipher" };
+const DECIPHER_T: IrType = { kind: "decipher" };
 const BYTES_U8_T: IrType = { kind: "bytes", elem: "u8" };
 
 /** Closed-union signature table for `libCall` (mirrors ambient/scriptc.d.ts).
@@ -717,6 +719,18 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "crypto.createHmacBytes": { argTypes: [STRING, BYTES_U8], result: HMAC_T },
   "crypto.createHmacStr": { argTypes: [STRING, STRING], result: HMAC_T },
   "crypto.createHmacKey": { argTypes: [STRING, KEYOBJ_T], result: HMAC_T },
+  "cipher.newBytes": { argTypes: [STRING, BYTES_U8_T, BYTES_U8_T], result: CIPHER_T },
+  "cipher.newKey": { argTypes: [STRING, KEYOBJ_T, BYTES_U8_T], result: CIPHER_T },
+  "decipher.newBytes": { argTypes: [STRING, BYTES_U8_T, BYTES_U8_T], result: DECIPHER_T },
+  "decipher.newKey": { argTypes: [STRING, KEYOBJ_T, BYTES_U8_T], result: DECIPHER_T },
+  "cipher.update": { argTypes: [CIPHER_T, BYTES_U8_T], result: BYTES_U8_T },
+  "cipher.final": { argTypes: [CIPHER_T], result: BYTES_U8_T },
+  "cipher.setAAD": { argTypes: [CIPHER_T, BYTES_U8_T], result: CIPHER_T },
+  "cipher.getAuthTag": { argTypes: [CIPHER_T], result: BYTES_U8_T },
+  "decipher.update": { argTypes: [DECIPHER_T, BYTES_U8_T], result: BYTES_U8_T },
+  "decipher.final": { argTypes: [DECIPHER_T], result: BYTES_U8_T },
+  "decipher.setAAD": { argTypes: [DECIPHER_T, BYTES_U8_T], result: DECIPHER_T },
+  "decipher.setAuthTag": { argTypes: [DECIPHER_T, BYTES_U8_T], result: DECIPHER_T },
   "crypto.hmacUpdateStr": { argTypes: [HMAC_T, STRING], result: HMAC_T },
   "crypto.hmacUpdateBytes": { argTypes: [HMAC_T, BYTES_U8], result: HMAC_T },
   "crypto.hmacDigestRaw": { argTypes: [HMAC_T], result: BYTES_U8 },

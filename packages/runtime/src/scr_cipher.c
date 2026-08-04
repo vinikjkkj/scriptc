@@ -388,6 +388,106 @@ static void scr_gcm_tag(const ScrGcm *g, const unsigned char j0[SCR_AES_BLOCK],
   for (int i = 0; i < SCR_GCM_TAG; i++) tag[i] = (unsigned char)(s[i] ^ ej0[i]);
 }
 
+/* ── streaming GCM ───────────────────────────────────────────────────── */
+
+void scr_gcm256_start(ScrGcmCtx *c, const unsigned char key[SCR_AES256_KEY],
+                      const unsigned char *iv, size_t iv_len) {
+  scr_gcm256_init(&c->g, key);
+  scr_gcm_j0(&c->g, iv, iv_len, c->j0);
+  memcpy(c->ctr, c->j0, SCR_AES_BLOCK);
+  scr_ctr_inc(c->ctr);
+  c->y[0] = 0;
+  c->y[1] = 0;
+  c->buflen = 0;
+  c->aad_len = 0;
+  c->ct_len = 0;
+  c->ksleft = 0;
+  c->in_data = false;
+}
+
+/* Absorbs into the running GHASH through the 16-byte buffer. Only the
+ * FINAL call for a section may leave a partial block, which is why the
+ * section lengths are tracked and the buffer is flushed at each
+ * transition. */
+static void scr_ghash_absorb(ScrGcmCtx *c, const unsigned char *p, size_t n) {
+  while (n > 0) {
+    const size_t take = SCR_AES_BLOCK - c->buflen < n ? SCR_AES_BLOCK - c->buflen : n;
+    memcpy(c->buf + c->buflen, p, take);
+    c->buflen += take;
+    p += take;
+    n -= take;
+    if (c->buflen == SCR_AES_BLOCK) {
+      c->y[0] ^= scr_load_be64(c->buf);
+      c->y[1] ^= scr_load_be64(c->buf + 8);
+      scr_ghash_mul(c->y, c->g.hkey);
+      c->buflen = 0;
+    }
+  }
+}
+
+/* Zero-pads whatever partial block is buffered and absorbs it — the end of
+ * a section (aad, then ciphertext) per SP 800-38D. */
+static void scr_ghash_flush(ScrGcmCtx *c) {
+  if (c->buflen == 0) return;
+  memset(c->buf + c->buflen, 0, SCR_AES_BLOCK - c->buflen);
+  c->y[0] ^= scr_load_be64(c->buf);
+  c->y[1] ^= scr_load_be64(c->buf + 8);
+  scr_ghash_mul(c->y, c->g.hkey);
+  c->buflen = 0;
+}
+
+void scr_gcm256_aad(ScrGcmCtx *c, const unsigned char *p, size_t n) {
+  if (c->in_data || n == 0) return;
+  scr_ghash_absorb(c, p, n);
+  c->aad_len += n;
+}
+
+void scr_gcm256_stream(ScrGcmCtx *c, bool decrypt, const unsigned char *in, size_t n,
+                       unsigned char *out) {
+  if (!c->in_data) {
+    scr_ghash_flush(c); /* close the aad section on its own boundary */
+    c->in_data = true;
+  }
+  if (n == 0) return;
+  /* Decryption hashes the input, encryption hashes the output; both are
+   * the ciphertext. The input is hashed BEFORE the keystream is applied,
+   * so in == out is safe. */
+  if (decrypt) scr_ghash_absorb(c, in, n);
+  /* The keystream carries across calls: a 5-byte update must not restart
+   * the block, or the next update would repeat keystream. */
+  size_t off = 0;
+  while (off < n) {
+    if (c->ksleft == 0) {
+      scr_aes256_encrypt_block(&c->g.aes, c->ctr, c->ks);
+      scr_ctr_inc(c->ctr);
+      c->ksleft = SCR_AES_BLOCK;
+    }
+    const size_t take = c->ksleft < n - off ? c->ksleft : n - off;
+    const size_t base = SCR_AES_BLOCK - c->ksleft;
+    for (size_t i = 0; i < take; i++) out[off + i] = (unsigned char)(in[off + i] ^ c->ks[base + i]);
+    c->ksleft -= take;
+    off += take;
+  }
+  if (!decrypt) scr_ghash_absorb(c, out, n);
+  c->ct_len += n;
+}
+
+void scr_gcm256_finish(ScrGcmCtx *c, unsigned char tag[SCR_GCM_TAG]) {
+  if (!c->in_data) scr_ghash_flush(c); /* aad-only message */
+  scr_ghash_flush(c);
+  unsigned char lens[SCR_AES_BLOCK];
+  scr_store_be64(lens, c->aad_len * 8);
+  scr_store_be64(lens + 8, c->ct_len * 8);
+  c->y[0] ^= scr_load_be64(lens);
+  c->y[1] ^= scr_load_be64(lens + 8);
+  scr_ghash_mul(c->y, c->g.hkey);
+  unsigned char s[SCR_AES_BLOCK], ej0[SCR_AES_BLOCK];
+  scr_store_be64(s, c->y[0]);
+  scr_store_be64(s + 8, c->y[1]);
+  scr_aes256_encrypt_block(&c->g.aes, c->j0, ej0);
+  for (int i = 0; i < SCR_GCM_TAG; i++) tag[i] = (unsigned char)(s[i] ^ ej0[i]);
+}
+
 void scr_gcm256_encrypt(const ScrGcm *g, const unsigned char *iv, size_t iv_len,
                         const unsigned char *aad, size_t aad_len,
                         const unsigned char *in, size_t len,

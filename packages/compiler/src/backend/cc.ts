@@ -88,6 +88,7 @@ export interface CcOptions {
   zlib?: boolean;
   bigint?: boolean;
   asym?: boolean;
+  cipher?: boolean;
   /** The program uses node:assert (index.ts detects assert.* libCalls on
    * the IR): compiles scr_assert.c — the zlib gating precedent, so
    * assert-free binaries keep their exact size class. scr_regex.c calls
@@ -753,6 +754,7 @@ export interface LibArchiveOptions {
   zlib?: boolean;
   bigint?: boolean;
   asym?: boolean;
+  cipher?: boolean;
   copying?: boolean;
 }
 
@@ -783,6 +785,7 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     ...(opts.zlib ? ["scr_zlib.c"] : []),
     ...(opts.bigint ? ["scr_bigint.c"] : []),
     ...(opts.asym ? ["scr_asym.c"] : []),
+    ...(opts.cipher ? ["scr_cipher.c", "scr_cipher_value.c"] : []),
     ...(opts.copying ? ["scr_copying.c"] : []),
   ];
   const cflags = [
@@ -1137,6 +1140,9 @@ export async function compileC(opts: CcOptions): Promise<void> {
           rt(join(vendorMonocypherDir(), "monocypher.c")),
           rt(join(vendorMonocypherDir(), "monocypher-ed25519.c")),
         ]
+      : []),
+    ...(opts.cipher
+      ? [rt(join(rtDir, "scr_cipher.c")), rt(join(rtDir, "scr_cipher_value.c"))]
       : []),
     ...(opts.assert || regex || opts.symbol ? [rt(join(rtDir, "scr_assert.c"))] : []),
     ...(opts.inspect ? [rt(join(rtDir, "scr_inspect.c"))] : []),

@@ -1259,6 +1259,33 @@ declare module "crypto" {
     format: "der" | "pem";
     type?: "spki";
   }): KeyObject;
+  /* AES-256 in the three modes the runtime implements. @types/node splits
+   * these by overload (a gcm algorithm gives CipherGCM, everything else
+   * plain Cipher); the fallback declares the union of the members and lets
+   * the runtime refuse the ones the mode does not have, which is what Node
+   * does too. update/final answer Buffers with Node's own chunking. */
+  export interface Cipher {
+    update(data: Uint8Array): Buffer;
+    final(): Buffer;
+    setAAD(buffer: Uint8Array): Cipher;
+    getAuthTag(): Buffer;
+  }
+  export interface Decipher {
+    update(data: Uint8Array): Buffer;
+    final(): Buffer;
+    setAAD(buffer: Uint8Array): Decipher;
+    setAuthTag(buffer: Uint8Array): Decipher;
+  }
+  export function createCipheriv(
+    algorithm: string,
+    key: Uint8Array | KeyObject,
+    iv: Uint8Array,
+  ): Cipher;
+  export function createDecipheriv(
+    algorithm: string,
+    key: Uint8Array | KeyObject,
+    iv: Uint8Array,
+  ): Decipher;
   /* The SYMMETRIC KeyObject — the same opaque handle, carrying arbitrary
    * key material instead of a curve point. Node's encoding argument for a
    * string key is not lowered: only its default (utf8) is. */
