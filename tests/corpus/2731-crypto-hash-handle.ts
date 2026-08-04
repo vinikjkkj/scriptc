@@ -4,7 +4,7 @@
 // digested at a distance from where it was made. The fused chain is still
 // exercised beside it (1534-crypto-hash-chain.ts), and both forms must
 // answer the same digests.
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import * as crypto from "node:crypto";
 
 // Bound to a variable, then updated and digested as ordinary members.
@@ -75,6 +75,19 @@ const ns = crypto.createHash("sha256");
 ns.update("namespace");
 console.log(ns.digest("base64"));
 
+// Through a GENERIC function, the zapo `feed` shape: the parameter is
+// declared by a type parameter, so inside the body the receiver reads as
+// the CONSTRAINT rather than as the type the instance was made with.
+function feedGeneric<T extends crypto.Hash>(target: T, chunks: readonly string[]): T {
+  for (let i = 0; i < chunks.length; i += 1) {
+    target.update(chunks[i]!);
+  }
+  return target;
+}
+console.log(feedGeneric(createHash("sha256"), ["a", "b", "c"]).digest("hex"));
+console.log(feedGeneric(createHash("sha512"), ["a", "b", "c"]).digest("hex"));
+console.log(createHash("sha512").update("abc").digest("hex"));
+
 // A handle in an array-free container position: passed twice, still one
 // message (the handle is a reference, not a copy).
 function bump(target: crypto.Hash): void {
@@ -84,3 +97,44 @@ const shared = createHash("sha256");
 bump(shared);
 bump(shared);
 console.log(shared.digest("hex"));
+
+// ── Hmac: the same handle, keyed (RFC 2104) ─────────────────────────
+const mac = createHmac("sha256", "key");
+mac.update("The quick brown fox jumps over the lazy dog");
+console.log(mac.digest("hex"));
+console.log(createHmac("sha256", "key").update("abc").digest("base64"));
+console.log(createHmac("sha512", "key").update("abc").digest("hex"));
+console.log(createHmac("sha1", "key").update("abc").digest("hex"));
+
+// A Buffer key, and the raw-Buffer digest.
+const bkey = Buffer.from([1, 2, 3, 4, 5]);
+console.log(Buffer.from(createHmac("sha256", bkey).update("abc").digest()).toString("hex"));
+console.log(crypto.createHmac("sha512", bkey).update("abc").digest("hex"));
+
+// An empty key and an empty message — both legal in Node.
+console.log(createHmac("sha256", "").update("").digest("hex"));
+
+// A key LONGER than the block (RFC 2104 hashes it first): 64 is the
+// sha256 block, 128 the sha512 one, so 200 is over both and 100 is over
+// only the first.
+console.log(createHmac("sha256", "k".repeat(100)).update("abc").digest("hex"));
+console.log(createHmac("sha512", "k".repeat(100)).update("abc").digest("hex"));
+console.log(createHmac("sha512", "k".repeat(200)).update("abc").digest("hex"));
+console.log(createHmac("sha256", "k".repeat(64)).update("abc").digest("hex"));
+console.log(createHmac("sha512", "k".repeat(128)).update("abc").digest("hex"));
+
+// Chunked and passed through a generic, zapo's hmacSha256Sign shape.
+function feedMac<T extends crypto.Hmac>(target: T, chunks: readonly Uint8Array[]): T {
+  for (let i = 0; i < chunks.length; i += 1) {
+    target.update(chunks[i]!);
+  }
+  return target;
+}
+console.log(Buffer.from(feedMac(createHmac("sha256", bkey), chunks).digest()).toString("hex"));
+console.log(Buffer.from(feedMac(createHmac("sha512", bkey), chunks).digest()).toString("hex"));
+
+// Mixed string/Buffer updates and a multi-block message.
+const bigMac = createHmac("sha512", bkey);
+bigMac.update("head-");
+bigMac.update(Buffer.from("x".repeat(300), "utf8"));
+console.log(bigMac.digest("hex"));

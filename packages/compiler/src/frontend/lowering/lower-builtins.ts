@@ -31,7 +31,7 @@ import { HTTP2_CONSTANTS } from "./http2-constants.js";
 import { CRYPTO_CIPHERS, CRYPTO_CONSTANTS, CRYPTO_CURVES, CRYPTO_HASHES } from "./crypto-tables.js";
 import { timerStyleCallback } from "./lower-calls.js";
 import { registerHttpClientFnBinding } from "./lower-server.js";
-import { KEYOBJ, HASH_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
+import { KEYOBJ, HASH_T, HMAC_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
 
 
 
@@ -3858,22 +3858,44 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     );
   }
 
-/** `update` / `digest` on a MATERIALIZED Hash handle — the shape the
-   * fused chain cannot see, because the handle passes through a variable,
-   * a parameter, or a return before it is digested. `update` answers the
-   * SAME handle (Node returns `this`, and callers chain on it), `digest`
-   * hashes whatever accumulated. Null when the receiver is not a Hash, so
-   * every other receiver keeps whatever lowering or fence it had; null
-   * also for the other Hash members (copy, the stream surface), which keep
-   * their fence rather than being silently mislowered. */
+/** Which digest handle a member call's receiver is, if either. The
+   * checker answers directly for an ordinary Hash/Hmac-typed expression. Inside a
+   * MONOMORPHIZED GENERIC BODY it does not: a parameter declared
+   * `target: T` where `T extends Hash | Hmac` reads as its CONSTRAINT
+   * there — the union — however the instance was actually made, which is
+   * exactly zapo's `feed(target, input)`. The specialized parameter's
+   * LOCAL carries the real binding, so an identifier receiver is settled
+   * by its IR type. peekLocal is the read-only probe for that (resolveLocal
+   * would thread captures as a side effect of a question). */
+  function digestKindOf(L: Lowerer, recv: ts.Expression): "hash" | "hmac" | null {
+    const mapped = L.mapTypeOf(L.typeOf(recv))?.kind;
+    if (mapped === "hash" || mapped === "hmac") return mapped;
+    if (!ts.isIdentifier(recv)) return null;
+    const local = L.peekLocal(recv)?.type.kind;
+    return local === "hash" || local === "hmac" ? local : null;
+  }
+
+/** `update` / `digest` on a MATERIALIZED Hash or Hmac handle — the shape
+   * the fused chain cannot see, because the handle passes through a
+   * variable, a parameter, or a return before it is digested. `update`
+   * answers the SAME handle (Node returns `this`, and callers chain on
+   * it), `digest` hashes whatever accumulated. Null when the receiver is
+   * neither handle, so every other receiver keeps whatever lowering or
+   * fence it had; null also for the other members (copy, setAAD, the
+   * stream surface), which keep their fence rather than being silently
+   * mislowered. */
   function lowerHashHandleCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "hash") return null;
+    const kind = digestKindOf(L, access.expression);
+    if (kind === null) return null;
+    const isHash = kind === "hash";
+    const name = isHash ? "Hash" : "Hmac";
+    const self: IrType = isHash ? HASH_T : HMAC_T;
     const loc = locOf(call);
     if (access.name.text === "update") {
       if (call.arguments.length !== 1) {
         L.noLowering(
-          `Hash.update with ${call.arguments.length} arguments`,
+          `${name}.update with ${call.arguments.length} arguments`,
           call,
           "one string or Buffer argument is the lowered update (input encodings have no lowering)",
         );
@@ -3885,14 +3907,16 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       const recv = L.lowerExpr(access.expression);
       if (dataIr?.kind === "bytes") {
         const data = L.lowerExpr(dataNode);
-        return { kind: "libCall", fn: "crypto.hashUpdateBytes", args: [recv, data], type: HASH_T, loc };
+        const fn: IrLibFn = isHash ? "crypto.hashUpdateBytes" : "crypto.hmacUpdateBytes";
+        return { kind: "libCall", fn, args: [recv, data], type: self, loc };
       }
       if (dataIr?.kind === "string") {
         const data = L.lowerExprExpecting(dataNode, STRING);
-        return { kind: "libCall", fn: "crypto.hashUpdateStr", args: [recv, data], type: HASH_T, loc };
+        const fn: IrLibFn = isHash ? "crypto.hashUpdateStr" : "crypto.hmacUpdateStr";
+        return { kind: "libCall", fn, args: [recv, data], type: self, loc };
       }
       L.noLowering(
-        `Hash.update of '${dataIr ? L.fmt(dataIr) : L.checker.typeToString(L.typeOf(dataNode))}' values`,
+        `${name}.update of '${dataIr ? L.fmt(dataIr) : L.checker.typeToString(L.typeOf(dataNode))}' values`,
         dataNode,
         "string and Buffer/Uint8Array inputs are the lowered update forms",
       );
@@ -3904,15 +3928,19 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     const encT = call.arguments.length === 1 ? L.typeOf(call.arguments[0]!) : undefined;
     if (!bare && (!encT?.isStringLiteralType() || (encT.value !== "hex" && encT.value !== "base64"))) {
       L.noLowering(
-        "Hash.digest with this encoding",
+        `${name}.digest with this encoding`,
         call,
         'hex and base64 are the lowered digests: .digest("hex"), or a bare .digest() for the raw Buffer',
       );
     }
     const recv = L.lowerExpr(access.expression);
-    if (bare) return { kind: "libCall", fn: "crypto.hashDigestRaw", args: [recv], type: BYTES_U8, loc };
+    if (bare) {
+      const fn: IrLibFn = isHash ? "crypto.hashDigestRaw" : "crypto.hmacDigestRaw";
+      return { kind: "libCall", fn, args: [recv], type: BYTES_U8, loc };
+    }
     const enc = L.lowerExprExpecting(call.arguments[0]!, STRING);
-    return { kind: "libCall", fn: "crypto.hashDigestEnc", args: [recv, enc], type: STRING, loc };
+    const fn: IrLibFn = isHash ? "crypto.hashDigestEnc" : "crypto.hmacDigestEnc";
+    return { kind: "libCall", fn, args: [recv, enc], type: STRING, loc };
   }
 
 /** The node:crypto introspection statics — build-time constants of the
@@ -3963,6 +3991,38 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       }
       const alg = L.lowerExprExpecting(algNode!, STRING);
       return { kind: "libCall", fn: "crypto.createHash", args: [alg], type: HASH_T, loc };
+    }
+    // `createHmac(alg, key)` — Hash's twin. Same algorithm gate; the key
+    // is a Buffer or a string (Node's BinaryLike). A KeyObject key would
+    // need the secret-key surface, which this runtime does not have, so
+    // it keeps its fence.
+    if (bi.member === "createHmac") {
+      const algNode = expr.arguments.length === 2 ? expr.arguments[0] : undefined;
+      const algT = algNode ? L.typeOf(algNode) : undefined;
+      if (!algT?.isStringLiteralType() || !LOWERED_HASH_ALGS.has(algT.value)) {
+        L.noLowering(
+          "createHmac with this algorithm",
+          expr,
+          'sha256, sha512 and sha1 are the lowered algorithms: createHmac("sha256", key)',
+        );
+      }
+      const keyNode = expr.arguments[1]!;
+      const keyIr = L.mapTypeOf(L.typeOf(keyNode));
+      const alg = L.lowerExprExpecting(algNode!, STRING);
+      if (keyIr?.kind === "bytes") {
+        const key = L.lowerExpr(keyNode);
+        return { kind: "libCall", fn: "crypto.createHmacBytes", args: [alg, key], type: HMAC_T, loc };
+      }
+      if (keyIr?.kind === "string") {
+        const key = L.lowerExprExpecting(keyNode, STRING);
+        return { kind: "libCall", fn: "crypto.createHmacStr", args: [alg, key], type: HMAC_T, loc };
+      }
+      L.noLowering(
+        `createHmac keyed by '${keyIr ? L.fmt(keyIr) : L.checker.typeToString(L.typeOf(keyNode))}' values`,
+        keyNode,
+        "string and Buffer/Uint8Array keys are the lowered forms (a KeyObject key needs the " +
+          "secret-key surface, which has no lowering)",
+      );
     }
     // `pbkdf2Sync(password, salt, iterations, keylen, digest)` — the
     // SHA-256 derivation. The digest name must be a literal and must

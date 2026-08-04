@@ -1645,8 +1645,9 @@ export class CEmitter {
       case "bigint":
         return `scr_big_truthy(${t.name})`;
       case "keyobj":
-      // A Hash handle is an object too: truthy whenever it exists.
+      // A Hash or Hmac handle is an object too: truthy whenever it exists.
       case "hash":
+      case "hmac":
       // A signal handle is an object: always truthy when present.
       case "abortSignal":
         return `${t.name} != NULL`;
