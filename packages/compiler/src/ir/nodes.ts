@@ -244,6 +244,15 @@ export type IrType =
    * confused: a keyed MAC and a bare digest are different answers, and
    * the value model is the only place that distinction survives. */
   | { kind: "hmac" }
+  /** A node:crypto Cipher / Decipher (ScrCipher) — the AES-256 handle
+   * createCipheriv and createDecipheriv mint. TWO kinds, not one with a
+   * direction flag: @types/node spells them apart (Cipher vs Decipher,
+   * and the GCM subclasses of each), so the value model can keep
+   * getAuthTag off a decryptor and setAuthTag off an encryptor by TYPE
+   * rather than by a runtime check. Mutable, refcounted, holds only
+   * bytes — never part of a cycle, no trace. */
+  | { kind: "cipher" }
+  | { kind: "decipher" }
   | { kind: "object"; className: string } // heap, refcounted class instance
   /** The class STATIC side as a value — `typeof C`, the type of the class
    * name itself and of `new (…) => T` constructor-typed slots. Runtime
@@ -363,6 +372,8 @@ export const BIGINT: IrType = { kind: "bigint" };
 export const KEYOBJ: IrType = { kind: "keyobj" };
 export const HASH_T: IrType = { kind: "hash" };
 export const HMAC_T: IrType = { kind: "hmac" };
+export const CIPHER_T: IrType = { kind: "cipher" };
+export const DECIPHER_T: IrType = { kind: "decipher" };
 export const URL_T: IrType = { kind: "url" };
 export const SEARCH_PARAMS_T: IrType = { kind: "searchParams" };
 export const SYMBOL_T: IrType = { kind: "symbol" };
@@ -648,6 +659,10 @@ export function typeKey(t: IrType): string {
       return "hash";
     case "hmac":
       return "hmac";
+    case "cipher":
+      return "cipher";
+    case "decipher":
+      return "decipher";
     case "union":
       return `union:${t.unionId}`;
     case "promise":
@@ -2880,6 +2895,24 @@ export type IrLibFn =
    * the same call — @types/node has one spelling for both — and the
    * runtime refuses it, as Node does. */
   | "crypto.createHmacKey"
+  /** The AES-256 Cipher/Decipher handle (ScrCipher, +1). Two
+   * constructors per direction — a Buffer key and a secret KeyObject —
+   * because @types/node's `BinaryLike | KeyObject` is a union and the
+   * two arms need different runtime entry points. update/final answer
+   * Buffers with Node's own CHUNKING; setAAD/setAuthTag answer the
+   * handle (Node returns `this`). */
+  | "cipher.newBytes"
+  | "cipher.newKey"
+  | "decipher.newBytes"
+  | "decipher.newKey"
+  | "cipher.update"
+  | "cipher.final"
+  | "cipher.setAAD"
+  | "cipher.getAuthTag"
+  | "decipher.update"
+  | "decipher.final"
+  | "decipher.setAAD"
+  | "decipher.setAuthTag"
   | "crypto.hmacUpdateStr"
   | "crypto.hmacUpdateBytes"
   | "crypto.hmacDigestRaw"
@@ -5341,6 +5374,10 @@ function isJsonSafeAt(
     // message is internal state, not an enumerable property.
     case "hash":
     case "hmac":
+    // A Cipher is a stream object whose every field is internal state;
+    // no honest JSON surface either.
+    case "cipher":
+    case "decipher":
     // An AbortSignal is an object with no own enumerable properties, so
     // Node stringifies it to {} — no honest JSON surface either.
     case "abortSignal":
@@ -6166,6 +6203,36 @@ export function moduleUsesBigInt(mod: IrModule): boolean {
  * vendored Monocypher in (cc.ts). Both are probed: a program can hold a
  * KeyObject without calling one of the operations, and generateKeyPair
  * produces one without a spelled KeyObject type anywhere. */
+/** Whether the AES unit has to be linked. Gated exactly like asym: a
+ * cipher/decipher VALUE in the IR, or one of the cipher libCalls. The
+ * two units go in together — scr_cipher.c is the primitive and
+ * scr_cipher_value.c the handle over it. */
+export function moduleUsesCipher(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "cipher" || node.kind === "decipher") {
+      found = true;
+      return;
+    }
+    if (
+      node.kind === "libCall" && typeof node.fn === "string" &&
+      (node.fn.startsWith("cipher.") || node.fn.startsWith("decipher."))
+    ) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 export function moduleUsesAsym(mod: IrModule): boolean {
   let found = false;
   const visit = (v: unknown): void => {
@@ -7201,6 +7268,22 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "key.jwkD",
   "key.crv",
   "crypto.createHmacKey",
+  // The cipher family: every one of these raises one of Node's own
+  // refusals — a wrong key/iv length at construction, a member called in
+  // a state Node rejects, a CBC pad that does not check out, and a GCM
+  // tag that does not authenticate.
+  "cipher.newBytes",
+  "cipher.newKey",
+  "decipher.newBytes",
+  "decipher.newKey",
+  "cipher.update",
+  "cipher.final",
+  "cipher.setAAD",
+  "cipher.getAuthTag",
+  "decipher.update",
+  "decipher.final",
+  "decipher.setAAD",
+  "decipher.setAuthTag",
   "buffer.concatLen",
   // The checked-dynamic compare/equals validators: Node's argument
   // ladders throw ERR_INVALID_ARG_TYPE / ERR_OUT_OF_RANGE catchably.
