@@ -849,6 +849,32 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         d.push(`  return ${arms.join(" || ")};`);
         break;
       }
+      case "func": {
+        // The FUNCTION leaf (a callable record field — the protobuf
+        // Long's `toNumber`, a codec's `Reader`). The checked-dynamic
+        // tree's function box carries the interned typeKey of the type it
+        // was boxed FROM, so "is this dyn a T?" has an exact answer and
+        // this asks for exactly that: the identical signature.
+        //
+        // dynCheckHelper's func builder is more permissive — it will also
+        // wrap a DIFFERENT signature in the per-target adapter — and the
+        // narrower rule here is deliberate, in both directions that
+        // matter:
+        //   * match still implies the builder succeeds (the builder's
+        //     first branch IS this strcmp), which is the invariant the
+        //     union builder relies on: "the matched arm's builder can no
+        //     longer fail".
+        //   * discrimination stays honest. Matching on callable-KIND
+        //     alone would make every function fit every function arm, so
+        //     `{a: () => number} | {a: () => string}` would take arm 0 for
+        //     a string-returning value and only throw later, inside the
+        //     adapter, with the union already wearing the wrong tag. The
+        //     signature test picks the arm the value actually is.
+        const sigLit = cStringLiteral(Buffer.from(key, "utf8"));
+        d.push(`  if (d->kind != SCR_DYN_FUNC) return false;`);
+        d.push(`  return strcmp(d->v.fn.sig, ${sigLit}) == 0;`);
+        break;
+      }
       default:
         throw new Error(`emitter bug: dynMatch of non-JSON type ${t.kind}`);
     }

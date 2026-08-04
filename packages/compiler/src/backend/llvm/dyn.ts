@@ -508,6 +508,32 @@ export class LlDyn {
         B.terminate(`ret i1 true`);
         break;
       }
+      case "func": {
+        // The FUNCTION leaf: the dyn function box carries the interned
+        // typeKey it was boxed FROM, so the exact signature IS the match
+        // test (emit-walkers.ts's func case, ported — the reasoning for
+        // being narrower than the builder lives there).
+        const fail = B.newLabel("dm.f");
+        const kd = this.kindOf(B, "%d");
+        const isFn = B.tmp();
+        B.line(`${isFn} = icmp eq i32 ${kd}, ${DK.FUNC}`);
+        const l0 = B.newLabel("dm.fn");
+        B.condBr(isFn, l0, fail);
+        B.startBlock(l0);
+        this.host.declare(`declare i32 @strcmp(ptr, ptr)`);
+        const sigp = B.tmp();
+        const sig = B.tmp();
+        const cmp = B.tmp();
+        const same = B.tmp();
+        B.line(`${sigp} = getelementptr inbounds i8, ptr %d, i64 32 ; ->v.fn.sig`);
+        B.line(`${sig} = load ptr, ptr ${sigp}`);
+        B.line(`${cmp} = call i32 @strcmp(ptr ${sig}, ptr ${this.host.cstr(key)})`);
+        B.line(`${same} = icmp eq i32 ${cmp}, 0`);
+        B.terminate(`ret i1 ${same}`);
+        B.startBlock(fail);
+        B.terminate(`ret i1 false`);
+        break;
+      }
       default:
         throw new LlvmUnsupportedError(`dynMatch:${t.kind}`);
     }
