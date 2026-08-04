@@ -1,0 +1,9 @@
+{
+  "packages": {
+    "pbgen": {
+      "dir": "./attested-src/pbgen",
+      "commit": "1111111111111111111111111111111111111111",
+      "repo": "https://github.com/example/pbgen"
+    }
+  }
+}
