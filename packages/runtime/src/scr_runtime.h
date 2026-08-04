@@ -2462,6 +2462,30 @@ ScrHash *scr_hash_update_str(ScrHash *h, ScrStr *data);
 ScrHash *scr_hash_update_bytes(ScrHash *h, ScrBytes *data);
 ScrBytes *scr_hash_digest_raw_buf(ScrHash *h);
 ScrStr *scr_hash_digest_enc(ScrHash *h, ScrStr *enc);
+
+/* Hash's twin for createHmac (RFC 2104): the same accumulate-then-compute
+ * handle with a key beside the message. The key is COPIED at construction
+ * and WIPED on the last release. Block size is the hash's own — 64 for
+ * sha1/sha256, 128 for sha512. */
+typedef struct ScrHmac {
+  size_t rc;
+  int alg;
+  unsigned char *msg;
+  size_t len, cap;
+  unsigned char *key;
+  size_t keylen;
+} ScrHmac;
+ScrHmac *scr_hmac_new_raw(ScrStr *alg, const unsigned char *key, size_t keylen);
+ScrHmac *scr_hmac_new_bytes(ScrStr *alg, ScrBytes *key);
+ScrHmac *scr_hmac_new_str(ScrStr *alg, ScrStr *key);
+ScrHmac *scr_hmac_retain(ScrHmac *h);
+void scr_hmac_release(ScrHmac *h);
+void *scr_hmac_retain_v(void *h);
+void scr_hmac_release_v(void *h);
+ScrHmac *scr_hmac_update_str(ScrHmac *h, ScrStr *data);
+ScrHmac *scr_hmac_update_bytes(ScrHmac *h, ScrBytes *data);
+ScrBytes *scr_hmac_digest_raw_buf(ScrHmac *h);
+ScrStr *scr_hmac_digest_enc(ScrHmac *h, ScrStr *enc);
 /* One-shot raw digest/HMAC by algorithm name ("md5" | "sha1" | "sha256")
  * — the island crypto shim's bridge (scr_island.c host hooks). Digest
  * bytes into out (≥32); returns the digest length, 0 for an unknown

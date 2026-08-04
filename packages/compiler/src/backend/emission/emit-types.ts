@@ -37,6 +37,8 @@ export function cType(t: IrType): string {
       return "ScrKeyObject *";
     case "hash":
       return "ScrHash *";
+    case "hmac":
+      return "ScrHmac *";
     case "bytes":
       // One struct for every element kind (the runtime dispatches on the
       // stored elem tag) — exactly the ScrArr pattern.
@@ -151,6 +153,8 @@ export function retainCallC(type: IrType, expr: string): string {
       return `scr_keyobj_retain(${expr})`;
     case "hash":
       return `scr_hash_retain(${expr})`;
+    case "hmac":
+      return `scr_hmac_retain(${expr})`;
     case "bytes":
       return `scr_bytes_retain(${expr})`;
     case "url":
@@ -238,6 +242,8 @@ export function releaseCallC(type: IrType, expr: string): string {
       return `scr_keyobj_release(${expr})`;
     case "hash":
       return `scr_hash_release(${expr})`;
+    case "hmac":
+      return `scr_hmac_release(${expr})`;
     case "bytes":
       return `scr_bytes_release(${expr})`;
     case "url":
@@ -329,6 +335,7 @@ export function boxKindC(t: IrType): string {
     case "bigint":
     case "keyobj":
     case "hash":
+    case "hmac":
     case "url":
     case "searchParams":
     case "symbol":
@@ -406,6 +413,8 @@ export function vAdapters(t: IrType): { retain: string; release: string } {
       return { retain: "scr_keyobj_retain_v", release: "scr_keyobj_release_v" };
     case "hash":
       return { retain: "scr_hash_retain_v", release: "scr_hash_release_v" };
+    case "hmac":
+      return { retain: "scr_hmac_retain_v", release: "scr_hmac_release_v" };
     case "bytes":
       return { retain: "scr_bytes_retain_v", release: "scr_bytes_release_v" };
     case "url":
@@ -551,6 +560,7 @@ export function elemKindC(elem: IrType): string {
     case "bigint":
     case "keyobj":
     case "hash":
+    case "hmac":
     case "url":
     case "searchParams":
     case "stats":

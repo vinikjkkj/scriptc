@@ -479,6 +479,8 @@ function formatIrTypeInner(t: IrType, shapes: ShapeRegistry, unions: UnionRegist
       return "KeyObject";
     case "hash":
       return "Hash";
+    case "hmac":
+      return "Hmac";
     case "abortSignal":
       return "AbortSignal";
     case "promise":
@@ -2190,6 +2192,19 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     )
   ) {
     return { kind: "hash" };
+  }
+
+  // node:crypto Hmac — Hash's twin, same story, same module check.
+  if (
+    psym?.name === "Hmac" &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+        ctx.isStdlibFile(d.getSourceFile()) &&
+        isDeclaredInAmbientModule(d, "crypto"),
+    )
+  ) {
+    return { kind: "hmac" };
   }
 
   if (

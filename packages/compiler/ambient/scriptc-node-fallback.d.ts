@@ -1226,6 +1226,14 @@ declare module "crypto" {
     digest(): Buffer;
   }
   export function createHash(algorithm: string): Hash;
+  /* Hash's twin: the same two members, keyed. The key is a string or a
+   * Buffer (Node's BinaryLike); a KeyObject key has no lowering. */
+  export interface Hmac {
+    update(data: string | Uint8Array): Hmac;
+    digest(encoding: "hex" | "base64"): string;
+    digest(): Buffer;
+  }
+  export function createHmac(algorithm: string, key: string | Uint8Array): Hmac;
   /* The asymmetric key-object slice, all of it lowered: an OPAQUE handle
    * with no members of its own -- it only flows into the calls below --
    * plus the two ways to make one, the X25519 agreement, and the Ed25519
