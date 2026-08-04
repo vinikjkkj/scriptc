@@ -2616,6 +2616,14 @@ export function islandPrimitiveExit(L: Lowerer, call: ts.CallExpression, result:
     ) {
       boxedCb = { kind: "dynFrom", value: cbLowered, type: DYN, loc };
     } else {
+      // The dyn thunk cannot express this callback — but a callback is
+      // only unboxable because one of its PARAMETER TYPES has no dyn
+      // representation, and that is a statement about the boundary, not
+      // about the call. When the arguments as written already land in
+      // those parameters, the typed thunk below carries them and no
+      // check is left for the boundary to perform.
+      const typed = deferredCallThunk(L, cbLowered, argNodes.map((a) => L.lowerExpr(a)), loc);
+      if (typed !== null) return typed;
       L.noLowering(
         `${what} with trailing arguments and a '${L.fmt(cbLowered.type)}' callback`,
         cbNode,
@@ -2667,6 +2675,116 @@ export function islandPrimitiveExit(L: Lowerer, call: ts.CallExpression, result:
       });
     }
     return { kind: "call", callee: name, args: [boxedCb, ...args], type: toT, loc };
+  }
+
+/** THE DEFERRED CALL THAT CARRIES ARGUMENTS — the typed half.
+   *
+   * Every deferred-call surface in this compiler ends at a runtime queue
+   * that holds ONE zero-argument closure (`scr_next_tick`, the immediate
+   * list, the timer heap). That is not a limitation on the arguments: a
+   * closure is exactly a call with some arguments already supplied, so a
+   * deferred call with arguments is a zero-argument closure that CAPTURED
+   * them. The dyn thunk above already does this — it just insists on
+   * doing it in dyn, and a callback whose parameter type has no dyn
+   * representation (`(err: Error | null) => void`, the node-style
+   * callback shape: a class instance in a union) can never box.
+   *
+   * This builds the same thunk with the captures left at their own types.
+   * The callback is called through `callValue` at its real signature, so
+   * there is nothing to validate at fire time — the arguments were
+   * checked into the parameter types HERE, at the deferring call, which
+   * is where their expressions were written and where tsc already
+   * type-checked them against the callback.
+   *
+   * ARITY is JS's: arguments past the parameter list still evaluate (a
+   * caller's side effects are not the callee's business) and ride along
+   * as captures the call drops. FEWER arguments than parameters would
+   * have to invent an undefined for the rest and is left to the caller's
+   * fence.
+   *
+   * OWNERSHIP is the capture box's, which is the point of building it
+   * this way: each argument is retained into the closure when the
+   * deferral is scheduled and released with the closure — once, by
+   * `scr_closure_release`, whether the queue ran the entry or the loop's
+   * teardown dropped it unrun. No queue entry, no runtime call
+   * convention and no teardown path had to learn about the argument.
+   *
+   * Null when the shape does not fit; the caller decides what to say. */
+  export function deferredCallThunk(L: Lowerer, cb: IrExpr, argsIn: readonly IrExpr[], loc: SrcLoc): IrExpr | null {
+    const fromT = cb.type;
+    if (fromT.kind !== "func" || fromT.rest) return null;
+    const params = fromT.params;
+    if (params.length > argsIn.length) return null;
+    // dyn on either side belongs to the boxed thunk (dyn has no capture
+    // box), and a bare unit parameter has no representation to capture.
+    if (params.some((p) => p.kind === "dyn" || isUnitType(p))) return null;
+    const coerced = argsIn.map((e, i) => (i < params.length ? L.coerceToExpected(e, params[i]!) : e));
+    for (let i = 0; i < params.length; i++) if (!typeEquals(coerced[i]!.type, params[i]!)) return null;
+    // The arguments past the parameter list still EVALUATE and ride along
+    // as captures the call drops — except a bare unit, which has neither a
+    // capture box nor anything to evaluate when it is the literal itself.
+    // (Node's `(null, buf)` reaching a zero-parameter callback is exactly
+    // this case.) A unit-TYPED expression that is not the literal keeps
+    // the fence rather than losing its evaluation.
+    const args: IrExpr[] = [];
+    for (let i = 0; i < coerced.length; i++) {
+      const e = coerced[i]!;
+      if (i >= params.length && isUnitType(e.type)) {
+        if (e.kind === "unitLit") continue;
+        return null;
+      }
+      args.push(e);
+    }
+    if (args.some((a) => a.type.kind === "dyn" || a.type.kind === "void")) return null;
+    if (process.env["SCRIPTC_DEFER_WHY"] !== undefined) {
+      console.error(`[deferwhy] typed thunk: cb ${L.fmt(fromT)} args ${args.map((a) => L.fmt(a.type)).join(",")}`);
+    }
+    const toT: IrType = { kind: "func", params: [], ret: VOID };
+    const capTypes: IrType[] = [fromT, ...args.map((a) => a.type)];
+    const key = `defer.typedthunk:${capTypes.map(typeKey).join("|")}`;
+    const existing = L.arrHofHelpers.get(key);
+    const name = existing ?? `%defer.typedthunk.${L.arrHofHelpers.size}`;
+    if (!existing) {
+      L.arrHofHelpers.set(key, name);
+      const impl = `${name}.impl`;
+      const capIds = ["f.0", ...args.map((_, i) => `a${i}.0`)];
+      const capNames = ["f", ...args.map((_, i) => `a${i}`)];
+      const capsOf = () => capIds.map((id, i) => ({ localId: id, name: capNames[i]!, type: capTypes[i]! }));
+      const localsOf = (): IrLocal[] =>
+        capIds.map((id, i) => ({ id, name: capNames[i]!, type: capTypes[i]!, mutable: false, boxed: true }));
+      L.liftedFns.push({
+        name: impl,
+        params: [],
+        returnType: VOID,
+        captures: capsOf(),
+        locals: localsOf(),
+        body: [
+          {
+            kind: "exprStmt",
+            expr: {
+              kind: "callValue",
+              callee: { kind: "varRef", localId: "f.0", type: fromT, loc },
+              args: params.map((p, i) => ({ kind: "varRef", localId: `a${i}.0`, type: p, loc }) as IrExpr),
+              type: fromT.ret,
+              loc,
+            },
+            loc,
+          },
+        ],
+        loc,
+      });
+      L.liftedFns.push({
+        name,
+        params: capsOf(),
+        returnType: toT,
+        locals: localsOf(),
+        body: [
+          { kind: "return", value: { kind: "closure", fnName: impl, captures: capIds, type: toT, loc }, loc },
+        ],
+        loc,
+      });
+    }
+    return { kind: "call", callee: name, args: [cb, ...args], type: toT, loc };
   }
 
 /** The timer surface's member names — the ambient globals AND the
