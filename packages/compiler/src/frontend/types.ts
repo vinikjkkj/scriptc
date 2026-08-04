@@ -3950,8 +3950,41 @@ function isDataOnlyObjectType(t: ts.Type, checker: ts.TypeChecker): boolean {
  * each key names a handler, and the handler's signature lists its
  * parameters. Answers the same array-of-union shape. */
 
+/** The FUNCTION TYPE NODE a key-map handler spells, following NAMED type
+ * aliases. The arity read below is deliberately SYNTACTIC — asking the
+ * checker for a handler's signature pulls the whole payload across the
+ * facade's synchronous channel, which on a wide event map kills the sidecar
+ * — and a member written `readonly mutation: WaAppStateMutationListener`
+ * lists no parameters of its own. Its alias does, and following the alias
+ * declaration is still syntax: one symbol lookup, no type payload.
+ *
+ * A GENERIC alias, or one spelled with type arguments, keeps the fence: its
+ * parameters are written against arguments this walk does not substitute.
+ * The hop budget bounds an alias cycle the checker would have rejected. */
+function handlerFnTypeNodeOf(node: ts.TypeNode | undefined, checker: ts.TypeChecker): ts.FunctionTypeNode | null {
+  let t: ts.TypeNode | undefined = node;
+  for (let hops = 0; t !== undefined && hops < 8; hops++) {
+    while (t !== undefined && ts.isParenthesizedTypeNode(t)) t = t.type;
+    if (t === undefined) return null;
+    if (ts.isFunctionTypeNode(t)) return t;
+    if (!ts.isTypeReferenceNode(t) || t.typeArguments !== undefined) return null;
+    let sym = checker.getSymbolAtLocation(t.typeName);
+    if (sym !== undefined && (sym.flags & ts.SymbolFlags.Alias) !== 0) sym = checker.getAliasedSymbol(sym);
+    const alias = sym === undefined
+      ? undefined
+      : checker.declarationsOf(sym).find((d) => ts.isTypeAliasDeclaration(d));
+    if (alias === undefined || !ts.isTypeAliasDeclaration(alias) || alias.typeParameters !== undefined) return null;
+    t = alias.type;
+  }
+  return null;
+}
+
 export function mapParametersAliasOverBoundKey(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   const { checker, resolveTypeParamTs } = ctx;
+  const pwhy = (r: string): null => {
+    if (process.env["SCRIPTC_PARAMS_WHY"] !== undefined) console.error(`[paramswhy] ${r}`);
+    return null;
+  };
   if (!resolveTypeParamTs) return null;
   if (type.getAliasSymbol()?.name !== "Parameters") return null;
   const args = type.getAliasTypeArguments();
@@ -3969,6 +4002,15 @@ export function mapParametersAliasOverBoundKey(type: ts.Type, ctx: TypeMapperCtx
   // channel (measured: the sidecar dies mid-build on zapo). Caching is
   // not an option — the answer depends on the bindings, so it cannot
   // outlive the context — but the crossings themselves collapse.
+  // Following an ALIASED handler sits behind the slot switch, like the rule
+  // it serves. A key map that maps where it used to refuse changes what the
+  // types AROUND it map to, and neutral builds must keep mapping exactly
+  // what they mapped before: measured on zapo, the ungated version takes
+  // neutral from 385 traps to 387 — the coordinator holding a
+  // `WaMobileEmit` field collects one step further and trades its single
+  // fence for two, one of them a latent `[]`-into-`readonly string[]`
+  // coercion the earlier refusal had been masking.
+  const followAliases = process.env["SCRIPTC_GENERIC_SLOT"] !== undefined;
   const arities = new Set<number>();
   const handlerNodes: ts.FunctionTypeNode[] = [];
   // ONE crossing for the whole property table, indexed locally. Asking
@@ -3989,11 +4031,15 @@ export function mapParametersAliasOverBoundKey(type: ts.Type, ctx: TypeMapperCtx
     // every handler agrees on the count, and a handler whose declaration
     // does not say plainly keeps the fence.
     const decl = checker.valueDeclarationOf(prop);
-    const fnNode = decl !== undefined && ts.isPropertySignature(decl) ? decl.type : undefined;
-    if (fnNode === undefined || !ts.isFunctionTypeNode(fnNode)) return null;
-    if (fnNode.parameters.some((x) => x.dotDotDotToken !== undefined)) return null;
+    const fnNode = decl !== undefined && ts.isPropertySignature(decl)
+      ? (followAliases
+        ? handlerFnTypeNodeOf(decl.type, checker)
+        : (decl.type !== undefined && ts.isFunctionTypeNode(decl.type) ? decl.type : null))
+      : null;
+    if (fnNode === null) return pwhy(`no fn type node for ${name}`);
+    if (fnNode.parameters.some((x) => x.dotDotDotToken !== undefined)) return pwhy(`rest handler ${name}`);
     arities.add(fnNode.parameters.length);
-    if (arities.size > 1) return null;
+    if (arities.size > 1) return pwhy(`arity split at ${name}`);
     handlerNodes.push(fnNode);
   }
   // One shape agreed on by every handler: NOW ask for types, once per
@@ -4011,14 +4057,16 @@ export function mapParametersAliasOverBoundKey(type: ts.Type, ctx: TypeMapperCtx
     const row: IrType[] = [];
     for (const q of fnNode.parameters) {
       const mapped = mapType(checker.getTypeAtLocation(q), specCtx);
-      if (!mapped || mapped.kind === "void") return null;
+      if (!mapped || mapped.kind === "void") {
+        return pwhy(`param does not map: ${checker.typeToString(checker.getTypeAtLocation(q)).slice(0, 70)}`);
+      }
       row.push(mapped);
     }
     rows.push(row);
   }
-  if (rows.length === 0) return null;
+  if (rows.length === 0) return pwhy("no rows");
   const arity = rows[0]!.length;
-  if (arity === 0 || !rows.every((r) => r.length === arity)) return null;
+  if (arity === 0 || !rows.every((r) => r.length === arity)) return pwhy(`bad arity ${arity}`);
   // FLATTEN: an element that is itself a union contributes its ARMS, not
   // itself — a union holding a union as an arm is rejected outright.
   const byKey = new Map<string, IrType>();
