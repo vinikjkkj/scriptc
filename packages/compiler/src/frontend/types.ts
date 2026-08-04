@@ -630,6 +630,11 @@ export interface TypeMapperCtx {
    * from the type itself, and widening every tuple-typed rest instead
    * changed the calling convention of 30 corpus programs. */
   restTupleFromErasure?: boolean | undefined;
+  /** This mapping is an ATTEMPT whose failure is discarded by the caller.
+   * Refusals collected under it are not the types' own answer and must not
+   * reach the memo — the caller's rollback restores registries and the
+   * sensitivity counters, but a WeakMap entry survives it. */
+  speculative?: boolean | undefined;
   /** GENERIC program classes (monomorphization by flow): the mapping of a
    * concrete instantiation reference (`Box<number>`) — the Lowerer
    * registers/reuses the instantiation (`Box%0`) and answers its object
@@ -838,7 +843,17 @@ export function mapType(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   const memoSensitivityAtEntry = memoSensitivity;
   try {
     const result = mapTypeInner(type, ctx);
-    if (contextResolutions === sensitivityAtEntry && memoSensitivity === memoSensitivityAtEntry) {
+    // A REFUSAL reached under a constraint-erased attempt is not the type's
+    // own answer — the attempt walks places the ordinary mapping never
+    // does, and caching its null hands that verdict to the legitimate
+    // mapping that comes later. Successes still cache: they are the type's
+    // answer either way.
+    const speculativeRefusal = result === null && (ctx.restTupleFromErasure === true || ctx.speculative === true);
+    if (
+      !speculativeRefusal &&
+      contextResolutions === sensitivityAtEntry &&
+      memoSensitivity === memoSensitivityAtEntry
+    ) {
       mapTypeMemo.set(type, { ctx, result });
     }
     return result;
@@ -3896,6 +3911,7 @@ function isDataOnlyObjectType(t: ts.Type, checker: ts.TypeChecker): boolean {
  * pieces are reachable without substitution: K's binding names the keys,
  * each key names a handler, and the handler's signature lists its
  * parameters. Answers the same array-of-union shape. */
+
 export function mapParametersAliasOverBoundKey(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   const { checker, resolveTypeParamTs } = ctx;
   if (!resolveTypeParamTs) return null;
@@ -3909,17 +3925,54 @@ export function mapParametersAliasOverBoundKey(type: ts.Type, ctx: TypeMapperCtx
   const idxT = (rawIdx.flags & ts.TypeFlags.TypeParameter) !== 0 ? resolveTypeParamTs(rawIdx) : rawIdx;
   if (idxT === null || idxT === undefined) return null;
   const keys = idxT.isUnionType() ? idxT.getTypes() : [idxT];
-  const rows: IrType[][] = [];
+  // ONE crossing per DISTINCT handler, not per key. A wide event map
+  // repeats a handful of handler shapes across dozens of names, and
+  // walking per key is what floods the checker facade's synchronous
+  // channel (measured: the sidecar dies mid-build on zapo). Caching is
+  // not an option — the answer depends on the bindings, so it cannot
+  // outlive the context — but the crossings themselves collapse.
+  const arities = new Set<number>();
+  const handlerNodes: ts.FunctionTypeNode[] = [];
+  // ONE crossing for the whole property table, indexed locally. Asking
+  // getPropertyOfType per key is what still made this O(keys) after the
+  // per-handler collapse — and O(keys) crossings of the synchronous
+  // channel is what kills the sidecar on a wide event map.
+  const props = new Map(checker.getPropertiesOfType(objT).map((q) => [q.name, q]));
   for (const k of keys) {
     const name = k.isStringLiteralType() ? k.value : k.isNumberLiteralType() ? String(k.value) : null;
     if (name === null) return null;
-    const prop = checker.getPropertyOfType(objT, name);
+    const prop = props.get(name);
     if (prop === undefined) return null;
-    const sigs = checker.getCallSignatures(checker.getTypeOfSymbol(prop));
-    if (sigs.length !== 1) return null;
+    // ARITY FIRST, and syntactically. Deciding it from the DECLARATION
+    // costs nothing, while asking the checker for a handler's signature
+    // pulls the whole payload across the synchronous channel — on zapo's
+    // `message` event (every WhatsApp content variant, deeply recursive)
+    // that single query kills the sidecar. Types are mapped only once
+    // every handler agrees on the count, and a handler whose declaration
+    // does not say plainly keeps the fence.
+    const decl = checker.valueDeclarationOf(prop);
+    const fnNode = decl !== undefined && ts.isPropertySignature(decl) ? decl.type : undefined;
+    if (fnNode === undefined || !ts.isFunctionTypeNode(fnNode)) return null;
+    if (fnNode.parameters.some((x) => x.dotDotDotToken !== undefined)) return null;
+    arities.add(fnNode.parameters.length);
+    if (arities.size > 1) return null;
+    handlerNodes.push(fnNode);
+  }
+  // One shape agreed on by every handler: NOW ask for types, once per
+  // distinct parameter node.
+  // SPECULATIVE ctx. This walk reaches types the ordinary mapping never
+  // visits, and a refusal it collects is not those types' own answer —
+  // cached against the real ctx it hands that verdict to the legitimate
+  // mapping that comes later (measured: zapo's WaClientOptions stopped
+  // mapping and the wall regressed 618 -> 242). mapType only withholds
+  // speculative refusals from the memo when the ctx says so; build it
+  // once so successes still share a memo among these crossings.
+  const specCtx: TypeMapperCtx = { ...ctx, restTupleFromErasure: true };
+  const rows: IrType[][] = [];
+  for (const fnNode of handlerNodes) {
     const row: IrType[] = [];
-    for (const q of sigs[0]!.getParameters()) {
-      const mapped = mapType(checker.getTypeOfSymbol(q), ctx);
+    for (const q of fnNode.parameters) {
+      const mapped = mapType(checker.getTypeAtLocation(q), specCtx);
       if (!mapped || mapped.kind === "void") return null;
       row.push(mapped);
     }
@@ -3939,7 +3992,8 @@ export function mapParametersAliasOverBoundKey(type: ts.Type, ctx: TypeMapperCtx
     }
   }
   const distinct = [...byKey.entries()].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)).map(([, t]) => t);
-  return arrayOf(distinct.length === 1 ? distinct[0]! : { kind: "union", unionId: ctx.unions.intern(distinct) });
+  const answer = arrayOf(distinct.length === 1 ? distinct[0]! : { kind: "union", unionId: ctx.unions.intern(distinct) });
+  return answer;
 }
 
 export function mapRestTupleUnion(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
@@ -4537,6 +4591,12 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
           + ` generic=${generic} sigs=${cs.length} tps=${cs.map((x) => x.getTypeParameters()?.length ?? 0).join("/")}`);
       }
       if (generic && process.env["SCRIPTC_GENERIC_SLOT"] === undefined) continue;
+      // REFUSE BEFORE DESCENDING. The attempt below is speculative and its
+      // failure is rolled back, but the rollback does not undo everything
+      // the descent touches (measured: withholding refusals from the memo,
+      // and disabling the memo outright, both leave the regression intact).
+      // A member mentioning an unbound type parameter can only fail, so do
+      // not walk it at all — which is exactly what the feature-off path did.
       const uMark = generic ? ctx.unions.mark() : 0;
       const sMark = generic ? shapes.mark() : 0;
       // The sensitivity counters are GLOBAL and drive two decisions outside
@@ -4547,7 +4607,15 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // gives up over work that no longer exists.
       const ctxResAtTry = contextResolutions;
       const memoSensAtTry = memoSensitivity;
-      let pt = mapType(fieldTs, ctx);
+      // ...and the MEMO, which the rollback below cannot reach. A generic
+      // member's attempt descends where the ordinary walk never goes (on
+      // zapo: into WaClientPluginContext, down to an open `keyof
+      // TPluginEvents`); every refusal it meets on the way was landing in
+      // the memo against the real ctx, so the legitimate mapping of
+      // WaClientPluginDefinition later read back a null it never earned
+      // and WaClientOptions stopped mapping entirely.
+      const tryCtx: TypeMapperCtx = generic ? { ...ctx, speculative: true } : ctx;
+      let pt = mapType(fieldTs, tryCtx);
       if (pt === null && generic) {
         // The member leaves the shape — say so. An exclusion that prints
         // nothing makes the NEXT failure invisible exactly where this
