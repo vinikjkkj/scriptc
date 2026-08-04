@@ -35,13 +35,19 @@ const outDir = join(repoRoot, "node_modules/.cache/scriptc-tests/provenance", fl
 
 const EXPECTED = "hello, world\nHELLO, COMPILER!\nhello, chain!\n";
 
-async function buildAndRun(name: string, dynamic: boolean): Promise<string> {
+/* The protobuf-intersection case (see the test below). */
+const pbEntry = join(fixtureDir, "cases/pb/main.ts");
+const PB_EXPECTED = "4 4 2 3\n";
+
+async function buildAndRun(name: string, dynamic: boolean, from = entry): Promise<string> {
   mkdirSync(outDir, { recursive: true });
-  const outPath = join(outDir, name);
+  // Windows cannot CreateProcess an extension-less file, so the built
+  // binary needs the suffix to be spawnable at all.
+  const outPath = join(outDir, process.platform === "win32" ? `${name}.exe` : name);
   // Pinned: the provenance thesis compares a source-static binary against
   // a dist-island binary — holding both on the C lane keeps that byte
   // comparison about PROVENANCE, never about which backend each build drew.
-  const result = await compile(entry, { outPath, outDir, dynamic, backend: "c" });
+  const result = await compile(from, { outPath, outDir, dynamic, backend: "c" });
   if (!result.ok) {
     throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
   }
@@ -93,6 +99,46 @@ describe("provenance sources", () => {
       expect(s.failed).toBe(0);
       expect(s.island).toBe(0);
     }
+  });
+
+  test("a generated .d.ts with a compiled twin flattens its class-intersection", async () => {
+    /* A protobufjs-style generated surface: `spec/proto/index.d.ts` beside
+     * its real `index.js`, and `decode` returning `Msg & Msg.$Shape` — a
+     * declaration-file CLASS intersected with its own $Properties
+     * interface. Provenance is the only build shape that produces it: the
+     * declaration stays authoritative while its implementation twin joins
+     * module order (provenanceDeclSiblings + declTwinOf), which is exactly
+     * the combination the class-part rule used to refuse. `Msg` alone
+     * mapped to a record and `Msg & Msg.$Shape` mapped to nothing, so the
+     * intersection failed every field, record and Promise above it.
+     *
+     * The intersection here is carried through a field of an async
+     * function's Promise payload — the WaPairingFlow shape that exposed it
+     * — and read back on the other side.
+     *
+     * The oracle is NODE over the published dist rather than the island
+     * binary the tests above compare against: the island half needs the
+     * embedded engine archive, and this assertion is about the STATIC
+     * mapping, which is where the refusal lived. */
+    const { stdout: oracle } = await execFileAsync(
+      process.execPath,
+      ["--experimental-strip-types", "--no-warnings", pbEntry],
+      { encoding: "utf8" },
+    );
+    expect(oracle).toBe(PB_EXPECTED);
+
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = join(fixtureDir, "manifest-pb.json");
+    const sources = await resolveProvenanceSources(pbEntry);
+    expect(sources.packages).toHaveLength(1);
+    expect(sources.packages[0]!.name).toBe("pbgen");
+    setProvenanceSources(sources);
+    // No island anywhere, so every value crossing the intersection had to
+    // lower statically. A refusal here is the fence coming back.
+    const { coverage } = analyze(pbEntry);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    const fromSource = await buildAndRun("pb-static", false, pbEntry);
+    expect(fromSource).toBe(oracle);
   });
 
   test("an unmappable package falls back to the island with a note, never a failure", async () => {
