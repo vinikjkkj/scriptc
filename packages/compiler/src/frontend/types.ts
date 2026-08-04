@@ -818,11 +818,43 @@ let memoSensitivity = 0;
  * SCRIPTC_NO_MEMO bypasses the cache entirely, for A/B against it. */
 const mapTypeMemo = new WeakMap<ts.Type, { ctx: TypeMapperCtx; result: IrType | null }>();
 
+/** Whether a cached answer may be READ under this context.
+ *
+ * What the entry needs is the guarantee the store side already established:
+ * the frame that produced it consulted nothing but the type, since neither
+ * sensitivity counter moved across it. The RESOLVERS — the whole reason a
+ * derived context exists — therefore cannot matter to it, and demanding the
+ * same context OBJECT throws away every hit for no soundness gained. What
+ * must still agree is what a context-free frame can nonetheless read: the
+ * REGISTRIES the answer's ids point into (per run, so this is the run check
+ * the identity test was really performing), and the mapping-MODE flags,
+ * which gate whole rules and can decline without bumping a counter on the
+ * way out.
+ *
+ * `speculative` is deliberately absent: it decides only whether a refusal is
+ * WRITTEN, never what any answer is.
+ *
+ * A derived context is minted fresh at every generic-member attempt and at
+ * every constraint erasure, so under the identity test those walks were
+ * unmemoizable by construction — each one re-crossed the checker for the
+ * whole member type graph. */
+function memoUsableUnder(entry: TypeMapperCtx, ctx: TypeMapperCtx): boolean {
+  return (
+    entry === ctx ||
+    (entry.unions === ctx.unions &&
+      entry.shapes === ctx.shapes &&
+      entry.checker === ctx.checker &&
+      entry.dynamic === ctx.dynamic &&
+      entry.indexUnionOk === ctx.indexUnionOk &&
+      entry.restTupleFromErasure === ctx.restTupleFromErasure)
+  );
+}
+
 export function mapType(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (mapTypeDepth >= MAP_TYPE_MAX_DEPTH) return null;
   const hit = process.env.SCRIPTC_NO_MEMO ? undefined : mapTypeMemo.get(type);
-  // Same run, same registries: a cached answer belongs to this ctx only.
-  if (hit !== undefined && hit.ctx === ctx) {
+  // Same run, same registries, same mapping mode: see memoUsableUnder.
+  if (hit !== undefined && memoUsableUnder(hit.ctx, ctx)) {
     if (process.env.SCRIPTC_MEMO_AUDIT) {
       // Recompute and compare the ANSWER, not the type's rendering: a type
       // parameter renders the same under every instantiation, so comparing
