@@ -10522,7 +10522,23 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       }
       return read;
     }
-    return { kind: "recordGet", obj: target.obj, shapeId: target.shapeId, field: target.field, type: target.fieldType, loc };
+    const recordRead: IrExpr = { kind: "recordGet", obj: target.obj, shapeId: target.shapeId, field: target.field, type: target.fieldType, loc };
+    // An OPTIONAL slot the checker narrowed at THIS use (`if
+    // (!deps.query) return; deps.query(...)`): bridge to the proven arm
+    // in the READ, not at each consumer. The property dispatch already
+    // maybeNarrows what it gets back, so for plain reads this is the same
+    // answer arriving one frame earlier (the second call sees a
+    // non-union and returns it untouched). What it ADDS is the paths that
+    // build a field read directly and then judge it by its own IR type —
+    // the record-field CALL path above all, where an optional method slot
+    // reached the callee position still `func | undefined` and fenced,
+    // even though the very same call spelled through a temporary
+    // (`const q = deps.query; q(...)`) narrowed and compiled. Restricted
+    // to union slots: that keeps this to the arm bridge maybeNarrow's
+    // union case builds, and leaves its dyn/class cases to the read
+    // dispatch that already asks for them.
+    if (recordRead.type.kind === "union") return L.maybeNarrow(recordRead, blame);
+    return recordRead;
   }
 
 /** The write statement for a field target (fieldSet / recordSet / setter
