@@ -5774,6 +5774,14 @@ export function canDynCheckTo(
   const nestedOk = (x: IrType, stack: ReadonlySet<IrType>): boolean => {
     if (isJsonSafeType(x, getRecord, getUnion)) return true;
     if (x.kind === "bytes" && x.elem === "u8") return true;
+    // A dyn ('unknown') LEAF: the target itself says "anything fits here",
+    // so there is nothing to validate. Both walkers have said so since
+    // they were written — dynMatch's record case skips dyn fields
+    // outright and its bare `dyn` case returns true; dynCheck's record
+    // case retains the subtree (a MISSING key becoming the undefined dyn
+    // value, JS's own missing-property read). Only the predicate had no
+    // case for it.
+    if (x.kind === "dyn") return true;
     if (stack.has(x)) return true;
     const deeper = new Set(stack).add(x);
     if (x.kind === "array") return nestedOk(x.elem, deeper);
