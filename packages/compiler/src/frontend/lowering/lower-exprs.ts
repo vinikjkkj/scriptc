@@ -26,6 +26,8 @@ import { mixinFnOfCallee } from "./lower-mixins.js";
 import { isConstAssertionTypeNode, isGenericCallableMemberType, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
 import { lowerStreamProperty, lowerStreamStateProperty, streamSidesOf } from "./lower-stream.js";
+import { emitterRooted } from "./lower-emitter.js";
+import { EMITTER_API_MEMBERS } from "./lower-classes.js";
 
 /** An assignable `obj.field` target — a class field, a record field, or a
  * class ACCESSOR property (reads become getter calls, writes setter calls;
@@ -1886,6 +1888,25 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           expr,
           `reading the abstract property '${expr.name.text}' through a '${L.checker.typeToString(L.typeOf(expr.expression))}'-typed receiver (abstract property declarations are erased at runtime, so no shared slot exists — type the receiver as the concrete class, or declare an abstract getter instead)`,
         );
+      }
+      // An EventEmitter API member taken as a VALUE (`this.emit.bind(this)`
+      // — the coordinator idiom that hands a class's emit to a collaborator
+      // through a function-typed field). These members are the RUNTIME's,
+      // not the class's: a subclass declaration of one is erased at
+      // collection, and every call compiles against a statically known
+      // EVENT NAME, because each event carries its own payload tuple. So
+      // there is no single function to take the address of, and the generic
+      // property-read recitation names neither that fact nor a way round
+      // it. A direct call is the working spelling.
+      if (recvLowered.type.kind === "object" && EMITTER_API_MEMBERS.has(expr.name.text)) {
+        const emitterInfo = L.classes.get(recvLowered.type.className);
+        if (emitterRooted(L, emitterInfo)) {
+          L.unsupported(
+            "SC1090",
+            expr,
+            `the EventEmitter member '${expr.name.text}' as a VALUE (it is the runtime's, and every call compiles against a statically known event name — each event has its own payload tuple, so no single function value exists to bind or pass; call '${expr.name.text}' directly, or wrap it in an arrow that names the event)`,
+          );
+        }
       }
       L.unsupported(
         "SC1090",
