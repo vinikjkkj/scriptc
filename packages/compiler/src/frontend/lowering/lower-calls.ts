@@ -9224,9 +9224,21 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
       // receiver's runtime class must be provable — name that discipline
       // instead of the object-literal wording when the method lives on an
       // interface.
+      // ...and only for a real METHOD. A PropertySignature holding a generic
+      // function type is a FIELD carrying a value: the call reads the field
+      // and invokes what it finds, so the receiver's runtime class plays no
+      // part and the advice to bind it to a `new` cannot be followed —
+      // zapo's `runtime` is destructured from a parameter and never has a
+      // `new` to point at. Such a member keeps the object-literal fence
+      // below, which names the thing that is actually missing.
       const onInterface = L.checker
         .declarationsOf(propSym)
-        .some((d) => d.parent !== undefined && ts.isInterfaceDeclaration(d.parent));
+        .some(
+          (d) =>
+            d.parent !== undefined &&
+            ts.isInterfaceDeclaration(d.parent) &&
+            d.kind === ts.SyntaxKind.MethodSignature,
+        );
       if (onInterface) {
         L.unsupported(
           "SC1090",
