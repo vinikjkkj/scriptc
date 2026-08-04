@@ -2424,6 +2424,54 @@ export class Lowerer {
     return (this.typeOf(node).flags & ts.TypeFlags.Any) !== 0;
   }
 
+  /** SCRIPTC_DYN_WHY (compiler-development probe): for every site that
+   * reports the dynamic-family TYPE fence, print the site, the node kind,
+   * the type, and the STATIC refusal chain that sent it here. The fence
+   * message names only the outermost type, which is never the level worth
+   * fixing; the chain is. The static answer is already in the memo as a
+   * refusal by the time badType runs, so the re-walk turns the memo off
+   * and the trace on. Diagnostic path only — the build has already failed
+   * at this site, so nothing this costs lands in a compiling program. */
+  private dynWhy(node: ts.Node, type: ts.Type, widened: ts.Type): void {
+    if (!process.env.SCRIPTC_DYN_WHY) return;
+    const loc = locOf(node);
+    console.error(
+      `DYNWHY ${loc.file}@${loc.start} kind=${ts.SyntaxKind[node.kind]} :: ${this.checker.typeToString(type).slice(0, 120)}`,
+    );
+    const frames = (new Error().stack ?? "")
+      .split("\n")
+      .slice(3, 8)
+      .map((l) => l.trim().replace(/^at /, "").replace(/ \(.*/, ""))
+      .join(" < ");
+    console.error(`DYNWHY   from ${frames}`);
+    const memoAnswer = mapType(widened, this.typeCtx);
+    console.error(`DYNWHY   memo-answer=${memoAnswer ? typeKey(memoAnswer).slice(0, 90) : "null"}`);
+    const prevTrace = process.env.SCRIPTC_MAP_TRACE;
+    const prevMemo = process.env.SCRIPTC_NO_MEMO;
+    process.env.SCRIPTC_MAP_TRACE = "1";
+    process.env.SCRIPTC_NO_MEMO = "1";
+    try {
+      const fresh = mapType(widened, this.typeCtx);
+      console.error(`DYNWHY   fresh-answer=${fresh ? typeKey(fresh).slice(0, 90) : "null"}`);
+    } finally {
+      if (prevTrace === undefined) delete process.env.SCRIPTC_MAP_TRACE;
+      else process.env.SCRIPTC_MAP_TRACE = prevTrace;
+      if (prevMemo === undefined) delete process.env.SCRIPTC_NO_MEMO;
+      else process.env.SCRIPTC_NO_MEMO = prevMemo;
+    }
+    if (ts.isPropertyAccessExpression(node)) {
+      const recvT = mapType(this.typeOf(node.expression), this.typeCtx);
+      let detail = recvT ? typeKey(recvT).slice(0, 60) : "null";
+      if (recvT?.kind === "record") {
+        const shape = this.shapes.get(recvT.shapeId);
+        const f = shape?.fields.find((x) => x.name === node.name.text);
+        detail += ` field ${node.name.text}=${f ? typeKey(f.type).slice(0, 70) : "ABSENT"}`;
+        if (shape) detail += ` [shape fields: ${shape.fields.map((x) => x.name).join(",").slice(0, 120)}]`;
+      }
+      console.error(`DYNWHY   recv=${detail}`);
+    }
+  }
+
   badType(node: ts.Node, type: ts.Type): never {
     const widened = this.checker.getBaseTypeOfLiteralType(type);
     // Types declared by the ADOPTED @types/node (Buffer, NodeJS.Timeout,
@@ -2508,6 +2556,7 @@ export class Lowerer {
         !(widened.flags & ts.TypeFlags.Any) &&
         mapType(widened, { ...this.typeCtx, dynamic: true }) !== null
       ) {
+        this.dynWhy(node, type, widened);
         this.pushDiag(requiresDynamicTypeDiag(this.checker.typeToString(type), locOf(node)));
         throw new PoisonError();
       }
@@ -2561,6 +2610,7 @@ export class Lowerer {
       !(widened.flags & ts.TypeFlags.Any) &&
       mapType(widened, { ...this.typeCtx, dynamic: true }) !== null
     ) {
+      this.dynWhy(node, type, widened);
       this.pushDiag(requiresDynamicTypeDiag(this.checker.typeToString(type), locOf(node)));
       throw new PoisonError();
     }
