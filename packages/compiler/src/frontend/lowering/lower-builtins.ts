@@ -29,7 +29,7 @@ import {
 import { conditionalSpreadOf, lowerDynObjectLiteral, probeLower } from "./lower-exprs.js";
 import { HTTP2_CONSTANTS } from "./http2-constants.js";
 import { CRYPTO_CIPHERS, CRYPTO_CONSTANTS, CRYPTO_CURVES, CRYPTO_HASHES } from "./crypto-tables.js";
-import { timerStyleCallback } from "./lower-calls.js";
+import { deferredCallThunk, timerStyleCallback } from "./lower-calls.js";
 import { registerHttpClientFnBinding } from "./lower-server.js";
 import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
 
@@ -4060,6 +4060,79 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     bi: { module: string; member: string },
     loc: SrcLoc,): IrExpr | null {
     if (bi.module !== "crypto") return null;
+    // `randomFill(buf, cb)` / `(buf, offset, cb)` / `(buf, offset, size, cb)`
+    // — randomBytes's draw over a buffer the caller owns, with the answer
+    // arriving through a callback instead of a return value.
+    //
+    // The fill is trivial; the CALLBACK is the whole feature. Node invokes
+    // it asynchronously, and every deferral queue in this runtime holds one
+    // ZERO-argument closure per entry — so the call is built HERE, as a
+    // thunk that captures the callback and the arguments Node passes it
+    // (`(null, buf)`), and the queue carries the thunk. The argument's
+    // ownership is then the capture box's: released with the closure
+    // exactly once, whether the deferral fires or the loop's teardown drops
+    // it at exit. Nothing in the queue, the call convention or the teardown
+    // had to learn about arguments — which is also why WHICH queue serves
+    // it is a free choice the runtime makes (scr_random_fill.c measures the
+    // three candidates against Node and takes the check phase).
+    if (bi.member === "randomFill") {
+      const n = expr.arguments.length;
+      if (n < 2 || n > 4 || expr.arguments.some(ts.isSpreadElement)) {
+        L.noLowering(
+          `randomFill with ${n} arguments`,
+          expr,
+          "the supported forms are randomFill(buf, cb), randomFill(buf, offset, cb) and randomFill(buf, offset, size, cb)",
+        );
+      }
+      const bufNode = expr.arguments[0]!;
+      const bufT = L.mapTypeOf(L.typeOf(bufNode));
+      if (bufT?.kind !== "bytes" || bufT.elem !== "u8") {
+        L.noLowering(
+          `randomFill into a '${bufT ? L.fmt(bufT) : L.checker.typeToString(L.typeOf(bufNode))}' target`,
+          bufNode,
+          "the lowered target is a Uint8Array or Buffer — a wider view's element size would change Node's offset and size arithmetic",
+        );
+      }
+      const cbNode = expr.arguments[n - 1]!;
+      const cb = L.lowerExpr(cbNode);
+      const buf = L.lowerExpr(bufNode);
+      const offset = n >= 3 ? L.lowerExprExpecting(expr.arguments[1]!, F64) : ({ kind: "numLit", value: 0, type: F64, loc } as IrExpr);
+      const sizeGiven = n === 4;
+      const size = sizeGiven
+        ? L.lowerExprExpecting(expr.arguments[2]!, F64)
+        : ({ kind: "numLit", value: 0, type: F64, loc } as IrExpr);
+      // Node calls back with `(null, buf)` — the SAME buffer object, never
+      // a copy. A callback that declares the second parameter therefore
+      // needs the target twice (once as the fill's subject, once as the
+      // argument), and re-reading it is only free when the expression is
+      // an identifier; anything else keeps a pointed fence rather than
+      // evaluating the caller's expression twice.
+      const wantsBuf = cb.type.kind === "func" && cb.type.params.length >= 2;
+      if (wantsBuf && !ts.isIdentifier(bufNode)) {
+        L.noLowering(
+          "randomFill with a two-parameter callback over this target expression",
+          bufNode,
+          "Node passes the SAME buffer to the callback — bind the target to a name first, or drop the callback's second parameter",
+        );
+      }
+      const cbArgs: IrExpr[] = [{ kind: "unitLit", unit: "null", type: NULL_T, loc }];
+      if (wantsBuf) cbArgs.push(L.lowerExpr(bufNode));
+      const done = deferredCallThunk(L, cb, cbArgs, loc);
+      if (done === null) {
+        L.noLowering(
+          `randomFill with a '${L.fmt(cb.type)}' callback`,
+          cbNode,
+          "the callback's parameters must accept Node's (error, buffer) arguments — error is always null here (the draw cannot fail)",
+        );
+      }
+      return {
+        kind: "libCall",
+        fn: "crypto.randomFillDeferred",
+        args: [buf, offset, size, { kind: "boolLit", value: sizeGiven, type: BOOL, loc }, done],
+        type: VOID,
+        loc,
+      };
+    }
     // `createHash(alg)` STANDING ALONE — the handle the fused chain never
     // needs. Reached only when the chain did not claim the call (the
     // handle is bound, passed, or updated more than once), so the fast

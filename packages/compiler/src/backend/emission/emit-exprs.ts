@@ -4705,6 +4705,18 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "crypto.randomBytesToString":
             // May throw Node's RangeError (may-throw seed set).
             return finish(`scr_crypto_random_string(${arg(0)}, ${arg(1)})`);
+          case "crypto.randomFillDeferred": {
+            // The deferral thunk MOVES: the tick queue takes it, or the
+            // range ladder releases it on the way out. A queued tick keeps
+            // the loop alive, so main must run it (usesTimers). May throw
+            // Node's RangeError ladder (may-throw seed set).
+            E.usesTimers = true;
+            const done = args[4]!;
+            E.moveTemp(done);
+            return finish(
+              `scr_crypto_random_fill_deferred(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${done.name})`,
+            );
+          }
           case "crypto.randomInt":
             return finish(`scr_crypto_random_int(${arg(0)}, ${arg(1)})`);
           case "crypto.randomBytesAsync":
