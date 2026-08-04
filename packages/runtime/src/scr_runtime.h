@@ -4968,6 +4968,21 @@ ScrPromise *scr_fsp_read_file_bytes(ScrStr *path); /* +1 */
  * RangeError catchably (same check as scr_crypto_random_string). */
 ScrBytes *scr_crypto_random_bytes(double n);
 ScrPromise *scr_crypto_random_bytes_async(double n);
+/* crypto.randomFill(buf, offset, size, cb): fills the range from the same
+ * CSPRNG and defers `done` — the compiler's ZERO-argument thunk, which
+ * already captured the callback and the (err, buf) arguments — onto the
+ * CHECK phase, the station measured against Node (after the whole
+ * tick/microtask checkpoint; scr_random_fill.c has the three candidates
+ * and why the other two are wrong). A ZERO-length draw calls back in
+ * line, which is Node's own answer. `has_size` false means the call
+ * omitted the size and the fill runs to the end of the buffer (no numeric
+ * sentinel can say that: every candidate is a value Node rejects with its
+ * own error). Node's offset/size range errors, in Node's order, throw
+ * catchably. `b` is borrowed and written through; `done` MOVES (the queue
+ * takes it, the in-line arm calls and releases it, and a throwing path
+ * releases it). */
+void scr_crypto_random_fill_deferred(ScrBytes *b, double offset, double size,
+                                     bool has_size, ScrClosure *done);
 /* crypto.randomInt(min, max): a uniform integer in [min, max) by
  * rejection sampling; Node's range errors verbatim. */
 double scr_crypto_random_int(double min, double max);
