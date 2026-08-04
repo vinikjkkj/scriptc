@@ -51,7 +51,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { arrayOf, BOOL, canAdaptDynFuncTo, funcOf, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, RUNTIME_ERROR_CLASSES, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { arrayOf, BOOL, canAdaptDynFuncTo, canDynCheckTo, funcOf, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, RUNTIME_ERROR_CLASSES, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -2927,6 +2927,45 @@ export class Lowerer {
     return mapped;
   }
 
+  /** SCRIPTC_DYNCHECK_WHY probe: the FIRST leaf `canDynCheckTo`'s nested
+   * walk refuses, as a dotted path. Diagnostic path only. */
+  dynCheckRefusal(t: IrType): string {
+    const jsonSafe = (x: IrType) => isJsonSafeType(x, (id) => this.shapes.get(id), (id) => this.unions.get(id));
+    const walk = (x: IrType, path: string, stack: Set<IrType>): string | null => {
+      if (jsonSafe(x)) return null;
+      if (x.kind === "bytes" && x.elem === "u8") return null;
+      if (stack.has(x)) return null;
+      const deeper = new Set(stack).add(x);
+      if (x.kind === "array") return walk(x.elem, `${path}[]`, deeper);
+      if (x.kind === "record") {
+        const shape = this.shapes.get(x.shapeId);
+        if (!shape) return `${path}:MISSING-SHAPE`;
+        if (shape.tuple) return `${path}:TUPLE`;
+        for (const f of shape.fields) {
+          const r = walk(f.type, `${path}.${f.name}`, deeper);
+          if (r) return r;
+        }
+        if (shape.indexValue) return walk(shape.indexValue, `${path}[idx]`, deeper);
+        return null;
+      }
+      if (x.kind === "union") {
+        const def = this.unions.get(x.unionId);
+        if (!def) return `${path}:MISSING-UNION`;
+        for (const a of def.arms) {
+          if (a.kind === "undefinedT") continue;
+          const r = walk(a, `${path}|${a.kind}`, deeper);
+          if (r) return r;
+        }
+        return null;
+      }
+      return `${path}:${x.kind}${x.kind === "func" ? `(${x.params.length})` : ""}`;
+    };
+    if (t.kind !== "array" && t.kind !== "record" && t.kind !== "union") {
+      return `TOP:${t.kind}`;
+    }
+    return walk(t, "T", new Set()) ?? "NESTED-OK";
+  }
+
   /** Exact-shape enforcement (SC2002). Records are monomorphic structs, so
    * everywhere a value flows into a typed slot (call arg, initializer,
    * assignment, field, return) the shapes must MATCH — or width-coerce:
@@ -2946,6 +2985,10 @@ export class Lowerer {
     // (constructing a dyn from static values is deliberately out this
     // round; only JSON.parse results are dyn).
     if (actual.kind === "dyn") {
+      if (process.env.SCRIPTC_DYNCHECK_WHY) {
+        const ok = canDynCheckTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id));
+        console.error(`DCWHY canDynCheckTo=${ok} :: ${this.dynCheckRefusal(expected)} :: ${typeKey(expected).slice(0, 90)}`);
+      }
       this.unsupported(
         "SC1100",
         node,
