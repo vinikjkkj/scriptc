@@ -5519,6 +5519,28 @@ export const DYN_HANDLE_KINDS: ReadonlyMap<string, { tag: string; cls: string }>
   ["httpClientReq", { tag: "SCR_DYNH_HTTP_CLIENT", cls: "ClientRequest" }],
 ]);
 
+/** A record whose EVERY member is a function — a method bundle (the
+ * store-backend `{ auth(id), signal(id), ... }` shape). canConvertToDyn's
+ * record rule strands an unboxable func FIELD because the record around it
+ * carries data the receiver wants; a bundle carries nothing else, so it is
+ * the same value as a bare function for the purpose of the fence — it
+ * exists to be CALLED — and keeps the compile-time rejection a bare func
+ * and a func union arm already get. Empty records are not bundles. */
+function isMethodBundle(
+  t: IrType,
+  getRecord: (shapeId: string) => IrRecordShape | undefined,
+): boolean {
+  if (t.kind !== "record") return false;
+  const shape = getRecord(t.shapeId);
+  return (
+    !!shape &&
+    !shape.tuple &&
+    shape.indexValue === undefined &&
+    shape.fields.length > 0 &&
+    shape.fields.every((f) => f.type.kind === "func")
+  );
+}
+
 /** A static type that CONVERTS into a dyn value — the dynFrom domain:
  * JSON-safe data, bytes<u8> (payload copied), undefined-armed unions of
  * JSON-safe arms, boxable function types, and the runtime HANDLE kinds
@@ -5563,10 +5585,37 @@ export function canConvertToDyn(
     // invalid-input probes iterate `[1, null, () => {}, true]` — the
     // union's func arm crosses through the checked-dynamic function
     // boundary exactly like a bare func dynFrom).
+    //
+    // A non-func ARM follows THIS SAME predicate, not the JSON-safe one:
+    // both emitters lower a union's non-scalar arm by calling the arm's own
+    // sc_td_* converter, so an arm boxes exactly as the same type would
+    // bare. Keeping the arm on isJsonSafeType made a protobuf
+    // `Long | number | null | undefined` (whose Long arm is a record
+    // carrying `toNumber(): number` beside its data fields) fence while the
+    // bare record crossed — the same value reached two ways. A bare FUNC
+    // arm keeps its own stricter clause above; a METHOD BUNDLE arm is
+    // refused for the reason a bare func is.
     return !!def && def.arms.every((a) =>
       a.kind === "undefinedT" || isJsonSafeType(a, getRecord, getUnion) ||
-      (a.kind === "func" && canBoxFuncIntoDyn(a, getRecord, getUnion)),
+      (a.kind === "func" && canBoxFuncIntoDyn(a, getRecord, getUnion)) ||
+      (a.kind !== "func" &&
+        !isMethodBundle(a, getRecord) &&
+        canConvertToDyn(a, getRecord, getUnion, visiting)),
     );
+  }
+  // An ARRAY of a convertible ELEMENT, by the same argument as the union
+  // arm above: the emitted array converter pushes `sc_td_<elem>(e)` per
+  // slot, so whatever the element boxes to, the array does — the container
+  // adds nothing the walker must decide. isJsonSafeType and
+  // canBoxBytesComposite already answer the scalar and bytes-bearing
+  // element types; this rule adds the ones the record rule below admits.
+  // FUNC elements stay out: the per-type converter has no func case at all
+  // (a func boxes through the closure path, which only the record-field
+  // and union-arm emitters reach), so admitting them would trade a fence
+  // for an emitter crash. A METHOD BUNDLE element is refused for the
+  // reason the union arm refuses one.
+  if (t.kind === "array" && t.elem.kind !== "func" && !isMethodBundle(t.elem, getRecord)) {
+    return canConvertToDyn(t.elem, getRecord, getUnion, visiting);
   }
   // A RECORD carrying FUNCTION fields — a store bundle handed to an
   // `unknown` parameter. The walker boxes each field by its own kind, so a
