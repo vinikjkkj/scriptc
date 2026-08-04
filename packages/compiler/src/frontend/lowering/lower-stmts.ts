@@ -259,6 +259,67 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     "promise",
   ]);
 
+/** True when `id` sits in a WRITE position: an assignment target (through
+   * destructuring layers), a ++/-- operand, or a for-in/of cursor. */
+  function isWritePosition(id: ts.Identifier): boolean {
+    let n: ts.Node = id;
+    for (;;) {
+      const p: ts.Node | undefined = n.parent;
+      if (!p) return false;
+      if (ts.isBinaryExpression(p)) {
+        const k = p.operatorToken.kind;
+        return p.left === n && k >= ts.SyntaxKind.FirstAssignment && k <= ts.SyntaxKind.LastAssignment;
+      }
+      if (ts.isPrefixUnaryExpression(p) || ts.isPostfixUnaryExpression(p)) {
+        return (
+          (p.operator === ts.SyntaxKind.PlusPlusToken || p.operator === ts.SyntaxKind.MinusMinusToken) &&
+          p.operand === n
+        );
+      }
+      if (ts.isForInStatement(p) || ts.isForOfStatement(p)) return p.initializer === n;
+      if (
+        ts.isParenthesizedExpression(p) || ts.isArrayLiteralExpression(p) ||
+        ts.isObjectLiteralExpression(p) || ts.isSpreadElement(p) ||
+        ts.isSpreadAssignment(p) || ts.isShorthandPropertyAssignment(p) ||
+        (ts.isPropertyAssignment(p) && p.initializer === n)
+      ) {
+        n = p;
+        continue;
+      }
+      return false;
+    }
+  }
+
+/** Any write to `symbol` written ABOVE `decl` — the dead-zone write a TDZ
+   * box cannot model (JS throws; the box would just fill). Scans the
+   * declaration's own enclosing function body (or source file), which is
+   * the whole of the binding's scope, and only on the rare predeclare
+   * path. Conservative by position: a write above the declaration is
+   * refused even when it could only ever run later. */
+  function writeBeforeDecl(L: Lowerer, symbol: ts.Symbol, decl: ts.VariableDeclaration): boolean {
+    let scope: ts.Node = decl;
+    while (scope.parent && !ts.isSourceFile(scope) && !ts.isFunctionLike(scope) && !ts.isClassStaticBlockDeclaration(scope)) {
+      scope = scope.parent;
+    }
+    const name = decl.name as ts.Identifier;
+    const limit = decl.getStart(decl.getSourceFile());
+    let found = false;
+    const walk = (n: ts.Node): void => {
+      if (found) return;
+      // A subtree that begins below the declaration holds no earlier write.
+      if (n !== scope && n.getStart(n.getSourceFile()) >= limit) return;
+      if (ts.isIdentifier(n) && n.text === name.text && isWritePosition(n)) {
+        if (L.checker.getSymbolAtLocation(n) === symbol) {
+          found = true;
+          return;
+        }
+      }
+      ts.forEachChild(n, walk);
+    };
+    walk(scope);
+    return found;
+  }
+
 /** The hoisted-handler shape: a function declared BEFORE a const it
    * captures, in the same (or an enclosing) statement list —
    *
@@ -275,13 +336,58 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
    * threads captures normally. The source declaration later becomes the
    * initializing `assign` (lowerVarDecl consumes tdzPredeclared). Reads
    * test the box and throw Node's exact catchable ReferenceError while it
-   * is empty. CONST ONLY: `let` would need the same trap on writes, a
-   * surface nothing yet needs. */
+   * is empty.
+   *
+   * The `let x!: T` HALF — the same shape written the other way, when the
+   * declaration cannot come first because its own initializer needs the
+   * things declared in between:
+   *
+   *   const coord = makeCoordinator({ publish: (n) => dispatch.publish(n) });
+   *   let dispatch!: Dispatch                 // the binding, no value yet
+   *   dispatch = new Dispatch({ coord })      // ...and the value
+   *
+   * The binding hoists to scope entry exactly as a const does, so the box
+   * and its ReferenceError are unchanged; only two things differ. The box
+   * is MUTABLE (a `let` may be written more than once, and the write at the
+   * assignment is an ordinary `assign` into the shared box). And the source
+   * declaration has no initializer, so it is not the initializing write —
+   * it emits nothing and leaves the box empty (lowerVarDecl's second
+   * tdzPredeclared branch).
+   *
+   * Leaving it empty is where this differs from Node, in exactly one
+   * window: `let x;` gives the binding `undefined`, so a read between the
+   * DECLARATION and the assignment answers undefined in Node and throws
+   * here. Two facts make that the right trade, and both are checked below
+   * rather than assumed. The definite-assignment assertion IS the author's
+   * statement that no read happens in that window — it exists only to
+   * switch tsc's own definite-assignment analysis off, so nothing else
+   * guards it either. And the binding's type must have no representation
+   * for undefined (unassignedSlotInit answers null): those are precisely
+   * the slots the CURRENT lowering of the same declaration leaves as a raw
+   * NULL, where a read is a null dereference. A named, catchable throw is
+   * strictly safer than that, and Node throws in that window too — one
+   * statement later, on the member access. An undefined-armed type keeps
+   * today's lowering, because there the undefined is representable and
+   * answering it is exact.
+   *
+   * WRITES in the true dead zone (before the declaration) throw in JS and
+   * would merely fill the box here, so any write positioned above the
+   * declaration refuses the whole shape (writeBeforeDecl). A write BELOW it
+   * cannot run in the dead zone: a closure written below the declaration
+   * cannot be called above it. */
   export function predeclareForwardCapture(L: Lowerer, symbol: ts.Symbol): boolean {
     const decl = L.checker.valueDeclarationOf(symbol);
     if (!decl || !ts.isVariableDeclaration(decl) || decl.name === undefined || !ts.isIdentifier(decl.name)) return false;
-    if (!decl.initializer) return false;
-    if ((ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) === 0) return false;
+    const flags = ts.getCombinedNodeFlags(decl);
+    const isConst = (flags & ts.NodeFlags.Const) !== 0;
+    // `let x!: T` with no initializer is the second admitted form; every
+    // other initializer-less or non-block-scoped spelling stays out.
+    const assertedLet =
+      !isConst &&
+      (flags & ts.NodeFlags.BlockScoped) !== 0 &&
+      decl.initializer === undefined &&
+      decl.exclamationToken !== undefined;
+    if (!assertedLet && (!isConst || !decl.initializer)) return false;
     if (L.tdzPredeclared.has(symbol)) return false; // defensive: never twice
     // MODULE-scope consts are pre-registered globals (collectGlobals):
     // references resolve through globalOf after the local search fails, so
@@ -305,10 +411,24 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
       if (idx < entry.index || entry.ctx === L.ctx) return false;
       const type = L.irTypeOf(decl.name);
       if (!TDZ_KINDS.has(type.kind) || isUnitType(type)) return false;
+      if (assertedLet) {
+        // Only slots with NO representation for undefined (see above): an
+        // undefined-armed binding is readable between the declaration and
+        // the assignment, and today's lowering answers that exactly.
+        if (L.unassignedSlotInit(type, locOf(decl)) !== null) return false;
+        // A write above the declaration would be a ReferenceError in JS and
+        // a silent fill here.
+        if (writeBeforeDecl(L, symbol, decl)) return false;
+      }
       const name = decl.name.text;
       const count = entry.ctx.localCounters.get(name) ?? 0;
       entry.ctx.localCounters.set(name, count + 1);
-      const local: IrLocal = { id: `${name}.${count}`, name, type, mutable: false, boxed: true, tdz: true };
+      const local: IrLocal = { id: `${name}.${count}`, name, type, mutable: assertedLet, boxed: true, tdz: true };
+      if (assertedLet && process.env["SCRIPTC_BIND_WHY"]) {
+        const dsf = decl.getSourceFile();
+        const dl = ts.getLineAndCharacterOfPosition(dsf, decl.getStart(dsf)).line + 1;
+        console.error(`BINDTDZLET ${name} ${dsf.fileName}:${dl} type=${type.kind}`);
+      }
       entry.ctx.locals.push(local);
       entry.frame.set(symbol, local);
       entry.out.push({ kind: "varDecl", localId: local.id, init: null, loc: locOf(decl) });
@@ -362,6 +482,10 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     try {
       const t = L.irTypeOf(decl.name);
       parts.push(`type=${t.kind}`, `tdzOk=${TDZ_KINDS.has(t.kind) && !isUnitType(t) ? "y" : "n"}`);
+      // The two gates the `let x!: T` half adds, so a refusal there names
+      // itself instead of looking like the const rule simply not matching.
+      parts.push(`undefArm=${L.unassignedSlotInit(t, locOf(decl)) !== null ? "y" : "n"}`);
+      parts.push(`writeBefore=${writeBeforeDecl(L, symbol, decl) ? "y" : "n"}`);
     } catch {
       parts.push("type=<throw>");
     }
@@ -3243,6 +3367,16 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       L.tdzPredeclared.delete(declSymbol!);
       const init = L.lowerExprExpecting(decl.initializer, pre.type);
       return { kind: "assign", localId: pre.id, value: init, loc: locOf(decl) };
+    }
+    // The `let x!: T` half of the same shape: the box already exists at
+    // scope entry and there is no initializer to fill it, so the statement
+    // emits NOTHING and the box stays empty until the assignment below it.
+    // predeclareForwardCapture admitted this only for a slot with no
+    // representation for undefined, so leaving the box empty is not losing
+    // a value it could have held.
+    if (pre && !decl.initializer) {
+      L.tdzPredeclared.delete(declSymbol!);
+      return null;
     }
 
     // `var x = e` — an ASSIGNMENT into the function-scoped hoisted slot
