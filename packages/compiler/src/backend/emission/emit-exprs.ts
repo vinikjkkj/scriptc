@@ -4726,6 +4726,19 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_crypto_hash_digest_str_raw(${arg(0)}, ${arg(1)})`);
           case "crypto.hashDigestBytesRaw":
             return finish(`scr_crypto_hash_digest_bytes_raw(${arg(0)}, ${arg(1)})`);
+          // The materialized handle: construction (+1), the two updates
+          // (which answer the SAME handle, retained for the chained
+          // value), and the two digests.
+          case "crypto.createHash":
+            return finish(`scr_hash_new(${arg(0)})`);
+          case "crypto.hashUpdateStr":
+            return finish(`scr_hash_update_str(${arg(0)}, ${arg(1)})`);
+          case "crypto.hashUpdateBytes":
+            return finish(`scr_hash_update_bytes(${arg(0)}, ${arg(1)})`);
+          case "crypto.hashDigestRaw":
+            return finish(`scr_hash_digest_raw_buf(${arg(0)})`);
+          case "crypto.hashDigestEnc":
+            return finish(`scr_hash_digest_enc(${arg(0)}, ${arg(1)})`);
           // The Buffer statics (scr_bytes.c): fromStr decodes Node-
           // leniently (never throws), concat copies its borrowed list.
           case "buffer.fromStr":

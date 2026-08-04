@@ -2976,6 +2976,97 @@ ScrBytes *scr_crypto_hash_digest_bytes_raw(ScrStr *alg, ScrBytes *data) {
   return scr_hash_digest_raw_bytes(alg, data->data, data->len * scr_bytes_elem_size(data->elem));
 }
 
+/* ── The MATERIALIZED Hash handle ─────────────────────────────────────
+ * The chain above is the fast path and stays; this is what the shapes it
+ * cannot see get — the handle bound to a variable, passed through a
+ * function, updated in a loop, returned. It ACCUMULATES the message and
+ * hashes it at digest() rather than keeping a compression state: the
+ * one-shot cores above are then reused exactly, with no second
+ * implementation of the padding to keep in agreement, and everything a
+ * compiled program hashes is already resident. */
+
+ScrHash *scr_hash_new(ScrStr *alg) {
+  ScrHash *h = malloc(sizeof(ScrHash));
+  if (!h) scr_trap("scriptc: out of memory\n");
+  h->rc = 1;
+  /* Only the three the compiler admits reach here. */
+  h->alg = (alg->len == 4 && memcmp(alg->data, "sha1", 4) == 0)     ? SCR_HASH_SHA1
+           : (alg->len == 6 && memcmp(alg->data, "sha512", 6) == 0) ? SCR_HASH_SHA512
+                                                                    : SCR_HASH_SHA256;
+  h->msg = NULL;
+  h->len = 0;
+  h->cap = 0;
+  return h;
+}
+
+ScrHash *scr_hash_retain(ScrHash *h) {
+  if (h && h->rc != SIZE_MAX) h->rc++;
+  return h;
+}
+
+void scr_hash_release(ScrHash *h) {
+  if (!h || h->rc == SIZE_MAX) return;
+  if (--h->rc == 0) {
+    free(h->msg);
+    free(h);
+  }
+}
+
+void *scr_hash_retain_v(void *h) { return scr_hash_retain((ScrHash *)h); }
+void scr_hash_release_v(void *h) { scr_hash_release((ScrHash *)h); }
+
+static void scr_hash_append(ScrHash *h, const unsigned char *p, size_t n) {
+  if (n == 0) return;
+  if (h->len + n > h->cap) {
+    size_t cap = h->cap ? h->cap * 2 : 64;
+    while (cap < h->len + n) cap *= 2;
+    unsigned char *next = realloc(h->msg, cap);
+    if (!next) scr_trap("scriptc: out of memory\n");
+    h->msg = next;
+    h->cap = cap;
+  }
+  memcpy(h->msg + h->len, p, n);
+  h->len += n;
+}
+
+/* Node's update() returns the hash itself, and callers chain on it — so
+ * the answer is the same handle, retained for the value the chain hands
+ * on. Strings append their UTF-8 bytes (ScrStr storage IS utf8). */
+ScrHash *scr_hash_update_str(ScrHash *h, ScrStr *data) {
+  scr_hash_append(h, (const unsigned char *)data->data, data->len);
+  return scr_hash_retain(h);
+}
+
+ScrHash *scr_hash_update_bytes(ScrHash *h, ScrBytes *data) {
+  scr_hash_append(h, data->data, data->len * scr_bytes_elem_size(data->elem));
+  return scr_hash_retain(h);
+}
+
+/* digest() does NOT consume the handle here. Node's does — a second
+ * digest() throws ERR_CRYPTO_HASH_FINALIZED — but a compiled program that
+ * reaches the second call has already diverged, and answering the same
+ * digest is the quieter wrong answer than a use-after-free. */
+static size_t scr_hash_finish(ScrHash *h, unsigned char out[64]) {
+  const unsigned char *p = h->msg ? h->msg : (const unsigned char *)"";
+  if (h->alg == SCR_HASH_SHA1) return scr_sha1_digest(p, h->len, out);
+  if (h->alg == SCR_HASH_SHA512) return scr_sha512_digest(p, h->len, out);
+  return scr_sha256_digest(p, h->len, out);
+}
+
+ScrBytes *scr_hash_digest_raw_buf(ScrHash *h) {
+  unsigned char d[64];
+  size_t n = scr_hash_finish(h, d);
+  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)n);
+  if (n > 0) memcpy(out->data, d, n);
+  return out;
+}
+
+ScrStr *scr_hash_digest_enc(ScrHash *h, ScrStr *enc) {
+  unsigned char d[64];
+  size_t n = scr_hash_finish(h, d);
+  return scr_digest_encode(d, n, enc);
+}
+
 /* The composed `new crypto.X509Certificate(data).fingerprint` read, fused
  * by the compiler (no certificate handle exists). Node's .fingerprint IS
  * the SHA-1 of the certificate's DER bytes, uppercase colon-separated —

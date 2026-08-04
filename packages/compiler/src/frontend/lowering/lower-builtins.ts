@@ -31,7 +31,7 @@ import { HTTP2_CONSTANTS } from "./http2-constants.js";
 import { CRYPTO_CIPHERS, CRYPTO_CONSTANTS, CRYPTO_CURVES, CRYPTO_HASHES } from "./crypto-tables.js";
 import { timerStyleCallback } from "./lower-calls.js";
 import { registerHttpClientFnBinding } from "./lower-server.js";
-import { KEYOBJ, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
+import { KEYOBJ, HASH_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
 
 
 
@@ -3731,7 +3731,13 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
   export function lowerCryptoComposedCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken || access.questionDotToken) return null;
-    if (access.name.text === "digest") return lowerHashDigestChain(L, call, access);
+    // The FUSED chain gets first refusal; only what it does not recognize
+    // as a chain falls through to the materialized handle. That ordering
+    // is what keeps the fast path exactly as it was.
+    if (access.name.text === "digest") {
+      return lowerHashDigestChain(L, call, access) ?? lowerHashHandleCall(L, call, access);
+    }
+    if (access.name.text === "update") return lowerHashHandleCall(L, call, access);
     if (access.name.text !== "toString") return null;
     const recv = access.expression;
     if (!ts.isCallExpression(recv) || recv.questionDotToken) return null;
@@ -3852,6 +3858,63 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     );
   }
 
+/** `update` / `digest` on a MATERIALIZED Hash handle — the shape the
+   * fused chain cannot see, because the handle passes through a variable,
+   * a parameter, or a return before it is digested. `update` answers the
+   * SAME handle (Node returns `this`, and callers chain on it), `digest`
+   * hashes whatever accumulated. Null when the receiver is not a Hash, so
+   * every other receiver keeps whatever lowering or fence it had; null
+   * also for the other Hash members (copy, the stream surface), which keep
+   * their fence rather than being silently mislowered. */
+  function lowerHashHandleCall(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,): IrExpr | null {
+    if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "hash") return null;
+    const loc = locOf(call);
+    if (access.name.text === "update") {
+      if (call.arguments.length !== 1) {
+        L.noLowering(
+          `Hash.update with ${call.arguments.length} arguments`,
+          call,
+          "one string or Buffer argument is the lowered update (input encodings have no lowering)",
+        );
+      }
+      const dataNode = call.arguments[0]!;
+      const dataIr = L.mapTypeOf(L.typeOf(dataNode));
+      // Receiver before argument — JS evaluates it that way and the
+      // argument may have effects.
+      const recv = L.lowerExpr(access.expression);
+      if (dataIr?.kind === "bytes") {
+        const data = L.lowerExpr(dataNode);
+        return { kind: "libCall", fn: "crypto.hashUpdateBytes", args: [recv, data], type: HASH_T, loc };
+      }
+      if (dataIr?.kind === "string") {
+        const data = L.lowerExprExpecting(dataNode, STRING);
+        return { kind: "libCall", fn: "crypto.hashUpdateStr", args: [recv, data], type: HASH_T, loc };
+      }
+      L.noLowering(
+        `Hash.update of '${dataIr ? L.fmt(dataIr) : L.checker.typeToString(L.typeOf(dataNode))}' values`,
+        dataNode,
+        "string and Buffer/Uint8Array inputs are the lowered update forms",
+      );
+    }
+    if (access.name.text !== "digest") return null;
+    // A bare digest answers the raw Buffer; the encoded forms take the
+    // same two literals the fused chain takes.
+    const bare = call.arguments.length === 0;
+    const encT = call.arguments.length === 1 ? L.typeOf(call.arguments[0]!) : undefined;
+    if (!bare && (!encT?.isStringLiteralType() || (encT.value !== "hex" && encT.value !== "base64"))) {
+      L.noLowering(
+        "Hash.digest with this encoding",
+        call,
+        'hex and base64 are the lowered digests: .digest("hex"), or a bare .digest() for the raw Buffer',
+      );
+    }
+    const recv = L.lowerExpr(access.expression);
+    if (bare) return { kind: "libCall", fn: "crypto.hashDigestRaw", args: [recv], type: BYTES_U8, loc };
+    const enc = L.lowerExprExpecting(call.arguments[0]!, STRING);
+    return { kind: "libCall", fn: "crypto.hashDigestEnc", args: [recv, enc], type: STRING, loc };
+  }
+
 /** The node:crypto introspection statics — build-time constants of the
    * compiled runtime, baked at the call site (the http2.constants stance
    * extended to calls): getFips() answers 0 (no FIPS provider can ever
@@ -3879,6 +3942,28 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     bi: { module: string; member: string },
     loc: SrcLoc,): IrExpr | null {
     if (bi.module !== "crypto") return null;
+    // `createHash(alg)` STANDING ALONE — the handle the fused chain never
+    // needs. Reached only when the chain did not claim the call (the
+    // handle is bound, passed, or updated more than once), so the fast
+    // path is untouched. The algorithm still has to be a literal this
+    // runtime implements: the name is baked into the handle at
+    // construction, and a hash lowered to the wrong function is silently
+    // wrong.
+    if (bi.member === "createHash") {
+      const algNode = expr.arguments.length === 1 ? expr.arguments[0] : undefined;
+      const algT = algNode ? L.typeOf(algNode) : undefined;
+      if (!algT?.isStringLiteralType() || !LOWERED_HASH_ALGS.has(algT.value)) {
+        L.noLowering(
+          "createHash with this algorithm",
+          expr,
+          'sha256, sha512 and sha1 are the lowered algorithms: createHash("sha256") ' +
+            "(sha1 exists for the RFC 6455 Sec-WebSocket-Accept hash, sha512 for the " +
+            "Noise handshake)",
+        );
+      }
+      const alg = L.lowerExprExpecting(algNode!, STRING);
+      return { kind: "libCall", fn: "crypto.createHash", args: [alg], type: HASH_T, loc };
+    }
     // `pbkdf2Sync(password, salt, iterations, keylen, digest)` — the
     // SHA-256 derivation. The digest name must be a literal and must
     // spell sha256: deriving with a different PRF silently produces a
