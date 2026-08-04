@@ -5774,10 +5774,11 @@ export function canDynCheckTo(
       return true;
     }
   }
-  // Containers whose every leaf is JSON-safe OR a bytes<u8> -- the one
-  // non-JSON leaf the walkers know. The recursion stops there on purpose:
-  // canDynCheckTo also grants funcs and runtime handles STANDING ALONE,
-  // and those the nested walkers cannot emit (dynMatch throws on them), so
+  // Containers whose every leaf is one the nested walkers can emit:
+  // JSON-safe data, bytes<u8>, a dyn ('unknown') leaf, or a FUNCTION
+  // leaf (dynMatch tests the boxed signature, dynCheck unwraps or adapts
+  // it). Runtime HANDLE leaves are still refused — canDynCheckTo grants
+  // those STANDING ALONE, but dynMatch has no tag test for one, so
   // admitting them here would trade a fence for an emitter crash.
   //
   // `seen` guards the walk: a self-referential shape would recurse
@@ -5786,8 +5787,25 @@ export function canDynCheckTo(
   const nestedOk = (x: IrType, stack: ReadonlySet<IrType>): boolean => {
     if (isJsonSafeType(x, getRecord, getUnion)) return true;
     if (x.kind === "bytes" && x.elem === "u8") return true;
+    // A dyn ('unknown') LEAF: the target itself says "anything fits here",
+    // so there is nothing to validate. Both walkers have said so since
+    // they were written — dynMatch's record case skips dyn fields
+    // outright and its bare `dyn` case returns true; dynCheck's record
+    // case retains the subtree (a MISSING key becoming the undefined dyn
+    // value, JS's own missing-property read). Only the predicate had no
+    // case for it.
+    if (x.kind === "dyn") return true;
     if (stack.has(x)) return true;
     const deeper = new Set(stack).add(x);
+    // A FUNCTION leaf — a callable record field, which is how every
+    // protobuf message type reaches here (the Long's `toNumber`). The
+    // checked-dynamic tree's function box carries the interned typeKey it
+    // was boxed from, so dynMatch answers by comparing that signature and
+    // dynCheck unwraps the very closure. No condition on the signature is
+    // needed for the walkers to be emittable: a target they cannot ADAPT
+    // they can still exact-unwrap, and the matcher is the exact-unwrap
+    // test either way.
+    if (x.kind === "func") return true;
     if (x.kind === "array") return nestedOk(x.elem, deeper);
     if (x.kind === "record") {
       const shape = getRecord(x.shapeId);
@@ -5799,6 +5817,12 @@ export function canDynCheckTo(
     }
     if (x.kind === "union") {
       const def = getUnion(x.unionId);
+      // A func ARM is admitted like any other. It is the OPTIONAL METHOD
+      // spelling — `toNumber?: () => number` interns as
+      // union{func()=>f64, undefined} — and it stays unambiguous because
+      // the func matcher compares the boxed signature: two arms that
+      // matched the same function value would have to have the same
+      // typeKey, and a union cannot hold the same type twice.
       return !!def && def.arms.every((a) => a.kind === "undefinedT" || nestedOk(a, deeper));
     }
     return false;

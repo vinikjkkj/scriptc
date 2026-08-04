@@ -977,4 +977,39 @@ console.log("done", caught);
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toBe("done 100\n");
   });
+
+  test("a non-callable value under a METHOD field throws with the path", async () => {
+    // The func LEAF: the target's field is callable, the JSON's is a
+    // number. Node's `as` would sail through and only fail at the call
+    // site (or not at all); the check names the field.
+    // (The VALID direction is corpus-tested differentially —
+    // 2734-dyncheck-func-leaf.)
+    const r = await compileAndRun(
+      "func-leaf-not-callable",
+      `type Box = { name: string; f: () => number };
+const bad = JSON.parse('{"name":"x","f":1}') as Box;
+console.log("unreachable", bad.name);
+`,
+    );
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toContain("Uncaught TypeError: expected function at $.f, got number");
+  });
+
+  test("a method-carrying union arm declines a lookalike object", async () => {
+    // protobufjs's Long shape: the JSON has every DATA field of the object
+    // arm and a number where the method belongs, so no arm fits and the
+    // union fails as a whole rather than picking the arm on field names.
+    const r = await compileAndRun(
+      "func-arm-lookalike",
+      `type Long = { high: number; low: number; toNumber: () => number; unsigned: boolean };
+type Stamp = number | Long | null;
+const s = JSON.parse('{"high":0,"low":1,"toNumber":2,"unsigned":false}') as Stamp;
+console.log("unreachable", s === null ? "n" : "y");
+`,
+    );
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toContain("Uncaught TypeError: expected number | null | object at $, got object");
+  });
 });
