@@ -4743,6 +4743,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_hmac_new_bytes(${arg(0)}, ${arg(1)})`);
           case "crypto.createHmacStr":
             return finish(`scr_hmac_new_str(${arg(0)}, ${arg(1)})`);
+          // Throws Node's TypeError when the KeyObject is an asymmetric one.
+          case "crypto.createHmacKey":
+            return finish(`scr_hmac_new_key(${arg(0)}, ${arg(1)})`);
           case "crypto.hmacUpdateStr":
             return finish(`scr_hmac_update_str(${arg(0)}, ${arg(1)})`);
           case "crypto.hmacUpdateBytes":
@@ -5971,6 +5974,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_key_from_pkcs8(${arg(0)})`);
           case "key.fromSpki":
             return finish(`scr_key_from_spki(${arg(0)})`);
+          // Throws Node's RangeError on an empty key, like the two DER
+          // parsers above throw on a framing they do not know — the whole
+          // key.* family sits outside MAY_THROW_LIB_FNS together.
+          case "key.secretBytes":
+            return finish(`scr_key_secret_bytes(${arg(0)})`);
+          case "key.secretStr":
+            return finish(`scr_key_secret_str(${arg(0)})`);
           case "key.dh":
             return finish(`scr_key_dh(${arg(0)}, ${arg(1)})`);
           case "key.sign":
