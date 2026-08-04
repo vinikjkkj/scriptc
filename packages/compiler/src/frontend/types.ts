@@ -3998,7 +3998,7 @@ function isDataOnlyObjectType(t: ts.Type, checker: ts.TypeChecker): boolean {
  * A GENERIC alias, or one spelled with type arguments, keeps the fence: its
  * parameters are written against arguments this walk does not substitute.
  * The hop budget bounds an alias cycle the checker would have rejected. */
-function handlerFnTypeNodeOf(node: ts.TypeNode | undefined, checker: ts.TypeChecker): ts.FunctionTypeNode | null {
+export function handlerFnTypeNodeOf(node: ts.TypeNode | undefined, checker: ts.TypeChecker): ts.FunctionTypeNode | null {
   let t: ts.TypeNode | undefined = node;
   for (let hops = 0; t !== undefined && hops < 8; hops++) {
     while (t !== undefined && ts.isParenthesizedTypeNode(t)) t = t.type;
