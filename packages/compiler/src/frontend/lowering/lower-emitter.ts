@@ -1573,6 +1573,73 @@ function keyMapArity(L: Lowerer, map: ts.Type, key: string): number | null {
   return fn.parameters.length;
 }
 
+/** The NESTED convert a union payload needs: `%emit.regroup.<n>(v: U) → T`.
+ *
+ * The slot's element union U holds the event union T's ARMS — the mapping
+ * flattened them in, and an arm that is itself a union is rejected outright,
+ * so T is never one of U's own arms and no single unionNarrow can extract
+ * it. What IS true is that every arm of T sits in U by itself, which makes
+ * the value reachable arm by arm: test U's tag, extract that arm, re-wrap it
+ * under T's own tag.
+ *
+ * The LAST arm is the unconditional tail rather than a tested branch: the
+ * caller's own type says the value is a T, so no tag outside T's arms can
+ * arrive — the same trust unionNarrow already places in the checker, and it
+ * leaves the helper with no unreachable return to invent.
+ *
+ * Ownership: unionNarrow hands back a +1 payload and unionWrap MOVES it into
+ * the fresh box, so the arm value is never double-owned and the result is
+ * the one +1 the call site releases. A UNIT arm carries no payload at all
+ * (the wrap yields the interned immortal instance), so it skips the narrow —
+ * which would be an emitter error against a unit arm.
+ *
+ * Interned per (U, T). Null when any arm of T is missing from U, which
+ * fences the whole dispatcher through the caller. */
+function unionRegroupHelper(
+  L: Lowerer,
+  from: IrType & { kind: "union" },
+  to: IrType & { kind: "union" },
+  loc: SrcLoc,
+): string | null {
+  const toArms = L.unions.get(to.unionId)?.arms;
+  if (toArms === undefined || toArms.length === 0) return null;
+  const tags = toArms.map((a) => L.armTag(from.unionId, a));
+  if (tags.some((t) => t < 0)) return null;
+  const key = `emitregroup:${typeKey(from)}:${typeKey(to)}`;
+  const existing = L.widthHelpers.get(key);
+  if (existing !== undefined) return existing;
+  const name = `%emit.regroup.${L.widthHelpers.size}`;
+  L.widthHelpers.set(key, name);
+  const v = (): IrExpr => ({ kind: "varRef", localId: "v.0", type: from, loc });
+  const regrouped = (i: number): IrExpr => {
+    const arm = toArms[i]!;
+    const payload: IrExpr = isUnitType(arm)
+      ? { kind: "unitLit", unit: arm.kind === "nullT" ? "null" : "undefined", type: arm, loc }
+      : { kind: "unionNarrow", unionId: from.unionId, tag: tags[i]!, value: v(), type: arm, loc };
+    return { kind: "unionWrap", unionId: to.unionId, tag: i, value: payload, type: to, loc };
+  };
+  const body: IrStmt[] = [];
+  for (let i = 0; i < toArms.length - 1; i++) {
+    body.push({
+      kind: "if",
+      cond: { kind: "unionIsTag", unionId: from.unionId, tag: tags[i]!, negated: false, value: v(), type: BOOL, loc },
+      then: [{ kind: "return", value: regrouped(i), loc }],
+      else_: null,
+      loc,
+    });
+  }
+  body.push({ kind: "return", value: regrouped(toArms.length - 1), loc });
+  L.liftedFns.push({
+    name,
+    params: [{ localId: "v.0", name: "v", type: from }],
+    returnType: to,
+    locals: [{ id: "v.0", name: "v", type: from, mutable: false }],
+    body,
+    loc,
+  });
+  return name;
+}
+
 /** `X.emit.bind(X)` against a generic key-map slot: the dispatcher, or null
  * when any part of the shape above does not hold (the caller then keeps the
  * existing member-as-a-value diagnostic, which names the real gap). */
@@ -1625,10 +1692,14 @@ export function boundEmitDispatcher(
     if (typeEquals(elem, want)) return read;
     if (elem.kind === "union") {
       const tag = L.armTag(elem.unionId, want);
-      // A tuple type that is itself a UNION is never one of the element
-      // union's arms — the slot's mapping flattened it away — so it lands
-      // here and fences. That is the nested-convert case, not this one.
       if (tag >= 0) return { kind: "unionNarrow", unionId: elem.unionId, tag, value: read, type: want, loc };
+      // A tuple type that is itself a UNION is never one of the element
+      // union's arms — the mapping flattened it away — so it takes the
+      // nested convert instead of a single narrow.
+      if (want.kind === "union") {
+        const helper = unionRegroupHelper(L, elem, want, loc);
+        if (helper !== null) return { kind: "call", callee: helper, args: [read], type: want, loc };
+      }
     }
     return null;
   };
