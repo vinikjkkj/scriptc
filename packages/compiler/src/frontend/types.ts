@@ -481,6 +481,10 @@ function formatIrTypeInner(t: IrType, shapes: ShapeRegistry, unions: UnionRegist
       return "Hash";
     case "hmac":
       return "Hmac";
+    case "cipher":
+      return "Cipher";
+    case "decipher":
+      return "Decipher";
     case "abortSignal":
       return "AbortSignal";
     case "promise":
@@ -2224,6 +2228,36 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     )
   ) {
     return { kind: "hash" };
+  }
+
+  // node:crypto Cipher / Decipher. FOUR names map, not two: @types/node
+  // gives createCipheriv an overload per mode family, so an aes-256-gcm
+  // call is typed `CipherGCM` and an aes-256-cbc call plain `Cipher` —
+  // the same runtime handle either way, and the GCM-only members are
+  // fenced by the runtime state, not by the name.
+  if (
+    (psym?.name === "Cipher" || psym?.name === "CipherGCM" || psym?.name === "CipherCCM" ||
+      psym?.name === "CipherOCB") &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+        ctx.isStdlibFile(d.getSourceFile()) &&
+        isDeclaredInAmbientModule(d, "crypto"),
+    )
+  ) {
+    return { kind: "cipher" };
+  }
+  if (
+    (psym?.name === "Decipher" || psym?.name === "DecipherGCM" || psym?.name === "DecipherCCM" ||
+      psym?.name === "DecipherOCB") &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+        ctx.isStdlibFile(d.getSourceFile()) &&
+        isDeclaredInAmbientModule(d, "crypto"),
+    )
+  ) {
+    return { kind: "decipher" };
   }
 
   // node:crypto Hmac — Hash's twin, same story, same module check.

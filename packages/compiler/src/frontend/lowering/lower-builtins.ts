@@ -31,7 +31,7 @@ import { HTTP2_CONSTANTS } from "./http2-constants.js";
 import { CRYPTO_CIPHERS, CRYPTO_CONSTANTS, CRYPTO_CURVES, CRYPTO_HASHES } from "./crypto-tables.js";
 import { timerStyleCallback } from "./lower-calls.js";
 import { registerHttpClientFnBinding } from "./lower-server.js";
-import { KEYOBJ, HASH_T, HMAC_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
+import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
 
 
 
@@ -3737,7 +3737,15 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     if (access.name.text === "digest") {
       return lowerHashDigestChain(L, call, access) ?? lowerHashHandleCall(L, call, access);
     }
-    if (access.name.text === "update") return lowerHashHandleCall(L, call, access);
+    if (access.name.text === "update") {
+      return lowerCipherHandleCall(L, call, access) ?? lowerHashHandleCall(L, call, access);
+    }
+    if (
+      access.name.text === "final" || access.name.text === "setAAD" ||
+      access.name.text === "getAuthTag" || access.name.text === "setAuthTag"
+    ) {
+      return lowerCipherHandleCall(L, call, access);
+    }
     if (access.name.text !== "toString") return null;
     const recv = access.expression;
     if (!ts.isCallExpression(recv) || recv.questionDotToken) return null;
@@ -3768,6 +3776,23 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * exactly these three (scr_lib.c): every other name keeps its fence,
    * because a hash lowered to the wrong function is silently wrong. */
   const LOWERED_HASH_ALGS = new Set(["sha256", "sha512", "sha1"]);
+
+/** The cipher names the runtime implements (scr_cipher.c). AES-256 only,
+   * in the three modes zapo's Noise channel uses. */
+  const LOWERED_CIPHER_ALGS = new Set(["aes-256-gcm", "aes-256-cbc", "aes-256-ctr"]);
+
+/** The tags of a `Buffer | KeyObject` union — the shape `createCipheriv`'s
+   * key parameter has. Null unless the union is EXACTLY those two arms, so
+   * a wider one keeps its fence rather than being dispatched on a guess. */
+  function bytesKeyobjUnionArms(L: Lowerer, unionId: string,
+  ): { bytesTag: number; keyobjTag: number } | null {
+    const def = L.unions.get(unionId);
+    if (!def || def.arms.length !== 2) return null;
+    const bytesTag = def.arms.findIndex((a) => a.kind === "bytes" && a.elem === "u8");
+    const keyobjTag = def.arms.findIndex((a) => a.kind === "keyobj");
+    if (bytesTag < 0 || keyobjTag < 0) return null;
+    return { bytesTag, keyobjTag };
+  }
 
 /** The composed hash chain — `createHash("sha256").update(data).digest("hex")`
    * — fused into ONE libCall: the Hash handle never materializes (no Hash
@@ -3856,6 +3881,71 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       dataNode,
       "string and Buffer/Uint8Array inputs are the lowered update forms",
     );
+  }
+
+/** `update` / `final` / `setAAD` / `getAuthTag` / `setAuthTag` on a Cipher
+   * or Decipher handle. The handle is local and straight-line in every
+   * caller seen so far, but it is NOT fused into one call the way the hash
+   * chain is: `setAAD` is CONDITIONAL at its call sites, and the fused
+   * trick matches one expression, never a statement sequence with a branch
+   * in it. Null when the receiver is neither handle. */
+  function lowerCipherHandleCall(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,): IrExpr | null {
+    const recvKind = L.mapTypeOf(L.typeOf(access.expression))?.kind;
+    const dec = recvKind === "decipher";
+    if (recvKind !== "cipher" && !dec) return null;
+    const loc = locOf(call);
+    const self = dec ? DECIPHER_T : CIPHER_T;
+    const name = dec ? "Decipher" : "Cipher";
+    const member = access.name.text;
+
+    // The zero-argument member.
+    if (member === "final" || member === "getAuthTag") {
+      if (call.arguments.length !== 0) {
+        L.noLowering(
+          `${name}.${member} with arguments`,
+          call,
+          `${member}() takes none — the output-encoding forms have no lowering`,
+        );
+      }
+      if (member === "getAuthTag" && dec) return null; // not a Decipher member
+      const recv = L.lowerExpr(access.expression);
+      const fn: IrLibFn = member === "final"
+        ? (dec ? "decipher.final" : "cipher.final")
+        : "cipher.getAuthTag";
+      return { kind: "libCall", fn, args: [recv], type: BYTES_U8, loc };
+    }
+    if (member === "setAuthTag" && !dec) return null; // not a Cipher member
+
+    // The one-Buffer-argument members.
+    if (call.arguments.length !== 1) {
+      L.noLowering(
+        `${name}.${member} with ${call.arguments.length} arguments`,
+        call,
+        "one Buffer argument is the lowered form (the encoding overloads have no lowering)",
+      );
+    }
+    const dataNode = call.arguments[0]!;
+    const dataIr = L.mapTypeOf(L.typeOf(dataNode));
+    if (dataIr?.kind !== "bytes") {
+      L.noLowering(
+        `${name}.${member} of '${dataIr ? L.fmt(dataIr) : L.checker.typeToString(L.typeOf(dataNode))}' values`,
+        dataNode,
+        "Buffer/Uint8Array input is the lowered form (a string input needs an " +
+          "input encoding, which has no lowering)",
+      );
+    }
+    const recv = L.lowerExpr(access.expression);
+    const data = L.lowerExpr(dataNode);
+    if (member === "update") {
+      const fn: IrLibFn = dec ? "decipher.update" : "cipher.update";
+      return { kind: "libCall", fn, args: [recv, data], type: BYTES_U8, loc };
+    }
+    if (member === "setAAD") {
+      const fn: IrLibFn = dec ? "decipher.setAAD" : "cipher.setAAD";
+      return { kind: "libCall", fn, args: [recv, data], type: self, loc };
+    }
+    return { kind: "libCall", fn: "decipher.setAuthTag", args: [recv, data], type: self, loc };
   }
 
 /** Which digest handle a member call's receiver is, if either. The
@@ -3991,6 +4081,84 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       }
       const alg = L.lowerExprExpecting(algNode!, STRING);
       return { kind: "libCall", fn: "crypto.createHash", args: [alg], type: HASH_T, loc };
+    }
+    // `createCipheriv(alg, key, iv)` / `createDecipheriv(...)`. The
+    // algorithm must be one of the three AES-256 modes the runtime
+    // implements, as a literal: it decides the mode at construction and a
+    // cipher lowered to the wrong mode is silently wrong.
+    if (bi.member === "createCipheriv" || bi.member === "createDecipheriv") {
+      const dec = bi.member === "createDecipheriv";
+      const algNode = expr.arguments.length === 3 ? expr.arguments[0] : undefined;
+      const algT = algNode ? L.typeOf(algNode) : undefined;
+      if (!algT?.isStringLiteralType() || !LOWERED_CIPHER_ALGS.has(algT.value)) {
+        L.noLowering(
+          `${bi.member} with this algorithm`,
+          expr,
+          "aes-256-gcm, aes-256-cbc and aes-256-ctr are the lowered ciphers " +
+            "(the options argument has no lowering either)",
+        );
+      }
+      const keyNode = expr.arguments[1]!;
+      const ivNode = expr.arguments[2]!;
+      const alg = L.lowerExprExpecting(algNode!, STRING);
+      const keyIr = L.mapTypeOf(L.typeOf(keyNode));
+      const loc2 = locOf(expr);
+      const self = dec ? DECIPHER_T : CIPHER_T;
+      if (keyIr?.kind === "bytes") {
+        const key = L.lowerExpr(keyNode);
+        const iv = L.lowerExpr(ivNode);
+        const fn: IrLibFn = dec ? "decipher.newBytes" : "cipher.newBytes";
+        return { kind: "libCall", fn, args: [alg, key, iv], type: self, loc: loc2 };
+      }
+      if (keyIr?.kind === "keyobj") {
+        const key = L.lowerExpr(keyNode);
+        const iv = L.lowerExpr(ivNode);
+        const fn: IrLibFn = dec ? "decipher.newKey" : "cipher.newKey";
+        return { kind: "libCall", fn, args: [alg, key, iv], type: self, loc: loc2 };
+      }
+      // `BinaryLike | KeyObject` — the shape zapo's `AesKey` alias has, and
+      // the one @types/node declares. Both arms are lowerable, just by
+      // DIFFERENT runtime entry points, so the choice is made at runtime on
+      // the union's own tag. The key expression is read twice (once by the
+      // test, once by the chosen arm), so this is only taken when reading it
+      // twice is free and cannot repeat a side effect: a plain identifier.
+      const armed = keyIr?.kind === "union" ? bytesKeyobjUnionArms(L, keyIr.unionId) : null;
+      if (armed !== null && ts.isIdentifier(keyNode)) {
+        const iv = L.lowerExpr(ivNode);
+        const mkArm = (tag: number, armT: IrType, fn: IrLibFn): IrExpr => ({
+          kind: "libCall",
+          fn,
+          args: [
+            alg,
+            { kind: "unionNarrow", unionId: (keyIr as { unionId: string }).unionId, tag, value: L.lowerExpr(keyNode), type: armT, loc: loc2 },
+            iv,
+          ],
+          type: self,
+          loc: loc2,
+        });
+        return {
+          kind: "ternary",
+          cond: {
+            kind: "unionIsTag",
+            unionId: (keyIr as { unionId: string }).unionId,
+            tag: armed.keyobjTag,
+            negated: false,
+            value: L.lowerExpr(keyNode),
+            type: BOOL,
+            loc: loc2,
+          },
+          then: mkArm(armed.keyobjTag, KEYOBJ, dec ? "decipher.newKey" : "cipher.newKey"),
+          else_: mkArm(armed.bytesTag, BYTES_U8, dec ? "decipher.newBytes" : "cipher.newBytes"),
+          type: self,
+          loc: loc2,
+        };
+      }
+      L.noLowering(
+        `${bi.member} keyed by '${keyIr ? L.fmt(keyIr) : L.checker.typeToString(L.typeOf(keyNode))}' values`,
+        keyNode,
+        "a Buffer/Uint8Array key, a secret KeyObject, or a plain variable holding " +
+          "either (the two-armed union is chosen at runtime) are the lowered forms",
+      );
     }
     // `createSecretKey(key)` — the SYMMETRIC KeyObject. Node also takes an
     // encoding for a string key; only the default (utf8) is lowered,

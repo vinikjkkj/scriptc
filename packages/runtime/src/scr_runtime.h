@@ -2420,6 +2420,31 @@ void scr_keyobj_release_v(void *k);
 /* The scriptc-value layer (libCall targets): borrowed in, +1 out. */
 ScrKeyObject *scr_key_from_pkcs8(const ScrBytes *der);
 ScrKeyObject *scr_key_from_spki(const ScrBytes *der);
+/* ── the Cipher / Decipher handle (scr_cipher_value.c) ────────────────
+ * OPAQUE: the struct lives in its own unit so the AES primitive beside it
+ * (scr_cipher.c) stays free of every runtime type and can be compiled
+ * alone against the published vectors. Refcounted; the key schedule and
+ * chaining state are wiped on the last release. Args borrowed, results
+ * +1. update/final/setAAD/get+setAuthTag all raise Node's own errors for
+ * the states Node refuses. */
+typedef struct ScrCipher ScrCipher;
+ScrCipher *scr_cipher_new_raw(ScrStr *alg, const unsigned char *key, size_t keylen,
+                              const unsigned char *iv, size_t ivlen, bool decrypt);
+ScrCipher *scr_cipher_new_bytes(ScrStr *alg, ScrBytes *key, ScrBytes *iv, bool decrypt);
+/* Keyed by a SECRET KeyObject; lives in scr_asym.c for the same reason
+ * scr_hmac_new_key does — it reads ScrKeyObject, and that unit is linked
+ * exactly when a keyobj value reaches the IR. */
+ScrCipher *scr_cipher_new_key(ScrStr *alg, ScrKeyObject *key, ScrBytes *iv, bool decrypt);
+ScrCipher *scr_cipher_retain(ScrCipher *c);
+void scr_cipher_release(ScrCipher *c);
+void *scr_cipher_retain_v(void *c);
+void scr_cipher_release_v(void *c);
+ScrCipher *scr_cipher_set_aad(ScrCipher *c, ScrBytes *aad);
+ScrBytes *scr_cipher_update(ScrCipher *c, ScrBytes *data);
+ScrBytes *scr_cipher_final(ScrCipher *c);
+ScrBytes *scr_cipher_get_auth_tag(ScrCipher *c);
+ScrCipher *scr_cipher_set_auth_tag(ScrCipher *c, ScrBytes *tag);
+
 /* createSecretKey(bytes | string): a symmetric KeyObject over a COPY of
  * the material (Node reads the buffer once; the caller may overwrite it
  * afterwards). Every length is legal, zero included — Node accepts that. */
