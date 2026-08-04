@@ -477,6 +477,10 @@ function formatIrTypeInner(t: IrType, shapes: ShapeRegistry, unions: UnionRegist
       return "bigint";
     case "keyobj":
       return "KeyObject";
+    case "hash":
+      return "Hash";
+    case "hmac":
+      return "Hmac";
     case "abortSignal":
       return "AbortSignal";
     case "promise":
@@ -2200,6 +2204,39 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     )
   ) {
     return { kind: "keyobj" };
+  }
+
+  // node:crypto Hash — the handle createHash mints. The FUSED chain
+  // (createHash(a).update(d).digest(e)) is still lowered as one libCall
+  // with no handle in sight; this mapping is what lets the handle exist
+  // as an ordinary value when the chain is broken up — bound to a
+  // variable, handed to a function, updated in a loop, returned.
+  // Module-checked like SecureContext: @types/node declares `class Hash`
+  // inside `declare module "crypto"` and the shipped fallback mirrors it
+  // as an interface.
+  if (
+    psym?.name === "Hash" &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+        ctx.isStdlibFile(d.getSourceFile()) &&
+        isDeclaredInAmbientModule(d, "crypto"),
+    )
+  ) {
+    return { kind: "hash" };
+  }
+
+  // node:crypto Hmac — Hash's twin, same story, same module check.
+  if (
+    psym?.name === "Hmac" &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+        ctx.isStdlibFile(d.getSourceFile()) &&
+        isDeclaredInAmbientModule(d, "crypto"),
+    )
+  ) {
+    return { kind: "hmac" };
   }
 
   if (

@@ -2424,16 +2424,68 @@ ScrPromise *scr_key_verify_async(const ScrBytes *msg, const ScrKeyObject *key,
 ScrPromise *scr_key_gen_async(double curve, bool want_private);
 ScrStr *scr_crypto_random_string(double n, ScrStr *enc); /* +1, or throws */
 /* The composed createHash(alg).update(data).digest(enc) chain, fused by
- * the compiler (no Hash handle exists). alg is "sha256" | "sha1" and enc
- * "hex" | "base64" — compile-time literals, frontend-fenced (sha1 exists
- * for the RFC 6455 Sec-WebSocket-Accept hash). Strings hash their UTF-8
- * bytes (Node's default input encoding; ScrStr storage IS utf8), the
- * bytes form a Buffer/typed array's raw bytes. Borrowed; +1 string.
- * Never throw. */
+ * the compiler (no Hash handle exists). alg is "sha256" | "sha512" |
+ * "sha1" and enc "hex" | "base64" — compile-time literals,
+ * frontend-fenced (sha1 exists for the RFC 6455 Sec-WebSocket-Accept
+ * hash, sha512 for the Noise handshake). Strings hash their UTF-8 bytes
+ * (Node's default input encoding; ScrStr storage IS utf8), the bytes form
+ * a Buffer/typed array's raw bytes. Borrowed; +1 string. Never throw. */
 ScrStr *scr_crypto_hash_digest_str(ScrStr *alg, ScrStr *data, ScrStr *enc);
 ScrStr *scr_crypto_hash_digest_bytes(ScrStr *alg, ScrBytes *data, ScrStr *enc);
 ScrBytes *scr_crypto_hash_digest_str_raw(ScrStr *alg, ScrStr *data);
 ScrBytes *scr_crypto_hash_digest_bytes_raw(ScrStr *alg, ScrBytes *data);
+
+/* The MATERIALIZED Hash handle — what a program gets when the chain above
+ * is broken up (the handle bound to a variable, handed to a function,
+ * updated in a loop, returned). Refcounted, MUTABLE: update() appends to
+ * the message, digest() hashes what accumulated. Holding the message
+ * rather than a compression state is deliberate — it reuses the one-shot
+ * digests verbatim, and every input a compiled program hashes is already
+ * in memory. update() answers the SAME handle (Node returns `this`), +1
+ * for the chained value. Args borrowed; results +1. Never throw except on
+ * allocation failure (which traps). */
+typedef struct ScrHash {
+  size_t rc;
+  int alg; /* SCR_HASH_SHA256 | SCR_HASH_SHA512 | SCR_HASH_SHA1 */
+  unsigned char *msg;
+  size_t len, cap;
+} ScrHash;
+#define SCR_HASH_SHA256 0
+#define SCR_HASH_SHA512 1
+#define SCR_HASH_SHA1 2
+ScrHash *scr_hash_new(ScrStr *alg);
+ScrHash *scr_hash_retain(ScrHash *h);
+void scr_hash_release(ScrHash *h);
+void *scr_hash_retain_v(void *h);
+void scr_hash_release_v(void *h);
+ScrHash *scr_hash_update_str(ScrHash *h, ScrStr *data);
+ScrHash *scr_hash_update_bytes(ScrHash *h, ScrBytes *data);
+ScrBytes *scr_hash_digest_raw_buf(ScrHash *h);
+ScrStr *scr_hash_digest_enc(ScrHash *h, ScrStr *enc);
+
+/* Hash's twin for createHmac (RFC 2104): the same accumulate-then-compute
+ * handle with a key beside the message. The key is COPIED at construction
+ * and WIPED on the last release. Block size is the hash's own — 64 for
+ * sha1/sha256, 128 for sha512. */
+typedef struct ScrHmac {
+  size_t rc;
+  int alg;
+  unsigned char *msg;
+  size_t len, cap;
+  unsigned char *key;
+  size_t keylen;
+} ScrHmac;
+ScrHmac *scr_hmac_new_raw(ScrStr *alg, const unsigned char *key, size_t keylen);
+ScrHmac *scr_hmac_new_bytes(ScrStr *alg, ScrBytes *key);
+ScrHmac *scr_hmac_new_str(ScrStr *alg, ScrStr *key);
+ScrHmac *scr_hmac_retain(ScrHmac *h);
+void scr_hmac_release(ScrHmac *h);
+void *scr_hmac_retain_v(void *h);
+void scr_hmac_release_v(void *h);
+ScrHmac *scr_hmac_update_str(ScrHmac *h, ScrStr *data);
+ScrHmac *scr_hmac_update_bytes(ScrHmac *h, ScrBytes *data);
+ScrBytes *scr_hmac_digest_raw_buf(ScrHmac *h);
+ScrStr *scr_hmac_digest_enc(ScrHmac *h, ScrStr *enc);
 /* One-shot raw digest/HMAC by algorithm name ("md5" | "sha1" | "sha256")
  * — the island crypto shim's bridge (scr_island.c host hooks). Digest
  * bytes into out (≥32); returns the digest length, 0 for an unknown
