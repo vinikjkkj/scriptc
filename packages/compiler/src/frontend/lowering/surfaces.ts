@@ -1234,7 +1234,7 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     ...Object.fromEntries(
       [
         "generateKeyPair", "generateKeyPairSync", "generateKey", "generateKeySync",
-        "createPrivateKey", "createPublicKey", "createSecretKey",
+        "createPrivateKey", "createPublicKey",
         "createSign", "createVerify", "sign", "verify",
         "createDiffieHellman", "createDiffieHellmanGroup", "getDiffieHellman",
         "createECDH", "diffieHellman",

@@ -3992,10 +3992,32 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       const alg = L.lowerExprExpecting(algNode!, STRING);
       return { kind: "libCall", fn: "crypto.createHash", args: [alg], type: HASH_T, loc };
     }
+    // `createSecretKey(key)` — the SYMMETRIC KeyObject. Node also takes an
+    // encoding for a string key; only the default (utf8) is lowered,
+    // because ScrStr storage IS utf8 and any other encoding would need a
+    // decode this call has no business doing.
+    if (bi.member === "createSecretKey" && expr.arguments.length === 1) {
+      const keyNode = expr.arguments[0]!;
+      const keyIr = L.mapTypeOf(L.typeOf(keyNode));
+      if (keyIr?.kind === "bytes") {
+        const key = L.lowerExpr(keyNode);
+        return { kind: "libCall", fn: "key.secretBytes", args: [key], type: KEYOBJ, loc };
+      }
+      if (keyIr?.kind === "string") {
+        const key = L.lowerExprExpecting(keyNode, STRING);
+        return { kind: "libCall", fn: "key.secretStr", args: [key], type: KEYOBJ, loc };
+      }
+      L.noLowering(
+        `createSecretKey over '${keyIr ? L.fmt(keyIr) : L.checker.typeToString(L.typeOf(keyNode))}' values`,
+        keyNode,
+        "string and Buffer/Uint8Array key material are the lowered forms",
+      );
+    }
     // `createHmac(alg, key)` — Hash's twin. Same algorithm gate; the key
-    // is a Buffer or a string (Node's BinaryLike). A KeyObject key would
-    // need the secret-key surface, which this runtime does not have, so
-    // it keeps its fence.
+    // is a Buffer, a string, or a secret KeyObject (Node's BinaryLike |
+    // KeyObject). An ASYMMETRIC KeyObject reaches the same call — nothing
+    // in the type distinguishes them — and the runtime refuses it there,
+    // which is what Node does too.
     if (bi.member === "createHmac") {
       const algNode = expr.arguments.length === 2 ? expr.arguments[0] : undefined;
       const algT = algNode ? L.typeOf(algNode) : undefined;
@@ -4016,6 +4038,10 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       if (keyIr?.kind === "string") {
         const key = L.lowerExprExpecting(keyNode, STRING);
         return { kind: "libCall", fn: "crypto.createHmacStr", args: [alg, key], type: HMAC_T, loc };
+      }
+      if (keyIr?.kind === "keyobj") {
+        const key = L.lowerExpr(keyNode);
+        return { kind: "libCall", fn: "crypto.createHmacKey", args: [alg, key], type: HMAC_T, loc };
       }
       L.noLowering(
         `createHmac keyed by '${keyIr ? L.fmt(keyIr) : L.checker.typeToString(L.typeOf(keyNode))}' values`,

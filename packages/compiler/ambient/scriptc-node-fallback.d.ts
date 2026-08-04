@@ -1233,7 +1233,7 @@ declare module "crypto" {
     digest(encoding: "hex" | "base64"): string;
     digest(): Buffer;
   }
-  export function createHmac(algorithm: string, key: string | Uint8Array): Hmac;
+  export function createHmac(algorithm: string, key: string | Uint8Array | KeyObject): Hmac;
   /* The asymmetric key-object slice, all of it lowered: an OPAQUE handle
    * with no members of its own -- it only flows into the calls below --
    * plus the two ways to make one, the X25519 agreement, and the Ed25519
@@ -1259,6 +1259,10 @@ declare module "crypto" {
     format: "der" | "pem";
     type?: "spki";
   }): KeyObject;
+  /* The SYMMETRIC KeyObject — the same opaque handle, carrying arbitrary
+   * key material instead of a curve point. Node's encoding argument for a
+   * string key is not lowered: only its default (utf8) is. */
+  export function createSecretKey(key: Uint8Array | string): KeyObject;
   export function diffieHellman(options: {
     privateKey: KeyObject;
     publicKey: KeyObject;
