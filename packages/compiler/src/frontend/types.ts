@@ -3266,7 +3266,13 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
           // fully-mapped arms — fill it in with them. Leaving it empty
           // would strand a degenerate union in whatever already holds it;
           // inventing arms would strand a false one.
-          if (arms.length >= 2) unions.finalizeRecursive(widened, arms);
+          if (arms.length >= 2) {
+            const id = unions.finalizeRecursive(widened, arms);
+            const answer: IrType = { kind: "union", unionId: id };
+            if (referencesPendingPlaceholder(answer, unions, ctx.shapes) !== null) return null;
+            frameOk = true;
+            return answer;
+          }
           return null;
         }
         frameOk = true;
@@ -4203,7 +4209,10 @@ function mapRecordType(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
   const sensitivityAtEntry = contextResolutions;
   try {
     const inner = mapRecordTypeInner(widened, ctx);
-    if (inner === null) return null; // a pending placeholder, if minted, stays unfinalized (prunes as unreachable)
+    if (inner === null) {
+      if (process.env["SCRIPTC_DOORS"] !== undefined && shapes.recursivePending(widened)) console.error("[doors] saiu por inner===null");
+      return null;
+    } // a pending placeholder, if minted, stays unfinalized (prunes as unreachable)
     if (!("fields" in inner)) {
       // A whole-type answer (the jsval/dyn absorbs, the header-family
       // canonical shape). If a back-reference minted a placeholder for
@@ -4216,7 +4225,16 @@ function mapRecordType(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
       // The knot closed through this shape. Context-sensitive frames
       // (generic type parameters, mixin instantiations) cannot intern by
       // checker-type identity — fence recursive generic-open shapes.
-      if (contextResolutions !== sensitivityAtEntry) return null;
+      if (contextResolutions !== sensitivityAtEntry) {
+        // The frame refuses to cache by ts.Type identity, but `inner.fields`
+        // are its REAL, fully-mapped fields and a back-reference already took
+        // the placeholder. Fill it before refusing — the union frame does
+        // exactly this. Leaving it empty strands a fieldless record in
+        // whatever holds it.
+        if (process.env["SCRIPTC_DOORS"] !== undefined) console.error("[doors] saiu pela SENSIVEL (finalizou)");
+        shapes.finalizeRecursive(widened, inner.fields, inner.indexValue, inner.declaredOrder);
+        return null;
+      }
       return {
         kind: "record",
         shapeId: shapes.finalizeRecursive(widened, inner.fields, inner.indexValue, inner.declaredOrder),
