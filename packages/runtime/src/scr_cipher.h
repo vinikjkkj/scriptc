@@ -89,6 +89,35 @@ typedef struct ScrGcm {
 } ScrGcm;
 
 void scr_gcm256_init(ScrGcm *g, const unsigned char key[SCR_AES256_KEY]);
+
+/* The STREAMING form, for a Cipher handle whose update() must return the
+ * same bytes at the same call Node's does. GHASH absorbs whole blocks
+ * only, so the context buffers up to 15 bytes between calls; the
+ * keystream needs no buffering beyond its counter because CTR is a stream
+ * cipher. Order is fixed and matches Node: aad() before the first
+ * update(), then update() any number of times, then finish(). */
+typedef struct ScrGcmCtx {
+  ScrGcm g;
+  unsigned char j0[SCR_AES_BLOCK];
+  unsigned char ctr[SCR_AES_BLOCK];
+  uint64_t y[2];                  /* running GHASH */
+  unsigned char buf[SCR_AES_BLOCK]; /* partial GHASH block */
+  size_t buflen;
+  uint64_t aad_len, ct_len;
+  unsigned char ks[SCR_AES_BLOCK]; /* keystream remainder */
+  size_t ksleft;
+  bool in_data; /* aad is closed once the first update lands */
+} ScrGcmCtx;
+
+void scr_gcm256_start(ScrGcmCtx *c, const unsigned char key[SCR_AES256_KEY],
+                      const unsigned char *iv, size_t iv_len);
+void scr_gcm256_aad(ScrGcmCtx *c, const unsigned char *p, size_t n);
+/* Encrypts (or decrypts) n bytes and hashes the CIPHERTEXT side, whichever
+ * that is. Writes exactly n bytes to out — the caller sees them at the
+ * same call Node does. */
+void scr_gcm256_stream(ScrGcmCtx *c, bool decrypt, const unsigned char *in, size_t n,
+                       unsigned char *out);
+void scr_gcm256_finish(ScrGcmCtx *c, unsigned char tag[SCR_GCM_TAG]);
 void scr_gcm256_encrypt(const ScrGcm *g, const unsigned char *iv, size_t iv_len,
                         const unsigned char *aad, size_t aad_len,
                         const unsigned char *in, size_t len,

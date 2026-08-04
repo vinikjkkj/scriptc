@@ -4746,6 +4746,28 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // Throws Node's TypeError when the KeyObject is an asymmetric one.
           case "crypto.createHmacKey":
             return finish(`scr_hmac_new_key(${arg(0)}, ${arg(1)})`);
+          // The cipher family. Every one may raise one of Node's refusals.
+          case "cipher.newBytes":
+            return finish(`scr_cipher_new_bytes(${arg(0)}, ${arg(1)}, ${arg(2)}, false)`);
+          case "decipher.newBytes":
+            return finish(`scr_cipher_new_bytes(${arg(0)}, ${arg(1)}, ${arg(2)}, true)`);
+          case "cipher.newKey":
+            return finish(`scr_cipher_new_key(${arg(0)}, ${arg(1)}, ${arg(2)}, false)`);
+          case "decipher.newKey":
+            return finish(`scr_cipher_new_key(${arg(0)}, ${arg(1)}, ${arg(2)}, true)`);
+          case "cipher.update":
+          case "decipher.update":
+            return finish(`scr_cipher_update(${arg(0)}, ${arg(1)})`);
+          case "cipher.final":
+          case "decipher.final":
+            return finish(`scr_cipher_final(${arg(0)})`);
+          case "cipher.setAAD":
+          case "decipher.setAAD":
+            return finish(`scr_cipher_set_aad(${arg(0)}, ${arg(1)})`);
+          case "cipher.getAuthTag":
+            return finish(`scr_cipher_get_auth_tag(${arg(0)})`);
+          case "decipher.setAuthTag":
+            return finish(`scr_cipher_set_auth_tag(${arg(0)}, ${arg(1)})`);
           case "crypto.hmacUpdateStr":
             return finish(`scr_hmac_update_str(${arg(0)}, ${arg(1)})`);
           case "crypto.hmacUpdateBytes":

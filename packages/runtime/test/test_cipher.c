@@ -280,6 +280,66 @@ static void test_gcm_iv_lengths(void) {
   }
 }
 
+/* The STREAMING context must agree with the one-shot it shares a core
+ * with, at every split — including splits that land mid-block, which is
+ * where a keystream that restarted per call or a GHASH that padded per
+ * call would show. */
+static void test_gcm_streaming(void) {
+  unsigned char key[32], iv[12], aad[20], pt[70], ct1[70], ct2[70], t1[16], t2[16], back[70];
+  unhex("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4", key);
+  for (int i = 0; i < 12; i++) iv[i] = (unsigned char)(i + 9);
+  for (int i = 0; i < 20; i++) aad[i] = (unsigned char)(i * 3);
+  for (int i = 0; i < 70; i++) pt[i] = (unsigned char)(i * 5 + 2);
+
+  ScrGcm g;
+  scr_gcm256_init(&g, key);
+  scr_gcm256_encrypt(&g, iv, 12, aad, 20, pt, 70, ct1, t1);
+
+  const size_t splits[][3] = {{0, 0, 70}, {1, 1, 68}, {15, 1, 54}, {16, 16, 38},
+                              {17, 33, 20}, {70, 0, 0}, {35, 35, 0}};
+  for (size_t s = 0; s < sizeof splits / sizeof *splits; s++) {
+    ScrGcmCtx c;
+    scr_gcm256_start(&c, key, iv, 12);
+    /* aad in two pieces too, to exercise its buffer */
+    scr_gcm256_aad(&c, aad, 7);
+    scr_gcm256_aad(&c, aad + 7, 13);
+    size_t off = 0;
+    for (int p = 0; p < 3; p++) {
+      scr_gcm256_stream(&c, false, pt + off, splits[s][p], ct2 + off);
+      off += splits[s][p];
+    }
+    scr_gcm256_finish(&c, t2);
+    check("streaming GCM ciphertext equals one-shot", ct2, ct1, 70);
+    check("streaming GCM tag equals one-shot", t2, t1, 16);
+
+    /* And the decrypt direction, in place. */
+    ScrGcmCtx d;
+    scr_gcm256_start(&d, key, iv, 12);
+    scr_gcm256_aad(&d, aad, 20);
+    memcpy(back, ct1, 70);
+    off = 0;
+    for (int p = 0; p < 3; p++) {
+      scr_gcm256_stream(&d, true, back + off, splits[s][p], back + off);
+      off += splits[s][p];
+    }
+    scr_gcm256_finish(&d, t2);
+    check("streaming GCM decrypt in place", back, pt, 70);
+    check("streaming GCM decrypt tag", t2, t1, 16);
+  }
+
+  /* An aad-only message, and a message with neither. */
+  ScrGcmCtx c;
+  scr_gcm256_start(&c, key, iv, 12);
+  scr_gcm256_aad(&c, aad, 20);
+  scr_gcm256_finish(&c, t2);
+  scr_gcm256_encrypt(&g, iv, 12, aad, 20, NULL, 0, NULL, t1);
+  check("streaming GCM aad-only tag", t2, t1, 16);
+  scr_gcm256_start(&c, key, iv, 12);
+  scr_gcm256_finish(&c, t2);
+  scr_gcm256_encrypt(&g, iv, 12, NULL, 0, NULL, 0, NULL, t1);
+  check("streaming GCM empty tag", t2, t1, 16);
+}
+
 int main(void) {
   test_block();
   test_cbc_vectors();
@@ -287,6 +347,7 @@ int main(void) {
   test_cbc_padding();
   test_gcm_vectors();
   test_gcm_iv_lengths();
+  test_gcm_streaming();
   if (failures != 0) {
     printf("%d cipher assertion(s) failed\n", failures);
     return 1;

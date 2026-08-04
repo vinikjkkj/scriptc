@@ -1648,6 +1648,8 @@ export class CEmitter {
       // A Hash or Hmac handle is an object too: truthy whenever it exists.
       case "hash":
       case "hmac":
+      case "cipher":
+      case "decipher":
       // A signal handle is an object: always truthy when present.
       case "abortSignal":
         return `${t.name} != NULL`;
