@@ -49,3 +49,20 @@ console.log(createHash("sha1").update("abc").digest("base64"));
 console.log(createHash("sha256").update("abc").digest("base64"));
 console.log(createHash("sha1").update("x".repeat(200)).digest("hex"));
 
+// sha512 — the Noise handshake digest. 128-byte blocks and a 16-byte
+// length field, so the block boundaries sit elsewhere than sha256's:
+// 111 fits one block, 112 forces a second, 128 and 256 are exact.
+console.log(createHash("sha512").update("").digest("hex"));
+console.log(createHash("sha512").update("abc").digest("hex"));
+console.log(crypto.createHash("sha512").update("hello world").digest("hex"));
+console.log(createHash("sha512").update("a".repeat(111)).digest("hex"));
+console.log(createHash("sha512").update("a".repeat(112)).digest("hex"));
+console.log(createHash("sha512").update("a".repeat(128)).digest("hex"));
+console.log(createHash("sha512").update("a".repeat(129)).digest("hex"));
+console.log(createHash("sha512").update("a".repeat(256)).digest("hex"));
+console.log(createHash("sha512").update("a".repeat(300)).digest("hex"));
+console.log(createHash("sha512").update("héllo wörld — ünïcode ✓").digest("hex"));
+console.log(createHash("sha512").update("abc").digest("base64"));
+console.log(createHash("sha512").update(Buffer.from([0, 1, 2, 255, 128, 0])).digest("hex"));
+console.log(Buffer.from(createHash("sha512").update("abc").digest()).toString("hex"));
+

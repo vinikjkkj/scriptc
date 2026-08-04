@@ -1215,13 +1215,15 @@ declare module "crypto" {
   export function randomUUID(): string;
   export function randomBytes(size: number): Buffer;
   /* The lowered Hash surface is exactly the COMPOSED chain
-   * createHash("sha256" | "sha1").update(data).digest("hex" | "base64")
-   * — fused into one call, the Hash handle never materializes (holding
-   * one fences). sha1 exists for the RFC 6455 Sec-WebSocket-Accept
-   * hash. */
+   * createHash("sha256" | "sha512" | "sha1").update(data).digest() —
+   * fused into one call, the Hash handle never materializes (holding one
+   * fences). The bare digest answers the raw Buffer; "hex"/"base64"
+   * answer the encoded string. sha1 exists for the RFC 6455
+   * Sec-WebSocket-Accept hash, sha512 for the Noise handshake. */
   export interface Hash {
     update(data: string | Uint8Array): Hash;
     digest(encoding: "hex" | "base64"): string;
+    digest(): Buffer;
   }
   export function createHash(algorithm: string): Hash;
   /* The asymmetric key-object slice, all of it lowered: an OPAQUE handle

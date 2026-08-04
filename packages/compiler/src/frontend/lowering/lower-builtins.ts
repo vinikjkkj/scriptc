@@ -3758,6 +3758,11 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     return { kind: "libCall", fn: "crypto.randomBytesToString", args: [size, enc], type: STRING, loc };
   }
 
+/** The algorithm literals `createHash` lowers. The runtime implements
+   * exactly these three (scr_lib.c): every other name keeps its fence,
+   * because a hash lowered to the wrong function is silently wrong. */
+  const LOWERED_HASH_ALGS = new Set(["sha256", "sha512", "sha1"]);
+
 /** The composed hash chain — `createHash("sha256").update(data).digest("hex")`
    * — fused into ONE libCall: the Hash handle never materializes (no Hash
    * type exists in the value model), exactly the randomBytesToString
@@ -3791,12 +3796,13 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     if (!bi || bi.module !== "crypto" || bi.member !== "createHash") return null;
     const loc = locOf(call);
     const algT = chCall.arguments.length === 1 ? L.typeOf(chCall.arguments[0]!) : undefined;
-    if (!algT?.isStringLiteralType() || (algT.value !== "sha256" && algT.value !== "sha1")) {
+    if (!algT?.isStringLiteralType() || !LOWERED_HASH_ALGS.has(algT.value)) {
       L.noLowering(
         "createHash with this algorithm",
         chCall,
-        'sha256 and sha1 are the lowered algorithms: createHash("sha256") ' +
-          "(sha1 exists for the RFC 6455 Sec-WebSocket-Accept hash)",
+        'sha256, sha512 and sha1 are the lowered algorithms: createHash("sha256") ' +
+          "(sha1 exists for the RFC 6455 Sec-WebSocket-Accept hash, sha512 for the " +
+          "Noise handshake)",
       );
     }
     if (updateCall.arguments.length !== 1) {
