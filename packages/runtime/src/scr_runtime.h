@@ -2376,12 +2376,24 @@ ScrStr *scr_crypto_random_uuid(void);
  * Primitives come from the vendored Monocypher (scr_asym.c). */
 #define SCR_CURVE_X25519 0
 #define SCR_CURVE_ED25519 1
+/* Not a curve: a SYMMETRIC secret (createSecretKey). Node's KeyObject
+ * spans both, with `type` reading 'secret' instead of 'private'/'public',
+ * so one struct spans both here too — the alternative would be a second
+ * value-model kind that @types/node gives no way to tell apart (both
+ * spellings are just `KeyObject`). The secret is arbitrary-length, so it
+ * lives in `secret`/`secret_len` rather than in `raw`, and every
+ * asymmetric entry point REFUSES it by curve — the same refusal Node
+ * raises (ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE). */
+#define SCR_KEY_SECRET 2
 
 typedef struct ScrKeyObject {
   size_t rc;
   int curve;
   bool is_private;
   unsigned char raw[32];
+  /* SCR_KEY_SECRET only; NULL otherwise. Wiped on the last release. */
+  unsigned char *secret;
+  size_t secret_len;
 } ScrKeyObject;
 
 ScrKeyObject *scr_keyobj_new(int curve, bool is_private, const unsigned char raw[32]);
@@ -2408,6 +2420,18 @@ void scr_keyobj_release_v(void *k);
 /* The scriptc-value layer (libCall targets): borrowed in, +1 out. */
 ScrKeyObject *scr_key_from_pkcs8(const ScrBytes *der);
 ScrKeyObject *scr_key_from_spki(const ScrBytes *der);
+/* createSecretKey(bytes | string): a symmetric KeyObject over a COPY of
+ * the material (Node reads the buffer once; the caller may overwrite it
+ * afterwards). Every length is legal, zero included — Node accepts that. */
+ScrKeyObject *scr_key_secret_bytes(const ScrBytes *key);
+ScrKeyObject *scr_key_secret_str(const ScrStr *key);
+/* Which half a KeyObject is — the POINTER below cannot answer it, since a
+ * zero-length secret key has a NULL `secret` too. */
+bool scr_keyobj_is_secret(const ScrKeyObject *k);
+/* The secret's bytes and length — symmetricKeySize, and what the keyed
+ * primitives read. NULL/0 for an asymmetric key. */
+const unsigned char *scr_keyobj_secret(const ScrKeyObject *k, size_t *len);
+double scr_key_secret_size(const ScrKeyObject *k);
 ScrBytes *scr_key_dh(const ScrKeyObject *priv, const ScrKeyObject *pub);
 ScrBytes *scr_key_sign(const ScrBytes *msg, const ScrKeyObject *key);
 bool scr_key_verify(const ScrBytes *msg, const ScrKeyObject *key, const ScrBytes *sig);
@@ -2478,6 +2502,11 @@ typedef struct ScrHmac {
 ScrHmac *scr_hmac_new_raw(ScrStr *alg, const unsigned char *key, size_t keylen);
 ScrHmac *scr_hmac_new_bytes(ScrStr *alg, ScrBytes *key);
 ScrHmac *scr_hmac_new_str(ScrStr *alg, ScrStr *key);
+/* Keyed by a SECRET KeyObject (createSecretKey); an asymmetric one throws
+ * Node's TypeError. Declared here, defined in scr_lib.c — the ScrKeyObject
+ * it reads lives in scr_asym.c, which cc.ts links whenever a keyobj value
+ * reaches the IR, and this call is only emitted when one does. */
+ScrHmac *scr_hmac_new_key(ScrStr *alg, ScrKeyObject *key);
 ScrHmac *scr_hmac_retain(ScrHmac *h);
 void scr_hmac_release(ScrHmac *h);
 void *scr_hmac_retain_v(void *h);
