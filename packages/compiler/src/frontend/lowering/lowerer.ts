@@ -3238,27 +3238,18 @@ export class Lowerer {
     // checked-cast machinery, applied automatically. Trust-but-verify,
     // exactly the island exit's stance: a value that doesn't match the
     // slot's type throws a catchable TypeError instead of misreading the
-    // payload. Only dynCheck's own domain (JSON-representable types,
-    // undefined-armed unions of those, bytes<u8>, the %Error root)
-    // converts; everything else keeps requireExactShape's SC1100 fence.
+    // payload. The domain is canDynCheckTo — the SAME predicate the `as T`
+    // cast path (lower-exprs) and the IR validator's dynCheck rule already
+    // apply, so a target the validator would accept is a target this
+    // conversion offers. It used to be a hand-rolled subset written out
+    // here (jsonSafe / undefined-armed union of jsonSafe arms / bytes<u8>
+    // / %Error / adaptable func), and the subset had DRIFTED: it refused
+    // every composite carrying a bytes<u8> LEAF — `Uint8Array | null`, a
+    // record of Uint8Array fields — which canDynCheckTo's nested walk
+    // grants and both emitters already walk field by field. Everything
+    // outside it keeps requireExactShape's SC1100 fence.
     if (expr.type.kind === "dyn" && expected.kind !== "dyn") {
-      const undefArmedOk =
-        expected.kind === "union" &&
-        (this.unions
-          .get(expected.unionId)
-          ?.arms.every((a) => a.kind === "undefinedT" || this.jsonSafe(a)) ??
-          false);
-      const bytesOk = expected.kind === "bytes" && expected.elem === "u8";
-      const errorOk = expected.kind === "object" && expected.className === "%Error";
-      // ADAPTABLE function targets (the checked-dynamic function
-      // boundary's OUT direction — `const wrapped: F = mustCall(fn)`):
-      // check callable-kind, then unwrap an identical boxed signature
-      // directly or adapt through a per-target shim that dynChecks
-      // arguments/results per F.
-      const funcOk =
-        expected.kind === "func" &&
-        canAdaptDynFuncTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id));
-      if (this.jsonSafe(expected) || undefArmedOk || bytesOk || errorOk || funcOk) {
+      if (canDynCheckTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id))) {
         return { kind: "dynCheck", value: expr, type: expected, loc: expr.loc };
       }
       return expr;
