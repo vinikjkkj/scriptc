@@ -2876,6 +2876,10 @@ export type IrLibFn =
    * release. */
   | "crypto.createHmacBytes"
   | "crypto.createHmacStr"
+  /** ...and keyed by a secret KeyObject. An ASYMMETRIC KeyObject reaches
+   * the same call — @types/node has one spelling for both — and the
+   * runtime refuses it, as Node does. */
+  | "crypto.createHmacKey"
   | "crypto.hmacUpdateStr"
   | "crypto.hmacUpdateBytes"
   | "crypto.hmacDigestRaw"
@@ -3713,6 +3717,14 @@ export type IrLibFn =
   | "big.str"
   | "key.fromPkcs8"
   | "key.fromSpki"
+  /** createSecretKey(bytes | string): the SYMMETRIC KeyObject. Same
+   * value-model kind as the asymmetric one, because @types/node gives no
+   * way to tell them apart — both spellings are just `KeyObject`. The
+   * runtime carries which it is and every asymmetric operation refuses a
+   * secret by that tag, exactly as Node does. Throws Node's RangeError on
+   * an empty key. */
+  | "key.secretBytes"
+  | "key.secretStr"
   | "key.dh"
   | "key.sign"
   | "key.verify"
@@ -7169,6 +7181,26 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "crypto.randomBytes",
   "crypto.randomInt",
   "crypto.pbkdf2Sha256",
+  // The KeyObject family. Every one of these refuses something Node also
+  // refuses — a DER framing these two curves do not use, an operation
+  // asked for the wrong half of a pair, and now a SECRET key handed to an
+  // asymmetric operation (or the reverse). The set was missing all of
+  // them, so those throws escaped the enclosing try instead of being
+  // caught at the call: the differential for the secret key caught it,
+  // with a `catch` that never ran and the refusal surfacing later as an
+  // uncaught error. The async twins stay out, matching pbkdf2Sha256Async
+  // beside them. key.gen/key.isPriv/key.secret* cannot throw.
+  "key.fromPkcs8",
+  "key.fromSpki",
+  "key.dh",
+  "key.sign",
+  "key.verify",
+  "key.pubRaw",
+  "key.raw",
+  "key.jwkX",
+  "key.jwkD",
+  "key.crv",
+  "crypto.createHmacKey",
   "buffer.concatLen",
   // The checked-dynamic compare/equals validators: Node's argument
   // ladders throw ERR_INVALID_ARG_TYPE / ERR_OUT_OF_RANGE catchably.

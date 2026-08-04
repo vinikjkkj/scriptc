@@ -21,6 +21,11 @@
 
 /* ── KeyObject ────────────────────────────────────────────────────────── */
 
+/* Node's TypeError, raised from the refusals below (defined with the DER
+ * framing further down, forward-declared here because the secret-key
+ * constructor above it needs the same refusal). */
+static void scr_asym_throw(const char *msg);
+
 /* Node's KeyObject for these curves carries exactly one 32-byte scalar (a
  * private seed) or one 32-byte point (a public key), plus which of the two it
  * is and which curve. Everything else Node keeps in one — PEM/DER framing,
@@ -32,6 +37,8 @@ ScrKeyObject *scr_keyobj_new(int curve, bool is_private, const unsigned char raw
   k->curve = curve;
   k->is_private = is_private;
   memcpy(k->raw, raw, 32);
+  k->secret = NULL;
+  k->secret_len = 0;
   return k;
 }
 
@@ -44,8 +51,77 @@ void scr_keyobj_release(ScrKeyObject *k) {
   if (!k || k->rc == SIZE_MAX) return;
   if (--k->rc == 0) {
     crypto_wipe(k->raw, 32);
+    if (k->secret) {
+      crypto_wipe(k->secret, k->secret_len);
+      free(k->secret);
+    }
     free(k);
   }
+}
+
+/* ── createSecretKey: the SYMMETRIC KeyObject ──────────────────────────
+ * A copy of the material, wiped on the last release like the asymmetric
+ * secret beside it. EVERY length is legal, including zero — Node accepts a
+ * zero-length secret key (checked against the oracle; an earlier draft
+ * here raised a RangeError for it and the differential caught the
+ * invention). HMAC takes any length; the AES ciphers check their own at
+ * construction. */
+static ScrKeyObject *scr_keyobj_secret_new(const unsigned char *key, size_t len) {
+  ScrKeyObject *k = malloc(sizeof(ScrKeyObject));
+  if (!k) scr_trap("scriptc: out of memory\n");
+  k->rc = 1;
+  k->curve = SCR_KEY_SECRET;
+  k->is_private = true; /* Node reports type 'secret'; never a public half. */
+  memset(k->raw, 0, 32);
+  k->secret = NULL;
+  if (len > 0) {
+    k->secret = malloc(len);
+    if (!k->secret) scr_trap("scriptc: out of memory\n");
+    memcpy(k->secret, key, len);
+  }
+  k->secret_len = len;
+  return k;
+}
+
+ScrKeyObject *scr_key_secret_bytes(const ScrBytes *key) {
+  return scr_keyobj_secret_new(key->data, key->len * scr_bytes_elem_size(key->elem));
+}
+
+ScrKeyObject *scr_key_secret_str(const ScrStr *key) {
+  /* Node's default encoding for a string key is utf8, and ScrStr storage
+   * IS utf8 — the bytes are the string's own. */
+  return scr_keyobj_secret_new((const unsigned char *)key->data, key->len);
+}
+
+/* Which half a KeyObject is. The POINTER cannot answer this: a
+ * zero-length secret key is legal and its `secret` is NULL too. */
+bool scr_keyobj_is_secret(const ScrKeyObject *k) {
+  return k->curve == SCR_KEY_SECRET;
+}
+
+const unsigned char *scr_keyobj_secret(const ScrKeyObject *k, size_t *len) {
+  *len = k->curve == SCR_KEY_SECRET ? k->secret_len : 0;
+  return k->curve == SCR_KEY_SECRET ? k->secret : NULL;
+}
+
+double scr_key_secret_size(const ScrKeyObject *k) {
+  return k->curve == SCR_KEY_SECRET ? (double)k->secret_len : 0.0;
+}
+
+/* createHmac keyed by a KeyObject. It lives HERE, not beside the other
+ * Hmac calls in scr_lib.c: it reads ScrKeyObject, and scr_asym.c is the
+ * unit cc.ts links exactly when a keyobj value reaches the IR — which is
+ * exactly when this call can be emitted. scr_hmac_new_raw comes the other
+ * way, out of the always-linked scr_lib.c. Only a SECRET key carries
+ * material; an asymmetric one gets Node's TypeError. */
+ScrHmac *scr_hmac_new_key(ScrStr *alg, ScrKeyObject *key) {
+  if (!scr_keyobj_is_secret(key)) {
+    scr_asym_throw("Invalid key object type private, expected secret");
+    return NULL;
+  }
+  size_t len = 0;
+  const unsigned char *secret = scr_keyobj_secret(key, &len);
+  return scr_hmac_new_raw(alg, secret, len);
 }
 
 /* ── DER framing ──────────────────────────────────────────────────────── */
@@ -157,6 +233,13 @@ bool scr_asym_verify(const unsigned char sig[64], const ScrKeyObject *key,
 /* The public point for a private KeyObject — what `export({format:'jwk'}).x`
  * answers, and what createPublicKey(privateKeyObject) derives. */
 void scr_asym_public_of(unsigned char pub[32], const ScrKeyObject *key) {
+  /* dh/sign/verify already refuse a secret key by curve; these two read
+   * `raw` unconditionally, so they need the refusal spelled out. Node
+   * raises ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE for the same call. */
+  if (key->curve == SCR_KEY_SECRET) {
+    scr_asym_throw("Invalid key object type secret, expected private or public");
+    return;
+  }
   if (!key->is_private) {
     memcpy(pub, key->raw, 32);
     return;
@@ -173,6 +256,10 @@ void scr_asym_public_of(unsigned char pub[32], const ScrKeyObject *key) {
 }
 
 void scr_asym_raw_of(unsigned char raw[32], const ScrKeyObject *key) {
+  if (key->curve == SCR_KEY_SECRET) {
+    scr_asym_throw("Invalid key object type secret, expected private or public");
+    return;
+  }
   memcpy(raw, key->raw, 32);
 }
 
@@ -282,6 +369,10 @@ ScrStr *scr_key_jwk_x(const ScrKeyObject *key) {
 }
 
 ScrStr *scr_key_jwk_d(const ScrKeyObject *key) {
+  if (key->curve == SCR_KEY_SECRET) {
+    scr_asym_throw("Invalid key object type secret, expected private or public");
+    return NULL;
+  }
   ScrBytes *b = scr_asym_bytes(key->raw, 32);
   ScrStr *enc = scr_str_new("base64url", 9);
   ScrStr *s = scr_bytes_to_str(b, enc);
@@ -293,6 +384,12 @@ ScrStr *scr_key_jwk_d(const ScrKeyObject *key) {
 bool scr_key_is_priv(const ScrKeyObject *key) { return key->is_private; }
 
 ScrStr *scr_key_crv(const ScrKeyObject *key) {
+  if (key->curve == SCR_KEY_SECRET) {
+    /* A secret key has no curve; Node's jwk export answers kty 'oct'. The
+     * jwk surface refuses it above, so reaching here would be a bug. */
+    scr_asym_throw("Invalid key object type secret, expected private or public");
+    return NULL;
+  }
   return key->curve == SCR_CURVE_ED25519 ? scr_str_new("Ed25519", 7) : scr_str_new("X25519", 6);
 }
 
