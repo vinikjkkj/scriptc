@@ -883,6 +883,9 @@ export function mapType(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   const memoSensitivityAtEntry = memoSensitivity;
   try {
     const result = mapTypeInner(type, ctx);
+    if (result === null && type.isIntersectionType() && process.env["SCRIPTC_ISECT_WHY"] !== undefined) {
+      isectWhy(type, ctx);
+    }
     // A REFUSAL reached under a constraint-erased attempt is not the type's
     // own answer — the attempt walks places the ordinary mapping never
     // does, and caching its null hands that verdict to the legitimate
@@ -4408,6 +4411,50 @@ function mapRecordType(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
  *
  * Diagnostics stay silent about it: this is a compiler-development facility,
  * not something to widen a user-facing message with. */
+/** SCRIPTC_ISECT_WHY — one line per REFUSED intersection, naming every
+ * constituent and the answer each one gets on its own. Measurement only:
+ * the question "how many distinct shapes are behind the intersection
+ * fence, and do they share a form" cannot be answered from the diagnostic,
+ * which names only the outermost type. */
+let isectWhyBusy = false;
+function isectWhy(t: ts.UnionOrIntersectionType, ctx: TypeMapperCtx): void {
+  if (isectWhyBusy) return;
+  isectWhyBusy = true;
+  try {
+    const { checker } = ctx;
+    const parts = t.getTypes().map((p) => {
+      const sym = p.getSymbol();
+      const decls = sym ? checker.declarationsOf(sym) : [];
+      const kind =
+        sym === undefined ? "anon"
+          : sym.flags & ts.SymbolFlags.Class ? "class"
+          : sym.flags & ts.SymbolFlags.Interface ? "iface"
+          : sym.flags & ts.SymbolFlags.TypeAlias ? "alias"
+          : "other";
+      const dfile = decls.some((d) => d.getSourceFile().isDeclarationFile) ? "dts" : "src";
+      const twin = decls.some((d) => ctx.declFileHasCompiledImpl?.(d.getSourceFile()) === true) ? "+impl" : "";
+      const m = mapType(p, ctx);
+      const dataOnly = isDataOnlyDeclFileClassInstance(p, checker, ctx);
+      return `${checker.typeToString(p)}[${kind}/${dfile}${twin}` +
+        `/props=${checker.getPropertiesOfType(p).length}` +
+        `/call=${checker.getCallSignatures(p).length}` +
+        `/ctor=${checker.getConstructSignatures(p).length}` +
+        `/dataOnlyClass=${dataOnly}` +
+        `/maps=${m === null ? "null" : m.kind}]`;
+    });
+    console.error(
+      `ISECTWHY ${checker.typeToString(t).slice(0, 120)}` +
+      ` || provOk=${recordProvenanceOk(t, checker, ctx)}` +
+      ` || dyn=${ctx.dynamic === true} spec=${ctx.speculative === true}` +
+      ` || ${parts.join(" & ")}`,
+    );
+  } catch (e) {
+    console.error(`ISECTWHY <threw> ${String(e).slice(0, 120)}`);
+  } finally {
+    isectWhyBusy = false;
+  }
+}
+
 function mapTrace(message: string): void {
   if (!process.env.SCRIPTC_MAP_TRACE) return;
   // INDENTED BY FRAME DEPTH. Failures print leaf-first as the stack
