@@ -20,7 +20,7 @@ import { lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDirentMethodCa
 import { droppableStatic, lowerPromiseAllTupleCall, lowerPromiseRejectCall, probeLower, templateRawTextOf } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { EMITTER_API_MEMBERS, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js";
-import { emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
+import { boundEmitDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
 import { lowerConsoleInspectArg, lowerFormatCall } from "./lower-inspect.js";
 import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lowerStreamStaticCall, streamSidesOf } from "./lower-stream.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, nsMemberIdentOf, nsPathPrefix, nsUndefRead } from "./lower-namespaces.js";
@@ -9189,6 +9189,13 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
           if (sameReceiver) {
             const bound = L.boundMethodValue(methodAccess, locOf(call));
             if (bound) return bound;
+            // `X.emit.bind(X)` has no method to bind — class collection
+            // ERASES a pure super-delegating emit override, and the member
+            // it shadows is the runtime's, monomorphized per event name. It
+            // still has a VALUE: a dispatcher whose arms emit with static
+            // names (lower-emitter.ts).
+            const dispatcher = boundEmitDispatcher(L, call, methodAccess);
+            if (dispatcher) return dispatcher;
           }
         }
         const fn = L.lowerExpr(access.expression);
