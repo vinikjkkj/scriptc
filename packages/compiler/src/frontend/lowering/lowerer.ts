@@ -6902,6 +6902,27 @@ export class Lowerer {
    * nothing evaluates; unit-typed non-literals keep the fences. */
   lowerReturnValue(node: ts.Expression): IrExpr | null {
     const expected = this.ctx.returnType;
+    // An EMPTY array literal takes the RETURN slot's element type, exactly
+    // as it does in every other typed slot (lowerExprExpecting says so, for
+    // the same reason): it has no element type of its own, and lowered bare
+    // it builds its never[] as the f64 representation, so the coercion then
+    // fences on a 'number[]' the source never wrote.
+    //
+    // A SYNC return was already fine — tsc hands the literal the declared
+    // return type as its contextual type and the inference reads the
+    // element off that. An ASYNC one is not: there the contextual type is
+    // the awaited-or-thenable union, which has no single element to read,
+    // so `async f(): Promise<string[]>` with `return []` fenced where the
+    // sync twin compiled. ctx.returnType is the plain AWAITED type in an
+    // async frame, which is exactly the type wanted — asking it directly
+    // settles both forms the same way.
+    if (expected.kind === "array") {
+      let x: ts.Expression = node;
+      while (ts.isParenthesizedExpression(x)) x = x.expression;
+      if (ts.isArrayLiteralExpression(x) && x.elements.length === 0) {
+        return this.coerceInto(node, this.lowerArrayLiteral(x, expected), expected);
+      }
+    }
     const e = this.lowerExpr(node);
     if (expected.kind === "void" && e.kind === "unitLit") return null;
     if (this.ctx.isAsync && e.type.kind === "promise" && expected.kind !== "promise") {
