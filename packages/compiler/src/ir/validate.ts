@@ -702,6 +702,10 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "crypto.randomUUID": { argTypes: [], result: STRING },
   "crypto.randomBytesToString": { argTypes: [F64, STRING], result: STRING },
   "crypto.randomBytes": { argTypes: [F64], result: BYTES_U8 },
+  "crypto.randomFillDeferred": {
+    argTypes: [BYTES_U8, F64, F64, BOOL, { kind: "func", params: [], ret: VOID }],
+    result: VOID,
+  },
   "crypto.randomInt": { argTypes: [F64, F64], result: F64 },
   "crypto.randomIntAsync": { argTypes: [F64, F64], result: { kind: "promise", inner: F64 } },
   "crypto.randomBytesAsync": { argTypes: [F64], result: { kind: "promise", inner: BYTES_U8 } },

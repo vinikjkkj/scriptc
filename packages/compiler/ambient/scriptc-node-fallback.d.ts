@@ -1214,6 +1214,27 @@ declare module "node:url" {
 declare module "crypto" {
   export function randomUUID(): string;
   export function randomBytes(size: number): Buffer;
+  /* randomFill: the same draw over a buffer the caller owns, answered
+   * through a callback Node invokes ASYNCHRONOUSLY. Node passes
+   * `(null, buf)` — the same buffer, never a copy — and a callback may
+   * declare fewer parameters, JS-style. @types/node makes the buffer type
+   * generic over ArrayBufferView; the fallback declares the Uint8Array
+   * form, which is the one that lowers. */
+  export function randomFill<T extends Uint8Array>(
+    buffer: T,
+    callback: (err: Error | null, buf: T) => void,
+  ): void;
+  export function randomFill<T extends Uint8Array>(
+    buffer: T,
+    offset: number,
+    callback: (err: Error | null, buf: T) => void,
+  ): void;
+  export function randomFill<T extends Uint8Array>(
+    buffer: T,
+    offset: number,
+    size: number,
+    callback: (err: Error | null, buf: T) => void,
+  ): void;
   /* The lowered Hash surface is exactly the COMPOSED chain
    * createHash("sha256" | "sha512" | "sha1").update(data).digest() —
    * fused into one call, the Hash handle never materializes (holding one

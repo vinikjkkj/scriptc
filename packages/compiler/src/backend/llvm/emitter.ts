@@ -10199,6 +10199,24 @@ class LlEmitter {
       B.line(`${t} = call ${this.llType(e.type)} @${sym}(${argList})`);
       return this.own({ name: t, type: e.type });
     }
+    if (e.fn === "crypto.randomFillDeferred") {
+      // crypto.randomFill: the range fills now, the CALLBACK defers. The
+      // fourth argument is the deferral thunk — a zero-argument closure
+      // that already captured the callback and its (err, buf) arguments —
+      // and it MOVES, exactly like a nextTick callback: the tick queue
+      // takes it, or the runtime's range ladder releases it while
+      // throwing. A queued tick holds the loop, so main must run it.
+      this.usesTimers = true;
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.moveTemp(args[4]!);
+      this.declare(`declare void @scr_crypto_random_fill_deferred(ptr, double, double, i1 zeroext, ptr)`);
+      B.line(
+        `call void @scr_crypto_random_fill_deferred(ptr ${args[0]!.name}, double ${args[1]!.name}, ` +
+          `double ${args[2]!.name}, i1 zeroext ${args[3]!.name}, ptr ${args[4]!.name})`,
+      );
+      this.emitPendingCheck(); // the offset/size ladder throws catchably
+      return { name: "", type: e.type };
+    }
     if (e.fn === "cp.spawn" || e.fn === "cp.spawnOpts") {
       // child_process.spawn: the child starts NOW (posix_spawnp); the
       // loop reaps it and fires its listeners. Never throws — spawn

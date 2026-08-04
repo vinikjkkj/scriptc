@@ -2863,6 +2863,18 @@ export type IrLibFn =
    * randomBytesToString THROWS Node's RangeError on out-of-range sizes. */
   | "crypto.randomUUID"
   | "crypto.randomBytesToString"
+  /** crypto.randomFill(buf, offset, size, cb) — the fill, plus a DEFERRED
+   * call. args are (bytes, offset, size, sizeGiven, thunk). The thunk is a
+   * ZERO-argument closure that already captured the callback and the
+   * (err, buf) arguments it will be called with (deferredCallThunk), so a
+   * deferral queue's one-closure entry carries the whole call and the
+   * arguments' ownership is the closure's. `sizeGiven` false means the
+   * call omitted the size and the fill runs to the end — no numeric
+   * sentinel can say that, because every candidate is a value Node
+   * rejects with an error this would then stop reporting. The thunk MOVES
+   * into the libCall. THROWS Node's ERR_OUT_OF_RANGE ladder for
+   * offset/size, releasing the thunk on the way out. */
+  | "crypto.randomFillDeferred"
   /** The COMPOSED hash chain createHash(alg).update(data).digest(enc)
    * fused into one call — the Hash handle never materializes. Args are
    * (alg, data, enc); alg is "sha256" | "sha1" and enc "hex" | "base64",
@@ -6760,6 +6772,10 @@ const LIB_MODE_REFUSED_PREFIXES: readonly [string, string][] = [
   // its fire rides the timer queue (scr_bytes_io.c), which library links
   // exclude — refuse the surface like the rest of the event-loop family.
   ["fs.existsChk", "the async fs callback surface (fs.exists)"],
+  // randomFill's callback rides the check phase (scr_random_fill.c), which
+  // library links exclude with the rest of the loop — refuse the surface
+  // by name instead of owing the embedder scr_set_immediate.
+  ["crypto.randomFillDeferred", "the async crypto callback surface (crypto.randomFill)"],
   ["timers.", "the timers surface (setTimeout family)"],
   ["tp.", "the timers/promises surface"],
   ["cp.", "the child_process surface"],
@@ -7246,6 +7262,10 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.statSync",
   "crypto.randomBytesToString",
   "crypto.randomBytes",
+  // The offset/size ladder throws BEFORE the deferral is scheduled (and
+  // releases the thunk on the way out) — Node validates synchronously
+  // too, so the RangeError reaches the caller's catch, never the callback.
+  "crypto.randomFillDeferred",
   "crypto.randomInt",
   "crypto.pbkdf2Sha256",
   // The KeyObject family. Every one of these refuses something Node also
