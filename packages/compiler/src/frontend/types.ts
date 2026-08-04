@@ -3742,7 +3742,15 @@ function mapRecordType(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
  * Diagnostics stay silent about it: this is a compiler-development facility,
  * not something to widen a user-facing message with. */
 function mapTrace(message: string): void {
-  if (process.env.SCRIPTC_MAP_TRACE) console.error(`MAPFAIL ${message}`);
+  if (!process.env.SCRIPTC_MAP_TRACE) return;
+  // INDENTED BY FRAME DEPTH. Failures print leaf-first as the stack
+  // unwinds, so in a flat list two adjacent lines look like cause and
+  // effect whether or not they belong to the same chain — and reading them
+  // that way sends the hunt after the wrong leaf. With the indent the
+  // relation is visible instead of inferred: a DEEPER line is the cause of
+  // the shallower one that follows it, and a shallower line that follows
+  // nothing deeper failed on its own.
+  console.error(`MAPFAIL ${"  ".repeat(Math.max(0, mapTypeDepth))}${message}`);
 }
 
 /** A mapped-type alias the checker kept SYMBOLIC because a type parameter
