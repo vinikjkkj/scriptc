@@ -8,7 +8,7 @@ import { lowerGenMethodCall } from "./lower-generators.js";
 import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import type { IrFfiImport } from "../../ir/nodes.js";
 import { isJsSourceFile, locOf } from "../program.js";
-import { isGenericCallableMemberType, typeKey } from "../types.js";
+import { isGenericCallableMemberType, typeKey} from "../types.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf } from "./surfaces.js";
@@ -120,6 +120,10 @@ export interface GenericFnInfo {
 }
 
 export interface GenericInstance {
+  /** Born from CONSTRAINT-erased bindings. Travels WITH the instance
+   * because its body lowers later, outside the frame that built it —
+   * the rest-tuple rule has to hold exactly while that body is walked. */
+  erasedRest?: true;
   name: string;
   /** 0 for the first instance of a base function — the only one whose
    * statements count toward coverage stats (re-instantiations re-visit the
@@ -1644,6 +1648,9 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
     // so only the method instantiation's own map installs.
     const prevTsBindings = L.typeParamTsBindings;
     L.typeParamTsBindings = inst.tsBindings ?? null;
+    // The rest-tuple rule is scoped to THIS body (see erasedRest).
+    const prevRestErasure = L.typeCtx.restTupleFromErasure;
+    L.typeCtx.restTupleFromErasure = inst.erasedRest === true ? true : undefined;
     // Implicit-any instances thread their param bindings through typeOf
     // (the checker reports `any` inside the body — there is no T for
     // mapType to substitute); see the implicit-monomorphization section.
@@ -1778,6 +1785,10 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
       L.currentClass = prevClass;
       L.typeParamBindings = prevBindings;
       L.typeParamTsBindings = prevTsBindings;
+      // Scoped to THIS body: left set, the rest-tuple rule would apply to
+      // everything lowered afterwards — which is exactly the over-broad
+      // behaviour that changed 30 corpus programs.
+      L.typeCtx.restTupleFromErasure = prevRestErasure;
       L.implicitParamTypes = prevImplicit;
       L.instantiationContext = prevContext;
       L.suppressStats = prevSuppress;
@@ -1940,8 +1951,54 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
     // A pinning signature that itself keeps type parameters (`let g: <T>(x:
     // T) => T = identity` — storing the generic signature as such) binds
     // nothing: mapType answers null for an unsubstituted parameter.
+    // ...unless every one of them has a mappable CONSTRAINT. The value
+    // still needs exactly one compiled body, and the call path already
+    // settled what that body is: each type parameter bound to its
+    // constraint (genericCallInstance's overload rule — the body
+    // type-checks for EVERY type satisfying the constraint, so the
+    // constraint itself is always among them). This is the pinning half
+    // of the constraint-erased VALUE slot a record keeps for a generic
+    // member (mapTypeInner's rule): the slot's own type is that same
+    // instantiation, so producer and slot agree by construction. An
+    // UNCONSTRAINED parameter (`<T>(x: T) => T`) still has no widest
+    // honest binding: fence.
+    let pinnedByConstraint = false;
+    const constraintTs = new Map<ts.Symbol, ts.Type>();
+    if (info.typeParams.some((tp) => !bindings.get(tp)) && target.getTypeParameters().length > 0) {
+      const byConstraint = constraintTypeParamBindings(L, info, constraintTs);
+      if (byConstraint) {
+        for (const tp of info.typeParams) {
+          const c = bindings.get(tp) ?? byConstraint.get(tp);
+          if (c) bindings.set(tp, c);
+        }
+        pinnedByConstraint = true;
+      }
+    }
     if (info.typeParams.some((tp) => !bindings.get(tp))) fenceUnpinned();
-    const inst = genericValueInstance(L, ref, info, bindings);
+    // A CONSTRAINT-erased instance maps its declared parameter types with
+    // the parameters bound to key unions, so `M[K]` there means the union
+    // of the payload types (mapBoundIndexedAccess's indexUnionOk rule) —
+    // the same widening the slot's own type already took. A per-call-site
+    // instance keeps the strict one-key rule.
+    const prevIndexUnion = L.typeCtx.indexUnionOk;
+    const prevTsBindings = L.typeParamTsBindings;
+    if (pinnedByConstraint) {
+      L.typeCtx.indexUnionOk = true;
+      L.typeCtx.restTupleFromErasure = true;
+      // The ts-level twin is what resolves `M[K]` at all: without it the
+      // indexed access has no object/index type to read at all
+      // (mapBoundIndexedAccess bails before the union rule).
+      L.typeParamTsBindings = constraintTs;
+    }
+    let inst: GenericInstance;
+    try {
+      inst = genericValueInstance(L, ref, info, bindings);
+      if (pinnedByConstraint) inst.erasedRest = true;
+    } finally {
+      L.typeCtx.indexUnionOk = prevIndexUnion;
+      L.typeCtx.restTupleFromErasure = undefined;
+      L.typeParamTsBindings = prevTsBindings;
+    }
     // The value's type is the completed ABI signature — exact-arity, the
     // declared-function value rule (dynRest slots stay out of the param
     // list; the rest marker carries the trailing dyn-array ABI).
@@ -9052,6 +9109,19 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     const propSym = L.checker.getPropertyOfType(recvT, name);
     if (!propSym) return null;
     if (!isGenericCallableMemberType(L.checker.getTypeOfSymbol(propSym), L.checker)) return null;
+    // A member that earned a real closure SLOT — its signature mapped at
+    // the constraint instantiation, so the shape kept the field — is an
+    // ORDINARY field call: decline here and let the record path read the
+    // slot. Only a member the shape dropped needs static monomorphization.
+    {
+      const recvIr = L.mapTypeOf(recvT);
+      if (
+        recvIr?.kind === "record" &&
+        L.shapes.get(recvIr.shapeId)?.fields.some((f) => f.name === name) === true
+      ) {
+        return null;
+      }
+    }
     // CLASS members belong to the class path (lowerClassGenericMethodCall
     // claimed compilable ones; a class that failed collection keeps its
     // own diagnostics and the generic method-call fence downstream).

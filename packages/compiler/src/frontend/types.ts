@@ -78,8 +78,36 @@ export class ShapeRegistry {
     return id;
   }
 
+  /** Rollback point for a SPECULATIVE mapping — UnionRegistry.mark's twin,
+   * for the same reason: an abandoned attempt must leave no placeholder
+   * behind for a later mapping to pick up through recIds. */
+  mark(): number {
+    return this.shapes.length;
+  }
+
+  /** Discards every shape minted since `mark`, with its cache entries. Safe
+   * only for a FAILED attempt: nothing kept may reference them. */
+  rollback(mark: number): void {
+    if (mark >= this.shapes.length) return;
+    const dropped = new Set<string>();
+    for (let i = mark; i < this.shapes.length; i++) {
+      const shape = this.shapes[i]!;
+      dropped.add(shape.id);
+      this.byId.delete(shape.id);
+      this.pendingRec.delete(shape.id);
+    }
+    for (const [k, v] of [...this.byKey]) if (dropped.has(v)) this.byKey.delete(k);
+    for (const [t, id] of [...this.recIds]) if (dropped.has(id)) this.recIds.delete(t);
+    this.shapes.length = mark;
+  }
+
   /** The FINALIZED recursive shape for a checker type — undefined while
    * never mapped, mid-construction, or permanently failed. */
+  /** True while `id` is a placeholder no frame has finalized. */
+  isPending(id: string): boolean {
+    return this.pendingRec.has(id);
+  }
+
   recursiveShapeFor(t: ts.Type): string | undefined {
     const id = this.recIds.get(t);
     return id !== undefined && !this.pendingRec.has(id) ? id : undefined;
@@ -174,6 +202,8 @@ export class UnionRegistry {
    * folding one-level unfoldings in). */
   private readonly recIds = new Map<ts.Type, string>();
   private readonly pendingRec = new Set<string>();
+  /** Placeholders whose frame FAILED: unmappable, never `undefined`. */
+  private readonly poisoned = new Set<string>();
 
   /** The union id a back-reference to an in-progress union resolves to:
    * reuses the type's persistent recursive id or mints a PLACEHOLDER
@@ -191,8 +221,66 @@ export class UnionRegistry {
     return id;
   }
 
+  /** A rollback point for a SPECULATIVE mapping — an attempt whose failure
+   * must leave no trace. A failed attempt can mint a recursive PLACEHOLDER
+   * that nothing will ever finalize; the registry expects such an id to be
+   * unreachable and prune, but a later successful mapping can pick it up
+   * through recIds and carry it into the program, where the validator sees
+   * a union with no arms. Marking before the attempt and rolling back after
+   * a failure keeps ids dense and the caches honest. */
+  mark(): number {
+    return this.unions.length;
+  }
+
+  /** Discards every union minted since `mark`, with its cache entries. Safe
+   * only for a FAILED attempt: nothing kept may reference them. */
+  rollback(mark: number): void {
+    if (mark >= this.unions.length) return;
+    const dropped = new Set<string>();
+    for (let i = mark; i < this.unions.length; i++) {
+      const def = this.unions[i]!;
+      dropped.add(def.id);
+      this.byId.delete(def.id);
+      this.pendingRec.delete(def.id);
+    }
+    for (const [k, v] of [...this.byKey]) if (dropped.has(v)) this.byKey.delete(k);
+    for (const [t, id] of [...this.recIds]) if (dropped.has(id)) this.recIds.delete(t);
+    // The POISON goes with them. A speculative attempt that failed and was
+    // rolled back must leave no verdict behind: the same union reached
+    // again on a legitimate path has to be mapped on its own merits, not
+    // refused because a discarded attempt once tripped over it.
+    for (const id of dropped) this.poisoned.delete(id);
+    this.unions.length = mark;
+  }
+
   /** The FINALIZED recursive union for a checker type — undefined while
    * never mapped, mid-construction, or permanently failed. */
+  /** True while `id` is a placeholder no frame has finalized. */
+  isPending(id: string): boolean {
+    return this.pendingRec.has(id);
+  }
+
+  /** POISONS the unfinalized placeholder minted for `t` — the frame that
+   * would have filled it in failed, so nothing ever will. The def stays in
+   * `unions` (ids are positional and later ones are already handed out) and
+   * keeps its empty arms: inventing arms would hand every stale reference a
+   * type the program never had, trading a loud ICE for a silent wrong one.
+   * Instead the id is marked, and mapType refuses any type that reaches it
+   * (isPoisoned) — the reference fences honestly. */
+  poisonPendingPlaceholder(t: ts.Type): void {
+    const id = this.recIds.get(t);
+    if (id === undefined || !this.pendingRec.has(id)) return;
+    this.pendingRec.delete(id);
+    this.recIds.delete(t);
+    this.poisoned.add(id);
+  }
+
+  /** True for a placeholder whose frame failed: anything reaching it is
+   * unmappable, not `undefined`. */
+  isPoisoned(id: string): boolean {
+    return this.poisoned.has(id);
+  }
+
   recursiveUnionFor(t: ts.Type): string | undefined {
     const id = this.recIds.get(t);
     return id !== undefined && !this.pendingRec.has(id) ? id : undefined;
@@ -532,6 +620,16 @@ export interface TypeMapperCtx {
    * only where literal identity matters — indexed accesses (`T[K]`) inside
    * generic bodies whose K is bound to a literal key. */
   resolveTypeParamTs?: TypeParamTsResolver;
+  /** Constraint-erased VALUE mapping: an indexed access whose index is a
+   * UNION of literal keys answers the UNION of those property types. Set
+   * only by constraintErasedCtx — a monomorphized body keeps the stricter
+   * one-key rule. */
+  indexUnionOk?: boolean | undefined;
+  /** Inside a CONSTRAINT-erased instantiation. Marks the context, not the
+   * type: once the checker resolves `Parameters<M[K]>` its origin is gone
+   * from the type itself, and widening every tuple-typed rest instead
+   * changed the calling convention of 30 corpus programs. */
+  restTupleFromErasure?: boolean | undefined;
   /** GENERIC program classes (monomorphization by flow): the mapping of a
    * concrete instantiation reference (`Box<number>`) — the Lowerer
    * registers/reuses the instantiation (`Box%0`) and answers its object
@@ -859,6 +957,9 @@ function interfaceRetypingClassInstance(
 }
 
 function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
+  if (process.env["SCRIPTC_INNER_WHY"] !== undefined && ctx.checker.typeToString(type).includes("keyof EvMap")) {
+    console.error(`[innerwhy] enter: ${ctx.checker.typeToString(type).slice(0, 90)}`);
+  }
   const { checker, unions, classNamer, resolveTypeParam } = ctx;
   if (resolveTypeParam && type.flags & ts.TypeFlags.TypeParameter) {
     const bound = resolveTypeParam(type);
@@ -899,6 +1000,21 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     if (viaIndexed !== null) {
       contextResolutions++;
       return viaIndexed;
+    }
+    // `Parameters<M[K]>` over a bound K — the emitter idiom's rest. Also a
+    // form the checker keeps symbolic, and answered HERE rather than at
+    // each place that meets it: the signature walk, the instance's
+    // parameter list and the body's own typing of the identifier all ask
+    // mapType, so one answer serves all three. The rest stays an ARRAY
+    // (the body indexes it); only the element widens, to the union of
+    // every position's type across the named handlers.
+    // Behind the SAME switch as the slot: these only exist to serve it,
+    // and left always-on they fire inside ordinary generic bodies (the
+    // corpus caught 30 programs changing behaviour that way).
+    const viaParamsAlias = mapRestTupleUnion(type, ctx) ?? mapParametersAliasOverBoundKey(type, ctx);
+    if (viaParamsAlias !== null) {
+      contextResolutions++;
+      return viaParamsAlias;
     }
   }
   const widened = checker.getBaseTypeOfLiteralType(type);
@@ -2722,7 +2838,31 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   const callSigs = checker.getCallSignatures(widened);
   if (callSigs.length === 1) {
     const sig = callSigs[0]!;
-    if (sig.getTypeParameters().length) return null;
+    // A GENERIC signature has no single calling convention of its own, but
+    // one instantiation is always honest: every type parameter bound to
+    // its CONSTRAINT. The body type-checks for every type satisfying the
+    // constraint, so the constraint itself is among them — the rule
+    // genericCallInstance already applies to an overload-selected call.
+    // That makes the emitter idiom (`<K extends keyof M>(e: K, p: M[K])
+    // => void` held in a record slot and called through it) a concrete
+    // func type. Both resolvers are installed: the ts-level twin is what
+    // lets an indexed access `M[K]` resolve (see TypeParamTsResolver).
+    // An UNCONSTRAINED parameter has no widest honest binding — unmapped,
+    // exactly as before.
+    if (sig.getTypeParameters().length) {
+      // Mapping the CONSTRAINTS is itself speculative: one may map (minting
+      // a recursive placeholder) and a later one fail, and the null answer
+      // would leave that placeholder for another mapping to pick up.
+      const uMark = ctx.unions.mark();
+      const sMark = ctx.shapes.mark();
+      const erased = constraintErasedCtx(sig, ctx);
+      if (!erased) {
+        ctx.unions.rollback(uMark);
+        ctx.shapes.rollback(sMark);
+        return null;
+      }
+      ctx = erased;
+    }
     // A SYNTHESIZED rest param (tsc's JS inference for a function body
     // reading `arguments` — `(...args: any[]) => any` whose args symbol
     // has no declaration): the dotDotDot check below can't see it, and a
@@ -2753,6 +2893,23 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         // callers pack the surplus arguments (restPackArity). A rest bound
         // to a TUPLE has no single element type and keeps the fence.
         const restT = mapType(checker.getTypeOfSymbol(p), ctx);
+        if (process.env["SCRIPTC_REST_WHY"] !== undefined) {
+          console.error(`[restwhy] ${p.name}: ts=${checker.typeToString(checker.getTypeOfSymbol(p)).slice(0,70)} -> ir=${restT?.kind ?? "null"}`);
+        }
+        // A rest bound to a TUPLE of known length is FIXED ARITY in
+        // disguise: `...args: Parameters<M[K]>` over a key map whose
+        // handlers all take the same count spells exactly that many
+        // positional parameters. Expand them — one slot per position,
+        // union-per-position when the erasure left a union of tuples — so
+        // the signature keeps a calling convention instead of fencing.
+        // Tuples of DIFFERING length keep the fence: there is no single
+        // honest arity to compile.
+        if (restT !== null && restT.kind !== "array" && restT.kind !== "dyn") {
+          const positional = tupleArityExpansion(restT, ctx);
+          if (positional === null) return null;
+          params.push(...positional);
+          continue;
+        }
         if (!restT || (restT.kind !== "array" && restT.kind !== "dyn")) return null;
         params.push(restT);
         continue;
@@ -2882,12 +3039,30 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       if (rows !== null) return arrayOf(rows);
     }
     const knownRecursive = unions.recursiveUnionFor(widened);
-    if (knownRecursive !== undefined) return { kind: "union", unionId: knownRecursive };
+    if (knownRecursive !== undefined) {
+      // A placeholder whose frame failed is POISONED, not empty: refuse the
+      // type rather than answer a union the program never had.
+      if (unions.isPoisoned(knownRecursive)) return null;
+      return { kind: "union", unionId: knownRecursive };
+    }
     if (unions.inProgress.has(widened)) {
       return { kind: "union", unionId: unions.recursiveRef(widened) };
     }
     unions.inProgress.add(widened);
     const sensitivityAtEntry = contextResolutions;
+    // A FAILED union frame is the one moment its placeholder is known to be
+    // orphaned: no later frame will finalize it, and anything interned
+    // during the attempt reached the program only through this union. Mark
+    // here and roll back on failure — a during-mapping test cannot tell an
+    // orphan from a legitimately in-flight placeholder (ordinary fields
+    // hold those constantly), so the distinction has to be made where the
+    // failure is observed.
+    // Rolling the whole frame back is too broad: shapes interned while it
+    // ran are reachable from elsewhere, and discarding them makes this very
+    // union stop mapping. Only the placeholder THIS frame left behind is
+    // known to be garbage.
+    const hadPlaceholder = unions.recursivePending(widened);
+    let frameOk = false;
     try {
       // The unit-literal value a type pins, or null if it is not one. Two
       // arms that pin DIFFERENT unit values are mutually exclusive — the
@@ -3068,12 +3243,31 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         // instantiations) cannot intern by checker-type identity — the
         // same ts.Type answers differently per instantiation — so
         // recursive generic-open unions stay fenced.
-        if (contextResolutions !== sensitivityAtEntry) return null;
+        if (contextResolutions !== sensitivityAtEntry) {
+          // The frame refuses to CACHE by checker-type identity (the same
+          // ts.Type answers differently per instantiation), so the type
+          // stays fenced. But the placeholder was already handed to a
+          // back-reference, and `arms` above are this frame's real,
+          // fully-mapped arms — fill it in with them. Leaving it empty
+          // would strand a degenerate union in whatever already holds it;
+          // inventing arms would strand a false one.
+          if (arms.length >= 2) unions.finalizeRecursive(widened, arms);
+          return null;
+        }
+        frameOk = true;
         return { kind: "union", unionId: unions.finalizeRecursive(widened, arms) };
       }
+      frameOk = true;
       return { kind: "union", unionId: unions.intern(arms) };
     } finally {
       unions.inProgress.delete(widened);
+      // A frame that failed AFTER a back-reference minted its placeholder
+      // leaves an id nothing will ever finalize; whatever already holds it
+      // would reach the validator as a union with no arms. Discard it here
+      // — the one moment the orphaning is observable.
+      if (!frameOk && !hadPlaceholder && unions.recursivePending(widened)) {
+        unions.poisonPendingPlaceholder(widened);
+      }
     }
   }
   return null;
@@ -3183,7 +3377,33 @@ function mapBoundIndexedAccess(type: ts.Type, ctx: TypeMapperCtx): IrType | null
     : idxT.isNumberLiteralType()
       ? String(idxT.value)
       : null;
-  if (key === null) return null;
+  if (key === null) {
+    // A CONSTRAINT-ERASED value slot indexes by the whole key union
+    // (`M[K]` with K bound to `keyof M`): the parameter's honest type is
+    // the UNION of the named property types — what a caller may pass. A
+    // monomorphized BODY keeps the stricter one-key rule above, where a
+    // single read must name a single field.
+    if (ctx.indexUnionOk !== true || !idxT.isUnionType()) return null;
+    const arms: IrType[] = [];
+    for (const k of idxT.getTypes()) {
+      const kn = k.isStringLiteralType() ? k.value : k.isNumberLiteralType() ? String(k.value) : null;
+      if (kn === null) return null;
+      const kprop = checker.getPropertyOfType(objT, kn);
+      if (!kprop) return null;
+      const armT = mapType(checker.getTypeOfSymbol(kprop), ctx);
+      if (!armT || armT.kind === "void") return null;
+      arms.push(armT);
+    }
+    // intern() takes a CANONICAL arm list — deduplicated and typeKey-sorted.
+    // Distinct keys routinely carry the same payload type (an emitter whose
+    // events share a shape), and passing the repeats through would mint a
+    // union with identical arms, which the validator rejects as an ICE.
+    const byKey = new Map<string, IrType>();
+    for (const a of arms) byKey.set(typeKey(a), a);
+    const canonical = [...byKey.entries()].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)).map(([, a]) => a);
+    if (canonical.length === 0) return null;
+    return canonical.length === 1 ? canonical[0]! : { kind: "union", unionId: ctx.unions.intern(canonical) };
+  }
   const prop = checker.getPropertyOfType(objT, key);
   if (!prop) return null;
   return mapType(checker.getTypeOfSymbol(prop), ctx);
@@ -3656,6 +3876,230 @@ function isDataOnlyObjectType(t: ts.Type, checker: ts.TypeChecker): boolean {
  * function-valued properties, so serialization of the shape stays exact;
  * Object.keys over such a shape omits the member (a pin — every excluded
  * member is a function the key walk would name). */
+/** A mapper context whose type-parameter resolvers bind every parameter of
+ * `sig` to its CONSTRAINT — the one instantiation a generic signature can
+ * honestly wear as a value. Null when any parameter is unconstrained or
+ * its constraint does not map, which keeps the signature unmapped. The
+ * outer resolvers stay reachable so a parameter of an ENCLOSING
+ * instantiation still resolves through them. */
+/** `Parameters<F>` where F is an INDEXED ACCESS over a bound key (`M[K]`
+ * with K erased to its constraint): the union of each named handler's
+ * parameter tuple, as IR. The checker keeps `Parameters<M[K]>` symbolic —
+ * substituting K is not something its API exposes — but the pieces are
+ * reachable without substitution: K's binding names the keys, each key
+ * names a handler, and a handler's own signature already lists its
+ * parameters. Null for any other spelling, so nothing else changes. */
+/** `Parameters<M[K]>` while the checker still keeps it SYMBOLIC — the
+ * signature frame, where K is not yet bound. (The body frame sees the same
+ * parameter already resolved to a union of tuples; mapRestTupleUnion takes
+ * that one. The two forms are disjoint, so both routes are tried.) The
+ * pieces are reachable without substitution: K's binding names the keys,
+ * each key names a handler, and the handler's signature lists its
+ * parameters. Answers the same array-of-union shape. */
+export function mapParametersAliasOverBoundKey(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
+  const { checker, resolveTypeParamTs } = ctx;
+  if (!resolveTypeParamTs) return null;
+  if (type.getAliasSymbol()?.name !== "Parameters") return null;
+  const args = type.getAliasTypeArguments();
+  if (args === undefined || args.length !== 1) return null;
+  const fnT = args[0]!;
+  if (!fnT.isIndexedAccessType()) return null;
+  const objT = fnT.getObjectType();
+  const rawIdx = fnT.getIndexType();
+  const idxT = (rawIdx.flags & ts.TypeFlags.TypeParameter) !== 0 ? resolveTypeParamTs(rawIdx) : rawIdx;
+  if (idxT === null || idxT === undefined) return null;
+  const keys = idxT.isUnionType() ? idxT.getTypes() : [idxT];
+  const rows: IrType[][] = [];
+  for (const k of keys) {
+    const name = k.isStringLiteralType() ? k.value : k.isNumberLiteralType() ? String(k.value) : null;
+    if (name === null) return null;
+    const prop = checker.getPropertyOfType(objT, name);
+    if (prop === undefined) return null;
+    const sigs = checker.getCallSignatures(checker.getTypeOfSymbol(prop));
+    if (sigs.length !== 1) return null;
+    const row: IrType[] = [];
+    for (const q of sigs[0]!.getParameters()) {
+      const mapped = mapType(checker.getTypeOfSymbol(q), ctx);
+      if (!mapped || mapped.kind === "void") return null;
+      row.push(mapped);
+    }
+    rows.push(row);
+  }
+  if (rows.length === 0) return null;
+  const arity = rows[0]!.length;
+  if (arity === 0 || !rows.every((r) => r.length === arity)) return null;
+  // FLATTEN: an element that is itself a union contributes its ARMS, not
+  // itself — a union holding a union as an arm is rejected outright.
+  const byKey = new Map<string, IrType>();
+  for (const r of rows) {
+    for (const x of r) {
+      if (x.kind === "union") {
+        for (const a of ctx.unions.get(x.unionId)?.arms ?? []) byKey.set(typeKey(a), a);
+      } else byKey.set(typeKey(x), x);
+    }
+  }
+  const distinct = [...byKey.entries()].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)).map(([, t]) => t);
+  return arrayOf(distinct.length === 1 ? distinct[0]! : { kind: "union", unionId: ctx.unions.intern(distinct) });
+}
+
+export function mapRestTupleUnion(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
+  if (ctx.restTupleFromErasure !== true) return null;
+  const { checker } = ctx;
+  // ONLY inside an instantiation that BOUND a type parameter. Without
+  // this the rule fires for every tuple-typed rest in the program and
+  // silently changes their calling convention — measured: 30 corpus
+  // programs broke (destructuring, spread, for-of projections, key
+  // order). The case this serves only ever arises under an erased
+  // instantiation, so gate on exactly that.
+  if (!ctx.resolveTypeParamTs) return null;
+  // A rest whose type is a TUPLE — or a union of tuples of the SAME
+  // length, which is what `Parameters<M[K]>` becomes once the checker has
+  // resolved it — is an array in the compiled calling convention, with the
+  // element widened to the union of every position's type. The body keeps
+  // indexing `args`; only the element type loses per-position precision.
+  // Differing lengths keep the fence: no single arity is honest there.
+  const arms = type.isUnionType() ? type.getTypes() : [type];
+  const rows: IrType[][] = [];
+  for (const arm of arms) {
+    if (!checker.isTupleType(arm)) return null;
+    const row: IrType[] = [];
+    for (const el of checker.getTypeArguments(arm as ts.TypeReference)) {
+      const mapped = mapType(el, ctx);
+      if (!mapped || mapped.kind === "void") return null;
+      row.push(mapped);
+    }
+    rows.push(row);
+  }
+  if (rows.length === 0) return null;
+  const arity = rows[0]!.length;
+  if (arity === 0 || !rows.every((r) => r.length === arity)) return null;
+  // FLATTEN: an element that is itself a union contributes its ARMS, not
+  // itself — a union holding a union as an arm is rejected outright.
+  const byKey = new Map<string, IrType>();
+  for (const r of rows) {
+    for (const x of r) {
+      if (x.kind === "union") {
+        for (const a of ctx.unions.get(x.unionId)?.arms ?? []) byKey.set(typeKey(a), a);
+      } else byKey.set(typeKey(x), x);
+    }
+  }
+  const distinct = [...byKey.entries()].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)).map(([, t]) => t);
+  return arrayOf(distinct.length === 1 ? distinct[0]! : { kind: "union", unionId: ctx.unions.intern(distinct) });
+}
+/** The POSITIONAL parameter list a tuple-typed rest stands for, or null.
+ * A tuple maps to a record of numeric fields, so its arity and per-slot
+ * types are already known; a UNION of tuples answers position-wise unions,
+ * but only when every arm has the SAME length — differing lengths have no
+ * single arity a compiled signature could wear. */
+function tupleArityExpansion(restT: IrType, ctx: TypeMapperCtx): IrType[] | null {
+  const numericFields = (t: IrType): { name: string; type: IrType }[] | null => {
+    if (t.kind !== "record") return null;
+    const shape = ctx.shapes.get(t.shapeId);
+    if (shape === undefined || shape.indexValue !== undefined) return null;
+    if (shape.fields.length === 0) return [];
+    if (!shape.fields.every((f) => /^\d+$/.test(f.name))) return null;
+    return [...shape.fields].sort((a, b) => Number(a.name) - Number(b.name));
+  };
+  const arms = restT.kind === "union" ? (ctx.unions.get(restT.unionId)?.arms ?? []) : [restT];
+  if (arms.length === 0) return null;
+  const perArm = arms.map(numericFields);
+  if (perArm.some((f) => f === null)) return null;
+  const lens = new Set(perArm.map((f) => f!.length));
+  if (lens.size !== 1) return null;
+  const arity = perArm[0]!.length;
+  const out: IrType[] = [];
+  for (let i = 0; i < arity; i++) {
+    const byKey = new Map<string, IrType>();
+    for (const f of perArm) byKey.set(typeKey(f![i]!.type), f![i]!.type);
+    const distinct = [...byKey.entries()].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)).map(([, t]) => t);
+    out.push(distinct.length === 1 ? distinct[0]! : { kind: "union", unionId: ctx.unions.intern(distinct) });
+  }
+  return out;
+}
+
+function constraintErasedCtx(sig: ts.Signature, ctx: TypeMapperCtx): TypeMapperCtx | null {
+  const why = (r: string): null => {
+    if (process.env["SCRIPTC_ERASE_WHY"] !== undefined) console.error(`[erasewhy] ${r}`);
+    return null;
+  };
+  const tps = sig.getTypeParameters();
+  if (!tps || tps.length === 0) return why("no type params");
+  // The constraint is read off the DECLARATION (the idiom
+  // constraintTypeParamBindings uses): a base-constraint query widens a
+  // bare parameter instead of answering that it has none.
+  const sigDecl = ctx.checker.signatureDeclaration(sig);
+  const tpDecls = sigDecl !== undefined && ts.isFunctionLike(sigDecl) ? sigDecl.typeParameters : undefined;
+  if (tpDecls === undefined || tpDecls.length !== tps.length) return why("no tp declarations");
+  const irByTp = new Map<ts.Type, IrType>();
+  const tsByTp = new Map<ts.Type, ts.Type>();
+  for (const [i, tp] of tps.entries()) {
+    const src = tpDecls[i]?.constraint ?? tpDecls[i]?.defaultType;
+    if (!src) return why("type param without constraint or default");
+    const constraint = ctx.checker.getTypeFromTypeNode(src);
+    const mapped = mapType(constraint, ctx);
+    if (!mapped || mapped.kind === "void") return why(`constraint does not map: ${ctx.checker.typeToString(constraint).slice(0,60)}`);
+    irByTp.set(tp, mapped);
+    tsByTp.set(tp, constraint);
+  }
+  const outerIr = ctx.resolveTypeParam;
+  const outerTs = ctx.resolveTypeParamTs;
+  return {
+    ...ctx,
+    resolveTypeParam: (t) => irByTp.get(t) ?? outerIr?.(t) ?? null,
+    resolveTypeParamTs: (t) => tsByTp.get(t) ?? outerTs?.(t) ?? null,
+    indexUnionOk: true,
+    restTupleFromErasure: true,
+  };
+}
+
+/** The id of a recursive placeholder this IR type reaches that NO frame has
+ * finalized, or null. A placeholder is normally transient — the outer frame
+ * fills it in — so this answers a question worth asking only where a type is
+ * about to be KEPT while its own construction may still fail: a kept
+ * reference to a never-finalized id reaches the validator as a union with no
+ * arms (or a shape with no fields). Walks structurally with a visited set,
+ * since the very types in question are cyclic. */
+export function referencesPendingPlaceholder(
+  t: IrType,
+  unions: UnionRegistry,
+  shapes: ShapeRegistry,
+  seen: Set<string> = new Set(),
+): string | null {
+  switch (t.kind) {
+    case "union": {
+      if (unions.isPending(t.unionId)) return t.unionId;
+      if (seen.has(`u:${t.unionId}`)) return null;
+      seen.add(`u:${t.unionId}`);
+      for (const arm of unions.get(t.unionId)?.arms ?? []) {
+        const hit = referencesPendingPlaceholder(arm, unions, shapes, seen);
+        if (hit) return hit;
+      }
+      return null;
+    }
+    case "record": {
+      if (shapes.isPending(t.shapeId)) return t.shapeId;
+      if (seen.has(`r:${t.shapeId}`)) return null;
+      seen.add(`r:${t.shapeId}`);
+      for (const f of shapes.get(t.shapeId)?.fields ?? []) {
+        const hit = referencesPendingPlaceholder(f.type, unions, shapes, seen);
+        if (hit) return hit;
+      }
+      return null;
+    }
+    case "array":
+      return referencesPendingPlaceholder(t.elem, unions, shapes, seen);
+    case "func": {
+      for (const p of t.params) {
+        const hit = referencesPendingPlaceholder(p, unions, shapes, seen);
+        if (hit) return hit;
+      }
+      return referencesPendingPlaceholder(t.ret, unions, shapes, seen);
+    }
+    default:
+      return null;
+  }
+}
+
 export function isGenericCallableMemberType(t: ts.Type, checker: ts.TypeChecker): boolean {
   const sigs = checker.getCallSignatures(t);
   // ANY generic signature disqualifies the slot, not only an all-generic
@@ -4078,8 +4522,62 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // can hold them — see isGenericCallableMemberType): the shape keeps
       // its data fields, and calls of the member monomorphize per call
       // site against the defining object literal's declaration.
-      if (isGenericCallableMemberType(fieldTs, checker)) continue;
+      // ...unless the signature maps at its CONSTRAINT instantiation, which
+      // gives it an ordinary closure slot (mapTypeInner's generic-value
+      // rule). Only a member that still fails to map leaves the shape.
+      // The attempt for a GENERIC member is SPECULATIVE — the member leaves
+      // the shape if it fails — so it runs under a rollback point: a failed
+      // walk can mint a recursive placeholder nothing will finalize, and a
+      // later mapping reaching the same checker type through recIds would
+      // carry that empty union/shape into the program.
+      const generic = isGenericCallableMemberType(fieldTs, checker);
+      if (process.env["SCRIPTC_MEMBER_WHY"] !== undefined) {
+        const cs = checker.getCallSignatures(fieldTs);
+        console.error(`[memberwhy] ${checker.typeToString(widened).slice(0,40)} . ${p.name}`
+          + ` generic=${generic} sigs=${cs.length} tps=${cs.map((x) => x.getTypeParameters()?.length ?? 0).join("/")}`);
+      }
+      if (generic && process.env["SCRIPTC_GENERIC_SLOT"] === undefined) continue;
+      const uMark = generic ? ctx.unions.mark() : 0;
+      const sMark = generic ? shapes.mark() : 0;
+      // The sensitivity counters are GLOBAL and drive two decisions outside
+      // this frame: the recursive fence (a frame whose counter moved
+      // refuses to intern by type identity) and the memo cache. A
+      // speculative walk that gets thrown away must not move them, or an
+      // ENCLOSING legitimate frame judges itself context-sensitive and
+      // gives up over work that no longer exists.
+      const ctxResAtTry = contextResolutions;
+      const memoSensAtTry = memoSensitivity;
       let pt = mapType(fieldTs, ctx);
+      if (pt === null && generic) {
+        // The member leaves the shape — say so. An exclusion that prints
+        // nothing makes the NEXT failure invisible exactly where this
+        // change acts (it hid the rest-tuple fence for several rounds).
+        mapTrace(`GENMEMBER ${checker.typeToString(widened).slice(0, 40)} . ${p.name} : ${checker.typeToString(fieldTs).slice(0, 70)}`);
+        ctx.unions.rollback(uMark);
+        shapes.rollback(sMark);
+        contextResolutions = ctxResAtTry;
+        memoSensitivity = memoSensAtTry;
+        continue;
+      }
+      if (pt !== null && process.env["SCRIPTC_PENDING_WHY"] !== undefined) {
+        const anyPend = referencesPendingPlaceholder(pt, ctx.unions, shapes);
+        if (anyPend !== null) {
+          console.error(
+            `[pendwhy] ${generic ? "GEN" : "plain"} ${checker.typeToString(widened).slice(0, 80)} . ${p.name} -> ${anyPend}`,
+          );
+        }
+      }
+      if (generic && pt !== null) {
+        const pend = referencesPendingPlaceholder(pt, ctx.unions, shapes);
+        if (pend !== null) {
+          // The slot would keep a placeholder whose own frame may still
+          // fail; the member leaves the shape instead, exactly as it did
+          // before it could map at all.
+          ctx.unions.rollback(uMark);
+          shapes.rollback(sMark);
+          continue;
+        }
+      }
       // tsgo PANICS computing `readonly []` through the symbol-type query
       // (the TupleType conversion — the facade's panic fence answers
       // `any`), which would absorb the whole shape into the dynamic tier.

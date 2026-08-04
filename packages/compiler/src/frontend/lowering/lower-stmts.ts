@@ -6297,13 +6297,21 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         const homogeneous = first !== undefined && byIndex.every((f) => typeEquals(f.type, first));
         let elemT: IrType | null = homogeneous ? first : null;
         if (!homogeneous && byIndex.length > 0) {
+          // Collect every arm FIRST, then intern once: interning inside the
+          // loop registers the partial list, and the very first pass makes a
+          // one-arm union — degenerate, and the validator rejects it. One
+          // distinct arm left over is that type itself, not a union.
           const arms: IrType[] = [];
+          let mixed = true;
           for (const f of byIndex) {
-            const arm = f.type.kind === "union" ? null : f.type;
-            if (arm === null) { elemT = null; break; }
-            if (!arms.some((a) => typeEquals(a, arm))) arms.push(arm);
-            elemT = { kind: "union", unionId: L.unions.intern(arms) };
+            if (f.type.kind === "union") { mixed = false; break; }
+            if (!arms.some((a) => typeEquals(a, f.type))) arms.push(f.type);
           }
+          elemT = !mixed || arms.length === 0
+            ? null
+            : arms.length === 1
+              ? arms[0]!
+              : { kind: "union", unionId: L.unions.intern(arms) };
         }
         if (elemT !== null && pureReemittable(iterable)) {
           const loc = locOf(stmt.expression);
