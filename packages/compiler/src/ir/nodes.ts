@@ -229,6 +229,21 @@ export type IrType =
   /* A node:crypto KeyObject over X25519/Ed25519 (ScrKeyObject) — heap,
    * refcounted, secret wiped on the last release. */
   | { kind: "keyobj" }
+  /** A node:crypto Hash over sha256/sha512/sha1 (ScrHash) — heap,
+   * refcounted, MUTABLE: `update` appends to the message the handle will
+   * digest, `digest` hashes what accumulated. The fused chain
+   * `createHash(a).update(d).digest(e)` still lowers to ONE libCall with
+   * no handle at all; this kind exists for the shapes that fusion cannot
+   * see — a handle stored in a variable, passed to a function, updated in
+   * a loop, returned. Holds only bytes, so it is never part of a cycle
+   * and has no trace. Container rules follow url's: union arms are fine
+   * (tag-based narrowing), arrays/maps/JSON are fenced. */
+  | { kind: "hash" }
+  /** A node:crypto Hmac (ScrHmac) — Hash's twin, the same handle with a
+   * key beside the message. Distinct from hash so the two cannot be
+   * confused: a keyed MAC and a bare digest are different answers, and
+   * the value model is the only place that distinction survives. */
+  | { kind: "hmac" }
   | { kind: "object"; className: string } // heap, refcounted class instance
   /** The class STATIC side as a value — `typeof C`, the type of the class
    * name itself and of `new (…) => T` constructor-typed slots. Runtime
@@ -346,6 +361,8 @@ export const BOOL: IrType = { kind: "bool" };
 export const REGEX: IrType = { kind: "regex" };
 export const BIGINT: IrType = { kind: "bigint" };
 export const KEYOBJ: IrType = { kind: "keyobj" };
+export const HASH_T: IrType = { kind: "hash" };
+export const HMAC_T: IrType = { kind: "hmac" };
 export const URL_T: IrType = { kind: "url" };
 export const SEARCH_PARAMS_T: IrType = { kind: "searchParams" };
 export const SYMBOL_T: IrType = { kind: "symbol" };
@@ -627,6 +644,10 @@ export function typeKey(t: IrType): string {
       return "bigint";
     case "keyobj":
       return "keyobj";
+    case "hash":
+      return "hash";
+    case "hmac":
+      return "hmac";
     case "union":
       return `union:${t.unionId}`;
     case "promise":
@@ -2839,6 +2860,26 @@ export type IrLibFn =
    * (+1), rather than the hex/base64 string the encoded forms give. */
   | "crypto.hashDigestStrRaw"
   | "crypto.hashDigestBytesRaw"
+  /** The MATERIALIZED Hash handle (ScrHash, +1): `createHash(alg)` on its
+   * own, then update/digest as ordinary methods. The four fused calls
+   * above stay — a chain the compiler can see whole never allocates a
+   * handle. `hashUpdate*` answer the SAME handle Node's update returns
+   * (+1 for the chained value); `hashDigestRaw` answers the raw u8 Buffer
+   * and `hashDigestEnc` the hex/base64 string. */
+  | "crypto.createHash"
+  | "crypto.hashUpdateStr"
+  | "crypto.hashUpdateBytes"
+  | "crypto.hashDigestRaw"
+  | "crypto.hashDigestEnc"
+  /** The Hmac handle (ScrHmac, +1): the same five calls with a key beside
+   * the message. The key is copied at construction and wiped on the last
+   * release. */
+  | "crypto.createHmacBytes"
+  | "crypto.createHmacStr"
+  | "crypto.hmacUpdateStr"
+  | "crypto.hmacUpdateBytes"
+  | "crypto.hmacDigestRaw"
+  | "crypto.hmacDigestEnc"
   /** crypto.randomBytes(n) → a real u8 Buffer (+1). THROWS Node's
    * RangeError on out-of-range sizes, exactly like the composed
    * randomBytesToString (which keeps its one-libCall lowering — the two
@@ -5284,6 +5325,10 @@ function isJsonSafeAt(
     case "bigint":
     // A KeyObject has no JSON form either (Node stringifies it to {}).
     case "keyobj":
+    // Node stringifies a Hash or an Hmac to {} as well — the accumulated
+    // message is internal state, not an enumerable property.
+    case "hash":
+    case "hmac":
     // An AbortSignal is an object with no own enumerable properties, so
     // Node stringifies it to {} — no honest JSON surface either.
     case "abortSignal":

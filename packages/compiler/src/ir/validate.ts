@@ -77,6 +77,8 @@ export const REGEX_INTRINSIC_SIGS: Record<
 
 const BIGINT_T: IrType = { kind: "bigint" };
 const KEYOBJ_T: IrType = { kind: "keyobj" };
+const HASH_T: IrType = { kind: "hash" };
+const HMAC_T: IrType = { kind: "hmac" };
 const BYTES_U8_T: IrType = { kind: "bytes", elem: "u8" };
 
 /** Closed-union signature table for `libCall` (mirrors ambient/scriptc.d.ts).
@@ -707,6 +709,17 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "crypto.hashDigestBytes": { argTypes: [STRING, BYTES_U8, STRING], result: STRING },
   "crypto.hashDigestStrRaw": { argTypes: [STRING, STRING], result: BYTES_U8 },
   "crypto.hashDigestBytesRaw": { argTypes: [STRING, BYTES_U8], result: BYTES_U8 },
+  "crypto.createHash": { argTypes: [STRING], result: HASH_T },
+  "crypto.hashUpdateStr": { argTypes: [HASH_T, STRING], result: HASH_T },
+  "crypto.hashUpdateBytes": { argTypes: [HASH_T, BYTES_U8], result: HASH_T },
+  "crypto.hashDigestRaw": { argTypes: [HASH_T], result: BYTES_U8 },
+  "crypto.hashDigestEnc": { argTypes: [HASH_T, STRING], result: STRING },
+  "crypto.createHmacBytes": { argTypes: [STRING, BYTES_U8], result: HMAC_T },
+  "crypto.createHmacStr": { argTypes: [STRING, STRING], result: HMAC_T },
+  "crypto.hmacUpdateStr": { argTypes: [HMAC_T, STRING], result: HMAC_T },
+  "crypto.hmacUpdateBytes": { argTypes: [HMAC_T, BYTES_U8], result: HMAC_T },
+  "crypto.hmacDigestRaw": { argTypes: [HMAC_T], result: BYTES_U8 },
+  "crypto.hmacDigestEnc": { argTypes: [HMAC_T, STRING], result: STRING },
   // The Buffer statics and the fs/zlib Buffer forms: fixed always-u8
   // signatures (Buffer IS a Uint8Array — one bytes kind).
   "buffer.fromStr": { argTypes: [STRING, STRING], result: BYTES_U8 },

@@ -2711,11 +2711,99 @@ static size_t scr_sha1_digest(const unsigned char *data, size_t len, unsigned ch
   return 20;
 }
 
+/* ── SHA-512 (FIPS 180-4) — the Noise handshake hash (zapo's crypto
+ * primitives derive with it). Same shape as SHA-256 one word size up:
+ * 64-bit lanes, 80 rounds, 128-byte blocks, and a 128-bit big-endian
+ * length field (only the low 64 bits can ever be nonzero here — a
+ * message longer than 2^64 bits does not fit in memory). ─────────── */
+
+static const uint64_t scr_sha512_k[80] = {
+    0x428a2f98d728ae22ULL, 0x7137449123ef65cdULL, 0xb5c0fbcfec4d3b2fULL,
+    0xe9b5dba58189dbbcULL, 0x3956c25bf348b538ULL, 0x59f111f1b605d019ULL,
+    0x923f82a4af194f9bULL, 0xab1c5ed5da6d8118ULL, 0xd807aa98a3030242ULL,
+    0x12835b0145706fbeULL, 0x243185be4ee4b28cULL, 0x550c7dc3d5ffb4e2ULL,
+    0x72be5d74f27b896fULL, 0x80deb1fe3b1696b1ULL, 0x9bdc06a725c71235ULL,
+    0xc19bf174cf692694ULL, 0xe49b69c19ef14ad2ULL, 0xefbe4786384f25e3ULL,
+    0x0fc19dc68b8cd5b5ULL, 0x240ca1cc77ac9c65ULL, 0x2de92c6f592b0275ULL,
+    0x4a7484aa6ea6e483ULL, 0x5cb0a9dcbd41fbd4ULL, 0x76f988da831153b5ULL,
+    0x983e5152ee66dfabULL, 0xa831c66d2db43210ULL, 0xb00327c898fb213fULL,
+    0xbf597fc7beef0ee4ULL, 0xc6e00bf33da88fc2ULL, 0xd5a79147930aa725ULL,
+    0x06ca6351e003826fULL, 0x142929670a0e6e70ULL, 0x27b70a8546d22ffcULL,
+    0x2e1b21385c26c926ULL, 0x4d2c6dfc5ac42aedULL, 0x53380d139d95b3dfULL,
+    0x650a73548baf63deULL, 0x766a0abb3c77b2a8ULL, 0x81c2c92e47edaee6ULL,
+    0x92722c851482353bULL, 0xa2bfe8a14cf10364ULL, 0xa81a664bbc423001ULL,
+    0xc24b8b70d0f89791ULL, 0xc76c51a30654be30ULL, 0xd192e819d6ef5218ULL,
+    0xd69906245565a910ULL, 0xf40e35855771202aULL, 0x106aa07032bbd1b8ULL,
+    0x19a4c116b8d2d0c8ULL, 0x1e376c085141ab53ULL, 0x2748774cdf8eeb99ULL,
+    0x34b0bcb5e19b48a8ULL, 0x391c0cb3c5c95a63ULL, 0x4ed8aa4ae3418acbULL,
+    0x5b9cca4f7763e373ULL, 0x682e6ff3d6b2b8a3ULL, 0x748f82ee5defb2fcULL,
+    0x78a5636f43172f60ULL, 0x84c87814a1f0ab72ULL, 0x8cc702081a6439ecULL,
+    0x90befffa23631e28ULL, 0xa4506cebde82bde9ULL, 0xbef9a3f7b2c67915ULL,
+    0xc67178f2e372532bULL, 0xca273eceea26619cULL, 0xd186b8c721c0c207ULL,
+    0xeada7dd6cde0eb1eULL, 0xf57d4f7fee6ed178ULL, 0x06f067aa72176fbaULL,
+    0x0a637dc5a2c898a6ULL, 0x113f9804bef90daeULL, 0x1b710b35131c471bULL,
+    0x28db77f523047d84ULL, 0x32caab7b40c72493ULL, 0x3c9ebe0a15c9bebcULL,
+    0x431d67c49c100d4cULL, 0x4cc5d4becb3e42b6ULL, 0x597f299cfc657e2aULL,
+    0x5fcb6fab3ad6faecULL, 0x6c44198c4a475817ULL};
+
+static uint64_t scr_sha512_rotr(uint64_t x, unsigned n) {
+  return (x >> n) | (x << (64 - n));
+}
+
+static void scr_sha512_block(uint64_t h[8], const unsigned char *p) {
+  uint64_t w[80];
+  for (int i = 0; i < 16; i++) {
+    w[i] = 0;
+    for (int b = 0; b < 8; b++) w[i] = (w[i] << 8) | (uint64_t)p[i * 8 + b];
+  }
+  for (int i = 16; i < 80; i++) {
+    uint64_t s0 = scr_sha512_rotr(w[i - 15], 1) ^ scr_sha512_rotr(w[i - 15], 8) ^ (w[i - 15] >> 7);
+    uint64_t s1 = scr_sha512_rotr(w[i - 2], 19) ^ scr_sha512_rotr(w[i - 2], 61) ^ (w[i - 2] >> 6);
+    w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+  }
+  uint64_t a = h[0], b = h[1], c = h[2], d = h[3];
+  uint64_t e = h[4], f = h[5], g = h[6], hh = h[7];
+  for (int i = 0; i < 80; i++) {
+    uint64_t s1 = scr_sha512_rotr(e, 14) ^ scr_sha512_rotr(e, 18) ^ scr_sha512_rotr(e, 41);
+    uint64_t ch = (e & f) ^ (~e & g);
+    uint64_t t1 = hh + s1 + ch + scr_sha512_k[i] + w[i];
+    uint64_t s0 = scr_sha512_rotr(a, 28) ^ scr_sha512_rotr(a, 34) ^ scr_sha512_rotr(a, 39);
+    uint64_t maj = (a & b) ^ (a & c) ^ (b & c);
+    uint64_t t2 = s0 + maj;
+    hh = g; g = f; f = e; e = d + t1;
+    d = c; c = b; b = a; a = t1 + t2;
+  }
+  h[0] += a; h[1] += b; h[2] += c; h[3] += d;
+  h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
+}
+
+static size_t scr_sha512_digest(const unsigned char *data, size_t len, unsigned char out[64]) {
+  uint64_t h[8] = {0x6a09e667f3bcc908ULL, 0xbb67ae8584caa73bULL, 0x3c6ef372fe94f82bULL,
+                   0xa54ff53a5f1d36f1ULL, 0x510e527fade682d1ULL, 0x9b05688c2b3e6c1fULL,
+                   0x1f83d9abfb41bd6bULL, 0x5be0cd19137e2179ULL};
+  size_t i = 0;
+  for (; i + 128 <= len; i += 128) scr_sha512_block(h, data + i);
+  unsigned char tail[256];
+  size_t rem = len - i;
+  memcpy(tail, data + i, rem);
+  tail[rem] = 0x80;
+  size_t pad = (rem + 1 + 16 <= 128) ? 128 : 256;
+  memset(tail + rem + 1, 0, pad - rem - 1);
+  uint64_t bits = (uint64_t)len * 8;
+  for (int b = 0; b < 8; b++) tail[pad - 1 - b] = (unsigned char)(bits >> (8 * b));
+  scr_sha512_block(h, tail);
+  if (pad == 256) scr_sha512_block(h, tail + 128);
+  for (int j = 0; j < 8; j++) {
+    for (int b = 0; b < 8; b++) out[j * 8 + b] = (unsigned char)(h[j] >> (56 - 8 * b));
+  }
+  return 64;
+}
+
 /* The digest's encoding: "hex" or "base64" (compiler-fenced literals). */
 static ScrStr *scr_digest_encode(const unsigned char *d, size_t n, const ScrStr *enc) {
   if (enc->len == 3 && memcmp(enc->data, "hex", 3) == 0) {
     static const char hex[] = "0123456789abcdef";
-    char buf[64];
+    char buf[128]; /* the widest digest is SHA-512's 64 bytes */
     for (size_t i = 0; i < n; i++) {
       buf[i * 2] = hex[d[i] >> 4];
       buf[i * 2 + 1] = hex[d[i] & 0x0f];
@@ -2724,7 +2812,7 @@ static ScrStr *scr_digest_encode(const unsigned char *d, size_t n, const ScrStr 
   }
   /* base64, standard alphabet, '=' padded — Buffer.toString("base64"). */
   static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  char buf[48];
+  char buf[96];
   size_t o = 0;
   for (size_t i = 0; i < n; i += 3) {
     unsigned v = (unsigned)d[i] << 16;
@@ -2842,13 +2930,19 @@ size_t scr_crypto_hmac_raw(const char *alg, const unsigned char *key, size_t key
   return scr_crypto_digest_raw(alg, outer, 64 + in, out);
 }
 
+/* sha1, sha256 or sha512 — the compiler fences every other algorithm
+ * literal, so the name only has to separate these three. */
+static size_t scr_hash_by_name(const ScrStr *alg, const unsigned char *data, size_t len,
+                               unsigned char out[64]) {
+  if (alg->len == 4 && memcmp(alg->data, "sha1", 4) == 0) return scr_sha1_digest(data, len, out);
+  if (alg->len == 6 && memcmp(alg->data, "sha512", 6) == 0) return scr_sha512_digest(data, len, out);
+  return scr_sha256_digest(data, len, out);
+}
+
 static ScrStr *scr_hash_digest_raw(const ScrStr *alg, const unsigned char *data, size_t len,
                                     const ScrStr *enc) {
-  unsigned char d[32];
-  /* sha1 or sha256 — the compiler fences every other algorithm literal. */
-  size_t n = (alg->len == 4 && memcmp(alg->data, "sha1", 4) == 0)
-                 ? scr_sha1_digest(data, len, d)
-                 : scr_sha256_digest(data, len, d);
+  unsigned char d[64];
+  size_t n = scr_hash_by_name(alg, data, len, d);
   return scr_digest_encode(d, n, enc);
 }
 
@@ -2863,14 +2957,12 @@ ScrStr *scr_crypto_hash_digest_bytes(ScrStr *alg, ScrBytes *data, ScrStr *enc) {
 }
 
 /* Bare `.digest()` (no encoding): Node hands back the raw digest as a Buffer.
- * Same two algorithms the compiler admits; the bytes are copied into a fresh
+ * Same algorithms the compiler admits; the bytes are copied into a fresh
  * u8 ScrBytes instead of being hex/base64-encoded. */
 static ScrBytes *scr_hash_digest_raw_bytes(const ScrStr *alg, const unsigned char *data,
                                            size_t len) {
-  unsigned char d[32];
-  size_t n = (alg->len == 4 && memcmp(alg->data, "sha1", 4) == 0)
-                 ? scr_sha1_digest(data, len, d)
-                 : scr_sha256_digest(data, len, d);
+  unsigned char d[64];
+  size_t n = scr_hash_by_name(alg, data, len, d);
   ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)n);
   if (n > 0) memcpy(out->data, d, n);
   return out;
@@ -2882,6 +2974,215 @@ ScrBytes *scr_crypto_hash_digest_str_raw(ScrStr *alg, ScrStr *data) {
 
 ScrBytes *scr_crypto_hash_digest_bytes_raw(ScrStr *alg, ScrBytes *data) {
   return scr_hash_digest_raw_bytes(alg, data->data, data->len * scr_bytes_elem_size(data->elem));
+}
+
+/* ── The MATERIALIZED Hash handle ─────────────────────────────────────
+ * The chain above is the fast path and stays; this is what the shapes it
+ * cannot see get — the handle bound to a variable, passed through a
+ * function, updated in a loop, returned. It ACCUMULATES the message and
+ * hashes it at digest() rather than keeping a compression state: the
+ * one-shot cores above are then reused exactly, with no second
+ * implementation of the padding to keep in agreement, and everything a
+ * compiled program hashes is already resident. */
+
+/* The accumulator both digest handles share. */
+static void scr_msg_append(unsigned char **buf, size_t *len, size_t *cap,
+                           const unsigned char *p, size_t n) {
+  if (n == 0) return;
+  if (*len + n > *cap) {
+    size_t next_cap = *cap ? *cap * 2 : 64;
+    while (next_cap < *len + n) next_cap *= 2;
+    unsigned char *next = realloc(*buf, next_cap);
+    if (!next) scr_trap("scriptc: out of memory\n");
+    *buf = next;
+    *cap = next_cap;
+  }
+  memcpy(*buf + *len, p, n);
+  *len += n;
+}
+
+static void scr_hash_append(ScrHash *h, const unsigned char *p, size_t n) {
+  scr_msg_append(&h->msg, &h->len, &h->cap, p, n);
+}
+
+/* The digest core an algorithm id names. */
+static size_t scr_digest_by_id(int alg, const unsigned char *p, size_t n, unsigned char out[64]) {
+  if (alg == SCR_HASH_SHA1) return scr_sha1_digest(p, n, out);
+  if (alg == SCR_HASH_SHA512) return scr_sha512_digest(p, n, out);
+  return scr_sha256_digest(p, n, out);
+}
+
+/* The algorithm id a compiler-fenced literal names. */
+static int scr_alg_id(const ScrStr *alg) {
+  if (alg->len == 4 && memcmp(alg->data, "sha1", 4) == 0) return SCR_HASH_SHA1;
+  if (alg->len == 6 && memcmp(alg->data, "sha512", 6) == 0) return SCR_HASH_SHA512;
+  return SCR_HASH_SHA256;
+}
+
+/* Node's update() returns the hash itself, and callers chain on it — so
+ * the answer is the same handle, retained for the value the chain hands
+ * on. Strings append their UTF-8 bytes (ScrStr storage IS utf8). */
+ScrHash *scr_hash_new(ScrStr *alg) {
+  ScrHash *h = malloc(sizeof(ScrHash));
+  if (!h) scr_trap("scriptc: out of memory\n");
+  h->rc = 1;
+  h->alg = scr_alg_id(alg); /* only the three the compiler admits reach here */
+  h->msg = NULL;
+  h->len = 0;
+  h->cap = 0;
+  return h;
+}
+
+ScrHash *scr_hash_retain(ScrHash *h) {
+  if (h && h->rc != SIZE_MAX) h->rc++;
+  return h;
+}
+
+void scr_hash_release(ScrHash *h) {
+  if (!h || h->rc == SIZE_MAX) return;
+  if (--h->rc == 0) {
+    free(h->msg);
+    free(h);
+  }
+}
+
+void *scr_hash_retain_v(void *h) { return scr_hash_retain((ScrHash *)h); }
+void scr_hash_release_v(void *h) { scr_hash_release((ScrHash *)h); }
+
+ScrHash *scr_hash_update_str(ScrHash *h, ScrStr *data) {
+  scr_hash_append(h, (const unsigned char *)data->data, data->len);
+  return scr_hash_retain(h);
+}
+
+ScrHash *scr_hash_update_bytes(ScrHash *h, ScrBytes *data) {
+  scr_hash_append(h, data->data, data->len * scr_bytes_elem_size(data->elem));
+  return scr_hash_retain(h);
+}
+
+/* digest() does NOT consume the handle here. Node's does — a second
+ * digest() throws ERR_CRYPTO_HASH_FINALIZED — but a compiled program that
+ * reaches the second call has already diverged, and answering the same
+ * digest is the quieter wrong answer than a use-after-free. */
+static size_t scr_hash_finish(ScrHash *h, unsigned char out[64]) {
+  const unsigned char *p = h->msg ? h->msg : (const unsigned char *)"";
+  return scr_digest_by_id(h->alg, p, h->len, out);
+}
+
+ScrBytes *scr_hash_digest_raw_buf(ScrHash *h) {
+  unsigned char d[64];
+  size_t n = scr_hash_finish(h, d);
+  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)n);
+  if (n > 0) memcpy(out->data, d, n);
+  return out;
+}
+
+ScrStr *scr_hash_digest_enc(ScrHash *h, ScrStr *enc) {
+  unsigned char d[64];
+  size_t n = scr_hash_finish(h, d);
+  return scr_digest_encode(d, n, enc);
+}
+
+/* ── The MATERIALIZED Hmac handle (RFC 2104) ───────────────────────────
+ * Hash's twin: the same accumulate-then-compute handle with a key beside
+ * the message. The key is COPIED at construction (Node's createHmac reads
+ * it once; a caller is free to overwrite its buffer afterwards) and wiped
+ * on the last release. Block size is the hash's own — 64 for sha1/sha256,
+ * 128 for sha512. */
+
+ScrHmac *scr_hmac_new_bytes(ScrStr *alg, ScrBytes *key) {
+  return scr_hmac_new_raw(alg, key->data, key->len * scr_bytes_elem_size(key->elem));
+}
+
+ScrHmac *scr_hmac_new_str(ScrStr *alg, ScrStr *key) {
+  return scr_hmac_new_raw(alg, (const unsigned char *)key->data, key->len);
+}
+
+ScrHmac *scr_hmac_new_raw(ScrStr *alg, const unsigned char *key, size_t keylen) {
+  ScrHmac *h = malloc(sizeof(ScrHmac));
+  if (!h) scr_trap("scriptc: out of memory\n");
+  h->rc = 1;
+  h->alg = scr_alg_id(alg);
+  h->msg = NULL;
+  h->len = 0;
+  h->cap = 0;
+  h->keylen = keylen;
+  h->key = NULL;
+  if (keylen > 0) {
+    h->key = malloc(keylen);
+    if (!h->key) scr_trap("scriptc: out of memory\n");
+    memcpy(h->key, key, keylen);
+  }
+  return h;
+}
+
+ScrHmac *scr_hmac_retain(ScrHmac *h) {
+  if (h && h->rc != SIZE_MAX) h->rc++;
+  return h;
+}
+
+void scr_hmac_release(ScrHmac *h) {
+  if (!h || h->rc == SIZE_MAX) return;
+  if (--h->rc == 0) {
+    if (h->key) {
+      memset(h->key, 0, h->keylen); /* the key is a secret: wipe, then free */
+      free(h->key);
+    }
+    free(h->msg);
+    free(h);
+  }
+}
+
+void *scr_hmac_retain_v(void *h) { return scr_hmac_retain((ScrHmac *)h); }
+void scr_hmac_release_v(void *h) { scr_hmac_release((ScrHmac *)h); }
+
+ScrHmac *scr_hmac_update_str(ScrHmac *h, ScrStr *data) {
+  scr_msg_append(&h->msg, &h->len, &h->cap, (const unsigned char *)data->data, data->len);
+  return scr_hmac_retain(h);
+}
+
+ScrHmac *scr_hmac_update_bytes(ScrHmac *h, ScrBytes *data) {
+  scr_msg_append(&h->msg, &h->len, &h->cap, data->data,
+                 data->len * scr_bytes_elem_size(data->elem));
+  return scr_hmac_retain(h);
+}
+
+static size_t scr_hmac_finish(ScrHmac *h, unsigned char out[64]) {
+  const size_t block = h->alg == SCR_HASH_SHA512 ? 128u : 64u;
+  unsigned char k0[128];
+  memset(k0, 0, block);
+  if (h->keylen > block) {
+    /* RFC 2104: a key longer than the block is replaced by its digest. */
+    unsigned char kd[64];
+    size_t kn = scr_digest_by_id(h->alg, h->key, h->keylen, kd);
+    memcpy(k0, kd, kn);
+  } else if (h->keylen > 0) {
+    memcpy(k0, h->key, h->keylen);
+  }
+  unsigned char *inner = malloc(block + h->len);
+  if (!inner) scr_trap("scriptc: out of memory\n");
+  for (size_t i = 0; i < block; i++) inner[i] = (unsigned char)(k0[i] ^ 0x36);
+  if (h->len > 0) memcpy(inner + block, h->msg, h->len);
+  unsigned char ih[64];
+  size_t in = scr_digest_by_id(h->alg, inner, block + h->len, ih);
+  free(inner);
+  unsigned char outer[128 + 64];
+  for (size_t i = 0; i < block; i++) outer[i] = (unsigned char)(k0[i] ^ 0x5c);
+  memcpy(outer + block, ih, in);
+  return scr_digest_by_id(h->alg, outer, block + in, out);
+}
+
+ScrBytes *scr_hmac_digest_raw_buf(ScrHmac *h) {
+  unsigned char d[64];
+  size_t n = scr_hmac_finish(h, d);
+  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)n);
+  if (n > 0) memcpy(out->data, d, n);
+  return out;
+}
+
+ScrStr *scr_hmac_digest_enc(ScrHmac *h, ScrStr *enc) {
+  unsigned char d[64];
+  size_t n = scr_hmac_finish(h, d);
+  return scr_digest_encode(d, n, enc);
 }
 
 /* The composed `new crypto.X509Certificate(data).fingerprint` read, fused
