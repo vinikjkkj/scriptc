@@ -5558,6 +5558,20 @@ export function canConvertToDyn(
         canConvertToDyn(a, getRecord, getUnion, visiting)),
     );
   }
+  // An ARRAY of a convertible ELEMENT, by the same argument as the union
+  // arm above: the emitted array converter pushes `sc_td_<elem>(e)` per
+  // slot, so whatever the element boxes to, the array does — the container
+  // adds nothing the walker must decide. isJsonSafeType and
+  // canBoxBytesComposite already answer the scalar and bytes-bearing
+  // element types; this rule adds the ones the record rule below admits.
+  // FUNC elements stay out: the per-type converter has no func case at all
+  // (a func boxes through the closure path, which only the record-field
+  // and union-arm emitters reach), so admitting them would trade a fence
+  // for an emitter crash. A METHOD BUNDLE element is refused for the
+  // reason the union arm refuses one.
+  if (t.kind === "array" && t.elem.kind !== "func" && !isMethodBundle(t.elem, getRecord)) {
+    return canConvertToDyn(t.elem, getRecord, getUnion, visiting);
+  }
   // A RECORD carrying FUNCTION fields — a store bundle handed to an
   // `unknown` parameter. The walker boxes each field by its own kind, so a
   // boxable func field is exactly the union-arm rule above, one container
