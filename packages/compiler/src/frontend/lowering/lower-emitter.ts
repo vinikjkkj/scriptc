@@ -96,9 +96,37 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
   table.set("removeListener", { tuple: [STRING], fromEmit: true, conflict: null, dynListener: false });
 
   const fmt = (t: IrType): string => L.fmt(t);
+  /** True when `arm` is one of `u`'s own arms. */
+  const isArmOf = (u: IrType, arm: IrType): boolean =>
+    u.kind === "union" && (L.unions.get(u.unionId)?.arms ?? []).some((x) => typeEquals(x, arm));
+  /** One position's unified type, or null when the two sites disagree.
+   *
+   * Equal types unify to themselves. Beyond that, exactly one pairing
+   * unifies: a LISTENER's declared UNION against one of its own ARMS
+   * supplied by an emit. That is not a concession — it is what the emit
+   * site already compiles to. Its payload is lowered EXPECTING the unified
+   * tuple (the lowerExprExpecting below), so a literal written for one arm
+   * is wrapped into the union right there; the listener observes exactly
+   * the type it declared, and no shape reaches it that its own union does
+   * not admit. Demanding typeEquals rejected the very pairing the lowering
+   * was already prepared to perform: on zapo, `emit('connection', {status:
+   * 'open', ..., code: null})` against `on('connection', (event:
+   * WaConnectionEvent) => ...)` conflicted the event, which fences EVERY
+   * site that touches it.
+   *
+   * The union may only ever come from the LISTENER side. An emit widening a
+   * position past what a listener declared is the unsound direction — the
+   * listener would be handed a shape it never agreed to read — so it keeps
+   * the conflict. */
+  const unifyPos = (recorded: IrType, incoming: IrType, unionSide: "recorded" | "incoming"): IrType | null => {
+    if (typeEquals(recorded, incoming)) return recorded;
+    if (unionSide === "recorded" && isArmOf(recorded, incoming)) return recorded;
+    if (unionSide === "incoming" && isArmOf(incoming, recorded)) return incoming;
+    return null;
+  };
   const mergeEmit = (name: string, args: (IrType | null)[]): void => {
     if (args.some((a) => a === null)) return; // its own site will diagnose
-    const tuple = args as IrType[];
+    const tuple = [...(args as IrType[])];
     const sig = sigOf(name);
     if (sig.conflict) return;
     if (!sig.fromEmit) {
@@ -108,10 +136,14 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
         return;
       }
       for (let i = 0; i < sig.tuple.length; i++) {
-        if (!typeEquals(sig.tuple[i]!, tuple[i]!)) {
+        // The recorded type is a LISTENER's here (nothing has emitted yet),
+        // so it is the side allowed to be the union.
+        const u = unifyPos(sig.tuple[i]!, tuple[i]!, "recorded");
+        if (u === null) {
           sig.conflict = `position ${i} is '${fmt(sig.tuple[i]!)}' at one site and '${fmt(tuple[i]!)}' at another`;
           return;
         }
+        tuple[i] = u;
       }
       sig.tuple = tuple;
       sig.fromEmit = true;
@@ -122,15 +154,22 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
       return;
     }
     for (let i = 0; i < tuple.length; i++) {
-      if (!typeEquals(sig.tuple[i]!, tuple[i]!)) {
+      // A position already widened to a listener's union absorbs a later
+      // emit of any of its arms; two emits alone keep the strict rule.
+      const u = unifyPos(sig.tuple[i]!, tuple[i]!, "recorded");
+      if (u === null) {
         sig.conflict = `position ${i} is '${fmt(sig.tuple[i]!)}' at one site and '${fmt(tuple[i]!)}' at another`;
         return;
       }
+      sig.tuple[i] = u;
     }
   };
   const mergeListener = (name: string, params: (IrType | null)[]): void => {
     if (params.some((p) => p === null)) return;
-    const prefix = params as IrType[];
+    // COPIED: the widening below writes the unified type back, and `params`
+    // is the listener's own func-type parameter list — mutating it would
+    // rewrite the listener's type behind the site's back.
+    const prefix = [...(params as IrType[])];
     const sig = sigOf(name);
     if (sig.conflict) return;
     if (sig.fromEmit) {
@@ -141,22 +180,46 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
     } else if (prefix.length > sig.tuple.length) {
       // The longest listener extends the provisional tuple.
       for (let i = 0; i < sig.tuple.length; i++) {
-        if (!typeEquals(sig.tuple[i]!, prefix[i]!)) {
+        const u = unifyPos(sig.tuple[i]!, prefix[i]!, "incoming");
+        if (u === null) {
           sig.conflict = `position ${i} is '${fmt(sig.tuple[i]!)}' at one site and '${fmt(prefix[i]!)}' at another`;
           return;
         }
+        prefix[i] = u;
       }
       sig.tuple = prefix;
       return;
     }
     for (let i = 0; i < prefix.length; i++) {
-      if (!typeEquals(sig.tuple[i]!, prefix[i]!)) {
+      // The INCOMING type is this listener's declaration, so it is the side
+      // allowed to be the union: a listener may widen a position an emit
+      // pinned to one of its arms. The reverse — a listener NARROWER than
+      // the recorded tuple — keeps the conflict, since the runtime would
+      // hand it values its own parameter type does not admit.
+      const u = unifyPos(sig.tuple[i]!, prefix[i]!, "incoming");
+      if (u === null) {
         sig.conflict = `position ${i} is '${fmt(sig.tuple[i]!)}' at one site and '${fmt(prefix[i]!)}' at another`;
         return;
       }
+      sig.tuple[i] = u;
     }
   };
 
+  // LISTENERS ARE MERGED FIRST, program-wide, before any emit.
+  //
+  // The listener's declared parameter type is the authority on an event's
+  // tuple — an emit has to fit under it, not the other way round — and a
+  // single pass in source order does not deliver that. A class emitting two
+  // arms of its own union event from its own methods is scanned before any
+  // caller registers a listener, so the first emit pins one arm, the second
+  // meets it as a plain record rather than as a union, and the event
+  // conflicts before the declaration that would have unified them is ever
+  // seen. Which spelling compiled then depended on where in the program the
+  // `on` happened to sit.
+  //
+  // Collecting is one cheap syntactic pass; the type-heavy merging is what
+  // gets ordered, so nothing is scanned twice.
+  const sites: { isEmit: boolean; name: string; node: ts.CallExpression }[] = [];
   for (const sf of L.program.getSourceFiles()) {
     if (sf.isDeclarationFile) continue;
     const walk = (node: ts.Node): void => {
@@ -184,6 +247,13 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
       // global table, so a stream's 'data' cannot collide with a user
       // event named 'data' on a plain emitter.
       if (streamForcedTuple(L, L.classes.get(recvT.className), name) !== null) return;
+      sites.push({ isEmit, name, node });
+    };
+    walk(sf);
+  }
+  for (const pass of [false, true]) {
+    for (const { isEmit, name, node } of sites) {
+      if (isEmit !== pass) continue;
       try {
         if (isEmit) {
           mergeEmit(name, node.arguments.slice(1).map((a) => L.mapTypeOf(L.typeOf(a))));
@@ -204,8 +274,7 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
       } catch {
         /* not a candidate */
       }
-    };
-    walk(sf);
+    }
   }
   holder.emitterEventTable = table;
   return table;
