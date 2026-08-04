@@ -3896,9 +3896,19 @@ function recordProvenanceOk(
         // static, instances are all data), which flattens soundly in a
         // static build exactly like the data-only interface rule below
         // (`ADVSignedDeviceIdentity & $Shape` from a decode return type).
+        // TWO shapes of that exception, and the second one is why this is
+        // not a single call: isDataOnlyDeclFileClassInstance describes the
+        // declaration-only module (no implementation compiled), which is
+        // the only case that needed the extra data-only argument. When the
+        // declaration file's implementation twin WAS compiled, the shape
+        // has code behind it and recordProvenanceOk's own non-intersection
+        // path admits it outright — so the class part of the intersection
+        // must admit it too, or the same class is a record alone and no
+        // record inside `X & X.$Shape`.
         const classPartOk =
           !(partSym && partSym.flags & ts.SymbolFlags.Class) ||
-          isDataOnlyDeclFileClassInstance(part, checker, ctx);
+          isDataOnlyDeclFileClassInstance(part, checker, ctx) ||
+          isDataOnlyDeclFileClassWithImpl(part, checker, ctx);
         return (part.flags & ts.TypeFlags.Object) !== 0 &&
           classPartOk &&
           checker.getCallSignatures(part).length === 0 &&
@@ -3972,6 +3982,55 @@ function isDataOnlyDeclFileClassInstance(
     checker.getCallSignatures(t).length === 0 &&
     isDataOnlyObjectType(t, checker)
   );
+}
+
+/** The SAME protobufjs message shape as above, for the declaration file
+ * whose implementation twin this build COMPILED — `X & X.$Shape`, the
+ * return type of every generated `decode`, when the generated `index.js`
+ * sits beside `index.d.ts` and joined module order (declTwinOf).
+ *
+ * Split out rather than folded into the predicate above because the two
+ * rest on different arguments. There, the module has no code at all, so
+ * the soundness argument is that every way to obtain a value FROM it
+ * fences at its own gate and only program-built values reach the record.
+ * Here the code IS compiled, which is strictly BETTER provenance: the
+ * non-intersection path of recordProvenanceOk admits such a shape outright
+ * (`if (!declFileNoImpl) return true`), with no data-only test and no
+ * --dynamic exclusion, because a compiled twin is not an island handle.
+ * The class part of an intersection was reaching only the no-implementation
+ * predicate, whose `declFileNoImpl` is FALSE exactly when the twin exists —
+ * so the better-supported shape was the one refused, and `X` mapped to a
+ * record alone while `X & X.$Shape` mapped to nothing.
+ *
+ * What this does NOT relax: the declarations must ALL be in declaration
+ * files. A program class keeps its nominal identity (its instances are
+ * `object(C)`, not a struct) and must never flatten into an intersection.
+ * Data-only is still required, for the reason it always was — flattening a
+ * method-bearing instance would drop the methods. */
+function isDataOnlyDeclFileClassWithImpl(
+  t: ts.Type,
+  checker: ts.TypeChecker,
+  ctx?: TypeMapperCtx,
+): boolean {
+  const sym = t.getSymbol();
+  if (!sym || !(sym.flags & ts.SymbolFlags.Class)) return false;
+  const decls = checker.declarationsOf(sym);
+  if (decls.length === 0) return false;
+  const declFileWithImpl = decls.every((d) => {
+    const sf = d.getSourceFile();
+    return sf.isDeclarationFile && (ctx?.declFileHasCompiledImpl?.(sf) ?? false);
+  });
+  const ok =
+    declFileWithImpl &&
+    checker.getCallSignatures(t).length === 0 &&
+    isDataOnlyObjectType(t, checker);
+  // Counted in the same run that reads the result: a branch that never
+  // fires and a branch that fires and changes nothing are indistinguishable
+  // from the trap count alone.
+  if (ok && process.env["SCRIPTC_ISECT_WHY"] !== undefined) {
+    console.error(`ISECTIMPL ${checker.typeToString(t)}`);
+  }
+  return ok;
 }
 
 /** Every property of an object type is a DATA slot — its type carries no
