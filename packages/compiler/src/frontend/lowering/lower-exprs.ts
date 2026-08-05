@@ -4214,36 +4214,100 @@ function fenceAccessorSpreadSource(L: Lowerer, prop: ts.Node, srcShape: IrRecord
   }
 }
 
-/** The JS trap-closure fallback for FUNCTION-VALUED object properties: a
- * lambda whose body fails to lower inside a JS object literal becomes a
+/** A function-valued property initializer whose EVALUATION is observably
+ * nothing — the precondition for replacing it with a trap closure, because
+ * the substitution keeps the value's type, identity and `typeof` but throws
+ * away whatever the expression would have done on the way to producing it.
+ * A syntactic lambda qualifies (creating a closure has no side effects);
+ * so does `<this|id>.method.bind(<this|id>)`, the collaborator idiom —
+ * binding a METHOD over pure references creates a closure and nothing
+ * more. An ACCESSOR is excluded by name: its read IS the side effect, and
+ * dropping the call would silently change the program. `as`/`satisfies`/
+ * parenthesis laundering is transparent — it is exactly what a caller
+ * writes when the declared slot is looser than the member
+ * (`client.emit.bind(client) as unknown as Ctx['emit']`) and it evaluates
+ * to nothing at runtime.
+ *
+ * A bare identifier read is pure too, but is deliberately NOT admitted: a
+ * JS literal's unlowerable identifier member already has a story one step
+ * down (lowerObjectLiteral's pure-member catch NARROWS the field away, so
+ * each read meets its own per-site fence), and two answers to one shape
+ * would be a silent behavior change to the export-aggregate tables that
+ * rule was written for.
+ *
+ * This is the same purity question the generic-callable branch answers for
+ * its own drop (`pureInit`, lowerObjectLiteral); kept separate because that
+ * one decides whether to DROP a field with no slot, and does not see
+ * through casts. */
+function pureFuncValueInit(L: Lowerer, node: ts.Node): boolean {
+  let inner: ts.Node = node;
+  for (;;) {
+    if (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+    else if (ts.isAsExpression(inner) || ts.isSatisfiesExpression(inner)) inner = inner.expression;
+    else break;
+  }
+  if (ts.isArrowFunction(inner) || ts.isFunctionExpression(inner) || ts.isMethodDeclaration(inner)) return true;
+  if (!ts.isCallExpression(inner) || inner.arguments.length !== 1) return false;
+  const callee = inner.expression;
+  if (
+    !ts.isPropertyAccessExpression(callee) ||
+    callee.name.text !== "bind" ||
+    !ts.isPropertyAccessExpression(callee.expression)
+  ) {
+    return false;
+  }
+  const methodAccess = callee.expression;
+  const pureRef = (x: ts.Expression): boolean => x.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(x);
+  if (!pureRef(methodAccess.expression) || !pureRef(inner.arguments[0]!)) return false;
+  const sym = L.checker.getSymbolAtLocation(methodAccess.name);
+  const decls = sym ? L.checker.declarationsOf(sym) : [];
+  if (decls.length === 0) return false;
+  return !decls.some((d) => ts.isGetAccessorDeclaration(d) || ts.isSetAccessorDeclaration(d));
+}
+
+/** The trap-closure fallback for FUNCTION-VALUED object properties: an
+ * initializer that fails to lower inside an object literal becomes a
  * closure of the field's exact func type whose body is the runtime fence —
  * the object still BUILDS (commander's `_outputConfiguration` table: the
  * driven writeOut/writeErr entries work; an unloweraable color probe traps
- * only if something CALLS it). The failed lambda's diagnostics move to the
- * runtime-fence inventory, exactly like a fenced JS statement. Null when
- * the fallback does not apply (not a JS file, not a lambda, no func slot)
- * — the caller lowers normally. ICEs (SC9001) never convert. */
+ * only if something CALLS it). The failed initializer's diagnostics move to
+ * the runtime-fence inventory, exactly like a fenced statement.
+ *
+ * WHEN it applies is the deferral rule the whole build already runs on
+ * (lowerStmts' `deferFences`): JavaScript sources always — no annotation
+ * exists there to change what lowers — and TypeScript under --best-effort,
+ * which asks for exactly this trade. WHAT it applies to is the purity rule
+ * above: the substitution must not skip work. With a func slot the trap's
+ * ABI is the slot's own, so any pure form is admissible; without one the
+ * arity has to be read off a syntactic lambda, so only those qualify.
+ *
+ * Null when the fallback does not apply — the caller lowers normally. ICEs
+ * (SC9001) never convert. */
 function fenceClosureProbe(
   L: Lowerer,
   node: ts.Node,
   slotType: IrType | undefined,
   attempt: () => IrExpr,
 ): IrExpr | null {
-  if (!isJsSourceFile(node.getSourceFile())) return null;
+  if (!isJsSourceFile(node.getSourceFile()) && !L.bestEffort) return null;
   let inner: ts.Node = node;
   while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
-  if (!ts.isArrowFunction(inner) && !ts.isFunctionExpression(inner) && !ts.isMethodDeclaration(inner)) {
-    return null;
-  }
+  if (slotType !== undefined && slotType.kind !== "func") return null;
   // The trap's ABI: the field's func slot when one exists; otherwise (the
   // dyn-object literal path — the value boxes into dyn) the all-dyn
   // signature of the lambda's own arity, which canBoxFuncIntoDyn always
-  // admits.
-  const fieldType: IrType & { kind: "func" } =
-    slotType !== undefined && slotType.kind === "func"
-      ? slotType
-      : { kind: "func", params: inner.parameters.map(() => DYN), ret: DYN };
-  if (slotType !== undefined && slotType.kind !== "func") return null;
+  // admits. Only a syntactic lambda can answer that second question, which
+  // is why a slotless field still requires one; a slotted field takes any
+  // pure form (pureFuncValueInit).
+  let fieldType: IrType & { kind: "func" };
+  if (slotType !== undefined) {
+    if (!pureFuncValueInit(L, node)) return null;
+    fieldType = slotType;
+  } else if (ts.isArrowFunction(inner) || ts.isFunctionExpression(inner) || ts.isMethodDeclaration(inner)) {
+    fieldType = { kind: "func", params: inner.parameters.map(() => DYN), ret: DYN };
+  } else {
+    return null;
+  }
   const diagsBefore = L.diags.length;
   try {
     return attempt();
@@ -4257,6 +4321,9 @@ function fenceClosureProbe(
     L.runtimeFences.push(...captured);
     const first = captured[0];
     const loc = locOf(node);
+    if (process.env["SCRIPTC_FENCEFN_WHY"] !== undefined) {
+      console.error(`[fencefn] ${loc.file}:${loc.start} ${first?.code ?? "?"} ${first?.message.slice(0, 90) ?? ""}`);
+    }
     const params = fieldType.params.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t }));
     const name = `%fence.fn.${L.liftedFns.length}`;
     L.liftedFns.push({
