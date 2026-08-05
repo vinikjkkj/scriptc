@@ -697,7 +697,12 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       // #private fields never render: they are not properties in any
       // observable way — Node's inspect omits them entirely (verified),
       // so a class whose only fields are private prints as `C {}`.
-      const visible = info.def.fields.filter((f) => !f.name.startsWith("#"));
+      // NON-ENUMERABLE symbol slots (Object.defineProperty's hidden data
+      // descriptor) never render either: util.inspect lists only ENUMERABLE
+      // own properties without showHidden, so Node omits them exactly as it
+      // omits #private fields.
+      const hidden = info.hiddenSymbolFields;
+      const visible = info.def.fields.filter((f) => !f.name.startsWith("#") && hidden?.has(f.name) !== true);
       if (visible.length === 0) {
         body = [ret(str(`${display} {}`, loc))];
         break;
