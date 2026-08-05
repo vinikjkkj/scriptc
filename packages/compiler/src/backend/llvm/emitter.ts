@@ -8832,6 +8832,48 @@ class LlEmitter {
         B.line(`${t} = call double @scr_arr_len(ptr ${r.name})`);
         return { name: t, type: e.type };
       }
+      case "unshift": {
+        // push's mirror at the FRONT: arguments evaluate left to right (JS
+        // order), then unshift RIGHT to left, landing at the head in
+        // declaration order. Ownership of refcounted arguments moves in;
+        // the result is the new length, or the unchanged one for Node's
+        // no-op zero-argument call.
+        const vs = e.args.map((a) => this.emitExpr(a));
+        if (acc === "ref") vs.forEach((v) => this.moveTemp(v));
+        this.declare(`declare double @scr_arr_unshift_${acc}(ptr, ${accArg})`);
+        let first = "";
+        for (let i = vs.length - 1; i >= 0; i--) {
+          const t = B.tmp();
+          B.line(`${t} = call double @scr_arr_unshift_${acc}(ptr ${r.name}, ${accTy} ${vs[i]!.name})`);
+          if (i === 0) first = t;
+        }
+        if (first !== "") return { name: first, type: e.type };
+        this.declare(`declare double @scr_arr_len(ptr)`);
+        const t = B.tmp();
+        B.line(`${t} = call double @scr_arr_len(ptr ${r.name})`);
+        return { name: t, type: e.type };
+      }
+      case "reverse": {
+        // In place, receiver (+1) back — the JS identity a.reverse() === a.
+        this.declare(`declare ptr @scr_arr_reverse(ptr)`);
+        const t = B.tmp();
+        B.line(`${t} = call ptr @scr_arr_reverse(ptr ${r.name})`);
+        return this.own({ name: t, type: e.type });
+      }
+      case "copyWithin": {
+        // In-place run copy, receiver (+1) back. All three indices are in
+        // the IR (the frontend completes an omitted end with +Infinity).
+        const target = this.emitExpr(e.args[0]!);
+        const start = this.emitExpr(e.args[1]!);
+        const end = this.emitExpr(e.args[2]!);
+        this.declare(`declare ptr @scr_arr_copy_within(ptr, double, double, double)`);
+        const t = B.tmp();
+        B.line(
+          `${t} = call ptr @scr_arr_copy_within(ptr ${r.name}, double ${target.name}, ` +
+            `double ${start.name}, double ${end.name})`,
+        );
+        return this.own({ name: t, type: e.type });
+      }
       case "fill": {
         // In-place write over the clamped range; answers the receiver (+1)
         // for chaining. The value is BORROWED — the ref form takes its own

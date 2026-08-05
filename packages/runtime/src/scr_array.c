@@ -259,6 +259,104 @@ double scr_arr_push_ref(ScrArr *a, void *v) {
   return scr_arr_push_slot(a, scr_slot_from_ptr(v));
 }
 
+/* ── unshift ───────────────────────────────────────────────────────────
+ * push's mirror at the FRONT: the tail slides up one and the new element
+ * takes index 0, answering the new length. Ownership of a refcounted
+ * argument moves IN, exactly like push — the emitter's moveTemp gives up
+ * the caller's reference. The variadic form is the emitter's: it
+ * evaluates every argument left to right (JS order) and then unshifts
+ * them RIGHT to left, which lands them in declaration order at the head.
+ * One memmove per argument, and argument counts are single digits. */
+static double scr_arr_unshift_slot(ScrArr *a, uint64_t slot) {
+  scr_arr_grow(a, a->len + 1);
+  memmove(a->data + 1, a->data, a->len * sizeof(uint64_t));
+  a->data[0] = slot;
+  a->len++;
+  return (double)a->len;
+}
+
+double scr_arr_unshift_f64(ScrArr *a, double v) {
+  return scr_arr_unshift_slot(a, scr_slot_from_f64(v));
+}
+
+double scr_arr_unshift_bool(ScrArr *a, bool v) {
+  return scr_arr_unshift_slot(a, (uint64_t)(v ? 1 : 0));
+}
+
+double scr_arr_unshift_ref(ScrArr *a, void *v) {
+  return scr_arr_unshift_slot(a, scr_slot_from_ptr(v));
+}
+
+/* ── reverse ───────────────────────────────────────────────────────────
+ * In place, then the RECEIVER back (+1) for chaining — fill's contract,
+ * and the reason `a.reverse()` and `a` stay the same array in JS. Slots
+ * only swap positions, so no element's reference count changes. */
+ScrArr *scr_arr_reverse(ScrArr *a) {
+  if (a->len > 1) {
+    for (size_t i = 0, j = a->len - 1; i < j; i++, j--) {
+      uint64_t t = a->data[i];
+      a->data[i] = a->data[j];
+      a->data[j] = t;
+    }
+  }
+  return scr_arr_retain(a);
+}
+
+/* ── copyWithin(target, start[, end]) ──────────────────────────────────
+ * Copies the [start, end) run over the slots at target, IN PLACE and
+ * without changing the length, then answers the receiver (+1). Every
+ * index goes through ToIntegerOrInfinity with negative-from-the-end
+ * resolution and clamping to [0, len] — splice's ladder — and the count
+ * is min(end - start, len - target), so nothing ever runs off the end.
+ * An omitted `end` arrives as +Infinity (the slice convention).
+ *
+ * Reference elements are the only interesting part: a copied value gains
+ * a reference and an overwritten slot gives one up. Source and
+ * destination OVERLAP in general (the ring-buffer compaction shape,
+ * copyWithin(0, head), overlaps whenever head*2 < len), so the whole
+ * source run is retained into scratch FIRST — a release during the write
+ * can then never free a slot the copy still has to read. The writes
+ * themselves are unlink-then-release, scr_arr_set_slot's discipline. */
+ScrArr *scr_arr_copy_within(ScrArr *a, double target, double start,
+                            double end) {
+  double len = (double)a->len;
+  double t0 = isnan(target) ? 0 : trunc(target);
+  if (t0 < 0) t0 += len;
+  size_t to = t0 <= 0 ? 0 : (t0 >= len ? a->len : (size_t)t0);
+  double s0 = isnan(start) ? 0 : trunc(start);
+  if (s0 < 0) s0 += len;
+  size_t from = s0 <= 0 ? 0 : (s0 >= len ? a->len : (size_t)s0);
+  double e0 = isnan(end) ? 0 : trunc(end);
+  if (e0 < 0) e0 += len;
+  size_t fin = e0 <= 0 ? 0 : (e0 >= len ? a->len : (size_t)e0);
+  size_t count = fin > from ? fin - from : 0;
+  if (count > a->len - to) count = a->len - to;
+  if (count == 0) return scr_arr_retain(a);
+  if (!scr_elem_is_ref(a->elem)) {
+    memmove(a->data + to, a->data + from, count * sizeof(uint64_t));
+    return scr_arr_retain(a);
+  }
+  uint64_t *tmp = malloc(count * sizeof(uint64_t));
+  if (!tmp) scr_arr_oom();
+  for (size_t i = 0; i < count; i++) {
+    void *p = scr_slot_to_ptr(a->data[from + i]);
+    if (p != NULL) {
+      if (a->elem == SCR_ELEM_STR) scr_str_retain((ScrStr *)p);
+      else if (a->elem == SCR_ELEM_BYTES) scr_bytes_retain((ScrBytes *)p);
+      else if (a->elem == SCR_ELEM_REF) p = a->elem_retain(p);
+      else scr_arr_retain((ScrArr *)p);
+    }
+    tmp[i] = scr_slot_from_ptr(p);
+  }
+  for (size_t i = 0; i < count; i++) {
+    uint64_t old = a->data[to + i];
+    a->data[to + i] = tmp[i];
+    scr_elem_release(a, old);
+  }
+  free(tmp);
+  return scr_arr_retain(a);
+}
+
 static uint64_t scr_arr_pop_slot(ScrArr *a) {
   if (a->len == 0) {
     scr_trap("scriptc: RangeError: pop() on an empty array\n");
