@@ -2515,13 +2515,18 @@ ScrBytes *scr_crypto_hash_digest_bytes_raw(ScrStr *alg, ScrBytes *data);
  * allocation failure (which traps). */
 typedef struct ScrHash {
   size_t rc;
-  int alg; /* SCR_HASH_SHA256 | SCR_HASH_SHA512 | SCR_HASH_SHA1 */
+  int alg; /* SCR_HASH_SHA256 | SCR_HASH_SHA512 | SCR_HASH_SHA1 | SCR_HASH_MD5 */
   unsigned char *msg;
   size_t len, cap;
 } ScrHash;
 #define SCR_HASH_SHA256 0
 #define SCR_HASH_SHA512 1
 #define SCR_HASH_SHA1 2
+/* md5 is a legacy DIGEST, not a security primitive — it is here because
+ * wire formats still specify it (WhatsApp's client payload derives its
+ * build hash with it). The core already existed for the island crypto
+ * shim's one-shot bridge; these handles reach the same function. */
+#define SCR_HASH_MD5 3
 ScrHash *scr_hash_new(ScrStr *alg);
 ScrHash *scr_hash_retain(ScrHash *h);
 void scr_hash_release(ScrHash *h);

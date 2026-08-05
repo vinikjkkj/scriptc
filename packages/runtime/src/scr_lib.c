@@ -2930,12 +2930,13 @@ size_t scr_crypto_hmac_raw(const char *alg, const unsigned char *key, size_t key
   return scr_crypto_digest_raw(alg, outer, 64 + in, out);
 }
 
-/* sha1, sha256 or sha512 — the compiler fences every other algorithm
- * literal, so the name only has to separate these three. */
+/* sha1, sha256, sha512 or md5 — the compiler fences every other algorithm
+ * literal, so the name only has to separate these four. */
 static size_t scr_hash_by_name(const ScrStr *alg, const unsigned char *data, size_t len,
                                unsigned char out[64]) {
   if (alg->len == 4 && memcmp(alg->data, "sha1", 4) == 0) return scr_sha1_digest(data, len, out);
   if (alg->len == 6 && memcmp(alg->data, "sha512", 6) == 0) return scr_sha512_digest(data, len, out);
+  if (alg->len == 3 && memcmp(alg->data, "md5", 3) == 0) return scr_md5_digest(data, len, out);
   return scr_sha256_digest(data, len, out);
 }
 
@@ -3009,6 +3010,7 @@ static void scr_hash_append(ScrHash *h, const unsigned char *p, size_t n) {
 static size_t scr_digest_by_id(int alg, const unsigned char *p, size_t n, unsigned char out[64]) {
   if (alg == SCR_HASH_SHA1) return scr_sha1_digest(p, n, out);
   if (alg == SCR_HASH_SHA512) return scr_sha512_digest(p, n, out);
+  if (alg == SCR_HASH_MD5) return scr_md5_digest(p, n, out);
   return scr_sha256_digest(p, n, out);
 }
 
@@ -3016,6 +3018,7 @@ static size_t scr_digest_by_id(int alg, const unsigned char *p, size_t n, unsign
 static int scr_alg_id(const ScrStr *alg) {
   if (alg->len == 4 && memcmp(alg->data, "sha1", 4) == 0) return SCR_HASH_SHA1;
   if (alg->len == 6 && memcmp(alg->data, "sha512", 6) == 0) return SCR_HASH_SHA512;
+  if (alg->len == 3 && memcmp(alg->data, "md5", 3) == 0) return SCR_HASH_MD5;
   return SCR_HASH_SHA256;
 }
 
