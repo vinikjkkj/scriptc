@@ -7018,7 +7018,18 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         if (ts.isBlock(hb)) {
           catchBody = L.lowerStmts(hb.statements);
         } else if (R.kind === "void") {
-          catchBody = [{ kind: "exprStmt", expr: L.lowerExpr(hb), loc: locOf(hb) }];
+          // A VALUELESS bare-expression handler: `() => undefined` over a
+          // `Promise<void>` (the checker's `Promise<void | undefined>`, which
+          // is the void mapping). The expression is a unit LITERAL — nothing
+          // to evaluate and nothing to return — so it contributes no
+          // statement at all; an exprStmt around it would be a bare unitLit
+          // outside a unionWrap, which the IR has no slot for. Any other
+          // expression still runs for its effects, exactly as before.
+          const discarded = L.lowerExpr(hb);
+          catchBody =
+            discarded.kind === "unitLit"
+              ? []
+              : [{ kind: "exprStmt", expr: discarded, loc: locOf(hb) }];
         } else {
           // Bare-expression handler: `(e) => v` (promise results flatten
           // through the async-return path, like any `return v`).
