@@ -91,6 +91,7 @@ import { settleOrValueArms,
 import { CompoundOp, IslandFnEntry, boundaryIntoIslandMsg, boundaryOutOfIslandMsg, BuiltinModuleFn, builtinConstLit, builtinModuleConstOf, builtinModulesArrayLit, builtinFenceHintOf, builtinModuleFnOf, stdlibMemberFence, isStdlibMember, isStdlibSymbol, isStdlibGlobal, stdlibGlobalMember, nodeTypesOnlySymbol } from "./surfaces.js";
 import { FileParts, splitFiles, collectProgram, collectNpmImports, collectJsonImports,
   collectJsonRequires, moduleArtifacts, collectGlobals, declSymbolOf, defaultExportSymbolOf, lowerFileInit, lowerDefaultExport, buildMain, appendDynamicImportModules } from "./lower-modules.js";
+import { scanDefinePropSymbolSlots } from "./lower-classes.js";
 import { ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerClassValueProperty, lowerStaticMethod, throwingSetterFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall } from "./lower-classes.js";
 import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } from "./lower-mixins.js";
 import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bindingNeverReassigned, bodyReadsArguments, isThisParameter, paramShape, paramShapes, checkDefaultParamBodyType, completeArgs, wrappedUndefined, undefinedArgFor, requireExactArityValue, bodyReturnType, declaredReturnType, collectSignature, collectSignatureInner, collectGenericSignature, genericFnOf, lowerGenericCall, lowerGenericFnValue, inferTypeParamBindings, lowerGenericInstance, lowerCall, lowerFfiCall, lowerTimersMemberCall, lowerPromiseMethodCall, lowerFilterNarrowCall, isTopLevelFnSymbol, lowerNestedFunctionDecl, lambdaSignature, lowerLambda, lowerFunction, validateFfiImports } from "./lower-calls.js";
@@ -8612,6 +8613,17 @@ export class Lowerer {
   accessorProducerProp(sym: ts.Symbol): boolean {
     this.accessorProducerCache ??= this.scanAccessorProducers();
     return this.accessorProducerCache.has(sym);
+  }
+
+  /** Hidden symbol slots declared by `Object.defineProperty`, per class
+   * declaration — the whole-program pre-pass (lower-classes.ts). Lazy for
+   * the same reason accessorProducerCache is: it must run after fileTag is
+   * populated and before shape interning. */
+  private definePropSlotCache: Map<ts.ClassLikeDeclaration, Map<ts.Symbol, { fieldName: string; values: ts.Expression[] }>> | null = null;
+
+  definePropSymbolSlots(decl: ts.ClassLikeDeclaration): ReadonlyMap<ts.Symbol, { fieldName: string; values: ts.Expression[] }> | undefined {
+    this.definePropSlotCache ??= scanDefinePropSymbolSlots(this);
+    return this.definePropSlotCache.get(decl);
   }
 
   private scanAccessorProducers(): Set<ts.Symbol> {

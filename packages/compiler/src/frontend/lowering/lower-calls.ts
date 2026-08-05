@@ -19,7 +19,7 @@ import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerDynArrayFilter
 import { lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerWatcherMethodCall } from "./lower-builtins.js";
 import { droppableStatic, lowerPromiseAllTupleCall, lowerPromiseRejectCall, probeLower, templateRawTextOf } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
-import { EMITTER_API_MEMBERS, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js";
+import { EMITTER_API_MEMBERS, definePropSlotSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
 import { lowerConsoleInspectArg, lowerFormatCall } from "./lower-inspect.js";
 import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lowerStreamStaticCall, streamSidesOf } from "./lower-stream.js";
@@ -7697,11 +7697,81 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     return { kind: "seqExpr", stmts, result: answer, type: BOOL, loc };
   }
 
+/** `Object.defineProperty(recv, K, { value, enumerable: false,
+   * configurable: false, writable: false })` over a program class — the
+   * WRITE half of the hidden symbol slot the whole-program pre-pass
+   * declared (definePropSlotSiteOf carries the shape and why each clause is
+   * load-bearing). The slot already exists in the layout, initialized to
+   * `undefined`, so the define is a field store.
+   *
+   * The store is guarded, because `writable: false, configurable: false`
+   * means the property is immutable once defined: a SECOND define on the
+   * same object is a TypeError in JS, and silently overwriting an immutable
+   * property is exactly the silent-wrong-value this compiler refuses. The
+   * guard reads the slot's undefined arm, so it is exact for every value
+   * but `undefined` itself — and a descriptor that defines `undefined` is
+   * indistinguishable from an undefined slot in this representation.
+   *
+   * STATEMENT position only. The call's value IS the receiver, and in
+   * expression position that value would have to be produced at the
+   * checker's type for the call (the receiver's own laundered spelling),
+   * which is not what the binding holds; nothing needs it, so it fences. */
+  function lowerDefinePropHiddenSlot(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+    if (call.parent === undefined || !ts.isExpressionStatement(call.parent)) return null;
+    const site = definePropSlotSiteOf(L, call);
+    if (!site) return null;
+    const recv = call.arguments[0]!;
+    if (!ts.isIdentifier(recv)) return null;
+    const recvIr = L.mapTypeOf(L.typeOf(recv));
+    if (recvIr?.kind !== "object") return null;
+    const info = L.classes.get(recvIr.className);
+    if (!info) return null;
+    const field = info.symbolFields?.get(site.key.sym);
+    if (field === undefined || info.hiddenSymbolFields?.has(field) !== true) return null;
+    const fieldType = info.fields.get(field);
+    if (!fieldType || fieldType.kind !== "union") return null;
+    const undefTag = L.armTag(fieldType.unionId, UNDEFINED_T);
+    if (undefTag < 0) return null;
+    // The receiver reads through its OWN local slot rather than lowering
+    // three times: the store, the guard's read and the result are one
+    // borrow of one binding, which is also why a bare identifier is the
+    // only admitted receiver.
+    const local = L.resolveLocal(recv);
+    if (!local || !typeEquals(local.type, recvIr)) return null;
+    const loc = locOf(call);
+    const obj = (): IrExpr => ({ kind: "varRef", localId: local.id, type: local.type, loc });
+    const value = L.lowerExprExpecting(site.value, fieldType);
+    const set: IrStmt = { kind: "fieldSet", obj: obj(), className: recvIr.className, field, value, loc };
+    if (process.env["SCRIPTC_DEFPROP_WHY"]) {
+      process.stderr.write(`[defprop] write ${recvIr.className}.${field} at ${loc.file}:${loc.start}\n`);
+    }
+    return {
+      kind: "ternary",
+      cond: {
+        kind: "unionIsTag",
+        unionId: fieldType.unionId,
+        tag: undefTag,
+        negated: true,
+        value: { kind: "fieldGet", obj: obj(), className: recvIr.className, field, type: fieldType, loc },
+        type: BOOL,
+        loc,
+      },
+      then: nodeThrowExpr(1, "", `Cannot redefine property: ${field}`, local.type, loc),
+      else_: { kind: "seqExpr", stmts: [set], result: obj(), type: local.type, loc },
+      type: local.type,
+      loc,
+    };
+  }
+
   function lowerObjectStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken || access.questionDotToken) return null;
     if (!L.isStdlibGlobal(access.expression, "Object")) return null;
     const member = access.name.text;
+    if (member === "defineProperty") {
+      const slot = lowerDefinePropHiddenSlot(L, call);
+      if (slot) return slot;
+    }
     // Object.is — the spec's SameValue over the static kinds. Number
     // pairs take the runtime SameValue (NaN equals NaN, +0 differs from
     // -0 — the two divergences from ===); every other supported pair
