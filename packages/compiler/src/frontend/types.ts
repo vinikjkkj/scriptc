@@ -802,6 +802,13 @@ let contextResolutions = 0;
  * blocker, not a slower cache. This one only ever costs a cache miss. */
 let memoSensitivity = 0;
 
+/** SCRIPTC_FLATTEN_WHY probe: how many union frames have spliced a nested
+ * union arm in (mapTypeInner's union rule). The trace line carries the
+ * running count, so the LAST line of a run is the total — read in the same
+ * run as the result, because "nothing changed" and "the branch never ran"
+ * are otherwise indistinguishable. */
+let unionArmFlattens = 0;
+
 /** Context-FREE mapping results, keyed by checker-type identity.
  *
  * The checker is a separate process: every property read, signature query and
@@ -3292,6 +3299,35 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
           );
           return null;
         }
+        // A UNION arm is a nested union. That is a shape the IR has no slot
+        // for, but it is NOT an ambiguity: `(A | B) | C` IS `A | B | C`, and
+        // ts flattens exactly that for every union it can SEE. What reaches
+        // here is a SUBSTITUTED arm — a type parameter bound to a union
+        // (mapTypeInner's resolveTypeParam hook), an intersection or a
+        // narrowed parameter that mapped to one — which no ts-level
+        // flattening can reach, because the nesting only exists after the
+        // binding is applied. Splice its arms in, so the home rules below
+        // judge the FLAT arm set: that set is exactly what a runtime tag has
+        // to tell apart, and it is the same set the caller's own union
+        // already carries.
+        // A PENDING placeholder is the one union that cannot be flattened:
+        // a back-reference minted its id and the frame that fills its arms
+        // is still running, so there is nothing to splice. It keeps the
+        // fence.
+        if (mapped.kind === "union") {
+          const inner = unions.get(mapped.unionId);
+          if (inner !== undefined && !unions.isPending(mapped.unionId) && inner.arms.length > 0) {
+            unionArmFlattens++;
+            if (process.env["SCRIPTC_FLATTEN_WHY"] !== undefined) {
+              console.error(
+                `[flattenwhy] #${unionArmFlattens} ${checker.typeToString(widened).slice(0, 70)}` +
+                  ` . arm ${checker.typeToString(part).slice(0, 40)} -> ${inner.arms.length} arms`,
+              );
+            }
+            for (const innerArm of inner.arms) byKey.set(typeKey(innerArm), innerArm);
+            continue;
+          }
+        }
         byKey.set(typeKey(mapped), mapped);
       }
       const arms = [...byKey.values()];
@@ -5313,6 +5349,18 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
     for (const { p: part, mapped } of mappedArms) {
       if (!mapped) {
         return `the union shape is supported, but its arm '${text(part)}' does not compile`;
+      }
+      // Mirror the mapper's nested-union SPLICE: a substituted arm that
+      // mapped to a finalized union is flattened before the home rules run,
+      // so it is never itself the blocker — the honest story is one of the
+      // arms it contributed, and the loop keeps looking. Only a PENDING
+      // placeholder (no arms to splice) is still blamed here, which is
+      // exactly what the mapper refused.
+      if (mapped.kind === "union") {
+        const inner = ctx.unions.get(mapped.unionId);
+        if (inner !== undefined && !ctx.unions.isPending(mapped.unionId) && inner.arms.length > 0) {
+          continue;
+        }
       }
       if (!armHasUnionHome(mapped, dataArms.length - 1)) {
         return `the union shape is supported, but '${text(part)}' arms have no home in a compiled union yet (no runtime narrowing test exists against sibling arms)`;
