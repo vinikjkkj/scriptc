@@ -1347,6 +1347,15 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // drain of the auxiliary-server registries): handles are ordinary
     // refcounted REF elements (their `_v` adapters, no trace — both drop
     // their closures at their terminal event).
+    if (process.env["SCRIPTC_ORDER_WHY"] !== undefined && elem.kind === "union") {
+      const arms = unions.get(elem.unionId)?.arms ?? [];
+      if (arms.length >= 2 && arms.every((a) => a.kind === "record")) {
+        console.error(
+          `ORDER arr ${checker.typeToString(widened).slice(0, 80)} -> ${typeKey(arrayOf(elem)).slice(0, 100)}` +
+          ` rest=${String(ctx.restTupleFromErasure)} idxU=${String(ctx.indexUnionOk)}`,
+        );
+      }
+    }
     return arrayOf(elem);
   }
   // Tuples: `[string, string]` maps to an interned RECORD shape flagged
@@ -1429,7 +1438,14 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       fields.push({ name: String(i), type: et });
     }
     fields.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    return { kind: "record", shapeId: ctx.shapes.intern(fields, true) };
+    const tupleId = ctx.shapes.intern(fields, true);
+    if (process.env["SCRIPTC_ORDER_WHY"] !== undefined && fields.length >= 2) {
+      console.error(
+        `ORDER tup ${checker.typeToString(widened).slice(0, 80)} -> #${tupleId}` +
+        ` rest=${String(ctx.restTupleFromErasure)} idxU=${String(ctx.indexUnionOk)}`,
+      );
+    }
+    return { kind: "record", shapeId: tupleId };
   }
   // Class instances: the type's symbol is a class declared in the user's
   // file. The class NAME as a value has the *constructor* type — same
@@ -4457,7 +4473,21 @@ function mapRecordType(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
         shapeId: shapes.finalizeRecursive(widened, inner.fields, inner.indexValue, inner.declaredOrder),
       };
     }
-    return { kind: "record", shapeId: shapes.intern(inner.fields, false, inner.indexValue, inner.declaredOrder) };
+    {
+      const id = shapes.intern(inner.fields, false, inner.indexValue, inner.declaredOrder);
+      if (process.env["SCRIPTC_ORDER_WHY"] !== undefined) {
+        const f = inner.fields.find((x) => x.name === "indexParts");
+        if (f) {
+          console.error(
+            `ORDER rec#${id} ${ctx.checker.typeToString(widened).slice(0, 60)}` +
+            ` indexParts=${typeKey(f.type).slice(0, 90)}` +
+            ` rest=${String(ctx.restTupleFromErasure)} idxU=${String(ctx.indexUnionOk)}` +
+            ` rtp=${ctx.resolveTypeParam !== undefined}`,
+          );
+        }
+      }
+      return { kind: "record", shapeId: id };
+    }
   } finally {
     shapes.inProgress.delete(widened);
   }
