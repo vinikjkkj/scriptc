@@ -4802,7 +4802,11 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       throw new PoisonError();
     };
 
-    const fields: { name: string; value: IrExpr; overflow?: true; drop?: true }[] = [];
+    // `expl` marks an entry written by an EXPLICIT property (not copied by a
+    // spread). Only those carry evaluation a spread's field-by-field copy
+    // could drop or step over — spread-contributed entries are reads and
+    // pure re-tag helper calls by construction.
+    const fields: { name: string; value: IrExpr; overflow?: true; drop?: true; expl?: true }[] = [];
     // Hoisted spread sources, in source order. A COMPUTED source (a call,
     // an await, an indexed read) is re-emitted once per field it
     // contributes, so it must be evaluated exactly ONCE first and the
@@ -4817,6 +4821,20 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // Member names DROPPED from the shape (JS deferral — unlowerable pure
     // member reads narrow away; see the catch in the property loop).
     const droppedNames = new Set<string>();
+    // A spread copy that OVERWRITES an earlier contributor takes over that
+    // name's EXISTING slot, so its read is emitted where the older value
+    // sat — ahead of everything the entries between them evaluate. Both
+    // moves are unobservable exactly while every EXPLICIT contributor
+    // accumulated so far is DROPPABLE (no call, no write, no trap): the
+    // older value's evaluation can then vanish, and the copy's read cannot
+    // see a different heap than it would at the spread's own position.
+    // Spread-copied entries never count — a field read and a pure re-tag
+    // call carry nothing to observe, which is the pre-existing
+    // `{ ...DEFAULTS, ...overrides }` merge. tsc already rejects the plain
+    // form (TS2783, "specified more than once"); what reaches here are
+    // OPTIONAL source fields, which it allows.
+    const overwriteObservable = (): boolean =>
+      fields.some((x) => x.expl === true && !droppableStatic(x.value));
     for (const prop of expr.properties) {
       if (ts.isSpreadAssignment(prop)) {
         const cs = conditionalSpreadOf(prop.expression);
@@ -4884,24 +4902,31 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         // so dropping the earlier read is exact). Identifier sources
         // re-read per field (historic path); any OTHER source must be a
         // re-emittable pure read, sharing one lowered node per field.
-        // The desugar's one-entry-per-name list reads spread fields
-        // EAGERLY at the spread's position, so an explicit property
-        // BEFORE a spread would need JS's overwrite — order-fenced (the
-        // index-signature merge path above takes any order).
-        if (
-          expr.properties
-            .slice(0, expr.properties.indexOf(prop))
-            .some((p) => !ts.isSpreadAssignment(p))
-        ) {
-          L.unsupported(
-            "SC1090",
-            prop,
-            "object spread after explicit properties (spreads must come first — a later spread would overwrite them with JS semantics the desugar does not model)",
-          );
-        }
+        // `{ jid, ...opts }` — an explicit property BEFORE the spread.
+        // The desugar's one-entry-per-name list APPENDS each copied field,
+        // so with no name collision the copies evaluate after the earlier
+        // properties, which is exactly JS's order; the two order hazards
+        // are handled where they arise, not by an up-front ban:
+        //   - a copy that OVERWRITES an earlier name lands in that name's
+        //     older slot, ahead of anything written between (the override
+        //     guard below);
+        //   - hoisting a COMPUTED source into the prelude moves its call
+        //     ahead of the earlier properties' reads, which could observe
+        //     what the call writes — so the hoist is withheld here and the
+        //     computed-source fence takes over.
+        // (The index-signature merge path above takes any order.)
+        const afterExplicit = expr.properties
+          .slice(0, expr.properties.indexOf(prop))
+          .some((p) => !ts.isSpreadAssignment(p));
         let srcNode: ts.Expression = prop.expression;
         while (ts.isParenthesizedExpression(srcNode)) srcNode = srcNode.expression;
         let srcLowered = ts.isIdentifier(srcNode) ? null : L.lowerExpr(srcNode);
+        if (process.env.SCRIPTC_SPREADORD_WHY && afterExplicit) {
+          const l = locOf(prop);
+          console.error(
+            `SPREADORD after-explicit ${l.file}@${l.start} fields=${fields.length} src=${ts.SyntaxKind[srcNode.kind]} hoistable=${srcLowered === null || pureReemittable(srcLowered)}`,
+          );
+        }
         // Evaluate a computed source ONCE into a hidden slot, so the
         // per-field copies read the slot instead of re-running it —
         // `{ ...makeBase(node), kind: 'x' }` must call makeBase once.
@@ -4911,8 +4936,10 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         // That is unobservable only while those are pure, so the hoist is
         // allowed exactly until the first impure contributor lands; after
         // that the fence stands, because reordering two effects is a wrong
-        // answer, not a missing feature.
-        if (srcLowered && !pureReemittable(srcLowered)) {
+        // answer, not a missing feature. An earlier explicit PROPERTY
+        // withholds it too: its read is pure, but a hoisted call could
+        // write what that read observes, and the two would swap.
+        if (srcLowered && !pureReemittable(srcLowered) && !afterExplicit) {
           if (fields.every((f) => pureReemittable(f.value))) {
             const slot = L.declareHiddenLocal("%spread", srcLowered.type);
             prelude.push({ kind: "varDecl", localId: slot.id, init: srcLowered, loc: locOf(srcNode) });
@@ -5064,6 +5091,16 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
               thenVal = L.applyWidthLift(lift, fRead(), targetType, locOf(prop));
             }
             const at = fields.findIndex((x) => x.name === f.name && !x.drop);
+            if (at >= 0 && overwriteObservable()) {
+              if (process.env.SCRIPTC_SPREADORD_WHY) {
+                console.error(`SPREADORD refuse-overwrite-union ${f.name} @${locOf(prop).start}`);
+              }
+              L.unsupported(
+                "SC1090",
+                prop,
+                `spread of '${f.name}' over an earlier contributor whose evaluation is observable (the present-test would make it conditional — give '${f.name}' one contributor, or move the spread first)`,
+              );
+            }
             const elseVal = at >= 0 ? fields[at]!.value : L.wrappedUndefined(targetType, locOf(prop));
             if (!elseVal) {
               L.unsupported(
@@ -5205,6 +5242,16 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
             );
           }
           const at = fields.findIndex((x) => x.name === f.name);
+          if (at >= 0 && overwriteObservable()) {
+            if (process.env.SCRIPTC_SPREADORD_WHY) {
+              console.error(`SPREADORD refuse-overwrite ${f.name} @${locOf(prop).start}`);
+            }
+            L.unsupported(
+              "SC1090",
+              prop,
+              `spread of '${f.name}' over an earlier contributor whose evaluation is observable (the desugar keeps one entry per name — give '${f.name}' one contributor, or move the spread first)`,
+            );
+          }
           if (at >= 0) fields[at] = { name: f.name, value };
           else fields.push({ name: f.name, value });
         }
@@ -5268,8 +5315,8 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
             if (only && ts.isReturnStatement(only) && only.expression && pureRef(only.expression)) {
               const value = L.coerceInto(only.expression, L.lowerExpr(only.expression), ft);
               const at2 = fields.findIndex((x) => x.name === name);
-              if (at2 >= 0) fields[at2] = { name, value };
-              else fields.push({ name, value });
+              if (at2 >= 0) fields[at2] = { name, value, expl: true };
+              else fields.push({ name, value, expl: true });
               continue;
             }
             L.unsupported(
@@ -5282,7 +5329,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         }
         const closure = L.coerceInto(prop, L.lowerLambda(prop), slotT);
         if (!typeEquals(closure.type, slotT)) L.badType(prop, L.typeOf(prop));
-        fields.push({ name: slotName, value: closure });
+        fields.push({ name: slotName, value: closure, expl: true });
         continue;
       }
       const name = propNameText(L, prop.name!); // key-form-checked above
@@ -5411,7 +5458,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         // are last-write-wins already; a duplicate literal key is a tsc
         // error anyway).
         const slotted = L.intoIndexValueSlot(value, shape.indexValue!, valueNode);
-        fields.push({ name, value: slotted, overflow: true });
+        fields.push({ name, value: slotted, overflow: true, expl: true });
         continue;
       }
       value = L.coerceInto(valueNode, value, fieldType); // union-typed fields wrap arm values
@@ -5430,7 +5477,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       }
       const at = fields.findIndex((x) => x.name === name);
       if (at >= 0) fields.splice(at, 1);
-      fields.push({ name, value });
+      fields.push({ name, value, expl: true });
     }
     // Optional fields (undefined-armed union slots) may be omitted: the
     // absent field holds the interned undefined arm, exactly like writing
