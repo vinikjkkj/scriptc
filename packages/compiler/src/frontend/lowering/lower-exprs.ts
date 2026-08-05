@@ -12,7 +12,7 @@ import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReaso
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, diffieHellmanFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import { UNSUPPORTED, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncNameOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
-import { arrayAtOf, BYTES_CTORS, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, strCharsCall } from "./lower-containers.js";
+import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, strCharsCall } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../shared.js";
 import { declModuleWithoutTwin, declTwinGlobalOf } from "./lower-modules.js";
@@ -2559,6 +2559,40 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     }
   }
 
+/** `{ ...maybe }` where `maybe` is `Record<K, V> | undefined` (an OPTIONAL
+   * field, an optional parameter) inside an index-signature merge: JS
+   * spreads NOTHING for the nullish arm, which is exactly what copying an
+   * EMPTY record of the same index shape does — so the argument becomes
+   * `tag-test ? narrow(src) : {}` and the merge helper needs no absent
+   * case of its own. Only a PURE source takes this (the tag test and the
+   * narrow are two emissions of it; `pureReemittable` is the same standard
+   * the field-by-field spread copies use), only a two-arm union, and only
+   * a PURE index-signature record arm — a source with declared fields has
+   * no empty value to stand in for it. Anything else comes back unchanged
+   * and meets the caller's fence. */
+  function optionalIndexSpreadSource(L: Lowerer, src: IrExpr, loc: SrcLoc): IrExpr {
+    if (src.type.kind !== "union" || !pureReemittable(src)) return src;
+    const arms = L.unions.get(src.type.unionId)?.arms ?? [];
+    if (arms.length !== 2) return src;
+    const recTag = arms.findIndex((a) => a.kind === "record");
+    const nullTag = arms.findIndex((a) => a.kind === "undefinedT" || a.kind === "nullT");
+    if (recTag < 0 || nullTag < 0) return src;
+    const recArm = arms[recTag] as IrType & { kind: "record" };
+    const from = L.shapes.get(recArm.shapeId);
+    if (!from || !from.indexValue || from.tuple || from.fields.length > 0) return src;
+    if (process.env.SCRIPTC_CONDSPREAD_WHY) {
+      console.error(`CONDSPREAD optional-source ${L.fmt(recArm)} ${loc.file}@${loc.start}`);
+    }
+    return {
+      kind: "ternary",
+      cond: { kind: "unionIsTag", unionId: src.type.unionId, tag: nullTag, negated: true, value: src, type: BOOL, loc },
+      then: { kind: "unionNarrow", unionId: src.type.unionId, tag: recTag, value: src, type: recArm, loc },
+      else_: { kind: "recordLit", fields: [], type: recArm, loc },
+      type: recArm,
+      loc,
+    };
+  }
+
 export function pureReemittable(e: IrExpr): boolean {
     if (e.kind === "varRef") return true;
     if (e.kind === "recordGet" || e.kind === "fieldGet") return pureReemittable(e.obj);
@@ -4777,10 +4811,10 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // with keyed writes (JS last-write-wins), sources and values evaluate
     // once each in source order (the call's argument order). A CONDITIONAL
     // spread `...(c ? { k: v } : {})` contributes its one key as a ternary
-    // — cond once, v lazily, the empty arm holding the value slot's
-    // undefined arm (the explicit-undefined-is-absent stance: JSON and
-    // child-env builders drop it, exactly Node's absent key); targets
-    // with declared fields keep the historic desugar below.
+    // — cond once, v lazily — and a whole spread SOURCE that may be absent
+    // (`{ ...maybe }` over `Record<K, V> | undefined`) contributes the
+    // empty record for its nullish arm; targets with declared fields keep
+    // the historic desugar below.
     const isRuntimeComputedKey = (p: ts.ObjectLiteralElementLike): boolean =>
       !ts.isSpreadAssignment(p) &&
       p.name !== undefined &&
@@ -4805,37 +4839,61 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
             );
           }
           if (cs) {
-            const absent = L.wrappedUndefined(shape.indexValue, locOf(prop));
-            if (!absent) {
+            const iv = shape.indexValue;
+            // A slot that already spells "absent" — an undefined-armed
+            // union — keeps the historic desugar: the key is WRITTEN
+            // holding that arm (divergence 56's explicit-undefined-is-
+            // absent stance). A slot with NO undefined of its own — the
+            // `Record<string, string>` header/param builders — carries
+            // presence in a WIDENED `T | undefined` helper parameter
+            // instead, and the helper writes the key only on the present
+            // side, so an absent key is genuinely absent (JS-exact, and
+            // strictly better than the stance above). `unknown` slots take
+            // the dyn tree's own undefined, the same way an omitted
+            // optional record field does, and test it with `dynTest`.
+            const absent = L.wrappedUndefined(iv, locOf(prop));
+            const widened = absent ? null : condPresenceSlot(L, iv);
+            const hole = absent ?? (widened ? L.wrappedUndefined(widened, locOf(prop)) : iv.kind === "dyn" ? dynUndefinedExpr(locOf(prop)) : null);
+            if (!hole) {
               L.unsupported(
                 "SC1090",
                 prop,
-                `conditional spreads into '${L.fmt(shape.indexValue)}'-valued index-signature keys (the empty arm needs an undefined arm to hold — write the key in an if statement instead)`,
+                `conditional spreads into '${L.fmt(iv)}'-valued index-signature keys (the empty arm needs an undefined arm to hold — write the key in an if statement instead)`,
               );
             }
             const csProp = cs.props[0]!;
             const cond = L.lowerCondition(cs.cond);
             const vNode: ts.Node = ts.isPropertyAssignment(csProp) ? csProp.initializer : csProp;
-            const v = L.intoIndexValueSlot(
+            let v = L.intoIndexValueSlot(
               ts.isPropertyAssignment(csProp) ? L.lowerExpr(csProp.initializer) : L.lowerShorthandValue(csProp),
-              shape.indexValue,
+              iv,
               vNode,
             );
+            if (widened) {
+              v = { kind: "unionWrap", unionId: widened.unionId, tag: L.armTag(widened.unionId, iv), value: v, type: widened, loc: locOf(prop) };
+            }
+            if (process.env.SCRIPTC_CONDSPREAD_WHY) {
+              const l = locOf(prop);
+              console.error(`CONDSPREAD ${absent ? "armed" : widened ? "widened" : "dyn"} slot=${L.fmt(iv)} ${l.file}@${l.start}`);
+            }
             contributors.push({
-              kind: "field",
+              // Only the slots that had no encoding until now take the
+              // conditional WRITE; the armed slots keep their historic
+              // unconditional write of the undefined arm.
+              kind: absent ? "field" : "condField",
               name: csProp.name.text,
               value: {
                 kind: "ternary",
                 cond,
-                then: cs.whenTrue ? v : absent,
-                else_: cs.whenTrue ? absent : v,
-                type: shape.indexValue,
+                then: cs.whenTrue ? v : hole,
+                else_: cs.whenTrue ? hole : v,
+                type: widened ?? iv,
                 loc: locOf(prop),
               },
             });
             continue;
           }
-          const src = L.lowerExpr(prop.expression);
+          const src = optionalIndexSpreadSource(L, L.lowerExpr(prop.expression), locOf(prop));
           if (src.type.kind !== "record") {
             L.unsupported(
               "SC1090",
@@ -5005,19 +5063,41 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
             }
             throw shapeMismatch(prop);
           }
-          const absent = L.wrappedUndefined(fieldType, locOf(prop));
+          // An EARLIER contributor for the same name (`{ jid, ...opts,
+          // ...(t ? { privacyTokenNode: t } : {}) }`, where `opts` already
+          // carries the key): JS's last-write-wins means the empty arm
+          // leaves the EARLIER value standing, so it — not the undefined
+          // arm — is what the else branch holds. That is the same
+          // present-test merge the union-source spread below builds, under
+          // the same order guard: the ternary takes over the earlier
+          // entry's slot, so its condition and value evaluate where the
+          // older value sat, which is unobservable exactly while every
+          // explicit entry accumulated so far is droppable. Only ONE plain
+          // entry qualifies — a dropped or duplicated name keeps the fence.
+          const prior = fields.findIndex((f) => f.name === name);
+          const priorEntry = prior >= 0 ? fields[prior]! : null;
+          if (
+            priorEntry &&
+            (priorEntry.drop === true ||
+              fields.filter((f) => f.name === name).length !== 1 ||
+              !typeEquals(priorEntry.value.type, fieldType) ||
+              overwriteObservable())
+          ) {
+            if (process.env.SCRIPTC_CONDSPREAD_WHY) {
+              console.error(`CONDSPREAD refuse-over-earlier ${name} @${locOf(prop).start}`);
+            }
+            L.unsupported(
+              "SC1090",
+              prop,
+              `conditional spread of '${name}' over an earlier '${name}' whose evaluation is observable (the empty arm would have to keep that value — give '${name}' one contributor, or move the conditional spread first)`,
+            );
+          }
+          const absent = priorEntry ? priorEntry.value : L.wrappedUndefined(fieldType, locOf(prop));
           if (!absent) {
             L.unsupported(
               "SC1090",
               prop,
               `conditional spreads onto the required field '${name}' (the empty arm leaves it undefined — declare the field optional)`,
-            );
-          }
-          if (fields.some((f) => f.name === name)) {
-            L.unsupported(
-              "SC1090",
-              prop,
-              `conditional spread of '${name}' over an earlier '${name}' (the desugar keeps one entry per name — restructure so each name has one contributor)`,
             );
           }
           const cond = L.lowerCondition(cs.cond);
@@ -5028,17 +5108,25 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           v = L.coerceInto(valueNode, v, fieldType);
           if (!typeEquals(v.type, fieldType)) L.badType(valueNode, L.typeOf(valueNode));
           conditionalNames.add(name);
-          fields.push({
+          const merged = {
             name,
             value: {
-              kind: "ternary",
+              kind: "ternary" as const,
               cond,
               then: cs.whenTrue ? v : absent,
               else_: cs.whenTrue ? absent : v,
               type: fieldType,
               loc: locOf(prop),
             },
-          });
+          };
+          if (priorEntry) {
+            if (process.env.SCRIPTC_CONDSPREAD_WHY) {
+              console.error(`CONDSPREAD over-earlier ${name} @${locOf(prop).start}`);
+            }
+            fields[prior] = { ...priorEntry, ...merged };
+          } else {
+            fields.push(merged);
+          }
           continue;
         }
         // `{ ...base, ... }` — field-by-field copy of a known record

@@ -7263,8 +7263,45 @@ export type IndexMergeContributor =
    * the target's value slot>` — cond evaluates once, `v` lazily — so the
    * target's index-value type must carry an undefined arm. The explicit
    * `{ k: undefined }` true-arm collapses to absence, divergence 56's
-   * documented stance. */
+   * documented stance. A slot that CANNOT hold undefined (a
+   * `Record<string, string>`) carries presence beside the value instead —
+   * see `condPresenceSlot`; `value` then has that widened type. */
   | { kind: "condField"; name: string; value: IrExpr };
+
+/** The slot a conditional spread's value travels in when the target's
+ * index-signature value type `tIv` has no "absent" of its own.
+ *
+ * A conditional spread is the one contributor whose key may not be written
+ * at all, so the helper needs a runtime presence bit. Where `tIv` already
+ * carries an undefined arm (or IS dyn, whose tree has an undefined kind)
+ * the bit rides the value and this returns null — the caller keeps `tIv`.
+ * Otherwise the value travels WIDENED to the interned `tIv | undefined`:
+ * the call site wraps on the present side and passes the undefined arm on
+ * the absent one (`cond` evaluated once, the value still lazy, no second
+ * parameter and no re-read of `cond`), and the helper narrows back before
+ * the keyed write. Exactly two arms is the invariant the helper's
+ * `unionIsTag`/`unionNarrow` pair rests on — a `tIv` that is itself a
+ * union, or that already spells undefined, gets null and keeps the fence. */
+export function condPresenceSlot(L: Lowerer, tIv: IrType): (IrType & { kind: "union" }) | null {
+  if (tIv.kind === "union" || tIv.kind === "dyn" || tIv.kind === "jsval") return null;
+  if (tIv.kind === "void" || tIv.kind === "caught" || isUnitType(tIv)) return null;
+  const opt = L.withUndefinedArm(tIv);
+  if (opt.kind !== "union") return null;
+  const arms = L.unions.get(opt.unionId)?.arms;
+  if (!arms || arms.length !== 2) return null;
+  if (L.armTag(opt.unionId, tIv) < 0 || L.armTag(opt.unionId, UNDEFINED_T) < 0) return null;
+  return opt;
+}
+
+/** How a conditional spread's key learns whether it was written, for a
+ * target index-value slot `tIv`. `"union"` — `tIv`'s own undefined arm;
+ * `"dyn"` — the checked-dynamic tree's undefined kind; a widened union —
+ * `condPresenceSlot`; null — no encoding exists, the caller fences. */
+function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & { kind: "union" }) | null {
+  if (tIv.kind === "union" && L.armTag(tIv.unionId, UNDEFINED_T) >= 0) return "union";
+  if (tIv.kind === "dyn") return "dyn";
+  return condPresenceSlot(L, tIv);
+}
 
 /** The interned merge helper behind `{ ...a, ...b, K: v }` literals whose
    * TARGET shape is a PURE index-signature record (no declared fields) —
@@ -7294,11 +7331,10 @@ export type IndexMergeContributor =
     // decline (a spread would need the getter's computed value).
     const srcPlans: { shapeId: string; wrapTag: number; retag: string | null; fields: Map<string, WidthLift | "dyn"> | null }[] = [];
     for (const c of contributors) {
-      // A conditional spread needs the undefined arm as its "absent"
-      // value — a target slot without one can't carry the empty arm.
-      if (c.kind === "condField" && (tIv.kind !== "union" || L.armTag(tIv.unionId, UNDEFINED_T) < 0)) {
-        return null;
-      }
+      // A conditional spread needs SOME encoding of "absent" — the slot's
+      // own undefined arm, the dyn tree's undefined, or the widened
+      // `tIv | undefined` parameter. None of the three: keep the fence.
+      if (c.kind === "condField" && condPresencePlan(L, tIv) === null) return null;
       if (c.kind !== "spread") continue;
       const from = L.shapes.get(c.shapeId);
       if (!from || from.tuple) return null;
@@ -7379,26 +7415,46 @@ export type IndexMergeContributor =
       }
       if (c.kind === "field" || c.kind === "condField") {
         const pid = `v.${ci}`;
-        params.push({ localId: pid, name: `v${ci}`, type: tIv });
-        locals.push({ id: pid, name: `v${ci}`, type: tIv, mutable: false });
+        // A conditional spread whose slot cannot hold "absent" travels
+        // WIDENED (condPresenceSlot): the parameter is `tIv | undefined`
+        // and the value narrows back for the write. Every other
+        // contributor keeps the slot type itself.
+        const presence = c.kind === "condField" ? condPresencePlan(L, tIv) : null;
+        const widened = presence !== null && presence !== "union" && presence !== "dyn" ? presence : null;
+        const slotT: IrType = widened ?? tIv;
+        params.push({ localId: pid, name: `v${ci}`, type: slotT });
+        locals.push({ id: pid, name: `v${ci}`, type: slotT, mutable: false });
         const write: IrStmt = {
           kind: "recordKeySet",
           obj: outRef,
           shapeId: toId,
           key: { kind: "strLit", value: c.name, type: STRING, loc },
-          value: ref(pid, tIv),
+          // Tag-unchecked narrowing is sound here because the write sits
+          // under the `!= undefined` test on a TWO-arm union.
+          value: widened
+            ? { kind: "unionNarrow", unionId: widened.unionId, tag: L.armTag(widened.unionId, tIv), value: ref(pid, widened), type: tIv, loc }
+            : ref(pid, tIv),
           overflowOnly: true,
           loc,
         };
-        if (c.kind === "condField" && tIv.kind === "union") {
-          // The key writes only when the spread's condition held (its
-          // value arg holds the interned undefined arm otherwise) — an
-          // absent key STAYS absent, presence being the observable.
-          // (The pre-pass above guaranteed the undefined arm exists.)
-          const undefTag = L.armTag(tIv.unionId, UNDEFINED_T);
+        if (c.kind === "condField") {
+          // The key writes only when the spread's condition held — an
+          // absent key STAYS absent, presence being the observable. The
+          // pre-pass above guaranteed one of the three encodings exists.
+          if (presence === "dyn") {
+            body.push({
+              kind: "if",
+              cond: { kind: "dynTest", test: "undefined", negated: true, value: ref(pid, tIv), type: BOOL, loc },
+              then: [write],
+              else_: null,
+              loc,
+            });
+            return;
+          }
+          const u = widened ?? (tIv as IrType & { kind: "union" });
           body.push({
             kind: "if",
-            cond: { kind: "unionIsTag", unionId: tIv.unionId, tag: undefTag, negated: true, value: ref(pid, tIv), type: BOOL, loc },
+            cond: { kind: "unionIsTag", unionId: u.unionId, tag: L.armTag(u.unionId, UNDEFINED_T), negated: true, value: ref(pid, u), type: BOOL, loc },
             then: [write],
             else_: null,
             loc,
