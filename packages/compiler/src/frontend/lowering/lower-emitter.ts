@@ -77,13 +77,59 @@ interface EventSig {
   dynListener: boolean;
 }
 
+/** Which event names the program REGISTERS a listener for — the syntactic
+ * over-approximation, collected by the same walk that builds the table but
+ * kept deliberately separate from it.
+ *
+ * The table cannot answer this question. A name is absent from the table
+ * both when nothing anywhere touches it AND when every site that touches
+ * it had a type that did not map (mergeEmit/mergeListener drop such a site
+ * before sigOf ever runs). Reading "absent from the table" as "nobody
+ * listens" would therefore silently drop an emit whose listener exists but
+ * whose parameter type failed to map — a wrong value, not a fence. This
+ * set records the REGISTRATION SITE itself, types be damned.
+ *
+ * `opaque` is the escape hatch: a registration whose event name is not a
+ * compile-time literal could name anything, so once one exists no name is
+ * provably unobserved. Registrations on a receiver that definitely is not
+ * an emitter (a mapped object class that does not root at %EventEmitter)
+ * are the only ones excluded — everything unresolved counts. */
+interface EmitterRegistrations {
+  names: ReadonlySet<string>;
+  opaque: boolean;
+  /** Where the first opaque registration is, for SCRIPTC_NOOPEMIT_WHY. */
+  opaqueAt: string | null;
+}
+
+/** `super.on(event, listener)` inside `on`'s own declaration — the
+ * type-only override forwarder every typed-events class writes (see
+ * superDelegationReason, which ERASES it). Its event name is never a
+ * literal, but it registers nothing of its own: it forwards whatever its
+ * caller passed, and each of those callers is a registration site the scan
+ * sees in its own right. Counting it would make every typed-events program
+ * opaque forever. */
+function isSameNameSuperForward(access: ts.PropertyAccessExpression, member: string): boolean {
+  if (access.expression.kind !== ts.SyntaxKind.SuperKeyword) return false;
+  for (let p: ts.Node | undefined = access.parent; p; p = p.parent) {
+    if (p.kind === ts.SyntaxKind.MethodDeclaration) {
+      const m = p as ts.MethodDeclaration;
+      return m.name !== undefined && ts.isIdentifier(m.name) && m.name.text === member;
+    }
+    if (p.kind === ts.SyntaxKind.ClassDeclaration || p.kind === ts.SyntaxKind.ClassExpression) return false;
+  }
+  return false;
+}
+
 /** The program-wide event-signature table, built lazily on the first
  * emitter lowering (class shapes are collected before any body lowers, so
  * receiver classes resolve). The scan is DIAGNOSTIC-FREE: unmappable
  * types and non-literal names are simply not candidates — the touching
  * sites speak for themselves when they lower. */
 function emitterEvents(L: Lowerer): Map<string, EventSig> {
-  const holder = L as unknown as { emitterEventTable?: Map<string, EventSig> };
+  const holder = L as unknown as {
+    emitterEventTable?: Map<string, EventSig>;
+    emitterRegistrations?: EmitterRegistrations;
+  };
   if (holder.emitterEventTable) return holder.emitterEventTable;
   const table = new Map<string, EventSig>();
   const sigOf = (name: string): EventSig => {
@@ -221,6 +267,9 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
   // Collecting is one cheap syntactic pass; the type-heavy merging is what
   // gets ordered, so nothing is scanned twice.
   const sites: { isEmit: boolean; name: string; node: ts.CallExpression }[] = [];
+  const registered = new Set<string>();
+  let opaqueRegistration = false;
+  let opaqueAt: string | null = null;
   for (const sf of L.program.getSourceFiles()) {
     if (sf.isDeclarationFile) continue;
     const walk = (node: ts.Node): void => {
@@ -230,15 +279,42 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
       const isEmit = member === "emit";
       if (!isEmit && !REGISTER_MEMBERS.has(member)) return;
       const arg0 = node.arguments[0];
-      if (!arg0) return;
+      if (!arg0) {
+        // `on()` with no arguments cannot register anything, but `once(em,
+        // name)` — the promise form — reaches here as a property-access
+        // call whose FIRST argument is the emitter. That shape is covered
+        // below by the non-literal branch, not by this one.
+        return;
+      }
       let recvT: IrType | null = null;
       let nameT: ts.Type | null = null;
+      let resolved = true;
       try {
         recvT = L.mapTypeOf(L.typeOf(node.expression.expression));
         nameT = L.typeOf(arg0);
       } catch {
-        return; // checker trouble is the lowering's business, not the scan's
+        resolved = false;
       }
+      if (!isEmit && !isSameNameSuperForward(node.expression, member)) {
+        // A receiver that MAPPED to a class not rooted at %EventEmitter is
+        // the one case that provably cannot reach an emitter's registry.
+        // Records (the plugin-context idiom: `ctx.on` holding
+        // `client.on.bind(client)`), dyn, and everything unresolved all
+        // count as a registration.
+        const notAnEmitter =
+          resolved && recvT?.kind === "object" && !emitterRooted(L, L.classes.get(recvT.className));
+        if (!notAnEmitter) {
+          if (resolved && nameT !== null && nameT.isStringLiteralType()) registered.add(nameT.value);
+          else {
+            opaqueRegistration = true;
+            if (opaqueAt === null) {
+              const l = locOf(node);
+              opaqueAt = `${l.file}@${l.start}`;
+            }
+          }
+        }
+      }
+      if (!resolved || nameT === null) return; // checker trouble is the lowering's business, not the scan's
       if (recvT?.kind !== "object" || !emitterRooted(L, L.classes.get(recvT.className))) return;
       if (!nameT.isStringLiteralType()) return;
       const name = nameT.value;
@@ -278,7 +354,15 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
     }
   }
   holder.emitterEventTable = table;
+  holder.emitterRegistrations = { names: registered, opaque: opaqueRegistration, opaqueAt };
   return table;
+}
+
+/** The registration set, forcing the scan if it has not run. */
+function emitterRegistrations(L: Lowerer): EmitterRegistrations {
+  emitterEvents(L);
+  return (L as unknown as { emitterRegistrations?: EmitterRegistrations }).emitterRegistrations ??
+    { names: new Set<string>(), opaque: true, opaqueAt: null };
 }
 
 /** The compile-time event name of the first argument, or a pointed fence
@@ -309,6 +393,148 @@ function tupleOf(L: Lowerer, table: Map<string, EventSig>, name: string, blame: 
     );
   }
   return sig.tuple;
+}
+
+/** True when every declaration behind `sym` is a plain PARAMETER — the one
+ * binding whose read can neither throw nor run an initializer, because it
+ * is bound before the body it is read in. */
+function bindsAParameter(L: Lowerer, sym: ts.Symbol | undefined): boolean {
+  if (!sym) return false;
+  let decls: readonly ts.Node[];
+  try {
+    decls = L.checker.declarationsOf(sym);
+  } catch {
+    return false;
+  }
+  return decls.length > 0 && decls.every((d) => ts.isParameter(d) && ts.isIdentifier(d.name));
+}
+
+/** True when producing `e`'s value is UNOBSERVABLE beyond the value: it
+ * reads a parameter or a literal and may build a fresh literal aggregate
+ * out of those, and that is all. No call, no getter, no `new`, no spread
+ * (which iterates, and iteration is a call), no computed key (whose
+ * `toString` is a call), no accessor or method member, no bare
+ * non-parameter identifier (a read above a `let` is a TDZ throw Node WOULD
+ * serve — the dead-binding rule's own carve-out, sideEffectFreeValueExpr).
+ *
+ * This is what lets the no-op below DROP an argument rather than lower it,
+ * which is the whole point: the arguments of the sites this rescues are
+ * typically the reason the site could not lower at all. */
+function inertEmitArg(L: Lowerer, e: ts.Expression): boolean {
+  let v = e;
+  for (;;) {
+    if (ts.isParenthesizedExpression(v) || ts.isAsExpression(v) || ts.isTypeAssertion(v) ||
+        ts.isNonNullExpression(v) || ts.isSatisfiesExpression(v)) {
+      v = v.expression;
+      continue;
+    }
+    break;
+  }
+  if (ts.isLiteralExpression(v)) return true;
+  if (v.kind === ts.SyntaxKind.NullKeyword || v.kind === ts.SyntaxKind.TrueKeyword ||
+      v.kind === ts.SyntaxKind.FalseKeyword || v.kind === ts.SyntaxKind.ThisKeyword) {
+    return true;
+  }
+  if (ts.isIdentifier(v)) {
+    if (v.text === "undefined") return true;
+    // PARAMETERS only. A parameter is bound before the body runs, so its
+    // read can neither throw nor observe an initializer.
+    return bindsAParameter(L, L.checker.getSymbolAtLocation(v));
+  }
+  if (ts.isObjectLiteralExpression(v)) {
+    return v.properties.every((p) => {
+      // A shorthand's NAME resolves to the property being built, never to
+      // the binding being read — the value symbol is a separate question.
+      if (ts.isShorthandPropertyAssignment(p)) {
+        return bindsAParameter(L, L.checker.getShorthandAssignmentValueSymbol(p));
+      }
+      if (!ts.isPropertyAssignment(p)) return false; // spread, accessor, method
+      if (ts.isComputedPropertyName(p.name)) return false;
+      return inertEmitArg(L, p.initializer);
+    });
+  }
+  if (ts.isArrayLiteralExpression(v)) {
+    return v.elements.every((el) => !ts.isSpreadElement(el) && inertEmitArg(L, el));
+  }
+  return false;
+}
+
+/** The first class in `info`'s hierarchy — ancestors and descendants both
+ * — whose emit override is NOT a pure `return super.emit(event, ...args)`
+ * forwarder, or null when every one of them is (or there are none). */
+function nonForwardingEmitOverride(info: ClassInfo): ClassInfo | null {
+  const opaque = (c: ClassInfo): boolean =>
+    c.emitOverride !== undefined && superDelegationReason(c.emitOverride.decl, "emit") !== null;
+  for (let c: ClassInfo | null = info; c; c = c.base) {
+    if (opaque(c)) return c;
+  }
+  const below: ClassInfo[] = [];
+  collectEmitOverridesBelow(info, below);
+  for (const c of below) {
+    if (opaque(c)) return c;
+  }
+  return null;
+}
+
+/** `emit(name, ...)` of an event the program NEVER registers a listener
+ * for, on a receiver whose hierarchy declares no emit override: the
+ * runtime call would find an empty bucket, do nothing, and answer false.
+ * So `false` is what this returns, with the receiver and the payload
+ * dropped — Node's exact semantics for an unobserved event.
+ *
+ * This is the rule `boundEmitDispatcher`'s fallthrough already runs on
+ * ("named by no emit and no listener in the whole program: emitting it is
+ * a no-op"), moved to the DIRECT call — with one correction that shape did
+ * not need. There, the key came from the slot's own constraint and absence
+ * from the event table meant absence from the program. Here it does not:
+ * an event's table entry is also missing when every site that touched it
+ * had a type that did not map. So the question is asked of the syntactic
+ * REGISTRATION set, never of the table.
+ *
+ * Claimed only as a RESCUE — at the point the site would otherwise fence.
+ * A site that already lowers keeps its real `emitter.emit` call, so this
+ * can only ever remove a trap, never rewrite working code.
+ *
+ * Null when any part of that does not hold; the caller then raises the
+ * diagnostic it was going to raise. */
+function listenerlessEmitNoop(
+  L: Lowerer,
+  info: ClassInfo,
+  name: string,
+  call: ts.CallExpression,
+  access: ts.PropertyAccessExpression,
+  superRecv: { thisRef: IrExpr; cls: ClassInfo } | undefined,
+  loc: SrcLoc,
+): IrExpr | null {
+  const why = (r: string): null => {
+    if (process.env["SCRIPTC_NOOPEMIT_WHY"] !== undefined) console.error(`[noopemit] '${name}': ${r}`);
+    return null;
+  };
+  if (superRecv !== undefined) return why("super.emit forwards up the prototype chain");
+  const reg = emitterRegistrations(L);
+  if (reg.opaque) return why(`a registration names its event opaquely (${reg.opaqueAt ?? "?"})`);
+  if (reg.names.has(name)) return why("the program registers a listener for it");
+  // An emit OVERRIDE may carry a body of its own (emitOverrideShapeReason
+  // constrains only the rest parameter's forwarding), so skipping the call
+  // would skip that body. The type-only forwarder — `return
+  // super.emit(event, ...args)`, which is what every typed-events class
+  // writes — does nothing but forward, so it alone is skippable. Both
+  // directions of the hierarchy are checked: descendants intercept through
+  // the vtable, ancestors through the super chain.
+  const opaqueOverride = nonForwardingEmitOverride(info);
+  if (opaqueOverride !== null) return why(`'${opaqueOverride.def.name}' overrides emit with a body of its own`);
+  // Everything this site would have evaluated is dropped, so everything it
+  // would have evaluated must be inert. The receiver is held to the two
+  // spellings that cannot even be a getter read.
+  const recvExpr = access.expression;
+  if (recvExpr.kind !== ts.SyntaxKind.ThisKeyword && !ts.isIdentifier(recvExpr)) {
+    return why("the receiver is not a plain read");
+  }
+  for (let i = 1; i < call.arguments.length; i++) {
+    if (!inertEmitArg(L, call.arguments[i]!)) return why(`argument ${i - 1} must be evaluated`);
+  }
+  if (process.env["SCRIPTC_NOOPEMIT_WHY"] !== undefined) console.error(`[noopemit] NOOP '${name}'`);
+  return boolLit(false, loc);
 }
 
 /** How a listener argument is dyn-flavored: "dyn" for a checked-dynamic
@@ -815,6 +1041,10 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
     }
     const tuple = streamForcedTuple(L, info, name) ?? tupleOf(L, table, name, call);
     if (args.length - 1 !== tuple.length) {
+      // An event nothing listens to: the call has no observable effect,
+      // so the arity it disagrees on cannot matter.
+      const noop = listenerlessEmitNoop(L, info, name, call, access, superRecv, loc);
+      if (noop !== null) return noop;
       L.noLowering(
         `emit('${name}') with ${args.length - 1} arguments where the event's tuple has ${tuple.length}`,
         call,
