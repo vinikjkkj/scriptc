@@ -5711,6 +5711,15 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       }
       const local = L.resolveKey(symbol, propName);
       if (local) {
+        // A CATCH BINDING reads through caughtRead here exactly as it does
+        // through the identifier path: the exception snapshot is not a
+        // value any slot can take raw, so every read of one narrows
+        // (caughtNarrow), converts (caughtToDyn), or fences. Resolving the
+        // local and handing the raw `caught` on made `{ error }` and
+        // `{ error: error }` — the same binding into the same slot —
+        // compile to different answers, the shorthand fencing where the
+        // longhand converted.
+        if (local.type.kind === "caught") return L.caughtRead(propName, local, loc);
         return L.maybeNarrow({ kind: "varRef", localId: local.id, type: local.type, loc }, propName);
       }
       const resolved = symbol.flags & ts.SymbolFlags.Alias ? L.checker.getAliasedSymbol(symbol) : symbol;

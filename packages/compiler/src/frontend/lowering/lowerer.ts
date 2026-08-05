@@ -3013,6 +3013,73 @@ export class Lowerer {
     return walk(t, "T", new Set()) ?? "NESTED-OK";
   }
 
+  /** SCRIPTC_DYNCONV_WHY probe: the IN-direction twin of dynCheckRefusal —
+   * EVERY leaf `canConvertToDyn` refuses, each as a dotted path. The
+   * SC1101 fence names only the outermost type, and in this program that
+   * type is routinely a protobuf record of several thousand characters,
+   * so the outermost name is never the level worth fixing.
+   *
+   * ALL the leaves rather than the first, and that is not a cosmetic
+   * choice. A container refuses when ANY of its parts does, so the first
+   * refusal is only the first one the walk happens to reach; admitting it
+   * moves the fence to the next one and nothing else. Reporting one leaf
+   * cost a session two whole-program builds to learn that the leaf behind
+   * the reported leaf was a different kind entirely. Each path is listed
+   * once, in walk order.
+   *
+   * Diagnostic path only — reachable exclusively from inside the env
+   * gate in requireExactShape. */
+  dynConvertRefusal(t: IrType): string {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    // Reports whether anything BELOW this node refused, which is not the
+    // same question as whether anything was PRINTED: identical paths are
+    // printed once (six media arms share `T|record.media`), so a
+    // print-count test would call the second arm opaque for having said
+    // nothing new.
+    const leaf = (p: string): true => {
+      if (!seen.has(p)) {
+        seen.add(p);
+        out.push(p);
+      }
+      return true;
+    };
+    const walk = (x: IrType, path: string, stack: Set<IrType>): boolean => {
+      if (this.dynConvertible(x)) return false;
+      if (stack.has(x)) return false;
+      const deeper = new Set(stack).add(x);
+      if (x.kind === "array") return walk(x.elem, `${path}[]`, deeper);
+      if (x.kind === "promise") return walk(x.inner, `${path}<promise>`, deeper);
+      if (x.kind === "record") {
+        const shape = this.shapes.get(x.shapeId);
+        if (!shape) return leaf(`${path}:MISSING-SHAPE`);
+        if (shape.indexValue !== undefined) return leaf(`${path}:INDEX-SIG`);
+        let any = false;
+        // A FUNCTION field is skipped exactly as the record rule skips it,
+        // so a carried method is never blamed for a refusal it did not
+        // cause.
+        for (const f of shape.fields) {
+          if (f.type.kind === "func") continue;
+          if (walk(f.type, `${path}.${f.name}`, deeper)) any = true;
+        }
+        return any || leaf(`${path}:record(opaque)`);
+      }
+      if (x.kind === "union") {
+        const def = this.unions.get(x.unionId);
+        if (!def) return leaf(`${path}:MISSING-UNION`);
+        let any = false;
+        for (const a of def.arms) {
+          if (a.kind === "undefinedT") continue;
+          if (walk(a, `${path}|${a.kind}`, deeper)) any = true;
+        }
+        return any || leaf(`${path}:union(opaque)`);
+      }
+      return leaf(`${path}:${x.kind}${x.kind === "func" ? `(${x.params.length})` : ""}`);
+    };
+    walk(t, "T", new Set());
+    return out.length === 0 ? "CONVERTIBLE" : out.join(" + ");
+  }
+
   /** Exact-shape enforcement (SC2002). Records are monomorphic structs, so
    * everywhere a value flows into a typed slot (call arg, initializer,
    * assignment, field, return) the shapes must MATCH — or width-coerce:
@@ -3043,6 +3110,12 @@ export class Lowerer {
       );
     }
     if (expected.kind === "dyn") {
+      if (process.env.SCRIPTC_DYNCONV_WHY) {
+        const loc = locOf(node);
+        console.error(
+          `DCONVWHY ${loc.file}@${loc.start} top=${actual.kind} :: ${this.dynConvertRefusal(actual)} :: ${typeKey(actual).slice(0, 110)}`,
+        );
+      }
       // Function values BOX into dyn when their signature crosses
       // (canBoxFuncIntoDyn — coerceToExpected already converted those), so
       // reaching here with a func means a param/result type outside the
