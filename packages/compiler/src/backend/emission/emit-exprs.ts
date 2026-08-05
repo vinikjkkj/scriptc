@@ -446,7 +446,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         E.moveTemp(l);
         const name = `sc_t${E.tempCounter++}`;
         E.line(`${cDecl(e.type, name)};`);
-        E.line(`if (${E.unionTruthyHelper(e.left.type.unionId)}(${l.name})) {`);
+        // `negated` is the `&&` mirror: the same test decides, the two
+        // arms of the `if` trade places (the left survives when FALSY),
+        // so the ownership dance below is untouched.
+        const test = `${E.unionTruthyHelper(e.left.type.unionId)}(${l.name})`;
+        E.line(`if (${e.negated ? `!${test}` : test}) {`);
         E.indent++;
         if (e.retag !== undefined) {
           // The helper CONSUMES the left box (callees own their params), so
