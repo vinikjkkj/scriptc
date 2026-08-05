@@ -390,6 +390,17 @@ export interface GenericInstance {
       return sf.isDeclarationFile && !L.isStdlibFile(sf);
     });
     if (!uncompilable) return null;
+    // SCRIPTC_DTSTWIN_WHY probe: this fence and the declaration-module
+    // fence in lower-exprs share a CAUSE but not a predicate — this one
+    // never asks whether the twin was compiled. The probe reports the
+    // answer it does not ask for, so one run says whether "ships only a
+    // declaration file" is the true story at these sites.
+    if (process.env["SCRIPTC_DTSTWIN_WHY"] !== undefined) {
+      const sf0 = decls[0]!.getSourceFile();
+      process.stderr.write(
+        `DTSTWIN methodtrap '${access.getText()}' decl=${sf0.fileName} twinCompiled=${L.declTwinCompiled(sf0)}\n`,
+      );
+    }
     // The result type is the mapped call type where it maps (the data-shape
     // rule maps proto return records now), else the checked-dynamic tree
     // (a Writer/handle result: the trap throws before the value is ever
