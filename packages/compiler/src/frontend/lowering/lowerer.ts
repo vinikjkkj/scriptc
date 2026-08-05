@@ -3186,6 +3186,13 @@ export class Lowerer {
           `SHAPE mismatch restTupleFromErasure=${String(this.typeCtx.restTupleFromErasure)} indexUnionOk=${String(this.typeCtx.indexUnionOk)} at ${l.file}:${l.start} detail=${detail?.slice(0, 120) ?? "-"}`,
         );
       }
+      if (process.env["SCRIPTC_ORDER_WHY"] !== undefined && actual.kind === "record" && expected.kind === "record") {
+        const l = locOf(node);
+        console.error(
+          `ORDER refuse actual#${actual.shapeId} expected#${expected.shapeId} at ${l.file}:${l.start}` +
+          ` rest=${String(this.typeCtx.restTupleFromErasure)} idxU=${String(this.typeCtx.indexUnionOk)}`,
+        );
+      }
       this.pushDiag(recordShapeMismatchDiag(this.fmt(expected), this.fmt(actual), locOf(node), detail));
       throw new PoisonError();
     }
