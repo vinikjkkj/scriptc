@@ -3234,6 +3234,44 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       const probe = L.lowerExpr(expr.expression);
       if (probe.type.kind === "array") kind = "array";
     }
+    // The MIRROR of that bridge, inside a MONOMORPHIZED generic body. The
+    // checker keeps reporting the DECLARED types there, so a member
+    // reached through a type parameter's APPARENT type reads as the
+    // CONSTRAINT: `input.schema.parts` under `S extends Schema` is the
+    // constraint's `ReadonlyArray<Part>` — an array — while the instance's
+    // own parameter, mapped from the RESOLVED signature, is the concrete
+    // positional TUPLE. `length` is the one member both spellings answer,
+    // and over a tuple its answer is the arity CONSTANT (lowerFieldRead's
+    // rule for a tuple record). Fold it here on the LOWERED value, which
+    // is the instantiation's truth: emitting the array intrinsic instead
+    // hands the validator an array op over a record and ICEs
+    // (`arrIntrinsic length on non-array record`) on a program tsc
+    // accepts. Every other member keeps its fence — the value IS a record
+    // and no array operation is representable over it.
+    //
+    // Gated on being inside an instantiation (typeParamBindings live), so
+    // an ordinary array `.length` never pays the probe.
+    if (
+      kind === "array" && expr.name.text === "length" &&
+      L.typeParamBindings !== null && L.typeParamBindings.size > 0
+    ) {
+      const probe = L.lowerExpr(expr.expression);
+      const shape = probe.type.kind === "record" ? L.shapes.get(probe.type.shapeId) : undefined;
+      if (shape?.tuple) {
+        // Folding discards the receiver's evaluation, so only a
+        // side-effect-free receiver folds — the record path's restriction.
+        let root: ts.Expression = expr.expression;
+        while (ts.isPropertyAccessExpression(root)) root = root.expression;
+        if (!ts.isIdentifier(root) && root.kind !== ts.SyntaxKind.ThisKeyword) {
+          L.unsupported(
+            "SC1090",
+            expr,
+            "'.length' of a computed tuple expression (the arity is a constant — bind the tuple to a const first)",
+          );
+        }
+        return { kind: "numLit", value: shape.fields.length, type: F64, loc: locOf(expr) };
+      }
+    }
     if (kind !== "string" && kind !== "array" && kind !== "map" && kind !== "set" && kind !== "f64" && kind !== "regex" && kind !== "url" && kind !== "searchParams" && kind !== "stats" && kind !== "spawnRes" && kind !== "child" && kind !== "bytes" && kind !== "symbol") {
       return null;
     }
