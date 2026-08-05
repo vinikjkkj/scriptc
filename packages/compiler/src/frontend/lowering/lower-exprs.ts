@@ -5,7 +5,7 @@
  * ToBoolean/ToString coercion helpers, and field/element reads and writes
  * (FieldTarget). */
 import * as ts from "../ts7/adapter.js";
-import { dirname } from "node:path";
+import { dirname, relative } from "node:path";
 import type { Lowerer } from "./lowerer.js";
 import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
@@ -15,7 +15,7 @@ import { PoisonError, dynUndefinedExpr, jsFuncNameOf, neverTaintedJsType, nodeTh
 import { arrayAtOf, BYTES_CTORS, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, strCharsCall } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../shared.js";
-import { declTwinGlobalOf } from "./lower-modules.js";
+import { declModuleWithoutTwin, declTwinGlobalOf } from "./lower-modules.js";
 import { fenceEnumObjectValue, lowerEnumAccess } from "./lower-enums.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, lowerNsIdentifierValue, nsMemberIdentOf, nsUndefRead, nsWritableTarget } from "./lower-namespaces.js";
 import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
@@ -28,6 +28,11 @@ import { lowerYield } from "./lower-generators.js";
 import { lowerStreamProperty, lowerStreamStateProperty, streamSidesOf } from "./lower-stream.js";
 import { emitterRooted } from "./lower-emitter.js";
 import { EMITTER_API_MEMBERS } from "./lower-classes.js";
+
+/** SCRIPTC_DTSTWIN_WHY probe: how many reads have taken the declaration-
+ * module fence instead of the silent erasure stance. Read in the SAME run
+ * as the result. */
+let declModuleFenceCount = 0;
 
 /** An assignable `obj.field` target — a class field, a record field, or a
  * class ACCESSOR property (reads become getter calls, writes setter calls;
@@ -996,15 +1001,25 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // access: the catchable ReferenceError "<name> is not defined".
       // Stdlib/@types/node ambients never reach here (their chokepoint
       // is above); only user-file declares do.
+      //
+      // NOT an export of a declaration MODULE (declModuleWithoutTwin):
+      // every declaration inside a `.d.ts` carries the Ambient flag, so
+      // the modifier alone cannot tell "nothing defines this name" from
+      // "the implementation ships in the file beside it". Node loads that
+      // file and the value IS defined, so the erasure stance would answer
+      // a WRONG value here — and say nothing while doing it. The fence
+      // below names the real cause instead.
       {
         const sym = L.resolveValueSymbol(expr);
         const decl = sym ? L.checker.declarationsOf(sym)[0] : undefined;
         if (
+          sym !== null &&
           decl !== undefined &&
           ts.isVariableDeclaration(decl) &&
           decl.initializer === undefined &&
           ts.getCombinedModifierFlags(decl) & ts.ModifierFlags.Ambient &&
-          !L.declTwinCompiled(decl.getSourceFile())
+          !L.declTwinCompiled(decl.getSourceFile()) &&
+          declModuleWithoutTwin(L, sym) === null
         ) {
           const declared = L.mapTypeOf(L.typeOf(expr));
           if (declared && declared.kind !== "void") {
@@ -1110,6 +1125,33 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         const twinSym = L.resolveValueSymbol(expr);
         const twinG = twinSym ? declTwinGlobalOf(L, twinSym) : undefined;
         if (twinG) return { kind: "varRef", localId: twinG.id, type: twinG.type, loc };
+        // ...and the same binding when the twin is NOT compiled: the
+        // declaration module claims a value whose implementation this
+        // build never saw. That is precisely what the method-call fence
+        // reports (uncompilableExternMethodTrap), so it reports it in the
+        // same words — one cause, one message, whether the binding is
+        // reached by a call or read as a value.
+        const declHome = twinSym ? declModuleWithoutTwin(L, twinSym) : null;
+        if (declHome !== null) {
+          declModuleFenceCount++;
+          if (process.env["SCRIPTC_DTSTWIN_WHY"] !== undefined) {
+            process.stderr.write(
+              `DTSTWIN fence#${declModuleFenceCount} '${expr.text}' <- ${declHome.fileName} @ ${loc.file}+${loc.start}\n`,
+            );
+          }
+          // Named RELATIVE to the file that referred to it: the absolute
+          // path of a generated declaration is a content-addressed cache
+          // path in the builds where this fires, and the relative one is
+          // both shorter and machine-independent.
+          const where = relative(dirname(expr.getSourceFile().fileName), declHome.fileName)
+            .replaceAll("\\", "/");
+          L.unsupported(
+            "SC1090",
+            expr,
+            `the reference to '${expr.text}' (it has no compiled implementation — its module ` +
+              `'${where.startsWith(".") ? where : `./${where}`}' ships only a declaration file)`,
+          );
+        }
       }
       L.rejectUnresolved(expr, `the reference to '${expr.text}' (a binding form with no lowering)`);
     }

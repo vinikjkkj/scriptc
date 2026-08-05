@@ -390,6 +390,17 @@ export interface GenericInstance {
       return sf.isDeclarationFile && !L.isStdlibFile(sf);
     });
     if (!uncompilable) return null;
+    // SCRIPTC_DTSTWIN_WHY probe: this fence and the declaration-module
+    // fence in lower-exprs share a CAUSE but not a predicate — this one
+    // never asks whether the twin was compiled. The probe reports the
+    // answer it does not ask for, so one run says whether "ships only a
+    // declaration file" is the true story at these sites.
+    if (process.env["SCRIPTC_DTSTWIN_WHY"] !== undefined) {
+      const sf0 = decls[0]!.getSourceFile();
+      process.stderr.write(
+        `DTSTWIN methodtrap '${access.getText()}' decl=${sf0.fileName} twinCompiled=${L.declTwinCompiled(sf0)}\n`,
+      );
+    }
     // The result type is the mapped call type where it maps (the data-shape
     // rule maps proto return records now), else the checked-dynamic tree
     // (a Writer/handle result: the trap throws before the value is ever
@@ -406,7 +417,21 @@ export interface GenericInstance {
     // never runs (the pairing flow's proto calls) builds; code that DOES
     // reach it throws the catchable "no compiled implementation" error.
     const member = access.getText();
-    const modFile = decls[0]!.getSourceFile().fileName;
+    const modSf = decls[0]!.getSourceFile();
+    const modFile = modSf.fileName;
+    // WHY the module has no body for this member — the two answers are
+    // different facts, and the twin question is what tells them apart.
+    // MEASURED, not assumed: over a whole zapo build every one of these
+    // 99 sites reports declTwinCompiled=TRUE. `spec/proto/index.js` is
+    // 1.8 MB of generated code this build pulled into module order and
+    // lowered; what is missing is a body for THIS member, because the
+    // minified bundle's per-method lazy factories never resolve. Saying
+    // that module "ships only a declaration file" sent the reader looking
+    // for a file sitting right beside the declaration. Both sentences are
+    // true of some site — so say the one that is true of THIS site.
+    const why = L.declTwinCompiled(modSf)
+      ? `its module '${modFile}' compiled, but no body for this member lowers out of it`
+      : `its module '${modFile}' ships only a declaration file`;
     const name = `%extern.trap.${L.lambdaCounter++}`;
     L.liftedFns.push({
       name,
@@ -418,9 +443,8 @@ export interface GenericInstance {
           kind: "runtimeFence",
           code: "SC1090",
           message:
-            `'${member}' has no compiled implementation (its module ` +
-            `'${modFile}' ships only a declaration file) — this call cannot ` +
-            `run in a static build`,
+            `'${member}' has no compiled implementation (${why}) — ` +
+            `this call cannot run in a static build`,
           loc,
         },
       ],

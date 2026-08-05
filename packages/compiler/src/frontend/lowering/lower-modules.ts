@@ -2195,3 +2195,39 @@ export function declTwinGlobalOf(L: Lowerer, sym: ts.Symbol): IrLocal | undefine
   }
   return undefined;
 }
+
+/** The declaration MODULE behind a binding whose implementation twin this
+ * build did not compile — or null.
+ *
+ * This is the discriminator between two stances that look identical to a
+ * modifier check, because EVERY declaration inside a `.d.ts` carries the
+ * Ambient flag:
+ *
+ *  - `declare const __VERSION__` in a program file, or in a SCRIPT
+ *    declaration file (a globals.d.ts with no top-level import/export):
+ *    nothing anywhere defines the name, so Node's own answer at the read
+ *    is the catchable ReferenceError, and reproducing it is exact.
+ *  - an export of a declaration MODULE: `import { X } from './m.js'`
+ *    makes Node load a real implementation file, where X IS defined. The
+ *    module merely ships its types separately. Answering "X is not
+ *    defined" here is a WRONG value, and a silent one — the build never
+ *    said anything.
+ *
+ * Null the moment any declaration is outside that shape: a non-declaration
+ * file, the stdlib/@types surface (their own chokepoints stand), a script
+ * declaration file, or a declaration file whose twin this build DID
+ * compile (declTwinGlobalOf then hands over the twin's storage). */
+export function declModuleWithoutTwin(L: Lowerer, sym: ts.Symbol): ts.SourceFile | null {
+  const decls = L.checker.declarationsOf(sym);
+  if (decls.length === 0) return null;
+  let home: ts.SourceFile | null = null;
+  for (const d of decls) {
+    const sf = d.getSourceFile();
+    if (!sf.isDeclarationFile) return null;
+    if (L.isStdlibFile(sf)) return null;
+    if (!ts.isExternalModule(sf)) return null;
+    if (L.declTwinCompiled(sf)) return null;
+    home = sf;
+  }
+  return home;
+}
