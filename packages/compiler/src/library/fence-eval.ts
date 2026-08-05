@@ -177,6 +177,9 @@ const ARR_DETECTABLE: Record<string, readonly string[] | undefined> = {
   includes: ["includes"],
   join: ["join"],
   slice: ["slice"],
+  unshift: ["unshift"],
+  reverse: ["reverse"],
+  copyWithin: ["copyWithin"],
 };
 
 const MAP_DETECTABLE = new Set(["get", "set", "has", "delete", "clear"]);

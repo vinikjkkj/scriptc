@@ -2410,8 +2410,12 @@ function validateFunction(
         }
         const elem = e.receiver.type.elem;
         const sig =
-          e.method === "push"
+          e.method === "push" || e.method === "unshift"
             ? { argTypes: e.args.map(() => elem), result: F64 }
+            : e.method === "reverse"
+            ? { argTypes: [], result: e.receiver.type }
+            : e.method === "copyWithin"
+              ? { argTypes: [F64, F64, F64], result: e.receiver.type }
             : e.method === "fill"
               ? { argTypes: [elem, F64, F64], result: e.receiver.type }
             : e.method === "setLength"

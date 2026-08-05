@@ -283,12 +283,14 @@ function lowerOptionalDefaultArg(
       fill: [1, 3],
       concat: [0, Number.MAX_SAFE_INTEGER],
       slice: [0, 2], shift: [0, 0], splice: [1, 2], at: [1, 1],
+      unshift: [0, Number.MAX_SAFE_INTEGER], reverse: [0, 0], copyWithin: [2, 3],
       map: [1, 1], filter: [1, 1], forEach: [1, 1], find: [1, 1], findIndex: [1, 1], some: [1, 1],
       findLast: [1, 1], findLastIndex: [1, 1],
       every: [1, 1], flatMap: [1, 1], reduce: [1, 2], reduceRight: [1, 2],
     }[
       name as
         | "push" | "pop" | "concat" | "indexOf" | "includes" | "join" | "slice" | "shift" | "splice" | "at" | "map" | "filter" | "fill"
+        | "unshift" | "reverse" | "copyWithin"
         | "forEach" | "find" | "findIndex" | "findLast" | "findLastIndex" | "some" | "every" | "flatMap" | "reduce" | "reduceRight"
     ];
     if (call.arguments.length < arity[0]! || call.arguments.length > arity[1]!) {
@@ -345,6 +347,54 @@ function lowerOptionalDefaultArg(
         receiver,
         args,
         type: name === "push" ? F64 : elem,
+        loc,
+      };
+    }
+    if (name === "unshift") {
+      // `a.unshift(...items)` — push's mirror at the FRONT: the items land
+      // at index 0 in declaration order and the new length comes back.
+      // Values flow into the element slot exactly like a push (union
+      // elements wrap their arm), and refcounted ownership moves in.
+      // Spread is fenced: `pushSpread`'s counterpart would have to insert
+      // a whole run at once, and no site here needs it.
+      const spreadArg = call.arguments.find((a) => ts.isSpreadElement(a));
+      if (spreadArg) {
+        L.unsupported(
+          "SC1090",
+          spreadArg,
+          "spread arguments to unshift (pass the elements, or build a new array with concat)",
+        );
+      }
+      const receiver = L.lowerExpr(access.expression);
+      const args = call.arguments.map((a) => L.lowerExprExpecting(a, elem));
+      return { kind: "arrIntrinsic", method: "unshift", receiver, args, type: F64, loc };
+    }
+    if (name === "reverse") {
+      // In place, answering the RECEIVER — the JS identity `a.reverse()
+      // === a`, which the ring-buffer and compaction idioms rely on.
+      // Every element kind reverses: slots only swap positions, so no
+      // element's representation is touched.
+      const receiver = L.lowerExpr(access.expression);
+      return { kind: "arrIntrinsic", method: "reverse", receiver, args: [], type: receiverIr, loc };
+    }
+    if (name === "copyWithin") {
+      // `a.copyWithin(target, start[, end])` — the [start, end) run copied
+      // over the slots at target IN PLACE, the length unchanged, receiver
+      // back for chaining. An omitted `end` is completed here with
+      // +Infinity (the slice convention: the IR carries all three, so the
+      // runtime's one index ladder sees every form).
+      const receiver = L.lowerExpr(access.expression);
+      const idx = call.arguments.map((a) => L.lowerExpr(a));
+      for (let i = 0; i < idx.length; i++) {
+        if (idx[i]!.type.kind !== "f64") L.badType(call.arguments[i]!, L.typeOf(call.arguments[i]!));
+      }
+      const end = idx[2] ?? { kind: "numLit" as const, value: Infinity, type: F64, loc };
+      return {
+        kind: "arrIntrinsic",
+        method: "copyWithin",
+        receiver,
+        args: [idx[0]!, idx[1]!, end],
+        type: receiverIr,
         loc,
       };
     }
