@@ -2233,14 +2233,31 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     return { kind: "hash" };
   }
 
-  // node:crypto Cipher / Decipher. FOUR names map, not two: @types/node
+  // node:crypto Cipher / Decipher. SEVERAL names map, not two: @types/node
   // gives createCipheriv an overload per mode family, so an aes-256-gcm
-  // call is typed `CipherGCM` and an aes-256-cbc call plain `Cipher` —
-  // the same runtime handle either way, and the GCM-only members are
-  // fenced by the runtime state, not by the name.
+  // call is typed `CipherGCM` while an aes-256-cbc call takes the GENERIC
+  // overload — the same runtime handle either way, and the GCM-only
+  // members are fenced by the runtime state, not by the name.
+  //
+  // The generic overload's result is spelled `Cipheriv` by the real
+  // @types/node (a class extending stream.Transform) and `Cipher` by the
+  // packaged fallback ambient, so BOTH have to be listed. Only `Cipher`
+  // was, which is why an aes-256-gcm call compiled while the cbc and ctr
+  // calls beside it did not: the CALL lowered, and then the local's own
+  // declared type had no mapping.
+  //
+  // Adding the generic name cannot widen what compiles to a wrong cipher.
+  // Nothing but a lowered createCipheriv/createDecipheriv call produces
+  // this handle, and that lowering already requires the ALGORITHM to be a
+  // string literal in LOWERED_CIPHER_ALGS (the three AES-256 modes) —
+  // so `createCipheriv('aes-128-cbc', ...)`, also typed `Cipheriv`, still
+  // refuses at the call. `CipherChaCha20Poly1305` is deliberately NOT
+  // here: its algorithm is refused at the call too, and mapping the name
+  // would only serve a declared parameter, for which answering "the
+  // AES-256 handle" would be a lie.
   if (
-    (psym?.name === "Cipher" || psym?.name === "CipherGCM" || psym?.name === "CipherCCM" ||
-      psym?.name === "CipherOCB") &&
+    (psym?.name === "Cipher" || psym?.name === "Cipheriv" || psym?.name === "CipherGCM" ||
+      psym?.name === "CipherCCM" || psym?.name === "CipherOCB") &&
     checker.declarationsOf(psym).some(
       (d) =>
         (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
@@ -2251,8 +2268,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     return { kind: "cipher" };
   }
   if (
-    (psym?.name === "Decipher" || psym?.name === "DecipherGCM" || psym?.name === "DecipherCCM" ||
-      psym?.name === "DecipherOCB") &&
+    (psym?.name === "Decipher" || psym?.name === "Decipheriv" || psym?.name === "DecipherGCM" ||
+      psym?.name === "DecipherCCM" || psym?.name === "DecipherOCB") &&
     checker.declarationsOf(psym).some(
       (d) =>
         (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
