@@ -2084,8 +2084,15 @@ function validateFunction(
           err(`orDefault left references unknown union ${e.left.type.unionId}`, e.loc);
           break;
         }
-        // Retagged shape: the truthy side is a call to the named helper, so
-        // the arm count is free and the type rule is the helper's signature.
+        // The `&&` mirror only exists in the retagged shape: the falsy
+        // side of `&&` cannot be a single non-unit arm extraction (a unit
+        // arm is falsy, and extracting one is not a value).
+        if (e.negated && e.retag === undefined) {
+          err("negated orDefault (the `&&` mirror) requires a retag helper", e.loc);
+          break;
+        }
+        // Retagged shape: the surviving side is a call to the named helper,
+        // so the arm count is free and the type rule is the helper's signature.
         if (e.retag !== undefined) {
           const helper = functions.get(e.retag);
           if (!helper) {

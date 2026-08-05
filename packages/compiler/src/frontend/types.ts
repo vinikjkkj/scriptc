@@ -4257,7 +4257,11 @@ export function mapRestTupleUnion(type: ts.Type, ctx: TypeMapperCtx): IrType | n
     }
   }
   const distinct = [...byKey.entries()].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)).map(([, t]) => t);
-  return arrayOf(distinct.length === 1 ? distinct[0]! : { kind: "union", unionId: ctx.unions.intern(distinct) });
+  const answer = arrayOf(distinct.length === 1 ? distinct[0]! : { kind: "union", unionId: ctx.unions.intern(distinct) });
+  if (process.env.SCRIPTC_SHAPE_WHY) {
+    console.error(`SHAPE restTuple FIRES on ${checker.typeToString(type).slice(0, 100)}`);
+  }
+  return answer;
 }
 /** The POSITIONAL parameter list a tuple-typed rest stands for, or null.
  * A tuple maps to a record of numeric fields, so its arity and per-slot
