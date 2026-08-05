@@ -4303,8 +4303,18 @@ export type IrExpr =
    * which is exactly why the left cannot be coerced eagerly into a target
    * the checker built by DROPPING them. The helper consumes its argument
    * (the ordinary call convention), so the truthy side must not also
-   * release the left. */
-  | { kind: "orDefault"; left: IrExpr; right: IrExpr; retag?: string; type: IrType; loc: SrcLoc }
+   * release the left.
+   *
+   * `negated` INVERTS the verdict that keeps the left — the `&&` mirror
+   * (`a && b` is `toBool(a) ? b : a`, `a || b` is `toBool(a) ? a : b`):
+   * the FALSY side retags the left, the truthy side runs the right. Same
+   * single evaluation, same ownership dance, branches swapped. There the
+   * unreachable-by-construction arms are the always-TRUTHY ones (the
+   * checker drops them from the result of `&&` exactly as it drops the
+   * falsy ones from the result of `||`), so `negated` only ever pairs
+   * with `retag` — a stranded-arm throw on that side is dead code for
+   * the mirrored reason. */
+  | { kind: "orDefault"; left: IrExpr; right: IrExpr; retag?: string; negated?: true; type: IrType; loc: SrcLoc }
   /** Optional chaining `a?.b` / `a?.m(...)` / `f?.()` / `a?.[i]` — the
    * `nullish` test inverted: `receiver` is a unit-armed union with exactly
    * ONE non-unit arm, evaluated exactly once; when its runtime tag is a

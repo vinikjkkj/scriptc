@@ -4728,7 +4728,10 @@ class LlEmitter {
         const lt = B.newLabel("ord.t");
         const lf = B.newLabel("ord.f");
         const lj = B.newLabel("ord.j");
-        B.condBr(truthy, lt, lf);
+        // `negated` is the `&&` mirror: same test, the two successors of
+        // the branch trade places (the left survives when FALSY). The
+        // block bodies — and their ownership dance — are untouched.
+        B.condBr(truthy, e.negated ? lf : lt, e.negated ? lt : lf);
         B.startBlock(lt);
         if (e.retag !== undefined) {
           // Retagged shape: the whole box goes to the union→union helper,
