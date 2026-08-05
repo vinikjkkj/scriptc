@@ -3013,6 +3013,45 @@ export class Lowerer {
     return walk(t, "T", new Set()) ?? "NESTED-OK";
   }
 
+  /** SCRIPTC_DYNCONV_WHY probe: the IN-direction twin of dynCheckRefusal —
+   * the FIRST leaf `canConvertToDyn` refuses, as a dotted path. The
+   * SC1101 fence names only the outermost type, and in this program that
+   * type is routinely a protobuf record of several thousand characters,
+   * so the outermost name is never the level worth fixing. Diagnostic
+   * path only. */
+  dynConvertRefusal(t: IrType): string {
+    const walk = (x: IrType, path: string, stack: Set<IrType>): string | null => {
+      if (this.dynConvertible(x)) return null;
+      if (stack.has(x)) return null;
+      const deeper = new Set(stack).add(x);
+      if (x.kind === "array") return walk(x.elem, `${path}[]`, deeper);
+      if (x.kind === "promise") return walk(x.inner, `${path}<promise>`, deeper);
+      if (x.kind === "record") {
+        const shape = this.shapes.get(x.shapeId);
+        if (!shape) return `${path}:MISSING-SHAPE`;
+        if (shape.indexValue !== undefined) return `${path}:INDEX-SIG`;
+        for (const f of shape.fields) {
+          if (f.type.kind === "func") continue;
+          const r = walk(f.type, `${path}.${f.name}`, deeper);
+          if (r) return r;
+        }
+        return `${path}:record(opaque)`;
+      }
+      if (x.kind === "union") {
+        const def = this.unions.get(x.unionId);
+        if (!def) return `${path}:MISSING-UNION`;
+        for (const a of def.arms) {
+          if (a.kind === "undefinedT") continue;
+          const r = walk(a, `${path}|${a.kind}`, deeper);
+          if (r) return r;
+        }
+        return `${path}:union(opaque)`;
+      }
+      return `${path}:${x.kind}${x.kind === "func" ? `(${x.params.length})` : ""}`;
+    };
+    return walk(t, "T", new Set()) ?? "CONVERTIBLE";
+  }
+
   /** Exact-shape enforcement (SC2002). Records are monomorphic structs, so
    * everywhere a value flows into a typed slot (call arg, initializer,
    * assignment, field, return) the shapes must MATCH — or width-coerce:
@@ -3043,6 +3082,12 @@ export class Lowerer {
       );
     }
     if (expected.kind === "dyn") {
+      if (process.env.SCRIPTC_DYNCONV_WHY) {
+        const loc = locOf(node);
+        console.error(
+          `DCONVWHY ${loc.file}@${loc.start} top=${actual.kind} :: ${this.dynConvertRefusal(actual)} :: ${typeKey(actual).slice(0, 110)}`,
+        );
+      }
       // Function values BOX into dyn when their signature crosses
       // (canBoxFuncIntoDyn — coerceToExpected already converted those), so
       // reaching here with a func means a param/result type outside the
