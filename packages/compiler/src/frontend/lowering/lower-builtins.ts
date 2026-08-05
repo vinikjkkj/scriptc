@@ -6802,19 +6802,28 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
         return { kind: "jsExit", value: raw, type: BOOL, loc };
       }
       if (arg.type.kind !== "f64") {
-        // A `number | undefined` argument (`Number.isFinite(value)` over an
-        // optional): the statics never coerce, so the undefined arm is
-        // constantly false while a present number answers exactly. Replace
-        // ONLY the undefined arm (`?? sentinel`, which keeps a real NaN — it
-        // is not nullish) with a value the predicate reads as false, then run
-        // the f64 static. isNaN's sentinel is 0 (isNaN(0) === false); the
-        // others take NaN (non-finite, non-integer).
+        // A NUMBER-PLUS-NULLISH argument (`Number.isFinite(value)` over an
+        // optional, or over the `number | null | undefined` a nullable
+        // clock-skew getter answers): the statics never coerce, so every
+        // nullish arm is constantly false while a present number answers
+        // exactly. Replace THOSE arms (`?? sentinel`, which keeps a real
+        // NaN — NaN is not nullish) with a value the predicate reads as
+        // false, then run the f64 static. isNaN's sentinel is 0
+        // (isNaN(0) === false); the others take NaN (non-finite,
+        // non-integer).
+        //
+        // The condition is "exactly one f64 arm and every other arm
+        // nullish", not a two-arm shape: `??` catches null and undefined
+        // and NOTHING else, so the residue it hands the static is exactly
+        // the f64 arm. An arm of any other kind would survive the `??` and
+        // be read as an f64 it is not, so those keep the fence below — a
+        // `number | string` argument is a real question (JS answers false
+        // for the string) that this rewrite has no honest answer for.
         const u = arg.type.kind === "union" ? L.unions.get(arg.type.unionId) : undefined;
         if (
           u !== undefined &&
-          u.arms.length === 2 &&
-          u.arms.some((a) => a.kind === "undefinedT") &&
-          u.arms.some((a) => a.kind === "f64")
+          u.arms.filter((a) => a.kind === "f64").length === 1 &&
+          u.arms.every((a) => a.kind === "f64" || isUnitType(a))
         ) {
           const sentinel = member === "isNaN" ? 0 : NaN;
           const coerced: IrExpr = {
