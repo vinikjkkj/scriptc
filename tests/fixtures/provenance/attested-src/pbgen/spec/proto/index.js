@@ -14,3 +14,32 @@ const decodeMsg = (r) => ({
 export const waproto = {
   Msg: { encode: encodeMsg, decode: decodeMsg },
 };
+
+/* The generated TABLE half. Every `parts` value is an ARRAY literal, so
+ * its inferred type here is `readonly (A|B)[]` however precisely
+ * index.d.ts spells it — a generator writes JS, and JS has no tuples.
+ * This is zapo-js's spec/appstate/index.js, WA_APPSTATE_SCHEMAS. */
+export const TABLE = Object.freeze({
+  Ping: Object.freeze({
+    name: "ping",
+    version: 1,
+    parts: Object.freeze([Object.freeze({ kind: "literal", value: "ping" })]),
+  }),
+  Mute: Object.freeze({
+    name: "mute",
+    version: 2,
+    parts: Object.freeze([
+      Object.freeze({ kind: "literal", value: "mute" }),
+      Object.freeze({ kind: "slot", label: "chatJid" }),
+    ]),
+  }),
+  Star: Object.freeze({
+    name: "star",
+    version: 5,
+    parts: Object.freeze([
+      Object.freeze({ kind: "literal", value: "star" }),
+      Object.freeze({ kind: "slot", label: "remote" }),
+      Object.freeze({ kind: "slot", label: "id" }),
+    ]),
+  }),
+});
