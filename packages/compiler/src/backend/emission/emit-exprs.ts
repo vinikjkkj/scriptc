@@ -883,6 +883,41 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               ? E.newTemp(e.type, `scr_arr_push_${acc}(${r.name}, ${last.name})`)
               : E.newTemp(e.type, `scr_arr_len(${r.name})`);
           }
+          case "unshift": {
+            // push's mirror at the FRONT. Arguments evaluate LEFT TO RIGHT
+            // (JS order — one reading the array sees the pre-unshift
+            // state), then unshift RIGHT TO LEFT, which lands them at the
+            // head in declaration order. Ownership of refcounted arguments
+            // moves into the array, exactly like push; the result is the
+            // new length, or the unchanged one for Node's no-op
+            // zero-argument call.
+            const vs = e.args.map((a) => E.emitExpr(a));
+            if (acc === "ref") vs.forEach((v) => E.moveTemp(v));
+            for (let i = vs.length - 1; i > 0; i--) {
+              E.line(`scr_arr_unshift_${acc}(${r.name}, ${vs[i]!.name});`);
+            }
+            const first = vs[0];
+            return first
+              ? E.newTemp(e.type, `scr_arr_unshift_${acc}(${r.name}, ${first.name})`)
+              : E.newTemp(e.type, `scr_arr_len(${r.name})`);
+          }
+          case "reverse":
+            // In place, receiver (+1) back — the JS identity a.reverse()
+            // === a. No element's refcount moves (slots only swap).
+            return E.newTemp(e.type, `scr_arr_reverse(${r.name})`);
+          case "copyWithin": {
+            // In-place run copy, receiver (+1) back. All three indices are
+            // present in the IR (the frontend completes an omitted end
+            // with +Infinity), so the runtime's one ladder sees every
+            // form.
+            const target = E.emitExpr(e.args[0]!);
+            const start = E.emitExpr(e.args[1]!);
+            const end = E.emitExpr(e.args[2]!);
+            return E.newTemp(
+              e.type,
+              `scr_arr_copy_within(${r.name}, ${target.name}, ${start.name}, ${end.name})`,
+            );
+          }
           case "fill": {
             // In-place write over the clamped range; answers the receiver
             // (+1) for chaining. The value is BORROWED (the ref form takes
