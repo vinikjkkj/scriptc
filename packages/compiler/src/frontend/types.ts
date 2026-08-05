@@ -4623,6 +4623,82 @@ function mapSymbolicMappedAlias(
   return { kind: "record", shapeId: ctx.shapes.intern([], false, indexValue) };
 }
 
+/** The ARRAY a `.d.ts`-declared TUPLE field is actually built as, or null.
+ *
+ * A generated module ships types in `X.d.ts` and values in `X.js`, and when
+ * this build compiles the twin (declFileHasCompiledImpl) the twin is the
+ * only producer any consumer of that declaration can see. The twin writes
+ * JS: it builds the field with an ARRAY literal, whose inferred type is
+ * `readonly (A|B)[]` and which maps to an array. The declaration's
+ * `readonly [A, B]` describes the very same runtime value more precisely,
+ * but a MIXED tuple maps to a positional RECORD — so the declaration and
+ * its implementation disagree about the representation and the value
+ * cannot enter its own declared slot (zapo's WA_APPSTATE_SCHEMAS: three
+ * SC2002, `indexParts: readonly [{type;value},{name;type}]` declared,
+ * `readonly ({type;value}|{name;type})[]` built).
+ *
+ * A UNIFORM readonly tuple already rides the array representation by
+ * mapTypeInner's own rule, which is exactly why the one-position schemas
+ * there agree today and the two-position ones do not. This extends that
+ * agreement to the mixed case on the one provenance where it is forced:
+ * the answer is the element union of the positions, the widening the
+ * producer already performed. Everything outside a compiled twin keeps the
+ * positional record — a tuple written and consumed in TypeScript has a
+ * producer that can build one.
+ *
+ * Null unless the field ALREADY mapped to a positional tuple record (so a
+ * uniform tuple, an array, or anything else is untouched), the field type
+ * is a real tuple, and every declaration of the property lives in a
+ * declaration file whose implementation this build compiled. */
+function declTwinTupleAsArray(
+  p: ts.Symbol,
+  fieldTs: ts.Type,
+  mapped: IrType | null,
+  ctx: TypeMapperCtx,
+): IrType | null {
+  if (mapped === null || mapped.kind !== "record") return null;
+  const shape = ctx.shapes.get(mapped.shapeId);
+  if (shape === undefined || !shape.tuple) return null;
+  const { checker } = ctx;
+  if (!checker.isTupleType(fieldTs)) return null;
+  const decls = checker.declarationsOf(p);
+  if (decls.length === 0) return null;
+  for (const d of decls) {
+    const sf = d.getSourceFile();
+    if (!sf.isDeclarationFile) return null;
+    if (!(ctx.declFileHasCompiledImpl?.(sf) ?? false)) return null;
+  }
+  const args = checker.getTypeArguments(fieldTs as ts.TypeReference);
+  if (args.length === 0) return null;
+  // The element is the union of every POSITION, arms flattened and
+  // deduplicated by typeKey — the same widening mapRestTupleUnion performs,
+  // and the same one the twin's array literal already performed.
+  const byKey = new Map<string, IrType>();
+  for (const a of args) {
+    const e = mapType(a, ctx);
+    if (e === null || e.kind === "void" || e.kind === "jsval" || e.kind === "dyn") return null;
+    if (e.kind === "union") {
+      for (const arm of ctx.unions.get(e.unionId)?.arms ?? []) byKey.set(typeKey(arm), arm);
+    } else {
+      byKey.set(typeKey(e), e);
+    }
+  }
+  const distinct = [...byKey.entries()]
+    .sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0))
+    .map(([, t]) => t);
+  if (distinct.length === 0) return null;
+  const answer = arrayOf(
+    distinct.length === 1 ? distinct[0]! : { kind: "union", unionId: ctx.unions.intern(distinct) },
+  );
+  if (process.env["SCRIPTC_ORDER_WHY"] !== undefined) {
+    console.error(
+      `ORDER twin ${p.name}: ${checker.typeToString(fieldTs).slice(0, 70)}` +
+      ` -> ${typeKey(answer).slice(0, 90)}`,
+    );
+  }
+  return answer;
+}
+
 function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | RecordShapeParts | null {
   const { checker, shapes } = ctx;
   if (checker.getConstructSignatures(widened).length > 0) return null;
@@ -4925,6 +5001,18 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // and WaClientOptions stopped mapping entirely.
       const tryCtx: TypeMapperCtx = generic ? { ...ctx, speculative: true } : ctx;
       let pt = mapType(fieldTs, tryCtx);
+      // A field DECLARED in a `.d.ts` whose IMPLEMENTATION twin this build
+      // COMPILES: the twin is the only producer the slot can ever have, and
+      // it writes JS — an array literal, whose own inferred type is
+      // `readonly (A|B)[]`. A mixed TUPLE in the declaration is the precise
+      // spelling of that same runtime array, but it maps to a positional
+      // RECORD, so declaration and implementation disagree about the
+      // REPRESENTATION and every read across the boundary fences. Map the
+      // declaration the way its implementation builds it.
+      {
+        const viaTwin = declTwinTupleAsArray(p, fieldTs, pt, ctx);
+        if (viaTwin !== null) pt = viaTwin;
+      }
       if (pt === null && generic) {
         // The member leaves the shape — say so. An exclusion that prints
         // nothing makes the NEXT failure invisible exactly where this

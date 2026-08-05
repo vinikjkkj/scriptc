@@ -37,7 +37,9 @@ const EXPECTED = "hello, world\nHELLO, COMPILER!\nhello, chain!\n";
 
 /* The protobuf-intersection case (see the test below). */
 const pbEntry = join(fixtureDir, "cases/pb/main.ts");
-const PB_EXPECTED = "4 4 2 3\n";
+const PB_EXPECTED =
+  "4 4 2 3\n" +
+  "123 ping@1:ping mute@2:mute-<chatJid> star@5:star-<remote>-<id> 3literal\n";
 
 async function buildAndRun(name: string, dynamic: boolean, from = entry): Promise<string> {
   mkdirSync(outDir, { recursive: true });
