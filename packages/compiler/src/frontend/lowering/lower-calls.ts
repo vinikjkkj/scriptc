@@ -5934,10 +5934,117 @@ const inliningPredicates = new Set<ts.Symbol>();
     return found;
   }
 
+/** Counts of the contextual constraint erasure, read in the same run as the
+ * result (SCRIPTC_ERASELAMBDA_WHY): a branch that changed nothing and a
+ * branch that never ran are otherwise indistinguishable. */
+  let eraseLambdaHits = 0;
+
+/** The lambda half of the constraint-erased generic slot.
+ *
+ * A record field declared `<S extends K>(s: S, v: M[S]) => R` already maps to
+ * ONE concrete closure type: mapTypeInner binds every type parameter to its
+ * CONSTRAINT (constraintErasedCtx), on the argument that the body type-checks
+ * for every type satisfying the constraint, so the constraint itself is among
+ * them. genericValueRef's `pinnedByConstraint` is the producer half for a
+ * NAMED generic function flowing into such a slot.
+ *
+ * The third producer had no half: an object-literal ARROW written against the
+ * slot (`setPrivacySetting: async (setting, value) => {...}`). It declares no
+ * type parameters of its own — they come from the contextual signature — so
+ * nothing installed a binding and `S` reached the body unresolved, which is
+ * the SC2001 the privacy coordinator dies on.
+ *
+ * This yields the same bindings from the CONTEXTUAL signature, so producer and
+ * slot are erased by one recipe and agree by construction. The constraint is
+ * read off the DECLARATION, like every other site here (a base-constraint
+ * query widens a bare parameter instead of admitting it has none), and an
+ * UNCONSTRAINED parameter has no widest honest binding — those keep the fence.
+ */
+  function contextualConstraintErasure(L: Lowerer, node: ts.Node,): { ir: Map<ts.Symbol, IrType>; ts: Map<ts.Symbol, ts.Type> } | null {
+    const why = (r: string): null => {
+      if (process.env["SCRIPTC_ERASELAMBDA_WHY"] !== undefined) {
+        const sf = node.getSourceFile();
+        const p = ts.getLineAndCharacterOfPosition(sf, node.getStart(sf));
+        console.error(`ERASELAMBDA skip ${sf.fileName}:${p.line + 1} ${r}`);
+      }
+      return null;
+    };
+    if (!ts.isArrowFunction(node) && !ts.isFunctionExpression(node)) return null;
+    if (node.typeParameters !== undefined) return null;
+    const ctxType = L.checker.getContextualType(node);
+    if (ctxType === undefined) return null;
+    const sigs = L.checker.getCallSignatures(L.checker.getNonNullableType(ctxType));
+    if (sigs.length !== 1) return null;
+    const sig = sigs[0]!;
+    const tps = sig.getTypeParameters();
+    if (tps === undefined || tps.length === 0) return null;
+    const sigDecl = L.checker.signatureDeclaration(sig);
+    const tpDecls = sigDecl !== undefined && ts.isFunctionLike(sigDecl) ? sigDecl.typeParameters : undefined;
+    if (tpDecls === undefined || tpDecls.length !== tps.length) return why("no type-parameter declarations");
+    const ir = new Map<ts.Symbol, IrType>();
+    const tsMap = new Map<ts.Symbol, ts.Type>();
+    for (const [i, tp] of tps.entries()) {
+      const src = tpDecls[i]?.constraint ?? tpDecls[i]?.defaultType;
+      const sym = tp.getSymbol();
+      if (src === undefined || sym === undefined) return why("type parameter without constraint or default");
+      let srcT: ts.Type;
+      try {
+        srcT = L.checker.getTypeFromTypeNode(src);
+      } catch {
+        return why("constraint type node threw");
+      }
+      const mapped = L.mapTypeOf(srcT);
+      if (!mapped || mapped.kind === "void") {
+        return why(`constraint does not map: ${L.checker.typeToString(srcT).slice(0, 70)}`);
+      }
+      ir.set(sym, mapped);
+      tsMap.set(sym, srcT);
+    }
+    if (process.env["SCRIPTC_ERASELAMBDA_WHY"] !== undefined) {
+      const sf = node.getSourceFile();
+      const p = ts.getLineAndCharacterOfPosition(sf, node.getStart(sf));
+      const shown = [...tsMap.values()].map((t) => L.checker.typeToString(t).slice(0, 60)).join(" | ");
+      console.error(`ERASELAMBDA erase ${sf.fileName}:${p.line + 1} <${shown}> hits=${eraseLambdaHits + 1}`);
+    }
+    eraseLambdaHits++;
+    return { ir, ts: tsMap };
+  }
+
 /** Lifts an arrow function / function expression / nested declaration /
    * object-literal shorthand method to a module-level function and yields
    * the `closure` expression creating it. */
   export function lowerLambda(L: Lowerer, node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration | ts.MethodDeclaration | ts.GetAccessorDeclaration | ts.SetAccessorDeclaration,): IrExpr {
+    // An arrow written against a GENERIC slot lowers under the same
+    // constraint erasure the slot's own type took (see
+    // contextualConstraintErasure). The bindings must be live for the
+    // SIGNATURE as well as the body: the parameter types are where the
+    // unresolved parameter surfaces first.
+    const erasure = contextualConstraintErasure(L, node);
+    if (erasure === null) return lowerLambdaInner(L, node);
+    const prevIr = L.typeParamBindings;
+    const prevTs = L.typeParamTsBindings;
+    const prevIndexUnion = L.typeCtx.indexUnionOk;
+    const prevRestTuple = L.typeCtx.restTupleFromErasure;
+    // Merged over any OUTER instantiation: an erased arrow can sit inside a
+    // monomorphized generic body, whose bindings the inner walk still needs.
+    L.typeParamBindings = new Map([...(prevIr ?? []), ...erasure.ir]);
+    L.typeParamTsBindings = new Map([...(prevTs ?? []), ...erasure.ts]);
+    // The same two flags constraintErasedCtx sets for the slot's type: `M[K]`
+    // under a key-union binding means the union of the named property types,
+    // and a rest tuple comes from the erasure.
+    L.typeCtx.indexUnionOk = true;
+    L.typeCtx.restTupleFromErasure = true;
+    try {
+      return lowerLambdaInner(L, node);
+    } finally {
+      L.typeParamBindings = prevIr;
+      L.typeParamTsBindings = prevTs;
+      L.typeCtx.indexUnionOk = prevIndexUnion;
+      L.typeCtx.restTupleFromErasure = prevRestTuple;
+    }
+  }
+
+  function lowerLambdaInner(L: Lowerer, node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration | ts.MethodDeclaration | ts.GetAccessorDeclaration | ts.SetAccessorDeclaration,): IrExpr {
     const loc = locOf(node);
     const { shapes, funcType } = L.lambdaSignature(node);
     // A lambda IS a value: the exact-arity rule applies at birth. The
