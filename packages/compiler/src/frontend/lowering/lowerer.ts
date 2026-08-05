@@ -4284,7 +4284,7 @@ export class Lowerer {
    * lift, or null when the pair isn't width-coercible. Callers that must
    * validate a WHOLE plan before interning anything (the retag helper's
    * per-arm width lifts) probe with this. */
-  recordWidthPlan(fromId: string, toId: string): Map<string, { src: IrType; lift: WidthLift } | { absent: true; utag: number } | { absentDyn: true }> | null {
+  recordWidthPlan(fromId: string, toId: string): Map<string, { src: IrType; lift: WidthLift } | { absent: true; utag: number } | { absentDyn: true } | { keyRead: IrType; lift: WidthLift }> | null {
     const from = this.shapes.get(fromId);
     const to = this.shapes.get(toId);
     // INDEX-SIGNATURE sources narrow like any wider record — the target
@@ -4303,7 +4303,11 @@ export class Lowerer {
     if (this.widthPlanning.has(key)) return new Map();
     this.widthPlanning.add(key);
     try {
-      type FieldLift = { src: IrType; lift: WidthLift } | { absent: true; utag: number } | { absentDyn: true };
+      type FieldLift =
+        | { src: IrType; lift: WidthLift }
+        | { absent: true; utag: number }
+        | { absentDyn: true }
+        | { keyRead: IrType; lift: WidthLift };
       const plan = new Map<string, FieldLift>();
       for (const tf of to.fields) {
         const ff = from.fields.find((f) => f.name === tf.name);
@@ -4315,12 +4319,47 @@ export class Lowerer {
           // the absent-property read: the options-record call shape
           // against `{ plugins: unknown, ... }`). Never for tuples: a
           // completed position would change .length and JSON where Node
-          // keeps the source arity. Never for INDEX-SIGNATURE sources:
-          // the overflow may hold this very key at runtime (tsc lets the
-          // signature satisfy optional target members), so completing to
-          // undefined would drop a value Node keeps — the pair stays
-          // fenced.
-          if (from.tuple || from.indexValue) return null;
+          // keeps the source arity.
+          if (from.tuple) return null;
+          // An INDEX-SIGNATURE source: the overflow MAY hold this very key
+          // at runtime (tsc lets the signature satisfy an optional target
+          // member), so completing to undefined would drop a value Node
+          // keeps. It does not have to be completed — it can be READ. The
+          // `Record<string, V>` accumulator returned as the declared shape
+          // (`const s: Record<string, WaPrivacyValue> = {}; …; return s`
+          // against `{ about?: string; … }`) reads each target field off
+          // the overflow map by its literal key: present is the value,
+          // absent is the undefined arm — exactly the absent-property
+          // read's answer, and exactly what Node's own property read
+          // would give. The read's type is `V | undefined` (the same type
+          // a keyed access on this shape has), which then lifts into the
+          // field like any other source. A field the read cannot reach
+          // that way — a REQUIRED target field (no undefined arm to carry
+          // "the map has no such key") — still declines the pair.
+          if (from.indexValue) {
+            // The field must be able to hold ABSENT — the same
+            // optional-flavored test the completion rule above applies.
+            // Without it the read's undefined would have to be narrowed or
+            // stranded away, and a key the map simply does not hold would
+            // THROW where the pair used to fence: a width plan never
+            // promises a bridge that can only throw, and "the key might
+            // not be there" is the whole reason this arm exists. (tsc
+            // rejects an index signature as a REQUIRED member anyway, so
+            // honest code never lands here.)
+            const optionalFlavored =
+              tf.type.kind === "dyn" ||
+              (tf.type.kind === "union" && this.armTag(tf.type.unionId, UNDEFINED_T) >= 0);
+            const readT = this.indexReadType(from.indexValue);
+            const lift = optionalFlavored ? this.widthLiftPlan(readT, tf.type) : null;
+            if (process.env.SCRIPTC_KEYREAD_WHY) {
+              console.error(
+                `KEYREAD plan ${fromId}->${toId} field=${tf.name} read=${this.fmt(readT)} want=${this.fmt(tf.type)} opt=${optionalFlavored} lift=${lift?.how ?? "NONE"}`,
+              );
+            }
+            if (!lift) return null;
+            plan.set(tf.name, { keyRead: readT, lift });
+            continue;
+          }
           if (tf.type.kind === "dyn") {
             plan.set(tf.name, { absentDyn: true });
             continue;
@@ -4340,6 +4379,21 @@ export class Lowerer {
     } finally {
       this.widthPlanning.delete(key);
     }
+  }
+
+  /** The type a KEYED read of an index-signature shape has, for a key that
+   * names no declared field: the signature's value type widened by the
+   * undefined a missing key produces. A dyn signature already carries its
+   * own undefined singleton (recordKeyGet's dyn rule), so it answers
+   * itself; every other value type gains the undefined arm. */
+  indexReadType(indexValue: IrType): IrType {
+    if (indexValue.kind === "dyn") return DYN;
+    if (indexValue.kind === "union" && this.armTag(indexValue.unionId, UNDEFINED_T) >= 0) return indexValue;
+    const arms =
+      indexValue.kind === "union"
+        ? [...(this.unions.get(indexValue.unionId)?.arms ?? []), UNDEFINED_T]
+        : [indexValue, UNDEFINED_T];
+    return { kind: "union", unionId: this.unions.intern(arms) };
   }
 
   /** Post-hoc classifier for SC2002's record→record residue: WHY the
@@ -4412,7 +4466,17 @@ export class Lowerer {
       if (!ff) {
         if (from.tuple) return null;
         if (from.indexValue) {
-          return `'${tf.name}' is not a declared field of the source, and the source's index signature could hold it at runtime (a completed undefined would drop that value)`;
+          // The keyed READ takes this field where it can (recordWidthPlan's
+          // keyRead arm); what is left is a target field the read's own
+          // type cannot reach — a REQUIRED field above all, which has no
+          // undefined arm to carry "the map has no such key".
+          const readT = this.indexReadType(from.indexValue);
+          const optionalFlavored =
+            tf.type.kind === "dyn" ||
+            (tf.type.kind === "union" && this.armTag(tf.type.unionId, UNDEFINED_T) >= 0);
+          return optionalFlavored
+            ? `the expected field '${tf.name}' is not a declared field of the source, and a keyed read of its '[key: string]: ${this.fmt(from.indexValue)}' signature ('${this.fmt(readT)}' — the key may be absent) does not lift into '${this.fmt(tf.type)}'`
+            : `the expected field '${tf.name}' ('${this.fmt(tf.type)}') is required, and the source has only a '[key: string]: ${this.fmt(from.indexValue)}' signature — a runtime key that is simply absent has no value to supply it`;
         }
         if (tf.type.kind === "dyn") continue;
         if (tf.type.kind !== "union" || this.armTag(tf.type.unionId, UNDEFINED_T) < 0) {
@@ -4462,6 +4526,26 @@ export class Lowerer {
                 // The unset 'unknown' field: the dyn undefined — exactly
                 // the absent-property read's answer.
                 return { name: f.name, value: dynUndefinedExpr(loc) };
+              }
+              if ("keyRead" in lift) {
+                if (process.env.SCRIPTC_KEYREAD_WHY) {
+                  console.error(`KEYREAD emit ${fromId}->${toId} field=${f.name}`);
+                }
+                // A field the INDEX SIGNATURE may hold: read it by its
+                // literal key off the overflow map. `overflowOnly` is
+                // exact here — the plan only takes this arm for a name
+                // the source shape does NOT declare — and the read
+                // answers the undefined arm when the key is absent.
+                const read: IrExpr = {
+                  kind: "recordKeyGet",
+                  obj: r,
+                  shapeId: fromId,
+                  key: { kind: "strLit", value: f.name, type: STRING, loc },
+                  overflowOnly: true,
+                  type: lift.keyRead,
+                  loc,
+                };
+                return { name: f.name, value: this.applyWidthLift(lift.lift, read, f.type, loc) };
               }
               if ("absent" in lift) {
                 if (f.type.kind !== "union") throw new Error("lowerer bug: absent lift against a non-union field");
