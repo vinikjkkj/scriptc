@@ -1,0 +1,13 @@
+dts-module-without-twin/main.ts:31:12 - error SC1090: the reference to 'ROWS' (it has no compiled implementation — its module './outofrealm/index.d.ts' ships only a declaration file) is not supported yet
+
+  30 | function firstRow(): string {
+  31 |     return ROWS[0]!.name
+     |            ^~~~
+  32 | }
+
+dts-module-without-twin/main.ts:35:12 - error SC1090: the reference to 'DEFAULT_IDENTITY' (it has no compiled implementation — its module './noimpl.d.ts' ships only a declaration file) is not supported yet
+
+  34 | function moduleDefault(): number {
+  35 |     return DEFAULT_IDENTITY.key
+     |            ^~~~~~~~~~~~~~~~
+  36 | }
