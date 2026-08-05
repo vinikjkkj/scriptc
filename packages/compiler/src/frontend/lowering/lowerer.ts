@@ -3176,6 +3176,16 @@ export class Lowerer {
         actual.kind === "record" && expected.kind === "record"
           ? (this.describeRecordWidthBlocker(actual.shapeId, expected.shapeId) ?? undefined)
           : undefined;
+      if (process.env.SCRIPTC_SHAPE_WHY) {
+        // The MAPPING MODE in force when the pair was built: a record whose
+        // field types differ only by a tuple-vs-array spelling was mapped
+        // under two different modes, and this is the only place that can
+        // say which one is live at the refusal.
+        const l = locOf(node);
+        console.error(
+          `SHAPE mismatch restTupleFromErasure=${String(this.typeCtx.restTupleFromErasure)} indexUnionOk=${String(this.typeCtx.indexUnionOk)} at ${l.file}:${l.start} detail=${detail?.slice(0, 120) ?? "-"}`,
+        );
+      }
       this.pushDiag(recordShapeMismatchDiag(this.fmt(expected), this.fmt(actual), locOf(node), detail));
       throw new PoisonError();
     }

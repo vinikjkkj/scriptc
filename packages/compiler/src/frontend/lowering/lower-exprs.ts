@@ -7585,11 +7585,45 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           // the shared shape below does, retags an arm the test is about to
           // rule out and throws where Node yields the default. Single-eval
           // instead: test the left in its OWN union and retag only on the
-          // truthy side, where the dropped arms are unreachable. `&&` keeps
-          // the eager shape — there the falsy left IS the result, so the
-          // checker keeps those arms in the target and they must coerce.
-          if (op === ts.SyntaxKind.BarBarToken && left.type.kind === "union" && !typeEquals(left.type, target)) {
-            const retag = L.unionRetagHelper(left.type.unionId, target.unionId, loc);
+          // truthy side, where the dropped arms are unreachable.
+          //
+          // `&&` is the exact MIRROR, not the eager shape: there the FALSY
+          // left is the result, so the checker built the target by dropping
+          // the left's TRUTHY arms (`comms && comms.state()` over `Comms |
+          // null` is `boolean | null` — the `Comms` arm is gone), and
+          // coercing the left eagerly asks for a home the target does not
+          // have. Same single-eval, retag on the falsy side. The arms with
+          // no home are the ones a JS object always answers true for
+          // (REF_TRUTHY_KINDS), so they may TRAP in the helper for the
+          // reason unit arms may on the `||` side: the truthiness test has
+          // already ruled them out. Arms that can be falsy by VALUE (bool,
+          // f64, string) still have to map honestly — `"" && x` really can
+          // yield the left.
+          if (left.type.kind === "union" && !typeEquals(left.type, target)) {
+            const and = op === ts.SyntaxKind.AmpersandAmpersandToken;
+            // The PLAIN retag — every arm of the left with a home of its
+            // own. `||` takes the lazy shape whenever it exists (the arms it
+            // drops are units, which the helper may already trap). `&&` only
+            // needs it when the eager coercion has NOWHERE to put a truthy
+            // arm, so gate on the plain retag DECLINING: an `&&` that
+            // compiles today keeps the lowering it has. Interning is by
+            // (from, to, stranded), so the probe costs nothing — the eager
+            // path below asks for the very same helper.
+            const plain = L.unionRetagHelper(left.type.unionId, target.unionId, loc);
+            const leftDef = and && plain === null ? L.unions.get(left.type.unionId) : undefined;
+            const unreachable = leftDef
+              ? new Set(leftDef.arms.flatMap((a, i) => (REF_TRUTHY_KINDS.has(a.kind) ? [i] : [])))
+              : undefined;
+            const retag = and
+              ? (unreachable !== undefined && unreachable.size > 0
+                  ? L.unionRetagHelper(left.type.unionId, target.unionId, loc, unreachable)
+                  : null)
+              : plain;
+            if (process.env.SCRIPTC_ANDLEFT_WHY && and) {
+              console.error(
+                `ANDLEFT ${L.fmt(left.type)} -> ${L.fmt(target)} plain=${plain ?? "NONE"} truthyArms=[${[...(unreachable ?? [])].join(",")}] retag=${retag ?? "NONE"} at ${loc.file}:${loc.start}`,
+              );
+            }
             if (retag) {
               L.requireTruthyUnion(left.type.unionId, expr);
               return {
@@ -7597,6 +7631,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
                 left,
                 right: L.coerceInto(expr.right, right, target),
                 retag,
+                ...(and ? { negated: true as const } : {}),
                 type: target,
                 loc,
               };
