@@ -1420,6 +1420,20 @@ export type IrArrIntrinsicMethod =
   | "push"
   | "pushSpread"
   | "pop"
+  /** `unshift(...items)`: push's mirror at the FRONT — the arguments land
+   * at index 0 in declaration order and the new length comes back.
+   * Ownership of refcounted arguments moves into the array, exactly like
+   * push; the zero-argument call is Node's no-op. */
+  | "unshift"
+  /** `reverse()`: in place, answering the RECEIVER (+1) — the JS identity
+   * that makes `a.reverse() === a`. Slots only swap positions, so no
+   * element's refcount moves. */
+  | "reverse"
+  /** `copyWithin(target, start, end)`: the [start, end) run copied over
+   * the slots at target IN PLACE (the length never changes), receiver
+   * (+1) back. Arguments are always three here — the frontend completes
+   * an omitted `end` with +Infinity, the slice convention. */
+  | "copyWithin"
   | "indexOf"
   | "includes"
   | "join"

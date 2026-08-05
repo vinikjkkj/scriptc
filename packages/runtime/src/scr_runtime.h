@@ -846,6 +846,26 @@ double scr_arr_push_f64(ScrArr *a, double v);
 double scr_arr_push_bool(ScrArr *a, bool v);
 double scr_arr_push_ref(ScrArr *a, void *v);
 
+/* unshift: push's mirror at the front — the tail slides up, the new
+ * element takes index 0, the new length comes back; _ref takes ownership
+ * like push. The variadic form is the emitter's (arguments evaluate left
+ * to right, then unshift right to left). */
+double scr_arr_unshift_f64(ScrArr *a, double v);
+double scr_arr_unshift_bool(ScrArr *a, bool v);
+double scr_arr_unshift_ref(ScrArr *a, void *v);
+
+/* reverse: in place, then the RECEIVER back (+1) for chaining. Slots only
+ * swap positions, so no element's reference count changes. */
+ScrArr *scr_arr_reverse(ScrArr *a);
+
+/* copyWithin(target, start, end): copies the [start, end) run over the
+ * slots at target in place (the length never changes) and answers the
+ * receiver (+1). Splice's index ladder; an omitted end arrives as
+ * +Infinity. Overlapping runs are safe — ref elements retain into scratch
+ * before any overwritten slot is released. */
+ScrArr *scr_arr_copy_within(ScrArr *a, double target, double start,
+                            double end);
+
 /* pop traps on an empty array; _ref transfers ownership out (+1 to the
  * caller, no release). */
 double scr_arr_pop_f64(ScrArr *a);

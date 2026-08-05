@@ -378,6 +378,181 @@ static void test_join(void) {
 #endif
 }
 
+/* ── unshift / reverse / copyWithin ───────────────────────────────────
+ * The three IN-PLACE mutators. unshift mirrors push (ownership moves IN,
+ * new length back); reverse only permutes slots (no count moves) and
+ * answers the receiver +1; copyWithin overwrites a run with a copy of
+ * another run of the SAME array, which is where the reference counting
+ * matters: source and destination overlap in the ring-buffer compaction
+ * shape, so every copied value must gain a reference before any
+ * overwritten slot gives one up.
+ *
+ * Live counts are asserted directly (SCR_RC_AUDIT), so a leak or a double
+ * release fails here rather than silently. */
+static void check_str_at(ScrArr *a, double i, const char *want, const char *what) {
+  ScrStr *s = (ScrStr *)scr_arr_get_ref(a, i); /* +1, released below */
+  check(strcmp(s->data, want) == 0, what);
+  if (strcmp(s->data, want) != 0) fprintf(stderr, "  got %s want %s\n", s->data, want);
+  scr_str_release(s);
+}
+
+static void test_in_place_mutators(void) {
+#ifdef SCR_RC_AUDIT
+  long strings0 = scr_str_live_count();
+  long arrays0 = scr_arr_live_count();
+#endif
+  /* unshift: the scalar path, and growth. */
+  ScrArr *a = scr_arr_new(SCR_ELEM_F64, 0);
+  check_f64(scr_arr_unshift_f64(a, 3), 1, "unshift onto empty returns 1");
+  check_f64(scr_arr_unshift_f64(a, 2), 2, "unshift returns new length");
+  check_f64(scr_arr_unshift_f64(a, 1), 3, "unshift returns new length (3)");
+  check_f64(scr_arr_get_f64(a, 0), 1, "unshift puts the newest first");
+  check_f64(scr_arr_get_f64(a, 2), 3, "unshift slides the tail up");
+  for (double i = 0; i < 500; i++) scr_arr_unshift_f64(a, i);
+  check_f64(scr_arr_len(a), 503, "500 unshifts grow");
+  check_f64(scr_arr_get_f64(a, 0), 499, "last unshift is at 0 after growth");
+  check_f64(scr_arr_get_f64(a, 502), 3, "original tail survives growth");
+
+  ScrArr *ab = scr_arr_new(SCR_ELEM_BOOL, 0);
+  check_f64(scr_arr_unshift_bool(ab, true), 1, "unshift_bool returns length");
+  scr_arr_unshift_bool(ab, false);
+  check(!scr_arr_get_bool(ab, 0) && scr_arr_get_bool(ab, 1), "unshift_bool order");
+  scr_arr_release(ab);
+
+  /* reverse: in place, receiver back (+1 — the caller owns it). */
+  ScrArr *r = scr_arr_new(SCR_ELEM_F64, 0);
+  ScrArr *rr = scr_arr_reverse(r);
+  check(rr == r, "reverse of an empty array answers the receiver");
+  check_f64(scr_arr_len(r), 0, "reverse of empty stays empty");
+  scr_arr_release(rr);
+  scr_arr_push_f64(r, 1);
+  scr_arr_release(scr_arr_reverse(r));
+  check_f64(scr_arr_get_f64(r, 0), 1, "reverse of one element");
+  scr_arr_push_f64(r, 2);
+  scr_arr_push_f64(r, 3);
+  scr_arr_push_f64(r, 4);
+  ScrArr *back = scr_arr_reverse(r);
+  check(back == r, "reverse answers the receiver, not a copy");
+  check(r->rc == 2, "reverse returns +1");
+  scr_arr_release(back);
+  check_f64(scr_arr_get_f64(r, 0), 4, "reverse: 4 first");
+  check_f64(scr_arr_get_f64(r, 3), 1, "reverse: 1 last");
+  scr_arr_push_f64(r, 0);
+  scr_arr_release(scr_arr_reverse(r)); /* odd length: the middle stays put */
+  check_f64(scr_arr_get_f64(r, 2), 2, "odd-length reverse keeps the middle in place");
+  check_f64(scr_arr_get_f64(r, 0), 0, "odd-length reverse: first is the old last");
+  check_f64(scr_arr_get_f64(r, 4), 4, "odd-length reverse: last is the old first");
+  scr_arr_release(r);
+
+  /* copyWithin: the receiver comes back and the length never moves. */
+  ScrArr *c = scr_arr_new(SCR_ELEM_F64, 0);
+  for (double i = 0; i < 5; i++) scr_arr_push_f64(c, i);
+  ScrArr *cw = scr_arr_copy_within(c, 0, 3, INFINITY);
+  check(cw == c, "copyWithin answers the receiver");
+  check(c->rc == 2, "copyWithin returns +1");
+  scr_arr_release(cw);
+  check_f64(scr_arr_len(c), 5, "copyWithin never changes the length");
+  check_f64(scr_arr_get_f64(c, 0), 3, "copyWithin(0,3): 3 lands at 0");
+  check_f64(scr_arr_get_f64(c, 1), 4, "copyWithin(0,3): 4 lands at 1");
+  check_f64(scr_arr_get_f64(c, 2), 2, "copyWithin(0,3): the tail is untouched");
+  scr_arr_release(c);
+
+  /* The index ladder: negatives resolve from the end, everything clamps,
+   * and the count is min(end - start, len - target). An omitted `end`
+   * arrives as +Infinity (the frontend's completion). */
+  static const struct {
+    double target, start, end;
+    const char *want;
+    const char *what;
+  } ix[] = {
+      {2, 0, 4, "01012367", "copyWithin(2,0,4)"},
+      {0, 3, 6, "34534567", "copyWithin(0,3,6)"},
+      {-2, 0, INFINITY, "01234501", "copyWithin(-2,0)"},
+      {0, -2, INFINITY, "67234567", "copyWithin(0,-2)"},
+      {0, 1, -1, "12345667", "copyWithin(0,1,-1)"},
+      {10, 0, INFINITY, "01234567", "copyWithin(10,0) is a no-op"},
+      {0, 4, 2, "01234567", "copyWithin(0,4,2) is a no-op"},
+      {0, 10, INFINITY, "01234567", "copyWithin(0,10) is a no-op"},
+      {-100, 1, INFINITY, "12345677", "copyWithin(-100,1) clamps the target to 0"},
+      {3, 0, 100, "01201234", "copyWithin(3,0,100) clamps the end"},
+      {1.7, 0.9, INFINITY, "00123456", "copyWithin truncates its indices"},
+      {0, 0, INFINITY, "01234567", "copyWithin(0,0) is the identity"},
+  };
+  for (size_t k = 0; k < sizeof ix / sizeof ix[0]; k++) {
+    ScrArr *t = scr_arr_new(SCR_ELEM_F64, 0);
+    for (double i = 0; i < 8; i++) scr_arr_push_f64(t, i);
+    scr_arr_release(scr_arr_copy_within(t, ix[k].target, ix[k].start, ix[k].end));
+    char got[16];
+    for (size_t i = 0; i < 8; i++) got[i] = (char)('0' + (int)scr_arr_get_f64(t, (double)i));
+    got[8] = '\0';
+    check(strcmp(got, ix[k].want) == 0, ix[k].what);
+    if (strcmp(got, ix[k].want) != 0) fprintf(stderr, "  got %s want %s\n", got, ix[k].want);
+    scr_arr_release(t);
+  }
+
+  /* REFERENCE elements — where the counting lives. unshift_ref takes
+   * ownership like push_ref; copyWithin retains the copied run and
+   * releases the overwritten one, with the runs overlapping BOTH ways. */
+  ScrArr *s = scr_arr_new(SCR_ELEM_STR, 0);
+  scr_arr_unshift_ref(s, scr_str_new("dd", 2));
+  scr_arr_unshift_ref(s, scr_str_new("cc", 2));
+  scr_arr_unshift_ref(s, scr_str_new("bb", 2));
+  scr_arr_unshift_ref(s, scr_str_new("aa", 2));
+  check_str_at(s, 0, "aa", "unshift_ref puts the newest first");
+  check_str_at(s, 3, "dd", "unshift_ref keeps the oldest last");
+#ifdef SCR_RC_AUDIT
+  check(scr_str_live_count() == strings0 + 4, "four strings live before copyWithin");
+#endif
+  /* forward overlap: destination BELOW the source (the compaction shape) */
+  scr_arr_release(scr_arr_copy_within(s, 0, 2, INFINITY));
+  check_str_at(s, 0, "cc", "forward overlap [0]");
+  check_str_at(s, 1, "dd", "forward overlap [1]");
+  check_str_at(s, 2, "cc", "forward overlap leaves the source [2]");
+#ifdef SCR_RC_AUDIT
+  check(scr_str_live_count() == strings0 + 2, "aa and bb released, cc and dd shared");
+#endif
+  /* backward overlap: destination ABOVE the source */
+  scr_arr_release(scr_arr_copy_within(s, 2, 0, 2));
+  check_str_at(s, 3, "dd", "backward overlap [3]");
+#ifdef SCR_RC_AUDIT
+  check(scr_str_live_count() == strings0 + 2, "backward overlap balances");
+#endif
+  /* a full self-copy must keep every element alive */
+  scr_arr_release(scr_arr_copy_within(s, 0, 0, INFINITY));
+  check_str_at(s, 0, "cc", "self-copy is the identity");
+#ifdef SCR_RC_AUDIT
+  check(scr_str_live_count() == strings0 + 2, "self-copy balances");
+#endif
+  scr_arr_release(s);
+#ifdef SCR_RC_AUDIT
+  check(scr_str_live_count() == strings0, "copyWithin over strings leaks nothing");
+#endif
+
+  /* Nested arrays (SCR_ELEM_ARR): the same story, one refcount kind over. */
+  ScrArr *outer = scr_arr_new(SCR_ELEM_ARR, 0);
+  for (int i = 0; i < 4; i++) {
+    ScrArr *in = scr_arr_new(SCR_ELEM_F64, 0);
+    scr_arr_push_f64(in, i);
+    scr_arr_unshift_ref(outer, in); /* ownership moves in */
+  }
+  scr_arr_release(scr_arr_reverse(outer));
+  scr_arr_release(scr_arr_copy_within(outer, 0, 2, INFINITY));
+  check_f64(scr_arr_len(outer), 4, "nested copyWithin keeps the length");
+  ScrArr *first = (ScrArr *)scr_arr_get_ref(outer, 0); /* +1 */
+  check_f64(scr_arr_get_f64(first, 0), 2, "nested copyWithin copies the right inner array");
+  scr_arr_release(first);
+  scr_arr_release(outer);
+#ifdef SCR_RC_AUDIT
+  check(scr_arr_live_count() == arrays0 + 1, "nested copyWithin releases every inner array");
+#endif
+
+  scr_arr_release(a);
+#ifdef SCR_RC_AUDIT
+  check(scr_arr_live_count() == arrays0, "in-place mutators leak no arrays");
+  check(scr_str_live_count() == strings0, "in-place mutators leak no strings");
+#endif
+}
+
 int main(int argc, char **argv) {
   if (argc > 1) {
     ScrArr *a = scr_arr_new(SCR_ELEM_F64, 0);
@@ -407,6 +582,7 @@ int main(int argc, char **argv) {
   test_ref_elements();
   test_ref_cycle();
   test_join();
+  test_in_place_mutators();
 
   fprintf(stderr, "%ld/%ld cases passed\n", total - failed, total);
   return failed == 0 ? 0 : 1;
