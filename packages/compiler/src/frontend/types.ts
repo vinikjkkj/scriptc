@@ -809,6 +809,12 @@ let memoSensitivity = 0;
  * are otherwise indistinguishable. */
 let unionArmFlattens = 0;
 
+/** SCRIPTC_VOIDUNION_WHY probe: how many types mapped through the
+ * valueless-union rule (`void | undefined` IS the standalone void mapping).
+ * Same discipline as the flatten counter — the running count rides the trace
+ * line so a run can tell "nothing changed" from "the branch never ran". */
+let voidUnionMappings = 0;
+
 /** Context-FREE mapping results, keyed by checker-type identity.
  *
  * The checker is a separate process: every property read, signature query and
@@ -1141,6 +1147,34 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // unit-only union themselves (isUnitOnlyTsType + unitOnlyUnion) — the
   // position knows it wants a value; this mapping cannot.
   if (flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined)) return VOID;
+  // THE SAME STANDALONE RULE, SPELLED AS A UNION. `void | undefined` is not
+  // a choice between two values — both parts are inhabited by exactly
+  // `undefined`, so the type carries no value at all and IS the standalone
+  // mapping above. The checker hands it out wherever a valueless callback
+  // meets a valueless promise: `Promise<void>.catch(() => undefined)` binds
+  // TResult = undefined and yields `Promise<void | undefined>`, which the
+  // union branch below cannot represent (both parts fold to the undefinedT
+  // arm, and a lone unit arm has no union representation — it fenced).
+  // `never` parts come along because they are uninhabited: `T | never ≡ T`,
+  // the same elision the union branch performs.
+  // NULL is deliberately NOT here: `null` and `undefined` are DISTINGUISHABLE
+  // values with separate tags, so `null | undefined` is a real two-arm union
+  // and keeps its existing home.
+  if (
+    widened.isUnionType() &&
+    widened.getTypes().some((p) => p.flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined)) &&
+    widened
+      .getTypes()
+      .every((p) => p.flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined | ts.TypeFlags.Never))
+  ) {
+    voidUnionMappings++;
+    if (process.env["SCRIPTC_VOIDUNION_WHY"] !== undefined) {
+      console.error(
+        `[voidunionwhy] #${voidUnionMappings} ${checker.typeToString(widened).slice(0, 70)}`,
+      );
+    }
+    return VOID;
+  }
   // Standalone `null` (a `const x = null` binding, a `{ value: null }`
   // field, a `(): null` return): the unit-only union — the value is always
   // THE interned null instance, comparisons are tag tests, JSON serializes
