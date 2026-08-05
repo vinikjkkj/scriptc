@@ -5580,28 +5580,6 @@ export const DYN_HANDLE_KINDS: ReadonlyMap<string, { tag: string; cls: string }>
   ["httpClientReq", { tag: "SCR_DYNH_HTTP_CLIENT", cls: "ClientRequest" }],
 ]);
 
-/** A record whose EVERY member is a function — a method bundle (the
- * store-backend `{ auth(id), signal(id), ... }` shape). canConvertToDyn's
- * record rule strands an unboxable func FIELD because the record around it
- * carries data the receiver wants; a bundle carries nothing else, so it is
- * the same value as a bare function for the purpose of the fence — it
- * exists to be CALLED — and keeps the compile-time rejection a bare func
- * and a func union arm already get. Empty records are not bundles. */
-function isMethodBundle(
-  t: IrType,
-  getRecord: (shapeId: string) => IrRecordShape | undefined,
-): boolean {
-  if (t.kind !== "record") return false;
-  const shape = getRecord(t.shapeId);
-  return (
-    !!shape &&
-    !shape.tuple &&
-    shape.indexValue === undefined &&
-    shape.fields.length > 0 &&
-    shape.fields.every((f) => f.type.kind === "func")
-  );
-}
-
 /** A static type that CONVERTS into a dyn value — the dynFrom domain:
  * JSON-safe data, bytes<u8> (payload copied), undefined-armed unions of
  * JSON-safe arms, boxable function types, and the runtime HANDLE kinds
@@ -5654,13 +5632,21 @@ export function canConvertToDyn(
     // `Long | number | null | undefined` (whose Long arm is a record
     // carrying `toNumber(): number` beside its data fields) fence while the
     // bare record crossed — the same value reached two ways. A bare FUNC
-    // arm keeps its own stricter clause above; a METHOD BUNDLE arm is
-    // refused for the reason a bare func is.
+    // arm keeps its own stricter clause above.
+    //
+    // A METHOD BUNDLE arm (a record whose every member is a function — the
+    // store-backend `{ auth(id), signal(id), ... }` shape) used to be
+    // refused here too, and the reason was never about this direction: a
+    // bundle boxes fine, but the `as unknown as Record<string, (id) => T>`
+    // idiom immediately asks for it BACK, and canDynCheckTo could not
+    // validate a record of funcs, so letting the value in only relocated
+    // the fence to a declaration and poisoned its use sites. That out-
+    // direction now walks func leaves, so the relocation does not happen
+    // and the cut has no reason left.
     return !!def && def.arms.every((a) =>
       a.kind === "undefinedT" || isJsonSafeType(a, getRecord, getUnion) ||
       (a.kind === "func" && canBoxFuncIntoDyn(a, getRecord, getUnion)) ||
       (a.kind !== "func" &&
-        !isMethodBundle(a, getRecord) &&
         canConvertToDyn(a, getRecord, getUnion, visiting)),
     );
   }
@@ -5673,9 +5659,9 @@ export function canConvertToDyn(
   // FUNC elements stay out: the per-type converter has no func case at all
   // (a func boxes through the closure path, which only the record-field
   // and union-arm emitters reach), so admitting them would trade a fence
-  // for an emitter crash. A METHOD BUNDLE element is refused for the
-  // reason the union arm refuses one.
-  if (t.kind === "array" && t.elem.kind !== "func" && !isMethodBundle(t.elem, getRecord)) {
+  // for an emitter crash. A METHOD BUNDLE element is in, for the reason
+  // the union arm now admits one.
+  if (t.kind === "array" && t.elem.kind !== "func") {
     return canConvertToDyn(t.elem, getRecord, getUnion, visiting);
   }
   // A RECORD carrying FUNCTION fields — a store bundle handed to an
