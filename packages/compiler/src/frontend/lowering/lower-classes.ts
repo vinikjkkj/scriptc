@@ -6292,14 +6292,40 @@ function fullFillLoopFollows(expr: ts.NewExpression): boolean {
     if (mentionsIdentifier(s, aName)) return false;
     if (hasLoopJump(s)) return false;
   }
-  return topLevelWrites === 1;
+  if (topLevelWrites !== 1) return false;
+  fullFillLoopProofs++;
+  if (process.env["SCRIPTC_FILLLOOP_WHY"] !== undefined) {
+    console.error(
+      `[fillloopwhy] #${fullFillLoopProofs} ${expr.getSourceFile().fileName}:` +
+        `${expr.getSourceFile().getLineAndCharacterOfPosition(expr.getStart()).line + 1} ${aName}`,
+    );
+  }
+  return true;
 }
 
-/** Any reference to `name` anywhere under `node`. */
+/** SCRIPTC_FILLLOOP_WHY probe: how many `new Array(n)` sites the
+ * counting-loop proof admitted. Read in the SAME run as the trap count —
+ * "nothing changed" and "the branch never ran" are otherwise the same
+ * observation. */
+let fullFillLoopProofs = 0;
+
+/** Any reference to `name` anywhere under `node`.
+ *
+ * A REFERENCE, not any identifier that happens to spell the name: the NAME
+ * half of a property access binds nothing, so `this.keys.get(...)` does not
+ * mention a local called `keys`. That distinction is what the counting-loop
+ * proof above needs — it asks "does the body read the array back", and a
+ * same-named FIELD is a different storage location entirely. The receiver
+ * half still walks (`keys.get(...)` IS a mention), and an ELEMENT access
+ * `obj[keys]` is untouched: its argument is a real reference. */
 function mentionsIdentifier(node: ts.Node, name: string): boolean {
   let found = false;
   const walk = (n: ts.Node): void => {
     if (found) return;
+    if (ts.isPropertyAccessExpression(n)) {
+      walk(n.expression);
+      return;
+    }
     if (ts.isIdentifier(n) && n.text === name) {
       found = true;
       return;
