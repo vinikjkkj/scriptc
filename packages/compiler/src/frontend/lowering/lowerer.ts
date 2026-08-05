@@ -2472,7 +2472,54 @@ export class Lowerer {
     }
   }
 
+  /** SCRIPTC_TPARAM_WHY=1 — one stderr line per refusal whose blamed type is
+   * an unresolved TYPE PARAMETER, naming the parameter, the syntactic form of
+   * its constraint, whether that constraint is a CLOSED set of string
+   * literals (the only shape a key-pinned widening could use), the
+   * declaration that introduces it, and whether a binding was in scope.
+   * Measurement only: without the variable nothing is written and no IR
+   * changes. */
+  tparamWhy(node: ts.Node, type: ts.Type): void {
+    if (!process.env["SCRIPTC_TPARAM_WHY"]) return;
+    if ((type.flags & ts.TypeFlags.TypeParameter) === 0) return;
+    const sf = node.getSourceFile();
+    const pos = ts.getLineAndCharacterOfPosition(sf, node.getStart(sf));
+    const parts = [`TPWHY ${this.checker.typeToString(type)} ${sf.fileName}:${pos.line + 1}`];
+    const sym = type.getSymbol();
+    const decl = sym === undefined ? undefined : this.checker.declarationsOf(sym)[0];
+    if (decl === undefined || decl.kind !== ts.SyntaxKind.TypeParameter) {
+      parts.push("decl=none");
+      console.error(parts.join(" "));
+      return;
+    }
+    const tp = decl as ts.TypeParameterDeclaration;
+    const dsf = tp.getSourceFile();
+    const dpos = ts.getLineAndCharacterOfPosition(dsf, tp.getStart(dsf));
+    parts.push(`declAt=${dsf.fileName}:${dpos.line + 1}`);
+    parts.push(`owner=${tp.parent === undefined ? "none" : ts.SyntaxKind[tp.parent.kind]}`);
+    parts.push(`cnode=${tp.constraint === undefined ? "none" : ts.SyntaxKind[tp.constraint.kind]}`);
+    let closed = "n";
+    let card = "-";
+    if (tp.constraint !== undefined) {
+      try {
+        const ct = this.checker.getTypeFromTypeNode(tp.constraint);
+        const arms = ct.isUnionType() ? ct.getTypes() : [ct];
+        card = String(arms.length);
+        closed = arms.every((a) => a.isStringLiteralType()) ? "y" : "n";
+        parts.push(`ctext=${this.checker.typeToString(ct).slice(0, 90)}`);
+      } catch {
+        parts.push("ctext=THREW");
+      }
+    }
+    parts.push(`closedLits=${closed}`, `card=${card}`);
+    parts.push(`bound=${this.typeParamResolver(type) ? "y" : "n"}`);
+    parts.push(`boundTs=${this.typeParamTsResolver(type) ? "y" : "n"}`);
+    parts.push(`node=${ts.SyntaxKind[node.kind]}`);
+    console.error(parts.join(" "));
+  }
+
   badType(node: ts.Node, type: ts.Type): never {
+    this.tparamWhy(node, type);
     const widened = this.checker.getBaseTypeOfLiteralType(type);
     // Types declared by the ADOPTED @types/node (Buffer, NodeJS.Timeout,
     // the undici Response, ...) are supported-surface provenance, not npm
