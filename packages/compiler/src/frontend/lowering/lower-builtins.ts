@@ -3773,9 +3773,12 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
   }
 
 /** The algorithm literals `createHash` lowers. The runtime implements
-   * exactly these three (scr_lib.c): every other name keeps its fence,
-   * because a hash lowered to the wrong function is silently wrong. */
-  const LOWERED_HASH_ALGS = new Set(["sha256", "sha512", "sha1"]);
+   * exactly these four (scr_lib.c): every other name keeps its fence,
+   * because a hash lowered to the wrong function is silently wrong —
+   * scr_alg_id/scr_hash_by_name FALL THROUGH to sha256 for anything they do
+   * not recognize, so this set and those two functions must name the same
+   * algorithms or the fall-through becomes a silently wrong digest. */
+  const LOWERED_HASH_ALGS = new Set(["sha256", "sha512", "sha1", "md5"]);
 
 /** The cipher names the runtime implements (scr_cipher.c). AES-256 only,
    * in the three modes zapo's Noise channel uses. */
@@ -3831,9 +3834,9 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       L.noLowering(
         "createHash with this algorithm",
         chCall,
-        'sha256, sha512 and sha1 are the lowered algorithms: createHash("sha256") ' +
+        'sha256, sha512, sha1 and md5 are the lowered algorithms: createHash("sha256") ' +
           "(sha1 exists for the RFC 6455 Sec-WebSocket-Accept hash, sha512 for the " +
-          "Noise handshake)",
+          "Noise handshake, md5 for legacy wire formats that specify it)",
       );
     }
     if (updateCall.arguments.length !== 1) {
@@ -4147,9 +4150,9 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         L.noLowering(
           "createHash with this algorithm",
           expr,
-          'sha256, sha512 and sha1 are the lowered algorithms: createHash("sha256") ' +
+          'sha256, sha512, sha1 and md5 are the lowered algorithms: createHash("sha256") ' +
             "(sha1 exists for the RFC 6455 Sec-WebSocket-Accept hash, sha512 for the " +
-            "Noise handshake)",
+            "Noise handshake, md5 for legacy wire formats that specify it)",
         );
       }
       const alg = L.lowerExprExpecting(algNode!, STRING);
@@ -4266,7 +4269,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         L.noLowering(
           "createHmac with this algorithm",
           expr,
-          'sha256, sha512 and sha1 are the lowered algorithms: createHmac("sha256", key)',
+          'sha256, sha512, sha1 and md5 are the lowered algorithms: createHmac("sha256", key)',
         );
       }
       const keyNode = expr.arguments[1]!;
