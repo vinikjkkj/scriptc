@@ -1226,13 +1226,13 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
   },
   crypto: {
     createHash:
-      "the lowered algorithms are sha256, sha512 and sha1 — every other name (md5 among them) " +
+      "the lowered algorithms are sha256, sha512, sha1 and md5 — every other name " +
       "has no lowering; the handle itself is an ordinary value (update/digest are its lowered members)",
     hash:
       "the one-shot digest has no lowering — the composed chain " +
       'createHash("sha256").update(data).digest("hex") is the lowered hashing surface',
     createHmac:
-      "the lowered algorithms are sha256, sha512 and sha1, keyed by a string or a Buffer — " +
+      "the lowered algorithms are sha256, sha512, sha1 and md5, keyed by a string or a Buffer — " +
       "a KeyObject key needs the secret-key surface, which has no lowering",
     ...Object.fromEntries(
       [
