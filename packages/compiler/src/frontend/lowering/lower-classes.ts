@@ -152,6 +152,14 @@ export interface ClassInfo {
    * spelling); inherited entries are seeded from the base like `fields`.
    * Absent on builtin classes and classes with no symbol-keyed fields. */
   symbolFields?: Map<ts.Symbol, string>;
+  /** The subset of `symbolFields` declared by an `Object.defineProperty`
+   * HIDDEN data descriptor (`enumerable: false`) rather than by a
+   * constructor assignment — non-enumerable own symbol properties, which
+   * Node's inspect omits and object spread does not copy. Layout-wise they
+   * are ordinary slots; only their OBSERVABILITY differs, so every
+   * enumeration path reads this set. Inherited entries seed from the base
+   * like `symbolFields`. */
+  hiddenSymbolFields?: Set<string>;
   /** GENERIC class FAMILY (`class Box<T>` itself): the synthetic,
    * never-constructed ancestor every instantiation extends. It owns what
    * JS's one runtime `Box` owns — the statics (one storage location for
@@ -263,6 +271,173 @@ export interface GenericClassInfo {
       if (sym) return sym;
     }
     return null;
+  }
+
+/** An `Object.defineProperty` call that DECLARES a hidden symbol-keyed
+   * slot on a program class, and everything the declaration needs.
+   *
+   * The admitted form is one shape and nothing near it:
+   *
+   *     Object.defineProperty(recv, K, {
+   *       value: <expr>, enumerable: false, configurable: false, writable: false
+   *     })
+   *
+   * where `K` is `uniqueSymbolKeyOf`-resolvable (a module-level `const k =
+   * Symbol('desc')` — a compile-time identity) and `recv` is a bare
+   * identifier whose type names a non-generic program class. This is the
+   * "hidden per-instance field on someone else's class" idiom TypeScript
+   * forces through `Object.defineProperty` because a symbol member cannot
+   * be declared on a class from another module.
+   *
+   * Every clause is load-bearing:
+   *
+   *  - `writable: false` + `configurable: false` means the property is
+   *    written at most ONCE and can never be deleted or redefined, so one
+   *    static slot models its whole lifetime (a second define is a
+   *    TypeError, emitted as a guard at the write).
+   *  - `enumerable: false` keeps it out of spread, Object.assign and
+   *    inspect — the paths a static layout would otherwise have to teach.
+   *    An enumerable slot is a different, larger problem; it keeps SC2020.
+   *  - A GETTER descriptor (`get`/`set`) is not a slot at all.
+   *  - A bare-identifier receiver may be evaluated twice with no effect
+   *    (defineProperty's result IS the receiver), which is what lets the
+   *    call lower in expression position as well as statement position.
+   *
+   * The receiver→class resolution here is deliberately an OVER-approximation
+   * (it navigates interface `extends` chains without mapType's retyping
+   * conditions): a slot declared on a class nothing reads is dead layout,
+   * while both the read and the write are gated at their own sites by
+   * `symbolFieldInfo`, which uses the real mapType. Over-approximating can
+   * only waste a field; it can never route a read to a slot the write
+   * missed. */
+  interface DefinePropSlotSite {
+    readonly decl: ts.ClassLikeDeclaration;
+    readonly key: { sym: ts.Symbol; fieldName: string };
+    readonly value: ts.Expression;
+  }
+
+/** The hidden-data-descriptor half of the recognizer: exactly `value` plus
+   * all three of `enumerable`/`configurable`/`writable` spelled `false`,
+   * as plain property assignments. Anything else — a missing flag (JS
+   * defaults it to false, but spelling it is what makes the intent
+   * checkable), a computed or shorthand member, a spread, an accessor, a
+   * non-literal flag — is not this shape. */
+  function hiddenDataDescriptorOf(node: ts.Expression): ts.Expression | null {
+    if (!ts.isObjectLiteralExpression(node)) return null;
+    let value: ts.Expression | undefined;
+    const flags = new Set<string>();
+    for (const p of node.properties) {
+      if (!ts.isPropertyAssignment(p)) return null;
+      const nm = ts.isIdentifier(p.name) || ts.isStringLiteral(p.name) ? p.name.text : null;
+      if (nm === null) return null;
+      if (nm === "value") {
+        if (value !== undefined) return null;
+        value = p.initializer;
+        continue;
+      }
+      if (nm !== "enumerable" && nm !== "configurable" && nm !== "writable") return null;
+      if (p.initializer.kind !== ts.SyntaxKind.FalseKeyword) return null;
+      flags.add(nm);
+    }
+    if (value === undefined || flags.size !== 3) return null;
+    return value;
+  }
+
+/** The class DECLARATION a defineProperty receiver's type names: the
+   * declared class itself, or the class an interface chain re-publishes
+   * (`export interface WaClient extends WaClientImpl` — the shape a
+   * package uses to give a class event-map-typed overloads it cannot
+   * express). Generic classes are excluded: one declaration node stands
+   * for every instantiation, and a per-instantiation slot type would need
+   * the bindings this scan runs without. */
+  function receiverClassDeclOf(L: Lowerer, recv: ts.Expression): ts.ClassLikeDeclaration | null {
+    if (!ts.isIdentifier(recv)) return null;
+    // The CHECKER's type, never L.typeOf: the scan runs before any lowering
+    // (so the narrowing maps typeOf consults are empty) but the recognizer
+    // is asked again at the write site with them live, and the two must
+    // agree on what the declaration is.
+    let sym: ts.Symbol | undefined = L.checker.getTypeAtLocation(recv).getSymbol();
+    for (let hop = 0; sym !== undefined && hop < 8; hop++) {
+      const decls = L.checker.declarationsOf(sym);
+      const cls = decls.find((d) => ts.isClassDeclaration(d) || ts.isClassExpression(d)) as
+        | ts.ClassLikeDeclaration
+        | undefined;
+      if (cls) {
+        if (cls.getSourceFile().isDeclarationFile || !L.fileTag.has(cls.getSourceFile())) return null;
+        return cls.typeParameters === undefined ? cls : null;
+      }
+      // An interface: follow a single agreed `extends <bare identifier>`.
+      const ifaces = decls.filter((d) => ts.isInterfaceDeclaration(d));
+      if (ifaces.length === 0) return null;
+      let next: ts.Symbol | undefined;
+      for (const d of ifaces) {
+        const clauses = d.heritageClauses ?? [];
+        if (clauses.length !== 1) return null;
+        const clause = clauses[0]!;
+        if (clause.token !== ts.SyntaxKind.ExtendsKeyword || clause.types.length !== 1) return null;
+        const ref = clause.types[0]!;
+        if (!ts.isIdentifier(ref.expression)) return null;
+        const s = L.checker.getSymbolAtLocation(ref.expression);
+        if (!s || (next !== undefined && next !== s)) return null;
+        next = s;
+      }
+      sym = next;
+    }
+    return null;
+  }
+
+  export function definePropSlotSiteOf(L: Lowerer, call: ts.CallExpression): DefinePropSlotSite | null {
+    if (call.questionDotToken) return null;
+    const access = call.expression;
+    if (!ts.isPropertyAccessExpression(access) || access.questionDotToken) return null;
+    if (access.name.text !== "defineProperty") return null;
+    if (call.arguments.length !== 3 || call.arguments.some(ts.isSpreadElement)) return null;
+    if (!L.isStdlibGlobal(access.expression, "Object")) return null;
+    const key = uniqueSymbolKeyOf(L, call.arguments[1]!);
+    if (!key) return null;
+    const value = hiddenDataDescriptorOf(call.arguments[2]!);
+    if (!value) return null;
+    const decl = receiverClassDeclOf(L, call.arguments[0]!);
+    if (!decl) return null;
+    return { decl, key, value };
+  }
+
+/** Every hidden symbol slot the program declares, class declaration by
+   * class declaration.
+   *
+   * A class layout is interned from the TYPE long before any
+   * defineProperty site is lowered — and the declaring site usually lives
+   * in a DIFFERENT module from the class — so the decision has to be made
+   * once, over the whole program, exactly like `scanAccessorProducers`.
+   * Computed on first ask rather than in the constructor: by then every
+   * file is in fileTag, and shape interning has not begun.
+   *
+   * The scan itself touches only the checker (uniqueSymbolKeyOf and
+   * declaration navigation) — never mapType — so asking for it from the
+   * middle of class collection cannot re-enter class collection. */
+  export function scanDefinePropSymbolSlots(L: Lowerer): Map<ts.ClassLikeDeclaration, Map<ts.Symbol, { fieldName: string; values: ts.Expression[] }>> {
+    const out = new Map<ts.ClassLikeDeclaration, Map<ts.Symbol, { fieldName: string; values: ts.Expression[] }>>();
+    const visit = (n: ts.Node): void => {
+      if (ts.isCallExpression(n)) {
+        const site = definePropSlotSiteOf(L, n);
+        if (site) {
+          let per = out.get(site.decl);
+          if (!per) {
+            per = new Map();
+            out.set(site.decl, per);
+          }
+          const prev = per.get(site.key.sym);
+          if (prev) prev.values.push(site.value);
+          else per.set(site.key.sym, { fieldName: site.key.fieldName, values: [site.value] });
+        }
+      }
+      ts.forEachChild(n, visit);
+    };
+    for (const sf of L.fileTag.keys()) {
+      if (sf.isDeclarationFile) continue;
+      ts.forEachChild(sf, visit);
+    }
+    return out;
   }
 
 /** Symbol-slot RETURN refinement (5.9.3 ABI parity): tsgo synthesizes no
@@ -1094,6 +1269,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
 
       const fields = new Map<string, IrType>(base ? base.fields : []);
       const symbolFields = new Map<ts.Symbol, string>(base?.symbolFields ?? []);
+      const hiddenSymbolFields = new Set<string>(base?.hiddenSymbolFields ?? []);
       const fieldOrder: ClassInfo["fieldOrder"] = [];
       const methods = new Map<string, { params: ParamShape[]; ret: IrType; abstract?: true; async?: true; gen?: { yieldT: IrType; nextT: IrType } }>();
       // Own accessor declarations ("get:x"/"set:x" → node), for the
@@ -2219,6 +2395,53 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         }
       }
 
+      // HIDDEN symbol slots declared by `Object.defineProperty` elsewhere
+      // in the program (definePropSlotSiteOf's shape). Unlike the JS
+      // constructor scan above this is NOT a JavaScript-only story: the
+      // idiom exists precisely because TypeScript cannot declare a symbol
+      // member on a class it does not own, so a TS program can only spell
+      // it this way. The slot's type is the descriptor value's, WIDENED BY
+      // AN UNDEFINED ARM, because the property does not exist until the
+      // define runs and a read before then answers undefined — Node's
+      // answer, and the same representation `undefArmedFieldType` gives the
+      // JS assigned-in-a-method fields (undefFieldInitLineC initializes it
+      // to the interned undefined instance, so a fresh instance reads
+      // undefined, never a calloc NULL). Sites whose value types disagree,
+      // or whose type cannot take the arm, declare NOTHING and keep every
+      // fence: one slot cannot hold two representations.
+      for (const [keySym, slot] of L.definePropSymbolSlots(decl) ?? []) {
+        if (symbolFields.has(keySym)) continue;
+        if (fields.has(slot.fieldName)) {
+          // Two distinct Symbol(...) consts with one description would need
+          // one printable name for two slots — the constructor scan's rule.
+          L.unsupported(
+            "SC1090",
+            slot.values[0]!,
+            `distinct symbol keys sharing the printable name '${slot.fieldName}' in one class`,
+          );
+        }
+        let vt: IrType | null = null;
+        let agree = true;
+        for (const v of slot.values) {
+          const m = L.mapTypeOf(L.checker.getBaseTypeOfLiteralType(L.checker.getTypeAtLocation(v)));
+          if (!m || m.kind === "void" || (vt !== null && !typeEquals(vt, m))) {
+            agree = false;
+            break;
+          }
+          vt = m;
+        }
+        if (!agree || vt === null) continue;
+        const armed = L.withUndefinedArmOf(vt);
+        if (armed === null) continue;
+        fields.set(slot.fieldName, armed);
+        symbolFields.set(keySym, slot.fieldName);
+        hiddenSymbolFields.add(slot.fieldName);
+        fieldOrder.push({ name: slot.fieldName, type: armed, initializer: undefined });
+        if (process.env["SCRIPTC_DEFPROP_WHY"]) {
+          process.stderr.write(`[defprop] slot ${className}.${slot.fieldName} : ${L.fmt(armed)} (${slot.values.length} site(s))\n`);
+        }
+      }
+
       // Second refinement chance, OWN symbol slots: the member loop ran
       // before the constructor scan declared this class's own symbol-keyed
       // fields, so methods returning those slots (1731's `extra()` —
@@ -2294,6 +2517,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         ...(staticMethods.size > 0 ? { staticMethods } : {}),
         ...(staticBlocks.length > 0 ? { staticBlocks } : {}),
         ...(symbolFields.size > 0 ? { symbolFields } : {}),
+        ...(hiddenSymbolFields.size > 0 ? { hiddenSymbolFields } : {}),
         ...(classDecoratorNodes.length > 0 ? { classDecorators: { nodes: classDecoratorNodes } } : {}),
         ...(deferredInitFields.size > 0 ? { deferredInitFields } : {}),
       };

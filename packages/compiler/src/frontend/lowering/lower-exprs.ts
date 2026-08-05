@@ -10594,6 +10594,28 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     return { sym, fieldName: `Symbol(${arg?.text ?? ""})` };
   }
 
+/** The KEY symbol behind a LATE-BOUND (`__@name@id`) member declared in
+   * TYPE position — `{ [K]?: T }`, the laundering cast's spelling — where
+   * the declaration is a computed property signature rather than the
+   * element-access ASSIGNMENT lateBoundKeySymOf reads. Kept separate from
+   * that helper deliberately: it feeds only the hidden-slot agreement
+   * check, and widening lateBoundKeySymOf itself would change which
+   * late-bound class properties the JS constructor scan considers already
+   * declared. */
+  function declaredSymbolKeyOf(L: Lowerer, p: ts.Symbol): ts.Symbol | null {
+    for (const d of L.checker.declarationsOf(p)) {
+      const nm =
+        (ts.isPropertySignature(d) || ts.isPropertyDeclaration(d)) &&
+        d.name !== undefined && ts.isComputedPropertyName(d.name)
+          ? d.name.expression
+          : null;
+      if (!nm || !ts.isIdentifier(nm)) continue;
+      const sym = L.resolveValueSymbol(nm);
+      if (sym) return sym;
+    }
+    return null;
+  }
+
 /** The declared symbol-keyed field (class name / layout field / type)
    * `expr` resolves to, WITHOUT lowering the receiver — the routing test
    * for the wiring sites (statement dispatch must not emit anything when
@@ -10601,7 +10623,29 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * keys no class on the chain declares. */
   export function symbolFieldInfo(L: Lowerer, expr: ts.ElementAccessExpression,): { className: string; field: string; fieldType: IrType } | null {
     if (L.chainBlocked(expr)) return null;
-    const receiverIr = L.mapTypeOf(L.typeOf(expr.expression));
+    const recvT = L.typeOf(expr.expression);
+    const direct = symbolFieldOnClass(L, expr, L.mapTypeOf(recvT), recvT, false);
+    if (direct) return direct;
+    // A LAUNDERED receiver — `client as unknown as { [K]?: T }`. TypeScript
+    // cannot declare a symbol member on a class another module owns, so
+    // this cast IS the spelling of the Object.defineProperty idiom, and the
+    // annotation maps to a RECORD while the binding still holds the class
+    // (the cast is a no-op: no copy exists at runtime, and the local's IR
+    // type says so). The local's own type is the representation every other
+    // read of it uses, so it is the one the slot lives on. Strictly
+    // ADDITIVE: this route answers only HIDDEN slots, so no read that
+    // resolved some other way before resolves differently now.
+    if (ts.isIdentifier(expr.expression)) {
+      const local = L.resolveLocal(expr.expression);
+      if (local?.type.kind === "object") return symbolFieldOnClass(L, expr, local.type, recvT, true);
+    }
+    return null;
+  }
+
+/** symbolFieldInfo against ONE candidate receiver representation.
+   * `hiddenOnly` restricts the answer to Object.defineProperty-declared
+   * slots — what makes the laundered route additive. */
+  function symbolFieldOnClass(L: Lowerer, expr: ts.ElementAccessExpression, receiverIr: IrType | null, recvT: ts.Type, hiddenOnly: boolean,): { className: string; field: string; fieldType: IrType } | null {
     if (receiverIr?.kind !== "object") return null;
     const info = L.classes.get(receiverIr.className);
     if (!info) {
@@ -10614,6 +10658,35 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     if (field === undefined) return null;
     const fieldType = info.fields.get(field);
     if (!fieldType) return null;
+    const hidden = info.hiddenSymbolFields?.has(field) === true;
+    if (hiddenOnly && !hidden) return null;
+    // HIDDEN slots are reached through exactly that laundering, and a cast
+    // can spell ANY member type — the slot's representation was fixed by
+    // the WRITE. So the receiver type's own declaration of this key must
+    // agree with the slot, or the read reinterprets one representation as
+    // another. The DECLARED late-bound member is compared, not the
+    // flow-narrowed read type: the narrowing rides on top of the slot
+    // (maybeNarrow), it does not change what is stored. No declaration at
+    // all, or a disagreeing one, keeps the fence. Constructor-declared
+    // slots skip this — their field type came from the checker's own
+    // property, so it agrees by construction.
+    if (hidden) {
+      let declared: IrType | null = null;
+      for (const p of L.checker.getPropertiesOfType(recvT)) {
+        if (!p.name.startsWith("__@")) continue;
+        if (declaredSymbolKeyOf(L, p) !== key.sym) continue;
+        declared = L.mapTypeOf(L.checker.getTypeOfSymbol(p));
+        break;
+      }
+      if (declared === null || !typeEquals(declared, fieldType)) {
+        if (process.env["SCRIPTC_DEFPROP_WHY"]) {
+          process.stderr.write(
+            `[defprop] read declined ${receiverIr.className}.${field}: declared=${declared ? L.fmt(declared) : "<none>"} slot=${L.fmt(fieldType)} recvT=${L.checker.typeToString(recvT)}\n`,
+          );
+        }
+        return null;
+      }
+    }
     return { className: receiverIr.className, field, fieldType };
   }
 
