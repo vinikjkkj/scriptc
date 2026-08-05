@@ -22,3 +22,43 @@ export declare namespace waproto {
 		type $Shape = waproto.Msg.$Properties
 	}
 }
+
+/* The TABLE half, pinned PRECISELY: each `parts` field is a MIXED readonly
+ * TUPLE, a more exact spelling of the array the index.js beside it
+ * actually builds. A mixed tuple maps to a positional RECORD and the array
+ * maps to an array, so before the compiled-twin rule the generated value
+ * could not enter its own declared slot. Ping's ONE-position tuple agreed
+ * already — a UNIFORM readonly tuple rides the array representation by
+ * types.ts's own rule, which is what made the arity-1 schemas the only
+ * ones that compiled in zapo. */
+export type Part =
+	| { readonly kind: 'literal'; readonly value: string }
+	| { readonly kind: 'slot'; readonly label: string }
+
+export interface Schema<
+	Name extends string = string,
+	Parts extends ReadonlyArray<Part> = ReadonlyArray<Part>
+> {
+	readonly name: Name
+	readonly version: number
+	readonly parts: Parts
+}
+
+export declare const TABLE: {
+	readonly Ping: Schema<'ping', readonly [{ readonly kind: 'literal'; readonly value: 'ping' }]>
+	readonly Mute: Schema<
+		'mute',
+		readonly [
+			{ readonly kind: 'literal'; readonly value: 'mute' },
+			{ readonly kind: 'slot'; readonly label: 'chatJid' }
+		]
+	>
+	readonly Star: Schema<
+		'star',
+		readonly [
+			{ readonly kind: 'literal'; readonly value: 'star' },
+			{ readonly kind: 'slot'; readonly label: 'remote' },
+			{ readonly kind: 'slot'; readonly label: 'id' }
+		]
+	>
+}
