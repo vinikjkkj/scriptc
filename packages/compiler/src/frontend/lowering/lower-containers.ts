@@ -5305,6 +5305,12 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
 /** The typed-array constructors with a runtime representation, by lib
  * interface name. The other TypedArray flavors (Int8Array, Uint16Array,
  * DataView, ...) fall through to the generic stdlib-constructor fence. */
+/** SCRIPTC_BYTESVIEW_WHY probe: how many `new Uint8Array(...)` sites took
+ * the aliasing-view construction. Read in the SAME run as the trap count —
+ * "nothing changed" and "the branch never ran" are otherwise the same
+ * observation. */
+let bytesViewCtors = 0;
+
 export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
   Uint8Array: "u8",
   Uint32Array: "u32",
@@ -5356,6 +5362,55 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
     const type = bytesOf(elem);
     const loc = locOf(expr);
     const args = expr.arguments ?? [];
+    // `new Uint8Array(x.buffer, byteOffset?, byteLength?)` and `new
+    // Uint8Array(<ArrayBuffer value>, ...)`: the u8 VIEW over the owner's
+    // storage. This is not a new construction — it is the one
+    // `Buffer.from(x.buffer, ...)` and `new DataView(x.buffer, ...)`
+    // already build, the same dataViewNew intrinsic, and it is the
+    // relationship the bytes<buf> flavor exists FOR (types.ts: ArrayBuffer
+    // "rides the same ScrBytes representation -- which is what makes the
+    // VIEW relationship work for free: `new Uint8Array(buf)` is the
+    // ordinary backing alias, chain depth 1"). Until now only the two
+    // other spellings could say it.
+    //
+    // Two entry forms, and each carries its own reason:
+    //   - the SYNTACTIC `.buffer` peel, where no ArrayBuffer value ever
+    //     exists (lowerDataViewNew's rule verbatim);
+    //   - an ArrayBuffer-typed VALUE, the bytes<buf> flavor a lib call can
+    //     hand back -- for which `.buffer` is not written at all.
+    // u8 ONLY: the intrinsic's offset and length are BYTE extents, and the
+    // constructor's length argument counts ELEMENTS, so the two agree for
+    // exactly this kind. Bad extents throw DataView's RangeError spelling
+    // rather than the typed array's -- the divergence Buffer.from(x.buffer,
+    // ...) already documents, on the same code path.
+    if (elem === "u8" && args.length >= 1 && args.length <= 3 && !args.some(ts.isSpreadElement)) {
+      const first = args[0]!;
+      const peeled =
+        ts.isPropertyAccessExpression(first) && first.name.text === "buffer" && !first.questionDotToken
+          ? first.expression
+          : null;
+      const viewSrc = peeled ?? first;
+      const srcIr = L.mapTypeOf(L.typeOf(viewSrc));
+      // A peeled `.buffer` takes ANY typed-array owner (its storage IS the
+      // buffer). An unpeeled value has to BE an ArrayBuffer: a Uint8Array
+      // argument is the COPY constructor below, not a view.
+      if (
+        srcIr?.kind === "bytes" &&
+        (peeled !== null ? L.isStdlibMember(first as ts.PropertyAccessExpression) : srcIr.elem === "buf")
+      ) {
+        const receiver = L.lowerExpr(viewSrc);
+        const idxArgs = args.slice(1).map((a) => L.lowerExprExpecting(a, F64));
+        bytesViewCtors++;
+        if (process.env["SCRIPTC_BYTESVIEW_WHY"] !== undefined) {
+          console.error(
+            `[bytesviewwhy] #${bytesViewCtors} ${peeled ? ".buffer" : "value"} ` +
+              `${L.fmt(srcIr)} nargs=${args.length} ${expr.getSourceFile().fileName}:` +
+              `${expr.getSourceFile().getLineAndCharacterOfPosition(expr.getStart()).line + 1}`,
+          );
+        }
+        return { kind: "bytesIntrinsic", method: "dataViewNew", receiver, args: idxArgs, type, loc };
+      }
+    }
     if (args.length === 0) return { kind: "bytesNew", source: null, type, loc };
     if (args.length === 1 && !ts.isSpreadElement(args[0]!)) {
       const argNode = args[0]!;

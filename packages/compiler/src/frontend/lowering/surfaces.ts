@@ -1257,10 +1257,13 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       ]),
     ),
     ...Object.fromEntries(
-      ["scrypt", "scryptSync", "hkdf", "hkdfSync"].map((m) => [
+      // hkdfSync came out of this list when its sha256 form landed; the
+      // CALLBACK form (hkdf) stays, and so does scrypt.
+      ["scrypt", "scryptSync", "hkdf"].map((m) => [
         m,
-        "this key-derivation function has no lowering yet — PBKDF2 with sha256 is the " +
-          "derived surface, alongside hashing, randomness, and the introspection statics",
+        "this key-derivation function has no lowering yet — PBKDF2 and HKDF with sha256 are the " +
+          "derived surfaces (hkdfSync, not the callback form), alongside hashing, randomness, " +
+          "and the introspection statics",
       ]),
     ),
     setFips:

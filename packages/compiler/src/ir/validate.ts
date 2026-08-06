@@ -711,6 +711,9 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "crypto.randomBytesAsync": { argTypes: [F64], result: { kind: "promise", inner: BYTES_U8 } },
   "crypto.pbkdf2Sha256": { argTypes: [BYTES_U8, BYTES_U8, F64, F64], result: BYTES_U8 },
   "crypto.pbkdf2Sha256Async": { argTypes: [BYTES_U8, BYTES_U8, F64, F64], result: { kind: "promise", inner: BYTES_U8 } },
+  // ikm, salt, info, keylen — the ArrayBuffer result is the OPAQUE flavor,
+  // matching what @types/node declares hkdfSync to return.
+  "crypto.hkdfSha256": { argTypes: [BYTES_U8, BYTES_U8, BYTES_U8, F64], result: bytesOf("buf") },
   "crypto.hashDigestStr": { argTypes: [STRING, STRING, STRING], result: STRING },
   "crypto.hashDigestBytes": { argTypes: [STRING, BYTES_U8, STRING], result: STRING },
   "crypto.hashDigestStrRaw": { argTypes: [STRING, STRING], result: BYTES_U8 },
