@@ -38,6 +38,15 @@ function detailLength(m: Decoded): number {
 export { TABLE } from "../spec/proto/index.js";
 import { TABLE, type Part, type Schema } from "../spec/proto/index.js";
 
+/* The RE-EXPORT-ONLY edge (zapo-js's `src/version-spec.ts` and `src/mex.ts`
+ * are nothing but this line). No import declaration names this module
+ * anywhere in the package, so it is the module-edge STATEMENT SHAPE alone
+ * that decides whether the twin's %init is scheduled. It was not: the
+ * reader got the twin's GLOBAL and the header kept calling the declaration
+ * file's empty init, leaving the storage NULL. `TABLE` above cannot cover
+ * this — the import on the line above it schedules that twin either way. */
+export { GEN_VERSION, GEN_LIMITS } from "../spec/version/index.js";
+
 /** A GENERIC slot over the declared schema — the shape that fenced in
  * zapo (`buildSetMutationFromSchema<S extends WaAppstateSchema>`): the
  * parameter type is the declaration's, the argument is the value the twin
