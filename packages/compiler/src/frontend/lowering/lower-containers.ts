@@ -6344,25 +6344,55 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       return { kind: "libCall", fn: "buffer.compareChk", args: dyns, type: F64, loc };
     }
     if (member === "isBuffer") {
-      // The type-predicate narrowing test. Lowered where it DECIDES
-      // something: a union-typed argument with a Buffer arm becomes a
-      // runtime tag test (tsc's narrowing then types the branches, the
-      // discriminated-union machinery). Statically-decided arguments are
-      // fenced — the answer is a constant, and the operand's evaluation
-      // would have to be discarded.
+      // The type-predicate narrowing test. It takes TWO questions, and
+      // the tag test alone answers only the first.
+      //
+      // The bytes<u8> arm of a union is Uint8Array AND Buffer — ONE
+      // representation — so `unionIsTag` says "this is the bytes arm",
+      // never "this is a Buffer". Measured against Node: with the tag
+      // test alone, `Buffer.isBuffer(x)` for `x: Uint8Array | string`
+      // holding a Uint8Array answered TRUE where Node answers false.
+      // That was a merged wrong answer, and unlike the `.constructor`
+      // divergence beside it, it is not identity-only: it is the boolean
+      // the program branches on.
+      //
+      // So: the tag decides whether a bytes value is there, and the
+      // value's own flavor decides whether that bytes value is a Buffer.
+      // The narrow is tag-UNCHECKED by kind but sits behind the tag test
+      // in a short-circuit `&&`, which is precisely its guard.
       if (args.length === 1 && !ts.isSpreadElement(args[0]!)) {
         const v = L.lowerExpr(args[0]!);
+        const line = call.getSourceFile().getLineAndCharacterOfPosition(call.getStart()).line + 1;
+        const why: IrExpr = { kind: "strLit", value: `Buffer.isBuffer at ${loc.file}:${line}`, type: STRING, loc };
         if (v.type.kind === "union") {
           const def = L.unions.get(v.type.unionId);
           const tag = def ? def.arms.findIndex((a) => a.kind === "bytes" && a.elem === "u8") : -1;
           if (tag >= 0) {
-            return { kind: "unionIsTag", unionId: v.type.unionId, tag, negated: false, value: v, type: BOOL, loc };
+            const isTag: IrExpr = { kind: "unionIsTag", unionId: v.type.unionId, tag, negated: false, value: v, type: BOOL, loc };
+            // The operand rides BOTH tests, so only a re-emittable read
+            // composes — the `== null` composition rule.
+            if (!pureReemittable(v)) {
+              L.noLowering(
+                "Buffer.isBuffer of a union-typed operand that isn't a plain read",
+                args[0]!,
+                "the value is tested twice (which arm, then which flavor) — bind it to a const first",
+              );
+            }
+            const payload: IrExpr = { kind: "unionNarrow", unionId: v.type.unionId, tag, value: v, type: BYTES_U8, loc };
+            const flavor: IrExpr = { kind: "libCall", fn: "bytes.isBuffer", args: [payload, why], type: BOOL, loc };
+            return { kind: "logical", op: "&&", left: isTag, right: flavor, type: BOOL, loc };
           }
+        }
+        // A statically bytes<u8> argument was fenced here as "the answer
+        // is static". It never was: the arm holds both flavors, and only
+        // the value knows which.
+        if (v.type.kind === "bytes" && v.type.elem === "u8") {
+          return { kind: "libCall", fn: "bytes.isBuffer", args: [v, why], type: BOOL, loc };
         }
         L.noLowering(
           `Buffer.isBuffer of '${L.fmt(v.type)}' values`,
           args[0]!,
-          "the check lowers as a runtime tag test on unions with a Buffer arm — here the answer is static",
+          "the check lowers over a bytes value, or over a union with a bytes arm — here no bytes value can be there, so the answer is constantly false",
         );
       }
       L.noLowering("Buffer.isBuffer with this argument shape", call);
