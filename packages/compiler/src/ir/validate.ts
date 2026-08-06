@@ -227,6 +227,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "num.toStringRadix": { argTypes: [F64, F64], result: STRING },
   "num.sameValue": { argTypes: [F64, F64], result: BOOL },
   "intl.numFormatEnUs": { argTypes: [F64], result: STRING },
+  "intl.defaultLocale": { argTypes: [], result: STRING },
   "sym.new": { argTypes: [STRING], result: SYMBOL_T },
   "sym.newAnon": { argTypes: [], result: SYMBOL_T },
   "sym.for": { argTypes: [STRING], result: SYMBOL_T },
