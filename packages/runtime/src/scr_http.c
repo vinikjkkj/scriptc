@@ -357,7 +357,7 @@ typedef struct {
 
 static void scr_http_sock_res_data(void *ctx, const char *buf, size_t n) {
   ScrSockResPipe *p = (ScrSockResPipe *)ctx;
-  ScrBytes *chunk = scr_bytes_new(SCR_BYTES_U8, (double)n);
+  ScrBytes *chunk = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)n));
   if (n > 0) memcpy(chunk->data, buf, n);
   scr_http_res_write_bytes(p->res, chunk);
   scr_bytes_release(chunk);
@@ -1484,7 +1484,7 @@ static void scr_http_req_deliver(ScrHttpReq *r, const char *data, size_t n) {
   }
   bool piped = r->pipe_res != NULL || r->pipe_client != NULL || r->pipe_sock != NULL;
   if (r->data_ls.n == 0 && !piped) return;
-  ScrBytes *chunk = scr_bytes_new(SCR_BYTES_U8, (double)n);
+  ScrBytes *chunk = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)n));
   memcpy(chunk->data, data, n);
   if (r->data_ls.n > 0) {
     ScrNetL *snap;
@@ -1638,7 +1638,7 @@ static bool scr_http_conn_parse_head(ScrHttpConn *conn, size_t head_len) {
       scr_net_sock_destroy(conn->sock);
       return true;
     }
-    ScrBytes *head = scr_bytes_new(SCR_BYTES_U8, (double)conn->len);
+    ScrBytes *head = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)conn->len));
     if (conn->len > 0) memcpy(head->data, conn->buf, conn->len);
     conn->len = 0;
     scr_net_sock_clear_native_reader(conn->sock);
@@ -1673,7 +1673,7 @@ static bool scr_http_conn_parse_head(ScrHttpConn *conn, size_t head_len) {
       scr_net_sock_destroy(conn->sock);
       return true;
     }
-    ScrBytes *head = scr_bytes_new(SCR_BYTES_U8, (double)conn->len);
+    ScrBytes *head = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)conn->len));
     if (conn->len > 0) memcpy(head->data, conn->buf, conn->len);
     conn->len = 0;
     scr_net_sock_clear_native_reader(conn->sock);
@@ -2642,7 +2642,7 @@ static bool scr_http_client_parse_head(ScrHttpConn *conn, size_t head_len) {
       scr_net_sock_destroy(conn->sock);
       return true;
     }
-    ScrBytes *head = scr_bytes_new(SCR_BYTES_U8, (double)conn->len);
+    ScrBytes *head = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)conn->len));
     if (conn->len > 0) memcpy(head->data, conn->buf, conn->len);
     conn->len = 0;
     scr_net_sock_clear_native_reader(conn->sock);
@@ -3429,7 +3429,7 @@ static bool scr_http_dynh_encode(const ScrDyn *chunk, const ScrDyn *enc, ScrByte
   if (strcmp(low, "binary") == 0) canon = "latin1";
   else if (strcmp(low, "ucs2") == 0 || strcmp(low, "ucs-2") == 0 || strcmp(low, "utf-16le") == 0) canon = "utf16le";
   ScrStr *cs = scr_str_new(canon, strlen(canon));
-  *out = scr_bytes_from_str(chunk->v.str, cs);
+  *out = scr_bytes_stamp_buffer(scr_bytes_from_str(chunk->v.str, cs));
   scr_str_release(cs);
   return true;
 }

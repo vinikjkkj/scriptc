@@ -29,7 +29,7 @@ ScrBytes *scr_zlib_deflate(const ScrBytes *data) {
   uLongf outLen = cap;
   int rc = compress2(buf, &outLen, data->data, srcLen, Z_DEFAULT_COMPRESSION);
   if (rc != Z_OK) scr_zlib_oom(); /* Z_MEM_ERROR is the only reachable code */
-  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)outLen);
+  ScrBytes *out = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)outLen));
   memcpy(out->data, buf, outLen);
   free(buf);
   return out;
@@ -77,7 +77,7 @@ ScrBytes *scr_zlib_inflate(const ScrBytes *data) {
     return NULL;
   }
   inflateEnd(&zs);
-  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)len);
+  ScrBytes *out = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)len));
   memcpy(out->data, buf, len);
   free(buf);
   return out;
@@ -117,7 +117,7 @@ ScrBytes *scr_zlib_deflate_mode(const ScrBytes *data, double mode, double level)
   if (rc != Z_STREAM_END) scr_zlib_oom(); /* bound guarantees completion */
   size_t len = cap - zs.avail_out;
   deflateEnd(&zs);
-  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)len);
+  ScrBytes *out = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)len));
   memcpy(out->data, buf, len);
   free(buf);
   return out;
@@ -168,7 +168,7 @@ ScrBytes *scr_zlib_inflate_mode(const ScrBytes *data, double mode) {
     return NULL;
   }
   inflateEnd(&zs);
-  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)len);
+  ScrBytes *out = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)len));
   memcpy(out->data, buf, len);
   free(buf);
   return out;

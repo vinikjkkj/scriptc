@@ -2996,6 +2996,36 @@ export type IrLibFn =
   | "buffer.compareChk"
   | "bytes.equalsChk"
   | "bytes.compareChk"
+  /** The BUFFER-NESS of a bytes value, carried by the value itself.
+   *
+   * ONE ScrBytes representation serves Uint8Array AND Buffer (types.ts:
+   * "Node's Buffer IS a Uint8Array subclass -- ONE runtime
+   * representation"), which is what makes every Buffer assignable to
+   * every Uint8Array slot for free. The price is that `x.constructor` --
+   * the one question that SEPARATES the two, where `instanceof
+   * Uint8Array` merely joins them -- has no static answer: the checker
+   * type of the SLOT says Uint8Array while the value in it is a Buffer,
+   * and folding from the slot answers TRUE where Node answers false.
+   * Measured, not assumed: a `createHash().digest()` through a
+   * Uint8Array-typed parameter.
+   *
+   * So the answer rides the VALUE. markBuffer/markPlain stamp a freshly
+   * constructed bytes value with the flavor its Node spelling produces
+   * (Buffer.alloc vs new Uint8Array over the SAME scr_bytes_new);
+   * isBuffer reads it. Both marks answer THE SAME value -- no copy --
+   * retained, because that is the libFn convention (borrowed argument,
+   * owned result: the emitter releases the argument temp and keeps the
+   * result). They belong ONLY on a fresh construction: stamping an
+   * aliased value would rewrite a flavor its other holders can see.
+   *
+   * A bytes value nobody has classified stays UNKNOWN, and isBuffer
+   * THROWS on it (may-throw seed) naming the read site. That is
+   * deliberate and it is the whole safety argument: the failure mode of
+   * a missed producer is a LOUD fence at the read, never a silent wrong
+   * answer -- the exact failure mode that got the static fold reverted. */
+  | "bytes.markBuffer"
+  | "bytes.markPlain"
+  | "bytes.isBuffer"
   /** The deprecated `new Buffer(number, 'enc')` string-arm rejection:
    * always throws Node's ERR_INVALID_ARG_TYPE ("The \"string\" argument
    * must be of type string. Received ..."). Borrowed dyn; may-throw. */
@@ -7352,6 +7382,10 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "buffer.compareChk",
   "bytes.equalsChk",
   "bytes.compareChk",
+  // Reading the Buffer-ness of a value whose producer nobody classified:
+  // the honest answer is a refusal, and it is a RUNTIME one because the
+  // flavor is a runtime property. The two marks never throw.
+  "bytes.isBuffer",
   "buffer.newStringFail",
   "fs.toUnixTimestamp",
   "fs.existsChk",

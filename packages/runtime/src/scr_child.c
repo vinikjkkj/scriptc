@@ -1233,7 +1233,7 @@ static bool scr_child_stream_pump(ScrChildStream *s) {
     char buf[65536];
     DWORD got = 0;
     if (!ReadFile(s->h, buf, avail, &got, NULL) || got == 0) return true;
-    ScrBytes *chunk = scr_bytes_new(SCR_BYTES_U8, (double)got);
+    ScrBytes *chunk = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)got));
     memcpy(chunk->data, buf, (size_t)got);
     size_t nd = s->n_data;
     ScrChildStreamDataL *snap = malloc(nd * sizeof *snap);
@@ -2915,7 +2915,7 @@ static bool scr_child_stream_pump(ScrChildStream *s) {
       return errno != EAGAIN;
     }
     if (n == 0) return true;
-    ScrBytes *chunk = scr_bytes_new(SCR_BYTES_U8, (double)n);
+    ScrBytes *chunk = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)n));
     memcpy(chunk->data, buf, (size_t)n);
     size_t nd = s->n_data;
     ScrChildStreamDataL *snap = malloc(nd * sizeof *snap);

@@ -404,7 +404,7 @@ static void scr_stdin_settle_done(void) {
   if (!scr_stdin_waiter) return;
   ScrPromise *p = scr_stdin_waiter;
   scr_stdin_waiter = NULL;
-  ScrBytes *empty = scr_bytes_new(SCR_BYTES_U8, 0);
+  ScrBytes *empty = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, 0));
   scr_promise_fulfill_ref(p, empty, scr_bytes_retain_v, scr_bytes_release_v, NULL);
   scr_promise_release(p);
 }
@@ -450,7 +450,7 @@ void scr_stdin_destroy(void) {
 ScrPromise *scr_stdin_next_chunk(void) {
   if (scr_stdin_eof || scr_stdin_destroyed) {
     ScrPromise *p = scr_promise_new();
-    ScrBytes *empty = scr_bytes_new(SCR_BYTES_U8, 0);
+    ScrBytes *empty = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, 0));
     scr_promise_fulfill_ref(p, empty, scr_bytes_retain_v, scr_bytes_release_v, NULL);
     return p;
   }
@@ -525,7 +525,7 @@ static void scr_stdin_service(void) {
     scr_stdin_finish(true); /* EOF: 'end' fires, iteration ends */
     return;
   }
-  ScrBytes *chunk = scr_bytes_new(SCR_BYTES_U8, (double)n);
+  ScrBytes *chunk = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)n));
   memcpy(chunk->data, buf, (size_t)n);
   if (scr_stdin_ndata > 0) {
     size_t nd = scr_stdin_ndata;

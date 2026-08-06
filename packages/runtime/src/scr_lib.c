@@ -2123,7 +2123,7 @@ ScrBytes *scr_fs_read_fd_bytes(double fd) {
   ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)len);
   if (len > 0) memcpy(b->data, buf, len);
   free(buf);
-  return b;
+  return scr_bytes_stamp_buffer(b); /* Node: readFileSync without an encoding answers a Buffer */
 }
 
 /* ── Atomics.wait: the synchronous-sleep idiom ───────────────────────
@@ -2966,7 +2966,7 @@ static ScrBytes *scr_hash_digest_raw_bytes(const ScrStr *alg, const unsigned cha
   size_t n = scr_hash_by_name(alg, data, len, d);
   ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)n);
   if (n > 0) memcpy(out->data, d, n);
-  return out;
+  return scr_bytes_stamp_buffer(out); /* Node: digest() answers a Buffer */
 }
 
 ScrBytes *scr_crypto_hash_digest_str_raw(ScrStr *alg, ScrStr *data) {
@@ -3076,7 +3076,7 @@ ScrBytes *scr_hash_digest_raw_buf(ScrHash *h) {
   size_t n = scr_hash_finish(h, d);
   ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)n);
   if (n > 0) memcpy(out->data, d, n);
-  return out;
+  return scr_bytes_stamp_buffer(out); /* Node: digest() answers a Buffer */
 }
 
 ScrStr *scr_hash_digest_enc(ScrHash *h, ScrStr *enc) {
@@ -3179,7 +3179,7 @@ ScrBytes *scr_hmac_digest_raw_buf(ScrHmac *h) {
   size_t n = scr_hmac_finish(h, d);
   ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)n);
   if (n > 0) memcpy(out->data, d, n);
-  return out;
+  return scr_bytes_stamp_buffer(out); /* Node: digest() answers a Buffer */
 }
 
 ScrStr *scr_hmac_digest_enc(ScrHmac *h, ScrStr *enc) {
