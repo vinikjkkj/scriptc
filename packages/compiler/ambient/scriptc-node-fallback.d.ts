@@ -1255,6 +1255,18 @@ declare module "crypto" {
     digest(): Buffer;
   }
   export function createHmac(algorithm: string, key: string | Uint8Array | KeyObject): Hmac;
+  /* hkdfSync('sha256', ikm, salt, info, keylen): RFC 5869 extract-then-
+   * expand, answering an ArrayBuffer exactly as Node does — the value a
+   * `new Uint8Array(buf)` view is taken over. @types/node's declaration is
+   * wider (BinaryLike | KeyObject inputs, any digest name); the fallback
+   * declares the form that lowers. The CALLBACK twin `hkdf` has none. */
+  export function hkdfSync(
+    digest: string,
+    ikm: Uint8Array,
+    salt: Uint8Array,
+    info: Uint8Array,
+    keylen: number,
+  ): ArrayBuffer;
   /* The asymmetric key-object slice, all of it lowered: an OPAQUE handle
    * with no members of its own -- it only flows into the calls below --
    * plus the two ways to make one, the X25519 agreement, and the Ed25519

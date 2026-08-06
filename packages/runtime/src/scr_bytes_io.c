@@ -816,6 +816,87 @@ ScrBytes *scr_crypto_pbkdf2_sha256(const ScrBytes *password, const ScrBytes *sal
   return out;
 }
 
+/* ── crypto.hkdfSync (HMAC-SHA256 only) ───────────────────────────────────
+ * HKDF per RFC 5869, over the same one-shot HMAC pbkdf2 above uses:
+ *
+ *   PRK  = HMAC(salt, IKM)                        extract -- salt is the KEY
+ *   T(0) = <empty>
+ *   T(i) = HMAC(PRK, T(i-1) || info || byte(i))   expand -- i is ONE-based
+ *   OKM  = T(1) || T(2) || ... truncated to keylen
+ *
+ * The salt-is-the-key inversion in extract is the step that answers
+ * plausible garbage rather than an error when it is wrong, so RFC 5869's
+ * A.1 vector rides in the corpus beside the Node differential.
+ *
+ * The result is the OPAQUE bytes flavor, because Node answers an
+ * ArrayBuffer -- a value whose one use here is the view a Uint8Array
+ * constructor takes over it.
+ *
+ * sha256 only, for pbkdf2's reason: the frontend fences every other digest
+ * rather than deriving with the wrong PRF, and the one-shot HMAC's 64-byte
+ * block is right for exactly the digests scr_crypto_digest_raw names.
+ * Node's four refusals are reproduced in ITS order -- a non-integer length
+ * (NaN and the infinities among them), an out-of-bounds one, a ZERO length
+ * (OpenSSL's bare "Deriving bits failed", not a range error), and more than
+ * 255*32 bytes. */
+ScrBytes *scr_crypto_hkdf_sha256(const ScrBytes *ikm, const ScrBytes *salt,
+                                 const ScrBytes *info, double keylen) {
+  const size_t HLEN = 32;
+  char num[32];
+  char msg[160];
+  if (!isfinite(keylen) || keylen != trunc(keylen)) {
+    size_t numlen = scr_f64_to_str(keylen, num);
+    int mlen = snprintf(msg, sizeof msg,
+                        "The value of \"length\" is out of range. It must be an integer. Received %.*s",
+                        (int)numlen, num);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)mlen, "ERR_OUT_OF_RANGE");
+    return NULL;
+  }
+  if (keylen < 0 || keylen > 9007199254740991.0) {
+    size_t numlen = scr_f64_to_str(keylen, num);
+    int mlen = snprintf(msg, sizeof msg,
+                        "The value of \"length\" is out of range. It must be >= 0 && <= 9007199254740991. Received %.*s",
+                        (int)numlen, num);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)mlen, "ERR_OUT_OF_RANGE");
+    return NULL;
+  }
+  if (keylen == 0) {
+    static const char zmsg[] = "Deriving bits failed";
+    scr_throw_error_msg(SCR_ERR_ERROR, zmsg, sizeof zmsg - 1);
+    return NULL;
+  }
+  if (keylen > 255.0 * 32.0) {
+    static const char kmsg[] = "Invalid key length";
+    scr_throw_error_msg_code(SCR_ERR_RANGE, kmsg, sizeof kmsg - 1, "ERR_CRYPTO_INVALID_KEYLEN");
+    return NULL;
+  }
+  unsigned char prk[32];
+  if (scr_crypto_hmac_raw("sha256", salt->data, salt->len, ikm->data, ikm->len, prk) == 0) {
+    return NULL;
+  }
+  size_t want = (size_t)keylen;
+  ScrBytes *out = scr_bytes_new(SCR_BYTES_BUF, keylen);
+  unsigned char t[32];
+  size_t tlen = 0;
+  size_t done = 0;
+  unsigned char *feed = malloc(HLEN + info->len + 1);
+  if (!feed) scr_bytes_io_oom();
+  for (unsigned i = 1; done < want; i++) {
+    size_t n = tlen;
+    if (tlen) memcpy(feed, t, tlen);
+    if (info->len) memcpy(feed + n, info->data, info->len);
+    n += info->len;
+    feed[n++] = (unsigned char)i;
+    scr_crypto_hmac_raw("sha256", prk, HLEN, feed, n, t);
+    tlen = HLEN;
+    size_t take = want - done < HLEN ? want - done : HLEN;
+    memcpy(out->data + done, t, take);
+    done += take;
+  }
+  free(feed);
+  return out;
+}
+
 /* util.promisify(pbkdf2): the derivation behind an already-settled
  * promise (the fs/promises stance). A range error rejects. */
 ScrPromise *scr_crypto_pbkdf2_sha256_async(const ScrBytes *password, const ScrBytes *salt,
