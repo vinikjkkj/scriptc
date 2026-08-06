@@ -1412,6 +1412,22 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (isRequireMainFilename(L, expr)) {
         return { kind: "strLit", value: L.entry.fileName, type: STRING, loc };
       }
+      // `process?.versions?.node` — the runtime-detection probe, written
+      // with optional links (zapo's transport asks it of a `process`
+      // snapshot the ambient types made optional). Claimed here for the
+      // require.main.filename reason: neither `?.` can short-circuit, so
+      // the chain's value is the member's, but the guard the gate below
+      // would build needs `process.versions` as a STANDALONE value — which
+      // has no lowering of its own and would fence a result that is
+      // already known. Only the optional spellings come through here; the
+      // plain one keeps its place in the ordinary property chain.
+      if (
+        expr.questionDotToken ||
+        (ts.isPropertyAccessExpression(expr.expression) && expr.expression.questionDotToken)
+      ) {
+        const pv = L.processVersionsMember(expr);
+        if (pv) return pv;
+      }
       // Optional chaining `a?.b`: the guard lowers here (a tag test around
       // the plain property lowering below); the handled marker keeps this
       // re-entrant dispatch from looping.
@@ -2560,10 +2576,28 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         return e.fields.every((f) => droppableStatic(f.value));
       case "closure":
         return true;
+      // A zero-argument CONSTANT builtin: reads nothing, touches nothing,
+      // and answers the same interned string on every call. Dropping one
+      // is unobservable, which is what the runtime-detection idiom needs —
+      // `typeof process.versions.node === 'string'` asks the question of a
+      // value it never uses, and without this the typeof fold refuses and
+      // the probe fences on a string it could have answered statically.
+      // Deliberately a NAMED set rather than a purity flag on libCall:
+      // most libCalls do observable work, and the two here are the only
+      // ones whose result is a compile-time constant of the runtime build.
+      case "libCall":
+        return e.args.length === 0 && CONST_LIB_CALLS.has(e.fn);
       default:
         return pureReemittable(e);
     }
   }
+
+/** Builtins whose value is a constant of the runtime build — see
+   * droppableStatic. */
+  const CONST_LIB_CALLS: ReadonlySet<string> = new Set([
+    "process.versionsNode",
+    "process.versionsOpenssl",
+  ]);
 
 /** `{ ...maybe }` where `maybe` is `Record<K, V> | undefined` (an OPTIONAL
    * field, an optional parameter) inside an index-signature merge: JS
