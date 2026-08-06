@@ -21,7 +21,7 @@ import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUn
 import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
 import { lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { findGenericMethodOn, lowerStaticFieldRead } from "./lower-classes.js";
-import { bindingNeverReassigned, implicitMonoFile, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
+import { bindingNeverReassigned, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js";
 import { isConstAssertionTypeNode, isGenericCallableMemberType, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
@@ -1709,6 +1709,11 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         L.lowerJsonProperty(expr) ??
         L.lowerErrorCodeProperty(expr) ??
         L.lowerNumberStaticProperty(expr) ??
+        // The composed default-locale form
+        // `Intl.DateTimeFormat().resolvedOptions().locale` — claimed at
+        // the MEMBER, because the receiver (a resolved-options record)
+        // has no representation of its own and would fence first.
+        lowerIntlDefaultLocaleProperty(L, expr) ??
         L.lowerMathProperty(expr) ??
         L.lowerIntrinsicProperty(expr) ??
         // The _readableState/_writableState scalar READS (the suite's
