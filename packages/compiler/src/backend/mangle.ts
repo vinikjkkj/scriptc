@@ -158,6 +158,29 @@ export function mangleGenSpawn(fnName: string): string {
 export function mangleGenDrop(fnName: string): string {
   return `sc_gd_${sanitize(fnName)}`;
 }
+/** The globalThis.WebSocket family, interned per construct-signature
+ * type: the ctor WRAPPER a call goes through, the IMMORTAL closure that
+ * IS the global value (identity -- one WebSocket object per program),
+ * the runtime DISPATCH the socket calls back through, the EVENT builder
+ * it shares, and the send/close method closures the API record holds. */
+export function mangleWsCtorWrap(n: number): string {
+  return `sc_wsw_${n}`;
+}
+export function mangleWsCtorClosure(n: number): string {
+  return `sc_wsfc_${n}`;
+}
+export function mangleWsDispatch(n: number): string {
+  return `sc_wsd_${n}`;
+}
+export function mangleWsEvent(n: number): string {
+  return `sc_wsev_${n}`;
+}
+export function mangleWsSend(n: number): string {
+  return `sc_wssnd_${n}`;
+}
+export function mangleWsClose(n: number): string {
+  return `sc_wscls_${n}`;
+}
 /** Emitted ref-kind resolve thunk, interned per inner-type key. */
 export function mangleResolveThunk(n: number): string {
   return `sc_rslv_${n}`;

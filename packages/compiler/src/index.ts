@@ -21,7 +21,7 @@ import {
 import { validateSidecar } from "./library/sidecar-validate.js";
 import { entryFunctionExports, type EntryExportInfo } from "./frontend/lib-exports.js";
 import { entryContractFacts, type ContractFacts } from "./frontend/lib-contract.js";
-import { moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsBuiltin, moduleEmbedsCompressedNpm, moduleUsesAssert, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesStream, moduleUsesSymbol, moduleUsesTls, moduleUsesTlsCa, moduleUsesBigInt,
+import { moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsBuiltin, moduleEmbedsCompressedNpm, moduleUsesAssert, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesStream, moduleUsesSymbol, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesBigInt,
   moduleUsesAsym, moduleUsesCipher, moduleUsesZlib, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc } from "./ir/nodes.js";
 import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
@@ -816,6 +816,12 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
       // cc.ts also compiles it under the tls gate (scr_tls.c consults the
       // unit's default-set override for its trust anchors).
       tlsCa: moduleUsesTlsCa(lowered.module),
+      // The link switch for the WebSocket client family (scr_websocket.c
+      // + scr_ws_client.c + scr_ws_global.c): a wsCtor node on the IR,
+      // i.e. the program took globalThis.WebSocket as a value. Implies
+      // net AND tls in cc.ts -- the codec dials over scr_net, and wss://
+      // is most of what a WebSocket is for.
+      wsGlobal: moduleUsesWsGlobal(lowered.module),
       ...(ffi !== null
         ? {
             linkInputs: ffi.libraries,

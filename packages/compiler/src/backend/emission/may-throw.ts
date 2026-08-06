@@ -24,6 +24,13 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
   // FUNC-targeted dynChecks synthesize adapter closures outside the IR's
   // closure table; any callValue may then reach a throwing body.
   let sawDynFuncAdapter = false;
+  // globalThis.WebSocket synthesizes its ctor and its send/close methods
+  // in the emitter (emit-ws.ts), outside the closure table too, and all
+  // three throw: a bad URL from the constructor, InvalidStateError from
+  // send before OPEN, InvalidAccessError from a close code the API
+  // rejects. Measured, not assumed -- without this the pending check
+  // after `new WebSocket(bad)` is omitted and the NULL result is read.
+  let sawWsGlobal = false;
   const asyncFns = new Set(mod.functions.filter((fn) => fn.async).map((fn) => fn.name));
   // Generator functions follow the async exclusion: CALLING one only
   // allocates the suspended fiber (nothing runs, nothing can throw) — a
@@ -74,6 +81,9 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
           if ((rec["type"] as { kind?: string } | undefined)?.kind === "func") {
             sawDynFuncAdapter = true;
           }
+          break;
+        case "wsCtor":
+          sawWsGlobal = true;
           break;
         case "fieldIncDec":
           // A checked-dynamic field's ++/-- validates the number out of
@@ -248,6 +258,7 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
   for (const [name, f] of facts) if (f.throws) may.add(name);
   let indirect =
     sawDynFuncAdapter ||
+    sawWsGlobal ||
     [...closureTargets].some((t) => may.has(t) && !asyncFns.has(t) && !genFns.has(t));
   let changed = true;
   while (changed) {

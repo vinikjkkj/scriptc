@@ -3,7 +3,7 @@ import type { IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
 import { ABORTSIGNAL_T, BIGINT, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile, isNodeTypesPath } from "./program.js";
-import { accessorSlotProp } from "../ir/nodes.js";
+import { accessorSlotProp, wsGlobalPlan } from "../ir/nodes.js";
 // typeKey moved to ir/nodes.ts (the backend needs it too, for per-type
 // helper interning); re-exported here so frontend call sites keep their
 // import path.
@@ -1555,6 +1555,38 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       }
     }
     if (refined && handle !== null) return handle;
+    // THE WEBSOCKET GLOBAL's cast intersection. A program with no lib.dom
+    // reaches the global the only way it can:
+    //
+    //   (globalThis as typeof globalThis & { WebSocket?: Ctor }).WebSocket
+    //
+    // and with @types/node adopted `typeof globalThis` ALREADY declares
+    // WebSocket, so the property's type is `typeof WebSocket & Ctor` —
+    // undici's class object (prototype, the four readyState statics, a
+    // construct signature over its own interface: nothing that maps)
+    // intersected with the shape the cast was written to assert. The
+    // VALUE is one object and exactly one constituent describes it in
+    // terms this compiler can build, which is the same reasoning as the
+    // handle refinement above, one level up.
+    //
+    // Deliberately keyed on wsGlobalPlan and nothing weaker: the rule
+    // fires only for a construct signature over the full WebSocket API
+    // record, and only when every OTHER constituent is unmappable — so
+    // it can never DISCARD a representable half. Members the discarded
+    // parts contribute keep fencing at their own sites.
+    {
+      const parts = widened.getTypes();
+      const mappedParts = parts.map((p) => mapType(p, ctx));
+      const wsParts = mappedParts.filter(
+        (m) =>
+          m !== null &&
+          m.kind === "func" &&
+          wsGlobalPlan(m, (id) => ctx.shapes.get(id), (id) => ctx.unions.get(id)) !== null,
+      );
+      if (wsParts.length === 1 && mappedParts.every((m) => m === null || m === wsParts[0])) {
+        return wsParts[0]!;
+      }
+    }
     // MIXIN instance intersections (`Tagged.C & Derived` — values built
     // through a mixin result): the chain structure names the unique
     // pinned instantiation; ambiguity stays unmapped (the hook's rules).

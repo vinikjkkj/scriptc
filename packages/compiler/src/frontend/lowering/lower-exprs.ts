@@ -26,6 +26,7 @@ import { mixinFnOfCallee } from "./lower-mixins.js";
 import { isConstAssertionTypeNode, isGenericCallableMemberType, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
 import { lowerStreamProperty, lowerStreamStateProperty, streamSidesOf } from "./lower-stream.js";
+import { lowerWebSocketGlobal } from "./lower-ws.js";
 import { emitterRooted } from "./lower-emitter.js";
 import { EMITTER_API_MEMBERS } from "./lower-classes.js";
 
@@ -1699,6 +1700,11 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         // the inner access maps no type of its own.
         lowerStreamStateProperty(L, expr) ??
         lowerStreamObjectProperty(L, expr) ??
+        // `globalThis.WebSocket` — the WHATWG global, matched
+        // STRUCTURALLY against the record the program declared for it
+        // (there is no lib.dom to anchor on). Ahead of lowerFieldRead
+        // because the receiver is a cast of globalThis, not a record.
+        lowerWebSocketGlobal(L, expr) ??
         L.lowerUnionProperty(expr) ??
         L.lowerFieldRead(expr);
       // A union-typed field read narrows like an identifier when the
