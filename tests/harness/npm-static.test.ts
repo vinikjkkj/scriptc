@@ -99,6 +99,13 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // (yaml's browser-vs-node shape) and the opted-in resolution must
     // land on the SAME artifact, never the browser build.
     ["dualist", "dualist-cli.ts"],
+    // varintish is untyped bitwise arithmetic end to end — the varint /
+    // zigzag / 64-bit-split core of a generated protobuf runtime. Every
+    // operand of every `&`, `|`, `^`, `<<`, `>>`, `>>>` is an implicit-any
+    // parameter, so the whole package rides the checked-dynamic path; the
+    // operators are ToInt32/ToUint32 by specification, so a static build
+    // owes Node the same bytes and this differential is the proof.
+    ["varintish", "varint-cli.ts"],
   ] as const)("%s compiles statically and byte-matches Node", async ([pkg, file]) => {
     const entry = join(pilotRoot, file);
     const binary = await buildStatic(entry, [pkg]);
