@@ -2961,6 +2961,11 @@ export type IrLibFn =
    * iteration count or key length; the Async twin rejects instead. */
   | "crypto.pbkdf2Sha256"
   | "crypto.pbkdf2Sha256Async"
+  /** HKDF-HMAC-SHA256 (RFC 5869) — extract then expand, over the same
+   * one-shot HMAC. The result is bytes<buf>, the OPAQUE flavor, because
+   * that is the ArrayBuffer Node answers; its consumer is the view a
+   * Uint8Array constructor takes. Throws Node's length ladder. */
+  | "crypto.hkdfSha256"
   /** The Buffer statics with fixed (always-u8) signatures. fromStr is
    * `Buffer.from(string, enc)` — the frontend completes an omitted
    * encoding to "utf8" and fences non-literal/unsupported ones; hex and
@@ -7302,6 +7307,9 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "crypto.randomFillDeferred",
   "crypto.randomInt",
   "crypto.pbkdf2Sha256",
+  // The same length ladder pbkdf2 has, plus OpenSSL's bare "Deriving bits
+  // failed" for a zero length and ERR_CRYPTO_INVALID_KEYLEN past 255*32.
+  "crypto.hkdfSha256",
   // The KeyObject family. Every one of these refuses something Node also
   // refuses — a DER framing these two curves do not use, an operation
   // asked for the wrong half of a pair, and now a SECRET key handed to an
