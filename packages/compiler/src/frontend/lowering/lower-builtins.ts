@@ -3797,6 +3797,42 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     return { bytesTag, keyobjTag };
   }
 
+/** How many update arguments took the VALUE-dispatched digest input.
+ * SCRIPTC_DIGESTIN_WHY prints each with its checker spelling. */
+let digestInputValueDispatches = 0;
+
+/** The digest input of `update(data)`, when the CHECKER TYPE cannot name it.
+ * `Array.isArray(chunks)` over a `Uint8Array | readonly Uint8Array[]` union
+ * narrows the true branch to tsc's `arg is any[]` predicate type, so
+ * `chunks[i]` reads back as `any` and maps to nothing — while the VALUE
+ * lowered from the union's one array arm and is a perfectly ordinary
+ * Uint8Array (maybeNarrow's isArray bridge, riding the runtime tag test
+ * lowerArrayIsArrayCall emitted for the guard). Dispatch follows the
+ * RUNTIME world here, the same stance the jsval and uniform-tuple element
+ * reads take: the lowered expression IS what the C code holds, so its IR
+ * type is the honest answer to "what does this update feed".
+ *
+ * Only consulted where the mapped type answered NOTHING — every site that
+ * lowers today keeps the type it had, so this can turn a fence into a
+ * lowering and can never re-point one. Probed (not lowered outright) so a
+ * data expression with a fence of its own keeps reporting the update
+ * surface rather than a deeper diagnostic; the probed node is used
+ * directly, so it lowers exactly once, after the receiver. Null when the
+ * value is neither a byte view nor a string — those keep the fence. */
+  function valueDispatchedDigestInput(L: Lowerer, dataNode: ts.Expression): IrExpr | null {
+    const probed = probeLower(L, dataNode);
+    if (!probed || (probed.type.kind !== "bytes" && probed.type.kind !== "string")) return null;
+    digestInputValueDispatches += 1;
+    if (process.env["SCRIPTC_DIGESTIN_WHY"] !== undefined) {
+      console.error(
+        `[digestin] #${digestInputValueDispatches} ${locOf(dataNode).file}@${locOf(dataNode).start}` +
+          ` '${dataNode.getText().slice(0, 40)}' checker='${L.checker.typeToString(L.typeOf(dataNode))}'` +
+          ` -> ${L.fmt(probed.type)}`,
+      );
+    }
+    return probed;
+  }
+
 /** The composed hash chain — `createHash("sha256").update(data).digest("hex")`
    * — fused into ONE libCall: the Hash handle never materializes (no Hash
    * type exists in the value model), exactly the randomBytesToString
@@ -3878,6 +3914,20 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       if (bare) return { kind: "libCall", fn: "crypto.hashDigestStrRaw", args: [alg, data], type: BYTES_U8, loc };
       const enc = L.lowerExprExpecting(call.arguments[0]!, STRING);
       return { kind: "libCall", fn: "crypto.hashDigestStr", args: [alg, data, enc], type: STRING, loc };
+    }
+    // The checker named nothing: let the LOWERED value answer.
+    if (dataIr === null) {
+      const data = valueDispatchedDigestInput(L, dataNode);
+      if (data) {
+        const bytes = data.type.kind === "bytes";
+        const enc = bare ? null : L.lowerExprExpecting(call.arguments[0]!, STRING);
+        if (enc === null) {
+          const fn: IrLibFn = bytes ? "crypto.hashDigestBytesRaw" : "crypto.hashDigestStrRaw";
+          return { kind: "libCall", fn, args: [alg, data], type: BYTES_U8, loc };
+        }
+        const fn: IrLibFn = bytes ? "crypto.hashDigestBytes" : "crypto.hashDigestStr";
+        return { kind: "libCall", fn, args: [alg, data, enc], type: STRING, loc };
+      }
     }
     L.noLowering(
       `Hash.update of '${dataIr ? L.fmt(dataIr) : L.checker.typeToString(L.typeOf(dataNode))}' values`,
@@ -4007,6 +4057,19 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         const data = L.lowerExprExpecting(dataNode, STRING);
         const fn: IrLibFn = isHash ? "crypto.hashUpdateStr" : "crypto.hmacUpdateStr";
         return { kind: "libCall", fn, args: [recv, data], type: self, loc };
+      }
+      // The checker named nothing: let the LOWERED value answer. This is
+      // `feed(target, input)`'s `target.update(input[i])` inside the
+      // Array.isArray guard — every mixHash of a Noise handshake.
+      if (dataIr === null) {
+        const data = valueDispatchedDigestInput(L, dataNode);
+        if (data) {
+          const bytes = data.type.kind === "bytes";
+          const fn: IrLibFn = bytes
+            ? (isHash ? "crypto.hashUpdateBytes" : "crypto.hmacUpdateBytes")
+            : (isHash ? "crypto.hashUpdateStr" : "crypto.hmacUpdateStr");
+          return { kind: "libCall", fn, args: [recv, data], type: self, loc };
+        }
       }
       L.noLowering(
         `${name}.update of '${dataIr ? L.fmt(dataIr) : L.checker.typeToString(L.typeOf(dataNode))}' values`,
