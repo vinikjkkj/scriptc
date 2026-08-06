@@ -5018,6 +5018,11 @@ ScrBytes *scr_crypto_pbkdf2_sha256(const ScrBytes *password, const ScrBytes *sal
                                    double iterations, double keylen);
 ScrPromise *scr_crypto_pbkdf2_sha256_async(const ScrBytes *password, const ScrBytes *salt,
                                            double iterations, double keylen); /* +1 */
+/* HKDF-HMAC-SHA256 (RFC 5869) over the same one-shot HMAC. Borrowed
+ * inputs; the result is the OPAQUE bytes flavor (+1), which is the
+ * ArrayBuffer Node answers. Throws Node's length ladder. */
+ScrBytes *scr_crypto_hkdf_sha256(const ScrBytes *ikm, const ScrBytes *salt,
+                                 const ScrBytes *info, double keylen);
 
 /* process.stdout/stderr.write(buf): the raw byte writes' Buffer overloads
  * (same streams and buffering as the string forms). Constantly true. */

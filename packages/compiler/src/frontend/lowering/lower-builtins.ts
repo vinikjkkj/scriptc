@@ -28,6 +28,11 @@ import {
 } from "./surfaces.js";
 import { conditionalSpreadOf, lowerDynObjectLiteral, probeLower } from "./lower-exprs.js";
 import { HTTP2_CONSTANTS } from "./http2-constants.js";
+
+/** SCRIPTC_HKDF_WHY probe: how many hkdfSync calls the sha256 lowering took.
+ * Read in the SAME run as the trap count — "nothing changed" and "the branch
+ * never ran" are otherwise the same observation. */
+let hkdfSyncCalls = 0;
 import { CRYPTO_CIPHERS, CRYPTO_CONSTANTS, CRYPTO_CURVES, CRYPTO_HASHES } from "./crypto-tables.js";
 import { deferredCallThunk, timerStyleCallback } from "./lower-calls.js";
 import { registerHttpClientFnBinding } from "./lower-server.js";
@@ -4469,6 +4474,50 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
           L.lowerExprExpecting(expr.arguments[3]!, F64),
         ],
         type: BYTES_U8,
+        loc,
+      };
+    }
+    // hkdfSync(digest, ikm, salt, info, keylen) -> ArrayBuffer. The return
+    // type is the OPAQUE bytes flavor, which is exactly what @types/node
+    // declares and what types.ts has always mapped ArrayBuffer to; its one
+    // consumer is the view `new Uint8Array(buf)` takes over it. sha256 only,
+    // the pbkdf2 stance beside this: another digest would derive a different
+    // key, and the one-shot HMAC's 64-byte block is right for exactly the
+    // digests the runtime's digest dispatcher names. KeyObject inputs fence
+    // through the BYTES_U8 expectation, like every other crypto surface.
+    if (bi.member === "hkdfSync") {
+      if (expr.arguments.length !== 5 || expr.arguments.some(ts.isSpreadElement)) {
+        L.noLowering(
+          `crypto.hkdfSync with ${expr.arguments.length} arguments`,
+          expr,
+          "the supported form is hkdfSync('sha256', ikm, salt, info, keylen)",
+        );
+      }
+      const digestT = L.typeOf(expr.arguments[0]!);
+      if (!digestT.isStringLiteralType() || digestT.value !== "sha256") {
+        L.noLowering(
+          "crypto.hkdfSync with this digest",
+          expr.arguments[0]!,
+          "sha256 is the derived PRF — pass it as a literal (another digest would derive different bytes)",
+        );
+      }
+      hkdfSyncCalls++;
+      if (process.env["SCRIPTC_HKDF_WHY"] !== undefined) {
+        console.error(
+          `[hkdfwhy] #${hkdfSyncCalls} ${expr.getSourceFile().fileName}:` +
+            `${expr.getSourceFile().getLineAndCharacterOfPosition(expr.getStart()).line + 1}`,
+        );
+      }
+      return {
+        kind: "libCall",
+        fn: "crypto.hkdfSha256",
+        args: [
+          L.lowerExprExpecting(expr.arguments[1]!, BYTES_U8),
+          L.lowerExprExpecting(expr.arguments[2]!, BYTES_U8),
+          L.lowerExprExpecting(expr.arguments[3]!, BYTES_U8),
+          L.lowerExprExpecting(expr.arguments[4]!, F64),
+        ],
+        type: { kind: "bytes", elem: "buf" },
         loc,
       };
     }
