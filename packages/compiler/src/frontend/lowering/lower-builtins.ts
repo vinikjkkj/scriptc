@@ -5654,6 +5654,39 @@ let digestInputValueDispatches = 0;
     return { kind: "libCall", fn: "process.columns", args: [fd], type: want, loc };
   }
 
+/** `process.versions.node` / `.openssl` in ANY spelling the access chain
+   * admits: the plain one, `process?.versions?.node`, and the read off a
+   * SNAPSHOT alias (`const p = (globalThis as ...).process` — zapo's
+   * `resolveSocketRuntime` writes it that way, and stdlibGlobalNameOf
+   * resolves the alias and peels the cast).
+   *
+   * The optional links are accepted rather than fenced because neither can
+   * short-circuit: the process global is always present in a compiled
+   * binary and its `versions` is always an object, so every spelling names
+   * the same value. That is the `require.main?.filename` stance — the
+   * checker types the chain `string | undefined`, the value is a
+   * compile-time string — and it is why lower-exprs claims this shape
+   * BEFORE the optional-chain gate: the guard the gate would build wants
+   * `process.versions` as a standalone value, which has no lowering of its
+   * own and would fence a chain whose result is already known.
+   *
+   * The answer itself is unchanged and pre-decided: there is no Node under
+   * the binary, so the honest string is the runtime's own Node
+   * compatibility target (divergence 60, the execPath stance).
+   * versions.openssl answers the compat target's string for the same
+   * reason — Boolean(versions.openssl) is Node's own "is crypto available"
+   * probe, and the crypto module exists here. Other versions members
+   * (v8, ...) name components that do not exist and keep the member
+   * fence. */
+  export function processVersionsMember(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+    if (expr.name.text !== "node" && expr.name.text !== "openssl") return null;
+    const recv = expr.expression;
+    if (!ts.isPropertyAccessExpression(recv) || recv.name.text !== "versions") return null;
+    if (!L.isStdlibGlobal(recv.expression, "process")) return null;
+    const fn = expr.name.text === "node" ? "process.versionsNode" : "process.versionsOpenssl";
+    return { kind: "libCall", fn, args: [], type: STRING, loc: locOf(expr) };
+  }
+
 /** `process.argv` / `process.platform` / `process.pid` property READS
    * lower to zero-arg libCalls (argv returns +1 on one interned array —
    * identity and mutation semantics match Node's stable process.argv).
@@ -5667,25 +5700,13 @@ let digestInputValueDispatches = 0;
    * rejected specifically. Null for non-process receivers (the chain keeps
    * trying other property lowerings). */
   export function lowerProcessProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-    // process.versions.node — the ONE lowered member of process.versions:
-    // there is no Node under the binary, so the honest answer is the
-    // runtime's own Node compatibility target (the version whose semantics
-    // SEMANTICS.md verifies against — divergence 60, the execPath stance).
-    // Other versions members (v8, openssl, ...) name components that do
-    // not exist here and fall through to the member fence.
-    if (
-      (expr.name.text === "node" || expr.name.text === "openssl") &&
-      !expr.questionDotToken &&
-      ts.isPropertyAccessExpression(expr.expression) &&
-      L.stdlibGlobalMember(expr.expression, "process") === "versions"
-    ) {
-      // versions.openssl answers the compat target's string for the same
-      // reason versions.node does: Boolean(versions.openssl) is Node's own
-      // "is crypto available" probe, and the crypto module exists here
-      // (unsupported members fence per site). SEMANTICS.md documents that
-      // the string names the compat target, not a linked library.
-      const fn = expr.name.text === "node" ? "process.versionsNode" : "process.versionsOpenssl";
-      return { kind: "libCall", fn, args: [], type: STRING, loc: locOf(expr) };
+    // process.versions.node / .openssl — the ONE lowered member family of
+    // process.versions, in every spelling of the chain (see
+    // processVersionsMember, which lower-exprs also reads for the optional
+    // spellings, before the optional-chain gate).
+    {
+      const v = processVersionsMember(L, expr);
+      if (v) return v;
     }
     // The capability-probe members that honestly DON'T EXIST in a
     // compiled binary — each reads undefined (their declared types carry
