@@ -8236,6 +8236,15 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       if (ts.isIdentifier(inner) && freezeBuilderBinding(L, inner, call)) {
         return value;
       }
+      // A FRESH LOCAL: the same theorem as the literal arm above, over a
+      // value this function allocated a few statements earlier instead of
+      // in the argument position. `const unique: string[] = []` filled by
+      // a loop and handed to freeze is the accumulate-then-publish idiom;
+      // nothing else holds the array when the freeze runs, so its frozen
+      // bit is exactly as unobservable as a literal's.
+      if (ts.isIdentifier(inner) && freezeFreshLocal(L, inner, call)) {
+        return value;
+      }
       L.noLowering(
         "Object.freeze of a possibly-aliased value",
         call,
@@ -9802,5 +9811,132 @@ function freezeBuilderBinding(L: Lowerer, ident: ts.Identifier, call: ts.CallExp
     if (ok) ts.forEachChild(n, visit);
   };
   ts.forEachChild(sf, visit);
+  return ok;
+}
+
+/** Receiver methods that cannot leak the array they are called on. The
+ * list is short on purpose and the exclusions are the point: every
+ * callback-taking method (forEach/map/filter/...) hands the RECEIVER to
+ * the callback as its third argument, and sort/reverse RETURN the
+ * receiver -- either one is an escape, so a value that meets them keeps
+ * the fence. Reads that answer a fresh value (slice, join, concat) are
+ * safe but left out until something needs them, and so is lastIndexOf,
+ * which has no lowering of its own yet -- every entry here is exercised
+ * by the corpus fixture. */
+const FREEZE_SAFE_ARRAY_METHODS = new Set([
+  "push", "pop", "shift", "unshift", "indexOf", "includes",
+]);
+
+/** True for the accumulate-then-publish idiom over a FUNCTION-LOCAL
+ * const:
+ *
+ *     const unique: string[] = []
+ *     for (const u of urls) if (unique.indexOf(u) === -1) unique.push(u)
+ *     return Object.freeze(unique)
+ *
+ * This is the SAME theorem the literal arm of the freeze lowering
+ * already grants -- "the allocation is this expression's, so nothing
+ * else can hold a reference to write through" -- with the allocation a
+ * few statements earlier instead of in the argument position. What has
+ * to be proved is that the value is still SOLE-REFERENCED when the
+ * freeze runs, and that nothing can write through it AFTERWARDS.
+ *
+ * Four conditions, each doing work:
+ *
+ *  1. the binding is a const whose initializer is an object/array
+ *     LITERAL -- the allocation is this function's, so no reference to
+ *     it predates the declaration;
+ *  2. the declaration and the freeze sit in the SAME function body, and
+ *     no reference lives in a nested function (whose run time cannot be
+ *     bounded -- the file-scope rule's reason, unchanged);
+ *  3. every other reference is either a WRITE TARGET (`u[k] = v`,
+ *     `u.p = v`) or the receiver of a non-escaping method call, and
+ *     lexically precedes the freeze;
+ *  4. no LOOP encloses the freeze that does not also enclose the
+ *     declaration. Lexically-before is not enough on its own: in
+ *     `for (...) { a.push(1); Object.freeze(a) }` the push runs again
+ *     after the first freeze and Node throws. When the declaration is
+ *     inside the loop too, every iteration allocates its own array and
+ *     the argument holds.
+ *
+ * The freeze's RESULT may escape freely -- it does in the idiom, as a
+ * return value -- for the same reason it may over a literal. */
+function freezeFreshLocal(L: Lowerer, ident: ts.Identifier, call: ts.CallExpression): boolean {
+  const sym = L.resolveValueSymbol(ident);
+  if (!sym) return false;
+  const decl = L.checker.valueDeclarationOf(sym);
+  if (!decl || !ts.isVariableDeclaration(decl) || !ts.isIdentifier(decl.name)) return false;
+  const list = decl.parent;
+  if (!ts.isVariableDeclarationList(list) || (list.flags & ts.NodeFlags.Const) === 0) return false;
+  // (1) a literal initializer: the allocation is HERE.
+  const init = decl.initializer;
+  if (!init || !(ts.isArrayLiteralExpression(init) || ts.isObjectLiteralExpression(init))) {
+    return false;
+  }
+
+  /** The innermost function-like `n` sits in, or null at file scope. */
+  const fnOf = (n: ts.Node): ts.Node | null => {
+    for (let cur: ts.Node | undefined = n.parent; cur; cur = cur.parent) {
+      if (ts.isFunctionLike(cur)) return cur;
+      if (ts.isSourceFile(cur)) return null;
+    }
+    return null;
+  };
+  // (2) LOCAL, and the freeze is in the same body. A file-scope const is
+  // freezeBuilderBinding's business, with its own once-only argument.
+  const fn = fnOf(decl);
+  if (fn === null || fnOf(call) !== fn) return false;
+
+  const isLoop = (n: ts.Node): boolean =>
+    ts.isForStatement(n) || ts.isForInStatement(n) || ts.isForOfStatement(n) ||
+    ts.isWhileStatement(n) || ts.isDoStatement(n);
+  const encloses = (outer: ts.Node, inner: ts.Node): boolean => {
+    for (let cur: ts.Node | undefined = inner; cur; cur = cur.parent) {
+      if (cur === outer) return true;
+    }
+    return false;
+  };
+  // (4) a loop around the freeze but not the declaration would run the
+  // earlier mutations again, after the value was frozen.
+  for (let cur: ts.Node | undefined = call.parent; cur && cur !== fn; cur = cur.parent) {
+    if (isLoop(cur) && !encloses(cur, decl)) return false;
+  }
+
+  const freezeAt = call.getStart();
+  const name = decl.name.getText();
+  let ok = true;
+  const visit = (n: ts.Node): void => {
+    if (!ok) return;
+    if (ts.isIdentifier(n) && n.text === name && n !== decl.name && n !== ident) {
+      if (L.resolveValueSymbol(n) === sym) {
+        const par = n.parent;
+        const access =
+          par !== undefined &&
+          (ts.isElementAccessExpression(par) || ts.isPropertyAccessExpression(par)) &&
+          par.expression === n
+            ? par
+            : undefined;
+        // (3a) a write through the binding, the file-scope rule's shape.
+        const isWriteTarget =
+          access !== undefined &&
+          access.parent !== undefined &&
+          ts.isBinaryExpression(access.parent) &&
+          access.parent.left === access &&
+          access.parent.operatorToken.kind === ts.SyntaxKind.EqualsToken;
+        // (3b) the receiver of a call that cannot hand the value on.
+        const isSafeCall =
+          access !== undefined &&
+          ts.isPropertyAccessExpression(access) &&
+          FREEZE_SAFE_ARRAY_METHODS.has(access.name.text) &&
+          access.parent !== undefined &&
+          ts.isCallExpression(access.parent) &&
+          access.parent.expression === access;
+        if (!isWriteTarget && !isSafeCall) ok = false;
+        else if (fnOf(n) !== fn || n.getStart() >= freezeAt) ok = false;
+      }
+    }
+    if (ok) ts.forEachChild(n, visit);
+  };
+  ts.forEachChild(fn, visit);
   return ok;
 }
