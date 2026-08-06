@@ -1082,7 +1082,7 @@ static bool scr_tls_dyn_truthy(const ScrDyn *v) {
  * 'cert' option"). */
 static ScrBytes *scr_tls_pem_dyn(const ScrDyn *v, const char *what, bool concat) {
   if (v->kind == SCR_DYN_STR) {
-    ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)v->v.str->len);
+    ScrBytes *b = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)v->v.str->len));
     memcpy(b->data, v->v.str->data, v->v.str->len);
     return b;
   }
@@ -1115,7 +1115,7 @@ static ScrBytes *scr_tls_pem_dyn(const ScrDyn *v, const char *what, bool concat)
         return NULL;
       }
     }
-    ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)total);
+    ScrBytes *b = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)total));
     size_t off = 0;
     for (size_t i = 0; i < v->v.arr.len; i++) {
       const ScrDyn *e = v->v.arr.items[i];
@@ -1625,7 +1625,7 @@ static void scr_tls_fire_session(ScrTlsSock *t) {
   }
   size_t need = 0;
   (void)mbedtls_ssl_session_save(&sess, NULL, 0, &need);
-  ScrBytes *buf = scr_bytes_new(SCR_BYTES_U8, (double)need);
+  ScrBytes *buf = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)need));
   size_t used = 0;
   int ok = mbedtls_ssl_session_save(&sess, buf->data, need, &used) == 0;
   mbedtls_ssl_session_free(&sess);

@@ -55,14 +55,17 @@ static void scr_cipher_throw(const char *msg) {
 
 /* An empty Buffer — what update() answers when nothing is ready and what
  * final() answers for the stream modes. */
+/* Every ScrBytes this file answers is one of Node's Buffers (update,
+ * final, getAuthTag): the flavor is stamped at the two allocations
+ * they all share. */
 static ScrBytes *scr_cipher_empty(void) {
-  return scr_bytes_new(SCR_BYTES_U8, 0);
+  return scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, 0));
 }
 
 static ScrBytes *scr_cipher_bytes(const unsigned char *p, size_t n) {
   ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)n);
   if (n > 0) memcpy(b->data, p, n);
-  return b;
+  return scr_bytes_stamp_buffer(b);
 }
 
 /* The three algorithm names the frontend admits; the mode is the suffix. */
@@ -141,12 +144,12 @@ ScrBytes *scr_cipher_update(ScrCipher *c, ScrBytes *data) {
   c->saw_data = true;
 
   if (c->mode == SCR_CMODE_CTR) {
-    ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)n);
+    ScrBytes *out = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)n));
     if (n > 0) scr_aes256_ctr(&c->aes, c->iv, in, n, out->data);
     return out;
   }
   if (c->mode == SCR_CMODE_GCM) {
-    ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)n);
+    ScrBytes *out = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)n));
     if (n > 0) scr_gcm256_stream(&c->gcm, c->decrypt, in, n, out->data);
     return out;
   }
@@ -157,7 +160,7 @@ ScrBytes *scr_cipher_update(ScrCipher *c, ScrBytes *data) {
   if (!c->decrypt) {
     /* Encrypt: emit every whole block, keep the remainder. */
     const size_t blocks = avail / SCR_AES_BLOCK;
-    ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)(blocks * SCR_AES_BLOCK));
+    ScrBytes *out = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)(blocks * SCR_AES_BLOCK)));
     size_t produced = 0, consumed = 0;
     unsigned char blk[SCR_AES_BLOCK];
     for (size_t b = 0; b < blocks; b++) {
@@ -193,7 +196,7 @@ ScrBytes *scr_cipher_update(ScrCipher *c, ScrBytes *data) {
    * is what it caught. */
   size_t blocks = avail / SCR_AES_BLOCK;
   if (blocks > 0 && avail % SCR_AES_BLOCK == 0) blocks--;
-  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)(blocks * SCR_AES_BLOCK));
+  ScrBytes *out = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)(blocks * SCR_AES_BLOCK)));
   size_t produced = 0, consumed = 0;
   unsigned char blk[SCR_AES_BLOCK];
   for (size_t b = 0; b < blocks; b++) {

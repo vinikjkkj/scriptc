@@ -4841,6 +4841,16 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_bytes_byte_length_str(${arg(0)}, ${arg(1)})`);
           case "buffer.isEncoding":
             return finish(`scr_bytes_is_encoding(${arg(0)})`);
+          // The bytes flavor trio (scr_bytes.c): the marks stamp a fresh
+          // construction and answer it retained (the libFn convention —
+          // borrowed argument, owned result); isBuffer reads the stamp
+          // and THROWS when the producer never set one.
+          case "bytes.markBuffer":
+            return finish(`scr_bytes_mark_buffer(${arg(0)})`);
+          case "bytes.markPlain":
+            return finish(`scr_bytes_mark_plain(${arg(0)})`);
+          case "bytes.isBuffer":
+            return finish(`scr_bytes_is_buffer(${arg(0)}, ${arg(1)})`);
           // The checked-dynamic compare/equals validators
           // (scr_bytes_io.c): Node's argument ladders throw catchably
           // (may-throw seed set); all dyn args borrowed.

@@ -6,10 +6,12 @@
 // length throws Node's DataView-shaped RangeError rather than the typed
 // array's, because the construction rides the same intrinsic those two do.
 //
-// `x.constructor === Uint8Array` is NOT covered because it does not compile,
-// and must not: Buffer and Uint8Array are ONE representation here, so a
-// Buffer arriving at a Uint8Array-typed slot cannot be told from a plain
-// view, and the predicate keeps its fence rather than guessing.
+// `x.constructor === Uint8Array` is covered by 2747, not here. It was
+// fenced when this fixture was written, for the reason the note used to
+// give: Buffer and Uint8Array are ONE representation, so a Buffer at a
+// Uint8Array-typed slot could not be told from a plain view. That reason
+// was right about the CHECKER and wrong about the only remaining fix —
+// the flavor now rides the VALUE, so the predicate answers at runtime.
 
 const u = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
 

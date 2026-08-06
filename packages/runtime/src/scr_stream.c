@@ -506,7 +506,7 @@ static void *scr_stream_rbuf_take(ScrStreamState *st, size_t n) {
     st->r.length -= n;
     return out;
   }
-  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)n);
+  ScrBytes *out = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)n));
   size_t at = 0;
   while (at < n) {
     ScrBytes *head = st->r.buf[0];
@@ -928,7 +928,7 @@ static void scr_stream_next_fulfill(ScrStreamState *st, ScrPromise *w /*moves*/,
     }
     scr_promise_fulfill_ref(w, d, scr_dyn_retain_v, scr_dyn_release_v, NULL);
   } else {
-    ScrBytes *b = chunk ? (ScrBytes *)chunk : scr_bytes_new(SCR_BYTES_U8, 0);
+    ScrBytes *b = chunk ? (ScrBytes *)chunk : scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, 0));
     scr_promise_fulfill_ref(w, b, scr_bytes_retain_v, scr_bytes_release_v, NULL);
   }
   scr_promise_release(w);
@@ -2279,7 +2279,7 @@ static void scr_sc_data(ScrClosure *cb, void *b, void *str) {
     scr_arr_push_ref(chunks, scr_bytes_retain((ScrBytes *)b));
   } else if (str != NULL) {
     ScrStr *enc = scr_str_new("utf8", 4);
-    scr_arr_push_ref(chunks, scr_bytes_from_str((ScrStr *)str, enc));
+    scr_arr_push_ref(chunks, scr_bytes_stamp_buffer(scr_bytes_from_str((ScrStr *)str, enc)));
     scr_str_release(enc);
   }
   scr_arr_release(chunks);
@@ -2364,9 +2364,9 @@ bool scr_stream_push_str(ScrStream *s, ScrStr *str) {
   ScrBytes *b;
   if (enc != NULL) {
     /* Node: Buffer.from(chunk, state.defaultEncoding). */
-    b = scr_bytes_from_str(str, enc);
+    b = scr_bytes_stamp_buffer(scr_bytes_from_str(str, enc));
   } else {
-    b = scr_bytes_new(SCR_BYTES_U8, (double)str->len);
+    b = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)str->len));
     memcpy(b->data, str->data, str->len);
   }
   bool ret = scr_stream_add_chunk(s, b, false);
@@ -2377,7 +2377,7 @@ bool scr_stream_push_str(ScrStream *s, ScrStr *str) {
 /* push(chunk, encoding) with an explicit non-utf8 literal: the per-call
  * encoding overrides the stream's default. Borrows both strings. */
 bool scr_stream_push_str_enc(ScrStream *s, ScrStr *str, ScrStr *enc) {
-  ScrBytes *b = scr_bytes_from_str(str, enc);
+  ScrBytes *b = scr_bytes_stamp_buffer(scr_bytes_from_str(str, enc));
   bool ret = scr_stream_add_chunk(s, b, false);
   scr_bytes_release(b);
   return ret;
@@ -2440,7 +2440,7 @@ void scr_stream_unshift(ScrStream *s, ScrBytes *chunk) {
 }
 
 void scr_stream_unshift_str(ScrStream *s, ScrStr *str) {
-  ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)str->len);
+  ScrBytes *b = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)str->len));
   memcpy(b->data, str->data, str->len);
   scr_stream_unshift(s, b);
   scr_bytes_release(b);
@@ -2490,7 +2490,7 @@ ScrStream *scr_stream_set_encoding(ScrStream *s, ScrStr *enc) {
     ScrBytes *chunk = st->r.buf[i];
     ScrBytes *view = chunk;
     if (i == 0 && skip > 0) {
-      view = scr_bytes_new(SCR_BYTES_U8, (double)(chunk->len - skip));
+      view = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)(chunk->len - skip)));
       memcpy(view->data, chunk->data + skip, chunk->len - skip);
     }
     ScrStr *piece = scr_strdec_write(st->r.enc, st->r.dec_pending, view);
@@ -2622,7 +2622,7 @@ bool scr_stream_write_null(ScrStream *s) {
 }
 
 bool scr_stream_write_str(ScrStream *s, ScrStr *str, ScrClosure *cb) {
-  ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)str->len);
+  ScrBytes *b = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)str->len));
   memcpy(b->data, str->data, str->len);
   bool ret = scr_stream_write_chunk(s, b, cb);
   scr_bytes_release(b);
@@ -2748,7 +2748,7 @@ void scr_stream_transform_done(ScrStream *s, ScrError *err /*moves*/, ScrBytes *
     if (data) {
       scr_stream_add_chunk(s, data, false);
     } else if (data_str) {
-      ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)data_str->len);
+      ScrBytes *b = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)data_str->len));
       memcpy(b->data, data_str->data, data_str->len);
       scr_stream_add_chunk(s, b, false);
       scr_bytes_release(b);
@@ -2777,7 +2777,7 @@ void scr_stream_flush_done(ScrStream *s, ScrError *err /*moves*/, ScrBytes *data
     scr_stream_add_chunk(s, data, false);
     scr_bytes_release(data);
   } else if (data_str) {
-    ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)data_str->len);
+    ScrBytes *b = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)data_str->len));
     memcpy(b->data, data_str->data, data_str->len);
     scr_stream_add_chunk(s, b, false);
     scr_bytes_release(b);

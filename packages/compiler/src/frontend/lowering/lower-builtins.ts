@@ -7202,7 +7202,15 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     }
     const s = L.lowerExprExpecting(call.arguments[0]!, STRING);
     const enc: IrExpr = { kind: "strLit", value: "utf8", type: STRING, loc };
-    return { kind: "libCall", fn: "buffer.fromStr", args: [s, enc], type: BYTES_U8, loc };
+    // TextEncoder.encode answers a plain Uint8Array; buffer.fromStr is
+    // shared with Buffer.from(string), so the flavor is stamped here.
+    return {
+      kind: "libCall",
+      fn: "bytes.markPlain",
+      args: [{ kind: "libCall", fn: "buffer.fromStr", args: [s, enc], type: BYTES_U8, loc }],
+      type: BYTES_U8,
+      loc,
+    };
   }
 
 /** `String.fromCharCode(...codes)` on THE String global: every argument

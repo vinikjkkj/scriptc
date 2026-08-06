@@ -324,6 +324,11 @@ const LIB_FN_SYMS: Record<string, string> = {
   "buffer.compareChk": "scr_buffer_compare_chk",
   "bytes.equalsChk": "scr_bytes_equals_chk",
   "bytes.compareChk": "scr_bytes_compare_chk",
+  // The bytes flavor trio (scr_bytes.c) — the Buffer-vs-Uint8Array
+  // distinction the ONE representation erases, carried by the value.
+  "bytes.markBuffer": "scr_bytes_mark_buffer",
+  "bytes.markPlain": "scr_bytes_mark_plain",
+  "bytes.isBuffer": "scr_bytes_is_buffer",
   "buffer.newStringFail": "scr_buffer_new_string_fail",
   "fs.toUnixTimestamp": "scr_fs_to_unix_timestamp",
   "fs.existsChk": "scr_fs_exists_async",
