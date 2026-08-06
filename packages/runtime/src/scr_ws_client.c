@@ -16,7 +16,16 @@ struct ScrWsClient {
   /* The socket outlives us only if the loop is mid-callback; `dead` stops
    * the reader from driving a torn-down conn. */
   bool dead;
+  /* Non-zero while scr_ws_conn_recv/eof is on the stack. A free that
+   * lands from inside a message callback -- the program dropped its
+   * last reference to the socket there -- must not pull the conn out
+   * from under the parser that is still walking the read buffer, so it
+   * waits for the frame to finish. */
+  int depth;
+  bool want_free;
 };
+
+static void wsc_free_now(ScrWsClient *c);
 
 /* ── the two directions ─────────────────────────────────────────────── */
 
@@ -29,16 +38,58 @@ static void wsc_want_write(void *u, const uint8_t *data, size_t len) {
 static void wsc_data(void *ctx, const char *buf, size_t n) {
   ScrWsClient *c = ctx;
   if (c->dead) return;
+  c->depth++;
   /* recv answers false once the conn is finished with the stream — a
    * protocol error it has already reported, or a close it has replied to.
    * Either way there is nothing further to feed it. */
   if (!scr_ws_conn_recv(c->conn, (const uint8_t *)buf, n)) c->dead = true;
+  if (--c->depth == 0 && c->want_free) wsc_free_now(c);
+}
+
+/* THE FAILURE PATH: the stream ended, or the transport reported an
+ * error, without a completed closing handshake. Both spellings are one
+ * thing to the API -- "fail the WebSocket connection": an `error`
+ * event and then the abnormal close 1006, with readyState already
+ * CLOSED when the error listener runs. Measured against Node 25's
+ * undici on three shapes: a refused dial (error + close 1006), a server
+ * that answers a close frame with a reset (error + close 1006), and a
+ * completed close handshake (neither -- wsc_on_close already moved
+ * ready to CLOSED, which is what silences this).
+ *
+ * The error hook also has to EXIST: scr_net raises Node's
+ * unhandled-'error'-event abort for a socket with no listener list of
+ * its own, so before this a WebSocket to a closed port killed the
+ * process instead of reporting. */
+static void wsc_fail(ScrWsClient *c, const char *msg) {
+  if (c->dead || c->ready == SCR_WS_CLOSED) return;
+  bool connecting = c->ready == SCR_WS_CONNECTING;
+  c->ready = SCR_WS_CLOSED;
+  if (c->cb.on_error) c->cb.on_error(c->user, msg);
+  if (connecting) {
+    /* The conn never opened, so its own EOF path stays silent; the
+     * abnormal close is ours to report. */
+    c->dead = true;
+    if (c->cb.on_close) c->cb.on_close(c->user, 1006, NULL, 0);
+  } else {
+    scr_ws_conn_eof(c->conn);
+  }
+}
+
+static bool wsc_err(void *ctx, ScrStr *msg) {
+  ScrWsClient *c = ctx;
+  if (c->dead) return true;
+  c->depth++;
+  wsc_fail(c, msg != NULL ? msg->data : "socket error");
+  if (--c->depth == 0 && c->want_free) wsc_free_now(c);
+  return true; /* consumed */
 }
 
 static void wsc_eof(void *ctx) {
   ScrWsClient *c = ctx;
   if (c->dead) return;
-  scr_ws_conn_eof(c->conn);
+  c->depth++;
+  wsc_fail(c, "socket hang up");
+  if (--c->depth == 0 && c->want_free) wsc_free_now(c);
 }
 
 /* ── the conn's events, forwarded ───────────────────────────────────── */
@@ -67,12 +118,11 @@ static void wsc_on_error(void *u, const char *msg) {
 
 /* ── dialing ────────────────────────────────────────────────────────── */
 
+/* scr_throw_error_named MOVES both strings into the error object (see
+ * its comment) -- releasing them here was a double free, and the unit was
+ * never linked into a program, so nothing had run it. */
 static void wsc_throw(const char *msg) {
-  ScrStr *name = scr_str_new("SyntaxError", 11);
-  ScrStr *m = scr_str_new(msg, strlen(msg));
-  scr_throw_error_named(name, m);
-  scr_str_release(name);
-  scr_str_release(m);
+  scr_throw_error_named(scr_str_new("SyntaxError", 11), scr_str_new(msg, strlen(msg)));
 }
 
 ScrWsClient *scr_ws_client_connect(ScrStr *url, ScrStr *protocols,
@@ -86,7 +136,7 @@ ScrWsClient *scr_ws_client_connect(ScrStr *url, ScrStr *protocols,
   else if (u->scheme->len == 2 && memcmp(u->scheme->data, "ws", 2) == 0) secure = false;
   else {
     scr_url_release(u);
-    wsc_throw("The URL's scheme must be either 'ws' or 'wss'");
+    wsc_throw("expected a ws: or wss: url");
     return NULL;
   }
   if (secure && (tls == NULL || tls->wrap == NULL)) {
@@ -167,6 +217,7 @@ ScrWsClient *scr_ws_client_connect(ScrStr *url, ScrStr *protocols,
   scr_str_release(dial);
 
   scr_net_sock_set_native_reader(c->sock, &wsc_data, &wsc_eof, &wsc_eof, c, NULL);
+  scr_net_sock_set_native_events(c->sock, NULL, &wsc_err);
 
   /* TLS wraps the dialed socket before any bytes go out; everything below
    * buffers until its handshake ends — the ordering scr_http.c relies on. */
@@ -203,13 +254,23 @@ int scr_ws_client_ready_state(const ScrWsClient *c) {
   return c == NULL ? SCR_WS_CLOSED : c->ready;
 }
 
-void scr_ws_client_free(ScrWsClient *c) {
-  if (c == NULL) return;
-  c->dead = true;
+static void wsc_free_now(ScrWsClient *c) {
   if (c->sock != NULL) {
     scr_net_sock_clear_native_reader(c->sock);
     scr_net_sock_release(c->sock);
+    c->sock = NULL;
   }
   scr_ws_conn_free(c->conn);
+  c->conn = NULL;
   free(c);
+}
+
+void scr_ws_client_free(ScrWsClient *c) {
+  if (c == NULL) return;
+  c->dead = true;
+  if (c->depth > 0) {
+    c->want_free = true; /* the parser above us is still reading */
+    return;
+  }
+  wsc_free_now(c);
 }
