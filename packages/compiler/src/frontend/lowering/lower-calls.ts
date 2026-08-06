@@ -7739,6 +7739,94 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     return { kind: "libCall", fn: "intl.numFormatEnUs", args: [arg], type: STRING, loc };
   }
 
+/** The composed default-locale form: `Intl.DateTimeFormat().
+   * resolvedOptions().locale` (and `new Intl.DateTimeFormat()...` — the
+   * spec makes the two constructions the same object). It answers the
+   * MACHINE's default locale as a BCP-47 tag, read at runtime.
+   *
+   * Why this one is a runtime read and not a baked constant, unlike
+   * `process.versions.node`: that one is a fact about the RUNTIME (there
+   * is no Node under the binary, so the honest answer is the compat
+   * target). A default locale is a fact about the machine the binary runs
+   * ON, which every host reports differently and which this runtime can
+   * ask for — the `process.platform` stance. Baking "en-US" would be
+   * green on the build host and wrong everywhere else, silently.
+   *
+   * Only the COMPOSED form lowers, and only its `.locale` member. Why the
+   * fences are drawn exactly here:
+   *  - A formatter VALUE has no representation (the NumberFormat rule's
+   *    reason), and neither does the resolved-options RECORD — its other
+   *    members are ICU data (`calendar`, `numberingSystem`, the
+   *    date-field widths) or a surface of their own (`timeZone`), and a
+   *    partially-populated record would be a silent lie in a spread.
+   *  - A locale ARGUMENT means "resolve this against the available
+   *    locales", which is negotiation against ICU data the binary does
+   *    not carry — Node answers the best match, not the argument.
+   *  - An options bag can move the answer (`-u-ca-…` extensions land in
+   *    `locale`), so it fences rather than being ignored.
+   *
+   * Null when the access isn't that chain; the caller keeps trying. */
+  export function lowerIntlDefaultLocaleProperty(L: Lowerer, expr: ts.PropertyAccessExpression,): IrExpr | null {
+    // `resolvedOptions()` is the receiver; the ctor call is inside it.
+    let recv: ts.Expression = expr.expression;
+    while (ts.isParenthesizedExpression(recv)) recv = recv.expression;
+    if (!ts.isCallExpression(recv)) return null;
+    let ro = recv.expression;
+    while (ts.isParenthesizedExpression(ro)) ro = ro.expression;
+    if (!ts.isPropertyAccessExpression(ro) || ro.name.text !== "resolvedOptions") return null;
+    let ctorCall: ts.Expression = ro.expression;
+    while (ts.isParenthesizedExpression(ctorCall)) ctorCall = ctorCall.expression;
+    if (!ts.isNewExpression(ctorCall) && !ts.isCallExpression(ctorCall)) return null;
+    let ctor = ctorCall.expression;
+    while (ts.isParenthesizedExpression(ctor)) ctor = ctor.expression;
+    if (
+      !ts.isPropertyAccessExpression(ctor) || ctor.questionDotToken ||
+      ctor.name.text !== "DateTimeFormat" || !L.isStdlibGlobal(ctor.expression, "Intl")
+    ) {
+      return null;
+    }
+    // An optional link anywhere in the chain goes back to the optional
+    // chain lowering, which owns the guard and reaches this member fence
+    // through its own re-dispatch. Nothing in the chain CAN be nullish,
+    // but claiming the spelling here would duplicate that machinery.
+    if (
+      expr.questionDotToken || recv.questionDotToken ||
+      ro.questionDotToken || (ts.isCallExpression(ctorCall) && ctorCall.questionDotToken)
+    ) {
+      return null;
+    }
+    // Past here the chain IS Intl.DateTimeFormat().resolvedOptions().<m>:
+    // claim it, so every rejection below teaches instead of falling
+    // through to the generic member fence.
+    const loc = locOf(expr);
+    const ctorArgs = ctorCall.arguments ?? [];
+    if (ctorArgs.length > 0) {
+      L.noLowering(
+        ctorArgs.length > 1
+          ? "Intl.DateTimeFormat with an options bag"
+          : "Intl.DateTimeFormat with a locale argument",
+        ctorArgs[ctorArgs.length === 1 ? 0 : 1]!,
+        "only the NO-ARGUMENT form lowers, and only its .locale: resolving a requested locale " +
+          "(or an options bag, whose -u- extensions land in .locale) is negotiation against ICU " +
+          "data the binary does not carry — Intl.DateTimeFormat().resolvedOptions().locale reads " +
+          "the machine's default locale tag",
+      );
+    }
+    if (recv.arguments.length > 0) {
+      L.noLowering("resolvedOptions with arguments", recv, "resolvedOptions() takes none");
+    }
+    if (expr.name.text !== "locale") {
+      L.noLowering(
+        `Intl.DateTimeFormat().resolvedOptions().${expr.name.text}`,
+        expr.name,
+        "`.locale` is the one member that lowers — it names the machine's locale, which the " +
+          "runtime can ask the OS for; calendar/numberingSystem/the field widths are ICU data " +
+          "the binary does not carry, and timeZone is a surface of its own",
+      );
+    }
+    return { kind: "libCall", fn: "intl.defaultLocale", args: [], type: STRING, loc };
+  }
+
   /** Object.is over statically disjoint kinds: the constant false, with
    * both operands still evaluated for their effects (droppable statics
    * fold away — JS evaluates arguments, but nothing observes a pure one). */

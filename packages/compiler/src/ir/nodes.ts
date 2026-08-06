@@ -2045,6 +2045,17 @@ export type IrLibFn =
    * grouping every three integer digits, "∞"/"NaN" texts, and "-0" for
    * negative inputs rounding to zero. Result +1; never throws. */
   | "intl.numFormatEnUs"
+  /** `Intl.DateTimeFormat().resolvedOptions().locale` — the ENVIRONMENT's
+   * default locale as a BCP-47 tag, read from the machine at runtime
+   * (scr_intl_default_locale: GetUserDefaultLocaleName on win32, ICU's
+   * LC_ALL / LC_MESSAGES / LANG order on POSIX, "en-US" for the C locale
+   * like V8's Intl::DefaultLocale). A locale NAME, not locale DATA — the
+   * process.platform stance, NOT the process.versions.node one: a
+   * compile-time constant would be right only on the build host, and this
+   * string reaches the wire in zapo's ClientPayload. Interned in the
+   * runtime, so repeated reads answer one identity; +1 per read; never
+   * throws. */
+  | "intl.defaultLocale"
   /** `delete process.env[NAME]` — unsetenv(3): the mutation is visible to
    * every later read (process.envGet asks getenv fresh) and inherited by
    * spawned children, exactly Node. Statement position only (JS's boolean

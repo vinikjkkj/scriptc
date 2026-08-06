@@ -2826,6 +2826,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // with default options (scr_lib.c). +1 string; no throw.
           case "intl.numFormatEnUs":
             return finish(`scr_intl_num_format_en_us(${arg(0)})`);
+          // Intl.DateTimeFormat().resolvedOptions().locale (scr_lib.c):
+          // the machine's default locale tag, interned. +1; no throw.
+          case "intl.defaultLocale":
+            return finish(`scr_intl_default_locale()`);
           // The URL surface (scr_url.c): construction and the two
           // fileURLToPath receiver forms throw catchable TypeErrors
           // (may-throw seed set); the getters are pure reads. Receivers

@@ -70,7 +70,7 @@ const who = process.argv.length > 2 ? process.argv[2] : "world";
 
 **Process shape** — `process.argv[0]` is `"scriptc"` and `argv[1]` is the binary's path (positions line up with Node; `argv[2]` onward are your args). The uncaught-exception stderr line reads `Uncaught <value>` instead of Node's stack-trace block (exit code and pre-throw stdout are identical). Runtime errors carry `message` and Node's `code`, but not `errno`/`syscall`/`path`.
 
-**Comparator call sequences differ in `sort` and `toSorted`** (stable insertion sort here, TimSort in V8 — sorted results are byte-identical for consistent comparators), and **`localeCompare` compares code units**, not ICU collation.
+**Comparator call sequences differ in `sort` and `toSorted`** (stable insertion sort here, TimSort in V8 — sorted results are byte-identical for consistent comparators), and **`localeCompare` compares code units**, not ICU collation. Locale *data* stays outside the runtime, but the locale *name* does not: `Intl.DateTimeFormat().resolvedOptions().locale` reads the machine's default locale tag at runtime (`GetUserDefaultLocaleName` on Windows, `LC_ALL`/`LC_MESSAGES`/`LANG` in ICU's order elsewhere, `en-US` for the C locale — V8's own fallback). A POSIX `@modifier` is dropped rather than folded into a script or variant, and the other `resolvedOptions()` members fence.
 
 ## Dynamic-tier limits
 

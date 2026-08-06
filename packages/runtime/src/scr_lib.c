@@ -110,6 +110,7 @@ static ScrStr *scr_exec_path_str = NULL; /* interned process.execPath */
 static ScrStr *scr_arch_str = NULL;      /* interned process.arch */
 static ScrStr *scr_versions_node_str = NULL; /* interned process.versions.node */
 static ScrStr *scr_versions_openssl_str = NULL; /* interned process.versions.openssl */
+static ScrStr *scr_default_locale_str = NULL;   /* interned Intl default locale */
 
 static void scr_lib_cleanup(void) {
   scr_arr_release(scr_argv_arr);
@@ -124,6 +125,8 @@ static void scr_lib_cleanup(void) {
   scr_versions_node_str = NULL;
   scr_str_release(scr_versions_openssl_str);
   scr_versions_openssl_str = NULL;
+  scr_str_release(scr_default_locale_str);
+  scr_default_locale_str = NULL;
 }
 
 #ifndef SCR_LIB
@@ -4081,6 +4084,127 @@ ScrStr *scr_intl_num_format_en_us(double x) {
     o += flen;
   }
   return scr_str_new(out, (size_t)o);
+}
+
+/* BCP-47 case normalization, in place over a '-'-separated tag: the
+ * language lowercase, a 4-alpha script subtag Titlecase, a 2-alpha or
+ * 3-digit region subtag uppercase, everything after that lowercase. The
+ * spec says tag case is insignificant; ICU's ToLanguageTag nevertheless
+ * emits exactly this spelling, and the tag is a STRING the program can
+ * compare, so the byte-exact answer is the cased one. Position-driven,
+ * like the grammar: only subtags 0..2 can be language/script/region, so
+ * an extension singleton ("-u-ca-gregory") and variants stay lowercase. */
+static void scr_locale_case_normalize(char *s) {
+  int pos = 0;
+  bool script_seen = false;
+  char *p = s;
+  while (*p) {
+    char *q = p;
+    while (*q && *q != '-') q++;
+    size_t n = (size_t)(q - p);
+    bool alpha = n > 0, digit = n > 0;
+    for (size_t k = 0; k < n; k++) {
+      if (!isalpha((unsigned char)p[k])) alpha = false;
+      if (!isdigit((unsigned char)p[k])) digit = false;
+    }
+    /* 0 = lowercase, 1 = Titlecase, 2 = UPPERCASE */
+    int form = 0;
+    if (pos == 1 && n == 4 && alpha) {
+      form = 1;
+      script_seen = true;
+    } else if ((pos == 1 || (pos == 2 && script_seen)) &&
+               ((n == 2 && alpha) || (n == 3 && digit))) {
+      form = 2;
+    }
+    for (size_t k = 0; k < n; k++) {
+      unsigned char c = (unsigned char)p[k];
+      p[k] = (char)(form == 2 || (form == 1 && k == 0) ? toupper(c) : tolower(c));
+    }
+    if (pos < 3) pos++;
+    p = *q ? q + 1 : q;
+  }
+}
+
+/* The environment's default locale as a BCP-47 language tag — the answer
+ * behind `Intl.DateTimeFormat().resolvedOptions().locale`.
+ *
+ * This is a fact about the MACHINE, not about the runtime build (the
+ * process.platform stance, not the process.versions.node one): a binary
+ * shipped to a pt-BR user must answer "pt-BR" there. It carries no ICU
+ * data — a locale NAME is environment info, like process.platform, where
+ * locale DATA (collation, formats) stays outside the static runtime.
+ *
+ * V8 derives it (Intl::DefaultLocale) from icu::Locale::getDefault(),
+ * whose id ICU builds in putil.cpp, with one special case of its own:
+ * the C/POSIX locale ("en_US_POSIX" after ICU's own normalization) is
+ * reported as "en-US", not as a language. Both arms below reproduce that
+ * chain at its two ends:
+ *
+ *  - win32: GetUserDefaultLocaleName(), which Windows already spells as a
+ *    BCP-47 tag and which ICU's win32 arm calls for exactly this.
+ *    VALIDATED against Node v25.9.0 (full ICU 78.2) on a win32 host: both
+ *    answer "en-US", and Node ignores LC_ALL/LANG here — the environment
+ *    plays no part in the Windows answer, matching ICU's own arm.
+ *  - POSIX: LC_ALL, else LC_MESSAGES, else LANG — ICU's
+ *    uprv_getPOSIXIDForCategory, in that order — with the codeset and the
+ *    modifier stripped ("pt_BR.UTF-8" names pt_BR) and '_' rewritten to
+ *    '-'. REASONED FROM ICU/V8's documented derivation, not validated:
+ *    this runtime has no POSIX host to differ against yet.
+ *
+ * Two declared gaps, both in the POSIX arm, both narrow and both silent
+ * rather than wrong-shaped: an @modifier ("sr_RS@latin") is DROPPED where
+ * ICU folds it into a script or a variant, and a locale ICU knows only by
+ * an alias is passed through as spelled. Neither can arise on win32.
+ *
+ * Interned like process.platform and read at most once per process, which
+ * is also Node's shape: ICU resolves its default locale once, at the
+ * first Intl use, and later environment writes do not move it.
+ * Result +1; never throws. */
+ScrStr *scr_intl_default_locale(void) {
+  if (!scr_default_locale_str) {
+    char raw[128];
+    raw[0] = '\0';
+#ifdef _WIN32
+    wchar_t wide[LOCALE_NAME_MAX_LENGTH];
+    if (GetUserDefaultLocaleName(wide, LOCALE_NAME_MAX_LENGTH) > 0) {
+      if (WideCharToMultiByte(CP_UTF8, 0, wide, -1, raw, (int)sizeof raw, NULL, NULL) <= 0) {
+        raw[0] = '\0';
+      }
+    }
+    /* A few Windows locale names carry a sort order ("de-DE_phoneb");
+     * the language tag is the part before it. */
+    {
+      char *u = strchr(raw, '_');
+      if (u) *u = '\0';
+    }
+#else
+    const char *id = getenv("LC_ALL");
+    if (!id || !*id) id = getenv("LC_MESSAGES");
+    if (!id || !*id) id = getenv("LANG");
+    if (id) {
+      strncpy(raw, id, sizeof raw - 1);
+      raw[sizeof raw - 1] = '\0';
+    }
+    /* "ll_CC.codeset@modifier" — the tag has room for neither tail. */
+    {
+      char *t = strpbrk(raw, ".@");
+      if (t) *t = '\0';
+    }
+#endif
+    /* V8's own fallback: the C/POSIX locale is not a language. Checked on
+     * the raw id, before '_' becomes '-', because "en_US_POSIX" is ICU's
+     * spelling of it. */
+    if (raw[0] == '\0' || strcmp(raw, "C") == 0 || strcmp(raw, "POSIX") == 0 ||
+        strcmp(raw, "en_US_POSIX") == 0) {
+      strcpy(raw, "en-US");
+    }
+    for (char *p = raw; *p; p++) {
+      if (*p == '_') *p = '-';
+    }
+    scr_locale_case_normalize(raw);
+    scr_default_locale_str = scr_str_new(raw, strlen(raw));
+  }
+  return scr_str_retain(scr_default_locale_str);
 }
 
 /* Object.is over two numbers — the spec's SameValue on doubles: NaN
