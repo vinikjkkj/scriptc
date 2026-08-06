@@ -418,8 +418,15 @@ void scr_ws_conn_eof(ScrWsConn *c) {
   if (c->state == SCR_WS_ST_CLOSED) return;
   int was = c->state;
   c->state = SCR_WS_ST_CLOSED;
-  if (was == SCR_WS_ST_OPEN && c->cb.on_close) {
-    /* 1006: abnormal closure, no close frame received. */
+  if ((was == SCR_WS_ST_OPEN || was == SCR_WS_ST_CLOSING) && c->cb.on_close) {
+    /* 1006: abnormal closure, no close frame received. CLOSING counts:
+     * a client that sent its Close and then saw the stream end without
+     * a reply never completed the closing handshake, so the event is
+     * the abnormal one -- Node reports `close 1006 wasClean=false`
+     * there (measured against a server that answers a close frame with
+     * a reset). Swallowing it lost the ONLY close event such a program
+     * ever gets. A completed handshake never reaches here: the peer's
+     * close frame already moved the state to CLOSED. */
     c->cb.on_close(c->user, 1006, NULL, 0);
   }
 }

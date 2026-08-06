@@ -185,6 +185,16 @@ export interface CcOptions {
    * moduleUsesHttpServer answer true for whenever this does. TLS-free
    * binaries keep their exact link line and never compile mbedTLS. */
   tls?: boolean;
+  /** The program takes globalThis.WebSocket as a value (moduleUsesWsGlobal
+   * on the IR): compiles the WebSocket client family - scr_websocket.c
+   * (the RFC 6455 frame codec), scr_ws_client.c (the dial and the pump)
+   * and scr_ws_global.c (the API-object glue the emitted record drives).
+   * Implies the net/http/tls triple the fetch gate pulls, for the same
+   * reasons: the codec dials over scr_net, a WebSocket that could not
+   * reach wss:// would not be one, and scr_tls.c's https half calls into
+   * scr_http.c unconditionally. Programs that never name the global keep
+   * their exact link line and never build mbedTLS. */
+  wsGlobal?: boolean;
   /** The program uses the CA-store introspection surface (moduleUsesTlsCa
    * on the IR — getCACertificates / rootCertificates /
    * setDefaultCACertificates): compiles scr_tls_ca.c, plain PEM-block
@@ -1043,9 +1053,15 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // import those builtins get working clients over the same socket units
   // (native-fetch builds always carry it — scr_fetch_install registers it).
   const netIsland = dynamic && ((opts.netIsland ?? false) || nativeFetch);
-  const net = (opts.net ?? false) || nativeFetch || netIsland;
-  const http = (opts.http ?? false) || nativeFetch || netIsland;
-  const tls = (opts.tls ?? false) || nativeFetch || netIsland;
+  // globalThis.WebSocket pulls the same net/http/tls triple the native
+  // fetch bridge does: the frame codec dials over scr_net, wss:// rides
+  // scr_tls.c's client wrap, and scr_tls.c's https half calls into
+  // scr_http.c unconditionally (measured -- the link fails on
+  // scr_http_request_ex without it).
+  const wsGlobal = opts.wsGlobal ?? false;
+  const net = (opts.net ?? false) || nativeFetch || netIsland || wsGlobal;
+  const http = (opts.http ?? false) || nativeFetch || netIsland || wsGlobal;
+  const tls = (opts.tls ?? false) || nativeFetch || netIsland || wsGlobal;
   const driver = resolveCc();
   if (driver.target !== null) {
     // See the resolveCc block: these inputs are built on and for the HOST
@@ -1198,6 +1214,17 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(net ? [rt(join(rtDir, "scr_net.c"))] : []),
     ...(http ? [rt(join(rtDir, "scr_http.c"))] : []),
     ...(opts.http2 ?? false ? [rt(join(rtDir, "scr_http2.c"))] : []),
+    // The WebSocket client family. Three units, one gate: the codec is
+    // transport-free (its own C test proves it), the client bolts it onto
+    // scr_net, and the global unit is the only one that knows there is a
+    // compiled program on the other side.
+    ...(wsGlobal
+      ? [
+          rt(join(rtDir, "scr_websocket.c")),
+          rt(join(rtDir, "scr_ws_client.c")),
+          rt(join(rtDir, "scr_ws_global.c")),
+        ]
+      : []),
     ...(opts.dgram ? [rt(join(rtDir, "scr_dgram.c"))] : []),
     ...(opts.watch ? [rt(join(rtDir, "scr_watch.c"))] : []),
     ...(opts.nodeTest ? [rt(join(rtDir, "scr_test.c"))] : []),

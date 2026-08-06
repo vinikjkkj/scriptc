@@ -4647,6 +4647,20 @@ export type IrExpr =
    * (T) => void (() => void for void T), reject is (%Error) => void.
    * Result +1; never throws. */
   | { kind: "promiseWithResolvers"; type: IrType; loc: SrcLoc }
+  /** `globalThis.WebSocket` — the WHATWG WebSocket global's CONSTRUCTOR,
+   * taken as a value. `type` is the construct signature's func type:
+   * (url: string, protocols?, options?) => <the API record>, and the
+   * frontend has already proved that record IS the WebSocket surface
+   * (wsGlobalPlan) — nothing else reaches here.
+   *
+   * The value is ONE interned immortal closure per func type, exactly
+   * like a declared function used as a value, because JS has one
+   * WebSocket object: `globalThis.WebSocket === globalThis.WebSocket`
+   * must hold (zapo's WaWebSocket compares the ctor it was handed
+   * against the global one to decide whether it may pass headers).
+   * Borrowed, never released. This node NEVER throws — the dial happens
+   * when the closure is CALLED. */
+  | { kind: "wsCtor"; type: IrType; loc: SrcLoc }
   /** `new C(args)`: allocate (fields zeroed), then call `%C.constructor`
    * with the new object as arg 0 (retained — the ctor owns and releases its
    * `this` param like any callee). Result is owned (+1). */
@@ -6796,6 +6810,284 @@ export function moduleUsesTls(mod: IrModule): boolean {
   };
   visit(mod);
   return found;
+}
+
+/** True when the module takes `globalThis.WebSocket` as a value — the
+ * link switch for the WebSocket client family (scr_websocket.c's frame
+ * codec, scr_ws_client.c's transport, scr_ws_global.c's API-object
+ * glue). It implies BOTH the socket units and TLS: the codec dials over
+ * scr_net, and a WebSocket that could not reach `wss://` would not be
+ * one — the native fetch bridge's stance, for the same reason. Programs
+ * that never name the global keep their exact link line and never build
+ * mbedTLS. */
+export function moduleUsesWsGlobal(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    if ((v as { kind?: unknown }).kind === "wsCtor") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
+/* ── the WebSocket global's shape ─────────────────────────────────────
+ *
+ * `globalThis.WebSocket` is unusual among lowered globals: the value it
+ * must produce is a record whose shape comes from the PROGRAM's own
+ * declaration of the API (zapo writes its own `RawWebSocket` interface
+ * and casts globalThis to a type carrying it — there is no lib.dom here
+ * to anchor on). So the surface is matched STRUCTURALLY, and it is
+ * matched in exactly one place: the frontend gate, the IR validator and
+ * the C emitter all call wsGlobalPlan, and a shape it declines keeps the
+ * site's existing SC2020 fence. A field this compiler cannot fill would
+ * otherwise be read out of uninitialized memory.
+ */
+
+/** One `onopen`/`onmessage`/`onclose`/`onerror` slot: a union of the
+ * listener function and an absent arm, the shape every browser
+ * WebSocket carries. */
+export interface WsGlobalHandlerPlan {
+  /** "onopen" | "onmessage" | "onclose" | "onerror" */
+  field: string;
+  unionId: string;
+  /** Arm index of the listener function. */
+  fnTag: number;
+  /** Arm index of the null/undefined the slot starts at. */
+  absentTag: number;
+  /** The listener's one parameter: the event record. */
+  eventShapeId: string;
+  fnType: IrType;
+}
+
+/** The event record the listeners take — a subset of WHATWG's
+ * `{ code, reason, wasClean, data }`, each optionally undefined-armed. */
+export interface WsGlobalEventPlan {
+  shapeId: string;
+  /** Field name → its slot type, and the union tags when the slot admits
+   * undefined (the emitter wraps or writes the unit arm accordingly). */
+  fields: { name: string; type: IrType; unionId?: string; valueTag?: number; absentTag?: number }[];
+}
+
+/** What the `protocols` argument's arms are, positionally: index i is
+ * the union's tag i (or the single entry for a non-union parameter).
+ *  - "absent"   undefined/null — no Sec-WebSocket-Protocol header
+ *  - "string"   the value verbatim
+ *  - "strArray" joined with ", " (undici's list spelling, byte-checked)
+ *  - "fence"    a shape with no WebSocket meaning (zapo's own
+ *               `WaRawWebSocketInit` option bag, which only the `ws`
+ *               package understands). Reached only if the program
+ *               actually passes one; the arm throws the deferred fence
+ *               rather than silently dropping headers on the floor. */
+export type WsProtocolsArm = "absent" | "string" | "strArray" | "fence";
+
+export interface WsGlobalPlan {
+  /** The API record. */
+  shapeId: string;
+  /** The construct signature's parameters, after the url. */
+  protocolsParam: IrType | undefined;
+  /** Per-arm handling of `protocols`; empty when the signature has none. */
+  protocolsArms: readonly WsProtocolsArm[];
+  /** Arity of the construct signature (1..3). Anything past `protocols`
+   * is IGNORED, exactly as a browser's WebSocket ignores it. */
+  arity: number;
+  handlers: WsGlobalHandlerPlan[];
+  event: WsGlobalEventPlan;
+  /** send's single parameter. */
+  sendParam: IrType;
+  /** Its arms, tag-indexed (one entry for a non-union parameter): each
+   * is a string (text frame) or bytes (binary frame). */
+  sendArms: readonly IrType[];
+  /** close's parameters, in order (0..2 of them). */
+  closeParams: readonly IrType[];
+  /** Per close parameter, the union tags when it is the `T | undefined`
+   * spelling — null for a bare parameter the caller always supplies. */
+  closeArms: readonly ({ valueTag: number; absentTag: number } | null)[];
+}
+
+/** The undefined/null arm index of a two-armed union, or null when the
+ * union is not `T | undefined` / `T | null` in the expected direction. */
+function wsUnitArm(arms: readonly IrType[]): { valueTag: number; absentTag: number } | null {
+  if (arms.length !== 2) return null;
+  const unit = (t: IrType): boolean => t.kind === "undefinedT" || t.kind === "nullT";
+  if (unit(arms[0]!) && !unit(arms[1]!)) return { valueTag: 1, absentTag: 0 };
+  if (unit(arms[1]!) && !unit(arms[0]!)) return { valueTag: 0, absentTag: 1 };
+  return null;
+}
+
+/** `T` or `T | undefined`, answering the arm layout when it is the
+ * union spelling. */
+function wsOptional(
+  t: IrType,
+  want: (a: IrType) => boolean,
+  getUnion: (unionId: string) => IrUnionDef | undefined,
+): { unionId?: string; valueTag?: number; absentTag?: number } | null {
+  if (want(t)) return {};
+  if (t.kind !== "union") return null;
+  const def = getUnion(t.unionId);
+  if (!def) return null;
+  const layout = wsUnitArm(def.arms);
+  if (!layout || !want(def.arms[layout.valueTag]!)) return null;
+  return { unionId: t.unionId, ...layout };
+}
+
+/** Structural proof that `t` is the WebSocket global's construct
+ * signature over a record this compiler can BUILD — every field
+ * accounted for, every callback's event record fillable. Null means
+ * "not the surface", and every caller must then leave the site fenced.
+ *
+ * The rules are deliberately tight. A record with one extra field would
+ * leave that field unwritten (scr_cyc_alloc does not zero), and a
+ * listener whose event carries something this unit cannot produce would
+ * hand the program a value it never had. */
+export function wsGlobalPlan(
+  t: IrType,
+  getRecord: (shapeId: string) => IrRecordShape | undefined,
+  getUnion: (unionId: string) => IrUnionDef | undefined,
+): WsGlobalPlan | null {
+  if (t.kind !== "func" || t.params.length < 1 || t.params.length > 3) return null;
+  if (t.params[0]!.kind !== "string") return null;
+  if (t.ret.kind !== "record") return null;
+  const shape = getRecord(t.ret.shapeId);
+  if (!shape || shape.tuple || shape.indexValue !== undefined || shapeHasAccessorSlots(shape)) {
+    return null;
+  }
+  const names = shape.fields.map((f) => f.name).join(",");
+  if (names !== "binaryType,close,onclose,onerror,onmessage,onopen,readyState,send") return null;
+  const fieldT = (n: string): IrType => shape.fields.find((f) => f.name === n)!.type;
+  if (fieldT("binaryType").kind !== "string") return null;
+  if (fieldT("readyState").kind !== "f64") return null;
+
+  // send(data): one parameter, and every arm of it something the wire
+  // can carry — a string (text frame) or u8/ArrayBuffer bytes (binary).
+  const sendT = fieldT("send");
+  if (sendT.kind !== "func" || sendT.ret.kind !== "void" || sendT.params.length !== 1) return null;
+  const sendable = (a: IrType): boolean =>
+    a.kind === "string" || (a.kind === "bytes" && (a.elem === "u8" || a.elem === "buf"));
+  const sendParam = sendT.params[0]!;
+  let sendArms: IrType[];
+  if (sendParam.kind === "union") {
+    const def = getUnion(sendParam.unionId);
+    if (!def || !def.arms.every(sendable)) return null;
+    sendArms = [...def.arms];
+  } else if (!sendable(sendParam)) {
+    return null;
+  } else {
+    sendArms = [sendParam];
+  }
+
+  // close(code?, reason?): a number and a string, either bare or
+  // undefined-armed. More than two parameters is not this API.
+  const closeT = fieldT("close");
+  if (closeT.kind !== "func" || closeT.ret.kind !== "void" || closeT.params.length > 2) return null;
+  const closeWants: ((a: IrType) => boolean)[] = [
+    (a) => a.kind === "f64",
+    (a) => a.kind === "string",
+  ];
+  const closeArms: ({ valueTag: number; absentTag: number } | null)[] = [];
+  for (let i = 0; i < closeT.params.length; i++) {
+    const opt = wsOptional(closeT.params[i]!, closeWants[i]!, getUnion);
+    if (opt === null) return null;
+    closeArms.push(
+      opt.valueTag === undefined ? null : { valueTag: opt.valueTag, absentTag: opt.absentTag! },
+    );
+  }
+
+  // The four listener slots, and the ONE event record they share.
+  const handlers: WsGlobalHandlerPlan[] = [];
+  let eventShapeId: string | null = null;
+  for (const field of ["onclose", "onerror", "onmessage", "onopen"]) {
+    const ht = fieldT(field);
+    if (ht.kind !== "union") return null;
+    const def = getUnion(ht.unionId);
+    if (!def) return null;
+    const layout = wsUnitArm(def.arms);
+    if (!layout) return null;
+    const fnType = def.arms[layout.valueTag]!;
+    if (fnType.kind !== "func" || fnType.ret.kind !== "void" || fnType.params.length !== 1) {
+      return null;
+    }
+    const evT = fnType.params[0]!;
+    if (evT.kind !== "record") return null;
+    if (eventShapeId !== null && eventShapeId !== evT.shapeId) return null;
+    eventShapeId = evT.shapeId;
+    handlers.push({
+      field,
+      unionId: ht.unionId,
+      fnTag: layout.valueTag,
+      absentTag: layout.absentTag,
+      eventShapeId: evT.shapeId,
+      fnType,
+    });
+  }
+  if (eventShapeId === null) return null;
+  const evShape = getRecord(eventShapeId);
+  if (!evShape || evShape.tuple || evShape.indexValue !== undefined || shapeHasAccessorSlots(evShape)) {
+    return null;
+  }
+  const evWants: Record<string, (a: IrType) => boolean> = {
+    code: (a) => a.kind === "f64",
+    reason: (a) => a.kind === "string",
+    wasClean: (a) => a.kind === "bool",
+    // `data: unknown` — the checked-dynamic slot. A frame becomes a
+    // string or an ArrayBuffer there, chosen by binaryType at delivery.
+    data: (a) => a.kind === "dyn",
+  };
+  const eventFields: WsGlobalEventPlan["fields"] = [];
+  for (const f of evShape.fields) {
+    const want = evWants[f.name];
+    if (!want) return null; // a field this unit cannot fill
+    const opt = wsOptional(f.type, want, getUnion);
+    if (opt === null) return null;
+    // code/reason/wasClean exist only on a CLOSE event. A shape that
+    // declares one of them non-optional has nowhere to put "absent",
+    // and inventing a 0 / "" / false on an open or message event would
+    // be a value the program never had — decline the whole surface.
+    if (f.name !== "data" && opt.unionId === undefined) return null;
+    eventFields.push({ name: f.name, type: f.type, ...opt });
+  }
+
+  // `protocols`, arm by arm. A union of arms is the ordinary spelling;
+  // a bare type is the one-entry case.
+  const protoArm = (a: IrType): WsProtocolsArm =>
+    a.kind === "undefinedT" || a.kind === "nullT"
+      ? "absent"
+      : a.kind === "string"
+        ? "string"
+        : a.kind === "array" && a.elem.kind === "string"
+          ? "strArray"
+          : "fence";
+  const protocolsParam = t.params[1];
+  let protocolsArms: WsProtocolsArm[] = [];
+  if (protocolsParam !== undefined) {
+    if (protocolsParam.kind === "union") {
+      const def = getUnion(protocolsParam.unionId);
+      if (!def) return null;
+      protocolsArms = def.arms.map(protoArm);
+    } else {
+      protocolsArms = [protoArm(protocolsParam)];
+    }
+  }
+
+  return {
+    shapeId: t.ret.shapeId,
+    protocolsParam,
+    protocolsArms,
+    arity: t.params.length,
+    handlers,
+    event: { shapeId: eventShapeId, fields: eventFields },
+    sendParam,
+    sendArms,
+    closeParams: closeT.params,
+    closeArms,
+  };
 }
 
 /** True when the module contains any tlsca.* libCall — the link switch

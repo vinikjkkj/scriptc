@@ -8,6 +8,7 @@ import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mang
 import { OVERFLOW_MEMBER } from "./emit-shapes.js";
 import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper } from "./emit-walkers.js";
 import { genResultThunkFor } from "./emit-async.js";
+import { wsGlobalCtorFor } from "./emit-ws.js";
 
 
 
@@ -6641,6 +6642,17 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           `scr_promise_run_executor(${p.name}, ${exec.name}, ${resolve.name});${E.srcComment(e.loc)}`,
         );
         return p;
+      }
+      case "wsCtor": {
+        // globalThis.WebSocket: the address of ONE immortal closure per
+        // construct signature — never an allocation, because the global
+        // has identity (`globalThis.WebSocket === globalThis.WebSocket`).
+        // Retained like every interned function value — a no-op at
+        // rc == SIZE_MAX, and the frame's release is one too.
+        return E.newTemp(
+          e.type,
+          retainCallC(e.type, `(ScrClosure *)&${wsGlobalCtorFor(E, e.type)}`),
+        );
       }
       case "promiseWithResolvers": {
         // The newPromise pieces without an executor: a pending promise,
