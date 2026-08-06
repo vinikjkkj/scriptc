@@ -4333,6 +4333,26 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
   export function lowerExprStatement(L: Lowerer, expr: ts.Expression): IrStmt {
     const stmtNode = expr.parent;
     while (ts.isParenthesizedExpression(expr)) expr = expr.expression;
+    // `cond ? f() : g();` where BOTH arms are void — the branch spelled as
+    // an expression. A conditional EXPRESSION has to produce a value and
+    // the IR has no void value, so lowerTernary builds a void ternary and
+    // the validator rejects it: an INTERNAL error (SC9001) on a statement
+    // Node runs without comment, not a fence a --best-effort build could
+    // route around. In statement position the value is discarded, so the
+    // honest lowering is the branch itself — evaluate the condition, then
+    // exactly one arm, exactly once, keeping nothing. Both arms void is
+    // what makes the whole conditional void, so this never swallows a
+    // conditional whose value some caller wanted.
+    if (ts.isConditionalExpression(expr) && L.mapTypeOf(L.typeOf(expr))?.kind === "void") {
+      const loc = locOf(expr);
+      return {
+        kind: "if",
+        cond: L.lowerCondition(expr.condition),
+        then: [lowerExprStatement(L, expr.whenTrue)],
+        else_: [lowerExprStatement(L, expr.whenFalse)],
+        loc,
+      };
+    }
     // Assignment statements over the no-storage binding families:
     //   - `f1 = f2` where the RHS roots at an ambient-undefined name:
     //     Node evaluates the RHS first and dies on the root's
