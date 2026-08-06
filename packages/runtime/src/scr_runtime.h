@@ -4521,6 +4521,17 @@ bool scr_num_same_value(double a, double b);
  * en-US is the one embedded locale. Result +1; never throws. */
 ScrStr *scr_intl_num_format_en_us(double x);
 
+/* The environment's default locale as a BCP-47 tag — the value behind
+ * Intl.DateTimeFormat().resolvedOptions().locale. A fact about the
+ * MACHINE (the process.platform stance): win32 reads
+ * GetUserDefaultLocaleName, POSIX reads LC_ALL / LC_MESSAGES / LANG in
+ * ICU's own order, and the C/POSIX locale answers "en-US" like V8's
+ * Intl::DefaultLocale. This is a locale NAME, not locale DATA — no ICU
+ * tables come with it. Interned (ICU resolves its default once per
+ * process too); +1 per read; never throws. scr_lib.c documents the two
+ * declared gaps in the POSIX arm. */
+ScrStr *scr_intl_default_locale(void);
+
 /* ── Date, the composed slice (scr_lib.c) ─────────────────────────────
  * Date values have no representation; the runtime surface is exactly
  * Date.now() and toISOString over a millisecond time value. */

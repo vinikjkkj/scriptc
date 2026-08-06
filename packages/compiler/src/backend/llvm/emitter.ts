@@ -191,6 +191,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "num.toStringRadix": "scr_num_to_str_radix",
   "num.sameValue": "scr_num_same_value",
   "intl.numFormatEnUs": "scr_intl_num_format_en_us",
+  "intl.defaultLocale": "scr_intl_default_locale",
   "number.isFinite": "scr_num_is_finite",
   "number.isNaN": "scr_num_is_nan",
   "number.isInteger": "scr_num_is_integer",
