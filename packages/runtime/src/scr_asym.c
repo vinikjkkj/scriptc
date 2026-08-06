@@ -300,10 +300,13 @@ ScrKeyObject *scr_key_from_spki(const ScrBytes *der) {
   return scr_keyobj_from_spki(der->data, der->len);
 }
 
+/* Every raw answer in this file is one of Node's Buffers
+ * (diffieHellman, sign, the raw key exports) — the flavor is stamped at
+ * the ONE allocation they share, error returns included below. */
 static ScrBytes *scr_asym_bytes(const unsigned char *src, size_t n) {
   ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)n);
   memcpy(b->data, src, n);
-  return b;
+  return scr_bytes_stamp_buffer(b);
 }
 
 ScrBytes *scr_key_dh(const ScrKeyObject *priv, const ScrKeyObject *pub) {
@@ -313,7 +316,7 @@ ScrBytes *scr_key_dh(const ScrKeyObject *priv, const ScrKeyObject *pub) {
       const char *m = "Unable to compute the shared secret";
       scr_throw_error_msg(SCR_ERR_TYPE, m, strlen(m));
     }
-    return scr_bytes_new(SCR_BYTES_U8, 0);
+    return scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, 0));
   }
   return scr_asym_bytes(out, 32);
 }
@@ -321,7 +324,7 @@ ScrBytes *scr_key_dh(const ScrKeyObject *priv, const ScrKeyObject *pub) {
 ScrBytes *scr_key_sign(const ScrBytes *msg, const ScrKeyObject *key) {
   unsigned char sig[64];
   scr_asym_sign(sig, key, msg->data, msg->len);
-  if (scr_exc_pending()) return scr_bytes_new(SCR_BYTES_U8, 0);
+  if (scr_exc_pending()) return scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, 0));
   return scr_asym_bytes(sig, 64);
 }
 

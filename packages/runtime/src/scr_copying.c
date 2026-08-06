@@ -119,13 +119,17 @@ ScrArr *scr_arr_with_ref(ScrArr *a, double index, void *value) {
   return out;
 }
 
+/* toReversed and with build through TypedArrayCreateSameType, which
+ * takes the INTRINSIC default constructor rather than the species one —
+ * so a Buffer's toReversed()/with() answer a plain Uint8Array, unlike
+ * slice/subarray/fill/sort, which propagate. Checked against Node. */
 ScrBytes *scr_bytes_to_reversed(const ScrBytes *b) {
   ScrBytes *out = scr_bytes_new(b->elem, (double)b->len);
   for (size_t i = 0; i < b->len; i++) {
     scr_bytes_set(out, (double)i,
                   scr_bytes_get(b, (double)(b->len - i - 1)));
   }
-  return out;
+  return scr_bytes_stamp_plain(out);
 }
 
 ScrBytes *scr_bytes_with(const ScrBytes *b, double index, double value) {
@@ -138,7 +142,7 @@ ScrBytes *scr_bytes_with(const ScrBytes *b, double index, double value) {
   }
   ScrBytes *out = scr_bytes_copy(b);
   scr_bytes_set(out, actual, value);
-  return out;
+  return scr_bytes_stamp_plain(out);
 }
 
 ScrArr *scr_bytes_to_arr(const ScrBytes *b) {

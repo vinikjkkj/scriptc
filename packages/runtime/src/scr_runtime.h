@@ -4591,10 +4591,37 @@ typedef enum ScrBytesElem {
   SCR_BYTES_BUF,
 } ScrBytesElem;
 
+/* Buffer-ness, carried by the VALUE.
+ *
+ * SCR_BYTES_U8 serves Uint8Array AND Buffer -- ONE representation, which
+ * is what makes every Buffer assignable to every Uint8Array slot for
+ * free. The price is that `x.constructor` (the one question that
+ * SEPARATES the two, where `instanceof Uint8Array` merely joins them) has
+ * no static answer: the slot says Uint8Array while the value in it is a
+ * Buffer. So the producer stamps the answer here and the read asks the
+ * value.
+ *
+ * UNKNOWN is the default for u8, and it is the safety property, not an
+ * oversight: a producer nobody has classified makes the READ refuse,
+ * loudly, instead of guessing. A missed producer is then a fence at a
+ * named site, never a silent wrong answer -- which matters because this
+ * flag decides branches inside the funnel every crypto result and every
+ * inbound frame passes through. Every other elem names exactly one
+ * constructor, so those are PLAIN at construction. */
+typedef enum ScrBytesFlavor {
+  SCR_BF_UNKNOWN = 0,
+  SCR_BF_PLAIN = 1,  /* the elem's own typed array (Uint8Array, Uint32Array, ...) */
+  SCR_BF_BUFFER = 2, /* node:buffer's Buffer */
+} ScrBytesFlavor;
+
 typedef struct ScrBytes {
   size_t rc;
   size_t len; /* ELEMENT count, fixed at construction */
   ScrBytesElem elem;
+  /* ScrBytesFlavor, widened to a byte: it lands in the padding `elem`
+   * already carried before the pointer, so sizeof(ScrBytes) is unchanged
+   * and no allocation, layout, or refcount assumption moves. */
+  uint8_t flavor;
   uint8_t *data; /* len * elem_size bytes; owned unless backing is set */
   /* NULL for owners. A view (DataView, subarray, Buffer-slice) sets this
    * to the retained OWNER it aliases (chain depth is always exactly 1:
@@ -4604,6 +4631,28 @@ typedef struct ScrBytes {
 } ScrBytes;
 
 size_t scr_bytes_elem_size(ScrBytesElem elem); /* 1, 4, 4, 4, 8 */
+
+/* Stamp a FRESHLY constructed value (+1, unaliased) with its Node flavor
+ * and answer it unchanged — no copy, no refcount step. Marking an aliased
+ * value would rewrite a flavor its other holders can see, so these belong
+ * only on a construction expression. NULL passes through (a pending
+ * exception from the constructor). Runtime-internal: producers here wrap
+ * their OWN fresh allocation, keeping its single reference. */
+ScrBytes *scr_bytes_stamp_buffer(ScrBytes *b);
+ScrBytes *scr_bytes_stamp_plain(ScrBytes *b);
+
+/* The same stamp under the LIBCALL convention — argument BORROWED, result
+ * OWNED (+1) — because that is what the emitter assumes of every libFn:
+ * it releases the argument temp and keeps the result. Same pointer, one
+ * retain. Getting this wrong frees the value the mark just stamped, which
+ * is how the first draft of this failed. */
+ScrBytes *scr_bytes_mark_buffer(ScrBytes *b);
+ScrBytes *scr_bytes_mark_plain(ScrBytes *b);
+
+/* `x.constructor === Buffer` — the flavor the producer stamped. THROWS a
+ * catchable Error naming `why` (the read site) when the value is
+ * UNCLASSIFIED: no producer said, so there is no honest answer. Borrows. */
+bool scr_bytes_is_buffer(const ScrBytes *b, const ScrStr *why);
 
 /* node:string_decoder's StringDecoder (scr_bytes.c, beside the decoders
  * it shares): the decoder value is a record holding the CANONICAL

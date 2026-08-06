@@ -779,7 +779,7 @@ static void scr_dgram_read(ScrDgramSocket *s) {
       inet_ntop(AF_INET, &((struct sockaddr_in *)&from)->sin_addr, ip, sizeof ip);
       rport = ntohs(((struct sockaddr_in *)&from)->sin_port);
     }
-    ScrBytes *chunk = scr_bytes_new(SCR_BYTES_U8, (double)n);
+    ScrBytes *chunk = scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, (double)n));
     memcpy(chunk->data, buf, (size_t)n);
     ScrStr *addr = scr_str_new(ip, strlen(ip));
     ScrStr *family = scr_str_new("IPv4", 4);
