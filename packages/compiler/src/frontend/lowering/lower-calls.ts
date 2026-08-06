@@ -5864,8 +5864,28 @@ const inliningPredicates = new Set<ts.Symbol>();
         ctxDecl && !ctxDecl.getSourceFile().isDeclarationFile
           ? L.mapTypeOf(L.checker.getReturnTypeOfSignature(ctxSigs[0]!))
           : null;
-      const ctxRet =
-        isAsyncLike && ctxRetRaw?.kind === "promise" ? ctxRetRaw.inner : ctxRetRaw;
+      // An ASYNC lambda's slot may spell the promise INSIDE a union: the
+      // optional-handler idiom `(info) => void | Promise<void>` maps to
+      // the IR union `Promise<void> | undefined`. The type an async body
+      // fulfils with is the PROMISE ARM's inner, never the whole union —
+      // an async function's value is always a promise, so `undefined` is
+      // not one of its outcomes. Adopting the union verbatim made the
+      // fiber's inner type `Promise<void> | undefined` and its ABI
+      // `Promise<Promise<void> | undefined>`, which is assignable to no
+      // slot at all: funcCoerceAdapter then stranded the INVOCATION with
+      // a TypeError, and every zapo socket handler died the moment it
+      // fired. Peel the single promise arm and let the ordinary adapter
+      // wrap the natural promise into the union (a plain arm wrap).
+      // Two-or-more promise arms name no single awaited type, and a union
+      // with none is not this idiom: both keep the previous disposition.
+      const asyncCtxInner = (t: IrType | null): IrType | null => {
+        if (t === null) return null;
+        if (t.kind === "promise") return t.inner;
+        if (t.kind !== "union") return t;
+        const proms = (L.unions.get(t.unionId)?.arms ?? []).filter((a) => a.kind === "promise");
+        return proms.length === 1 ? (proms[0] as IrType & { kind: "promise" }).inner : t;
+      };
+      const ctxRet = isAsyncLike ? asyncCtxInner(ctxRetRaw) : ctxRetRaw;
       if (
         ctxRet?.kind === "union" &&
         (innerRet.kind === "void" ? L.armTag(ctxRet.unionId, UNDEFINED_T) >= 0 : true)

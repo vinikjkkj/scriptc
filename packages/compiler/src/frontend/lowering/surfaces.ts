@@ -1503,6 +1503,19 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
    *     tamper-guard prologue) registered in stdlibGlobalAliases. */
   export function stdlibGlobalNameOf(L: Lowerer, expr: ts.Expression): string | null {
     if (ts.isParenthesizedExpression(expr)) return stdlibGlobalNameOf(L, expr.expression);
+    // A CAST over the receiver changes only the STATIC view — the object
+    // is still the one global. This is how a program names a global the
+    // ambient types do not declare the way it wants to read it:
+    // `(globalThis as typeof globalThis & { WebSocket?: Ctor }).WebSocket`
+    // is the canonical spelling (lower-ws.ts peels it for its own gate for
+    // exactly this reason), and zapo's transport reaches `process` through
+    // the same one. What keeps the peel honest is the MEMBER check below,
+    // untouched: the name must still resolve to a symbol the standard
+    // library declares, so a cast that INVENTS a member resolves to no
+    // global and keeps its fence.
+    if (ts.isAsExpression(expr) || ts.isSatisfiesExpression(expr) || ts.isNonNullExpression(expr)) {
+      return stdlibGlobalNameOf(L, expr.expression);
+    }
     if (ts.isIdentifier(expr)) {
       // `globalThis` itself: a reserved intrinsic — tsc rejects user
       // bindings of the name, and its special symbol carries no ordinary
