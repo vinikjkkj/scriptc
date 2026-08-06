@@ -2720,6 +2720,31 @@ export function pureReemittable(e: IrExpr): boolean {
         }
       }
     }
+    // The default is a WIDTH-SUBSET of the left's single non-unit arm. The
+    // result type tsc computes for `a ?? b` is `NonNullable<typeof a> |
+    // typeof b`, and an OBJECT LITERAL default keeps its own FRESH type
+    // there even when the only slot it was ever written for is the left's
+    // arm: `config.webInfo ?? { webSubPlatform: 0 }` over a
+    // `WebInfo | null | undefined` left types
+    // `{ webSubPlatform: number } | WebInfo`. Those are not two
+    // representations — the default names only fields the arm declares,
+    // and every arm field it omits is optional-flavored, so building it AT
+    // the arm is exactly the literal completion an annotated slot performs
+    // (`const w: WebInfo = { webSubPlatform: 0 }`, which lowers today).
+    // Build it there and the whole expression IS the arm — the ordinary
+    // narrowed shape above, with the default still LAZY. The retag helper
+    // cannot take this one: it pre-evaluates the default, and a default
+    // that calls something is not droppable.
+    // LOSSLESS only: a default carrying a field the arm does not declare
+    // would have that field dropped by the width copy, and Node keeps it.
+    if (rest.length === 1) {
+      const arm = rest[0]!;
+      const rightT = L.mapTypeOf(L.typeOf(expr.right));
+      if (rightT !== null && losslessWidthInto(L, rightT, arm)) {
+        const right = L.lowerExprExpecting(expr.right, arm);
+        if (typeEquals(right.type, arm)) return { kind: "nullish", left, right, type: arm, loc };
+      }
+    }
     L.unsupported(
       "SC1090",
       expr,
@@ -2727,6 +2752,26 @@ export function pureReemittable(e: IrExpr): boolean {
         ? `'??' on '${L.fmt(left.type)}' (the non-nullish result is a sub-union; check a discriminant field first)`
         : `'??' where the default changes the result type (left is '${L.fmt(left.type)}' but the whole expression is '${L.fmt(type)}' — give both sides one type)`,
     );
+  }
+
+/** True when a `src`-typed value enters a `dst` record slot by the width
+   * copy WITHOUT LOSING ANYTHING: both are plain records (no tuple, no
+   * index signature on the source — an overflow map could hold keys the
+   * copy would drop), every field `src` declares is declared by `dst` too,
+   * and the pair is in the width relation. widthLiftPlan alone is not
+   * enough: recordWidthPlan only walks the DESTINATION's fields, so it
+   * happily accepts a source whose extra fields the copy silently drops.
+   * The direction this adds is the one a `??` default needs — the fields
+   * `dst` contributes are exactly the optional-flavored ones completion
+   * fills with undefined, which is what an annotated slot already does to
+   * the same literal. */
+  function losslessWidthInto(L: Lowerer, src: IrType, dst: IrType): boolean {
+    if (src.kind !== "record" || dst.kind !== "record") return false;
+    const s = L.shapes.get(src.shapeId);
+    const d = L.shapes.get(dst.shapeId);
+    if (!s || !d || s.tuple || d.tuple || s.indexValue !== undefined) return false;
+    if (s.fields.some((f) => !d.fields.some((g) => g.name === f.name))) return false;
+    return L.widthLiftPlan(src, dst) !== null;
   }
 
 /** Interned `%nullish.retag.<n>(l, r)` — the retagged `??` (see
