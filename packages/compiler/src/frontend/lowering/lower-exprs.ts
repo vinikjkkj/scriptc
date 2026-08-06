@@ -8233,8 +8233,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         }
       }
       // JS `any`-origin operands (the checked-dynamic declaration story):
-      // arithmetic and ordering CHECK the dyn side to the static side's
-      // scalar kind (dynCheck — a catchable TypeError on mismatch) and
+      // arithmetic, bitwise and ordering CHECK the dyn side to the static
+      // side's scalar kind (dynCheck — a catchable TypeError on mismatch) and
       // compute natively. Node would ToNumber-coerce instead — the honest
       // divergence is loud (a throw), never a silent wrong answer
       // (SEMANTICS.md). tsc rejects these forms on real `unknown`, so only
@@ -8257,12 +8257,32 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           [ts.SyntaxKind.GreaterThanToken]: ">",
           [ts.SyntaxKind.GreaterThanEqualsToken]: ">=",
         };
+        // The BITWISE six on a dyn operand. Same table, and the one row
+        // where the number context is not a guess at all: `&`, `|`, `^`,
+        // `<<`, `>>`, `>>>` are ToInt32/ToUint32 in the spec — there is no
+        // ToPrimitive branch, no string arm, and the result is always a
+        // number. The static f64 case below already lowers these JS-exact
+        // (scr_bit_*: NaN/±Infinity → 0, truncate, wrap mod 2^32, shift
+        // counts masked to 5 bits), so the dyn form is the SAME node with
+        // the operands checked — which is what the untyped varint / zigzag
+        // / 64-bit-split core of a generated protobuf runtime is written
+        // in, and the only reason it needed an engine.
+        const BIT_BIN: Partial<Record<ts.SyntaxKind, "&" | "|" | "^" | "<<" | ">>" | ">>>">> = {
+          [ts.SyntaxKind.AmpersandToken]: "&",
+          [ts.SyntaxKind.BarToken]: "|",
+          [ts.SyntaxKind.CaretToken]: "^",
+          [ts.SyntaxKind.LessThanLessThanToken]: "<<",
+          [ts.SyntaxKind.GreaterThanGreaterThanToken]: ">>",
+          [ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken]: ">>>",
+        };
         const arith = NUM_BIN[op];
         const cmp = NUM_CMP[op];
-        if ((arith || cmp) && (other.type.kind === "f64" || other.type.kind === "dyn")) {
+        const bit = BIT_BIN[op];
+        if ((arith || cmp || bit) && (other.type.kind === "f64" || other.type.kind === "dyn")) {
           const l = checkNum(left);
           const r = checkNum(right);
           if (arith) return { kind: "bin", op: arith, left: l, right: r, type: F64, loc };
+          if (bit) return { kind: "bin", op: bit, left: l, right: r, type: F64, loc };
           return { kind: "bin", op: cmp!, left: l, right: r, type: BOOL, loc };
         }
         // `+`: number when the OTHER side is a number, string concat when
