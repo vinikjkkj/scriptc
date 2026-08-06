@@ -1852,17 +1852,42 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
    * inline in the body. JSON-import bindings (pure data) load next; then
    * the body. Top-level var statements assign the pre-registered globals
    * instead of declaring locals. */
-  /** True when an import STATEMENT binds at least one value that resolves
-   * to a static (non-island) global — the signal that its `.d.ts` twin's
-   * runtime must be initialized here (a spec table read at init). A
+  /** True when a module-edge STATEMENT binds at least one value that
+   * resolves to a static (non-island) global — the signal that its `.d.ts`
+   * twin's runtime must be initialized here (a spec table read at init). A
    * namespace/island binding (the minified proto) resolves to no static
-   * global, so its trap-only twin init stays orphaned. */
+   * global, so its trap-only twin init stays orphaned.
+   *
+   * A RE-EXPORT (`export { WA_VERSION } from '../spec/version'`) binds the
+   * same value through the same twin storage as the import spelling: the
+   * name resolves past the alias to the declaration file, and globalOf's
+   * twin bridge hands back the `.js` twin's global. Reading the edge off
+   * the import spelling alone left the whole re-export form orphaned —
+   * declTwinGlobalOf gave the reader the twin's GLOBAL while the header
+   * kept calling the declaration file's empty init, so the storage stayed
+   * at its C zero value. For a `ScrStr *` that is NULL and scr_str_retain
+   * dereferences it: a crash with no trap, no code and no location. */
   function importBindsStaticTwinGlobal(L: Lowerer, stmt: ts.Statement): boolean {
-    if (!ts.isImportDeclaration(stmt) || stmt.importClause === undefined) return false;
-    const nb = stmt.importClause.namedBindings;
-    if (nb === undefined || !ts.isNamedImports(nb)) return false;
-    for (const el of nb.elements) {
+    let elements: readonly (ts.ImportSpecifier | ts.ExportSpecifier)[];
+    if (ts.isImportDeclaration(stmt)) {
+      if (stmt.importClause === undefined) return false;
+      const nb = stmt.importClause.namedBindings;
+      if (nb === undefined || !ts.isNamedImports(nb)) return false;
+      elements = nb.elements;
+    } else if (ts.isExportDeclaration(stmt)) {
+      // `export * from` names no binding to resolve — no static global to
+      // prove, so the declaration file's own init stands (unchanged).
+      if (stmt.isTypeOnly || stmt.exportClause === undefined) return false;
+      if (!ts.isNamedExports(stmt.exportClause)) return false;
+      elements = stmt.exportClause.elements;
+    } else {
+      return false;
+    }
+    for (const el of elements) {
       if (el.isTypeOnly) continue;
+      // A string export name (`export { x as "a-b" }`) is not a resolvable
+      // reference — nothing to ask globalOf about.
+      if (!ts.isIdentifier(el.name)) continue;
       const g = L.globalOf(el.name);
       if (g && g.type.kind !== "jsval") return true;
     }
@@ -1920,6 +1945,17 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
           // use, as before) by taking the declaration file's own empty init.
           const depTwin = dep.isDeclarationFile ? L.declTwinSourceOf(dep) : null;
           const depRt = depTwin !== null && importBindsStaticTwinGlobal(L, stmt) ? depTwin : dep;
+          // SCRIPTC_TWININIT_WHY probe: every declaration-file edge, the
+          // statement spelling that carries it, and which init the header
+          // ended up naming. One run says whether a twin stayed orphaned
+          // because it holds no static global (the intended carve-out) or
+          // because the edge was spelled as a re-export (the bug).
+          if (depTwin !== null && process.env["SCRIPTC_TWININIT_WHY"] !== undefined) {
+            process.stderr.write(
+              `TWININIT ${ts.isExportDeclaration(stmt) ? "export" : "import"} ` +
+                `dep=${dep.fileName} twin=${depTwin.fileName} redirected=${depRt === depTwin}\n`,
+            );
+          }
           const depInit = L.initNameOf.get(depRt);
           if (depInit !== undefined) {
             const loc = locOf(stmt);

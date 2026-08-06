@@ -39,7 +39,13 @@ const EXPECTED = "hello, world\nHELLO, COMPILER!\nhello, chain!\n";
 const pbEntry = join(fixtureDir, "cases/pb/main.ts");
 const PB_EXPECTED =
   "4 4 2 3\n" +
-  "123 ping@1:ping mute@2:mute-<chatJid> star@5:star-<remote>-<id> 3literal\n";
+  "123 ping@1:ping mute@2:mute-<chatJid> star@5:star-<remote>-<id> 3literal\n" +
+  // The re-export-only generated module (spec/version): the whole line
+  // reads storage that only its twin's %init writes. Reaching a declaration
+  // file through `export { X } from` and nothing else left that init
+  // unscheduled while the read was bound to the twin's global — a NULL
+  // dereference with no trap, no code and no location.
+  "pbgen-2.0.1 11 65535 5\n";
 
 async function buildAndRun(name: string, dynamic: boolean, from = entry): Promise<string> {
   mkdirSync(outDir, { recursive: true });

@@ -7844,6 +7844,66 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             };
           }
         }
+        // `o.f = v` on a CLASS-INSTANCE or RECORD receiver in VALUE
+        // position — the CHAINED write `a.len = o.head = 0`, whose INNER
+        // assignment is an expression. Nothing about the write differs
+        // from statement position; only its value was missing. So this is
+        // the statement machinery's own target resolution and its own
+        // write (fieldTarget / fieldSetStmt) under a seqExpr, in JS's
+        // evaluation order — the target reference first, then the RHS,
+        // then the write — with the assigned value as the expression's
+        // value. That value is the FIELD-typed one, the same
+        // representation-only yield the `x = e` variable form above
+        // documents: a plain data slot has no setter to observe the
+        // difference.
+        //
+        // ACCESSOR containers stay fenced. Their write is a setter CALL,
+        // and a call is a control transfer the seqExpr straight-line
+        // contract (seqExprSafeStmt) does not admit; a setter can also
+        // return something other than what it was handed, so the yielded
+        // value would be a second question. Checked-dynamic receivers are
+        // the branch above.
+        if (ts.isPropertyAccessExpression(expr.left) && !expr.left.questionDotToken) {
+          const ft = L.fieldTarget(expr.left);
+          if (
+            ft !== null &&
+            (ft.container === "class" || ft.container === "record" || ft.container === "recordOvf") &&
+            ft.obj.type.kind !== "dyn"
+          ) {
+            const recvT = ft.obj.type;
+            const recvTmp = L.declareHiddenLocal("%setRecv", recvT);
+            const value = L.lowerExprExpecting(expr.right, ft.fieldType);
+            const valTmp = L.declareHiddenLocal("%setVal", ft.fieldType);
+            const valRef = (): IrExpr => ({ kind: "varRef", localId: valTmp.id, type: ft.fieldType, loc });
+            const write = L.fieldSetStmt(
+              { ...ft, obj: { kind: "varRef", localId: recvTmp.id, type: recvT, loc } },
+              valRef(),
+              loc,
+              expr.left,
+            );
+            // SCRIPTC_CHAINASSIGN_WHY probe: every site this branch claims,
+            // with its container and field type — so one run says which
+            // sites moved from the fence to a lowering, and whether any of
+            // them is a container this rule did not mean to take.
+            if (process.env["SCRIPTC_CHAINASSIGN_WHY"] !== undefined) {
+              process.stderr.write(
+                `CHAINASSIGN ${ft.container} ${expr.left.name.text}:${L.fmt(ft.fieldType)} ` +
+                  `${loc.file}:${expr.getSourceFile().getLineAndCharacterOfPosition(expr.getStart()).line + 1}\n`,
+              );
+            }
+            return {
+              kind: "seqExpr",
+              stmts: [
+                { kind: "varDecl", localId: recvTmp.id, init: ft.obj, loc },
+                { kind: "varDecl", localId: valTmp.id, init: value, loc },
+                write,
+              ],
+              result: valRef(),
+              type: ft.fieldType,
+              loc,
+            };
+          }
+        }
       }
       // Destructuring assignment in VALUE position (`(() => [i] = [i+1])()`,
       // `({} = {x} = a)`, `var d = ([] = src)`): the statement machinery's
