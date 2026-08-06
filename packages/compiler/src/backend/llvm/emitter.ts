@@ -6621,6 +6621,12 @@ class LlEmitter {
       // ABI yet, so it refuses loudly (SC3001) instead of miscompiling.
       case "bigLit":
         throw new LlvmUnsupportedError("bigint literals");
+      // globalThis.WebSocket builds its API record out of five
+      // synthesized C functions (emit-ws.ts) over per-program record
+      // shapes; the LLVM tier has no port of that scaffolding yet, so it
+      // refuses loudly rather than emitting a half-built object.
+      case "wsCtor":
+        throw new LlvmUnsupportedError("globalThis.WebSocket");
       case "promiseVoidWiden": {
         // One ScrPromise* either way — ownership transfers, type-only
         // (the C emitter's rule).

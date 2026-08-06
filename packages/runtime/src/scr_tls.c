@@ -386,6 +386,22 @@ static mbedtls_x509_crt *scr_tls_system_ca(void) {
     for (size_t i = 0; i < sizeof bundles / sizeof bundles[0]; i++) {
       if (mbedtls_x509_crt_parse_file(&scr_tls_system_roots, bundles[i]) == 0) break;
     }
+    /* NODE_EXTRA_CA_CERTS EXTENDS the trust anchors for real dials --
+     * that is what the variable does in Node, and scr_tls_ca.c only
+     * ever surfaced it to the INTROSPECTION api (getCACertificates
+     * ('extra')). The distinction is invisible on a Linux host, where
+     * one of the bundle paths above answers; on win32 there is no path
+     * in the list at all, so before this the chain was EMPTY and every
+     * https/wss verification failed with 'unable to verify the first
+     * certificate' (measured, dialing wss://web.whatsapp.com). Parsed
+     * after the bundles so a system store still wins first place in
+     * the chain, exactly like Node's append. */
+    {
+      const char *extra = getenv("NODE_EXTRA_CA_CERTS");
+      if (extra != NULL && extra[0] != '\0') {
+        (void)mbedtls_x509_crt_parse_file(&scr_tls_system_roots, extra);
+      }
+    }
   }
   return &scr_tls_system_roots;
 }
