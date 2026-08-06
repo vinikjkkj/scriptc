@@ -8025,7 +8025,11 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         lowerErrorCodeTypeofTest(L, expr, loc) ??
         L.lowerCaughtTypeofTest(expr, loc) ??
         lowerDynTypeofTest(L, expr, loc) ??
-        lowerUnionTypeofTest(L, expr, loc);
+        lowerUnionTypeofTest(L, expr, loc) ??
+        // Also intercepted BEFORE the operands lower: a bare `.constructor`
+        // read has no value form (no constructor objects exist here), so
+        // the comparison has to be seen whole.
+        lowerBytesCtorTest(L, expr, loc);
       if (test) return test;
     }
 
@@ -8630,6 +8634,73 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       });
       if (!tsArm) continue;
       return { sym: valSym, tsArm: L.checker.getBaseTypeOfLiteralType(tsArm) };
+    }
+    return null;
+  }
+
+/** `x.constructor === Uint8Array` / `=== Buffer` (and the `!==` forms) on
+   * a bytes<u8> operand — a RUNTIME flavor read, never a fold.
+   *
+   * The seductive analogy is backwards, and measuring it is what put this
+   * rule here rather than a boolLit. `x instanceof Uint8Array` folds from
+   * the static type EXACTLY because a Buffer *is* instanceof Uint8Array:
+   * the test joins the two spellings, so one representation answers both.
+   * `.constructor` is the one question that SEPARATES them, which is
+   * precisely the distinction one representation erased. Folding it from
+   * the checker's type answers TRUE for every Buffer that arrives through
+   * a Uint8Array-typed slot — and on the QR path nearly every caller does
+   * exactly that (`createHash().digest()`, `createHmac().digest()`,
+   * `diffieHellman()` all hand Node a Buffer into a `Uint8Array`
+   * parameter). Content and aliasing agreed there; identity did not, and
+   * an identity-only divergence is still a wrong value, produced silently
+   * inside the funnel every crypto result passes through.
+   *
+   * So the answer comes from the VALUE: bytes.isBuffer reads the flavor
+   * its producer stamped. A value whose producer never classified it
+   * REFUSES at this read instead of guessing (nodes.ts, bytes.isBuffer).
+   *
+   * u8 ONLY, and only against these two names. Every other elem names
+   * exactly one constructor, so `u32.constructor === Uint32Array` is a
+   * static question — a fold with no measured demand, and this site has
+   * already shown what an unmeasured fold costs. It keeps the fence. */
+  function lowerBytesCtorTest(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr | null {
+    const negated = expr.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken;
+    for (const [a, b] of [
+      [expr.left, expr.right],
+      [expr.right, expr.left],
+    ] as const) {
+      if (!ts.isPropertyAccessExpression(a) || a.name.text !== "constructor" || a.questionDotToken) continue;
+      if (!ts.isIdentifier(b)) continue;
+      const rSym = L.resolveValueSymbol(b);
+      if (!rSym || !L.isStdlibSymbol(rSym)) continue;
+      const wantBuffer = rSym.name === "Buffer" ? true : rSym.name === "Uint8Array" ? false : null;
+      if (wantBuffer === null) continue;
+      // The CHECKER's type decides only whether this rule applies at all
+      // — never what the answer is. A receiver it cannot call bytes<u8>
+      // keeps the stdlib-member fence, so this can turn a fence into a
+      // lowering and can never re-answer one.
+      const recvIr = L.mapTypeOf(L.typeOf(a.expression));
+      if (recvIr?.kind !== "bytes" || recvIr.elem !== "u8") continue;
+      const value = L.lowerExpr(a.expression);
+      if (value.type.kind !== "bytes" || value.type.elem !== "u8") continue;
+      // The refusal an UNCLASSIFIED value raises names this READ, so the
+      // unstamped producer is findable from the message. Deliberately NOT
+      // the `[SCxxxx at ...]` bracket form: that spelling is a compile
+      // fence's, it is what every trap count greps for, and this is a
+      // runtime condition, not a refused lowering.
+      const line = a.expression.getSourceFile().getLineAndCharacterOfPosition(a.expression.getStart()).line + 1;
+      const why: IrExpr = {
+        kind: "strLit",
+        value: `${rSym.name} at ${loc.file}:${line}`,
+        type: STRING,
+        loc,
+      };
+      const isBuf: IrExpr = { kind: "libCall", fn: "bytes.isBuffer", args: [value, why], type: BOOL, loc };
+      // `=== Uint8Array` is the NEGATION of Buffer-ness, `=== Buffer` is
+      // Buffer-ness itself; `!==` flips whichever it was.
+      return wantBuffer === negated
+        ? { kind: "unary", op: "!", operand: isBuf, type: BOOL, loc }
+        : isBuf;
     }
     return null;
   }

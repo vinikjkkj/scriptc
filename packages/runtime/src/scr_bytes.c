@@ -35,6 +35,10 @@ static ScrBytes *scr_bytes_alloc(ScrBytesElem elem, size_t len) {
   b->rc = 1;
   b->len = len;
   b->elem = elem;
+  /* u8 is the one ambiguous elem (Uint8Array AND Buffer ride it), so it
+   * starts UNCLASSIFIED and the producer must say; every other elem
+   * names exactly one constructor. See the header. */
+  b->flavor = (elem == SCR_BYTES_U8) ? SCR_BF_UNKNOWN : SCR_BF_PLAIN;
   b->data = calloc(len ? len : 1, scr_bytes_elem_size(elem));
   if (!b->data) scr_bytes_oom();
   b->backing = NULL;
@@ -64,7 +68,56 @@ ScrBytes *scr_bytes_new(ScrBytesElem elem, double n) {
 ScrBytes *scr_bytes_copy(const ScrBytes *src) {
   ScrBytes *b = scr_bytes_alloc(src->elem, src->len);
   memcpy(b->data, src->data, src->len * scr_bytes_elem_size(src->elem));
+  /* A copy of the SAME logical value keeps its flavor — the dyn/jsval
+   * boundaries copy where Node passes the object through, so preserving
+   * is what keeps them faithful. The two COPY CONSTRUCTORS built on this
+   * (`new Uint8Array(buf)`, `Buffer.from(u8)`) take the constructor's
+   * flavor instead, and the frontend stamps it over this one. */
+  b->flavor = src->flavor;
   return b;
+}
+
+/* ── Buffer-ness (see the header) ──────────────────────────────────────── */
+
+ScrBytes *scr_bytes_stamp_buffer(ScrBytes *b) {
+  if (b) b->flavor = SCR_BF_BUFFER;
+  return b;
+}
+
+ScrBytes *scr_bytes_stamp_plain(ScrBytes *b) {
+  if (b) b->flavor = SCR_BF_PLAIN;
+  return b;
+}
+
+/* The libCall convention: the argument is BORROWED and the result OWNED,
+ * so the stamp answers a RETAINED reference to the same value. */
+ScrBytes *scr_bytes_mark_buffer(ScrBytes *b) {
+  return scr_bytes_retain(scr_bytes_stamp_buffer(b));
+}
+
+ScrBytes *scr_bytes_mark_plain(ScrBytes *b) {
+  return scr_bytes_retain(scr_bytes_stamp_plain(b));
+}
+
+bool scr_bytes_is_buffer(const ScrBytes *b, const ScrStr *why) {
+  if (!b || b->flavor == SCR_BF_UNKNOWN) {
+    /* No producer classified this value, so neither answer is honest.
+     * Refuse at the READ, naming it — a missed producer has to be
+     * findable, never a silently wrong branch. */
+    static const char head[] = "the Buffer-ness of this value is unknown "
+                               "(its producer stamps no flavor): ";
+    size_t whylen = why ? why->len : 0;
+    size_t n = sizeof head - 1 + whylen;
+    char *msg = malloc(n + 1);
+    if (!msg) scr_bytes_oom();
+    memcpy(msg, head, sizeof head - 1);
+    if (whylen) memcpy(msg + sizeof head - 1, why->data, whylen);
+    msg[n] = '\0';
+    scr_throw_error_msg(SCR_ERR_ERROR, msg, n);
+    free(msg);
+    return false;
+  }
+  return b->flavor == SCR_BF_BUFFER;
 }
 
 void scr_bytes_release(ScrBytes *b) {
@@ -202,6 +255,10 @@ ScrBytes *scr_bytes_slice(const ScrBytes *b, double start, double end) {
   size_t esize = scr_bytes_elem_size(b->elem);
   ScrBytes *out = scr_bytes_alloc(b->elem, count);
   memcpy(out->data, b->data + s * esize, count * esize);
+  /* TypedArray.prototype.slice builds through SpeciesConstructor, and
+   * Buffer sets no Symbol.species, so a Buffer's slice IS a Buffer
+   * (verified against Node, both directions). The flavor rides. */
+  out->flavor = b->flavor;
   return out;
 }
 
@@ -232,6 +289,9 @@ ScrBytes *scr_bytes_subarray(ScrBytes *b, double start, double end) {
   v->rc = 1;
   v->len = count;
   v->elem = b->elem;
+  /* subarray is species-built too — `buf.subarray()` is a Buffer, and
+   * Buffer.prototype.slice IS this function. */
+  v->flavor = b->flavor;
   v->data = b->data + s * scr_bytes_elem_size(b->elem);
   v->backing = scr_bytes_retain(owner);
 #ifdef SCR_RC_AUDIT
@@ -293,6 +353,13 @@ ScrBytes *scr_dataview_new(ScrBytes *src, double byte_off, bool has_len, double 
   v->rc = 1;
   v->len = (size_t)len; /* elem u8 — len IS the byte length */
   v->elem = SCR_BYTES_U8;
+  /* THREE spellings share this constructor: `new DataView(x.buffer, ..)`,
+   * `new Uint8Array(x.buffer, ..)` and `Buffer.from(x.buffer, ..)`. Only
+   * the spelling knows which, so the frontend stamps the two it can name
+   * and a bare DataView stays UNCLASSIFIED — DataView is neither of the
+   * two constructors this flag distinguishes, and guessing one would be
+   * the wrong answer for both. */
+  v->flavor = SCR_BF_UNKNOWN;
   v->data = owner->data + (size_t)off;
   v->backing = scr_bytes_retain(owner);
 #ifdef SCR_RC_AUDIT
@@ -1230,9 +1297,9 @@ double scr_bytes_write_str(ScrBytes *b, const ScrStr *s, const ScrStr *enc,
 ScrBytes *scr_bytes_concat_len(const ScrArr *list, double total) {
   /* An empty list short-circuits BEFORE the total validates — Node's
    * own `if (list.length === 0) return new FastBuffer()`. */
-  if (list->len == 0) return scr_bytes_alloc(SCR_BYTES_U8, 0);
+  if (list->len == 0) return scr_bytes_stamp_buffer(scr_bytes_alloc(SCR_BYTES_U8, 0));
   if (!scr_bytes_validate_off("length", total, 9007199254740991.0)) return NULL;
-  ScrBytes *b = scr_bytes_alloc(SCR_BYTES_U8, (size_t)total);
+  ScrBytes *b = scr_bytes_stamp_buffer(scr_bytes_alloc(SCR_BYTES_U8, (size_t)total));
   size_t o = 0;
   for (size_t i = 0; i < list->len && o < b->len; i++) {
     const ScrBytes *part = (const ScrBytes *)(uintptr_t)list->data[i];
@@ -1292,7 +1359,7 @@ ScrBytes *scr_bytes_concat(const ScrArr *list) {
     const ScrBytes *part = (const ScrBytes *)(uintptr_t)list->data[i];
     total += part->len;
   }
-  ScrBytes *b = scr_bytes_alloc(SCR_BYTES_U8, total);
+  ScrBytes *b = scr_bytes_stamp_buffer(scr_bytes_alloc(SCR_BYTES_U8, total));
   size_t o = 0;
   for (size_t i = 0; i < list->len; i++) {
     const ScrBytes *part = (const ScrBytes *)(uintptr_t)list->data[i];

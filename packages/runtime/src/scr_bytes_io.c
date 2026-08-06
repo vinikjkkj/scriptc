@@ -53,7 +53,7 @@ ScrBytes *scr_fs_read_file_bytes(ScrStr *path) {
   ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)len);
   memcpy(b->data, buf, len);
   free(buf);
-  return b;
+  return scr_bytes_stamp_buffer(b); /* Node: readFileSync without an encoding answers a Buffer */
 }
 
 /* readFileSync's runtime-encoding form (a JS helper's untyped `enc`
@@ -148,7 +148,7 @@ ScrBytes *scr_crypto_random_bytes(double n) {
   }
   ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, n);
   if (b->len > 0) arc4random_buf(b->data, b->len);
-  return b;
+  return scr_bytes_stamp_buffer(b); /* Node: randomBytes answers a Buffer */
 }
 
 /* ── process.stdout/stderr.write(buf) ──────────────────────────────────── */
@@ -813,7 +813,7 @@ ScrBytes *scr_crypto_pbkdf2_sha256(const ScrBytes *password, const ScrBytes *sal
     done += take;
   }
   free(block);
-  return out;
+  return scr_bytes_stamp_buffer(out); /* Node: pbkdf2Sync answers a Buffer */
 }
 
 /* ── crypto.hkdfSync (HMAC-SHA256 only) ───────────────────────────────────

@@ -749,6 +749,13 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "buffer.byteLenStr": { argTypes: [STRING, STRING], result: F64 },
   "buffer.isEncoding": { argTypes: [STRING], result: BOOL },
   "buffer.concatLen": { argTypes: [arrayOf(BYTES_U8), F64], result: BYTES_U8 },
+  // The bytes FLAVOR trio (see nodes.ts): the marks answer their own
+  // argument, so they wrap a fresh construction in place; isBuffer takes
+  // the read site's diagnostic text as its second argument, for the
+  // refusal an UNCLASSIFIED value raises.
+  "bytes.markBuffer": { argTypes: [BYTES_U8], result: BYTES_U8 },
+  "bytes.markPlain": { argTypes: [BYTES_U8], result: BYTES_U8 },
+  "bytes.isBuffer": { argTypes: [BYTES_U8, STRING], result: BOOL },
   // The checked-dynamic compare/equals validators (Node's argument
   // ladders over dyn-boxed invalid-input probes).
   "buffer.compareChk": { argTypes: [DYN, DYN], result: F64 },

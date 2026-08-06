@@ -5311,6 +5311,27 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
  * observation. */
 let bytesViewCtors = 0;
 
+/** Stamp a FRESHLY constructed bytes value with the Node flavor its
+ * spelling produces. `Buffer.alloc(n)` and `new Uint8Array(n)` are the
+ * same scr_bytes_new at runtime -- one representation, by design -- so
+ * the spelling is the only place that knows, and it has to say so here
+ * or the value stays UNCLASSIFIED and every later `.constructor` read of
+ * it refuses (loudly, which is the point: see nodes.ts on bytes.isBuffer).
+ *
+ * Only u8 carries the ambiguity. Every other elem names exactly one
+ * constructor, so the runtime classifies those at construction and a
+ * mark here would be noise. */
+function markFlavor(v: IrExpr, flavor: "buffer" | "plain", loc: SrcLoc): IrExpr {
+  if (v.type.kind !== "bytes" || v.type.elem !== "u8") return v;
+  return {
+    kind: "libCall",
+    fn: flavor === "buffer" ? "bytes.markBuffer" : "bytes.markPlain",
+    args: [v],
+    type: v.type,
+    loc,
+  };
+}
+
 export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
   Uint8Array: "u8",
   Uint32Array: "u32",
@@ -5408,16 +5429,16 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
               `${expr.getSourceFile().getLineAndCharacterOfPosition(expr.getStart()).line + 1}`,
           );
         }
-        return { kind: "bytesIntrinsic", method: "dataViewNew", receiver, args: idxArgs, type, loc };
+        return markFlavor({ kind: "bytesIntrinsic", method: "dataViewNew", receiver, args: idxArgs, type, loc }, "plain", loc);
       }
     }
-    if (args.length === 0) return { kind: "bytesNew", source: null, type, loc };
+    if (args.length === 0) return markFlavor({ kind: "bytesNew", source: null, type, loc }, "plain", loc);
     if (args.length === 1 && !ts.isSpreadElement(args[0]!)) {
       const argNode = args[0]!;
       if (ts.isArrayLiteralExpression(argNode) && !argNode.elements.some(ts.isSpreadElement)) {
         const elems = argNode.elements.map((el) => L.lowerExprExpecting(el, F64));
         const seed: IrExpr = { kind: "arrayLit", elems, type: arrayOf(F64), loc };
-        return { kind: "bytesNew", source: seed, type, loc };
+        return markFlavor({ kind: "bytesNew", source: seed, type, loc }, "plain", loc);
       }
       // The SYNTACTIC `new T(new ArrayBuffer(n))` and `new T(new
       // SharedArrayBuffer(n))` forms — fresh-buffer construction (the
@@ -5460,7 +5481,7 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
           );
         }
         const count: IrExpr = { kind: "numLit", value: byteLen / elemSize, type: F64, loc };
-        return { kind: "bytesNew", source: count, type, loc };
+        return markFlavor({ kind: "bytesNew", source: count, type, loc }, "plain", loc);
       }
       const src = L.lowerExpr(argNode);
       if (
@@ -5468,7 +5489,10 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
         typeEquals(src.type, type) ||
         (src.type.kind === "array" && src.type.elem.kind === "f64")
       ) {
-        return { kind: "bytesNew", source: src, type, loc };
+        // The COPY constructor: `new Uint8Array(buf)` over a Buffer is a
+        // plain Uint8Array in Node -- the copy does not inherit the
+        // source's flavor, it takes the constructor's.
+        return markFlavor({ kind: "bytesNew", source: src, type, loc }, "plain", loc);
       }
       if (src.type.kind === "bytes") {
         L.noLowering(
@@ -5565,6 +5589,11 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
     }
     const receiver = L.lowerExpr(bufNode.expression);
     const idxArgs = args.slice(1).map((a) => L.lowerExprExpecting(a, F64));
+    // NOT markFlavor'd, and neither is the fresh-buffer form above: a
+    // DataView is neither Uint8Array nor Buffer, so the value stays
+    // UNCLASSIFIED and a `.constructor` read of one refuses rather than
+    // picking one of two wrong answers. DataView-ness would be a third
+    // flavor; nothing in zapo or the corpus asks for it.
     return { kind: "bytesIntrinsic", method: "dataViewNew", receiver, args: idxArgs, type: BYTES_U8, loc };
   }
 
@@ -6181,7 +6210,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
         if (srcIr?.kind === "bytes") {
           const receiver = L.lowerExpr(srcNode);
           const idxArgs = args.slice(1).map((a) => L.lowerExprExpecting(a, F64));
-          return { kind: "bytesIntrinsic", method: "dataViewNew", receiver, args: idxArgs, type: BYTES_U8, loc };
+          return markFlavor({ kind: "bytesIntrinsic", method: "dataViewNew", receiver, args: idxArgs, type: BYTES_U8, loc }, "buffer", loc);
         }
       }
       if (args.length >= 1 && args.length <= 2 && !ts.isSpreadElement(args[0]!)) {
@@ -6192,7 +6221,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
           if (args.length === 1) {
             const elems = argNode.elements.map((el) => L.lowerExprExpecting(el, F64));
             const seed: IrExpr = { kind: "arrayLit", elems, type: arrayOf(F64), loc };
-            return { kind: "bytesNew", source: seed, type: BYTES_U8, loc };
+            return markFlavor({ kind: "bytesNew", source: seed, type: BYTES_U8, loc }, "buffer", loc);
           }
         } else {
           const srcIr = L.mapTypeOf(L.typeOf(argNode));
@@ -6201,13 +6230,16 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
             const encName = encNode ? bufEncoding(L, "Buffer.from", encNode) : "utf8";
             const s = L.lowerExprExpecting(argNode, STRING);
             const enc: IrExpr = { kind: "strLit", value: encName, type: STRING, loc };
-            return { kind: "libCall", fn: "buffer.fromStr", args: [s, enc], type: BYTES_U8, loc };
+            // buffer.fromStr is SHARED with TextEncoder.encode, whose
+            // answer is a plain Uint8Array — so the flavor belongs to the
+            // call site, not to the runtime function.
+            return markFlavor({ kind: "libCall", fn: "buffer.fromStr", args: [s, enc], type: BYTES_U8, loc }, "buffer", loc);
           }
           if (args.length === 1 && srcIr?.kind === "bytes" && srcIr.elem === "u8") {
-            return { kind: "bytesNew", source: L.lowerExpr(argNode), type: BYTES_U8, loc };
+            return markFlavor({ kind: "bytesNew", source: L.lowerExpr(argNode), type: BYTES_U8, loc }, "buffer", loc);
           }
           if (args.length === 1 && srcIr?.kind === "array" && srcIr.elem.kind === "f64") {
-            return { kind: "bytesNew", source: L.lowerExpr(argNode), type: BYTES_U8, loc };
+            return markFlavor({ kind: "bytesNew", source: L.lowerExpr(argNode), type: BYTES_U8, loc }, "buffer", loc);
           }
         }
       }
@@ -6229,7 +6261,9 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       // and the deterministic choice — a program observing the difference
       // is depending on garbage.
       const size = L.lowerExprExpecting(args[0]!, F64);
-      const fresh: IrExpr = { kind: "bytesNew", source: size, type: BYTES_U8, loc };
+      // The fill forms below answer the RECEIVER (+1, chaining), so the
+      // flavor stamped here rides through them.
+      const fresh: IrExpr = markFlavor({ kind: "bytesNew", source: size, type: BYTES_U8, loc }, "buffer", loc);
       if (args.length === 1) return fresh;
       // alloc(size, fill, encoding?): the fill semantics ARE fill()'s —
       // the fresh buffer is the receiver of a whole-range fill.
