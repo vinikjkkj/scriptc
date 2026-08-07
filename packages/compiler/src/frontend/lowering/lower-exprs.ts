@@ -6263,15 +6263,72 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     );
   }
 
+/** A node whose body gets its OWN `this`, so a `this` inside it is not the
+ * enclosing object-literal method's. Arrows are deliberately absent: they
+ * inherit, which is why the walk keeps descending into them. */
+function resetsThis(n: ts.Node): boolean {
+  const k = n.kind;
+  return (
+    k === ts.SyntaxKind.FunctionDeclaration ||
+    k === ts.SyntaxKind.FunctionExpression ||
+    k === ts.SyntaxKind.ClassDeclaration ||
+    k === ts.SyntaxKind.ClassExpression ||
+    k === ts.SyntaxKind.MethodDeclaration ||
+    k === ts.SyntaxKind.GetAccessor ||
+    k === ts.SyntaxKind.SetAccessor ||
+    k === ts.SyntaxKind.Constructor ||
+    k === ts.SyntaxKind.ClassStaticBlockDeclaration
+  );
+}
+
 /** Rejects any `this` inside an object-literal method body — including in
-   * nested arrows, which inherit the method's `this` (nested function
-   * expressions reset it, but their bare `this` is already a tsc error
-   * under noImplicitThis, so over-rejecting them here changes nothing). */
+   * nested arrows, which inherit the method's `this`.
+   *
+   * A nested function declaration/expression, class, method or accessor
+   * does NOT inherit it: its `this` is its own, and the compiler already
+   * has a lowering for that one (lowerExpr's ThisKeyword arm — `dyn.this`,
+   * the ambient receiver, in a JS source file; SC1080 in TypeScript). The
+   * walk used to descend into them anyway, on the stated ground that
+   * "their bare `this` is already a tsc error under noImplicitThis" — true
+   * of TypeScript and FALSE of the provenance JS this rule exists for,
+   * where checkJs defers the diagnostic and the fence takes the whole
+   * enclosing body with it. Measured on zapo's shipped
+   * `spec/proto/index.js`: nine of the nineteen esbuild `__commonJS`
+   * module-table bodies refuse here, ZERO of the nine has a `this` that is
+   * lexically the method's (every one is inside protobufjs's own
+   * `function Writer() { this.len = 0 }`), and those nine are 27 519 of
+   * the 34 111 bytes of protobufjs the bundle carries.
+   *
+   * The stop is taken only when NO frame on the lowering stack carries a
+   * `this` local (L.peekThis()). Where one does, the old whole-body walk
+   * stands: resolveThis() would reach past the function boundary and
+   * answer with the ENCLOSING binding — a class method's receiver, or the
+   * stream the shim bound for `new Readable({ read() {...} })` — and a
+   * wrong receiver is worse than a fence.
+   *
+   * Half of a rule: a `this` let through here is only correct because a
+   * method call on a dyn receiver binds that receiver (lower-calls'
+   * dynInvoke fallback). Loosening this walk without that one turns a
+   * located refusal into a silent wrong value. */
   export function rejectThisInObjectMethod(L: Lowerer, node: ts.Node): void {
+    rejectThisInObjectMethodIn(L, node, L.peekThis() === null);
+  }
+
+function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean): void {
     if (node.kind === ts.SyntaxKind.ThisKeyword) {
       L.unsupported("SC1090", node, "references to 'this' in object literal methods");
     }
-    ts.forEachChild(node, (child) => L.rejectThisInObjectMethod(child));
+    ts.forEachChild(node, (child) => {
+      if (mayStop && resetsThis(child)) {
+        if (process.env["SCRIPTC_THISWALK_WHY"] !== undefined) {
+          const sf = child.getSourceFile();
+          const p = ts.getLineAndCharacterOfPosition(sf, child.getStart(sf));
+          process.stderr.write(`[thiswalk] stop ${ts.SyntaxKind[child.kind]} ${sf.fileName}:${p.line + 1}\n`);
+        }
+        return;
+      }
+      rejectThisInObjectMethodIn(L, child, mayStop);
+    });
   }
 
 /** The accessor twin of rejectThisInObjectMethod: a get/set accessor body

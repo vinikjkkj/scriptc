@@ -5026,16 +5026,12 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       };
     }
     // Names NO dyn-representable prototype declares: the member can only
-    // be an OWN property, so "read the member, call it" IS Node's
-    // semantics for every possible dyn value — `handlers.onDone(x)` on a
-    // checked-dynamic object calls the stored function (dynKeyGet answers
-    // the member or undefined; dynCall throws Node's exact catchable
-    // "handlers.onDone is not a function" on a non-function). Prototype
-    // names (map/join/hasOwnProperty/call/...) keep the fence: on a real
-    // dyn array/string/object Node would run the METHOD, which no stored
-    // member models. Order note: JS reads the callee before evaluating
-    // arguments — dynKeyGet's undefined-receiver TypeError fires first,
-    // exactly Node.
+    // be an OWN property, so "call the own member" IS Node's semantics for
+    // every possible dyn value — `handlers.onDone(x)` on a checked-dynamic
+    // object calls the stored function. Prototype names
+    // (map/join/hasOwnProperty/call/...) keep the fence: on a real dyn
+    // array/string/object Node would run the METHOD, which no stored
+    // member models.
     if (DYN_PROTO_METHOD_NAMES.has(access.name.text)) return null;
     // Optional forms (`obj.cb?.()`, `obj?.cb()`) belong to the chain
     // machinery's short-circuit semantics — not modeled here yet.
@@ -5044,15 +5040,36 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     if (call.arguments.some((a) => ts.isSpreadElement(a))) {
       L.unsupported("SC1090", call, "spread arguments in calls through 'unknown' values");
     }
-    const member: IrExpr = {
-      kind: "dynKeyGet",
-      key: { kind: "strLit", value: access.name.text, type: STRING, loc: locOf(access) },
-      value: recv,
-      type: DYN,
-      loc: locOf(access),
-    };
     const args = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
-    return { kind: "dynCall", callee: member, calleeName: access.getText(), args, type: DYN, loc };
+    // dynInvoke, NOT a keyed read plus a plain call. `o.m(x)` in JS binds
+    // `o` as the callee's `this`, and a read-then-call DROPS it: the
+    // member runs with the ambient receiver (undefined), so a body that
+    // says `this.len` answers "Cannot read properties of undefined" — or,
+    // in a `typeof this.x` shape, a wrong STRING and no diagnostic at all.
+    // scr_dyn_invoke's OBJ arm reads the same own member the keyed read
+    // would have (own properties shadow prototypes in JS too) and calls it
+    // inside the ambient-receiver window, which is the whole difference.
+    // Everything else the runtime already answered the same way: a FUNC
+    // box calls its own property with the box bound, a HANDLE takes the
+    // tag's ops ladder, an island cell runs the engine's own dispatch, and
+    // every remaining kind falls out at the same catchable
+    // "<spelling> is not a function".
+    //
+    // Order note: a nullish receiver's "Cannot read properties of
+    // undefined (reading 'm')" now fires AFTER the arguments evaluate
+    // rather than before — the divergence this function's header already
+    // documents for the dispatch-name arm above, unchanged in message and
+    // unchanged in kind, and now uniform across both arms instead of
+    // splitting on the method's name.
+    return {
+      kind: "dynInvoke",
+      recv,
+      method: access.name.text,
+      calleeName: access.getText(),
+      args,
+      type: DYN,
+      loc,
+    };
   }
 
 /** Prototype method names of the checked-dynamic tree-representable kinds (String, Array,
