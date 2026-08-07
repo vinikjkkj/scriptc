@@ -106,6 +106,18 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // operators are ToInt32/ToUint32 by specification, so a static build
     // owes Node the same bytes and this differential is the proof.
     ["varintish", "varint-cli.ts"],
+    // dyntable is shorthand METHODS in a dyn object literal — the value half
+    // of esbuild's `__commonJS` module table. The helper's parameter is
+    // untyped, so each table's contextual type is `any` and the literal
+    // takes the JS declaration fallback (a dyn object, not a record); the
+    // methods lower through the same lowerLambda the record path gives the
+    // identical node. String-literal keys no C identifier can spell, a
+    // numeric key, closures over the enclosing scope, a method calling a
+    // sibling entry, and the source-order interleaving of effectful
+    // property values are all driven, so the differential is the proof
+    // that the lowered closures carry the right values and not just a
+    // compiling shape.
+    ["dyntable", "dyntable-cli.ts"],
   ] as const)("%s compiles statically and byte-matches Node", async ([pkg, file]) => {
     const entry = join(pilotRoot, file);
     const binary = await buildStatic(entry, [pkg]);
@@ -182,6 +194,36 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     for (const f of fences) {
       expect(f.message).toMatch(/bare 'return'/);
     }
+  }, 120_000);
+
+  // Tier 2, and the frontier this pins is the BUNDLER MODULE TABLE:
+  // esbuild's `__commonJS`, `r({ "node_modules/x.js"(e, t) {...} })`, which
+  // is what zapo's `spec/proto/index.js` is built out of nineteen times.
+  //
+  // The methods now lower (each one is a bundled module body), so the whole
+  // table COMPILES and the module bodies are visible to the compiler. What
+  // is left is the OTHER half of the same helper, and it is one construct
+  // wearing two faces: `var o = Object.getOwnPropertyNames` is a builtin in
+  // VALUE position, and `o` captured by the returned thunk then has no
+  // static storage to thread. Both fences sit on the table's ACCESS path,
+  // so the package compiles and traps on use.
+  //
+  // Pinned at exactly two, by message: if a method refusal ever comes back
+  // it lands here as a third, and if the value-position lift ever arrives
+  // this drops to zero and the package graduates to tier 1.
+  test("the esbuild module table compiles, with only the getOwnPropertyNames pair left", () => {
+    const { coverage } = analyze(join(pilotRoot, "modtable-cli.ts"), { npmStatic: ["modtable"] });
+    expect(coverage.npmStatic).toEqual([{ package: "modtable", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0); // builds — fences are runtime
+    const fences = coverage.runtimeFences ?? [];
+    expect(fences.map((f) => f.message).sort()).toEqual([
+      expect.stringContaining("'Object.getOwnPropertyNames'") as string,
+      expect.stringContaining("the binding 'o' captured through a plain nested function") as string,
+    ]);
+    // the module bodies are REACHED: the three method bodies more than
+    // doubled the statements the compiler sees (20 behind the refusal)
+    expect(coverage.stats.statementsTotal).toBeGreaterThan(35);
   }, 120_000);
 
   // Tier 2: commander opts in and COMPILES as program modules — the
