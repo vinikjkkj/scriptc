@@ -6361,8 +6361,8 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       // exit primitives eagerly): the engine element read, exiting at the
       // declared number type.
       if (recv.type.kind === "jsval") return islandElementRead(L, expr, recv);
-      const index = L.lowerExpr(expr.argumentExpression);
-      if (index.type.kind !== "f64") {
+      const index = checkedJsNumber(L, expr.argumentExpression, L.lowerExpr(expr.argumentExpression));
+      if (index === null) {
         L.unsupported("SC1090", expr.argumentExpression, "indexing with non-number keys");
       }
       return { kind: "bytesIntrinsic", method: "get", receiver: recv, args: [index], type: F64, loc: locOf(expr) };
@@ -6568,8 +6568,8 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         );
       }
     }
-    const index = L.lowerExpr(expr.argumentExpression);
-    if (index.type.kind !== "f64") {
+    const index = checkedJsNumber(L, expr.argumentExpression, L.lowerExpr(expr.argumentExpression));
+    if (index === null) {
       L.unsupported("SC1090", expr.argumentExpression, "indexing with non-number keys");
     }
     // The LOWERED receiver's element type wins over the checker's when
@@ -7078,8 +7078,8 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         const loc = locOf(expr);
         return { kind: "exprStmt", expr: { kind: "jsOp", op: "setIdx", args: [recv, key, value], type: VOID, loc }, loc };
       }
-      const index = L.lowerExpr(target.argumentExpression);
-      if (index.type.kind !== "f64") {
+      const index = checkedJsNumber(L, target.argumentExpression, L.lowerExpr(target.argumentExpression));
+      if (index === null) {
         L.unsupported("SC1090", target.argumentExpression, "indexing with non-number keys");
       }
       const value = L.lowerExprExpecting(expr.right, F64);
@@ -7307,8 +7307,8 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       const loc = locOf(expr);
       return { kind: "exprStmt", expr: { kind: "jsOp", op: "setIdx", args: [arr, key, value], type: VOID, loc }, loc };
     }
-    const index = L.lowerExpr(target.argumentExpression);
-    if (index.type.kind !== "f64") {
+    const index = checkedJsNumber(L, target.argumentExpression, L.lowerExpr(target.argumentExpression));
+    if (index === null) {
       L.unsupported("SC1090", target.argumentExpression, "indexing with non-number keys");
     }
     // The value flows into the element slot like an assignment: union
@@ -7652,6 +7652,15 @@ export function lowerPrefixUnary(L: Lowerer, expr: ts.PrefixUnaryExpression): Ir
         if (operand.type.kind === "jsval") {
           return { kind: "jsOp", op: "neg", args: [operand], type: JSVAL, loc };
         }
+        // Unary `-` is ToNumber then negate — no string arm, no
+        // ToPrimitive branch past the primitives — so an untyped JS
+        // operand runs the real conversion (`-'3'` is -3, `-undefined` is
+        // NaN) instead of refusing.
+        if (operand.type.kind === "dyn" && isJsSourceFile(expr.getSourceFile())) {
+          tonumWhy(expr, "unary-minus");
+          const n: IrExpr = { kind: "libCall", fn: "dyn.toNumber", args: [operand], type: F64, loc };
+          return { kind: "unary", op: "-", operand: n, type: F64, loc };
+        }
         if (operand.type.kind !== "f64") L.unsupported("SC1043", expr);
         if (operand.kind === "numLit") return { ...operand, value: -operand.value, loc };
         return { kind: "unary", op: "-", operand, type: F64, loc };
@@ -7667,6 +7676,11 @@ export function lowerPrefixUnary(L: Lowerer, expr: ts.PrefixUnaryExpression): Ir
         if (operand.type.kind === "string") {
           return { kind: "libCall", fn: "num.fromString", args: [operand], type: F64, loc };
         }
+        // Unary `+` over an untyped JS operand IS ToNumber, spelled.
+        if (operand.type.kind === "dyn" && isJsSourceFile(expr.getSourceFile())) {
+          tonumWhy(expr, "unary-plus");
+          return { kind: "libCall", fn: "dyn.toNumber", args: [operand], type: F64, loc };
+        }
         if (operand.type.kind !== "f64") L.unsupported("SC1043", expr);
         return operand;
       }
@@ -7681,6 +7695,15 @@ export function lowerPrefixUnary(L: Lowerer, expr: ts.PrefixUnaryExpression): Ir
         // `~x` on a bigint is -x-1 over the infinite representation.
         if (operand.type.kind === "bigint") {
           return { kind: "libCall", fn: "big.not", args: [operand], type: BIGINT, loc };
+        }
+        // `~x` on an untyped JS operand: ToInt32 is ToNumber then the
+        // truncating wrap the f64 node already performs, so the dyn form
+        // is the same node with the operand converted (`~'3'` is -4,
+        // `~undefined` is -1) — the unary twin of the bitwise six.
+        if (operand.type.kind === "dyn" && isJsSourceFile(expr.getSourceFile())) {
+          tonumWhy(expr, "unary-tilde");
+          const n: IrExpr = { kind: "libCall", fn: "dyn.toNumber", args: [operand], type: F64, loc };
+          return { kind: "unary", op: "~", operand: n, type: F64, loc };
         }
         if (operand.type.kind !== "f64") L.unsupported("SC1043", expr);
         return { kind: "unary", op: "~", operand, type: F64, loc };
@@ -7779,6 +7802,40 @@ function seqExprSafeStmt(s: IrStmt): boolean {
     default:
       return false;
   }
+}
+
+/** The SCRIPTC_TONUM_WHY probe: one line per site where a JS operator over
+ * an untyped operand now runs its real ToNumber/ToPrimitive conversion
+ * instead of a checked cast to number. Read in the SAME run as the result
+ * it is meant to explain — a branch that never fires produces a
+ * byte-identical artifact and no honest claim can be made about it. */
+export function tonumWhy(node: ts.Node, what: string): void {
+  if (!process.env["SCRIPTC_TONUM_WHY"]) return;
+  const sf = node.getSourceFile();
+  const pos = ts.getLineAndCharacterOfPosition(sf, node.getStart(sf));
+  console.error(`[tonum] ${what} ${sf.fileName}:${pos.line + 1}:${pos.character + 1}`);
+}
+
+/** A position that must hold a NUMBER and has no ToNumber of its own: an
+ * element-access index, an `a.slice(i)` argument, a numeric switch
+ * discriminant. `+` over untyped JS operands answers a dyn (its result
+ * kind is a runtime property — either side a string makes it
+ * concatenation), so `a[i + 1]` and `a.slice(i + 1)` now arrive here with
+ * a dyn where the sum used to be an f64 built from two checked operands.
+ * These positions settle it the same way the operand check used to: a
+ * CHECKED cast, exactly as loud as before and in the same place.
+ *
+ * ToNumber would be WRONG here and that is the whole distinction — `a[true]`
+ * is the property "true" in JS, not element 1, and `a.slice('2')` is not
+ * `a.slice(2)`'s spec path either. Conversion belongs to the operators
+ * that specify one; a slot that specifies none keeps the validated exit.
+ * Null when there is no numeric home and the caller should fence. */
+export function checkedJsNumber(L: Lowerer, node: ts.Node, value: IrExpr): IrExpr | null {
+  if (value.type.kind === "f64") return value;
+  if (value.type.kind === "dyn" && isJsSourceFile(node.getSourceFile())) {
+    return { kind: "dynCheck", value, type: F64, loc: value.loc };
+  }
+  return null;
 }
 
 export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
@@ -8318,16 +8375,27 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         }
       }
       // JS `any`-origin operands (the checked-dynamic declaration story):
-      // arithmetic, bitwise and ordering CHECK the dyn side to the static
-      // side's scalar kind (dynCheck — a catchable TypeError on mismatch) and
-      // compute natively. Node would ToNumber-coerce instead — the honest
-      // divergence is loud (a throw), never a silent wrong answer
-      // (SEMANTICS.md). tsc rejects these forms on real `unknown`, so only
-      // any-typed JS reaches this; when BOTH sides are dyn a number
-      // context is the only honest guess for arithmetic — both check.
+      // each operator runs its OWN specified conversion on the dyn side —
+      // ToNumber for arithmetic and the bitwise six, ToPrimitive plus the
+      // string test for `+` and for ordering — instead of a checked cast
+      // to number. The cast was a guess everywhere except when the value
+      // already WAS a number: `'3' - 1`, `x | 0` over an unset field,
+      // `undefined + 1`, `'a' + 'b'` and `'a' < 'b'` are each fully
+      // specified, none of them is a number context, and every one of
+      // them threw. tsc rejects these forms on real `unknown`, so only
+      // any-typed JS reaches this.
+      // The REFERENCE kinds keep the loud throw: their ToPrimitive calls
+      // a user valueOf/toString the dyn model holds no prototype chain
+      // for, so answering there would be the silent wrong value this
+      // whole tier exists to avoid (see dyn.toNumber in nodes.ts).
       if (isJsSourceFile(expr.getSourceFile())) {
-        const checkNum = (e: IrExpr): IrExpr =>
-          e.type.kind === "dyn" ? { kind: "dynCheck", value: e, type: F64, loc: e.loc } : e;
+        const toNum = (e: IrExpr, why: string): IrExpr => {
+          if (e.type.kind !== "dyn") return e;
+          tonumWhy(expr, why);
+          return { kind: "libCall", fn: "dyn.toNumber", args: [e], type: F64, loc: e.loc };
+        };
+        const asDyn = (e: IrExpr): IrExpr =>
+          e.type.kind === "dyn" ? e : { kind: "dynFrom", value: e, type: DYN, loc: e.loc };
         const other = left.type.kind === "dyn" ? right : left;
         const NUM_BIN: Partial<Record<ts.SyntaxKind, "-" | "*" | "/" | "%" | "**">> = {
           [ts.SyntaxKind.MinusToken]: "-",
@@ -8345,8 +8413,10 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         // The BITWISE six on a dyn operand. Same table, and the one row
         // where the number context is not a guess at all: `&`, `|`, `^`,
         // `<<`, `>>`, `>>>` are ToInt32/ToUint32 in the spec — there is no
-        // ToPrimitive branch, no string arm, and the result is always a
-        // number. The static f64 case below already lowers these JS-exact
+        // ToPrimitive string arm and the result is always a number. What
+        // ToInt32 does NOT do is refuse a non-number: it is ToNumber and
+        // then a truncating wrap, so `'3' | 0` is 3 and `undefined | 0`
+        // is 0. The static f64 case below already lowers these JS-exact
         // (scr_bit_*: NaN/±Infinity → 0, truncate, wrap mod 2^32, shift
         // counts masked to 5 bits), so the dyn form is the SAME node with
         // the operands checked — which is what the untyped varint / zigzag
@@ -8363,18 +8433,38 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         const arith = NUM_BIN[op];
         const cmp = NUM_CMP[op];
         const bit = BIT_BIN[op];
-        if ((arith || cmp || bit) && (other.type.kind === "f64" || other.type.kind === "dyn")) {
-          const l = checkNum(left);
-          const r = checkNum(right);
+        const otherNumeric = other.type.kind === "f64" || other.type.kind === "dyn";
+        if ((arith || bit) && otherNumeric) {
+          const l = toNum(left, arith ? "arith" : "bitwise");
+          const r = toNum(right, arith ? "arith" : "bitwise");
           if (arith) return { kind: "bin", op: arith, left: l, right: r, type: F64, loc };
-          if (bit) return { kind: "bin", op: bit, left: l, right: r, type: F64, loc };
-          return { kind: "bin", op: cmp!, left: l, right: r, type: BOOL, loc };
+          return { kind: "bin", op: bit!, left: l, right: r, type: F64, loc };
         }
-        // `+`: number when the OTHER side is a number, string concat when
-        // it is a string — the two static homes; dyn+dyn stays a number.
+        if (cmp && otherNumeric) {
+          // Abstract relational comparison. With a STATIC number on the
+          // other side the two ToPrimitive results can never BOTH be
+          // strings, so the string arm is unreachable and ToNumber on the
+          // dyn side is the entire algorithm. dyn vs dyn cannot be decided
+          // here — `'a' < 'b'` is a string comparison and `'10' < 9` is a
+          // numeric one — so the runtime makes the test.
+          if (left.type.kind === "dyn" && right.type.kind === "dyn") {
+            tonumWhy(expr, "relational");
+            const fn: IrLibFn =
+              cmp === "<" ? "dyn.lt" : cmp === "<=" ? "dyn.le" : cmp === ">" ? "dyn.gt" : "dyn.ge";
+            return { kind: "libCall", fn, args: [left, right], type: BOOL, loc };
+          }
+          return { kind: "bin", op: cmp, left: toNum(left, "relational"), right: toNum(right, "relational"), type: BOOL, loc };
+        }
+        // `+` is the operator that is NOT a number context: after
+        // ToPrimitive, EITHER side being a string makes the whole thing
+        // concatenation. Only a statically STRING other side settles that
+        // at compile time; a number or a dyn on the other side leaves the
+        // result KIND a runtime property, so the node's type is dyn and
+        // scr_dyn_add makes the test.
         if (op === ts.SyntaxKind.PlusToken) {
           if (other.type.kind === "f64" || other.type.kind === "dyn") {
-            return { kind: "bin", op: "+", left: checkNum(left), right: checkNum(right), type: F64, loc };
+            tonumWhy(expr, "add");
+            return { kind: "libCall", fn: "dyn.add", args: [asDyn(left), asDyn(right)], type: DYN, loc };
           }
           if (other.type.kind === "string") {
             // String-context `+`: JS's answer is String(unknown) — the
