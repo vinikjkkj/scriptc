@@ -29,6 +29,7 @@ import { compile } from "@scriptc/compiler";
 // the IDENTICAL routes standalone inside its container.
 // eslint-disable-next-line import/no-relative-packages
 import { startFetchServers } from "../fixtures/fetch/servers.mjs";
+import { exeName } from "./exe.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -102,7 +103,7 @@ async function build(entry: string): Promise<string> {
   const outDir = join(cacheDir, `fetch-${key}`);
   mkdirSync(outDir, { recursive: true });
   const result = await compile(entry, {
-    outPath: join(outDir, "program"),
+    outPath: join(outDir, exeName("program")),
     outDir,
     sanitize,
     dynamic: true,

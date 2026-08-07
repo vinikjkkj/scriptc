@@ -10,12 +10,20 @@ import { describe, expect, test } from "vitest";
 import { compile, renderAll } from "@scriptc/compiler";
 
 const repoRoot = join(import.meta.dirname, "../..");
-const diagDir = join(repoRoot, "tests/diagnostics");
+/* Spelled POSIX because the SNAPSHOTS are: renderAll reports forward-slash
+ * paths on every host, while join()/globSync() hand back backslashes on
+ * win32 — so a backslash-spelled diagDir strips nothing and every snapshot
+ * comes out carrying an absolute path. Normalizing here fixes the strip
+ * below, the "<dir>/main.ts" test names, and the snapshot filenames at
+ * once; it is a no-op off win32. */
+const posix = (s: string): string => s.split("\\").join("/");
+const diagDir = posix(join(repoRoot, "tests/diagnostics"));
 const files = ["ts", "js", "mjs", "cjs"]
   .flatMap((ext) => [
     ...globSync(join(diagDir, `*.${ext}`)),
     ...globSync(join(diagDir, `*/main.${ext}`)),
   ])
+  .map(posix)
   .sort();
 
 describe(`diagnostics corpus (${files.length} programs)`, () => {

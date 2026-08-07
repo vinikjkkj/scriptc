@@ -5,11 +5,15 @@ import { analyze, renderCoverage } from "@scriptc/compiler";
 import { shardSelect, shardSuffix } from "./shard.js";
 
 const repoRoot = join(import.meta.dirname, "../..");
+/* POSIX spelling: the analyzer reports forward-slash paths on every host,
+ * so a backslash-spelled repoRoot strips nothing on win32 and the snapshot
+ * carries an absolute path. No-op elsewhere. */
+const repoRootPosix = repoRoot.split("\\").join("/");
 const fixture = (name: string) => join(repoRoot, "tests/coverage-fixtures", name);
 
 function report(path: string, opts: { dynamic?: boolean } = {}): string {
   const { coverage } = analyze(path, opts);
-  return renderCoverage({ ...coverage, file: coverage.file.replace(repoRoot + "/", "") });
+  return renderCoverage({ ...coverage, file: coverage.file.replace(repoRootPosix + "/", "") });
 }
 
 test("mixed program: percentage and grouped blockers", async () => {

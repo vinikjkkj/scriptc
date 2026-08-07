@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
 import { analyze, compile, renderAll } from "@scriptc/compiler";
+import { exeName } from "./exe.js";
 
 /* Every compile below deliberately carries NO backend pin: this suite is
  * the user-adoption path, so it must see exactly what a flagless
@@ -24,7 +25,9 @@ import { analyze, compile, renderAll } from "@scriptc/compiler";
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
 const fixture = (name: string) => join(repoRoot, "tests/fixtures/strictness", name);
-const nodeTypesDir = join(repoRoot, "tests/fixtures/node-types");
+/* POSIX spelling: renderAll reports forward-slash paths on every host, so a
+ * backslash-spelled dir strips nothing on win32. No-op elsewhere. */
+const nodeTypesDir = join(repoRoot, "tests/fixtures/node-types").split("\\").join("/");
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
 
 function outDirFor(name: string): string {
@@ -34,7 +37,7 @@ function outDirFor(name: string): string {
 test("indexed-loose: the project's own (less strict) knobs are adopted — compiles and runs", async () => {
   const outDir = outDirFor("loose");
   const result = await compile(join(fixture("indexed-loose"), "main.ts"), {
-    outPath: join(outDir, "main"),
+    outPath: join(outDir, exeName("main")),
     outDir,
     sanitize,
   });
@@ -47,7 +50,7 @@ test("indexed-loose: the project's own (less strict) knobs are adopted — compi
 test("indexed-strict: the project's EXTRA strictness is honored — preflight fails", async () => {
   const outDir = outDirFor("strict");
   const result = await compile(join(fixture("indexed-strict"), "main.ts"), {
-    outPath: join(outDir, "main"),
+    outPath: join(outDir, exeName("main")),
     outDir,
     sanitize,
   });
@@ -61,7 +64,7 @@ test("indexed-strict: the project's EXTRA strictness is honored — preflight fa
 test("node-types: the supported process surface lowers statically under @types/node", async () => {
   const outDir = outDirFor("node-types");
   const result = await compile(join(nodeTypesDir, "argv-env.ts"), {
-    outPath: join(outDir, "argv-env"),
+    outPath: join(outDir, exeName("argv-env")),
     outDir,
     sanitize,
   });
@@ -78,7 +81,7 @@ test("node-types: the supported process surface lowers statically under @types/n
 test("node-types: captured NodeJS.WritableStream values write through the procStream scalar", async () => {
   const outDir = outDirFor("node-stream-capture");
   const result = await compile(join(nodeTypesDir, "stream-capture.ts"), {
-    outPath: join(outDir, "stream-capture"),
+    outPath: join(outDir, exeName("stream-capture")),
     outDir,
     sanitize,
   });
@@ -92,7 +95,7 @@ test("node-types: captured NodeJS.WritableStream values write through the procSt
 test("node-types: path and os lower statically under @types/node's shapes", async () => {
   const outDir = outDirFor("node-path-os");
   const result = await compile(join(nodeTypesDir, "path-os.ts"), {
-    outPath: join(outDir, "path-os"),
+    outPath: join(outDir, exeName("path-os")),
     outDir,
     sanitize,
   });
@@ -105,7 +108,7 @@ test("node-types: path and os lower statically under @types/node's shapes", asyn
 test("node-types: declared-but-not-lowered surface fences, naming @types/node", async () => {
   const outDir = outDirFor("node-fenced");
   const result = await compile(join(nodeTypesDir, "fenced.ts"), {
-    outPath: join(outDir, "fenced"),
+    outPath: join(outDir, exeName("fenced")),
     outDir,
     sanitize,
   });
@@ -130,7 +133,7 @@ test("json-any: any-typed JSON.parse reads pass preflight (the project's own tsc
   // surface and lowers). The unknown READS lower now (the dyn keyed read,
   // corpus 1544) — no SC1100 remains. Never a SC0001.
   const result = await compile(entry, {
-    outPath: join(outDir, "main"),
+    outPath: join(outDir, exeName("main")),
     outDir,
     sanitize,
   });
@@ -147,7 +150,7 @@ test("json-any: any-typed JSON.parse reads pass preflight (the project's own tsc
 test("json-any-broken: genuine type errors report the project world's own tsc errors, not override-manufactured ones", async () => {
   const outDir = outDirFor("json-any-broken");
   const result = await compile(join(fixture("json-any-broken"), "main.ts"), {
-    outPath: join(outDir, "main"),
+    outPath: join(outDir, exeName("main")),
     outDir,
     sanitize,
   });
@@ -163,7 +166,7 @@ test("json-any-broken: genuine type errors report the project world's own tsc er
 test("null-floor: disabling strictNullChecks fails with the floor diagnostic", async () => {
   const outDir = outDirFor("floor");
   const result = await compile(join(fixture("null-floor"), "main.ts"), {
-    outPath: join(outDir, "main"),
+    outPath: join(outDir, exeName("main")),
     outDir,
     sanitize,
   });
@@ -185,7 +188,7 @@ test("no-types-node: a bare project outside the repo compiles on the fallback de
   writeFileSync(join(dir, "main.ts"), 'const who: string = "bare";\nconsole.log(`hi ${who}`);\n');
   const outDir = outDirFor("bare");
   const result = await compile(join(dir, "main.ts"), {
-    outPath: join(outDir, "main"),
+    outPath: join(outDir, exeName("main")),
     outDir,
     sanitize,
   });
@@ -202,7 +205,7 @@ test("dot-parent: bare '.' and '..' imports build and run (the TS project dialec
   // resolution dialect (the SEMANTICS.md relative-specifier note).
   const outDir = outDirFor("dot-parent");
   const result = await compile(join(repoRoot, "tests/coverage-fixtures/dot-parent/main.ts"), {
-    outPath: join(outDir, "main"),
+    outPath: join(outDir, exeName("main")),
     outDir,
     sanitize,
   });

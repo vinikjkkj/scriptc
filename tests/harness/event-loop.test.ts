@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { eventLoopCases, type StdinScript } from "./event-loop-cases.js";
+import { exeName } from "./exe.js";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const fixtureDir = join(repoRoot, "tests/fixtures/event-loop");
@@ -56,7 +57,7 @@ async function compileFixture(name: string): Promise<string> {
   const outDir = join(cacheDir, key);
   mkdirSync(outDir, { recursive: true });
   const result = await compile(file, {
-    outPath: join(outDir, "program"),
+    outPath: join(outDir, exeName("program")),
     outDir,
     sanitize,
     // Pinned: piped-stdin timing fixtures were written against the C

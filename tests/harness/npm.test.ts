@@ -22,6 +22,7 @@ import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { npmCases } from "./npm-cases.js";
 import { shardSelect, shardSuffix } from "./shard.js";
+import { exeName } from "./exe.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -75,7 +76,7 @@ async function build(entry: string): Promise<string> {
   // at scale — the binaries stay C-emitted (the historical lane) while
   // proving a flagless user build of npm programs keeps working verbatim.
   const result = await compile(entry, {
-    outPath: join(outDir, "program"),
+    outPath: join(outDir, exeName("program")),
     outDir,
     sanitize,
     dynamic: true,

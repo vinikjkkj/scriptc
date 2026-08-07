@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import { analyze, compile } from "@scriptc/compiler";
+import { exeName } from "./exe.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -67,7 +68,7 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
   const outDir = join(cacheDir, `npm-static-${key}`);
   mkdirSync(outDir, { recursive: true });
   const result = await compile(entry, {
-    outPath: join(outDir, "program"),
+    outPath: join(outDir, exeName("program")),
     outDir,
     sanitize,
     npmStatic,
@@ -426,7 +427,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // flag, even) and must not share the dir.
     const outDir = join(cacheDir, `npm-static-workspace-${sanitize ? "san" : "plain"}`);
     mkdirSync(outDir, { recursive: true });
-    const result = await compile(entry, { outPath: join(outDir, "program"), outDir, sanitize, npmStatic: ["wslinked"] });
+    const result = await compile(entry, { outPath: join(outDir, exeName("program")), outDir, sanitize, npmStatic: ["wslinked"] });
     if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
     const [nodeRes, nativeRes] = await Promise.all([
       runBinary("node", [entry]),
