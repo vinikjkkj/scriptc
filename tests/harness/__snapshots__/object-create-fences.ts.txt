@@ -5,16 +5,7 @@ object-create-fences.ts:10:19 - error SC2020: 'Object.create over '{ indent: num
      |                   ^~~~~~~~~~~~~~~~~~~
   11 | 
 
-  hint: the compiled representations have no prototype chain, and an own-copy would answer wrong observably (Node lists NO own keys on the created object, and prototype mutations show through it live) — only Object.create(null) lowers
-
-object-create-fences.ts:14:16 - error SC2020: 'Object.create over 'unknown' prototypes' is part of the standard library types but has no scriptc lowering yet
-
-  13 | const dynProto: object = JSON.parse('{"a":1}');
-  14 | const viaDyn = Object.create(dynProto);
-     |                ^~~~~~~~~~~~~~~~~~~~~~~
-  15 | 
-
-  hint: the compiled representations have no prototype chain, and an own-copy would answer wrong observably (Node lists NO own keys on the created object, and prototype mutations show through it live) — only Object.create(null) lowers
+  hint: a STATIC value has no dyn prototype link to be given (the checked-dynamic tree's objects do — pass a dyn prototype, or null)
 
 object-create-fences.ts:17:25 - error SC2020: 'Object.create with a properties-descriptor argument' is part of the standard library types but has no scriptc lowering yet
 

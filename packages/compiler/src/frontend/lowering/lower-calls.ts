@@ -8158,10 +8158,24 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         return { kind: "libCall", fn: "dyn.objCreateNullProto", args: [], type: DYN, loc };
       }
       const proto = L.lowerExpr(protoNode);
+      // A checked-dynamic prototype now has somewhere to be linked: an
+      // OBJ's [[Prototype]] is a real link the keyed read walks, so the
+      // three observations the fence below named as impossible — no own
+      // keys on the created object, LIVE delegation through it, and a
+      // write that shadows rather than mutating — all hold by
+      // construction rather than by copy.
+      //
+      // This is the spelling of INHERITANCE in every pre-class program
+      // (`Child.prototype = Object.create(Parent.prototype)`), and until
+      // it lowered, a chain was at most one link deep and `instanceof`'s
+      // walk had nothing to walk.
+      if (proto.type.kind === "dyn") {
+        return { kind: "libCall", fn: "dyn.objCreateProto", args: [proto], type: DYN, loc };
+      }
       L.noLowering(
         `Object.create over '${L.fmt(proto.type)}' prototypes`,
         call,
-        "the compiled representations have no prototype chain, and an own-copy would answer wrong observably (Node lists NO own keys on the created object, and prototype mutations show through it live) — only Object.create(null) lowers",
+        "a STATIC value has no dyn prototype link to be given (the checked-dynamic tree's objects do — pass a dyn prototype, or null)",
       );
     }
     // `Object.assign(fn, { props })` whose RESULT type maps to the hybrid

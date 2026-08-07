@@ -2518,7 +2518,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_dyn_construct(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "dyn.instanceOf":
             // `v instanceof f`: the prototype-chain identity walk (both
-            // borrowed, no allocation, never throws).
+            // borrowed, no allocation). Throws JS's three right-operand
+            // TypeErrors — not an object, not callable, non-object
+            // `prototype` — so it is in the may-throw seed set and the
+            // false it answers on those paths is never read.
             return finish(`scr_dyn_instance_of(${arg(0)}, ${arg(1)})`);
           case "dyn.keySet":
             // Keyed write on a dyn receiver: all three borrowed (the
@@ -5427,6 +5430,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // Object.create(null): the fresh null-prototype dictionary
             // (+1). Never throws.
             return finish(`scr_dyn_new_obj_null_proto()`);
+          case "dyn.objCreateProto":
+            // Object.create(<proto>): a fresh OBJ linked to the borrowed
+            // prototype (+1); a primitive argument throws Node's
+            // catchable TypeError (may-throw seed set).
+            return finish(`scr_dyn_obj_create_proto(${arg(0)})`);
           case "dyn.hasOwn":
             // Object.hasOwn over a dyn receiver (throws on nullish, like
             // Node's ToObject).
