@@ -9,7 +9,7 @@ import { dirname as dirnamePath, resolve as resolvePath } from "node:path";
 import { NpmGraphBuilder, packageNameOfPath, probeNodeImportRefusal, probeNodeRequireRefusal } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
 import { isJsSourceFileName, isRelativeSpecifier } from "../shared.js";
-import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
+import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, commaWholeExportRecordOf, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
 import type { CycleEdge } from "../program.js";
 import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
 import { BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrLocal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/nodes.js";
@@ -841,6 +841,117 @@ function jsDynHoldableInitializer(L: Lowerer, init: ts.Expression | undefined): 
   return false;
 }
 
+/** True when this identifier is being WRITTEN (a rebinding of the binding
+ * itself — a property write through it is not one). */
+function isBindingWriteTarget(n: ts.Identifier): boolean {
+  const p = n.parent;
+  if (p === undefined) return false;
+  if (ts.isBinaryExpression(p) && p.left === n) {
+    const k = p.operatorToken.kind;
+    return k === ts.SyntaxKind.EqualsToken ||
+      (k >= ts.SyntaxKind.FirstCompoundAssignment && k <= ts.SyntaxKind.LastCompoundAssignment);
+  }
+  if ((ts.isPrefixUnaryExpression(p) || ts.isPostfixUnaryExpression(p)) && p.operand === n) {
+    return p.operator === ts.SyntaxKind.PlusPlusToken || p.operator === ts.SyntaxKind.MinusMinusToken;
+  }
+  if (ts.isVariableDeclaration(p) && p.name === n) return true;
+  if (ts.isBindingElement(p) && p.name === n) return true;
+  if (ts.isShorthandPropertyAssignment(p) && p.name === n) return true; // may be a destructuring target
+  if ((ts.isForInStatement(p) || ts.isForOfStatement(p)) && p.initializer === n) return true;
+  return false;
+}
+
+/** True when some write to `root` could run AFTER `exportExpr` — the one
+ * question a whole-export root's storage has to answer.
+ *
+ * Node copies module.exports's VALUE at the export statement. Separate
+ * storage is exactly that copy, so it is Node-exact whatever happens next —
+ * but a requirer read that resolves through the ALIAS path (a root with a
+ * module global of its own) reads the LIVE binding instead, and the two
+ * views part company the moment anything rebinds the root. Registering
+ * storage without asking this question compiles a program that answers a
+ * value Node never exported; measured, on exactly that shape.
+ *
+ * Writes that provably run BEFORE the export cannot separate the two views,
+ * so they are admitted: a write at the module's own top level, earlier in
+ * the file (the `var e,t,n,j; j = {}; …; module.exports = j` spelling every
+ * hand-written bundle prologue uses). A write inside ANY function body is a
+ * write that can run later — the function may be called from anywhere — and
+ * refuses, as does any write after the export. That is the write analysis
+ * the `const` keyword stands in for, decided instead of assumed. */
+function wholeExportRootRebindable(L: Lowerer, root: ts.Identifier, exportExpr: ts.BinaryExpression): boolean {
+  const sf = root.getSourceFile();
+  const sym = L.checker.getSymbolAtLocation(root);
+  if (!sym) return true;
+  const exportPos = exportExpr.getStart(sf);
+  const runsBeforeTheExport = (n: ts.Node): boolean => {
+    for (let p: ts.Node | undefined = n.parent; p !== undefined; p = p.parent) {
+      if (ts.isSourceFile(p)) return n.getStart(sf) < exportPos;
+      if (
+        ts.isFunctionDeclaration(p) || ts.isFunctionExpression(p) || ts.isArrowFunction(p) ||
+        ts.isMethodDeclaration(p) || ts.isConstructorDeclaration(p) ||
+        ts.isGetAccessorDeclaration(p) || ts.isSetAccessorDeclaration(p) ||
+        ts.isClassStaticBlockDeclaration(p)
+      ) {
+        return false;
+      }
+    }
+    return false;
+  };
+  let rebindable = false;
+  const visit = (n: ts.Node): void => {
+    if (rebindable) return;
+    if (
+      ts.isIdentifier(n) && n !== root && n.text === root.text &&
+      isBindingWriteTarget(n) && L.checker.getSymbolAtLocation(n) === sym &&
+      !runsBeforeTheExport(n)
+    ) {
+      rebindable = true;
+      return;
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return rebindable;
+}
+
+/** True when `module.exports = <root>` needs storage of its OWN — the
+ * whole-export root is a module-scope VARIABLE of this file that the alias
+ * path cannot carry, and nothing can rebind it after the export.
+ *
+ * Alias plumbing (no storage, unchanged) covers every root whose value
+ * already lives somewhere a requirer read can resolve to and which nothing
+ * can rebind: a class, a function, an IMMUTABLE module global. What is left
+ * is the `var`/`let` root — for which the export object and the binding are
+ * two different things the moment anything rebinds it, so Node's snapshot
+ * needs a slot — and the root with no module-level storage at all, which is
+ * what every minified bundle has (a merged `var e,t,n,…,j=…` declarator list
+ * the file keeps as an init local, read by nothing outside the init).
+ *
+ * Non-variable roots (a class or function declaration, an import binding, a
+ * name from another file) stay OUT: their storage is the declaration's, and
+ * the existing alias path is both correct and already exercised. */
+function wholeExportRootNeedsStorage(L: Lowerer, root: ts.Identifier, exportExpr: ts.BinaryExpression): boolean {
+  const sym = L.checker.getSymbolAtLocation(root);
+  if (!sym) return false;
+  const g = L.globalsBySymbol.get(sym);
+  if (g && !g.mutable) return false; // immutable global — today's alias plumbing
+  const decls = L.checker.declarationsOf(sym);
+  if (decls.length !== 1) return false;
+  const d = decls[0]!;
+  if (
+    !ts.isVariableDeclaration(d) ||
+    !ts.isIdentifier(d.name) ||
+    d.getSourceFile() !== root.getSourceFile() ||
+    !ts.isVariableDeclarationList(d.parent) ||
+    !ts.isVariableStatement(d.parent.parent) ||
+    !ts.isSourceFile(d.parent.parent.parent)
+  ) {
+    return false;
+  }
+  return !wholeExportRootRebindable(L, root, exportExpr);
+}
+
 export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.Statement[]): void {
     // Segment-tagged so mangled names can't collide across files (user
     // identifiers cannot contain '.'): entry globals "e.<name>", others
@@ -948,7 +1059,13 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // Statements Node would DISCARD (a replaced export object) never
         // register storage — importer reads must not bind to values Node's
         // importers never see. The statement lowering owns the diagnostic.
-        const cjs = cjsExportDiscardReason(stmt) === null ? cjsExportAssignmentOf(stmt) : null;
+        // The comma spelling counts (cjsWholeExportAssignmentOf): a
+        // bundler's last statement is `<effects>, module.exports = <root>`,
+        // and the replacement it performs is the same replacement whether
+        // or not the minifier gave it a statement of its own.
+        const cjs = cjsExportDiscardReason(stmt) === null
+          ? (cjsExportAssignmentOf(stmt) ?? commaWholeExportRecordOf(stmt))
+          : null;
         const registerExport = (nameNode: ts.Node, name: string, typeNode: ts.Node): void => {
           const diagsBefore = L.diags.length;
           try {
@@ -1057,6 +1174,40 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
               if (!(e instanceof PoisonError)) throw e;
               deferJsCollectionDiags(L, sf, diagsBefore);
             }
+          } else if (ts.isIdentifier(rhs) && wholeExportRootNeedsStorage(L, rhs, cjs.expr)) {
+            // `module.exports = <root>` over a module-scope VARIABLE the
+            // alias path cannot carry — THE WHOLE-EXPORT ROOT'S STORAGE.
+            //
+            // An identifier root is alias plumbing exactly when requirer
+            // reads can resolve THROUGH it to storage that already exists
+            // and can never change afterwards: a class, a function, an
+            // immutable global. A `var`/`let` root has no such storage —
+            // the export object and the binding are two different things
+            // the moment anything rebinds it — and a root the file keeps
+            // as an init LOCAL (a minifier's merged declarator list, which
+            // is where every generated bundle puts it) has no module-level
+            // storage at all. Both fell off the end of the subset: the
+            // first fenced "exporting the mutable 'let' binding by
+            // reference", the second "'module.exports =' with a
+            // non-literal value", and in a bundle's comma spelling neither
+            // was even reached — the statement took the generic
+            // "assignment to non-variables" and aborted the module init at
+            // its last statement.
+            //
+            // The storage this registers is Node's OWN answer, not a
+            // widening of the alias rule: `module.exports` holds the value
+            // the root had AT THIS STATEMENT. A separate const global IS
+            // that copy — the identical argument the sibling member-export
+            // registration already makes for a mutable dyn source ("Node
+            // copies the VALUE at this statement, and separate storage is
+            // exactly that copy"), so a later rebinding of the root stays
+            // invisible through the export, which is what Node does. DYN
+            // because a whole-export root's value is what the twin's own
+            // binding is worth; the global asserts the STORAGE, not a
+            // shape.
+            const g: IrGlobal = { id: `%g.${tag}exports`, name: "exports", type: DYN, mutable: false };
+            L.globalsByDeclNode.set(cjs.expr, g);
+            L.globalsList.push(g);
           }
           continue;
         }

@@ -2777,6 +2777,81 @@ export function isModuleExportsAccess(expr: ts.Expression): expr is ts.PropertyA
   );
 }
 
+/** `module.exports = <expr>` — the whole-export REPLACEMENT, as an
+ * expression rather than a statement. */
+export function isCjsWholeExportAssign(e: ts.Expression): e is ts.BinaryExpression {
+  return (
+    ts.isBinaryExpression(e) &&
+    e.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+    isModuleExportsAccess(e.left)
+  );
+}
+
+/** The `module.exports = <expr>` a top-level expression statement performs,
+ * COMMA OPERANDS INCLUDED — null when it performs none.
+ *
+ * `cjsExportAssignmentOf` reads `ExpressionStatement { BinaryExpression }`
+ * and nothing else, so it sees a whole-export replacement only when the
+ * source spells it as its own statement. Bundlers do not: esbuild and
+ * terser end a generated CommonJS file with ONE expression statement whose
+ * last comma operand is the export — zapo's shipped `spec/proto/index.js`
+ * is literally `j.waproto = (…265 factories…), module.exports = j`. To a
+ * scan that stops at the top level that file exports nothing at all, and
+ * its export assignment falls through every CommonJS path to the generic
+ * "assignment to non-variables" fence, which aborts the module init at its
+ * very last statement.
+ *
+ * A comma is not a statement (the granularity rule, splitPartsOf) — the
+ * operands are independently sequenced, and the export operand is a
+ * CommonJS export statement wherever the minifier parked it.
+ *
+ * The LAST one wins: Node's export object is whatever `module.exports`
+ * holds when the body finishes. */
+export function cjsWholeExportAssignmentOf(stmt: ts.Statement): ts.BinaryExpression | null {
+  if (!ts.isExpressionStatement(stmt)) return null;
+  let found: ts.BinaryExpression | null = null;
+  const scan = (e: ts.Expression): void => {
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+      scan(e.left);
+      scan(e.right);
+      return;
+    }
+    if (isCjsWholeExportAssign(e)) found = e;
+  };
+  scan(stmt.expression);
+  return found;
+}
+
+/** The `cjsExportAssignmentOf`-shaped record for a whole-export replacement
+ * a top-level statement performs from inside a COMMA — null when it performs
+ * none, and null for the plain spelling, which `cjsExportAssignmentOf`
+ * already answers. Global registration and the statement lowering read the
+ * same record, so the two spellings take exactly one path between them. */
+export function commaWholeExportRecordOf(
+  stmt: ts.Statement,
+): { kind: "table"; obj: ts.ObjectLiteralExpression | null; expr: ts.BinaryExpression } | null {
+  if (ts.isExpressionStatement(stmt) && isCjsWholeExportAssign(stmt.expression)) return null;
+  const expr = cjsWholeExportAssignmentOf(stmt);
+  if (expr === null) return null;
+  let rhs: ts.Expression = expr.right;
+  while (ts.isParenthesizedExpression(rhs)) rhs = rhs.expression;
+  return { kind: "table", obj: ts.isObjectLiteralExpression(rhs) ? rhs : null, expr };
+}
+
+/** The top-level statement of a JS module file this expression sits in —
+ * null when it sits anywhere else. The whole-export routing's gate: a
+ * bundler's export assignment is a comma operand, so `expr.parent` is a
+ * BinaryExpression and the ordinary `ExpressionStatement`-parent test that
+ * lowerStmt uses answers nothing. */
+export function topLevelJsStatementOf(expr: ts.Expression): ts.Statement | null {
+  let n: ts.Node = expr;
+  while (n.parent !== undefined && !ts.isStatement(n)) n = n.parent;
+  if (!ts.isStatement(n) || !ts.isExpressionStatement(n)) return null;
+  if (!ts.isSourceFile(n.parent) || !isJsSourceFile(n.parent)) return null;
+  return n;
+}
+
 /** Classifies a statement as a CommonJS EXPORT assignment:
  *   - table:  `module.exports = { ... }` — the whole export table at once
  *             (obj is null when the RHS is not an object literal — the
@@ -2820,7 +2895,16 @@ export function cjsExportDiscardReason(stmt: ts.Statement): string | null {
   const stmts = sf.statements;
   let lastTable = -1;
   for (let i = 0; i < stmts.length; i++) {
-    if (cjsExportAssignmentOf(stmts[i]!)?.kind === "table") lastTable = i;
+    // Comma operands count: a replacement Node performs is a replacement
+    // wherever a minifier parked it (cjsWholeExportAssignmentOf), and the
+    // members it discards must fence whether or not the statement that
+    // replaced them was spelled on its own.
+    if (
+      cjsExportAssignmentOf(stmts[i]!)?.kind === "table" ||
+      cjsWholeExportAssignmentOf(stmts[i]!) !== null
+    ) {
+      lastTable = i;
+    }
   }
   if (lastTable < 0) return null;
   const myIdx = stmts.indexOf(stmt as never);
