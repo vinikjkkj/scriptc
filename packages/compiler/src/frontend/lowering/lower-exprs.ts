@@ -4208,7 +4208,34 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     return (name as ts.Identifier | ts.StringLiteral).text;
   }
 
-/** The runtime-keyed JS object literal (a computed key that doesn't fold):
+/** SCRIPTC_DYNOBJ_METHOD probe: how many object-literal METHODS the dyn
+ * object-literal path lowered (each one is a bundled module body on the
+ * esbuild `__commonJS` table). Read in the SAME run as the trap count —
+ * "nothing changed" and "the branch never ran" are otherwise the same
+ * observation. */
+let dynObjMethods = 0;
+
+/** `super` inside an object-literal method: the method has a [[HomeObject]]
+ * in JS, a dyn object has none, and the compiler's super machinery
+ * (lowerSuperCall and friends) assumes a class body — so a body that names
+ * it keeps a fence rather than lowering to the wrong receiver. Nested
+ * arrows inherit the method's `super`, so the walk has to descend through
+ * them. It descends through everything, which OVER-rejects one shape: a
+ * class declared inside the method body, whose members' `super` names that
+ * class's own base and has nothing to do with the object literal. That is
+ * the same over-rejection the sibling `this` walk
+ * (rejectThisInObjectMethod) already carries, and it costs a fence on a
+ * shape no bundler emits — never a wrong receiver, which is the direction
+ * that would matter. */
+function rejectSuperInObjectMethod(L: Lowerer, node: ts.Node): void {
+  if (node.kind === ts.SyntaxKind.SuperKeyword) {
+    L.unsupported("SC1090", node, "references to 'super' in object literal methods");
+  }
+  ts.forEachChild(node, (child) => rejectSuperInObjectMethod(L, child));
+}
+
+/** The dyn JS object literal (a computed key that doesn't fold, or the JS
+   * declaration fallback — an unmappable or `any` contextual type):
    * builds a dyn object member-by-member. Keys evaluate before their values,
    * properties in source order — JS's object-literal evaluation exactly.
    * Identifier/string keys are compile-time strings; numeric keys take
@@ -4217,18 +4244,53 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
    * dyn's String() for dyn operands — `{ [field]: v }` where field is a
    * checked-dynamic param). Values convert through the usual dyn boundary
    * (dynFrom's domain, functions box); a value with no dyn representation
-   * fences per property. Spreads, accessors, and methods stay fenced —
-   * none co-occur with the computed-key idiom in the wild. */
+   * fences per property.
+   *
+   * METHODS lower as the closure values they are — `{ "a.js"(e, t) {...} }`
+   * is a function under a shorthand name, routed to the SAME lowerLambda
+   * the record path (lowerObjectLiteral) and the island path already give
+   * the identical node, so nothing new is invented for it. This literal
+   * reaches here by TWO roads and the method form belongs to the second:
+   * a computed key that doesn't fold (the original idiom — the comment
+   * that used to sit here said methods "don't co-occur" with it, which is
+   * true), and the JS DECLARATION FALLBACK, where a literal whose
+   * contextual type is unmappable or `any` builds as a dyn object with
+   * ordinary string-literal keys. esbuild's `__commonJS` module table
+   * — `r({ "node_modules/x.js"(e, t) {...} })`, where the helper's
+   * parameter is untyped so the argument's contextual type is `any` — is
+   * that second road, and its refusal hid one bundled module body per
+   * bundled module. `this` and `super` stay fenced: a dyn object is not a
+   * receiver the method could bind either to.
+   *
+   * Spreads and accessors stay fenced (an accessor is not a data
+   * property; the dyn object has no getter machinery to define it into). */
   export function lowerDynObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression): IrExpr {
     const loc = locOf(expr);
     const fields: { key: IrExpr; value: IrExpr }[] = [];
     for (const prop of expr.properties) {
-      if (!ts.isPropertyAssignment(prop) && !ts.isShorthandPropertyAssignment(prop)) {
+      const isMethod = ts.isMethodDeclaration(prop) && prop.body !== undefined;
+      if (!ts.isPropertyAssignment(prop) && !ts.isShorthandPropertyAssignment(prop) && !isMethod) {
         L.unsupported(
           "SC1090",
           prop,
-          "spreads, accessors, and methods in a runtime-keyed (computed-key) object literal",
+          "spreads and accessors in a dyn object literal (methods lower)",
         );
+      }
+      if (isMethod) {
+        dynObjMethods++;
+        if (process.env["SCRIPTC_DYNOBJ_METHOD"] !== undefined) {
+          const p = ts.getLineAndCharacterOfPosition(prop.getSourceFile(), prop.getStart());
+          process.stderr.write(
+            `[dynobjmethod] #${dynObjMethods} ${prop.getSourceFile().fileName}:${p.line + 1}\n`,
+          );
+        }
+        // `this` is the receiver — a dyn object models no receiver, and the
+        // generic lexical-this walk would silently capture an ENCLOSING
+        // method's `this` (the record path's reasoning, verbatim).
+        L.rejectThisInObjectMethod(prop.body!);
+        // `super` needs a [[HomeObject]] a dyn object has none of; the
+        // call-site machinery for it assumes a class body.
+        rejectSuperInObjectMethod(L, prop.body!);
       }
       const name = prop.name;
       let key: IrExpr;
@@ -4257,16 +4319,23 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       } else {
         L.unsupported("SC1090", prop, "non-identifier property names");
       }
-      const valueExpr = ts.isShorthandPropertyAssignment(prop) ? (prop.name as ts.Identifier) : prop.initializer;
+      // A METHOD's value node is the method itself (there is no
+      // initializer), and it lowers through lowerLambda; everything else
+      // reads its initializer or, for shorthand, its own name.
+      const valueExpr: ts.Node = ts.isMethodDeclaration(prop)
+        ? prop
+        : ts.isShorthandPropertyAssignment(prop)
+          ? (prop.name as ts.Identifier)
+          : prop.initializer;
+      const lowerValue = (): IrExpr =>
+        ts.isMethodDeclaration(prop) ? L.lowerLambda(prop) : L.lowerExpr(valueExpr as ts.Expression);
       // Lambda values that fail to lower become trap closures (the
       // per-call fence granularity — fenceClosureProbe) so the object
       // still builds; everything else keeps the per-property fence below.
       let raw: IrExpr;
       const propDiagsBefore = L.diags.length;
       try {
-        raw =
-          fenceClosureProbe(L, valueExpr, undefined, () => L.lowerExpr(valueExpr)) ??
-          L.lowerExpr(valueExpr);
+        raw = fenceClosureProbe(L, valueExpr, undefined, lowerValue) ?? lowerValue();
       } catch (err) {
         // A PURE member read a JS file cannot lower (a namespace object
         // in an export aggregate): the slot takes a boxed fence closure —
