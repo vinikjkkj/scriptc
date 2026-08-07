@@ -8020,6 +8020,27 @@ export class Lowerer {
     return this.resolveKey(THIS_BINDING);
   }
 
+  /** READ-ONLY twin of resolveThis: does ANY frame on the stack carry a
+   * `this` local? resolveKey mutates capture state (it boxes the origin
+   * and threads a capture through every frame between), so a question
+   * asked BEFORE the reference exists has to be asked without it.
+   *
+   * The question this answers is "could resolveThis() answer non-null
+   * here?", and it is the precondition for declining to reject a `this`
+   * that a walk stops short of (rejectThisInObjectMethod). Answering by
+   * SCANNING THE STACK rather than by scanning ANCESTOR SYNTAX is the
+   * point: `this` locals are declared by class members AND by the shims
+   * that give an object-literal callback Node's receiver (lower-stream's
+   * `new Readable({ read() { this.push(...) } })`), and a class-ancestor
+   * test would answer "no binding" inside the second one. */
+  peekThis(): IrLocal | null {
+    for (let depth = this.fnStack.length - 1; depth >= 0; depth--) {
+      const hit = this.bindingIn(this.fnStack[depth]!, THIS_BINDING);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
   /** READ-ONLY twin of resolveLocal for PROBES (isIslandExpr): answers
    * the nearest binding entry without boxing, threading, or predeclaring.
    * resolveKey mutates capture state as a side effect, and a speculative
