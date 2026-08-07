@@ -106,6 +106,14 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
           // ladder on either form — seed both.
           f.throws = true;
           break;
+        case "dynArrNew":
+          // `new Array(n)` throws V8's `RangeError: Invalid array length`
+          // for anything that is not a non-negative integer below 2^32 —
+          // catchable, and on BOTH arms (the dyn arm reaches the same
+          // check whenever the runtime value turns out to be a number).
+          // bytesNew's size form is the same seed.
+          f.throws = true;
+          break;
         case "dynDestrCheck":
         case "dynIterN":
           // Destructuring guards throw V8's TypeErrors on nullish /

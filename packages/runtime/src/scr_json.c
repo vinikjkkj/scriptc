@@ -678,6 +678,53 @@ ScrDyn *scr_dyn_new_str(ScrStr *s) {
 }
 
 ScrDyn *scr_dyn_new_arr(void) { return scr_dyn_alloc(SCR_DYN_ARR); }
+
+/* `new Array(n)` in the checked-dynamic tier — the spec's ArrayCreate. `n`
+ * must be a valid array LENGTH (a non-negative integer below 2^32); NaN, a
+ * fraction, a negative and 2^32 itself all throw V8's exact
+ * `RangeError: Invalid array length`, which is catchable and pending on
+ * return (callers check for NULL).
+ *
+ * The n slots read undefined. JS makes them HOLES and this tree makes them
+ * the undefined value: the same stance scr_dyn_key_set's index growth
+ * already took ("holes padding with undefined exactly like JS length
+ * growth"), so length / index reads / join / JSON.stringify all answer
+ * exactly and only the hole-vs-undefined observers (`i in a`,
+ * Object.keys, forEach/map's skip) can tell. Returns +1. */
+ScrDyn *scr_dyn_new_arr_len(double n) {
+  if (!(n >= 0) || n > 4294967295.0 || n != (double)(uint32_t)n) {
+    static const char msg[] = "Invalid array length";
+    scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
+    return NULL;
+  }
+  ScrDyn *d = scr_dyn_alloc(SCR_DYN_ARR);
+  size_t len = (size_t)n;
+  /* One reservation instead of len doubling pushes: the length is known. */
+  if (len > d->v.arr.cap) {
+    ScrDyn **items = realloc(d->v.arr.items, len * sizeof *items);
+    if (!items) scr_json_oom();
+    d->v.arr.items = items;
+    d->v.arr.cap = len;
+  }
+  for (size_t i = 0; i < len; i++) d->v.arr.items[i] = scr_dyn_retain(scr_dyn_undefined());
+  d->v.arr.len = len;
+  return d;
+}
+
+/* The ONE-argument `new Array(v)` dispatch. JS reads a single argument as a
+ * LENGTH when it is a number and as the array's one ELEMENT otherwise
+ * (`new Array('3')` is `['3']`, not three holes) — a fact about the runtime
+ * VALUE, so a static type that does not decide it (an implicit-any binding)
+ * has to ask here rather than guess. Borrows v (NULL is the absent
+ * argument, i.e. undefined — the element form). +1, NULL with the
+ * RangeError pending. */
+ScrDyn *scr_dyn_new_arr_ctor1(ScrDyn *v) {
+  if (v != NULL && v->kind == SCR_DYN_NUM) return scr_dyn_new_arr_len(v->v.num);
+  ScrDyn *d = scr_dyn_alloc(SCR_DYN_ARR);
+  scr_dyn_arr_push(d, scr_dyn_retain(v != NULL ? v : scr_dyn_undefined()));
+  return d;
+}
+
 ScrDyn *scr_dyn_new_obj(void) { return scr_dyn_alloc(SCR_DYN_OBJ); }
 ScrDyn *scr_dyn_new_obj_null_proto(void) {
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_OBJ);

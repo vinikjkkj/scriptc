@@ -1940,6 +1940,19 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         }
         return arr;
       }
+      case "dynArrNew": {
+        // `new Array(n)` in the checked-dynamic tier. An f64 operand is
+        // the LENGTH (ArrayCreate); a dyn operand is the undecided
+        // one-argument form, whose length-or-element question is about the
+        // runtime value. Both throw the RangeError for a bad length, so
+        // both take the fallible temp.
+        const a = E.emitExpr(e.arg);
+        const call =
+          e.arg.type.kind === "f64"
+            ? `scr_dyn_new_arr_len(${a.name})`
+            : `scr_dyn_new_arr_ctor1(${a.name})`;
+        return E.fallibleTemp(e.type, call);
+      }
       case "dynObjLit": {
         // A dyn object built member-by-member: key then value, source
         // order (JS's literal evaluation). scr_dyn_key_set BORROWS all

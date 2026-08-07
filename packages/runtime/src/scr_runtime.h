@@ -3227,6 +3227,15 @@ ScrDyn *scr_dyn_new_bool(bool b);
 ScrDyn *scr_dyn_new_num(double n);
 ScrDyn *scr_dyn_new_str(ScrStr *s);
 ScrDyn *scr_dyn_new_arr(void);
+/* `new Array(n)` — the spec's ArrayCreate: n slots that read undefined (the
+ * holes-are-undefined stance scr_dyn_key_set's index growth already took).
+ * An n that is not a valid array length (NaN, fractional, negative, >= 2^32)
+ * throws the catchable `RangeError: Invalid array length` and answers NULL. */
+ScrDyn *scr_dyn_new_arr_len(double n);
+/* The ONE-argument `new Array(v)` dispatch: a NUMBER is a length, every
+ * other kind is the array's single element. Borrows v (NULL = undefined =
+ * the element form). +1, NULL with the RangeError pending. */
+ScrDyn *scr_dyn_new_arr_ctor1(ScrDyn *v);
 ScrDyn *scr_dyn_new_obj(void);
 /* Object.create(null): the fresh null-prototype dictionary (see the
  * null_proto flavor flag above). */
