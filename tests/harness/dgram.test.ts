@@ -15,6 +15,7 @@ import { existsSync, globSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
+import { exeName } from "./exe.js";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const fixturesRoot = join(repoRoot, "tests/fixtures/dgram");
@@ -85,7 +86,7 @@ async function build(entry: string): Promise<string> {
   const outDir = join(cacheDir, `dgram-${key}`);
   mkdirSync(outDir, { recursive: true });
   const result = await compile(entry, {
-    outPath: join(outDir, "program"),
+    outPath: join(outDir, exeName("program")),
     outDir,
     sanitize,
     // Pinned: a networking suite whose flake surface is already the

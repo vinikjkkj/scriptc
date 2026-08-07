@@ -58,6 +58,7 @@ let driverOutDir = "";
 
 const DRIVER_ENTRY = `/// <reference path="./prettier-cli.d.ts" />
 import { run } from "prettier/internal/legacy-cli.mjs";
+import { exeName } from "./exe.js";
 
 async function main(): Promise<void> {
   await run();
@@ -114,7 +115,7 @@ async function buildDriver(): Promise<string> {
   symlinkSync(join(prettierRoot, "node_modules"), join(driverDir, "node_modules"));
   const key = hashInputs();
   driverOutDir = join(cacheDir, `prettier-e2e-${key}-${executionTag}`);
-  const binary = join(driverOutDir, "program");
+  const binary = join(driverOutDir, exeName("program"));
   mkdirSync(driverOutDir, { recursive: true });
   const result = await compile(join(driverDir, "main.ts"), {
     outPath: binary,

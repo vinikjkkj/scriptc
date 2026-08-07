@@ -25,6 +25,7 @@ import { afterAll, describe, expect, test } from "vitest";
 import ts5 from "typescript";
 import { compile } from "@scriptc/compiler";
 import { shardSelect, shardSuffix } from "./shard.js";
+import { EXE_SUFFIX } from "./exe.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -215,7 +216,7 @@ async function build(file: string, backend: "c" | "llvm" | "default") {
   // race, reproducible locally by racing the two same-named binaries.
   const lane = backend === "llvm" ? "program-llvm" : backend === "c" ? "program-llvmc" : "program-llvmdef";
   return compile(file, {
-    outPath: join(outDir, `${lane}${sanitize ? "-san" : ""}`),
+    outPath: join(outDir, `${lane}${sanitize ? "-san" : ""}${EXE_SUFFIX}`),
     outDir,
     sanitize,
     dynamic: wantsDynamic(file),

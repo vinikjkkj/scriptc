@@ -468,7 +468,7 @@ export function grow(a: number): void {
   expect(result.ok).toBe(false);
   if (result.ok) return;
   expect(result.diagnostics.map((d) => d.code).sort()).toEqual(["SC4021", "SC4022", "SC4023"]);
-  const rendered = renderAll(result.diagnostics, result.sourceTexts, { color: false }).replaceAll(outDir + "/", "");
+  const rendered = renderAll(result.diagnostics, result.sourceTexts, { color: false }).replaceAll(outDir.split("\\").join("/") + "/", "");
   await expect(rendered).toMatchFileSnapshot("__snapshots__/library-int-refusals.txt");
 });
 

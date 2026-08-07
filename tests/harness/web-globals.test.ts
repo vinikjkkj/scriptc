@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
+import { exeName } from "./exe.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -45,7 +46,7 @@ async function compileAndRun(name: string, source: string): Promise<RunResult> {
   // fence MESSAGES asserted below come from the island runtime the two
   // backends share, so they are lane-invariant by construction.
   const result = await compile(file, {
-    outPath: join(outDir, name),
+    outPath: join(outDir, exeName(name)),
     outDir,
     sanitize,
     dynamic: true,
