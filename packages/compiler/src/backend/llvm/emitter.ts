@@ -544,6 +544,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.typeof": "scr_dyn_typeof",
   "dyn.toString": "scr_dyn_to_string_method",
   "dyn.this": "scr_dyn_this_get",
+  "dyn.thisPush": "scr_dyn_this_push_dyn",
+  "dyn.thisPop": "scr_dyn_this_pop",
   "insp.dyn": "scr_insp_dyn",
   "insp.dynS": "scr_insp_dyn_s",
   "big.str": "scr_big_to_str",

@@ -1,13 +1,19 @@
 // `f.bind(thisArg)` on a function VALUE, which a lock wrapper writes when it
 // re-exposes a store's method.
 //
-// It is ERASURE, for the reason the fence itself used to give: a compiled
-// function value carries no runtime `this` to re-route, so binding one cannot
-// change what a call does. The receiver is the answer; the argument still
-// evaluates for its effects (the last case pins that).
+// In TYPESCRIPT it is ERASURE, and here the reason holds: `this` in a plain
+// TypeScript function does not compile at all (noImplicitThis is tsc's error
+// and SC1080 is the lowerer's), so no TypeScript function value can observe a
+// bound receiver and `f` really is `f.bind(x)`. The receiver is the answer;
+// the argument still evaluates for its effects (the last case pins that).
 //
-// Extra arguments are partial application, not erasure, and keep the fence --
-// not exercised here, since a corpus case only holds programs that compile.
+// JAVASCRIPT is the opposite and 2767 is where it lives: a plain JS function's
+// `this` IS a runtime read, so the same erasure was a silent wrong answer
+// there and the bind now builds a real bound function.
+//
+// Extra arguments are partial application, which in TypeScript keeps the
+// fence -- not exercised here, since a corpus case only holds programs that
+// compile.
 type Store = { readonly ttl: () => number; readonly name: string };
 const impl: Store = { ttl: () => 42, name: "s" };
 
