@@ -3729,6 +3729,16 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       if (arg.type.kind === "string") {
         return { kind: "libCall", fn: "num.fromString", args: [arg], type: F64, loc };
       }
+      // Number(v) over a CHECKED-DYNAMIC value in untyped JS: ToNumber is
+      // exactly what the call means, and the runtime now performs it —
+      // the same conversion the arithmetic operators run on an untyped
+      // operand. The reference kinds still throw there, so the fence does
+      // not disappear, it moves to the values that really need a
+      // prototype. TS `any` keeps today's refusal: the island retry owns
+      // that tier, the JS-file stance is the binary operators'.
+      if (arg.type.kind === "dyn" && isJsSourceFile(expr.getSourceFile())) {
+        return { kind: "libCall", fn: "dyn.toNumber", args: [arg], type: F64, loc };
+      }
       L.noLowering(
         `Number of ${L.fmt(arg.type)} values`,
         argNode,
@@ -4928,6 +4938,21 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // JS ignores extra toString arguments on the other kinds, and so
     // does the runtime dispatch).
     if (access.name.text === "toString" && call.arguments.length <= 1) {
+      // A NUMERIC argument is a radix, and only Number.prototype.toString
+      // takes one — so "the receiver is a number, or Node throws" is the
+      // whole story, the same argument DYN_STRING_ONLY_METHODS makes for
+      // strings. `(a + b).toString(16)` in untyped JS reaches here because
+      // `+` answers a dyn; the checked receiver puts it back on the exact
+      // radix lowering instead of the byte-encoding one.
+      const radixArg = call.arguments[0];
+      if (radixArg !== undefined && (L.typeOf(radixArg).flags & ts.TypeFlags.NumberLike) !== 0) {
+        const num: IrExpr = { kind: "dynCheck", value: recv, type: F64, loc: recv.loc };
+        return {
+          kind: "libCall", fn: "num.toStringRadix",
+          args: [num, L.lowerExprExpecting(radixArg, F64)],
+          type: STRING, loc: locOf(call),
+        };
+      }
       const enc = call.arguments[0]
         ? bufEncoding(L, "toString", call.arguments[0])
         : "utf8";

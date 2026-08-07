@@ -185,6 +185,16 @@ const LIB_FN_SYMS: Record<string, string> = {
   "error.domCause": "scr_domex_cause",
   "error.domClone": "scr_domex_clone",
   "dyn.errInstanceof": "scr_dyn_err_instanceof",
+  // The JS operator conversions over dyn operands. They throw on the
+  // reference kinds (MAY_THROW_LIB_FNS), so the generic path emits the
+  // standard pending check after each — one C symbol per operator so the
+  // call needs no synthesized constant argument.
+  "dyn.toNumber": "scr_dyn_to_number",
+  "dyn.add": "scr_dyn_add",
+  "dyn.lt": "scr_dyn_lt",
+  "dyn.le": "scr_dyn_le",
+  "dyn.gt": "scr_dyn_gt",
+  "dyn.ge": "scr_dyn_ge",
   "num.toExponential": "scr_num_to_exponential",
   "num.toFixed0": "scr_num_to_fixed0",
   "num.toFixed": "scr_num_to_fixed",

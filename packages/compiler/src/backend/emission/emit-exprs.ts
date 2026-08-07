@@ -5369,6 +5369,21 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // Borrowed receiver + borrowed options; +1 %DOMException.
             // Option errors throw (may-throw seed set).
             return finish(`scr_domex_clone(${arg(0)}, ${arg(1)})`);
+          // The JS operator conversions over dyn operands (scr_json.c):
+          // args borrowed, +1 on the dyn result, and the reference kinds
+          // take the loud dynCheck throw (may-throw seed set).
+          case "dyn.toNumber":
+            return finish(`scr_dyn_to_number(${arg(0)})`);
+          case "dyn.add":
+            return finish(`scr_dyn_add(${arg(0)}, ${arg(1)})`);
+          case "dyn.lt":
+            return finish(`scr_dyn_lt(${arg(0)}, ${arg(1)})`);
+          case "dyn.le":
+            return finish(`scr_dyn_le(${arg(0)}, ${arg(1)})`);
+          case "dyn.gt":
+            return finish(`scr_dyn_gt(${arg(0)}, ${arg(1)})`);
+          case "dyn.ge":
+            return finish(`scr_dyn_ge(${arg(0)}, ${arg(1)})`);
           case "dyn.objKeys":
             return finish(`scr_dyn_obj_keys(${arg(0)})`);
           case "dyn.assign":

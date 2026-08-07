@@ -22,7 +22,7 @@ import { lowerStreamUnderscoreAssign, streamClassAliasDecl, streamSidesOf } from
 import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment } from "./lower-server.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
-import { abstractPropertyDeclOf, aliasTypeofNarrows, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo } from "./lower-exprs.js";
+import { abstractPropertyDeclOf, aliasTypeofNarrows, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, checkedJsNumber, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import { canonicalBuiltinModule, isRelativeSpecifier } from "../shared.js";
@@ -4009,6 +4009,19 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     return { kind: "varDecl", localId: local.id, init, loc: locOf(decl) };
   }
 
+/** A case test that is syntactically a number: the literal and its negated
+ * spelling. Deliberately syntactic — this decides whether a switch pins
+ * its discriminant to a number BEFORE the tests lower, so it must not
+ * depend on lowering them. */
+function isNumericCaseTest(e: ts.Expression): boolean {
+  if (ts.isNumericLiteral(e)) return true;
+  return (
+    ts.isPrefixUnaryExpression(e) &&
+    (e.operator === ts.SyntaxKind.MinusToken || e.operator === ts.SyntaxKind.PlusToken) &&
+    ts.isNumericLiteral(e.operand)
+  );
+}
+
 /** JS-exact switch (see docs/ir.md): one shared lexical scope for all case
    * bodies, lazy source-order test evaluation, fall-through. tsc has already
    * checked case-test comparability (TS2678) — the kind check below is the
@@ -4018,7 +4031,21 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // union desugar drops them (its if/else chain has no switch-end label
     // point — labeled jumps naming this switch fence at the jump).
     const labels = L.takeLabels();
-    const disc = L.lowerExpr(stmt.expression);
+    let disc = L.lowerExpr(stmt.expression);
+    // An untyped JS discriminant whose every case test is a NUMERIC
+    // literal: the switch itself says the value must be a number, so the
+    // checked cast belongs here. `switch (i + 1)` in untyped JS reaches
+    // this since `+` answers a dyn (its result kind is a runtime
+    // property); the cast is exactly the check its operands used to carry,
+    // in the same place and just as loud. Cases of any other shape keep
+    // the fence — a checked cast to the wrong kind would only move the
+    // refusal, not answer it.
+    if (
+      disc.type.kind === "dyn" && isJsSourceFile(stmt.getSourceFile()) &&
+      stmt.caseBlock.clauses.every((c) => !ts.isCaseClause(c) || isNumericCaseTest(c.expression))
+    ) {
+      disc = { kind: "dynCheck", value: disc, type: F64, loc: disc.loc };
+    }
     const dk = disc.type.kind;
     if (dk === "dyn") {
       L.unsupported("SC1100", stmt.expression, "switch statements on 'unknown' values");
@@ -5320,16 +5347,21 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     const loc = locOf(expr);
     const op = expr.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-";
     const readTarget: IrExpr = { kind: "varRef", localId: target.id, type: target.type, loc };
-    // JS any-origin targets: check the read to number, convert the
-    // result back into the dyn slot (the compound-assign stance).
+    // JS any-origin targets: `++`/`--` are ToNumeric on the READ — the
+    // one increment form with no string arm at all (`x = '3'; x++` leaves
+    // 4, not '31') — so the read runs the real ToNumber and the result
+    // converts back into the dyn slot (the compound-assign stance).
     const dynTarget = target.type.kind === "dyn" && isJsSourceFile(expr.getSourceFile());
     if (target.type.kind !== "f64" && !dynTarget) {
       L.unsupported("SC1090", expr.operand, "increment/decrement of non-number targets");
     }
+    if (dynTarget) tonumWhy(expr, "incdec");
     const computed: IrExpr = {
       kind: "bin",
       op,
-      left: dynTarget ? { kind: "dynCheck", value: readTarget, type: F64, loc } : readTarget,
+      left: dynTarget
+        ? { kind: "libCall", fn: "dyn.toNumber", args: [readTarget], type: F64, loc }
+        : readTarget,
       right: { kind: "numLit", value: 1, type: F64, loc },
       type: F64,
       loc,
@@ -5453,13 +5485,33 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       (rhs.type.kind === "dyn" || rhs.type.kind === "f64") &&
       isJsSourceFile(expr.getSourceFile())
     ) {
-      // JS any-origin operands: check to number and compute natively
-      // (the binary-operator stance) — the dyn target takes the result
-      // back through the usual dyn conversion.
-      const checkNum = (e: IrExpr): IrExpr =>
-        e.type.kind === "dyn" ? { kind: "dynCheck", value: e, type: F64, loc: e.loc } : e;
-      const computed: IrExpr = { kind: "bin", op: compound, left: checkNum(read), right: checkNum(rhs), type: F64, loc };
-      value = target.type.kind === "dyn" ? { kind: "dynFrom", value: computed, type: DYN, loc } : computed;
+      // JS any-origin operands: run the operator's OWN conversion and
+      // compute natively (the binary-operator stance) — the dyn target
+      // takes the result back through the usual dyn conversion.
+      const toNum = (e: IrExpr, why: string): IrExpr => {
+        if (e.type.kind !== "dyn") return e;
+        tonumWhy(expr, why);
+        return { kind: "libCall", fn: "dyn.toNumber", args: [e], type: F64, loc: e.loc };
+      };
+      if (compound === "+") {
+        // `x += v` is `x = x + v`, and `+` is not a number context: with
+        // an untyped operand on either side the sum's KIND is decided at
+        // runtime. A dyn slot takes it as it comes; an f64 slot cannot
+        // hold a concatenation, so the checked cast stays exactly where
+        // JS would have retyped the binding — loud, and only there.
+        tonumWhy(expr, "add-compound");
+        const asDyn = (e: IrExpr): IrExpr =>
+          e.type.kind === "dyn" ? e : { kind: "dynFrom", value: e, type: DYN, loc: e.loc };
+        const sum: IrExpr = { kind: "libCall", fn: "dyn.add", args: [asDyn(read), asDyn(rhs)], type: DYN, loc };
+        value = target.type.kind === "dyn" ? sum : { kind: "dynCheck", value: sum, type: F64, loc };
+      } else {
+        const computed: IrExpr = {
+          kind: "bin", op: compound,
+          left: toNum(read, "compound"), right: toNum(rhs, "compound"),
+          type: F64, loc,
+        };
+        value = target.type.kind === "dyn" ? { kind: "dynFrom", value: computed, type: DYN, loc } : computed;
+      }
     } else {
       L.unsupported("SC1043", expr);
     }
@@ -6248,8 +6300,8 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         if (arr.type.kind === "array") {
           const recv = L.declareHiddenLocal("%dtRecv", arr.type);
           out.push({ kind: "varDecl", localId: recv.id, init: arr, loc });
-          const index = L.lowerExpr(t.argumentExpression);
-          if (index.type.kind !== "f64") {
+          const index = checkedJsNumber(L, t.argumentExpression, L.lowerExpr(t.argumentExpression));
+          if (index === null) {
             L.unsupported("SC1090", t.argumentExpression, "indexing with non-number keys");
           }
           const idx = L.declareHiddenLocal("%dtIdx", F64);
