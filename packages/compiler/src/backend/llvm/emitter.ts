@@ -6325,6 +6325,28 @@ class LlEmitter {
         }
         return out;
       }
+      case "dynArrNew": {
+        // `new Array(n)` in the checked-dynamic tier. f64 operand: the
+        // LENGTH (ArrayCreate). dyn operand: the undecided one-argument
+        // form, whose length-or-element question is about the runtime
+        // value. Both can throw the RangeError, so both check pending.
+        const isLen = e.arg.type.kind === "f64";
+        this.declare(
+          isLen
+            ? `declare ptr @scr_dyn_new_arr_len(double)`
+            : `declare ptr @scr_dyn_new_arr_ctor1(ptr)`,
+        );
+        const a = this.emitExpr(e.arg);
+        const t = B.tmp();
+        B.line(
+          isLen
+            ? `${t} = call ptr @scr_dyn_new_arr_len(double ${a.name})`
+            : `${t} = call ptr @scr_dyn_new_arr_ctor1(ptr ${a.name})`,
+        );
+        const out = this.own({ name: t, type: e.type });
+        this.emitPendingCheck();
+        return out;
+      }
       case "dynObjLit": {
         // A dyn object built member-by-member: key then value, source
         // order. scr_dyn_key_set BORROWS all three (the member retains the
