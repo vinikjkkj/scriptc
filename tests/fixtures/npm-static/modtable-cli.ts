@@ -26,5 +26,8 @@ console.log("field5", hex(modtable.encodeField(5, -1)));
 console.log("field6", hex(modtable.encodeField(6, 16384)));
 console.log("names", modtable.names());
 console.log("family", modtable.family());
+// a module body whose `this` belongs to a function the body DECLARES, not
+// to the object-literal method the bundler wrote the body as
+console.log("writer", modtable.writer([0, 1, 127, 128, 300]));
 // each module body appended its name once, in first-call order
 console.log("order", modtable.order());
