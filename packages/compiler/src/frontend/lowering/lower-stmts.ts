@@ -22,7 +22,7 @@ import { lowerStreamUnderscoreAssign, streamClassAliasDecl, streamSidesOf } from
 import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment } from "./lower-server.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
-import { abstractPropertyDeclOf, aliasTypeofNarrows, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, checkedJsNumber, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
+import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import { canonicalBuiltinModule, isRelativeSpecifier } from "../shared.js";
@@ -5134,6 +5134,53 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
                 expr.left,
                 `dot writes to index-signature keys (spell it r["${expr.left.name.text}"] = v — brackets are the index-signature form)`,
               );
+            }
+          }
+          // `Codec.TAG = v` — an own property written onto a FUNCTION
+          // value in a JS file. This is pbjs `--target static-module`'s
+          // whole flat idiom, and its receiver is a function declaration
+          // NESTED in a factory, so the expando rule (module globals,
+          // top-level receivers only) declined above and every other
+          // lowering has too: the next step is "assignment to
+          // non-variables".
+          //
+          // The storage is the CLOSURE's own-property table, and the READ
+          // half has answered from it since 23d5918 (lower-exprs' function
+          // -value own-property arm boxes and dynKeyGets). What was
+          // missing was only this half — and because both halves box the
+          // SAME closure, they cannot disagree, which is the constraint
+          // estado-propassign.md §5 measured when a write was routed to a
+          // module global the reader could not reach.
+          //
+          // `name`/`length` deliberately keep the generic fence: the box
+          // READS them (its static name and declared arity) but Node makes
+          // them non-writable own properties, so a stored value would be a
+          // wrong read afterwards. `prototype` and the Function.prototype
+          // methods are the shared skip list's, for the read arm's reasons.
+          if (
+            !expr.left.questionDotToken &&
+            fnOwnRoutableKey(expr.left.name.text) &&
+            expr.left.name.text !== "name" && expr.left.name.text !== "length"
+          ) {
+            const boxed = fnOwnPropBox(L, expr.left.expression, locOf(expr.left.expression));
+            if (boxed) {
+              const loc = locOf(expr);
+              const key: IrExpr = { kind: "strLit", value: expr.left.name.text, type: STRING, loc: locOf(expr.left.name) };
+              const value = L.lowerExprExpecting(expr.right, DYN);
+              if (value.type.kind !== "dyn") {
+                L.unsupported(
+                  "SC1100",
+                  expr.right,
+                  `assigning '${L.fmt(value.type)}' values onto a function value's own properties`,
+                );
+              }
+              fnOwnCounters.write++;
+              fnOwnWhy("write", expr.left, expr.left.name.text);
+              return {
+                kind: "exprStmt",
+                expr: { kind: "libCall", fn: "dyn.keySet", args: [boxed, key, value], type: VOID, loc },
+                loc,
+              };
             }
           }
         }

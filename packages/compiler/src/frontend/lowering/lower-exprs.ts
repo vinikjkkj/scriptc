@@ -35,6 +35,71 @@ import { EMITTER_API_MEMBERS } from "./lower-classes.js";
  * as the result. */
 let declModuleFenceCount = 0;
 
+/** Member names a FUNCTION value's dyn box does NOT serve as own
+ * properties. The `Function.prototype` methods stay out because a stored
+ * `undefined` would mis-answer `f.call` as a VALUE, and `prototype` stays
+ * out because nothing here builds a prototype OBJECT — the chain is the
+ * other half of this route (estado-objmodel.md §4b).
+ *
+ * The list is shared by the READ, the WRITE and the CALL arms on purpose:
+ * the three are one table seen from three sides, and a key one arm serves
+ * while another refuses is exactly the split-brain estado-propassign.md §5
+ * measured (a routed write whose read still fences turns runtime fences
+ * into hard compile errors). Same set, or the halves disagree. */
+const FN_OWN_SKIPPED_KEYS = new Set([
+  "apply", "bind", "call", "toString", "constructor", "prototype", "caller", "arguments",
+]);
+
+/** True when a member name routes to a function value's own-property
+ * table. `name` and `length` READ from the box (its static name and
+ * declared arity) but never route a WRITE — see fnOwnPropBox's callers. */
+export function fnOwnRoutableKey(key: string): boolean {
+  return !FN_OWN_SKIPPED_KEYS.has(key);
+}
+
+/** SCRIPTC_FNOWN_WHY: what the function-value own-property route claimed,
+ * read in the SAME run as the result it produced. `read` is the arm that
+ * has shipped since 23d5918; `write` and `call` are this session's. */
+export const fnOwnCounters = { read: 0, write: 0, call: 0, boxed: 0, declinedNotFunc: 0 };
+
+/** The per-use dyn box for a FUNCTION-typed receiver whose own properties
+ * are wanted, or null when the receiver is not one.
+ *
+ * A PER-USE box is correct and no declaration-site interning is needed:
+ * `dynFrom` over a function value emits `scr_dyn_new_func(scr_closure_retain(v), …)`
+ * (emit-walkers.ts), so every box of one function value shares one
+ * `ScrClosure` and therefore one property table (`ScrClosure::props`).
+ * Two boxes see each other's writes; a function value created afresh per
+ * call of an enclosing factory gets a fresh closure and a fresh table,
+ * which is exactly Node. `Object.defineProperties` has boxed a
+ * function-typed target per use on this same argument since it shipped
+ * (lower-calls.ts, the defineProperties arm).
+ *
+ * JAVASCRIPT files only, mirroring the read arm this factors out of: in
+ * TypeScript the checker has a declared member type at every such access
+ * and answering DYN there would cascade through every downstream
+ * consumer. */
+export function fnOwnPropBox(L: Lowerer, recv: ts.Expression, loc: SrcLoc): IrExpr | null {
+  if (!isJsSourceFile(recv.getSourceFile())) return null;
+  const probed = probeLower(L, recv);
+  if (!probed || probed.type.kind !== "func") {
+    if (probed) fnOwnCounters.declinedNotFunc++;
+    return null;
+  }
+  if (!canBoxFuncIntoDyn(probed.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))) return null;
+  const fnName = jsFuncNameOf(recv);
+  fnOwnCounters.boxed++;
+  return { kind: "dynFrom", value: probed, type: DYN, ...(fnName !== null ? { fnName } : {}), loc };
+}
+
+/** The SCRIPTC_FNOWN_WHY trace line for one claimed site. Off unless the
+ * env var is set; the counters above are always live. */
+export function fnOwnWhy(arm: string, node: ts.Node, key: string): void {
+  if (process.env["SCRIPTC_FNOWN_WHY"] === undefined) return;
+  const sf = node.getSourceFile();
+  process.stderr.write(`FNOWN ${arm} ${key} ${sf.fileName}@${node.getStart()}\n`);
+}
+
 /** An assignable `obj.field` target — a class field, a record field, or a
  * class ACCESSOR property (reads become getter calls, writes setter calls;
  * fieldType is the property's one type). */
@@ -1797,24 +1862,12 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // the own-property answer, undefined. Function.prototype METHOD
       // names stay fenced (a stored-member undefined would mis-answer
       // `f.call` as a value). JS files only; TS keeps the fence.
-      if (
-        !["apply", "bind", "call", "toString", "constructor", "prototype", "caller", "arguments"].includes(expr.name.text) &&
-        isJsSourceFile(expr.getSourceFile())
-      ) {
-        const probed = probeLower(L, expr.expression);
-        if (
-          probed?.type.kind === "func" &&
-          canBoxFuncIntoDyn(probed.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))
-        ) {
-          const fnName = jsFuncNameOf(expr.expression);
-          const boxed: IrExpr = {
-            kind: "dynFrom",
-            value: probed,
-            type: DYN,
-            ...(fnName !== null ? { fnName } : {}),
-            loc,
-          };
+      if (fnOwnRoutableKey(expr.name.text)) {
+        const boxed = fnOwnPropBox(L, expr.expression, loc);
+        if (boxed) {
           const key: IrExpr = { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr.name) };
+          fnOwnCounters.read++;
+          fnOwnWhy("read", expr, expr.name.text);
           return L.maybeNarrow({ kind: "dynKeyGet", key, value: boxed, type: DYN, loc }, expr);
         }
       }
@@ -8040,6 +8093,53 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
               ],
               result: valRef(),
               type: ft.fieldType,
+              loc,
+            };
+          }
+        }
+        // `Codec.TAG = v` in VALUE position on a FUNCTION-typed JS
+        // receiver — the statement arm's twin, and needed for the same
+        // reason the checked-dynamic arm above has one: a minifier writes
+        // `x = (a.k = v, …)`, so the same write arrives in both positions
+        // and a rule that claims only one of them leaves the other's read
+        // looking at a table nothing wrote. Same box, same shared skip
+        // list, same order (receiver reference, then RHS, then the write),
+        // and the expression's value is the RHS with its OWN type.
+        if (
+          ts.isPropertyAccessExpression(expr.left) && !expr.left.questionDotToken &&
+          fnOwnRoutableKey(expr.left.name.text) &&
+          expr.left.name.text !== "name" && expr.left.name.text !== "length"
+        ) {
+          const boxed = fnOwnPropBox(L, expr.left.expression, locOf(expr.left.expression));
+          if (boxed) {
+            const recvTmp = L.declareHiddenLocal("%setRecv", DYN);
+            const rhsVal = L.lowerExpr(expr.right);
+            const valTmp = L.declareHiddenLocal("%setVal", rhsVal.type);
+            const valRef = (): IrExpr => ({ kind: "varRef", localId: valTmp.id, type: rhsVal.type, loc });
+            const stored = L.coerceToExpected(valRef(), DYN);
+            if (stored.type.kind !== "dyn") {
+              L.unsupported(
+                "SC1101",
+                expr.right,
+                `assigning '${L.fmt(rhsVal.type)}' values onto a function value's own properties`,
+              );
+            }
+            const key: IrExpr = { kind: "strLit", value: expr.left.name.text, type: STRING, loc: locOf(expr.left.name) };
+            fnOwnCounters.write++;
+            fnOwnWhy("writeval", expr.left, expr.left.name.text);
+            return {
+              kind: "seqExpr",
+              stmts: [
+                { kind: "varDecl", localId: recvTmp.id, init: boxed, loc },
+                { kind: "varDecl", localId: valTmp.id, init: rhsVal, loc },
+                {
+                  kind: "exprStmt",
+                  expr: { kind: "libCall", fn: "dyn.keySet", args: [{ kind: "varRef", localId: recvTmp.id, type: DYN, loc }, key, stored], type: VOID, loc },
+                  loc,
+                },
+              ],
+              result: valRef(),
+              type: rhsVal.type,
               loc,
             };
           }
