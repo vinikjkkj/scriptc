@@ -4,9 +4,15 @@
 // (the helper's parameter is untyped, so the literal takes the JS
 // declaration fallback and builds as a dyn object).
 //
-// This is the single construct that hides every bundled module body: one
-// refusal per bundled module, and the bodies behind it are never reached.
-// The three modules here cross-require through the memoizing thunk, so the
+// The table's ACCESS path rides with it: `var o = Object.getOwnPropertyNames`
+// is a builtin in VALUE position, bound at module scope and read from
+// inside the returned thunk — which is a monomorphized instance that takes
+// no captures, so the binding needs module STORAGE rather than a capture
+// thread. Both are driven here, and `family` drives the twin the lift also
+// covers — over the receivers where the own-NAMES walk and the own-KEYS
+// walk part company.
+//
+// The three modules cross-require through the memoizing thunk, so the
 // differential also pins that each body runs EXACTLY ONCE.
 import modtable from "modtable";
 
@@ -19,5 +25,6 @@ console.log("field4", hex(modtable.encodeField(4, 128)));
 console.log("field5", hex(modtable.encodeField(5, -1)));
 console.log("field6", hex(modtable.encodeField(6, 16384)));
 console.log("names", modtable.names());
+console.log("family", modtable.family());
 // each module body appended its name once, in first-call order
 console.log("order", modtable.order());

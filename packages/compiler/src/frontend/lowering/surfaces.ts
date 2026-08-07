@@ -7,8 +7,8 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { UNSUPPORTED } from "../../diagnostics/diagnostic.js";
-import { BOOL, BYTES_U8, CHILD_T, DYN, F64, IrExpr, IrLibFn, IrStrIntrinsicMethod, IrType, RUNTIME_ERROR_CLASSES, SPAWNRES_T, STATS_T, STRING, URL_T, VOID, arrayOf, funcOf, } from "../../ir/nodes.js";
-import { isNodeTypesPath, locOf, requireSpecOf } from "../program.js";
+import { BOOL, BYTES_U8, CHILD_T, DYN, F64, IrExpr, IrLibFn, IrStmt, IrStrIntrinsicMethod, IrType, RUNTIME_ERROR_CLASSES, SPAWNRES_T, STATS_T, STRING, SrcLoc, URL_T, VOID, arrayOf, funcOf, } from "../../ir/nodes.js";
+import { isJsSourceFile, isNodeTypesPath, locOf, requireSpecOf } from "../program.js";
 
 /** Statement-level constructs rejected wholesale, keyed by syntax kind. */
 export const UNSUPPORTED_STMT: Partial<Record<ts.SyntaxKind, { code: keyof typeof UNSUPPORTED; feature?: string }>> = {
@@ -1731,4 +1731,188 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       });
     }
     return { kind: "closure", fnName: name, captures: [], type: funcOf([optT], bytesT), loc };
+  }
+
+/** `Object.getOwnPropertyNames` — and its twin `Object.keys` — taken as a
+   * VALUE rather than called. The diffieHellman lift, one surface over.
+   *
+   * A builtin has no closure representation: it lowers to a libCall at its
+   * CALL sites, so the bare member read fences. The bundler preamble needs
+   * the value itself. esbuild's `__commonJS` is
+   *
+   *     var o = Object.getOwnPropertyNames,
+   *       r = (e, t) => function () { return t || (0, e[o(e)[0]])(...), ... };
+   *
+   * — the builtin bound once at module scope and read from inside the
+   * memoizing thunk. Fencing the BINDING costs more than the read: the
+   * declaration is poisoned, so `o` gets no module global, which leaves it
+   * an %init-body local, and the thunk (a MONOMORPHIZED instance that takes
+   * no captures) then fences a SECOND time on a capture with nothing to
+   * thread. Measured on the `modtable` pilot: the lift alone takes two
+   * fences to one, and the matching global registration
+   * (objectStaticFnValueDeclType, read by collectGlobals) takes one to
+   * zero. The control is the same program with a plain function value in
+   * that position — no second fence there, which is what proves the second
+   * fence is this construct's and not the object model's.
+   *
+   * The lift is a real function over the SAME lowering the call form uses
+   * on a checked-dynamic receiver — `dyn.objKeys` for `keys`,
+   * dynOwnNamesHelper for `getOwnPropertyNames`. Nothing new is claimed:
+   * any argument this closure receives answers exactly what it would have
+   * answered spelled at the call site.
+   *
+   * `values` and `entries` are deliberately NOT here, and that is a
+   * measurement rather than a scoping choice: they are declared GENERIC, so
+   * a bare read of them refuses at the generic-method-as-value rule long
+   * before this chokepoint and lifting them would only register storage
+   * nothing can fill. Their value position is that rule's to open.
+   *
+   * Memoized per program. Null when the access is not this pair — the
+   * caller keeps its fence. */
+  export function objectStaticFnValueOf(L: Lowerer, access: ts.PropertyAccessExpression): IrExpr | null {
+    if (!isObjectOwnKeysFnValue(L, access)) return null;
+    const loc = locOf(access);
+    const ownNames = L.stdlibGlobalMember(access, "Object") === "getOwnPropertyNames";
+    const name = ownNames ? dynOwnNamesHelper(L, loc) : "%object.keys.value";
+    if (!ownNames && !L.liftedFns.some((f) => f.name === name)) {
+      const argId = "o.0";
+      L.liftedFns.push({
+        name,
+        params: [{ localId: argId, name: "o", type: DYN }],
+        returnType: DYN,
+        locals: [{ id: argId, name: "o", type: DYN, mutable: false }],
+        body: [
+          {
+            kind: "return",
+            value: {
+              kind: "libCall",
+              fn: "dyn.objKeys",
+              args: [{ kind: "varRef", localId: argId, type: DYN, loc }],
+              type: DYN,
+              loc,
+            },
+            loc,
+          },
+        ],
+        loc,
+      });
+    }
+    if (process.env["SCRIPTC_OBJFNVALUE_WHY"] !== undefined) {
+      console.error(`[objfnvalue] lift ${loc.file}:${loc.start} ${name}`);
+    }
+    return { kind: "closure", fnName: name, captures: [], type: OBJECT_OWN_KEYS_FN_VALUE_T, loc };
+  }
+
+/** `Object.getOwnPropertyNames` over a CHECKED-DYNAMIC receiver, as a
+   * memoized lifted function — the honest twin of `dyn.objKeys`.
+   *
+   * The two walks coincide for a plain object (no non-enumerable own
+   * members, no symbol keys) and that is what the record path relies on,
+   * but they DO NOT coincide for the index-keyed kinds: JS arrays and
+   * strings carry `length` as an own property, so Node answers
+   * `["0","1","length"]` where `Object.keys` answers `["0","1"]`. A dyn
+   * receiver's kind is a runtime fact, so the test is a runtime test —
+   * `dyn.objKeys` first, then append `"length"` when the receiver turns
+   * out to be one of those two kinds. Typed arrays are correctly NOT in
+   * the list: their `length` is an accessor on `%TypedArray%.prototype`,
+   * so Node answers the indices alone, which is what the walk already
+   * gives.
+   *
+   * (Function receivers keep the walk's answer and stay divergent from
+   * Node's `["length","name","prototype"]` — untouched here, and the same
+   * in the call form.) */
+  export function dynOwnNamesHelper(L: Lowerer, loc: SrcLoc): string {
+    const name = "%object.ownNames";
+    if (L.liftedFns.some((f) => f.name === name)) return name;
+    const argId = "o.0";
+    const outId = "names.0";
+    const oRef: IrExpr = { kind: "varRef", localId: argId, type: DYN, loc };
+    const outRef: IrExpr = { kind: "varRef", localId: outId, type: DYN, loc };
+    // `names[names.length] = "length"` — the dyn index write appends.
+    const appendLength: IrStmt = {
+      kind: "exprStmt",
+      expr: {
+        kind: "libCall",
+        fn: "dyn.keySet",
+        args: [
+          outRef,
+          { kind: "toString", operand: { kind: "libCall", fn: "dyn.arrLen", args: [outRef], type: F64, loc }, type: STRING, loc },
+          { kind: "dynFrom", value: { kind: "strLit", value: "length", type: STRING, loc }, type: DYN, loc },
+        ],
+        type: VOID,
+        loc,
+      },
+      loc,
+    };
+    const kindGuard = (test: "array" | "string"): IrStmt => ({
+      kind: "if",
+      cond: { kind: "dynTest", test, value: oRef, type: BOOL, loc },
+      then: [appendLength],
+      else_: null,
+      loc,
+    });
+    L.liftedFns.push({
+      name,
+      params: [{ localId: argId, name: "o", type: DYN }],
+      returnType: DYN,
+      locals: [
+        { id: argId, name: "o", type: DYN, mutable: false },
+        { id: outId, name: "names", type: DYN, mutable: false },
+      ],
+      body: [
+        {
+          kind: "varDecl",
+          localId: outId,
+          init: { kind: "libCall", fn: "dyn.objKeys", args: [oRef], type: DYN, loc },
+          loc,
+        },
+        kindGuard("array"),
+        kindGuard("string"),
+        { kind: "return", value: outRef, loc },
+      ],
+      loc,
+    });
+    return name;
+  }
+
+/** The lift's function type: the runtime walk takes a checked-dynamic
+   * receiver and answers a checked-dynamic list. */
+  export const OBJECT_OWN_KEYS_FN_VALUE_T: IrType = funcOf([DYN], DYN);
+
+/** True for `Object.getOwnPropertyNames` / `Object.keys` read as a VALUE.
+   * Shared by the expression lift and by collectGlobals, which needs the
+   * same answer BEFORE any statement lowers. */
+  function isObjectOwnKeysFnValue(L: Lowerer, access: ts.PropertyAccessExpression): boolean {
+    if (access.questionDotToken) return false;
+    // STATIC builds only. The lift's body is the checked-dynamic walk, and
+    // under --dynamic a JS value is an island HANDLE, not a dyn node — the
+    // walk would answer the empty list for it. The call form self-gates the
+    // same way (its dyn arm dispatches on the LOWERED receiver kind, which
+    // is jsval there); the lift has no receiver to probe, so it says so.
+    if (L.dynamic) return false;
+    // JAVASCRIPT sources only. The walk answers a checked-dynamic list,
+    // which is what a JS consumer of this value already holds everywhere
+    // else; in TypeScript the checker promises `string[]` and handing back
+    // a dyn would be a representation nothing annotated asked for. TS keeps
+    // the SC2020 fence, which stays true there.
+    if (!isJsSourceFile(access.getSourceFile())) return false;
+    // The CALL form is lower-calls' — including the arities and receivers
+    // it declines, which must keep their own fences rather than becoming
+    // an arity error against a lifted closure.
+    const parent = access.parent;
+    if (parent && ts.isCallExpression(parent) && parent.expression === access) return false;
+    const member = L.stdlibGlobalMember(access, "Object");
+    return member === "getOwnPropertyNames" || member === "keys";
+  }
+
+/** The module-global slot type for a JS file-scope declaration whose
+   * initializer IS that lift (`var o = Object.getOwnPropertyNames` — the
+   * whole of esbuild's `__commonJS` preamble). Null for everything else,
+   * so the JS-unmappable skip keeps its default. */
+  export function objectStaticFnValueDeclType(L: Lowerer, init: ts.Expression | undefined): IrType | null {
+    if (init === undefined) return null;
+    let inner: ts.Expression = init;
+    while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+    if (!ts.isPropertyAccessExpression(inner)) return null;
+    return isObjectOwnKeysFnValue(L, inner) ? OBJECT_OWN_KEYS_FN_VALUE_T : null;
   }
