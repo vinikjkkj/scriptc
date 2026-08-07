@@ -6252,6 +6252,9 @@ const inliningPredicates = new Set<ts.Symbol>();
 
     const fnCtx = newFnCtx(true, selfSymbol, funcType, bodyReturn);
     fnCtx.isAsync = isAsync;
+    // An arrow binds neither `this` nor `arguments` (JS scoping): the
+    // ARGUMENTS_BINDING walk resolves outward through this frame.
+    fnCtx.isArrow = ts.isArrowFunction(node);
     if (isGenerator && funcType.ret.kind === "generator") {
       fnCtx.generator = { yieldT: funcType.ret.yieldT, nextT: funcType.ret.nextT };
     }
@@ -6263,9 +6266,8 @@ const inliningPredicates = new Set<ts.Symbol>();
       // param): a synthetic trailing dyn-array param carries the call's
       // arguments; `arguments` reads resolve to it (identifier lowering).
       if (funcType.rest && !shapes.some((s) => s.mode === "dynRest" || s.mode === "islandRest")) {
-        const argsLocal = L.declareHiddenLocal("%arguments", DYN);
+        const argsLocal = L.declareArgumentsLocal();
         params.push({ localId: argsLocal.id, name: "%arguments", type: DYN });
-        fnCtx.argumentsLocal = argsLocal;
       }
 
       let body: IrStmt[];
@@ -8867,9 +8869,8 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
       // parameters — collectSignatureInner appended it): one trailing
       // dyn-array param, resolved by `arguments` reads.
       if (sig.params.length > decl.parameters.length && sig.params[sig.params.length - 1]!.mode === "dynRest") {
-        const argsLocal = L.declareHiddenLocal("%arguments", DYN);
+        const argsLocal = L.declareArgumentsLocal();
         params.push({ localId: argsLocal.id, name: "%arguments", type: DYN });
-        ctx.argumentsLocal = argsLocal;
       }
       const bodyBlock = blockBodyOf(decl);
       if (!bodyBlock) {

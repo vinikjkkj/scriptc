@@ -173,6 +173,21 @@ export function own<T>(table: Record<string, T | undefined>, key: string): T | u
  * arrows capturing `this` ride the ordinary capture machinery. */
 export const THIS_BINDING = { escapedName: "%this" } as unknown as ts.Symbol;
 
+/** Sentinel binding key for the `arguments` object — the twin of
+ * THIS_BINDING, and for the same reason: an ARROW binds neither `this` nor
+ * `arguments`, so a read inside one names the ENCLOSING function's. The
+ * synthetic `%arguments` slot is registered under this key, so an arrow's
+ * read rides the ordinary capture machinery (box the origin, thread one
+ * capture per function in between) instead of needing a story of its own.
+ *
+ * The one way it differs from `this`: the outward walk must STOP at the
+ * first non-arrow frame. Every other function form — declaration,
+ * expression, method, accessor, constructor — binds an `arguments` of its
+ * own, so a frame that is not an arrow and carries no binding is a frame
+ * whose `arguments` simply never got storage; walking past it would answer
+ * with a DIFFERENT call's argument list. peekArgumentsLocal enforces it. */
+export const ARGUMENTS_BINDING = { escapedName: "%arguments" } as unknown as ts.Symbol;
+
 /* ── the island boundary, in one voice ────────────────────────────────
  * Whether a value can cross between the static world and the island is
  * ONE question — canCrossIslandBoundary (nodes.ts), asked here through
@@ -206,8 +221,13 @@ export interface FnCtx {
   generator?: { yieldT: IrType; nextT: IrType } | null;
   /** VARIADIC `arguments` form (rest-marked func type with no declared
    * rest param): the synthetic trailing dyn-array param `arguments`
-   * reads resolve to. */
+   * reads resolve to. Also registered under ARGUMENTS_BINDING in the
+   * frame's outermost scope, which is what nested arrows capture. */
   argumentsLocal?: IrLocal | null;
+  /** This frame is an ARROW's. JS scoping: an arrow binds neither `this`
+   * nor `arguments`, so both resolve outward THROUGH it — and the
+   * `arguments` walk stops at the first frame where this is false. */
+  isArrow?: boolean;
   /** Declared return type — lets `return` detect record-shape mismatches
    * (SC2002) before the validator would ICE on them. */
   returnType: IrType;
@@ -7841,6 +7861,20 @@ export class Lowerer {
     return local;
   }
 
+  /** Declares this function's synthetic `%arguments` slot — the whole
+   * argument list as one dyn array — registered under the
+   * ARGUMENTS_BINDING sentinel so nested arrows capture it through the
+   * normal machinery, exactly as declareThis does for `this`. The caller
+   * still appends the matching trailing IrParam: the slot is part of the
+   * ABI (funcType.rest), not a body local. */
+  declareArgumentsLocal(): IrLocal {
+    const ctx = this.ctx;
+    const local = this.declareHiddenLocal("%arguments", DYN);
+    ctx.argumentsLocal = local;
+    ctx.scopes[ctx.scopes.length - 1]!.set(ARGUMENTS_BINDING, local);
+    return local;
+  }
+
   lowerFunction(decl: ts.FunctionDeclaration): IrFunction | null {
     return lowerFunction(this, decl);
   }
@@ -8170,6 +8204,36 @@ export class Lowerer {
       if (hit) return hit;
     }
     return null;
+  }
+
+  /** The `arguments` object visible at the current point, WITHOUT touching
+   * capture state — the read-only twin of resolveArgumentsLocal, and the
+   * question the `arguments.length` constant fold has to ask before it
+   * decides it may fold (resolveKey boxes the origin and threads captures
+   * as a side effect, so a speculative query must not use it).
+   *
+   * The walk is the JS scoping rule and nothing more: the current frame
+   * first, then outward for exactly as long as the frames are ARROWS. A
+   * non-arrow frame that carries no binding ends the search with null —
+   * that function owns an `arguments` the compiler never materialized, and
+   * answering with its caller's list would be a different wrong answer. */
+  peekArgumentsLocal(): IrLocal | null {
+    for (let depth = this.fnStack.length - 1; depth >= 0; depth--) {
+      const frame = this.fnStack[depth]!;
+      const hit = this.bindingIn(frame, ARGUMENTS_BINDING);
+      if (hit) return hit;
+      if (frame.isArrow !== true) return null;
+    }
+    return null;
+  }
+
+  /** The `arguments` object as a local OF THE CURRENT FUNCTION: the origin
+   * slot when this frame owns one, otherwise a capture threaded through
+   * every arrow between here and the function that does. Null when JS
+   * itself would not resolve the name here (see peekArgumentsLocal). */
+  resolveArgumentsLocal(blame: ts.Node): IrLocal | null {
+    if (this.peekArgumentsLocal() === null) return null;
+    return this.resolveKey(ARGUMENTS_BINDING, blame);
   }
 
   /** READ-ONLY twin of resolveLocal for PROBES (isIslandExpr): answers
