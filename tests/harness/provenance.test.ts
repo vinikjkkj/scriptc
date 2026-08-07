@@ -45,7 +45,16 @@ const PB_EXPECTED =
   // file through `export { X } from` and nothing else left that init
   // unscheduled while the read was bound to the twin's global — a NULL
   // dereference with no trap, no code and no location.
-  "pbgen-2.0.1 11 65535 5\n";
+  "pbgen-2.0.1 11 65535 5\n" +
+  // The CJS-WHOLE-EXPORT generated module (spec/wire): a twin whose last
+  // line is `module.exports = <identifier>`, so no export its declaration
+  // names has a binding of that name anywhere in it. Before the
+  // declaration-twin export bridge this line was zapo's own wall word for
+  // word — "'wire.Frame.encode' has no compiled implementation (its module
+  // '…/index.d.ts' compiled, but no body for this member lowers out of
+  // it)" — with 1.8 MB of compiled twin sitting beside the declaration and
+  // nothing able to reach it.
+  "f:42 wire-2 6\n";
 
 async function buildAndRun(name: string, dynamic: boolean, from = entry): Promise<string> {
   mkdirSync(outDir, { recursive: true });
