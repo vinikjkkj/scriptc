@@ -118,6 +118,13 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // that the lowered closures carry the right values and not just a
     // compiling shape.
     ["dyntable", "dyntable-cli.ts"],
+    // fnmembers attaches its whole API as members of a module-level
+    // function — the pre-ES6 namespace-object idiom, untyped end to end.
+    // Function members are per-(symbol × key) module globals, and the
+    // export-table spelling of the receiver names the same function
+    // object, so the importer's reads and the package's own writes meet
+    // at one storage.
+    ["fnmembers", "fnmembers-cli.ts"],
   ] as const)("%s compiles statically and byte-matches Node", async ([pkg, file]) => {
     const entry = join(pilotRoot, file);
     const binary = await buildStatic(entry, [pkg]);
@@ -262,6 +269,21 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // the module bodies are REACHED: the three method bodies more than
     // doubled the statements the compiler sees (20 behind the refusal)
     expect(coverage.stats.statementsTotal).toBeGreaterThan(35);
+  }, 120_000);
+
+  // fnmembers's frontier, pinned: the pre-ES6 namespace-object idiom
+  // compiles with NOTHING left over — no build diagnostic and no runtime
+  // fence. Before function members reached untyped JS this same program
+  // did not build at all: the writes fell through to "assignment to
+  // non-variables" and every read of a member was a hard "reading 'X'
+  // from a value of type '{ (…): …; X: … }'" error.
+  test("fnmembers's function-member idiom compiles with nothing left over", () => {
+    const { coverage } = analyze(join(pilotRoot, "fnmembers-cli.ts"), { npmStatic: ["fnmembers"] });
+    expect(coverage.npmStatic).toEqual([{ package: "fnmembers", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
+    expect(coverage.stats.statementsFailed).toBe(0);
   }, 120_000);
 
   // Tier 2: commander opts in and COMPILES as program modules — the
