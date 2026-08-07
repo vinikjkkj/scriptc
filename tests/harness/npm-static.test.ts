@@ -106,6 +106,13 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // operators are ToInt32/ToUint32 by specification, so a static build
     // owes Node the same bytes and this differential is the proof.
     ["varintish", "varint-cli.ts"],
+    // fnmembers attaches its whole API as members of a module-level
+    // function — the pre-ES6 namespace-object idiom, untyped end to end.
+    // Function members are per-(symbol × key) module globals, and the
+    // export-table spelling of the receiver names the same function
+    // object, so the importer's reads and the package's own writes meet
+    // at one storage.
+    ["fnmembers", "fnmembers-cli.ts"],
   ] as const)("%s compiles statically and byte-matches Node", async ([pkg, file]) => {
     const entry = join(pilotRoot, file);
     const binary = await buildStatic(entry, [pkg]);
@@ -182,6 +189,21 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     for (const f of fences) {
       expect(f.message).toMatch(/bare 'return'/);
     }
+  }, 120_000);
+
+  // fnmembers's frontier, pinned: the pre-ES6 namespace-object idiom
+  // compiles with NOTHING left over — no build diagnostic and no runtime
+  // fence. Before function members reached untyped JS this same program
+  // did not build at all: the writes fell through to "assignment to
+  // non-variables" and every read of a member was a hard "reading 'X'
+  // from a value of type '{ (…): …; X: … }'" error.
+  test("fnmembers's function-member idiom compiles with nothing left over", () => {
+    const { coverage } = analyze(join(pilotRoot, "fnmembers-cli.ts"), { npmStatic: ["fnmembers"] });
+    expect(coverage.npmStatic).toEqual([{ package: "fnmembers", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
+    expect(coverage.stats.statementsFailed).toBe(0);
   }, 120_000);
 
   // Tier 2: commander opts in and COMPILES as program modules — the
