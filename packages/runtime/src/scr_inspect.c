@@ -779,11 +779,30 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
        * with "[Object: null prototype]" (formatValue's constructor-less
        * base), the empty form included, and the beyond-depth answer IS
        * the bare marker (where a plain object says [Object]). */
+      /* An INSTANCE (`new F()`) carries its constructor's name, and Node
+       * prefixes the rendering with it: `F { a: 1 }`, `G {}` — and
+       * `[F]` past the depth limit where a plain object says [Object].
+       * The name is the static literal the FUNC box carries, copied at
+       * construction; a plain literal has none and renders unchanged. */
+      const char *cn = d->v.obj.cname;
       if (d->v.obj.len == 0) {
+        if (cn != NULL && cn[0]) {
+          InspBuf nb = {0};
+          ib_cstr(&nb, cn);
+          ib_cstr(&nb, " {}");
+          return ib_take(&nb);
+        }
         return d->null_proto ? scr_str_new("[Object: null prototype] {}", 27)
                              : scr_str_new("{}", 2);
       }
       if (recurse > depth) {
+        if (cn != NULL && cn[0]) {
+          InspBuf nb = {0};
+          ib_char(&nb, '[');
+          ib_cstr(&nb, cn);
+          ib_char(&nb, ']');
+          return ib_take(&nb);
+        }
         return d->null_proto ? scr_str_new("[Object: null prototype]", 24)
                              : scr_str_new("[Object]", 8);
       }
@@ -800,8 +819,9 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         scr_insp_entry(entry, false);
         scr_str_release(entry);
       }
-      ScrStr *base = d->null_proto ? scr_str_new("[Object: null prototype]", 24)
-                                   : scr_str_new("", 0);
+      ScrStr *base = cn != NULL && cn[0] ? scr_str_new(cn, strlen(cn))
+                     : d->null_proto     ? scr_str_new("[Object: null prototype]", 24)
+                                         : scr_str_new("", 0);
       ScrStr *b0 = scr_str_new("{", 1);
       ScrStr *b1 = scr_str_new("}", 1);
       ScrStr *out = scr_insp_end(base, b0, b1, recurse + 1, false, false);

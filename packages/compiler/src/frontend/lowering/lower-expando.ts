@@ -77,8 +77,22 @@ export interface ExpandoMember {
 /** Function members JS refuses to assign in strict mode (every module is
  * strict): non-writable own properties of functions plus the poisoned
  * caller/arguments pair. A global slot would silently succeed where Node
- * throws TypeError, so writes fence by name. */
-const READONLY_FN_MEMBERS = new Set(["length", "name", "caller", "arguments", "prototype"]);
+ * throws TypeError, so writes fence by name.
+ *
+ * `prototype` is NOT one of them, and saying it was made this diagnostic
+ * a false statement about the language: on a function DECLARATION
+ * `prototype` is a writable own data property, so `F.prototype = {…}`
+ * succeeds in Node — the runtime's own keyed-write arm has said so in a
+ * comment since the write landed. It stays out of the EXPANDO set below
+ * (a module global would be the wrong home — the prototype object lives
+ * in the function value's own-property table, where scr_dyn_fn_prototype
+ * mints it and `new` reads it back), so an unfenced write here simply
+ * falls through to the dyn keyed write that already stores it. */
+const READONLY_FN_MEMBERS = new Set(["length", "name", "caller", "arguments"]);
+
+/** Members that never become expando GLOBALS: the read-only set, plus
+ * `prototype`, whose home is the function value's own-property table. */
+const NON_EXPANDO_FN_MEMBERS = new Set([...READONLY_FN_MEMBERS, "prototype"]);
 
 /** The member key of an assignment target / read site: a spelled or
  * folded string name, a unique-symbol const's ts.Symbol, or null (not a
@@ -220,7 +234,7 @@ export function collectExpandoMembers(L: Lowerer, sf: ts.SourceFile): void {
       const existing = members.get(w.key);
       if (existing) {
         existing.firstWriteStart = Math.min(existing.firstWriteStart, node.getStart());
-      } else if (!(typeof w.key === "string" && READONLY_FN_MEMBERS.has(w.key)) && !nsOwnedMember(L, w.access)) {
+      } else if (!(typeof w.key === "string" && NON_EXPANDO_FN_MEMBERS.has(w.key)) && !nsOwnedMember(L, w.access)) {
         // The member slot's type is the checker's DECLARED member type at
         // the access (expando members widen across all assignments;
         // interface members carry their declared type). Mapping failures

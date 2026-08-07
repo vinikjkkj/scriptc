@@ -5025,13 +5025,28 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         loc: locOf(call),
       };
     }
-    // Names NO dyn-representable prototype declares: the member can only
-    // be an OWN property, so "call the own member" IS Node's semantics for
-    // every possible dyn value — `handlers.onDone(x)` on a checked-dynamic
-    // object calls the stored function. Prototype names
-    // (map/join/hasOwnProperty/call/...) keep the fence: on a real dyn
-    // array/string/object Node would run the METHOD, which no stored
-    // member models.
+    // Names NO dyn-representable prototype declares: the member is an OWN
+    // property or an INHERITED one, and either way JS's `o.m(...)` binds
+    // the RECEIVER — `handlers.onDone(x)` runs with `this === handlers`,
+    // and `inst.encode(m)` where `encode` came from
+    // `Klass.prototype.encode = fn` runs with `this === inst`. That is
+    // scr_dyn_invoke's OBJ arm exactly (own member, then the prototype
+    // chain, called through the ambient-receiver window), so the call
+    // goes there rather than to "read the member, then call the value".
+    //
+    // The read-then-call form this replaces LOST the receiver: it read
+    // the member as a plain value and called it with no `this` at all,
+    // which was invisible while the only reachable members were own
+    // properties written by helpers that ignore `this`, and becomes
+    // wrong the moment a prototype method exists — every such method
+    // exists to read `this`. For the kinds with no member table
+    // (numbers, booleans, strings, arrays past their ladders) the two
+    // forms answer identically: Node's catchable "<spelling> is not a
+    // function". Prototype names (map/join/hasOwnProperty/call/...) never
+    // reach here — DYN_DISPATCH_METHODS claimed them above and
+    // DYN_PROTO_METHOD_NAMES fences the rest, because on a real dyn
+    // array/string Node would run the METHOD, which no stored member
+    // models.
     if (DYN_PROTO_METHOD_NAMES.has(access.name.text)) return null;
     // Optional forms (`obj.cb?.()`, `obj?.cb()`) belong to the chain
     // machinery's short-circuit semantics — not modeled here yet.
@@ -8161,10 +8176,24 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         return { kind: "libCall", fn: "dyn.objCreateNullProto", args: [], type: DYN, loc };
       }
       const proto = L.lowerExpr(protoNode);
+      // A checked-dynamic prototype now has somewhere to be linked: an
+      // OBJ's [[Prototype]] is a real link the keyed read walks, so the
+      // three observations the fence below named as impossible — no own
+      // keys on the created object, LIVE delegation through it, and a
+      // write that shadows rather than mutating — all hold by
+      // construction rather than by copy.
+      //
+      // This is the spelling of INHERITANCE in every pre-class program
+      // (`Child.prototype = Object.create(Parent.prototype)`), and until
+      // it lowered, a chain was at most one link deep and `instanceof`'s
+      // walk had nothing to walk.
+      if (proto.type.kind === "dyn") {
+        return { kind: "libCall", fn: "dyn.objCreateProto", args: [proto], type: DYN, loc };
+      }
       L.noLowering(
         `Object.create over '${L.fmt(proto.type)}' prototypes`,
         call,
-        "the compiled representations have no prototype chain, and an own-copy would answer wrong observably (Node lists NO own keys on the created object, and prototype mutations show through it live) — only Object.create(null) lowers",
+        "a STATIC value has no dyn prototype link to be given (the checked-dynamic tree's objects do — pass a dyn prototype, or null)",
       );
     }
     // `Object.assign(fn, { props })` whose RESULT type maps to the hybrid

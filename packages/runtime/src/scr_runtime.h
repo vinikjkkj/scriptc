@@ -2968,7 +2968,27 @@ struct ScrDyn {
     ScrStr *str; /* owned */
     ScrBytes *bytes; /* owned (SCR_DYN_BYTES) */
     struct { size_t len; size_t cap; ScrDyn **items; } arr;      /* owned */
-    struct { size_t len; size_t cap; ScrDynEntry *entries; } obj; /* owned */
+    /* SCR_DYN_OBJ: the own members (owned), plus the two fields that make
+     * the object a member of a PROTOTYPE CHAIN.
+     *
+     *   proto  the [[Prototype]] link (owned, NULL for a plain literal and
+     *          for the null-prototype dictionary). Set by `new F()` to
+     *          F's lazily created prototype object. The keyed READ, the
+     *          method dispatch and `in` walk it on an own-member MISS;
+     *          the keyed WRITE, Object.keys/values/entries, hasOwn, JSON
+     *          and structuredClone are chain-BLIND (own-only is what JS
+     *          says for every one of them).
+     *   cname  the constructor's NAME for util.inspect's prefix (Node
+     *          prints `F { a: 1 }` for an instance and `{ … }` for a
+     *          plain object). A STATIC compiler-emitted literal copied
+     *          off the FUNC box's `name`, never freed and never owned —
+     *          so it cannot pin the closure the way a real `constructor`
+     *          back-link would (see scr_dyn_fn_prototype).
+     *
+     * The freelist recycles OBJ nodes with their entries buffer intact
+     * (scr_dyn_alloc); both fields are cleared on release so a recycled
+     * node never inherits a chain. */
+    struct { size_t len; size_t cap; ScrDynEntry *entries; ScrDyn *proto; const char *cname; } obj; /* owned */
     /* SCR_DYN_FUNC: the boxed closure (owned) + its call descriptor. `sig`
      * and `name` are static compiler-emitted literals (never freed); name
      * may be NULL (anonymous — inspect prints [Function (anonymous)]).
@@ -3009,8 +3029,87 @@ void scr_dyn_release(ScrDyn *d); /* releases the tree recursively; NULL-tolerant
  * compiler-emitted pending checks — json.parse is in the may-throw seed). */
 ScrDyn *scr_json_parse(ScrStr *text);
 
-/* BORROWED member lookup on a SCR_DYN_OBJ; NULL when the key is absent. */
+/* BORROWED member lookup on a SCR_DYN_OBJ; NULL when the key is absent.
+ * OWN members only — the prototype chain is scr_dyn_proto_get's. */
 ScrDyn *scr_dyn_obj_get(const ScrDyn *d, const char *key, size_t key_len);
+
+/* ── the prototype chain ───────────────────────────────────────────────
+ * JS's [[Get]] over an object is "own member, else the same question of
+ * [[Prototype]]". Two entry points, deliberately separate from
+ * scr_dyn_obj_get so that every OWN-only consumer (Object.keys/values/
+ * entries, hasOwn, JSON, structuredClone, deepStrictEqual, Object.assign)
+ * keeps answering own-only by construction rather than by care.
+ *
+ * scr_dyn_proto_get walks from `d`'s PROTOTYPE upward (the caller has
+ * already missed on the own members) and answers a BORROWED member, or
+ * NULL when the whole chain misses. Cycle-safe: the walk is bounded, so a
+ * hand-built `a.__proto__ = a` cannot hang the program.
+ *
+ * scr_dyn_obj_set_proto installs the link (retains; releases any previous
+ * one). Only `new` calls it today. */
+ScrDyn *scr_dyn_proto_get(const ScrDyn *d, const char *key, size_t key_len);
+void scr_dyn_obj_set_proto(ScrDyn *obj, ScrDyn *proto);
+
+/* A FUNCTION value's `prototype` object, created on FIRST demand and
+ * stored in the same own-property table `F.k = v` writes to — so
+ * `F.prototype` is one object per CLOSURE (JS has one function object per
+ * closure, not one per dyn boundary crossing) and a later
+ * `F.prototype = Object.create(P)` simply overwrites the member. +1.
+ *
+ * It carries NO `constructor` member. Node's does, and storing one would
+ * mean the prototype object retaining a FUNC box retaining the closure
+ * retaining the property table retaining the prototype object — a cycle
+ * refcounting cannot break and the cycle collector cannot see (the
+ * documented dyn→closure stance). So an UNASSIGNED `constructor` read
+ * through this object throws the loud not-supported-yet fence instead of
+ * answering undefined; an explicitly assigned one
+ * (`F.prototype.constructor = F`, which is how the shipped protobufjs
+ * bundle spells it) is a plain own member and answers exactly. */
+ScrDyn *scr_dyn_fn_prototype(ScrDyn *fn);
+/* True when `d`'s chain reaches such an object (the emitted keyed read
+ * asks before turning a missed `constructor` into the fence below). */
+bool scr_dyn_proto_chain_is_fn_pub(const ScrDyn *d);
+/* Throws that fence (the emitted keyed read calls it). */
+void scr_dyn_proto_ctor_fence(void);
+
+/* `new f(...args)` over a dyn FUNCTION value — the JS [[Construct]] the
+ * pre-class constructor idiom needs. Allocates a fresh OBJ whose
+ * [[Prototype]] is f.prototype, binds it as the ambient receiver (so the
+ * body's `this.x = v` writes land on it), calls through the boxed thunk,
+ * and answers the constructor's OBJECT result when it returned one, else
+ * the instance (JS's [[Construct]] return rule). `args` is a dyn ARRAY
+ * (the emitted argument pack); `what` is the source spelling for the
+ * "<name> is not a constructor" TypeError. All borrowed; +1 or NULL with
+ * the exception pending. */
+ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *what);
+
+/* `v instanceof f` — JS's OrdinaryHasInstance over the chain `new`
+ * built: is the object `f.prototype` answers anywhere in v's
+ * [[Prototype]] chain? Pointer identity, both borrowed.
+ *
+ * THREE of the operator's outcomes are throws, not answers, and the
+ * spec's order between them is observable:
+ *   - a right operand that is not an object   → TypeError "…is not an
+ *     object"
+ *   - one that is an object but not callable  → TypeError "…is not
+ *     callable"
+ *   - a primitive LEFT operand                → false, asked before the
+ *     prototype below is fetched
+ *   - a right operand whose `prototype` is not an object → TypeError
+ *     "Function has non-object prototype 'X' in instanceof check"
+ * The false it returns on a throw is never read (may-throw seed set);
+ * a value merely built by another constructor is the one honest false. */
+bool scr_dyn_instance_of(const ScrDyn *v, ScrDyn *fn);
+
+/* `Object.create(proto)` over a dyn prototype: a fresh OBJ carrying the
+ * same [[Prototype]] link `new` installs, so delegation is LIVE (a
+ * member added to the prototype afterwards reads through) and the
+ * created object has no own keys. This is what makes a chain deeper
+ * than one link — `Child.prototype = Object.create(Parent.prototype)`.
+ * null answers the null-prototype dictionary; a primitive throws Node's
+ * "Object prototype may only be an Object or null: X". Borrows; +1 or
+ * NULL with the exception pending. */
+ScrDyn *scr_dyn_obj_create_proto(const ScrDyn *proto);
 
 /* Object.keys/values/entries over the checked-dynamic tree: JS own-key order (array-index
  * keys ascending first), dyn-array results (+1); values/entries RETAIN
