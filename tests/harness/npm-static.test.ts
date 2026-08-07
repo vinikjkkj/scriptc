@@ -125,6 +125,16 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // object, so the importer's reads and the package's own writes meet
     // at one storage.
     ["fnmembers", "fnmembers-cli.ts"],
+    // modtable is esbuild's `__commonJS` WHOLE — the module table (the
+    // dyntable half above) plus the ACCESS path the table is reached
+    // through: `var o = Object.getOwnPropertyNames` (a builtin in VALUE
+    // position, lifted to a real function over the same runtime walk the
+    // call form uses) bound at module scope and read from inside the
+    // memoizing thunk, which is a monomorphized instance that takes no
+    // captures — so the binding needs STORAGE, not a thread. The three
+    // modules cross-require through the thunk, so the differential also
+    // pins that each body runs exactly once, in first-call order.
+    ["modtable", "modtable-cli.ts"],
   ] as const)("%s compiles statically and byte-matches Node", async ([pkg, file]) => {
     const entry = join(pilotRoot, file);
     const binary = await buildStatic(entry, [pkg]);
@@ -241,31 +251,32 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     }
   }, 120_000);
 
-  // Tier 2, and the frontier this pins is the BUNDLER MODULE TABLE:
-  // esbuild's `__commonJS`, `r({ "node_modules/x.js"(e, t) {...} })`, which
-  // is what zapo's `spec/proto/index.js` is built out of nineteen times.
+  // The BUNDLER MODULE TABLE, pinned with nothing left over: esbuild's
+  // `__commonJS`, `r({ "node_modules/x.js"(e, t) {...} })`, which is what
+  // zapo's `spec/proto/index.js` is built out of nineteen times.
   //
-  // The methods now lower (each one is a bundled module body), so the whole
-  // table COMPILES and the module bodies are visible to the compiler. What
-  // is left is the OTHER half of the same helper, and it is one construct
-  // wearing two faces: `var o = Object.getOwnPropertyNames` is a builtin in
-  // VALUE position, and `o` captured by the returned thunk then has no
-  // static storage to thread. Both fences sit on the table's ACCESS path,
-  // so the package compiles and traps on use.
+  // This was a tier-2 partial pinned at exactly two fences, and they were
+  // ONE construct wearing two faces. `var o = Object.getOwnPropertyNames`
+  // is a builtin in VALUE position; fencing it poisoned the declaration,
+  // which left the JS binding with no module global, which left it an
+  // %init-body local — and the memoizing thunk that reads it is a
+  // MONOMORPHIZED instance that takes no captures, so the read fenced a
+  // second time on a capture with nothing to thread. Measured on this
+  // fixture: lifting the value alone dropped two fences to one; giving the
+  // binding its global dropped one to zero. Both halves are needed and
+  // neither is the object model — the second fence disappears for a
+  // plain function value in the same position, which is the control.
   //
-  // Pinned at exactly two, by message: if a method refusal ever comes back
-  // it lands here as a third, and if the value-position lift ever arrives
-  // this drops to zero and the package graduates to tier 1.
-  test("the esbuild module table compiles, with only the getOwnPropertyNames pair left", () => {
+  // The differential is in the tier-1 list above. This pins the COVERAGE
+  // so a regression surfaces as a frontier move rather than a byte diff:
+  // no build diagnostic, no runtime fence, and every statement static.
+  test("the esbuild module table compiles with nothing left over", () => {
     const { coverage } = analyze(join(pilotRoot, "modtable-cli.ts"), { npmStatic: ["modtable"] });
     expect(coverage.npmStatic).toEqual([{ package: "modtable", status: "static" }]);
     expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.diagnostics).toHaveLength(0); // builds — fences are runtime
-    const fences = coverage.runtimeFences ?? [];
-    expect(fences.map((f) => f.message).sort()).toEqual([
-      expect.stringContaining("'Object.getOwnPropertyNames'") as string,
-      expect.stringContaining("the binding 'o' captured through a plain nested function") as string,
-    ]);
+    expect(coverage.diagnostics).toHaveLength(0);
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
+    expect(coverage.stats.statementsFailed).toBe(0);
     // the module bodies are REACHED: the three method bodies more than
     // doubled the statements the compiler sees (20 behind the refusal)
     expect(coverage.stats.statementsTotal).toBeGreaterThan(35);
