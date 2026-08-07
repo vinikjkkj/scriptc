@@ -37,9 +37,16 @@ let declModuleFenceCount = 0;
 
 /** Member names a FUNCTION value's dyn box does NOT serve as own
  * properties. The `Function.prototype` methods stay out because a stored
- * `undefined` would mis-answer `f.call` as a VALUE, and `prototype` stays
- * out because nothing here builds a prototype OBJECT — the chain is the
- * other half of this route (estado-objmodel.md §4b).
+ * `undefined` would mis-answer `f.call` as a VALUE.
+ *
+ * `prototype` is NO LONGER on this list. It was, for exactly one reason —
+ * "nothing here builds a prototype OBJECT" (estado-objmodel.md §4b) — and
+ * the runtime now does: scr_dyn_fn_get mints one on first demand into the
+ * same table every other member lives in, `new` links instances to it,
+ * and the keyed read walks the chain. Taking it off opens all four arms
+ * at once, which is the point: `F.prototype` becomes a dyn value, so
+ * `F.prototype.m = fn` reaches the dyn keyed WRITE that has always been
+ * there (lower-stmts' probed-dyn receiver arm) with no new write path.
  *
  * The list is shared by the READ, the WRITE and the CALL arms on purpose:
  * the three are one table seen from three sides, and a key one arm serves
@@ -47,7 +54,7 @@ let declModuleFenceCount = 0;
  * measured (a routed write whose read still fences turns runtime fences
  * into hard compile errors). Same set, or the halves disagree. */
 const FN_OWN_SKIPPED_KEYS = new Set([
-  "apply", "bind", "call", "toString", "constructor", "prototype", "caller", "arguments",
+  "apply", "bind", "call", "toString", "constructor", "caller", "arguments",
 ]);
 
 /** True when a member name routes to a function value's own-property
@@ -60,7 +67,7 @@ export function fnOwnRoutableKey(key: string): boolean {
 /** SCRIPTC_FNOWN_WHY: what the function-value own-property route claimed,
  * read in the SAME run as the result it produced. `read` is the arm that
  * has shipped since 23d5918; `write` and `call` are this session's. */
-export const fnOwnCounters = { read: 0, write: 0, call: 0, boxed: 0, declinedNotFunc: 0 };
+export const fnOwnCounters = { read: 0, write: 0, call: 0, construct: 0, boxed: 0, declinedNotFunc: 0 };
 
 /** The per-use dyn box for a FUNCTION-typed receiver whose own properties
  * are wanted, or null when the receiver is not one.
@@ -82,6 +89,14 @@ export const fnOwnCounters = { read: 0, write: 0, call: 0, boxed: 0, declinedNot
 export function fnOwnPropBox(L: Lowerer, recv: ts.Expression, loc: SrcLoc): IrExpr | null {
   if (!isJsSourceFile(recv.getSourceFile())) return null;
   const probed = probeLower(L, recv);
+  // The DECLINE trace, the other half of fnOwnWhy: what the receiver
+  // actually probed to, for every site the box refused. Reading it is how
+  // the `new` arm learned that an expando-typed module binding probes DYN
+  // rather than FUNC (estado-protochain.md §3) — a decline is invisible
+  // in the trap message, which only says the construction was refused.
+  if (process.env["SCRIPTC_FNOWN_WHY"] !== undefined && probed?.type.kind !== "func") {
+    process.stderr.write(`FNOWN decline ${recv.getText()} -> ${probed ? probed.type.kind : "unlowerable"}\n`);
+  }
   if (!probed || probed.type.kind !== "func") {
     if (probed) fnOwnCounters.declinedNotFunc++;
     return null;
@@ -9804,6 +9819,41 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             expr,
             `'instanceof ${rSym!.name}' on this operand (supported: a union carrying the flavor as an arm, or a bound value of a bytes type — an 'unknown' operand needs a runtime flavor test the checked-dynamic tree does not carry yet: it tags bytes as one kind, and only Uint8Array reads that tag)`,
           );
+        }
+      }
+      // `x instanceof Klass` where Klass is a plain FUNCTION value in a
+      // JavaScript file — the completion of the pre-class constructor
+      // idiom: `new Klass()` links the instance to `Klass.prototype`, and
+      // this is the operator that reads that link back. The runtime walks
+      // the left operand's [[Prototype]] chain looking for the SAME
+      // object `Klass.prototype` answers (JS's OrdinaryHasInstance is
+      // pointer identity on the prototype object, not a name or a shape
+      // match), so it answers false — never throws — for every dyn value
+      // that was not constructed here, which is Node's answer too.
+      //
+      // JavaScript only and last, like the `new` arm it completes: every
+      // typed instanceof above already claimed its shape, so this can
+      // only turn a refusal into a lowering.
+      if (isJsSourceFile(expr.getSourceFile())) {
+        // The two spellings the `new` arm takes: a receiver that already
+        // lowers dyn (an expando-typed module binding) is the box; a
+        // func-typed one goes through the shared per-use box.
+        const probedCtor = probeLower(L, expr.right);
+        const ctorBox =
+          probedCtor !== null && probedCtor.type.kind === "dyn"
+            ? probedCtor
+            : fnOwnPropBox(L, expr.right, loc);
+        if (ctorBox) {
+          const value = L.lowerExprExpecting(expr.left, DYN);
+          if (value.type.kind === "dyn") {
+            return {
+              kind: "libCall",
+              fn: "dyn.instanceOf",
+              args: [value, ctorBox],
+              type: BOOL,
+              loc,
+            };
+          }
         }
       }
       L.unsupported(

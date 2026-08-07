@@ -1504,6 +1504,7 @@ export class LlDyn {
     host.declare(`declare void @scr_jb_puts(ptr, ptr)`);
     host.declare(`declare ptr @scr_f64_to_scrstr(double)`);
     host.declare(`declare void @scr_str_release(ptr)`);
+    host.declare(`declare ptr @scr_dyn_to_string(ptr, ptr)`);
 
     // The recursive buffer walker.
     {
@@ -1600,7 +1601,16 @@ export class LlDyn {
         const lPlain = B.newLabel("ds.pl");
         B.condBr(isErr, lErr, lPlain);
         B.startBlock(lPlain);
-        this.puts(B, "%b", "[object Object]");
+        // Object.prototype.toString UNLESS the object's own members or
+        // its PROTOTYPE CHAIN carry a callable toString — the C emitter's
+        // arm, through the same runtime entry point, which falls back to
+        // the "[object Object]" constant when there is none.
+        {
+          const s = B.tmp();
+          B.line(`${s} = call ptr @scr_dyn_to_string(ptr %d, ptr null)`);
+          this.putScrStr(B, "%b", s);
+          B.line(`call void @scr_str_release(ptr ${s})`);
+        }
         B.br(done);
         B.startBlock(lErr);
         const en = this.objGetLit(B, "%d", "name");
@@ -2001,7 +2011,11 @@ export class LlDyn {
       B.terminate(`ret ptr ${r}`);
       B.startBlock(lNext);
     }
-    // OBJ: the own member (+1) or the undefined singleton.
+    // OBJ: JS's [[Get]] — the own member, then the PROTOTYPE CHAIN, then
+    // the undefined singleton. The chain walk is one runtime call (the C
+    // emitter's arm, same entry point) rather than an inlined loop; a
+    // missed `constructor` on a chain a FUNCTION minted takes the loud
+    // fence instead of undefined, exactly as sc_dyn_key_get does.
     {
       const isObj = B.tmp();
       B.line(`${isObj} = icmp eq i32 ${kd}, ${DK.OBJ}`);
@@ -2010,15 +2024,62 @@ export class LlDyn {
       B.condBr(isObj, lObj, lNext);
       B.startBlock(lObj);
       host.declare(`declare ptr @scr_dyn_obj_get(ptr, ptr, i64)`);
-      const m = B.tmp();
-      B.line(`${m} = call ptr @scr_dyn_obj_get(ptr %d, ptr ${kParts.data}, i64 ${kParts.len})`);
-      const has = B.tmp();
-      B.line(`${has} = icmp ne ptr ${m}, null`);
-      const u = this.undef(B);
-      const sel = B.tmp();
-      B.line(`${sel} = select i1 ${has}, ptr ${m}, ptr ${u}`);
-      const r = this.retainDyn(B, sel);
-      B.terminate(`ret ptr ${r}`);
+      host.declare(`declare ptr @scr_dyn_proto_get(ptr, ptr, i64)`);
+      host.declare(`declare zeroext i1 @scr_dyn_proto_chain_is_fn_pub(ptr)`);
+      host.declare(`declare void @scr_dyn_proto_ctor_fence()`);
+      const own = B.tmp();
+      B.line(`${own} = call ptr @scr_dyn_obj_get(ptr %d, ptr ${kParts.data}, i64 ${kParts.len})`);
+      const hasOwn = B.tmp();
+      B.line(`${hasOwn} = icmp ne ptr ${own}, null`);
+      const lHit = B.newLabel("kg.oh");
+      const lChain = B.newLabel("kg.oc");
+      B.condBr(hasOwn, lHit, lChain);
+      B.startBlock(lChain);
+      const inh = B.tmp();
+      B.line(`${inh} = call ptr @scr_dyn_proto_get(ptr %d, ptr ${kParts.data}, i64 ${kParts.len})`);
+      const hasInh = B.tmp();
+      B.line(`${hasInh} = icmp ne ptr ${inh}, null`);
+      const lInh = B.newLabel("kg.oi");
+      const lMiss = B.newLabel("kg.om");
+      B.condBr(hasInh, lInh, lMiss);
+      B.startBlock(lInh);
+      {
+        const r = this.retainDyn(B, inh);
+        B.terminate(`ret ptr ${r}`);
+      }
+      B.startBlock(lMiss);
+      // The `constructor` carve-out: only when the key is that literal
+      // AND the chain reaches a function-minted prototype object.
+      {
+        const isCtorKey = B.tmp();
+        B.line(`${isCtorKey} = icmp eq i64 ${kParts.len}, 11`);
+        const lCmp = B.newLabel("kg.cc");
+        const lU = B.newLabel("kg.ou");
+        B.condBr(isCtorKey, lCmp, lU);
+        B.startBlock(lCmp);
+        host.declare(`declare i32 @memcmp(ptr, ptr, i64)`);
+        const cmp = B.tmp();
+        B.line(`${cmp} = call i32 @memcmp(ptr ${kParts.data}, ptr ${host.cstr("constructor")}, i64 11)`);
+        const same = B.tmp();
+        B.line(`${same} = icmp eq i32 ${cmp}, 0`);
+        const lFn = B.newLabel("kg.cf");
+        B.condBr(same, lFn, lU);
+        B.startBlock(lFn);
+        const isFnChain = B.tmp();
+        B.line(`${isFnChain} = call zeroext i1 @scr_dyn_proto_chain_is_fn_pub(ptr %d)`);
+        const lFence = B.newLabel("kg.cx");
+        B.condBr(isFnChain, lFence, lU);
+        B.startBlock(lFence);
+        B.line(`call void @scr_dyn_proto_ctor_fence()`);
+        B.terminate(`ret ptr null`);
+        B.startBlock(lU);
+        retainUndef();
+      }
+      B.startBlock(lHit);
+      {
+        const r = this.retainDyn(B, own);
+        B.terminate(`ret ptr ${r}`);
+      }
       B.startBlock(lNext);
     }
     // HANDLE: the tag's modeled properties through the installed ops.

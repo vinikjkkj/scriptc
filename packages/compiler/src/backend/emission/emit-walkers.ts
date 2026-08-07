@@ -330,7 +330,18 @@ import { OVERFLOW_MEMBER } from "./emit-shapes.js";
       `      if (ems) for (size_t i = 0; i < ems->len; i++) scr_jb_putc(b, ems->data[i]);`,
       `      break;`,
       `    }`,
-      `    scr_jb_puts(b, "[object Object]");`,
+      `    {`,
+      `      /* Everything else is Object.prototype.toString UNLESS the`,
+      `       * object's own members or its PROTOTYPE CHAIN carry a`,
+      `       * callable toString — \`K.prototype.toString = fn\` is where JS`,
+      `       * programs put one, and scr_dyn_to_string runs that protocol`,
+      `       * (falling back to the "[object Object]" constant when there`,
+      `       * is none). A throw inside it leaves the exception pending`,
+      `       * and appends the empty string, the JSVAL arm's convention. */`,
+      `      ScrStr *s = scr_dyn_to_string(d, NULL);`,
+      `      for (size_t i = 0; i < s->len; i++) scr_jb_putc(b, s->data[i]);`,
+      `      scr_str_release(s);`,
+      `    }`,
       `    break;`,
       `  case SCR_DYN_BYTES: {`,
       `    /* Buffer-flavored values (stream chunks) coerce utf8 (Node's`,
@@ -1035,7 +1046,21 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`    return NULL;`);
     d.push(`  }`);
     d.push(`  if (d->kind == SCR_DYN_OBJ) {`);
+    d.push(`    /* JS's [[Get]]: own member, then the PROTOTYPE CHAIN — an`);
+    d.push(`     * instance built by \`new F()\` reads F.prototype's members`);
+    d.push(`     * through it. Own-only consumers (Object.keys, hasOwn,`);
+    d.push(`     * JSON, structuredClone) call scr_dyn_obj_get directly and`);
+    d.push(`     * are unaffected. */`);
     d.push(`    ScrDyn *m = scr_dyn_obj_get(d, k->data, k->len);`);
+    d.push(`    if (m == NULL) m = scr_dyn_proto_get(d, k->data, k->len);`);
+    d.push(`    if (m == NULL && k->len == 11 && memcmp(k->data, "constructor", 11) == 0 &&`);
+    d.push(`        scr_dyn_proto_chain_is_fn_pub(d)) {`);
+    d.push(`      /* The one member Node's implicit prototype has and this`);
+    d.push(`       * one deliberately does not (the back-link would be an`);
+    d.push(`       * uncollectable cycle): loud, never a silent undefined. */`);
+    d.push(`      scr_dyn_proto_ctor_fence();`);
+    d.push(`      return NULL;`);
+    d.push(`    }`);
     d.push(`    return scr_dyn_retain(m ? m : scr_dyn_undefined());`);
     d.push(`  }`);
     d.push(`  if (d->kind == SCR_DYN_JSVAL) {`);

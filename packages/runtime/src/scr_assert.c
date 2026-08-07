@@ -508,6 +508,11 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
     }
     case SCR_DYN_OBJ: {
       if (a->null_proto != b->null_proto) return false; /* the prototype gate */
+      /* Node compares [[Prototype]]s: `deepStrictEqual(new A(1), {a:1})`
+       * throws even though the own members match, and two instances of
+       * two different constructors never compare equal. Identity on the
+       * prototype object is exactly that test (one object per closure). */
+      if (a->v.obj.proto != b->v.obj.proto) return false;
       if (a->v.obj.len != b->v.obj.len) return false;
       for (size_t i = 0; i < a->v.obj.len; i++) {
         const ScrDynEntry *ent = &a->v.obj.entries[i];

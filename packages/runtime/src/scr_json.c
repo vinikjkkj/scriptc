@@ -333,6 +333,8 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
       d->v.arr.len = 0; /* cap/items preserved from the node's last life */
     } else if (kind == SCR_DYN_OBJ) {
       d->v.obj.len = 0; /* cap/entries preserved */
+      d->v.obj.proto = NULL; /* release already cleared both; belt and braces */
+      d->v.obj.cname = NULL;
     } else {
       memset(&d->v, 0, sizeof d->v);
     }
@@ -369,6 +371,13 @@ void scr_dyn_release(ScrDyn *d) {
       free(d->v.obj.entries[i].key);
       scr_dyn_release(d->v.obj.entries[i].value);
     }
+    /* The [[Prototype]] link is owned; the constructor NAME is a static
+     * literal. Both are cleared because the node may be recycled below
+     * with its entries buffer intact — a recycled node must not inherit
+     * the chain of its previous life. */
+    scr_dyn_release(d->v.obj.proto);
+    d->v.obj.proto = NULL;
+    d->v.obj.cname = NULL;
     break;
   case SCR_DYN_FUNC:
     scr_closure_release(d->v.fn.clo); /* sig/name are static literals */
@@ -415,6 +424,61 @@ ScrDyn *scr_dyn_obj_get(const ScrDyn *d, const char *key, size_t key_len) {
     if (e->key_len == key_len && memcmp(e->key, key, key_len) == 0) return e->value;
   }
   return NULL;
+}
+
+/* The rest of JS's [[Get]]: the caller has already missed on `d`'s OWN
+ * members, so continue up the [[Prototype]] links. BORROWED, or NULL when
+ * the chain runs out.
+ *
+ * The step limit is not a policy, it is a liveness guarantee: nothing in
+ * the compiled surface can build a cyclic chain today (only `new` sets a
+ * link, and it links to a prototype object that cannot be an instance of
+ * itself), but a lookup is not the place to discover that assumption
+ * broke — a bounded walk answers "absent" where an unbounded one hangs. */
+#define SCR_PROTO_MAX_DEPTH 1000
+ScrDyn *scr_dyn_proto_get(const ScrDyn *d, const char *key, size_t key_len) {
+  if (d->kind != SCR_DYN_OBJ) return NULL;
+  const ScrDyn *p = d->v.obj.proto;
+  for (size_t steps = 0; p != NULL && steps < SCR_PROTO_MAX_DEPTH; steps++) {
+    if (p->kind != SCR_DYN_OBJ) return NULL;
+    ScrDyn *m = scr_dyn_obj_get(p, key, key_len);
+    if (m != NULL) return m;
+    p = p->v.obj.proto;
+  }
+  return NULL;
+}
+
+/* True when the chain above `d` reaches a prototype object that a
+ * FUNCTION value minted (scr_dyn_fn_prototype) — the one place where
+ * Node has a `constructor` member and this runtime deliberately does
+ * not. Used to turn that read into a loud fence instead of undefined. */
+bool scr_dyn_proto_chain_is_fn_pub(const ScrDyn *d) {
+  if (d->kind != SCR_DYN_OBJ) return false;
+  const ScrDyn *p = d->v.obj.proto;
+  for (size_t steps = 0; p != NULL && steps < SCR_PROTO_MAX_DEPTH; steps++) {
+    if (p->kind != SCR_DYN_OBJ) return false;
+    if (p->v.obj.cname != NULL) return true;
+    p = p->v.obj.proto;
+  }
+  return false;
+}
+
+/* The `constructor` fence (see scr_dyn_fn_prototype's header): loud,
+ * never a silent undefined. Throws; callers return NULL after. */
+void scr_dyn_proto_ctor_fence(void) {
+  static const char msg[] =
+      "reading 'constructor' through a function's implicit prototype object is not supported yet"
+      " (the implicit prototype carries no constructor back-link here: it would retain the"
+      " function, which retains the prototype — a cycle reference counting cannot break;"
+      " assign it explicitly, `F.prototype.constructor = F`, and the read answers exactly)";
+  scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
+}
+
+void scr_dyn_obj_set_proto(ScrDyn *obj, ScrDyn *proto) {
+  if (obj->kind != SCR_DYN_OBJ) return;
+  ScrDyn *prev = obj->v.obj.proto;
+  obj->v.obj.proto = proto ? scr_dyn_retain(proto) : NULL;
+  scr_dyn_release(prev);
 }
 
 /* Public: the compiler-emitted static→dyn converters push through this
@@ -1535,8 +1599,30 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
     return scr_f64_to_scrstr(d->v.num);
   case SCR_DYN_BOOL:
     return d->v.b ? scr_str_new("true", 4) : scr_str_new("false", 5);
-  case SCR_DYN_OBJ:
+  case SCR_DYN_OBJ: {
+    /* An OWN or INHERITED `toString` shadows Object.prototype's — the
+     * whole point of writing `K.prototype.toString = fn`. Only a
+     * callable one counts, and only a PRIMITIVE answer (a toString
+     * returning an object is a TypeError in JS, which the ToPrimitive
+     * path spells; here the constant stands rather than guessing). */
+    ScrDyn *m = scr_dyn_obj_get(d, "toString", 8);
+    if (m == NULL) m = scr_dyn_proto_get(d, "toString", 8);
+    if (m != NULL && m->kind == SCR_DYN_FUNC) {
+      scr_dyn_this_push_dyn(d);
+      ScrDyn *r = scr_dyn_call(m, NULL, 0, "toString");
+      scr_dyn_this_pop();
+      if (r == NULL) return scr_str_new("", 0); /* threw — pending */
+      if (r->kind == SCR_DYN_STR || r->kind == SCR_DYN_NUM ||
+          r->kind == SCR_DYN_BOOL || r->kind == SCR_DYN_NULL ||
+          r->kind == SCR_DYN_UNDEF) {
+        ScrStr *s = scr_dyn_string_coerce(r);
+        scr_dyn_release(r);
+        return s;
+      }
+      scr_dyn_release(r);
+    }
     return scr_str_new("[object Object]", 15);
+  }
   case SCR_DYN_HANDLE:
     /* IncomingMessage/ServerResponse/Socket inherit
      * Object.prototype.toString — Node's String() answer exactly. */
@@ -1628,9 +1714,18 @@ ScrStr *scr_dyn_string_coerce_js(const ScrDyn *d) {
   if (d->kind == SCR_DYN_OBJ) {
     static const char *const hint[2] = { "toString", "valueOf" };
     for (int i = 0; i < 2; i++) {
+      /* ToPrimitive is a [[Get]], so it walks the PROTOTYPE CHAIN — a
+       * `K.prototype.toString = fn` is exactly where JS programs put
+       * one, and reading own-only would answer the spec's "cannot
+       * convert" TypeError for an object that HAS the method. */
       ScrDyn *m = scr_dyn_obj_get(d, hint[i], strlen(hint[i])); /* borrowed */
+      if (!m) m = scr_dyn_proto_get(d, hint[i], strlen(hint[i]));
       if (!m || m->kind != SCR_DYN_FUNC) continue;
+      /* JS calls it with the OBJECT as the receiver — a toString that
+       * reads `this` is the only interesting kind. */
+      scr_dyn_this_push_dyn(d);
       ScrDyn *r = scr_dyn_call(m, NULL, 0, hint[i]);
+      scr_dyn_this_pop();
       if (!r) return NULL; /* the method threw — pending */
       if (r->kind == SCR_DYN_OBJ || r->kind == SCR_DYN_ARR ||
           r->kind == SCR_DYN_FUNC || r->kind == SCR_DYN_HANDLE ||
@@ -1671,11 +1766,21 @@ bool scr_dyn_fn_has(const ScrDyn *v, const char *key, size_t key_len) {
   return true;
 }
 /* `key in v` with a RUNTIME key (the compile-time dynHasKey fold, per
- * value): OBJ answers own-member presence, ARR answers 'length' or a
- * valid dense index, every other kind false (tsc admits `in` only on
- * object-typed operands). Borrows both; never throws. */
+ * value): OBJ answers own-member presence AND the prototype chain (`in`
+ * is one of the two JS operators that walks it — `"m" in new F()` is
+ * true where Object.hasOwn is false), ARR answers 'length' or a valid
+ * dense index, every other kind false (tsc admits `in` only on
+ * object-typed operands). Borrows both; never throws.
+ *
+ * Still false for the members no chain here HAS: `"toString" in {}` is
+ * true in Node (Object.prototype) and false here, because this runtime
+ * models no Object.prototype — the pre-existing divergence
+ * estado-objmodel.md §4d named, unchanged. */
 bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
-  if (v->kind == SCR_DYN_OBJ) return scr_dyn_obj_get(v, key->data, key->len) != NULL;
+  if (v->kind == SCR_DYN_OBJ) {
+    return scr_dyn_obj_get(v, key->data, key->len) != NULL ||
+           scr_dyn_proto_get(v, key->data, key->len) != NULL;
+  }
   if (v->kind == SCR_DYN_ARR) {
     if (key->len == 6 && memcmp(key->data, "length", 6) == 0) return true;
     if (key->len == 0 || key->len > 15) return false;
@@ -2522,6 +2627,15 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
   if (key_len == 6 && memcmp(key, "length", 6) == 0) {
     return scr_dyn_new_num((double)d->v.fn.arity);
   }
+  /* `F.prototype` on a function that never assigned one: JS has ALREADY
+   * created that object (a function declaration owns a writable
+   * `prototype` own property from the moment it exists), so answering
+   * undefined here would make `F.prototype.m = fn` — the whole pre-class
+   * method idiom — a TypeError where Node succeeds. Mint it on demand
+   * into the same table an explicit assignment writes to. */
+  if (key_len == 9 && memcmp(key, "prototype", 9) == 0) {
+    return scr_dyn_fn_prototype((ScrDyn *)d);
+  }
   return NULL;
 }
 
@@ -2537,6 +2651,241 @@ ScrDyn *scr_dyn_fn_props(ScrDyn *d) {
     d->v.fn.clo->props = box;
   }
   return (ScrDyn *)scr_box_get_ref(d->v.fn.clo->props); /* +1 */
+}
+
+/* The FUNC node's `prototype` OBJECT, minted on first demand and stored
+ * in the own-property table (see scr_runtime.h for why it carries no
+ * `constructor`). One object per CLOSURE, like every other member. +1. */
+ScrDyn *scr_dyn_fn_prototype(ScrDyn *fn) {
+  ScrDyn *table = scr_dyn_fn_props(fn); /* +1 */
+  ScrDyn *existing = scr_dyn_obj_get(table, "prototype", 9); /* borrowed */
+  if (existing != NULL) {
+    ScrDyn *r = scr_dyn_retain(existing);
+    scr_dyn_release(table);
+    return r;
+  }
+  ScrDyn *proto = scr_dyn_new_obj(); /* +1 */
+  /* The constructor NAME rides on the prototype object so instances can
+   * copy it for util.inspect ("F { a: 1 }"). It is the FUNC box's static
+   * literal — no ownership, so no cycle. */
+  proto->v.obj.cname = fn->v.fn.name;
+  scr_dyn_obj_set(table, "prototype", 9, scr_dyn_retain(proto)); /* table owns one */
+  scr_dyn_release(table);
+  return proto; /* the caller's +1 */
+}
+
+/* Is this dyn value an OBJECT to JavaScript? The five scalar kinds are
+ * not; everything else is (a function, an array, a Buffer, a native
+ * handle, a promise and an engine value all answer "object" or
+ * "function" to typeof, and all are Objects to the spec's Type()).
+ * `instanceof` asks the question three times, in three different places,
+ * and gets a different wrong answer each time if it guesses. */
+static bool scr_dyn_is_object_kind(const ScrDyn *d) {
+  switch (d->kind) {
+    case SCR_DYN_NULL:
+    case SCR_DYN_BOOL:
+    case SCR_DYN_NUM:
+    case SCR_DYN_STR:
+    case SCR_DYN_UNDEF:
+      return false;
+    default:
+      return true;
+  }
+}
+
+/* JS's OrdinaryHasInstance, `v instanceof f`: walk v's [[Prototype]]
+ * chain looking for the SAME object f.prototype answers. Pointer
+ * identity, not a name or shape match — two functions with identical
+ * bodies are different constructors, exactly Node.
+ *
+ * The THREE throws are the operator's, not decoration, and their ORDER
+ * is observable — the spec interleaves them with the answer:
+ *
+ *   1. a non-object right operand   → "…is not an object"
+ *   2. an object that is not callable → "…is not callable"
+ *   3. a non-object LEFT operand      → false, before anything else is
+ *      asked (`7 instanceof F` is false even when F.prototype is 5)
+ *   4. a right operand whose `prototype` is not an object
+ *                                     → "Function has non-object
+ *                                        prototype 'X' in instanceof
+ *                                        check"
+ *
+ * Answering false for 1, 2 and 4 — which is what this did before — is a
+ * silent wrong answer at exactly the sites a program writes the operator
+ * to find out. Only step 3 is a false.
+ *
+ * The right operand's prototype object is DEMANDED (minted if this is
+ * the first time anyone asked), because otherwise the answer would
+ * depend on whether some earlier read happened to mint it. */
+bool scr_dyn_instance_of(const ScrDyn *v, ScrDyn *fn) {
+  /* An engine-held right operand IS callable to the engine — answering
+   * false, or claiming it is not an object, would both be wrong. The
+   * island route (lowerInstanceOf's jsOp arm) is where that operator
+   * belongs; reaching here means it did not, so: loud. */
+  if (fn->kind == SCR_DYN_JSVAL) {
+    scr_dyn_isl_fence(fn, "'instanceof' against an engine value");
+    return false;
+  }
+  if (!scr_dyn_is_object_kind(fn)) {
+    static const char msg[] = "Right-hand side of 'instanceof' is not an object";
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    return false;
+  }
+  if (fn->kind != SCR_DYN_FUNC) {
+    static const char msg[] = "Right-hand side of 'instanceof' is not callable";
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    return false;
+  }
+  /* Step 3: a primitive left operand is false and asks no further
+   * question — the prototype check below never runs for it. */
+  if (!scr_dyn_is_object_kind(v)) return false;
+  ScrDyn *proto = scr_dyn_fn_prototype(fn); /* +1 */
+  if (!scr_dyn_is_object_kind(proto)) {
+    /* V8 renders the offending value with String() — 'null',
+     * 'undefined', '5', 'NaN', 'true', the string itself. */
+    ScrStr *shown = scr_dyn_string_coerce(proto); /* +1 */
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "Function has non-object prototype '");
+    if (shown != NULL) scr_jb_write(&b, shown->data, shown->len);
+    scr_jb_puts(&b, "' in instanceof check");
+    scr_str_release(shown);
+    scr_dyn_release(proto);
+    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+    return false;
+  }
+  bool found = false;
+  /* Only an OBJ carries a [[Prototype]] link here, so every other object
+   * kind has an empty chain and answers false — which is the right
+   * answer for the constructors this route can name (a user function),
+   * since nothing links an array or a Buffer to one. */
+  const ScrDyn *p = v->kind == SCR_DYN_OBJ ? v->v.obj.proto : NULL;
+  for (size_t steps = 0; p != NULL && steps < SCR_PROTO_MAX_DEPTH; steps++) {
+    if (p == proto) { found = true; break; }
+    if (p->kind != SCR_DYN_OBJ) break;
+    p = p->v.obj.proto;
+  }
+  scr_dyn_release(proto);
+  return found;
+}
+
+/* Object.create(<proto>): a fresh object whose [[Prototype]] is the
+ * argument — the SAME link `new` installs, so everything already true of
+ * a constructed instance is true of this one (reads delegate live,
+ * writes shadow, own-key walks list nothing).
+ *
+ * The argument must be an Object or null; a primitive takes V8's
+ * catchable "Object prototype may only be an Object or null: X", which
+ * renders the offending value. null goes to the null-prototype
+ * dictionary, which is where `Object.create(null)` has always landed —
+ * a runtime-valued null reaches here too (the compile-time literal is
+ * folded to objCreateNullProto at the call site).
+ *
+ * Only an OBJ can BE a link here (the field is on the OBJ arm), so the
+ * other object kinds take the loud fence rather than a chain that
+ * silently ends one step early. */
+ScrDyn *scr_dyn_obj_create_proto(const ScrDyn *proto) {
+  if (proto->kind == SCR_DYN_NULL) return scr_dyn_new_obj_null_proto();
+  if (!scr_dyn_is_object_kind(proto)) {
+    ScrStr *shown = scr_dyn_string_coerce(proto); /* +1 */
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "Object prototype may only be an Object or null: ");
+    if (shown != NULL) scr_jb_write(&b, shown->data, shown->len);
+    scr_str_release(shown);
+    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+    return NULL;
+  }
+  if (proto->kind != SCR_DYN_OBJ) {
+    ScrJsonBuf fb;
+    scr_jb_init(&fb);
+    scr_jb_puts(&fb, "Object.create over a '");
+    scr_jb_puts(&fb, scr_dyn_kind_name(proto));
+    scr_jb_puts(&fb, "' prototype is not supported yet"
+                     " (the [[Prototype]] link holds a plain object here — pass a plain"
+                     " object, or null)");
+    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&fb));
+    return NULL;
+  }
+  ScrDyn *o = scr_dyn_new_obj(); /* +1 */
+  scr_dyn_obj_set_proto(o, (ScrDyn *)proto);
+  /* The created object shows under the constructor NAME its prototype
+   * carries, exactly as an instance does — `Object.create(P.prototype)`
+   * IS the object a `new P()` would have linked to. */
+  o->v.obj.cname = proto->v.obj.cname;
+  return o;
+}
+
+ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *what) {
+  if (fn->kind != SCR_DYN_FUNC) {
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, what && what->len ? what->data : "value");
+    scr_jb_puts(&b, " is not a constructor");
+    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+    return NULL;
+  }
+  ScrDyn *proto = scr_dyn_fn_prototype((ScrDyn *)fn); /* +1 */
+  ScrDyn *inst = scr_dyn_new_obj();                   /* +1 */
+  /* OrdinaryCreateFromConstructor: a `prototype` that is not an OBJECT
+   * is IGNORED and the instance gets %Object.prototype% instead
+   * (`F.prototype = 5; new F()` is a plain object in Node, and inspect
+   * prints `{}` rather than `F {}` because the name rides the prototype
+   * that was replaced). A plain literal's NULL link IS that object here
+   * — own-only lookup is what %Object.prototype% contributes to this
+   * tier — so the link and the name both simply stay unset.
+   *
+   * Reading `proto->v.obj.cname` unconditionally, as this did before,
+   * read the `cname` slot out of a NUM/STR node's union: a stale pointer
+   * left by whatever OBJ last occupied that freelist cell, handed
+   * straight to util.inspect. */
+  if (proto->kind == SCR_DYN_OBJ) {
+    scr_dyn_obj_set_proto(inst, proto);
+    inst->v.obj.cname = proto->v.obj.cname;
+  } else if (scr_dyn_is_object_kind(proto)) {
+    /* An OBJECT that is not a plain one — `F.prototype = []`, a Buffer,
+     * another function. JS links the instance to it and inherited reads
+     * walk into it; nothing here can hold such a link, and silently
+     * falling back to %Object.prototype% would make `instanceof` answer
+     * false where Node answers true. Loud. */
+    ScrJsonBuf fb;
+    scr_jb_init(&fb);
+    scr_jb_puts(&fb, "constructing with a '");
+    scr_jb_puts(&fb, scr_dyn_kind_name(proto));
+    scr_jb_puts(&fb, "' as the function's 'prototype' is not supported yet"
+                     " (the instance's [[Prototype]] link holds a plain object here;"
+                     " assign a plain object, or Object.create(<proto>), to '.prototype')");
+    scr_dyn_release(proto);
+    scr_dyn_release(inst);
+    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&fb));
+    return NULL;
+  }
+  scr_dyn_release(proto);
+
+  /* JS binds the fresh object as the constructor's `this` — the body's
+   * `this.x = v` writes are plain keyed writes onto it (the ambient
+   * receiver window `this` in a plain JS function already reads). */
+  scr_dyn_this_push_dyn(inst);
+  ScrDyn *r = scr_dyn_call(fn, args->kind == SCR_DYN_ARR ? args->v.arr.items : NULL,
+                           args->kind == SCR_DYN_ARR ? args->v.arr.len : 0,
+                           what && what->len ? what->data : "value");
+  scr_dyn_this_pop();
+  if (scr_exc_pending()) {
+    scr_dyn_release(r); /* NULL-tolerant */
+    scr_dyn_release(inst);
+    return NULL;
+  }
+  /* [[Construct]]'s return rule: an OBJECT result replaces the instance,
+   * anything else (the overwhelmingly common `return;`) is discarded. */
+  if (r != NULL && (r->kind == SCR_DYN_OBJ || r->kind == SCR_DYN_ARR ||
+                    r->kind == SCR_DYN_FUNC || r->kind == SCR_DYN_BYTES ||
+                    r->kind == SCR_DYN_HANDLE || r->kind == SCR_DYN_PROMISE ||
+                    r->kind == SCR_DYN_JSVAL)) {
+    scr_dyn_release(inst);
+    return r;
+  }
+  scr_dyn_release(r);
+  return inst;
 }
 
 /* ── structuredClone over the checked-dynamic tree ─────────────────────────────────────
@@ -2875,7 +3224,14 @@ static ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
       for (size_t i = 0; i < table->v.obj.len; i++) {
         const ScrDynEntry *e = &table->v.obj.entries[i];
         if ((e->key_len == 4 && memcmp(e->key, "name", 4) == 0) ||
-            (e->key_len == 6 && memcmp(e->key, "length", 6) == 0)) {
+            (e->key_len == 6 && memcmp(e->key, "length", 6) == 0) ||
+            /* `prototype` joins them for the same reason and with the
+             * same force: Node makes it non-enumerable, and it is now in
+             * the table for every function whose prototype object has
+             * been demanded — without this line `Object.keys(F)` would
+             * answer ["prototype"] where Node answers [], and it would
+             * do so as a side effect of an unrelated read. */
+            (e->key_len == 9 && memcmp(e->key, "prototype", 9) == 0)) {
           continue;
         }
         scr_dyn_objwalk_push(out, mode, e->key, e->key_len, e->value);

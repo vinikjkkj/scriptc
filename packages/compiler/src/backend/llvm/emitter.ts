@@ -538,6 +538,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.arrLen": "scr_dyn_arr_len",
   "dyn.arrAt": "scr_dyn_arr_at",
   "dyn.hasKey": "scr_dyn_has_key",
+  "dyn.construct": "scr_dyn_construct",
+  "dyn.instanceOf": "scr_dyn_instance_of",
   "dyn.defineProps": "scr_dyn_define_props",
   "dyn.typeof": "scr_dyn_typeof",
   "dyn.toString": "scr_dyn_to_string_method",
@@ -816,6 +818,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.packPushSpreadIter": "scr_dyn_pack_push_spread_iter",
   "dyn.assignAll": "scr_dyn_assign_all",
   "dyn.objCreateNullProto": "scr_dyn_new_obj_null_proto",
+  "dyn.objCreateProto": "scr_dyn_obj_create_proto",
   "dyn.objValues": "scr_dyn_obj_values",
   "dyn.objEntries": "scr_dyn_obj_entries",
   "dyn.structuredClone": "scr_structured_clone",
@@ -6372,7 +6375,17 @@ class LlEmitter {
         const has = B.tmp();
         B.line(`${m} = call ptr @scr_dyn_obj_get(ptr ${d.name}, ptr ${this.cstr(e.key)}, i64 ${keyBytes})`);
         B.line(`${has} = icmp ne ptr ${m}, null`);
-        B.line(`store i1 ${has}, ptr ${slot}`);
+        // `in` walks the PROTOTYPE CHAIN (`"m" in new F()` is true where
+        // Object.hasOwn is false) — the C backend's twin is in
+        // emit-exprs.ts. One runtime call on the own-member miss.
+        this.declare(`declare ptr @scr_dyn_proto_get(ptr, ptr, i64)`);
+        const pm = B.tmp();
+        const phas = B.tmp();
+        const both = B.tmp();
+        B.line(`${pm} = call ptr @scr_dyn_proto_get(ptr ${d.name}, ptr ${this.cstr(e.key)}, i64 ${keyBytes})`);
+        B.line(`${phas} = icmp ne ptr ${pm}, null`);
+        B.line(`${both} = or i1 ${has}, ${phas}`);
+        B.line(`store i1 ${both}, ptr ${slot}`);
         B.br(lj);
         B.startBlock(lNotObj);
         const isArr = B.tmp();
