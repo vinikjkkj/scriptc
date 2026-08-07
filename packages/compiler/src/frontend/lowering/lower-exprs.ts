@@ -797,9 +797,12 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       }
       // `arguments` in a variadic JS function (the rest-marked form): the
       // synthetic trailing dyn-array param — lambdaSignature marked the
-      // type and lowerLambda declared the local.
-      if (expr.text === "arguments" && L.ctx.argumentsLocal) {
-        return { kind: "varRef", localId: L.ctx.argumentsLocal.id, type: DYN, loc };
+      // type and lowerLambda declared the local. Inside an ARROW the same
+      // name is the ENCLOSING function's object (an arrow has none of its
+      // own), which resolveArgumentsLocal reaches by capturing that slot.
+      if (expr.text === "arguments") {
+        const argsLocal = L.resolveArgumentsLocal(expr);
+        if (argsLocal) return { kind: "varRef", localId: argsLocal.id, type: DYN, loc };
       }
       // A `const x = promisify(execFile)` binding as a VALUE: the
       // promisified function never exists at runtime (its calls lower to
@@ -1600,14 +1603,16 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // fenced, so the actual count IS the declared count — a compile-time
       // constant. Arrows don't bind `arguments` (the walk skips them,
       // exactly JS's scoping); variable-arity signatures keep the fence
-      // (the count would need a hidden argc). The JS-source variadic
-      // `arguments` object (dynRest) was claimed at identifier lowering.
+      // (the count would need a hidden argc). The variadic `arguments`
+      // object (dynRest) was claimed at identifier lowering — asked here
+      // through peekArgumentsLocal, because inside an arrow the slot
+      // belongs to an ENCLOSING frame and this frame's own field is null.
       if (
         expr.name.text === "length" &&
         !expr.questionDotToken &&
         ts.isIdentifier(expr.expression) &&
         expr.expression.text === "arguments" &&
-        !L.ctx.argumentsLocal &&
+        L.peekArgumentsLocal() === null &&
         L.typeOf(expr.expression).getSymbol()?.name === "IArguments" &&
         L.isStdlibSymbol(L.typeOf(expr.expression).getSymbol())
       ) {
@@ -1621,6 +1626,30 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           fn = ts.isSourceFile(fn) ? undefined : fn.parent;
         }
         if (fn !== undefined) {
+          // The fold's whole warrant is that tsc ENFORCES the arity it
+          // reads off the declaration. A JavaScript source file has no
+          // such enforcement — `outer(1, 2, 3)` against `function outer()`
+          // type-checks there — so in JS the declared count is not the
+          // call's count and folding to it is a SILENTLY WRONG answer.
+          // JS functions that CAN answer honestly already did: their
+          // `%arguments` slot is above (peekArgumentsLocal). Landing here
+          // from JS means this function's calling convention carries no
+          // argument list at all — a class method or constructor (the ABI
+          // is the vtable's), or a callback whose ABI a shim fixed. Refuse
+          // out loud rather than answer with the declaration's count.
+          //
+          // ACCESSORS are the one exception and stay folded: JavaScript
+          // itself fixes their arity at the CALL, not at the declaration.
+          // A [[Get]] passes nothing and a [[Set]] passes exactly the
+          // value, whatever the property access looks like — so here the
+          // declared count is the call's count in JS too.
+          if (isJsSourceFile(fn.getSourceFile()) && !ts.isAccessor(fn)) {
+            L.unsupported(
+              "SC1090",
+              expr,
+              "'arguments' in a JavaScript function whose calling convention carries no argument list (a class method or constructor — its ABI is the vtable's — or a callback with a fixed shim signature; a plain function or an object-literal method materializes one)",
+            );
+          }
           const fixedArity = (fn as ts.FunctionLikeDeclaration).parameters.every(
             (p) => p.questionToken === undefined && p.initializer === undefined &&
               p.dotDotDotToken === undefined,
