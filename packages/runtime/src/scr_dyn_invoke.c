@@ -348,9 +348,13 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
   }
 
   /* OBJ: the own member calls (own properties shadow prototypes in JS
-   * too); anything else is Node's is-not-a-function. */
+   * too), then the PROTOTYPE CHAIN — `inst.method()` where `method` came
+   * from `F.prototype.method = fn` is the whole pre-class dispatch, and
+   * it must bind the INSTANCE as the receiver, not the prototype object
+   * that stores the function. Anything else is Node's is-not-a-function. */
   if (recv->kind == SCR_DYN_OBJ) {
     ScrDyn *m = scr_dyn_obj_get(recv, method, strlen(method));
+    if (m == NULL) m = scr_dyn_proto_get(recv, method, strlen(method));
     if (m && (m->kind == SCR_DYN_FUNC ||
               /* a WRAPPED engine function stored as a dyn member: the
                * routed call (scr_dyn_call's JSVAL arm) runs it. */

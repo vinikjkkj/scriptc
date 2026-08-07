@@ -11,7 +11,7 @@ import { isGenericCallableMemberType, typeKey } from "../types.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeTypesPath, locOf } from "../program.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
 import { bufEncoding, lowerMapSeedArrayNew } from "./lower-containers.js";
-import { pureReemittable } from "./lower-exprs.js";
+import { fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
 import { lowerSearchParamsNew } from "./lower-builtins.js";
 import { requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { STREAM_API_MEMBERS, STREAM_PROP_MEMBERS, UNDERSCORE_METHODS, lowerStreamNew, lowerStreamSuperCall, streamCtorShape } from "./lower-stream.js";
@@ -6084,6 +6084,66 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             }
             return { kind: "callValue", callee, args, type: callee.type.ret, loc };
           }
+        }
+      }
+    }
+    // `new Klass(a)` where `Klass` is a plain FUNCTION value in a
+    // JavaScript file — JS's pre-class constructor, and the other half of
+    // `Klass.prototype.m = fn`. The callee boxes through the same
+    // per-use dyn box the own-property route uses (one ScrClosure, one
+    // property table, one `prototype` object however many times it is
+    // boxed), the arguments box into one dyn array, and the runtime runs
+    // JS's [[Construct]]: a fresh OBJ linked to `Klass.prototype`, bound
+    // as the ambient receiver so the body's `this.x = a` writes land on
+    // it (`this` in a plain JS function already reads scr_dyn_this_get).
+    //
+    // Placed HERE, immediately before the generic construction fence and
+    // after every typed arm above (declared classes, classval unions,
+    // construct-signature func slots), so it can only turn a refusal into
+    // a lowering — never change a program that compiles today.
+    //
+    // JavaScript only, mirroring `fnOwnPropBox`: in TypeScript the
+    // checker has a declared type at the construction and answering DYN
+    // there would cascade through every downstream consumer. The SPREAD
+    // form (`new F(...xs)`) keeps the fence — the argument pack would
+    // need the flattening walk `dynCall`'s spread arm has, and no
+    // measured site spells it.
+    if (
+      isJsSourceFile(expr.getSourceFile()) &&
+      !(expr.arguments ?? []).some((a) => ts.isSpreadElement(a))
+    ) {
+      // Two spellings reach the same runtime value. A receiver that
+      // probes to DYN already IS the box (a module binding holding an
+      // expando function — `const A = makeWriter()` where the factory
+      // also wrote `W.create = …` — lowers dyn, not func); a func-typed
+      // one goes through the shared per-use box so it lands on the same
+      // ScrClosure the own-property route uses. A dyn value that turns
+      // out not to be callable throws Node's "<name> is not a
+      // constructor" at the construction, which is Node's answer.
+      const probed = probeLower(L, expr.expression);
+      const boxed =
+        probed !== null && probed.type.kind === "dyn"
+          ? probed
+          : fnOwnPropBox(L, expr.expression, loc);
+      if (boxed) {
+        const args: IrExpr[] = (expr.arguments ?? []).map((a) => L.lowerExprExpecting(a, DYN));
+        if (args.every((a) => a.type.kind === "dyn")) {
+          const pack: IrExpr = { kind: "dynArrLit", elems: args, type: DYN, loc };
+          const what: IrExpr = {
+            kind: "strLit",
+            value: expr.expression.getText(),
+            type: STRING,
+            loc,
+          };
+          fnOwnCounters.construct++;
+          fnOwnWhy("construct", expr, expr.expression.getText());
+          return {
+            kind: "libCall",
+            fn: "dyn.construct",
+            args: [boxed, pack, what],
+            type: DYN,
+            loc,
+          };
         }
       }
     }

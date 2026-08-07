@@ -5025,17 +5025,30 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         loc: locOf(call),
       };
     }
-    // Names NO dyn-representable prototype declares: the member can only
-    // be an OWN property, so "read the member, call it" IS Node's
-    // semantics for every possible dyn value — `handlers.onDone(x)` on a
-    // checked-dynamic object calls the stored function (dynKeyGet answers
-    // the member or undefined; dynCall throws Node's exact catchable
-    // "handlers.onDone is not a function" on a non-function). Prototype
-    // names (map/join/hasOwnProperty/call/...) keep the fence: on a real
-    // dyn array/string/object Node would run the METHOD, which no stored
-    // member models. Order note: JS reads the callee before evaluating
-    // arguments — dynKeyGet's undefined-receiver TypeError fires first,
-    // exactly Node.
+    // Names NO dyn-representable prototype declares: the member is an OWN
+    // property or an INHERITED one, and either way JS's `o.m(...)` binds
+    // the RECEIVER — `handlers.onDone(x)` runs with `this === handlers`,
+    // and `inst.encode(m)` where `encode` came from
+    // `Klass.prototype.encode = fn` runs with `this === inst`. That is
+    // scr_dyn_invoke's OBJ arm exactly (own member, then the prototype
+    // chain, called through the ambient-receiver window), so the call
+    // goes there rather than to "read the member, then call the value".
+    //
+    // The read-then-call form this replaces LOST the receiver: it read
+    // the member as a plain value and called it with no `this` at all,
+    // which was invisible while the only reachable members were own
+    // properties written by helpers that ignore `this`, and becomes
+    // wrong the moment a prototype method exists — every such method
+    // exists to read `this`. For the kinds with no member table
+    // (numbers, booleans, strings, arrays past their ladders) the two
+    // forms answer identically: Node's catchable "<spelling> is not a
+    // function". Prototype names (map/join/hasOwnProperty/call/...) never
+    // reach here — DYN_DISPATCH_METHODS claimed them above and
+    // DYN_PROTO_METHOD_NAMES fences the rest, because on a real dyn
+    // array/string Node would run the METHOD, which no stored member
+    // models. Order note: JS reads the callee before evaluating
+    // arguments — the undefined-receiver TypeError fires first, exactly
+    // Node.
     if (DYN_PROTO_METHOD_NAMES.has(access.name.text)) return null;
     // Optional forms (`obj.cb?.()`, `obj?.cb()`) belong to the chain
     // machinery's short-circuit semantics — not modeled here yet.
@@ -5044,15 +5057,16 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     if (call.arguments.some((a) => ts.isSpreadElement(a))) {
       L.unsupported("SC1090", call, "spread arguments in calls through 'unknown' values");
     }
-    const member: IrExpr = {
-      kind: "dynKeyGet",
-      key: { kind: "strLit", value: access.name.text, type: STRING, loc: locOf(access) },
-      value: recv,
-      type: DYN,
-      loc: locOf(access),
-    };
     const args = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
-    return { kind: "dynCall", callee: member, calleeName: access.getText(), args, type: DYN, loc };
+    return {
+      kind: "dynInvoke",
+      recv,
+      method: access.name.text,
+      calleeName: access.getText(),
+      args,
+      type: DYN,
+      loc,
+    };
   }
 
 /** Prototype method names of the checked-dynamic tree-representable kinds (String, Array,
