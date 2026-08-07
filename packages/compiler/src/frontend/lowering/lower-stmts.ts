@@ -8,7 +8,7 @@ import { lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators
 import { BIGINT, type IrLibFn, BOOL, isRefCounted, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrJsOp, IrLocal, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
-import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, isCjsJsFile, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
+import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, isCjsWholeExportAssign, isJsSourceFile, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
 import { COMPOUND_ASSIGN_OPS, CompoundOp, STR_METHODS, UNSUPPORTED_STMT, isStdlibMember, sideEffectFreeOptionValue, stdlibGlobalAliasDecl, stdlibGlobalNameOf } from "./surfaces.js";
 import { isProvenanceSourceFile } from "../provenance-registry.js";
 import { ambientUndefVarRootOf, lowerImportEquals, nsUndefRead, nsWritableTarget, trapDeclRootOf } from "./lower-namespaces.js";
@@ -4439,7 +4439,11 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     // Statements Node discards (a replaced export object) fence instead of
     // shipping tsc's answer — the checker models them as live exports.
     {
-      const stmt = cjs.expr.parent;
+      // The ENCLOSING statement, comma operands included — the discard
+      // rules are about a file's statement order, and a minifier's comma
+      // does not move the assignment out of the statement it sits in.
+      let stmt: ts.Node = cjs.expr;
+      while (stmt.parent !== undefined && !ts.isStatement(stmt)) stmt = stmt.parent;
       const discarded = ts.isExpressionStatement(stmt) ? cjsExportDiscardReason(stmt) : null;
       if (discarded !== null) L.unsupported("SC1090", cjs.expr, discarded);
     }
@@ -4633,15 +4637,26 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         return { kind: "block", body: [], loc };
       }
       const g = L.globalsBySymbol.get(sym);
-      if (g) {
-        if (g.mutable) {
-          L.unsupported(
-            "SC1090",
-            rhs,
-            `exporting the mutable 'let' binding '${rhs.text}' by reference (Node copies its VALUE at this statement — declare it const, or export a function that reads it)`,
-          );
-        }
-        return { kind: "block", body: [], loc };
+      if (g && !g.mutable) return { kind: "block", body: [], loc };
+      // THE WHOLE-EXPORT ROOT'S STORAGE (collectGlobals): a root the alias
+      // path cannot carry — a `var`/`let` binding, or one the file keeps as
+      // an init local — got a const export global of its own, and this
+      // statement is the assignment that fills it. It is Node's semantics
+      // spelled out: `module.exports` holds the value the root has AT THIS
+      // STATEMENT, so the copy the separate slot makes is the snapshot,
+      // and a later rebinding of the root stays invisible through the
+      // export exactly as it is in Node. The mutable-root fence below
+      // stands for every root this did NOT register.
+      const own = L.globalsByDeclNode.get(expr);
+      if (own) {
+        return { kind: "assign", localId: own.id, value: L.lowerExprExpecting(rhs, own.type), loc: locOf(rhs) };
+      }
+      if (g?.mutable) {
+        L.unsupported(
+          "SC1090",
+          rhs,
+          `exporting the mutable 'let' binding '${rhs.text}' by reference (Node copies its VALUE at this statement — declare it const, or export a function that reads it)`,
+        );
       }
       return null;
     }
@@ -4674,6 +4689,22 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
   export function lowerExprStatement(L: Lowerer, expr: ts.Expression): IrStmt {
     const stmtNode = expr.parent;
     while (ts.isParenthesizedExpression(expr)) expr = expr.expression;
+    // `module.exports = <expr>` reached as a COMMA OPERAND of a top-level
+    // statement in a JS file: the module machinery owns it, exactly as it
+    // owns the statement spelling (lowerStmt's cjs routing, which only
+    // sees `ExpressionStatement { BinaryExpression }`). Both the
+    // granularity split and the comma's own two-operand block land here,
+    // and without this the export takes the generic assignment path and
+    // fences "assignment to non-variables" — which is where every
+    // bundler-generated CommonJS module's init dies, at its last
+    // statement, one operand short of finished.
+    if (isCjsWholeExportAssign(expr) && !ts.isExpressionStatement(expr.parent)) {
+      const enclosing = topLevelJsStatementOf(expr);
+      if (enclosing !== null) {
+        const rec = commaWholeExportRecordOf(enclosing);
+        if (rec !== null && rec.expr === expr) return lowerCjsExportStatement(L, rec);
+      }
+    }
     // `cond ? f() : g();` where BOTH arms are void — the branch spelled as
     // an expression. A conditional EXPRESSION has to produce a value and
     // the IR has no void value, so lowerTernary builds a void ternary and
