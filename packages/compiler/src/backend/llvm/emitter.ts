@@ -6382,11 +6382,29 @@ class LlEmitter {
           B.line(`store i1 ${inR}, ptr ${slot}`);
         }
         B.br(lj);
+        // A FUNCTION receiver carries own properties (the closure's
+        // property table — assignment and defineProperties both land
+        // there), so `in` answers from the same place the keyed READ
+        // does. Without this arm the write side would make them
+        // disagree: `f.k = 1` then `f.k` answers 1 while `"k" in f`
+        // still said false. The C backend's twin is in emit-exprs.ts.
+        B.startBlock(lNotArr);
+        const isFn = B.tmp();
+        const lFn = B.newLabel("dhk.fn");
+        const lNotFn = B.newLabel("dhk.nf");
+        B.line(`${isFn} = icmp eq i32 ${kd}, ${DK.FUNC}`);
+        B.condBr(isFn, lFn, lNotFn);
+        B.startBlock(lFn);
+        this.declare(`declare zeroext i1 @scr_dyn_fn_has(ptr, ptr, i64)`);
+        const fnHas = B.tmp();
+        B.line(`${fnHas} = call zeroext i1 @scr_dyn_fn_has(ptr ${d.name}, ptr ${this.cstr(e.key)}, i64 ${keyBytes})`);
+        B.line(`store i1 ${fnHas}, ptr ${slot}`);
+        B.br(lj);
         // An ISLAND-held receiver fences loudly (Node asks the real
         // engine object — `false` would be a silent wrong answer); the
         // helper answers false for every other kind, so this arm is a
         // plain unconditional call.
-        B.startBlock(lNotArr);
+        B.startBlock(lNotFn);
         this.declare(`declare zeroext i1 @scr_dyn_isl_fence(ptr, ptr)`);
         const fenced = B.tmp();
         B.line(`${fenced} = call zeroext i1 @scr_dyn_isl_fence(ptr ${d.name}, ptr ${this.cstr("'in'")})`);

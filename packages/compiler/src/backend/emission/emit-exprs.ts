@@ -2162,7 +2162,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             : /^(0|[1-9][0-9]*)$/.test(e.key) && Number(e.key) <= Number.MAX_SAFE_INTEGER
               ? `${d.name}->v.arr.len > ${e.key}`
               : "false";
-        const test = `(${d.name}->kind == SCR_DYN_OBJ ? (${objTest}) : ${d.name}->kind == SCR_DYN_ARR ? (${arrTest}) : scr_dyn_isl_fence(${d.name}, "'in'"))`;
+        // A FUNCTION receiver carries own properties (the closure's
+        // property table — assignment and defineProperties both land
+        // there), so `in` answers from the same place the keyed READ
+        // does. Without this arm the write side would make them
+        // disagree: `f.k = 1` then `f.k` answers 1 while `"k" in f`
+        // still said false.
+        const fnTest = `scr_dyn_fn_has(${d.name}, ${keyLit}, ${keyBytes.length})`;
+        const test = `(${d.name}->kind == SCR_DYN_OBJ ? (${objTest}) : ${d.name}->kind == SCR_DYN_ARR ? (${arrTest}) : ${d.name}->kind == SCR_DYN_FUNC ? (${fnTest}) : scr_dyn_isl_fence(${d.name}, "'in'"))`;
         return E.fallibleTemp(e.type, e.negated ? `!${test}` : test);
       }
       case "dynScalarEq": {
