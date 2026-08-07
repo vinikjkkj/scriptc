@@ -8885,7 +8885,7 @@ export class Lowerer {
     return lowerNestedFunctionDecl(this, stmt);
   }
 
-  lambdaSignature(node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration | ts.MethodDeclaration | ts.GetAccessorDeclaration | ts.SetAccessorDeclaration,): { shapes: ParamShape[]; funcType: IrType & { kind: "func" } } {
+  lambdaSignature(node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration | ts.MethodDeclaration | ts.GetAccessorDeclaration | ts.SetAccessorDeclaration,): { shapes: ParamShape[]; funcType: IrType & { kind: "func" }; argumentsBound?: true } {
     return lambdaSignature(this, node);
   }
 

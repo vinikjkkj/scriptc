@@ -7,7 +7,7 @@ import type { Lowerer } from "./lowerer.js";
 import { lowerGenMethodCall } from "./lower-generators.js";
 import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import type { IrFfiImport } from "../../ir/nodes.js";
-import { isJsSourceFile, locOf } from "../program.js";
+import { isCjsJsFile, isJsSourceFile, locOf } from "../program.js";
 import { isGenericCallableMemberType, typeKey} from "../types.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
@@ -55,6 +55,11 @@ export interface FnSig {
   /** Call-site result type — Promise<inner> for async functions, the
    * generator type for generator functions. */
   returnType: IrType;
+  /** The ARGUMENTS-BOUND parameter form (argumentsRebindsParams): the
+   * declaration spells parameters but they are NOT in `params` — the single
+   * dynRest slot carries the whole argument list and lowerFunction's prologue
+   * re-binds each declared name off it. */
+  argumentsBound?: true;
   /** Async: the IrFunction's returnType is the promise's INNER type. */
   isAsync?: boolean;
   /** Generator: the IrFunction's returnType is the TReturn channel; the
@@ -1101,21 +1106,33 @@ export function collectSignatureInner(L: Lowerer, decl: ts.FunctionDeclaration):
 
     const params = L.paramShapes(decl.parameters);
     // The VARIADIC `arguments` form on a DECLARED function: same rule as
-    // lambdas (lambdaSignature) — zero declared params, the body reads
-    // `arguments`, a synthetic trailing dynRest shape carries the call's
-    // arguments (completeArgs packs direct calls; the boxed thunk packs
-    // indirect ones; lowerFunction declares the `arguments` local).
+    // lambdas (lambdaSignature) — the body reads `arguments`, and one
+    // synthetic dynRest shape carries the WHOLE argument list (completeArgs
+    // packs direct calls; the boxed thunk packs indirect ones; lowerFunction
+    // declares the `arguments` local). Declared parameters, if any, give up
+    // their ABI slots to it and re-bind off it in the prologue.
+    let argumentsBound = false;
     if (
       !params.some((sh) => sh.mode === "dynRest") &&
       isJsSourceFile(decl.getSourceFile()) &&
       bodyReadsArguments(decl)
     ) {
       if (decl.parameters.length > 0) {
-        L.unsupported(
-          "SC1090",
-          decl,
-          "'arguments' in functions with declared parameters (use a rest parameter: (...args))",
-        );
+        // DECLARED parameters alongside `arguments`: the declared slots leave
+        // the ABI entirely and the one dynRest carries the whole argument
+        // list, so `arguments.length` is the CALL's arity (argumentsRebindsParams);
+        // lowerFunction's prologue re-binds the names off it. Parameter forms
+        // the index read cannot reproduce, and sloppy bodies whose writes the
+        // copy would not alias, keep the fence.
+        if (!argumentsRebindsParams(L, decl)) {
+          L.unsupported(
+            "SC1090",
+            decl,
+            "'arguments' in functions with declared parameters (use a rest parameter: (...args))",
+          );
+        }
+        params.length = 0;
+        argumentsBound = true;
       }
       params.push({ type: DYN, mode: "dynRest" });
     }
@@ -1139,6 +1156,7 @@ export function collectSignatureInner(L: Lowerer, decl: ts.FunctionDeclaration):
       params,
       returnType,
       isAsync,
+      ...(argumentsBound ? { argumentsBound: true as const } : {}),
       ...(isGenerator && returnType.kind === "generator"
         ? { generator: { yieldT: returnType.yieldT, nextT: returnType.nextT } }
         : {}),
@@ -5905,7 +5923,7 @@ const inliningPredicates = new Set<ts.Symbol>();
    * optional/default params has the same IR type as one spelling the
    * `T | undefined` unions with required params — exactly the exact-arity
    * value rule (requireExactArityValue decides who may become a value). */
-  export function lambdaSignature(L: Lowerer, node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration | ts.MethodDeclaration | ts.GetAccessorDeclaration | ts.SetAccessorDeclaration,): { shapes: ParamShape[]; funcType: IrType & { kind: "func" } } {
+  export function lambdaSignature(L: Lowerer, node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration | ts.MethodDeclaration | ts.GetAccessorDeclaration | ts.SetAccessorDeclaration,): { shapes: ParamShape[]; funcType: IrType & { kind: "func" }; argumentsBound?: true } {
     if (!node.body) L.unsupported("SC1090", node, "function overload signatures");
     if (
       node.asteriskToken &&
@@ -6036,11 +6054,12 @@ const inliningPredicates = new Set<ts.Symbol>();
     // `function() { ...; return fn.apply(this, arguments); }`). Both mark
     // the func type `rest`: the lifted body takes one trailing dyn-array
     // param, filled by the boxed call thunk with the call's arguments
-    // from index params.length on. `arguments` is only claimed in
-    // ZERO-param functions (there it IS the surplus array); alongside
-    // declared params the alias story has no model — the fence says to
-    // use a rest parameter. Arrows never claim it (JS: an arrow's
-    // `arguments` is the enclosing function's).
+    // from index params.length on. `arguments` IS that array: a zero-param
+    // function has nothing else, and one that DECLARES parameters gives up
+    // its declared slots so the array can still be the whole argument list
+    // (argumentsRebindsParams — the prologue re-binds the names off it).
+    // Arrows never claim it (JS: an arrow's `arguments` is the enclosing
+    // function's).
     const hasDynRest = shapes.some((s) => s.mode === "dynRest");
     const hasIslandRest = shapes.some((s) => s.mode === "islandRest");
     const usesArguments =
@@ -6048,15 +6067,31 @@ const inliningPredicates = new Set<ts.Symbol>();
       !ts.isArrowFunction(node) &&
       isJsSourceFile(node.getSourceFile()) &&
       bodyReadsArguments(node);
+    let argumentsBound = false;
     if (usesArguments && node.parameters.length > 0) {
-      L.unsupported(
-        "SC1090",
-        node,
-        "'arguments' in functions with declared parameters (use a rest parameter: (...args))",
-      );
+      if (
+        // Only the two LAMBDA-LIFTED forms: methods and accessors are lowered
+        // by lower-classes/lower-stream, which pair their own declareParams
+        // with these shapes and have no `%arguments` slot to re-bind from.
+        !(ts.isFunctionExpression(node) || ts.isFunctionDeclaration(node)) ||
+        !argumentsRebindsParams(L, node) ||
+        // A slot that SPELLS parameters would receive a value whose func
+        // type spells none: the arguments-bound form only stands where the
+        // value's own signature is the one flowing.
+        shapes.length !== node.parameters.length
+      ) {
+        L.unsupported(
+          "SC1090",
+          node,
+          "'arguments' in functions with declared parameters (use a rest parameter: (...args))",
+        );
+      }
+      shapes.length = 0;
+      argumentsBound = true;
     }
     return {
       shapes,
+      ...(argumentsBound ? { argumentsBound: true as const } : {}),
       funcType: {
         kind: "func",
         // dynRest is EXCLUDED (the boxed thunk fills the trailing dyn
@@ -6096,6 +6131,167 @@ const inliningPredicates = new Set<ts.Symbol>();
       return undefined;
     });
     return found;
+  }
+
+/** Is `arguments` WRITTEN THROUGH in this function's own body — `arguments =
+   * v`, `arguments[i] = v`, `arguments.k = v`, `++arguments[i]`, `delete
+   * arguments[i]`? Only writes matter: in SLOPPY mode a simple-parameter
+   * function's `arguments` slots are ALIASED to the parameter bindings, so a
+   * write on either side is visible on the other, and the arguments-bound
+   * parameter form (argumentsRebindsParams) copies rather than aliases. */
+  function argumentsWrittenInBody(fn: { body?: ts.Node | undefined }): boolean {
+    let written = false;
+    if (fn.body === undefined) return false;
+    const isWriteOf = (target: ts.Node): boolean => {
+      const p: ts.Node | undefined = target.parent;
+      if (p === undefined) return false;
+      if (ts.isBinaryExpression(p) && p.left === target) {
+        const k = p.operatorToken.kind;
+        return (
+          k === ts.SyntaxKind.EqualsToken ||
+          (k >= ts.SyntaxKind.FirstCompoundAssignment && k <= ts.SyntaxKind.LastCompoundAssignment)
+        );
+      }
+      if (ts.isPrefixUnaryExpression(p) || ts.isPostfixUnaryExpression(p)) {
+        return (
+          p.operator === ts.SyntaxKind.PlusPlusToken || p.operator === ts.SyntaxKind.MinusMinusToken
+        );
+      }
+      return ts.isDeleteExpression(p);
+    };
+    ts.walkPreorder(fn.body, (n) => {
+      if (written) return "stop";
+      if (ts.isIdentifier(n) && n.text === "arguments" && !(ts.isPropertyAccessExpression(n.parent) && n.parent.name === n)) {
+        // The identifier itself, or the access step it heads.
+        const access =
+          n.parent !== undefined &&
+          (ts.isElementAccessExpression(n.parent) || ts.isPropertyAccessExpression(n.parent)) &&
+          n.parent.expression === n
+            ? n.parent
+            : n;
+        if (isWriteOf(access)) {
+          written = true;
+          return "stop";
+        }
+        return undefined;
+      }
+      if (
+        (ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n) || ts.isMethodDeclaration(n)) &&
+        n !== fn
+      ) {
+        return "skip"; // own `arguments` scope
+      }
+      return undefined;
+    });
+    return written;
+  }
+
+/** Is this node inside STRICT code? A directive prologue on the source file
+   * or on any enclosing function body, a class body, or an ES module — the
+   * three ways JS turns strictness on. Sloppy code is the only place where
+   * `arguments` slots ALIAS the declared parameter bindings.
+   *
+   * The module test is `isCjsJsFile`, not `ts.isExternalModule`: tsgo marks
+   * CommonJS files as external modules too, and a `.cjs` script is sloppy no
+   * matter what its export surface looks like. */
+  function inStrictCode(node: ts.Node): boolean {
+    const hasUseStrict = (stmts: readonly ts.Statement[]): boolean => {
+      for (const s of stmts) {
+        // The directive prologue ends at the first non-string-literal
+        // expression statement (a template literal is not a directive).
+        if (!ts.isExpressionStatement(s) || !ts.isStringLiteral(s.expression)) return false;
+        if (s.expression.text === "use strict") return true;
+      }
+      return false;
+    };
+    const sf = node.getSourceFile();
+    if (!isCjsJsFile(sf)) return true;
+    if (hasUseStrict(sf.statements)) return true;
+    let n: ts.Node | undefined = node;
+    while (n !== undefined && !ts.isSourceFile(n)) {
+      if (ts.isClassDeclaration(n) || ts.isClassExpression(n)) return true;
+      const body = (n as { body?: ts.Node | undefined }).body;
+      if (body !== undefined && ts.isBlock(body) && hasUseStrict(body.statements)) return true;
+      n = n.parent;
+    }
+    return false;
+  }
+
+/** The DECLARED-PARAMETER `arguments` form: may `function f(a, b) { … arguments
+   * … }` re-bind its parameters OFF the arguments object?
+   *
+   * `arguments` is the CALL's argument list, not the DECLARATION's. Its length
+   * is the count the caller passed and index i is the i-th argument, whether or
+   * not a parameter was declared for it — so a signature that keeps its declared
+   * ABI slots and appends only the SURPLUS cannot answer `arguments.length` for a
+   * short call (`f(1)` against `function f(a, b)`: JS says 1, the slots say 2).
+   * That mismatch is why this form was fenced.
+   *
+   * The lowering therefore does the opposite of appending: the declared
+   * parameters LEAVE the ABI and the one synthetic dynRest slot carries the
+   * WHOLE argument list — which is exactly the zero-parameter form, whose
+   * machinery (completeArgs' pack, the boxed thunk's `rest` from index 0,
+   * lowerFunction's `%arguments` local) this reuses verbatim. The prologue then
+   * re-binds each declared name as an ordinary mutable body local reading
+   * `arguments[i]`; a short call reads undefined off the end of the array, which
+   * is precisely what JS gives the parameter, so both spellings answer together.
+   *
+   * Two gates. The parameters must be a SIMPLE list of implicitly-typed
+   * identifiers — a pattern, default, optional or rest parameter has a prologue
+   * of its own that the index read does not reproduce, and a param the checker
+   * gave a real type to would lose it on the way through dyn. And in SLOPPY code
+   * the arguments slots ALIAS the parameter bindings, so a write on either side
+   * must be visible on the other: the re-binding is a copy, so a sloppy body that
+   * writes a parameter or writes through `arguments` keeps the fence. Strict code
+   * (a directive, a class, an ES module) has no aliasing and passes freely. */
+  export function argumentsRebindsParams(L: Lowerer,
+    fn: ts.FunctionDeclaration | ts.FunctionExpression | ts.MethodDeclaration | ts.ArrowFunction,): boolean {
+    if (fn.body === undefined || fn.parameters.length === 0) return false;
+    for (const p of fn.parameters) {
+      // A `this` parameter is type-world and consumes no argument slot;
+      // rather than model the offset, the form keeps its fence.
+      if (isThisParameter(p)) return false;
+      if (!ts.isIdentifier(p.name)) return false;
+      if (p.dotDotDotToken || p.questionToken || p.initializer) return false;
+      const t = L.typeOf(p.name);
+      if ((t.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) === 0) return false;
+    }
+    if (inStrictCode(fn)) return true;
+    if (argumentsWrittenInBody(fn)) return false;
+    for (const p of fn.parameters) {
+      const sym = L.checker.getSymbolAtLocation(p.name);
+      if (!sym) return false;
+      if (paramWrittenInBody(L, fn.body, sym, (p.name as ts.Identifier).text)) return false;
+    }
+    return true;
+  }
+
+/** The prologue of the arguments-bound parameter form: `var <p_i> =
+   * arguments[i]`, one per declared parameter, reading the synthetic dyn
+   * array. The locals are MUTABLE (a JS parameter is), and the read is by
+   * canonical index string — off the end it answers the undefined singleton,
+   * exactly the value JS binds to a parameter a short call did not fill. */
+  export function bindArgumentsParams(L: Lowerer,
+    params: readonly ts.ParameterDeclaration[],
+    argsLocal: IrLocal,
+    prologue: IrStmt[],): void {
+    params.forEach((param, i) => {
+      const loc = locOf(param);
+      const name = (param.name as ts.Identifier).text;
+      const local = L.declareLocal(param.name, name, DYN, true);
+      prologue.push({
+        kind: "varDecl",
+        localId: local.id,
+        init: {
+          kind: "dynKeyGet",
+          key: { kind: "strLit", value: String(i), type: STRING, loc },
+          value: { kind: "varRef", localId: argsLocal.id, type: DYN, loc },
+          type: DYN,
+          loc,
+        },
+        loc,
+      });
+    });
   }
 
 /** Counts of the contextual constraint erasure, read in the same run as the
@@ -6210,7 +6406,7 @@ const inliningPredicates = new Set<ts.Symbol>();
 
   function lowerLambdaInner(L: Lowerer, node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration | ts.MethodDeclaration | ts.GetAccessorDeclaration | ts.SetAccessorDeclaration,): IrExpr {
     const loc = locOf(node);
-    const { shapes, funcType } = L.lambdaSignature(node);
+    const { shapes, funcType, argumentsBound } = L.lambdaSignature(node);
     // A lambda IS a value: the exact-arity rule applies at birth. The
     // contextual (target) type decides — `(x?: number) => void` may flow
     // into a slot annotated `(x: number | undefined) => void` (same ABI
@@ -6258,7 +6454,10 @@ const inliningPredicates = new Set<ts.Symbol>();
     const diagsBefore = L.diags.length;
     L.fnStack.push(fnCtx);
     try {
-      const { params, prologue } = L.declareParams(node.parameters, shapes);
+      // ARGUMENTS-BOUND parameters: lambdaSignature dropped the declared
+      // shapes, so nothing here is a parameter — the whole list re-binds off
+      // the synthetic array below.
+      const { params, prologue } = L.declareParams(argumentsBound ? [] : node.parameters, shapes);
       // The VARIADIC `arguments` form (rest-marked with no declared rest
       // param): a synthetic trailing dyn-array param carries the call's
       // arguments; `arguments` reads resolve to it (identifier lowering).
@@ -6266,6 +6465,7 @@ const inliningPredicates = new Set<ts.Symbol>();
         const argsLocal = L.declareHiddenLocal("%arguments", DYN);
         params.push({ localId: argsLocal.id, name: "%arguments", type: DYN });
         fnCtx.argumentsLocal = argsLocal;
+        if (argumentsBound) bindArgumentsParams(L, node.parameters, argsLocal, prologue);
       }
 
       let body: IrStmt[];
@@ -8797,14 +8997,20 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     const diagsBefore = L.diags.length;
     L.fnStack.push(ctx);
     try {
-      const { params, prologue } = L.declareParams(decl.parameters, sig.params);
+      // ARGUMENTS-BOUND parameters: collectSignatureInner dropped the declared
+      // slots, so nothing here is a parameter — the whole list re-binds off
+      // the synthetic array below.
+      const argsBound = sig.argumentsBound === true;
+      const declaredParams = argsBound ? [] : decl.parameters;
+      const { params, prologue } = L.declareParams(declaredParams, sig.params);
       // The synthetic `arguments` slot (a dynRest shape BEYOND the declared
       // parameters — collectSignatureInner appended it): one trailing
       // dyn-array param, resolved by `arguments` reads.
-      if (sig.params.length > decl.parameters.length && sig.params[sig.params.length - 1]!.mode === "dynRest") {
+      if (sig.params.length > declaredParams.length && sig.params[sig.params.length - 1]!.mode === "dynRest") {
         const argsLocal = L.declareHiddenLocal("%arguments", DYN);
         params.push({ localId: argsLocal.id, name: "%arguments", type: DYN });
         ctx.argumentsLocal = argsLocal;
+        if (argsBound) bindArgumentsParams(L, decl.parameters, argsLocal, prologue);
       }
       const bodyBlock = blockBodyOf(decl);
       if (!bodyBlock) {
