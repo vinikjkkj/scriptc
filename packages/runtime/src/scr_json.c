@@ -333,8 +333,9 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
       d->v.arr.len = 0; /* cap/items preserved from the node's last life */
     } else if (kind == SCR_DYN_OBJ) {
       d->v.obj.len = 0; /* cap/entries preserved */
-      d->v.obj.proto = NULL; /* release already cleared both; belt and braces */
+      d->v.obj.proto = NULL; /* release already cleared all three; belt and braces */
       d->v.obj.cname = NULL;
+      d->v.obj.accessors = NULL;
     } else {
       memset(&d->v, 0, sizeof d->v);
     }
@@ -371,13 +372,16 @@ void scr_dyn_release(ScrDyn *d) {
       free(d->v.obj.entries[i].key);
       scr_dyn_release(d->v.obj.entries[i].value);
     }
-    /* The [[Prototype]] link is owned; the constructor NAME is a static
-     * literal. Both are cleared because the node may be recycled below
-     * with its entries buffer intact — a recycled node must not inherit
-     * the chain of its previous life. */
+    /* The [[Prototype]] link and the ACCESSOR table are owned; the
+     * constructor NAME is a static literal. All three are cleared because
+     * the node may be recycled below with its entries buffer intact — a
+     * recycled node must not inherit the chain (or the getters) of its
+     * previous life. */
     scr_dyn_release(d->v.obj.proto);
     d->v.obj.proto = NULL;
     d->v.obj.cname = NULL;
+    scr_dyn_release(d->v.obj.accessors);
+    d->v.obj.accessors = NULL;
     break;
   case SCR_DYN_FUNC:
     scr_closure_release(d->v.fn.clo); /* sig/name are static literals */
@@ -1744,6 +1748,149 @@ ScrStr *scr_dyn_string_coerce_js(const ScrDyn *d) {
   return scr_dyn_string_coerce(d);
 }
 
+/* ── ACCESSOR PROPERTIES ───────────────────────────────────────────────
+ *
+ * `Object.defineProperty(o, k, { get, set })`. The pair lives in the OBJ
+ * node's SEPARATE `accessors` table (scr_runtime.h says why), which is
+ * what keeps a non-enumerable accessor off Object.keys / JSON / assign /
+ * structuredClone / deepStrictEqual by construction: every one of those
+ * reads `entries`, and an accessor is never in `entries`.
+ *
+ * Only three operations consult the table, and they are exactly JS's
+ * three: [[Get]], [[Set]] and `in`. The getter runs with `this` bound to
+ * the RECEIVER the read started from, not to the object the accessor was
+ * found on — which is the whole reason the idiom works: pbjs defines the
+ * `_field` oneof accessor ONCE on `Message.prototype`, and each
+ * instance's read has to run it against its own members. */
+
+typedef enum { SCR_PROP_ABSENT, SCR_PROP_DATA, SCR_PROP_ACCESSOR } ScrPropKind;
+
+/* One property lookup over the receiver and its [[Prototype]] chain,
+ * shared by [[Get]], [[Set]] and `in` so the three can never disagree
+ * about where a property lives. At any ONE level a key is either a data
+ * member or an accessor and never both — scr_dyn_obj_define_accessor
+ * drops the data entry it replaces, and scr_dyn_key_set routes to the
+ * setter instead of writing a shadowing data entry — so the per-level
+ * order below is a fast path, not a tie-break. `*out` is BORROWED: the
+ * data member, or the accessor's `[getter, setter, configurable]` ARR. */
+static ScrPropKind scr_dyn_obj_resolve(const ScrDyn *d, const char *key, size_t key_len,
+                                       ScrDyn **out) {
+  const ScrDyn *o = d;
+  for (size_t steps = 0; o != NULL && steps <= SCR_PROTO_MAX_DEPTH; steps++) {
+    if (o->kind != SCR_DYN_OBJ) break;
+    ScrDyn *m = scr_dyn_obj_get(o, key, key_len);
+    if (m != NULL) {
+      *out = m;
+      return SCR_PROP_DATA;
+    }
+    if (o->v.obj.accessors != NULL) {
+      ScrDyn *pair = scr_dyn_obj_get(o->v.obj.accessors, key, key_len);
+      if (pair != NULL) {
+        *out = pair;
+        return SCR_PROP_ACCESSOR;
+      }
+    }
+    o = o->v.obj.proto;
+  }
+  *out = NULL;
+  return SCR_PROP_ABSENT;
+}
+
+/* JS's [[Get]] on an OBJ receiver, whole: own member, own accessor, the
+ * prototype chain, then the `constructor` fence. ALWAYS +1 on success;
+ * NULL only with a pending exception (a throwing getter, or the fence).
+ *
+ * BOTH backends' keyed-read walkers call exactly this rather than
+ * reimplementing the walk, so neither can answer a property the other
+ * cannot — the split estado-protochain.md §2e found the hard way. */
+ScrDyn *scr_dyn_obj_key_get(ScrDyn *recv, const char *key, size_t key_len) {
+  ScrDyn *found = NULL;
+  ScrPropKind k = scr_dyn_obj_resolve(recv, key, key_len, &found);
+  if (k == SCR_PROP_DATA) return scr_dyn_retain(found);
+  if (k == SCR_PROP_ACCESSOR) {
+    /* A set-only accessor READS as undefined in JS — absence of a getter
+     * is not an error, and answering one here would be a wrong throw. */
+    ScrDyn *getter = found->v.arr.items[0];
+    if (getter->kind != SCR_DYN_FUNC) return scr_dyn_retain(scr_dyn_undefined());
+    scr_dyn_this_push_dyn(recv);
+    ScrDyn *r = scr_dyn_call(getter, NULL, 0, "getter");
+    scr_dyn_this_pop();
+    return r; /* +1, or NULL with the getter's own exception pending */
+  }
+  if (key_len == 11 && memcmp(key, "constructor", 11) == 0 &&
+      scr_dyn_proto_chain_is_fn_pub(recv)) {
+    /* The one member Node's implicit prototype has and this one
+     * deliberately does not (the back-link would be an uncollectable
+     * cycle): loud, never a silent undefined. */
+    scr_dyn_proto_ctor_fence();
+    return NULL;
+  }
+  return scr_dyn_retain(scr_dyn_undefined());
+}
+
+/* `key in obj` over an OBJ receiver: own member, own accessor, then the
+ * chain — an accessor IS a property, so `in` sees it even though
+ * Object.keys does not. Never throws (no getter runs). */
+bool scr_dyn_obj_key_present(const ScrDyn *d, const char *key, size_t key_len) {
+  ScrDyn *found = NULL;
+  return scr_dyn_obj_resolve(d, key, key_len, &found) != SCR_PROP_ABSENT;
+}
+
+/* Drop one OWN data member, preserving the insertion order of the rest
+ * (JS own-key order is insertion order, and defineProperty replacing a
+ * data property with an accessor must not reshuffle its neighbours). */
+static void scr_dyn_obj_unset(ScrDyn *obj, const char *key, size_t key_len) {
+  for (size_t i = 0; i < obj->v.obj.len; i++) {
+    ScrDynEntry *e = &obj->v.obj.entries[i];
+    if (e->key_len == key_len && memcmp(e->key, key, key_len) == 0) {
+      free(e->key);
+      scr_dyn_release(e->value);
+      memmove(&obj->v.obj.entries[i], &obj->v.obj.entries[i + 1],
+              (obj->v.obj.len - i - 1) * sizeof *obj->v.obj.entries);
+      obj->v.obj.len--;
+      return;
+    }
+  }
+}
+
+/* Install `key` as an accessor property of `recv`. Both halves are
+ * BORROWED (the pair retains them); either may be the undefined
+ * singleton for a one-sided accessor. Any own DATA member of the same
+ * name is dropped — defineProperty CONVERTS a data property into an
+ * accessor property, it does not layer one over the other. `configurable`
+ * rides in the triple so a second define can answer JS's "Cannot redefine
+ * property" instead of silently replacing a sealed getter. */
+void scr_dyn_obj_define_accessor(ScrDyn *recv, const char *key, size_t key_len,
+                                 ScrDyn *getter, ScrDyn *setter, bool configurable) {
+  if (recv->kind != SCR_DYN_OBJ) return;
+  if (recv->v.obj.accessors == NULL) recv->v.obj.accessors = scr_dyn_new_obj();
+  scr_dyn_obj_unset(recv, key, key_len);
+  ScrDyn *triple = scr_dyn_new_arr();
+  scr_dyn_arr_push(triple, scr_dyn_retain(getter));
+  scr_dyn_arr_push(triple, scr_dyn_retain(setter));
+  scr_dyn_arr_push(triple, scr_dyn_new_bool(configurable));
+  scr_dyn_obj_set(recv->v.obj.accessors, key, key_len, triple); /* ownership moves in */
+}
+
+/* True when `recv` already carries an OWN accessor for `key` that was NOT
+ * declared configurable — the case a second define is a TypeError in JS.
+ * OWN only: shadowing an inherited accessor with a define is legal. */
+bool scr_dyn_obj_accessor_sealed(const ScrDyn *recv, const char *key, size_t key_len) {
+  if (recv->kind != SCR_DYN_OBJ || recv->v.obj.accessors == NULL) return false;
+  ScrDyn *triple = scr_dyn_obj_get(recv->v.obj.accessors, key, key_len);
+  if (triple == NULL || triple->v.arr.len < 3) return false;
+  return !scr_dyn_truthy(triple->v.arr.items[2]);
+}
+
+/* The other direction: redefining an accessor property as a DATA property
+ * drops the pair, so the two tables never both claim one key and the
+ * getter/setter closures are released at the redefinition rather than at
+ * the object's death. */
+void scr_dyn_obj_drop_accessor(ScrDyn *recv, const char *key, size_t key_len) {
+  if (recv->kind != SCR_DYN_OBJ || recv->v.obj.accessors == NULL) return;
+  scr_dyn_obj_unset(recv->v.obj.accessors, key, key_len);
+}
+
 /* The checked-dynamic keyed WRITE (`h.k = v` on a dyn receiver): OBJ sets
  * the member (later writes win, insertion order — JS); undefined/null
  * throws Node's "Cannot set properties of ..."; every other kind throws
@@ -1778,8 +1925,9 @@ bool scr_dyn_fn_has(const ScrDyn *v, const char *key, size_t key_len) {
  * estado-objmodel.md §4d named, unchanged. */
 bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
   if (v->kind == SCR_DYN_OBJ) {
-    return scr_dyn_obj_get(v, key->data, key->len) != NULL ||
-           scr_dyn_proto_get(v, key->data, key->len) != NULL;
+    /* One walk, accessors included: an accessor IS a property, so `in`
+     * answers true for it even though Object.keys skips it. */
+    return scr_dyn_obj_key_present(v, key->data, key->len);
   }
   if (v->kind == SCR_DYN_ARR) {
     if (key->len == 6 && memcmp(key->data, "length", 6) == 0) return true;
@@ -1802,6 +1950,40 @@ bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
 
 void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
   if (recv->kind == SCR_DYN_OBJ) {
+    /* JS's OrdinarySet is not "write the own member": it walks the chain
+     * looking for an ACCESSOR first, and a setter found anywhere on it
+     * takes the write with `this` bound to the RECEIVER — no own data
+     * property appears. That is the half of the oneof idiom that makes
+     * `msg._field = "x"` run pbjs's setter instead of creating a member
+     * `Object.keys(msg)` would then report. A data property found on the
+     * chain still SHADOWS (an own member is created), which is what the
+     * plain obj_set below does.
+     *
+     * Only reached when the receiver's chain carries accessors at all —
+     * the common object pays one NULL test per write. */
+    ScrDyn *found = NULL;
+    if (recv->v.obj.accessors != NULL || recv->v.obj.proto != NULL) {
+      if (scr_dyn_obj_resolve(recv, key->data, key->len, &found) == SCR_PROP_ACCESSOR) {
+        ScrDyn *setter = found->v.arr.items[1];
+        if (setter->kind != SCR_DYN_FUNC) {
+          /* V8's strict-mode text. Sloppy mode ignores the write
+           * silently; this runtime does not do silent. */
+          ScrJsonBuf sb;
+          scr_jb_init(&sb);
+          scr_jb_puts(&sb, "Cannot set property ");
+          scr_jb_write(&sb, key->data, key->len);
+          scr_jb_puts(&sb, " of #<Object> which has only a getter");
+          scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&sb));
+          return;
+        }
+        ScrDyn *argv[1] = { value };
+        scr_dyn_this_push_dyn(recv);
+        ScrDyn *r = scr_dyn_call(setter, argv, 1, "setter");
+        scr_dyn_this_pop();
+        scr_dyn_release(r); /* NULL-tolerant: a throwing setter leaves it pending */
+        return;
+      }
+    }
     scr_dyn_obj_set(recv, key->data, key->len, scr_dyn_retain(value));
     return;
   }

@@ -769,7 +769,7 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
       // The link switch for scr_inspect.c: insp.* libCalls on the IR.
       inspect: moduleUsesInspect(lowered.module),
       // The link switch for scr_dyn_invoke.c: dynInvoke nodes or
-      // dyn.defineProps libCalls on the IR.
+      // dyn.defineProp(s) libCalls on the IR.
       dynInvoke: moduleUsesDynInvoke(lowered.module),
       // The link switch for scr_dc.c: dc.* libCalls on the IR (the
       // diagnostics_channel registry and pub/sub).

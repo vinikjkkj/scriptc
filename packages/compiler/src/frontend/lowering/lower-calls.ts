@@ -7993,6 +7993,55 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     };
   }
 
+/** `Object.defineProperty(target, key, descriptor)` over a
+   * CHECKED-DYNAMIC target — the one that carries the accessor half, and
+   * the single most common refusal in the zapo artifact (234 occurrences
+   * on main's tip, 233 of them one `pbjs --target static-module` shape).
+   *
+   *     Object.defineProperty(Message.prototype, "_field", {
+   *       get: util.oneOfGetter(g), set: util.oneOfSetter(g) });
+   *
+   * `Message.prototype` became a dyn VALUE with the prototype-chain
+   * commit, which is what put these sites in reach: estado-accessor.md
+   * §1 measured the same family and found it refused at the RECEIVER,
+   * not at the descriptor — true then, and no longer true. The receiver
+   * is a value now, and the descriptor is what is left.
+   *
+   * The runtime holds the semantics (scr_dyn_define_prop): a data
+   * descriptor writes a plain own property, an accessor over an OBJ
+   * target becomes a real accessor property whose getter runs with
+   * `this` bound to the reading receiver, and the two shapes that would
+   * answer wrongly — a FUNC target, and `enumerable: true` on an
+   * accessor — keep a loud refusal there rather than a silent one here.
+   *
+   * A FUNCTION-typed target boxes through the dyn boundary on the
+   * defineProperties arm's argument: the property table lives on the
+   * CLOSURE, so defining through a fresh box sticks. Typed targets keep
+   * the fence — static shapes have no property table to extend. Keys are
+   * STRINGS: ToPropertyKey over numbers and symbols is a separate
+   * question, and nothing measured spells one (2 924 of the bundle's
+   * 2 925 sites are string literals). */
+  function lowerDefinePropDyn(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+    if (call.arguments.length !== 3 || call.arguments.some((a) => ts.isSpreadElement(a))) return null;
+    let target = probeLower(L, call.arguments[0]!);
+    if (
+      target && target.type.kind === "func" &&
+      canBoxFuncIntoDyn(target.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))
+    ) {
+      target = { kind: "dynFrom", value: target, type: DYN, loc: locOf(call.arguments[0]!) };
+    }
+    if (target?.type.kind !== "dyn") return null;
+    const key = L.lowerExprExpecting(call.arguments[1]!, STRING);
+    if (key.type.kind !== "string") return null;
+    const desc = L.lowerExprExpecting(call.arguments[2]!, DYN);
+    if (desc.type.kind !== "dyn") return null;
+    if (process.env["SCRIPTC_DEFPROP_WHY"]) {
+      const loc = locOf(call);
+      process.stderr.write(`[defprop] dyn ${call.arguments[1]!.getText()} at ${loc.file}:${loc.start}\n`);
+    }
+    return { kind: "libCall", fn: "dyn.defineProp", args: [target, key, desc], type: DYN, loc: locOf(call) };
+  }
+
   function lowerObjectStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken || access.questionDotToken) return null;
@@ -8001,6 +8050,8 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     if (member === "defineProperty") {
       const slot = lowerDefinePropHiddenSlot(L, call);
       if (slot) return slot;
+      const dynDefine = lowerDefinePropDyn(L, call);
+      if (dynDefine) return dynDefine;
     }
     // Object.is — the spec's SameValue over the static kinds. Number
     // pairs take the runtime SameValue (NaN equals NaN, +0 differs from
