@@ -3487,6 +3487,39 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       };
     }
 
+    // `Error(msg)` / `TypeError(msg)` / `RangeError(msg)` / `SyntaxError(msg)`
+    // WITHOUT `new` — the spec's own equivalence, not an approximation:
+    // "When Error is called as a function rather than as a constructor, it
+    // creates and initializes a new Error object. Thus the function call
+    // Error(...) is equivalent to the object creation expression
+    // new Error(...) with the same arguments" (ECMA-262 20.5.1.1; 20.5.6.1.1
+    // says the same of every NativeError). So this arm is the `new` arm:
+    // one shared message completion, one `error.new`, the same result type
+    // — a divergence between the two spellings is impossible by
+    // construction. It is `throw Error("...")`'s whole reason for existing,
+    // and minified bundles spell it that way everywhere.
+    //
+    // DOMException is deliberately NOT here: it is a Web IDL interface, and
+    // Web IDL constructors REQUIRE `new` — `DOMException("x")` throws a
+    // TypeError in Node. Its fence stays.
+    //
+    // Provenance-checked through builtinErrorInfoOf (a user's own `Error`
+    // resolves elsewhere), and only the plain call form is claimed:
+    // `Error?.(...)` keeps its fence rather than quietly answering.
+    if (ts.isIdentifier(expr.expression) && expr.questionDotToken === undefined) {
+      const errInfo = L.builtinErrorInfoOf(L.resolveValueSymbol(expr.expression));
+      if (errInfo && errInfo.def.name !== "%DOMException") {
+        const msg = L.errorMessageArg(expr.arguments, loc, expr);
+        return {
+          kind: "libCall",
+          fn: "error.new",
+          args: [msg],
+          type: { kind: "object", className: errInfo.def.name },
+          loc,
+        };
+      }
+    }
+
     // The timer globals — setTimeout/clearTimeout, setInterval/
     // clearInterval, setImmediate/clearImmediate. Provenance-checked (a
     // user function shadowing the name has a different, non-ambient
