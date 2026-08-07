@@ -16,7 +16,7 @@ import { BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrLocal, IrRecordS
 import { ENTRY_NAME, PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, newFnCtx, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, isPromisifyCall } from "./lower-builtins.js";
 import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, nullishGenericBindingUnitOf } from "./lower-calls.js";
-import { isVarDeclared, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
+import { isVarDeclared, jsEvolvingObjectLiteralInit, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
 import { objectStaticFnValueDeclType, stdlibGlobalAliasDecl } from "./surfaces.js";
 import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-namespaces.js";
@@ -1623,10 +1623,17 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // A file-scope JS `let x = {}`: the same checked-dynamic rule
             // lowerVarDecl applies to locals — TS's empty-object-literal
             // type admits ANY later non-nullish assignment, so the static
-            // empty struct cannot hold the binding's future.
+            // empty struct cannot hold the binding's future — the evolved
+            // spelling (expando-inferred fields over an empty literal)
+            // included.
             if (isLet && type.kind === "record" && isJsSourceFile(sf)) {
               const shape = L.shapes.get(type.shapeId);
-              if (shape && shape.fields.length === 0 && !shape.indexValue && !shape.tuple) type = DYN;
+              if (
+                shape && !shape.indexValue && !shape.tuple &&
+                (shape.fields.length === 0 || jsEvolvingObjectLiteralInit(decl))
+              ) {
+                type = DYN;
+              }
             }
             // A const LOOKUP TABLE: `export const T = ['a', 'b'] as const`
             // (an Object.freeze wrapper included). The declared type is a
@@ -1775,7 +1782,12 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             if (type.kind === "void") L.badType(nameNode, L.typeOf(nameNode));
             if (type.kind === "record" && isJsSourceFile(sf)) {
               const shape = L.shapes.get(type.shapeId);
-              if (shape && shape.fields.length === 0 && !shape.indexValue && !shape.tuple) type = DYN;
+              if (
+                shape && !shape.indexValue && !shape.tuple &&
+                (shape.fields.length === 0 || jsEvolvingObjectLiteralInit(decl))
+              ) {
+                type = DYN;
+              }
             }
             const symbol = L.checker.getSymbolAtLocation(nameNode);
             if (!symbol || L.globalsBySymbol.has(symbol)) continue;

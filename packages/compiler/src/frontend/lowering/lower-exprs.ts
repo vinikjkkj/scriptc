@@ -7941,6 +7941,19 @@ export function tonumWhy(node: ts.Node, what: string): void {
   console.error(`[tonum] ${what} ${sf.fileName}:${pos.line + 1}:${pos.character + 1}`);
 }
 
+/** The SCRIPTC_VALPOS_WHY probe: one line per assignment in VALUE
+ * position that this file either CLAIMS (an arm's tag) or refuses (the
+ * "fence" tag), with the target's own text. A minified bundle is one
+ * line, so file:line says nothing there — the text is the only way a run
+ * can report which spellings moved and which are still refused. */
+export function valPosWhy(node: ts.Node, what: string): void {
+  if (process.env["SCRIPTC_VALPOS_WHY"] === undefined) return;
+  const sf = node.getSourceFile();
+  const pos = ts.getLineAndCharacterOfPosition(sf, node.getStart(sf));
+  const text = node.getText().replace(/\s+/g, " ").slice(0, 90);
+  process.stderr.write(`VALPOS ${what} ${sf.fileName}:${pos.line + 1}:${pos.character + 1} ${text}\n`);
+}
+
 /** A position that must hold a NUMBER and has no ToNumber of its own: an
  * element-access index, an `a.slice(i)` argument, a numeric switch
  * discriminant. `+` over untyped JS operands answers a dyn (its result
@@ -8109,6 +8122,79 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             };
           }
         }
+        // `h[k] = v` on a CHECKED-DYNAMIC receiver in VALUE position —
+        // the ELEMENT-ACCESS twin of the property arm above, missing for
+        // no reason but that nothing had asked. protobufjs's enum-table
+        // factory is the asking: `t[e[0] = "E2EE"] = 0` is a keyed write
+        // whose KEY is itself a keyed write, so the same store arrives in
+        // value position and in statement position, and a rule that
+        // claims only one of them leaves the other's read looking at a
+        // table nothing wrote.
+        //
+        // Same order as the property arm and as the statement path (the
+        // receiver reference, then the KEY — JS evaluates the whole
+        // member reference before the RHS — then the RHS, then the
+        // write), same conversion into the checked-dynamic tree, and the
+        // expression's value is the RHS with its OWN type. Number and
+        // boolean keys stringify: ToPropertyKey, exactly the statement
+        // path's rule. Every other receiver kind keeps the fence below —
+        // an array element's write in value position needs the element
+        // slot's coercion to answer what JS yields, which is a different
+        // question from this one.
+        if (ts.isElementAccessExpression(expr.left) && expr.left.questionDotToken === undefined) {
+          const recv = probeLower(L, expr.left.expression);
+          if (recv && recv.type.kind === "dyn") {
+            const recvTmp = L.declareHiddenLocal("%setRecv", DYN);
+            const keyNode = expr.left.argumentExpression;
+            const litKey = recordKeyLiteralText(keyNode);
+            let key: IrExpr =
+              litKey !== null
+                ? { kind: "strLit", value: litKey, type: STRING, loc: locOf(keyNode) }
+                : L.lowerExpr(keyNode);
+            if (key.type.kind === "f64") key = L.ensureString(key, keyNode);
+            if (key.type.kind === "bool" || key.type.kind === "dyn") {
+              key = { kind: "toString", operand: key, type: STRING, loc: locOf(keyNode) };
+            }
+            if (key.type.kind !== "string") {
+              L.unsupported("SC1090", keyNode, "indexing checked-dynamic values with non-string or non-number keys");
+            }
+            const keyTmp = L.declareHiddenLocal("%setKey", STRING);
+            const rhsVal = L.lowerExpr(expr.right);
+            const valTmp = L.declareHiddenLocal("%setVal", rhsVal.type);
+            const valRef = (): IrExpr => ({ kind: "varRef", localId: valTmp.id, type: rhsVal.type, loc });
+            const stored = L.coerceToExpected(valRef(), DYN);
+            if (stored.type.kind !== "dyn") {
+              L.unsupported("SC1101", expr.right, `assigning '${L.fmt(rhsVal.type)}' values into a checked-dynamic member`);
+            }
+            valPosWhy(expr.left, "elem-dyn");
+            return {
+              kind: "seqExpr",
+              stmts: [
+                { kind: "varDecl", localId: recvTmp.id, init: recv, loc },
+                { kind: "varDecl", localId: keyTmp.id, init: key, loc },
+                { kind: "varDecl", localId: valTmp.id, init: rhsVal, loc },
+                {
+                  kind: "exprStmt",
+                  expr: {
+                    kind: "libCall",
+                    fn: "dyn.keySet",
+                    args: [
+                      { kind: "varRef", localId: recvTmp.id, type: DYN, loc },
+                      { kind: "varRef", localId: keyTmp.id, type: STRING, loc },
+                      stored,
+                    ],
+                    type: VOID,
+                    loc,
+                  },
+                  loc,
+                },
+              ],
+              result: valRef(),
+              type: rhsVal.type,
+              loc,
+            };
+          }
+        }
         // `o.f = v` on a CLASS-INSTANCE or RECORD receiver in VALUE
         // position — the CHAINED write `a.len = o.head = 0`, whose INNER
         // assignment is an expression. Nothing about the write differs
@@ -8229,6 +8315,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         const parts = L.lowerDestructuringAssignParts(expr.left, expr.right, loc);
         return { kind: "seqExpr", stmts: parts.stmts, result: parts.value, type: parts.value.type, loc };
       }
+      valPosWhy(expr.left, "fence");
       L.unsupported(
         "SC1090",
         expr,
