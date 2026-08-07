@@ -106,6 +106,15 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.toString": { argTypes: [DYN, STRING, STRING], result: STRING },
   "dyn.defineProps": { argTypes: [DYN, DYN], result: DYN },
   "dyn.typeof": { argTypes: [DYN], result: STRING },
+  // The JS operator conversions over dyn operands. `+` answers DYN
+  // because its result kind is a runtime property of the operands
+  // (either side a string makes it concatenation).
+  "dyn.toNumber": { argTypes: [DYN], result: F64 },
+  "dyn.add": { argTypes: [DYN, DYN], result: DYN },
+  "dyn.lt": { argTypes: [DYN, DYN], result: BOOL },
+  "dyn.le": { argTypes: [DYN, DYN], result: BOOL },
+  "dyn.gt": { argTypes: [DYN, DYN], result: BOOL },
+  "dyn.ge": { argTypes: [DYN, DYN], result: BOOL },
   "timers.setTimeout": { argTypes: [{ kind: "func", params: [], ret: VOID }, F64], result: VOID },
   "timers.setInterval": { argTypes: [{ kind: "func", params: [], ret: VOID }, F64], result: F64 },
   "timers.clearInterval": { argTypes: [F64], result: VOID },

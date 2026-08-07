@@ -6,7 +6,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { BOOL, BYTES_U8, CAUGHT, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
-import { droppableStatic, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable } from "./lower-exprs.js";
+import { checkedJsNumber, droppableStatic, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable } from "./lower-exprs.js";
 import { forOfVarTarget, lowerDestructuringAssign } from "./lower-stmts.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { DYN_DISPATCH_METHODS, islandPrimitiveExit } from "./lower-calls.js";
@@ -386,7 +386,9 @@ function lowerOptionalDefaultArg(
       const receiver = L.lowerExpr(access.expression);
       const idx = call.arguments.map((a) => L.lowerExpr(a));
       for (let i = 0; i < idx.length; i++) {
-        if (idx[i]!.type.kind !== "f64") L.badType(call.arguments[i]!, L.typeOf(call.arguments[i]!));
+        const n = checkedJsNumber(L, call.arguments[i]!, idx[i]!);
+        if (n === null) L.badType(call.arguments[i]!, L.typeOf(call.arguments[i]!));
+        idx[i] = n;
       }
       const end = idx[2] ?? { kind: "numLit" as const, value: Infinity, type: F64, loc };
       return {
@@ -508,7 +510,9 @@ function lowerOptionalDefaultArg(
       const receiver = L.lowerExpr(access.expression);
       const args = call.arguments.map((a) => L.lowerExpr(a));
       for (let i = 0; i < args.length; i++) {
-        if (args[i]!.type.kind !== "f64") L.badType(call.arguments[i]!, L.typeOf(call.arguments[i]!));
+        const n = checkedJsNumber(L, call.arguments[i]!, args[i]!);
+        if (n === null) L.badType(call.arguments[i]!, L.typeOf(call.arguments[i]!));
+        args[i] = n;
       }
       return { kind: "arrIntrinsic", method: "slice", receiver, args, type: receiverIr, loc };
     }
@@ -520,7 +524,9 @@ function lowerOptionalDefaultArg(
       const receiver = L.lowerExpr(access.expression);
       const args = call.arguments.map((a) => L.lowerExpr(a));
       for (let i = 0; i < args.length; i++) {
-        if (args[i]!.type.kind !== "f64") L.badType(call.arguments[i]!, L.typeOf(call.arguments[i]!));
+        const n = checkedJsNumber(L, call.arguments[i]!, args[i]!);
+        if (n === null) L.badType(call.arguments[i]!, L.typeOf(call.arguments[i]!));
+        args[i] = n;
       }
       return { kind: "arrIntrinsic", method: "splice", receiver, args, type: receiverIr, loc };
     }
@@ -793,7 +799,9 @@ function lowerOptionalDefaultArg(
       }
       const args = call.arguments.map((a) => L.lowerExpr(a));
       for (let i = 0; i < args.length; i++) {
-        if (args[i]!.type.kind !== "f64") L.badType(call.arguments[i]!, L.typeOf(call.arguments[i]!));
+        const n = checkedJsNumber(L, call.arguments[i]!, args[i]!);
+        if (n === null) L.badType(call.arguments[i]!, L.typeOf(call.arguments[i]!));
+        args[i] = n;
       }
       return { kind: "arrIntrinsic", method: "slice", receiver: snapshot, args, type: arrayOf(snapshotElem), loc };
     }
