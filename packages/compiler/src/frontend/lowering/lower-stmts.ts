@@ -856,6 +856,27 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     return ts.isVariableDeclaration(n) ? n : null;
   }
 
+/** A JS binding whose INITIALIZER is the empty object literal — the
+   * EVOLVING-object idiom (`var e = {}; e[0] = "A"`, protobufjs's
+   * enum-table factory). tsc's JS expando inference synthesizes the
+   * properties of that literal's type from assignments made LATER, so the
+   * checker answers a record naming fields the value does not have when
+   * the declaration runs. A static struct materializes every declared
+   * field at birth — `console.log(e)` before the first write would print
+   * them, where Node prints `{}` — and the initializer's own zero-field
+   * literal cannot even fill the slot (the width-coercion fence). The
+   * value IS an object that grows its own keys in insertion order, which
+   * is what the checked-dynamic tree is; the un-evolved `{}` already
+   * takes that route for the same reason (tsc admits any later assignment
+   * to it), and this is the same declaration with the assignments
+   * happening to be visible. */
+  export function jsEvolvingObjectLiteralInit(decl: ts.VariableDeclaration | null | undefined): boolean {
+    if (!decl || decl.initializer === undefined) return false;
+    let init: ts.Expression = decl.initializer;
+    while (ts.isParenthesizedExpression(init)) init = init.expression;
+    return ts.isObjectLiteralExpression(init) && init.properties.length === 0;
+  }
+
 /** `for (var x of ...)` loop variables: the ONE function-scoped binding
    * every for-of desugar must ASSIGN per iteration instead of declaring a
    * fresh per-pass local — a captured `var` loop variable is shared by
@@ -882,7 +903,12 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     let type = L.mapTypeOf(L.typeOf(nameNode));
     if (type?.kind === "record" && isJsSourceFile(nameNode.getSourceFile())) {
       const shape = L.shapes.get(type.shapeId);
-      if (shape && shape.fields.length === 0 && !shape.indexValue && !shape.tuple) type = DYN;
+      if (
+        shape && !shape.indexValue && !shape.tuple &&
+        (shape.fields.length === 0 || jsEvolvingObjectLiteralInit(hostVariableDeclarationOf(nameNode)))
+      ) {
+        type = DYN;
+      }
     }
     if (!type) type = dynFallbackType(L, nameNode, L.typeOf(nameNode));
     // `var p = import("./m")` in a function body: the hoisted slot holds
@@ -3835,9 +3861,21 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // cannot hold the binding's future. The binding is checked-dynamic
     // instead (irTypeOf's JS story): writes dynFrom, typed exits dynCheck.
     // Const keeps the static empty record — no reassignment exists.
+    //
+    // The EVOLVED spelling of the same declaration rides with it: where
+    // tsc's JS expando inference has already named the properties later
+    // assignments add (`var e = {}; e[0] = "A"` types `e` as
+    // `{ 0: string }` — protobufjs's enum-table factory), the record it
+    // answers describes the binding's FUTURE, not the empty object the
+    // declaration actually creates. See jsEvolvingObjectLiteralInit.
     if (isLet && type?.kind === "record" && isJsSourceFile(decl.getSourceFile())) {
       const shape = L.shapes.get(type.shapeId);
-      if (shape && shape.fields.length === 0 && !shape.indexValue && !shape.tuple) type = DYN;
+      if (
+        shape && !shape.indexValue && !shape.tuple &&
+        (shape.fields.length === 0 || jsEvolvingObjectLiteralInit(decl))
+      ) {
+        type = DYN;
+      }
     }
     // A JS `const leaked = [];` (the evolving-array idiom — test/common's
     // leak ledger): tsc types the binding by its LATER pushes, but this
