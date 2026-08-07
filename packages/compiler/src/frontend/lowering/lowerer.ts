@@ -5016,6 +5016,128 @@ export class Lowerer {
     return { kind: "closure", fnName: name, captures: [captureLocalId], type: proj.func, loc };
   }
 
+  /** `f.bind(thisArg, ...bound)` over a COMPILED FUNCTION VALUE: the real
+   * bound function, as a closure over an interned `%bindthis.<n>` wrapper.
+   *
+   * This replaces an ERASURE. `f.bind(x)` used to compile to `f`, on the
+   * stated reason that "a compiled function value carries no runtime
+   * `this` to re-route" — which has been false since the ambient-receiver
+   * window shipped: a plain JS function's `this` is `dyn.this`
+   * (scr_dyn_this_get), the same innermost binding a firing site or a dyn
+   * method dispatch pushes. So binding one IS expressible: capture the
+   * receiver, open the window for the wrapped call's extent, close it on
+   * the way out.
+   *
+   * The pop lives in a `finally` because the wrapped call can throw and
+   * the emitted unwind is an early `return` — a bare push/call/pop would
+   * leak a stack entry onto every later `this` read in the program.
+   *
+   * Leading bound arguments are captured and prepended, so the wrapper's
+   * own arity is the REMAINING parameters — which is also what makes
+   * `b.length` right for free. Rebinding needs no special case: the outer
+   * wrapper pushes second and the inner pushes last, and the innermost
+   * binding is what `dyn.this` answers, so the FIRST bind wins exactly as
+   * JS specifies.
+   *
+   * Declines (and the caller keeps its fence) on a rest signature, on more
+   * bound arguments than the target declares, and on a target or bound
+   * argument whose type cannot ride a capture box. */
+  bindThisClosure(fn: IrExpr, thisArg: IrExpr, boundArgs: IrExpr[], loc: SrcLoc): IrExpr | null {
+    const ft = fn.type;
+    if (ft.kind !== "func" || ft.rest === true) return null;
+    if (thisArg.type.kind !== "dyn" && !this.dynConvertible(thisArg.type)) return null;
+    if (boundArgs.length > ft.params.length) return null;
+    for (let i = 0; i < boundArgs.length; i++) {
+      if (!typeEquals(boundArgs[i]!.type, ft.params[i]!)) return null;
+    }
+    const rest = ft.params.slice(boundArgs.length);
+    const outT = funcOf(rest, ft.ret);
+    const key = `bindthis:${typeKey(ft)}:${boundArgs.length}`;
+    const existing = this.widthHelpers.get(key);
+    const name = existing ?? `%bindthis.${this.widthHelpers.size}`;
+    if (!existing) {
+      this.widthHelpers.set(key, name);
+      const capParams: IrParam[] = [
+        { localId: "bt.0", name: "bt", type: DYN },
+        { localId: "tf.0", name: "tf", type: ft },
+        ...boundArgs.map((_, i) => ({ localId: `b.${i}`, name: `b${i}`, type: ft.params[i]! })),
+      ];
+      const params: IrParam[] = rest.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t }));
+      const callArgs: IrExpr[] = [
+        ...boundArgs.map((_, i) => ({ kind: "varRef" as const, localId: `b.${i}`, type: ft.params[i]!, loc })),
+        ...rest.map((t, i) => ({ kind: "varRef" as const, localId: `p.${i}`, type: t, loc })),
+      ];
+      const call: IrExpr = {
+        kind: "callValue",
+        callee: { kind: "varRef", localId: "tf.0", type: ft, loc },
+        args: callArgs,
+        type: ft.ret,
+        loc,
+      };
+      const body: IrStmt[] = [
+        {
+          kind: "exprStmt",
+          expr: {
+            kind: "libCall",
+            fn: "dyn.thisPush",
+            args: [{ kind: "varRef", localId: "bt.0", type: DYN, loc }],
+            type: VOID,
+            loc,
+          },
+          loc,
+        },
+        {
+          kind: "tryCatch",
+          tryBody:
+            ft.ret.kind === "void"
+              ? [{ kind: "exprStmt", expr: call, loc }]
+              : [{ kind: "return", value: call, loc }],
+          catchBody: null,
+          catchLocalId: null,
+          finallyBody: [
+            { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.thisPop", args: [], type: VOID, loc }, loc },
+          ],
+          loc,
+        },
+      ];
+      this.liftedFns.push({
+        name,
+        params,
+        returnType: ft.ret,
+        captures: capParams,
+        locals: [
+          ...capParams.map((c) => ({ id: c.localId, name: c.name, type: c.type, mutable: false, boxed: true as const })),
+          ...params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+        ],
+        body,
+        loc,
+      });
+    }
+    // The creation site: one hidden BOXED local per capture (a capture can
+    // only retain a box), initialized in order, then the closure over them.
+    const ctx = this.ctx;
+    const inits: IrStmt[] = [];
+    const capIds: string[] = [];
+    const hold = (init: IrExpr): void => {
+      const n = ctx.localCounters.get("%bind") ?? 0;
+      ctx.localCounters.set("%bind", n + 1);
+      const id = `%bind.${n}`;
+      ctx.locals.push({ id, name: "%bind", type: init.type, mutable: false, boxed: true });
+      inits.push({ kind: "varDecl", localId: id, init, loc });
+      capIds.push(id);
+    };
+    hold(thisArg.type.kind === "dyn" ? thisArg : { kind: "dynFrom", value: thisArg, type: DYN, loc });
+    hold(fn);
+    for (const a of boundArgs) hold(a);
+    return {
+      kind: "seqExpr",
+      stmts: inits,
+      result: { kind: "closure", fnName: name, captures: capIds, type: outT, loc },
+      type: outT,
+      loc,
+    };
+  }
+
   /** A class METHOD taken as a BOUND VALUE — `obj.m` / `obj.m.bind(obj)`,
    * the coordinator `.bind(this)` idiom — becomes a closure that captures
    * the receiver and calls the method. The receiver is bound into a fresh
