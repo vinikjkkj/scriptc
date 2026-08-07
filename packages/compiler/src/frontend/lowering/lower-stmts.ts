@@ -22,7 +22,7 @@ import { lowerStreamUnderscoreAssign, streamClassAliasDecl, streamSidesOf } from
 import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment } from "./lower-server.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
-import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
+import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import { canonicalBuiltinModule, isRelativeSpecifier } from "../shared.js";
@@ -5561,77 +5561,9 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     const loc = locOf(expr);
     const read: IrExpr = { kind: "varRef", localId: target.id, type: target.type, loc: locOf(expr.left) };
     const rhs = L.lowerExpr(expr.right);
-    let value: IrExpr;
-    if (target.type.kind === "jsval" || rhs.type.kind === "jsval") {
-      const JS_COMPOUND: Record<string, IrJsOp> = { "+": "add", "-": "sub", "*": "mul", "/": "div", "%": "mod", "**": "pow" };
-      const jop = JS_COMPOUND[compound];
-      if (jop === undefined) L.unsupported("SC1043", expr);
-      const wrapped: IrExpr = {
-        kind: "jsOp", op: jop,
-        args: [L.jsvalIn(read, expr.left), L.jsvalIn(rhs, expr.right)],
-        type: JSVAL, loc,
-      };
-      value = L.coerceInto(expr, wrapped, target.type);
-    } else if (target.type.kind === "bigint" && rhs.type.kind === "bigint") {
-      // `n >>= 16n` and friends: the same operator family as the binary
-      // form (lowerBinary's bigint branch), read-modify-write on the slot.
-      const BIG_COMPOUND: Partial<Record<CompoundOp, IrLibFn>> = {
-        "+": "big.add",
-        "-": "big.sub",
-        "*": "big.mul",
-        "/": "big.div",
-        "%": "big.rem",
-        "**": "big.pow",
-        "&": "big.and",
-        "|": "big.or",
-        "^": "big.xor",
-        "<<": "big.shl",
-        ">>": "big.shr",
-      };
-      const fn = BIG_COMPOUND[compound];
-      if (fn === undefined) L.unsupported("SC1043", expr);
-      value = { kind: "libCall", fn, args: [read, rhs], type: BIGINT, loc };
-    } else if (compound === "+" && target.type.kind === "string") {
-      value = { kind: "strConcat", left: read, right: L.ensureString(rhs, expr.right), type: STRING, loc };
-    } else if (target.type.kind === "f64" && rhs.type.kind === "f64") {
-      value = { kind: "bin", op: compound, left: read, right: rhs, type: F64, loc };
-    } else if (
-      (target.type.kind === "dyn" || rhs.type.kind === "dyn") &&
-      (target.type.kind === "dyn" || target.type.kind === "f64") &&
-      (rhs.type.kind === "dyn" || rhs.type.kind === "f64") &&
-      isJsSourceFile(expr.getSourceFile())
-    ) {
-      // JS any-origin operands: run the operator's OWN conversion and
-      // compute natively (the binary-operator stance) — the dyn target
-      // takes the result back through the usual dyn conversion.
-      const toNum = (e: IrExpr, why: string): IrExpr => {
-        if (e.type.kind !== "dyn") return e;
-        tonumWhy(expr, why);
-        return { kind: "libCall", fn: "dyn.toNumber", args: [e], type: F64, loc: e.loc };
-      };
-      if (compound === "+") {
-        // `x += v` is `x = x + v`, and `+` is not a number context: with
-        // an untyped operand on either side the sum's KIND is decided at
-        // runtime. A dyn slot takes it as it comes; an f64 slot cannot
-        // hold a concatenation, so the checked cast stays exactly where
-        // JS would have retyped the binding — loud, and only there.
-        tonumWhy(expr, "add-compound");
-        const asDyn = (e: IrExpr): IrExpr =>
-          e.type.kind === "dyn" ? e : { kind: "dynFrom", value: e, type: DYN, loc: e.loc };
-        const sum: IrExpr = { kind: "libCall", fn: "dyn.add", args: [asDyn(read), asDyn(rhs)], type: DYN, loc };
-        value = target.type.kind === "dyn" ? sum : { kind: "dynCheck", value: sum, type: F64, loc };
-      } else {
-        const computed: IrExpr = {
-          kind: "bin", op: compound,
-          left: toNum(read, "compound"), right: toNum(rhs, "compound"),
-          type: F64, loc,
-        };
-        value = target.type.kind === "dyn" ? { kind: "dynFrom", value: computed, type: DYN, loc } : computed;
-      }
-    } else {
-      L.unsupported("SC1043", expr);
-    }
-    return { kind: "assign", localId: target.id, value, loc };
+    const combined = compoundCombine(L, compound, read, rhs, target.type, expr, expr.left, expr.right, loc);
+    if (!combined) L.unsupported("SC1043", expr);
+    return { kind: "assign", localId: target.id, value: combined.toSlot(combined.natural), loc };
   }
 
 /** One destructuring-assignment pattern the island can run: empty object/
