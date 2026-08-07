@@ -69,6 +69,7 @@ import { compile } from "@scriptc/compiler";
 import { shardSelect } from "./shard.js";
 import { jailEnv, refusedLoopbackUrl } from "./net-jail.js";
 import { MOCK_PROJECT_LINK, startMockVercelApi, type RecordedRequest } from "../fixtures/vercel-e2e/mock-vercel-api.js";
+import { exeName } from "./exe.js";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
@@ -148,7 +149,7 @@ async function buildDriver(name: string, entrySource: (rel: string) => string): 
   const entry = join(dir, "main.ts");
   writeFileSync(entry, text);
   writeFileSync(join(dir, "tsconfig.json"), DRIVER_TSCONFIG);
-  const binary = join(outDir, "program");
+  const binary = join(outDir, exeName("program"));
   mkdirSync(outDir, { recursive: true });
   // Deliberately NO backend pin: the acceptance build is flagless-user-
   // shaped, so it rides the release default — today the npm embedding

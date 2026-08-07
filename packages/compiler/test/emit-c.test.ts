@@ -12,12 +12,19 @@ import { BOOL, F64, STRING, VOID, type IrExpr, type IrModule } from "../src/ir/n
 
 const execFileAsync = promisify(execFile);
 
+/* Windows will not exec an extensionless file (libuv's lpApplicationName
+ * assumes no default extension) and compileC writes exactly the -o name it
+ * is given — so anything spawned below must ask for the suffix. Spelled
+ * inline rather than imported: tests/harness/exe.ts carries the full
+ * explanation but lives in another package. */
+const EXE = process.platform === "win32" ? ".exe" : "";
+
 async function emitCompileRun(mod: IrModule, sanitize = true): Promise<string> {
   expect(validateModule(mod)).toEqual([]);
   const dir = await mkdtemp(join(tmpdir(), "scriptc-emit-"));
   const cPath = join(dir, "program.c");
   await writeFile(cPath, emitModule(mod));
-  const outPath = join(dir, "program");
+  const outPath = join(dir, `program${EXE}`);
   await compileC({ cPath, outPath, sanitize });
   const { stdout } = await execFileAsync(outPath);
   return stdout;

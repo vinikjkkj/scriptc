@@ -102,13 +102,20 @@ async function withCcEnv(cc: string | undefined, target: string | undefined, bod
   }
 }
 
+/* Windows will not exec an extensionless file (libuv's lpApplicationName
+ * assumes no default extension) and compileC writes exactly the -o name it
+ * is given, so the cases below that SPAWN must ask for the suffix. The
+ * cross-target cases stay bare: they read the artifact's magic bytes and
+ * never execute it. tests/harness/exe.ts carries the full explanation. */
+const EXE = process.platform === "win32" ? ".exe" : "";
+
 const HOST_CLANG_C = '#include <stdio.h>\nint main(void) { printf("clang says hi\\n"); return 0; }\n';
 
 test("host-native clang static build compiles the runtime and runs", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scr-host-clang-"));
   const cPath = join(dir, "program.c");
   await writeFile(cPath, HOST_CLANG_C);
-  const outPath = join(dir, "program");
+  const outPath = join(dir, `program${EXE}`);
   // This exact default path caught both Linux regressions: without
   // -D_GNU_SOURCE the glibc headers hide declarations used by the runtime;
   // with the macro but no trailing -lm, the runtime's fmod/exp2 references
@@ -125,7 +132,7 @@ describe.skipIf(!zigOnPath())("zig cc builds (zig on PATH)", () => {
     const dir = await mkdtemp(join(tmpdir(), "scr-zigcc-"));
     const cPath = join(dir, "program.c");
     await writeFile(cPath, HELLO_C);
-    const outPath = join(dir, "program");
+    const outPath = join(dir, `program${EXE}`);
     await withCcEnv("zigcc", undefined, () => compileC({ cPath, outPath }));
     const { stdout } = await execFileAsync(outPath);
     expect(stdout).toBe("zigcc says hi\n");

@@ -59,8 +59,17 @@ const baseline = JSON.parse(readFileSync(baselinePath, "utf8")) as {
 };
 
 /** Machine-independent spelling: absolute repo paths become "<repo>/…" in
- * file fields AND message text (cycle messages embed paths). */
-const rel = (s: string): string => s.split(repoRoot + "/").join("<repo>/");
+ * file fields AND message text (cycle messages embed paths).
+ *
+ * The separator is normalized FIRST because the baseline is recorded in
+ * POSIX spelling and win32 hands back backslashes: `join`/`globSync`
+ * produce `G:\…\tests\corpus\x.ts`, so splitting on `repoRoot + "/"` never
+ * matched and EVERY key missed — the whole suite failing as "no recorded
+ * baseline" on Windows, which reads exactly like a stale baseline file and
+ * is not one. */
+const posix = (s: string): string => s.split("\\").join("/");
+const repoRootPosix = posix(repoRoot);
+const rel = (s: string): string => posix(s).split(repoRootPosix + "/").join("<repo>/");
 
 function nativeAnswer(host: Ts7Host, entry: string): BaselineEntry {
   const t7 = checkPreflightTs7(entry, host);
@@ -74,6 +83,9 @@ function nativeAnswer(host: Ts7Host, entry: string): BaselineEntry {
   };
 }
 
+/* Every entry list is spelled POSIX: the shape predicates below ask about
+ * "/main." and the baseline is keyed the same way. Node reads forward
+ * slashes on win32 happily, so normalizing at the source is enough. */
 function entriesUnder(dir: string): string[] {
   const exts = ["ts", "js", "mjs", "cjs"];
   return exts
@@ -81,6 +93,7 @@ function entriesUnder(dir: string): string[] {
       ...globSync(join(repoRoot, dir, `*.${ext}`)),
       ...globSync(join(repoRoot, dir, `*/main.${ext}`)),
     ])
+    .map(posix)
     .sort();
 }
 
@@ -91,8 +104,8 @@ function allEntries(): string[] {
     ...entriesUnder("tests/corpus"),
     ...entriesUnder("tests/diagnostics"),
     ...entriesUnder("tests/fixtures/npm/cases"),
-    ...globSync(join(repoRoot, "tests/fixtures/strictness/*/main.ts")).sort(),
-    ...globSync(join(repoRoot, "tests/fixtures/node-types/*.ts")).sort(),
+    ...globSync(join(repoRoot, "tests/fixtures/strictness/*/main.ts")).map(posix).sort(),
+    ...globSync(join(repoRoot, "tests/fixtures/node-types/*.ts")).map(posix).sort(),
   ];
 }
 
@@ -134,12 +147,12 @@ if (UPDATE) {
   });
 } else {
   describe(`preflight/order canary vs recorded 5.9.3 baselines (${entries.length} entries${FULL ? ", full sweep" : ""})`, () => {
-    test.for(chunks.map((c) => [`${c[0]!.slice(repoRoot.length + 1)} … +${c.length - 1}`, c] as const))(
+    test.for(chunks.map((c) => [`${c[0]!.slice(repoRootPosix.length + 1)} … +${c.length - 1}`, c] as const))(
       "%s",
       async ([, chunk]) => {
         for (const entry of chunk) {
           await new Promise((r) => setImmediate(r)); // keep the worker RPC alive
-          const name = entry.slice(repoRoot.length + 1);
+          const name = entry.slice(repoRootPosix.length + 1);
           const recorded = baseline.entries[rel(entry)];
           expect(
             recorded,
