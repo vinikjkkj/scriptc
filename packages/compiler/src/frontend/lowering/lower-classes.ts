@@ -6,7 +6,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { BOOL, DYN, F64, bytesOf, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isUnitType, typeEquals } from "../../ir/nodes.js";
-import { MAX_GENERIC_INSTANCES, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
+import { MAX_GENERIC_INSTANCES, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
 import { isGenericCallableMemberType, typeKey } from "../types.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeTypesPath, locOf } from "../program.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
@@ -5074,6 +5074,82 @@ function lowerProgramClassNew(L: Lowerer, expr: ts.NewExpression, info0: ClassIn
   };
 }
 
+/** An expression whose SPELLING cannot have an effect — a name, `this`, a
+ * keyword or numeric/string literal, or a dotted path over those. Used to
+ * decide whether a dropped operand still has to be evaluated. */
+function effectFreeSpelling(e: ts.Expression): boolean {
+  let n: ts.Expression = e;
+  while (ts.isParenthesizedExpression(n)) n = n.expression;
+  if (ts.isPropertyAccessExpression(n) && !n.questionDotToken) return effectFreeSpelling(n.expression);
+  return (
+    ts.isIdentifier(n) ||
+    ts.isStringLiteral(n) ||
+    ts.isNumericLiteral(n) ||
+    n.kind === ts.SyntaxKind.ThisKeyword ||
+    n.kind === ts.SyntaxKind.NullKeyword ||
+    n.kind === ts.SyntaxKind.TrueKeyword ||
+    n.kind === ts.SyntaxKind.FalseKeyword
+  );
+}
+
+/** A construct-position expression that names a BOUND function, resolved
+ * to what JS's [[Construct]] actually runs: the innermost bind TARGET, the
+ * bound arguments it prepends, and the bound receivers it IGNORES (kept so
+ * their effects still happen where the bind expression sat).
+ *
+ * Two spellings resolve. The DIRECT one — `new (f.bind(o, a))(b)` — owns
+ * its bind expression, so the receiver has not been evaluated yet and
+ * comes back in `thisArgs`. The INDIRECT one — `var B = f.bind(o); new
+ * B(x)` — reaches through a never-reassigned binding whose declaration
+ * already ran the bind, so nothing re-evaluates; it is admitted only with
+ * NO bound arguments, because those were evaluated at the declaration and
+ * re-lowering them here would run their effects a second time, in the
+ * wrong order. Rebinding chains fold (the first bind's target wins,
+ * arguments concatenate outward), exactly as JS composes them. */
+function boundFnOriginOf(
+  L: Lowerer,
+  node: ts.Expression,
+): { target: ts.Expression; boundArgs: readonly ts.Expression[]; thisArgs: readonly ts.Expression[] } | null {
+  let e: ts.Expression = node;
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (
+    ts.isCallExpression(e) &&
+    ts.isPropertyAccessExpression(e.expression) &&
+    e.expression.name.text === "bind" &&
+    !e.expression.questionDotToken &&
+    e.arguments.length >= 1 &&
+    !e.arguments.some((a) => ts.isSpreadElement(a)) &&
+    L.checker.getCallSignatures(L.typeOf(e.expression.expression)).length > 0
+  ) {
+    const inner = boundFnOriginOf(L, e.expression.expression);
+    return {
+      target: inner ? inner.target : e.expression.expression,
+      boundArgs: [...(inner?.boundArgs ?? []), ...e.arguments.slice(1)],
+      thisArgs: [...(inner?.thisArgs ?? []), e.arguments[0]!],
+    };
+  }
+  if (ts.isIdentifier(e)) {
+    const sym = L.resolveValueSymbol(e) ?? undefined;
+    const decls = sym ? L.checker.declarationsOf(sym) : [];
+    const decl = decls.length === 1 ? decls[0]! : undefined;
+    if (
+      decl !== undefined &&
+      ts.isVariableDeclaration(decl) &&
+      decl.initializer !== undefined &&
+      sym !== undefined &&
+      bindingNeverReassigned(L, sym, decl)
+    ) {
+      const inner = boundFnOriginOf(L, decl.initializer);
+      // Only the argument-free bind: the declaration already evaluated
+      // everything this form would otherwise re-run.
+      if (inner && inner.boundArgs.length === 0) {
+        return { target: inner.target, boundArgs: [], thisArgs: [] };
+      }
+    }
+  }
+  return null;
+}
+
 export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
     const loc = locOf(expr);
     // `new X(...)` where X is a package-declared class, in a static build:
@@ -6120,13 +6196,25 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
       // ScrClosure the own-property route uses. A dyn value that turns
       // out not to be callable throws Node's "<name> is not a
       // constructor" at the construction, which is Node's answer.
-      const probed = probeLower(L, expr.expression);
+      // `new (f.bind(o, a))(b)` — a BOUND function in construct position.
+      // JS's [[Construct]] on a bound function forwards to the TARGET's
+      // [[Construct]] with the bound arguments prepended and the bound
+      // THIS IGNORED (a constructor's receiver is the fresh instance, not
+      // whatever bind captured), so the honest lowering is the target's
+      // construction — which is also the only one that links the instance
+      // to the target's `prototype`. The bound receiver still evaluates,
+      // for its effects, exactly where the bind expression sat.
+      const bound = boundFnOriginOf(L, expr.expression);
+      const calleeNode = bound ? bound.target : expr.expression;
+      const probed = probeLower(L, calleeNode);
       const boxed =
         probed !== null && probed.type.kind === "dyn"
           ? probed
-          : fnOwnPropBox(L, expr.expression, loc);
+          : fnOwnPropBox(L, calleeNode, loc);
       if (boxed) {
-        const args: IrExpr[] = (expr.arguments ?? []).map((a) => L.lowerExprExpecting(a, DYN));
+        const args: IrExpr[] = [...(bound?.boundArgs ?? []), ...(expr.arguments ?? [])].map((a) =>
+          L.lowerExprExpecting(a, DYN),
+        );
         if (args.every((a) => a.type.kind === "dyn")) {
           const pack: IrExpr = { kind: "dynArrLit", elems: args, type: DYN, loc };
           const what: IrExpr = {
@@ -6137,10 +6225,29 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           };
           fnOwnCounters.construct++;
           fnOwnWhy("construct", expr, expr.expression.getText());
-          return {
+          const made: IrExpr = {
             kind: "libCall",
             fn: "dyn.construct",
             args: [boxed, pack, what],
+            type: DYN,
+            loc,
+          };
+          // The bound receiver(s) the construction ignores still ran in
+          // Node (the bind expression evaluated them) — keep the effects.
+          // A receiver SPELLED without effects (`null`, `this`, a name, a
+          // literal) has none to keep, and re-lowering one in statement
+          // position is not even well-formed (a bare `null` is a unitLit
+          // with no union to wrap it).
+          const effectful = (bound?.thisArgs ?? []).filter((t) => !effectFreeSpelling(t));
+          if (effectful.length === 0) return made;
+          return {
+            kind: "seqExpr",
+            stmts: effectful.map((t) => ({
+              kind: "exprStmt" as const,
+              expr: L.lowerExpr(t),
+              loc,
+            })),
+            result: made,
             type: DYN,
             loc,
           };

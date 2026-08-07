@@ -7642,6 +7642,50 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     return { kind: "call", callee: helper, args: [receiver], type: resultT, loc };
   }
 
+  /** The own-key membership answer for a receiver/key pair, shared by
+   * `Object.hasOwn(o, k)` and the `X.hasOwnProperty.call(o, k)` spelling
+   * that means exactly the same thing. Null keeps the caller's fence.
+   *
+   * A CHECKED-DYNAMIC receiver (the JS file-scope object-literal identity
+   * story) takes the runtime dyn probe — OBJ member presence, ARR index
+   * bounds, Node's ToObject TypeError on nullish. A RECORD receiver's
+   * own-key set is its declared field list, so membership is a compare
+   * chain against the field names (interned per shape); undefined-armed
+   * (optional) fields answer by their runtime tag — the
+   * explicit-undefined-is-absent stance, an omitted optional field reading
+   * as NOT own exactly like Node's absent key. Tuple, index-signature
+   * (overflow membership lives in the runtime map), accessor-carrying
+   * shapes and every other receiver kind keep the fence. */
+  export function lowerHasOwnOver(L: Lowerer, call: ts.CallExpression, recvNode: ts.Expression,
+    keyNode: ts.Expression,): IrExpr | null {
+    const probed = probeLower(L, recvNode);
+    const loc = locOf(call);
+    const keyOf = (): IrExpr | null => {
+      let key = L.lowerExpr(keyNode);
+      // Number/boolean/dyn keys stringify — ToPropertyKey, the keyed-write
+      // path's rule; symbol and composite keys keep the fence.
+      if (key.type.kind === "f64" || key.type.kind === "bool" || key.type.kind === "dyn") {
+        key = { kind: "toString", operand: key, type: STRING, loc: locOf(keyNode) };
+      }
+      return key.type.kind === "string" ? key : null;
+    };
+    if (probed?.type.kind === "dyn") {
+      const receiver = L.lowerExpr(recvNode);
+      const key = keyOf();
+      if (key === null) return null;
+      return { kind: "libCall", fn: "dyn.hasOwn", args: [receiver, key], type: BOOL, loc };
+    }
+    if (probed?.type.kind !== "record") return null;
+    const shape = L.shapes.get(probed.type.shapeId);
+    if (!shape || shape.tuple || shape.indexValue || shapeHasAccessorSlots(shape)) return null;
+    const receiver = L.lowerExpr(recvNode);
+    if (receiver.type.kind !== "record") return null; // probe/lower drift: keep the fence
+    const key = keyOf();
+    if (key === null) return null;
+    const helper = recordHasOwnHelper(L, receiver.type.shapeId, loc);
+    return { kind: "call", callee: helper, args: [receiver, key], type: BOOL, loc };
+  }
+
   /** Interned `%obj.hasOwn.<n>(r, k)` — Object.hasOwn's membership walk
    * over a signature-free record shape: the key compares against each
    * declared field name, undefined-armed fields answering by their tag
@@ -8504,37 +8548,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     // accessor-carrying shapes keep the SC2020 fence; non-record receivers
     // do too.
     if (member === "hasOwn" && call.arguments.length === 2 && !call.arguments.some((a) => ts.isSpreadElement(a))) {
-      const recvNode = call.arguments[0]!;
-      const keyNode = call.arguments[1]!;
-      const probed = probeLower(L, recvNode);
-      // A CHECKED-DYNAMIC receiver (the JS file-scope object-literal
-      // identity story): the runtime dyn probe — OBJ member presence, ARR
-      // index bounds, Node's ToObject TypeError on nullish.
-      if (probed?.type.kind === "dyn") {
-        const loc = locOf(call);
-        const receiver = L.lowerExpr(recvNode);
-        let key = L.lowerExpr(keyNode);
-        if (key.type.kind === "f64" || key.type.kind === "bool" || key.type.kind === "dyn") {
-          key = { kind: "toString", operand: key, type: STRING, loc: locOf(keyNode) };
-        }
-        if (key.type.kind !== "string") return null;
-        return { kind: "libCall", fn: "dyn.hasOwn", args: [receiver, key], type: BOOL, loc };
-      }
-      if (probed?.type.kind !== "record") return null;
-      const shape = L.shapes.get(probed.type.shapeId);
-      if (!shape || shape.tuple || shape.indexValue || shapeHasAccessorSlots(shape)) return null;
-      const loc = locOf(call);
-      const receiver = L.lowerExpr(recvNode);
-      if (receiver.type.kind !== "record") return null; // probe/lower drift: keep the fence
-      let key = L.lowerExpr(keyNode);
-      // Number/boolean/dyn keys stringify — ToPropertyKey, the keyed-write
-      // path's rule; symbol and composite keys keep the fence.
-      if (key.type.kind === "f64" || key.type.kind === "bool" || key.type.kind === "dyn") {
-        key = { kind: "toString", operand: key, type: STRING, loc: locOf(keyNode) };
-      }
-      if (key.type.kind !== "string") return null;
-      const helper = recordHasOwnHelper(L, receiver.type.shapeId, loc);
-      return { kind: "call", callee: helper, args: [receiver, key], type: BOOL, loc };
+      return lowerHasOwnOver(L, call, call.arguments[0]!, call.arguments[1]!);
     }
     // getOwnPropertyNames answers the same list as keys for every RECORD
     // this compiles: a record has no non-enumerable own members and no
@@ -9754,15 +9768,27 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
       // function value can follow. Before the stdlib decline: these ARE
       // stdlib members (CallableFunction), but the pointed message is
       // the honest one.
-      // `f.bind(thisArg)` on a function VALUE is ERASURE here, and the
-      // reason is the very one the fence gives: a compiled function value
-      // carries no runtime `this` to re-route, so binding one cannot change
-      // what a call does. The receiver IS the answer; the argument still
-      // evaluates for its effects. Extra arguments are partial application,
-      // which is not erasure and keeps the fence.
+      // `f.bind(thisArg, ...bound)` on a function VALUE used to be an
+      // ERASURE here — it compiled to `f`, dropping the receiver — on the
+      // stated reason that "a compiled function value carries no runtime
+      // `this` to re-route". That reason is false and has been since the
+      // ambient-receiver window shipped: a plain JS function's `this` IS a
+      // runtime read (`dyn.this` → scr_dyn_this_get), so the bound
+      // receiver has somewhere to go. The erasure was a SILENT WRONG
+      // ANSWER — invisible to the trap census, because an erasure emits no
+      // trap. `bindThisClosure` is the real bound function; extra leading
+      // arguments are partial application and ride the same wrapper.
+      //
+      // JAVASCRIPT call sites only, and the reason is not caution: in
+      // TypeScript a plain function's `this` does not compile at all
+      // (noImplicitThis makes it tsc's error, and the lowerer's SC1080
+      // backs it), so no TS function value can observe a bound receiver
+      // and the erasure there is SOUND — the only thing a wrapper would
+      // add is an allocation and a lost function identity. The TS arm
+      // keeps the old behavior, comment and all (corpus 2690).
       if (
         name === "bind" &&
-        call.arguments.length === 1 &&
+        call.arguments.length >= 1 &&
         !call.arguments.some((a) => ts.isSpreadElement(a)) &&
         L.checker.getCallSignatures(recvT).length > 0
       ) {
@@ -9772,7 +9798,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
         // receiver, call the method. Only when the bind argument names the
         // same receiver as the method access (both `this`, or the same
         // binding), so the closure's `this` is what .bind requests.
-        if (ts.isPropertyAccessExpression(access.expression)) {
+        if (call.arguments.length === 1 && ts.isPropertyAccessExpression(access.expression)) {
           const methodAccess = access.expression;
           const recvNode = methodAccess.expression;
           const bindArg = call.arguments[0]!;
@@ -9793,17 +9819,137 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
             if (dispatcher) return dispatcher;
           }
         }
-        const fn = L.lowerExpr(access.expression);
-        if (fn.type.kind === "func") {
-          const thisArg = L.lowerExpr(call.arguments[0]!);
-          if (droppableStatic(thisArg)) return fn;
-          return {
-            kind: "seqExpr",
-            stmts: [{ kind: "exprStmt", expr: thisArg, loc: locOf(call) }],
-            result: fn,
-            type: fn.type,
-            loc: locOf(call),
-          };
+        if (isJsSourceFile(call.getSourceFile())) {
+          const fn = L.lowerExpr(access.expression);
+          if (fn.type.kind === "func" && fn.type.params.length >= call.arguments.length - 1) {
+            const thisArg = L.lowerExpr(call.arguments[0]!);
+            const boundArgs = call.arguments
+              .slice(1)
+              .map((a, i) => L.coerceInto(a, L.lowerExpr(a), (fn.type as { params: IrType[] }).params[i]!));
+            const bound = L.bindThisClosure(fn, thisArg, boundArgs, locOf(call));
+            if (bound) return bound;
+          }
+        } else if (call.arguments.length === 1) {
+          // TypeScript: the erasure, unchanged (see above — a TS function
+          // value cannot read a receiver, so `f` IS `f.bind(x)`). The
+          // argument still evaluates for its effects.
+          const fn = L.lowerExpr(access.expression);
+          if (fn.type.kind === "func") {
+            const thisArg = L.lowerExpr(call.arguments[0]!);
+            if (droppableStatic(thisArg)) return fn;
+            return {
+              kind: "seqExpr",
+              stmts: [{ kind: "exprStmt", expr: thisArg, loc: locOf(call) }],
+              result: fn,
+              type: fn.type,
+              loc: locOf(call),
+            };
+          }
+        }
+      }
+      // `X.hasOwnProperty.call(o, k)` — by a wide margin the most common
+      // `Function.prototype.call` in real JavaScript, and NOT a `this`
+      // problem at all: `Object.prototype.hasOwnProperty` has no compiled
+      // function value to re-route a receiver into, but the operation it
+      // performs is `Object.hasOwn(o, k)`, which has lowered for as long
+      // as the dyn own-key probe has existed. Recognizing the spelling is
+      // the whole fix. (zapo's protobuf twin spells it 3 564 times, all
+      // as `Object.hasOwnProperty.call` — the minified form, `Object` the
+      // constructor inheriting the method, identical in effect.)
+      //
+      // `isStdlibMember` is what makes it sound: the member must resolve
+      // to the library declaration, so a receiver that SHADOWS
+      // hasOwnProperty with its own is not this call and keeps the fence.
+      if (
+        name === "call" &&
+        ts.isPropertyAccessExpression(access.expression) &&
+        access.expression.name.text === "hasOwnProperty" &&
+        L.isStdlibSymbol(
+          L.checker.getSymbolAtLocation(access.expression.name) ??
+            L.checker.getPropertyOfType(L.typeOf(access.expression.expression), "hasOwnProperty") ??
+            undefined,
+        ) &&
+        call.arguments.length === 2 &&
+        !call.arguments.some((a) => ts.isSpreadElement(a))
+      ) {
+        // The CHECKED-DYNAMIC receiver only, and the restriction is not
+        // caution: the RECORD arm of Object.hasOwn carries the documented
+        // explicit-undefined-is-absent divergence (an own key holding
+        // `undefined` reads as absent), and a protobuf writer testing a
+        // field it set to undefined is exactly where that would become a
+        // new silent wrong answer. A record receiver keeps the loud fence.
+        if (probeLower(L, call.arguments[0]!)?.type.kind === "dyn") {
+          const own = lowerHasOwnOver(L, call, call.arguments[0]!, call.arguments[1]!);
+          if (own) return own;
+        }
+      }
+      // `f.call(thisArg, ...args)` / `f.apply(thisArg, [args])` on a
+      // compiled function value: the SAME machinery, immediately invoked.
+      // The bound wrapper opens the ambient-receiver window for exactly
+      // the call's extent, so the ES5 inheritance idiom
+      // (`Parent.call(this, x)`) lands the parent's `this.f = x` writes on
+      // the child instance, which is the whole point of spelling it.
+      // `apply` needs a STATICALLY KNOWN argument list (an array literal,
+      // or none) — a runtime-length pack would need a variadic call the
+      // compiled ABI does not have, and that arm keeps the fence.
+      if (
+        (name === "call" || name === "apply") &&
+        isJsSourceFile(call.getSourceFile()) &&
+        L.checker.getCallSignatures(recvT).length > 0 &&
+        call.arguments.length >= 1 &&
+        !call.arguments.some((a) => ts.isSpreadElement(a))
+      ) {
+        const argNodes: readonly ts.Expression[] | null =
+          name === "call"
+            ? call.arguments.slice(1)
+            : call.arguments.length === 1
+              ? []
+              : call.arguments.length === 2 &&
+                  ts.isArrayLiteralExpression(call.arguments[1]!) &&
+                  !call.arguments[1]!.elements.some((e) => ts.isSpreadElement(e))
+                ? (call.arguments[1] as ts.ArrayLiteralExpression).elements
+                : null;
+        if (argNodes !== null) {
+          // SPECULATIVE lowering of the receiver: one with no compiled
+          // function value (a stdlib member — `Object.prototype.toString`,
+          // an un-lowered `Array.prototype.slice`) must leave NO
+          // diagnostic behind, because the fence below is still the
+          // answer and it names the spelling. probeLower replays what it
+          // captures, so the capture happens here and is DISCARDED.
+          const saved = L.diagSink;
+          const captured: ScrDiagnostic[] = [];
+          L.diagSink = captured;
+          let fn: IrExpr | null = null;
+          try {
+            fn = L.lowerExpr(access.expression);
+          } catch (e) {
+            if (!(e instanceof PoisonError)) {
+              L.diagSink = saved;
+              throw e;
+            }
+          }
+          L.diagSink = saved;
+          // EXACT arity: the compiled ABI has no missing-argument default
+          // and no variadic tail, so a short or long list keeps the fence
+          // rather than silently mis-calling.
+          if (
+            fn !== null &&
+            captured.length === 0 &&
+            fn.type.kind === "func" &&
+            fn.type.params.length === argNodes.length
+          ) {
+            const thisArg = L.lowerExpr(call.arguments[0]!);
+            const bound = L.bindThisClosure(fn, thisArg, [], locOf(call));
+            if (bound) {
+              const args = L.completeArgs(
+                argNodes,
+                fn.type.params.map((t) => ({ type: t, mode: "required" as const })),
+                locOf(call),
+                call,
+              );
+              return { kind: "callValue", callee: bound, args, type: fn.type.ret, loc: locOf(call) };
+            }
+          }
         }
       }
       if (

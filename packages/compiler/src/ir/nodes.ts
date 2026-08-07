@@ -3182,6 +3182,19 @@ export type IrLibFn =
    * (the strict-mode plain-call answer, the old constant). Zero args →
    * dyn (+1). Never throws. */
   | "dyn.this"
+  /** OPEN an ambient-receiver window: bind the dyn operand as `this` for
+   * everything the current frame calls until the matching `dyn.thisPop`.
+   * The operand is BORROWED at the call and retained for the window
+   * (scr_dyn_this_push_dyn). Emitted only as the head of a bound-function
+   * wrapper (`%bindthis.<n>` — Function.prototype.bind/call/apply over a
+   * compiled function value), whose body pairs it with a `finally` that
+   * pops, so an exception unwinding out of the wrapped call cannot leave
+   * the stack out of balance. Never throws. */
+  | "dyn.thisPush"
+  /** CLOSE the innermost ambient-receiver window (scr_dyn_this_pop —
+   * releases the pushed value). Only ever emitted in the `finally` of the
+   * wrapper that pushed. Never throws. */
+  | "dyn.thisPop"
   /** process.execPath: the compiled binary's own resolved absolute path
    * (one interned string, +1 per read) — the honest answer where Node's
    * is the node executable's (SEMANTICS.md divergence 12). Never throws. */
