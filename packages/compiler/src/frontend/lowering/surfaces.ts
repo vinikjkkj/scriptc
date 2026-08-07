@@ -1443,8 +1443,63 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
         "an index-signature record whose value slot every source value enters — " +
         "other aliased targets are real mutation, and a function target (Object.assign(fn, { prop })) " +
         "is a function-with-properties value the model cannot represent: bind the property separately";
+    } else if (container === "Object" && member === "defineProperty") {
+      hint = definePropertyHint(access);
     }
     L.noLowering(`${container}.${member}`, access, hint, sym);
+  }
+
+/** Why THIS `Object.defineProperty` did not lower.
+   *
+   * There IS a defineProperty lowering (lower-calls.ts's hidden symbol
+   * slot), so the bare "no lowering yet" line is the one fence in this
+   * family that reads as a whole missing feature when it is a shape miss —
+   * and it hides which argument is the miss. Measured on protobufjs's
+   * static-module output: 44 of the 45 refusals in the QR-path closure are
+   * `Object.defineProperty(<function-constructor>.prototype, "_field",
+   * { get: util.oneOfGetter(...), set: util.oneOfSetter(...) })`, the oneof
+   * accessors. Replacing those 44 calls with a bare read of the SAME
+   * receiver leaves the total trap count unchanged and moves all 44 onto
+   * the `.prototype` fence one for one: the receiver refuses before the
+   * descriptor is even looked at, so a descriptor-side lowering would
+   * uncover the receiver at the same statement and buy nothing. Say which
+   * one refuses, so a reader budgets the right work.
+   *
+   * Text only — the diagnostic code, the site and the count are unchanged. */
+  function definePropertyHint(access: ts.PropertyAccessExpression): string | undefined {
+    const LOWERED_SHAPE =
+      "what lowers is a hidden per-instance DATA slot: Object.defineProperty(<a bare " +
+      "identifier typed as a program class>, <a module-level `const k = Symbol('...')`>, " +
+      "{ value, enumerable: false, configurable: false, writable: false })";
+    const call = access.parent;
+    if (!ts.isCallExpression(call) || call.expression !== access || call.arguments.length !== 3) {
+      // `Object.defineProperty` as a VALUE, or at another arity: the
+      // shape question does not arise.
+      return undefined;
+    }
+    const recv = call.arguments[0]!;
+    if (ts.isPropertyAccessExpression(recv) && recv.name.text === "prototype") {
+      return (
+        "the RECEIVER is a prototype object, and prototype objects are not values here " +
+        "(method lookup is static) — there is no object for the property to live on, so this " +
+        "refuses at the receiver whatever the descriptor says; " + LOWERED_SHAPE
+      );
+    }
+    const desc = call.arguments[2]!;
+    const accessorKey = ts.isObjectLiteralExpression(desc) &&
+      desc.properties.some((p) => {
+        if (ts.isSpreadAssignment(p)) return false;
+        const nm = ts.isIdentifier(p.name) || ts.isStringLiteral(p.name) ? p.name.text : null;
+        return nm === "get" || nm === "set";
+      });
+    if (accessorKey) {
+      return (
+        "the DESCRIPTOR is an accessor (get/set), not data: a getter is a control transfer on " +
+        "every read of the property and a setter one on every write, and a static shape carries " +
+        "no slot for either; " + LOWERED_SHAPE
+      );
+    }
+    return LOWERED_SHAPE;
   }
 
 /** True iff the accessed member is declared by the standard library —
