@@ -2157,11 +2157,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const keyLit = cStringLiteral(keyBytes);
         // `in` is one of the two JS operators that walks the PROTOTYPE
         // CHAIN (`"m" in new F()` is true where Object.hasOwn is false),
-        // so the OBJ arm asks the chain after missing the own members —
-        // the same order the keyed read uses.
-        const objTest =
-          `(scr_dyn_obj_get(${d.name}, ${keyLit}, ${keyBytes.length}) != NULL` +
-          ` || scr_dyn_proto_get(${d.name}, ${keyLit}, ${keyBytes.length}) != NULL)`;
+        // and it counts ACCESSOR properties too (they ARE properties —
+        // only Object.keys skips them, because they are non-enumerable).
+        // One runtime call over the same walk the keyed read uses, so
+        // presence and the read cannot disagree.
+        const objTest = `scr_dyn_obj_key_present(${d.name}, ${keyLit}, ${keyBytes.length})`;
         const arrTest =
           e.key === "length"
             ? "true"
@@ -2506,6 +2506,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // Object.defineProperties over dyn values: both borrowed,
             // result the target (+1); throws catchably (may-throw seed).
             return finish(`scr_dyn_define_props(${arg(0)}, ${arg(1)})`);
+          case "dyn.defineProp":
+            // Object.defineProperty over a dyn target — the singular
+            // form, and the one an ACCESSOR descriptor arrives in. All
+            // three borrowed, result the target (+1); throws catchably.
+            return finish(`scr_dyn_define_prop(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "dyn.hasKey":
             // `k in v` with a runtime key: the dyn presence answer (both
             // borrowed, no allocation, never throws).
