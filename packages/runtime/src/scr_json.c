@@ -1112,6 +1112,135 @@ bool scr_dyn_truthy(const ScrDyn *d) {
   }
 }
 
+/* ── JS operator semantics over checked-dynamic operands ───────────────── */
+
+/* True for the dyn kinds whose ToPrimitive is the IDENTITY — every
+ * primitive. The reference kinds answer false: their ToPrimitive calls a
+ * user valueOf/toString, and the dyn model holds no prototype chain to
+ * call one from, so the operators below refuse them loudly instead of
+ * guessing (a guess there would be the silent wrong value the whole
+ * checked-dynamic tier exists to avoid). */
+static bool scr_dyn_is_prim(const ScrDyn *d) {
+  if (!d) return false;
+  switch (d->kind) {
+  case SCR_DYN_NUM:
+  case SCR_DYN_STR:
+  case SCR_DYN_BOOL:
+  case SCR_DYN_NULL:
+  case SCR_DYN_UNDEF: return true;
+  default: return false;
+  }
+}
+
+/* ToNumber (ECMA-262 7.1.4) over a dyn value — the numeric sibling of
+ * scr_dyn_truthy (ToBoolean) and scr_dyn_string_coerce (ToString), and the
+ * conversion every arithmetic, bitwise and relational operator performs on
+ * an untyped operand before it computes:
+ *
+ *   number     itself                      string     StringToNumber
+ *   boolean    1 / 0                       null       +0
+ *   undefined  NaN
+ *
+ * ToInt32/ToUint32 (the bitwise six) are this followed by the truncating
+ * wrap the f64 nodes already perform, so they need nothing further.
+ * Borrowed; throws (scr_exc_pending) only on the reference kinds, with the
+ * same "expected number at $, got <kind>" text as the checked cast this
+ * replaces — the loud half of the old behaviour, kept exactly where the
+ * value really is unknowable. */
+double scr_dyn_to_number(const ScrDyn *d) {
+  if (d) {
+    switch (d->kind) {
+    case SCR_DYN_NUM: return d->v.num;
+    case SCR_DYN_STR: return scr_string_to_number(d->v.str);
+    case SCR_DYN_BOOL: return d->v.b ? 1.0 : 0.0;
+    case SCR_DYN_NULL: return 0.0;
+    case SCR_DYN_UNDEF: return (double)NAN;
+    default: break;
+    }
+  }
+  scr_dyn_check_fail(NULL, "number", d);
+  return (double)NAN;
+}
+
+/* JS `+` over two dyn operands (ECMA-262 13.15.3,
+ * ApplyStringOrNumericBinaryOperator with opText "+"): ToPrimitive both
+ * with no hint, then EITHER side being a String makes the operator
+ * CONCATENATION of the two ToString results, and only otherwise is it
+ * ToNumber addition. `+` is the one arithmetic operator that is not a
+ * number context, which is why it cannot be a checked cast to number and
+ * why its result KIND is decided here rather than by the compiler.
+ * Borrows both; +1 result, or NULL with the exception pending when either
+ * side is a reference kind. */
+ScrDyn *scr_dyn_add(const ScrDyn *a, const ScrDyn *b) {
+  if (!scr_dyn_is_prim(a)) {
+    scr_dyn_check_fail(NULL, "a number or a string", a);
+    return NULL;
+  }
+  if (!scr_dyn_is_prim(b)) {
+    scr_dyn_check_fail(NULL, "a number or a string", b);
+    return NULL;
+  }
+  if (a->kind == SCR_DYN_STR || b->kind == SCR_DYN_STR) {
+    /* scr_dyn_string_coerce is String() over the kind — the units render
+     * "null"/"undefined" instead of throwing, which is exactly what `+`
+     * asks for ('' + undefined is 'undefined'). */
+    ScrStr *ls = scr_dyn_string_coerce(a);
+    ScrStr *rs = scr_dyn_string_coerce(b);
+    ScrStr *cat = scr_str_concat(ls, rs);
+    scr_str_release(ls);
+    scr_str_release(rs);
+    ScrDyn *out = scr_dyn_new_str(cat); /* retains cat into the node */
+    scr_str_release(cat);
+    return out;
+  }
+  return scr_dyn_new_num(scr_dyn_to_number(a) + scr_dyn_to_number(b));
+}
+
+/* Abstract relational comparison (ECMA-262 7.2.13 IsLessThan) over two dyn
+ * operands: both sides ToPrimitive with the number hint, and when BOTH
+ * results are strings the answer is the STRING ordering — `'a' < 'b'` is
+ * not a number question — otherwise both go through ToNumber and an
+ * unordered (NaN) result answers false for all four operators.
+ *
+ * String ordering is scr_str_cmp, scriptc's documented code-point order:
+ * the same order the statically-typed `<` on strings already uses (the
+ * strCmp node without `utf16`), so the two spellings of one comparison
+ * agree with each other and carry one documented divergence between them,
+ * not two. Borrows; throws only on the reference kinds. */
+static bool scr_dyn_rel(const ScrDyn *a, const ScrDyn *b, int op) {
+  int c;
+  if (!scr_dyn_is_prim(a)) {
+    scr_dyn_check_fail(NULL, "a number or a string", a);
+    return false;
+  }
+  if (!scr_dyn_is_prim(b)) {
+    scr_dyn_check_fail(NULL, "a number or a string", b);
+    return false;
+  }
+  if (a->kind == SCR_DYN_STR && b->kind == SCR_DYN_STR) {
+    c = scr_str_cmp(a->v.str, b->v.str);
+    c = c < 0 ? -1 : (c > 0 ? 1 : 0);
+  } else {
+    double x = scr_dyn_to_number(a);
+    double y = scr_dyn_to_number(b);
+    if (x != x || y != y) return false; /* NaN: every relational op is false */
+    c = x < y ? -1 : (x > y ? 1 : 0);   /* ±0 compare equal, like JS */
+  }
+  switch (op) {
+  case 0: return c < 0;   /* <  */
+  case 1: return c <= 0;  /* <= */
+  case 2: return c > 0;   /* >  */
+  default: return c >= 0; /* >= */
+  }
+}
+
+/* One entry point per operator, so the emitted call needs no synthesized
+ * constant argument and both backends map it by name alone. */
+bool scr_dyn_lt(const ScrDyn *a, const ScrDyn *b) { return scr_dyn_rel(a, b, 0); }
+bool scr_dyn_le(const ScrDyn *a, const ScrDyn *b) { return scr_dyn_rel(a, b, 1); }
+bool scr_dyn_gt(const ScrDyn *a, const ScrDyn *b) { return scr_dyn_rel(a, b, 2); }
+bool scr_dyn_ge(const ScrDyn *a, const ScrDyn *b) { return scr_dyn_rel(a, b, 3); }
+
 /* Bare `typeof v` on a dyn value: the dyn kind's JS answer (+1 string).
  * null answers "object" — JS's oldest wart, preserved. */
 ScrStr *scr_dyn_typeof(const ScrDyn *d) {

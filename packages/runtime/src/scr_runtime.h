@@ -3152,6 +3152,33 @@ ScrError *scr_errdyn_err_of(const ScrDyn *d); /* +1 or NULL */
 void scr_errdyn_put(ScrError *e, ScrDyn *d);  /* retains both sides */
 /* ToBoolean over the dyn kind (JS-exact); borrowed, never throws. */
 bool scr_dyn_truthy(const ScrDyn *d);
+/* The JS operator conversions over checked-dynamic operands — what an
+ * arithmetic, bitwise, relational or `+` operator does to an UNTYPED
+ * operand before it computes (scr_json.c):
+ *   scr_dyn_to_number  ToNumber (7.1.4) — numbers pass, strings run the
+ *                      ECMA-exact StringToNumber, booleans 1/0, null +0,
+ *                      undefined NaN. ToInt32/ToUint32 are this plus the
+ *                      truncating wrap the f64 bit nodes already do.
+ *   scr_dyn_add        JS `+` (13.15.3) — either side a string after
+ *                      ToPrimitive makes it concatenation, else ToNumber
+ *                      addition; the result kind is a runtime property,
+ *                      hence a dyn result (+1).
+ *   scr_dyn_lt/le/gt/ge  abstract relational comparison (7.2.13) — two
+ *                      strings compare AS strings (scr_str_cmp's
+ *                      documented code-point order, matching the typed
+ *                      strCmp node), everything else through ToNumber
+ *                      with NaN answering false.
+ * The REFERENCE kinds (object/array/function/bytes/handle/promise/island
+ * value) are absent from all of them on purpose: their ToPrimitive calls
+ * a user valueOf/toString the dyn model holds no prototype chain for, so
+ * they keep the loud dynCheck throw that names the site. Args borrowed;
+ * these throw only there (scr_exc_pending; scr_dyn_add answers NULL). */
+double scr_dyn_to_number(const ScrDyn *d);
+ScrDyn *scr_dyn_add(const ScrDyn *a, const ScrDyn *b);
+bool scr_dyn_lt(const ScrDyn *a, const ScrDyn *b);
+bool scr_dyn_le(const ScrDyn *a, const ScrDyn *b);
+bool scr_dyn_gt(const ScrDyn *a, const ScrDyn *b);
+bool scr_dyn_ge(const ScrDyn *a, const ScrDyn *b);
 /* JS String() over a dyn value (arrays join, [object Object], the error
  * encoding renders "name: message"); borrowed, result +1, never throws. */
 ScrStr *scr_dyn_display(const ScrDyn *d);

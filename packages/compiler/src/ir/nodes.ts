@@ -3438,6 +3438,41 @@ export type IrLibFn =
    * answer). args are the borrowed dyn and the SCR_ERR_* kind literal.
    * Never throws. */
   | "dyn.errInstanceof"
+  /** ToNumber (ECMA-262 7.1.4) over a checked-dynamic operand
+   * (scr_json.c) — the numeric sibling of scr_dyn_truthy (ToBoolean) and
+   * scr_dyn_string_coerce (ToString), and the conversion every
+   * arithmetic, bitwise and relational operator performs on an untyped JS
+   * operand before it computes: numbers pass through, strings run the
+   * ECMA-exact StringToNumber, booleans are 1/0, null is +0, undefined is
+   * NaN. The REFERENCE kinds (object/array/function/bytes/handle/promise/
+   * island value) are deliberately absent — their ToNumber runs
+   * ToPrimitive, which calls a user valueOf/toString the dyn model holds
+   * no prototype chain for, so they keep the LOUD dynCheck throw
+   * ("expected number at $, got object") that names the site. Borrows;
+   * throws only on those kinds (may-throw seed set). */
+  | "dyn.toNumber"
+  /** JS `+` over checked-dynamic operands (ECMA-262 13.15.3,
+   * ApplyStringOrNumericBinaryOperator): ToPrimitive both with no hint,
+   * then EITHER side being a String makes it CONCATENATION of the two
+   * ToString results, and only otherwise is it ToNumber addition. `+` is
+   * the one arithmetic operator that is not a number context, which is
+   * exactly why it cannot be a checked cast to number — the result kind
+   * is a runtime property of the operands, so the node's type is DYN.
+   * Borrows both; +1 result; throws on the reference kinds. */
+  | "dyn.add"
+  /** Abstract relational comparison (ECMA-262 7.2.13 IsLessThan) over two
+   * checked-dynamic operands, one entry per operator (scr_json.c): both
+   * sides ToPrimitive with the number hint, and when BOTH results are
+   * strings the answer is the string ordering — `'a' < 'b'` is not a
+   * number question — otherwise both go through ToNumber and an
+   * unordered (NaN) result answers false for all four. String ordering is
+   * scr_str_cmp, scriptc's documented code-point order, the same order
+   * the statically-typed `<` on strings already uses (strCmp without
+   * `utf16`). Borrows; throws on the reference kinds. */
+  | "dyn.lt"
+  | "dyn.le"
+  | "dyn.gt"
+  | "dyn.ge"
   /** Object.keys/values/entries over a CHECKED-DYNAMIC receiver
    * (scr_json.c): the runtime walks the dyn node's own members in JS
    * own-key order (array-index keys ascending first, then insertion
@@ -7589,6 +7624,16 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.structuredClone",
   "dyn.cloneMissing",
   "dyn.cloneTransferFail",
+  // The JS operator conversions over a dyn operand: exact for every
+  // PRIMITIVE kind, and a loud dynCheck throw naming the site for the
+  // reference kinds, whose ToPrimitive would need a prototype chain the
+  // dyn model does not hold.
+  "dyn.toNumber",
+  "dyn.add",
+  "dyn.lt",
+  "dyn.le",
+  "dyn.gt",
+  "dyn.ge",
   // the dyn Object walks throw on null/undefined receivers
   "dyn.objKeys",
   "dyn.hasOwn",
