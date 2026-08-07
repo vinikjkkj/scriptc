@@ -3528,6 +3528,21 @@ export type IrLibFn =
    * and deepStrictEqual's prototype gate. Never throws. Static builds
    * only; --dynamic routes Object.create through the engine instead. */
   | "dyn.objCreateNullProto"
+  /** `Object.create(<proto>)` over a dyn prototype (scr_json.c): a fresh
+   * OBJ whose [[Prototype]] link is the argument. The link is the SAME
+   * one `new` installs, so delegation is LIVE — a member added to the
+   * prototype afterwards shows through the created object, and the
+   * created object lists no own keys — which is exactly what the
+   * own-copy stand-in this replaces could not honor, and the reason
+   * this fenced until the link existed.
+   *
+   * It is also what makes a chain longer than one link reachable at all:
+   * `Child.prototype = Object.create(Parent.prototype)` is how every
+   * pre-class program spells inheritance, and without it `instanceof`
+   * only ever walks a single step. Throws Node's catchable "Object
+   * prototype may only be an Object or null: X" for a primitive
+   * argument (may-throw seed set). Static builds only. */
+  | "dyn.objCreateProto"
   | "dyn.objValues"
   | "dyn.objEntries"
   /** structuredClone over the checked-dynamic tree (scr_json.c): the JSON-safe subset plus
@@ -7670,6 +7685,13 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // `new f(...)` throws "is not a constructor", and the constructor BODY
   // throws whatever it throws — through the boxed thunk, catchably
   "dyn.construct",
+  // `v instanceof f` throws THREE of JS's TypeErrors, all of them about
+  // the right operand: not an object, not callable, and a `prototype`
+  // that is not an object. Only a primitive LEFT operand is a false.
+  "dyn.instanceOf",
+  // Object.create(<proto>) throws "Object prototype may only be an
+  // Object or null" for a primitive argument
+  "dyn.objCreateProto",
   // the destructuring pack throws V8's TypeError on non-iterable dyn kinds
   "dyn.iterPack",
   "dyn.toString",

@@ -879,6 +879,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.packPushSpreadIter": { argTypes: [DYN, DYN], result: VOID },
   "dyn.assignAll": { argTypes: [DYN, DYN], result: DYN },
   "dyn.objCreateNullProto": { argTypes: [], result: DYN },
+  "dyn.objCreateProto": { argTypes: [DYN], result: DYN },
   "dyn.objValues": { argTypes: [DYN], result: DYN },
   "dyn.objEntries": { argTypes: [DYN], result: DYN },
   "dyn.structuredClone": { argTypes: [DYN, DYN], result: DYN },

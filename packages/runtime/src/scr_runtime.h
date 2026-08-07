@@ -3085,9 +3085,31 @@ ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *wh
 
 /* `v instanceof f` — JS's OrdinaryHasInstance over the chain `new`
  * built: is the object `f.prototype` answers anywhere in v's
- * [[Prototype]] chain? Pointer identity, both borrowed, never throws
- * (a value built by another constructor answers false, exactly Node). */
+ * [[Prototype]] chain? Pointer identity, both borrowed.
+ *
+ * THREE of the operator's outcomes are throws, not answers, and the
+ * spec's order between them is observable:
+ *   - a right operand that is not an object   → TypeError "…is not an
+ *     object"
+ *   - one that is an object but not callable  → TypeError "…is not
+ *     callable"
+ *   - a primitive LEFT operand                → false, asked before the
+ *     prototype below is fetched
+ *   - a right operand whose `prototype` is not an object → TypeError
+ *     "Function has non-object prototype 'X' in instanceof check"
+ * The false it returns on a throw is never read (may-throw seed set);
+ * a value merely built by another constructor is the one honest false. */
 bool scr_dyn_instance_of(const ScrDyn *v, ScrDyn *fn);
+
+/* `Object.create(proto)` over a dyn prototype: a fresh OBJ carrying the
+ * same [[Prototype]] link `new` installs, so delegation is LIVE (a
+ * member added to the prototype afterwards reads through) and the
+ * created object has no own keys. This is what makes a chain deeper
+ * than one link — `Child.prototype = Object.create(Parent.prototype)`.
+ * null answers the null-prototype dictionary; a primitive throws Node's
+ * "Object prototype may only be an Object or null: X". Borrows; +1 or
+ * NULL with the exception pending. */
+ScrDyn *scr_dyn_obj_create_proto(const ScrDyn *proto);
 
 /* Object.keys/values/entries over the checked-dynamic tree: JS own-key order (array-index
  * keys ascending first), dyn-array results (+1); values/entries RETAIN

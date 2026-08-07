@@ -818,6 +818,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.packPushSpreadIter": "scr_dyn_pack_push_spread_iter",
   "dyn.assignAll": "scr_dyn_assign_all",
   "dyn.objCreateNullProto": "scr_dyn_new_obj_null_proto",
+  "dyn.objCreateProto": "scr_dyn_obj_create_proto",
   "dyn.objValues": "scr_dyn_obj_values",
   "dyn.objEntries": "scr_dyn_obj_entries",
   "dyn.structuredClone": "scr_structured_clone",
