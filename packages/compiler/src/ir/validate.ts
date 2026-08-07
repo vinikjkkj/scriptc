@@ -103,6 +103,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.arrLen": { argTypes: [DYN], result: F64 },
   "dyn.arrAt": { argTypes: [DYN, F64], result: DYN },
   "dyn.hasKey": { argTypes: [DYN, STRING], result: BOOL },
+  "dyn.construct": { argTypes: [DYN, DYN, STRING], result: DYN },
+  "dyn.instanceOf": { argTypes: [DYN, DYN], result: BOOL },
   "dyn.toString": { argTypes: [DYN, STRING, STRING], result: STRING },
   "dyn.defineProps": { argTypes: [DYN, DYN], result: DYN },
   "dyn.typeof": { argTypes: [DYN], result: STRING },
