@@ -9,7 +9,7 @@ import { dirname, relative } from "node:path";
 import type { Lowerer } from "./lowerer.js";
 import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
-import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, diffieHellmanFnValueOf, objectStaticFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
+import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, diffieHellmanFnValueOf, objectStaticFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import { UNSUPPORTED, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncNameOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, strCharsCall } from "./lower-containers.js";
@@ -7932,6 +7932,41 @@ export function lowerPrefixUnary(L: Lowerer, expr: ts.PrefixUnaryExpression): Ir
     if (!target) {
       L.rejectUnresolved(expr.operand, `increment/decrement of '${expr.operand.text}' (not a writable local or module global)`);
     }
+    // A CHECKED-DYNAMIC binding (`t++` over a minified codec's untyped
+    // cursor — by far the commonest spelling behind this fence): `x++` is
+    // ToNumber, ±1, store, yield. The ToNumber is the operator's OWN
+    // conversion, the same one the binary operators run on a dyn operand,
+    // and it is where the two spellings had drifted: `t = t + 1` already
+    // converted while `t++` refused. What JS yields is the CONVERTED old
+    // value, not the old cell — `x = '5'; x++` is 5 and leaves 6 — so the
+    // number is what the temp holds and what the expression answers.
+    if (target.type.kind === "dyn" && isJsSourceFile(expr.getSourceFile())) {
+      tonumWhy(expr, prefix ? "prefix-incdec" : "postfix-incdec");
+      const oldTmp = L.declareHiddenLocal("%incOld", F64);
+      const newTmp = L.declareHiddenLocal("%incNew", F64);
+      const oldRef = (): IrExpr => ({ kind: "varRef", localId: oldTmp.id, type: F64, loc });
+      const newRef = (): IrExpr => ({ kind: "varRef", localId: newTmp.id, type: F64, loc });
+      const cur: IrExpr = {
+        kind: "libCall", fn: "dyn.toNumber",
+        args: [{ kind: "varRef", localId: target.id, type: DYN, loc: locOf(expr.operand) }],
+        type: F64, loc,
+      };
+      return {
+        kind: "seqExpr",
+        stmts: [
+          { kind: "varDecl", localId: oldTmp.id, init: cur, loc },
+          {
+            kind: "varDecl", localId: newTmp.id,
+            init: { kind: "bin", op, left: oldRef(), right: { kind: "numLit", value: 1, type: F64, loc }, type: F64, loc },
+            loc,
+          },
+          { kind: "assign", localId: target.id, value: { kind: "dynFrom", value: newRef(), type: DYN, loc }, loc },
+        ],
+        result: prefix ? newRef() : oldRef(),
+        type: F64,
+        loc,
+      };
+    }
     if (target.type.kind !== "f64") L.unsupported("SC1043", expr);
     return { kind: "incDec", op, prefix, localId: target.id, type: F64, loc };
   }
@@ -8344,13 +8379,91 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         const parts = L.lowerDestructuringAssignParts(expr.left, expr.right, loc);
         return { kind: "seqExpr", stmts: parts.stmts, result: parts.value, type: parts.value.type, loc };
       }
+      // COMPOUND assignment in VALUE position — `switch (c >>>= 3)` and
+      // `readU32(this.buf, this.pos += 4)` (a generated protobuf codec's
+      // tag dispatch and its fixed-width reader), `(e |= 0) < 0`, and the
+      // comma-operand accumulators every minifier writes. The third
+      // member of the value-position assignment family, after the
+      // property write and the element write: the statement path already
+      // knows how to combine and store each of these targets, and all
+      // value position adds is that the computed value is KEPT instead of
+      // dropped — which is what compoundCombine separates out. The
+      // combine runs once, the target is written once, and the yielded
+      // value is the operation's own (JS's, not the slot's).
+      //
+      // Not here: element targets over arrays and typed arrays (the
+      // statement path's double-evaluation bargain needs its own reading
+      // in value position), and the LOGICAL assignments `&&=`/`||=`/`??=`,
+      // whose whole point is that the store is CONDITIONAL — statement
+      // position refuses two of the three and models the third only over
+      // a variable, and a value-position rule that always assigned would
+      // be a silent wrong answer through an accessor.
+      if (
+        op === ts.SyntaxKind.AmpersandAmpersandEqualsToken ||
+        op === ts.SyntaxKind.BarBarEqualsToken ||
+        op === ts.SyntaxKind.QuestionQuestionEqualsToken
+      ) {
+        L.unsupported(
+          "SC1090",
+          expr,
+          "logical assignment (&&=, ||=, ??=) as an expression (the store is conditional and the value is one of two operands: write the if out)",
+        );
+      }
+      {
+        const compound = COMPOUND_ASSIGN_OPS[op];
+        if (compound !== undefined) {
+          // A VARIABLE target: a local, a module global, a namespace
+          // member or an expando function member — the last two are
+          // "members" whose storage IS a variable, exactly as the `=`
+          // arm above reads them.
+          let varTarget: { id: string; type: IrType } | null = null;
+          if (ts.isIdentifier(expr.left)) {
+            varTarget = L.resolveWritable(expr.left);
+            if (!varTarget) {
+              L.rejectUnresolved(expr.left, `assignment to '${expr.left.text}' (not a writable local or module global)`);
+            }
+          } else if (ts.isPropertyAccessExpression(expr.left) && !expr.left.questionDotToken) {
+            varTarget = expandoWritableTarget(L, expr.left) ?? nsWritableTarget(L, expr.left);
+          }
+          if (varTarget) {
+            const read: IrExpr = { kind: "varRef", localId: varTarget.id, type: varTarget.type, loc: locOf(expr.left) };
+            const rhs = L.lowerExpr(expr.right);
+            const combined = compoundCombine(L, compound, read, rhs, varTarget.type, expr, expr.left, expr.right, loc);
+            if (!combined) L.unsupported("SC1043", expr);
+            const type = combined.natural.type;
+            const tmp = L.declareHiddenLocal("%cmpVal", type);
+            const ref = (): IrExpr => ({ kind: "varRef", localId: tmp.id, type, loc });
+            valPosWhy(expr.left, "compound-var");
+            return {
+              kind: "seqExpr",
+              stmts: [
+                { kind: "varDecl", localId: tmp.id, init: combined.natural, loc },
+                { kind: "assign", localId: varTarget.id, value: combined.toSlot(ref()), loc },
+              ],
+              result: ref(),
+              type,
+              loc,
+            };
+          }
+          // A FIELD target — the same receivers statement position
+          // admits (an identifier or `this`, because the write re-lowers
+          // the receiver), including the checked-dynamic keyed form.
+          if (
+            ts.isPropertyAccessExpression(expr.left) ||
+            (ts.isElementAccessExpression(expr.left) && symbolFieldInfo(L, expr.left))
+          ) {
+            valPosWhy(expr.left, "compound-field");
+            return lowerFieldCompoundValue(L, expr.left, compound, expr.right, loc);
+          }
+        }
+      }
       valPosWhy(expr.left, "fence");
       L.unsupported(
         "SC1090",
         expr,
         op === ts.SyntaxKind.EqualsToken
           ? "assignment to non-variables as an expression (only `x = e` over a variable yields a value; write property/destructuring assignments as statements)"
-          : "compound assignment as an expression (write `x op= e` as a statement, or spell out `x = x op e`)",
+          : "compound assignment as an expression (supported: a variable, a namespace or expando member, and a field of an identifier or `this` receiver; write other targets as statements, or spell out `x = x op e`)",
       );
     }
     if (op === ts.SyntaxKind.EqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsToken) {
@@ -11870,14 +11983,150 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     return { kind: "intrinsic", name: "promise.all", args: [entries], type, loc };
   }
 
+/** The value `x op= e` COMPUTES, split from the slot it is written into.
+ *
+ * `x op= e` is `x = x op e` with x read once, and what JS yields is the
+ * value of the OPERATION — not a read-back of the slot. Those are the
+ * same node whenever the slot's type is the operation's own (`n += 1`
+ * over an f64 binding), and different whenever the slot has to convert:
+ * a checked-dynamic slot BOXES the f64 sum back into a dyn cell, and an
+ * f64 binding CHECKS a runtime-kinded sum down to a number. Statement
+ * position never had to tell the two apart — nothing reads the value —
+ * so it built one expression and stored it. Value position must tell
+ * them apart, because `switch (c >>>= 3)` switches on the number and
+ * `readU32(this.buf, this.pos += 4)` indexes with it; yielding the
+ * boxed cell instead would hand every consumer a dyn where JS handed it
+ * a Number, and the consumers are exactly the positions (a switch
+ * discriminant, an index, a relational operand) that have no ToNumber of
+ * their own.
+ *
+ * `natural` is JS's yielded value with its OWN type; `toSlot` converts
+ * any expression of that type into the slot's, so statement position is
+ * `toSlot(natural)` — the same node it always built — and value position
+ * is `%t = natural; slot = toSlot(%t); yield %t`. Null when no arm claims
+ * the (slot, rhs) pair; the caller fences (SC1043).
+ *
+ * `numeric` says the `+`/`-` arrived from a `++`/`--` desugar, where the
+ * operator is ToNumeric and NOT the binary `+`: `o.f = '5'; o.f++` leaves
+ * 6, while `o.f += 1` leaves '51'. The desugar hands over a literal 1 as
+ * the right operand, so nothing downstream could tell the two apart — and
+ * over an untyped slot, where `+` really can concatenate, telling them
+ * apart is the difference between the answer and a plausible wrong one. */
+export interface CompoundCombine {
+  natural: IrExpr;
+  toSlot: (v: IrExpr) => IrExpr;
+}
+
+export function compoundCombine(
+  L: Lowerer,
+  op: CompoundOp,
+  read: IrExpr,
+  rhs: IrExpr,
+  slot: IrType,
+  blame: ts.Node,
+  leftNode: ts.Node,
+  rhsNode: ts.Node,
+  loc: SrcLoc,
+  numeric = false,
+): CompoundCombine | null {
+  const same = (v: IrExpr): IrExpr => v;
+  if (slot.kind === "jsval" || rhs.type.kind === "jsval") {
+    const JS_COMPOUND: Record<string, IrJsOp> = { "+": "add", "-": "sub", "*": "mul", "/": "div", "%": "mod", "**": "pow" };
+    const jop = JS_COMPOUND[op];
+    if (jop === undefined) return null;
+    const wrapped: IrExpr = {
+      kind: "jsOp", op: jop,
+      args: [L.jsvalIn(read, leftNode), L.jsvalIn(rhs, rhsNode)],
+      type: JSVAL, loc,
+    };
+    return { natural: wrapped, toSlot: (v) => L.coerceInto(blame, v, slot) };
+  }
+  if (slot.kind === "bigint" && rhs.type.kind === "bigint") {
+    // `n >>= 16n` and friends: the same operator family as the binary
+    // form (lowerBinary's bigint branch), read-modify-write on the slot.
+    const BIG_COMPOUND: Partial<Record<CompoundOp, IrLibFn>> = {
+      "+": "big.add", "-": "big.sub", "*": "big.mul", "/": "big.div",
+      "%": "big.rem", "**": "big.pow", "&": "big.and", "|": "big.or",
+      "^": "big.xor", "<<": "big.shl", ">>": "big.shr",
+    };
+    const fn = BIG_COMPOUND[op];
+    if (fn === undefined) return null;
+    return { natural: { kind: "libCall", fn, args: [read, rhs], type: BIGINT, loc }, toSlot: same };
+  }
+  if (op === "+" && slot.kind === "string" && !numeric) {
+    return {
+      natural: { kind: "strConcat", left: read, right: L.ensureString(rhs, rhsNode), type: STRING, loc },
+      toSlot: same,
+    };
+  }
+  if (slot.kind === "f64" && rhs.type.kind === "f64") {
+    return { natural: { kind: "bin", op, left: read, right: rhs, type: F64, loc }, toSlot: same };
+  }
+  // JS any-origin operands: run the operator's OWN conversion and compute
+  // natively (the binary-operator stance) — the dyn slot takes the result
+  // back through the usual dyn conversion.
+  if (isJsSourceFile(blame.getSourceFile()) && (slot.kind === "dyn" || rhs.type.kind === "dyn")) {
+    const toNum = (e: IrExpr, why: string): IrExpr => {
+      if (e.type.kind !== "dyn") return e;
+      tonumWhy(blame, why);
+      return { kind: "libCall", fn: "dyn.toNumber", args: [e], type: F64, loc: e.loc };
+    };
+    if (op === "+" && !numeric) {
+      // `x += v` is `x = x + v`, and `+` is not a number context: with an
+      // untyped operand on either side the sum's KIND is decided at
+      // runtime — a STRING on the other side makes the whole thing
+      // concatenation (`o += '�'` over an untyped accumulator is the
+      // decoder's spelling, and it is not arithmetic). A dyn slot takes
+      // the sum as it comes; an f64 slot cannot hold a concatenation, so
+      // the checked cast stays exactly where JS would have retyped the
+      // binding — loud, and only there.
+      const l = L.coerceToExpected(read, DYN);
+      const r = L.coerceToExpected(rhs, DYN);
+      if (l.type.kind === "dyn" && r.type.kind === "dyn") {
+        tonumWhy(blame, "add-compound");
+        const sum: IrExpr = { kind: "libCall", fn: "dyn.add", args: [l, r], type: DYN, loc };
+        return {
+          natural: sum,
+          toSlot: (v) => (slot.kind === "dyn" ? v : { kind: "dynCheck", value: v, type: F64, loc }),
+        };
+      }
+      return null;
+    }
+    // Every other compound operator IS a number context (`-`, `*`, `/`,
+    // `%`, `**` are ToNumber; the bitwise six are ToInt32/ToUint32, which
+    // is ToNumber plus a truncating wrap the f64 node already performs).
+    if (
+      (slot.kind === "dyn" || slot.kind === "f64") &&
+      (rhs.type.kind === "dyn" || rhs.type.kind === "f64")
+    ) {
+      const computed: IrExpr = {
+        kind: "bin", op,
+        left: toNum(read, "compound"), right: toNum(rhs, "compound"),
+        type: F64, loc,
+      };
+      return {
+        natural: computed,
+        toSlot: (v) => (slot.kind === "dyn" ? { kind: "dynFrom", value: v, type: DYN, loc } : v),
+      };
+    }
+  }
+  return null;
+}
+
 /** `obj.f op= e` (and `obj.f++` with rhs null ≡ 1) — the element spelling
-   * `obj[k] op= e` included when k is a declared symbol-keyed field.
+   * `obj[k] op= e` included when k is a declared symbol-keyed field, split
+   * into the VALUE the operation yields and the WRITE that stores it.
    * Restricted to side-effect-free receivers (identifier or `this`)
-   * because the desugar evaluates the receiver twice. */
-  export function lowerFieldCompound(L: Lowerer, access: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+   * because the desugar evaluates the receiver twice.
+   *
+   * `write` re-lowers the receiver, so it must be called exactly once and
+   * its statement placed AFTER `natural` has been evaluated — which is
+   * both orders the callers need: statement position calls it with the
+   * value inline, value position with a temp holding it. */
+  export function fieldCompoundParts(L: Lowerer, access: ts.PropertyAccessExpression | ts.ElementAccessExpression,
     op: CompoundOp,
     rhsNode: ts.Expression | null,
-    loc: SrcLoc,): IrStmt {
+    loc: SrcLoc,): { natural: IrExpr; write: (v: IrExpr) => IrStmt } {
     if (access.expression.kind === ts.SyntaxKind.SuperKeyword) {
       L.unsupported("SC1090", access, "compound assignment through 'super' (read and write separately)");
     }
@@ -11886,29 +12135,34 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     }
     // A CHECKED-DYNAMIC receiver (`context.actual++` — test/common's call
     // accounting; dot spelling only — symbol-keyed element targets are
-    // static fields): read the member (dynKeyGet), VALIDATE it as a
-    // number (dynCheck — a non-number member throws the catchable
-    // TypeError where JS would ToNumber-coerce; loud, never a silent
-    // NaN — SEMANTICS.md), combine, write back (dyn.keySet). The
-    // receiver is an identifier (checked above), so evaluating it for
-    // read and write matches JS's once-evaluation observably.
+    // static fields): read the member (dynKeyGet), combine under the
+    // operator's own conversion, write back (dyn.keySet). The receiver is
+    // an identifier (checked above), so evaluating it for read and write
+    // matches JS's once-evaluation observably.
     if (ts.isPropertyAccessExpression(access)) {
       const probed = probeLower(L, access.expression);
       if (probed?.type.kind === "dyn") {
         const key: IrExpr = { kind: "strLit", value: access.name.text, type: STRING, loc: locOf(access.name) };
         const read: IrExpr = { kind: "dynKeyGet", key, value: probed, type: DYN, loc };
-        const cur: IrExpr = { kind: "dynCheck", value: read, type: F64, loc };
         const rhs: IrExpr = rhsNode
           ? L.lowerExpr(rhsNode)
           : { kind: "numLit", value: 1, type: F64, loc };
-        if (rhs.type.kind !== "f64") L.unsupported("SC1043", access);
-        const value: IrExpr = { kind: "bin", op, left: cur, right: rhs, type: F64, loc };
-        const recv2 = L.lowerExpr(access.expression);
-        const boxed: IrExpr = { kind: "dynFrom", value, type: DYN, loc };
+        const combined = compoundCombine(L, op, read, rhs, DYN, access, access, rhsNode ?? access, loc, rhsNode === null);
+        if (!combined) L.unsupported("SC1043", access);
         return {
-          kind: "exprStmt",
-          expr: { kind: "libCall", fn: "dyn.keySet", args: [recv2, { ...key }, boxed], type: VOID, loc },
-          loc,
+          natural: combined.natural,
+          // Second, independent evaluation of the (side-effect-free)
+          // receiver, after the value — JS's order for a compound whose
+          // reference was already resolved.
+          write: (v) => ({
+            kind: "exprStmt",
+            expr: {
+              kind: "libCall", fn: "dyn.keySet",
+              args: [L.lowerExpr(access.expression), { ...key }, combined.toSlot(v)],
+              type: VOID, loc,
+            },
+            loc,
+          }),
         };
       }
     }
@@ -11923,48 +12177,46 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const rhs: IrExpr = rhsNode
       ? L.lowerExpr(rhsNode)
       : { kind: "numLit", value: 1, type: F64, loc };
-    let value: IrExpr;
-    if (op === "+" && target.fieldType.kind === "string") {
-      value = { kind: "strConcat", left: read, right: L.ensureString(rhs, rhsNode ?? access), type: STRING, loc };
-    } else if (target.fieldType.kind === "f64" && rhs.type.kind === "f64") {
-      value = { kind: "bin", op, left: read, right: rhs, type: F64, loc };
-    } else if (
-      target.fieldType.kind === "dyn" &&
-      isJsSourceFile(access.getSourceFile()) &&
-      (op === "+" || op === "-" || op === "*" || op === "/" || op === "%" || op === "**")
-    ) {
-      // CHECKED-DYNAMIC fields (implicit-any ctor assignments —
-      // countdown.js's `this[kLimit]` shape with a plain name) follow the
-      // JS dyn-operand binary stance: arithmetic CHECKS the dyn side to
-      // number (dynCheck — the catchable TypeError, never a silent
-      // ToNumber; SEMANTICS.md) and computes natively; the result boxes
-      // back into the field's dyn slot. `+=` with a string RHS is the
-      // string-context read: check to string, concat, box back.
-      const checkNum = (e: IrExpr): IrExpr =>
-        e.type.kind === "dyn" ? { kind: "dynCheck", value: e, type: F64, loc: e.loc } : e;
-      if (op === "+" && rhs.type.kind === "string") {
-        const concat: IrExpr = {
-          kind: "strConcat",
-          // String-context read: JS's String(unknown) over the field —
-          // the JS-exact dyn walker, never a checked cast.
-          left: { kind: "toString", operand: read, type: STRING, loc },
-          right: rhs,
-          type: STRING,
-          loc,
-        };
-        value = { kind: "dynFrom", value: concat, type: DYN, loc };
-      } else if (rhs.type.kind === "f64" || rhs.type.kind === "dyn") {
-        const bin: IrExpr = { kind: "bin", op, left: checkNum(read), right: checkNum(rhs), type: F64, loc };
-        value = { kind: "dynFrom", value: bin, type: DYN, loc };
-      } else {
-        L.unsupported("SC1043", access);
-      }
-    } else {
-      L.unsupported("SC1043", access);
-    }
+    // CHECKED-DYNAMIC fields (implicit-any ctor assignments — countdown.js's
+    // `this[kLimit]` shape) take the SAME arms a checked-dynamic BINDING
+    // takes: the operator's own conversion, not a checked cast to number.
+    // The two had drifted — the binding path learned ToNumber when the
+    // binary operators did and the field path kept the older dynCheck, so
+    // `this.pos += 4` over an untyped field threw where `pos += 4` over an
+    // untyped local answered. One helper now settles both.
+    const combined = compoundCombine(L, op, read, rhs, target.fieldType, access, access, rhsNode ?? access, loc, rhsNode === null);
+    if (!combined) L.unsupported("SC1043", access);
     // Second, independent evaluation of the (side-effect-free) receiver.
-    const target2 = targetOf()!;
-    return L.fieldSetStmt(target2, value, loc, access);
+    return { natural: combined.natural, write: (v) => L.fieldSetStmt(targetOf()!, combined.toSlot(v), loc, access) };
+  }
+
+/** `obj.f op= e` as a STATEMENT — the parts, written straight back. */
+  export function lowerFieldCompound(L: Lowerer, access: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+    op: CompoundOp,
+    rhsNode: ts.Expression | null,
+    loc: SrcLoc,): IrStmt {
+    const parts = fieldCompoundParts(L, access, op, rhsNode, loc);
+    return parts.write(parts.natural);
+  }
+
+/** `obj.f op= e` in VALUE position (`readU32(this.buf, this.pos += 4)`):
+   * the same parts with the computed value held in a temp, so the write
+   * stores it and the expression yields it. */
+  export function lowerFieldCompoundValue(L: Lowerer, access: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+    op: CompoundOp,
+    rhsNode: ts.Expression | null,
+    loc: SrcLoc,): IrExpr {
+    const parts = fieldCompoundParts(L, access, op, rhsNode, loc);
+    const type = parts.natural.type;
+    const tmp = L.declareHiddenLocal("%cmpVal", type);
+    const ref = (): IrExpr => ({ kind: "varRef", localId: tmp.id, type, loc });
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "varDecl", localId: tmp.id, init: parts.natural, loc }, parts.write(ref())],
+      result: ref(),
+      type,
+      loc,
+    };
   }
 
 /** Stream-rooted receivers' property surface (readableEnded, destroyed,
