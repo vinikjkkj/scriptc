@@ -156,7 +156,17 @@ function lowerStreamCallback(
   fullTuple: IrType[],
 ): IrExpr {
   const loc = locOf(node);
-  const { shapes, funcType } = L.lambdaSignature(node);
+  const { shapes, funcType, argumentsBound } = L.lambdaSignature(node);
+  if (argumentsBound) {
+    // The arguments-bound parameter form drops its declared shapes for a
+    // single `%arguments` slot the lambda lift declares; a stream callback's
+    // ABI is Node's fixed tuple, which has no room for it.
+    L.unsupported(
+      "SC1090",
+      node,
+      "'arguments' in functions with declared parameters (use a rest parameter: (...args))",
+    );
+  }
   if (node.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword)) {
     L.unsupported("SC1090", node, `async stream '${which}' callbacks`);
   }
