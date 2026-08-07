@@ -807,8 +807,15 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
                              : scr_str_new("[Object]", 8);
       }
       scr_insp_begin(recurse + 1);
+      /* JS own-key order — index keys first, ascending, then the rest in
+       * insertion order. Node's util.inspect lists exactly what
+       * Object.keys lists, in the same order; this walk used to print the
+       * entry table raw and disagree with Object.keys inside one process
+       * (`{ z: 1, '10': 3, '2': 4 }` where Node prints
+       * `{ '2': 4, '10': 3, z: 1 }`). Shared projection, one definition. */
+      size_t *ord = scr_dyn_obj_key_order(d);
       for (size_t i = 0; i < d->v.obj.len; i++) {
-        ScrDynEntry *ent = &d->v.obj.entries[i];
+        ScrDynEntry *ent = &d->v.obj.entries[ord ? ord[i] : i];
         ScrStr *val = scr_insp_dyn(ent->value, recurse + 1, depth);
         InspBuf eb = {0};
         insp_key_into(&eb, ent->key, ent->key_len);
@@ -819,6 +826,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         scr_insp_entry(entry, false);
         scr_str_release(entry);
       }
+      free(ord);
       ScrStr *base = cn != NULL && cn[0] ? scr_str_new(cn, strlen(cn))
                      : d->null_proto     ? scr_str_new("[Object: null prototype]", 24)
                                          : scr_str_new("", 0);
