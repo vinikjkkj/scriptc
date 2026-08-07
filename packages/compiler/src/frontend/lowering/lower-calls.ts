@@ -11,7 +11,7 @@ import { isJsSourceFile, locOf } from "../program.js";
 import { isGenericCallableMemberType, typeKey} from "../types.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
-import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf } from "./surfaces.js";
+import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
 import { ffiBindingDiag, ffiSignatureDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
@@ -8402,11 +8402,19 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       const helper = recordHasOwnHelper(L, receiver.type.shapeId, loc);
       return { kind: "call", callee: helper, args: [receiver, key], type: BOOL, loc };
     }
-    // getOwnPropertyNames answers the same list as keys for every value this
-    // compiles: a record has no non-enumerable own members and no symbol
-    // keys, so "own property names" and "own enumerable keys" coincide. The
-    // esbuild CJS preamble reaches it (`Object.getOwnPropertyNames(mods)[0]`),
-    // which is how a bundled dependency finds its single module factory.
+    // getOwnPropertyNames answers the same list as keys for every RECORD
+    // this compiles: a record has no non-enumerable own members and no
+    // symbol keys, so "own property names" and "own enumerable keys"
+    // coincide. The esbuild CJS preamble reaches it
+    // (`Object.getOwnPropertyNames(mods)[0]`), which is how a bundled
+    // dependency finds its single module factory.
+    //
+    // A CHECKED-DYNAMIC receiver is the case where they do NOT coincide,
+    // and folding it onto keys unconditionally was a wrong byte: a JS array
+    // (and a string) carries `length` as an own property, so Node answers
+    // ["0","1","length"] where the keys walk answers ["0","1"]. The dyn arm
+    // below routes through dynOwnNamesHelper, which does the keys walk and
+    // then appends `length` for exactly those two runtime kinds.
     const objMember = member === "getOwnPropertyNames" ? "keys" : member;
     if (objMember !== "keys" && objMember !== "values" && objMember !== "entries") return null;
     if (call.arguments.length !== 1 || ts.isSpreadElement(call.arguments[0]!)) return null;
@@ -8426,6 +8434,12 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         const fn = objMember === "keys" ? "dyn.objKeys" : objMember === "values" ? "dyn.objValues" : "dyn.objEntries";
         let v = L.lowerExpr(argNode);
         if (v.type.kind !== "dyn") v = { kind: "dynFrom", value: v, type: DYN, loc: locOf(call) };
+        if (member === "getOwnPropertyNames") {
+          // The own-NAMES walk, which is the keys walk plus `length` for
+          // the two kinds that carry it as an own property.
+          const helper = dynOwnNamesHelper(L, locOf(call));
+          return { kind: "call", callee: helper, args: [v], type: DYN, loc: locOf(call) };
+        }
         return { kind: "libCall", fn, args: [v], type: DYN, loc: locOf(call) };
       }
     }

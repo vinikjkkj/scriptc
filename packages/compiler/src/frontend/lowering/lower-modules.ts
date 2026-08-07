@@ -18,7 +18,7 @@ import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRe
 import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, nullishGenericBindingUnitOf } from "./lower-calls.js";
 import { isVarDeclared, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
-import { stdlibGlobalAliasDecl } from "./surfaces.js";
+import { objectStaticFnValueDeclType, stdlibGlobalAliasDecl } from "./surfaces.js";
 import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-namespaces.js";
 import { collectExpandoMembers } from "./lower-expando.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
@@ -1482,7 +1482,27 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // and closures created in the init body capture it normally.
             // References from separately-declared functions cascade to
             // their own per-site runtime fences.
-            if (isJsSourceFile(sf) && !L.mapTypeOf(L.typeOf(nameNode))) continue;
+            //
+            // ONE exception, and it is the whole of esbuild's `__commonJS`
+            // preamble: `var o = Object.getOwnPropertyNames` — the builtin
+            // in VALUE position. Its DECLARED type `(o: any) => string[]`
+            // maps nowhere, but its VALUE does: the lifted closure over
+            // the same runtime walk the CALL form uses
+            // (objectStaticFnValueOf). Without storage the declaration is
+            // an %init-body local, and the memoizing thunk that reads it
+            // is a MONOMORPHIZED instance that takes no captures — so the
+            // reference fences a second time on a capture it cannot
+            // thread. The slot's type comes off the lift, exactly like the
+            // handle/cast-class overrides below take theirs off the
+            // initializer.
+            const objFnValueT =
+              ts.isIdentifier(decl.name) && nameNode === decl.name
+                ? objectStaticFnValueDeclType(L, decl.initializer)
+                : null;
+            if (isJsSourceFile(sf) && objFnValueT === null && !L.mapTypeOf(L.typeOf(nameNode))) continue;
+            if (objFnValueT !== null && process.env["SCRIPTC_OBJFNVALUE_WHY"] !== undefined) {
+              console.error(`[objfnvalue] global ${locOf(nameNode).file}:${locOf(nameNode).start} ${nameNode.text}`);
+            }
             // `var p1 = import("./m")` at file scope: the global holds the
             // island promise/handle — the import expression's only
             // production — whatever the checker's namespace type mapped to
@@ -1509,6 +1529,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             let type =
               handleT ??
               (castClass ? ({ kind: "classval", className: castClass.def.name } as IrType) : null) ??
+              objFnValueT ??
               L.irTypeOf(nameNode);
             // An evolving-`any` array's DERIVED file-scope binding under
             // --dynamic (`const kept = fns.filter(...)` where `fns`
