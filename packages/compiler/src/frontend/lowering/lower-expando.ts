@@ -15,6 +15,32 @@
  * alias keeps its fences: a different function value could satisfy the
  * same type, so symbol identity, not type identity, is the routing key).
  *
+ * JAVASCRIPT files are in, and their members' types come from the same
+ * checked-dynamic fallback their file-scope bindings take. This is where
+ * the idiom actually LIVES — it predates ES6 classes and every untyped
+ * CJS package still writes it — and a `--npm-static` / provenance JS file
+ * is a compiled program module like any other, so "the island or the dyn
+ * keyed write owns those members" was never true of it: the write reached
+ * no lowering at all.
+ *
+ * Two SPELLINGS of the receiver reach one storage: the local name, and
+ * the CJS export table's member (`pkg.parse.VERSION` — resolveValueSymbol
+ * re-resolves an export-table property to the local declaration it names,
+ * which is the same function OBJECT). Both are needed together: with the
+ * write routed and the read not, an importer's member read becomes a hard
+ * "reading 'X' from a value of type '{ (…): …; X: … }'" error — strictly
+ * worse than the fence it replaced.
+ *
+ * NOT covered, and the reason is representational rather than syntactic:
+ * a function declaration NESTED in another function (each call creates a
+ * fresh function object, so one module global would alias every
+ * instantiation), and `<fn>.prototype.<member> = v` (a prototype is an
+ * object instances inherit through — a module global is not on any
+ * instance's lookup path, and seeding own properties instead would make
+ * `Object.hasOwnProperty.call(m, k)` answer true where Node answers
+ * false). Those two shapes are what pbjs `--target static-module` output
+ * is built out of; see estado-propassign.md for the census.
+ *
  * Honesty guards, mirroring the namespace-member stance:
  * - reads in INIT-EXECUTING position textually above the member's FIRST
  *   assignment fence (JS would answer undefined; the global would answer
@@ -31,7 +57,7 @@
  *   unique-symbol consts (uniqueSymbolKeyOf — the class symbol-field
  *   precedent); runtime-valued keys keep their fences. */
 import * as ts from "../ts7/adapter.js";
-import type { Lowerer } from "./lowerer.js";
+import { dynFallbackType, type Lowerer } from "./lowerer.js";
 import { IrExpr, IrGlobal, IrStmt, IrType } from "../../ir/nodes.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
@@ -66,25 +92,73 @@ function memberKeyOf(L: Lowerer, expr: ts.PropertyAccessExpression | ts.ElementA
   return L.foldedStringKeyOf(expr.argumentExpression);
 }
 
+/** How many sites each of the three JS-side branches CLAIMED, so a probe
+ * can read the numbers in the same run as the result they produced:
+ * `jsDecl` a receiver that resolved to a JS-file function declaration or
+ * function-valued const, `jsDynSlot` a member slot whose type came from
+ * the checked-dynamic fallback, `viaExport` a receiver spelled through a
+ * CJS export table. Monotonic per process; the suite reads deltas. */
+export const expandoCounters = { jsDecl: 0, jsDynSlot: 0, viaExport: 0 };
+
 /** The module-level function-ish symbol a receiver expression resolves
  * to, or null: a top-level FunctionDeclaration, or a top-level `const`
  * variable whose checker type is callable (arrow/function-expression
- * consts, interface-typed callable consts). Only direct identifier
- * references qualify — routing is by symbol identity. */
+ * consts, interface-typed callable consts).
+ *
+ * Routing is by SYMBOL identity, and two spellings reach the same symbol:
+ * a direct identifier reference, and the CJS export-table member spelling
+ * (`pkg.parse.VERSION` — resolveValueSymbol already re-resolves an export
+ * table's property to the LOCAL declaration it names, which is the same
+ * function OBJECT, so the importer's reads and the exporter's writes must
+ * meet at one storage; without this the write lands in the slot and the
+ * read becomes a hard "reading 'X' from a value of type '{ (…): …; X: … }'"
+ * error, which is strictly worse than the fence it replaced). */
 function expandoFnSymbolOf(L: Lowerer, recv: ts.Expression): ts.Symbol | null {
-  if (!ts.isIdentifier(recv)) return null;
+  if (!ts.isIdentifier(recv)) {
+    if (
+      !ts.isPropertyAccessExpression(recv) || recv.questionDotToken !== undefined ||
+      !ts.isIdentifier(recv.name)
+    ) {
+      return null;
+    }
+    const viaExport = L.resolveValueSymbol(recv.name);
+    if (!viaExport) return null;
+    // Only a symbol the registry ALREADY carries members for routes this
+    // way: collection runs identifier-receiver-only and over every file
+    // before any statement lowers, so the registry is complete here and a
+    // miss means this receiver is not a member-carrying function at all.
+    if (!L.expandoMembers.has(viaExport)) return null;
+    const d = L.checker.valueDeclarationOf(viaExport);
+    if (!d || d.getSourceFile().isDeclarationFile) return null;
+    if (!ts.isFunctionDeclaration(d) || !ts.isSourceFile(d.parent)) return null;
+    expandoCounters.viaExport++;
+    return viaExport;
+  }
   // Island and checked-dynamic receivers never qualify by construction:
   // the declaration-shape checks below (a function DECLARATION, or a
-  // const whose initializer is a function/arrow LITERAL in a TS file)
-  // exclude import bindings, call results, and JS-file values — their
-  // member stories (engine property writes, dyn keyed writes) stay put.
+  // const whose initializer is a function/arrow LITERAL) exclude import
+  // bindings and call results — their member stories (engine property
+  // writes, dyn keyed writes) stay put.
   const sym = L.resolveValueSymbol(recv);
   if (!sym) return null;
   const decl = L.checker.valueDeclarationOf(sym);
   if (!decl || decl.getSourceFile().isDeclarationFile) return null;
-  if (isJsSourceFile(decl.getSourceFile())) return null;
+  // JS files were excluded wholesale on the theory that their member
+  // stories are the island's or the dyn keyed write's. MEASURED false for
+  // the lane that matters: a `--npm-static` / provenance JS file IS a
+  // compiled program module, its function declarations ARE compiled
+  // functions, and `parse.VERSION = "1.2.3"` there reaches no other
+  // lowering — it falls through to "assignment to non-variables", and
+  // every read of the member is a hard compile error. Same symbol
+  // identity, same storage rule.
+  const js = isJsSourceFile(decl.getSourceFile());
   if (ts.isFunctionDeclaration(decl)) {
-    return ts.isSourceFile(decl.parent) ? sym : null;
+    // A NESTED function declaration stays out, in JS exactly as in TS:
+    // each call of the enclosing function creates a fresh function
+    // object, and one module global would alias every instantiation.
+    if (!ts.isSourceFile(decl.parent)) return null;
+    if (js) expandoCounters.jsDecl++;
+    return sym;
   }
   if (ts.isVariableDeclaration(decl)) {
     if (!ts.isVariableStatement(decl.parent.parent) || !ts.isSourceFile(decl.parent.parent.parent)) return null;
@@ -96,6 +170,7 @@ function expandoFnSymbolOf(L: Lowerer, recv: ts.Expression): ts.Symbol | null {
     while (init !== undefined && (ts.isParenthesizedExpression(init) || ts.isAsExpression(init) || ts.isTypeAssertion(init))) init = init.expression;
     if (init === undefined || (!ts.isArrowFunction(init) && !ts.isFunctionExpression(init))) return null;
     if (L.checker.getCallSignatures(L.checker.getTypeOfSymbol(sym)).length === 0) return null;
+    if (js) expandoCounters.jsDecl++;
     return sym;
   }
   return null;
@@ -161,6 +236,24 @@ export function collectExpandoMembers(L: Lowerer, sf: ts.SourceFile): void {
           type = null;
         }
         if (type?.kind === "void" && isUnitOnlyTsType(tsType)) type = unitOnlyUnion(L.unions);
+        // A JS member whose declared type is inference RESIDUE (`(v: any)
+        // => any`, `any` — every member of an untyped CJS package, where
+        // mapTypeOf answers null and the slot would never be registered):
+        // the checked-dynamic fallback the JS file-scope bindings already
+        // take (dynFallbackType — a pure single-signature function keeps
+        // its func-ness with dyn pieces, so direct calls through the
+        // member stay static calls; everything else is dyn storage).
+        // Collection-time diagnostics drop either way: the write
+        // statement's own lowering re-diagnoses in context.
+        if (!type && isJsSourceFile(sf)) {
+          try {
+            type = dynFallbackType(L, w.access, tsType);
+          } catch {
+            type = null;
+          }
+          L.diags.splice(diagsBefore);
+          if (type) expandoCounters.jsDynSlot++;
+        }
         if (type && type.kind !== "void") {
           const fnName = w.fnSym.name;
           const memberName = typeof w.key === "string" ? w.key : `sym%${w.key.name}%${L.checker.declarationsOf(w.key)[0]?.getStart() ?? 0}`;
