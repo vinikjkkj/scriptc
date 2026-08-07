@@ -3111,6 +3111,28 @@ bool scr_dyn_instance_of(const ScrDyn *v, ScrDyn *fn);
  * NULL with the exception pending. */
 ScrDyn *scr_dyn_obj_create_proto(const ScrDyn *proto);
 
+/* OrdinaryOwnPropertyKeys order over a checked-dynamic OBJ's entry table:
+ * ARRAY-INDEX keys first, ascending by value, then every other string key
+ * in insertion order. The table stores insertion order, so this is the
+ * projection — and it is the ONLY one. Every own-key enumeration in the
+ * runtime (Object.keys/values/entries, JSON.stringify, util.format's %j,
+ * util.inspect, a function's own property table) goes through it, because
+ * when they each had their own idea of the order they did not agree.
+ *
+ * Answers NULL when the stored order already IS the JS order (no index
+ * keys, or they lead and ascend) — no allocation on that path. Otherwise
+ * a malloc'd permutation of `len` entry indices the CALLER frees:
+ *
+ *   size_t *ord = scr_dyn_obj_key_order(d);
+ *   for (size_t i = 0; i < d->v.obj.len; i++) {
+ *     const ScrDynEntry *e = &d->v.obj.entries[ord ? ord[i] : i];
+ *     ...
+ *   }
+ *   free(ord);
+ *
+ * Non-OBJ kinds answer NULL. */
+size_t *scr_dyn_obj_key_order(const ScrDyn *v);
+
 /* Object.keys/values/entries over the checked-dynamic tree: JS own-key order (array-index
  * keys ascending first), dyn-array results (+1); values/entries RETAIN
  * member nodes. null/undefined receivers throw Node's catchable
