@@ -102,7 +102,7 @@ export interface CcOptions {
    * precedent, so inspect-free binaries keep their exact size class. */
   inspect?: boolean;
   /** The program dispatches prototype methods on dyn receivers (index.ts
-   * detects dynInvoke nodes / dyn.defineProps libCalls on the IR):
+   * detects dynInvoke nodes / dyn.defineProp(s) libCalls on the IR):
    * compiles scr_dyn_invoke.c — the assert gating precedent, so
    * dispatch-free binaries keep their exact size class. */
   dynInvoke?: boolean;
