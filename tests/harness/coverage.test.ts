@@ -116,6 +116,21 @@ test("import fences no longer stop analysis: percentage plus module blockers", a
   ).toMatchFileSnapshot("__snapshots__/coverage-import-fences.txt");
 });
 
+test("a whole-export root that is REBOUND after the export keeps its fence", () => {
+  // `module.exports = <root>` over a root the alias path cannot carry gets
+  // storage of its own — Node's snapshot of the value the root had at that
+  // statement. Its one soundness condition is that nothing can rebind the
+  // root afterwards: storage would then answer the snapshot while a requirer
+  // read resolving through the alias path answers the LIVE binding, and a
+  // compiled program that picks one of two different answers is the
+  // silent-divergence trap, not a lowering. The write analysis decides it
+  // (writes provably before the export are admitted — corpus
+  // 1714-cjs-whole-export-root), and this fixture rebinds after, so the
+  // refusal stands.
+  const out = report(fixture("cjs-whole-export-rebound/main.cjs"));
+  expect(out).toContain("exporting the mutable 'let' binding 'j' by reference");
+});
+
 test("type errors block analysis", () => {
   const out = report(fixture("type-errors.ts"));
   expect(out).toContain("not analyzable");
