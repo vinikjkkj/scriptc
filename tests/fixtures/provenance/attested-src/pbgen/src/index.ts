@@ -92,3 +92,18 @@ export function describeTable(): string {
     `${star.parts.length}${star.parts[0]!.kind}`,
   ].join(" ");
 }
+
+/* The CJS-WHOLE-EXPORT edge (spec/wire): a generated CommonJS module whose
+ * `module.exports = <identifier>` leaves every declared export without a
+ * binding of its own name. Both spellings are here — the re-export that
+ * carries the module edge, and the import the body calls through — because
+ * the declaration-twin export bridge has to answer for both. */
+export { wire, WIRE_TAG } from "../spec/wire/index.js";
+import { wire, WIRE_TAG } from "../spec/wire/index.js";
+
+/** A STATIC method call through the declaration, which is the whole point:
+ * the body it needs lives in the twin, attached to the root object at run
+ * time, and the declaration half has no storage the call could reach. */
+export function describeWire(): string {
+  return `${wire.Frame.encode({ n: 21, tag: "f" })} ${WIRE_TAG} ${WIRE_TAG.length}`;
+}

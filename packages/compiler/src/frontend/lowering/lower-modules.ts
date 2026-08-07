@@ -9,7 +9,7 @@ import { dirname as dirnamePath, resolve as resolvePath } from "node:path";
 import { NpmGraphBuilder, packageNameOfPath, probeNodeImportRefusal, probeNodeRequireRefusal } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
 import { isJsSourceFileName, isRelativeSpecifier } from "../shared.js";
-import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
+import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
 import type { CycleEdge } from "../program.js";
 import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
 import { BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrLocal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/nodes.js";
@@ -208,6 +208,7 @@ export interface FileParts {
         L.collectNpmImports(parts);
         L.collectJsonImports(parts);
         L.collectJsonRequires(parts);
+        L.collectDeclTwinExportBridges(parts);
       } finally {
         L.diagSink = null;
       }
@@ -216,6 +217,7 @@ export interface FileParts {
       L.collectNpmImports(parts);
       L.collectJsonImports(parts);
         L.collectJsonRequires(parts);
+      L.collectDeclTwinExportBridges(parts);
     }
   }
 
@@ -2135,6 +2137,30 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         body.push(...L.lowerStaticFieldInits(statics[at]!.info));
         at++;
       }
+      // THE DECLARATION-TWIN EXPORT BRIDGE (collectDeclTwinExportBridges):
+      // this file whole-exports an identifier, and its `.d.ts` half names
+      // exports that are PROPERTIES of that object. Read them off it here
+      // — after the body, which is when the object is finished, and which
+      // is also where the hand-edit `var waproto = j.waproto` would sit.
+      // A cache-hit revisit returns at the guard and never reaches this,
+      // exactly like every other assignment in the body.
+      for (const b of L.twinExportBridges.get(sf) ?? []) {
+        const rootRef: IrExpr = { kind: "varRef", localId: b.root.id, type: b.root.type, loc: loc0 };
+        const recv: IrExpr =
+          b.root.type.kind === "dyn" ? rootRef : { kind: "dynFrom", value: rootRef, type: DYN, loc: loc0 };
+        body.push({
+          kind: "assign",
+          localId: b.gid,
+          value: {
+            kind: "dynKeyGet",
+            key: { kind: "strLit", value: b.key, type: STRING, loc: loc0 },
+            value: recv,
+            type: DYN,
+            loc: loc0,
+          },
+          loc: loc0,
+        });
+      }
       const loc: SrcLoc = { file: sf.fileName, start: 0, end: 0 };
       return {
         name,
@@ -2287,4 +2313,147 @@ export function declModuleWithoutTwin(L: Lowerer, sym: ts.Symbol): ts.SourceFile
     home = sf;
   }
   return home;
+}
+
+/** The IDENTIFIER a CommonJS module whole-exports: `module.exports = j` at
+ * its top level, comma operands included.
+ *
+ * The comma spelling is not exotic — it is what every bundler emits. The
+ * pbjs/esbuild/terser chain that generates `spec/proto/index.js` ends the
+ * file with `(…, …, module.exports=j)` as ONE expression statement, so a
+ * scan that only looks at `ExpressionStatement { BinaryExpression }`
+ * (cjsExportAssignmentOf) sees nothing there.
+ *
+ * The LAST such assignment wins: Node's export object is whatever
+ * `module.exports` holds when the body finishes, and a later assignment
+ * replaces an earlier one (cjsExportDiscardReason already fences the
+ * shapes where an earlier one was observable). */
+export function cjsWholeExportIdentifierOf(sf: ts.SourceFile): ts.Identifier | null {
+  let found: ts.Identifier | null = null;
+  const scan = (e: ts.Expression): void => {
+    let inner = e;
+    while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+    if (!ts.isBinaryExpression(inner)) return;
+    if (inner.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+      scan(inner.left);
+      scan(inner.right);
+      return;
+    }
+    if (inner.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return;
+    if (!isModuleExportsAccess(inner.left)) return;
+    let rhs: ts.Expression = inner.right;
+    while (ts.isParenthesizedExpression(rhs)) rhs = rhs.expression;
+    // Only the IDENTIFIER spelling. Every other RHS shape either registers
+    // its own storage in collectGlobals (scalar, function, object literal)
+    // or fences in the statement lowering; this is the one that registered
+    // nothing ("Identifier values register nothing — alias plumbing").
+    if (ts.isIdentifier(rhs)) found = rhs;
+    return;
+  };
+  for (const stmt of sf.statements) {
+    if (ts.isExpressionStatement(stmt)) scan(stmt.expression);
+  }
+  return found;
+}
+
+/** True when `ident` names a module-scope `const` of its own file — a
+ * binding nothing can rebind after the statement that read it. */
+function immutableModuleBinding(L: Lowerer, ident: ts.Identifier): boolean {
+  const sym = L.checker.getSymbolAtLocation(ident);
+  const decls = sym ? L.checker.declarationsOf(sym) : [];
+  if (decls.length !== 1) return false;
+  const d = decls[0]!;
+  if (!ts.isVariableDeclaration(d)) return false;
+  if (d.getSourceFile() !== ident.getSourceFile()) return false;
+  if (!ts.isSourceFile(d.parent.parent.parent)) return false;
+  return (ts.getCombinedNodeFlags(d) & ts.NodeFlags.Const) !== 0;
+}
+
+/** THE DECLARATION-TWIN EXPORT BRIDGE.
+ *
+ * A generated module ships its types in `X.d.ts` and its values in `X.js`.
+ * Every import resolves to the DECLARATION — which owns no storage — and
+ * `declTwinGlobalOf` / `globalOf`'s twin bridge hand over the twin's own
+ * storage instead. Both find storage in exactly two spellings: an export
+ * symbol the twin registered, or a top-level `var <name>` of the same name.
+ *
+ * A CommonJS twin that whole-exports an IDENTIFIER (`module.exports = j`)
+ * has NEITHER, and it is the commonest generated-CJS spelling there is:
+ * the export named `N` is the PROPERTY `j.N`, not a binding called `N`.
+ * With no storage to bridge to, every value read and every method call
+ * through that declaration fenced — for zapo's `spec/proto` that is the
+ * whole `waproto` surface, 1.8 MB of compiled twin reachable by nothing.
+ *
+ * This registers, for each such export, the storage the declaration half
+ * lacks: one DYN global per declared value export, assigned at the END of
+ * the TWIN's own init (after its body has built the object) from
+ * `<whole-export identifier>.<name>`. That is precisely the statement a
+ * hand-edit of the bundle would add, and from there every existing path —
+ * `globalOf`, `declTwinGlobalOf`, `importBindsStaticTwinGlobal`'s init
+ * redirect, the dyn member/call machinery — applies unchanged.
+ *
+ * The correspondence is TypeScript's own contract for a declaration file
+ * describing a JS module: `export namespace N` / `export declare const N`
+ * in `X.d.ts` states that the module `X` exports `N`, and for a CommonJS
+ * module the module's exports ARE the properties of `module.exports`. The
+ * value is DYN because that is what the twin's own binding is worth — the
+ * bridge asserts the PATH, never a shape.
+ *
+ * NOT registered (each would answer a value nothing assigns, or a value
+ * Node would not have answered):
+ *  - a twin whose whole export is not a plain identifier, or whose
+ *    identifier has no registered global;
+ *  - a MUTABLE root (`var`/`let`) — the one soundness condition, argued at
+ *    the check below;
+ *  - an export that already has storage (a named export of the twin, a
+ *    top-level `var` of the same name) — those bridges already work and
+ *    carry a real static type;
+ *  - a type-only export;
+ *  - the stdlib surface, whose gaps are real scriptc gaps.
+ */
+export function collectDeclTwinExportBridges(L: Lowerer, parts: FileParts[]): void {
+  for (const fp of parts) {
+    const twin = fp.sf;
+    const dts = L.declSiblingOf(twin);
+    if (dts === null || L.isStdlibFile(dts)) continue;
+    if (!isCjsJsFile(twin)) continue;
+    const rootIdent = cjsWholeExportIdentifierOf(twin);
+    if (rootIdent === null) continue;
+    // The root has to be IMMUTABLE, and this is the bridge's one soundness
+    // condition. Node's export object is whatever `module.exports` holds
+    // when the body finishes, and the bridge reads its properties at that
+    // same point; if the root binding can be REBOUND between the export
+    // statement and the end of the body, Node's exports and the bridge's
+    // read are two different objects. It is the argument the sibling fence
+    // already makes in words — "exporting the mutable 'let' binding by
+    // reference (Node copies its VALUE at this statement)" — applied to
+    // the properties instead of the binding. A `var`/`let` root changes
+    // nothing: every existing fence stands.
+    if (!immutableModuleBinding(L, rootIdent)) continue;
+    const root = L.globalOf(rootIdent);
+    if (root === null || root.type.kind === "jsval") continue;
+    const dtsSym = L.checker.getSymbolAtLocation(dts);
+    if (!dtsSym) continue;
+    const tag = L.fileTag.get(twin) ?? "";
+    const bridges = L.twinExportBridges.get(twin) ?? [];
+    for (const [name, sym] of dtsSym.getExports()) {
+      const key = String(name);
+      if (key.startsWith("__")) continue; // __export / __esModule plumbing
+      // VALUE meaning only: a type/interface export names no runtime value.
+      // A namespace counts (`export namespace waproto` is an object at
+      // runtime); a pure type alias or interface does not.
+      const meaning =
+        ts.SymbolFlags.Variable | ts.SymbolFlags.Function | ts.SymbolFlags.Class |
+        ts.SymbolFlags.Enum | ts.SymbolFlags.ValueModule;
+      if (!(sym.flags & meaning)) continue;
+      if (L.globalsBySymbol.has(sym)) continue;
+      if (declTwinGlobalOf(L, sym) !== undefined) continue;
+      const g: IrGlobal = { id: `%g.${tag}%dtsexport.${key}`, name: key, type: DYN, mutable: false };
+      L.globalsBySymbol.set(sym, g);
+      for (const d of L.checker.declarationsOf(sym)) L.globalsByDeclNode.set(d, g);
+      L.globalsList.push(g);
+      bridges.push({ gid: g.id, root, key });
+    }
+    if (bridges.length > 0) L.twinExportBridges.set(twin, bridges);
+  }
 }
