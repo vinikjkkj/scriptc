@@ -1330,10 +1330,93 @@ ScrStr *scr_dyn_typeof(const ScrDyn *d) {
   return scr_str_new(s, strlen(s));
 }
 
+/* ── JS own-key order over a checked-dynamic object ───────────────────
+ *
+ * OrdinaryOwnPropertyKeys (ECMA-262 10.1.11.1) is not insertion order.
+ * The ARRAY-INDEX keys come first, ascending by numeric value; every
+ * other string key follows in insertion order. The entry table stores
+ * pure insertion order, so JS's order is a PROJECTION of it, computed
+ * here — once, in one helper, so that every own-key enumeration in this
+ * runtime answers the same order.
+ *
+ * It did not used to be one helper. `Object.keys` carried a private copy
+ * of this walk and `JSON.stringify`, `util.format`'s `%j` and
+ * `util.inspect` carried none, so three of them disagreed with the
+ * fourth about the same object inside the same process — silently, on
+ * exactly the shape protobufjs builds its enum tables out of
+ * (`{0:"E2EE",1:"HOSTED"}`).
+ *
+ * The array-index test is the spec's, not "looks numeric": a canonical
+ * decimal string with no leading zero, strictly BELOW 2^32-1. So "0" and
+ * "4294967294" sort ahead; "4294967295" (the boundary itself), "01",
+ * "-1", "1.5" and "4294967296" are ordinary string keys and hold their
+ * insertion slot. Verified against Node v25.9.0.
+ *
+ * Answers NULL when the stored order ALREADY IS the JS order — no index
+ * keys, or they lead the table and ascend. That is the overwhelmingly
+ * common case and it costs one scan and no allocation. Otherwise the
+ * result is a malloc'd permutation of `len` entry indices that the
+ * caller frees. */
+static bool scr_dyn_key_is_index(const char *key, size_t len, double *out);
+
+typedef struct {
+  double idx;
+  size_t pos;
+  bool is_index;
+} ScrKeyOrd;
+
+/* A total order: index keys before string keys, index keys by value,
+ * string keys by insertion slot. Both index values and slots are
+ * distinct by construction (an entry table cannot hold a duplicate key),
+ * so no two elements compare equal and qsort needs no stability. */
+static int scr_key_ord_cmp(const void *a, const void *b) {
+  const ScrKeyOrd *x = (const ScrKeyOrd *)a;
+  const ScrKeyOrd *y = (const ScrKeyOrd *)b;
+  if (x->is_index != y->is_index) return x->is_index ? -1 : 1;
+  if (x->is_index) return x->idx < y->idx ? -1 : 1;
+  return x->pos < y->pos ? -1 : 1;
+}
+
+size_t *scr_dyn_obj_key_order(const ScrDyn *v) {
+  if (v->kind != SCR_DYN_OBJ) return NULL;
+  size_t n = v->v.obj.len;
+  if (n < 2) return NULL;
+  /* Pass 1 — allocation-free: does the stored order need reordering at
+   * all? It does exactly when an index key follows a string key, or when
+   * two index keys are out of ascending order. */
+  bool seen_string = false, need = false;
+  double last = -1, idx = 0;
+  for (size_t i = 0; i < n; i++) {
+    const ScrDynEntry *e = &v->v.obj.entries[i];
+    if (!scr_dyn_key_is_index(e->key, e->key_len, &idx)) {
+      seen_string = true;
+      continue;
+    }
+    if (seen_string || idx < last) need = true;
+    last = idx;
+  }
+  if (!need) return NULL;
+  ScrKeyOrd *k = (ScrKeyOrd *)malloc(n * sizeof *k);
+  if (!k) scr_json_oom();
+  for (size_t i = 0; i < n; i++) {
+    const ScrDynEntry *e = &v->v.obj.entries[i];
+    k[i].pos = i;
+    k[i].idx = 0;
+    k[i].is_index = scr_dyn_key_is_index(e->key, e->key_len, &k[i].idx);
+  }
+  qsort(k, n, sizeof *k, scr_key_ord_cmp);
+  size_t *order = (size_t *)malloc(n * sizeof *order);
+  if (!order) scr_json_oom();
+  for (size_t i = 0; i < n; i++) order[i] = k[i].pos;
+  free(k);
+  return order;
+}
+
 /* ── JSON.stringify over a dyn value (util.format's %j) ───────────────
  * The RUNTIME walk the type-directed serializers deliberately avoid for
  * static values — a dyn value has no static type, so the checked-dynamic tree's own kinds
- * drive it, JS-exactly: insertion-ordered objects with undefined/function
+ * drive it, JS-exactly: objects in JS OWN-KEY order (scr_dyn_obj_key_order —
+ * index keys first, not insertion order) with undefined/function
  * members OMITTED, arrays rendering those as null, Buffer's toJSON shape
  * ({"type":"Buffer","data":[...]}), shortest-roundtrip numbers, escaped
  * strings. HANDLE values fence loudly (Node walks own enumerable props
@@ -1361,16 +1444,18 @@ static bool scr_dyn_json_write(ScrJsonBuf *b, const ScrDyn *d) {
   case SCR_DYN_OBJ: {
     scr_jb_putc(b, '{');
     bool first = true;
-    for (size_t i = 0; i < d->v.obj.len; i++) {
+    size_t *ord = scr_dyn_obj_key_order(d); /* JS own-key order, NULL when stored order is it */
+    for (size_t oi = 0; oi < d->v.obj.len; oi++) {
+      const ScrDynEntry *ent = &d->v.obj.entries[ord ? ord[oi] : oi];
       ScrJsonBuf probe;
       scr_jb_init(&probe);
-      if (!scr_dyn_json_write(&probe, d->v.obj.entries[i].value)) {
+      if (!scr_dyn_json_write(&probe, ent->value)) {
         scr_jb_dispose(&probe);
         continue; /* undefined/function members drop, like Node */
       }
       if (!first) scr_jb_putc(b, ',');
       first = false;
-      ScrStr *k = scr_str_new(d->v.obj.entries[i].key, d->v.obj.entries[i].key_len);
+      ScrStr *k = scr_str_new(ent->key, ent->key_len);
       scr_jb_put_json_str(b, k);
       scr_str_release(k);
       scr_jb_putc(b, ':');
@@ -1378,6 +1463,7 @@ static bool scr_dyn_json_write(ScrJsonBuf *b, const ScrDyn *d) {
       scr_jb_write(b, body->data, body->len);
       scr_str_release(body);
     }
+    free(ord);
     scr_jb_putc(b, '}');
     return true;
   }
@@ -1988,8 +2074,12 @@ void scr_jb_put_dyn(ScrJsonBuf *b, const ScrDyn *d) {
   case SCR_DYN_OBJ: {
     scr_jb_putc(b, '{');
     bool first = true;
-    for (size_t i = 0; i < d->v.obj.len; i++) {
-      const ScrDynEntry *e = &d->v.obj.entries[i];
+    /* JS own-key order, not the entry table's insertion order: an enum
+     * table's integer keys serialize first, ascending, exactly as Node
+     * does (scr_dyn_obj_key_order). */
+    size_t *ord = scr_dyn_obj_key_order(d);
+    for (size_t oi = 0; oi < d->v.obj.len; oi++) {
+      const ScrDynEntry *e = &d->v.obj.entries[ord ? ord[oi] : oi];
       if (e->value->kind == SCR_DYN_UNDEF || e->value->kind == SCR_DYN_FUNC) continue; /* dropped, like Node */
       if (e->value->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(e->value, "function")) continue; /* engine functions drop too */
       if (!first) scr_jb_putc(b, ',');
@@ -2001,6 +2091,7 @@ void scr_jb_put_dyn(ScrJsonBuf *b, const ScrDyn *d) {
       scr_jb_putc(b, ':');
       scr_jb_put_dyn(b, e->value);
     }
+    free(ord);
     scr_jb_putc(b, '}');
     return;
   }
@@ -3053,7 +3144,9 @@ bool scr_dyn_err_instanceof(const ScrDyn *d, double kind) {
  * answer their index keys; other scalars an empty array; null/undefined
  * throw Node's catchable TypeError. */
 
-/* The array-index test (ECMA: a canonical numeric string < 2^32-1). */
+/* The array-index test (ECMA: a canonical numeric string < 2^32-1).
+ * Forward-declared above scr_dyn_obj_key_order, the single own-key-order
+ * projection this runtime enumerates through. */
 static bool scr_dyn_key_is_index(const char *key, size_t len, double *out) {
   if (len == 0 || len > 10) return false;
   if (key[0] == '0' && len > 1) return false;
@@ -3111,43 +3204,16 @@ static ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
   }
   ScrDyn *out = scr_dyn_new_arr();
   if (v->kind == SCR_DYN_OBJ) {
-    size_t n = v->v.obj.len;
-    /* Two passes: array-index keys ascending, then the rest in insertion
-     * order (JS's own-key order). Index keys are rare in dyn objects —
-     * the ascending pass is a simple selection scan. */
-    bool *is_index = malloc(n ? n * sizeof *is_index : 1);
-    double *idx = malloc(n ? n * sizeof *idx : 1);
-    if (!is_index || !idx) {
-      scr_trap("scriptc: out of memory\n");
-    }
-    size_t index_count = 0;
-    for (size_t i = 0; i < n; i++) {
-      const ScrDynEntry *e = &v->v.obj.entries[i];
-      /* Reserved '%'-prefixed members (the checked-dynamic tree's error marker) never
-       * appear in user objects — '%' cannot start a JS identifier-ish
-       * JSON key from this runtime's own producers; skip defensively. */
-      is_index[i] = scr_dyn_key_is_index(e->key, e->key_len, &idx[i]);
-      if (is_index[i]) index_count++;
-    }
-    double last = -1;
-    for (size_t done = 0; done < index_count; done++) {
-      size_t best = (size_t)-1;
-      for (size_t i = 0; i < n; i++) {
-        if (!is_index[i] || idx[i] <= last) continue;
-        if (best == (size_t)-1 || idx[i] < idx[best]) best = i;
-      }
-      if (best == (size_t)-1) break;
-      last = idx[best];
-      const ScrDynEntry *e = &v->v.obj.entries[best];
+    /* JS's own-key order, from the shared projection. This used to be a
+     * private two-pass selection scan living only here, which is how
+     * Object.keys ended up right while JSON.stringify, util.format's %j
+     * and util.inspect were all wrong about the same object. */
+    size_t *ord = scr_dyn_obj_key_order(v);
+    for (size_t oi = 0; oi < v->v.obj.len; oi++) {
+      const ScrDynEntry *e = &v->v.obj.entries[ord ? ord[oi] : oi];
       scr_dyn_objwalk_push(out, mode, e->key, e->key_len, e->value);
     }
-    for (size_t i = 0; i < n; i++) {
-      if (is_index[i]) continue;
-      const ScrDynEntry *e = &v->v.obj.entries[i];
-      scr_dyn_objwalk_push(out, mode, e->key, e->key_len, e->value);
-    }
-    free(is_index);
-    free(idx);
+    free(ord);
     return out;
   }
   if (v->kind == SCR_DYN_ARR || v->kind == SCR_DYN_BYTES) {
@@ -3221,8 +3287,11 @@ static ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
      * divergence (SEMANTICS.md), not a new one. */
     ScrDyn *table = (ScrDyn *)scr_box_get_ref(v->v.fn.clo->props); /* +1 */
     if (table != NULL && table->kind == SCR_DYN_OBJ) {
-      for (size_t i = 0; i < table->v.obj.len; i++) {
-        const ScrDynEntry *e = &table->v.obj.entries[i];
+      /* A function's own keys take the same projection as an object's —
+       * `f.a = 1; f[0] = 2` lists ["0","a"] in Node too. */
+      size_t *ford = scr_dyn_obj_key_order(table);
+      for (size_t oi = 0; oi < table->v.obj.len; oi++) {
+        const ScrDynEntry *e = &table->v.obj.entries[ford ? ford[oi] : oi];
         if ((e->key_len == 4 && memcmp(e->key, "name", 4) == 0) ||
             (e->key_len == 6 && memcmp(e->key, "length", 6) == 0) ||
             /* `prototype` joins them for the same reason and with the
@@ -3236,6 +3305,7 @@ static ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
         }
         scr_dyn_objwalk_push(out, mode, e->key, e->key_len, e->value);
       }
+      free(ford);
     }
     scr_dyn_release(table);
     return out;
