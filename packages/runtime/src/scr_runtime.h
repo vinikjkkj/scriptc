@@ -2968,14 +2968,16 @@ struct ScrDyn {
     ScrStr *str; /* owned */
     ScrBytes *bytes; /* owned (SCR_DYN_BYTES) */
     struct { size_t len; size_t cap; ScrDyn **items; } arr;      /* owned */
-    /* SCR_DYN_OBJ: the own members (owned), plus the two fields that make
-     * the object a member of a PROTOTYPE CHAIN.
+    /* SCR_DYN_OBJ: the own DATA members (owned), plus the three fields
+     * that make the object a member of a PROTOTYPE CHAIN and a carrier of
+     * ACCESSOR properties.
      *
      *   proto  the [[Prototype]] link (owned, NULL for a plain literal and
      *          for the null-prototype dictionary). Set by `new F()` to
      *          F's lazily created prototype object. The keyed READ, the
      *          method dispatch and `in` walk it on an own-member MISS;
-     *          the keyed WRITE, Object.keys/values/entries, hasOwn, JSON
+     *          the keyed WRITE walks it only to find a SETTER (JS's
+     *          OrdinarySet does); Object.keys/values/entries, hasOwn, JSON
      *          and structuredClone are chain-BLIND (own-only is what JS
      *          says for every one of them).
      *   cname  the constructor's NAME for util.inspect's prefix (Node
@@ -2984,11 +2986,30 @@ struct ScrDyn {
      *          off the FUNC box's `name`, never freed and never owned —
      *          so it cannot pin the closure the way a real `constructor`
      *          back-link would (see scr_dyn_fn_prototype).
+     *   accessors
+     *          the own ACCESSOR properties (owned, NULL until the first
+     *          `Object.defineProperty(o, k, {get,set})`): an OBJ dyn whose
+     *          member `k` is the two-element ARR `[getter, setter]` (an
+     *          absent half is the undefined singleton). It is a SEPARATE
+     *          table from `entries` on purpose, and the reason is the
+     *          whole point of the representation: an accessor defined
+     *          without `enumerable: true` is NOT an own enumerable key, so
+     *          Object.keys / values / entries / assign / JSON.stringify /
+     *          structuredClone / deepStrictEqual must not see it — and
+     *          every one of them reads `entries`. Keeping accessors out of
+     *          `entries` makes all of them correct by construction rather
+     *          than by remembering to filter. Only [[Get]], [[Set]] and
+     *          `in` consult it. (protobufjs's `_field` oneof accessors are
+     *          exactly this shape, and their whole job is to keep `_field`
+     *          off `Object.keys(msg)`.)
      *
      * The freelist recycles OBJ nodes with their entries buffer intact
-     * (scr_dyn_alloc); both fields are cleared on release so a recycled
-     * node never inherits a chain. */
-    struct { size_t len; size_t cap; ScrDynEntry *entries; ScrDyn *proto; const char *cname; } obj; /* owned */
+     * (scr_dyn_alloc); all three are cleared on release so a recycled
+     * node never inherits a chain or a stale accessor table. */
+    struct {
+      size_t len; size_t cap; ScrDynEntry *entries;
+      ScrDyn *proto; const char *cname; ScrDyn *accessors;
+    } obj; /* owned */
     /* SCR_DYN_FUNC: the boxed closure (owned) + its call descriptor. `sig`
      * and `name` are static compiler-emitted literals (never freed); name
      * may be NULL (anonymous — inspect prints [Function (anonymous)]).
@@ -3071,6 +3092,35 @@ ScrDyn *scr_dyn_fn_prototype(ScrDyn *fn);
 bool scr_dyn_proto_chain_is_fn_pub(const ScrDyn *d);
 /* Throws that fence (the emitted keyed read calls it). */
 void scr_dyn_proto_ctor_fence(void);
+
+/* ── ACCESSOR PROPERTIES (Object.defineProperty's get/set half) ────────
+ *
+ * scr_dyn_obj_key_get is JS's [[Get]] on an OBJ receiver, WHOLE: own
+ * member, own accessor, the prototype chain, and the `constructor` fence.
+ * Both backends' keyed-read walkers call it instead of open-coding the
+ * walk, so the C and LLVM lanes cannot drift apart on what a property
+ * answers. Always +1; NULL only with a pending exception (a getter that
+ * threw, or the fence). A getter runs with `this` bound to `recv` — the
+ * object the READ started from, not the one the accessor was found on.
+ *
+ * scr_dyn_obj_key_present is `in`'s answer over the same walk (accessors
+ * included — they are properties; Object.keys still skips them because
+ * they never enter `entries`). Never throws.
+ *
+ * scr_dyn_obj_define_accessor installs one pair (borrowed halves; either
+ * may be the undefined singleton for a one-sided accessor) and drops any
+ * own DATA member of that name, because defineProperty CONVERTS a data
+ * property into an accessor property. `configurable` rides along so that
+ * scr_dyn_obj_accessor_sealed can answer JS's "Cannot redefine property"
+ * — the flag defaults to FALSE, so a second define over an accessor is a
+ * TypeError unless the first one asked for it. */
+ScrDyn *scr_dyn_obj_key_get(ScrDyn *recv, const char *key, size_t key_len);
+bool scr_dyn_obj_key_present(const ScrDyn *d, const char *key, size_t key_len);
+void scr_dyn_obj_define_accessor(ScrDyn *recv, const char *key, size_t key_len,
+                                 ScrDyn *getter, ScrDyn *setter, bool configurable);
+bool scr_dyn_obj_accessor_sealed(const ScrDyn *recv, const char *key, size_t key_len);
+/* …and drops one, for the redefinition back to a DATA property. */
+void scr_dyn_obj_drop_accessor(ScrDyn *recv, const char *key, size_t key_len);
 
 /* `new f(...args)` over a dyn FUNCTION value — the JS [[Construct]] the
  * pre-class constructor idiom needs. Allocates a fresh OBJ whose
@@ -3334,12 +3384,41 @@ ScrDyn *scr_dyn_fn_props(ScrDyn *d);
  * rather than this predicate. Object.hasOwn is exact. */
 bool scr_dyn_fn_has(const ScrDyn *v, const char *key, size_t key_len);
 /* Object.defineProperties over dyn values (targets: OBJ and FUNC): each
- * descriptor's `value` becomes a plain own property — writable/enumerable/
- * configurable are accepted and IGNORED (dyn properties are plain data
- * properties; SEMANTICS.md), get/set throw the loud unsupported Error.
- * Returns the target (+1, JS's return), or NULL with a pending catchable
- * TypeError (non-object target/descriptor — Node's messages). */
+ * descriptor is defined by the SAME core the singular form uses
+ * (dyn_define_one), so the two spellings cannot disagree — a data
+ * descriptor's `value` becomes a plain own property with
+ * writable/enumerable/configurable accepted and IGNORED (dyn data
+ * properties; SEMANTICS' documented stance), and an accessor descriptor
+ * over an OBJ target becomes a real accessor property. Returns the target
+ * (+1, JS's return), or NULL with a pending catchable throw. */
 ScrDyn *scr_dyn_define_props(ScrDyn *target, ScrDyn *descs);
+/* Object.defineProperty over a dyn target — the SINGULAR form, and the
+ * one that carries the get/set half.
+ *
+ *   accessor descriptor  an OBJ target stores the (get, set) pair as an
+ *                        accessor property (scr_dyn_obj_define_accessor);
+ *                        reads call the getter and writes the setter,
+ *                        both with `this` bound to the RECEIVER. Shared
+ *                        with the plural form, so the two spellings
+ *                        cannot disagree. A FUNC target, and any
+ *                        `enumerable: true` accessor, refuse loudly.
+ *   data descriptor      EXACT-OR-LOUD, and this is where it parts
+ *                        company with the plural form. defineProperty
+ *                        defaults every flag to false, so bare
+ *                        `{ value: v }` means non-enumerable and
+ *                        non-writable — which a dyn own member is not.
+ *                        Only `writable: true, enumerable: true` (the
+ *                        descriptor a plain own member reproduces
+ *                        exactly) is admitted; anything else refuses by
+ *                        name rather than silently answering a different
+ *                        Object.keys. `configurable` is accepted and
+ *                        ignored — observable only through `delete` and
+ *                        redefinition, neither of which lowers over a dyn
+ *                        receiver today.
+ *
+ * Returns the target (+1, JS's return), or NULL with a pending catchable
+ * throw. Target and descriptor borrowed. */
+ScrDyn *scr_dyn_define_prop(ScrDyn *target, ScrStr *key, ScrDyn *desc);
 /* Boxes a closure as a callable dyn value. Ownership of `clo` MOVES in
  * (callers retain first when they keep their own reference); `sig`/`name`
  * must be static literals (the box never frees them; name may be NULL). */

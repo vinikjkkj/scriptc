@@ -1843,11 +1843,25 @@ export type IrLibFn =
    * both borrowed dyn; result: the target, +1 — JS's return value).
    * Value descriptors become plain own properties on OBJ and FUNC targets
    * (writable/enumerable/configurable accepted and IGNORED — dyn
-   * properties are plain data properties, SEMANTICS.md); get/set
-   * descriptors and non-object targets/descriptors throw catchably
-   * (Node's TypeError texts; accessors the loud unsupported Error). In
-   * the may-throw seed set. */
+   * properties are plain data properties, SEMANTICS.md); an ACCESSOR
+   * descriptor over an OBJ target defines a real accessor property (the
+   * singular form's rule, shared); non-object targets/descriptors throw
+   * catchably (Node's TypeError texts). In the may-throw seed set. */
   | "dyn.defineProps"
+  /** `Object.defineProperty(target, key, descriptor)` over a
+   * checked-dynamic target — args (dyn target, string key, dyn
+   * descriptor), all borrowed; result the TARGET (+1, JS's return).
+   *
+   * The singular form is not the plural one with a single entry: it is
+   * the spelling an ACCESSOR descriptor arrives in, and it is the single
+   * most common refusal in the zapo artifact (`pbjs --target
+   * static-module` emits one per proto3 `optional` field). An OBJ target
+   * takes `{get,set}` as a real accessor property — reads call the
+   * getter and writes the setter with `this` bound to the receiver, and
+   * the key stays off Object.keys because a non-enumerable accessor is
+   * not an own enumerable key. A FUNC target, and any `enumerable: true`
+   * accessor, keep a loud runtime refusal. In the may-throw seed set. */
+  | "dyn.defineProp"
   /** Bare `typeof v` on a dyn value AS A STRING (arg: the dyn value,
    * borrowed; result: an owned string) — the dyn kind's JS answer:
    * undefined→"undefined", null/object/array/bytes→"object" (JS's oldest
@@ -6492,7 +6506,10 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
       return;
     }
     const node = v as { kind?: unknown; fn?: unknown };
-    if (node.kind === "dynInvoke" || (node.kind === "libCall" && node.fn === "dyn.defineProps")) {
+    if (
+      node.kind === "dynInvoke" ||
+      (node.kind === "libCall" && (node.fn === "dyn.defineProps" || node.fn === "dyn.defineProp"))
+    ) {
       found = true;
       return;
     }
@@ -7245,9 +7262,11 @@ const LIB_MODE_REFUSED_PREFIXES: readonly [string, string][] = [
   ["urj.", "unhandled-rejection tracking"],
   ["dc.", "the diagnostics_channel surface"],
   // NOT the whole "dyn." family: the checked-dynamic tree (ScrDyn) is
-  // static-tier surface hosted by always-linked units; only defineProps
-  // drags the prototype-dispatch unit (scr_dyn_invoke.c → scr_async_dyn.c).
+  // static-tier surface hosted by always-linked units; only the two
+  // property definers drag the prototype-dispatch unit
+  // (scr_dyn_invoke.c → scr_async_dyn.c).
   ["dyn.defineProps", "checked-dynamic prototype dispatch"],
+  ["dyn.defineProp", "checked-dynamic prototype dispatch"],
 ];
 
 /** Value/type kinds whose mere presence means an excluded unit's code (or
@@ -7696,6 +7715,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.iterPack",
   "dyn.toString",
   "dyn.defineProps",
+  "dyn.defineProp",
   "process.chdir",
   "fs.realpathSync",
   "fs.readFileSync",
