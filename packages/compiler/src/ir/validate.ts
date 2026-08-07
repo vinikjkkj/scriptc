@@ -3211,6 +3211,16 @@ function validateFunction(
         }
         break;
       }
+      case "dynArrNew": {
+        if (e.type.kind !== "dyn") err(`dynArrNew must be dyn-typed, got ${e.type.kind}`, e.loc);
+        checkExpr(e.arg);
+        // f64 is the statically-known LENGTH; dyn is the undecided
+        // one-argument constructor, which asks the runtime value.
+        if (e.arg.type.kind !== "f64" && e.arg.type.kind !== "dyn") {
+          err(`dynArrNew argument of kind ${e.arg.type.kind} (must be f64 or dyn)`, e.loc);
+        }
+        break;
+      }
       case "unionWrap": {
         // A unitLit is legal exactly HERE: validate it inline (checkExpr
         // rejects bare ones) — the unit spelling must agree with its type,

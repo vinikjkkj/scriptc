@@ -5537,6 +5537,61 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         if (args.some(ts.isSpreadElement)) {
           L.noLowering("new Array with spread arguments", expr, "write the array literal: [...xs]");
         }
+        // Where does this construction LIVE? A static array type — the
+        // expression's own or the contextual annotation — takes the static
+        // lowerings below. `new Array(...)` in a JavaScript source types
+        // `any[]`, which has no static home; an `unknown[]` slot maps to
+        // the checked-dynamic tree wholesale (mapType's dyn-element array
+        // rule). Both build a dyn ARRAY here, exactly as the array LITERAL
+        // already does at those same two slots (lower-exprs' JS
+        // declaration fallback) — length/index/method uses then ride the
+        // keyed-dyn paths that already carry them.
+        const staticArr = ((): (IrType & { kind: "array" }) | null => {
+          let t = L.mapTypeOf(L.typeOf(expr));
+          if (t?.kind !== "array") {
+            const ctx = L.checker.getContextualType(expr);
+            const ctxMapped = ctx ? L.mapTypeOf(ctx) : null;
+            if (ctxMapped?.kind === "array") t = ctxMapped;
+          }
+          return t?.kind === "array" ? t : null;
+        })();
+        if (
+          staticArr === null &&
+          (isJsSourceFile(expr.getSourceFile()) || L.mapTypeOf(L.typeOf(expr))?.kind === "dyn")
+        ) {
+          if (args.length === 1) {
+            // The one-argument form is JS's fork: a NUMBER is a length
+            // (holes), anything else is the array's single element
+            // (`new Array('3')` is `['3']`). A statically numeric argument
+            // decides it here; an implicit-any one does NOT, and guessing
+            // either way would be a silent wrong answer at every call with
+            // the other kind — so the runtime asks the value (dynArrNew's
+            // dyn arm), which is what JS does.
+            const argT = L.mapTypeOf(L.typeOf(args[0]!));
+            const arg =
+              argT?.kind === "f64"
+                ? L.lowerExprExpecting(args[0]!, F64)
+                : L.coerceToExpected(L.lowerExpr(args[0]!), DYN);
+            if (arg.type.kind !== "f64" && arg.type.kind !== "dyn") {
+              L.unsupported(
+                "SC1101",
+                args[0]!,
+                `'${L.fmt(arg.type)}' as the argument of a dynamic (any[]) Array constructor`,
+              );
+            }
+            return { kind: "dynArrNew", arg, type: DYN, loc };
+          }
+          // No arguments (the empty array) or the ELEMENTS form: every
+          // argument is an element, so this IS the dyn array literal.
+          const elems = args.map((a): IrExpr => {
+            const v = L.coerceToExpected(L.lowerExpr(a), DYN);
+            if (v.type.kind !== "dyn") {
+              L.unsupported("SC1101", a, `holding '${L.fmt(v.type)}' values in a dynamic (any[]) array`);
+            }
+            return v;
+          });
+          return { kind: "dynArrLit", elems, type: DYN, loc };
+        }
         if (args.length === 1 && L.mapTypeOf(L.typeOf(args[0]!))?.kind === "f64") {
           // `new Array(n)` allocates HOLES and is written to be filled by
           // index before anything reads it -- the same shape mapper-less
@@ -5547,13 +5602,8 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           // if read before assignment (SEMANTICS.md 46) rather than
           // answering a value Node never would.
           const n = L.lowerExprExpecting(args[0]!, F64);
-          let arrT = L.mapTypeOf(L.typeOf(expr));
-          if (arrT?.kind !== "array") {
-            const ctx = L.checker.getContextualType(expr);
-            const ctxMapped = ctx ? L.mapTypeOf(ctx) : null;
-            if (ctxMapped?.kind === "array") arrT = ctxMapped;
-          }
-          if (arrT?.kind !== "array") L.badType(expr, L.typeOf(expr));
+          if (staticArr === null) L.badType(expr, L.typeOf(expr));
+          const arrT = staticArr;
           const elem = arrT.elem;
           // `new Array(n).fill(v)` is a COMPOSED form: the whole-range
           // fill writes every slot before anything can read one, so a
@@ -5584,15 +5634,12 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           }
           return { kind: "arrayNewLen", length: n, type: arrT, loc };
         }
-        let t = L.mapTypeOf(L.typeOf(expr));
         // JS's `new Array()` types any[]; the contextual type carries the
-        // annotation when one exists (the new Map() stance).
-        if (t?.kind !== "array") {
-          const ctx = L.checker.getContextualType(expr);
-          const ctxMapped = ctx ? L.mapTypeOf(ctx) : null;
-          if (ctxMapped?.kind === "array") t = ctxMapped;
-        }
-        if (t?.kind !== "array") L.badType(expr, L.typeOf(expr));
+        // annotation when one exists (the new Map() stance) — staticArr
+        // consulted both, and the checked-dynamic build above already
+        // answered the two slots that have no static home.
+        if (staticArr === null) L.badType(expr, L.typeOf(expr));
+        const t = staticArr;
         const elems = args.map((a) => L.lowerExprExpecting(a, t.elem));
         return { kind: "arrayLit", elems, type: t, loc };
       }

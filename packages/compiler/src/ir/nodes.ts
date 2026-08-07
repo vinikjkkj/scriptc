@@ -4949,6 +4949,20 @@ export type IrExpr =
    * `['pwd', []]` — and evolving `[]` declarations): each element is
    * already a dyn value; the result owns them. Never throws. */
   | { kind: "dynArrLit"; elems: IrExpr[]; type: IrType; loc: SrcLoc }
+  /** The `Array` CONSTRUCTOR over a runtime-arity length — the dyn twin of
+   * arrayNewLen, for `new Array(n)` where the element type has no static
+   * home (`any[]` in a JavaScript source, an `unknown[]` slot). `arg` is
+   * either f64 (the length is statically a number: the spec's ArrayCreate,
+   * `scr_dyn_new_arr_len`) or dyn (the static type does NOT decide whether
+   * the one argument is a length or the array's single element — JS asks the
+   * runtime VALUE, and so does `scr_dyn_new_arr_ctor1`; `new Array('3')` is
+   * `['3']`). The slots read undefined, which is what a JS hole reads —
+   * the padding stance scr_dyn_key_set's index growth already ratified, and
+   * the only observable difference is `in`/Object.keys/forEach's skip.
+   * The operand is borrowed; the result is owned (+1).
+   * MAY THROW: a length that is not a non-negative integer below 2^32 is
+   * V8's catchable `RangeError: Invalid array length`. */
+  | { kind: "dynArrNew"; arg: IrExpr; type: IrType; loc: SrcLoc }
   /** A dyn OBJECT built member-by-member. With no `fields` it is the empty
    * object (the JS stand-in for opaque container values — `new WeakMap()`
    * in harness code: the value exists for identity; every reached METHOD
