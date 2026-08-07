@@ -747,13 +747,10 @@ ScrDyn *scr_dyn_define_props(ScrDyn *target, ScrDyn *descs) {
     if (target->kind == SCR_DYN_OBJ) {
       scr_dyn_obj_set(target, ent->key, ent->key_len, scr_dyn_retain(value));
     } else {
-      if (!target->v.fn.clo->props) {
-        ScrBox *box = scr_box_new_obj(&scr_dyn_retain_v, &scr_dyn_release_v, NULL);
-        ScrDyn *table = scr_dyn_new_obj();
-        scr_box_set_ref(box, table); /* the box owns the fresh table */
-        target->v.fn.clo->props = box;
-      }
-      ScrDyn *table = (ScrDyn *)scr_box_get_ref(target->v.fn.clo->props); /* +1 */
+      /* The same table the keyed write and scr_dyn_fn_get use — one
+       * allocator (scr_dyn_fn_props) so the two spellings of "give this
+       * function a property" can never end up with two tables. */
+      ScrDyn *table = scr_dyn_fn_props(target); /* +1 */
       scr_dyn_obj_set(table, ent->key, ent->key_len, scr_dyn_retain(value));
       scr_dyn_release(table);
     }

@@ -125,6 +125,19 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // object, so the importer's reads and the package's own writes meet
     // at one storage.
     ["fnmembers", "fnmembers-cli.ts"],
+    // fnprops writes own properties ONTO a function value that arrives
+    // through the checked-dynamic path — the other half of the same
+    // idiom, where the receiver is a dyn function box rather than a name
+    // the frontend can route to a module global. The read side already
+    // answered from the closure's property table while the WRITE threw
+    // "Cannot create property 'k' on function", so this program compiled
+    // with no diagnostic and no fence and then died at run time. Every
+    // observable it prints is a Node answer: the read back, own-property
+    // presence (the call protobufjs's encode guards every field with),
+    // `in`, Object.keys, Object.assign, and — the one that decides where
+    // the table lives — a SECOND box of the same function value seeing
+    // the same properties.
+    ["fnprops", "fnprops-cli.ts"],
   ] as const)("%s compiles statically and byte-matches Node", async ([pkg, file]) => {
     const entry = join(pilotRoot, file);
     const binary = await buildStatic(entry, [pkg]);
@@ -280,6 +293,22 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
   test("fnmembers's function-member idiom compiles with nothing left over", () => {
     const { coverage } = analyze(join(pilotRoot, "fnmembers-cli.ts"), { npmStatic: ["fnmembers"] });
     expect(coverage.npmStatic).toEqual([{ package: "fnmembers", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
+    expect(coverage.stats.statementsFailed).toBe(0);
+  }, 120_000);
+
+  // fnprops's frontier, pinned. This one compiles clean on BOTH sides of
+  // the fix — the write reached the dyn keyed write all along and simply
+  // threw there — so this pin does not guard the runtime behaviour (the
+  // differential above does). What it guards is that the whole shape
+  // stays on the static path: if any of the keyed write, Object.hasOwn,
+  // `in`, Object.keys or Object.assign over a function value ever falls
+  // back to a fence, the count moves here first.
+  test("fnprops's function-value property writes stay on the static path", () => {
+    const { coverage } = analyze(join(pilotRoot, "fnprops-cli.ts"), { npmStatic: ["fnprops"] });
+    expect(coverage.npmStatic).toEqual([{ package: "fnprops", status: "static" }]);
     expect(coverage.preflightFailed).toBe(false);
     expect(coverage.diagnostics).toHaveLength(0);
     expect(coverage.runtimeFences ?? []).toHaveLength(0);

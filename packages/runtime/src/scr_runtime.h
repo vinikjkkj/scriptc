@@ -3171,6 +3171,20 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
  * for anonymous) and "length" (the boxed arity). Returns +1, or NULL when
  * the key answers nothing (the caller's undefined). Never throws. */
 ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len);
+/* The FUNC node's own-property table, ALLOCATING it on first use (+1; the
+ * caller releases). FUNC receivers only. The table lives on the CLOSURE,
+ * not the dyn box — boxing one function value twice yields two boxes
+ * sharing one closure, and JS has ONE function object, so every box must
+ * see the same properties. That is also why the emitted per-USE box is
+ * correct and no declaration-site interning is needed. */
+ScrDyn *scr_dyn_fn_props(ScrDyn *d);
+/* Own-property presence on a FUNC node — the property table, then the
+ * name/length built-ins. It asks scr_dyn_fn_get, so presence can never
+ * disagree with what the keyed READ answers. Borrows; never throws.
+ * Declared divergence: Node's `in` also walks Function.prototype
+ * ("call" in f is true there), which is the missing prototype chain
+ * rather than this predicate. Object.hasOwn is exact. */
+bool scr_dyn_fn_has(const ScrDyn *v, const char *key, size_t key_len);
 /* Object.defineProperties over dyn values (targets: OBJ and FUNC): each
  * descriptor's `value` becomes a plain own property — writable/enumerable/
  * configurable are accepted and IGNORED (dyn properties are plain data

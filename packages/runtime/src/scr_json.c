@@ -1527,6 +1527,20 @@ ScrStr *scr_dyn_string_coerce_js(const ScrDyn *d) {
  * ignore silently — the loud choice, SEMANTICS.md). Receiver, key, and
  * value are all BORROWED (the member retains the value in). */
 static const char *scr_dyn_kind_name(const ScrDyn *d);
+/* Own-property presence on a FUNC node, for `in` and Object.hasOwn. It
+ * asks scr_dyn_fn_get, so presence can never disagree with what the READ
+ * answers: the property table first, then the name/length built-ins.
+ *
+ * Declared divergence: Node's `in` also walks Function.prototype, so
+ * `"call" in f` is true there and false here. That is the missing
+ * prototype chain, not this arm — it answered false before the table was
+ * writable too. Object.hasOwn is exact. */
+bool scr_dyn_fn_has(const ScrDyn *v, const char *key, size_t key_len) {
+  ScrDyn *m = scr_dyn_fn_get(v, key, key_len); /* +1 or NULL */
+  if (m == NULL) return false;
+  scr_dyn_release(m);
+  return true;
+}
 /* `key in v` with a RUNTIME key (the compile-time dynHasKey fold, per
  * value): OBJ answers own-member presence, ARR answers 'length' or a
  * valid dense index, every other kind false (tsc admits `in` only on
@@ -1545,6 +1559,10 @@ bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
     }
     return idx < v->v.arr.len;
   }
+  /* A function value carries own properties (assignment and
+   * defineProperties both land in one table), so `k in f` answers from
+   * the same place the read does. */
+  if (v->kind == SCR_DYN_FUNC) return scr_dyn_fn_has(v, key->data, key->len);
   return false;
 }
 
@@ -1582,6 +1600,50 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
      * island-side readers see it); the value crosses through the uniform
      * from_dyn conversion, and engine refusals bridge catchably. */
     scr_dyn_jsval_ops()->key_set(recv->v.jsval.cell, key, value);
+    return;
+  }
+  if (recv->kind == SCR_DYN_FUNC) {
+    /* `f.k = v` on a function value — the namespace-object idiom
+     * (`Codec.encode = fn`) untyped CommonJS is written in. It lands in
+     * the SAME own-property table Object.defineProperties writes and
+     * scr_dyn_fn_get / scr_dyn_invoke already read: the read side shipped
+     * first, so before this the two disagreed — defineProperty(f,'x',…)
+     * then `f.x` answered, but `f.x = 1` threw. The table hangs off the
+     * closure, so a per-USE box is correct (see scr_dyn_fn_props).
+     *
+     * Which keys store is Node's own answer to "does plain assignment
+     * create an own DATA property here":
+     *   name/length  non-writable own properties — strict mode throws,
+     *                sloppy silently ignores; either way no own data
+     *                property appears, so storing would be a wrong read
+     *                afterwards. LOUD fence.
+     *   caller/args  poisoned accessors on a strict function — assignment
+     *                throws TypeError. LOUD fence.
+     *   prototype    a WRITABLE own data property on a function
+     *                declaration; assignment succeeds in Node, so it
+     *                stores. Nothing consumes it as a prototype CHAIN yet
+     *                — `new`/`instanceof` over non-program values and
+     *                Object.create(<proto>) all still refuse at compile
+     *                time — so this is a plain own property and answers
+     *                no differently than Node until that lands.
+     *   everything   a fresh own data property. Stores. */
+    if ((key->len == 4 && memcmp(key->data, "name", 4) == 0) ||
+        (key->len == 6 && memcmp(key->data, "length", 6) == 0) ||
+        (key->len == 6 && memcmp(key->data, "caller", 6) == 0) ||
+        (key->len == 9 && memcmp(key->data, "arguments", 9) == 0)) {
+      ScrJsonBuf fb;
+      scr_jb_init(&fb);
+      scr_jb_puts(&fb, "assigning the read-only function member '");
+      for (size_t i = 0; i < key->len; i++) scr_jb_putc(&fb, key->data[i]);
+      scr_jb_puts(&fb, "' on a dynamic function value is not supported yet"
+                       " (JS creates no own data property there: strict mode throws,"
+                       " sloppy mode ignores — Object.defineProperty is the spelling that lands)");
+      scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&fb));
+      return;
+    }
+    ScrDyn *table = scr_dyn_fn_props(recv); /* +1 */
+    scr_dyn_obj_set(table, key->data, key->len, scr_dyn_retain(value));
+    scr_dyn_release(table);
     return;
   }
   ScrJsonBuf b;
@@ -2334,6 +2396,20 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
   return NULL;
 }
 
+/* The FUNC node's own-property table, allocated on first write (see
+ * scr_runtime.h). It hangs off the CLOSURE, so every box of one function
+ * value shares it — which is what makes a per-USE box correct: JS has one
+ * function object per closure, not one per boundary crossing. +1. */
+ScrDyn *scr_dyn_fn_props(ScrDyn *d) {
+  if (!d->v.fn.clo->props) {
+    ScrBox *box = scr_box_new_obj(&scr_dyn_retain_v, &scr_dyn_release_v, NULL);
+    ScrDyn *table = scr_dyn_new_obj();
+    scr_box_set_ref(box, table); /* the box owns the fresh table */
+    d->v.fn.clo->props = box;
+  }
+  return (ScrDyn *)scr_box_get_ref(d->v.fn.clo->props); /* +1 */
+}
+
 /* ── structuredClone over the checked-dynamic tree ─────────────────────────────────────
  * The JSON-safe subset plus bytes, deep. Functions and handle kinds
  * throw the spec's catchable DataCloneError; cycles throw the scriptc
@@ -2649,8 +2725,38 @@ static ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
     }
     return out;
   }
-  /* Scalars (numbers, booleans, functions, handles): no own enumerable
-   * string keys. */
+  if (v->kind == SCR_DYN_FUNC && v->v.fn.clo->props) {
+    /* A function value's own ENUMERABLE keys — the property table, minus
+     * the two built-ins. Without this arm the keyed WRITE would create a
+     * new wrong answer of its own (`f.x = 1; Object.keys(f)` answering
+     * [] where Node answers ["x"]), which is why it lands in the same
+     * commit as the write rather than after it.
+     *
+     * `name`/`length` are skipped because they are the only keys that can
+     * be in the table while Node calls them non-enumerable: the keyed
+     * write REFUSES them (see scr_dyn_key_set), so the only way in is
+     * Object.defineProperties, whose bare `{value: …}` descriptor is
+     * non-enumerable in Node too. Every OTHER table key is enumerable in
+     * Node when it got there by assignment; a defineProperties-written
+     * one is listed here where Node hides it, which is the runtime's
+     * already-documented "dyn properties are plain data properties"
+     * divergence (SEMANTICS.md), not a new one. */
+    ScrDyn *table = (ScrDyn *)scr_box_get_ref(v->v.fn.clo->props); /* +1 */
+    if (table != NULL && table->kind == SCR_DYN_OBJ) {
+      for (size_t i = 0; i < table->v.obj.len; i++) {
+        const ScrDynEntry *e = &table->v.obj.entries[i];
+        if ((e->key_len == 4 && memcmp(e->key, "name", 4) == 0) ||
+            (e->key_len == 6 && memcmp(e->key, "length", 6) == 0)) {
+          continue;
+        }
+        scr_dyn_objwalk_push(out, mode, e->key, e->key_len, e->value);
+      }
+    }
+    scr_dyn_release(table);
+    return out;
+  }
+  /* Scalars (numbers, booleans, handles) and a function with no property
+   * table: no own enumerable string keys. */
   return out;
 }
 
@@ -2676,8 +2782,13 @@ static void scr_dyn_assign_from(ScrDyn *target, const ScrDyn *src) {
     }
     return;
   }
+  /* FUNC rides the entries walk too, for the same reason Object.keys
+   * does: once a function value can CARRY own properties, "a function
+   * source copies nothing" stops being Node's answer. The walk lists
+   * exactly the enumerable set (built-ins skipped), so this arm and
+   * Object.keys can never disagree. */
   if (src->kind != SCR_DYN_ARR && src->kind != SCR_DYN_STR &&
-      src->kind != SCR_DYN_BYTES) {
+      src->kind != SCR_DYN_BYTES && src->kind != SCR_DYN_FUNC) {
     return;
   }
   ScrDyn *pairs = scr_dyn_obj_entries(src); /* +1; never throws here */
@@ -2842,6 +2953,7 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
     }
     return is_index != 0 && idx < v->v.arr.len;
   }
+  if (v->kind == SCR_DYN_FUNC) return scr_dyn_fn_has(v, key->data, key->len);
   return false;
 }
 ScrDyn *scr_dyn_obj_values(const ScrDyn *v) { return scr_dyn_objwalk(v, SCR_OBJWALK_VALUES); }
