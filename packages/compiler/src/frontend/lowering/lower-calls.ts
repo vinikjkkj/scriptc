@@ -17,7 +17,7 @@ import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerObjectIterOverIndexShape, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
 import { lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerWatcherMethodCall } from "./lower-builtins.js";
-import { droppableStatic, lowerPromiseAllTupleCall, lowerPromiseRejectCall, probeLower, templateRawTextOf } from "./lower-exprs.js";
+import { droppableStatic, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, probeLower, templateRawTextOf } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { EMITTER_API_MEMBERS, definePropSlotSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
@@ -4590,6 +4590,36 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       // The npm METHOD-CALL chokepoint: a call on a package-typed receiver
       // in a static build — attributed to the package.
       L.npmMemberFence(expr.expression);
+      // `Codec.encode(m)` — calling a function-valued OWN PROPERTY of a
+      // function value in a JS file. The member lives in the closure's
+      // property table that the read and write arms share, and dynInvoke
+      // is the receiver-kind dispatch that reads it there with `this`
+      // bound to the box (scr_dyn_invoke.c's own-property arm) — which is
+      // exactly what Node does for `Codec.encode(m)`. Routing the CALL
+      // matters on its own: without it a read+write pair still leaves
+      // every use of a function-valued member fenced, which is the shape
+      // pbjs's whole API is written in.
+      if (
+        !expr.expression.questionDotToken && expr.questionDotToken === undefined &&
+        !expr.arguments.some((a) => ts.isSpreadElement(a)) &&
+        fnOwnRoutableKey(expr.expression.name.text)
+      ) {
+        const boxed = fnOwnPropBox(L, expr.expression.expression, locOf(expr.expression.expression));
+        if (boxed) {
+          const args = expr.arguments.map((a) => L.lowerExprExpecting(a, DYN));
+          fnOwnCounters.call++;
+          fnOwnWhy("call", expr.expression, expr.expression.name.text);
+          return {
+            kind: "dynInvoke",
+            recv: boxed,
+            method: expr.expression.name.text,
+            calleeName: expr.expression.getText(),
+            args,
+            type: DYN,
+            loc,
+          };
+        }
+      }
       // The chalk shape: a FUNCTION carrying properties
       // (`Object.assign(identity, { bold })`, typed `F & { bold: F }`) —
       // a callable-record hybrid this representation doesn't model yet.
