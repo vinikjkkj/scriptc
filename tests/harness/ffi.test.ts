@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compile, loadFfiProfile } from "@scriptc/compiler";
+import { exeName } from "./exe.js";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const fixtureRoot = join(repoRoot, "tests/ffi");
@@ -66,7 +67,7 @@ describe.each(["c", "llvm"] as const)("outbound native FFI, %s backend", (backen
     mkdirSync(outDir, { recursive: true });
     const result = await compile(join(fixtureRoot, "main.ts"), {
       outDir,
-      outPath: join(outDir, "program"),
+      outPath: join(outDir, exeName("program")),
       backend,
       sanitize,
       ffiProfilePath: manifest(nativeArchive()),
@@ -261,7 +262,7 @@ describe.each(["c", "llvm"] as const)("FFI binding identity, %s backend", (backe
 
       const result = await compile(entry, {
         outDir,
-        outPath: join(outDir, "program"),
+        outPath: join(outDir, exeName("program")),
         backend,
         sanitize,
         ffiProfilePath: profilePath,
@@ -321,7 +322,7 @@ test("a missing FFI symbol is an SC5004 diagnostic, not a rejected compile", asy
 
   const result = await compile(entry, {
     outDir,
-    outPath: join(outDir, "program"),
+    outPath: join(outDir, exeName("program")),
     sanitize,
     ffiProfilePath: profilePath,
   });

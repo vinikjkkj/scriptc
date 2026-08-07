@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
+import { exeName } from "./exe.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -52,7 +53,7 @@ async function compileAndRun(name: string, source: string, ext: "ts" | "cjs" = "
   // Pinned: the exact TypeError text and path rendering of failed checked
   // casts are C-reference pins; lane identity stays fixed so a diff means
   // the dyn boundary changed, never that the default backend moved.
-  const result = await compile(file, { outPath: join(outDir, name), outDir, sanitize, backend: "c", dynamic });
+  const result = await compile(file, { outPath: join(outDir, exeName(name)), outDir, sanitize, backend: "c", dynamic });
   if (!result.ok) {
     throw new Error(
       "dyncheck program failed to compile:\n" +

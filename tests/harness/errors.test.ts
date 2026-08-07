@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
+import { exeName } from "./exe.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -68,7 +69,7 @@ async function compileAndRun(
   // Pinned: the uncaught-STDERR line shape (SEMANTICS.md divergence 11) is
   // pinned against the C reference; the LLVM lane's uncaught epilogue is
   // llvm-differential's parity job, not this suite's.
-  const result = await compile(file, { outPath: join(outDir, name), outDir, sanitize, backend: "c", dynamic });
+  const result = await compile(file, { outPath: join(outDir, exeName(name)), outDir, sanitize, backend: "c", dynamic });
   if (!result.ok) {
     throw new Error(
       "errors program failed to compile:\n" +

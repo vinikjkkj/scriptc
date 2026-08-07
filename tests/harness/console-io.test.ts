@@ -13,6 +13,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
+import { exeName } from "./exe.js";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const fixtureDir = join(repoRoot, "tests/fixtures/console-io");
@@ -37,7 +38,7 @@ async function build(name: string): Promise<{ binary: string; sourceFile: string
   const outDir = join(cacheDir, `console-io-${key}`);
   mkdirSync(outDir, { recursive: true });
   const result = await compile(sourceFile, {
-    outPath: join(outDir, name),
+    outPath: join(outDir, exeName(name)),
     outDir,
     sanitize,
     backend: "c",

@@ -27,6 +27,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { shardSelect, shardSuffix } from "./shard.js";
+import { exeName } from "./exe.js";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const fixturesRoot = join(repoRoot, "tests/fixtures/server");
@@ -97,7 +98,7 @@ async function build(entry: string): Promise<string> {
   const outDir = join(cacheDir, `server-${key}`);
   mkdirSync(outDir, { recursive: true });
   const result = await compile(entry, {
-    outPath: join(outDir, "program"),
+    outPath: join(outDir, exeName("program")),
     outDir,
     sanitize,
     // Pinned: the listening-process differential was written against the

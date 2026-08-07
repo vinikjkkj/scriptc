@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
+import { exeName } from "./exe.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -52,7 +53,7 @@ async function build(
   // Pinned: the size/stability pins below grep the emitted C (no ScrRegex
   // symbol) and weigh the C-lane binary — this suite measures the C
   // backend's artifact by design.
-  const result = await compile(file, { outPath: join(outDir, name), outDir, sanitize: san, backend: "c" });
+  const result = await compile(file, { outPath: join(outDir, exeName(name)), outDir, sanitize: san, backend: "c" });
   if (!result.ok) {
     throw new Error(
       "regex program failed to compile:\n" +
