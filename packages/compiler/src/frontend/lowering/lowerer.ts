@@ -1169,6 +1169,13 @@ export class Lowerer {
    * in the same function, JS's function hoisting): the statement loop skips
    * the source statement when it arrives. */
   readonly hoistedFnDecls = new Set<ts.FunctionDeclaration>();
+  /** Comma expressions whose LEFT operand the statement loop already emitted
+   * as its own statement (the granularity rule's sequence-assignment split —
+   * `x = (a, b, v);` lowered as `a; b; x = v;` so each effect owns its poison
+   * window). lowerBinary's value-position comma branch reads only the right
+   * operand for these, because re-lowering the left would run the effect
+   * TWICE. Registered and cleared around one statement. */
+  readonly hoistedSeqEffects = new Set<ts.BinaryExpression>();
   /** `var` bindings hoisted to their function root (hoistVarBinding), keyed
    * by the checker's merged symbol — every same-name `var` in one function
    * is one symbol, so one slot. Module-scope vars live in globalsBySymbol

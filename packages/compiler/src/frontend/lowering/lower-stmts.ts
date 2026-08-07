@@ -97,10 +97,283 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
   return true;
 }
 
+/** The deferred-fence conversion for ONE poisoned lowering unit. The unit's
+   * diagnostics move OFF the build and onto the fence: executing the unit
+   * throws the first one's message, so nothing is ever silently dropped —
+   * either it never runs (Node parity: the construct never executed) or it
+   * reports exactly what the compile fence would have said. The thrown
+   * message carries the fence's own position (the unit's line when the
+   * capture was empty) — a run-phase failure must name its blocker as
+   * precisely as a compile diagnostic would have.
+   *
+   * Returns null for an INTERNAL error (SC9001): those stay compile errors,
+   * and the diagnostics are put back for the build to report. */
+  function deferredFenceStmt(
+    L: Lowerer,
+    sf: ts.SourceFile,
+    node: ts.Node,
+    diagsBefore: number,
+  ): IrStmt | null {
+    const captured = L.diags.splice(diagsBefore);
+    if (captured.some((d) => d.code === "SC9001")) {
+      L.diags.push(...captured); // ICEs stay compile errors
+      return null;
+    }
+    const first = captured[0];
+    L.runtimeFences.push(...captured);
+    const at = (d?: { loc: { file: string; start: number } }): string => {
+      const loc = d?.loc ?? { file: sf.fileName, start: node.getStart(sf) };
+      const pos = ts.getLineAndCharacterOfPosition(
+        d ? L.program.getSourceFile(loc.file) ?? sf : sf,
+        loc.start,
+      );
+      return `${loc.file}:${pos.line + 1}`;
+    };
+    return {
+      kind: "runtimeFence",
+      code: first?.code ?? "SC1090",
+      message: first
+        ? `${first.message} [${first.code} at ${at(first)}]`
+        : `this statement uses a construct with no static lowering [SC1090 at ${at()}]`,
+      loc: locOf(node),
+    };
+  }
+
+/** One independently-sequenced PART of a statement — see splitPartsOf. */
+  interface SplitPart {
+    /** The part's own syntax node: the fence's position and diagnostic anchor. */
+    readonly node: ts.Node;
+    /** A short tag for the SCRIPTC_SPLIT_WHY probe. */
+    readonly what: string;
+    /** Lowers exactly this part, by the same call the unsplit statement
+     * would have made on it — nothing about HOW a part lowers changes. */
+    lower(): IrStmt[];
+    /** Records the bindings this part alone would have bound, when it
+     * poisons (the per-part half of noteBlockedBindings). */
+    blocked?(): void;
+  }
+
+/** An expression's comma-chain leaves, in evaluation order (just the
+   * expression itself when it is not a chain). Mirrors lowerExprStatement
+   * exactly: parentheses are transparent, and a comma recurses into both
+   * operands. `((a, b), c)` therefore yields [a, b, c] — the identical leaf
+   * sequence, visited by the identical call, that the unsplit lowering
+   * already produces as block{block{a,b},c}. */
+  function commaLeaves(expr: ts.Expression): ts.Expression[] {
+    const leaves: ts.Expression[] = [];
+    const walk = (e: ts.Expression): void => {
+      while (ts.isParenthesizedExpression(e)) e = e.expression;
+      if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+        walk(e.left);
+        walk(e.right);
+        return;
+      }
+      leaves.push(e);
+    };
+    walk(expr);
+    return leaves;
+  }
+
+/** THE GRANULARITY RULE. `unsupported` aborts the enclosing STATEMENT path
+   * and sibling statements survive — that is what makes --best-effort worth
+   * having. But a statement is a unit of SYNTAX, not a unit of sequencing,
+   * and three spellings in the grammar pack several independently sequenced
+   * operations into one:
+   *
+   *     var a = f(), b = g(), c = h();          three initialisations
+   *     a(), b(), c();                          three effects
+   *     x = (a(), b(), v);                      two effects and a write
+   *
+   * Minifiers pick those spellings on purpose, and the unit of partial
+   * failure then becomes the unit of syntax a minifier chose. zapo's shipped
+   * `spec/proto/index.js` is ONE 1.87 MB line of exactly THREE statements:
+   * `"use strict"`; a `var` with 28 declarators, where declarator 3 is
+   * `o = Object.getOwnPropertyNames` (which refuses) and declarators 5-23 are
+   * the nineteen esbuild module tables it takes down with it; and
+   * `j.waproto = (n.A = …, n.B = …, …, n), module.exports = j`, whose first
+   * operand is a 265-operand comma carrying the whole protobuf schema.
+   * Statement granularity there is not a fence, it is a blast radius: two
+   * refusals for 1.87 MB.
+   *
+   * Returns the parts when the statement is one of those spellings, so each
+   * gets its OWN poison window. Null keeps the statement atomic.
+   *
+   * WHY THIS PRESERVES SEQUENCING EXACTLY, which is the whole argument:
+   *
+   *  1. The parts are the same nodes, lowered by the same calls, in source
+   *     order. `lowerVarStatement` already emits one varDecl per declarator
+   *     in order; `lowerExprStatement` already lowers a comma as its two
+   *     operands' statement lowerings in order. Nothing moves, nothing is
+   *     duplicated, nothing is dropped — only the CATCH boundary moves in.
+   *  2. A fence is a THROW, not a no-op. If part i refuses, the emitted
+   *     fence aborts before part i+1 runs, so a trap in `f()` still stops
+   *     `g()` — exactly as it does today between two sibling statements.
+   *  3. Parts BEFORE the refusing one now run where the whole statement
+   *     used to be skipped. That is strictly closer to Node, and it is the
+   *     same guarantee the language already gives the equivalent program
+   *     written as separate statements.
+   *  4. The one place the split WOULD reorder — an assignment's target
+   *     reference, which JS evaluates before the right-hand side — is fenced
+   *     by inertAssignTargetRef instead of assumed away.
+   *
+   * Only under deferFences: with compile fences a refusal fails the build,
+   * so there is no partial failure to be granular about. */
+  function splitPartsOf(L: Lowerer, stmt: ts.Statement): SplitPart[] | null {
+    if (ts.isVariableStatement(stmt)) {
+      const list = stmt.declarationList;
+      if (list.declarations.length < 2) return null;
+      // `using` rejects as a list, and an ambient list declares nothing:
+      // both are whole-statement verdicts (lowerStmt / lowerVarStatement).
+      if ((list.flags & ts.NodeFlags.Using) !== 0) return null;
+      const first = list.declarations[0];
+      if (first && ts.getCombinedModifierFlags(first) & ts.ModifierFlags.Ambient) return null;
+      const isConst = (list.flags & ts.NodeFlags.Const) !== 0;
+      const isLet = (list.flags & ts.NodeFlags.Let) !== 0 || (list.flags & ts.NodeFlags.BlockScoped) === 0;
+      return list.declarations.map((decl) => ({
+        node: decl,
+        what: "declarator",
+        lower: () => lowerOneVarDecl(L, stmt, decl, isConst, isLet),
+        blocked: () => noteBlockedDeclBindings(L, decl),
+      }));
+    }
+    if (ts.isExpressionStatement(stmt)) {
+      const parts = expressionParts(L, stmt.expression);
+      return parts.length > 1 ? parts : null;
+    }
+    return null;
+  }
+
+/** The independently sequenced parts of one statement-position expression:
+   * its comma leaves, each expanded again when the leaf is itself a sequence
+   * assignment. The recursion is what reaches zapo's schema — the shipped
+   * bundle's last statement is `j.waproto = (…265 factories…),
+   * module.exports = j`, so the 1.83 MB half is a LEAF of a two-operand
+   * comma, and stopping at the top level finds nothing. */
+  function expressionParts(L: Lowerer, expr: ts.Expression): SplitPart[] {
+    const parts: SplitPart[] = [];
+    for (const leaf of commaLeaves(expr)) {
+      const sub = sequenceAssignPartsOf(L, leaf);
+      if (sub !== null) parts.push(...sub);
+      else parts.push({ node: leaf, what: "comma", lower: () => [L.lowerExprStatement(leaf)] });
+    }
+    return parts;
+  }
+
+/** `x = (a, b, v);` in STATEMENT position — a comma sequence in the RHS of a
+   * simple assignment. This is the shape terser leaves behind, and on zapo's
+   * shipped bundle it is 98% of the file: the whole protobuf schema is
+   * `j.waproto = (n.A = …, n.B = …, …, n)`, ONE assignment over 265 message
+   * and enum factories, so a refusal in the first costs all 265.
+   *
+   * The parts are `a`, `b`, and the assignment itself with only `v` for its
+   * value (lowerBinary reads hoistedSeqEffects and skips the already-emitted
+   * left operand — the effect must not run twice).
+   *
+   * SEQUENCING. JS evaluates the assignment in three steps: the target
+   * Reference, then the RHS, then PutValue. Splitting keeps a…v in order and
+   * keeps PutValue last, but it moves the TARGET REFERENCE from before `a` to
+   * after `b`. That is a real reorder, so it is only admitted when evaluating
+   * the reference is unobservable — inertAssignTargetRef below. Everything
+   * else keeps the whole statement as one unit. */
+  function sequenceAssignPartsOf(L: Lowerer, expr: ts.Expression): SplitPart[] | null {
+    let e = expr;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return null;
+    if (!inertAssignTargetRef(L, e.left)) return null;
+    // A comma chain associates left, so `(a, b, v)` is `((a, b), v)`: ALL of
+    // the effects live in the outermost comma's left subtree and the value is
+    // its right operand.
+    let outer = e.right;
+    while (ts.isParenthesizedExpression(outer)) outer = outer.expression;
+    if (!ts.isBinaryExpression(outer) || outer.operatorToken.kind !== ts.SyntaxKind.CommaToken) return null;
+    const comma = outer;
+    // Every effect leaf, each expanded again when it is itself a sequence
+    // assignment (`n.A = (e = {}, t[…] = 0, t)` — the enum-table shape the
+    // schema is made of). The call on a leaf that does NOT expand is the
+    // IDENTICAL one the value-position comma branch makes on it today
+    // (lower-exprs.ts, `const effect = L.lowerExprStatement(expr.left)`), so
+    // the leaf sequence and the way each leaf lowers are both unchanged.
+    const parts: SplitPart[] = [];
+    for (const leaf of commaLeaves(comma.left)) {
+      const sub = sequenceAssignPartsOf(L, leaf);
+      if (sub !== null) parts.push(...sub);
+      else parts.push({ node: leaf, what: "seq", lower: () => [L.lowerExprStatement(leaf)] });
+    }
+    // ...and the assignment itself, whose value is now just the tail.
+    parts.push({
+      node: e,
+      what: "seqAssign",
+      lower: () => {
+        L.hoistedSeqEffects.add(comma);
+        try {
+          return [L.lowerExprStatement(expr)];
+        } finally {
+          L.hoistedSeqEffects.delete(comma);
+        }
+      },
+    });
+    return parts;
+  }
+
+/** True when evaluating this assignment TARGET's reference is unobservable,
+   * so the sequence split may move it past the hoisted effects.
+   *
+   *   x = (a, b, v)          resolving a binding: nothing happens
+   *   obj.k = (a, b, v)      GetValue(obj): nothing happens EITHER, provided
+   *                          `obj` cannot be in a temporal dead zone
+   *
+   * A `var`, a function declaration, a parameter and an import binding are
+   * all initialised before any statement of their scope runs, so reading one
+   * can neither throw nor observe. `let`/`const`/`class` can throw
+   * ReferenceError from the dead zone — Node would throw BEFORE running `a`,
+   * where the split would run `a` first — so they are refused, as is every
+   * computed, optional or non-identifier-rooted target (its base could be a
+   * call, an index, or a getter). Refusing keeps the whole statement atomic,
+   * which is exactly today's behaviour. */
+  function inertAssignTargetRef(L: Lowerer, target: ts.Expression): boolean {
+    let base: ts.Expression = target;
+    if (ts.isPropertyAccessExpression(target)) {
+      if (target.questionDotToken !== undefined) return false;
+      base = target.expression;
+    } else if (!ts.isIdentifier(target)) {
+      // Element access (a computed key is a second expression to evaluate),
+      // destructuring patterns, `super.x`, and everything else stay atomic.
+      return false;
+    }
+    if (!ts.isIdentifier(base)) return false;
+    if (base.text === "eval" || base.text === "arguments") return false;
+    const sym = L.checker.getSymbolAtLocation(base);
+    if (sym === undefined) return false;
+    const decls = L.checker.declarationsOf(sym);
+    if (decls.length === 0) return false;
+    return decls.every((d) => {
+      if (ts.isParameter(d) || ts.isFunctionDeclaration(d) || ts.isImportSpecifier(d) ||
+          ts.isImportClause(d) || ts.isNamespaceImport(d)) {
+        return true;
+      }
+      if (!ts.isVariableDeclaration(d)) return false;
+      // `var` only: a block-scoped binding has a dead zone, and a read in it
+      // throws where the split would not.
+      return (ts.getCombinedNodeFlags(d) & ts.NodeFlags.BlockScoped) === 0;
+    });
+  }
+
+/** The per-declarator half of noteBlockedBindings: only the bindings THIS
+   * declarator would have bound are poisoned, because only this declarator
+   * failed — its siblings declared theirs. */
+  function noteBlockedDeclBindings(L: Lowerer, decl: ts.VariableDeclaration): void {
+    for (const nameNode of boundIdentifiersOf(decl.name)) {
+      const symbol = L.checker.getSymbolAtLocation(nameNode);
+      if (symbol) L.blockedBindings.add(symbol);
+    }
+  }
+
 /** Lowers statements, one poison catch per statement so one unsupported
    * construct doesn't hide the rest of the file's diagnostics. A single
    * source statement may expand to several IR statements (multi-declaration
-   * `let a = 1, b = a + 1;`) but is counted once. */
+   * `let a = 1, b = a + 1;`) but is counted once — and when the statement's
+   * parts are independently sequenced (splitPartsOf) each part carries its
+   * own poison window inside the statement's. */
   export function lowerStmts(L: Lowerer, stmts: readonly ts.Statement[]): IrStmt[] {
     const out: IrStmt[] = [];
     // JAVASCRIPT sources defer their compile fences to runtime (the
@@ -137,17 +410,67 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
           if (sf !== undefined) L.bumpFileStat(sf.fileName, "total");
         }
         const diagsBefore = L.diags.length;
+        let partFenced = false;
         try {
-          const lowered = L.lowerStmt(stmt);
+          // The granularity rule (splitPartsOf): a multi-declarator `var`, a
+          // statement-position comma chain and an assignment over a comma
+          // sequence are all several independently sequenced parts wearing
+          // one statement's syntax, so each part gets its own poison window.
+          // A part's fence THROWS, so a later part still never runs after an
+          // earlier refusal.
+          const parts = deferFences && L.diagSink === null ? splitPartsOf(L, stmt) : null;
+          let lowered: IrStmt | IrStmt[] | null;
+          if (parts !== null) {
+            const acc: IrStmt[] = [];
+            for (const part of parts) {
+              const partDiags = L.diags.length;
+              try {
+                const got = part.lower();
+                enforceLibBoundary(L, got);
+                acc.push(...got);
+              } catch (e) {
+                if (isCheckerPanic(e)) {
+                  L.pushDiag(checkerPanicDiag(e.message.split("\n", 1)[0]!, locOf(part.node)));
+                } else if (!(e instanceof PoisonError)) {
+                  throw e;
+                }
+                part.blocked?.();
+                const fence = deferredFenceStmt(L, sf!, part.node, partDiags);
+                // An ICE is not a fence: hand the whole statement back to
+                // the statement-level catch, which reports it as today.
+                if (fence === null) throw new PoisonError();
+                if (process.env.SCRIPTC_SPLIT_WHY) {
+                  const pos = ts.getLineAndCharacterOfPosition(sf!, part.node.getStart(sf));
+                  const code = fence.kind === "runtimeFence" ? fence.code : "?";
+                  console.error(
+                    `[split] ${part.what} ${code} ${sf!.fileName}:${pos.line + 1}:${pos.character + 1}`,
+                  );
+                }
+                acc.push(fence);
+                partFenced = true;
+              }
+            }
+            lowered = acc;
+          } else {
+            lowered = L.lowerStmt(stmt);
+          }
           // The lib-boundary chokepoint (lib-boundary.ts): checked-dynamic
           // arguments that reached builtin-call slots without the checked
           // coercion get their dynCheck here, and the uncoercible ones
           // fence — inside this statement's poison window, so a JS fence
           // becomes the statement's runtimeFence exactly like every other
-          // deferred rejection.
+          // deferred rejection. (Idempotent: a split statement's parts were
+          // already walked inside their own windows.)
           if (lowered) enforceLibBoundary(L, lowered);
           if (Array.isArray(lowered)) out.push(...lowered);
           else if (lowered) out.push(lowered);
+          // A statement any of whose parts fenced still counts as a failed
+          // statement — "statements that carry a fence" is what the stat
+          // has always meant.
+          if (partFenced && !L.suppressStats) {
+            L.stats.statementsFailed++;
+            if (sf !== undefined) L.bumpFileStat(sf.fileName, "failed");
+          }
           // Island accounting (--dynamic coverage): a statement that lowered
           // but carries island constructs compiles DYNAMICALLY — its work
           // runs in the embedded engine, and the report says so instead of
@@ -193,33 +516,8 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
           // executed) or it reports exactly what the compile fence would
           // have said.
           if (deferFences && L.diagSink === null) {
-            const captured = L.diags.splice(diagsBefore);
-            if (captured.some((d) => d.code === "SC9001")) {
-              L.diags.push(...captured); // ICEs stay compile errors
-            } else {
-              const first = captured[0];
-              L.runtimeFences.push(...captured);
-              // The thrown message carries the fence's own position (the
-              // statement's line when the capture was empty) — a run-phase
-              // failure must name its blocker as precisely as a compile
-              // diagnostic would have.
-              const at = (d?: { loc: { file: string; start: number } }): string => {
-                const loc = d?.loc ?? { file: sf!.fileName, start: stmt.getStart(sf) };
-                const pos = ts.getLineAndCharacterOfPosition(
-                  d ? L.program.getSourceFile(loc.file) ?? sf! : sf!,
-                  loc.start,
-                );
-                return `${loc.file}:${pos.line + 1}`;
-              };
-              out.push({
-                kind: "runtimeFence",
-                code: first?.code ?? "SC1090",
-                message: first
-                  ? `${first.message} [${first.code} at ${at(first)}]`
-                  : `this statement uses a construct with no static lowering [SC1090 at ${at()}]`,
-                loc: locOf(stmt),
-              });
-            }
+            const fence = deferredFenceStmt(L, sf!, stmt, diagsBefore);
+            if (fence !== null) out.push(fence);
           }
         }
       }
@@ -1050,7 +1348,23 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
     }
     const isConst = (list.flags & ts.NodeFlags.Const) !== 0;
     const isLet = (list.flags & ts.NodeFlags.Let) !== 0 || (list.flags & ts.NodeFlags.BlockScoped) === 0;
-    return list.declarations.flatMap((decl) => {
+    return list.declarations.flatMap((decl) => lowerOneVarDecl(L, stmt, decl, isConst, isLet));
+  }
+
+/** ONE declarator of a variable statement. Split out of lowerVarStatement
+   * so the granularity rule (splitPartsOf) can give each declarator its own
+   * poison window WITHOUT changing anything about how a declarator lowers:
+   * this is the identical body the flatMap always ran, called on the same
+   * node, in the same order. (The body keeps its old indentation inside a
+   * bare block so the extraction reads as a move, not a rewrite.) */
+  function lowerOneVarDecl(
+    L: Lowerer,
+    stmt: ts.VariableStatement,
+    decl: ts.VariableDeclaration,
+    isConst: boolean,
+    isLet: boolean,
+  ): IrStmt[] {
+    {
       // CommonJS require declarations (JS files): at the module's top
       // level the BINDINGS are alias plumbing (no storage;
       // resolveValueSymbol routes the reads), but the require itself is
@@ -1106,7 +1420,7 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
       if (drained) return drained;
       const lowered = L.lowerVarDecl(decl, isLet);
       return lowered ? [lowered] : [];
-    });
+    }
   }
 
 /** The numeric indexed source of a built-in value-iterator expression:

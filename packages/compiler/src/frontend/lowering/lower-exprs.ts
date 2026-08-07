@@ -8209,6 +8209,13 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       return L.lowerNullishCoalesce(expr, loc);
     }
     if (op === ts.SyntaxKind.CommaToken) {
+      // The statement loop may already have emitted this comma's LEFT operand
+      // as its own statement (hoistedSeqEffects — the granularity rule's
+      // sequence-assignment split, lower-stmts.ts). The effect happened, at
+      // exactly this point in the statement sequence; lowering it again here
+      // would run it TWICE, so the expression's value is just the right
+      // operand's.
+      if (L.hoistedSeqEffects.has(expr)) return L.lowerExpr(expr.right);
       // Comma expression in VALUE position (`r = ({} = a, [] = a)` — the
       // conformance corpus's paired-destructuring idiom): the left operand
       // runs for EFFECT exactly as its statement lowering (JS discards its
