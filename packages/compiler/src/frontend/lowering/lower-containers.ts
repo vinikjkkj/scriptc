@@ -5200,17 +5200,52 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       if (receiverIr?.kind !== "string" && !isRequireMainFilename(L, access.expression)) return null;
       if (!L.isStdlibMember(access)) return null;
     }
+    // `s.split(sep, limit)` — the lib's second parameter. The spec's loop
+    // (22.1.3.23) stops once `limit` elements are collected; splitting on a
+    // STRING separator is pure, so the list it stops at IS the full split
+    // truncated to ToUint32(limit) — the same array, element for element.
+    // The only thing that must be exact is the conversion, and it is exact
+    // because this arm takes only a COMPILE-TIME limit: ToUint32 folds
+    // here (NaN and both infinities go to 0, fractions truncate toward
+    // zero, negatives wrap modulo 2^32 — which is how `split(sep, -1)`
+    // means "no limit", and why `split(sep, 0)` is Node's empty array).
+    // An omitted-by-`undefined` limit is Node's unlimited split.
+    // A limit that is NOT statically known keeps the arity fence below:
+    // there is no ToUint32-clamped split in the runtime to hand it to, and
+    // computing the truncation from a live f64 would be a second, separate
+    // conversion to get right.
+    let splitLimit: number | null = null;
+    if (
+      entry.method === "split" && call.arguments.length === 2 &&
+      !call.arguments.some(ts.isSpreadElement)
+    ) {
+      const limNode = call.arguments[1]!;
+      if (L.typeOf(limNode).flags & ts.TypeFlags.Undefined) {
+        splitLimit = UNLIMITED_SPLIT;
+      } else {
+        const n = staticNumberOf(L, limNode);
+        if (n !== null) {
+          splitLimit = Number.isFinite(n)
+            ? (((Math.trunc(n) % 0x1_0000_0000) + 0x1_0000_0000) % 0x1_0000_0000)
+            : 0; // ToUint32(NaN) = ToUint32(±Infinity) = 0
+        }
+      }
+    }
     // The lib declares optional parameters beyond the lowered forms
     // (includes/startsWith/endsWith take a position); fence the unlowered
     // arities instead of passing arguments the runtime doesn't take.
-    if (call.arguments.length < entry.minArgs || call.arguments.length > entry.maxArgs) {
+    const loweredArgCount = splitLimit === null ? call.arguments.length : 1;
+    if (loweredArgCount < entry.minArgs || loweredArgCount > entry.maxArgs) {
       L.noLowering(
         `.${access.name.text} with ${call.arguments.length} argument${call.arguments.length === 1 ? "" : "s"} on strings`,
         call,
+        entry.method === "split"
+          ? "split's limit lowers when it is a compile-time number — split(sep, 2), or a const initialized with one"
+          : undefined,
       );
     }
     const receiver = dynReceiver ? dynReceiver() : L.lowerExpr(access.expression);
-    const args = call.arguments.map((a) => L.lowerExpr(a));
+    const args = call.arguments.slice(0, loweredArgCount).map((a) => L.lowerExpr(a));
     // split's separator must BE a string here (a regex argument was
     // claimed by lowerRegexMethodCall before this path) — the lib's
     // `string | RegExp` union has no lowering as a VALUE.
@@ -5226,7 +5261,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     if ((entry.method === "padStart" || entry.method === "padEnd") && args.length === 1) {
       args.push({ kind: "strLit", value: " ", type: STRING, loc: locOf(call) });
     }
-    return {
+    const split: IrExpr = {
       kind: "strIntrinsic",
       method: entry.method,
       receiver,
@@ -5234,7 +5269,59 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       type: entry.result,
       loc: locOf(call),
     };
+    // The truncation half of the limited split. `UNLIMITED_SPLIT` (the
+    // undefined limit and every negative one, which wrap past any possible
+    // length) is the plain split — no slice, no copy.
+    if (splitLimit !== null && splitLimit !== UNLIMITED_SPLIT) {
+      const l = locOf(call);
+      return {
+        kind: "arrIntrinsic",
+        method: "slice",
+        receiver: split,
+        args: [
+          { kind: "numLit", value: 0, type: F64, loc: l },
+          { kind: "numLit", value: splitLimit, type: F64, loc: l },
+        ],
+        type: entry.result,
+        loc: l,
+      };
+    }
+    return split;
   }
+
+/** ToUint32's ceiling: `split(sep, limit)` collects at most 2^32-1 pieces,
+ * so every limit at or above it — the undefined limit and every negative
+ * one, which wrap there — is the unlimited split. A sentinel rather than
+ * the number, so the truncation is skipped instead of emitting a slice
+ * that can never cut. */
+const UNLIMITED_SPLIT = 0xffff_ffff;
+
+/** The number an expression provably IS at compile time, or null. The
+ * checker's own literal type answers for numeric literals, their negations
+ * and `const` bindings initialized with one; the two non-finite spellings
+ * have no literal type, so the standard library's `NaN` and `Infinity`
+ * globals are read by symbol (provenance-checked — a user's own `Infinity`
+ * is a different binding and answers null). Deliberately narrow: this is a
+ * FOLD, not a constant propagator, and every shape it declines keeps its
+ * fence. */
+function staticNumberOf(L: Lowerer, node: ts.Expression): number | null {
+  let e: ts.Expression = node;
+  while (ts.isParenthesizedExpression(e) || ts.isAsExpression(e)) e = e.expression;
+  const t = L.typeOf(e);
+  if (t.isNumberLiteralType()) return t.value;
+  if (ts.isPrefixUnaryExpression(e)) {
+    const inner = staticNumberOf(L, e.operand);
+    if (inner === null) return null;
+    if (e.operator === ts.SyntaxKind.MinusToken) return -inner;
+    if (e.operator === ts.SyntaxKind.PlusToken) return inner;
+    return null;
+  }
+  if (ts.isIdentifier(e) && (e.text === "NaN" || e.text === "Infinity")) {
+    if (!L.isStdlibSymbol(L.resolveValueSymbol(e) ?? undefined)) return null;
+    return e.text === "NaN" ? NaN : Infinity;
+  }
+  return null;
+}
 
 /** `a.localeCompare(b)` — the one-argument form only (locales/options
    * select ICU collations that do not exist here). Lowers to an interned
