@@ -1983,6 +1983,19 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
         { id: outId, name: "names", type: DYN, mutable: false },
       ],
       body: [
+        // …and the one receiver for which "keys plus length" is not the
+        // own-NAMES list: an object carrying NON-ENUMERABLE own
+        // properties. Those are exactly the names the two functions
+        // disagree about, they never enter the keys walk, and JS orders
+        // own keys by creation — which the separate table does not
+        // record. The runtime refuses by name rather than answering a
+        // list that is silently short (scr_dyn_own_names_fence); every
+        // other receiver pays one NULL test.
+        {
+          kind: "exprStmt",
+          expr: { kind: "libCall", fn: "dyn.ownNamesFence", args: [oRef], type: VOID, loc },
+          loc,
+        },
         {
           kind: "varDecl",
           localId: outId,

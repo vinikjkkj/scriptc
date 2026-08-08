@@ -1363,6 +1363,20 @@ export class Lowerer {
    * IrModule.unions. An arm's index in the canonical list is its runtime
    * tag. */
   readonly unions = new UnionRegistry();
+  /** Object literals that must build as DYN OBJECTS rather than at their
+   * contextual type — the property-DESCRIPTOR map of
+   * `Object.create(proto, descs)` and the descriptor objects inside it.
+   *
+   * The contextual type is the poison there: the library declares
+   * `PropertyDescriptor.value?: any` and `get?(): any`, so a literal
+   * built at the CONTEXT loses everything the literal knows and forces
+   * every member through the engine boundary a static build does not
+   * have (`{ value: function () {…} }` reports SC2011 on a `() => string`
+   * that maps perfectly well). The literal's OWN type is strictly more
+   * informative here, and a descriptor map is a checked-dynamic value by
+   * construction — the runtime reads it key by key. Marked by the
+   * lowering that knows the position, never inferred. */
+  readonly dynObjectLiterals = new Set<ts.ObjectLiteralExpression>();
   readonly ambient = ambientDtsPath();
   readonly overridesAmbient = overridesDtsPath();
   readonly fallbackAmbient = fallbackDtsPath();

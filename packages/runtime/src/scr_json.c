@@ -338,7 +338,7 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
       d->v.obj.len = 0; /* cap/entries preserved */
       d->v.obj.proto = NULL; /* release already cleared all three; belt and braces */
       d->v.obj.cname = NULL;
-      d->v.obj.accessors = NULL;
+      d->v.obj.hidden = NULL;
     } else {
       memset(&d->v, 0, sizeof d->v);
     }
@@ -375,7 +375,7 @@ void scr_dyn_release(ScrDyn *d) {
       free(d->v.obj.entries[i].key);
       scr_dyn_release(d->v.obj.entries[i].value);
     }
-    /* The [[Prototype]] link and the ACCESSOR table are owned; the
+    /* The [[Prototype]] link and the NON-ENUMERABLE table are owned; the
      * constructor NAME is a static literal. All three are cleared because
      * the node may be recycled below with its entries buffer intact — a
      * recycled node must not inherit the chain (or the getters) of its
@@ -383,8 +383,8 @@ void scr_dyn_release(ScrDyn *d) {
     scr_dyn_release(d->v.obj.proto);
     d->v.obj.proto = NULL;
     d->v.obj.cname = NULL;
-    scr_dyn_release(d->v.obj.accessors);
-    d->v.obj.accessors = NULL;
+    scr_dyn_release(d->v.obj.hidden);
+    d->v.obj.hidden = NULL;
     break;
   case SCR_DYN_FUNC:
     scr_closure_release(d->v.fn.clo); /* sig/name are static literals */
@@ -443,6 +443,25 @@ ScrDyn *scr_dyn_obj_get(const ScrDyn *d, const char *key, size_t key_len) {
  * itself), but a lookup is not the place to discover that assumption
  * broke — a bounded walk answers "absent" where an unbounded one hangs. */
 #define SCR_PROTO_MAX_DEPTH 1000
+/* The hidden-entry readers, defined with the table they belong to (the
+ * NON-ENUMERABLE OWN PROPERTIES section below). */
+static bool scr_hid_is_data(const ScrDyn *q);
+static ScrDyn *scr_hid_value(const ScrDyn *q);
+
+/* An OWN property whose value can be handed back BORROWED — the member
+ * table, then the hidden table's DATA entries. This is what the
+ * coercion protocols (toString / valueOf / Symbol.toPrimitive) can ask
+ * for: they cannot run a getter, because they hold no exception path
+ * for one. The full [[Get]] is scr_dyn_obj_key_get. */
+ScrDyn *scr_dyn_obj_own_data(const ScrDyn *d, const char *key, size_t key_len) {
+  if (d->kind != SCR_DYN_OBJ) return NULL;
+  ScrDyn *m = scr_dyn_obj_get(d, key, key_len);
+  if (m != NULL) return m;
+  if (d->v.obj.hidden == NULL) return NULL;
+  ScrDyn *ent = scr_dyn_obj_get(d->v.obj.hidden, key, key_len);
+  return (ent != NULL && scr_hid_is_data(ent)) ? scr_hid_value(ent) : NULL;
+}
+
 ScrDyn *scr_dyn_proto_get(const ScrDyn *d, const char *key, size_t key_len) {
   if (d->kind != SCR_DYN_OBJ) return NULL;
   const ScrDyn *p = d->v.obj.proto;
@@ -450,6 +469,19 @@ ScrDyn *scr_dyn_proto_get(const ScrDyn *d, const char *key, size_t key_len) {
     if (p->kind != SCR_DYN_OBJ) return NULL;
     ScrDyn *m = scr_dyn_obj_get(p, key, key_len);
     if (m != NULL) return m;
+    /* A NON-ENUMERABLE data property is a property: `toString` installed
+     * by `Object.create(proto, { toString: { value: fn } })` has to be
+     * findable by the coercion protocols that ask this, or String(x)
+     * would answer "[object Object]" for an object that has a toString.
+     * An ACCESSOR is deliberately not answered here — running a getter
+     * needs the +1-and-may-throw entry point (scr_dyn_obj_key_get), and
+     * this one is borrow-only by contract. Unchanged limitation: an
+     * accessor-provided toString/valueOf was invisible to the coercion
+     * protocol before this table held data too. */
+    if (p->v.obj.hidden != NULL) {
+      ScrDyn *ent = scr_dyn_obj_get(p->v.obj.hidden, key, key_len);
+      if (ent != NULL && scr_hid_is_data(ent)) return scr_hid_value(ent);
+    }
     p = p->v.obj.proto;
   }
   return NULL;
@@ -1833,7 +1865,7 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
      * callable one counts, and only a PRIMITIVE answer (a toString
      * returning an object is a TypeError in JS, which the ToPrimitive
      * path spells; here the constant stands rather than guessing). */
-    ScrDyn *m = scr_dyn_obj_get(d, "toString", 8);
+    ScrDyn *m = scr_dyn_obj_own_data(d, "toString", 8);
     if (m == NULL) m = scr_dyn_proto_get(d, "toString", 8);
     if (m != NULL && m->kind == SCR_DYN_FUNC) {
       scr_dyn_this_push_dyn(d);
@@ -1991,7 +2023,7 @@ ScrStr *scr_dyn_string_coerce_js(const ScrDyn *d) {
        * `K.prototype.toString = fn` is exactly where JS programs put
        * one, and reading own-only would answer the spec's "cannot
        * convert" TypeError for an object that HAS the method. */
-      ScrDyn *m = scr_dyn_obj_get(d, hint[i], strlen(hint[i])); /* borrowed */
+      ScrDyn *m = scr_dyn_obj_own_data(d, hint[i], strlen(hint[i])); /* borrowed */
       if (!m) m = scr_dyn_proto_get(d, hint[i], strlen(hint[i]));
       if (!m || m->kind != SCR_DYN_FUNC) continue;
       /* JS calls it with the OBJECT as the receiver — a toString that
@@ -2049,7 +2081,7 @@ ScrStr *scr_dyn_string_coerce_js(const ScrDyn *d) {
  * toString to fall back to — raises the spec's TypeError). */
 ScrStr *scr_dyn_to_primitive_string(const ScrDyn *d) {
   if (d->kind != SCR_DYN_OBJ) return scr_dyn_string_coerce(d);
-  ScrDyn *m = scr_dyn_obj_get(d, "valueOf", 7); /* borrowed */
+  ScrDyn *m = scr_dyn_obj_own_data(d, "valueOf", 7); /* borrowed */
   if (!m) m = scr_dyn_proto_get(d, "valueOf", 7);
   if (m != NULL && m->kind == SCR_DYN_FUNC) {
     /* JS calls it with the OBJECT as the receiver. */
@@ -2075,51 +2107,84 @@ ScrStr *scr_dyn_to_primitive_string(const ScrDyn *d) {
   return scr_dyn_to_string(d, NULL);
 }
 
-/* ── ACCESSOR PROPERTIES ───────────────────────────────────────────────
+/* ── NON-ENUMERABLE OWN PROPERTIES ─────────────────────────────────────
  *
- * `Object.defineProperty(o, k, { get, set })`. The pair lives in the OBJ
- * node's SEPARATE `accessors` table (scr_runtime.h says why), which is
- * what keeps a non-enumerable accessor off Object.keys / JSON / assign /
- * structuredClone / deepStrictEqual by construction: every one of those
- * reads `entries`, and an accessor is never in `entries`.
+ * `Object.defineProperty(o, k, { get, set })` and its DATA twin
+ * `Object.defineProperty(o, k, { value })` — which means non-enumerable
+ * too, because defineProperty defaults every flag to FALSE. Both live in
+ * the OBJ node's SEPARATE `hidden` table (scr_runtime.h says why), which
+ * is what keeps them off Object.keys / JSON / assign / structuredClone /
+ * deepStrictEqual by construction: every one of those reads `entries`,
+ * and a hidden property is never in `entries`.
  *
- * Only three operations consult the table, and they are exactly JS's
- * three: [[Get]], [[Set]] and `in`. The getter runs with `this` bound to
- * the RECEIVER the read started from, not to the object the accessor was
- * found on — which is the whole reason the idiom works: pbjs defines the
- * `_field` oneof accessor ONCE on `Message.prototype`, and each
- * instance's read has to run it against its own members. */
+ * One table, one walk, two families, told apart by the entry's first
+ * element:
+ *
+ *     [false, getter, setter,   configurable]
+ *     [true,  value,  writable, configurable]
+ *
+ * Only four operations consult it, and they are exactly JS's four:
+ * [[Get]], [[Set]], [[Delete]] and `in` (plus Object.hasOwn, which is
+ * own-presence and therefore the same question `in` asks minus the
+ * chain). The getter runs with `this` bound to the RECEIVER the read
+ * started from, not to the object the accessor was found on — which is
+ * the whole reason the idiom works: pbjs defines the `_field` oneof
+ * accessor ONCE on `Message.prototype`, and each instance's read has to
+ * run it against its own members. */
 
-typedef enum { SCR_PROP_ABSENT, SCR_PROP_DATA, SCR_PROP_ACCESSOR } ScrPropKind;
+typedef enum {
+  SCR_PROP_ABSENT,
+  SCR_PROP_DATA,        /* an own ENUMERABLE member, in `entries` */
+  SCR_PROP_ACCESSOR,    /* a hidden [false, get, set, cfg] entry */
+  SCR_PROP_HIDDEN_DATA, /* a hidden [true, value, writable, cfg] entry */
+} ScrPropKind;
+
+/* The four accessors over a hidden entry. `configurable` is the last
+ * element in BOTH families, so the delete/redefine gate can ask without
+ * knowing which one it holds. */
+static bool scr_hid_is_data(const ScrDyn *q) { return scr_dyn_truthy(q->v.arr.items[0]); }
+static ScrDyn *scr_hid_getter(const ScrDyn *q) { return q->v.arr.items[1]; }
+static ScrDyn *scr_hid_setter(const ScrDyn *q) { return q->v.arr.items[2]; }
+static ScrDyn *scr_hid_value(const ScrDyn *q) { return q->v.arr.items[1]; }
+static bool scr_hid_writable(const ScrDyn *q) { return scr_dyn_truthy(q->v.arr.items[2]); }
+static bool scr_hid_configurable(const ScrDyn *q) { return scr_dyn_truthy(q->v.arr.items[3]); }
 
 /* One property lookup over the receiver and its [[Prototype]] chain,
- * shared by [[Get]], [[Set]] and `in` so the three can never disagree
- * about where a property lives. At any ONE level a key is either a data
- * member or an accessor and never both — scr_dyn_obj_define_accessor
- * drops the data entry it replaces, and scr_dyn_key_set routes to the
- * setter instead of writing a shadowing data entry — so the per-level
- * order below is a fast path, not a tie-break. `*out` is BORROWED: the
- * data member, or the accessor's `[getter, setter, configurable]` ARR. */
+ * shared by [[Get]], [[Set]], [[Delete]] and `in` so they can never
+ * disagree about where a property lives. At any ONE level a key is in
+ * `entries` or in `hidden` and never both — every definer drops the
+ * entry of the other kind it replaces, and scr_dyn_key_set updates a
+ * hidden data slot in place instead of writing a shadowing member — so
+ * the per-level order below is a fast path, not a tie-break.
+ *
+ * `*out` is BORROWED: the enumerable member, or the hidden entry's
+ * four-element ARR. `*holder`, when asked for, is the object the
+ * property was found ON — [[Set]] needs it, because JS treats an
+ * INHERITED writable data property differently from an own one (the
+ * write creates a fresh ordinary own property instead of updating). */
 static ScrPropKind scr_dyn_obj_resolve(const ScrDyn *d, const char *key, size_t key_len,
-                                       ScrDyn **out) {
+                                       ScrDyn **out, const ScrDyn **holder) {
   const ScrDyn *o = d;
   for (size_t steps = 0; o != NULL && steps <= SCR_PROTO_MAX_DEPTH; steps++) {
     if (o->kind != SCR_DYN_OBJ) break;
     ScrDyn *m = scr_dyn_obj_get(o, key, key_len);
     if (m != NULL) {
       *out = m;
+      if (holder != NULL) *holder = o;
       return SCR_PROP_DATA;
     }
-    if (o->v.obj.accessors != NULL) {
-      ScrDyn *pair = scr_dyn_obj_get(o->v.obj.accessors, key, key_len);
-      if (pair != NULL) {
-        *out = pair;
-        return SCR_PROP_ACCESSOR;
+    if (o->v.obj.hidden != NULL) {
+      ScrDyn *ent = scr_dyn_obj_get(o->v.obj.hidden, key, key_len);
+      if (ent != NULL) {
+        *out = ent;
+        if (holder != NULL) *holder = o;
+        return scr_hid_is_data(ent) ? SCR_PROP_HIDDEN_DATA : SCR_PROP_ACCESSOR;
       }
     }
     o = o->v.obj.proto;
   }
   *out = NULL;
+  if (holder != NULL) *holder = NULL;
   return SCR_PROP_ABSENT;
 }
 
@@ -2132,12 +2197,15 @@ static ScrPropKind scr_dyn_obj_resolve(const ScrDyn *d, const char *key, size_t 
  * cannot — the split estado-protochain.md §2e found the hard way. */
 ScrDyn *scr_dyn_obj_key_get(ScrDyn *recv, const char *key, size_t key_len) {
   ScrDyn *found = NULL;
-  ScrPropKind k = scr_dyn_obj_resolve(recv, key, key_len, &found);
+  ScrPropKind k = scr_dyn_obj_resolve(recv, key, key_len, &found, NULL);
   if (k == SCR_PROP_DATA) return scr_dyn_retain(found);
+  /* A non-enumerable DATA property reads exactly like an enumerable one
+   * — `enumerable` is about ENUMERATION, never about [[Get]]. */
+  if (k == SCR_PROP_HIDDEN_DATA) return scr_dyn_retain(scr_hid_value(found));
   if (k == SCR_PROP_ACCESSOR) {
     /* A set-only accessor READS as undefined in JS — absence of a getter
      * is not an error, and answering one here would be a wrong throw. */
-    ScrDyn *getter = found->v.arr.items[0];
+    ScrDyn *getter = scr_hid_getter(found);
     if (getter->kind != SCR_DYN_FUNC) return scr_dyn_retain(scr_dyn_undefined());
     scr_dyn_this_push_dyn(recv);
     ScrDyn *r = scr_dyn_call(getter, NULL, 0, "getter");
@@ -2155,12 +2223,57 @@ ScrDyn *scr_dyn_obj_key_get(ScrDyn *recv, const char *key, size_t key_len) {
   return scr_dyn_retain(scr_dyn_undefined());
 }
 
-/* `key in obj` over an OBJ receiver: own member, own accessor, then the
- * chain — an accessor IS a property, so `in` sees it even though
- * Object.keys does not. Never throws (no getter runs). */
+/* `key in obj` over an OBJ receiver: own member, own hidden property,
+ * then the chain — a non-enumerable property IS a property, so `in` sees
+ * it even though Object.keys does not. Never throws (no getter runs). */
 bool scr_dyn_obj_key_present(const ScrDyn *d, const char *key, size_t key_len) {
   ScrDyn *found = NULL;
-  return scr_dyn_obj_resolve(d, key, key_len, &found) != SCR_PROP_ABSENT;
+  return scr_dyn_obj_resolve(d, key, key_len, &found, NULL) != SCR_PROP_ABSENT;
+}
+
+/* OWN presence, hidden table included — Object.hasOwn's question. Node
+ * answers TRUE for an own non-enumerable property (that is the whole
+ * difference between hasOwn and Object.keys), so this must too. */
+bool scr_dyn_obj_has_own_prop(const ScrDyn *d, const char *key, size_t key_len) {
+  if (d->kind != SCR_DYN_OBJ) return false;
+  if (scr_dyn_obj_get(d, key, key_len) != NULL) return true;
+  return d->v.obj.hidden != NULL &&
+         scr_dyn_obj_get(d->v.obj.hidden, key, key_len) != NULL;
+}
+
+/* `Object.getOwnPropertyNames`'s guard. The emitted own-names walk is
+ * `Object.keys` plus `length` for the two kinds that carry it, which is
+ * exact for a receiver whose own properties are ALL enumerable — and
+ * wrong for one that carries non-enumerable ones, because those are
+ * exactly the names the two functions disagree about and exactly what
+ * the keys walk cannot see.
+ *
+ * Membership alone would not be enough to fix it either: JS lists own
+ * string keys in PROPERTY CREATION order, and the two tables here record
+ * their own insertion orders separately, not a shared one. So a receiver
+ * with a hidden property refuses by name rather than answering a list
+ * Node disagrees with — the answer would be silently SHORT, which is the
+ * shape of a bug that surfaces somewhere else. Every other receiver pays
+ * one NULL test. */
+void scr_dyn_own_names_fence(const ScrDyn *d) {
+  if (d == NULL || d->kind != SCR_DYN_OBJ || d->v.obj.hidden == NULL) return;
+  if (d->v.obj.hidden->v.obj.len == 0) return;
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_jb_puts(&b, "Object.getOwnPropertyNames over a dynamic object carrying NON-ENUMERABLE"
+                  " own properties is not supported yet (");
+  for (size_t i = 0; i < d->v.obj.hidden->v.obj.len; i++) {
+    if (i > 0) scr_jb_puts(&b, ", ");
+    scr_jb_putc(&b, '\'');
+    scr_jb_write(&b, d->v.obj.hidden->v.obj.entries[i].key,
+                 d->v.obj.hidden->v.obj.entries[i].key_len);
+    scr_jb_putc(&b, '\'');
+  }
+  scr_jb_puts(&b, " — the walk behind this answers Object.keys plus 'length', so those"
+                  " names would be MISSING from the list, and JS orders own keys by"
+                  " creation, which the separate table does not record. Object.keys is"
+                  " exact; so is a read, a write, `in` and Object.hasOwn)");
+  scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
 }
 
 /* Drop one OWN data member, preserving the insertion order of the rest
@@ -2180,42 +2293,80 @@ static void scr_dyn_obj_unset(ScrDyn *obj, const char *key, size_t key_len) {
   }
 }
 
+/* The one allocator for a hidden entry, so the two families cannot end
+ * up with different shapes. `a`/`b` are BORROWED (the entry retains
+ * them). Any own ENUMERABLE member of the same name is dropped — a
+ * define CONVERTS a property, it does not layer one over the other. */
+static void scr_dyn_obj_put_hidden(ScrDyn *recv, const char *key, size_t key_len,
+                                   bool is_data, ScrDyn *a, ScrDyn *b, bool configurable) {
+  if (recv->kind != SCR_DYN_OBJ) return;
+  if (recv->v.obj.hidden == NULL) recv->v.obj.hidden = scr_dyn_new_obj();
+  scr_dyn_obj_unset(recv, key, key_len);
+  ScrDyn *ent = scr_dyn_new_arr();
+  scr_dyn_arr_push(ent, scr_dyn_new_bool(is_data));
+  scr_dyn_arr_push(ent, scr_dyn_retain(a));
+  scr_dyn_arr_push(ent, scr_dyn_retain(b));
+  scr_dyn_arr_push(ent, scr_dyn_new_bool(configurable));
+  scr_dyn_obj_set(recv->v.obj.hidden, key, key_len, ent); /* ownership moves in */
+}
+
 /* Install `key` as an accessor property of `recv`. Both halves are
- * BORROWED (the pair retains them); either may be the undefined
- * singleton for a one-sided accessor. Any own DATA member of the same
- * name is dropped — defineProperty CONVERTS a data property into an
- * accessor property, it does not layer one over the other. `configurable`
- * rides in the triple so a second define can answer JS's "Cannot redefine
- * property" instead of silently replacing a sealed getter. */
+ * BORROWED; either may be the undefined singleton for a one-sided
+ * accessor. `configurable` rides in the entry so a second define can
+ * answer JS's "Cannot redefine property" instead of silently replacing a
+ * sealed getter. */
 void scr_dyn_obj_define_accessor(ScrDyn *recv, const char *key, size_t key_len,
                                  ScrDyn *getter, ScrDyn *setter, bool configurable) {
-  if (recv->kind != SCR_DYN_OBJ) return;
-  if (recv->v.obj.accessors == NULL) recv->v.obj.accessors = scr_dyn_new_obj();
-  scr_dyn_obj_unset(recv, key, key_len);
-  ScrDyn *triple = scr_dyn_new_arr();
-  scr_dyn_arr_push(triple, scr_dyn_retain(getter));
-  scr_dyn_arr_push(triple, scr_dyn_retain(setter));
-  scr_dyn_arr_push(triple, scr_dyn_new_bool(configurable));
-  scr_dyn_obj_set(recv->v.obj.accessors, key, key_len, triple); /* ownership moves in */
+  scr_dyn_obj_put_hidden(recv, key, key_len, false, getter, setter, configurable);
 }
 
-/* True when `recv` already carries an OWN accessor for `key` that was NOT
- * declared configurable — the case a second define is a TypeError in JS.
- * OWN only: shadowing an inherited accessor with a define is legal. */
-bool scr_dyn_obj_accessor_sealed(const ScrDyn *recv, const char *key, size_t key_len) {
-  if (recv->kind != SCR_DYN_OBJ || recv->v.obj.accessors == NULL) return false;
-  ScrDyn *triple = scr_dyn_obj_get(recv->v.obj.accessors, key, key_len);
-  if (triple == NULL || triple->v.arr.len < 3) return false;
-  return !scr_dyn_truthy(triple->v.arr.items[2]);
+/* Install `key` as a NON-ENUMERABLE data property — what
+ * `Object.defineProperty(o, k, { value })` means, since defineProperty
+ * defaults every flag to false, and what `Object.create(p, descs)`
+ * installs for every `{ value }` descriptor in its map. `writable` is
+ * real here: [[Set]] refuses a write to a non-writable slot with V8's
+ * text rather than quietly accepting one JS rejects. */
+void scr_dyn_obj_define_hidden_data(ScrDyn *recv, const char *key, size_t key_len,
+                                    ScrDyn *value, bool writable, bool configurable) {
+  ScrDyn *w = scr_dyn_new_bool(writable); /* +1 */
+  scr_dyn_obj_put_hidden(recv, key, key_len, true, value, w, configurable);
+  scr_dyn_release(w);
 }
 
-/* The other direction: redefining an accessor property as a DATA property
- * drops the pair, so the two tables never both claim one key and the
- * getter/setter closures are released at the redefinition rather than at
- * the object's death. */
-void scr_dyn_obj_drop_accessor(ScrDyn *recv, const char *key, size_t key_len) {
-  if (recv->kind != SCR_DYN_OBJ || recv->v.obj.accessors == NULL) return;
-  scr_dyn_obj_unset(recv->v.obj.accessors, key, key_len);
+/* The attributes of an OWN hidden property, for the redefinition rule
+ * (ES keeps every field a descriptor OMITS). False when there is none.
+ * Any out-pointer may be NULL. */
+bool scr_dyn_obj_hidden_attrs(const ScrDyn *recv, const char *key, size_t key_len,
+                              bool *is_data, bool *writable, bool *configurable) {
+  if (recv->kind != SCR_DYN_OBJ || recv->v.obj.hidden == NULL) return false;
+  ScrDyn *ent = scr_dyn_obj_get(recv->v.obj.hidden, key, key_len);
+  if (ent == NULL || ent->v.arr.len < 4) return false;
+  if (is_data) *is_data = scr_hid_is_data(ent);
+  /* An accessor has no `writable` at all; false is the answer a data
+   * redefinition over one should inherit (ES's conversion defaults it). */
+  if (writable) *writable = scr_hid_is_data(ent) && scr_hid_writable(ent);
+  if (configurable) *configurable = scr_hid_configurable(ent);
+  return true;
+}
+
+/* True when `recv` already carries an OWN hidden property for `key` that
+ * was NOT declared configurable — the case a second define is a
+ * TypeError in JS, whichever family it is. OWN only: shadowing an
+ * inherited one with a define is legal. */
+bool scr_dyn_obj_hidden_sealed(const ScrDyn *recv, const char *key, size_t key_len) {
+  if (recv->kind != SCR_DYN_OBJ || recv->v.obj.hidden == NULL) return false;
+  ScrDyn *ent = scr_dyn_obj_get(recv->v.obj.hidden, key, key_len);
+  if (ent == NULL || ent->v.arr.len < 4) return false;
+  return !scr_hid_configurable(ent);
+}
+
+/* The other direction: redefining a hidden property as an ordinary
+ * enumerable member drops the entry, so the two tables never both claim
+ * one key and any getter/setter closures are released at the
+ * redefinition rather than at the object's death. */
+void scr_dyn_obj_drop_hidden(ScrDyn *recv, const char *key, size_t key_len) {
+  if (recv->kind != SCR_DYN_OBJ || recv->v.obj.hidden == NULL) return;
+  scr_dyn_obj_unset(recv->v.obj.hidden, key, key_len);
 }
 
 /* `delete recv[key]` over a dyn receiver — JS's [[Delete]], which is an
@@ -2227,15 +2378,16 @@ void scr_dyn_obj_drop_accessor(ScrDyn *recv, const char *key, size_t key_len) {
  *     removed. `delete {}.x` is true in JS.
  *   - an own DATA member → removed, true. Order-preserving, because own
  *     key order is insertion order and the survivors keep theirs.
- *   - an own ACCESSOR → removed if it was defined CONFIGURABLE, else
- *     V8's strict-mode TypeError, verbatim. The accessors
- *     Object.defineProperty installs here default to non-configurable, so
- *     this path is reachable; sloppy mode would answer a quiet `false`
- *     instead, and this runtime does not do quiet (the stance
- *     scr_dyn_key_set already takes for the setter-less write).
+ *   - an own HIDDEN property, accessor or non-enumerable data → removed
+ *     if it was defined CONFIGURABLE, else V8's strict-mode TypeError,
+ *     verbatim. The properties Object.defineProperty installs here
+ *     default to non-configurable, so this path is reachable; sloppy
+ *     mode would answer a quiet `false` instead, and this runtime does
+ *     not do quiet (the stance scr_dyn_key_set already takes for the
+ *     setter-less write).
  *
  * The two tables are consulted separately on purpose: `entries` and
- * `accessors` never both hold one key (define converts, and this drops
+ * `hidden` never both hold one key (define converts, and this drops
  * from whichever holds it), so "delete from the right one" is a lookup,
  * not a policy.
  *
@@ -2261,9 +2413,9 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
       scr_dyn_obj_unset(recv, key->data, key->len);
       return true;
     }
-    if (recv->v.obj.accessors != NULL &&
-        scr_dyn_obj_get(recv->v.obj.accessors, key->data, key->len) != NULL) {
-      if (scr_dyn_obj_accessor_sealed(recv, key->data, key->len)) {
+    if (recv->v.obj.hidden != NULL &&
+        scr_dyn_obj_get(recv->v.obj.hidden, key->data, key->len) != NULL) {
+      if (scr_dyn_obj_hidden_sealed(recv, key->data, key->len)) {
         ScrJsonBuf sb;
         scr_jb_init(&sb);
         scr_jb_puts(&sb, "Cannot delete property '");
@@ -2272,7 +2424,7 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
         scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&sb));
         return false;
       }
-      scr_dyn_obj_unset(recv->v.obj.accessors, key->data, key->len);
+      scr_dyn_obj_unset(recv->v.obj.hidden, key->data, key->len);
       return true;
     }
     return true;
@@ -2410,12 +2562,41 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
      * chain still SHADOWS (an own member is created), which is what the
      * plain obj_set below does.
      *
-     * Only reached when the receiver's chain carries accessors at all —
-     * the common object pays one NULL test per write. */
+     * A NON-ENUMERABLE data property is the other thing the walk can
+     * find, and JS distinguishes two cases that look alike:
+     *   - OWN and writable: [[Set]] updates the VALUE and keeps every
+     *     attribute, so the key must stay non-enumerable. Falling
+     *     through to obj_set would quietly promote it into Object.keys.
+     *   - INHERITED and writable: JS creates a FRESH ordinary own
+     *     property (all three flags true) and leaves the prototype's
+     *     alone — which is what obj_set below already does.
+     * Non-writable refuses either way, with V8's strict-mode text.
+     *
+     * Only reached when the receiver's chain carries hidden properties
+     * at all — the common object pays one NULL test per write. */
     ScrDyn *found = NULL;
-    if (recv->v.obj.accessors != NULL || recv->v.obj.proto != NULL) {
-      if (scr_dyn_obj_resolve(recv, key->data, key->len, &found) == SCR_PROP_ACCESSOR) {
-        ScrDyn *setter = found->v.arr.items[1];
+    const ScrDyn *holder = NULL;
+    if (recv->v.obj.hidden != NULL || recv->v.obj.proto != NULL) {
+      ScrPropKind pk = scr_dyn_obj_resolve(recv, key->data, key->len, &found, &holder);
+      if (pk == SCR_PROP_HIDDEN_DATA) {
+        if (!scr_hid_writable(found)) {
+          ScrJsonBuf sb;
+          scr_jb_init(&sb);
+          scr_jb_puts(&sb, "Cannot assign to read only property '");
+          scr_jb_write(&sb, key->data, key->len);
+          scr_jb_puts(&sb, "' of object '#<Object>'");
+          scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&sb));
+          return;
+        }
+        if (holder == recv) {
+          ScrDyn *old = found->v.arr.items[1];
+          found->v.arr.items[1] = scr_dyn_retain(value);
+          scr_dyn_release(old); /* after the retain: value may BE old */
+          return;
+        }
+        /* inherited and writable — fall through to the shadowing write */
+      } else if (pk == SCR_PROP_ACCESSOR) {
+        ScrDyn *setter = scr_hid_setter(found);
         if (setter->kind != SCR_DYN_FUNC) {
           /* V8's strict-mode text. Sloppy mode ignores the write
            * silently; this runtime does not do silent. */
@@ -4071,7 +4252,10 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
     return scr_dyn_jsval_ops()->has_own(v->v.jsval.cell, key) == 1;
   }
   if (v->kind == SCR_DYN_OBJ) {
-    return scr_dyn_obj_get(v, key->data, key->len) != NULL;
+    /* Own presence, hidden table included: `hasOwn` differs from
+     * Object.keys by ENUMERABILITY, not by which table a property is
+     * filed in, and Node answers true for an own non-enumerable one. */
+    return scr_dyn_obj_has_own_prop(v, key->data, key->len);
   }
   if (v->kind == SCR_DYN_ARR) {
     if (key->len == 6 && memcmp(key->data, "length", 6) == 0) return true;

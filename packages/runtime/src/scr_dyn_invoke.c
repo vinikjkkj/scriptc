@@ -491,25 +491,36 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
     return scr_dyn_jsval_ops()->invoke(recv->v.jsval.cell, method, args, argc, what);
   }
 
-  /* OBJ: the own member calls (own properties shadow prototypes in JS
-   * too), then the PROTOTYPE CHAIN — `inst.method()` where `method` came
-   * from `F.prototype.method = fn` is the whole pre-class dispatch, and
-   * it must bind the INSTANCE as the receiver, not the prototype object
-   * that stores the function. Anything else is Node's is-not-a-function. */
+  /* OBJ: `o.m(...)` is Get(o, "m") followed by Call, so the LOOKUP is
+   * the whole [[Get]] — the very one the keyed read takes. Sharing
+   * scr_dyn_obj_key_get is what keeps `o.m` and `o.m()` from disagreeing
+   * about where a method lives, which they did while dispatch kept its
+   * own walk: own member, own NON-ENUMERABLE property (a `{ value: fn }`
+   * descriptor installs a method Object.keys must not report —
+   * protobufjs's `CustomError.prototype.toString` is exactly that), an
+   * accessor that RUNS, then the prototype chain.
+   *
+   * The chain half is the whole pre-class dispatch (`inst.method()`
+   * where `method` came from `F.prototype.method = fn`), and the call
+   * binds the INSTANCE as the receiver, not the prototype object that
+   * stores the function. Anything non-callable is Node's
+   * is-not-a-function. */
   if (recv->kind == SCR_DYN_OBJ) {
-    ScrDyn *m = scr_dyn_obj_get(recv, method, strlen(method));
-    if (m == NULL) m = scr_dyn_proto_get(recv, method, strlen(method));
-    if (m && (m->kind == SCR_DYN_FUNC ||
-              /* a WRAPPED engine function stored as a dyn member: the
-               * routed call (scr_dyn_call's JSVAL arm) runs it. */
-              (m->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(m, "function")))) {
+    ScrDyn *m = scr_dyn_obj_key_get(recv, method, strlen(method)); /* +1, or NULL */
+    if (m == NULL) return NULL; /* a getter threw, or the `constructor` fence */
+    if (m->kind == SCR_DYN_FUNC ||
+        /* a WRAPPED engine function stored as a dyn member: the
+         * routed call (scr_dyn_call's JSVAL arm) runs it. */
+        (m->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(m, "function"))) {
       /* JS binds the receiver for the call (`obj.method()` — this === obj):
        * the ambient-receiver window (scr_runtime.h). */
       scr_dyn_this_push_dyn(recv);
       ScrDyn *r = scr_dyn_call(m, args, argc, what);
       scr_dyn_this_pop();
+      scr_dyn_release(m);
       return r;
     }
+    scr_dyn_release(m);
     dyn_throw_not_fn(what);
     return NULL;
   }
@@ -902,6 +913,43 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
   return NULL;
 }
 
+/* The attribute half of ES's ValidateAndApplyPropertyDescriptor, which is
+ * the rule everything below turns on and the one that is easy to get
+ * silently wrong: a field the descriptor OMITS defaults to FALSE only
+ * when the property is being CREATED. Over an EXISTING property the
+ * current value is KEPT — and every own member of a dynamic object is
+ * enumerable, writable and configurable, so a bare
+ * `Object.defineProperty(o, "k", { value: v })` over `o.k = 1` leaves an
+ * ORDINARY member behind rather than making a hidden one.
+ *
+ * Getting this backwards is not a throw, it is a key quietly leaving
+ * Object.keys — so it is computed once, here, and every arm reads it. */
+typedef struct { bool enumerable, writable, configurable; } DynAttrs;
+
+static DynAttrs dyn_effective_attrs(ScrDyn *target, const char *key, size_t key_len,
+                                    ScrDyn *desc) {
+  bool curEnum = false, curWrite = false, curConf = false;
+  if (target->kind == SCR_DYN_OBJ) {
+    if (scr_dyn_obj_get(target, key, key_len) != NULL) {
+      /* An own member: enumerable, writable and configurable, all three,
+       * because that is the only data property `entries` can hold. */
+      curEnum = curWrite = curConf = true;
+    } else {
+      /* An own hidden property, or nothing — in which case the three
+       * stay false, which IS the creation default. */
+      scr_dyn_obj_hidden_attrs(target, key, key_len, NULL, &curWrite, &curConf);
+    }
+  }
+  ScrDyn *en = scr_dyn_obj_get(desc, "enumerable", 10);
+  ScrDyn *wr = scr_dyn_obj_get(desc, "writable", 8);
+  ScrDyn *cf = scr_dyn_obj_get(desc, "configurable", 12);
+  DynAttrs a;
+  a.enumerable = en != NULL ? scr_dyn_truthy(en) : curEnum;
+  a.writable = wr != NULL ? scr_dyn_truthy(wr) : curWrite;
+  a.configurable = cf != NULL ? scr_dyn_truthy(cf) : curConf;
+  return a;
+}
+
 /* The ACCESSOR half of a descriptor, shared by both spellings so the
  * singular and plural forms cannot disagree about what `{get,set}` means.
  * `api` is the caller's own name — Node spells it in every message.
@@ -923,16 +971,21 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
  *                    table, read through scr_dyn_fn_get rather than the
  *                    OBJ accessor walk; a half-wired accessor there would
  *                    answer undefined instead of running.
- *   enumerable:true  Object.keys reads `entries` and an accessor never
+ *   an EFFECTIVE `enumerable: true`
+ *                    Object.keys reads `entries` and an accessor never
  *                    enters it, so admitting the flag would silently
  *                    answer a key set Node disagrees with. The DEFAULT —
- *                    what a bare get/set descriptor declares, and what
- *                    pbjs writes — is exact.
- *   over an existing own DATA member
- *                    the same refusal in disguise: ES keeps the
- *                    attributes a REDEFINITION omits, and dyn members are
- *                    enumerable, so the result would be an enumerable
- *                    accessor.
+ *                    what a bare get/set descriptor declares over a FRESH
+ *                    key, and what pbjs writes — is exact.
+ *
+ *                    "Effective" is the whole subtlety: ES only defaults
+ *                    an omitted attribute to false when the property is
+ *                    being CREATED — over an EXISTING one the omitted
+ *                    flags are KEPT — and every own member of a dynamic
+ *                    object is enumerable. So a bare `{get}` over
+ *                    `o.k = v` is an ENUMERABLE accessor in Node and
+ *                    refuses here, while `{get, enumerable: false}` over
+ *                    the same member is exact and lands.
  *
  * Returns false with a pending catchable throw. Everything borrowed. */
 static bool dyn_define_accessor_desc(ScrDyn *target, const char *key, size_t key_len,
@@ -949,35 +1002,17 @@ static bool dyn_define_accessor_desc(ScrDyn *target, const char *key, size_t key
     scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
     return false;
   }
-  ScrDyn *en = scr_dyn_obj_get(desc, "enumerable", 10);
-  if (en != NULL && scr_dyn_truthy(en)) {
+  DynAttrs at = dyn_effective_attrs(target, key, key_len, desc);
+  if (at.enumerable) {
     ScrJsonBuf b;
     scr_jb_init(&b);
     scr_jb_puts(&b, api);
     scr_jb_puts(&b, " with an ENUMERABLE accessor descriptor is not supported yet"
-                    " (a non-enumerable accessor — the default, and what a bare get/set"
-                    " descriptor declares — compiles: reads call the getter, writes the setter,"
-                    " and Object.keys/JSON skip the key exactly as they should)");
-    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
-    return false;
-  }
-  /* Redefining an EXISTING own member as an accessor is the same refusal
-   * wearing a disguise. ES only defaults the attributes a descriptor
-   * omits when the property is being CREATED — over an existing one the
-   * omitted flags are KEPT — and every own member of a dynamic object is
-   * enumerable. So `{get}` over `o.k = v` produces an ENUMERABLE accessor
-   * in Node, which this representation cannot answer. (Over an existing
-   * ACCESSOR there is nothing to inherit: those are non-enumerable here
-   * by construction, so that redefinition is exact and is allowed.) */
-  if (scr_dyn_obj_get(target, key, key_len) != NULL) {
-    ScrJsonBuf b;
-    scr_jb_init(&b);
-    scr_jb_puts(&b, api);
-    scr_jb_puts(&b, " redefining an existing own DATA property as an accessor is not supported"
-                    " yet (JS keeps the attributes a redefinition omits, and an own member of a"
-                    " dynamic object is enumerable — so the result would be an ENUMERABLE"
-                    " accessor, which Object.keys would have to report and this representation"
-                    " cannot. Define the accessor before the member exists)");
+                    " (Object.keys reads the member table and an accessor never enters it,"
+                    " so the key would be missing from a set Node reports. A non-enumerable"
+                    " accessor compiles exactly: reads call the getter, writes the setter."
+                    " Over an EXISTING own member, `enumerable` is INHERITED as true unless"
+                    " the descriptor says `enumerable: false` — say it, and this lands)");
     scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
     return false;
   }
@@ -992,28 +1027,137 @@ static bool dyn_define_accessor_desc(ScrDyn *target, const char *key, size_t key
     scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
     return false;
   }
-  ScrDyn *cf = scr_dyn_obj_get(desc, "configurable", 12);
   scr_dyn_obj_define_accessor(target, key, key_len,
                               getter ? getter : scr_dyn_undefined(),
                               setter ? setter : scr_dyn_undefined(),
-                              cf != NULL && scr_dyn_truthy(cf));
+                              at.configurable);
   return true;
 }
 
-/* JS's "Cannot redefine property" for the case this representation can
- * see: an OWN accessor that was not declared `configurable`. Redefining
- * one is a TypeError in Node, and answering silently would let a program
- * install a getter it believes is live over one that is not.
+/* The DATA half of a descriptor, exact-or-loud, shared by the singular
+ * `Object.defineProperty` and by `Object.create(proto, descriptors)`.
  *
- * DECLARED LIMIT: a non-configurable DATA property cannot be recognised —
- * a dyn own member carries no flags, so a `{value}` define over a key an
- * assignment already created is indistinguishable from a fresh one. That
- * is the plural form's grandfathered flags-are-ignored class, unchanged
- * and not widened: the singular form's data arm admits only the
- * explicitly writable+enumerable descriptor, whose meaning a plain member
- * reproduces. */
+ * `Object.defineProperty` defaults every flag to FALSE, so the bare
+ * `{ value: v }` Node writes is a NON-ENUMERABLE, NON-WRITABLE property:
+ * it stays out of Object.keys and assigning to it throws in strict mode.
+ * That shape now HAS a representation — the OBJ node's `hidden` table
+ * grew a data family beside its accessor one — so it is answered rather
+ * than refused, `writable` and `configurable` carried along and honored
+ * by [[Set]] and [[Delete]].
+ *
+ * Two shapes stay LOUD, and the enumerable one is the interesting half:
+ *
+ *   enumerable: true, writable: false   an ENUMERABLE non-writable
+ *      property. It has to live in `entries` to be enumerated, and an
+ *      entry carries no flags, so the write JS refuses would be accepted
+ *      silently. (enumerable + writable IS an ordinary member, exactly,
+ *      and is stored as one — `configurable` is accepted and ignored
+ *      there, observable only through delete and redefinition.)
+ *
+ *   a FUNC target with any non-default flag
+ *      a function's own properties live in the CLOSURE's table, read
+ *      through scr_dyn_fn_get, which has no attribute room at all.
+ *
+ * Returns false with a pending catchable throw. Everything borrowed. */
+static bool dyn_define_data_desc(ScrDyn *target, const char *key, size_t key_len,
+                                 ScrDyn *desc, const char *api) {
+  ScrDyn *value = scr_dyn_obj_get(desc, "value", 5);
+  if (!value) value = scr_dyn_undefined();
+  DynAttrs at = dyn_effective_attrs(target, key, key_len, desc);
+  bool enumerable = at.enumerable, writable = at.writable, configurable = at.configurable;
+  if (target->kind != SCR_DYN_OBJ) {
+    if (!enumerable || !writable) {
+      ScrJsonBuf b;
+      scr_jb_init(&b);
+      scr_jb_puts(&b, api);
+      scr_jb_puts(&b, " with a ");
+      scr_jb_puts(&b, !enumerable ? "NON-ENUMERABLE" : "NON-WRITABLE");
+      scr_jb_puts(&b, " data descriptor on a dynamic FUNCTION value is not supported yet"
+                      " (a function's own properties live in its closure's table, which"
+                      " carries no property attributes — spell"
+                      " `{ value: v, writable: true, enumerable: true }`, or define the"
+                      " property on a plain object)");
+      scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+      return false;
+    }
+    /* The same table the keyed write and scr_dyn_fn_get use — one
+     * allocator (scr_dyn_fn_props) so the two spellings of "give this
+     * function a property" can never end up with two tables. */
+    ScrDyn *table = scr_dyn_fn_props(target); /* +1 */
+    scr_dyn_obj_set(table, key, key_len, scr_dyn_retain(value));
+    scr_dyn_release(table);
+    return true;
+  }
+  if (enumerable && !writable) {
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, api);
+    scr_jb_puts(&b, " with an ENUMERABLE NON-WRITABLE data descriptor is not supported yet"
+                    " (an enumerated key has to live in the member table, whose entries carry"
+                    " no attributes — so the write JS refuses would be accepted silently."
+                    " A non-enumerable `{ value: v }` descriptor, with or without"
+                    " `writable`, compiles exactly)");
+    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+    return false;
+  }
+  if (enumerable) {
+    /* enumerable + writable IS an ordinary own member. Redefining a
+     * hidden property into one drops the hidden entry, so the two tables
+     * never both claim the key. */
+    scr_dyn_obj_drop_hidden(target, key, key_len);
+    scr_dyn_obj_set(target, key, key_len, scr_dyn_retain(value));
+    return true;
+  }
+  scr_dyn_obj_define_hidden_data(target, key, key_len, value, writable, configurable);
+  return true;
+}
+
+/* ONE descriptor onto one target — the whole of ES's
+ * DefinePropertyOrThrow as this representation can answer it, and the
+ * single installer behind `Object.defineProperty` and
+ * `Object.create(proto, descriptors)` so the two spellings cannot
+ * disagree about what a descriptor means. Borrows everything; returns
+ * false with a pending catchable throw. */
+static bool dyn_redefine_refused(ScrDyn *target, const char *key, size_t key_len);
+static bool dyn_define_one(ScrDyn *target, const char *key, size_t key_len,
+                           ScrDyn *desc, const char *api) {
+  if (desc->kind != SCR_DYN_OBJ) {
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "Property description must be an object: ");
+    scr_dyn_diag_buf(&b, desc);
+    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+    return false;
+  }
+  if (dyn_redefine_refused(target, key, key_len)) return false;
+  /* ES asks HasProperty, not "is it a function": `{ get: f, set: undefined }`
+   * — protobufjs's read-only `name` — IS an accessor descriptor. */
+  ScrDyn *getter = scr_dyn_obj_get(desc, "get", 3);
+  ScrDyn *setter = scr_dyn_obj_get(desc, "set", 3);
+  if (getter != NULL || setter != NULL) {
+    return dyn_define_accessor_desc(target, key, key_len, desc, getter, setter, api);
+  }
+  return dyn_define_data_desc(target, key, key_len, desc, api);
+}
+
+/* JS's "Cannot redefine property" for the cases this representation can
+ * see: an OWN hidden property — accessor or non-enumerable data — that
+ * was not declared `configurable`. Redefining one is a TypeError in
+ * Node, and answering silently would let a program install a getter it
+ * believes is live over one that is not, or overwrite a sealed constant.
+ *
+ * DECLARED LIMIT, both directions:
+ *   - a non-configurable ENUMERABLE property cannot be recognised: an
+ *     entry in the member table carries no flags, so a `{ value }`
+ *     define over a key an assignment already created is
+ *     indistinguishable from a fresh one.
+ *   - ES permits one redefinition of a non-configurable property — the
+ *     one that changes NOTHING (same value, same flags, or writable
+ *     true→false). This refuses it. That is a LOUD false refusal rather
+ *     than a silent wrong answer, and it is the side of the trade the
+ *     rest of this file takes. */
 static bool dyn_redefine_refused(ScrDyn *target, const char *key, size_t key_len) {
-  if (!scr_dyn_obj_accessor_sealed(target, key, key_len)) return false;
+  if (!scr_dyn_obj_hidden_sealed(target, key, key_len)) return false;
   ScrJsonBuf b;
   scr_jb_init(&b);
   scr_jb_puts(&b, "Cannot redefine property: ");
@@ -1066,7 +1210,7 @@ ScrDyn *scr_dyn_define_props(ScrDyn *target, ScrDyn *descs) {
     ScrDyn *value = scr_dyn_obj_get(ent->value, "value", 5);
     if (!value) value = scr_dyn_undefined();
     if (target->kind == SCR_DYN_OBJ) {
-      scr_dyn_obj_drop_accessor(target, ent->key, ent->key_len);
+      scr_dyn_obj_drop_hidden(target, ent->key, ent->key_len);
       scr_dyn_obj_set(target, ent->key, ent->key_len, scr_dyn_retain(value));
     } else {
       /* The same table the keyed write and scr_dyn_fn_get use — one
@@ -1081,23 +1225,16 @@ ScrDyn *scr_dyn_define_props(ScrDyn *target, ScrDyn *descs) {
 }
 
 /* Object.defineProperty over a dyn target — the SINGULAR form, and the
- * spelling the accessor descriptor actually arrives in (see
+ * spelling every non-default descriptor actually arrives in (see
  * scr_runtime.h for the full contract).
  *
- * Its DATA arm is EXACT-OR-LOUD, which is where it parts company with the
- * plural form above. `Object.defineProperty` defaults every flag to
- * FALSE, so the bare `{ value: v }` Node writes is a NON-ENUMERABLE,
- * NON-WRITABLE property: it does not appear in Object.keys and assigning
- * to it throws in strict mode. A dyn own member is enumerable and
- * writable, so storing one there would answer both questions wrongly and
- * silently — and unlike the plural form, this arm has no shipped
- * consumers to grandfather. It therefore admits only the descriptor whose
- * meaning a plain own member reproduces exactly (`enumerable` and
- * `writable` both true) and refuses the rest by name.
- *
- * `configurable` is accepted and ignored on that admitted shape: it is
- * observable only through `delete` and redefinition, neither of which
- * lowers over a dyn receiver today. Declared, not hidden. */
+ * Everything past the two fences is `dyn_define_one`, which is also what
+ * `Object.create(proto, descriptors)` runs over each member of its map:
+ * one installer, so the two spellings cannot disagree about what a
+ * descriptor means. Its DATA arm is EXACT-OR-LOUD, which is where it
+ * parts company with the plural form above — the plural form's three
+ * flags are accepted and IGNORED, a grandfathered divergence with
+ * shipped consumers that this one does not repeat. */
 ScrDyn *scr_dyn_define_prop(ScrDyn *target, ScrStr *key, ScrDyn *desc) {
   scr_dyn_isl_fence(target, "Object.defineProperty");
   if (!scr_exc_pending()) scr_dyn_isl_fence(desc, "Object.defineProperty");
@@ -1107,51 +1244,79 @@ ScrDyn *scr_dyn_define_prop(ScrDyn *target, ScrStr *key, ScrDyn *desc) {
                         strlen("Object.defineProperty called on non-object"));
     return NULL;
   }
-  if (desc->kind != SCR_DYN_OBJ) {
-    ScrJsonBuf b;
-    scr_jb_init(&b);
-    scr_jb_puts(&b, "Property description must be an object: ");
-    scr_dyn_diag_buf(&b, desc);
-    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
-    return NULL;
-  }
-  if (dyn_redefine_refused(target, key->data, key->len)) return NULL;
-  ScrDyn *getter = scr_dyn_obj_get(desc, "get", 3);
-  ScrDyn *setter = scr_dyn_obj_get(desc, "set", 3);
-  if (getter != NULL || setter != NULL) {
-    if (!dyn_define_accessor_desc(target, key->data, key->len, desc,
-                                  getter, setter, "Object.defineProperty")) {
-      return NULL;
-    }
-    return scr_dyn_retain(target);
-  }
-  ScrDyn *en = scr_dyn_obj_get(desc, "enumerable", 10);
-  ScrDyn *wr = scr_dyn_obj_get(desc, "writable", 8);
-  if (en == NULL || !scr_dyn_truthy(en) || wr == NULL || !scr_dyn_truthy(wr)) {
-    ScrJsonBuf b;
-    scr_jb_init(&b);
-    scr_jb_puts(&b, "Object.defineProperty with a ");
-    scr_jb_puts(&b, (en == NULL || !scr_dyn_truthy(en)) ? "NON-ENUMERABLE" : "NON-WRITABLE");
-    scr_jb_puts(&b, " data descriptor is not supported yet on a dynamic value"
-                    " (defineProperty defaults every flag to false, and an own member of a"
-                    " dynamic object is enumerable and writable — storing one would put the key"
-                    " in Object.keys and accept a write that JS refuses. Spell"
-                    " `{ value: v, writable: true, enumerable: true }`, or assign `o.k = v`;"
-                    " a get/set descriptor is the non-enumerable shape that does compile)");
-    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
-    return NULL;
-  }
-  ScrDyn *value = scr_dyn_obj_get(desc, "value", 5);
-  if (!value) value = scr_dyn_undefined();
-  if (target->kind == SCR_DYN_OBJ) {
-    /* Redefining an accessor property as a DATA property drops the pair,
-     * so the two tables never both claim one key. */
-    scr_dyn_obj_drop_accessor(target, key->data, key->len);
-    scr_dyn_obj_set(target, key->data, key->len, scr_dyn_retain(value));
-  } else {
-    ScrDyn *table = scr_dyn_fn_props(target); /* +1 */
-    scr_dyn_obj_set(table, key->data, key->len, scr_dyn_retain(value));
-    scr_dyn_release(table);
-  }
+  if (!dyn_define_one(target, key->data, key->len, desc, "Object.defineProperty")) return NULL;
   return scr_dyn_retain(target);
+}
+
+/* ES's ObjectDefineProperties over an already-created target: every
+ * member of `descs` is a property name, its value the descriptor. Shared
+ * by both `Object.create` entry points below. Borrowed; false with a
+ * pending catchable throw. */
+static bool dyn_install_descs(ScrDyn *target, ScrDyn *descs) {
+  scr_dyn_isl_fence(descs, "Object.create");
+  if (scr_exc_pending()) return false;
+  if (descs->kind == SCR_DYN_UNDEF || descs->kind == SCR_DYN_NULL) {
+    /* Node's own text — ToObject(undefined/null) is where it fails. */
+    const char *m = "Cannot convert undefined or null to object";
+    scr_throw_error_msg(SCR_ERR_TYPE, m, strlen(m));
+    return false;
+  }
+  if (descs->kind != SCR_DYN_OBJ) {
+    /* ES wraps a primitive here and finds no own enumerable keys, so
+     * Node answers a bare `{}`. That is a legal answer this could give,
+     * but it is far likelier to be a mistake than an intention, and a
+     * quiet empty object is the shape of a bug that surfaces later.
+     * Loud, and named. */
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "Object.create with a primitive properties-descriptor argument (");
+    scr_dyn_diag_buf(&b, descs);
+    scr_jb_puts(&b, ") is not supported yet — Node wraps it and finds no own keys,"
+                    " answering an empty object; pass a descriptor MAP, or drop the"
+                    " second argument");
+    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+    return false;
+  }
+  for (size_t i = 0; i < descs->v.obj.len; i++) {
+    ScrDynEntry *ent = &descs->v.obj.entries[i];
+    if (!dyn_define_one(target, ent->key, ent->key_len, ent->value, "Object.create")) return false;
+  }
+  return true;
+}
+
+/* `Object.create(proto, descriptors)` — the two-argument form, which ES
+ * defines as OrdinaryObjectCreate followed by ObjectDefineProperties,
+ * and which is exactly what this is.
+ *
+ * The order matters and is Node's: the PROTOTYPE is validated (and the
+ * object minted) before any descriptor is installed, and a descriptor
+ * that refuses leaves the half-built object unreachable — it is released
+ * here, so a refusal costs nothing but the throw.
+ *
+ * This is protobufjs's `util.newError`, whose descriptor map carries two
+ * non-enumerable data properties (`constructor`, `toString`) and one
+ * getter-only accessor (`name`) — none of which an ordinary own member
+ * can stand in for, which is why the shape fenced until the OBJ node had
+ * a non-enumerable table to put them in. Both arguments borrowed;
+ * returns the created object (+1) or NULL with a pending throw. */
+ScrDyn *scr_dyn_obj_create_descs(ScrDyn *proto, ScrDyn *descs) {
+  ScrDyn *o = scr_dyn_obj_create_proto(proto); /* +1, or NULL + pending */
+  if (o == NULL) return NULL;
+  if (!dyn_install_descs(o, descs)) {
+    scr_dyn_release(o);
+    return NULL;
+  }
+  return o;
+}
+
+/* `Object.create(null, descriptors)`: the same, over the null-prototype
+ * dictionary — the shape whose whole point is that it inherits nothing,
+ * so every property it has, the descriptor map put there. */
+ScrDyn *scr_dyn_obj_create_null_descs(ScrDyn *descs) {
+  ScrDyn *o = scr_dyn_new_obj_null_proto(); /* +1, never throws */
+  if (!dyn_install_descs(o, descs)) {
+    scr_dyn_release(o);
+    return NULL;
+  }
+  return o;
 }
