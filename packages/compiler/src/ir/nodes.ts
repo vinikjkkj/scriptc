@@ -1198,6 +1198,18 @@ export interface IrGlobal {
   name: string;
   type: IrType;
   mutable: boolean;
+  /** A module-scope binding read from a function body created ABOVE its
+   * declarator: the slot is a raw NULL until the init body reaches the
+   * declaration, and a read there is a null dereference, not a value.
+   * The global face of IrLocal.tdz and the same sentinel — every read
+   * tests the slot and an empty one throws JS's catchable ReferenceError
+   * ("Cannot access 'name' before initialization"), which is exactly what
+   * Node does for a `let`/`const` in its temporal dead zone. Restricted
+   * to pointer-backed slot types (the NULL IS the sentinel); scalars have
+   * no spare state and never carry the flag. A `var` prefers the
+   * checked-dynamic widening (Node answers `undefined`, not a throw) and
+   * only falls back to this when the slot cannot hold a dyn. */
+  tdz?: true;
 }
 
 export interface IrLocal {

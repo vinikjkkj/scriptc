@@ -993,6 +993,9 @@ class LlEmitter {
   /** Manifest-bound native imports, used by ffiCall emission. */
   private readonly ffiByName = new Map<string, IrFfiImport>();
   private readonly globalTypes = new Map<string, IrType>();
+  /** Module globals carrying IrGlobal.tdz → the source name for the
+   * ReferenceError message: their reads test the slot for NULL first. */
+  private readonly tdzGlobals = new Map<string, string>();
   /** May-throw analysis (the C emitter's computeMayThrow, shared): pending
    * checks are emitted only after calls that can actually raise. */
   private readonly mayThrow: Set<string>;
@@ -1109,6 +1112,7 @@ class LlEmitter {
         throw err;
       }
       this.globalTypes.set(g.id, g.type);
+      if (g.tdz) this.tdzGlobals.set(g.id, g.name);
     }
     // User classes are IN the tier (phase 3), and so are the runtime
     // error classes and the runtime EventEmitter/stream classes (phase 6
@@ -2989,6 +2993,28 @@ class LlEmitter {
     B.line(`call void @scr_box_set_ref(ptr ${box}, ptr ${cell})`);
   }
 
+  /** The TDZ guard on a MODULE GLOBAL's loaded value: a NULL slot is the
+   * pre-declaration window — throw Node's exact catchable ReferenceError
+   * (emit-exprs.ts's varRef global guard). Pointer-backed slots only, so
+   * the loaded value is already the sentinel and no box is involved. */
+  private tdzGlobalGuard(loaded: string, name: string): void {
+    const B = this.B;
+    const empty = B.tmp();
+    B.line(`${empty} = icmp eq ptr ${loaded}, null`);
+    const lt = B.newLabel("gtdz.t");
+    const lk = B.newLabel("gtdz.k");
+    B.condBr(empty, lt, lk);
+    B.startBlock(lt);
+    // Interned literals are immortal (rc SIZE_MAX), so handing them to
+    // the ownership-taking thrower is safe.
+    const errName = this.internLiteral("ReferenceError");
+    const msg = this.internLiteral(`Cannot access '${name}' before initialization`);
+    this.declare(`declare void @scr_throw_error_named(ptr, ptr)`);
+    B.line(`call void @scr_throw_error_named(ptr ${errName}, ptr ${msg})`);
+    this.emitUnwind();
+    B.startBlock(lk);
+  }
+
   /** The TDZ-guarded read of a boxed binding: an empty payload slot is
    * the temporal dead zone — throw Node's exact catchable ReferenceError
    * (emit-exprs.ts's varRef guard). Scalars then peek the one-element
@@ -4034,6 +4060,13 @@ class LlEmitter {
         }
         const t = B.tmp();
         B.line(`${t} = load ${this.llType(b.type)}, ptr ${b.slot}`);
+        // A module-scope binding read from a function created above its
+        // declarator: the slot is still NULL and retaining it is a null
+        // dereference. The pointer-backed slot IS the sentinel (the boxed
+        // local's tdzBoxRead, one scope out) — throw Node's exact
+        // catchable ReferenceError.
+        const tdzName = b.kind === "global" ? this.tdzGlobals.get(e.localId) : undefined;
+        if (tdzName !== undefined) this.tdzGlobalGuard(t, tdzName);
         if (isRefCounted(e.type)) return this.own({ name: this.retainValue(t, e.type), type: e.type });
         return { name: t, type: e.type };
       }
