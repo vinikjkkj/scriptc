@@ -35,7 +35,7 @@ import { newFnCtx, own } from "./lowerer.js";
 import { appendImplicitUndefinedReturn } from "./lower-calls.js";
 import { bufEncoding, knownBufEncoding } from "./lower-containers.js";
 import { probeLower } from "./lower-exprs.js";
-import { BOOL, DYN, F64, IrExpr, IrFunction, IrLibFn, IrStmt, IrType, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, VOID, arrayOf, bytesOf, canBoxFuncIntoDyn, funcOf, typeEquals, typeKey } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, IrExpr, IrFunction, IrLibFn, IrStmt, IrType, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBoxFuncIntoDyn, funcOf, typeEquals, typeKey } from "../../ir/nodes.js";
 
 const BYTES = bytesOf("u8");
 
@@ -156,7 +156,28 @@ function lowerStreamCallback(
   fullTuple: IrType[],
 ): IrExpr {
   const loc = locOf(node);
-  const { shapes, funcType, argumentsBound } = L.lambdaSignature(node);
+  const { shapes: declaredShapes, funcType: declaredType, argumentsBound } = L.lambdaSignature(node);
+  // The COMPLETION CALLBACK's own tuple is a runtime ABI fact
+  // (normalizeDoneType), substituted into the signature and the parameter
+  // shapes together so the lifted function, its parameter local, the
+  // closure's type and the emitted done-thunk all read one answer.
+  //
+  // Only that parameter. The callback's other positions are left exactly
+  // as declared: forcing a dyn CHUNK to the tuple's Buffer would put the
+  // IR type at odds with what the checker keeps reporting for the body's
+  // reads of it (`chunk.toString()` resolves against the checker, which
+  // still says `any`), so an unannotated chunk under @types/node stays a
+  // dyn and fences at its use — annotating the parameter is the fix, and
+  // the diagnostic points there. The completion callback is different
+  // because a body only ever CALLS it: the arguments coerce into the
+  // forced parameter types and nothing reads its declared shape.
+  const normParams = declaredType.params.map((p) => normalizeDoneType(L, p, which));
+  const funcType: IrType & { kind: "func" } = { ...declaredType, params: normParams };
+  const shapes = declaredShapes.map((s, i) =>
+    normParams[i] !== undefined && normParams[i] !== declaredType.params[i]
+      ? { ...s, type: normParams[i]! }
+      : s,
+  );
   if (argumentsBound) {
     // The arguments-bound parameter form drops its declared shapes for a
     // single `%arguments` slot the lambda lift declares; a stream callback's
@@ -299,6 +320,38 @@ function unionOf(L: Lowerer, arms: IrType[]): IrType {
 
 function errorOrNull(L: Lowerer): IrType {
   return unionOf(L, [{ kind: "object", className: "%Error" }, { kind: "nullT" }]);
+}
+
+/** The completion callback's OWN parameter tuple, as the emitted *_done
+ * entry consumes it: `(error?)` for write/final/destroy, `(error?, data?)`
+ * for transform/flush, where data is the chunk union.
+ *
+ * The declared type is kept as-is except at positions the declaration
+ * source left untyped. The two sources disagree there: the shipped
+ * fallback types the transform/flush `data` parameter `Buffer | string`,
+ * @types/node types it `any`. The emitted thunk has to know the arms to
+ * unwrap either way, so an untyped position takes the runtime's own
+ * answer — which makes both declaration sources produce identical IR, and
+ * leaves an explicitly annotated (or short) callback untouched. Before
+ * this, a `dyn` data parameter reached the backend as the "stream done
+ * data param not a union" emitter bug. */
+function normalizeDoneType(L: Lowerer, declared: IrType, which: string): IrType {
+  if (declared.kind !== "func") return declared;
+  const err = unionOf(L, [{ kind: "object", className: "%Error" }, { kind: "nullT" }, UNDEFINED_T]);
+  const runtimeTuple: IrType[] =
+    which === "transform" || which === "flush"
+      ? [err, unionOf(L, [BYTES, STRING, UNDEFINED_T])]
+      : [err];
+  let changed = false;
+  const params = declared.params.map((p, i) => {
+    const forced = runtimeTuple[i];
+    if (p.kind === "dyn" && forced !== undefined) {
+      changed = true;
+      return forced;
+    }
+    return p;
+  });
+  return changed ? funcOf(params, declared.ret) : declared;
 }
 
 /** The program's property-mutated symbols (`opts.read = f`, `opts["x"]
@@ -548,7 +601,7 @@ function parseStreamOptions(
             fnNode!,
           );
         }
-        return declared ?? funcOf([], VOID);
+        return declared === undefined ? funcOf([], VOID) : normalizeDoneType(L, declared, name);
       });
       present.set(name, lowerStreamCallback(L, name, fnNode, thisType, tuple));
       continue;
@@ -1023,7 +1076,7 @@ export function lowerStreamUnderscoreAssign(L: Lowerer, expr: ts.BinaryExpressio
           rhs,
         );
       }
-      return declared ?? funcOf([], VOID);
+      return declared === undefined ? funcOf([], VOID) : normalizeDoneType(L, declared, which);
     });
     cb = lowerStreamCallback(L, which, rhs, thisType, tuple);
   } else {

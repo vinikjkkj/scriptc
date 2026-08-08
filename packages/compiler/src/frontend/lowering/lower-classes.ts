@@ -7,8 +7,8 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { BOOL, DYN, F64, bytesOf, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { MAX_GENERIC_INSTANCES, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
-import { isGenericCallableMemberType, typeKey } from "../types.js";
-import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeTypesPath, locOf } from "../program.js";
+import { isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
+import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
 import { bufEncoding, lowerMapSeedArrayNew } from "./lower-containers.js";
 import { fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
@@ -616,11 +616,9 @@ export interface GenericClassInfo {
 
 /** The stream ClassInfo a VALUE symbol refers to (`new Readable(...)`,
    * `x instanceof Writable`) — any import spelling resolves to the
-   * ambient class. Provenance: a stdlib-file CLASS declaration inside the
-   * "stream" ambient module, EXCLUDING @types/node's (whose stream.Readable
-   * also types child stdio — under @types/node the childStream mapping
-   * keeps priority and the static stream classes stand down; the shipped
-   * fallback declarations are the supported surface). */
+   * ambient class. Provenance is runtimeStreamClassOf, the SAME test the
+   * type mapping uses (this used to carry its own copy, and the copies
+   * drifted). */
   export function builtinStreamInfoOf(L: Lowerer, symbol: ts.Symbol | null | undefined): ClassInfo | null {
     if (!symbol) return null;
     if (!L.isStdlibSymbol(symbol)) {
@@ -645,24 +643,12 @@ export interface GenericClassInfo {
       }
       return null;
     }
-    let irName: string | null = null;
-    for (const [name, rec] of RUNTIME_STREAM_CLASSES) {
-      if (rec.lib === symbol.name) irName = name;
-    }
-    if (!irName) return null;
-    const declared = L.checker.declarationsOf(symbol).some((d) => {
-      if (!ts.isClassDeclaration(d)) return false;
-      if (isNodeTypesPath(d.getSourceFile().fileName)) return false;
-      let node: ts.Node | undefined = d.parent;
-      while (node) {
-        if (ts.isModuleDeclaration(node) && ts.isStringLiteral(node.name)) {
-          return node.name.text === "stream" || node.name.text === "node:stream";
-        }
-        node = node.parent;
-      }
-      return false;
-    });
-    return declared ? (L.classes.get(irName) ?? null) : null;
+    const irName = runtimeStreamClassOf(
+      L.checker.declarationsOf(symbol),
+      symbol.name,
+      (sf) => L.isStdlibFile(sf),
+    );
+    return irName ? (L.classes.get(irName) ?? null) : null;
   }
 
 /** The undefined-armed union of a JS class property's inferred type — the
