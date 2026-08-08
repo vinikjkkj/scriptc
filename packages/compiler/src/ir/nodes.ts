@@ -3614,6 +3614,41 @@ export type IrLibFn =
    * prototype may only be an Object or null: X" for a primitive
    * argument (may-throw seed set). Static builds only. */
   | "dyn.objCreateProto"
+  /** `Object.create(<proto>, <descriptors>)` and its null-prototype twin
+   * (scr_dyn_invoke.c): create the object, then install every own
+   * property the descriptor map declares — ES's ObjectDefineProperties,
+   * which is literally how the spec defines the two-argument form.
+   *
+   * The descriptors go through the SAME exact-or-loud installer the
+   * singular `Object.defineProperty` uses, not the plural form's
+   * grandfathered flags-are-ignored arm: a fresh object's own-key set is
+   * exactly what `Object.keys` of the result reports, so silently
+   * promoting a `{ value }` descriptor (all flags FALSE) to an
+   * enumerable writable member would answer that set wrongly on the one
+   * object whose keys the caller is defining. `enumerable: false` is now
+   * representable (the OBJ node's `hidden` table), which is what makes
+   * the exact answer available at all.
+   *
+   * Throws Node's "Object prototype may only be an Object or null: X",
+   * "Property description must be an object: X", and whatever the
+   * installer refuses by name (may-throw seed set). Static builds
+   * only; --dynamic keeps the fence. */
+  | "dyn.objCreateDescs"
+  | "dyn.objCreateNullDescs"
+  /** The `Object.getOwnPropertyNames` guard (scr_json.c): the own-names
+   * walk is `Object.keys` plus `length`, which is exact for a receiver
+   * whose own properties are all ENUMERABLE and wrong for one that
+   * carries non-enumerable ones — those are the names the two functions
+   * disagree about, and they are precisely what this walk cannot see
+   * (they live in the OBJ node's separate table, and their creation
+   * ORDER relative to the enumerable members is not recorded, so even
+   * membership alone would not give Node's list).
+   *
+   * A short list is the silent kind of wrong, so the receiver is
+   * TESTED: no hidden properties, no cost and no change; any hidden
+   * property, and the walk refuses by name instead of answering. Never
+   * throws for any other kind. */
+  | "dyn.ownNamesFence"
   | "dyn.objValues"
   | "dyn.objEntries"
   /** structuredClone over the checked-dynamic tree (scr_json.c): the JSON-safe subset plus
@@ -6632,10 +6667,12 @@ export function moduleUsesAssert(mod: IrModule): boolean {
   return found;
 }
 
-/** True when the module contains any dynInvoke node or dyn.defineProps
- * libCall — the link switch that pulls scr_dyn_invoke.c (the prototype-
- * method dispatch on dyn receivers, plus scr_dyn_define_prop and
- * scr_dyn_define_props) into the binary (cc.ts; the assert gating
+/** True when the module contains any dynInvoke node or one of the
+ * property-DEFINING libCalls — the link switch that pulls
+ * scr_dyn_invoke.c (the prototype-method dispatch on dyn receivers, plus
+ * scr_dyn_define_prop / scr_dyn_define_props and the
+ * Object.create-with-descriptors pair that shares their installer) into
+ * the binary (cc.ts; the assert gating
  * precedent — dispatch-free binaries keep their exact size class). Same
  * walk shape as moduleUsesZlib. */
 export function moduleUsesDynInvoke(mod: IrModule): boolean {
@@ -6649,7 +6686,9 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
     const node = v as { kind?: unknown; fn?: unknown };
     if (
       node.kind === "dynInvoke" ||
-      (node.kind === "libCall" && (node.fn === "dyn.defineProps" || node.fn === "dyn.defineProp"))
+      (node.kind === "libCall" &&
+        (node.fn === "dyn.defineProps" || node.fn === "dyn.defineProp" ||
+          node.fn === "dyn.objCreateDescs" || node.fn === "dyn.objCreateNullDescs"))
     ) {
       found = true;
       return;
@@ -7408,6 +7447,8 @@ const LIB_MODE_REFUSED_PREFIXES: readonly [string, string][] = [
   // (scr_dyn_invoke.c → scr_async_dyn.c).
   ["dyn.defineProps", "checked-dynamic prototype dispatch"],
   ["dyn.defineProp", "checked-dynamic prototype dispatch"],
+  ["dyn.objCreateDescs", "checked-dynamic prototype dispatch"],
+  ["dyn.objCreateNullDescs", "checked-dynamic prototype dispatch"],
 ];
 
 /** Value/type kinds whose mere presence means an excluded unit's code (or
@@ -7855,6 +7896,14 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // Object.create(<proto>) throws "Object prototype may only be an
   // Object or null" for a primitive argument
   "dyn.objCreateProto",
+  // ... and the descriptor forms throw that PLUS everything the
+  // property installer refuses (bad descriptor, non-function getter,
+  // a shape this representation would have to answer wrongly)
+  "dyn.objCreateDescs",
+  "dyn.objCreateNullDescs",
+  // the own-names walk refuses a receiver carrying non-enumerable own
+  // properties rather than answering a list Node disagrees with
+  "dyn.ownNamesFence",
   // the destructuring pack throws V8's TypeError on non-iterable dyn kinds
   "dyn.iterPack",
   "dyn.toString",

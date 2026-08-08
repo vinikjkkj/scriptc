@@ -4879,6 +4879,11 @@ function literalUnionArmOf(
 
 export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression): IrExpr {
     const loc = locOf(expr);
+    // A literal the LOWERING marked as a dyn object (the property-
+    // descriptor map of `Object.create(proto, descs)` and the descriptors
+    // in it — Lowerer.dynObjectLiterals says why the contextual type is
+    // the wrong builder there).
+    if (L.dynObjectLiterals.has(expr)) return lowerDynObjectLiteral(L, expr);
     // The RUNTIME-KEYED literal (JS): a computed key that doesn't fold to a
     // compile-time string means the literal's shape is not a compile-time
     // fact — no record shape can hold it. The whole literal builds as a dyn
