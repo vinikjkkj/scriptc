@@ -619,7 +619,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         if (v.type.kind === "dyn") {
           // String(unknown): dispatch over the dyn kind (dynToStrHelper —
           // Node's String() incl. arrays-join and "[object Object]").
-          return E.newTemp(e.type, `${E.dynToStrHelper()}(${v.name})`);
+          // The walker runs the value's OWN toString where the tree
+          // carries one, so it can leave a catchable exception pending;
+          // the result temp joins the frame BEFORE the check so an unwind
+          // releases the empty-string dummy the walker returns.
+          const t = E.newTemp(e.type, `${E.dynToStrHelper()}(${v.name})`);
+          E.emitPendingCheck();
+          return t;
         }
         if (v.type.kind === "record") {
           // String(record) / `${record}`: Object.prototype.toString's

@@ -1849,6 +1849,27 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
       }
       scr_dyn_release(r);
     }
+    /* No callable toString: Error.prototype.toString still shadows
+     * Object.prototype's, and the checked-dynamic tree spells a caught
+     * error as the reserved "%error" marker plus name/message. The
+     * emitted sc_ds walker and scr_dyn_display_buf BOTH render that form
+     * and this copy did not, so one caught error answered
+     * "TypeError: kaboom" through String(e) and "[object Object]"
+     * through e.toString() — the same value, two answers, decided by the
+     * spelling that reached it. Ordered AFTER the protocol above so a
+     * value carrying its own toString still wins, exactly as in JS. */
+    if (scr_dyn_obj_get(d, "%error", 6)) {
+      const ScrDyn *en = scr_dyn_obj_get(d, "name", 4);
+      const ScrDyn *em = scr_dyn_obj_get(d, "message", 7);
+      const ScrStr *ens = (en && en->kind == SCR_DYN_STR) ? en->v.str : NULL;
+      const ScrStr *ems = (em && em->kind == SCR_DYN_STR) ? em->v.str : NULL;
+      ScrJsonBuf eb;
+      scr_jb_init(&eb);
+      if (ens) for (size_t i = 0; i < ens->len; i++) scr_jb_putc(&eb, ens->data[i]);
+      if (ens && ens->len && ems && ems->len) scr_jb_puts(&eb, ": ");
+      if (ems) for (size_t i = 0; i < ems->len; i++) scr_jb_putc(&eb, ems->data[i]);
+      return scr_jb_finish(&eb);
+    }
     return scr_str_new("[object Object]", 15);
   }
   case SCR_DYN_HANDLE:
@@ -1892,6 +1913,11 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
       scr_str_release(out);
       scr_str_release(piece);
       out = joined;
+      /* An element's own toString threw: JS's join stops there, so the
+       * REMAINING elements' toStrings — user code with side effects Node
+       * never runs — must not run either. The caller's pending check
+       * turns the dummy below into the real unwind. */
+      if (scr_exc_pending()) return out;
     }
     return out;
   }
@@ -4087,6 +4113,12 @@ static int scr_b64_val(unsigned char c) {
 
 ScrStr *scr_atob(const ScrDyn *data) {
   ScrStr *s = scr_dyn_string_coerce(data);
+  /* The WebIDL ToString ran the value's OWN toString, which can throw:
+   * the empty-string dummy must not be decoded, or the argument's
+   * exception is REPLACED by an InvalidCharacterError about a string the
+   * program never produced. NULL is this function's throw shape and the
+   * seeded call site checks it. */
+  if (scr_exc_pending()) { scr_str_release(s); return NULL; }
   /* Strip ASCII whitespace (the forgiving step). */
   char *buf = malloc(s->len ? s->len : 1);
   if (!buf) scr_json_oom();
@@ -4148,6 +4180,9 @@ ScrStr *scr_btoa(const ScrDyn *data) {
   static const char alphabet[] =
       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   ScrStr *s = scr_dyn_string_coerce(data);
+  /* The coercion's own throw wins over any encoding complaint about the
+   * empty-string dummy (scr_atob carries the same bail). */
+  if (scr_exc_pending()) { scr_str_release(s); return NULL; }
   /* UTF-8 → code points, each must fit latin1 (one byte). The runtime's
    * strings are well-formed UTF-8, so only C2/C3 leads can stay in
    * range; every other lead byte names a code point over U+00FF. */

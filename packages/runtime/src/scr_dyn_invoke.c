@@ -65,6 +65,10 @@ static void scr_dyn_display_buf(ScrJsonBuf *b, const ScrDyn *d) {
       const ScrDyn *e = d->v.arr.items[i];
       if (e->kind == SCR_DYN_UNDEF || e->kind == SCR_DYN_NULL) continue;
       scr_dyn_display_buf(b, e);
+      /* A nested JSVAL element's bridged ToString can leave an exception
+       * pending; JS's join stops at the first throw, so the rest of the
+       * elements do not render (scr_json.c's twin carries the same bail). */
+      if (scr_exc_pending()) return;
     }
     return;
   case SCR_DYN_OBJ: {
