@@ -231,18 +231,10 @@ static void dyn_throw_unsupported(const char *proto, const char *method) {
  * other kind throws the loud fence (Node would ToNumber-coerce — a
  * documented gap, never a silent misread). */
 static double dyn_index_arg(ScrDyn *const *args, size_t argc, size_t i, double dflt, const char *what) {
-  if (i >= argc || args[i]->kind == SCR_DYN_UNDEF) return dflt;
-  if (args[i]->kind == SCR_DYN_NUM) {
-    double n = args[i]->v.num;
-    if (n != n) return 0;
-    return trunc(n);
-  }
-  ScrJsonBuf b;
-  scr_jb_init(&b);
-  scr_jb_puts(&b, what);
-  scr_jb_puts(&b, ": non-number index arguments on a dynamic receiver are not supported yet");
-  scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
-  return 0;
+  /* The body moved to scr_json.c with the typed-array dispatch that
+   * shares it — an always-linked unit cannot call into this optional
+   * one, and two coercions would be two answers. */
+  return scr_dyn_index_arg(args, argc, i, dflt, what);
 }
 
 /* JS relative-index normalization (slice's rule). */
@@ -447,14 +439,6 @@ static bool dyn_arr_proto_unimpl(const char *m) {
   static const char *names[] = { "splice", "reduce", "reduceRight", "flat",
     "fill", "copyWithin", "keys", "values", "entries", "toReversed", "toSorted", "toSpliced",
     "with", "toString", "toLocaleString", NULL };
-  for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
-  return false;
-}
-static bool dyn_bytes_proto_real(const char *m) {
-  static const char *names[] = { "slice", "at", "indexOf", "lastIndexOf", "includes", "join",
-    "forEach", "map", "filter", "some", "every", "find", "findIndex", "reverse", "fill", "set",
-    "subarray", "sort", "keys", "values", "entries", "reduce", "reduceRight", "copyWithin",
-    "toString", "toLocaleString", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
   return false;
 }
@@ -879,32 +863,14 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
   }
 
   if (recv->kind == SCR_DYN_BYTES) {
-    ScrBytes *bytes = recv->v.bytes;
-    size_t blen = bytes->len;
-    if (dyn_name_is(method, "at")) {
-      double iD = dyn_index_arg(args, argc, 0, 0, what);
-      if (scr_exc_pending()) return NULL;
-      double idx = iD < 0 ? (double)blen + iD : iD;
-      if (idx < 0 || idx >= (double)blen) return scr_dyn_retain(scr_dyn_undefined());
-      return scr_dyn_new_num((double)bytes->data[(size_t)idx]);
-    }
-    if (dyn_name_is(method, "slice") || dyn_name_is(method, "subarray")) {
-      /* Both COPY (no views in this runtime — the static lane's
-       * documented divergence for subarray/Buffer.slice); the result
-       * keeps the receiver's Buffer flavor. */
-      double startD = dyn_index_arg(args, argc, 0, 0, what);
-      if (scr_exc_pending()) return NULL;
-      double endD = dyn_index_arg(args, argc, 1, (double)blen, what);
-      if (scr_exc_pending()) return NULL;
-      ScrBytes *out = scr_bytes_slice(bytes, startD, endD);
-      ScrDyn *d = recv->buffer ? scr_dyn_new_buffer_copy(out) : scr_dyn_new_bytes_copy(out);
-      scr_bytes_release(out);
-      return d;
-    }
-    if (dyn_bytes_proto_real(method)) {
-      dyn_throw_unsupported("Uint8Array", method);
-      return NULL;
-    }
+    /* The typed-array methods live in scr_json.c — ONE body, shared with
+     * the %TypedArray%.prototype thunks, so `b.subarray(1, 3)` and
+     * `Uint8Array.prototype.subarray.call(b, 1, 3)` cannot answer
+     * differently. A name that is no method of this kind at all falls
+     * through to JS's is-not-a-function below. */
+    bool known = false;
+    ScrDyn *r = scr_dyn_bytes_method(recv, method, args, argc, what, &known);
+    if (known) return r;
   }
 
   /* NUM/BOOL/BYTES-remainder: the name is no method of this kind — JS's

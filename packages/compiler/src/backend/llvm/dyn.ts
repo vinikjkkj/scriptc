@@ -2066,20 +2066,22 @@ export class LlDyn {
       B.line(`${idx} = load i64, ptr ${idxSlot}`);
       return { digits, idx };
     };
-    const isLength = (): string => {
+    // `k` is exactly this literal. One shape, so the two keys the BYTES
+    // arm tests below cannot drift apart in how they compare.
+    const isKey = (lit: string, tag: string): string => {
       host.declare(`declare i32 @memcmp(ptr, ptr, i64)`);
       const slot = B.slot();
       B.entryAllocas.push(`${slot} = alloca i1`);
       B.line(`store i1 false, ptr ${slot}`);
-      const len6 = B.tmp();
-      B.line(`${len6} = icmp eq i64 ${kParts.len}, 6`);
-      const lCmp = B.newLabel("kg.l6");
-      const lj = B.newLabel("kg.lj");
-      B.condBr(len6, lCmp, lj);
+      const lenEq = B.tmp();
+      B.line(`${lenEq} = icmp eq i64 ${kParts.len}, ${lit.length}`);
+      const lCmp = B.newLabel(`kg.${tag}c`);
+      const lj = B.newLabel(`kg.${tag}j`);
+      B.condBr(lenEq, lCmp, lj);
       B.startBlock(lCmp);
       const c = B.tmp();
       const same = B.tmp();
-      B.line(`${c} = call i32 @memcmp(ptr ${kParts.data}, ptr ${host.cstr("length")}, i64 6)`);
+      B.line(`${c} = call i32 @memcmp(ptr ${kParts.data}, ptr ${host.cstr(lit)}, i64 ${lit.length})`);
       B.line(`${same} = icmp eq i32 ${c}, 0`);
       B.line(`store i1 ${same}, ptr ${slot}`);
       B.br(lj);
@@ -2088,11 +2090,14 @@ export class LlDyn {
       B.line(`${out} = load i1, ptr ${slot}`);
       return out;
     };
+    const isLength = (): string => isKey("length", "l6");
     // Parse once up front (pure), branch per kind below — C parses per
     // branch, but the computation is effect-free and identical.
     const lenHit = isLength();
+    const ctorHit = isKey("constructor", "kc");
     const { digits, idx } = parseIndex();
-    // BYTES: .length and canonical-index byte reads answer like Node.
+    // BYTES: .constructor, .length and canonical-index byte reads answer
+    // like Node.
     {
       const isB = B.tmp();
       B.line(`${isB} = icmp eq i32 ${kd}, ${DK.BYTES}`);
@@ -2101,6 +2106,20 @@ export class LlDyn {
       B.condBr(isB, lB, lNext);
       B.startBlock(lB);
       host.declare(`declare ptr @scr_dyn_new_num(double)`);
+      // `b.constructor`: the %Uint8Array% singleton, through the same
+      // runtime function the C lane calls (a Buffer or a non-u8 element
+      // kind refuses by name inside it).
+      {
+        host.declare(`declare ptr @scr_dyn_bytes_constructor(ptr)`);
+        const lC = B.newLabel("kg.bc");
+        const lNc = B.newLabel("kg.bn");
+        B.condBr(ctorHit, lC, lNc);
+        B.startBlock(lC);
+        const rc = B.tmp();
+        B.line(`${rc} = call ptr @scr_dyn_bytes_constructor(ptr %d)`);
+        B.terminate(`ret ptr ${rc}`);
+        B.startBlock(lNc);
+      }
       const bts = this.payloadOf(B, "%d", "ptr");
       const blenp = B.tmp();
       const blen = B.tmp();
