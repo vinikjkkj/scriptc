@@ -36,7 +36,26 @@ export const DYN_HANDLE_TAG_NUM: Record<string, number> = {
   httpRes: 1,
   netSocket: 2,
   netServer: 3,
+  // 4..7 (h2Session, h2Stream, httpClientReq, httpAgent) are not listed:
+  // this lane has never emitted one, and a WRONG number here is a
+  // mis-tagged handle rather than a build error. See dynHandleTagNum.
+  regex: 8,
 };
+
+/** The tag's numeric value, or the LLVM lane's honest miss.
+ *
+ * The C backend writes the tag by NAME, so the enum answers it; this lane
+ * writes the number, and a kind the table has no row for used to
+ * interpolate `undefined` straight into the IR — text that only fails at
+ * llc parse time, with a message naming a token rather than a construct.
+ * A miss is the lane's own gap, which is exactly what
+ * LlvmUnsupportedError spells: the build falls back to the C emitter and
+ * the note names the kind. */
+export function dynHandleTagNum(kind: string): number {
+  const n = DYN_HANDLE_TAG_NUM[kind];
+  if (n === undefined) throw new LlvmUnsupportedError(`dyn-handle-tag:${kind}`);
+  return n;
+}
 
 export const DK = {
   NULL: 0,
@@ -986,7 +1005,7 @@ export class LlDyn {
         if (h) {
           host.declare(`declare ptr @scr_dyn_handle_unbox(ptr, i32, ptr, ptr)`);
           const r = B.tmp();
-          B.line(`${r} = call ptr @scr_dyn_handle_unbox(ptr %d, i32 ${DYN_HANDLE_TAG_NUM[t.kind]}, ptr %path, ptr ${want})`);
+          B.line(`${r} = call ptr @scr_dyn_handle_unbox(ptr %d, i32 ${dynHandleTagNum(t.kind)}, ptr %path, ptr ${want})`);
           B.terminate(`ret ptr ${r}`);
           break;
         }
@@ -1384,7 +1403,7 @@ export class LlDyn {
         if (h) {
           host.declare(`declare ptr @scr_dyn_new_handle(ptr, i32)`);
           const r = B.tmp();
-          B.line(`${r} = call ptr @scr_dyn_new_handle(ptr %v, i32 ${DYN_HANDLE_TAG_NUM[t.kind]})`);
+          B.line(`${r} = call ptr @scr_dyn_new_handle(ptr %v, i32 ${dynHandleTagNum(t.kind)})`);
           B.terminate(`ret ptr ${r}`);
           break;
         }
@@ -1770,7 +1789,16 @@ export class LlDyn {
         B.br(done);
       }
       B.startBlock(labels.get(DK.HANDLE)!);
-      this.puts(B, "%b", "[object Object]");
+      // The I/O classes inherit Object.prototype.toString, but RegExp owns
+      // its own — so this arm delegates to the runtime entry point exactly
+      // as the OBJ arm above does, rather than repeating a constant that
+      // is right for some tags and wrong for others.
+      {
+        const s = B.tmp();
+        B.line(`${s} = call ptr @scr_dyn_to_string(ptr %d, ptr null)`);
+        this.putScrStr(B, "%b", s);
+        B.line(`call void @scr_str_release(ptr ${s})`);
+      }
       B.br(done);
       B.startBlock(labels.get(DK.PROMISE)!);
       // Object.prototype.toString with the Promise @@toStringTag.

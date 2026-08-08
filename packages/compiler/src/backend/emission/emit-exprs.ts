@@ -2223,7 +2223,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             : st.kind === "f64"
               ? `(${d.name}->kind == SCR_DYN_NUM && ${d.name}->v.num == ${s.name})`
               : `(${d.name}->kind == SCR_DYN_BOOL && ${d.name}->v.b == ${s.name})`;
-        return E.newTemp(e.type, e.negated ? `!${test}` : test);
+        // dyn-vs-dyn goes through scr_dyn_strict_eq, which REFUSES two
+        // RegExp handles (interned literals make pointer identity a wrong
+        // boolean) — so that arm needs the pending check the scalar arms,
+        // which cannot throw, do without.
+        return st.kind === "dyn"
+          ? E.fallibleTemp(e.type, e.negated ? `!${test}` : test)
+          : E.newTemp(e.type, e.negated ? `!${test}` : test);
       }
       case "dynTest": {
         // A pure kind compare on the dyn node — borrowed; only the truthy

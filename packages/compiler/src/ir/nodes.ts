@@ -5837,6 +5837,7 @@ export const DYN_HANDLE_KINDS: ReadonlyMap<string, { tag: string; cls: string }>
   ["http2Session", { tag: "SCR_DYNH_H2_SESSION", cls: "Http2Session" }],
   ["http2Stream", { tag: "SCR_DYNH_H2_STREAM", cls: "Http2Stream" }],
   ["httpClientReq", { tag: "SCR_DYNH_HTTP_CLIENT", cls: "ClientRequest" }],
+  ["regex", { tag: "SCR_DYNH_REGEX", cls: "RegExp" }],
 ]);
 
 /** A static type that CONVERTS into a dyn value — the dynFrom domain:
