@@ -7,7 +7,8 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { UNSUPPORTED } from "../../diagnostics/diagnostic.js";
-import { BOOL, BYTES_U8, CHILD_T, DYN, F64, IrExpr, IrLibFn, IrStmt, IrStrIntrinsicMethod, IrType, RUNTIME_ERROR_CLASSES, SPAWNRES_T, STATS_T, STRING, SrcLoc, URL_T, VOID, arrayOf, funcOf, } from "../../ir/nodes.js";
+import { BOOL, BYTES_U8, CHILD_T, DYN, F64, IrExpr, IrLibFn, IrParam, IrStmt, IrStrIntrinsicMethod, IrType, RUNTIME_ERROR_CLASSES, SPAWNRES_T, STATS_T, STRING, SrcLoc, URL_T, VOID, arrayOf, funcOf, typeEquals, } from "../../ir/nodes.js";
+import { STR_INTRINSIC_SIGS } from "../../ir/validate.js";
 import { isJsSourceFile, isNodeTypesPath, locOf, requireSpecOf } from "../program.js";
 
 /** Statement-level constructs rejected wholesale, keyed by syntax kind. */
@@ -1943,4 +1944,194 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
     if (!ts.isPropertyAccessExpression(inner)) return null;
     return isObjectOwnKeysFnValue(L, inner) ? OBJECT_OWN_KEYS_FN_VALUE_T : null;
+  }
+
+/** `String.prototype.charCodeAt` — a STRING method taken as a VALUE — as a
+   * memoized lifted function. The `objectStaticFnValueOf` lift, one surface
+   * over, and deliberately NOT the identity-token generalisation.
+   *
+   * protobufjs's `longbits.js` opens its module body with
+   *
+   *     var charCodeAt = String.prototype.charCodeAt;
+   *     LongBits.fromHash = function (hash) {
+   *       return new LongBits(charCodeAt.call(hash, 0) | charCodeAt.call(hash, 1) << 8 | ..., ...);
+   *     };
+   *
+   * — the intrinsic bound once and reached through `Function.prototype
+   * .call`. An opaque token would answer the READ and then make every
+   * `.call` a "not a function" the trap census cannot see; the honest
+   * answer is a real function whose body IS the lowering the call form
+   * uses. `charCodeAt.call(hash, 0)` then lands on the arm that already
+   * exists (lower-calls' `bindThisClosure` over a compiled function value
+   * of matching arity), which opens the ambient-receiver window for the
+   * call's extent — and the window is exactly where the body reads its
+   * receiver from.
+   *
+   * A detached method is NOT bound to the receiver it was read through:
+   * `String.prototype.charCodeAt` and `"x".charCodeAt` are the same
+   * function object in Node, and neither remembers a `this`. So the lift
+   * takes no captures and the receiver comes from `dyn.this`, resolved per
+   * call exactly as the spec's step 1 and 2 say:
+   *
+   *   * RequireObjectCoercible — a nullish receiver throws Node's own
+   *     TypeError ("String.prototype.<m> called on null or undefined"),
+   *     verbatim, rather than coercing to "undefined"/"null". Skipping this
+   *     is the whole difference between a lift and a silent wrong answer:
+   *     `charCodeAt.call(undefined, 0)` would otherwise answer 117.
+   *   * ToString with the object protocol (`dyn.toStringCoerce`), so
+   *     `charCodeAt.call(42, 0)` is `"42".charCodeAt(0)` = 52, Node's
+   *     answer, and a `toString` that throws propagates.
+   *
+   * Everything downstream of the receiver is the CALL form, unchanged: the
+   * body is one `strIntrinsic`, over the same per-method signature the
+   * validator enforces at every ordinary `s.<m>(...)` site. That is what
+   * the arity/type gate below buys — the lift is built ONLY when the
+   * checker's own mapped signature for the member is exactly
+   * `STR_INTRINSIC_SIGS`'s, so no member can be lifted into a shape the
+   * intrinsic does not implement (`split`'s `string | RegExp` separator,
+   * `slice`'s omitted-argument defaults, an `at` that is island-only) and
+   * every one of those keeps its loud fence.
+   *
+   * One divergence, stated: the closure is a fresh allocation per read, so
+   * `String.prototype.charCodeAt === String.prototype.charCodeAt` is false
+   * where Node says true. The `objectStaticFnValueOf` lift has the same
+   * property; no lowered function value in this compiler has JS's identity.
+   *
+   * Memoized per program, per member spelling AND arity. Null when the
+   * access is not this shape — the caller keeps its fence. */
+  export function stringMethodFnValueOf(L: Lowerer, access: ts.PropertyAccessExpression): IrExpr | null {
+    const plan = stringMethodFnValuePlan(L, access);
+    if (plan === null) return null;
+    const member = access.name.text;
+    const loc = locOf(access);
+    const name = `%string.${member}.${plan.params.length}.value`;
+    const irParams: IrParam[] = plan.params.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t }));
+    if (!L.liftedFns.some((f) => f.name === name)) {
+      const thisId = "recv.0";
+      const strId = "s.0";
+      const thisRef: IrExpr = { kind: "varRef", localId: thisId, type: DYN, loc };
+      L.liftedFns.push({
+        name,
+        params: irParams,
+        returnType: plan.ret,
+        locals: [
+          { id: thisId, name: "recv", type: DYN, mutable: false },
+          { id: strId, name: "s", type: STRING, mutable: false },
+          ...irParams.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+        ],
+        body: [
+          {
+            kind: "varDecl",
+            localId: thisId,
+            init: { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc },
+            loc,
+          },
+          {
+            kind: "if",
+            cond: { kind: "dynTest", test: "nullish", value: thisRef, type: BOOL, loc },
+            then: [
+              {
+                kind: "exprStmt",
+                expr: {
+                  kind: "libCall",
+                  fn: "error.nodeThrow",
+                  args: [
+                    { kind: "numLit", value: 1, type: F64, loc },
+                    { kind: "strLit", value: "", type: STRING, loc },
+                    {
+                      kind: "strLit",
+                      value: `String.prototype.${member} called on null or undefined`,
+                      type: STRING,
+                      loc,
+                    },
+                  ],
+                  type: VOID,
+                  loc,
+                },
+                loc,
+              },
+            ],
+            else_: null,
+            loc,
+          },
+          {
+            kind: "varDecl",
+            localId: strId,
+            init: { kind: "libCall", fn: "dyn.toStringCoerce", args: [thisRef], type: STRING, loc },
+            loc,
+          },
+          {
+            kind: "return",
+            value: {
+              kind: "strIntrinsic",
+              method: plan.method,
+              receiver: { kind: "varRef", localId: strId, type: STRING, loc },
+              args: irParams.map((p) => ({ kind: "varRef" as const, localId: p.localId, type: p.type, loc })),
+              type: plan.ret,
+              loc,
+            },
+            loc,
+          },
+        ],
+        loc,
+      });
+    }
+    if (process.env["SCRIPTC_STRFNVALUE_WHY"] !== undefined) {
+      console.error(`[strfnvalue] lift ${loc.file}:${loc.start} ${name}`);
+    }
+    return { kind: "closure", fnName: name, captures: [], type: funcOf(plan.params, plan.ret), loc };
+  }
+
+/** The gate for that lift: the member, the arity and the exact parameter
+   * and result types the lifted body will hand the string intrinsic. Null
+   * for everything else. */
+  function stringMethodFnValuePlan(
+    L: Lowerer,
+    access: ts.PropertyAccessExpression,
+  ): { method: IrStrIntrinsicMethod; params: IrType[]; ret: IrType } | null {
+    if (access.questionDotToken) return null;
+    // STATIC builds only. Under --dynamic a JS value is an island HANDLE
+    // and the engine keeps its own `this`; the ambient-receiver window
+    // this body reads is the static world's, so it would answer a receiver
+    // no island call ever pushed. The island's own string surface owns
+    // that build's value position.
+    if (L.dynamic) return null;
+    // JAVASCRIPT sources only, and the reason is the receiver. The body's
+    // whole content is "read the ambient receiver", and that window is a
+    // JavaScript-only mechanism: in TypeScript a plain function's `this`
+    // does not compile (SC1080), and `Function.prototype.call/bind` over a
+    // compiled function value is JS-gated for exactly that reason
+    // (bindThisClosure's caller). A TS consumer therefore has no way to
+    // bind one, so the fence there stays true.
+    if (!isJsSourceFile(access.getSourceFile())) return null;
+    // The CALL form is lower-containers' (lowerStringMethodCall) —
+    // including the arities and receivers it declines, which must keep
+    // their own fences rather than becoming an arity error against a
+    // lifted closure.
+    const parent = access.parent;
+    if (parent && ts.isCallExpression(parent) && parent.expression === access) return null;
+    if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "string") return null;
+    if (!L.isStdlibMember(access)) return null;
+    // Reading a method DISCARDS the receiver's value, so the receiver's
+    // evaluation must be discardable — the same restriction the tuple
+    // `.length` fold takes. `String.prototype.charCodeAt` and
+    // `s.charCodeAt` are roots this holds for; `f().charCodeAt` is not,
+    // and keeps the fence rather than losing the call.
+    let root: ts.Expression = access.expression;
+    while (ts.isPropertyAccessExpression(root)) root = root.expression;
+    if (!ts.isIdentifier(root) && root.kind !== ts.SyntaxKind.ThisKeyword && !ts.isStringLiteralLike(root)) return null;
+    const entry = ownEntry(STR_METHODS, access.name.text);
+    if (entry === undefined) return null;
+    const sig = STR_INTRINSIC_SIGS[entry.method];
+    // The checker's own mapped signature must BE the intrinsic's. This is
+    // what keeps the lift honest for the members it does fire on and loud
+    // for the rest: an optional parameter the intrinsic has no default
+    // for, a union parameter (`split`'s `string | RegExp`), an
+    // island-surface result — each fails one of these and keeps the fence.
+    const ft = L.mapTypeOf(L.typeOf(access));
+    if (ft === null || ft === undefined || ft.kind !== "func" || ft.rest === true) return null;
+    if (ft.params.length < sig.minArgs || ft.params.length > sig.argTypes.length) return null;
+    if (!ft.params.every((t, i) => typeEquals(t, sig.argTypes[i]!))) return null;
+    if (!typeEquals(ft.ret, sig.result)) return null;
+    return { method: entry.method, params: ft.params.slice(), ret: ft.ret };
   }
