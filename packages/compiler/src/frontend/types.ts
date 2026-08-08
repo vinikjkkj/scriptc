@@ -2,7 +2,7 @@ import * as ts from "./ts7/adapter.js";
 import type { IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
 import { ABORTSIGNAL_T, BIGINT, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
-import { isJsSourceFile, isNodeTypesPath } from "./program.js";
+import { isJsSourceFile } from "./program.js";
 import { accessorSlotProp, wsGlobalPlan } from "../ir/nodes.js";
 // typeKey moved to ir/nodes.ts (the backend needs it too, for per-type
 // helper interning); re-exported here so frontend call sites keep their
@@ -515,6 +515,48 @@ export function esOwnKeyOrder(names: string[]): string[] {
   };
   const indices = names.filter(isArrayIndex).sort((a, b) => Number(a) - Number(b));
   return indices.length === 0 ? names : [...indices, ...names.filter((n) => !isArrayIndex(n))];
+}
+
+/** The runtime stream class one stdlib CLASS symbol names (`%Readable`,
+ * `%Writable`, `%Duplex`, `%Transform`, `%PassThrough`) — null for
+ * everything else.
+ *
+ * THE ONE provenance test for "this symbol is a node:stream class", used
+ * by both the TYPE mapping (mapType, for values whose declared type is
+ * `Readable`) and the VALUE mapping (builtinStreamInfoOf, for `new
+ * Readable(...)` / `x instanceof Writable`). It used to be written twice,
+ * once in each place, and the copies had to agree about declaration
+ * provenance forever; streams-under-@types/node is exactly the drift that
+ * bug produced. Accounted for by the "one stream-class provenance test"
+ * case in tests/harness/stream-node-types.test.ts.
+ *
+ * Both declaration sources answer: the shipped fallback declarations'
+ * `declare module "stream"` classes and @types/node's same-named classes
+ * (which sit in `namespace internal` inside its own `declare module
+ * "stream"` — the ambient-module walk passes through the namespace).
+ *
+ * These no longer collide with child stdio. The fallback types
+ * ChildProcess.stdout as NodeJS.ReadableStream, which is a separate
+ * branch; @types/node types it as stream.Readable, which this claims, and
+ * the child-stdio spoke keys off the producing syntax instead. */
+export function runtimeStreamClassOf(
+  decls: readonly ts.Node[],
+  symbolName: string | undefined,
+  isStdlibFile: (sf: ts.SourceFile) => boolean,
+): string | null {
+  if (symbolName === undefined) return null;
+  let irName: string | null = null;
+  for (const [ir, rec] of RUNTIME_STREAM_CLASSES) {
+    if (rec.lib === symbolName) irName = ir;
+  }
+  if (irName === null) return null;
+  const declared = decls.some(
+    (d) =>
+      ts.isClassDeclaration(d) &&
+      isStdlibFile(d.getSourceFile()) &&
+      isDeclaredInAmbientModule(d, "stream"),
+  );
+  return declared ? irName : null;
 }
 
 function isDeclaredInAmbientModule(d: ts.Declaration, name: string): boolean {
@@ -2486,42 +2528,31 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   ) {
     return PROCSTREAM_T;
   }
-  // The static node:stream classes (the shipped fallback declarations —
-  // NOT @types/node, whose stream.Readable also types child stdio; under
-  // @types/node the childStream mapping below keeps priority and the
-  // static stream classes stand down). Checked BEFORE the childStream
-  // branch: the fallback's Readable must map to the runtime class, and
-  // under the fallback child.stdout is NodeJS.ReadableStream (its own
-  // branch below), so the two never collide.
-  for (const [irName, rec] of RUNTIME_STREAM_CLASSES) {
-    if (
-      psym?.name === rec.lib &&
-      checker.declarationsOf(psym).some(
-        (d) =>
-          ts.isClassDeclaration(d) &&
-          ctx.isStdlibFile(d.getSourceFile()) &&
-          !isNodeTypesPath(d.getSourceFile().fileName) &&
-          isDeclaredInAmbientModule(d, "stream"),
-      )
-    ) {
-      return { kind: "object", className: irName };
-    }
+  // The static node:stream classes, under BOTH declaration sources: the
+  // shipped fallback's `declare module "stream"` classes and @types/node's
+  // same-named classes inside its own. Checked BEFORE the childStream
+  // branch — see runtimeStreamClassOf for why the two no longer collide.
+  {
+    const irName = psym
+      ? runtimeStreamClassOf(checker.declarationsOf(psym), psym.name, ctx.isStdlibFile)
+      : null;
+    if (irName) return { kind: "object", className: irName };
   }
+  // The piped child-output stream. ONE spelling now: NodeJS.ReadableStream,
+  // the global-namespace interface the shipped fallback gives
+  // ChildProcess.stdout/stderr. @types/node spells those slots
+  // `stream.Readable`, which the branch above claims for the runtime class
+  // — child stdio under @types/node keeps working because its lowering
+  // spoke keys off the PRODUCING SYNTAX (child.stdout/child.stderr), not
+  // off this type mapping. See lowerChildStreamMethodCall.
   if (
-    (psym?.name === "Readable" &&
-      checker.declarationsOf(psym).some(
-        (d) =>
-          (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
-          ctx.isStdlibFile(d.getSourceFile()) &&
-          isDeclaredInAmbientModule(d, "stream"),
-      )) ||
-    (psym?.name === "ReadableStream" &&
-      checker.declarationsOf(psym).some(
-        (d) =>
-          ts.isInterfaceDeclaration(d) &&
-          ctx.isStdlibFile(d.getSourceFile()) &&
-          isDeclaredInAmbientNamespace(d, "NodeJS"),
-      ))
+    psym?.name === "ReadableStream" &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        ts.isInterfaceDeclaration(d) &&
+        ctx.isStdlibFile(d.getSourceFile()) &&
+        isDeclaredInAmbientNamespace(d, "NodeJS"),
+    )
   ) {
     return { kind: "childStream" };
   }
