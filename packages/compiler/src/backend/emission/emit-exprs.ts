@@ -2495,6 +2495,19 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           if (MAY_THROW_LIB_FNS.has(e.fn)) E.emitPendingCheck();
           return t;
         };
+        // The VOID half of finish(), for the members emitted as a bare
+        // statement. finish() is the ONLY place a libCall's pending check
+        // was ever placed, so every case that wrote its own E.line() had
+        // no check at all: the throw stayed in the cell and the next
+        // statement ran on top of it. The LLVM backend never had the
+        // hole — its generic LIB_FN_SYMS path checks MAY_THROW_LIB_FNS
+        // for every member it lists, which is why six of these were
+        // right there and wrong here.
+        const stmt = (call: string): Temp => {
+          E.line(`${call};${E.srcComment(e.loc)}`);
+          if (MAY_THROW_LIB_FNS.has(e.fn)) E.emitPendingCheck();
+          return { name: "", type: e.type };
+        };
         const fn = e.fn;
         switch (fn) {
           case "island.eval":
@@ -3520,11 +3533,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             E.line(`scr_net_sock_end_bytes(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
           case "net.sockWriteDyn":
-            E.line(`scr_net_sock_write_dynv(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
-            return { name: "", type: e.type };
+            return stmt(`scr_net_sock_write_dynv(${arg(0)}, ${arg(1)})`);
           case "net.sockEndDyn":
-            E.line(`scr_net_sock_end_dynv(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
-            return { name: "", type: e.type };
+            return stmt(`scr_net_sock_end_dynv(${arg(0)}, ${arg(1)})`);
           case "net.sockDestroy":
             E.line(`scr_net_sock_destroy(${arg(0)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
@@ -3820,11 +3831,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             E.line(`scr_http_res_end_bytes(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
           case "http.resWriteDyn":
-            E.line(`scr_http_res_write_dynv(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
-            return { name: "", type: e.type };
+            return stmt(`scr_http_res_write_dynv(${arg(0)}, ${arg(1)})`);
           case "http.resEndDyn":
-            E.line(`scr_http_res_end_dynv(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
-            return { name: "", type: e.type };
+            return stmt(`scr_http_res_end_dynv(${arg(0)}, ${arg(1)})`);
           case "http.resHeadersSent":
             return finish(`scr_http_res_headers_sent(${arg(0)})`);
           // The server-surface member follow-ups.
@@ -4558,23 +4567,17 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "http2.sessionSocket":
             return finish(`scr_http2_session_socket(${arg(0)})`);
           case "http2.streamRespond":
-            E.line(`scr_http2_stream_respond(${arg(0)}, ${arg(1)}, ${arg(2)});${E.srcComment(e.loc)}`);
-            return { name: "", type: e.type };
+            return stmt(`scr_http2_stream_respond(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "http2.streamWrite":
-            E.line(`scr_http2_stream_write_str(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
-            return { name: "", type: e.type };
+            return stmt(`scr_http2_stream_write_str(${arg(0)}, ${arg(1)})`);
           case "http2.streamWriteBytes":
-            E.line(`scr_http2_stream_write_bytes(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
-            return { name: "", type: e.type };
+            return stmt(`scr_http2_stream_write_bytes(${arg(0)}, ${arg(1)})`);
           case "http2.streamEnd":
-            E.line(`scr_http2_stream_end(${arg(0)});${E.srcComment(e.loc)}`);
-            return { name: "", type: e.type };
+            return stmt(`scr_http2_stream_end(${arg(0)})`);
           case "http2.streamEndStr":
-            E.line(`scr_http2_stream_end_str(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
-            return { name: "", type: e.type };
+            return stmt(`scr_http2_stream_end_str(${arg(0)}, ${arg(1)})`);
           case "http2.streamEndBytes":
-            E.line(`scr_http2_stream_end_bytes(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
-            return { name: "", type: e.type };
+            return stmt(`scr_http2_stream_end_bytes(${arg(0)}, ${arg(1)})`);
           case "http2.streamClose":
             E.line(`scr_http2_stream_close(${arg(0)}, ${arg(1)}, NULL);${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
@@ -4594,8 +4597,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             E.line(`scr_http2_session_settings(${arg(0)}, ${arg(1)}, NULL, NULL);${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
           case "http2.sessionSettingsDynCb":
-            E.line(`scr_http2_session_settings_dyncb(${arg(0)}, ${arg(1)}, ${arg(2)});${E.srcComment(e.loc)}`);
-            return { name: "", type: e.type };
+            return stmt(`scr_http2_session_settings_dyncb(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "http2.sessionSettingsCb0": {
             const cb = args[2]!;
             E.moveTemp(cb);
@@ -4603,8 +4605,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return { name: "", type: e.type };
           }
           case "http2.sessionOnSettingsDyn":
-            E.line(`scr_http2_session_on_settings_dyn(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)});${E.srcComment(e.loc)}`);
-            return { name: "", type: e.type };
+            return stmt(`scr_http2_session_on_settings_dyn(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "http2.sessionOnSettings0": {
             const cb = args[1]!;
             E.moveTemp(cb);
@@ -4618,8 +4619,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "http2.getDefaultSettings":
             return finish(`scr_http2_get_default_settings()`);
           case "http2.streamSetEncoding":
-            E.line(`scr_http2_stream_set_encoding(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
-            return { name: "", type: e.type };
+            return stmt(`scr_http2_stream_set_encoding(${arg(0)}, ${arg(1)})`);
           case "http2.streamSetEncodingRet":
             // the chaining spelling: same write, answers the receiver +1
             return finish(`scr_http2_stream_set_encoding_ret(${arg(0)}, ${arg(1)})`);
@@ -4765,11 +4765,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             E.line(`scr_http_client_end_bytes(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
           case "http.clientWriteDyn":
-            E.line(`scr_http_client_write_dynv(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
-            return { name: "", type: e.type };
+            return stmt(`scr_http_client_write_dynv(${arg(0)}, ${arg(1)})`);
           case "http.clientEndDyn":
-            E.line(`scr_http_client_end_dynv(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
-            return { name: "", type: e.type };
+            return stmt(`scr_http_client_end_dynv(${arg(0)}, ${arg(1)})`);
           case "http.clientDestroy":
             E.line(`scr_http_client_destroy(${arg(0)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
