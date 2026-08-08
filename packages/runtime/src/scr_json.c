@@ -799,16 +799,80 @@ ScrDyn *scr_dyn_new_chunk(const ScrBytes *b) {
   return scr_dyn_new_buffer_copy(b);
 }
 
+/* The Function.prototype.toString sentinels. Only their ADDRESSES matter;
+ * the contents are documentation for a debugger. */
+const char SCR_FN_SRC_NATIVE[] = "<native>";
+const char SCR_FN_SRC_BOUND[] = "<bound>";
+
 /* A boxed static function value (the compiler's static→dyn converters).
- * Ownership of the closure MOVES in; sig/name are static literals. */
-ScrDyn *scr_dyn_new_func(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity, const char *sig, const char *name) {
+ * Ownership of the closure MOVES in; sig/name/src are static literals. */
+ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity, const char *sig, const char *name,
+                             const char *src) {
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_FUNC);
   d->v.fn.clo = clo;
   d->v.fn.thunk = thunk;
   d->v.fn.sig = sig;
   d->v.fn.name = name;
+  d->v.fn.src = src;
   d->v.fn.arity = arity;
   return d;
+}
+
+/* The RUNTIME's own boxing spelling: every closure minted here is native
+ * glue (a stream completion callback, the immediate thunk, the callbackify
+ * wrapper), so `[native code]` is the truthful answer and the box says so
+ * rather than leaving the slot ambiguous. */
+ScrDyn *scr_dyn_new_func(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity, const char *sig, const char *name) {
+  return scr_dyn_new_func_src(clo, thunk, arity, sig, name, SCR_FN_SRC_NATIVE);
+}
+
+/* Function.prototype.toString — the ONE renderer (scr_runtime.h). JS
+ * answers a function's SOURCE TEXT; `[native code]` is right only for a
+ * function that has none, and a box that carries neither has no honest
+ * answer at all, so it refuses instead of guessing. Never returns NULL:
+ * the refusal is a TRAP, not a catchable throw. A catchable one would be
+ * worse than the bug it replaces — the display walkers append the empty
+ * string and leave the exception pending, and their call sites are not
+ * in the may-throw seed, so `console.log(String(f))` would print a blank
+ * line and exit 0. Silent is exactly what this whole item is about. The
+ * circular-structure conversion trap two hundred lines up is the same
+ * stance for the same reason. */
+ScrStr *scr_fn_to_string(const ScrDyn *d) {
+  const char *src = d->v.fn.src;
+  if (src == NULL) {
+    /* A compiled user function whose source text this build did not
+     * carry. Printing `[native code]` here would be a silent lie about a
+     * function that HAS source — name the boundary and stop. */
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "scriptc: Function.prototype.toString on '");
+    scr_jb_puts(&b, d->v.fn.name ? d->v.fn.name : "(anonymous)");
+    scr_jb_puts(&b, "': this build carries no source text for that function value, and JS answers a "
+                    "function's source text -- '[native code]' would be a wrong answer for a function "
+                    "compiled from one. The text rides along where the value's CREATION SITE is "
+                    "provable (a JavaScript function, arrow, class, method, or a binding holding one); "
+                    "it does not where the compiler cannot see which function a value is, and a "
+                    "TypeScript source carries none at all (Node stringifies a .ts program's functions "
+                    "type-STRIPPED, so the file's own text would be the wrong answer there).\n");
+    /* scr_jb_finish NUL-terminates, and scr_trap never returns, so the
+     * string outliving the call is the point rather than a leak. */
+    scr_trap(scr_jb_finish(&b)->data); /* _Noreturn */
+  }
+  if (src == SCR_FN_SRC_BOUND) {
+    /* Node prints a bound function WITHOUT its name: `f.bind(o).name` is
+     * "bound f", but its toString is the nameless native form. */
+    static const char f[] = "function () { [native code] }";
+    return scr_str_new(f, sizeof f - 1);
+  }
+  if (src == SCR_FN_SRC_NATIVE) {
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "function ");
+    if (d->v.fn.name) scr_jb_puts(&b, d->v.fn.name);
+    scr_jb_puts(&b, "() { [native code] }");
+    return scr_jb_finish(&b);
+  }
+  return scr_str_new(src, strlen(src));
 }
 
 /* Calling a dyn value: kind check (Node's "<what> is not a function"
@@ -1831,10 +1895,12 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
     }
     return out;
   }
-  case SCR_DYN_FUNC: {
-    static const char f[] = "function () { [native code] }";
-    return scr_str_new(f, sizeof f - 1);
-  }
+  case SCR_DYN_FUNC:
+    /* Function.prototype.toString, through the ONE renderer — this arm
+     * used to print a nameless native stub while the emitted display
+     * walker printed a NAMED one, so a single value answered two ways
+     * depending on which spelling reached it. */
+    return scr_fn_to_string(d);
   case SCR_DYN_JSVAL: {
     /* The engine's own ToString (row 2 of the jsval→dyn op table): the
      * real prototype chain runs — user toString included, its throw
@@ -3494,9 +3560,21 @@ static ScrDyn *scr_sc_clone(const ScrDyn *v, const ScrScParent *up) {
   case SCR_DYN_FUNC:
   case SCR_DYN_HANDLE:
   default: {
-    /* Node renders the value's source text; the checked-dynamic tree has none — the
-     * String() rendering stands in ("function () { [native code] } could
-     * not be cloned."). */
+    /* Node names the value by its String() rendering ("function f() {}
+     * could not be cloned."), which for a function IS its source text.
+     * A box that carries none must not turn this DIAGNOSTIC into a
+     * different exception — the message falls back to the native form
+     * and the DataCloneError below still fires, which is the failure the
+     * caller asked about. */
+    if (v->kind == SCR_DYN_FUNC && v->v.fn.src == NULL) {
+      ScrJsonBuf nb;
+      scr_jb_init(&nb);
+      scr_jb_puts(&nb, "function ");
+      if (v->v.fn.name) scr_jb_puts(&nb, v->v.fn.name);
+      scr_jb_puts(&nb, "() { [native code] } could not be cloned.");
+      scr_throw_domex_str("DataCloneError", scr_jb_finish(&nb)); /* takes ownership */
+      return NULL;
+    }
     ScrStr *what = scr_dyn_string_coerce(v);
     static const char suffix[] = " could not be cloned.";
     size_t len = what->len + sizeof suffix - 1;

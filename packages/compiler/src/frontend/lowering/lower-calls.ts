@@ -9,7 +9,7 @@ import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLocal, 
 import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, locOf } from "../program.js";
 import { isGenericCallableMemberType, typeKey} from "../types.js";
-import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
+import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
 import { ffiBindingDiag, ffiSignatureDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -3482,11 +3482,13 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           canBoxFuncIntoDyn(lowered.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))
         ) {
           const name = jsFuncValueNameOf(L, a);
+          const src = jsFuncValueSourceOf(L, a);
           const boxed: IrExpr = {
             kind: "dynFrom",
             value: lowered,
             type: DYN,
             ...(name !== null ? { fnName: name } : {}),
+            ...(src !== null ? { fnSrc: src } : {}),
             loc,
           };
           return {

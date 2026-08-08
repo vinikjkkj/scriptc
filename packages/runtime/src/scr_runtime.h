@@ -3046,14 +3046,30 @@ struct ScrDyn {
       size_t len; size_t cap; ScrDynEntry *entries;
       ScrDyn *proto; const char *cname; ScrDyn *accessors;
     } obj; /* owned */
-    /* SCR_DYN_FUNC: the boxed closure (owned) + its call descriptor. `sig`
-     * and `name` are static compiler-emitted literals (never freed); name
-     * may be NULL (anonymous — inspect prints [Function (anonymous)]).
+    /* SCR_DYN_FUNC: the boxed closure (owned) + its call descriptor. `sig`,
+     * `name` and `src` are static compiler-emitted literals (never freed);
+     * name may be NULL (anonymous — inspect prints [Function (anonymous)]).
      * The dyn→closure edge is NOT visible to the cycle collector (ScrDyn
      * has no trace header): trial deletion treats it as an external root,
      * so nothing dangles — a cycle THROUGH a dyn-boxed function is merely
-     * never collected (documented divergence). */
-    struct { ScrClosure *clo; ScrDynThunk thunk; const char *sig; const char *name; uint32_t arity; } fn;
+     * never collected (documented divergence).
+     *
+     * `src` is what Function.prototype.toString answers — JS returns the
+     * function's SOURCE TEXT, exactly as written, and `[native code]` is
+     * a truthful answer only for a function that has no JS source. Four
+     * states, three of them right by construction:
+     *
+     *   - a static literal: THE source text, printed verbatim;
+     *   - SCR_FN_SRC_NATIVE: a genuinely native function (a runtime-minted
+     *     glue closure) — `function <name>() { [native code] }`, which is
+     *     what an engine prints for its own builtins;
+     *   - SCR_FN_SRC_BOUND: a bound function — `function () { [native code] }`,
+     *     Node's exact answer, and note it carries NO name (a bound
+     *     function's `.name` is "bound f" but its toString is nameless);
+     *   - NULL: a compiled user function whose text this build did not
+     *     carry. There is no honest string for it, so the renderers REFUSE
+     *     loudly instead of claiming native code. */
+    struct { ScrClosure *clo; ScrDynThunk thunk; const char *sig; const char *name; const char *src; uint32_t arity; } fn;
     /* SCR_DYN_HANDLE: the retained native handle + its type tag. The
      * dyn→handle edge is NOT visible to the cycle collector (the dyn→
      * closure stance): handles drop their listener lists at settlement,
@@ -3490,10 +3506,31 @@ ScrDyn *scr_dyn_define_props(ScrDyn *target, ScrDyn *descs);
  * Returns the target (+1, JS's return), or NULL with a pending catchable
  * throw. Target and descriptor borrowed. */
 ScrDyn *scr_dyn_define_prop(ScrDyn *target, ScrStr *key, ScrDyn *desc);
+/* The two non-source answers Function.prototype.toString can truthfully
+ * give, as SENTINEL addresses in the `src` slot (never dereferenced —
+ * compared by pointer). A string literal cannot serve: a user function
+ * whose source text happened to equal one would be indistinguishable. */
+extern const char SCR_FN_SRC_NATIVE[]; /* a runtime-minted native closure */
+extern const char SCR_FN_SRC_BOUND[];  /* the result of Function#bind */
 /* Boxes a closure as a callable dyn value. Ownership of `clo` MOVES in
  * (callers retain first when they keep their own reference); `sig`/`name`
- * must be static literals (the box never frees them; name may be NULL). */
+ * must be static literals (the box never frees them; name may be NULL).
+ * This spelling marks the box NATIVE — it is the runtime's own entry
+ * point, and every closure the runtime mints here really is native glue.
+ * Compiled boxes go through scr_dyn_new_func_src with their source. */
 ScrDyn *scr_dyn_new_func(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity, const char *sig, const char *name);
+/* scr_dyn_new_func carrying the function's Function.prototype.toString
+ * answer: a static source-text literal, one of the SCR_FN_SRC_* sentinels,
+ * or NULL when the build carried no text (the renderers then refuse). */
+ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity, const char *sig, const char *name, const char *src);
+/* Function.prototype.toString over a SCR_DYN_FUNC box — the ONE renderer.
+ * String(), `+`, template interpolation and `.toString()` all land here so
+ * one value cannot answer two ways depending on the spelling that reached
+ * it. Returns +1 and NEVER NULL: a box carrying no honest answer
+ * (fn.src == NULL) TRAPS. A catchable throw would be silent here — the
+ * display walkers append the empty string and leave the exception
+ * pending, and their call sites run no pending check. */
+ScrStr *scr_fn_to_string(const ScrDyn *d);
 /* Calls a dyn value: a non-function kind throws the catchable TypeError
  * "<what> is not a function" (Node's wording — `what` is the call site's
  * callee spelling) and returns NULL; a function kind delegates to the

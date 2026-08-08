@@ -906,6 +906,150 @@ function declaredFuncValueName(L: Lowerer, id: ts.Identifier, seen: Set<ts.Symbo
   return jsFuncValueNameOf(L, d.initializer, seen);
 }
 
+/** The SOURCE TEXT `Function.prototype.toString` must answer for a
+ * function value flowing into a dyn slot — resolved at the value's
+ * CREATION site, the same walk jsFuncValueNameOf uses for the name, for
+ * the same reason: JS fixes a function's source once, when it is created,
+ * and every later binding carries that one text (`function f(){};
+ * var g = f; String(g)` prints f's body, not "g").
+ *
+ * The walk answers one of three things, and the two non-text answers are
+ * as much the truth as the text is:
+ *
+ *   - `{ text }` — the creation site is a function/arrow/class/method
+ *     node, so its text IS the answer, comments and whitespace included;
+ *   - `"bound"` — a `.bind(...)` call. A bound function has NO source, so
+ *     `function () { [native code] }` is what every engine prints, and
+ *     that is a right answer rather than a missing one;
+ *   - `null` — a parameter, a call result, an element read, a reassigned
+ *     binding: nothing here can say which function the value is. The
+ *     caller carries no text and the runtime refuses to guess.
+ *
+ * JAVASCRIPT sources only. Node executes a `.ts` program type-STRIPPED,
+ * so its answer is the erased text (each annotation replaced by spaces of
+ * equal width), not what the file says; handing back `getText()` there
+ * would trade one invisible wrong answer for another. TypeScript function
+ * values keep the compile-time fence they already have (SC2011 on
+ * `String(f)`), which is loud.
+ *
+ * `seen` breaks `var a = b, b = a` cycles, like the name walk. */
+export function jsFuncValueSourceOf(
+  L: Lowerer,
+  node: ts.Node,
+  seen?: Set<ts.Symbol>,
+): { text: string } | "bound" | null {
+  let n: ts.Node = node;
+  while (ts.isParenthesizedExpression(n)) n = n.expression;
+
+  // `target.bind(...)`. A rebind is still bound, so the recursion needs no
+  // special case — every answer up the chain is "bound".
+  if (
+    ts.isCallExpression(n) &&
+    ts.isPropertyAccessExpression(n.expression) &&
+    n.expression.name.text === "bind" &&
+    n.expression.questionDotToken === undefined
+  ) {
+    return "bound";
+  }
+
+  if (ts.isIdentifier(n)) {
+    const sym = L.resolveValueSymbol(n);
+    if (!sym) return null;
+    const s = seen ?? new Set<ts.Symbol>();
+    if (s.has(sym)) return null;
+    s.add(sym);
+    const decls = L.checker.declarationsOf(sym);
+    // Two declarations means two possible values behind one name; nothing
+    // here can say which one a use sees.
+    if (decls.length !== 1) return null;
+    const d = decls[0];
+    if (!d) return null;
+    if (ts.isFunctionDeclaration(d) || ts.isClassDeclaration(d)) return functionNodeSource(d);
+    if (!ts.isVariableDeclaration(d) || !d.initializer) return null;
+    // A binding written again after its initializer can hold a different
+    // function at the point of use.
+    const isConst = (ts.getCombinedNodeFlags(d) & ts.NodeFlags.Const) !== 0;
+    if (!isConst && !bindingNeverReassigned(L, sym, d)) return null;
+    return jsFuncValueSourceOf(L, d.initializer, s);
+  }
+
+  // `o.m` / `K.prototype.m` / `K.s` — a method shorthand and a property
+  // holding a function literal are creation sites like any other, and the
+  // property symbol names exactly one declaration when it has one. (The
+  // NAME walk has no equivalent because jsFuncNameOf's reference-site
+  // spelling already answers `m` here; the TEXT has no such shortcut.)
+  if (ts.isPropertyAccessExpression(n) && n.questionDotToken === undefined) {
+    const psym = L.checker.getSymbolAtLocation(n.name);
+    if (!psym) return null;
+    const s = seen ?? new Set<ts.Symbol>();
+    if (s.has(psym)) return null;
+    s.add(psym);
+    const decls = L.checker.declarationsOf(psym);
+    if (decls.length !== 1) return null;
+    const d = decls[0];
+    if (!d) return null;
+    if (ts.isMethodDeclaration(d) || ts.isGetAccessorDeclaration(d) || ts.isSetAccessorDeclaration(d)) {
+      return functionNodeSource(d);
+    }
+    if (ts.isPropertyAssignment(d) && d.initializer) return jsFuncValueSourceOf(L, d.initializer, s);
+    if (ts.isPropertyDeclaration(d) && d.initializer) return jsFuncValueSourceOf(L, d.initializer, s);
+    return null;
+  }
+
+  if (
+    ts.isFunctionExpression(n) || ts.isArrowFunction(n) || ts.isFunctionDeclaration(n) ||
+    ts.isClassExpression(n) || ts.isClassDeclaration(n) || ts.isMethodDeclaration(n)
+  ) {
+    return functionNodeSource(n);
+  }
+  return null;
+}
+
+/** Modifiers an engine does NOT count as part of a function's source
+ * text: they belong to the DECLARATION that holds the function, not to
+ * the function. `export function f(){}` stringifies as `function f(){}`
+ * and `static s(){}` as `s(){}`, while `async`, `get`, `set` and `*` —
+ * which change what the function IS — stay. */
+const SRC_OUTER_MODIFIERS = new Set<ts.SyntaxKind>([
+  ts.SyntaxKind.ExportKeyword,
+  ts.SyntaxKind.DefaultKeyword,
+  ts.SyntaxKind.DeclareKeyword,
+  ts.SyntaxKind.StaticKeyword,
+  ts.SyntaxKind.PublicKeyword,
+  ts.SyntaxKind.PrivateKeyword,
+  ts.SyntaxKind.ProtectedKeyword,
+  ts.SyntaxKind.ReadonlyKeyword,
+  ts.SyntaxKind.AbstractKeyword,
+  ts.SyntaxKind.OverrideKeyword,
+]);
+
+/** A function-like node's own source text, or null when the node is not
+ * in a JavaScript file (see jsFuncValueSourceOf's TypeScript note) or the
+ * text is unavailable (a synthesized node has no position). */
+function functionNodeSource(n: ts.Node): { text: string } | null {
+  const sf = n.getSourceFile() as ts.SourceFile | undefined;
+  if (!sf) return null;
+  if (!/\.(js|mjs|cjs|jsx)$/i.test(sf.fileName)) return null;
+  if (n.pos < 0 || n.end < 0 || n.end > sf.text.length) return null;
+  // getStart() is the node proper, past leading trivia — but the node
+  // proper still includes the outer modifiers, which the engine's answer
+  // does not.
+  let start = n.getStart(sf);
+  const mods = ts.canHaveModifiers(n) ? ts.getModifiers(n) : undefined;
+  if (mods) {
+    for (const m of mods) {
+      if (!SRC_OUTER_MODIFIERS.has(m.kind)) {
+        start = m.getStart(sf);
+        break;
+      }
+      start = ts.skipTrivia(sf.text, m.end);
+    }
+  }
+  if (start >= n.end) return null;
+  const text = sf.text.slice(start, n.end);
+  return text.length > 0 ? { text } : null;
+}
+
 export class Lowerer {
   readonly checker: ts.TypeChecker;
   readonly diags: ScrDiagnostic[] = [];
@@ -7082,6 +7226,13 @@ export class Lowerer {
     if (e.kind === "dynFrom" && e.value.type.kind === "func" && e.fnName === undefined) {
       const name = jsFuncValueNameOf(this, node);
       if (name !== null) e = { ...e, fnName: name };
+    }
+    // …and its Function.prototype.toString SOURCE TEXT from the same
+    // creation site (jsFuncValueSourceOf). Absent means unprovable, and
+    // the box then refuses to stringify rather than claim native code.
+    if (e.kind === "dynFrom" && e.value.type.kind === "func" && e.fnSrc === undefined) {
+      const src = jsFuncValueSourceOf(this, node);
+      if (src !== null) e = { ...e, fnSrc: src };
     }
     // A union the plain re-tag declined (stranded NON-unit arms): when the
     // node's CHECKER type proves those arms away, they trap instead — the

@@ -11,7 +11,7 @@ import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBi
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, diffieHellmanFnValueOf, objectStaticFnValueOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import { UNSUPPORTED, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
-import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
+import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, strCharsCall } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../shared.js";
@@ -4563,6 +4563,16 @@ function rejectSuperInObjectMethod(L: Lowerer, node: ts.Node): void {
         raw = { kind: "closure", fnName, captures: [], type: funcOf([], VOID), loc: locOf(prop) };
       }
       let v = L.coerceToExpected(raw, DYN);
+      // A function MEMBER of a runtime-keyed object literal is created
+      // right here, so its Function.prototype.toString source text is
+      // readable off the member node — coerceInto's creation-site walk
+      // never runs on this path (it is coerceToExpected, which takes no
+      // node). Without it the box would carry no text and `String(o.m)`
+      // would refuse where Node prints the method's source.
+      if (v.kind === "dynFrom" && v.value.type.kind === "func" && v.fnSrc === undefined) {
+        const mSrc = jsFuncValueSourceOf(L, valueExpr);
+        if (mSrc !== null) v = { ...v, fnSrc: mSrc };
+      }
       if (v.type.kind !== "dyn") {
         const convDiagsBefore = L.diags.length;
         try {

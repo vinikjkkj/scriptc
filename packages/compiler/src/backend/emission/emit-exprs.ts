@@ -1873,12 +1873,20 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // A closure boxes as the checked-dynamic tree's function kind: retained closure +
           // the per-signature call thunk + the interned signature key. The
           // best-effort name rides along for inspect/error rendering (NULL
-          // when the lowering had none).
+          // when the lowering had none), and the creation site's SOURCE
+          // TEXT rides along for Function.prototype.toString — `"bound"`
+          // where the value is a bound function (whose toString really IS
+          // the native form), absent where the lowering could not prove a
+          // creation site (the box then refuses rather than guessing).
           const name =
             e.fnName !== undefined && e.fnName !== ""
               ? cStringLiteral(Buffer.from(e.fnName, "utf8"))
               : "NULL";
-          return E.newTemp(e.type, `${E.dynFuncBoxHelper(v.type)}(${v.name}, ${name})`);
+          const src =
+            e.fnSrc === undefined ? "NULL"
+            : e.fnSrc === "bound" ? "SCR_FN_SRC_BOUND"
+            : cStringLiteral(Buffer.from(e.fnSrc.text, "utf8"));
+          return E.newTemp(e.type, `${E.dynFuncBoxHelper(v.type)}(${v.name}, ${name}, ${src})`);
         }
         const conv = `${E.toDynHelper(v.type)}(${v.name})`;
         // An ARRAY or RECORD the caller still names: the copy the converter
