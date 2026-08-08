@@ -191,6 +191,32 @@ export function abstractPropertyDeclOf(L: Lowerer, expr: ts.PropertyAccessExpres
     );
 }
 
+/** JS ToBoolean of an IR value the LOWERING already reduced to a literal,
+ * or null when the value is not a compile-time constant.
+ *
+ * Only genuine literals answer. A literal has no side effects, so a caller
+ * that skips evaluating it — which is what the short-circuit folds do —
+ * drops nothing observable; anything computed keeps its runtime test. The
+ * falsy set is JS's own: `false`, `0`/`-0`/`NaN`, `""`, and the units. */
+function staticTruth(e: IrExpr): boolean | null {
+  if (e.kind === "boolLit") return e.value;
+  if (e.kind === "numLit") return e.value !== 0 && !Number.isNaN(e.value);
+  if (e.kind === "strLit") return e.value.length > 0;
+  if (e.kind === "unitLit") return false;
+  return null;
+}
+
+/** A string comparison, folded when BOTH sides are literals. The fold is
+ * what makes a `typeof` sniff DECIDE: `"undefined" != typeof window` is a
+ * constant only if the comparison against the folded typeof string is one,
+ * and the short-circuit rules downstream read that constant. */
+function strEqExpr(negated: boolean, left: IrExpr, right: IrExpr, loc: SrcLoc): IrExpr {
+  if (left.kind === "strLit" && right.kind === "strLit") {
+    return { kind: "boolLit", value: (left.value === right.value) !== negated, type: BOOL, loc };
+  }
+  return { kind: "strEq", negated, left, right, type: BOOL, loc };
+}
+
 /** The `() => bytes` value behind a bare `diffieHellman` reference: a
  * memoized lifted closure `(opts) => key.dh(opts.privateKey, opts.publicKey)`
  * over the interned `{ privateKey: keyobj; publicKey: keyobj }` options
@@ -730,6 +756,27 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           ) {
             return { kind: "strLit", value: "function", type: STRING, loc };
           }
+        }
+        // `typeof window` / `typeof define` — a name NOTHING in the program
+        // binds. This is the one read of an undeclared name JavaScript does
+        // not throw on, and its answer is fixed: "undefined". The operand
+        // has no value to lower (a bare read of the same name IS the
+        // ReferenceError), so folding is not an optimization — it is the
+        // only lowering the expression has.
+        //
+        // "Nothing binds it" is the checker's answer, not a guess: an
+        // identifier the checker resolves to no symbol at all has no
+        // declaration in any program file, no ambient declaration, and no
+        // lib declaration. Every source language reports that as a hard
+        // type error before a build gets here; what reaches this fold is
+        // the provenance lane, where a vendored bundle's environment sniff
+        // (`"undefined" != typeof window && window`, the UMD prologue's
+        // `"function" == typeof define && define.amd`) is compiled against
+        // types that deliberately do not declare a browser. Node running
+        // the same bundle answers "undefined" too, which is why the sniff
+        // is written this way.
+        if (sym === undefined) {
+          return { kind: "strLit", value: "undefined", type: STRING, loc };
         }
       }
       // Island values ask the engine; static primitives constant-fold to
@@ -3362,6 +3409,11 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       if (op === ts.SyntaxKind.AmpersandAmpersandToken || op === ts.SyntaxKind.BarBarToken) {
         const isAnd = op === ts.SyntaxKind.AmpersandAmpersandToken;
         const left = L.lowerCondition(e.left);
+        // A left operand that DECIDED at compile time answers the whole
+        // test, and the right one never evaluates — so it never lowers
+        // either. The value-position twin of this fold carries the
+        // argument; in TEST position the answer is simply the constant.
+        if (left.kind === "boolLit" && left.value !== isAnd) return left;
         // The right operand evaluates only when the left already answered
         // (true for &&, false for ||) — aliased-typeof narrows the left
         // PROVES under that polarity hold while it lowers (`type ===
@@ -3369,6 +3421,9 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         const right = L.narrowingAliases(aliasTypeofNarrows(L, e.left, isAnd), () =>
           L.lowerCondition(e.right),
         );
+        // ...and a left that decided the OTHER way leaves the right as the
+        // whole answer (`false || cond` IS cond).
+        if (left.kind === "boolLit") return right;
         return {
           kind: "logical",
           op: isAnd ? "&&" : "||",
@@ -3388,6 +3443,14 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
    * value; ref arms always truthy). Anything else (void) cannot be
    * tested. */
   export function ensureBool(L: Lowerer, e: IrExpr, node: ts.Expression): IrExpr {
+    // A LITERAL operand: ToBoolean is a compile-time constant, so the test
+    // is one — which is what lets the short-circuit and ternary folds
+    // downstream drop the branch JS never evaluates. A literal has no
+    // effects, so nothing is lost by not testing it at runtime.
+    {
+      const t = staticTruth(e);
+      if (t !== null) return { kind: "boolLit", value: t, type: BOOL, loc: e.loc };
+    }
     if (e.type.kind === "bool") return e;
     if (e.type.kind === "f64" || e.type.kind === "string") {
       return { kind: "toBool", operand: e, type: BOOL, loc: e.loc };
@@ -8510,7 +8573,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         const left = L.lowerExpr(expr.left);
         const right = L.lowerExpr(expr.right);
         if (left.type.kind === "string" && right.type.kind === "string") {
-          return { kind: "strEq", negated, left, right, type: BOOL, loc };
+          return strEqExpr(negated, left, right, loc);
         }
         if (
           (left.type.kind === "f64" && right.type.kind === "f64") ||
@@ -8527,6 +8590,27 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // also what tsc's type says, modulo literal-union collapsing that
       // mapType already handles). Mixed kinds (`n && s`) stay rejected.
       const left = L.lowerExpr(expr.left);
+      // A left operand that already DECIDED at compile time: JavaScript
+      // does not evaluate the right one, so neither does this — the dead
+      // operand is not lowered AT ALL, which is the whole point. A
+      // vendored bundle's environment sniff (`"undefined" != typeof window
+      // && window`) reaches its dead half with a value the compiler has no
+      // representation for, and lowering it costs a fence for code no run
+      // ever enters. The `&& X` there is not "X we cannot compile" — it is
+      // a branch the program provably never takes.
+      //
+      // A literal decides and carries no effects, so dropping the read
+      // loses nothing (the ternary's boolLit fold makes the same argument
+      // for the same reason). The result is the operand JS's own rule
+      // names: `a && b` is `a` when a is falsy and `b` otherwise, `a || b`
+      // is `a` when a is truthy and `b` otherwise.
+      {
+        const decided = staticTruth(left);
+        if (decided !== null) {
+          const isAnd = op === ts.SyntaxKind.AmpersandAmpersandToken;
+          return decided === isAnd ? L.lowerExpr(expr.right) : left;
+        }
+      }
       const right = L.lowerExpr(expr.right);
       // A LITERAL-unit left operand (a compile-time undefined/null — the
       // capability-probe members: `process.features.inspector ||
@@ -8535,6 +8619,9 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // `unit || X` IS X, `unit && X` IS the unit (X's side effects never
       // run in JS either; the lowered right is simply dropped). Literal
       // units only — computed unit-typed values keep the fences below.
+      // (The staticTruth fold above already claims the unit-literal case;
+      // this arm stays as the backstop for a unit that arrives through a
+      // path staticTruth declines.)
       if (left.kind === "unitLit") {
         return op === ts.SyntaxKind.BarBarToken ? right : left;
       }
@@ -9050,7 +9137,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       case ts.SyntaxKind.ExclamationEqualsEqualsToken: {
         const negated = op === ts.SyntaxKind.ExclamationEqualsEqualsToken;
         if (bothNum) return { kind: "bin", op: negated ? "!==" : "===", left, right, type: BOOL, loc };
-        if (bothStr) return { kind: "strEq", negated, left, right, type: BOOL, loc };
+        if (bothStr) return strEqExpr(negated, left, right, loc);
         // bool === bool: a plain value compare (the config-drift checks'
         // `desired.lanMode !== actual.lanMode` shape).
         if (left.type.kind === "bool" && right.type.kind === "bool") {

@@ -990,6 +990,21 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
    * silent-wrong-output sin. */
   export function predeclareForwardVar(L: Lowerer, symbol: ts.Symbol): boolean {
     if (L.hoistedVars.has(symbol)) return false; // would have resolved
+    // A binding that already owns MODULE-GLOBAL storage never predeclares:
+    // the global is reachable from every function in the program, the
+    // declaration assigns THAT slot, and minting a local here would shadow
+    // it with a slot nothing ever writes. Resolution reaches this function
+    // before it consults globalOf, so the guard has to be here.
+    //
+    // Nothing used to depend on it, by accident: every global-backed
+    // `var` this could fire on had a type with no representation for
+    // `undefined`, so the refusal below turned it away. The widening
+    // beneath that refusal removes the accident, and a shadowed global is
+    // exactly the shape it would produce — a JS bundler preamble's
+    // `var o = Object.getOwnPropertyNames, …, y = mod({...})` reads `o`
+    // from inside a module body created above `y`, and `o`'s own global
+    // must keep answering that read.
+    if (L.globalsBySymbol.has(symbol)) return false;
     const decl = L.checker.valueDeclarationOf(symbol);
     if (!decl || !ts.isVariableDeclaration(decl) || !isVarDeclared(decl)) return false;
     const nameNode = ts.isIdentifier(decl.name) ? decl.name : null;
@@ -1016,13 +1031,55 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     // binding (the engine's undefined).
     const type = varBindingType(L, nameNode);
     if (!type) return false;
-    const wrapped = type.kind === "dyn" ? dynUndefinedExpr(locOf(decl)) : L.unassignedSlotInit(type, locOf(decl));
+    let slot = type;
+    let wrapped = type.kind === "dyn" ? dynUndefinedExpr(locOf(decl)) : L.unassignedSlotInit(type, locOf(decl));
+    // A JAVASCRIPT `var` whose inferred type has no room for `undefined`
+    // (a FUNCTION, overwhelmingly — every bundler preamble is a list of
+    // `var thunk = memoize({...})` declarators, and the module bodies
+    // registered by the EARLIER declarators call the LATER ones): the slot
+    // widens to checked-dynamic, which is the one representation that can
+    // hold both states this binding really has.
+    //
+    // This is not a guess in either direction, and that is the whole
+    // argument for it. The refusal above exists because a narrow slot has
+    // no bit pattern for the `undefined` Node yields when the read really
+    // does run early, so predeclaring one would be the silent-wrong-answer
+    // sin. A dyn slot has that pattern: it holds the dyn undefined from
+    // function entry and the boxed value from the declarator on, so BOTH
+    // readings are exact — an early read answers `undefined` exactly as
+    // Node does, and a later one answers the value. Nothing is assumed
+    // about WHEN the read runs, which is precisely what no analysis here
+    // can prove for a closure.
+    //
+    // Gated three ways. JAVASCRIPT sources only: a TypeScript annotation
+    // is a contract the program wrote, and widening it silently would
+    // change what its other uses mean, whereas a JS `var`'s type is
+    // inference and the language's own answer for this binding IS "value
+    // or undefined". STATIC builds only, matching every other rule that
+    // reads the checked-dynamic tree (under --dynamic a JS value is an
+    // island handle, not a dyn node). And only when the declarator's own
+    // value can ENTER the slot (dynConvertible) — otherwise the widening
+    // would just move the fence from the early read onto the declaration,
+    // which is a worse place for it.
+    if (
+      wrapped === null &&
+      !L.dynamic &&
+      isJsSourceFile(decl.getSourceFile()) &&
+      L.dynConvertible(type)
+    ) {
+      slot = DYN;
+      wrapped = dynUndefinedExpr(locOf(decl));
+      if (process.env["SCRIPTC_VARWIDEN_WHY"] !== undefined) {
+        const l = locOf(decl);
+        process.stderr.write(`VARWIDEN ${nameNode.text} : ${L.fmt(type)} -> dyn @ ${l.file}+${l.start}\n`);
+      }
+    }
     if (!wrapped) return false;
     const root = L.activeStmtLists.find((e) => e.ctx === ctx)!;
     const name = nameNode.text;
     const count = ctx.localCounters.get(name) ?? 0;
     ctx.localCounters.set(name, count + 1);
-    const local: IrLocal = { id: `${name}.${count}`, name, type, mutable: true };
+    const local: IrLocal = { id: `${name}.${count}`, name, type: slot, mutable: true };
     ctx.locals.push(local);
     ctx.scopes[0]!.set(symbol, local);
     root.out.push({ kind: "varDecl", localId: local.id, init: wrapped, loc: locOf(decl) });
