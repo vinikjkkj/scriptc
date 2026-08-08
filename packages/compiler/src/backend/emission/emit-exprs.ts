@@ -2,7 +2,7 @@
  * expression lands in a fresh C temp, with RC ownership tracked on the
  * emitter's frames (see the discipline comment in emitter core). */
 import type { CEmitter, Temp } from "./emitter.js";
-import { arrayOf, BOOL, BYTES_U8, bytesOf, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, F64, IrExpr, IrRecordShape, IrType, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, STRING, typeEquals } from "../../ir/nodes.js";
+import { arrayOf, BOOL, BYTES_U8, bytesOf, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, STRING, typeEquals } from "../../ir/nodes.js";
 import { boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct } from "../mangle.js";
 import { OVERFLOW_MEMBER } from "./emit-shapes.js";
@@ -1861,7 +1861,18 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               : "NULL";
           return E.newTemp(e.type, `${E.dynFuncBoxHelper(v.type)}(${v.name}, ${name})`);
         }
-        return E.newTemp(e.type, `${E.toDynHelper(v.type)}(${v.name})`);
+        const conv = `${E.toDynHelper(v.type)}(${v.name})`;
+        // An ARRAY or RECORD the caller still names: the copy the converter
+        // just made cannot alias the source (different representations), so
+        // a write through it would be silently dropped where Node writes
+        // the original. Mark the copy — the mutating dyn entry points
+        // (scr_dyn_key_set and the array mutators) then refuse LOUDLY,
+        // naming the boundary, instead of accepting a write nobody will
+        // ever read. Read-only uses are untouched.
+        return E.newTemp(
+          e.type,
+          dynCopyIsObservable(e.value) ? `scr_dyn_mark_static_copy(${conv})` : conv,
+        );
       }
       case "dynFromJsval": {
         // Island value → dyn: the by-reference wrap (scr_dyn_from_jsval

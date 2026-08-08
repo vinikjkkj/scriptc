@@ -329,6 +329,9 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
     d->kind = kind;
     d->buffer = false;
     d->null_proto = false;
+    /* A recycled node must not inherit the previous life's boundary mark,
+     * or an unrelated fresh value would refuse its own writes. */
+    d->static_copy = false;
     if (kind == SCR_DYN_ARR) {
       d->v.arr.len = 0; /* cap/items preserved from the node's last life */
     } else if (kind == SCR_DYN_OBJ) {
@@ -734,7 +737,31 @@ ScrDyn *scr_dyn_new_obj_null_proto(void) {
 
 ScrDyn *scr_dyn_new_bytes_copy(const ScrBytes *b) {
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_BYTES);
-  d->v.bytes = scr_bytes_copy(b); /* the static→dyn boundary copies */
+  d->v.bytes = scr_bytes_copy(b); /* the CLONING constructor */
+  return d;
+}
+
+ScrDyn *scr_dyn_new_bytes_ref(ScrBytes *b) {
+  /* The static→dyn BOUNDARY constructor: one refcounted payload, two
+   * views of it. Retaining (rather than copying) is what makes a write
+   * through an untyped parameter reach the caller's buffer. */
+  ScrDyn *d = scr_dyn_alloc(SCR_DYN_BYTES);
+  d->v.bytes = scr_bytes_retain(b);
+  return d;
+}
+
+ScrDyn *scr_dyn_mark_static_copy(ScrDyn *d) {
+  /* Only the two kinds the boundary actually copies carry the mark, and
+   * the already-marked early exit keeps a shared sub-object from being
+   * walked twice. */
+  if (d == NULL || d->static_copy) return d;
+  if (d->kind == SCR_DYN_ARR) {
+    d->static_copy = true;
+    for (size_t i = 0; i < d->v.arr.len; i++) scr_dyn_mark_static_copy(d->v.arr.items[i]);
+  } else if (d->kind == SCR_DYN_OBJ) {
+    d->static_copy = true;
+    for (size_t i = 0; i < d->v.obj.len; i++) scr_dyn_mark_static_copy(d->v.obj.entries[i].value);
+  }
   return d;
 }
 
@@ -2058,6 +2085,10 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
     scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&sb));
     return false;
   }
+  if (recv->static_copy) {
+    scr_dyn_static_copy_refuse("deleting a property");
+    return false;
+  }
   if (recv->kind == SCR_DYN_OBJ) {
     if (scr_dyn_obj_get(recv, key->data, key->len) != NULL) {
       scr_dyn_obj_unset(recv, key->data, key->len);
@@ -2155,7 +2186,53 @@ bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
   return false;
 }
 
+/* The one refusal every mutating dyn entry point shares: this receiver is
+ * a copy the static→dyn boundary made of a value the caller still names,
+ * so the write cannot reach what Node would write. Loud beats lost. */
+void scr_dyn_static_copy_refuse(const char *what) {
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_jb_puts(&b, what);
+  scr_jb_puts(&b, " through a value that crossed into an 'unknown' (dynamic) slot"
+                  " is not supported yet for arrays and records: the crossing COPIES"
+                  " them (their static and dynamic representations are different"
+                  " memory), so this write would land on the copy and never reach the"
+                  " object the caller still holds — where Node writes that object"
+                  " itself. A Uint8Array or Buffer crosses by REFERENCE and its writes"
+                  " do land; giving the parameter a static type keeps the write static");
+  scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+}
+
 void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
+  if (recv->static_copy) {
+    scr_dyn_static_copy_refuse("assigning a property");
+    return;
+  }
+  if (recv->kind == SCR_DYN_BYTES) {
+    /* A typed-array element write. The payload is SHARED with the static
+     * source (scr_dyn_new_bytes_ref), so this lands where Node's does.
+     *
+     * JS's integer-indexed exotic objects: a canonical index inside the
+     * bounds stores the value through the element's own coercion
+     * (ToNumber, then the width's modular truncation — scr_bytes_set is
+     * the same routine the static tier uses), and an index OUT of bounds
+     * is a SILENT no-op that creates no property and throws even in
+     * strict mode never. A non-index key would create an ordinary expando
+     * property, which a dyn bytes value has no table for — that keeps the
+     * loud "Cannot create property" fence below. */
+    size_t idx = 0;
+    int is_index = key->len > 0 && !(key->len > 1 && key->data[0] == '0');
+    for (size_t i = 0; is_index && i < key->len; i++) {
+      if (key->data[i] < '0' || key->data[i] > '9') is_index = 0;
+      else idx = idx * 10 + (size_t)(key->data[i] - '0');
+    }
+    if (is_index) {
+      double num = scr_dyn_to_number(value);
+      if (scr_exc_pending()) return; /* ToNumber of a Symbol, a throwing valueOf */
+      if (idx < recv->v.bytes->len) scr_bytes_set(recv->v.bytes, (double)idx, num);
+      return;
+    }
+  }
   if (recv->kind == SCR_DYN_OBJ) {
     /* JS's OrdinarySet is not "write the own member": it walks the chain
      * looking for an ACCESSOR first, and a setter found anywhere on it

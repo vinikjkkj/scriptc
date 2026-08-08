@@ -1054,10 +1054,13 @@ export class LlDyn {
         break;
       }
       case "bytes": {
+        // Shared by REFERENCE, not copied — see the C emitter's twin: a
+        // typed array's static and dyn representations are the same
+        // refcounted ScrBytes, so the boundary aliases like Node.
         if (t.elem !== "u8") throw new Error(`llvm emitter bug: to-dyn of bytes<${t.elem}>`);
-        host.declare(`declare ptr @scr_dyn_new_bytes_copy(ptr)`);
+        host.declare(`declare ptr @scr_dyn_new_bytes_ref(ptr)`);
         const r = B.tmp();
-        B.line(`${r} = call ptr @scr_dyn_new_bytes_copy(ptr %v)`);
+        B.line(`${r} = call ptr @scr_dyn_new_bytes_ref(ptr %v)`);
         B.terminate(`ret ptr ${r}`);
         break;
       }

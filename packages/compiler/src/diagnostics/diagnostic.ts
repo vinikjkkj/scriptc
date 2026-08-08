@@ -254,7 +254,7 @@ export const UNSUPPORTED: Record<string, UnsupportedEntry> = {
   SC1101: {
     feature: "converting typed values to 'unknown'",
     milestone: "later",
-    hint: "numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value never aliases the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet",
+    hint: "numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value does not alias the original, so a write through it is refused rather than lost), Uint8Array/Buffer (shared by reference — writes through the 'unknown' value DO reach the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet",
   },
   // Regex fences. SC1120 is the shared code for regex features outside the
   // supported slice (the rejection site names the construct); SC1121 is
