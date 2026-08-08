@@ -24,14 +24,29 @@ import { assertRuntimeUnitsClosed, compileC, resolveCc, runtimeSrcDir, runtimeUn
 
 const execFileAsync = promisify(execFile);
 
-function zigOnPath(): boolean {
+function onPath(cmd: string, arg: string): boolean {
   try {
-    execFileSync("zig", ["version"], { stdio: "ignore" });
+    execFileSync(cmd, [arg], { stdio: "ignore" });
     return true;
   } catch {
     return false;
   }
 }
+const ZIG = onPath("zig", "version");
+/* The default driver is `clang`, and until now the leg that SPAWNS it ran
+ * unconditionally: on a box with only zig installed it failed as `spawn
+ * clang ENOENT`, which reads as "the driver is broken" and means "the
+ * harness could not run". packages/runtime/test/cc.ts made exactly this
+ * argument for the runtime's C tests; the compiler's driver test kept the
+ * hardcoded spawn. Skipping it needs a counterweight, or a box with
+ * NEITHER compiler would report a green driver suite that built nothing —
+ * "host-native build coverage" below is that counterweight. */
+const CLANG = onPath("clang", "--version");
+
+/* C's `printf("\n")` on a Windows stdio stream is CRLF by design (text-mode
+ * translation in the CRT, not anything the driver chose), so a build test's
+ * stdout expectation has to be spelled in line ENDINGS, not bytes. */
+const lines = (s: string): string => s.split("\r\n").join("\n");
 
 test("default driver keeps bare clang while selecting host platform flags", () => {
   for (const env of [{}, { SCRIPTC_CC: "clang" }, { SCRIPTC_CC: "" }]) {
@@ -111,7 +126,7 @@ const EXE = process.platform === "win32" ? ".exe" : "";
 
 const HOST_CLANG_C = '#include <stdio.h>\nint main(void) { printf("clang says hi\\n"); return 0; }\n';
 
-test("host-native clang static build compiles the runtime and runs", async () => {
+test.skipIf(!CLANG)("host-native clang static build compiles the runtime and runs", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scr-host-clang-"));
   const cPath = join(dir, "program.c");
   await writeFile(cPath, HOST_CLANG_C);
@@ -122,12 +137,25 @@ test("host-native clang static build compiles the runtime and runs", async () =>
   // fail to link. macOS keeps exercising its unchanged bare-clang path.
   await withCcEnv(undefined, undefined, () => compileC({ cPath, outPath }));
   const { stdout } = await execFileAsync(outPath);
-  expect(stdout).toBe("clang says hi\n");
+  expect(lines(stdout)).toBe("clang says hi\n");
+});
+
+/* The accounting gate for the two skipIf's above: a skip must never add up
+ * to "no host-native build was ever checked". Same shape as
+ * llvm-differential's "tier accounting" and order-parity's "baseline
+ * accounting" — it fails when the covered set stops covering, and it names
+ * what is missing rather than leaving a count of green tests to decompose. */
+test("host-native build coverage: at least one host toolchain was actually exercised", () => {
+  expect(
+    { clang: CLANG, zig: ZIG },
+    "neither clang nor zig is on PATH, so every leg below that SPAWNS a compiler skipped and " +
+      "this file checked resolveCc's argv tables and nothing else. Install one, or set SCRIPTC_CC.",
+  ).not.toEqual({ clang: false, zig: false });
 });
 
 const HELLO_C = '#include <stdio.h>\nint main(void) { printf("zigcc says hi\\n"); return 0; }\n';
 
-describe.skipIf(!zigOnPath())("zig cc builds (zig on PATH)", () => {
+describe.skipIf(!ZIG)("zig cc builds (zig on PATH)", () => {
   test("host-native zigcc build compiles the runtime and runs", async () => {
     const dir = await mkdtemp(join(tmpdir(), "scr-zigcc-"));
     const cPath = join(dir, "program.c");
@@ -135,7 +163,7 @@ describe.skipIf(!zigOnPath())("zig cc builds (zig on PATH)", () => {
     const outPath = join(dir, `program${EXE}`);
     await withCcEnv("zigcc", undefined, () => compileC({ cPath, outPath }));
     const { stdout } = await execFileAsync(outPath);
-    expect(stdout).toBe("zigcc says hi\n");
+    expect(lines(stdout)).toBe("zigcc says hi\n");
   });
 
   test("cross build for aarch64-linux-gnu produces an ELF", async () => {

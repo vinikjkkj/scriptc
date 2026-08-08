@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { ccCompile, expectAbort, exeSuffix, testBin } from "./cc.js";
+import { ccCompile, expectAbort, expectCasesPassed, exeSuffix } from "./cc.js";
 import { beforeAll, expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
@@ -33,7 +33,7 @@ beforeAll(async () => {
 
 test("array runtime: push/pop/set/get, RC recursion, growth", async () => {
   const { stderr } = await execFileAsync(bin, []);
-  expect(stderr.trim()).toMatch(/^(\d+)\/\1 cases passed$/);
+  expectCasesPassed(stderr);
 });
 
 // JS returns undefined for OOB reads and creates holes for far writes; both
