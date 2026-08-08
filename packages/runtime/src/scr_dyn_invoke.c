@@ -43,7 +43,7 @@
  * the emitted sc_ds walker exists only in programs that spell
  * String(unknown) themselves). Same rules: arrays join with "," and
  * null/undefined elements print empty, the checked-dynamic tree's error encoding renders
- * "name: message", functions render the native-code form, plain objects
+ * "name: message", functions render their SOURCE TEXT, plain objects
  * are [object Object]. */
 static void scr_dyn_display_buf(ScrJsonBuf *b, const ScrDyn *d) {
   switch (d->kind) {
@@ -100,11 +100,14 @@ static void scr_dyn_display_buf(ScrJsonBuf *b, const ScrDyn *d) {
       scr_jb_puts(b, n);
     }
     return;
-  case SCR_DYN_FUNC:
-    scr_jb_puts(b, "function ");
-    if (d->v.fn.name) scr_jb_puts(b, d->v.fn.name);
-    scr_jb_puts(b, "() { [native code] }");
+  case SCR_DYN_FUNC: {
+    /* Function.prototype.toString — the source text, through the one
+     * renderer (scr_fn_to_string; never NULL, it traps instead). */
+    ScrStr *s = scr_fn_to_string(d);
+    for (size_t i = 0; i < s->len; i++) scr_jb_putc(b, s->data[i]);
+    scr_str_release(s);
     return;
+  }
   case SCR_DYN_HANDLE:
     /* Object.prototype.toString — Node's String() over these classes. */
     scr_jb_puts(b, "[object Object]");

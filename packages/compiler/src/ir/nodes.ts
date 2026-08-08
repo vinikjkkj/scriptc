@@ -4932,8 +4932,27 @@ export type IrExpr =
    * TypeError), the interned signature key (dynCheck's exact-unwrap fast
    * path), and `fnName` — the best-effort static spelling for inspect
    * ([Function: name]) and Node-shaped call errors. The operand is
-   * borrowed; the result is owned (+1). Never throws. */
-  | { kind: "dynFrom"; value: IrExpr; fnName?: string; type: IrType; loc: SrcLoc }
+   * borrowed; the result is owned (+1). Never throws.
+   *
+   * `fnSrc` is what Function.prototype.toString must answer: JS returns
+   * the function's SOURCE TEXT, exactly as written, and `[native code]`
+   * is truthful only for a function that has none. Three states:
+   *
+   *   - `{ text }` — the creation site's source text (jsFuncValueSourceOf
+   *     proved which function the value IS, the same walk fnName uses);
+   *   - `"bound"` — the value came from `Function#bind`, whose toString
+   *     is `function () { [native code] }`, nameless, in every engine;
+   *   - absent — no creation site was provable. The box carries NULL and
+   *     stringifying it REFUSES loudly, because a compiled user function
+   *     printed as `[native code]` is a silent wrong answer.
+   *
+   * Only JAVASCRIPT creation sites carry text. Node runs a `.ts` program
+   * through type STRIPPING, so its `toString` answers the erased text
+   * (annotations replaced by spaces, offsets preserved) — reproducing
+   * that byte-exactly is a separate piece of work, and until it exists a
+   * TypeScript function's text would be wrong in a way no one could see.
+   * The TypeScript arms stay loud. */
+  | { kind: "dynFrom"; value: IrExpr; fnName?: string; fnSrc?: { text: string } | "bound"; type: IrType; loc: SrcLoc }
   /** Island value → dyn conversion (`type` is always dyn; the operand
    * is always jsval): the jsval→dyn crossing — an 'any'-typed engine
    * value flowing into an 'unknown'/'object'/JS-residue slot wraps BY

@@ -362,14 +362,21 @@ import { OVERFLOW_MEMBER } from "./emit-shapes.js";
       `    }`,
       `    break;`,
       `  }`,
-      `  case SCR_DYN_FUNC:`,
-      `    /* Function.prototype.toString: the SOURCE is gone in a compiled`,
-      `     * program, so the native-code form — exactly what JS engines`,
-      `     * print for their own non-JS functions. */`,
-      `    scr_jb_puts(b, "function ");`,
-      `    if (d->v.fn.name) scr_jb_puts(b, d->v.fn.name);`,
-      `    scr_jb_puts(b, "() { [native code] }");`,
+      `  case SCR_DYN_FUNC: {`,
+      `    /* Function.prototype.toString answers the function's SOURCE`,
+      `     * TEXT, which the box carries (fn.src) when the boxing site`,
+      `     * could prove the value's creation site. This walker is a`,
+      `     * per-program COPY of the runtime's ToString table and a copy`,
+      `     * that answers differently from the original is one value with`,
+      `     * two answers — so it delegates, exactly as the OBJ and HANDLE`,
+      `     * arms do. Never NULL: a box that carries no honest answer`,
+      `     * TRAPS inside the renderer rather than leaving a pending`,
+      `     * exception this arm's caller would never check. */`,
+      `    ScrStr *fs = scr_fn_to_string(d);`,
+      `    for (size_t i = 0; i < fs->len; i++) scr_jb_putc(b, fs->data[i]);`,
+      `    scr_str_release(fs);`,
       `    break;`,
+      `  }`,
       `  case SCR_DYN_HANDLE: {`,
       `    /* Object.prototype.toString for the I/O classes`,
       `     * (IncomingMessage/ServerResponse/Socket), but RegExp owns its`,
@@ -1560,7 +1567,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           } else if (arm.kind === "func") {
             // A boxable function arm crosses through the checked-dynamic
             // function boundary (the dynFrom func special case, sans name).
-            d.push(`  case ${i}: return ${dynFuncBoxHelper(E, arm)}((ScrClosure *)scr_union_peek(v), NULL);`);
+            d.push(`  case ${i}: return ${dynFuncBoxHelper(E, arm)}((ScrClosure *)scr_union_peek(v), NULL, NULL);`);
           } else {
             d.push(`  case ${i}: return ${E.toDynHelper(arm)}((${cType(arm).trim()})scr_union_peek(v));`);
           }
@@ -1682,7 +1689,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
    * else rides the toDyn converter. `expr` is BORROWED in every arm. */
   function toDynExprC(E: CEmitter, t: IrType, expr: string): string {
     if (t.kind === "dyn") return `scr_dyn_retain(${expr})`;
-    if (t.kind === "func") return `${E.dynFuncBoxHelper(t)}(${expr}, NULL)`;
+    if (t.kind === "func") return `${E.dynFuncBoxHelper(t)}(${expr}, NULL, NULL)`;
     // An island value wraps by reference (scalar-normalizing) — the
     // jsval-returning callback shape of the routed-dispatch lane.
     if (t.kind === "jsval") return `scr_dyn_from_jsval(${expr})`;
@@ -1793,12 +1800,12 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       `}`,
       ``,
     );
-    const sig = `static ScrDyn *${name}(ScrClosure *v, const char *fname)`;
+    const sig = `static ScrDyn *${name}(ScrClosure *v, const char *fname, const char *fsrc)`;
     E.walkerProtos.push(`${sig}; /* box ${key} into dyn (uncallable) */`);
     const sigLit = cStringLiteral(Buffer.from(key, "utf8"));
     E.walkerDefs.push(
       `${sig} { /* box ${key} into dyn (uncallable) */`,
-      `  return scr_dyn_new_func(scr_closure_retain(v), &${thunkName}, ${t.params.length}, ${sigLit}, fname);`,
+      `  return scr_dyn_new_func_src(scr_closure_retain(v), &${thunkName}, ${t.params.length}, ${sigLit}, fname, fsrc);`,
       `}`,
       ``,
     );
@@ -1810,7 +1817,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
   export function dynFuncFieldBoxC(E: CEmitter, t: IrType & { kind: "func" }, expr: string): string {
     const boxable = canBoxFuncIntoDyn(t, (id: string) => E.recordsById.get(id), (id: string) => E.unionsById.get(id));
     const helper = boxable ? E.dynFuncBoxHelper(t) : strandedDynFuncBoxHelper(E, t);
-    return `${helper}(${expr}, NULL)`;
+    return `${helper}(${expr}, NULL, NULL)`;
   }
 
 /** The box builder dynFrom emits for one closure signature. */
@@ -1820,13 +1827,13 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     if (existing) return existing;
     const name = `sc_dfb_${E.dynFuncBoxes.size}`;
     E.dynFuncBoxes.set(key, name);
-    const sig = `static ScrDyn *${name}(ScrClosure *v, const char *fname)`;
+    const sig = `static ScrDyn *${name}(ScrClosure *v, const char *fname, const char *fsrc)`;
     E.walkerProtos.push(`${sig}; /* box ${key} into dyn */`);
     const thunk = dynFuncThunkHelper(E, t);
     const sigLit = cStringLiteral(Buffer.from(key, "utf8"));
     E.walkerDefs.push(
       `${sig} { /* box ${key} into dyn */`,
-      `  return scr_dyn_new_func(scr_closure_retain(v), &${thunk}, ${t.params.length}, ${sigLit}, fname);`,
+      `  return scr_dyn_new_func_src(scr_closure_retain(v), &${thunk}, ${t.params.length}, ${sigLit}, fname, fsrc);`,
       `}`,
       ``,
     );
