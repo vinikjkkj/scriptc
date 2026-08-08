@@ -33,7 +33,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesDgram, moduleUsesDynInvoke, moduleEmbedsBuiltin, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID } from "../../ir/nodes.js";
+import { funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesDgram, moduleUsesDynInvoke, moduleEmbedsBuiltin, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID } from "../../ir/nodes.js";
 import {
   mangleAsyncSpawn,
   mangleGenSpawn,
@@ -850,6 +850,12 @@ export class CEmitter {
       // ops (scr_http2.c links exactly when this line is emitted — cc.ts's
       // http2 gate).
       ...(moduleUsesHttp2(this.mod) ? [`  scr_http2_dyn_install();`] : []),
+      // Regex-surface programs stamp the RegExp handle-dispatch ops so a
+      // regex can cross into the checked-dynamic tree by reference. The
+      // gate is moduleUsesRegex — the SAME switch cc.ts links scr_regex.c
+      // on — so the call and the symbol appear together or not at all
+      // (a program that boxes a regex necessarily contains one).
+      ...(moduleUsesRegex(this.mod) ? [`  scr_regex_dyn_install();`] : []),
       // Stream-surface programs fill the loop's stream hook (the deferred
       // next-tick emissions) before %main — scr_stream.c links only when
       // this line is emitted (cc.ts gates on the same predicate).

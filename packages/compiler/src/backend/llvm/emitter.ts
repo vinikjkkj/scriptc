@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleUsesDynInvoke, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleUsesDynInvoke, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
@@ -1287,6 +1287,9 @@ class LlEmitter {
     // any island entry (the engine's lazy boot consults it) — cc.ts
     // compiles scr_fetch.c on the same predicate.
     const usesFetch = moduleUsesFetch(this.mod);
+    // Regex-surface programs stamp the RegExp handle-dispatch ops, gated
+    // on the same moduleUsesRegex switch cc.ts links scr_regex.c by.
+    const usesRegex = moduleUsesRegex(this.mod);
     const hasRefGlobals = globals.some((g) => isRefCounted(g.type)) || fnValueProps.length > 0;
     // Declared NOW — the extern block flushes before main assembles.
     if (usesEvents) this.declare(`declare void @scr_events_install()`);
@@ -1297,6 +1300,7 @@ class LlEmitter {
       this.declare(`declare void @scr_net_dyn_install()`);
     }
     if (usesHttp) this.declare(`declare void @scr_http_dyn_install()`);
+    if (usesRegex) this.declare(`declare void @scr_regex_dyn_install()`);
     if (usesFetch) this.declare(`declare void @scr_fetch_install()`);
     if (usesEvents && hasRefGlobals) {
       this.declare(`declare void @scr_run_exit_listeners(double)`);
@@ -1567,6 +1571,7 @@ class LlEmitter {
       ...(usesFetch ? [`  call void @scr_fetch_install()`] : []),
       ...(usesNet ? [`  call void @scr_net_install()`, `  call void @scr_net_dyn_install()`] : []),
       ...(usesHttp ? [`  call void @scr_http_dyn_install()`] : []),
+      ...(usesRegex ? [`  call void @scr_regex_dyn_install()`] : []),
       ...(usesStream ? [`  call void @scr_stream_install()`] : []),
       `  call void @scr_lib_init(i32 %argc, ptr %argv)`,
       ...(asyncEntry
@@ -6526,6 +6531,9 @@ class LlEmitter {
           this.declare(`declare zeroext i1 @scr_dyn_strict_eq(ptr, ptr)`);
           test = B.tmp();
           B.line(`${test} = call zeroext i1 @scr_dyn_strict_eq(ptr ${l.name}, ptr ${r.name})`);
+          // It REFUSES two RegExp handles (interned literals make pointer
+          // identity a wrong boolean) — the C emitter's fallible arm.
+          this.emitPendingCheck();
         } else {
           const kd = this.dynKind(d.name);
           const kindOk = B.tmp();

@@ -9234,7 +9234,18 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         // Runtime HANDLES are objects to === too: one handle per socket/
         // request/response, so pointer identity IS JS's object equality
         // (`c.pause() === c` — Node's chaining assertions). */
-        if (DYN_HANDLE_KINDS.has(idLeft.type.kind) && typeEquals(idLeft.type, idRight.type)) {
+        // REGEX is in that set for CONVERSION (it boxes by reference like
+        // the rest) but not for identity: the emitter interns one static
+        // per (pattern, flags) pair, so two distinct `/x/` literals are
+        // ONE pointer here and two objects in JS. Pointer identity would
+        // answer true where Node answers false — measured, not assumed —
+        // so the comparison keeps the SC1043 fence it has always had
+        // rather than trading a build error for a wrong boolean.
+        if (
+          idLeft.type.kind !== "regex" &&
+          DYN_HANDLE_KINDS.has(idLeft.type.kind) &&
+          typeEquals(idLeft.type, idRight.type)
+        ) {
           return { kind: "bin", op: negated ? "!==" : "===", left: idLeft, right: idRight, type: BOOL, loc };
         }
         L.unsupported("SC1043", expr);
