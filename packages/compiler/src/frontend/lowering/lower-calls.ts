@@ -8337,6 +8337,29 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     return { kind: "libCall", fn: "dyn.defineProp", args: [target, key, desc], type: DYN, loc: locOf(call) };
   }
 
+  /** Mark a property-DESCRIPTOR map, and the descriptor objects one level
+   * inside it, to build as DYN OBJECTS rather than at the library's
+   * contextual type (`PropertyDescriptorMap` / `PropertyDescriptor`,
+   * whose `value?: any` and `get?(): any` erase everything the literal
+   * knows — Lowerer.dynObjectLiterals). One level is the whole depth a
+   * descriptor map has: map → descriptor → values, and the values are
+   * ordinary expressions again.
+   *
+   * A non-literal map (an identifier, a call result) needs nothing: with
+   * no literal to build, there is no contextual type to be poisoned by,
+   * which is exactly why the variable spelling already compiled and the
+   * inline one did not. */
+  function markDescriptorMapLiterals(L: Lowerer, node: ts.Expression, depth: number): void {
+    let e: ts.Expression = node;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    if (!ts.isObjectLiteralExpression(e)) return;
+    L.dynObjectLiterals.add(e);
+    if (depth <= 0) return;
+    for (const p of e.properties) {
+      if (ts.isPropertyAssignment(p)) markDescriptorMapLiterals(L, p.initializer, depth - 1);
+    }
+  }
+
   function lowerObjectStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken || access.questionDotToken) return null;
@@ -8479,20 +8502,53 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       if (call.arguments.some((a) => ts.isSpreadElement(a))) {
         L.noLowering("Object.create with spread arguments", call);
       }
-      if (call.arguments.length >= 2) {
-        L.noLowering(
-          "Object.create with a properties-descriptor argument",
-          call,
-          "create first, then assign: const o = Object.create(null); o.k = v",
-        );
-      }
-      if (call.arguments.length !== 1) {
+      if (call.arguments.length !== 1 && call.arguments.length !== 2) {
         L.noLowering(`Object.create with ${call.arguments.length} arguments`, call);
       }
       const loc = locOf(call);
       let protoNode: ts.Expression = call.arguments[0]!;
       while (ts.isParenthesizedExpression(protoNode)) protoNode = protoNode.expression;
       const nullProto = protoNode.kind === ts.SyntaxKind.NullKeyword;
+      // `Object.create(proto, descriptors)` IS `Object.create(proto)`
+      // followed by ObjectDefineProperties — that is the spec's own
+      // definition of the two-argument form, so it lowers to one call
+      // that does both in that order (Node evaluates BOTH arguments
+      // before creating anything, which a nested pair of libCalls would
+      // not reproduce when the prototype is the invalid one).
+      //
+      // The descriptors are installed by the SAME exact-or-loud
+      // installer `Object.defineProperty` uses: a fresh object's own-key
+      // set is precisely what `Object.keys` of the result reports, so
+      // the plural form's grandfathered "flags are ignored" arm would
+      // answer that set wrongly on the one object the caller is defining
+      // from scratch. `enumerable: false` became representable when the
+      // OBJ node's non-enumerable table grew a DATA shape beside its
+      // accessor one — which is what makes the exact answer available.
+      //
+      // This is protobufjs's `util.newError`:
+      //
+      //   CustomError.prototype = Object.create(Error.prototype, {
+      //     constructor: { value: CustomError, writable: true,
+      //                    enumerable: false, configurable: true },
+      //     name:        { get: () => name, set: undefined,
+      //                    enumerable: false, configurable: true },
+      //     toString:    { value: function () { … }, writable: true,
+      //                    enumerable: false, configurable: true } });
+      //
+      // — two non-enumerable data descriptors and a getter-only
+      // accessor, none of which a plain own member can stand in for.
+      const descsNode = call.arguments.length === 2 ? call.arguments[1]! : null;
+      if (L.dynamic && descsNode !== null) {
+        // The engine's own Object.create would answer this exactly, but
+        // the descriptor map has to cross the boundary as a DEEP COPY
+        // and a descriptor carries FUNCTIONS (get/set/value) whose
+        // identity and closure the copy cannot preserve. Named fence.
+        L.noLowering(
+          "Object.create with a properties-descriptor argument under --dynamic",
+          call,
+          "the descriptor map carries getter/setter functions, which the engine boundary's deep copy cannot carry across; build the object statically, or assign the properties after creating it",
+        );
+      }
       if (L.dynamic) {
         // The checker types the result `any` — an ENGINE value under
         // --dynamic — and the engine's own Object.create answers with
@@ -8518,29 +8574,58 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
           "prototype reads delegate LIVE in Node (mutating the prototype shows through the created object), which the boundary's deep copy cannot honor — only null and engine-held ('any') prototypes lower",
         );
       }
+      // Both arguments lower in Node's evaluation ORDER — prototype
+      // first, descriptors second — so a program with two problems is
+      // told about the one it would have hit first.
+      const proto = nullProto ? null : L.lowerExpr(protoNode);
+      if (proto !== null && proto.type.kind !== "dyn") {
+        // A checked-dynamic prototype has somewhere to be linked: an
+        // OBJ's [[Prototype]] is a real link the keyed read walks, so the
+        // three observations this fence names as impossible — no own keys
+        // on the created object, LIVE delegation through it, and a write
+        // that shadows rather than mutating — all hold by construction
+        // rather than by copy. A STATIC value has no such link.
+        //
+        // The dyn spelling is INHERITANCE in every pre-class program
+        // (`Child.prototype = Object.create(Parent.prototype)`), and
+        // until it lowered, a chain was at most one link deep and
+        // `instanceof`'s walk had nothing to walk.
+        L.noLowering(
+          `Object.create over '${L.fmt(proto.type)}' prototypes`,
+          call,
+          "a STATIC value has no dyn prototype link to be given (the checked-dynamic tree's objects do — pass a dyn prototype, or null)",
+        );
+      }
+      // The descriptor map is a checked-dynamic value: the runtime reads
+      // it key by key, and its members' `get`/`set`/`value` functions box
+      // into the dyn tree the way `Object.defineProperty`'s third
+      // argument already does. Marking it (and the descriptor objects
+      // inside it) keeps the LIBRARY's contextual type out of the
+      // builder — see Lowerer.dynObjectLiterals for why that context is
+      // actively wrong here. A map that will not lower as a dyn keeps the
+      // fence rather than being half-installed.
+      let descs: IrExpr | null = null;
+      if (descsNode !== null) {
+        markDescriptorMapLiterals(L, descsNode, 1);
+        descs = L.lowerExprExpecting(descsNode, DYN);
+        if (descs.type.kind !== "dyn") {
+          L.noLowering(
+            `Object.create with a '${L.fmt(descs.type)}' properties-descriptor argument`,
+            call,
+            "the descriptor map must be a checked-dynamic object (an object literal of { value } / { get, set } descriptors is one)",
+          );
+        }
+      }
       if (nullProto) {
+        if (descs !== null) {
+          return { kind: "libCall", fn: "dyn.objCreateNullDescs", args: [descs], type: DYN, loc };
+        }
         return { kind: "libCall", fn: "dyn.objCreateNullProto", args: [], type: DYN, loc };
       }
-      const proto = L.lowerExpr(protoNode);
-      // A checked-dynamic prototype now has somewhere to be linked: an
-      // OBJ's [[Prototype]] is a real link the keyed read walks, so the
-      // three observations the fence below named as impossible — no own
-      // keys on the created object, LIVE delegation through it, and a
-      // write that shadows rather than mutating — all hold by
-      // construction rather than by copy.
-      //
-      // This is the spelling of INHERITANCE in every pre-class program
-      // (`Child.prototype = Object.create(Parent.prototype)`), and until
-      // it lowered, a chain was at most one link deep and `instanceof`'s
-      // walk had nothing to walk.
-      if (proto.type.kind === "dyn") {
-        return { kind: "libCall", fn: "dyn.objCreateProto", args: [proto], type: DYN, loc };
+      if (descs !== null) {
+        return { kind: "libCall", fn: "dyn.objCreateDescs", args: [proto!, descs], type: DYN, loc };
       }
-      L.noLowering(
-        `Object.create over '${L.fmt(proto.type)}' prototypes`,
-        call,
-        "a STATIC value has no dyn prototype link to be given (the checked-dynamic tree's objects do — pass a dyn prototype, or null)",
-      );
+      return { kind: "libCall", fn: "dyn.objCreateProto", args: [proto!], type: DYN, loc };
     }
     // `Object.assign(fn, { props })` whose RESULT type maps to the hybrid
     // (function-with-properties) record: the chalk-shape CONSTRUCTOR.

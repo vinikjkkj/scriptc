@@ -3022,29 +3022,40 @@ struct ScrDyn {
      *          off the FUNC box's `name`, never freed and never owned —
      *          so it cannot pin the closure the way a real `constructor`
      *          back-link would (see scr_dyn_fn_prototype).
-     *   accessors
-     *          the own ACCESSOR properties (owned, NULL until the first
-     *          `Object.defineProperty(o, k, {get,set})`): an OBJ dyn whose
-     *          member `k` is the two-element ARR `[getter, setter]` (an
-     *          absent half is the undefined singleton). It is a SEPARATE
-     *          table from `entries` on purpose, and the reason is the
-     *          whole point of the representation: an accessor defined
-     *          without `enumerable: true` is NOT an own enumerable key, so
-     *          Object.keys / values / entries / assign / JSON.stringify /
-     *          structuredClone / deepStrictEqual must not see it — and
-     *          every one of them reads `entries`. Keeping accessors out of
-     *          `entries` makes all of them correct by construction rather
-     *          than by remembering to filter. Only [[Get]], [[Set]] and
-     *          `in` consult it. (protobufjs's `_field` oneof accessors are
-     *          exactly this shape, and their whole job is to keep `_field`
-     *          off `Object.keys(msg)`.)
+     *   hidden the own NON-ENUMERABLE properties (owned, NULL until the
+     *          first `Object.defineProperty` / `Object.create(p, descs)`
+     *          that installs one): an OBJ dyn whose member `k` is a
+     *          four-element ARR, TAGGED BY ITS FIRST ELEMENT so the two
+     *          descriptor families share one table and one walk:
+     *
+     *            [false, getter, setter,   configurable]   accessor
+     *            [true,  value,  writable, configurable]   data
+     *
+     *          (an absent accessor half is the undefined singleton, and
+     *          `configurable` is the LAST element in both families).
+     *
+     *          It is a SEPARATE table from `entries` on purpose, and the
+     *          reason is the whole point of the representation: a
+     *          property defined without `enumerable: true` is NOT an own
+     *          enumerable key, so Object.keys / values / entries / assign
+     *          / JSON.stringify / structuredClone / deepStrictEqual must
+     *          not see it — and every one of them reads `entries`.
+     *          Keeping the non-enumerables out of `entries` makes all of
+     *          them correct by construction rather than by remembering to
+     *          filter. Only [[Get]], [[Set]], [[Delete]] and `in` consult
+     *          it. (protobufjs's `_field` oneof accessors are exactly the
+     *          ACCESSOR shape, and their whole job is to keep `_field`
+     *          off `Object.keys(msg)`. The DATA shape is what a bare
+     *          `Object.defineProperty(o, k, { value })` MEANS, because
+     *          defineProperty defaults every flag to FALSE — and it is
+     *          what `Object.create(proto, descs)` installs.)
      *
      * The freelist recycles OBJ nodes with their entries buffer intact
      * (scr_dyn_alloc); all three are cleared on release so a recycled
-     * node never inherits a chain or a stale accessor table. */
+     * node never inherits a chain or a stale hidden table. */
     struct {
       size_t len; size_t cap; ScrDynEntry *entries;
-      ScrDyn *proto; const char *cname; ScrDyn *accessors;
+      ScrDyn *proto; const char *cname; ScrDyn *hidden;
     } obj; /* owned */
     /* SCR_DYN_FUNC: the boxed closure (owned) + its call descriptor. `sig`,
      * `name` and `src` are static compiler-emitted literals (never freed);
@@ -3121,6 +3132,21 @@ ScrDyn *scr_dyn_obj_get(const ScrDyn *d, const char *key, size_t key_len);
  * scr_dyn_obj_set_proto installs the link (retains; releases any previous
  * one). Only `new` calls it today. */
 ScrDyn *scr_dyn_proto_get(const ScrDyn *d, const char *key, size_t key_len);
+/* An OWN property a BORROW-only caller can have: the member table, then
+ * the hidden table's DATA entries. The coercion protocols (toString /
+ * valueOf / Symbol.toPrimitive / inspect's %s) ask through this and
+ * scr_dyn_proto_get, because they hold no exception path for a getter —
+ * so an ACCESSOR-provided toString stays invisible to them, unchanged
+ * from before the table held data too. The full [[Get]], accessors and
+ * all, is scr_dyn_obj_key_get. */
+ScrDyn *scr_dyn_obj_own_data(const ScrDyn *d, const char *key, size_t key_len);
+/* Object.getOwnPropertyNames's guard: the emitted own-names walk is the
+ * keys walk plus `length`, which is exact only while every own property
+ * is ENUMERABLE. A receiver carrying non-enumerable ones would get a
+ * SHORT list — and JS orders own keys by creation, which the separate
+ * table does not record — so this refuses by name (and names the keys)
+ * instead. Borrows; throws catchably, otherwise one NULL test. */
+void scr_dyn_own_names_fence(const ScrDyn *d);
 void scr_dyn_obj_set_proto(ScrDyn *obj, ScrDyn *proto);
 
 /* A FUNCTION value's `prototype` object, created on FIRST demand and
@@ -3155,24 +3181,39 @@ void scr_dyn_proto_ctor_fence(void);
  * threw, or the fence). A getter runs with `this` bound to `recv` — the
  * object the READ started from, not the one the accessor was found on.
  *
- * scr_dyn_obj_key_present is `in`'s answer over the same walk (accessors
- * included — they are properties; Object.keys still skips them because
- * they never enter `entries`). Never throws.
+ * scr_dyn_obj_key_present is `in`'s answer over the same walk (hidden
+ * properties included — they ARE properties; Object.keys still skips
+ * them because they never enter `entries`). Never throws.
+ * scr_dyn_obj_has_own_prop asks the same question without the chain,
+ * which is Object.hasOwn's.
  *
- * scr_dyn_obj_define_accessor installs one pair (borrowed halves; either
- * may be the undefined singleton for a one-sided accessor) and drops any
- * own DATA member of that name, because defineProperty CONVERTS a data
- * property into an accessor property. `configurable` rides along so that
- * scr_dyn_obj_accessor_sealed can answer JS's "Cannot redefine property"
- * — the flag defaults to FALSE, so a second define over an accessor is a
- * TypeError unless the first one asked for it. */
+ * scr_dyn_obj_define_accessor installs one get/set pair (borrowed
+ * halves; either may be the undefined singleton for a one-sided
+ * accessor). scr_dyn_obj_define_hidden_data installs the other family —
+ * a NON-ENUMERABLE data property, which is what a bare
+ * `Object.defineProperty(o, k, { value })` means and what
+ * `Object.create(p, descs)` installs. Both drop any own ENUMERABLE
+ * member of that name, because a define CONVERTS a property rather than
+ * layering one over the other. `configurable` rides along so that
+ * scr_dyn_obj_hidden_sealed can answer JS's "Cannot redefine property"
+ * — the flag defaults to FALSE, so a second define over a hidden
+ * property is a TypeError unless the first one asked for it. */
 ScrDyn *scr_dyn_obj_key_get(ScrDyn *recv, const char *key, size_t key_len);
 bool scr_dyn_obj_key_present(const ScrDyn *d, const char *key, size_t key_len);
+bool scr_dyn_obj_has_own_prop(const ScrDyn *d, const char *key, size_t key_len);
 void scr_dyn_obj_define_accessor(ScrDyn *recv, const char *key, size_t key_len,
                                  ScrDyn *getter, ScrDyn *setter, bool configurable);
-bool scr_dyn_obj_accessor_sealed(const ScrDyn *recv, const char *key, size_t key_len);
-/* …and drops one, for the redefinition back to a DATA property. */
-void scr_dyn_obj_drop_accessor(ScrDyn *recv, const char *key, size_t key_len);
+void scr_dyn_obj_define_hidden_data(ScrDyn *recv, const char *key, size_t key_len,
+                                    ScrDyn *value, bool writable, bool configurable);
+bool scr_dyn_obj_hidden_sealed(const ScrDyn *recv, const char *key, size_t key_len);
+/* The attributes of an OWN hidden property (false when there is none) —
+ * what ES's ValidateAndApplyPropertyDescriptor needs, because a field a
+ * redefinition OMITS keeps the CURRENT property's value rather than
+ * defaulting to false. Any out-pointer may be NULL. */
+bool scr_dyn_obj_hidden_attrs(const ScrDyn *recv, const char *key, size_t key_len,
+                              bool *is_data, bool *writable, bool *configurable);
+/* …and drops one, for the redefinition back to an ENUMERABLE member. */
+void scr_dyn_obj_drop_hidden(ScrDyn *recv, const char *key, size_t key_len);
 
 /* `new f(...args)` over a dyn FUNCTION value — the JS [[Construct]] the
  * pre-class constructor idiom needs. Allocates a fresh OBJ whose
@@ -3474,42 +3515,48 @@ ScrDyn *scr_dyn_fn_props(ScrDyn *d);
  * ("call" in f is true there), which is the missing prototype chain
  * rather than this predicate. Object.hasOwn is exact. */
 bool scr_dyn_fn_has(const ScrDyn *v, const char *key, size_t key_len);
-/* Object.defineProperties over dyn values (targets: OBJ and FUNC): each
- * descriptor is defined by the SAME core the singular form uses
- * (dyn_define_one), so the two spellings cannot disagree — a data
- * descriptor's `value` becomes a plain own property with
- * writable/enumerable/configurable accepted and IGNORED (dyn data
- * properties; SEMANTICS' documented stance), and an accessor descriptor
- * over an OBJ target becomes a real accessor property. Returns the target
- * (+1, JS's return), or NULL with a pending catchable throw. */
+/* Object.defineProperties over dyn values (targets: OBJ and FUNC). Its
+ * ACCESSOR half is the shared one, so `{get,set}` cannot mean two things
+ * depending on the spelling; its DATA half is the GRANDFATHERED one —
+ * writable/enumerable/configurable accepted and IGNORED, a documented
+ * divergence with shipped consumers (test/common's _mustCallInner
+ * copying name/length). The singular form and Object.create below do NOT
+ * repeat it. Returns the target (+1, JS's return), or NULL with a
+ * pending catchable throw. */
 ScrDyn *scr_dyn_define_props(ScrDyn *target, ScrDyn *descs);
 /* Object.defineProperty over a dyn target — the SINGULAR form, and the
- * one that carries the get/set half.
+ * one every non-default descriptor arrives in.
  *
- *   accessor descriptor  an OBJ target stores the (get, set) pair as an
- *                        accessor property (scr_dyn_obj_define_accessor);
- *                        reads call the getter and writes the setter,
- *                        both with `this` bound to the RECEIVER. Shared
- *                        with the plural form, so the two spellings
- *                        cannot disagree. A FUNC target, and any
+ *   accessor descriptor  an OBJ target stores the (get, set) pair as a
+ *                        real accessor property; reads call the getter
+ *                        and writes the setter, both with `this` bound
+ *                        to the RECEIVER. A FUNC target, and any
  *                        `enumerable: true` accessor, refuse loudly.
- *   data descriptor      EXACT-OR-LOUD, and this is where it parts
- *                        company with the plural form. defineProperty
- *                        defaults every flag to false, so bare
- *                        `{ value: v }` means non-enumerable and
- *                        non-writable — which a dyn own member is not.
- *                        Only `writable: true, enumerable: true` (the
- *                        descriptor a plain own member reproduces
- *                        exactly) is admitted; anything else refuses by
- *                        name rather than silently answering a different
- *                        Object.keys. `configurable` is accepted and
- *                        ignored — observable only through `delete` and
- *                        redefinition, neither of which lowers over a dyn
- *                        receiver today.
+ *   data descriptor      EXACT-OR-LOUD. defineProperty defaults every
+ *                        flag to false, so bare `{ value: v }` means
+ *                        NON-ENUMERABLE and non-writable — which is now
+ *                        a representable property (the OBJ node's
+ *                        `hidden` table), stored with its `writable` and
+ *                        `configurable` flags live: [[Set]] refuses a
+ *                        read-only slot with V8's text and [[Delete]]
+ *                        refuses a sealed one. `enumerable: true,
+ *                        writable: true` IS an ordinary own member and
+ *                        is stored as one. The ONE refusal left is
+ *                        `enumerable: true, writable: false`: an
+ *                        enumerated key has to live in the member table,
+ *                        whose entries carry no attributes.
  *
  * Returns the target (+1, JS's return), or NULL with a pending catchable
  * throw. Target and descriptor borrowed. */
 ScrDyn *scr_dyn_define_prop(ScrDyn *target, ScrStr *key, ScrDyn *desc);
+/* `Object.create(proto, descriptors)` and `Object.create(null, descs)` —
+ * ES's OrdinaryObjectCreate followed by ObjectDefineProperties, in that
+ * order, over the SAME per-descriptor installer scr_dyn_define_prop
+ * uses. A refusal releases the half-built object, so it costs nothing
+ * but the throw. Both arguments borrowed; the created object comes back
+ * +1, or NULL with a pending catchable throw. */
+ScrDyn *scr_dyn_obj_create_descs(ScrDyn *proto, ScrDyn *descs);
+ScrDyn *scr_dyn_obj_create_null_descs(ScrDyn *descs);
 /* The two non-source answers Function.prototype.toString can truthfully
  * give, as SENTINEL addresses in the `src` slot (never dereferenced —
  * compared by pointer). A string literal cannot serve: a user function
