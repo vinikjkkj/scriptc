@@ -1809,6 +1809,194 @@ ScrError *scr_errdyn_err_of(const ScrDyn *d) {
   return NULL;
 }
 
+/* ── %Error.prototype% ─────────────────────────────────────────────────
+ *
+ * The one prototype object this tier holds by NAME. `Error.prototype` is
+ * the FIRST argument of protobufjs's `util.newError`
+ * (`CustomError.prototype = Object.create(Error.prototype, { … })`), and
+ * a prototype argument has to be a real dyn OBJ for the link to exist —
+ * the own-copy stand-in the frontend refuses would answer `Object.keys`,
+ * delegation and `instanceof` wrong.
+ *
+ * A PROCESS SINGLETON, because JS has exactly one: two expressions that
+ * both say `Error.prototype` must answer the SAME node, or `===`, the
+ * chain walk and `Object.getPrototypeOf` would all disagree with Node.
+ *
+ * Its shape is Node's, minus one member, and the difference is LOUD:
+ *
+ *   name      "Error"   own, non-enumerable, writable, configurable
+ *   message   ""        own, non-enumerable, writable, configurable
+ *   toString  <native>  own, non-enumerable, writable, configurable
+ *   constructor         ABSENT — scr_dyn_error_ctor_fence, never undefined
+ *
+ * `Object.keys(Error.prototype)` is `[]` in Node, and all three live in
+ * the `hidden` table, so it is `[]` here for the same REASON rather than
+ * by luck. `cname` is deliberately left NULL: Node's
+ * `util.inspect(Error.prototype)` is `{}`, and a constructor name would
+ * make it print `Error {}` and infect every descendant.
+ *
+ * REFCOUNTS, by hand (ASan does not link on the Windows/zig lane):
+ *   - `scr_error_proto` holds one reference for the process; the atexit
+ *     teardown drops it, and re-entry after teardown rebuilds.
+ *   - Each call hands out +1; the emitted code releases it like any
+ *     other dyn temporary.
+ *   - The three members are owned by the singleton's hidden table and
+ *     die with it. The `toString` closure captures NOTHING (0 caps), so
+ *     it holds no reference back to the prototype.
+ *   - A descendant (`Object.create(Error.prototype, …)`) retains the
+ *     singleton through its [[Prototype]] link; the singleton holds no
+ *     reference to any descendant. The graph is a TREE rooted at one
+ *     immortal node — there is no cycle to break, which is exactly why
+ *     `constructor` (the one edge that WOULD close one, and which has no
+ *     value to point at in this tier anyway) is a fence instead.
+ */
+static ScrDyn *scr_error_proto;
+
+static void scr_error_proto_teardown(void) {
+  scr_dyn_release(scr_error_proto);
+  scr_error_proto = NULL;
+}
+
+/* `Error.prototype.toString()` — ES's Error.prototype.toString, whole:
+ * ToString(this.name, defaulting to "Error"), ToString(this.message,
+ * defaulting to ""), joined with ": " unless one side is empty. Reads
+ * through the FULL [[Get]] (scr_dyn_obj_key_get) because a descendant's
+ * `name` is routinely an ACCESSOR — that is exactly how protobufjs
+ * spells it — and a borrow-only read would miss it and answer "Error"
+ * for every custom error type. Both reads and both coercions can throw
+ * (a getter's own exception); each is checked and propagated with the
+ * exception left pending. */
+static ScrDyn *scr_error_proto_to_string_thunk(ScrClosure *clo, ScrDyn *const *args,
+                                               size_t argc) {
+  (void)clo;
+  (void)args;
+  (void)argc;
+  ScrStr *name = NULL;
+  ScrStr *message = NULL;
+  ScrDyn *self = scr_dyn_this_get(); /* +1; the undefined singleton with no binding */
+  if (self->kind != SCR_DYN_OBJ) {
+    scr_dyn_release(self);
+    static const char msg[] = "Error.prototype.toString called on non-object";
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    return NULL;
+  }
+  ScrDyn *nv = scr_dyn_obj_key_get(self, "name", 4); /* +1, or NULL pending */
+  if (nv == NULL) goto fail;
+  name = nv->kind == SCR_DYN_UNDEF ? scr_str_new("Error", 5) : scr_dyn_string_coerce_js(nv);
+  scr_dyn_release(nv);
+  if (name == NULL) goto fail;
+  ScrDyn *mv = scr_dyn_obj_key_get(self, "message", 7); /* +1, or NULL pending */
+  if (mv == NULL) goto fail;
+  message = mv->kind == SCR_DYN_UNDEF ? scr_str_new("", 0) : scr_dyn_string_coerce_js(mv);
+  scr_dyn_release(mv);
+  if (message == NULL) goto fail;
+  scr_dyn_release(self);
+  /* scr_dyn_new_str RETAINS its argument, so every string built here is
+   * released after the box is made — the box holds the reference it
+   * needs and these locals hold their own. */
+  ScrStr *out;
+  if (name->len == 0) {
+    out = scr_str_retain(message);
+  } else if (message->len == 0) {
+    out = scr_str_retain(name);
+  } else {
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_write(&b, name->data, name->len);
+    scr_jb_puts(&b, ": ");
+    scr_jb_write(&b, message->data, message->len);
+    out = scr_jb_finish(&b); /* +1 */
+  }
+  scr_str_release(name);
+  scr_str_release(message);
+  ScrDyn *r = scr_dyn_new_str(out);
+  scr_str_release(out);
+  return r;
+fail:
+  scr_str_release(name);
+  scr_str_release(message);
+  scr_dyn_release(self);
+  return NULL; /* the getter's / the coercion's own exception is pending */
+}
+
+ScrDyn *scr_dyn_error_prototype(void) {
+  if (scr_error_proto == NULL) {
+    ScrDyn *p = scr_dyn_new_obj(); /* +1, the process's */
+    ScrStr *ns = scr_str_new("Error", 5);
+    ScrDyn *n = scr_dyn_new_str(ns); /* retains ns */
+    scr_str_release(ns);
+    scr_dyn_obj_define_hidden_data(p, "name", 4, n, true, true);
+    scr_dyn_release(n);
+    ScrStr *ms = scr_str_new("", 0);
+    ScrDyn *m = scr_dyn_new_str(ms);
+    scr_str_release(ms);
+    scr_dyn_obj_define_hidden_data(p, "message", 7, m, true, true);
+    scr_dyn_release(m);
+    ScrDyn *ts = scr_dyn_new_func(scr_closure_new((void *)scr_error_proto_to_string_thunk, 0),
+                                  scr_error_proto_to_string_thunk, 0, "()", "toString");
+    scr_dyn_obj_define_hidden_data(p, "toString", 8, ts, true, true);
+    scr_dyn_release(ts);
+    scr_error_proto = p;
+    scr_atexit(scr_error_proto_teardown);
+  }
+  return scr_dyn_retain(scr_error_proto);
+}
+
+/* Is %Error.prototype% this value, or anywhere above it? IDENTITY, not
+ * shape — the singleton is the only node that can answer true, so a
+ * hand-built `{ name: "Error" }` never does. Bounded like every other
+ * chain walk here, so a hand-made cycle cannot hang the program. */
+bool scr_dyn_error_proto_in_chain(const ScrDyn *d) {
+  if (scr_error_proto == NULL) return false;
+  for (size_t steps = 0; d != NULL && steps <= SCR_PROTO_MAX_DEPTH; steps++) {
+    if (d == scr_error_proto) return true;
+    if (d->kind != SCR_DYN_OBJ) return false;
+    d = d->v.obj.proto;
+  }
+  return false;
+}
+
+/* `v instanceof Error` over a checked-dynamic value — the ONE predicate
+ * both backends call, so the C and LLVM lanes cannot answer differently
+ * (the split estado-protochain.md §2e found the hard way).
+ *
+ * Three ways to be an Error here, and none is redundant:
+ *   - the OWN "%error" marker: the encoding scr_dyn_from_error builds
+ *     when a runtime ScrError crosses into the checked-dynamic tree;
+ *   - %Error.prototype% on the [[Prototype]] chain: what a custom error
+ *     type built by `Object.create(Error.prototype, …)` is, and the ONLY
+ *     way `new CustomError(…) instanceof Error` can answer Node's true;
+ *   - the engine's own answer for an island-held value.
+ *
+ * %Error.prototype% ITSELF answers false, exactly like Node's (it is an
+ * ordinary object, not an Error instance) — which is why the chain walk
+ * starts at the PROTOTYPE rather than at the value. */
+bool scr_dyn_instanceof_error(const ScrDyn *d) {
+  if (d == NULL) return false;
+  if (d->kind == SCR_DYN_OBJ) {
+    if (scr_dyn_obj_get((ScrDyn *)d, "%error", 6) != NULL) return true;
+    if (scr_dyn_error_proto_in_chain(d->v.obj.proto)) return true;
+  }
+  return scr_dyn_isl_is_error(d);
+}
+
+/* The `Error.prototype.constructor` fence. Node's answers the `Error`
+ * CONSTRUCTOR; this tier has no such value at all — `Error` in a value
+ * position is itself the SC2020 lib fence, and `new Error(...)` compiles
+ * to a static runtime error rather than a call through a function
+ * object. So the back-link has nothing to point at, and answering
+ * `undefined` would be the silent kind of wrong. Loud instead, like the
+ * function-prototype fence beside it. */
+void scr_dyn_error_ctor_fence(void) {
+  static const char msg[] =
+      "reading 'constructor' through Error.prototype is not supported yet"
+      " (the Error CONSTRUCTOR is not a value in a static build — `new Error(...)` compiles"
+      " to a runtime error object, not a call through a function object — so the back-link"
+      " has nothing to point at; define it yourself, Object.create(Error.prototype,"
+      " { constructor: { value: MyError } }), and the read answers exactly)";
+  scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
+}
+
 void scr_errdyn_put(ScrError *e, ScrDyn *d) {
   if (scr_errdyn_n == scr_errdyn_cap) {
     scr_errdyn_cap = scr_errdyn_cap ? scr_errdyn_cap * 2 : 8;
@@ -2212,13 +2400,23 @@ ScrDyn *scr_dyn_obj_key_get(ScrDyn *recv, const char *key, size_t key_len) {
     scr_dyn_this_pop();
     return r; /* +1, or NULL with the getter's own exception pending */
   }
-  if (key_len == 11 && memcmp(key, "constructor", 11) == 0 &&
-      scr_dyn_proto_chain_is_fn_pub(recv)) {
+  if (key_len == 11 && memcmp(key, "constructor", 11) == 0) {
+    /* %Error.prototype% first: it is REACHED from the receiver (or IS
+     * it), and its reason is its own — there is no `Error` function
+     * value in a static build for the back-link to name, where the
+     * function-prototype case has one and refuses the cycle. Both are
+     * loud; neither is a silent undefined. */
+    if (scr_dyn_error_proto_in_chain(recv)) {
+      scr_dyn_error_ctor_fence();
+      return NULL;
+    }
     /* The one member Node's implicit prototype has and this one
      * deliberately does not (the back-link would be an uncollectable
      * cycle): loud, never a silent undefined. */
-    scr_dyn_proto_ctor_fence();
-    return NULL;
+    if (scr_dyn_proto_chain_is_fn_pub(recv)) {
+      scr_dyn_proto_ctor_fence();
+      return NULL;
+    }
   }
   return scr_dyn_retain(scr_dyn_undefined());
 }
@@ -2228,7 +2426,15 @@ ScrDyn *scr_dyn_obj_key_get(ScrDyn *recv, const char *key, size_t key_len) {
  * it even though Object.keys does not. Never throws (no getter runs). */
 bool scr_dyn_obj_key_present(const ScrDyn *d, const char *key, size_t key_len) {
   ScrDyn *found = NULL;
-  return scr_dyn_obj_resolve(d, key, key_len, &found, NULL) != SCR_PROP_ABSENT;
+  if (scr_dyn_obj_resolve(d, key, key_len, &found, NULL) != SCR_PROP_ABSENT) return true;
+  /* %Error.prototype% HAS a `constructor` in Node, and the fact that
+   * this tier cannot produce its VALUE (scr_dyn_error_ctor_fence) is no
+   * reason to claim the property does not exist: `in` asks about
+   * existence, and answering false would be a silent wrong answer where
+   * the read is a loud refusal. Own-or-inherited, like the rest of the
+   * walk. */
+  return key_len == 11 && memcmp(key, "constructor", 11) == 0 &&
+         scr_dyn_error_proto_in_chain(d);
 }
 
 /* OWN presence, hidden table included — Object.hasOwn's question. Node
@@ -2237,8 +2443,14 @@ bool scr_dyn_obj_key_present(const ScrDyn *d, const char *key, size_t key_len) {
 bool scr_dyn_obj_has_own_prop(const ScrDyn *d, const char *key, size_t key_len) {
   if (d->kind != SCR_DYN_OBJ) return false;
   if (scr_dyn_obj_get(d, key, key_len) != NULL) return true;
-  return d->v.obj.hidden != NULL &&
-         scr_dyn_obj_get(d->v.obj.hidden, key, key_len) != NULL;
+  if (d->v.obj.hidden != NULL && scr_dyn_obj_get(d->v.obj.hidden, key, key_len) != NULL) {
+    return true;
+  }
+  /* `constructor` is an OWN property of %Error.prototype% in Node — of
+   * that object and of no descendant. The value is a loud refusal; the
+   * existence is a plain true (scr_dyn_obj_key_present's note). */
+  return key_len == 11 && memcmp(key, "constructor", 11) == 0 &&
+         d == scr_error_proto;
 }
 
 /* `Object.getOwnPropertyNames`'s guard. The emitted own-names walk is

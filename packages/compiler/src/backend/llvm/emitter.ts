@@ -828,6 +828,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.packPushSpreadIter": "scr_dyn_pack_push_spread_iter",
   "dyn.assignAll": "scr_dyn_assign_all",
   "dyn.objCreateNullProto": "scr_dyn_new_obj_null_proto",
+  "dyn.errorProto": "scr_dyn_error_prototype",
   "dyn.objCreateProto": "scr_dyn_obj_create_proto",
   "dyn.objCreateDescs": "scr_dyn_obj_create_descs",
   "dyn.objCreateNullDescs": "scr_dyn_obj_create_null_descs",
@@ -6611,33 +6612,16 @@ class LlEmitter {
           test = B.tmp();
           B.line(`${test} = call zeroext i1 @scr_dyn_truthy(ptr ${d.name})`);
         } else if (e.test === "error") {
-          // `u instanceof Error`: the checked-dynamic tree's error encoding — an object
-          // carrying the reserved "%error" marker key — or a real engine
-          // Error held by reference (the isl helper answers false for
-          // every non-JSVAL kind, so the call is unconditional).
-          const kd = this.dynKind(d.name);
-          const isObj = B.tmp();
-          B.line(`${isObj} = icmp eq i32 ${kd}, ${DK.OBJ}`);
-          const slot = B.slot();
-          B.entryAllocas.push(`${slot} = alloca i1`);
-          this.declare(`declare zeroext i1 @scr_dyn_isl_is_error(ptr)`);
-          const isl = B.tmp();
-          B.line(`${isl} = call zeroext i1 @scr_dyn_isl_is_error(ptr ${d.name})`);
-          B.line(`store i1 ${isl}, ptr ${slot}`);
-          const lObj = B.newLabel("dts.o");
-          const lj = B.newLabel("dts.j");
-          B.condBr(isObj, lObj, lj);
-          B.startBlock(lObj);
-          this.declare(`declare ptr @scr_dyn_obj_get(ptr, ptr, i64)`);
-          const m = B.tmp();
-          const has = B.tmp();
-          B.line(`${m} = call ptr @scr_dyn_obj_get(ptr ${d.name}, ptr ${this.cstr("%error")}, i64 6)`);
-          B.line(`${has} = icmp ne ptr ${m}, null`);
-          B.line(`store i1 ${has}, ptr ${slot}`);
-          B.br(lj);
-          B.startBlock(lj);
+          // `u instanceof Error`: the ONE runtime predicate, shared with
+          // the C lane so the two keyed walkers cannot answer differently
+          // (the split estado-protochain.md §2e found the hard way). It
+          // covers the reserved own "%error" marker, a [[Prototype]] chain
+          // reaching %Error.prototype% (what a custom error type built by
+          // Object.create(Error.prototype, …) is), and a real engine Error
+          // held by reference. Borrowed; never throws.
+          this.declare(`declare zeroext i1 @scr_dyn_instanceof_error(ptr)`);
           test = B.tmp();
-          B.line(`${test} = load i1, ptr ${slot}`);
+          B.line(`${test} = call zeroext i1 @scr_dyn_instanceof_error(ptr ${d.name})`);
         } else {
           const kd = this.dynKind(d.name);
           const oneOf = (kinds: number[]): string => {

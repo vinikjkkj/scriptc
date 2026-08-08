@@ -98,7 +98,7 @@ import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bindingNeverReassign
 import { lowerArrayMethodCall, lowerBufferStaticCall, lowerBytesMethodCall, lowerBytesNew, lowerMapMethodCall, lowerMapForEachCall, buildMapForEachFn, lowerRecordOvfCaptureHelper, ovfCapturePlannable, lowerEnvToPairsHelper, lowerSetMethodCall, lowerSetForEachCall, buildSetForEachFn, lowerRegexMethodCall, lowerStringMethodCall } from "./lower-containers.js";
 import { lowerStreamModuleCall } from "./lower-stream.js";
 import { lowerEmitOverrideSpec, type EmitSpecCtx, type EmitSpecRequest } from "./lower-emitter.js";
-import { builtinImportOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, stripTypeCasts, lowerBuiltinModuleCall, lowerFsToUnixTimestampCall, lowerFsLadderCall, lowerChildArgsArg, lowerSpawnSyncCall, lowerSpawnCall, lowerExecSyncCall, recordToEnvPairs, lowerJsonMethodCall, fencedBuiltinImportOf, lowerCryptoComposedCall, lowerUrlMethodCall, lowerSearchParamsMethodCall, lowerStatsMethodCall, lowerChildMethodCall, lowerAtomicsCall, lowerBuiltinExtraProperty, promisifiedExecFileDecl, lowerPromisifiedSettledCall, type PromisifiedTarget, lowerExecFileAsyncCall, execFileAsyncHelper, lowerStringDecoderMethodCall, strdecHelper, lowerReadlineMethodCall, lowerDcChannelMethodCall, lowerDcChannelProperty, lowerAlsMethodCall, lowerDcTracingChannelMethodCall, lowerDcTracingChannelProperty, lowerJsonProperty, lowerErrorCodeProperty, lowerProcessProperty, processVersionsMember, isProcessEnv, envValueType, lowerProcessEnvGet, lowerProcessMethodCall, lowerProcessOptionalMethodCall, lowerTimeoutMethodCall, envSnapshotHelper, isConsoleLog, consoleCallMember, lowerNumberStaticCall, lowerNumberStaticProperty, lowerDateCall, lowerTextCodecCall, lowerCryptoModuleCall, lowerFsConstantsProperty, lowerBuiltinConstantsProperty, builtinConstantBindingOf, builtinConstantsDestructureDecl, lowerProcessStreamProperty, lowerStringStaticCall, lowerStringLastIndexOfCall, lowerPromiseStaticCall } from "./lower-builtins.js";
+import { builtinImportOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, stripTypeCasts, lowerBuiltinModuleCall, lowerFsToUnixTimestampCall, lowerFsLadderCall, lowerChildArgsArg, lowerSpawnSyncCall, lowerSpawnCall, lowerExecSyncCall, recordToEnvPairs, lowerJsonMethodCall, fencedBuiltinImportOf, lowerCryptoComposedCall, lowerUrlMethodCall, lowerSearchParamsMethodCall, lowerStatsMethodCall, lowerChildMethodCall, lowerAtomicsCall, lowerBuiltinExtraProperty, promisifiedExecFileDecl, lowerPromisifiedSettledCall, type PromisifiedTarget, lowerExecFileAsyncCall, execFileAsyncHelper, lowerStringDecoderMethodCall, strdecHelper, lowerReadlineMethodCall, lowerDcChannelMethodCall, lowerDcChannelProperty, lowerAlsMethodCall, lowerDcTracingChannelMethodCall, lowerDcTracingChannelProperty, lowerJsonProperty, lowerErrorCodeProperty, lowerErrorPrototypeProperty, lowerProcessProperty, processVersionsMember, isProcessEnv, envValueType, lowerProcessEnvGet, lowerProcessMethodCall, lowerProcessOptionalMethodCall, lowerTimeoutMethodCall, envSnapshotHelper, isConsoleLog, consoleCallMember, lowerNumberStaticCall, lowerNumberStaticProperty, lowerDateCall, lowerTextCodecCall, lowerCryptoModuleCall, lowerFsConstantsProperty, lowerBuiltinConstantsProperty, builtinConstantBindingOf, builtinConstantsDestructureDecl, lowerProcessStreamProperty, lowerStringStaticCall, lowerStringLastIndexOfCall, lowerPromiseStaticCall } from "./lower-builtins.js";
 import { isIslandExpr, islandFuncValueFence, islandRegexpOf, jsvalIn, requireDynamicApi, islandGlobalFnOf, lowerDynamicImportCall, lowerFetchCall, lowerIslandMethodCall, lowerMathProperty, npmPackageOf, npmMemberFence, npmPackageOfSymbol } from "./lower-island.js";
 import { lowerHttpHeadersElement, lowerNetModuleCall, lowerServerMethodCall, lowerServerProperty, lowerTlsRootCertificates } from "./lower-server.js";
 import { lowerDgramDnsModuleCall, lowerDgramMethodCall } from "./lower-dgram.js";
@@ -3030,12 +3030,71 @@ export class Lowerer {
     return stdlibMemberFence(this, access);
   }
 
+  /** Is `node` an identifier bound, without a type annotation, straight
+   * to `Error.prototype`? The binding then holds the checked-dynamic
+   * singleton, not an %Error struct — see typeOf. A binding with an
+   * explicit `: Error` annotation is NOT this: the program asked for the
+   * struct, and it keeps the dynCheck that refuses to fake one. */
+  errorProtoBinding(node: ts.Identifier): boolean {
+    const sym = this.checker.getSymbolAtLocation(node);
+    if (sym === undefined) return false;
+    const decls = this.checker.declarationsOf(sym);
+    if (decls.length !== 1) return false;
+    const decl = decls[0]!;
+    if (!ts.isVariableDeclaration(decl) || decl.type !== undefined) return false;
+    let init: ts.Expression | undefined = decl.initializer;
+    while (init !== undefined && (ts.isParenthesizedExpression(init) || ts.isAsExpression(init))) {
+      init = init.expression;
+    }
+    return (
+      init !== undefined &&
+      ts.isPropertyAccessExpression(init) &&
+      init.name.text === "prototype" &&
+      stdlibGlobalMember(this, init, "Error") === "prototype"
+    );
+  }
+
   typeOf(node: ts.Node): ts.Type {
     // Inside an optional-chain body the guarded receiver is typed by its
     // NON-NULLISH type (the chain's tag test proved it), so every
     // receiver-kind check downstream sees the narrowed arm.
     const narrowed = this.chainNarrowedType.get(node);
     if (narrowed) return narrowed;
+    // `Error.prototype` is the ONE standard-library prototype object this
+    // compiler holds as a value (lowerErrorPrototypeProperty), and it is a
+    // CHECKED-DYNAMIC one. tsc types the expression `Error` — that is how
+    // the lib declares `ErrorConstructor.prototype` — and every consumer
+    // that believed it would be wrong in the same way: a var bound to it
+    // would want an %Error struct, `Error.prototype.name` would build a
+    // fieldGet over a dyn receiver (an ICE), and maybeNarrow would insert
+    // a %Error dynCheck that rebuilds a COPY and loses the identity the
+    // prototype link depends on. Node's Error.prototype is not an Error
+    // instance at all (`Error.prototype instanceof Error` is false — no
+    // [[ErrorData]]); it is an ordinary object. Answering `unknown` HERE,
+    // at the one place every consumer asks, is what keeps them agreeing:
+    // the keyed read, typeof, ===, String() and the Object.create argument
+    // all take their checked-dynamic paths without a special case each.
+    if (
+      !this.dynamic &&
+      ts.isPropertyAccessExpression(node) &&
+      node.name.text === "prototype" &&
+      stdlibGlobalMember(this, node, "Error") === "prototype"
+    ) {
+      return this.checker.getUnknownType();
+    }
+    // ...and so does a BINDING initialized from it (`var P =
+    // Error.prototype`, the shape a reader writes first). tsc infers the
+    // binding's type from the initializer, so it would be `Error` and the
+    // local would be an %Error struct fed by a dynCheck that throws
+    // "expected Error, got object" on the one value that IS right. The
+    // test costs nothing on the hot path: it runs only for an identifier
+    // the checker already types Error.
+    if (ts.isIdentifier(node) && !this.dynamic) {
+      const t0 = this.checker.getTypeAtLocation(node);
+      if (t0.getSymbol()?.name === "Error" && this.errorProtoBinding(node)) {
+        return this.checker.getUnknownType();
+      }
+    }
     const t = this.checker.getTypeAtLocation(node);
     // ALIASED-TYPEOF narrowing: inside a branch a `type === 'string'`
     // test proves (type = typeof val, both never reassigned), references
@@ -9969,6 +10028,10 @@ export class Lowerer {
 
   lowerErrorCodeProperty(expr: ts.PropertyAccessExpression): IrExpr | null {
     return lowerErrorCodeProperty(this, expr);
+  }
+
+  lowerErrorPrototypeProperty(expr: ts.PropertyAccessExpression): IrExpr | null {
+    return lowerErrorPrototypeProperty(this, expr);
   }
 
   lowerStringDecoderMethodCall(call: ts.CallExpression, access: ts.PropertyAccessExpression): IrExpr | null {
