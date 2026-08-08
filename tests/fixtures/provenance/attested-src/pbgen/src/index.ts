@@ -107,3 +107,17 @@ import { wire, WIRE_TAG } from "../spec/wire/index.js";
 export function describeWire(): string {
   return `${wire.Frame.encode({ n: 21, tag: "f" })} ${WIRE_TAG} ${WIRE_TAG.length}`;
 }
+
+/* The BUNDLER spelling of the same edge (spec/bundle): the root is a `var`
+ * in a merged declarator list the twin keeps as an init LOCAL, and the
+ * export is a comma operand of the last expression statement. There is no
+ * binding to root a bridge at — not for the declared export, and not for
+ * the root either — so the only storage that can answer is the module's
+ * own export OBJECT, which is what `module.exports = <root>` registers. */
+export { codec, BUNDLE_TAG } from "../spec/bundle/index.js";
+import { codec, BUNDLE_TAG } from "../spec/bundle/index.js";
+
+/** The same static call as describeWire, through the bundler's root. */
+export function describeBundle(): string {
+  return `${codec.Tag.encode({ id: 23, name: "b" })} ${BUNDLE_TAG} ${BUNDLE_TAG.length}`;
+}

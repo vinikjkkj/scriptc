@@ -2750,8 +2750,9 @@ export function declModuleWithoutTwin(L: Lowerer, sym: ts.Symbol): ts.SourceFile
   return home;
 }
 
-/** The IDENTIFIER a CommonJS module whole-exports: `module.exports = j` at
- * its top level, comma operands included.
+/** The IDENTIFIER a CommonJS module whole-exports, with the ASSIGNMENT that
+ * exports it: `module.exports = j` at its top level, comma operands
+ * included.
  *
  * The comma spelling is not exotic — it is what every bundler emits. The
  * pbjs/esbuild/terser chain that generates `spec/proto/index.js` ends the
@@ -2759,12 +2760,19 @@ export function declModuleWithoutTwin(L: Lowerer, sym: ts.Symbol): ts.SourceFile
  * scan that only looks at `ExpressionStatement { BinaryExpression }`
  * (cjsExportAssignmentOf) sees nothing there.
  *
+ * The assignment node comes back beside the identifier because it is the
+ * key the EXPORT OBJECT's storage is registered under (collectGlobals'
+ * `globalsByDeclNode.set(cjs.expr, …)`), and that object — not the root's
+ * live binding — is what a requirer reads.
+ *
  * The LAST such assignment wins: Node's export object is whatever
  * `module.exports` holds when the body finishes, and a later assignment
  * replaces an earlier one (cjsExportDiscardReason already fences the
  * shapes where an earlier one was observable). */
-export function cjsWholeExportIdentifierOf(sf: ts.SourceFile): ts.Identifier | null {
-  let found: ts.Identifier | null = null;
+export function cjsWholeExportRootOf(
+  sf: ts.SourceFile,
+): { ident: ts.Identifier; expr: ts.BinaryExpression } | null {
+  let found: { ident: ts.Identifier; expr: ts.BinaryExpression } | null = null;
   const scan = (e: ts.Expression): void => {
     let inner = e;
     while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
@@ -2782,7 +2790,7 @@ export function cjsWholeExportIdentifierOf(sf: ts.SourceFile): ts.Identifier | n
     // its own storage in collectGlobals (scalar, function, object literal)
     // or fences in the statement lowering; this is the one that registered
     // nothing ("Identifier values register nothing — alias plumbing").
-    if (ts.isIdentifier(rhs)) found = rhs;
+    if (ts.isIdentifier(rhs)) found = { ident: rhs, expr: inner };
     return;
   };
   for (const stmt of sf.statements) {
@@ -2822,7 +2830,7 @@ function immutableModuleBinding(L: Lowerer, ident: ts.Identifier): boolean {
  * This registers, for each such export, the storage the declaration half
  * lacks: one DYN global per declared value export, assigned at the END of
  * the TWIN's own init (after its body has built the object) from
- * `<whole-export identifier>.<name>`. That is precisely the statement a
+ * `<the module's export object>.<name>`. That is precisely the statement a
  * hand-edit of the bundle would add, and from there every existing path —
  * `globalOf`, `declTwinGlobalOf`, `importBindsStaticTwinGlobal`'s init
  * redirect, the dyn member/call machinery — applies unchanged.
@@ -2836,10 +2844,11 @@ function immutableModuleBinding(L: Lowerer, ident: ts.Identifier): boolean {
  *
  * NOT registered (each would answer a value nothing assigns, or a value
  * Node would not have answered):
- *  - a twin whose whole export is not a plain identifier, or whose
- *    identifier has no registered global;
- *  - a MUTABLE root (`var`/`let`) — the one soundness condition, argued at
- *    the check below;
+ *  - a twin whose whole export is not a plain identifier, and one whose
+ *    export has neither an export-object snapshot nor an immutable root
+ *    global to read from;
+ *  - a root that something can REBIND after the export — the one soundness
+ *    condition, argued at the check below;
  *  - an export that already has storage (a named export of the twin, a
  *    top-level `var` of the same name) — those bridges already work and
  *    carry a real static type;
@@ -2852,21 +2861,29 @@ export function collectDeclTwinExportBridges(L: Lowerer, parts: FileParts[]): vo
     const dts = L.declSiblingOf(twin);
     if (dts === null || L.isStdlibFile(dts)) continue;
     if (!isCjsJsFile(twin)) continue;
-    const rootIdent = cjsWholeExportIdentifierOf(twin);
-    if (rootIdent === null) continue;
-    // The root has to be IMMUTABLE, and this is the bridge's one soundness
-    // condition. Node's export object is whatever `module.exports` holds
-    // when the body finishes, and the bridge reads its properties at that
-    // same point; if the root binding can be REBOUND between the export
-    // statement and the end of the body, Node's exports and the bridge's
-    // read are two different objects. It is the argument the sibling fence
-    // already makes in words — "exporting the mutable 'let' binding by
-    // reference (Node copies its VALUE at this statement)" — applied to
-    // the properties instead of the binding. A `var`/`let` root changes
-    // nothing: every existing fence stands.
-    if (!immutableModuleBinding(L, rootIdent)) continue;
-    const root = L.globalOf(rootIdent);
-    if (root === null || root.type.kind === "jsval") continue;
+    const whole = cjsWholeExportRootOf(twin);
+    if (whole === null) continue;
+    // WHAT THE BRIDGE READS FROM: Node's EXPORT OBJECT, when there is one.
+    //
+    // `module.exports = j` gives a requirer the object `j` held AT THAT
+    // STATEMENT, and collectGlobals registers exactly that snapshot —
+    // `%g.<tag>exports`, keyed by the assignment node — for every root the
+    // alias path cannot carry (a `var`/`let` binding, or the init LOCAL a
+    // minifier's merged declarator list leaves behind, which is what every
+    // generated bundle has). Reading the declared exports off THAT is
+    // Node's own view, and it comes pre-gated: the storage exists only
+    // where the whole-export root provably cannot be rebound after the
+    // export (wholeExportRootRebindable's write analysis), which is
+    // strictly stronger than asking whether the root was spelled `const`.
+    //
+    // An immutable root keeps its own global and registers no snapshot —
+    // that is today's alias plumbing, and reading the properties off the
+    // binding is the same object by construction. It is the fallback, and
+    // the `const` test is what makes "the same object" true there.
+    const root =
+      L.globalsByDeclNode.get(whole.expr) ??
+      (immutableModuleBinding(L, whole.ident) ? L.globalOf(whole.ident) : null);
+    if (root === null || root === undefined || root.type.kind === "jsval") continue;
     const dtsSym = L.checker.getSymbolAtLocation(dts);
     if (!dtsSym) continue;
     const tag = L.fileTag.get(twin) ?? "";
