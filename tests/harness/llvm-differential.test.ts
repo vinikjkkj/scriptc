@@ -10,6 +10,14 @@
  * additionally rebuilt through the default lane below, asserting the
  * fallback lands on the C backend with the same refusal kind recorded.)
  *
+ * A REFUSAL IS SCORED AS A SKIP, NEVER AS A PASS. It used to `return`
+ * green, which made this lane's pass count include programs the backend
+ * had declined to compile — not comparable to the C differential's, and
+ * read as if it were. So this suite reports THREE numbers and they do not
+ * overlap: passed (compiled, executed, byte-identical to Node and to C),
+ * failed, and skipped (= refused = outside the tier, scored by the C
+ * differential instead). The afterAll line prints the same split.
+ *
  * SCRIPTC_SAN=1 rebuilds both lanes with ASan + the runtime RC audit; the
  * emitted .ll opts its functions into instrumentation via sanitize_address,
  * so the LLVM-emitted frames are covered too. The refusal histogram and
@@ -231,15 +239,22 @@ async function build(file: string, backend: "c" | "llvm" | "default") {
 // SCRIPTC_LLVM_REFUSALS=1 additionally lists every refused program under
 // its kind — the burn-down view the phase reports work from.
 const claimed: string[] = [];
+const refused: string[] = [];
 const refusalKinds = new Map<string, number>();
 const refusalPrograms = new Map<string, string[]>();
 
 describe(`llvm differential corpus (${files.length} programs${sanitize ? ", sanitized" : ""}${shardSuffix()})`, () => {
   test.for(files.map((f) => [f.slice(corpusDir.length + 1), f] as const))(
     "%s",
-    async ([rel, file]) => {
+    async ([rel, file], ctx) => {
       const llvmRes = await build(file, "llvm");
       if (!llvmRes.ok) {
+        // Recorded FIRST, before any assertion: the tier ledger must
+        // account for every program even when the refusal itself is
+        // malformed (a non-SC3001 diagnostic fails the next line, and the
+        // accounting test below would otherwise silently lose that
+        // program from both columns).
+        refused.push(rel);
         // Out of tier: the refusal must be LOUD and must be THE refusal —
         // exactly one SC3001 naming the first unhandled construct. Any
         // other diagnostic here means a corpus program stopped compiling
@@ -256,7 +271,23 @@ describe(`llvm differential corpus (${files.length} programs${sanitize ? ", sani
         expect(defRes.backend).toBe("c");
         expect(defRes.llvmRefusal).toBe(kind);
         expect(defRes.cPath.endsWith(".c")).toBe(true);
-        return;
+        // A REFUSAL IS NOT A PASS. Everything above is a contract on the
+        // refusal — that it is loud, singular, and transparently rescued
+        // by the C fallback — and none of it executes the program: it is
+        // never run, never compared to Node, never compared to the C
+        // lane. Scoring it green made this lane's headline pass count
+        // read as if it were the C differential's, which it never was
+        // (the base tier refused 31 of 1188 programs, and both members of
+        // the "C fails, LLVM passes" set the debt report called a free
+        // list of C-backend bugs were programs the LLVM backend had
+        // refused to compile). SKIP rather than FAIL: the tier is
+        // auto-discovered and documented C-first, the release default
+        // genuinely lands these on the C backend — asserted four lines up
+        // — and the C differential scores them there for real. So a
+        // refusal is out-of-tier, not broken. The skip COUNT is the
+        // refusal count: read it beside the tier line, never folded into
+        // the pass count.
+        ctx.skip(`SC3001 refusal (${kind}) — outside the LLVM tier; the C fallback lane scores this program`);
       }
       claimed.push(rel);
       expect(llvmRes.backend).toBe("llvm");
@@ -313,11 +344,32 @@ describe(`llvm differential corpus (${files.length} programs${sanitize ? ", sani
     }
   });
 
+  // The ledger must be exhaustive, because the two numbers it separates are
+  // the two the reports keep merging. Every corpus program is either
+  // CLAIMED (compiled by the LLVM backend, executed, and scored against
+  // Node and the C lane) or REFUSED (skipped here, scored by the C
+  // differential). A program in neither column means a build threw before
+  // either was recorded, and the count printed below would understate the
+  // refusals rather than say so.
+  test("tier accounting: claimed + refused covers every program", () => {
+    expect(claimed.length + refused.length).toBe(files.length);
+    expect(claimed.filter((r) => refused.includes(r))).toEqual([]);
+  });
+
   afterAll(() => {
     const hist = [...refusalKinds].sort((a, b) => b[1] - a[1]);
+    // The refusal count is printed as its OWN number and never folded into
+    // a pass count: a refused program is SKIPPED by this suite (see the
+    // ctx.skip above), so vitest's own "skipped" tally is this same number
+    // and its "passed" tally is now programs that really ran. `malformed`
+    // counts refusals that were not the single loud SC3001 the contract
+    // requires — those FAIL, and they are refusals all the same.
+    const malformed = refused.length - [...refusalKinds.values()].reduce((a, b) => a + b, 0);
     // eslint-disable-next-line no-console
     console.info(
-      `llvm tier: ${claimed.length}/${files.length} corpus programs claimed; ` +
+      `llvm tier: ${claimed.length}/${files.length} corpus programs claimed, ` +
+        `${refused.length} REFUSED (skipped, NOT passed` +
+        `${malformed > 0 ? `; ${malformed} of them failed the loud-SC3001 contract` : ""}); ` +
         `top refusals: ${hist.slice(0, 8).map(([k, n]) => `${k}×${n}`).join(", ")}`,
     );
     if (process.env["SCRIPTC_LLVM_REFUSALS"] === "1") {
