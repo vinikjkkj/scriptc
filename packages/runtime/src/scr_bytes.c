@@ -836,7 +836,17 @@ static uint32_t scr_bytes_next_cp(const uint8_t *in, size_t *ip) {
   return cp;
 }
 
+/* A NULL encoding is the ABSENT one, and every caller that spells it that
+ * way means Node's default: scr_dyn_to_string(d, NULL) is the whole
+ * String(v)/ToPrimitive family, and its BYTES arm reached here through
+ * scr_dyn_string_coerce with nothing to say about encoding. Answering
+ * false for every named encoding drops those callers onto the utf8
+ * fall-through at the bottom of scr_bytes_to_str, which is the answer the
+ * two walkers that build an explicit "utf8" already give. Reading
+ * enc->len first instead was a NULL dereference that nothing had reached
+ * yet — `"" + bufferChunk` reaches it. */
 static bool scr_enc_is(const ScrStr *enc, const char *name) {
+  if (enc == NULL) return false;
   size_t n = strlen(name);
   return enc->len == n && memcmp(enc->data, name, n) == 0;
 }

@@ -1618,103 +1618,25 @@ export class LlDyn {
       }
       B.startBlock(labels.get(DK.OBJ)!);
       {
-        // The checked-dynamic tree's error encoding renders Error.prototype.toString;
-        // plain objects are "[object Object]".
-        const marker = this.objGetLit(B, "%d", "%error");
-        const isErr = B.tmp();
-        B.line(`${isErr} = icmp ne ptr ${marker}, null`);
-        const lErr = B.newLabel("ds.er");
-        const lPlain = B.newLabel("ds.pl");
-        B.condBr(isErr, lErr, lPlain);
-        B.startBlock(lPlain);
-        // Object.prototype.toString UNLESS the object's own members or
-        // its PROTOTYPE CHAIN carry a callable toString — the C emitter's
-        // arm, through the same runtime entry point, which falls back to
-        // the "[object Object]" constant when there is none.
-        {
-          const s = B.tmp();
-          B.line(`${s} = call ptr @scr_dyn_to_string(ptr %d, ptr null)`);
-          this.putScrStr(B, "%b", s);
-          B.line(`call void @scr_str_release(ptr ${s})`);
-        }
-        B.br(done);
-        B.startBlock(lErr);
-        const en = this.objGetLit(B, "%d", "name");
-        const em = this.objGetLit(B, "%d", "message");
-        // ens/ems: the member's ScrStr when it is a string, else null.
-        const strOf = (m: string, hint: string): string => {
-          const slot = B.slot();
-          B.entryAllocas.push(`${slot} = alloca ptr`);
-          B.line(`store ptr null, ptr ${slot}`);
-          const nn = B.tmp();
-          B.line(`${nn} = icmp ne ptr ${m}, null`);
-          const lt = B.newLabel(`${hint}.t`);
-          const lj = B.newLabel(`${hint}.j`);
-          B.condBr(nn, lt, lj);
-          B.startBlock(lt);
-          const k = this.kindOf(B, m);
-          const isStr = B.tmp();
-          B.line(`${isStr} = icmp eq i32 ${k}, ${DK.STR}`);
-          const ls = B.newLabel(`${hint}.s`);
-          B.condBr(isStr, ls, lj);
-          B.startBlock(ls);
-          const sv = this.payloadOf(B, m, "ptr");
-          B.line(`store ptr ${sv}, ptr ${slot}`);
-          B.br(lj);
-          B.startBlock(lj);
-          const out = B.tmp();
-          B.line(`${out} = load ptr, ptr ${slot}`);
-          return out;
-        };
-        const ens = strOf(en, "ds.en");
-        const ems = strOf(em, "ds.em");
-        const putIf = (s: string, hint: string): void => {
-          const nn = B.tmp();
-          B.line(`${nn} = icmp ne ptr ${s}, null`);
-          const lt = B.newLabel(`${hint}.t`);
-          const lj = B.newLabel(`${hint}.j`);
-          B.condBr(nn, lt, lj);
-          B.startBlock(lt);
-          this.putScrStr(B, "%b", s);
-          B.br(lj);
-          B.startBlock(lj);
-        };
-        putIf(ens, "ds.pn");
-        {
-          // if (ens && ens->len && ems && ems->len) ": "
-          const lenNz = (s: string, hint: string): string => {
-            const slot = B.slot();
-            B.entryAllocas.push(`${slot} = alloca i1`);
-            B.line(`store i1 false, ptr ${slot}`);
-            const nn = B.tmp();
-            B.line(`${nn} = icmp ne ptr ${s}, null`);
-            const lt = B.newLabel(`${hint}.t`);
-            const lj = B.newLabel(`${hint}.j`);
-            B.condBr(nn, lt, lj);
-            B.startBlock(lt);
-            const { len } = this.strParts(B, s);
-            const nz = B.tmp();
-            B.line(`${nz} = icmp ne i64 ${len}, 0`);
-            B.line(`store i1 ${nz}, ptr ${slot}`);
-            B.br(lj);
-            B.startBlock(lj);
-            const out = B.tmp();
-            B.line(`${out} = load i1, ptr ${slot}`);
-            return out;
-          };
-          const a = lenNz(ens, "ds.ln");
-          const b2 = lenNz(ems, "ds.lm");
-          const both = B.tmp();
-          B.line(`${both} = and i1 ${a}, ${b2}`);
-          const lt = B.newLabel("ds.cl");
-          const lj = B.newLabel("ds.cj");
-          B.condBr(both, lt, lj);
-          B.startBlock(lt);
-          this.puts(B, "%b", ": ");
-          B.br(lj);
-          B.startBlock(lj);
-        }
-        putIf(ems, "ds.pm");
+        // JS ToString over an object: an OWN or INHERITED callable
+        // `toString` runs (`K.prototype.toString = fn` is where JS
+        // programs put one), a caught error renders its encoded
+        // name/message, and everything else is the
+        // "[object Object]" constant. All three live in
+        // scr_dyn_to_string, so this arm DELEGATES rather than
+        // repeating them: this walker is a per-program COPY of the
+        // runtime ToString table, and a copy that answers a value
+        // differently from the original is one value with two answers.
+        // It used to pre-check the "%error" marker HERE, ahead of the
+        // protocol, so an error carrying its own toString answered the
+        // encoded form through String(e) and the toString through
+        // e.toString(); the runtime orders the two the way JS does
+        // (Error.prototype.toString is only a fallback), so the
+        // pre-check was the disagreement, not the fix.
+        const s = B.tmp();
+        B.line(`${s} = call ptr @scr_dyn_to_string(ptr %d, ptr null)`);
+        this.putScrStr(B, "%b", s);
+        B.line(`call void @scr_str_release(ptr ${s})`);
         B.br(done);
       }
       B.startBlock(labels.get(DK.BYTES)!);
