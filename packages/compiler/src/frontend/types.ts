@@ -3808,8 +3808,25 @@ function mapGenericUtilityAlias(widened: ts.Type, ctx: TypeMapperCtx): IrType | 
     (d) => ts.isTypeAliasDeclaration(d) && ctx.isStdlibFile(d.getSourceFile()),
   );
   if (!isLibAlias) return null;
+  // This answer depends on the CURRENT instantiation, so it must move the
+  // sensitivity counters exactly like mapTypeInner's own type-parameter
+  // branch and every sibling hook (Awaited<T>, T[K], Parameters<M[K]>) —
+  // which bump at their call sites. This one did not, and `Partial<T>` is
+  // a whole ts.Type of its own: the memo is keyed by type identity, so the
+  // FIRST instantiation's shape was handed to every later one. `stash<A>`
+  // then `stash<B>` compiled B's body against A's fields and the second
+  // call silently answered `{}` (corpus 907, and SCRIPTC_MEMO_AUDIT prints
+  // `MEMOBAD Partial<T> cached=record:r0 fresh=record:r2` on it).
+  //
+  // Consulting the bindings is context-dependent whether or not a binding
+  // exists — an absent one is the collection-order leak memoSensitivity
+  // documents — so that counter moves first, before the refusals. A bound
+  // answer is additionally a context RESOLUTION, which is what keeps a
+  // recursive frame from interning this shape by checker-type identity.
+  memoSensitivity++;
   const bound = resolveTypeParam(arg);
   if (!bound || bound.kind !== "record") return null;
+  contextResolutions++;
   if (alias.name === "Readonly") return bound;
   const shape = shapes.get(bound.shapeId);
   if (!shape) return null;
