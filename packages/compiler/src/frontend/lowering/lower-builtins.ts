@@ -5638,6 +5638,45 @@ let digestInputValueDispatches = 0;
     return { kind: "libCall", fn: "dyn.u8Proto", args: [], type: DYN, loc: locOf(expr) };
   }
 
+/** `Uint8Array.from` / `Uint8Array.of` as VALUES — the two process
+   * singleton function objects, the same boxes a keyed read off the
+   * constructor answers.
+   *
+   * This is the spelling protobufjs actually writes, and unlike
+   * `.prototype` it is written STATICALLY:
+   *
+   *   util._Buffer_from = Buffer.from !== Uint8Array.from && Buffer.from
+   *                    || function (value, encoding) { … };
+   *
+   * The read is the whole of the use — the value is only ever compared —
+   * but it could not be read at all: tsc types
+   * `Uint8ArrayConstructor.from` as a generic callable member, so
+   * lowerFieldRead's object-literal-method rule claimed it with SC1090
+   * before the identifier chokepoint's singleton could be reached. That
+   * trap sat in the NOT-TAKEN arm of a conditional (`util.Buffer` is null
+   * in a compiled program — there is no Buffer object for the feature
+   * test to find), and the poison widened over the whole statement, so
+   * `util._configure()` threw where Node runs it and assigns null.
+   *
+   * Only `from` and `of` — every other member of the `Uint8Array` global
+   * keeps its fence, and in a TypeScript source a CALL through either
+   * keeps its own SC2020 (the static call has no lowering; this is the
+   * value). Null for every other receiver and member, so the property
+   * chain keeps trying. */
+  export function lowerUint8ArrayStaticProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+    if (expr.questionDotToken) return null;
+    if (L.dynamic) return null;
+    const member = L.stdlibGlobalMember(expr, "Uint8Array");
+    if (member !== "from" && member !== "of") return null;
+    return {
+      kind: "libCall",
+      fn: member === "from" ? "dyn.u8From" : "dyn.u8Of",
+      args: [],
+      type: DYN,
+      loc: locOf(expr),
+    };
+  }
+
 /** `JSON.parse` / `JSON.stringify` referenced without a call: rejected
    * specifically, like process methods as values. Null for non-JSON
    * receivers (the property chain keeps trying other lowerings). */

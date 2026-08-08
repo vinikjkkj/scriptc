@@ -3649,6 +3649,24 @@ export type IrLibFn =
    * `Object.hasOwn(Uint8Array.prototype, "subarray")` Node's false while
    * `in` stays Node's true. Never throws. Static builds only. */
   | "dyn.u8Proto"
+  /** `Uint8Array.from` / `Uint8Array.of` as VALUES (scr_json.c): the two
+   * static methods, one box each for the process.
+   *
+   * protobufjs reads the first one as a value and never calls it —
+   * `util._Buffer_from = Buffer.from !== Uint8Array.from && Buffer.from
+   * || …` — and the read is the whole blocker: tsc types
+   * `Uint8ArrayConstructor.from` as a GENERIC callable member, so the
+   * object-literal-method fence claimed it (SC1090) before any dyn
+   * lowering could, and the trap sat in the not-taken arm of a
+   * conditional whose poison widened over the whole statement. A value
+   * that cannot be read is not a value; these two are real functions.
+   *
+   * Node inherits both from %TypedArray%, so they are answered off the
+   * constructor BOX and never enter its property table —
+   * `Object.hasOwn(Uint8Array, "from")` is false there. Never throws at
+   * the READ (the call has Node's TypeErrors). Static builds only. */
+  | "dyn.u8From"
+  | "dyn.u8Of"
   /** `Object.create(<proto>)` over a dyn prototype (scr_json.c): a fresh
    * OBJ whose [[Prototype]] link is the argument. The link is the SAME
    * one `new` installs, so delegation is LIVE — a member added to the

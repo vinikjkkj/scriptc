@@ -5541,6 +5541,15 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // `Uint8Array.prototype`: the same process singleton the
             // constructor's `prototype` is pinned to (+1). Never throws.
             return finish(`scr_dyn_uint8array_prototype()`);
+          case "dyn.u8From":
+            // `Uint8Array.from`: the process singleton function object,
+            // the same box a keyed read off the constructor answers
+            // (+1). Never throws — the CALL is where Node's TypeErrors
+            // live.
+            return finish(`scr_dyn_uint8array_from()`);
+          case "dyn.u8Of":
+            // `Uint8Array.of`, likewise (+1). Never throws.
+            return finish(`scr_dyn_uint8array_of()`);
           case "dyn.u8Ctor":
             // `Uint8Array` as a value: the process singleton constructor
             // object (+1 per read, one node per process — the pinned
