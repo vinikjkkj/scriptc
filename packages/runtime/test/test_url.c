@@ -135,16 +135,19 @@ int main(int argc, char **argv) {
         scr_url_release(u);
       }
     } else if (strcmp(op, "u2p-posix") == 0) {
-      /* The public pair IS the posix arm on this (posix) host. */
+      /* fileURLToPath(string, { windows: false }) — the posix arm NAMED.
+       * This used to call the public pair on the assumption that it "is
+       * the posix arm on this (posix) host"; on a Windows host the public
+       * pair is the win32 arm, so the leg checked the wrong side. */
       ScrUrl *u = scr_url_new(arg);
       if (u == NULL) {
         got = outcome(NULL);
       } else {
-        got = outcome(scr_url_to_path(u));
+        got = outcome(scr_url_to_path_posix(u));
         scr_url_release(u);
       }
     } else if (strcmp(op, "p2u-posix") == 0) {
-      ScrUrl *u = scr_url_from_path(arg);
+      ScrUrl *u = scr_url_from_path_posix(arg);
       if (u == NULL) {
         got = outcome(NULL);
       } else {

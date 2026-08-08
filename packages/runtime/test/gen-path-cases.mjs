@@ -26,6 +26,21 @@ import { stdout } from "node:process";
 
 process.chdir("/");
 
+// The cwd-consulting cases (resolve, relative, toNamespacedPath) can only
+// be pinned as bytes on the host that generated them: `chdir("/")` lands on
+// "/" on a POSIX box and on the current DRIVE'S ROOT ("G:\") on Windows, and
+// path.win32 answers differently — correctly — for each. The harness
+// re-derives those cases against the running host's Node instead of trusting
+// the committed bytes, and it works out WHICH cases those are by running
+// this generator several times over synthetic cwds and diffing.
+//
+// lib/path.js reads the cwd through `process.cwd()` on every call (win32
+// directly, posix through its drive-truncating `posixCwd()`), so replacing
+// the function is enough — no second real directory, and no second drive,
+// has to exist for the probe.
+const probeCwd = process.env.SCR_ORACLE_PROBE_CWD;
+if (probeCwd !== undefined) process.cwd = () => probeCwd;
+
 const hex = (str) => {
   const b = Buffer.from(str, "utf8");
   return b.length ? b.toString("hex") : "-";
