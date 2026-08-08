@@ -1125,7 +1125,7 @@ export class LlDyn {
             const fbox = canBoxFuncIntoDyn(f.type, (id: string) => this.host.recordsById.get(id), (id: string) => this.host.unionsById.get(id))
               ? this.dynFuncBoxHelper(f.type)
               : this.strandedDynFuncBoxHelper(f.type);
-            B.line(`${conv} = call ptr @${fbox}(ptr ${fv}, ptr null)`);
+            B.line(`${conv} = call ptr @${fbox}(ptr ${fv}, ptr null, ptr null)`);
           } else {
             B.line(`${conv} = call ptr @${this.toDynHelper(f.type)}(${this.valTy(f.type)} ${fv})`);
           }
@@ -1158,7 +1158,7 @@ export class LlDyn {
             const fbox = canBoxFuncIntoDyn(f.type, (id: string) => this.host.recordsById.get(id), (id: string) => this.host.unionsById.get(id))
               ? this.dynFuncBoxHelper(f.type)
               : this.strandedDynFuncBoxHelper(f.type);
-            B.line(`${conv} = call ptr @${fbox}(ptr ${fv}, ptr null)`);
+            B.line(`${conv} = call ptr @${fbox}(ptr ${fv}, ptr null, ptr null)`);
           } else {
             B.line(`${conv} = call ptr @${this.toDynHelper(f.type)}(${this.valTy(f.type)} ${fv})`);
           }
@@ -1357,7 +1357,7 @@ export class LlDyn {
             B.line(`${pp} = getelementptr inbounds %ScrUnion, ptr %v, i64 0, i32 5`);
             B.line(`${p} = load ptr, ptr ${pp}`);
             const r = B.tmp();
-            B.line(`${r} = call ptr @${this.dynFuncBoxHelper(arm)}(ptr ${p}, ptr null)`);
+            B.line(`${r} = call ptr @${this.dynFuncBoxHelper(arm)}(ptr ${p}, ptr null, ptr null)`);
             B.terminate(`ret ptr ${r}`);
           } else {
             const pp = B.tmp();
@@ -1770,22 +1770,17 @@ export class LlDyn {
       }
       B.startBlock(labels.get(DK.FUNC)!);
       {
-        // Function.prototype.toString: the native-code form.
-        this.puts(B, "%b", "function ");
-        const namep = B.tmp();
-        const nm = B.tmp();
-        B.line(`${namep} = getelementptr inbounds i8, ptr %d, i64 40 ; ->v.fn.name`);
-        B.line(`${nm} = load ptr, ptr ${namep}`);
-        const nn = B.tmp();
-        B.line(`${nn} = icmp ne ptr ${nm}, null`);
-        const lt = B.newLabel("ds.fn");
-        const lj = B.newLabel("ds.fj");
-        B.condBr(nn, lt, lj);
-        B.startBlock(lt);
-        B.line(`call void @scr_jb_puts(ptr %b, ptr ${nm})`);
-        B.br(lj);
-        B.startBlock(lj);
-        this.puts(B, "%b", "() { [native code] }");
+        // Function.prototype.toString answers the function's SOURCE TEXT,
+        // which the box carries; this walker delegates to the runtime's
+        // one renderer exactly as the OBJ and HANDLE arms do, rather than
+        // open-coding a native-code stub that would make one value answer
+        // two ways depending on the spelling that reached it. Never NULL:
+        // a box with no honest answer traps inside the renderer.
+        this.host.declare(`declare ptr @scr_fn_to_string(ptr)`);
+        const s = B.tmp();
+        B.line(`${s} = call ptr @scr_fn_to_string(ptr %d)`);
+        this.putScrStr(B, "%b", s);
+        B.line(`call void @scr_str_release(ptr ${s})`);
         B.br(done);
       }
       B.startBlock(labels.get(DK.HANDLE)!);
@@ -2658,7 +2653,7 @@ export class LlDyn {
     if (t.kind === "func") {
       const box = this.dynFuncBoxHelper(t);
       const r = B.tmp();
-      B.line(`${r} = call ptr @${box}(ptr ${expr}, ptr null)`);
+      B.line(`${r} = call ptr @${box}(ptr ${expr}, ptr null, ptr null)`);
       return r;
     }
     if (t.kind === "jsval") {
@@ -2845,7 +2840,7 @@ export class LlDyn {
     const msgLit = host.cstr(msg);
     host.declare(`declare void @scr_throw_error_msg(i32, ptr, i64)`);
     host.declare(`declare ptr @scr_closure_retain_v(ptr)`);
-    host.declare(`declare ptr @scr_dyn_new_func(ptr, ptr, i32, ptr, ptr)`);
+    host.declare(`declare ptr @scr_dyn_new_func_src(ptr, ptr, i32, ptr, ptr, ptr)`);
     this.defs.push(
       `define internal ptr @${thunk}(ptr %c, ptr %args, i64 %argc) ${FN_ATTRS} { ; stranded dyn call thunk for ${key}`,
       `entry:`,
@@ -2856,10 +2851,10 @@ export class LlDyn {
     );
     const sigLit = host.cstr(key);
     this.defs.push(
-      `define internal ptr @${name}(ptr %v, ptr %fname) ${FN_ATTRS} { ; box ${key} into dyn (uncallable)`,
+      `define internal ptr @${name}(ptr %v, ptr %fname, ptr %fsrc) ${FN_ATTRS} { ; box ${key} into dyn (uncallable)`,
       `entry:`,
       `  %c = call ptr @scr_closure_retain_v(ptr %v)`,
-      `  %r = call ptr @scr_dyn_new_func(ptr %c, ptr @${thunk}, i32 ${t.params.length}, ptr ${sigLit}, ptr %fname)`,
+      `  %r = call ptr @scr_dyn_new_func_src(ptr %c, ptr @${thunk}, i32 ${t.params.length}, ptr ${sigLit}, ptr %fname, ptr %fsrc)`,
       `  ret ptr %r`,
       `}`,
       ``,
@@ -2876,13 +2871,13 @@ export class LlDyn {
     const host = this.host;
     const thunk = this.dynFuncThunkHelper(t);
     host.declare(`declare ptr @scr_closure_retain_v(ptr)`);
-    host.declare(`declare ptr @scr_dyn_new_func(ptr, ptr, i32, ptr, ptr)`);
+    host.declare(`declare ptr @scr_dyn_new_func_src(ptr, ptr, i32, ptr, ptr, ptr)`);
     const sigLit = host.cstr(key);
     this.defs.push(
-      `define internal ptr @${name}(ptr %v, ptr %fname) ${FN_ATTRS} { ; box ${key} into dyn`,
+      `define internal ptr @${name}(ptr %v, ptr %fname, ptr %fsrc) ${FN_ATTRS} { ; box ${key} into dyn`,
       `entry:`,
       `  %c = call ptr @scr_closure_retain_v(ptr %v)`,
-      `  %r = call ptr @scr_dyn_new_func(ptr %c, ptr @${thunk}, i32 ${t.params.length}, ptr ${sigLit}, ptr %fname)`,
+      `  %r = call ptr @scr_dyn_new_func_src(ptr %c, ptr @${thunk}, i32 ${t.params.length}, ptr ${sigLit}, ptr %fname, ptr %fsrc)`,
       `  ret ptr %r`,
       `}`,
       ``,
