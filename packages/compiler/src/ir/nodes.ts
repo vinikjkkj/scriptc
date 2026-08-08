@@ -3599,6 +3599,24 @@ export type IrLibFn =
    * and deepStrictEqual's prototype gate. Never throws. Static builds
    * only; --dynamic routes Object.create through the engine instead. */
   | "dyn.objCreateNullProto"
+  /** `Error.prototype` as a VALUE (scr_json.c): the process singleton
+   * standing for %Error.prototype%.
+   *
+   * It exists because `Object.create(<proto>, <descs>)` needs a real dyn
+   * OBJ for its first argument, and the one two-argument Object.create
+   * in protobufjs's shipped bundle passes `Error.prototype` —
+   * `util.newError`, the custom error type every decoder throws. The
+   * object carries Node's three own NON-ENUMERABLE members (`name`
+   * "Error", `message` "", a native `toString`), so `Object.keys` of it
+   * is `[]` and a descendant's `String(e)` runs a real toString; the
+   * fourth, `constructor`, has no value to name in a static build and
+   * throws a loud fence rather than answering undefined.
+   *
+   * One node per PROCESS: `Error.prototype === Error.prototype` and the
+   * chain walk both depend on identity. Never throws. Static builds
+   * only — under --dynamic the engine owns the real one, and the member
+   * read keeps its fence. */
+  | "dyn.errorProto"
   /** `Object.create(<proto>)` over a dyn prototype (scr_json.c): a fresh
    * OBJ whose [[Prototype]] link is the argument. The link is the SAME
    * one `new` installs, so delegation is LIVE — a member added to the
