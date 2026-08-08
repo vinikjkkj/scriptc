@@ -7,7 +7,7 @@ import type { CEmitter } from "./emitter.js";
 import type { IrFunction } from "../../ir/nodes.js";
 import { IrClassDef, IrType, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, isRefCounted, mapOf, STRING } from "../../ir/nodes.js";
 import { mangleClassGcFree, mangleClassNew, mangleClassRelease, mangleClassReleaseDirect, mangleClassRetain, mangleClassStruct, mangleClassTrace, mangleCtorThunk, mangleField, mangleFunction, mangleRecordGcFree, mangleRecordNew, mangleRecordRelease, mangleRecordRetain, mangleRecordStruct, mangleRecordTrace, mangleVtAdapter, mangleVtInstance, mangleVtStruct } from "../mangle.js";
-import { boxKindC, cDecl, cType, elemKindC, mapValKindC, releaseCallC, vAdapters } from "./emit-types.js";
+import { arrayElemIsRef, boxKindC, cDecl, cType, elemKindC, mapValKindC, releaseCallC, vAdapters } from "./emit-types.js";
 
 /** The overflow map's C member name on index-signature record structs.
  * User fields mangle to `sc_fld_*`, so no field can collide. */
@@ -723,27 +723,16 @@ export interface ClassMeta {
    * carries one (trace non-NULL). Every other element kind keeps the
    * historic scr_arr_new call. */
   export function arrNewC(E: CEmitter, elem: IrType, capExpr: string | number): string {
+    // One list, shared with elemKindC and the LLVM backend (arrayElemIsRef):
+    // every kind tagged SCR_ELEM_REF constructs through scr_arr_new_ref with
+    // its `_v` adapters. A cycle-capable inner ARRAY joins them — its
+    // SCR_ELEM_ARR spelling would hide it from the outer array's trace —
+    // and that answer needs the emitter's trace fixpoint, so it is decided
+    // here rather than in the shared predicate.
     const useRef =
-      elem.kind === "record" || elem.kind === "object" || elem.kind === "union" ||
-      // Promise elements (Promise.all's food): refcounted, cycle-headered
-      // — the `_v` adapters and scr_promise_trace_v ride the same REF
-      // machinery as record/object/union elements.
-      elem.kind === "promise" ||
-      elem.kind === "jsval" || // island handles: scr_jsval_* adapters, no trace
-      // Map/Set elements: scr_map_* adapters, and scr_map_trace_v exactly
-      // when the inner container is itself cycle-capable (traceAdapterC's
-      // map rule) — the same pair a Map VALUE holding a container uses.
-      elem.kind === "map" ||
-      elem.kind === "set" ||
-      elem.kind === "regex" || // RegExp values: scr_regex_* adapters, no trace (no refs inside)
-      elem.kind === "child" || // spawned child handles: scr_child_* adapters, no trace
-      elem.kind === "netServer" || // server handles: scr_net_server_* adapters, no trace
-      elem.kind === "symbol" || // symbol identities: scr_sym_* adapters, no trace
-      elem.kind === "classval" || // class objects: no-op adapters, no trace (immortal statics)
-      // Closures: scr_closure_* adapters + scr_closure_trace_v (always
-      // cycle-headered — captures can reach back through boxes).
-      elem.kind === "func" ||
-      (elem.kind === "array" && E.traceAdapterC(elem) !== null);
+      elem.kind === "array"
+        ? E.traceAdapterC(elem) !== null
+        : arrayElemIsRef(elem);
     if (!useRef) return `scr_arr_new(${elemKindC(elem)}, ${capExpr})`;
     const v = vAdapters(elem);
     return `scr_arr_new_ref(&${v.retain}, &${v.release}, ${E.traceArgC(elem)}, ${capExpr})`;
