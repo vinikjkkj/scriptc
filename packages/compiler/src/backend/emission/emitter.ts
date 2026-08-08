@@ -33,7 +33,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesDgram, moduleUsesDynInvoke, moduleEmbedsBuiltin, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID } from "../../ir/nodes.js";
+import { funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesDgram, moduleEmbedsBuiltin, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID } from "../../ir/nodes.js";
 import {
   mangleAsyncSpawn,
   mangleGenSpawn,
@@ -724,11 +724,14 @@ export class CEmitter {
     }
     const refGlobals = globals.filter((g) => isRefCounted(g.type));
     // Interned function-value closures are IMMORTAL (rc == SIZE_MAX), so
-    // an own-property table Object.defineProperties hung on one would
-    // outlive the RC audit — release it with the globals. Only emitted
-    // when the dispatch unit is even linked (defineProps is the only
-    // writer).
-    const fnValueProps = moduleUsesDynInvoke(this.mod) ? [...this.fnValues] : [];
+    // an own-property table hung on one would outlive the RC audit —
+    // release it with the globals. UNGATED on purpose: this used to fire
+    // only under moduleUsesDynInvoke, on the premise that
+    // Object.defineProperties was the table's only writer. It is not —
+    // a keyed write `F.k = v` and a keyed READ of `F.prototype` both
+    // reach scr_dyn_fn_props, and the lazily-minted prototype object
+    // lives in that table. See the LLVM emitter's note.
+    const fnValueProps = [...this.fnValues];
     if (refGlobals.length > 0 || fnValueProps.length > 0) {
       out.push(`static void sc_release_globals(void) {`);
       for (const g of refGlobals) {
