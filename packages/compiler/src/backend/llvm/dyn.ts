@@ -1581,7 +1581,10 @@ export class LlDyn {
       B.startBlock(labels.get(DK.ARR)!);
       {
         // Array.prototype.toString: join(",") — null/undefined ELEMENTS
-        // print empty (unlike top level), nested arrays flatten.
+        // print empty (unlike top level), nested arrays flatten. An
+        // element's own toString can throw, and JS's join stops there:
+        // the remaining elements' toStrings are user code Node never
+        // runs (emit-walkers.ts's C twin carries the same bail).
         const n = this.lenOf(B, "%d");
         const items = this.itemsOf(B, "%d");
         this.i64Loop(B, "ds.ar", n, (i, brNext) => {
@@ -1609,6 +1612,7 @@ export class LlDyn {
           brNext();
           B.startBlock(lRec);
           B.line(`call void @sc_ds_buf(ptr %b, ptr ${e})`);
+          this.pendingBail(B, "ds.ap", () => {}, "void");
         });
         B.br(done);
       }
