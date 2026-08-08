@@ -456,6 +456,23 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
 
   if (recv->kind == SCR_DYN_ARR) {
     size_t len = recv->v.arr.len;
+    /* An IN-PLACE array method on a copy the static→dyn boundary made of
+     * a value the caller still names: the mutation would be confined to
+     * the copy, so refuse loudly instead of dropping it (see
+     * scr_dyn_static_copy_refuse). The non-mutating methods — map, slice,
+     * join, indexOf and the rest — read the copy, which is exact, and are
+     * deliberately not listed here. */
+    if (recv->static_copy &&
+        (dyn_name_is(method, "push") || dyn_name_is(method, "pop") ||
+         dyn_name_is(method, "shift") || dyn_name_is(method, "unshift") ||
+         dyn_name_is(method, "splice") || dyn_name_is(method, "sort") ||
+         dyn_name_is(method, "reverse") || dyn_name_is(method, "fill") ||
+         dyn_name_is(method, "copyWithin"))) {
+      char named[64];
+      int n = snprintf(named, sizeof named, "calling '%s'", method);
+      scr_dyn_static_copy_refuse(n > 0 ? named : "an in-place array method");
+      return NULL;
+    }
     if (dyn_name_is(method, "push")) {
       for (size_t i = 0; i < argc; i++) scr_dyn_arr_push(recv, scr_dyn_retain(args[i]));
       return scr_dyn_new_num((double)recv->v.arr.len);

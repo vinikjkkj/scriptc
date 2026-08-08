@@ -2827,12 +2827,20 @@ typedef enum {
   /* A Uint8Array/Buffer VALUE. Never produced by the parser — it enters
    * the checked-dynamic tree through the compiler's static→dyn converters (a bytes<u8>
    * value flowing into an `unknown` slot: stdin chunks passed to
-   * unknown-typed helpers). Owns a ScrBytes payload (a COPY of the static
-   * source — the boundary's aliasing stance). typeof answers "object"
-   * (kind tests all miss), String() joins the elements ("1,2,3" —
-   * Uint8Array.prototype.toString), JSON serializes the index-keyed
-   * object form ({"0":1}), and dynCheck extracts a fresh copy against a
-   * Uint8Array target. */
+   * unknown-typed helpers). Holds a RETAINED ScrBytes payload — the SAME
+   * one the static side holds (scr_dyn_new_bytes_ref): typed arrays are
+   * the one composite whose two representations are the same refcounted
+   * object, so the boundary shares instead of copying and an element
+   * write through the dyn value lands on the caller's buffer, exactly
+   * Node. (Arrays and records cannot do this — different representations
+   * — so those copy and carry `static_copy` instead.) An element WRITE
+   * goes through scr_dyn_key_set's bytes arm: an in-range canonical index
+   * stores through the width's own coercion, an out-of-range one is JS's
+   * silent no-op. typeof answers "object" (kind tests all miss), String()
+   * joins the elements ("1,2,3" — Uint8Array.prototype.toString), JSON
+   * serializes the index-keyed object form ({"0":1}), and dynCheck
+   * extracts a fresh copy against a Uint8Array target (the one direction
+   * that still copies — declared in estado-aliasing.md). */
   SCR_DYN_BYTES,
   /* A FUNCTION value. Never produced by the parser — it enters the checked-dynamic tree
    * through the compiler's static→dyn converters (a typed closure flowing
@@ -2968,6 +2976,18 @@ struct ScrDyn {
    * fresh copies (structuredClone) DROP the flag — Node's serialization
    * answers a plain object too. */
   bool null_proto;
+  /* SCR_DYN_ARR / SCR_DYN_OBJ flavor: this value is a COPY made at the
+   * static→dyn boundary of a source the program still names (the compiler
+   * marks exactly those — dynCopyIsObservable). An array's and a record's
+   * two representations are physically different memory (a packed ScrArr /
+   * a C struct against this vector / entry table), so the boundary cannot
+   * alias them the way it aliases bytes; it copies. READS off the copy are
+   * exact, so only the MUTATING entry points consult the flag —
+   * scr_dyn_key_set and the array mutators refuse loudly there, because
+   * the write would land on this copy and never reach the object the
+   * caller still holds, where Node writes that object itself. A silently
+   * dropped write is the one answer worse than a refusal. */
+  bool static_copy;
   union {
     bool b;
     double num;
@@ -3246,9 +3266,28 @@ ScrDyn *scr_dyn_new_obj(void);
 /* Object.create(null): the fresh null-prototype dictionary (see the
  * null_proto flavor flag above). */
 ScrDyn *scr_dyn_new_obj_null_proto(void);
-/* Wraps a fresh COPY of the u8 payload (the static→dyn boundary copies —
- * DataView-backed sources copy their aliased window). Borrows b. */
+/* Wraps a fresh COPY of the u8 payload. The CLONING constructor — used
+ * where JS itself makes a new buffer (structuredClone). Borrows b. */
 ScrDyn *scr_dyn_new_bytes_copy(const ScrBytes *b);
+/* Wraps the SAME payload, retained (+1 on b; b stays borrowed by the
+ * caller). This is the static→dyn BOUNDARY constructor: a typed array is
+ * the one composite whose static and dynamic representations are the same
+ * refcounted ScrBytes, so the crossing SHARES instead of copying and
+ * `write(val, buf, pos) { buf[pos] = val }` reached through an untyped
+ * parameter writes the caller's buffer — exactly Node, which has no copy
+ * at all. Views (DataView/subarray/Buffer-slice) share their window too:
+ * the payload keeps its own `backing` link, so a write through the dyn
+ * lands in the owner the view aliases, again like Node. */
+ScrDyn *scr_dyn_new_bytes_ref(ScrBytes *b);
+/* Marks a static→dyn composite copy — and every ARR/OBJ under it — as one
+ * whose mutation would be lost, and answers d unchanged (+0). The tree is
+ * the converter's own freshly built, acyclic output (cycle-capable shapes
+ * trap before reaching here), so the walk terminates. */
+ScrDyn *scr_dyn_mark_static_copy(ScrDyn *d);
+/* Throws the shared refusal for a mutation attempted through a marked
+ * boundary copy. `what` names the operation ("assigning a property",
+ * "deleting a property", "'push'") and leads the message. */
+void scr_dyn_static_copy_refuse(const char *what);
 /* The Buffer-flavored twin (stream chunks): string coercion/toString
  * decode utf8 instead of joining elements. */
 ScrDyn *scr_dyn_new_buffer_copy(const ScrBytes *b);
