@@ -93,8 +93,10 @@ export function wsGlobalCtorFor(E: CEmitter, t: IrType): string {
     // The interned immortal closure: the VALUE of globalThis.WebSocket,
     // one per program so `globalThis.WebSocket === globalThis.WebSocket`
     // is true the way it is in every runtime that has one.
-    `static struct { size_t rc; void *fn; size_t ncaps; ScrBox *props; } ${sym} =`,
-    `    { SIZE_MAX, (void *)&${names.wrap}, 0, NULL }; /* globalThis.WebSocket */`,
+    // Field list MIRRORS ScrClosure's — the runtime casts this to
+    // ScrClosure * and writes through it (emitter.ts's note).
+    `static struct { size_t rc; void *fn; size_t ncaps; ScrBox *props; void *implicit_proto; } ${sym} =`,
+    `    { SIZE_MAX, (void *)&${names.wrap}, 0, NULL, NULL }; /* globalThis.WebSocket */`,
   );
 
   E.walkerDefs.push(

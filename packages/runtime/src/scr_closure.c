@@ -170,9 +170,22 @@ static void scr_closure_trace(void *o, ScrTraceVisit visit, void *ctx) {
   for (size_t i = 0; i < c->ncaps; i++) visit(c->caps[i], ctx);
 }
 
+/* NULL until the dyn unit mints its first implicit prototype object; see
+ * scr_runtime.h. */
+void (*scr_closure_ctor_unlink)(ScrClosure *c) = NULL;
+
+/* The one teardown step both paths below share: drop the minted implicit
+ * prototype (and its `constructor` registry entry) BEFORE `props` goes,
+ * so the registry never holds a borrowed pointer to a closure that is
+ * already being freed. */
+static void scr_closure_drop_ctor(ScrClosure *c) {
+  if (c->implicit_proto != NULL) scr_closure_ctor_unlink(c);
+}
+
 static void scr_closure_gcfree(void *o) {
   /* Caps are all boxes — all traced. The own-property table (props) is
    * an untraced box: released here like any external owned edge. */
+  scr_closure_drop_ctor((ScrClosure *)o);
   scr_box_release(((ScrClosure *)o)->props);
 #ifdef SCR_RC_AUDIT
   scr_live_closures--;
@@ -187,6 +200,7 @@ ScrClosure *scr_closure_new(void *fn, size_t ncaps) {
   c->fn = fn;
   c->ncaps = ncaps;
   c->props = NULL; /* lazily allocated by Object.defineProperties */
+  c->implicit_proto = NULL; /* lazily minted by scr_dyn_fn_prototype */
 #ifdef SCR_RC_AUDIT
   scr_live_closures++;
 #endif
@@ -198,6 +212,7 @@ void scr_closure_release(ScrClosure *c) {
   if (--c->rc == 0) {
     scr_cyc_on_dead(c);
     for (size_t i = 0; i < c->ncaps; i++) scr_box_release(c->caps[i]);
+    scr_closure_drop_ctor(c);
     scr_box_release(c->props); /* NULL-tolerant */
 #ifdef SCR_RC_AUDIT
     scr_live_closures--;
@@ -206,6 +221,20 @@ void scr_closure_release(ScrClosure *c) {
   } else {
     scr_cyc_on_release(c); /* possible cycle root; may collect — c is done */
   }
+}
+
+/* Teardown for an INTERNED function-value closure — the emitted static
+ * literal whose `rc` is SIZE_MAX, so neither release path above can ever
+ * run for it. Both of its lazily-created OWNED edges are dropped here:
+ * the own-property table and the minted implicit prototype. Idempotent
+ * (both are cleared), NULL-tolerant, and the single entry point the
+ * emitters call so a future edge added to this struct does not need a
+ * matching edit in three backends' exit code. */
+void scr_closure_static_teardown(ScrClosure *c) {
+  if (c == NULL) return;
+  scr_closure_drop_ctor(c);
+  scr_box_release(c->props);
+  c->props = NULL;
 }
 
 void scr_closure_trace_v(void *c, ScrTraceVisit visit, void *ctx) {
