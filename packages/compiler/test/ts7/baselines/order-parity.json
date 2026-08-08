@@ -5536,6 +5536,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3041-tmpdir-is-not-gettemppath.js": {
+   "order": [
+    "<repo>/tests/corpus/3041-tmpdir-is-not-gettemppath.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/305-truthiness.ts": {
    "order": [
     "<repo>/tests/corpus/305-truthiness.ts"
