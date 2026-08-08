@@ -5643,6 +5643,33 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         const elems = args.map((a) => L.lowerExprExpecting(a, t.elem));
         return { kind: "arrayLit", elems, type: t, loc };
       }
+      // `new WeakMap()` / `new WeakSet()` in JAVASCRIPT sources: no weak
+      // container exists in the value model, but harness code constructs
+      // one unconditionally and touches it only on paths tests don't
+      // reach — the value lowers as an opaque dyn object (identity only;
+      // every reached METHOD use meets its own per-site fence → runtime
+      // fence). TypeScript keeps the compile fence.
+      //
+      // This sits ABOVE the `Map || WeakMap` branch deliberately, and it
+      // used to sit below it. Down there its WeakMap arm was unreachable:
+      // the Map branch claims the symbol and never falls out of itself —
+      // every path returns or calls unsupported/badType/noLowering, all of
+      // which are typed `never` — and `new WeakMap()` types as
+      // WeakMap<WeakKey, any>, so the Map branch's own all-`any` JS escape
+      // misses on `targs[0] = WeakKey` and the walk ends at
+      // `SC1090: Map keys of type 'WeakKey'`. Only WeakSet, which that
+      // branch does not name, ever reached this code. Hoisting is the
+      // smaller edit than teaching the Map branch a fourth condition, and
+      // it leaves both fences exactly where they were: TypeScript sources
+      // and any argument list still fall through to the Map branch.
+      if (
+        (symbol?.name === "WeakMap" || symbol?.name === "WeakSet") &&
+        L.isStdlibSymbol(symbol) &&
+        isJsSourceFile(expr.getSourceFile()) &&
+        (expr.arguments?.length ?? 0) === 0
+      ) {
+        return { kind: "dynObjLit", type: DYN, loc };
+      }
       if ((symbol?.name === "Map" || symbol?.name === "WeakMap") && L.isStdlibSymbol(symbol)) {
         const seedArg = (expr.arguments?.length ?? 0) === 1 ? expr.arguments![0]! : null;
         const isPairLit = (el: ts.Expression): el is ts.ArrayLiteralExpression =>
@@ -5734,20 +5761,6 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
       // insertion order preserved, exactly JS). Non-array seeds (another
       // Set, general iterables) keep the fence. Unsupported element types
       // are named specifically.
-      // `new WeakMap()` / `new WeakSet()` in JAVASCRIPT sources: no weak
-      // container exists in the value model, but harness code constructs
-      // one unconditionally and touches it only on paths tests don't
-      // reach — the value lowers as an opaque dyn object (identity only;
-      // every reached METHOD use meets its own per-site fence → runtime
-      // fence). TypeScript keeps the compile fence.
-      if (
-        (symbol?.name === "WeakMap" || symbol?.name === "WeakSet") &&
-        L.isStdlibSymbol(symbol) &&
-        isJsSourceFile(expr.getSourceFile()) &&
-        (expr.arguments?.length ?? 0) === 0
-      ) {
-        return { kind: "dynObjLit", type: DYN, loc };
-      }
       if (symbol?.name === "Set" && L.isStdlibSymbol(symbol)) {
         const tsType = L.typeOf(expr);
         const mapped = L.mapTypeOf(tsType);
