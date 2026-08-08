@@ -82,8 +82,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         switch (e.op) {
           case "%":
             return E.newTemp(e.type, `fmod(${l.name}, ${r.name})`);
+          // `**` IS Math.pow — one spec operation (Number::exponentiate),
+          // so one runtime entry. C pow() is NOT it: pow(1, NaN) and
+          // pow(-1, ±Infinity) answer 1.0 where JS answers NaN, and this
+          // lane answered the C values until scr_math_pow landed.
           case "**":
-            return E.newTemp(e.type, `pow(${l.name}, ${r.name})`);
+            return E.newTemp(e.type, `scr_math_pow(${l.name}, ${r.name})`);
           case "===":
             return E.newTemp(e.type, `${l.name} == ${r.name}`);
           case "!==":
@@ -2546,6 +2550,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // member retains the value in); throws Node's TypeErrors on
             // non-object receivers (may-throw seed set).
             return finish(`scr_dyn_key_set(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "dyn.keyDelete":
+            // `delete d[k]` on a dyn receiver: both borrowed, a bool
+            // answer, and JS's own-property rule (the chain is never
+            // touched). Throws ToObject on a nullish receiver and on the
+            // array-element hole (may-throw seed set).
+            return finish(`scr_dyn_key_delete(${arg(0)}, ${arg(1)})`);
           case "dyn.iterPack":
             // Destructuring/for-of pack over a dyn source: both borrowed,
             // fresh array +1; throws V8's not-iterable TypeError on
@@ -2802,6 +2812,17 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`trunc(${arg(0)})`);
           case "math.ceil":
             return finish(`ceil(${arg(0)})`);
+          // Math.pow — scr_math_pow, NOT C pow(): the spec's NaN-exponent
+          // and |base|==1-with-infinite-exponent rules are exactly where
+          // C disagrees. Math.log — C log() IS the JS operation at every
+          // edge (log(±0) = -Infinity, log(negative) = NaN). Math.clz32 —
+          // the ToUint32 count (scr_lib.c). Borrow nothing; no throw.
+          case "math.pow":
+            return finish(`scr_math_pow(${arg(0)}, ${arg(1)})`);
+          case "math.log":
+            return finish(`log(${arg(0)})`);
+          case "math.clz32":
+            return finish(`scr_math_clz32(${arg(0)})`);
           // Math.abs — C fabs IS the JS operation. Math.round — the JS
           // half-toward-+Infinity rule (scr_lib.c; C round() differs on
           // halves and naive floor(x+0.5) drifts at the epsilon boundary).

@@ -520,22 +520,6 @@
       "note": "recognized module (bare and node:-prefixed specifiers)"
     },
     {
-      "id": "node-builtin.crypto.createCipheriv",
-      "kind": "node-builtin",
-      "name": "crypto.createCipheriv",
-      "status": "unsupported",
-      "code": "SC2020",
-      "note": "symmetric ciphers need a cipher stack the static runtime does not vendor — the lowered crypto surface is hashing, randomness, and the introspection statics"
-    },
-    {
-      "id": "node-builtin.crypto.createDecipheriv",
-      "kind": "node-builtin",
-      "name": "crypto.createDecipheriv",
-      "status": "unsupported",
-      "code": "SC2020",
-      "note": "symmetric ciphers need a cipher stack the static runtime does not vendor — the lowered crypto surface is hashing, randomness, and the introspection statics"
-    },
-    {
       "id": "node-builtin.crypto.createDiffieHellman",
       "kind": "node-builtin",
       "name": "crypto.createDiffieHellman",
@@ -565,7 +549,7 @@
       "name": "crypto.createHash",
       "status": "unsupported",
       "code": "SC2020",
-      "note": "the one lowered shape is the composed chain createHash(\"sha256\").update(data).digest(\"hex\") — the Hash handle itself has no lowering"
+      "note": "the lowered algorithms are sha256, sha512, sha1 and md5 — every other name has no lowering; the handle itself is an ordinary value (update/digest are its lowered members)"
     },
     {
       "id": "node-builtin.crypto.createHmac",
@@ -573,7 +557,7 @@
       "name": "crypto.createHmac",
       "status": "unsupported",
       "code": "SC2020",
-      "note": "HMAC has no lowering yet — the lowered crypto surface is randomUUID, randomBytes, the createHash(\"sha256\"|\"sha1\") chain, and the introspection statics"
+      "note": "the lowered algorithms are sha256, sha512, sha1 and md5, keyed by a string or a Buffer — a KeyObject key needs the secret-key surface, which has no lowering"
     },
     {
       "id": "node-builtin.crypto.createPrivateKey",
@@ -587,14 +571,6 @@
       "id": "node-builtin.crypto.createPublicKey",
       "kind": "node-builtin",
       "name": "crypto.createPublicKey",
-      "status": "unsupported",
-      "code": "SC2020",
-      "note": "asymmetric-key operations need a public-key stack (bignum, RSA/EC/EdDSA math) and a KeyObject value model — neither exists in the static runtime, so no faithful lowering can be small; the lowered crypto surface is hashing, randomness, and the introspection statics"
-    },
-    {
-      "id": "node-builtin.crypto.createSecretKey",
-      "kind": "node-builtin",
-      "name": "crypto.createSecretKey",
       "status": "unsupported",
       "code": "SC2020",
       "note": "asymmetric-key operations need a public-key stack (bignum, RSA/EC/EdDSA math) and a KeyObject value model — neither exists in the static runtime, so no faithful lowering can be small; the lowered crypto surface is hashing, randomness, and the introspection statics"
@@ -661,7 +637,7 @@
       "name": "crypto.getCipherInfo",
       "status": "unsupported",
       "code": "SC2020",
-      "note": "symmetric ciphers need a cipher stack the static runtime does not vendor — the lowered crypto surface is hashing, randomness, and the introspection statics"
+      "note": "the cipher introspection record has no lowering — the ciphers themselves do: aes-256-gcm, aes-256-cbc and aes-256-ctr through createCipheriv/createDecipheriv"
     },
     {
       "id": "node-builtin.crypto.getDiffieHellman",
@@ -685,31 +661,7 @@
       "name": "crypto.hkdf",
       "status": "unsupported",
       "code": "SC2020",
-      "note": "key-derivation functions have no lowering yet — the lowered crypto surface is hashing, randomness, and the introspection statics"
-    },
-    {
-      "id": "node-builtin.crypto.hkdfSync",
-      "kind": "node-builtin",
-      "name": "crypto.hkdfSync",
-      "status": "unsupported",
-      "code": "SC2020",
-      "note": "key-derivation functions have no lowering yet — the lowered crypto surface is hashing, randomness, and the introspection statics"
-    },
-    {
-      "id": "node-builtin.crypto.pbkdf2",
-      "kind": "node-builtin",
-      "name": "crypto.pbkdf2",
-      "status": "unsupported",
-      "code": "SC2020",
-      "note": "key-derivation functions have no lowering yet — the lowered crypto surface is hashing, randomness, and the introspection statics"
-    },
-    {
-      "id": "node-builtin.crypto.pbkdf2Sync",
-      "kind": "node-builtin",
-      "name": "crypto.pbkdf2Sync",
-      "status": "unsupported",
-      "code": "SC2020",
-      "note": "key-derivation functions have no lowering yet — the lowered crypto surface is hashing, randomness, and the introspection statics"
+      "note": "this key-derivation function has no lowering yet — PBKDF2 and HKDF with sha256 are the derived surfaces (hkdfSync, not the callback form), alongside hashing, randomness, and the introspection statics"
     },
     {
       "id": "node-builtin.crypto.privateDecrypt",
@@ -750,6 +702,12 @@
       "status": "static"
     },
     {
+      "id": "node-builtin.crypto.randomInt",
+      "kind": "node-builtin",
+      "name": "crypto.randomInt",
+      "status": "static"
+    },
+    {
       "id": "node-builtin.crypto.randomUUID",
       "kind": "node-builtin",
       "name": "crypto.randomUUID",
@@ -761,7 +719,7 @@
       "name": "crypto.scrypt",
       "status": "unsupported",
       "code": "SC2020",
-      "note": "key-derivation functions have no lowering yet — the lowered crypto surface is hashing, randomness, and the introspection statics"
+      "note": "this key-derivation function has no lowering yet — PBKDF2 and HKDF with sha256 are the derived surfaces (hkdfSync, not the callback form), alongside hashing, randomness, and the introspection statics"
     },
     {
       "id": "node-builtin.crypto.scryptSync",
@@ -769,7 +727,7 @@
       "name": "crypto.scryptSync",
       "status": "unsupported",
       "code": "SC2020",
-      "note": "key-derivation functions have no lowering yet — the lowered crypto surface is hashing, randomness, and the introspection statics"
+      "note": "this key-derivation function has no lowering yet — PBKDF2 and HKDF with sha256 are the derived surfaces (hkdfSync, not the callback form), alongside hashing, randomness, and the introspection statics"
     },
     {
       "id": "node-builtin.crypto.setFips",
@@ -1818,7 +1776,7 @@
       "name": "zlib.brotliCompressSync",
       "status": "unsupported",
       "code": "SC2020",
-      "note": "deflateSync and inflateSync are the lowered zlib surface"
+      "note": "deflateSync/inflateSync and the gzip twins (gzipSync, gunzipSync, unzipSync) are the lowered zlib surface"
     },
     {
       "id": "node-builtin.zlib.brotliDecompressSync",
@@ -1826,7 +1784,13 @@
       "name": "zlib.brotliDecompressSync",
       "status": "unsupported",
       "code": "SC2020",
-      "note": "deflateSync and inflateSync are the lowered zlib surface"
+      "note": "deflateSync/inflateSync and the gzip twins (gzipSync, gunzipSync, unzipSync) are the lowered zlib surface"
+    },
+    {
+      "id": "node-builtin.zlib.deflateRawSync",
+      "kind": "node-builtin",
+      "name": "zlib.deflateRawSync",
+      "status": "static"
     },
     {
       "id": "node-builtin.zlib.deflateSync",
@@ -1838,17 +1802,19 @@
       "id": "node-builtin.zlib.gunzipSync",
       "kind": "node-builtin",
       "name": "zlib.gunzipSync",
-      "status": "unsupported",
-      "code": "SC2020",
-      "note": "deflateSync and inflateSync are the lowered zlib surface"
+      "status": "static"
     },
     {
       "id": "node-builtin.zlib.gzipSync",
       "kind": "node-builtin",
       "name": "zlib.gzipSync",
-      "status": "unsupported",
-      "code": "SC2020",
-      "note": "deflateSync and inflateSync are the lowered zlib surface"
+      "status": "static"
+    },
+    {
+      "id": "node-builtin.zlib.inflateRawSync",
+      "kind": "node-builtin",
+      "name": "zlib.inflateRawSync",
+      "status": "static"
     },
     {
       "id": "node-builtin.zlib.inflateSync",
@@ -1860,9 +1826,7 @@
       "id": "node-builtin.zlib.unzipSync",
       "kind": "node-builtin",
       "name": "zlib.unzipSync",
-      "status": "unsupported",
-      "code": "SC2020",
-      "note": "deflateSync and inflateSync are the lowered zlib surface"
+      "status": "static"
     },
     {
       "id": "stdlib.array.at",
@@ -1877,9 +1841,21 @@
       "status": "static"
     },
     {
+      "id": "stdlib.array.copyWithin",
+      "kind": "stdlib",
+      "name": "Array.prototype.copyWithin",
+      "status": "static"
+    },
+    {
       "id": "stdlib.array.every",
       "kind": "stdlib",
       "name": "Array.prototype.every",
+      "status": "static"
+    },
+    {
+      "id": "stdlib.array.fill",
+      "kind": "stdlib",
+      "name": "Array.prototype.fill",
       "status": "static"
     },
     {
@@ -1973,6 +1949,12 @@
       "status": "static"
     },
     {
+      "id": "stdlib.array.reverse",
+      "kind": "stdlib",
+      "name": "Array.prototype.reverse",
+      "status": "static"
+    },
+    {
       "id": "stdlib.array.slice",
       "kind": "stdlib",
       "name": "Array.prototype.slice",
@@ -2000,6 +1982,12 @@
       "id": "stdlib.array.toSpliced",
       "kind": "stdlib",
       "name": "Array.prototype.toSpliced",
+      "status": "static"
+    },
+    {
+      "id": "stdlib.array.unshift",
+      "kind": "stdlib",
+      "name": "Array.prototype.unshift",
       "status": "static"
     },
     {
@@ -2076,15 +2064,57 @@
       "id": "stdlib.math.E",
       "kind": "stdlib",
       "name": "Math.E",
-      "status": "dynamic-only",
-      "code": "SC2012"
+      "status": "static",
+      "note": "folds to the constant's exact double"
+    },
+    {
+      "id": "stdlib.math.LN10",
+      "kind": "stdlib",
+      "name": "Math.LN10",
+      "status": "static",
+      "note": "folds to the constant's exact double"
+    },
+    {
+      "id": "stdlib.math.LN2",
+      "kind": "stdlib",
+      "name": "Math.LN2",
+      "status": "static",
+      "note": "folds to the constant's exact double"
+    },
+    {
+      "id": "stdlib.math.LOG10E",
+      "kind": "stdlib",
+      "name": "Math.LOG10E",
+      "status": "static",
+      "note": "folds to the constant's exact double"
+    },
+    {
+      "id": "stdlib.math.LOG2E",
+      "kind": "stdlib",
+      "name": "Math.LOG2E",
+      "status": "static",
+      "note": "folds to the constant's exact double"
     },
     {
       "id": "stdlib.math.PI",
       "kind": "stdlib",
       "name": "Math.PI",
-      "status": "dynamic-only",
-      "code": "SC2012"
+      "status": "static",
+      "note": "folds to the constant's exact double"
+    },
+    {
+      "id": "stdlib.math.SQRT1_2",
+      "kind": "stdlib",
+      "name": "Math.SQRT1_2",
+      "status": "static",
+      "note": "folds to the constant's exact double"
+    },
+    {
+      "id": "stdlib.math.SQRT2",
+      "kind": "stdlib",
+      "name": "Math.SQRT2",
+      "status": "static",
+      "note": "folds to the constant's exact double"
     },
     {
       "id": "stdlib.math.abs",
@@ -2136,6 +2166,13 @@
       "note": "compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic)"
     },
     {
+      "id": "stdlib.math.clz32",
+      "kind": "stdlib",
+      "name": "Math.clz32",
+      "status": "static",
+      "note": "compiles statically at arity 1"
+    },
+    {
       "id": "stdlib.math.cos",
       "kind": "stdlib",
       "name": "Math.cos",
@@ -2167,8 +2204,8 @@
       "id": "stdlib.math.log",
       "kind": "stdlib",
       "name": "Math.log",
-      "status": "dynamic-only",
-      "code": "SC2012"
+      "status": "static",
+      "note": "compiles statically at arity 1"
     },
     {
       "id": "stdlib.math.log10",
@@ -2202,8 +2239,8 @@
       "id": "stdlib.math.pow",
       "kind": "stdlib",
       "name": "Math.pow",
-      "status": "dynamic-only",
-      "code": "SC2012"
+      "status": "static",
+      "note": "compiles statically at arity 2"
     },
     {
       "id": "stdlib.math.random",

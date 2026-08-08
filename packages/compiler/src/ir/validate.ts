@@ -99,6 +99,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "island.castFail": { argTypes: [JSVAL, STRING], result: VOID },
   "json.parse": { argTypes: [STRING], result: DYN },
   "dyn.keySet": { argTypes: [DYN, STRING, DYN], result: VOID },
+  "dyn.keyDelete": { argTypes: [DYN, STRING], result: BOOL },
   "dyn.iterPack": { argTypes: [DYN, STRING], result: DYN },
   "dyn.arrLen": { argTypes: [DYN], result: F64 },
   "dyn.arrAt": { argTypes: [DYN, F64], result: DYN },
@@ -217,6 +218,9 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "math.round": { argTypes: [F64], result: F64 },
   "math.trunc": { argTypes: [F64], result: F64 },
   "math.ceil": { argTypes: [F64], result: F64 },
+  "math.pow": { argTypes: [F64, F64], result: F64 },
+  "math.log": { argTypes: [F64], result: F64 },
+  "math.clz32": { argTypes: [F64], result: F64 },
   "math.min": { argTypes: [F64, F64], result: F64 },
   "math.max": { argTypes: [F64, F64], result: F64 },
   "math.random": { argTypes: [], result: F64 },
@@ -1882,7 +1886,7 @@ function validateFunction(
       case "seqExpr": {
         // Statements in an expression: straight-line writes only — no
         // control flow, no jumps (the C emission point is mid-expression).
-        const allowed = new Set(["varDecl", "assign", "exprStmt", "fieldSet", "recordSet", "recordKeySet", "arraySet", "bytesSet", "block"]);
+        const allowed = new Set(["varDecl", "assign", "exprStmt", "fieldSet", "recordSet", "recordKeySet", "recordKeyDelete", "arraySet", "bytesSet", "block"]);
         const flat = (ss: IrStmt[]): void => {
           for (const s of ss) {
             if (!allowed.has(s.kind)) {

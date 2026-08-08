@@ -1800,6 +1800,19 @@ export type IrLibFn =
    * SEMANTICS.md notes the sloppy divergence: loud, never silent). Void
    * result; in the may-throw seed set. */
   | "dyn.keySet"
+  /** `delete d[k]` over a dyn receiver — JS's [[Delete]], which is an
+   * own-property operation and an ANSWER (bool), not a void statement:
+   * true when the key was absent or was removed, and V8's strict-mode
+   * TypeError for a non-configurable own accessor (sloppy mode's quiet
+   * `false` is the one answer this runtime will not give). Data members
+   * and accessor properties
+   * live in two tables, and the delete drops from whichever holds the
+   * key, so an accessor never survives as a phantom key nor a data
+   * member as a phantom accessor. Both arguments borrowed. Throws Node's
+   * ToObject TypeError on an undefined/null receiver, and refuses an
+   * array-element delete loudly (a hole has no representation): in the
+   * may-throw seed set. */
+  | "dyn.keyDelete"
   /** Destructuring pack over a dyn source — `const [a, b] = d`, a
    * destructured dyn callback param (args: the source and the STATIC
    * TypeError spelling, "" when the source has none — both borrowed;
@@ -1990,6 +2003,20 @@ export type IrLibFn =
    * inference needs them compiled, not island-served. Never throw. */
   | "math.trunc"
   | "math.ceil"
+  /** `Math.pow(x, y)` — and the `**` operator, which is the SAME spec
+   * operation (ECMA-262 Number::exponentiate). C pow() is not it: pow(1,
+   * NaN) and pow(-1, ±Infinity) are 1.0 in C where JS answers NaN, so
+   * scr_math_pow wraps the three guards the spec orders first. Never
+   * throws. */
+  | "math.pow"
+  /** `Math.log(x)` — C log() IS the JS operation at every edge the spec
+   * names (log(±0) is -Infinity, log(x<0) and log(NaN) are NaN, log(1) is
+   * +0, log(+Infinity) is +Infinity). Never throws. */
+  | "math.log"
+  /** `Math.clz32(x)` — leading zeros of ToUint32(x), 32 for zero
+   * (scr_lib.c: the ToUint32 wrap the bitwise six already use, then the
+   * count). Never throws. */
+  | "math.clz32"
   /** The static global parsers/tests (scr_string.c). num.parseInt is
    * ECMA-262 19.2.5 exactly — JS whitespace, sign, ToInt32 radix (the
    * frontend completes an omitted radix to 0 = the spec's "undefined":
@@ -7728,6 +7755,9 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // throws Node's catchable SyntaxError at construction.
   "regex.new",
   "dyn.keySet",
+  // delete: ToObject on a nullish receiver, and the array-element hole
+  // this representation refuses rather than fakes.
+  "dyn.keyDelete",
   // `new f(...)` throws "is not a constructor", and the constructor BODY
   // throws whatever it throws — through the boxed thunk, catchably
   "dyn.construct",
