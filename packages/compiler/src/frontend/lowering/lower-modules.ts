@@ -1539,6 +1539,9 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
                 const g: IrGlobal = { id: `%g.${tag}${nameNode.text}`, name: nameNode.text, type: DYN, mutable: isLet };
                 L.globalsBySymbol.set(symbol, g);
                 L.globalsList.push(g);
+                // The dyn slot's NULL is a trap, not a value — see the
+                // object-literal branch below.
+                if (g.mutable) noteVarGlobalEntryInit(L, sf, g);
               }
               continue;
             }
@@ -1572,6 +1575,12 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
                 const g: IrGlobal = { id: `%g.${tag}${nameNode.text}`, name: nameNode.text, type: DYN, mutable: isLet };
                 L.globalsBySymbol.set(symbol, g);
                 L.globalsList.push(g);
+                // A dyn slot's NULL is a trap, not a value: a function
+                // created above this declarator reads it before the init
+                // body assigns, so the entry init must plant the dyn
+                // undefined first — the any-residue branch's rule below,
+                // and Node's own answer for a `var`.
+                if (g.mutable) noteVarGlobalEntryInit(L, sf, g);
               }
               continue;
             }
@@ -1810,11 +1819,14 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // one symbol) register exactly one global; later declarations
             // are plain assignments.
             if (!symbol || L.globalsBySymbol.has(symbol)) continue;
+            const window = preDeclarationSlot(L, sf, symbol, nameNode, decl, type);
+            type = window.type;
             const g: IrGlobal = {
               id: `%g.${tag}${nsPrefix}${nameNode.text}`,
               name: nameNode.text,
               type,
               mutable: isLet,
+              ...(window.tdz ? { tdz: true as const } : {}),
             };
             L.globalsBySymbol.set(symbol, g);
             L.globalsList.push(g);
@@ -1864,6 +1876,259 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
     const g = sym ? L.globalsBySymbol.get(sym) : undefined;
     return g?.type.kind === "array" && g.type.elem.kind === "jsval";
   }
+
+/** Slot kinds whose storage is a single pointer, so a NULL slot is an
+ * unambiguous "never written" sentinel and the TDZ test costs one compare.
+ * The pointer-backed half of lower-stmts.ts's TDZ_KINDS: the scalars there
+ * (`f64`, `bool`) only work because a BOXED local can hide a one-element
+ * array cell behind the slot, and a module global has no box to hide it
+ * in — a zero double is a legitimate value. `dyn` and `jsval` are absent
+ * on purpose: those slots already carry a real undefined and take the
+ * entry init instead. */
+const TDZ_GLOBAL_KINDS = new Set<IrType["kind"]>([
+  "func", "string", "array", "record", "object", "union", "map", "set", "regex", "bytes",
+  "child", "childStream", "netServer", "netSocket", "dgramSocket", "testCtx",
+]);
+
+/** THE PRE-DECLARATION WINDOW OF A MODULE-SCOPE BINDING — the slot type a
+ * module global must take so a read in that window is a value and not a
+ * fault, and whether its reads must be TDZ-guarded.
+ *
+ * A module global's slot is a raw NULL (or a C zero) from program start
+ * until the init body reaches its declarator, and a function body created
+ * ABOVE the declarator can read it there. Nothing can prove that read does
+ * not run — the function's call sites are wherever the program puts them —
+ * so the slot has to be honest about holding two states. It was not: a
+ * pointer-backed slot handed its NULL straight to a retain, which is a
+ * SEGMENTATION FAULT with no diagnostic, and a scalar slot answered its C
+ * zero, which is a silent wrong answer. Two answers, one per binding form,
+ * both of them Node's own:
+ *
+ *   * a `var` reads `undefined` there, so the slot WIDENS to
+ *     checked-dynamic — predeclareForwardVar's rule (lower-stmts.ts),
+ *     which is the FUNCTION-scope face of this exact window, moved to
+ *     module scope. The same three gates for the same reasons. JAVASCRIPT
+ *     sources only: a TypeScript annotation is a contract the program
+ *     wrote, and a JS `var`'s type is inference whose own answer for this
+ *     binding IS "value or undefined". STATIC builds only, matching every
+ *     other rule that reads the checked-dynamic tree. And only when the
+ *     declarator's own value can ENTER the slot, or the widening would
+ *     merely move a fence onto the declaration. The caller's entry-init
+ *     note then plants the dyn undefined before any body statement: an
+ *     early read answers `undefined` exactly as Node does, a later one the
+ *     value, and nothing is assumed about WHEN the read runs.
+ *
+ *   * everything else keeps its slot and takes the TDZ SENTINEL. A
+ *     pointer-backed slot's NULL already IS the "never written" state, so
+ *     every read tests it and an empty one throws Node's exact catchable
+ *     ReferenceError. For a `let`/`const` that is Node verbatim — the
+ *     temporal dead zone, and the module-scope face of IrLocal.tdz, which
+ *     predeclareForwardCapture explicitly declines to mint here ("MODULE-
+ *     scope consts are pre-registered globals"). For the `var` residue the
+ *     widening could not take (a TypeScript source, a value with no dyn
+ *     representation) it is a LOUD wrong answer where Node says
+ *     `undefined` — the same trade predeclareForwardCapture's `let x!: T`
+ *     half already makes, and for the same reason: a named catchable throw
+ *     is strictly better than the null dereference it replaces.
+ *
+ * Slots that already carry a real undefined (`dyn`, `jsval`, an
+ * undefined-armed union) need neither — unassignedSlotInit answers for
+ * them and the entry init plants it. */
+function preDeclarationSlot(
+  L: Lowerer, sf: ts.SourceFile, symbol: ts.Symbol, nameNode: ts.Identifier,
+  decl: ts.VariableDeclaration, type: IrType,
+): { type: IrType; tdz: boolean } {
+  if (L.unassignedSlotInit(type, locOf(decl)) !== null || type.kind === "dyn") return { type, tdz: false };
+  const name = nameNode.text;
+  // The two gates carry DIFFERENT burdens of proof, on purpose. Widening
+  // changes the slot's REPRESENTATION, so it rests on the tightest
+  // evidence there is — the reference is right there, above the
+  // declarator, exactly what predeclareForwardVar is handed. The TDZ
+  // sentinel changes no correct program's answer (a slot the declarator
+  // already filled never trips the test), so it takes the widest evidence
+  // available: any read whose function can be ACTIVATED above the
+  // declarator, transitively.
+  if (
+    isVarDeclared(decl) && isJsSourceFile(sf) && !L.dynamic && L.dynConvertible(type) &&
+    readAbove(L, sf, symbol, name, decl.getStart(sf))
+  ) {
+    return { type: DYN, tdz: false };
+  }
+  if (
+    TDZ_GLOBAL_KINDS.has(type.kind) && !isUnitType(type) &&
+    readBeforeActivation(L, sf, symbol, name, decl.getStart(sf))
+  ) {
+    return { type, tdz: true };
+  }
+  return { type, tdz: false };
+}
+
+/** Per-source-file index of every identifier by TEXT, in source order.
+ * Built once per file on first use: the pre-declaration probe below runs
+ * per declarator, and re-walking a bundled megafile for each one would be
+ * quadratic. Keyed on the node, so a dropped program drops the index. */
+const identifierIndexBySf = new WeakMap<ts.SourceFile, Map<string, ts.Identifier[]>>();
+
+function identifierIndexOf(sf: ts.SourceFile): Map<string, ts.Identifier[]> {
+  const cached = identifierIndexBySf.get(sf);
+  if (cached) return cached;
+  const index = new Map<string, ts.Identifier[]>();
+  // ITERATIVE (walkPreorder): a whole-file sweep must survive the
+  // pathologically deep trees a recursive forEachChild overflows on —
+  // collectNestedVarGlobals walks this way for the same reason.
+  ts.walkPreorder(sf, (n) => {
+    if (ts.isIdentifier(n)) {
+      let list = index.get(n.text);
+      if (!list) index.set(n.text, (list = []));
+      list.push(n);
+    }
+    return undefined;
+  });
+  // Position order, so a scan for "anything above X" can stop at the first
+  // identifier that is not.
+  for (const list of index.values()) list.sort((a, b) => a.getStart(sf) - b.getStart(sf));
+  identifierIndexBySf.set(sf, index);
+  return index;
+}
+
+/** Every identifier in the file that resolves to `symbol`. Text-keyed
+ * first, so the checker is asked only about the handful of identifiers
+ * that could possibly match; symbol identity then does the real filtering
+ * — a same-named property in `x.later`, a same-named local in another
+ * function, and a same-named type all resolve elsewhere. */
+function* referencesTo(
+  L: Lowerer, sf: ts.SourceFile, symbol: ts.Symbol, name: string,
+): Generator<ts.Identifier> {
+  for (const id of identifierIndexOf(sf).get(name) ?? []) {
+    if (L.checker.getSymbolAtLocation(id) === symbol) yield id;
+  }
+}
+
+/** True when this module-scope binding is READ ABOVE ITS OWN DECLARATOR —
+ * `predeclareForwardVar`'s own trigger, spelled for a scope that cannot
+ * use it. That function is entered FROM a resolution failure, so the
+ * forward reference is the reason it runs; `collectGlobals` runs before a
+ * single body lowers and has no such signal, so the reference has to be
+ * looked for. A textual position is exactly the evidence the function-
+ * scope rule acts on, and the widening it gates asks for nothing weaker. */
+function readAbove(L: Lowerer, sf: ts.SourceFile, symbol: ts.Symbol, name: string, start: number): boolean {
+  for (const id of identifierIndexOf(sf).get(name) ?? []) {
+    if (id.getStart(sf) >= start) return false; // sorted: nothing later can precede
+    if (L.checker.getSymbolAtLocation(id) === symbol) return true;
+  }
+  return false;
+}
+
+/** True when some read of this binding can RUN before the declarator does
+ * — the widest honest answer, and what the TDZ sentinel is gated on.
+ *
+ * A read above the declarator qualifies outright. So does a read BELOW it
+ * that sits inside a function the program can already call from above:
+ *
+ *     function a() { return b(); }
+ *     a();                            // <- runs here
+ *     var later = …;                  // <- declarator
+ *     function b() { return later; }  // <- read, textually BELOW
+ *
+ * `b`'s read is below the declarator and runs before it anyway, because
+ * `b` is reachable from `a` and `a` is called above. Position alone cannot
+ * see that; the activation fixpoint below can. `activationsOf` gives each
+ * function-like the earliest position from which it can be entered, so
+ * this is one lookup per reference. */
+function readBeforeActivation(
+  L: Lowerer, sf: ts.SourceFile, symbol: ts.Symbol, name: string, start: number,
+): boolean {
+  let activations: Map<ts.Node, number> | null = null;
+  for (const id of referencesTo(L, sf, symbol, name)) {
+    if (id.getStart(sf) < start) return true;
+    const host = enclosingFunctionLike(id);
+    if (host === null) continue; // a top-level read below the declarator runs after it
+    activations ??= activationsOf(L, sf);
+    if ((activations.get(host) ?? Number.MAX_SAFE_INTEGER) < start) return true;
+  }
+  return false;
+}
+
+function isFunctionLikeNode(n: ts.Node): boolean {
+  return ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n) ||
+    ts.isMethodDeclaration(n) || ts.isConstructorDeclaration(n) ||
+    ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n) ||
+    ts.isClassStaticBlockDeclaration(n);
+}
+
+function enclosingFunctionLike(n: ts.Node): ts.Node | null {
+  for (let p: ts.Node | undefined = n.parent; p !== undefined; p = p.parent) {
+    if (isFunctionLikeNode(p)) return p;
+  }
+  return null;
+}
+
+const activationsBySf = new WeakMap<ts.SourceFile, Map<ts.Node, number>>();
+
+/** Per function-like in the file, the EARLIEST source position from which
+ * the program can enter it — the least fixpoint of:
+ *
+ *   * an ANONYMOUS function-like (expression, arrow, method, accessor,
+ *     static block) is entered no earlier than where it is written: the
+ *     value has to exist before anything can call it, and a callback
+ *     handed to a call on that very line may run immediately. Its own
+ *     start is the honest floor and needs no iteration.
+ *   * a hoisted FUNCTION DECLARATION exists from module entry, so its
+ *     floor is the earliest place it is NAMED: a reference at top level
+ *     activates it there, and a reference inside another function-like
+ *     activates it no earlier than that function's own activation.
+ *
+ * Positions only ever fall, so iterating to a fixed point terminates; a
+ * mutual-recursion cycle simply carries the earliest activation of any
+ * member. Functions nothing names stay unreachable (MAX_SAFE_INTEGER).
+ * Computed once per file — every declarator in it shares the answer. */
+function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
+  const cached = activationsBySf.get(sf);
+  if (cached) return cached;
+  const act = new Map<ts.Node, number>();
+  const decls: ts.FunctionDeclaration[] = [];
+  ts.walkPreorder(sf, (n) => {
+    if (isFunctionLikeNode(n)) {
+      if (ts.isFunctionDeclaration(n) && n.name !== undefined) {
+        act.set(n, Number.MAX_SAFE_INTEGER);
+        decls.push(n);
+      } else {
+        act.set(n, n.getStart(sf));
+      }
+    }
+    return undefined;
+  });
+  // Each declaration's naming sites, resolved once: the fixpoint below
+  // only re-reads positions.
+  const namings = decls.map((fn) => {
+    const symbol = L.checker.getSymbolAtLocation(fn.name!);
+    const sites: { pos: number; host: ts.Node | null }[] = [];
+    if (symbol) {
+      for (const id of referencesTo(L, sf, symbol, fn.name!.text)) {
+        if (id === fn.name) continue; // the declaration's own name is not a call
+        sites.push({ pos: id.getStart(sf), host: enclosingFunctionLike(id) });
+      }
+    }
+    return { fn, sites };
+  });
+  for (let pass = 0; pass <= namings.length; pass++) {
+    let changed = false;
+    for (const { fn, sites } of namings) {
+      let best = act.get(fn)!;
+      for (const s of sites) {
+        const from = s.host === null ? s.pos : (act.get(s.host) ?? Number.MAX_SAFE_INTEGER);
+        if (from < best) best = from;
+      }
+      if (best < act.get(fn)!) {
+        act.set(fn, best);
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  activationsBySf.set(sf, act);
+  return act;
+}
 
 /** Registers the entry-init note for a `var` module global: JS hoists
    * module vars to `undefined` at module entry, so an undefined-armed slot
@@ -1942,7 +2207,14 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             }
             const symbol = L.checker.getSymbolAtLocation(nameNode);
             if (!symbol || L.globalsBySymbol.has(symbol)) continue;
-            const g: IrGlobal = { id: `%g.${tag}${nameNode.text}`, name: nameNode.text, type, mutable: true };
+            // The pre-declaration window is the same window here: a `var`
+            // in a top-level block is module-scoped, so a function created
+            // above it reads the same empty slot (preDeclarationSlot).
+            const window = preDeclarationSlot(L, sf, symbol, nameNode, decl, type);
+            const g: IrGlobal = {
+              id: `%g.${tag}${nameNode.text}`, name: nameNode.text, type: window.type, mutable: true,
+              ...(window.tdz ? { tdz: true as const } : {}),
+            };
             L.globalsBySymbol.set(symbol, g);
             L.globalsList.push(g);
             noteVarGlobalEntryInit(L, sf, g);
