@@ -527,8 +527,10 @@ export function esOwnKeyOrder(names: string[]): string[] {
  * Readable(...)` / `x instanceof Writable`). It used to be written twice,
  * once in each place, and the copies had to agree about declaration
  * provenance forever; streams-under-@types/node is exactly the drift that
- * bug produced. Accounted for by the "one stream-class provenance test"
- * case in tests/harness/stream-node-types.test.ts.
+ * bug produced. Accounted for by the "EVERY class in
+ * RUNTIME_STREAM_CLASSES maps under @types/node" case in
+ * tests/harness/stream-node-types.test.ts, which walks the registry so it
+ * cannot go stale against a class added later.
  *
  * Both declaration sources answer: the shipped fallback declarations'
  * `declare module "stream"` classes and @types/node's same-named classes
