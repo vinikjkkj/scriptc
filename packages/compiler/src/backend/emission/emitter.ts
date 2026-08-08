@@ -694,8 +694,13 @@ export class CEmitter {
         `  (void)sc_env;`,
         fn.returnType.kind === "void" && !fn.async && !fn.generator ? `  ${call};` : `  return ${call};`,
         `}`,
-        `static struct { size_t rc; void *fn; size_t ncaps; ScrBox *props; } ${mangleFnClosure(name)} =`,
-        `    { SIZE_MAX, (void *)&${mangleWrapper(name)}, 0, NULL };`,
+        // The field list MIRRORS ScrClosure's, and it has to stay exact:
+        // the runtime casts &sc_fc_* to ScrClosure * and writes through
+        // it, so a field the literal omits is a write past the object.
+        // `implicit_proto` is the prototype object scr_dyn_fn_prototype
+        // mints on first demand.
+        `static struct { size_t rc; void *fn; size_t ncaps; ScrBox *props; void *implicit_proto; } ${mangleFnClosure(name)} =`,
+        `    { SIZE_MAX, (void *)&${mangleWrapper(name)}, 0, NULL, NULL };`,
       );
     }
     // Construct-thunk definitions (prototyped with the class objects
@@ -724,13 +729,15 @@ export class CEmitter {
     }
     const refGlobals = globals.filter((g) => isRefCounted(g.type));
     // Interned function-value closures are IMMORTAL (rc == SIZE_MAX), so
-    // an own-property table hung on one would outlive the RC audit —
-    // release it with the globals. UNGATED on purpose: this used to fire
-    // only under moduleUsesDynInvoke, on the premise that
-    // Object.defineProperties was the table's only writer. It is not —
-    // a keyed write `F.k = v` and a keyed READ of `F.prototype` both
-    // reach scr_dyn_fn_props, and the lazily-minted prototype object
-    // lives in that table. See the LLVM emitter's note.
+    // every lazily-created owned edge hung on one would outlive the RC
+    // audit — dropped with the globals through the runtime's one
+    // teardown entry point (scr_closure_static_teardown: the
+    // own-property table AND the minted implicit prototype). UNGATED on
+    // purpose: this used to fire only under moduleUsesDynInvoke, on the
+    // premise that Object.defineProperties was the table's only writer.
+    // It is not — a keyed write `F.k = v` and a keyed READ of
+    // `F.prototype` both reach scr_dyn_fn_props, and the lazily-minted
+    // prototype object lives in that table. See the LLVM emitter's note.
     const fnValueProps = [...this.fnValues];
     if (refGlobals.length > 0 || fnValueProps.length > 0) {
       out.push(`static void sc_release_globals(void) {`);
@@ -739,7 +746,7 @@ export class CEmitter {
       }
       for (const name of fnValueProps) {
         out.push(
-          `  if (${mangleFnClosure(name)}.props) { scr_box_release(${mangleFnClosure(name)}.props); ${mangleFnClosure(name)}.props = NULL; }`,
+          `  scr_closure_static_teardown((ScrClosure *)&${mangleFnClosure(name)});`,
         );
       }
       out.push(`}`, ``);

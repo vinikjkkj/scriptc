@@ -1244,7 +1244,7 @@ class LlEmitter {
     // so releasing unconditionally costs one load and one call per
     // interned function value at exit and can never be wrong.
     const fnValueProps = [...this.fnValues];
-    if (fnValueProps.length > 0) this.declare(`declare void @scr_box_release(ptr)`);
+    if (fnValueProps.length > 0) this.declare(`declare void @scr_closure_static_teardown(ptr)`);
     const globalReleaseLines = (prefix: string): string[] => {
       const lines: string[] = [];
       globals.forEach((g, i) => {
@@ -1254,13 +1254,13 @@ class LlEmitter {
           `  call void ${releaseSym(this, g.type)}(ptr %${prefix}${i}) ; ${g.name}`,
         );
       });
-      fnValueProps.forEach((name, i) => {
-        // props sits at %ScrClosure field 3; release is NULL-tolerant —
-        // cleared so a second release path stays idempotent.
+      fnValueProps.forEach((name) => {
+        // One runtime call rather than a hand-written field release: it
+        // drops BOTH lazily-created owned edges (the own-property table
+        // and the minted implicit prototype), is idempotent and
+        // NULL-tolerant, and keeps the field indices out of this file.
         lines.push(
-          `  %${prefix}fp${i} = load ptr, ptr getelementptr inbounds (%ScrClosure, ptr @${mangleFnClosure(name)}, i64 0, i32 3)`,
-          `  call void @scr_box_release(ptr %${prefix}fp${i}) ; ${name}.props`,
-          `  store ptr null, ptr getelementptr inbounds (%ScrClosure, ptr @${mangleFnClosure(name)}, i64 0, i32 3)`,
+          `  call void @scr_closure_static_teardown(ptr @${mangleFnClosure(name)}) ; ${name}`,
         );
       });
       return lines;
@@ -1389,7 +1389,11 @@ class LlEmitter {
       `%ScrLogArg = type { i32, i64 }`,
       `%ScrVt = type { i64, i64, ptr }`,
       `%ScrUnion = type { i64, i32, ptr, ptr, ptr, i64 }`,
-      `%ScrClosure = type { i64, ptr, i64, ptr }`,
+      // …including `implicit_proto` (field 4), the prototype object
+      // scr_dyn_fn_prototype mints: the caps[] tail is addressed as one
+      // WHOLE struct past the base, so a missing field would shift every
+      // capture read as well as being a write past the object.
+      `%ScrClosure = type { i64, ptr, i64, ptr, ptr }`,
       `%ScrRegex = type { i64, ptr, ptr, ptr }`,
       // ScrArr mirror { rc, len, cap, elem(i32+pad), elem_retain,
       // elem_release, elem_trace, data } — the immortal tagged-template
@@ -2016,7 +2020,7 @@ class LlEmitter {
         ret === "void" ? `  ${call}` : `  %r = ${call}`,
         ret === "void" ? `  ret void` : `  ret ${ret} %r`,
         `}`,
-        `@${mangleFnClosure(name)} = internal global %ScrClosure { i64 -1, ptr @${mangleWrapper(name)}, i64 0, ptr null }`,
+        `@${mangleFnClosure(name)} = internal global %ScrClosure { i64 -1, ptr @${mangleWrapper(name)}, i64 0, ptr null, ptr null }`,
         ``,
       );
     }
@@ -3107,7 +3111,9 @@ class LlEmitter {
     (fn.captures ?? []).forEach((c, i) => {
       const p = B.tmp();
       const box = B.tmp();
-      B.line(`${p} = getelementptr inbounds i8, ptr %sc_env, i64 ${32 + 8 * i} ; caps[${i}]`);
+      const base = B.tmp();
+      B.line(`${base} = getelementptr inbounds %ScrClosure, ptr %sc_env, i64 1 ; caps`);
+      B.line(`${p} = getelementptr inbounds ptr, ptr ${base}, i64 ${i} ; caps[${i}]`);
       B.line(`${box} = load ptr, ptr ${p}`);
       B.line(`store ptr ${box}, ptr %${mangleLocal(c.localId)} ; captured ${c.name}`);
     });
@@ -5168,7 +5174,9 @@ class LlEmitter {
           const box = this.loadBox(`%${mangleLocal(localId)}`);
           const retained = this.retainBox(box);
           const capp = B.tmp();
-          B.line(`${capp} = getelementptr inbounds i8, ptr ${c}, i64 ${32 + 8 * i} ; caps[${i}]`);
+          const capsBase = B.tmp();
+          B.line(`${capsBase} = getelementptr inbounds %ScrClosure, ptr ${c}, i64 1 ; caps`);
+          B.line(`${capp} = getelementptr inbounds ptr, ptr ${capsBase}, i64 ${i} ; caps[${i}]`);
           B.line(`store ptr ${retained}, ptr ${capp}`);
         });
         return out;
