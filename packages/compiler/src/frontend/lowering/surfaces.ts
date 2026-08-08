@@ -1832,6 +1832,100 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     return { kind: "closure", fnName: name, captures: [], type: OBJECT_OWN_KEYS_FN_VALUE_T, loc };
   }
 
+/** True iff the ONLY consumer of this expression's value is JS ToBoolean:
+   * a `?:` / `if` / `while` / `do` / `for` condition, or a `!` operand
+   * (`!x` is itself a boolean, so wherever IT goes is already answered).
+   *
+   * `&&` and `||` are deliberately absent. They yield an OPERAND, not a
+   * boolean — `Number.isInteger || function (v) { ... }` puts the read's
+   * VALUE in the result and then calls it — so an operand of theirs is a
+   * value position and keeps whatever fence it had. */
+  function boolOnlyConsumer(node: ts.Expression): boolean {
+    let cur: ts.Node = node;
+    for (;;) {
+      const parent: ts.Node | undefined = cur.parent;
+      if (parent === undefined) return false;
+      if (ts.isParenthesizedExpression(parent)) { cur = parent; continue; }
+      if (ts.isConditionalExpression(parent)) return parent.condition === cur;
+      if (ts.isIfStatement(parent) || ts.isWhileStatement(parent) || ts.isDoStatement(parent)) {
+        return parent.expression === cur;
+      }
+      if (ts.isForStatement(parent)) return parent.condition === cur;
+      if (ts.isPrefixUnaryExpression(parent)) {
+        return parent.operator === ts.SyntaxKind.ExclamationToken && parent.operand === cur;
+      }
+      return false;
+    }
+  }
+
+/** A stdlib global's declared METHOD read in a position whose only
+   * consumer is ToBoolean — the CAPABILITY TEST, which is a different
+   * construct from the function value it reads. protobufjs's util opens
+   * with two of them in one statement:
+   *
+   *     t.emptyArray = Object.freeze ? Object.freeze([]) : [],
+   *     t.emptyObject = Object.freeze ? Object.freeze({}) : {}
+   *
+   * (the `Object.freeze(...)` CALLS in the same statement are lower-calls'
+   * and already compile — only the bare reads fenced).
+   *
+   * The answer is the constant `true`, and that is a theorem in three
+   * parts rather than a guess:
+   *
+   *  1. WHAT IS READ. The member must be declared by the standard library
+   *     — EVERY declaration, not merely one, so a program's own global
+   *     augmentation cannot smuggle a name in — it must be NON-optional,
+   *     and its type must carry CALL SIGNATURES. That combination is
+   *     exactly the declaration that says "this function is always
+   *     defined"; tsc asserts the same thing itself, and reports TS2774
+   *     on `if (fn)` for this precise reason. Two kinds are excluded on
+   *     purpose because their truthiness is a RUNTIME fact and no
+   *     declaration settles it: OPTIONAL members (`process.send` is
+   *     absent in a process nobody forked) and DATA members
+   *     (`process.exitCode`, `Math.PI`, a zero or an empty string).
+   *     Constructor-only globals go with them — `globalThis.WebSocket`
+   *     has construct signatures and no call signature, and whether the
+   *     host provides it is the very thing the test is asking.
+   *  2. WHAT IS DONE WITH IT. boolOnlyConsumer: nothing calls the value,
+   *     stores it, passes it, or compares it. So no representation for a
+   *     stdlib function value is claimed here, and the identity-token
+   *     trap — a value that answers a truthiness test and then turns into
+   *     the wrong thing when something CALLS it — cannot be reached.
+   *  3. WHY TRUE. ToBoolean of every function object is `true`. The one
+   *     exception in the language, an [[IsHTMLDDA]] object
+   *     (`document.all`), is a host object of the DOM and is not a member
+   *     of any stdlib global.
+   *
+   * The RECEIVER is a stdlib global, which is why the read can vanish
+   * outright: there is no subexpression to evaluate for effect first.
+   *
+   * Deliberately NOT a function-VALUE lift for `freeze`. The CALL form
+   * (lower-calls) admits `Object.freeze(x)` only where it can prove x is
+   * FRESH, because this tier carries no frozen bit and a freeze whose
+   * frozen-ness is observable would be a lie; a lifted closure has no
+   * call site to prove freshness at, so its body could only be identity —
+   * and then `var f = Object.freeze; f(aliased)` would silently answer
+   * where `Object.freeze(aliased)` loudly refuses. The value position of
+   * `freeze` stays fenced; only the existence question is answered. */
+  export function stdlibExistenceTestOf(L: Lowerer, access: ts.PropertyAccessExpression): IrExpr | null {
+    if (access.questionDotToken) return null;
+    if (stdlibGlobalNameOf(L, access.expression) === null) return null;
+    if (!boolOnlyConsumer(access)) return null;
+    const propSym =
+      L.checker.getSymbolAtLocation(access.name) ??
+      L.checker.getPropertyOfType(L.typeOf(access.expression), access.name.text);
+    if (!propSym) return null;
+    if ((propSym.flags & ts.SymbolFlags.Optional) !== 0) return null;
+    const decls = L.checker.declarationsOf(propSym);
+    if (decls.length === 0 || !decls.every((d) => L.isStdlibFile(d.getSourceFile()))) return null;
+    if (L.checker.getCallSignatures(L.checker.getTypeOfSymbol(propSym)).length === 0) return null;
+    if (process.env["SCRIPTC_EXISTTEST_WHY"] !== undefined) {
+      const loc = locOf(access);
+      console.error(`[existtest] ${loc.file}:${loc.start} ${access.name.text}`);
+    }
+    return { kind: "boolLit", value: true, type: BOOL, loc: locOf(access) };
+  }
+
 /** `Object.getOwnPropertyNames` over a CHECKED-DYNAMIC receiver, as a
    * memoized lifted function — the honest twin of `dyn.objKeys`.
    *
