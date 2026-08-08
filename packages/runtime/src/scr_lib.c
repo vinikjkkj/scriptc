@@ -678,17 +678,63 @@ double scr_os_totalmem(void) {
   return (double)ms.ullTotalPhys;
 }
 
-ScrStr *scr_os_tmpdir(void) {
-  /* GetTempPathA is libuv's source (TMP → TEMP → USERPROFILE → windir),
-   * with Node's one-trailing-separator trim. */
-  char buf[MAX_PATH + 2];
-  DWORD n = GetTempPathA(sizeof buf, buf);
-  if (n == 0 || n >= sizeof buf) {
-    scr_trap("scriptc: os.tmpdir() failed\n");
+/* One environment variable as a fresh NUL-terminated buffer, or NULL when
+ * absent OR empty — Node reaches for these through `a || b || c`, where the
+ * empty string falls through exactly like the missing one. Read with
+ * GetEnvironmentVariableA, this file's convention for the environment (see
+ * scr_env_get): the live WIN32 block rather than the CRT's startup snapshot,
+ * case-insensitive like Node's process.env on Windows. Caller frees. */
+static char *scr_win_env_dup(const char *name) {
+  DWORD need = GetEnvironmentVariableA(name, NULL, 0);
+  if (need == 0) return NULL; /* absent, or present-but-empty */
+  char *buf = malloc(need);
+  if (!buf) {
+    scr_trap("scriptc: out of memory\n");
   }
-  size_t len = n;
-  if (len > 1 && (buf[len - 1] == '\\' || buf[len - 1] == '/')) len--;
-  return scr_str_new(buf, len);
+  DWORD got = GetEnvironmentVariableA(name, buf, need);
+  if (got == 0 || buf[0] == '\0') {
+    free(buf);
+    return NULL;
+  }
+  return buf;
+}
+
+ScrStr *scr_os_tmpdir(void) {
+  /* Node's lib/os.js tmpdir() on Windows is plain JS over process.env — it
+   * is NOT uv_os_tmpdir and NOT GetTempPath, and all three disagree. This
+   * used to call GetTempPathA, which reads TMP BEFORE TEMP, absolutizes a
+   * relative value against the cwd, rewrites '/' to '\\', collapses
+   * repeated separators, and fails above MAX_PATH (whereupon we fell back
+   * to the profile directory — landing the process's temporary files on a
+   * different VOLUME than the one the user asked for). Node does none of
+   * that: whatever the variable holds is what it answers, minus at most one
+   * trailing backslash. */
+  char *temp = scr_win_env_dup("TEMP");
+  if (!temp) temp = scr_win_env_dup("TMP");
+  if (!temp) {
+    char *root = scr_win_env_dup("SystemRoot");
+    if (!root) root = scr_win_env_dup("windir");
+    /* Node concatenates the undefined straight into the result when neither
+     * is set, so the literal string "undefined\temp" is the honest port. */
+    const char *r = root ? root : "undefined";
+    size_t rl = strlen(r);
+    temp = malloc(rl + 6);
+    if (!temp) {
+      scr_trap("scriptc: out of memory\n");
+    }
+    memcpy(temp, r, rl);
+    memcpy(temp + rl, "\\temp", 6);
+    free(root);
+  }
+  size_t len = strlen(temp);
+  /* Drop ONE trailing backslash, unless the character before it is ':' —
+   * the drive root "C:\" keeps its separator, because "C:" is drive-
+   * RELATIVE and would resolve against that drive's current directory. A
+   * trailing FORWARD slash is not a separator to this rule and stays. */
+  if (len > 1 && temp[len - 1] == '\\' && temp[len - 2] != ':') len--;
+  ScrStr *s = scr_str_new(temp, len);
+  free(temp);
+  return s;
 }
 #else
 ScrStr *scr_os_homedir(void) {
