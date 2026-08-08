@@ -1,6 +1,8 @@
 /* Prototype-method dispatch on checked-dynamic receivers (scr_dyn_invoke)
- * and its companions: JS String() over the checked-dynamic tree (scr_dyn_display — join
- * and the error texts need it standalone) and the two property definers
+ * and its companions: ToString over the checked-dynamic tree (dyn_str_buf
+ * — join, the default sort comparator and the error texts each need it
+ * standalone, the first two with the object protocol and the last
+ * without) and the two property definers
  * over dyn values (scr_dyn_define_prop / scr_dyn_define_props, including
  * the ACCESSOR descriptor pbjs's oneof fields are spelled with). Linked
  * only when the IR carries dynInvoke nodes or either define call (cc.ts gates on
@@ -39,13 +41,37 @@
  * recv/args are BORROWED; the result is owned (+1). MAY THROW (returns
  * NULL with the exception pending). */
 
-/* JS String() over a dyn value, runtime-side (join needs it standalone —
- * the emitted sc_ds walker exists only in programs that spell
- * String(unknown) themselves). Same rules: arrays join with "," and
- * null/undefined elements print empty, the checked-dynamic tree's error encoding renders
- * "name: message", functions render their SOURCE TEXT, plain objects
- * are [object Object]. */
-static void scr_dyn_display_buf(ScrJsonBuf *b, const ScrDyn *d) {
+/* ── ToString over a dyn value, runtime-side: ONE table, TWO MODES ─────
+ *
+ * join and the default sort comparator need String() standalone (the
+ * emitted sc_ds walker exists only in programs that spell
+ * String(unknown) themselves), and so do five error-message builders in
+ * this file. Those two needs are NOT the same conversion, and running
+ * one where the other belongs is a bug in either direction:
+ *
+ *   DISPLAY (protocol = true) is JS ToString. An OBJ's own or inherited
+ *   `toString` RUNS, a RegExp handle answers /source/flags, an island
+ *   value crosses to the engine's ToString. That is user code: it can
+ *   throw, and the throw is the program's — it stays pending and the
+ *   caller unwinds. Node: `[{toString(){throw}}].join("")` throws the
+ *   toString's error, and `[o,"b"].sort()` orders on o's toString.
+ *
+ *   DIAGNOSTIC (protocol = false) is V8's NoSideEffectsToString: the
+ *   CONSTANTS only, never a user call. Every site below that builds an
+ *   EXCEPTION MESSAGE uses this mode, because a `toString` that threw
+ *   while an error message was being formatted would REPLACE the error
+ *   the program actually hit with an unrelated one — and because Node
+ *   does not run it either. Measured against Node v25.9.0:
+ *     [1].forEach({toString(){throw}})   -> "object is not a function"
+ *     [1,2].sort({toString(){return "N"}})
+ *        -> "...must be either a function or undefined: [object Object]"
+ *   Both messages ignore the user toString entirely; the second proves
+ *   it is ignored rather than merely unreached, since a working
+ *   toString still does not appear.
+ *
+ * The two share this one switch so the table cannot drift between them;
+ * only the arms that would call user code branch on the mode. */
+static void dyn_str_buf(ScrJsonBuf *b, const ScrDyn *d, bool protocol) {
   switch (d->kind) {
   case SCR_DYN_UNDEF: scr_jb_puts(b, "undefined"); return;
   case SCR_DYN_NULL: scr_jb_puts(b, "null"); return;
@@ -64,14 +90,34 @@ static void scr_dyn_display_buf(ScrJsonBuf *b, const ScrDyn *d) {
       if (i > 0) scr_jb_putc(b, ',');
       const ScrDyn *e = d->v.arr.items[i];
       if (e->kind == SCR_DYN_UNDEF || e->kind == SCR_DYN_NULL) continue;
-      scr_dyn_display_buf(b, e);
-      /* A nested JSVAL element's bridged ToString can leave an exception
-       * pending; JS's join stops at the first throw, so the rest of the
-       * elements do not render (scr_json.c's twin carries the same bail). */
-      if (scr_exc_pending()) return;
+      dyn_str_buf(b, e, protocol);
+      /* An element's own toString threw (or a nested JSVAL element's
+       * bridged ToString did); JS's join stops at the first throw, so
+       * the rest of the elements do not render — their toStrings are
+       * user code with side effects Node never runs (scr_json.c's twin
+       * carries the same bail). The DIAGNOSTIC mode calls nothing and so
+       * can raise nothing; it must not read the flag either, or an
+       * exception already in flight would silently truncate the message
+       * being built to describe it. */
+      if (protocol && scr_exc_pending()) return;
     }
     return;
   case SCR_DYN_OBJ: {
+    if (protocol) {
+      /* The whole ToString protocol, through the ONE runtime table:
+       * an own or inherited callable `toString` first, the checked-
+       * dynamic tree's "%error" encoding (Error.prototype.toString)
+       * second, "[object Object]" last. Delegating rather than
+       * repeating is why this copy cannot drift from scr_dyn_to_string
+       * — and the "%error" case that used to sit here, AHEAD of the
+       * protocol, was precisely such a drift. */
+      ScrStr *s = scr_dyn_to_string(d, NULL);
+      for (size_t i = 0; i < s->len; i++) scr_jb_putc(b, s->data[i]);
+      scr_str_release(s);
+      return;
+    }
+    /* Diagnostic: the constants, in the order the protocol would have
+     * reached them had it been allowed to run. */
     const ScrDyn *marker = scr_dyn_obj_get(d, "%error", 6);
     if (marker) {
       const ScrDyn *en = scr_dyn_obj_get(d, "name", 4);
@@ -113,7 +159,18 @@ static void scr_dyn_display_buf(ScrJsonBuf *b, const ScrDyn *d) {
     return;
   }
   case SCR_DYN_HANDLE:
-    /* Object.prototype.toString — Node's String() over these classes. */
+    /* The I/O classes inherit Object.prototype.toString, but RegExp owns
+     * its own and answers /source/flags — ask the runtime rather than
+     * repeating a constant that is wrong for one tag. The renderer is
+     * native (no user code, cannot throw), so DISPLAY may use it; the
+     * diagnostic mode keeps the constant only because changing an error
+     * message's text is not this conversion's job. */
+    if (protocol) {
+      ScrStr *s = scr_dyn_to_string(d, NULL);
+      for (size_t i = 0; i < s->len; i++) scr_jb_putc(b, s->data[i]);
+      scr_str_release(s);
+      return;
+    }
     scr_jb_puts(b, "[object Object]");
     return;
   case SCR_DYN_PROMISE:
@@ -123,19 +180,32 @@ static void scr_dyn_display_buf(ScrJsonBuf *b, const ScrDyn *d) {
     scr_jb_puts(b, "[object Promise]");
     return;
   case SCR_DYN_JSVAL:
-    /* The engine's own ToString (a bridged failure leaves the exception
-     * pending and appends nothing — the loud path). */
-    scr_dyn_isl_tostr_buf(b, d);
+    /* The engine's own ToString runs the real prototype chain — user
+     * code included — so a bridged failure leaves the exception pending
+     * and appends nothing (the loud path). That makes it DISPLAY only:
+     * an error message must not be able to raise a second exception
+     * over the first, and Node does not run an argument's toString to
+     * name it either. Reasoned, not measured: §6.5 of
+     * estado-displaythrow.md records that no probe can get a throwing
+     * engine object into `unknown` on this lane, so the constant here
+     * REMOVES a hazard that was never reachable rather than fixing an
+     * observed divergence. */
+    if (protocol) {
+      scr_dyn_isl_tostr_buf(b, d);
+      return;
+    }
+    scr_jb_puts(b, "[object Object]");
     return;
   }
 }
 
-ScrStr *scr_dyn_display(const ScrDyn *d) {
-  ScrJsonBuf b;
-  scr_jb_init(&b);
-  scr_dyn_display_buf(&b, d);
-  return scr_jb_finish(&b);
-}
+/* JS ToString — the value's own toString runs; MAY leave an exception
+ * pending, which every caller below checks. */
+static void scr_dyn_display_buf(ScrJsonBuf *b, const ScrDyn *d) { dyn_str_buf(b, d, true); }
+
+/* V8's NoSideEffectsToString — for building EXCEPTION MESSAGES only.
+ * Never calls user code, therefore never throws. */
+static void scr_dyn_diag_buf(ScrJsonBuf *b, const ScrDyn *d) { dyn_str_buf(b, d, false); }
 
 static void dyn_throw_not_fn(const char *what) {
   ScrJsonBuf b;
@@ -195,19 +265,72 @@ static ScrDyn *dyn_call_cb(ScrDyn *cb, ScrDyn *item, size_t i, ScrDyn *recv) {
   return r;
 }
 
-/* The callable-callback gate: JS's "<String(cb)> is not a function". */
+/* V8's CalledNonCallable rendering — a THIRD table, and deliberately not
+ * either mode of dyn_str_buf above. `[1].forEach(x)` does not name x by
+ * its string image; it names x by its TYPE, and only the three primitive
+ * types that print short carry their value. Measured, Node v25.9.0:
+ *
+ *   {} / [] / /x/ / new Date / Object.create(null)  ->  "object"
+ *   null            -> "object null"      undefined -> "undefined"
+ *   5 / NaN / -0    -> "number 5" / "number NaN" / "number 0"
+ *   "hi" / 'a"b'    -> 'string "hi"' / 'string "a"b"'  (NOT re-escaped)
+ *   true / false    -> "boolean true" / "boolean false"
+ *   Symbol("s")     -> "symbol"           5n        -> "bigint"
+ *
+ * Every object renders as the bare word, so an object carrying a user
+ * `toString` cannot be reached through this message at all — the
+ * property that makes it safe to build while an exception is being
+ * raised. The `o.m()` spelling is a DIFFERENT template (V8's
+ * CallPrinter names the source text) and stays with dyn_throw_not_fn. */
+static void dyn_notfn_buf(ScrJsonBuf *b, const ScrDyn *cb) {
+  switch (cb->kind) {
+  case SCR_DYN_UNDEF: scr_jb_puts(b, "undefined"); return;
+  case SCR_DYN_NULL: scr_jb_puts(b, "object null"); return;
+  case SCR_DYN_BOOL:
+    scr_jb_puts(b, cb->v.b ? "boolean true" : "boolean false");
+    return;
+  case SCR_DYN_NUM: {
+    scr_jb_puts(b, "number ");
+    ScrStr *s = scr_f64_to_scrstr(cb->v.num);
+    for (size_t i = 0; i < s->len; i++) scr_jb_putc(b, s->data[i]);
+    scr_str_release(s);
+    return;
+  }
+  case SCR_DYN_STR:
+    scr_jb_puts(b, "string \"");
+    for (size_t i = 0; i < cb->v.str->len; i++) scr_jb_putc(b, cb->v.str->data[i]);
+    scr_jb_putc(b, '"');
+    return;
+  case SCR_DYN_FUNC:
+    /* Unreachable — a FUNC is callable and returned above. */
+    scr_jb_puts(b, "function");
+    return;
+  case SCR_DYN_JSVAL:
+    /* A wrapped value that is not a function. Primitives normalize to
+     * the native kinds above when they cross, so what survives here is
+     * an engine OBJECT; asking the engine for a value image would run
+     * its ToString, which this message must not do. */
+    scr_jb_puts(b, "object");
+    return;
+  case SCR_DYN_ARR:
+  case SCR_DYN_OBJ:
+  case SCR_DYN_BYTES:
+  case SCR_DYN_HANDLE:
+  case SCR_DYN_PROMISE: scr_jb_puts(b, "object"); return;
+  }
+}
+
+/* The callable-callback gate: JS's "<type of cb> is not a function". */
 static bool dyn_cb_check(ScrDyn *const *args, size_t argc) {
   ScrDyn *cb = argc > 0 ? args[0] : scr_dyn_undefined();
   if (cb->kind == SCR_DYN_FUNC) return true;
   /* An ENGINE function is callable — scr_dyn_call's JSVAL arm routes it
    * (the loops below call through scr_dyn_call, which converts the checked-dynamic tree
-   * element arguments per the uniform crossing). A wrapped NON-function
-   * falls through to the display path: String(cb) renders through the
-   * engine, exactly Node's message. */
+   * element arguments per the uniform crossing). */
   if (cb->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(cb, "function")) return true;
   ScrJsonBuf b;
   scr_jb_init(&b);
-  scr_dyn_display_buf(&b, cb);
+  dyn_notfn_buf(&b, cb);
   scr_jb_puts(&b, " is not a function");
   scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
   return false;
@@ -231,9 +354,18 @@ static ScrDyn *scr_dynh_dispatch(ScrDyn *recv, const char *method, ScrDyn *const
  * The default comparator compares ToString images (scr_dyn_display_buf —
  * join's conversion) bytewise: code-POINT order, where JS orders UTF-16
  * code units — identical through the BMP, divergent only across the
- * surrogate boundary (SEMANTICS.md). A comparator result converts
- * loosely to number; NaN and non-numeric answers count as 0 (ToNumber's
- * common cases; exotic ToString-of-object coercions stay 0). */
+ * surrogate boundary (SEMANTICS.md). That ToString runs the ELEMENT'S
+ * OWN toString, which is user code and can throw; JS abandons the sort
+ * at the first throw and leaves the receiver in whatever order it had
+ * reached, so a failing image sets the same `failed` flag a throwing
+ * comparator does and the write-back is skipped. A comparator result
+ * converts loosely to number; NaN and non-numeric answers count as 0
+ * (ToNumber's common cases; exotic ToString-of-object coercions stay 0).
+ *
+ * Comparison COUNT is not JS-observable through the spec, and this merge
+ * sort does not make the same calls V8's TimSort does: a program that
+ * counts how many times an element's toString ran can see the
+ * difference. Order is exact; the count is not, and is not promised. */
 static ScrStr *dyn_sort_str(const ScrDyn *e) {
   ScrJsonBuf b;
   scr_jb_init(&b);
@@ -251,8 +383,12 @@ static int dyn_sort_compare(ScrDyn *x, ScrDyn *y, ScrDyn *cmp, bool *failed) {
     scr_dyn_release(r);
     return v < 0 ? -1 : v > 0 ? 1 : 0;
   }
+  /* SortCompare's default: ToString(x) THEN ToString(y). x's throw means
+   * y's toString never runs — it is user code Node does not execute. */
   ScrStr *xs = dyn_sort_str(x);
+  if (scr_exc_pending()) { scr_str_release(xs); *failed = true; return 0; }
   ScrStr *ys = dyn_sort_str(y);
+  if (scr_exc_pending()) { scr_str_release(xs); scr_str_release(ys); *failed = true; return 0; }
   int c = scr_str_cmp(xs, ys);
   scr_str_release(xs);
   scr_str_release(ys);
@@ -540,17 +676,48 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       return dyn_name_is(method, "includes") ? scr_dyn_new_bool(false) : scr_dyn_new_num(-1);
     }
     if (dyn_name_is(method, "join")) {
+      /* Array.prototype.join, in the spec's order: ToString(separator)
+       * runs ONCE and FIRST — before any element, and even when the
+       * array is empty or holds a single item — then each element's
+       * ToString in turn. Rendering the separator per gap instead called
+       * a side-effecting separator (len-1) times where Node calls it
+       * once, and called it AFTER the first element where Node calls it
+       * before. Both are user code, so both are observable. */
+      ScrJsonBuf sb;
+      scr_jb_init(&sb);
+      if (argc > 0 && args[0]->kind != SCR_DYN_UNDEF) scr_dyn_display_buf(&sb, args[0]);
+      else scr_jb_putc(&sb, ',');
+      ScrStr *sep = scr_jb_finish(&sb);
+      if (scr_exc_pending()) { scr_str_release(sep); return NULL; }
+
       ScrJsonBuf b;
       scr_jb_init(&b);
       for (size_t i = 0; i < len; i++) {
-        if (i > 0) {
-          if (argc > 0 && args[0]->kind != SCR_DYN_UNDEF) scr_dyn_display_buf(&b, args[0]);
-          else scr_jb_putc(&b, ',');
-        }
-        const ScrDyn *e = recv->v.arr.items[i];
-        if (e->kind == SCR_DYN_UNDEF || e->kind == SCR_DYN_NULL) continue;
+        if (i > 0) for (size_t j = 0; j < sep->len; j++) scr_jb_putc(&b, sep->data[j]);
+        /* `len` is the spec's up-front snapshot, but an element's own
+         * toString can SHRINK the receiver — JS reads Get(O, k), which
+         * answers undefined past the end and contributes the empty
+         * string, and reading items[i] would be out of bounds. It can
+         * also drop the last reference to the very element being
+         * rendered, so the element is retained across its own call
+         * (forEach above takes the same precaution for the same
+         * reason). */
+        if (i >= recv->v.arr.len) continue;
+        ScrDyn *e = scr_dyn_retain(recv->v.arr.items[i]);
+        if (e->kind == SCR_DYN_UNDEF || e->kind == SCR_DYN_NULL) { scr_dyn_release(e); continue; }
         scr_dyn_display_buf(&b, e);
+        scr_dyn_release(e);
+        /* An element's own toString threw: JS stops there, so the
+         * remaining elements' toStrings do not run and the half-built
+         * text is discarded — the pending exception is the answer. */
+        if (scr_exc_pending()) {
+          ScrStr *partial = scr_jb_finish(&b);
+          scr_str_release(partial);
+          scr_str_release(sep);
+          return NULL;
+        }
       }
+      scr_str_release(sep);
       ScrStr *joined = scr_jb_finish(&b);
       ScrDyn *r = scr_dyn_new_str(joined); /* retains */
       scr_str_release(joined);
@@ -666,7 +833,7 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
         ScrJsonBuf b;
         scr_jb_init(&b);
         scr_jb_puts(&b, "The comparison function must be either a function or undefined: ");
-        scr_dyn_display_buf(&b, cmp);
+        scr_dyn_diag_buf(&b, cmp);
         scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
         return NULL;
       }
@@ -821,7 +988,7 @@ static bool dyn_define_accessor_desc(ScrDyn *target, const char *key, size_t key
     ScrJsonBuf b;
     scr_jb_init(&b);
     scr_jb_puts(&b, badGet ? "Getter must be a function: " : "Setter must be a function: ");
-    scr_dyn_display_buf(&b, badGet ? getter : setter);
+    scr_dyn_diag_buf(&b, badGet ? getter : setter);
     scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
     return false;
   }
@@ -882,7 +1049,7 @@ ScrDyn *scr_dyn_define_props(ScrDyn *target, ScrDyn *descs) {
       ScrJsonBuf b;
       scr_jb_init(&b);
       scr_jb_puts(&b, "Property description must be an object: ");
-      scr_dyn_display_buf(&b, ent->value);
+      scr_dyn_diag_buf(&b, ent->value);
       scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
       return NULL;
     }
@@ -944,7 +1111,7 @@ ScrDyn *scr_dyn_define_prop(ScrDyn *target, ScrStr *key, ScrDyn *desc) {
     ScrJsonBuf b;
     scr_jb_init(&b);
     scr_jb_puts(&b, "Property description must be an object: ");
-    scr_dyn_display_buf(&b, desc);
+    scr_dyn_diag_buf(&b, desc);
     scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
     return NULL;
   }

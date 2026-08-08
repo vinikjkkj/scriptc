@@ -1058,8 +1058,17 @@ function lowerInspectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrE
 
 /** One argument as format's %s conversion (Node: numbers via
  * formatNumber, strings verbatim, objects through inspect at the given
- * depth). Null = fence with the given reason. */
-function formatSArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc): IrExpr {
+ * depth). Null = fence with the given reason.
+ *
+ * `sSpec` distinguishes the two conversions Node's formatter actually
+ * has, which differ on exactly one value shape. A `%s` POSITION reads
+ * `!hasBuiltInToString(arg) ? String(arg) : inspect(arg)`, so an object
+ * carrying its own `toString` is converted; a TRAILING argument — the
+ * same code path that renders `console.log`'s non-format arguments —
+ * always inspects. `util.format("%s", {toString(){return "U"}})` is
+ * "U" and `console.log({toString(){return "U"}})` is
+ * "{ toString: … }", measured on Node v25.9.0. */
+function formatSArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc, sSpec: boolean): IrExpr {
   const value = L.lowerExpr(node);
   const t = value.type;
   if (t.kind === "string") return value;
@@ -1071,7 +1080,10 @@ function formatSArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc)
   // answer too, one runtime call either way.
   if (t.kind === "symbol") return { kind: "libCall", fn: "sym.toString", args: [value], type: STRING, loc };
   if (t.kind === "dyn") {
-    return { kind: "libCall", fn: "insp.dynS", args: [value, num(depth, loc)], type: STRING, loc };
+    // The %s position runs an object's OWN toString; the trailing-argument
+    // position never does (that is console.log's conversion).
+    const fn = sSpec ? "insp.fmtS" : "insp.dynS";
+    return { kind: "libCall", fn, args: [value, num(depth, loc)], type: STRING, loc };
   }
   // A UNION argument dispatches per arm at runtime: a string arm prints
   // VERBATIM (typeof arg === 'string' in Node's formatter — inspect's
@@ -1148,7 +1160,7 @@ export function lowerFormatCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
 
   /** The rest-args tail: ` ` + (strings verbatim, everything else
    * inspected at the default depth). */
-  const restArg = (node: ts.Expression): IrExpr => formatSArg(L, node, 2, loc);
+  const restArg = (node: ts.Expression): IrExpr => formatSArg(L, node, 2, loc, false);
 
   if (!firstIsLiteral) {
     const firstT = L.mapTypeOf(L.typeOf(first));
@@ -1179,7 +1191,7 @@ export function lowerFormatCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   const convert = (spec: number, node: ts.Expression): IrExpr => {
     switch (spec) {
       case 115: // %s
-        return formatSArg(L, node, 0, loc);
+        return formatSArg(L, node, 0, loc, true);
       case 100: {
         // %d — Number(arg) formatted: numbers as-is, booleans 1/0,
         // strings through the runtime's ECMA-exact StringToNumber

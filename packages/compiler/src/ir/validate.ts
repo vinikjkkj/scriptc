@@ -1055,6 +1055,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "insp.error": { argTypes: [null, F64, F64], result: STRING },
   "insp.dyn": { argTypes: [DYN, F64, F64], result: STRING },
   "insp.dynS": { argTypes: [DYN, F64], result: STRING },
+  "insp.fmtS": { argTypes: [DYN, F64], result: STRING },
   "big.str": { argTypes: [BIGINT_T, F64], result: STRING },
   "key.fromPkcs8": { argTypes: [BYTES_U8_T], result: KEYOBJ_T },
   "key.fromSpki": { argTypes: [BYTES_U8_T], result: KEYOBJ_T },

@@ -623,7 +623,16 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // carries one, so it can leave a catchable exception pending;
           // the result temp joins the frame BEFORE the check so an unwind
           // releases the empty-string dummy the walker returns.
-          const t = E.newTemp(e.type, `${E.dynToStrHelper()}(${v.name})`);
+          //
+          // `+` asks for ToPrimitive's DEFAULT hint instead, which reads
+          // `valueOf` before `toString` — a different runtime entry point
+          // because it is a different conversion, not a variant of this
+          // one. It answers NULL rather than a dummy on a throw, so the
+          // temp is the pending-check's own value either way.
+          const call = e.hint === "default"
+            ? `scr_dyn_to_primitive_string(${v.name})`
+            : `${E.dynToStrHelper()}(${v.name})`;
+          const t = E.newTemp(e.type, call);
           E.emitPendingCheck();
           return t;
         }
@@ -6198,6 +6207,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_insp_dyn(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "insp.dynS":
             return finish(`scr_insp_dyn_s(${arg(0)}, ${arg(1)})`);
+          case "insp.fmtS":
+            return finish(`scr_insp_fmt_s(${arg(0)}, ${arg(1)})`);
           case "big.str":
             return finish(`scr_big_to_str(${arg(0)}, ${arg(1)})`);
           case "key.fromPkcs8":

@@ -555,6 +555,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.thisPop": "scr_dyn_this_pop",
   "insp.dyn": "scr_insp_dyn",
   "insp.dynS": "scr_insp_dyn_s",
+  "insp.fmtS": "scr_insp_fmt_s",
   "big.str": "scr_big_to_str",
   "key.fromPkcs8": "scr_key_from_pkcs8",
   "key.fromSpki": "scr_key_from_spki",
@@ -4330,9 +4331,16 @@ class LlEmitter {
           // The walker runs the value's OWN toString where the tree
           // carries one, so it can leave a catchable exception pending —
           // the result joins the frame BEFORE the check, like caughtCheck.
-          const helper = this.dyn.dynToStrHelper();
+          // `+` asks for ToPrimitive's DEFAULT hint (valueOf first) —
+          // a different conversion, so a different entry point.
           const t = B.tmp();
-          B.line(`${t} = call ptr @${helper}(ptr ${v.name})`);
+          if (e.hint === "default") {
+            this.declare(`declare ptr @scr_dyn_to_primitive_string(ptr)`);
+            B.line(`${t} = call ptr @scr_dyn_to_primitive_string(ptr ${v.name})`);
+          } else {
+            const helper = this.dyn.dynToStrHelper();
+            B.line(`${t} = call ptr @${helper}(ptr ${v.name})`);
+          }
           const out = this.own({ name: t, type: e.type });
           this.emitPendingCheck();
           return out;
