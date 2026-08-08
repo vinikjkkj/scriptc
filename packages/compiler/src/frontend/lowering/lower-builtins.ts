@@ -8131,11 +8131,26 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
   }
 
 /** `process.getuid?.()` — the optional call of an optional process
-   * method. On a POSIX target the member always exists, so the `?.` IS the
-   * call (the checker's undefined arm covers Windows, which scriptc does
-   * not target) and the honest result is the plain number. Intercepted
-   * BEFORE the optional-chain machinery: `process.getuid` has no value
-   * lowering for the chain to guard. Null when this isn't that shape. */
+   * method, and the `?.` is load-bearing on exactly one target. Node puts
+   * getuid/getgid on `process` under POSIX and leaves them OFF under
+   * Windows, so the guarded call answers a number there and `undefined`
+   * here; the checker's type is `number | undefined` for that reason and
+   * not as a formality. A program compiles for ONE platform
+   * (Lowerer.targetPlatform), so which arm this is a compile-time
+   * constant of the build, not a runtime probe — and the union is what
+   * `?? -1` and `?.toString()` are written against.
+   *
+   * This used to lower as the plain number on every target, which under a
+   * windows triple made `process.getuid?.() ?? -1` answer 0 on a machine
+   * that has no uids. The runtime now raises the property-access
+   * TypeError those calls really produce (MAY_THROW_LIB_FNS), so the wrong
+   * value became a loud throw — but the throw is wrong too: Node does not
+   * throw here, the `?.` is precisely the guard that stops it. Only the
+   * undefined arm is Node's answer.
+   *
+   * Intercepted BEFORE the optional-chain machinery: `process.getuid` has
+   * no value lowering for the chain to guard. Null when this isn't that
+   * shape. */
   export function lowerProcessOptionalMethodCall(L: Lowerer, expr: ts.CallExpression): IrExpr | null {
     if (!expr.questionDotToken) return null;
     if (!ts.isPropertyAccessExpression(expr.expression)) return null;
@@ -8144,7 +8159,26 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     if (expr.arguments.length !== 0) {
       L.noLowering(`process.${member} with ${expr.arguments.length} arguments`, expr);
     }
-    return { kind: "libCall", fn: member === "getuid" ? "process.getuid" : "process.getgid", args: [], type: F64, loc: locOf(expr) };
+    const loc = locOf(expr);
+    if (L.targetPlatform === "win32") {
+      // The member is absent on the target: the optional call short-
+      // circuits and the whole expression IS undefined. Wrapped into the
+      // expression's own `number | undefined` union so the consumer sees
+      // the type it was written against.
+      const t = L.mapTypeOf(L.typeOf(expr));
+      const u = t ? L.wrappedUndefined(t, loc) : null;
+      if (u) return u;
+      // The union collapsed (a cast, or a contextual type that erased the
+      // undefined arm) — there is no honest value left to hand back, so
+      // fence rather than answer with a number this target cannot produce.
+      L.noLowering(
+        `process.${member}?.() narrowed to '${L.checker.typeToString(L.typeOf(expr))}'`,
+        expr,
+        `a windows target has no ${member}, so the guarded call is undefined — keep the ` +
+          `'number | undefined' type the optional call really has (don't cast it away)`,
+      );
+    }
+    return { kind: "libCall", fn: member === "getuid" ? "process.getuid" : "process.getgid", args: [], type: F64, loc };
   }
 
 /** The interned `%env.snapshot` helper behind `process.env` as a VALUE: a
