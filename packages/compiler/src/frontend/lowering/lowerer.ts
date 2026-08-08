@@ -108,7 +108,7 @@ import { lowerUtilModuleCall } from "./lower-inspect.js";
 import { lowerComptime, comptimeBakeable, rejectComptimeCaptures, comptimeValueToIr } from "./lower-comptime.js";
 import { lowerDeleteValue, lowerStmts, noteBlockedBindings, isBlockedBinding, lowerScopedBlock, predeclareForwardCapture, probeBindWhy, predeclareForwardFnDecl, predeclareForwardVar, rejectJumpCrossingFinally, lowerStmt, lowerVarStatement, lowerDestructuringDecl, lowerDestructuringAssignParts, lowerBindingPattern, lowerJsvalBindingPattern, checkBindingElement, bindPatternTarget, lowerVarDeclList, lowerVarDecl, lowerSwitch, lowerTry, lowerExprStatement, lowerForOf, lowerForStatement } from "./lower-stmts.js";
 import { FieldTarget, lowerDynObjectLiteral, lowerExpr, maybeNarrow, lowerUnitComparison, lowerNullishCoalesce, lowerOptionalChain, finishOptionalChain, lowerCondition, ensureBool, requireTruthyUnion, eqComparableUnion, lowerIntrinsicProperty, lowerArrayLiteral, lowerObjectLiteral, lowerShorthandValue, rejectThisInObjectMethod, lowerElementAccess, lowerElementWrite, lowerRecordKeyRead, ensureString, lowerTemplate, lowerAsExpression, lowerPrefixUnary, lowerBinary, lowerCaughtTypeofTest, caughtRead, caughtLocalOf, caughtToString, lowerInstanceOf, lowerRegexLiteral, lowerFieldRead, lowerUnionProperty, fieldTarget, fieldGetExpr, fieldSetStmt, lowerFieldCompound, uniqueSymbolKeyOf, foldedStringKeyOf } from "./lower-exprs.js";
-import type { ExpandoMember } from "./lower-expando.js";
+import { assertExpandoAccounting, expandoCounters, type ExpandoBind, type ExpandoMember } from "./lower-expando.js";
 import { lowerRecordFieldCall, lowerObjectMethodCall } from "./lower-calls.js";
 import { fenceCrossBlockNsRef, nsPathPrefix } from "./lower-namespaces.js";
 
@@ -513,6 +513,12 @@ export function lowerToIr(
   for (const d of dynamicCycleDiags) emit.pushDiag(d);
   for (const d of ffiValidation.diagnostics) emit.pushDiag(d);
   const result = emit.run();
+  // The expando member partition must be exhaustive (lower-expando.ts):
+  // every registered slot is either bound to its dyn-box accessor pair or
+  // counted under a named skip. Checked here, so the corpus lane IS the
+  // accounting test — a skip added without a counter stops the sum from
+  // balancing on the first program that takes it.
+  assertExpandoAccounting(expandoCounters);
   if (options.coverage !== true) return result;
   const remainder = new Lowerer(program, entry, moduleOrder, dynamic, {
     reachable,
@@ -1267,6 +1273,11 @@ export class Lowerer {
    * global — string keys for spelled/folded names, ts.Symbols for
    * unique-symbol keys (lower-expando.ts). */
   readonly expandoMembers = new Map<ts.Symbol, Map<string | ts.Symbol, ExpandoMember>>();
+  /** Per-file `dyn.expandoBind` requests: the accessor pair that lets a
+   * dyn box over the function value reach the member's module global
+   * (lower-expando.ts). lowerFileInit emits them interleaved with the
+   * top-level statements, by the recorded source position. */
+  readonly expandoBinds = new Map<ts.SourceFile, ExpandoBind[]>();
   /** CJS export globals ALSO key by their declaration NODE: the checker
    * hands importers a distinct (late-bound) symbol for `module.exports`
    * property exports — different object, same declaration — so globalOf

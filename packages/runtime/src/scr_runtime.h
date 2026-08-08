@@ -3661,7 +3661,14 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
 /* Keyed read on a FUNC node: the own-property table first (defineProperties
  * writes land there), then "name" (the box's best-effort static name; ""
  * for anonymous) and "length" (the boxed arity). Returns +1, or NULL when
- * the key answers nothing (the caller's undefined). Never throws. */
+ * the key answers nothing (the caller's undefined).
+ *
+ * Between those two it asks the LIFTED-member accessors below, which are
+ * compiled code: in principle a read can therefore throw, and callers
+ * that check nothing see NULL with an exception pending. In practice it
+ * cannot — a member only binds when its type boxes into dyn, so the
+ * getter is a slot read and a box — and the asymmetric gate in
+ * lower-expando.ts exists to keep it that way. */
 ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len);
 /* The FUNC node's own-property table, ALLOCATING it on first use (+1; the
  * caller releases). FUNC receivers only. The table lives on the CLOSURE,
@@ -3670,6 +3677,46 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len);
  * see the same properties. That is also why the emitted per-USE box is
  * correct and no declaration-site interning is needed. */
 ScrDyn *scr_dyn_fn_props(ScrDyn *d);
+/* ── a compiled function's LIFTED members, reachable from any box ─────
+ *
+ * `function F(){}; F.alloc = fn` at module scope does NOT store into the
+ * table above: the compiler lifts each member to a typed MODULE GLOBAL
+ * keyed by (function symbol x member key) and routes reads and writes
+ * SPELLED THROUGH THE NAME straight at that global (lower-expando.ts).
+ * Nothing about that is visible to a FUNC box, so every other route to
+ * the same function value — an object property, an array element, a
+ * parameter, a local alias, `F.prototype.constructor`, `new F()
+ * .constructor` — used to read `undefined`, and a write through one of
+ * them landed in the table where no static read could ever see it. Two
+ * storages for one JavaScript fact, disagreeing in both directions.
+ *
+ * The unification keeps the global as the ONE storage and gives the box a
+ * way in: the compiler emits a tiny accessor PAIR per lifted member (a
+ * `() => dyn` reading the global and a `(dyn) => void` writing it, both
+ * ordinary compiled functions) and binds them here at module init. A
+ * keyed read that misses the own-property table asks the getter; a keyed
+ * write asks the setter. Both spellings then end at the same global, so
+ * they cannot disagree.
+ *
+ * The key is the CLOSURE, borrowed: only module-lifetime function values
+ * are ever bound (a top-level declaration's interned immortal closure, or
+ * a module-level callable const's), so the pointer cannot be freed or its
+ * address recycled while an entry lives. The accessor boxes are OWNED (+1
+ * each) and dropped at exit — they wrap immortal accessor closures, so
+ * nothing here can cycle. `fn`, `key` and both accessors are borrowed by
+ * the bind call itself. */
+void scr_dyn_expando_bind(ScrDyn *fn, ScrStr *key, ScrDyn *get, ScrDyn *set);
+/* Answers whether this (closure, key) HAS an accessor, and when it does
+ * stores the member's value in *out (+1). The two facts are separate on
+ * purpose: a throwing accessor also answers NULL, and the caller may have
+ * had an exception pending already, so "did anything answer" cannot be
+ * read off the value. `*out` is untouched when the answer is false. MAY
+ * THROW (the accessor is compiled code). */
+bool scr_dyn_expando_get(const ScrClosure *clo, const char *key, size_t key_len, ScrDyn **out);
+/* Writes the lifted member and answers true, or answers false when this
+ * (closure, key) has no accessor and the caller should store into the
+ * own-property table instead. `value` borrowed. MAY THROW. */
+bool scr_dyn_expando_set(ScrClosure *clo, const char *key, size_t key_len, ScrDyn *value);
 /* Own-property presence on a FUNC node — the property table, then the
  * name/length built-ins. It asks scr_dyn_fn_get, so presence can never
  * disagree with what the keyed READ answers. Borrows; never throws.

@@ -2621,6 +2621,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // `prototype` — so it is in the may-throw seed set and the
             // false it answers on those paths is never read.
             return finish(`scr_dyn_instance_of(${arg(0)}, ${arg(1)})`);
+          case "dyn.expandoBind":
+            // Binds a lifted member's accessor pair to the function
+            // value's closure (see nodes.ts): all four borrowed, the
+            // registry takes its own +1 on the two accessor boxes. Never
+            // throws — the accessors do, from the keyed read/write.
+            return finish(`scr_dyn_expando_bind(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "dyn.keySet":
             // Keyed write on a dyn receiver: all three borrowed (the
             // member retains the value in); throws Node's TypeErrors on
