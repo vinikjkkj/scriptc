@@ -29,6 +29,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compile } from "../src/index.js";
+import { rcAdapters } from "../src/backend/emission/emit-types.js";
+import type { IrType } from "../src/ir/nodes.js";
+import { BOOL, F64, STRING, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES } from "../src/ir/nodes.js";
 
 const repoRoot = join(import.meta.dirname, "../../..");
 const headerPath = join(repoRoot, "packages/runtime/src/scr_runtime.h");
@@ -299,6 +302,120 @@ describe("LLVM backend declares match scr_runtime.h prototypes", () => {
       }
     }
     expect(seen.size).toBeGreaterThan(50);
+    expect(failures).toEqual([]);
+  });
+
+  /* Direction 4: the RC adapter TABLE.
+   *
+   * emit-types.ts's `rcAdapters` is the one place both backends learn a
+   * kind's retain/release symbols, and the LLVM tier turns each entry into
+   * `declare ptr @<retain>(ptr)` / `declare void @<release>(ptr)` by
+   * INTERPOLATION — so the literal-source scan above cannot see them (it
+   * saw 64 of them while the tier carried its own hand-written switch, and
+   * that switch was also nine kinds short). Checking the table directly is
+   * both the replacement and a strict improvement: it covers every kind,
+   * not just the ones some source line happened to spell out, and it is
+   * what pins the assumption the derivation rests on — that EVERY runtime
+   * `_v` pair really is `void *(void *)` / `void (void *)`. A pair that
+   * isn't would link silently and corrupt refcounts. */
+  const KIND_SAMPLES: Record<string, IrType | null> = {
+    // Not refcounted: rcAdapters must answer null and each backend raises
+    // its own error (emitter bug on C, `rc:` tier refusal on LLVM).
+    f64: F64,
+    bool: BOOL,
+    void: { kind: "void" },
+    undefinedT: { kind: "undefinedT" },
+    nullT: { kind: "nullT" },
+    procStream: { kind: "procStream" },
+    // Refcounted.
+    string: STRING,
+    array: { kind: "array", elem: STRING },
+    map: { kind: "map", key: STRING, value: STRING },
+    set: { kind: "set", elem: STRING },
+    regex: { kind: "regex" },
+    bigint: { kind: "bigint" },
+    keyobj: { kind: "keyobj" },
+    hash: { kind: "hash" },
+    hmac: { kind: "hmac" },
+    cipher: { kind: "cipher" },
+    decipher: { kind: "decipher" },
+    bytes: { kind: "bytes", elem: "u8" },
+    url: { kind: "url" },
+    searchParams: { kind: "searchParams" },
+    symbol: { kind: "symbol" },
+    stats: { kind: "stats" },
+    spawnRes: { kind: "spawnRes" },
+    child: { kind: "child" },
+    netServer: { kind: "netServer" },
+    netSocket: { kind: "netSocket" },
+    http2Session: { kind: "http2Session" },
+    http2Stream: { kind: "http2Stream" },
+    dgramSocket: { kind: "dgramSocket" },
+    testCtx: { kind: "testCtx" },
+    httpReq: { kind: "httpReq" },
+    httpRes: { kind: "httpRes" },
+    httpClientReq: { kind: "httpClientReq" },
+    secureCtx: { kind: "secureCtx" },
+    abortSignal: { kind: "abortSignal" },
+    fsWatcher: { kind: "fsWatcher" },
+    childStream: { kind: "childStream" },
+    func: { kind: "func", params: [], ret: { kind: "void" } },
+    classval: { kind: "classval", className: "C" },
+    union: { kind: "union", unionId: "u0" },
+    promise: { kind: "promise", inner: STRING },
+    generator: { kind: "generator", yieldT: STRING, retT: STRING, nextT: STRING },
+    dyn: { kind: "dyn" },
+    jsval: { kind: "jsval" },
+    caught: { kind: "caught" },
+    // Emitted per-shape helpers, not runtime symbols.
+    object: { kind: "object", className: "UserClass" },
+    record: { kind: "record", shapeId: "r0" },
+  };
+
+  /** The `object` kind fans out into four rows — three runtime families
+   * plus the emitted per-class helper — and only the sample above covers
+   * the last one. */
+  const OBJECT_ROWS: IrType[] = [
+    { kind: "object", className: [...RUNTIME_ERROR_CLASSES.keys()][0]! },
+    { kind: "object", className: RUNTIME_EMITTER_CLASS },
+    { kind: "object", className: [...RUNTIME_STREAM_CLASSES.keys()][0]! },
+  ];
+
+  test("every IrType kind has a row in the sample table", async () => {
+    // Parsed from the union itself: a new kind lands here as a failure,
+    // which is the point — someone must decide whether it is refcounted
+    // before the table can silently omit it on one backend only.
+    const src = await readFile(join(import.meta.dirname, "../src/ir/nodes.ts"), "utf8");
+    const start = src.indexOf("export type IrType =");
+    const end = src.indexOf(";", src.indexOf('kind: "void"', start));
+    const kinds = [...new Set(
+      [...src.slice(start, end).matchAll(/\|\s*\{\s*kind:\s*"([A-Za-z0-9_]+)"/g)].map((m) => m[1]!),
+    )];
+    expect(kinds.length).toBeGreaterThan(40); // extractor guard
+    expect([...kinds].sort()).toEqual(Object.keys(KIND_SAMPLES).sort());
+  });
+
+  test("every runtime RC adapter pair matches its scr_runtime.h prototype", async () => {
+    const { protos } = await parseHeader();
+    const failures: string[] = [];
+    let checked = 0;
+    for (const t of [...Object.values(KIND_SAMPLES), ...OBJECT_ROWS]) {
+      if (t === null) continue;
+      const a = rcAdapters(t);
+      // `emitted` pairs are defined by the program TU, not the runtime;
+      // `null` means the kind carries no refcount. Neither is header ABI.
+      if (a === null || a.origin === "emitted") continue;
+      for (const [sym, shape] of [[a.retain, "ptr"], [a.release, "void"]] as const) {
+        checked++;
+        const issue = checkDeclare(
+          { ret: shape, name: sym, params: ["ptr"], variadic: false },
+          protos,
+        );
+        if (issue !== undefined) failures.push(`rcAdapters(${t.kind}): ${issue}`);
+      }
+    }
+    // Extractor guard: ~40 refcounted kinds, two symbols each.
+    expect(checked).toBeGreaterThan(70);
     expect(failures).toEqual([]);
   });
 });
