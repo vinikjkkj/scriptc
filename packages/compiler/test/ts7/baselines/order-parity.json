@@ -5524,6 +5524,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3031-a-top-level-constructor-owns-its-prototype-table.js": {
+   "order": [
+    "<repo>/tests/corpus/3031-a-top-level-constructor-owns-its-prototype-table.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/304-compound-incdec.ts": {
    "order": [
     "<repo>/tests/corpus/304-compound-incdec.ts"
