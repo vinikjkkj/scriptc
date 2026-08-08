@@ -1859,6 +1859,21 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         const tm = lowerCjsExportTableThisMember(L, expr);
         if (tm) return tm;
       }
+      // `Error.prototype` — the process singleton, and the ONE member of
+      // the `Error` global with a value (every other member, `Error`
+      // itself included, keeps the stdlib member fence below).
+      //
+      // Returned WITHOUT maybeNarrow on purpose. tsc types this
+      // expression `Error`, because that is how the lib declares
+      // `ErrorConstructor.prototype`, and maybeNarrow would read the dyn
+      // through a %Error dynCheck and hand back a runtime error OBJECT.
+      // Node's Error.prototype is not an Error instance (`Error.prototype
+      // instanceof Error` is false — it carries no [[ErrorData]]); it is an
+      // ordinary object, which is exactly what the singleton is.
+      {
+        const ep = L.lowerErrorPrototypeProperty(expr);
+        if (ep) return ep;
+      }
       const handled =
         // A stdlib global's declared METHOD read where ToBoolean is the
         // ONLY consumer (`Object.freeze ? Object.freeze([]) : []`): the

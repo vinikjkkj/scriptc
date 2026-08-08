@@ -3171,6 +3171,51 @@ bool scr_dyn_proto_chain_is_fn_pub(const ScrDyn *d);
 /* Throws that fence (the emitted keyed read calls it). */
 void scr_dyn_proto_ctor_fence(void);
 
+/* ── %Error.prototype% ─────────────────────────────────────────────────
+ *
+ * THE `Error.prototype` object — a process singleton, because JS has
+ * exactly one and two expressions that both name it must answer the
+ * same node or `===`, the chain walk and Object.getPrototypeOf would
+ * disagree with Node. The frontend lowers the `Error.prototype`
+ * expression to this and nothing else; +1 per call.
+ *
+ * Own properties, all three NON-ENUMERABLE (so `Object.keys` is `[]`
+ * like Node's), writable and configurable: `name` ("Error"), `message`
+ * ("") and a native `toString`. It carries NO constructor NAME, because
+ * Node's util.inspect(Error.prototype) is `{}` and a name would print
+ * `Error {}` here and on every descendant.
+ *
+ * `constructor` is deliberately ABSENT and LOUD
+ * (scr_dyn_error_ctor_fence): there is no `Error` function value in a
+ * static build to point the back-link at — `new Error(...)` compiles to
+ * a runtime error object, not a call through a function box — so
+ * answering undefined would be the silent kind of wrong. An explicitly
+ * defined one (`Object.create(Error.prototype, { constructor: { value:
+ * MyError } })`, which is how the shipped protobufjs bundle spells it)
+ * is an ordinary property and answers exactly, shadowing the fence.
+ *
+ * The singleton is the ROOT of a tree: descendants retain it through
+ * their [[Prototype]] link and it retains nothing of theirs, so unlike
+ * the function-prototype back-link there is no cycle here to break. */
+ScrDyn *scr_dyn_error_prototype(void);
+/* Is %Error.prototype% this value, or anywhere above it on the chain?
+ * Identity, never shape. False before anything has asked for the
+ * singleton (nothing can be linked to a node that does not exist). */
+bool scr_dyn_error_proto_in_chain(const ScrDyn *d);
+/* `v instanceof Error` over a checked-dynamic value — the ONE predicate
+ * BOTH backends emit a call to, so the C and LLVM keyed lanes cannot
+ * answer differently. True for the own "%error" marker
+ * (scr_dyn_from_error's encoding of a runtime ScrError), for a value
+ * whose PROTOTYPE chain reaches %Error.prototype% (a custom error type
+ * built by Object.create(Error.prototype, ...)), and for an island-held
+ * engine Error. %Error.prototype% itself answers false, like Node's. */
+bool scr_dyn_instanceof_error(const ScrDyn *d);
+/* Throws the `Error.prototype.constructor` fence (the keyed read calls
+ * it before the function-prototype one — the receiver reaches both when
+ * a function's prototype was replaced by an Object.create of it, and
+ * this one names the more specific reason). */
+void scr_dyn_error_ctor_fence(void);
+
 /* ── ACCESSOR PROPERTIES (Object.defineProperty's get/set half) ────────
  *
  * scr_dyn_obj_key_get is JS's [[Get]] on an OBJ receiver, WHOLE: own

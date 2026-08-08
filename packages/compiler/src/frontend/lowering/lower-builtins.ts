@@ -5578,6 +5578,41 @@ let digestInputValueDispatches = 0;
     };
   }
 
+/** `Error.prototype` as a VALUE — the process singleton standing for
+   * %Error.prototype% (`dyn.errorProto`).
+   *
+   * The whole population in protobufjs's shipped bundle is ONE site, and
+   * it is the reason this exists: `util.newError` spells a custom error
+   * type as
+   *
+   *     CustomError.prototype = Object.create(Error.prototype, { … })
+   *
+   * and `Object.create`'s prototype argument has to be a real dyn OBJ for
+   * the [[Prototype]] link to exist at all. It is the only prototype
+   * object of a standard-library constructor this compiler holds, and it
+   * is held by NAME rather than by an `ErrorConstructor` surface: `Error`
+   * in a value position stays the SC2020 lib fence, because there is no
+   * function object behind it here (`new Error(...)` compiles to a
+   * runtime error object, not a call through a function box).
+   *
+   * Everything else on the `Error` global — captureStackTrace,
+   * stackTraceLimit, `Error` itself as a value — keeps its fence. So does
+   * this member under --dynamic, where the engine owns the real one and a
+   * second, static, `Error.prototype` would be a DIFFERENT object from
+   * the one every engine-side value is linked to.
+   *
+   * The prototype objects of the SUBCLASS constructors (TypeError,
+   * RangeError, …) are deliberately NOT claimed: each would need its own
+   * singleton linked to this one, and none occurs. They fence by name.
+   *
+   * Null for every other receiver, so the property chain keeps trying. */
+  export function lowerErrorPrototypeProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+    if (expr.questionDotToken) return null;
+    if (L.dynamic) return null;
+    if (L.stdlibGlobalMember(expr, "Error") !== "prototype") return null;
+    return { kind: "libCall", fn: "dyn.errorProto", args: [], type: DYN, loc: locOf(expr) };
+  }
+
 /** `JSON.parse` / `JSON.stringify` referenced without a call: rejected
    * specifically, like process methods as values. Null for non-JSON
    * receivers (the property chain keeps trying other lowerings). */
