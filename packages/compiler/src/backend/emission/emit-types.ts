@@ -401,106 +401,162 @@ export function boxKindC(t: IrType): string {
   }
 }
 
+/** Where one kind's retain/release entry points come from, and under what
+ * BASE name. THE one copy of that fact: `vAdapters` below and the LLVM
+ * tier's `vAdapters`/`releaseSym`/`llFieldType` (llvm/shapes.ts) are all
+ * pure derivations of this table, so they cannot drift from it — the
+ * arrayElemIsRef stance, one level up. Before it existed the two backends
+ * each carried their own hand-written switch and the LLVM copy had fallen
+ * NINE kinds behind (bigint, keyobj, hash, hmac, cipher, decipher,
+ * http2Session, http2Stream, abortSignal): not wrong, just narrow — every
+ * one of them refused the tier and fell back to C for no reason.
+ *
+ * `runtime` — the runtime exports a `void *`-signature pair under exactly
+ *   these names (its `_v` thunks). Both backends use the names verbatim;
+ *   the LLVM tier additionally emits the `declare`s.
+ * `emitted` — the program TU emits its own per-shape helper. C's helper is
+ *   TYPED, so C appends `_v` (the emitted void*-thunk) wherever a container
+ *   wants a function pointer; in LLVM every value is already `ptr`, so the
+ *   base name IS the `_v` shape and serves both roles.
+ * `direct`  — the runtime pair exists ONLY with its typed C signature (no
+ *   `_v` thunk). Fine as a call target on either backend, but not as C
+ *   function-pointer DATA, so C's `vAdapters` refuses it. `caught` is the
+ *   only member: a catch-binding snapshot never enters a container.
+ *
+ * `null` means the kind carries no refcount at all — scalars, the unit
+ * types, and procStream's bare fd. Deciding what THAT is stays with the
+ * callers, because the two backends disagree on purpose: an unrefcounted
+ * type reaching C's RC machinery is an emitter bug, while the LLVM tier
+ * turns it into a loud SC3001 refusal and falls back. */
+export type RcOrigin = "runtime" | "emitted" | "direct";
+
+export interface RcAdapters {
+  origin: RcOrigin;
+  retain: string;
+  release: string;
+}
+
+export function rcAdapters(t: IrType): RcAdapters | null {
+  const rt = (retain: string, release: string): RcAdapters => ({ origin: "runtime", retain, release });
+  switch (t.kind) {
+    case "string":
+      return rt("scr_str_retain_v", "scr_str_release_v");
+    case "array":
+      return rt("scr_arr_retain_v", "scr_arr_release_v");
+    case "map":
+    case "set":
+      return rt("scr_map_retain_v", "scr_map_release_v");
+    case "regex":
+      return rt("scr_regex_retain_v", "scr_regex_release_v");
+    case "bigint":
+      return rt("scr_big_retain_v", "scr_big_release_v");
+    case "keyobj":
+      return rt("scr_keyobj_retain_v", "scr_keyobj_release_v");
+    case "hash":
+      return rt("scr_hash_retain_v", "scr_hash_release_v");
+    case "hmac":
+      return rt("scr_hmac_retain_v", "scr_hmac_release_v");
+    case "cipher":
+    case "decipher":
+      return rt("scr_cipher_retain_v", "scr_cipher_release_v");
+    case "bytes":
+      return rt("scr_bytes_retain_v", "scr_bytes_release_v");
+    case "url":
+      return rt("scr_url_retain_v", "scr_url_release_v");
+    case "searchParams":
+      return rt("scr_sp_retain_v", "scr_sp_release_v");
+    case "symbol":
+      return rt("scr_sym_retain_v", "scr_sym_release_v");
+    case "stats":
+      return rt("scr_stats_retain_v", "scr_stats_release_v");
+    case "spawnRes":
+      return rt("scr_spawn_res_retain_v", "scr_spawn_res_release_v");
+    case "child":
+      return rt("scr_child_retain_v", "scr_child_release_v");
+    case "netServer":
+      return rt("scr_net_server_retain_v", "scr_net_server_release_v");
+    case "netSocket":
+      return rt("scr_net_sock_retain_v", "scr_net_sock_release_v");
+    case "http2Session":
+      return rt("scr_http2_session_retain_v", "scr_http2_session_release_v");
+    case "http2Stream":
+      return rt("scr_http2_stream_retain_v", "scr_http2_stream_release_v");
+    case "dgramSocket":
+      return rt("scr_dgram_retain_v", "scr_dgram_release_v");
+    case "testCtx":
+      return rt("scr_testctx_retain_v", "scr_testctx_release_v");
+    case "httpReq":
+      return rt("scr_http_req_retain_v", "scr_http_req_release_v");
+    case "httpRes":
+      return rt("scr_http_res_retain_v", "scr_http_res_release_v");
+    case "httpClientReq":
+      return rt("scr_http_client_retain_v", "scr_http_client_release_v");
+    case "secureCtx":
+      return rt("scr_secure_ctx_retain_v", "scr_secure_ctx_release_v");
+    case "abortSignal":
+      return rt("scr_abort_signal_retain_v", "scr_abort_signal_release_v");
+    case "fsWatcher":
+      return rt("scr_watcher_retain_v", "scr_watcher_release_v");
+    case "childStream":
+      return rt("scr_child_stream_retain_v", "scr_child_stream_release_v");
+    case "func":
+      return rt("scr_closure_retain_v", "scr_closure_release_v");
+    case "classval":
+      // No-ops on the immortal class object; the container machinery
+      // stays uniform.
+      return rt("scr_classobj_retain_v", "scr_classobj_release_v");
+    case "union":
+      return rt("scr_union_retain_v", "scr_union_release_v");
+    case "promise":
+      return rt("scr_promise_retain_v", "scr_promise_release_v");
+    case "generator":
+      return rt("scr_gen_retain_v", "scr_gen_release_v");
+    case "dyn":
+      return rt("scr_dyn_retain_v", "scr_dyn_release_v");
+    case "jsval":
+      return rt("scr_jsval_retain_v", "scr_jsval_release_v");
+    case "caught":
+      // Catch-binding snapshot boxes (ScrCaught): typed C signature only,
+      // and none is needed — a caught value is read and rethrown, never
+      // handed to a container as data.
+      return { origin: "direct", retain: "scr_caught_retain", release: "scr_caught_release" };
+    case "object":
+      if (RUNTIME_ERROR_CLASSES.has(t.className)) {
+        return rt("scr_error_retain_v", "scr_error_release_v");
+      }
+      if (t.className === RUNTIME_EMITTER_CLASS) {
+        // Release dispatches through the stamped vtable, so a base-typed
+        // release tears down a user subclass too.
+        return rt("scr_emitter_retain_v", "scr_emitter_release_v");
+      }
+      if (RUNTIME_STREAM_CLASSES.has(t.className)) {
+        // The five runtime stream classes share ONE runtime layout; the
+        // `_v` pair dispatches teardown through the stamped vtable.
+        return rt("scr_stream_retain_v", "scr_stream_release_v");
+      }
+      return { origin: "emitted", retain: mangleClassRetain(t.className), release: mangleClassRelease(t.className) };
+    case "record":
+      return { origin: "emitted", retain: mangleRecordRetain(t.shapeId), release: mangleRecordRelease(t.shapeId) };
+    default:
+      return null;
+  }
+}
+
 /** The runtime `_v` (void*-signature) RC entry points for one refcounted
  * type — the currency of every generic container that must retain/release
  * payloads whose concrete struct it cannot know: union values, capture
  * boxes, promises, and the exception cell. Classes and records use their
  * emitted per-shape adapters; everything else has runtime-provided ones.
- * Bare symbol names — call sites prefix `&` where a fn ptr is passed. */
+ * Bare symbol names — call sites prefix `&` where a fn ptr is passed.
+ * Derived from `rcAdapters`, which is the table. */
 export function vAdapters(t: IrType): { retain: string; release: string } {
-  switch (t.kind) {
-    case "string":
-      return { retain: "scr_str_retain_v", release: "scr_str_release_v" };
-    case "array":
-      return { retain: "scr_arr_retain_v", release: "scr_arr_release_v" };
-    case "map":
-    case "set":
-      return { retain: "scr_map_retain_v", release: "scr_map_release_v" };
-    case "regex":
-      return { retain: "scr_regex_retain_v", release: "scr_regex_release_v" };
-    case "bigint":
-      return { retain: "scr_big_retain_v", release: "scr_big_release_v" };
-    case "keyobj":
-      return { retain: "scr_keyobj_retain_v", release: "scr_keyobj_release_v" };
-    case "hash":
-      return { retain: "scr_hash_retain_v", release: "scr_hash_release_v" };
-    case "hmac":
-      return { retain: "scr_hmac_retain_v", release: "scr_hmac_release_v" };
-    case "cipher":
-    case "decipher":
-      return { retain: "scr_cipher_retain_v", release: "scr_cipher_release_v" };
-    case "bytes":
-      return { retain: "scr_bytes_retain_v", release: "scr_bytes_release_v" };
-    case "url":
-      return { retain: "scr_url_retain_v", release: "scr_url_release_v" };
-    case "searchParams":
-      return { retain: "scr_sp_retain_v", release: "scr_sp_release_v" };
-    case "symbol":
-      return { retain: "scr_sym_retain_v", release: "scr_sym_release_v" };
-    case "stats":
-      return { retain: "scr_stats_retain_v", release: "scr_stats_release_v" };
-    case "spawnRes":
-      return { retain: "scr_spawn_res_retain_v", release: "scr_spawn_res_release_v" };
-    case "child":
-      return { retain: "scr_child_retain_v", release: "scr_child_release_v" };
-    case "netServer":
-      return { retain: "scr_net_server_retain_v", release: "scr_net_server_release_v" };
-    case "netSocket":
-      return { retain: "scr_net_sock_retain_v", release: "scr_net_sock_release_v" };
-    case "http2Session":
-      return { retain: "scr_http2_session_retain_v", release: "scr_http2_session_release_v" };
-    case "http2Stream":
-      return { retain: "scr_http2_stream_retain_v", release: "scr_http2_stream_release_v" };
-    case "dgramSocket":
-      return { retain: "scr_dgram_retain_v", release: "scr_dgram_release_v" };
-    case "testCtx":
-      return { retain: "scr_testctx_retain_v", release: "scr_testctx_release_v" };
-    case "httpReq":
-      return { retain: "scr_http_req_retain_v", release: "scr_http_req_release_v" };
-    case "httpRes":
-      return { retain: "scr_http_res_retain_v", release: "scr_http_res_release_v" };
-    case "httpClientReq":
-      return { retain: "scr_http_client_retain_v", release: "scr_http_client_release_v" };
-    case "secureCtx":
-      return { retain: "scr_secure_ctx_retain_v", release: "scr_secure_ctx_release_v" };
-    case "abortSignal":
-      return { retain: "scr_abort_signal_retain_v", release: "scr_abort_signal_release_v" };
-    case "fsWatcher":
-      return { retain: "scr_watcher_retain_v", release: "scr_watcher_release_v" };
-    case "childStream":
-      return { retain: "scr_child_stream_retain_v", release: "scr_child_stream_release_v" };
-    case "func":
-      return { retain: "scr_closure_retain_v", release: "scr_closure_release_v" };
-    case "classval":
-      // No-ops on the immortal class object; the container machinery
-      // stays uniform.
-      return { retain: "scr_classobj_retain_v", release: "scr_classobj_release_v" };
-    case "union":
-      return { retain: "scr_union_retain_v", release: "scr_union_release_v" };
-    case "object":
-      if (RUNTIME_ERROR_CLASSES.has(t.className)) {
-        return { retain: "scr_error_retain_v", release: "scr_error_release_v" };
-      }
-      if (t.className === RUNTIME_EMITTER_CLASS) {
-        return { retain: "scr_emitter_retain_v", release: "scr_emitter_release_v" };
-      }
-      if (RUNTIME_STREAM_CLASSES.has(t.className)) {
-        return { retain: "scr_stream_retain_v", release: "scr_stream_release_v" };
-      }
-      return { retain: `${mangleClassRetain(t.className)}_v`, release: `${mangleClassRelease(t.className)}_v` };
-    case "record":
-      return { retain: `${mangleRecordRetain(t.shapeId)}_v`, release: `${mangleRecordRelease(t.shapeId)}_v` };
-    case "promise":
-      return { retain: "scr_promise_retain_v", release: "scr_promise_release_v" };
-    case "generator":
-      return { retain: "scr_gen_retain_v", release: "scr_gen_release_v" };
-    case "dyn":
-      return { retain: "scr_dyn_retain_v", release: "scr_dyn_release_v" };
-    case "jsval":
-      return { retain: "scr_jsval_retain_v", release: "scr_jsval_release_v" };
-    default:
-      throw new Error(`emitter bug: no RC adapters for ${t.kind}`);
-  }
+  const a = rcAdapters(t);
+  // A `direct` pair has no void*-thunk to hand a container, and `null` is
+  // not refcounted at all: on the C side both are emitter bugs, exactly as
+  // the hand-written switch's `default` used to report them.
+  if (a === null || a.origin === "direct") throw new Error(`emitter bug: no RC adapters for ${t.kind}`);
+  const sfx = a.origin === "emitted" ? "_v" : "";
+  return { retain: `${a.retain}${sfx}`, release: `${a.release}${sfx}` };
 }
 
 /** Box accessor suffix: scalars stored unboxed, ref kinds as pointers. */
@@ -608,8 +664,6 @@ export function elemKindC(elem: IrType): string {
     case "stats":
     case "spawnRes":
     case "netSocket":
-    case "http2Session":
-    case "http2Stream":
     case "dgramSocket":
     case "testCtx":
     case "httpReq":
@@ -621,11 +675,15 @@ export function elemKindC(elem: IrType): string {
     case "procStream":
     case "dyn":
     case "caught":
-    case "promise":
     case "generator":
     case "undefinedT":
     case "nullT":
-    case "abortSignal":
+      // (promise, http2Session, http2Stream and abortSignal were listed
+      // here too until the SCR_ELEM_REF group above grew to cover them.
+      // A duplicate case label is DEAD — the first match wins — so the
+      // four were already returning SCR_ELEM_REF and only this list still
+      // claimed otherwise. esbuild flagged all four; they are dropped
+      // rather than left to read as a contradiction.)
       // No ScrArr element representation for these kinds. Reaching here is
       // an internal error, NOT a user-facing refusal: the frontend's array
       // rule (mapTypeInner) leaves every one of them unmapped, so a program

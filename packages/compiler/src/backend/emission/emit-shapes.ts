@@ -7,7 +7,7 @@ import type { CEmitter } from "./emitter.js";
 import type { IrFunction } from "../../ir/nodes.js";
 import { IrClassDef, IrType, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, isRefCounted, mapOf, STRING } from "../../ir/nodes.js";
 import { mangleClassGcFree, mangleClassNew, mangleClassRelease, mangleClassReleaseDirect, mangleClassRetain, mangleClassStruct, mangleClassTrace, mangleCtorThunk, mangleField, mangleFunction, mangleRecordGcFree, mangleRecordNew, mangleRecordRelease, mangleRecordRetain, mangleRecordStruct, mangleRecordTrace, mangleVtAdapter, mangleVtInstance, mangleVtStruct } from "../mangle.js";
-import { arrayElemIsRef, boxKindC, cDecl, cType, elemKindC, mapValKindC, releaseCallC, vAdapters } from "./emit-types.js";
+import { arrayElemIsRef, boxKindC, cDecl, cType, elemKindC, mapValKindC, rcAdapters, releaseCallC, vAdapters } from "./emit-types.js";
 
 /** The overflow map's C member name on index-signature record structs.
  * User fields mangle to `sc_fld_*`, so no field can collide. */
@@ -750,35 +750,30 @@ export interface ClassMeta {
     if (t.kind === "object" && !E.classMeta.has(t.className)) {
       return `scr_box_new(SCR_BOX_F64) /* ${t.className}: uncollected class, all uses trap */`;
     }
+    // PLAIN-kind boxes first: the runtime knows these payload shapes
+    // itself, so the box carries a tag instead of adapter pointers. An
+    // ACYCLIC array is one of them; a cycle-capable array must ride the
+    // obj-box below so the box's trace reaches it (SCR_BOX_ARR payloads
+    // are never traced). procStream is a bare fd — a scalar box.
     if (
-      t.kind === "object" || t.kind === "record" || t.kind === "union" ||
-      t.kind === "classval" ||
-      t.kind === "map" || t.kind === "set" || t.kind === "promise" ||
-      t.kind === "generator" ||
-      t.kind === "regex" || t.kind === "url" || t.kind === "searchParams" ||
-      t.kind === "symbol" || t.kind === "stats" ||
-      t.kind === "spawnRes" || t.kind === "child" || t.kind === "bytes" ||
-      t.kind === "netServer" || t.kind === "netSocket" ||
-      t.kind === "http2Session" || t.kind === "http2Stream" ||
-      t.kind === "dgramSocket" || t.kind === "testCtx" ||
-      t.kind === "httpReq" || t.kind === "httpRes" ||
-      t.kind === "httpClientReq" || t.kind === "secureCtx" ||
-      t.kind === "fsWatcher" || t.kind === "childStream" ||
-      // Island handles: the box carries scr_jsval_retain_v/release_v and
-      // no trace — the same stance as jsval array elements.
-      t.kind === "jsval" ||
-      // Checked-dynamic captures (the mustCall wrapper closing over its
-      // implicit-any `fn` param): the box carries scr_dyn_retain_v/
-      // release_v and NO trace — a dyn tree is pure data except the
-      // function kind, whose closure edge stays invisible to the
-      // collector (trial deletion treats it as an external root: cycles
-      // through dyn never collect, nothing dangles — SEMANTICS.md).
-      t.kind === "dyn" ||
-      // A CYCLE-CAPABLE array must ride the obj-box so the box's trace
-      // reaches it (SCR_BOX_ARR payloads are never traced); acyclic arrays
-      // keep the historic plain-kind box below.
-      (t.kind === "array" && E.traceAdapterC(t) !== null)
+      t.kind === "f64" || t.kind === "bool" || t.kind === "string" ||
+      t.kind === "func" || t.kind === "procStream" ||
+      (t.kind === "array" && E.traceAdapterC(t) === null)
     ) {
+      return `scr_box_new(${boxKindC(t)})`;
+    }
+    // Everything else that HAS RC adapters rides an obj-box carrying them
+    // (plus the payload's trace) as function pointers — the runtime cannot
+    // know per-shape layouts. Which kinds those are is rcAdapters', not
+    // this list's, question: the hand-written chain here was another copy
+    // of it and omitted `bigint`, `keyobj`, `hash`, `hmac`, `cipher` and
+    // `decipher`, so a closure capturing a Hash handle reached boxKindC
+    // and ABORTED the C emitter with "hash boxes go through boxNewC" —
+    // an internal error on a program the value model otherwise supports.
+    // A `direct` pair (caught) has no void*-thunk to store, and a catch
+    // binding is never captured, so it stays with boxKindC's own throw.
+    const rc = rcAdapters(t);
+    if (rc !== null && rc.origin !== "direct") {
       const v = vAdapters(t);
       return `scr_box_new_obj(&${v.retain}, &${v.release}, ${E.traceArgC(t)})`;
     }
