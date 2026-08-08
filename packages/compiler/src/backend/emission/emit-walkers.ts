@@ -1380,7 +1380,8 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
 /** The emitted static→dyn converter for one type:
    * `static ScrDyn *sc_td_<n>(<T> v)` — build a fresh dyn value from a
    * static one (+1), DEEP-COPYING composites (a dyn value never aliases
-   * static storage — the jsMarshal stance). Domain: the JSON-safe kinds
+   * static storage — the jsMarshal stance; bytes are the ONE exception,
+   * see the `bytes` arm). Domain: the JSON-safe kinds
    * plus undefined-armed unions (the undefined arm becomes the undefined
    * dyn singleton) and index-signature records (whose overflow entries
    * copy over). The operand is borrowed. Never throws. */
@@ -1425,10 +1426,16 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         d.push(`  return scr_dyn_retain(v);`);
         break;
       case "bytes":
-        // bytes<u8> → the checked-dynamic tree's bytes kind, payload COPIED (the boundary
-        // stance; stdin chunks into unknown-typed helpers).
+        // bytes<u8> → the checked-dynamic tree's bytes kind, payload SHARED
+        // by reference. A typed array is the one composite whose two
+        // representations are the SAME object — ScrBytes is refcounted and
+        // already aliasable (the `backing` view chain) — so the boundary
+        // has no reason to copy, and copying is observably wrong: JS's
+        // `write(val, buf, pos) { buf[pos] = val }` writes the CALLER's
+        // buffer. Retaining keeps the deep-copy stance's ownership
+        // contract (the operand stays borrowed) and adds Node's aliasing.
         if (t.elem !== "u8") throw new Error(`emitter bug: to-dyn of bytes<${t.elem}>`);
-        d.push(`  return scr_dyn_new_bytes_copy(v);`);
+        d.push(`  return scr_dyn_new_bytes_ref(v);`);
         break;
       case "record": {
         const shape = E.recordsById.get(t.shapeId);

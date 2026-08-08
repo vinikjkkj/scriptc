@@ -5476,6 +5476,46 @@ export function isUndefinedArmedUnion(
  * decided by the rest of the graph): a recursive TYPE is JSON-safe when
  * every reachable constituent is; a cyclic VALUE of such a type throws
  * Node's circular-structure TypeError at runtime instead. */
+/** Does a static→dyn conversion of this operand produce a copy whose
+ * later MUTATION would be silently lost?
+ *
+ * The static→dyn boundary deep-copies composites (toDynHelper), so a write
+ * through the resulting dyn value lands on the copy. Node has no copy: the
+ * callee writes the caller's object. The divergence is only OBSERVABLE
+ * when the caller still holds a reference to the source — i.e. when the
+ * converted operand is an lvalue (a variable, a field, an element) rather
+ * than a value the conversion itself consumes (a literal, a call result).
+ * `f({ a: 1 })` mutated inside `f` diverges from Node in a way nothing can
+ * read, and must keep compiling; `f(cfg)` does not.
+ *
+ * ARRAYS and RECORDS answer true: their two representations are physically
+ * different memory (a packed ScrArr / a C struct against a ScrDyn vector /
+ * a key-value table), so aliasing is not available and the runtime marks
+ * the copy instead — a write through it TRAPS with the reason rather than
+ * being dropped. BYTES answer false: ScrBytes is refcounted and shared by
+ * reference across the boundary, so those writes land. */
+export function dynCopyIsObservable(e: IrExpr): boolean {
+  const t = e.type;
+  if (t.kind !== "array" && t.kind !== "record") return false;
+  switch (e.kind) {
+    // The caller keeps a name for the value, so the callee's write is
+    // observable through it.
+    case "varRef":
+    case "selfRef":
+    case "fieldGet":
+    case "recordGet":
+    case "arrayGet":
+    case "recordKeyGet":
+      return true;
+    // Transparent re-typings of an operand: ask the value underneath.
+    case "upcast":
+    case "unionNarrow":
+      return dynCopyIsObservable(e.value);
+    default:
+      return false;
+  }
+}
+
 export function isJsonSafeType(
   t: IrType,
   getRecord: (shapeId: string) => IrRecordShape | undefined,
