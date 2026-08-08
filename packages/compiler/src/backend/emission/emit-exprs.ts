@@ -40,6 +40,25 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const local = E.currentLocals.get(e.localId);
         if (!local && E.globalsById.has(e.localId)) {
           const gname = mangleGlobal(e.localId);
+          const gl = E.globalsById.get(e.localId)!;
+          if (gl.tdz) {
+            // A module-scope binding read from a function created above
+            // its declarator: the slot is still the NULL the linker laid
+            // down, and retaining it is a null dereference, not a value.
+            // The pointer-backed slot IS the sentinel (the boxed local's
+            // TDZ guard above, one scope out) — throw Node's exact
+            // catchable ReferenceError instead. Interned literals are
+            // immortal (rc SIZE_MAX), so the ownership-taking thrower is
+            // safe to hand them to.
+            const errName = E.internLiteral("ReferenceError");
+            const msg = E.internLiteral(`Cannot access '${gl.name}' before initialization`);
+            E.line(`if (${gname} == NULL) { /* TDZ: module binding read before initialization */`);
+            E.indent++;
+            E.line(`scr_throw_error_named((ScrStr *)&${errName}, (ScrStr *)&${msg});`);
+            E.emitUnwind();
+            E.indent--;
+            E.line(`}`);
+          }
           return E.newTemp(e.type, isRefCounted(e.type) ? retainCallC(e.type, gname) : gname);
         }
         const name = mangleLocal(e.localId);

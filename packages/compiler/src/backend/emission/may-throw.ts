@@ -45,11 +45,17 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
       list.push(`%${cls.name}.${m}`);
     }
   }
+  const tdzGlobalIds = (mod.globals ?? []).filter((g) => g.tdz).map((g) => g.id);
   for (const fn of mod.functions) {
     const f: Facts = { throws: false, callees: [], callsValue: false };
     // TDZ locals (forward-captured consts): every read tests the box and
     // throws the catchable ReferenceError while it is empty.
     const tdzIds = new Set(fn.locals.filter((l) => l.tdz).map((l) => l.id));
+    // TDZ module GLOBALS (a binding read from a function created above its
+    // declarator) test the slot at every read and throw the same
+    // ReferenceError while it is empty — a varRef of one is a throw site
+    // wherever it appears, so it joins the per-function local set.
+    for (const id of tdzGlobalIds) tdzIds.add(id);
     // The IR is plain JSON: a generic walk keyed on `kind` stays correct as
     // nodes grow fields (types' own `kind`s never collide with these).
     const visit = (node: unknown): void => {
