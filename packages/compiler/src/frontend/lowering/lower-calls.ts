@@ -887,6 +887,22 @@ export interface GenericInstance {
     return isAsync && declared.kind === "promise" ? declared.inner : declared;
   }
 
+/** Whether this statement ENDS its function — nothing executes past it.
+ *
+ * A BLOCK that ends in a terminal statement is terminal too: the block is a
+ * sequencing wrapper, not a scope control flow can leave by falling out of.
+ * Several lowerings wrap a terminal statement in one — the return-sequence
+ * split (`return a, b, v;` becomes `block { a; b; return v; }`,
+ * lower-stmts) is the common case — and reading only the wrapper's kind
+ * appended a dead SC9002 trap after a return that always runs. */
+  function terminates(s: IrStmt | undefined): boolean {
+    if (s === undefined) return false;
+    if (s.kind === "return" || s.kind === "throw" || s.kind === "rethrow" || s.kind === "runtimeFence") {
+      return true;
+    }
+    return s.kind === "block" && terminates(s.body[s.body.length - 1]);
+  }
+
 /** A union-returning body may complete WITHOUT returning — JS yields
    * undefined then (`(): string | undefined => { if (c) return "x"; }`), so
    * an undefined-armed union return gets a trailing `return <undefined
@@ -904,10 +920,7 @@ export interface GenericInstance {
   export function appendImplicitUndefinedReturn(L: Lowerer, body: IrStmt[],
     bodyReturn: IrType, loc: SrcLoc,): void {
     if (bodyReturn.kind === "void") return;
-    const last = body[body.length - 1];
-    if (last && (last.kind === "return" || last.kind === "throw" || last.kind === "rethrow" || last.kind === "runtimeFence")) {
-      return;
-    }
+    if (terminates(body[body.length - 1])) return;
     // A DYN body that can complete without returning (a JS function whose
     // guarded return may not run — mustSucceed's `if (typeof fn ===
     // 'function') return fn.apply(...)`): JS completes with undefined —
