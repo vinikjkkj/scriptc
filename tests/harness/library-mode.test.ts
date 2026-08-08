@@ -72,6 +72,14 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compileLibrary } from "@scriptc/compiler";
+import {
+  asanLinkable,
+  ccProbe,
+  expectAbort,
+  NM_DEFINED_ONLY,
+  probeName,
+  probeStdout,
+} from "./cc.js";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const fixtureRoot = join(repoRoot, "tests/library-mode");
@@ -136,8 +144,11 @@ function buildProbe(
   outDir: string,
   opts: { sanitize?: boolean; defines?: string[] } = {},
 ): string {
-  const bin = join(outDir, "probe");
-  execFileSync("clang", [
+  // An EMBEDDER's build: the same driver and target the archive was built
+  // with (cc.ts), the archive's win32 system-DLL imports on the link line,
+  // and the platform's executable suffix so the probe can be spawned.
+  const bin = join(outDir, probeName("probe"));
+  ccProbe([
     "-std=c11",
     ...(opts.sanitize ? ["-fsanitize=address"] : []),
     ...(opts.defines ?? []).map((d) => `-D${d}`),
@@ -151,7 +162,7 @@ function buildProbe(
 
 function runProbe(bin: string, args: string[] = []): { stdout: string; status: number | null; signal: string | null } {
   const r = spawnSync(bin, args, { encoding: "utf8", timeout: 60_000 });
-  return { stdout: r.stdout ?? "", status: r.status, signal: r.signal };
+  return { stdout: probeStdout(r.stdout ?? ""), status: r.status, signal: r.signal };
 }
 
 /** nm over the archive: [definedExternal, undefined] symbol sets, macOS/
@@ -166,7 +177,7 @@ function nmSymbols(archive: string): { defined: Set<string>; undef: Set<string> 
     }
     return set;
   };
-  const defined = parse(execFileSync("nm", ["-gU", archive], { encoding: "utf8" }));
+  const defined = parse(execFileSync("nm", [...NM_DEFINED_ONLY, archive], { encoding: "utf8" }));
   const undef = parse(execFileSync("nm", ["-u", archive], { encoding: "utf8" }));
   return { defined, undef };
 }
@@ -372,7 +383,7 @@ survived, sink_calls=1
     const { archive, outDir } = await buildLibrary("traps", emission);
     const probe = buildProbe("traps", archive, outDir);
     const run = runProbe(probe, ["poisoned"]);
-    expect(run.signal).toBe("SIGABRT");
+    expectAbort(run);
     expect(run.stdout).toContain("poisoned now");
     expect(run.stdout).not.toContain("UNREACHABLE");
   });
@@ -381,7 +392,7 @@ survived, sink_calls=1
     const { archive, outDir } = await buildLibrary("traps", emission);
     const probe = buildProbe("traps", archive, outDir);
     const run = runProbe(probe, ["preregister"]);
-    expect(run.signal).toBe("SIGABRT");
+    expectAbort(run);
     expect(run.stdout).not.toContain("UNREACHABLE");
   });
 
@@ -505,9 +516,19 @@ survived, sink_calls=1
     );
   });
 
-  /* ── K10: the sanitized lane (ASan + the RC audit's re-init seam) ────── */
+  /* ── K10: the sanitized lane (ASan + the RC audit's re-init seam) ──────
+   * K10 is the only pair here that asks for ASan explicitly (the rest run
+   * whatever flavor the suite is in), so it is the only pair a toolchain
+   * without an asan runtime cannot honor: zig's mingw target compiles the
+   * instrumentation and then has no runtime to link it against
+   * (`lld-link: error: undefined symbol: __asan_init` — the fact AGENTS.md
+   * records as "the whole Windows lane runs unsanitized"). Dropping the
+   * flag would leave a green test that is a duplicate of K4/K5 and checks
+   * no memory at all, so the pair SKIPS, named, and the archive-side
+   * `sanitize: true` build is never attempted either. */
+  const asanTest = asanLinkable() ? platformTest : platformTest.skip;
 
-  platformTest("K10: K4 under ASan + RC audit (zero live heap across re-init)", async () => {
+  asanTest("K10: K4 under ASan + RC audit (zero live heap across re-init)", async () => {
     const { archive, outDir } = await buildLibrary("reinit", emission, { sanitize: true });
     const probe = buildProbe("reinit", archive, outDir, { sanitize: true });
     const run = runProbe(probe);
@@ -516,7 +537,7 @@ survived, sink_calls=1
     expect(run.stdout).toBe(SESSION + SESSION + SESSION);
   });
 
-  platformTest("K10: K5/K7 under ASan", async () => {
+  asanTest("K10: K5/K7 under ASan", async () => {
     const { archive, outDir } = await buildLibrary("traps", emission, { sanitize: true });
     const probe = buildProbe("traps", archive, outDir, { sanitize: true });
     const trap = runProbe(probe, ["trap"]);

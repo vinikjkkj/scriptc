@@ -1,3 +1,4 @@
+// @deferred-fences: 2
 // Every BigInt operation that ECMA-262 says raises a RangeError, caught.
 //
 // `big.div`, `big.rem`, `big.pow` and `big.fromF64` all raise a CATCHABLE

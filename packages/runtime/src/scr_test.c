@@ -453,13 +453,51 @@ static void scr_test_info_line(const char *label, double value) {
  * spaces per line. Node appends the stack frames and an inspect property
  * block; this runtime stops at the message (SEMANTICS.md — the harness
  * strips both sides). */
+/* One path character, compared the way the host filesystem compares it.
+ * On Windows `/` and `\` are the same separator and names are
+ * case-insensitive, and the two spellings genuinely MEET here: the
+ * compiler embeds the location with forward slashes on every host, while
+ * getcwd() answers `G:\dir`. A byte compare therefore never matched on
+ * win32, so every failing test printed its ABSOLUTE location where Node
+ * prints the cwd-relative one. */
+static bool scr_test_path_eq(char a, char b) {
+#ifdef _WIN32
+  if (a == '/') a = '\\';
+  if (b == '/') b = '\\';
+  if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+  if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+#endif
+  return a == b;
+}
+
+static bool scr_test_is_sep(char c) {
+#ifdef _WIN32
+  return c == '/' || c == '\\';
+#else
+  return c == '/';
+#endif
+}
+
 static void scr_test_print_at(const ScrStr *at) {
   fputs("test at ", stdout);
   char cwd[4096];
   if (getcwd(cwd, sizeof cwd)) {
     size_t cl = strlen(cwd);
-    if (at->len > cl + 1 && memcmp(at->data, cwd, cl) == 0 && at->data[cl] == '/') {
-      fwrite(at->data + cl + 1, 1, at->len - cl - 1, stdout);
+    bool match = at->len > cl + 1 && scr_test_is_sep(at->data[cl]);
+    for (size_t i = 0; match && i < cl; i++) {
+      if (!scr_test_path_eq(at->data[i], cwd[i])) match = false;
+    }
+    if (match) {
+      /* Node renders the relative path with the platform separator
+       * (`tests\fixtures\…` on Windows), so the tail is re-spelled the
+       * way path.relative would spell it. Identity off win32. */
+      for (size_t i = cl + 1; i < at->len; i++) {
+        char c = at->data[i];
+#ifdef _WIN32
+        if (c == '/') c = '\\';
+#endif
+        fputc(c, stdout);
+      }
       fputc('\n', stdout);
       return;
     }

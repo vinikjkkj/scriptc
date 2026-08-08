@@ -56,6 +56,7 @@ import { existsSync, globSync, mkdirSync, readFileSync, writeFileSync } from "no
 import { basename, dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compileLibrary } from "@scriptc/compiler";
+import { NM_DEFINED_ONLY, WIN32_EMBEDDER_LIBS } from "./cc.js";
 
 const enabled = process.env["SCRIPTC_CROSS"] === "1";
 
@@ -78,14 +79,16 @@ const TARGETS = [
 ] as const;
 type Target = (typeof TARGETS)[number];
 
-/* The win32 embedder link contract: the system DLLs the archive's runtime
- * units import beyond the CRT — advapi32 (RtlGenRandom behind
- * arc4random_buf, GetUserNameA), iphlpapi (GetAdaptersAddresses behind
+/* The win32 embedder link contract (WIN32_EMBEDDER_LIBS, imported from
+ * tests/harness/cc.ts): the system DLLs the archive's runtime units import
+ * beyond the CRT — advapi32 (RtlGenRandom behind arc4random_buf,
+ * GetUserNameA), iphlpapi (GetAdaptersAddresses behind
  * os.networkInterfaces), ws2_32 (inet_ntop/htonl) — exactly the
  * unconditional win32 libs cc.ts links into every win32 executable. An
  * archive carries no -l flags, so a win32 embedder spells these on its own
- * link line; the probe links pin the set. */
-const WIN32_EMBEDDER_LIBS = ["-ladvapi32", "-liphlpapi", "-lws2_32"];
+ * link line; the probe links pin the set. The DEFAULT library lanes now
+ * link their probes through the same helper, so a win32 HOST gets the same
+ * recipe this cross lane has always used for the windows triple. */
 
 type Emission = "llvm" | "c";
 const EMISSIONS: Emission[] = ["llvm", "c"];
@@ -185,7 +188,7 @@ function nmSymbols(archive: string): { defined: Set<string>; undef: Set<string> 
     }
     return set;
   };
-  const defined = parse(execFileSync("nm", ["-gU", archive], { encoding: "utf8" }));
+  const defined = parse(execFileSync("nm", [...NM_DEFINED_ONLY, archive], { encoding: "utf8" }));
   const undef = parse(execFileSync("nm", ["-u", archive], { encoding: "utf8" }));
   return { defined, undef };
 }

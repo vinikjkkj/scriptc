@@ -5,15 +5,24 @@ import { analyze, renderCoverage } from "@scriptc/compiler";
 import { shardSelect, shardSuffix } from "./shard.js";
 
 const repoRoot = join(import.meta.dirname, "../..");
-/* POSIX spelling: the analyzer reports forward-slash paths on every host,
- * so a backslash-spelled repoRoot strips nothing on win32 and the snapshot
- * carries an absolute path. No-op elsewhere. */
-const repoRootPosix = repoRoot.split("\\").join("/");
+/* POSIX spelling on BOTH sides. The diagnostics the analyzer renders carry
+ * forward slashes on every host, but `coverage.file` is the entry path as
+ * the caller spelled it — join() hands that back with backslashes on win32,
+ * so normalizing only the needle (c3c35d2's fix elsewhere) still stripped
+ * nothing here and every snapshot header came out absolute. Worse than
+ * cosmetic: renderCoverage lays its code column out against the widest
+ * line, so an absolute header silently re-flowed every table too. No-op
+ * off win32. */
+const posix = (s: string): string => s.split("\\").join("/");
+const repoRootPosix = posix(repoRoot);
 const fixture = (name: string) => join(repoRoot, "tests/coverage-fixtures", name);
 
 function report(path: string, opts: { dynamic?: boolean } = {}): string {
   const { coverage } = analyze(path, opts);
-  return renderCoverage({ ...coverage, file: coverage.file.replace(repoRootPosix + "/", "") });
+  return renderCoverage({
+    ...coverage,
+    file: posix(coverage.file).replace(repoRootPosix + "/", ""),
+  });
 }
 
 test("mixed program: percentage and grouped blockers", async () => {
