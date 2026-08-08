@@ -2825,6 +2825,12 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
 static const char *scr_dyn_kind_name(const ScrDyn *d);
 /* Is this box the %Uint8Array% singleton? Defined with it, below. */
 static bool scr_u8_is_ctor(const ScrDyn *d);
+/* `Uint8Array.from` / `Uint8Array.of`, the two STATIC methods a keyed
+ * read on the %Uint8Array% box must answer. +1, or NULL for every other
+ * name. Defined with the singletons, below; declared here because
+ * scr_dyn_fn_get is the one place the read arrives and it comes first in
+ * the file. */
+static ScrDyn *scr_u8_static_member(const char *key, size_t key_len);
 /* Own-property presence on a FUNC node, for `in` and Object.hasOwn. It
  * asks scr_dyn_fn_get, so presence can never disagree with what the READ
  * answers: the property table first, then the name/length built-ins.
@@ -2838,6 +2844,24 @@ bool scr_dyn_fn_has(const ScrDyn *v, const char *key, size_t key_len) {
   if (m == NULL) return false;
   scr_dyn_release(m);
   return true;
+}
+/* The OWN half of the same question, which is NOT the same answer for
+ * one receiver: `Uint8Array.from` and `Uint8Array.of` are INHERITED from
+ * %TypedArray% in Node, so `Object.hasOwn(Uint8Array, "from")` is FALSE
+ * there while `"from" in Uint8Array` stays true. It is the split
+ * %Uint8Array.prototype% models with a real [[Prototype]] link, spelled
+ * out here instead because a FUNC box walks no chain. `name`, `length`
+ * and `BYTES_PER_ELEMENT` are all genuinely OWN in Node and keep
+ * answering true through both. */
+bool scr_dyn_fn_has_own(const ScrDyn *v, const char *key, size_t key_len) {
+  if (scr_u8_is_ctor(v)) {
+    ScrDyn *st = scr_u8_static_member(key, key_len); /* +1, or NULL */
+    if (st != NULL) {
+      scr_dyn_release(st);
+      return false;
+    }
+  }
+  return scr_dyn_fn_has(v, key, key_len);
 }
 /* `key in v` with a RUNTIME key (the compile-time dynHasKey fold, per
  * value): OBJ answers own-member presence AND the prototype chain (`in`
@@ -3913,6 +3937,16 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
   if (key_len == 17 && memcmp(key, "BYTES_PER_ELEMENT", 17) == 0 && scr_u8_is_ctor(d)) {
     return scr_dyn_new_num(1);
   }
+  /* `Uint8Array.from` and `Uint8Array.of`. Off the BOX for the same
+   * reason BYTES_PER_ELEMENT is, and for a second one Node states
+   * itself: both are INHERITED from %TypedArray%, so `Object.hasOwn(
+   * Uint8Array, "from")` is FALSE there and a table entry would make it
+   * true. One box each for the process, so `Uint8Array.from ===
+   * Uint8Array.from` is JS identity. */
+  if (scr_u8_is_ctor(d)) {
+    ScrDyn *st = scr_u8_static_member(key, key_len); /* +1, or NULL */
+    if (st != NULL) return st;
+  }
   /* `F.prototype` on a function that never assigned one: JS has ALREADY
    * created that object (a function declaration owns a writable
    * `prototype` own property from the moment it exists), so answering
@@ -4261,12 +4295,22 @@ ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *ar
  * of merely becoming unreachable. Each method and accessor box is a
  * ZERO-capture closure, so none of them holds a reference back to the
  * object it is defined on. */
-static ScrDyn *scr_u8_ctor;  /* %Uint8Array% */
-static ScrDyn *scr_u8_proto; /* %Uint8Array.prototype% */
-static ScrDyn *scr_ta_proto; /* %TypedArray%.prototype */
+static ScrDyn *scr_u8_ctor;    /* %Uint8Array% */
+static ScrDyn *scr_u8_proto;   /* %Uint8Array.prototype% */
+static ScrDyn *scr_ta_proto;   /* %TypedArray%.prototype */
+static ScrDyn *scr_u8_from_fn; /* %TypedArray%.from — see below */
+static ScrDyn *scr_u8_of_fn;   /* %TypedArray%.of   — see below */
 
 static void scr_u8_teardown(void) {
   if (scr_u8_proto != NULL) scr_dyn_obj_drop_hidden(scr_u8_proto, "constructor", 11);
+  /* The two statics hang off nothing but these two roots (they are
+   * answered off the BOX, never stored in its property table), so
+   * releasing them here is the whole of their teardown — no cycle to
+   * break, unlike the prototype's `constructor` back-link above. */
+  scr_dyn_release(scr_u8_from_fn);
+  scr_u8_from_fn = NULL;
+  scr_dyn_release(scr_u8_of_fn);
+  scr_u8_of_fn = NULL;
   scr_dyn_release(scr_u8_ctor);
   scr_u8_ctor = NULL;
   scr_dyn_release(scr_u8_proto);
@@ -4430,6 +4474,304 @@ SCR_U8_ACCESSOR(byteOffset, 2)
 SCR_U8_ACCESSOR(buffer, 3)
 #undef SCR_U8_ACCESSOR
 
+/* ── %TypedArray%.from and %TypedArray%.of ─────────────────────────────
+ * The two STATIC methods on the constructor. protobufjs reads the first
+ * one as a VALUE and never calls it —
+ *
+ *   util._Buffer_from = Buffer.from !== Uint8Array.from && Buffer.from || …
+ *
+ * — but a value that cannot be called is not a function, so both are
+ * real: Node's names, Node's arities, Node's algorithm.
+ *
+ * They live on %TypedArray%, the constructor Uint8Array INHERITS from,
+ * which is why they are answered off the box instead of out of its
+ * property table (scr_dyn_fn_get): `Object.hasOwn(Uint8Array, "from")`
+ * is false in Node, and `Object.getOwnPropertyNames(Uint8Array)` lists
+ * length/name/prototype/BYTES_PER_ELEMENT/fromBase64/fromHex — not
+ * these. One box each for the process, so `===` is identity. The two
+ * boxes are declared with the other three singletons above, because the
+ * teardown that releases them comes first in the file. */
+
+/* `C = this`. Node builds the result through the RECEIVER constructor,
+ * so a receiver that is not one throws before the source is even looked
+ * at. Two V8 renderings, both verified against v25: a NON-callable
+ * receiver is "<recv> is not a constructor" (`5`, `undefined`, `null`,
+ * `[object Array]`, `#<Object>` — scr_u8_put_recv's spellings, which are
+ * V8's), and a callable one that is not a typed-array constructor gets
+ * past IsConstructor and fails inside TypedArrayCreate with "Method
+ * %TypedArray%.<name> called on incompatible receiver #<F>". */
+static bool scr_u8_static_recv(const char *name) {
+  ScrDyn *self = scr_dyn_this_get(); /* +1; the undefined singleton with no binding */
+  if (self == scr_u8_ctor) {
+    scr_dyn_release(self);
+    return true;
+  }
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  if (self->kind == SCR_DYN_FUNC) {
+    scr_jb_puts(&b, "Method %TypedArray%.");
+    scr_jb_puts(&b, name);
+    scr_jb_puts(&b, " called on incompatible receiver #<");
+    scr_jb_puts(&b, self->v.fn.name != NULL ? self->v.fn.name : "Function");
+    scr_jb_puts(&b, ">");
+  } else {
+    scr_u8_put_recv(&b, self, false);
+    scr_jb_puts(&b, " is not a constructor");
+  }
+  scr_dyn_release(self);
+  scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+  return false;
+}
+
+/* The mapfn that is present and not callable. V8 spells the value into
+ * this one and spells it by TYPE: `number 5`, `string "x"`, `object
+ * null`, and a bare `object` for everything else (it prints no value for
+ * an ordinary object). */
+static void scr_u8_throw_not_fn(const ScrDyn *f) {
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  switch (f->kind) {
+  case SCR_DYN_NULL:
+    scr_jb_puts(&b, "object null");
+    break;
+  case SCR_DYN_NUM:
+  case SCR_DYN_BOOL:
+  case SCR_DYN_STR: {
+    scr_jb_puts(&b, f->kind == SCR_DYN_NUM      ? "number "
+                    : f->kind == SCR_DYN_BOOL   ? "boolean "
+                                                : "string ");
+    ScrStr *s = scr_dyn_string_coerce_js(f); /* +1; never throws for these */
+    if (f->kind == SCR_DYN_STR) scr_jb_puts(&b, "\"");
+    if (s != NULL) {
+      scr_jb_write(&b, s->data, s->len);
+      scr_str_release(s);
+    }
+    if (f->kind == SCR_DYN_STR) scr_jb_puts(&b, "\"");
+    break;
+  }
+  default:
+    scr_jb_puts(&b, "object");
+    break;
+  }
+  scr_jb_puts(&b, " is not a function");
+  scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+}
+
+/* ToLength: NaN and anything <= 0 are 0, a fraction truncates. The upper
+ * clamp is scr_bytes_new's RangeError, which is the one a real
+ * allocation of that size would hit anyway. */
+static double scr_u8_to_length(double n) {
+  if (n != n || n <= 0) return 0;
+  return floor(n);
+}
+
+/* Is `d` a source %TypedArray%.from can read exactly here? The four
+ * kinds with a real answer are ARR, BYTES, STR (iterated by CODE POINT,
+ * like Node) and the array-like walk over OBJ/FUNC; NUM and BOOL have no
+ * `length` at all and are Node's empty result. A handle, a promise or an
+ * engine value could be iterable in Node and is not readable here, so it
+ * refuses by name rather than answering an empty typed array. */
+static bool scr_u8_from_source_ok(const ScrDyn *d) {
+  switch (d->kind) {
+  case SCR_DYN_ARR:
+  case SCR_DYN_BYTES:
+  case SCR_DYN_STR:
+  case SCR_DYN_OBJ:
+  case SCR_DYN_FUNC:
+  case SCR_DYN_NUM:
+  case SCR_DYN_BOOL:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static ScrDyn *scr_u8_from_impl(ScrDyn *const *args, size_t argc) {
+  if (!scr_u8_static_recv("from")) return NULL;
+  const ScrDyn *src = argc > 0 ? args[0] : scr_dyn_undefined();
+  const ScrDyn *mapfn = argc > 1 ? args[1] : scr_dyn_undefined();
+  const ScrDyn *this_arg = argc > 2 ? args[2] : scr_dyn_undefined();
+  /* The mapfn check comes BEFORE the source is touched (the spec's step
+   * order — `Uint8Array.from(null, 5)` blames the 5, not the null). */
+  bool mapping = mapfn->kind != SCR_DYN_UNDEF;
+  if (mapping && mapfn->kind != SCR_DYN_FUNC) {
+    scr_u8_throw_not_fn(mapfn);
+    return NULL;
+  }
+  if (src->kind == SCR_DYN_UNDEF || src->kind == SCR_DYN_NULL) {
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, src->kind == SCR_DYN_NULL ? "object null" : "undefined");
+    scr_jb_puts(&b, " is not iterable (cannot read property Symbol(Symbol.iterator))");
+    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+    return NULL;
+  }
+  if (!scr_u8_from_source_ok(src)) {
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "Uint8Array.from over a ");
+    scr_jb_puts(&b, scr_dyn_kind_name(src));
+    scr_jb_puts(&b, " is not supported yet"
+                    " (an array, another typed array, a string, or an array-like object with a"
+                    " 'length' — this tier cannot run a value's own iterator)");
+    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+    return NULL;
+  }
+  /* A STRING iterates by CODE POINT, so a surrogate pair is ONE element
+   * (and, being a two-unit string, coerces to NaN → 0 — Node's answer).
+   * The boundaries are computed once; `len` is the count. */
+  size_t *cp = NULL;
+  double len = 0;
+  switch (src->kind) {
+  case SCR_DYN_ARR:
+    len = (double)src->v.arr.len;
+    break;
+  case SCR_DYN_BYTES:
+    len = scr_bytes_len(src->v.bytes);
+    break;
+  case SCR_DYN_STR: {
+    size_t units = (size_t)scr_str_utf16_len(src->v.str);
+    cp = (size_t *)malloc((units + 1) * sizeof *cp);
+    if (cp == NULL) return NULL;
+    size_t n = 0;
+    for (size_t i = 0; i < units;) {
+      double u = scr_str_char_code_at(src->v.str, (double)i);
+      size_t w = 1;
+      if (u >= 0xD800 && u <= 0xDBFF && i + 1 < units) {
+        double lo = scr_str_char_code_at(src->v.str, (double)(i + 1));
+        if (lo >= 0xDC00 && lo <= 0xDFFF) w = 2;
+      }
+      cp[n++] = i;
+      i += w;
+    }
+    cp[n] = units;
+    len = (double)n;
+    break;
+  }
+  case SCR_DYN_OBJ: {
+    ScrDyn *lv = scr_dyn_obj_key_get((ScrDyn *)src, "length", 6); /* +1, or NULL */
+    if (lv == NULL) return NULL;                                  /* a getter threw */
+    double n = scr_dyn_to_number(lv);
+    scr_dyn_release(lv);
+    if (scr_exc_pending()) return NULL;
+    len = scr_u8_to_length(n);
+    break;
+  }
+  default: {
+    /* FUNC (its arity IS its `length`), NUM and BOOL (no `length` at
+     * all, so zero elements — Node's answer for `Uint8Array.from(5)`). */
+    ScrDyn *lv = src->kind == SCR_DYN_FUNC ? scr_dyn_fn_get(src, "length", 6) : NULL;
+    double n = lv != NULL ? scr_dyn_to_number(lv) : 0;
+    scr_dyn_release(lv);
+    if (scr_exc_pending()) return NULL;
+    len = scr_u8_to_length(n);
+    break;
+  }
+  }
+  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, len); /* +1, or NULL pending */
+  if (out == NULL) {
+    free(cp);
+    return NULL;
+  }
+  scr_bytes_stamp_plain(out);
+  for (double k = 0; k < len; k += 1) {
+    ScrDyn *v = NULL; /* +1 */
+    switch (src->kind) {
+    case SCR_DYN_ARR:
+      v = scr_dyn_retain(src->v.arr.items[(size_t)k]);
+      break;
+    case SCR_DYN_BYTES:
+      v = scr_dyn_new_num(scr_bytes_get(src->v.bytes, k));
+      break;
+    case SCR_DYN_STR: {
+      size_t i = (size_t)k;
+      ScrStr *piece = scr_str_slice(src->v.str, (double)cp[i], (double)cp[i + 1]); /* +1 */
+      v = scr_dyn_new_str(piece);                                                  /* retains */
+      scr_str_release(piece);
+      break;
+    }
+    default: {
+      char key[32];
+      int kl = snprintf(key, sizeof key, "%.0f", k);
+      v = src->kind == SCR_DYN_OBJ ? scr_dyn_obj_key_get((ScrDyn *)src, key, (size_t)kl)
+                                   : scr_dyn_fn_get(src, key, (size_t)kl);
+      if (v == NULL && !scr_exc_pending()) v = scr_dyn_retain(scr_dyn_undefined());
+      break;
+    }
+    }
+    if (v == NULL) { /* a getter threw */
+      free(cp);
+      scr_bytes_release(out);
+      return NULL;
+    }
+    if (mapping) {
+      ScrDyn *kv = scr_dyn_new_num(k); /* +1 */
+      ScrDyn *cargs[2] = {v, kv};
+      scr_dyn_this_push_dyn(this_arg);
+      ScrDyn *m = scr_dyn_call(mapfn, cargs, 2, "mapfn"); /* +1, or NULL pending */
+      scr_dyn_this_pop();
+      scr_dyn_release(kv);
+      scr_dyn_release(v);
+      v = m;
+      if (v == NULL) {
+        free(cp);
+        scr_bytes_release(out);
+        return NULL;
+      }
+    }
+    double num = scr_dyn_to_number(v);
+    scr_dyn_release(v);
+    if (scr_exc_pending()) { /* a Symbol element, a BigInt, a throwing valueOf */
+      free(cp);
+      scr_bytes_release(out);
+      return NULL;
+    }
+    scr_bytes_set(out, k, num); /* the ToUint8 wrap — 300 is 44, like Node */
+  }
+  free(cp);
+  ScrDyn *d = scr_dyn_new_bytes_ref(out); /* +1 on out */
+  scr_bytes_release(out);
+  return d;
+}
+
+static ScrDyn *scr_u8_of_impl(ScrDyn *const *args, size_t argc) {
+  if (!scr_u8_static_recv("of")) return NULL;
+  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)argc); /* +1, or NULL pending */
+  if (out == NULL) return NULL;
+  scr_bytes_stamp_plain(out);
+  for (size_t i = 0; i < argc; i++) {
+    double v = scr_dyn_to_number(args[i]);
+    if (scr_exc_pending()) {
+      scr_bytes_release(out);
+      return NULL;
+    }
+    scr_bytes_set(out, (double)i, v);
+  }
+  ScrDyn *d = scr_dyn_new_bytes_ref(out);
+  scr_bytes_release(out);
+  return d;
+}
+
+static ScrDyn *scr_u8_s_from(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  return scr_u8_from_impl(args, argc);
+}
+
+static ScrDyn *scr_u8_s_of(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  return scr_u8_of_impl(args, argc);
+}
+
+static ScrDyn *scr_u8_static_member(const char *key, size_t key_len) {
+  if (key_len == 4 && memcmp(key, "from", 4) == 0 && scr_u8_from_fn != NULL) {
+    return scr_dyn_retain(scr_u8_from_fn);
+  }
+  if (key_len == 2 && memcmp(key, "of", 2) == 0 && scr_u8_of_fn != NULL) {
+    return scr_dyn_retain(scr_u8_of_fn);
+  }
+  return NULL;
+}
+
 /* Calling %Uint8Array% without `new`. `new` never reaches this thunk —
  * scr_dyn_construct routes on pointer identity — so the throw is the
  * body's whole job, and it is Node's. */
@@ -4497,9 +4839,14 @@ static void scr_u8_build(void) {
   scr_dyn_release(table);
   scr_dyn_obj_define_hidden_data(p, "constructor", 11, c, true, true);
 
+  /* The two statics. Built LAST because scr_u8_static_recv compares the
+   * ambient receiver against `scr_u8_ctor`, and the assignment below is
+   * what makes that pointer real. */
   scr_ta_proto = ta;
   scr_u8_proto = p;
   scr_u8_ctor = c;
+  scr_u8_from_fn = scr_u8_new_func("from", scr_u8_s_from, 1); /* +1 */
+  scr_u8_of_fn = scr_u8_new_func("of", scr_u8_s_of, 0);       /* +1 */
   scr_atexit(scr_u8_teardown);
 }
 
@@ -4515,6 +4862,20 @@ static bool scr_u8_is_ctor(const ScrDyn *d) {
 ScrDyn *scr_dyn_uint8array_prototype(void) {
   scr_u8_build();
   return scr_dyn_retain(scr_u8_proto);
+}
+
+/* `Uint8Array.from` / `Uint8Array.of` written STATICALLY. The same two
+ * boxes a keyed read off the constructor answers (scr_u8_static_member),
+ * so the two spellings are one function object and `Uint8Array.from ===
+ * Uint8Array.from` holds through either. */
+ScrDyn *scr_dyn_uint8array_from(void) {
+  scr_u8_build();
+  return scr_dyn_retain(scr_u8_from_fn);
+}
+
+ScrDyn *scr_dyn_uint8array_of(void) {
+  scr_u8_build();
+  return scr_dyn_retain(scr_u8_of_fn);
 }
 
 /* `b.constructor` on a typed array. Node answers the constructor
@@ -5227,7 +5588,7 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
     }
     return is_index != 0 && idx < v->v.arr.len;
   }
-  if (v->kind == SCR_DYN_FUNC) return scr_dyn_fn_has(v, key->data, key->len);
+  if (v->kind == SCR_DYN_FUNC) return scr_dyn_fn_has_own(v, key->data, key->len);
   return false;
 }
 ScrDyn *scr_dyn_obj_values(const ScrDyn *v) { return scr_dyn_objwalk(v, SCR_OBJWALK_VALUES); }

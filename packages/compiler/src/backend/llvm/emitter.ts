@@ -832,6 +832,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.errorProto": "scr_dyn_error_prototype",
   "dyn.u8Ctor": "scr_dyn_uint8array_ctor",
   "dyn.u8Proto": "scr_dyn_uint8array_prototype",
+  "dyn.u8From": "scr_dyn_uint8array_from",
+  "dyn.u8Of": "scr_dyn_uint8array_of",
   "dyn.objCreateProto": "scr_dyn_obj_create_proto",
   "dyn.objCreateDescs": "scr_dyn_obj_create_descs",
   "dyn.objCreateNullDescs": "scr_dyn_obj_create_null_descs",

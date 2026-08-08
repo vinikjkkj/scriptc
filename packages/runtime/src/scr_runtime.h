@@ -3243,6 +3243,22 @@ ScrDyn *scr_dyn_uint8array_ctor(void);
 /* %Uint8Array.prototype% itself — the same object `Uint8Array.prototype`
  * answers, for the spelling that reaches the member statically. +1. */
 ScrDyn *scr_dyn_uint8array_prototype(void);
+/* `Uint8Array.from` and `Uint8Array.of`: the two STATIC methods, one box
+ * each for the process. They are answered off the constructor BOX rather
+ * than out of its property table because Node INHERITS them from
+ * %TypedArray% — `Object.hasOwn(Uint8Array, "from")` is false there —
+ * and these two entry points are the same boxes a keyed read answers, so
+ * the static and the dynamic spelling cannot be two functions.
+ *
+ * `from(source, mapfn?, thisArg?)` reads an array, another typed array,
+ * a string (by CODE POINT) or an array-like `length`/index walk over an
+ * object or a function; a receiver that is not the Uint8Array
+ * constructor, a non-callable mapfn and a nullish source all throw
+ * Node's own TypeErrors, and a source this tier cannot iterate (a handle,
+ * a promise, an engine value) refuses by name rather than answering an
+ * empty typed array. +1, or NULL with an exception pending. */
+ScrDyn *scr_dyn_uint8array_from(void);
+ScrDyn *scr_dyn_uint8array_of(void);
 /* `b.constructor` on a typed array — the constructor above for a plain
  * Uint8Array, and a LOUD refusal for a Buffer or a non-u8 element kind,
  * whose constructors are different functions this tier does not hold.
@@ -3611,6 +3627,10 @@ ScrDyn *scr_dyn_fn_props(ScrDyn *d);
  * ("call" in f is true there), which is the missing prototype chain
  * rather than this predicate. Object.hasOwn is exact. */
 bool scr_dyn_fn_has(const ScrDyn *v, const char *key, size_t key_len);
+/* ...and the OWN half. The two differ on exactly two names: Node
+ * INHERITS `from` and `of` from %TypedArray%, so `Object.hasOwn(
+ * Uint8Array, "from")` is false there while `in` is true. */
+bool scr_dyn_fn_has_own(const ScrDyn *v, const char *key, size_t key_len);
 /* Object.defineProperties over dyn values (targets: OBJ and FUNC). Its
  * ACCESSOR half is the shared one, so `{get,set}` cannot mean two things
  * depending on the spelling; its DATA half is the GRANDFATHERED one —
