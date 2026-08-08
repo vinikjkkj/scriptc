@@ -806,6 +806,12 @@ double scr_math_min(double a, double b);
 double scr_math_round(double x);
 double scr_math_max(double a, double b);
 double scr_math_random(void);
+/* Math.pow AND the `**` operator (one spec operation, ECMA-262
+ * Number::exponentiate). NOT C pow(): pow(1, NaN) and pow(-1, ±Infinity)
+ * are 1.0 in C where JS answers NaN. */
+double scr_math_pow(double x, double y);
+/* Math.clz32 — leading zeros of ToUint32(x); 32 for zero. */
+double scr_math_clz32(double x);
 
 double scr_arr_get_f64(ScrArr *a, double i); /* trap OOB */
 bool scr_arr_get_bool(ScrArr *a, double i);  /* trap OOB */
@@ -3277,6 +3283,13 @@ void scr_dyn_obj_set(ScrDyn *obj, const char *key, size_t key_len, ScrDyn *value
  * non-object kinds throw Node's catchable TypeErrors (strict-mode
  * wording). All three operands BORROWED (the value is retained in). */
 void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value);
+/* `delete recv[key]` — JS's [[Delete]], own-property only, and an ANSWER:
+ * true when nothing of that name is own or when it was removed. Both
+ * borrowed. Throws: V8's strict-mode "Cannot delete property" for a
+ * non-configurable own accessor, Node's ToObject TypeError on an
+ * undefined/null receiver, and a loud refusal for an array-element delete
+ * (a hole has no representation here) — may-throw. */
+bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key);
 /* `key in v` with a runtime key — the dynHasKey fold per value (OBJ own
  * members, ARR length/valid indices, false elsewhere). Never throws. */
 bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key);

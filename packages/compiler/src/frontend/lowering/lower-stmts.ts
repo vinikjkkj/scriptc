@@ -4344,13 +4344,26 @@ function isNumericCaseTest(e: ts.Expression): boolean {
     };
   }
 
-/** Statement-position `delete`: process.env keys → process.envUnset
-   * (unsetenv), pure `Record<string, T>` keys → recordKeyDelete (the
-   * overflow Map delete), declared OPTIONAL fields → the undefined-arm
-   * write (absence IS the undefined arm; divergence 60). Everything else
-   * fences with the honest reason — a required field is a struct slot no
-   * runtime can remove. */
-  function lowerDeleteStatement(L: Lowerer, expr: ts.DeleteExpression): IrStmt {
+/** `delete o.k` — the EFFECT and the ANSWER, separately, because JS's
+   * delete is an operator and not a statement form: it evaluates to a
+   * boolean, and a minifier writes the guarded spelling as one
+   * (`k !== name && delete this[k]` is what terser makes of pbjs's
+   * `oneOfSetter`, and there the delete is the right operand of `&&`).
+   *
+   * The arms: a checked-dynamic receiver → dyn.keyDelete, which IS the
+   * answer (own data member, own accessor, or nothing there — JS's
+   * [[Delete]]); process.env keys → process.envUnset (unsetenv);
+   * pure `Record<string, T>` keys → recordKeyDelete (the overflow Map
+   * delete); declared OPTIONAL fields → the undefined-arm write (absence
+   * IS the undefined arm; divergence 60). Everything else fences with the
+   * honest reason — a required field is a struct slot no runtime can
+   * remove.
+   *
+   * Every arm but the dyn one answers `true`, and that is JS's answer for
+   * them: a configurable own property removed, or a name that was not own
+   * to begin with. Only [[Delete]] over a real object can ANSWER false,
+   * and only the dyn arm has one. */
+  function lowerDeleteParts(L: Lowerer, expr: ts.DeleteExpression): { pre: IrStmt[]; result: IrExpr } {
     const loc = locOf(expr);
     let target: ts.Expression = expr.expression;
     while (ts.isParenthesizedExpression(target)) target = target.expression;
@@ -4372,18 +4385,49 @@ function isNumericCaseTest(e: ts.Expression): boolean {
       }
       return key;
     };
+    const yes: IrExpr = { kind: "boolLit", value: true, type: BOOL, loc };
     if (L.isProcessEnv(target.expression)) {
       return {
-        kind: "exprStmt",
-        expr: { kind: "libCall", fn: "process.envUnset", args: [lowerKey()], type: VOID, loc },
-        loc,
+        pre: [{
+          kind: "exprStmt",
+          expr: { kind: "libCall", fn: "process.envUnset", args: [lowerKey()], type: VOID, loc },
+          loc,
+        }],
+        result: yes,
       };
     }
     const obj = L.lowerExpr(target.expression);
+    // A CHECKED-DYNAMIC receiver (`delete this[names[i]]` — pbjs's oneOf
+    // setter clearing its siblings; `this` inside a plain JS function
+    // expression is untyped): JS's [[Delete]] over the real object, which
+    // is the ONE arm with a false to answer. The key is a property key,
+    // so a number or an untyped key stringifies exactly as an indexed
+    // READ does (the o[k] === o[String(k)] rule).
+    if (obj.type.kind === "dyn") {
+      let key: IrExpr = ts.isPropertyAccessExpression(target)
+        ? { kind: "strLit", value: target.name.text, type: STRING, loc: locOf(target.name) }
+        : L.lowerExpr(target.argumentExpression);
+      const keyNode = ts.isPropertyAccessExpression(target) ? target.name : target.argumentExpression;
+      if (key.type.kind === "f64" || key.type.kind === "dyn") key = L.ensureString(key, keyNode);
+      if (key.type.kind !== "string") {
+        L.unsupported(
+          "SC1090",
+          keyNode,
+          `'delete' with '${L.fmt(key.type)}' keys (property keys are strings)`,
+        );
+      }
+      return {
+        pre: [],
+        result: { kind: "libCall", fn: "dyn.keyDelete", args: [obj, key], type: BOOL, loc },
+      };
+    }
     if (obj.type.kind === "record") {
       const shape = L.shapes.get(obj.type.shapeId);
       if (shape?.indexValue && shape.fields.length === 0 && !shape.tuple) {
-        return { kind: "recordKeyDelete", obj, shapeId: obj.type.shapeId, key: lowerKey(), loc };
+        return {
+          pre: [{ kind: "recordKeyDelete", obj, shapeId: obj.type.shapeId, key: lowerKey(), loc }],
+          result: yes,
+        };
       }
       // `delete r.f` of a declared OPTIONAL field (undefined-armed slot) is
       // the undefined-arm write: a monomorphic shape cannot remove its
@@ -4404,7 +4448,10 @@ function isNumericCaseTest(e: ts.Expression): boolean {
       if (field) {
         const absent = L.wrappedUndefined(field.type, loc);
         if (absent) {
-          return { kind: "recordSet", obj, shapeId: obj.type.shapeId, field: field.name, value: absent, loc };
+          return {
+            pre: [{ kind: "recordSet", obj, shapeId: obj.type.shapeId, field: field.name, value: absent, loc }],
+            result: yes,
+          };
         }
       }
       if (shape?.indexValue) {
@@ -4423,8 +4470,30 @@ function isNumericCaseTest(e: ts.Expression): boolean {
     L.unsupported(
       "SC1090",
       expr,
-      `'delete' on '${L.fmt(obj.type)}' receivers (process.env keys and pure Record<string, T> keys delete)`,
+      `'delete' on '${L.fmt(obj.type)}' receivers (process.env keys, checked-dynamic receivers and pure Record<string, T> keys delete)`,
     );
+  }
+
+/** `delete o.k` as a STATEMENT — the effect, with the answer discarded.
+   * A dyn delete has no effect statement of its own (the libCall IS the
+   * delete), so it becomes the discarded call; every other arm already
+   * WAS a statement. */
+  function lowerDeleteStatement(L: Lowerer, expr: ts.DeleteExpression): IrStmt {
+    const loc = locOf(expr);
+    const parts = lowerDeleteParts(L, expr);
+    if (parts.pre.length === 0) return { kind: "exprStmt", expr: parts.result, loc };
+    return parts.pre.length === 1 ? parts.pre[0]! : { kind: "block", body: parts.pre, loc };
+  }
+
+/** `delete o.k` in VALUE position — the effect, then the boolean. The
+   * effect statements are straight-line writes (seqExprSafeStmt's set),
+   * and the dyn arm has none at all: it is one call that both deletes and
+   * answers. */
+  export function lowerDeleteValue(L: Lowerer, expr: ts.DeleteExpression): IrExpr {
+    const loc = locOf(expr);
+    const parts = lowerDeleteParts(L, expr);
+    if (parts.pre.length === 0) return parts.result;
+    return { kind: "seqExpr", stmts: parts.pre, result: parts.result, type: BOOL, loc };
   }
 
 /** The exact `Object.defineProperty(exports|module.exports, "__esModule",

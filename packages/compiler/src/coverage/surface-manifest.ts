@@ -50,6 +50,7 @@ import {
   MAP_METHODS,
   SET_COMBINE_METHODS,
   SET_METHODS,
+  STATIC_MATH_CONSTS,
   STATIC_MATH_FNS,
   STATIC_NUMBER_METHODS,
   STR_METHODS,
@@ -216,6 +217,18 @@ export function generateSurfaceManifest(compilerVersion: string): SurfaceManifes
     } else {
       add({ id: `stdlib.math.${name}`, kind: "stdlib", name: `Math.${name}`, status: "dynamic-only", code: "SC2012" });
     }
+  }
+  // Math's number CONSTANTS are literals — the compiler folds each to a
+  // numLit, in every build. The island `props` table is what is LEFT
+  // over after that, and it is currently empty.
+  for (const name of Object.keys(STATIC_MATH_CONSTS)) {
+    add({
+      id: `stdlib.math.${name}`,
+      kind: "stdlib",
+      name: `Math.${name}`,
+      status: "static",
+      note: "folds to the constant's exact double",
+    });
   }
   for (const name of Object.keys(ISLAND_SURFACE.math.props)) {
     add({ id: `stdlib.math.${name}`, kind: "stdlib", name: `Math.${name}`, status: "dynamic-only", code: "SC2012" });
