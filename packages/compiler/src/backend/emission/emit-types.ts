@@ -569,14 +569,40 @@ export function elemKindC(elem: IrType): string {
     // use for a nested container.
     case "map":
     case "set":
-      return "SCR_ELEM_REF";
+    // Regex values: scr_regex_retain_v/release_v, no trace — a regex holds
+    // only its bytecode and source. The derived-pattern idiom
+    // `[bases].map(p => new RegExp(p))` builds real regex arrays, and
+    // indexOf/includes/=== are the REF kind's pointer identity, which is
+    // exactly JS object identity for RegExp values.
     case "regex":
+    // Promise entries (Promise.all's food): refcounted and cycle-headered
+    // — scr_promise_retain_v/release_v plus scr_promise_trace_v, the same
+    // REF machinery record/object/union elements ride.
+    case "promise":
+    // BigInts are refcounted heap digits (scr_big_retain_v/release_v, no
+    // trace — no references inside), so `bigint[]` is the ordinary ref
+    // element. Arithmetic reads them back through the same slot.
     case "bigint":
+    // Opaque crypto handles. Every one is an ordinary refcounted pointer
+    // with runtime-provided `_v` adapters and nothing to trace: a KeyObject
+    // holds parsed key material, a Hash/Hmac its digest state, a Cipher/
+    // Decipher its stream state. None can reach back at the array holding
+    // it, so a handle-in-array cycle is impossible — the `child`/
+    // `netServer` story under a different spelling. `KeyObject[]` (a key
+    // ring) and `Hash[]` (a rolling-digest column) are the idioms.
     case "keyobj":
     case "hash":
     case "hmac":
     case "cipher":
     case "decipher":
+    // h2 session/stream handles: refcounted like the net pair, and their
+    // listeners drop at settlement, so the session↔stream cycle breaks
+    // there rather than through the array.
+    case "http2Session":
+    case "http2Stream":
+    // AbortSignal handles: refcounted, immutable from the array's side.
+    case "abortSignal":
+      return "SCR_ELEM_REF";
     case "url":
     case "searchParams":
     case "stats":
@@ -600,7 +626,13 @@ export function elemKindC(elem: IrType): string {
     case "undefinedT":
     case "nullT":
     case "abortSignal":
-      throw new Error(`emitter bug: array of ${elem.kind} (frontend rejects these)`);
+      // No ScrArr element representation for these kinds. Reaching here is
+      // an internal error, NOT a user-facing refusal: the frontend's array
+      // rule (mapTypeInner) leaves every one of them unmapped, so a program
+      // spelling one gets SC2009 naming the element type. If this fires, the
+      // two lists have drifted and the frontend gate is what needs the
+      // entry — do not weaken this throw into a guess.
+      throw new Error(`emitter bug: no array element representation for ${elem.kind}`);
     case "void":
       throw new Error("emitter bug: array of void");
     default: {
@@ -608,6 +640,31 @@ export function elemKindC(elem: IrType): string {
       void _exhaustive;
       throw new Error("unreachable");
     }
+  }
+}
+
+/** Does an array of this element construct through scr_arr_new_ref (RC
+ * entry points carried as data) rather than plain scr_arr_new with a
+ * ScrElemKind tag? This is elemKindC's own answer, so the two can never
+ * disagree: exactly the kinds it tags SCR_ELEM_REF take the ref path.
+ *
+ * Cycle-capable inner ARRAYS also need the ref path — their SCR_ELEM_ARR
+ * spelling would hide them from the outer array's trace — but that answer
+ * needs emitter state, so the array case stays with the callers
+ * (arrNewC/arrNewCall), which consult their trace fixpoint first.
+ *
+ * Both backends call this. Before it existed, the C emitter, the LLVM
+ * emitter and elemKindC each carried their own hand-maintained list; they
+ * drifted, and a kind missing from the C list ICEd instead of refusing
+ * (`KeyObject[]`, `bigint[]`, `Hash[]`, `Cipher[]`). One list, no drift. */
+export function arrayElemIsRef(elem: IrType): boolean {
+  if (elem.kind === "array") return false; // caller's trace fixpoint decides
+  try {
+    return elemKindC(elem) === "SCR_ELEM_REF";
+  } catch {
+    // Unrepresentable: let the caller's own path raise its own error (the
+    // C backend rethrows from elemKindC, LLVM raises LlvmUnsupportedError).
+    return false;
   }
 }
 

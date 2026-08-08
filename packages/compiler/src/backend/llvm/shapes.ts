@@ -23,6 +23,7 @@ import {
   mangleRecordStruct,
   mangleRecordTrace,
 } from "../mangle.js";
+import { arrayElemIsRef } from "../emission/emit-types.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 
 /** What the tables need from the emitter: the extern-declaration ledger
@@ -502,16 +503,15 @@ function elemKindNum(elem: IrType): number {
  * construct through scr_arr_new_ref with the element type's `_v` RC entry
  * points; every other element kind keeps the plain scr_arr_new call. */
 export function arrNewCall(host: ShapeHost, elem: IrType, capText: string): string {
+  // The SAME list the C backend and elemKindC use (arrayElemIsRef). This
+  // used to be a third hand-maintained copy and had drifted: it was missing
+  // map/set, so `Map<K,V>[]` refused the LLVM tier and fell back to C for no
+  // reason. A cycle-capable inner array still answers from the trace
+  // fixpoint here, exactly as in arrNewC.
   const useRef =
-    elem.kind === "record" || elem.kind === "object" || elem.kind === "union" || elem.kind === "func" ||
-    elem.kind === "symbol" || // symbol identities: scr_sym_* adapters, no trace
-    elem.kind === "classval" || // class objects: no-op adapters, no trace (immortal statics)
-    elem.kind === "promise" || // promise entries (Promise.all inputs): full REF story
-    elem.kind === "child" || // spawned child handles: scr_child_* adapters, no trace
-    elem.kind === "netServer" || // server handles ([...set] drains): REF, no trace
-    elem.kind === "jsval" || // island handles (`any[]` under --dynamic): REF, no trace
-    elem.kind === "regex" || // RegExp values: scr_regex_* adapters, no trace (no refs inside)
-    (elem.kind === "array" && traceAdapter(host, elem) !== null);
+    elem.kind === "array"
+      ? traceAdapter(host, elem) !== null
+      : arrayElemIsRef(elem);
   if (!useRef) {
     host.declare(`declare ptr @scr_arr_new(i32, i64)`);
     return `call ptr @scr_arr_new(i32 ${elemKindNum(elem)}, i64 ${capText})`;
