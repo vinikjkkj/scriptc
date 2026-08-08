@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleUsesDynInvoke, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
@@ -1226,11 +1226,20 @@ class LlEmitter {
     // Two spellings with distinct temp names: the normal exit and the
     // uncaught-exception exit are separate blocks of the same function.
     // Interned function-value closures are IMMORTAL (rc == SIZE_MAX), so
-    // an own-property table Object.defineProperties hung on one would
-    // outlive the RC audit — release it with the globals (the C emitter's
-    // sc_release_globals tail). Only when the dispatch unit is even
-    // linked (defineProps is the only writer).
-    const fnValueProps = moduleUsesDynInvoke(this.mod) ? [...this.fnValues] : [];
+    // an own-property table hung on one would outlive the RC audit —
+    // release it with the globals (the C emitter's sc_release_globals
+    // tail). UNGATED on purpose: this used to fire only under
+    // moduleUsesDynInvoke, on the premise that Object.defineProperties
+    // was the table's only writer. It is not — a keyed write `F.k = v`
+    // and a keyed READ of `F.prototype` both reach scr_dyn_fn_props, and
+    // the lazily-minted prototype object (scr_dyn_fn_prototype) is stored
+    // in that very table. A program that only ever says `F.prototype.m =
+    // ...` carries no dynInvoke node, so the gate left its props box, its
+    // table and its prototype object live at exit. The release is
+    // NULL-tolerant and props is NULL on every closure never written to,
+    // so releasing unconditionally costs one load and one call per
+    // interned function value at exit and can never be wrong.
+    const fnValueProps = [...this.fnValues];
     if (fnValueProps.length > 0) this.declare(`declare void @scr_box_release(ptr)`);
     const globalReleaseLines = (prefix: string): string[] => {
       const lines: string[] = [];

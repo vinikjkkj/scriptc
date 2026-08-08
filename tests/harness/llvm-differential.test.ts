@@ -52,6 +52,15 @@ const files = shardSelect(
 );
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
 
+// The RC audit is a SEPARATE dial from ASan (cc.ts's optAuditArgs): on a
+// toolchain that cannot link -fsanitize=address, SCRIPTC_RC_AUDIT=1 still
+// turns the corpus into a leak suite. Whichever way it was switched on, the
+// runtime's deliberate "audit skipped" note has to be filtered out of the
+// stderr comparison below, or every loop-exhaustion program reads as a
+// mismatch against Node.
+const rcAudit =
+  sanitize || !["", "0", undefined].includes(process.env["SCRIPTC_RC_AUDIT"]);
+
 // Same known-env contract as the main differential suite.
 process.env["SCRIPTC_TEST_ENV"] = "from-harness";
 
@@ -123,7 +132,7 @@ async function runBinary(cmd: string, args: string[]): Promise<RunResult> {
 }
 
 function comparableStderr(stderr: Buffer): Buffer {
-  if (!sanitize) return stderr;
+  if (!rcAudit) return stderr;
   const lines = stderr.toString("utf8").split("\n");
   const kept = lines.filter(
     (l) =>
