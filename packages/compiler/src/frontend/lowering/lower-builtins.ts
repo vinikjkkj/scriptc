@@ -6991,6 +6991,134 @@ const NUMBER_STATIC_PREDICATES: Record<string, IrLibFn | undefined> = {
   isSafeInteger: "number.isSafeInteger",
 };
 
+/** The lift's function type. `(number: unknown) => boolean` is what the
+ * standard library declares for all four predicates, and it maps to
+ * exactly this — so the lifted closure's type IS the checker's type, in
+ * TypeScript as much as in JavaScript. */
+const NUMBER_PREDICATE_FN_T: IrType = funcOf([DYN], BOOL);
+
+/** A Number PREDICATE static — `isInteger`, `isFinite`, `isNaN`,
+ * `isSafeInteger` — taken as a VALUE rather than called, as a memoized
+ * lifted function. The `objectStaticFnValueOf` lift, one surface over.
+ *
+ * A builtin has no closure representation: it lowers to a libCall at its
+ * CALL sites, so the bare member read fences. protobufjs's `util.js`
+ * needs the value itself:
+ *
+ *     util.isInteger = Number.isInteger || function (value) {
+ *       return typeof value === "number" && isFinite(value) && Math.floor(value) === value;
+ *     };
+ *
+ * — the static bound once at module scope and called through the
+ * property afterwards. This is a genuine VALUE position: `||` yields an
+ * OPERAND, not a boolean, so the read escapes and is CALLED. That is
+ * precisely the case the capability-test rule (stdlibExistenceTestOf)
+ * excludes `&&`/`||` for, and precisely where an opaque identity token
+ * would be a silent wrong answer — the read would succeed and the later
+ * call would fail as "not a function", or worse, answer for a token. The
+ * honest answer is a real function whose body IS the call form's
+ * lowering.
+ *
+ * The body is that lowering plus the kind test the call form gets from
+ * the checker instead:
+ *
+ *     function (v) { if (typeof v === "number") return <number.isX>(v); return false; }
+ *
+ * `NUMBER_STATIC_PREDICATES` maps each member to a libCall over **f64**,
+ * and the ES2015 statics NEVER COERCE — `Number.isInteger("3")` is
+ * `false` where the ES5 global `isNaN`'s ToNumber would have said
+ * otherwise. So `false` for every non-number kind is not a fallback for
+ * an unhandled case, it is the specified answer for it, and the f64 arm
+ * is byte-for-byte the static that a spelled-out call site gets. (This
+ * is the same fact the call form's own comment states, read in the other
+ * direction: it fences non-f64 arguments only because folding to false
+ * there would step past the argument's side effects — a lifted body
+ * receives an already-evaluated value, so it has no effects left to
+ * skip and can answer.)
+ *
+ * The RECEIVER protocol is `undefined` by construction, and that is
+ * decided rather than omitted: all four are properties of the `Number`
+ * constructor whose spec algorithms read no `this` at any step, so
+ * `f.call(anything, x)` is `f(x)`. The lifted body reads no receiver, so
+ * a detached call has nothing to get wrong. (Contrast the `charCodeAt`
+ * lift, whose body MUST resolve an ambient receiver — omitting that
+ * there made `charCodeAt.call(undefined, 0)` answer 117.)
+ *
+ * The gate is the checker's OWN mapped type for the read: the lift is
+ * built only when that type is exactly `(dyn) => bool`. So the value
+ * handed back is what the annotation at the use site promised, and a
+ * declaration that reshaped the member keeps its fence rather than being
+ * answered in a shape this body does not implement.
+ *
+ * STATIC builds only. Under --dynamic a JS value is an island HANDLE
+ * rather than a dyn node, so the kind test would be asking the wrong
+ * question; the island surface owns that build's value position, exactly
+ * as the argument-side island arm of the call form does.
+ *
+ * One divergence, stated: the closure is a fresh allocation per read, so
+ * `Number.isInteger === Number.isInteger` is false where Node says true.
+ * Both lifts above have the same property; no lowered function value in
+ * this compiler carries JS's identity.
+ *
+ * Memoized per program, per member. Null for everything else — the
+ * caller keeps its SC2020 fence. */
+  function numberStaticPredicateFnValueOf(
+    L: Lowerer,
+    expr: ts.PropertyAccessExpression,
+    member: string,
+  ): IrExpr | null {
+    if (expr.questionDotToken) return null;
+    if (L.dynamic) return null;
+    // The CALL form is lowerNumberStaticCall's — including the arities and
+    // the island/nullish argument arms it handles, which must keep their
+    // own paths rather than becoming an arity error against a closure.
+    const parent = expr.parent;
+    if (parent && ts.isCallExpression(parent) && parent.expression === expr) return null;
+    const fn = own(NUMBER_STATIC_PREDICATES, member);
+    if (fn === undefined) return null;
+    const ft = L.mapTypeOf(L.typeOf(expr));
+    if (ft === null || ft === undefined || !typeEquals(ft, NUMBER_PREDICATE_FN_T)) return null;
+    const loc = locOf(expr);
+    const name = `%number.${member}.value`;
+    if (!L.liftedFns.some((f) => f.name === name)) {
+      const argId = "v.0";
+      const vRef: IrExpr = { kind: "varRef", localId: argId, type: DYN, loc };
+      L.liftedFns.push({
+        name,
+        params: [{ localId: argId, name: "v", type: DYN }],
+        returnType: BOOL,
+        locals: [{ id: argId, name: "v", type: DYN, mutable: false }],
+        body: [
+          {
+            kind: "if",
+            cond: { kind: "dynTest", test: "number", value: vRef, type: BOOL, loc },
+            then: [
+              {
+                kind: "return",
+                value: {
+                  kind: "libCall",
+                  fn,
+                  args: [{ kind: "dynCheck", value: vRef, type: F64, loc }],
+                  type: BOOL,
+                  loc,
+                },
+                loc,
+              },
+            ],
+            else_: null,
+            loc,
+          },
+          { kind: "return", value: { kind: "boolLit", value: false, type: BOOL, loc }, loc },
+        ],
+        loc,
+      });
+    }
+    if (process.env["SCRIPTC_NUMFNVALUE_WHY"] !== undefined) {
+      console.error(`[numfnvalue] lift ${loc.file}:${loc.start} ${name}`);
+    }
+    return { kind: "closure", fnName: name, captures: [], type: NUMBER_PREDICATE_FN_T, loc };
+  }
+
 /** The Number constants, baked as literals — non-finite ones included
  * (numLits carry NaN and the infinities; both backends spell them). */
 const NUMBER_CONSTANTS: Record<string, number | undefined> = {
@@ -8150,15 +8278,17 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     return null; // reject lands on lowerPromiseRejectCall / the member fence
   }
 
-/** Property READS on THE `Number` global: the finite constants bake as
-   * number literals. NaN/POSITIVE_INFINITY/NEGATIVE_INFINITY and method
-   * members as values fall through to the member fence. Null for
+/** Property READS on THE `Number` global: the constants bake as number
+   * literals (the non-finite ones included — numLits carry NaN and the
+   * infinities), and the four PREDICATE statics read as values lift to
+   * real functions over the same libCall their call sites take. Every
+   * other member as a value falls through to the member fence. Null for
    * non-Number receivers. */
   export function lowerNumberStaticProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     const member = L.stdlibGlobalMember(expr, "Number");
     if (member === null) return null;
     const value = own(NUMBER_CONSTANTS, member);
-    if (value === undefined) return null;
+    if (value === undefined) return numberStaticPredicateFnValueOf(L, expr, member);
     return { kind: "numLit", value, type: F64, loc: locOf(expr) };
   }
 
