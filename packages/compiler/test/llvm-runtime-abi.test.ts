@@ -31,7 +31,7 @@ import { describe, expect, test } from "vitest";
 import { compile } from "../src/index.js";
 import { rcAdapters } from "../src/backend/emission/emit-types.js";
 import type { IrType } from "../src/ir/nodes.js";
-import { BOOL, F64, STRING, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES } from "../src/ir/nodes.js";
+import { BOOL, F64, isRefCounted, STRING, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES } from "../src/ir/nodes.js";
 
 const repoRoot = join(import.meta.dirname, "../../..");
 const headerPath = join(repoRoot, "packages/runtime/src/scr_runtime.h");
@@ -393,6 +393,35 @@ describe("LLVM backend declares match scr_runtime.h prototypes", () => {
     )];
     expect(kinds.length).toBeGreaterThan(40); // extractor guard
     expect([...kinds].sort()).toEqual(Object.keys(KIND_SAMPLES).sort());
+  });
+
+  /* The SAME question, asked in two places. `isRefCounted` (ir/nodes.ts)
+   * gates frame tracking, retains, releases and NULL-initialized locals;
+   * `rcAdapters` (emit-types.ts) names the symbols those releases call.
+   * A kind the first says no to and the second answers for is a value the
+   * backend knows how to free and never does — which is exactly what six
+   * kinds were: bigint, keyobj, hash, hmac, cipher and decipher had
+   * working adapters on both backends and no frame tracking on either, so
+   * every Hash a program made leaked. The predicate cannot call the table
+   * (the table is backend, the predicate is IR), so the agreement is
+   * pinned here instead, over the same exhaustive sample the test above
+   * keeps honest. */
+  test("isRefCounted and rcAdapters agree, kind for kind", () => {
+    const disagree: string[] = [];
+    let checked = 0;
+    for (const t of [...Object.values(KIND_SAMPLES), ...OBJECT_ROWS]) {
+      if (t === null) continue;
+      checked++;
+      const byPredicate = isRefCounted(t);
+      const byTable = rcAdapters(t) !== null;
+      if (byPredicate !== byTable) {
+        disagree.push(
+          `${t.kind}: isRefCounted=${byPredicate} but rcAdapters=${byTable ? "a pair" : "null"}`,
+        );
+      }
+    }
+    expect(checked).toBeGreaterThan(45); // extractor guard
+    expect(disagree).toEqual([]);
   });
 
   test("every runtime RC adapter pair matches its scr_runtime.h prototype", async () => {

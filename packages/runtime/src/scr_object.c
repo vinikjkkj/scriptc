@@ -37,6 +37,23 @@ static long scr_live_objects = 0;
 long scr_obj_live_count(void) { return scr_live_objects; }
 void scr_obj_alloc_note(void) { scr_live_objects++; }
 void scr_obj_free_note(void) { scr_live_objects--; }
+
+/* The handle kinds' live counters. Here rather than beside their values
+ * because scr_bigint.c, scr_asym.c and scr_cipher_value.c are OPTIONAL
+ * link units and this TU is always linked -- see scr_runtime.h. Off the
+ * audit lane the notes are macros that expand to nothing, so none of this
+ * exists. */
+#define SCR_HANDLE_COUNTER(kind)                                 \
+  static long scr_live_##kind = 0;                               \
+  long scr_##kind##_live_count(void) { return scr_live_##kind; } \
+  void scr_##kind##_alloc_note(void) { scr_live_##kind++; }      \
+  void scr_##kind##_free_note(void) { scr_live_##kind--; }
+SCR_HANDLE_COUNTER(bigint)
+SCR_HANDLE_COUNTER(keyobj)
+SCR_HANDLE_COUNTER(hash)
+SCR_HANDLE_COUNTER(hmac)
+SCR_HANDLE_COUNTER(cipher)
+#undef SCR_HANDLE_COUNTER
 #else
 void scr_obj_alloc_note(void) {}
 void scr_obj_free_note(void) {}
