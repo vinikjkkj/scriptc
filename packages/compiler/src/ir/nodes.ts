@@ -3222,9 +3222,14 @@ export type IrLibFn =
   | "process.envPairs"
   | "process.exit"
   | "process.cwd"
-  /** getpid(2) / getuid(2): zero args → f64. POSIX-only target, so both
-   * always answer (the checker's `getuid?` optionality covers Windows —
-   * `process.getuid?.()` lowers as the plain call). Never throw. */
+  /** getpid(2) / getuid(2): zero args → f64. `process.pid` never throws.
+   * getuid/getgid answer only on a POSIX target: under a windows triple
+   * Node's process object has no such member, so the runtime raises the
+   * property-access TypeError instead of inventing a uid, and both are in
+   * MAY_THROW_LIB_FNS for it. The GUARDED spelling
+   * `process.getuid?.()` never reaches this libCall on that target —
+   * lowerProcessOptionalMethodCall answers the undefined arm of its
+   * `number | undefined` type directly, which is what Node does. */
   | "process.pid"
   | "process.getuid"
   | "process.getgid"
