@@ -58,7 +58,7 @@
  *   precedent); runtime-valued keys keep their fences. */
 import * as ts from "../ts7/adapter.js";
 import { dynFallbackType, type Lowerer } from "./lowerer.js";
-import { IrExpr, IrGlobal, IrStmt, IrType } from "../../ir/nodes.js";
+import { canConvertToDyn, canDynCheckTo, DYN, funcOf, IrExpr, IrFunction, IrGlobal, IrStmt, IrType, VOID } from "../../ir/nodes.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 
@@ -112,7 +112,64 @@ function memberKeyOf(L: Lowerer, expr: ts.PropertyAccessExpression | ts.ElementA
  * function-valued const, `jsDynSlot` a member slot whose type came from
  * the checked-dynamic fallback, `viaExport` a receiver spelled through a
  * CJS export table. Monotonic per process; the suite reads deltas. */
-export const expandoCounters = { jsDecl: 0, jsDynSlot: 0, viaExport: 0 };
+export const expandoCounters = {
+  jsDecl: 0,
+  jsDynSlot: 0,
+  viaExport: 0,
+  /** The MEMBER accounting, and it is a PARTITION on purpose: every slot
+   * this module registers either gets its dyn-box accessor pair (`bound`)
+   * or lands in exactly one named skip. The four numbers are asserted to
+   * add up at the end of every lowering (assertExpandoAccounting), so the
+   * corpus lane is the accounting test: a future skip added without a
+   * counter stops the sum from balancing on the first program that takes
+   * it, instead of silently restoring the two-storage split this module's
+   * second half exists to close. */
+  members: 0,
+  bound: 0,
+  /** A unique-symbol member key: no spelling a dyn keyed read can arrive
+   * with, so there is nothing for a box to ask for. */
+  skipSymbolKey: 0,
+  /** The registering receiver is not an identifier in the DECLARING file
+   * (the CJS export-table spelling — `pkg.parse.VERSION`): it reaches the
+   * same global through the same routing, and the declaring file's own
+   * bind already covers the box. */
+  skipForeignRecv: 0,
+  /** The slot's type has no dyn representation OUT (canConvertToDyn), so
+   * a getter could not be written; see the section header for why this
+   * one stays silent rather than fencing. */
+  skipNotBoxable: 0,
+  /** Bound, but with a FENCED setter: the type boxes out and cannot be
+   * checked back (canDynCheckTo). A subset of `bound`. */
+  writeFenced: 0,
+  /** Counted at BIND-EMISSION time, not registration: the accessor pair
+   * exists but the function VALUE itself does not lower at the bind site
+   * (the exact-arity value rule is the one that reaches this), so the
+   * member keeps today's box behavior rather than making the program stop
+   * compiling. A subset of `bound` — the partition above is about
+   * registration and stays exact. */
+  bindDeclined: 0,
+  /** Also emission-time: the member's FIRST write is inside a function
+   * body, so no module-scope position can know the slot is real. Binding
+   * anyway would put the box route into the unassigned-slot hole the
+   * name-spelled route already has (bindPositionOf's header). A subset of
+   * `bound`. */
+  bindNoInitWrite: 0,
+};
+
+/** The partition above must be exhaustive. Exported so a test can arm the
+ * detector with a deliberately broken tally rather than trusting that a
+ * green corpus proves the check runs. */
+export function assertExpandoAccounting(c: typeof expandoCounters): void {
+  const parts = c.bound + c.skipSymbolKey + c.skipForeignRecv + c.skipNotBoxable;
+  if (parts !== c.members) {
+    throw new Error(
+      `lowerer bug: expando member accounting — ${c.members} registered but ` +
+        `${c.bound} bound + ${c.skipSymbolKey} symbol-keyed + ${c.skipForeignRecv} foreign-receiver + ` +
+        `${c.skipNotBoxable} unboxable = ${parts}. A member that is neither bound nor named here reads ` +
+        `undefined through every dyn box, which is the split lower-expando.ts closes.`,
+    );
+  }
+}
 
 /** The module-level function-ish symbol a receiver expression resolves
  * to, or null: a top-level FunctionDeclaration, or a top-level `const`
@@ -279,6 +336,12 @@ export function collectExpandoMembers(L: Lowerer, sf: ts.SourceFile): void {
           };
           members.set(w.key, { global: g, firstWriteStart: node.getStart(), file: sf });
           L.globalsList.push(g);
+          // The dyn-box half of the same storage (see below).
+          expandoCounters.members++;
+          const fnDecl = L.checker.valueDeclarationOf(w.fnSym);
+          if (typeof w.key !== "string") expandoCounters.skipSymbolKey++;
+          else if (!fnDecl) expandoCounters.skipForeignRecv++;
+          else bindExpandoAccessors(L, sf, w.access.expression, w.key, members.get(w.key)!, fnDecl);
         }
       }
     }
@@ -376,6 +439,260 @@ export function expandoMemberRead(
     );
   }
   return { kind: "varRef", localId: member.global.id, type: member.global.type, loc: locOf(access) };
+}
+
+/* ── the other spelling of the same member: a DYN BOX ─────────────────
+ *
+ * Everything above routes by SYMBOL: a member read or written through the
+ * function's NAME finds the module global. Nothing routes when the
+ * function VALUE is reached some other way — `holder.f`, `arr[0]`, a
+ * parameter, a local alias, `F.prototype.constructor`, `new F()
+ * .constructor`, an importer's `const p = pkg.parse`. Each of those boxes
+ * the function into a dyn, and a FUNC box's own-property table hangs off
+ * the CLOSURE, which knows nothing about a module global. Measured, on
+ * the tree this landed against: every one of those reads answered
+ * `undefined` (or threw the checked conversion on the way out of it)
+ * where Node answers the member, and — the worse half — a WRITE through
+ * one of them landed in the table, where no name-spelled read could ever
+ * see it. Two storages for one JavaScript fact, disagreeing in both
+ * directions. Nested function declarations never had the split because
+ * they are excluded from lifting above: their members live in the table
+ * and every route meets there, which is the shape this restores.
+ *
+ * The unification keeps the GLOBAL as the one storage — deleting it
+ * instead would cost every name-spelled read its static type, and a TS
+ * importer of a JS package its lowering — and gives the box a way in: one
+ * accessor PAIR per member, compiled like any other function, bound to
+ * the closure at module init (scr_dyn_expando_bind). The runtime's keyed
+ * read asks the getter when its table misses; the keyed write asks the
+ * setter instead of storing beside the global. Both spellings then end at
+ * the same slot and cannot disagree.
+ *
+ * What the getter answers is the boundary's OWN stance, inherited rather
+ * than invented here: a typed value crossing into dyn boxes through
+ * `dynFrom`, which for a func value carries the closure (so identity and
+ * the shared property table survive) and for a RECORD builds a dyn copy.
+ * So `holder.f.opts.deep` now reads the member where it read `undefined`,
+ * but `holder.f.opts` is not the same object as `Writer.opts` and a
+ * mutation through one is not seen by the other. That is the same copy
+ * every other static→dyn crossing in the compiler makes, not a new rule
+ * of this registry — and it is strictly closer to Node than the
+ * `undefined` it replaces.
+ *
+ * The two directions are gated separately, and asymmetrically on purpose.
+ * A member whose type cannot be boxed OUT (canConvertToDyn) binds
+ * nothing: `scr_dyn_fn_get` is a read the runtime treats as
+ * non-throwing — `scr_dyn_fn_has` and the `in`/hasOwn pair ask it — so a
+ * refusal there would leak a pending exception into callers that never
+ * check for one, and the honest cheap answer is to leave that member
+ * exactly as it reads today. A member that boxes out but cannot be
+ * checked BACK (canDynCheckTo) binds a real getter and a fenced setter:
+ * the keyed WRITE is already in the may-throw seed set, so a refusal
+ * naming the member is free there and beats a write that silently lands
+ * somewhere no static read can see. */
+export interface ExpandoBind {
+  /** The registered slot, read at EMISSION time for its final
+   * `firstWriteStart` — collection may lower that boundary after this
+   * record is made (a later-walked write earlier in the file). */
+  member: ExpandoMember;
+  /** A receiver spelling that resolves to the function value, lowered in
+   * the init context to produce it. */
+  recv: ts.Identifier;
+  /** The callable const's declaration end, or 0 for a hoisted function
+   * declaration: the bind can never run BEFORE the function value exists,
+   * whatever the member's first write says. */
+  valueReady: number;
+  key: string;
+  getter: string;
+  setter: string;
+}
+
+/** Where in the declaring file a member's bind must run: after the
+ * top-level statement carrying its FIRST write, and never before the
+ * function value itself exists. Null when the first write is inside a
+ * function body.
+ *
+ * Binding at the first write rather than at module entry is what keeps a
+ * box read HONEST before the member exists. An unassigned pointer-backed
+ * global is a NULL slot, and reading one is a crash — the pre-existing
+ * hole that `function F(){}; function e(){return F.tag} e(); F.tag="t"`
+ * already falls into through the NAME (measured: segfault at `fdcf308`).
+ * An accessor bound at module entry would drag the BOX route into that
+ * same hole, turning `h.f.tag` before the write from Node's `undefined`
+ * into a crash. Bound after the write, the box finds no accessor until
+ * the slot is real and answers `undefined` exactly like Node — and from
+ * there on the two routes are as safe as each other, which is the most
+ * this can claim without closing the underlying hole.
+ *
+ * A first write inside a FUNCTION body binds nothing: nothing at module
+ * scope can know whether that function ran, so any placement would either
+ * be too early (the NULL slot again) or arbitrary. */
+function bindPositionOf(sf: ts.SourceFile, b: ExpandoBind): number | null {
+  const at = b.member.firstWriteStart;
+  const stmt = sf.statements.find((s) => s.getStart() <= at && at < s.getEnd());
+  if (stmt === undefined) return null;
+  return Math.max(stmt.getEnd(), b.valueReady);
+}
+
+/** Function-value type of the accessors, so the bind site can spell the
+ * closure without re-deriving it. */
+const EXPANDO_GET_T: IrType = funcOf([], DYN);
+const EXPANDO_SET_T: IrType = funcOf([DYN], VOID);
+
+/** Synthesizes the accessor pair for one registered member and records
+ * the bind. Called from collection, where the slot's type is settled and
+ * the module globals list is still open. Silent (never diagnoses): a
+ * member that cannot be bound keeps exactly today's behavior at every
+ * name-spelled site, which is the only place it was ever right. */
+function bindExpandoAccessors(
+  L: Lowerer,
+  sf: ts.SourceFile,
+  recv: ts.Expression,
+  key: string,
+  member: ExpandoMember,
+  decl: ts.Node,
+): void {
+  const g = member.global;
+  // Only the DECLARING file's own identifier spelling can produce the
+  // function value in that file's %init. The CJS export-table spelling
+  // (`pkg.parse.VERSION`) reaches the same storage through the same
+  // global and needs no second bind.
+  if (!ts.isIdentifier(recv) || recv.getSourceFile() !== sf || decl.getSourceFile() !== sf) {
+    expandoCounters.skipForeignRecv++;
+    return;
+  }
+  const loc = locOf(recv);
+  const getName = `%xget${g.id}`;
+  const setName = `%xset${g.id}`;
+  const getRecord = (id: string) => L.shapes.get(id);
+  const getUnion = (id: string) => L.unions.get(id);
+  const isDyn = g.type.kind === "dyn";
+  if (!isDyn && !canConvertToDyn(g.type, getRecord, getUnion)) {
+    expandoCounters.skipNotBoxable++;
+    return;
+  }
+  const writable = isDyn || canDynCheckTo(g.type, getRecord, getUnion);
+  expandoCounters.bound++;
+  if (!writable) expandoCounters.writeFenced++;
+  const slot: IrExpr = { kind: "varRef", localId: g.id, type: g.type, loc };
+  const vId = `%xv.0`;
+  const getter: IrFunction = {
+    name: getName,
+    params: [],
+    returnType: DYN,
+    locals: [],
+    body: [{ kind: "return", value: isDyn ? slot : { kind: "dynFrom", value: slot, type: DYN, loc }, loc }],
+    loc,
+  };
+  const setter: IrFunction = {
+    name: setName,
+    params: [{ localId: vId, name: "v", type: DYN }],
+    returnType: VOID,
+    locals: [{ id: vId, name: "v", type: DYN, mutable: false }],
+    body: writable
+      ? [
+          {
+            kind: "assign",
+            localId: g.id,
+            value: isDyn
+              ? { kind: "varRef", localId: vId, type: DYN, loc }
+              : { kind: "dynCheck", value: { kind: "varRef", localId: vId, type: DYN, loc }, type: g.type, loc },
+            loc,
+          },
+        ]
+      : [
+          {
+            kind: "runtimeFence",
+            code: "SC1090",
+            message:
+              `writing the function member '${g.name}' through a DYNAMIC reference to the function ` +
+              `(its storage is a module global of type '${L.fmt(g.type)}', which no dyn value can be ` +
+              `checked back into — write it through the function's name instead) is not supported yet`,
+            loc,
+          },
+        ],
+    loc,
+  };
+  L.implicitFns.push(getter, setter);
+  const binds = L.expandoBinds.get(sf) ?? [];
+  L.expandoBinds.set(sf, binds);
+  binds.push({
+    member,
+    recv,
+    valueReady: ts.isFunctionDeclaration(decl) ? 0 : decl.getEnd(),
+    key,
+    getter: getName,
+    setter: setName,
+  });
+}
+
+/** The `dyn.expandoBind` statements for one file's members whose bind
+ * position (bindPositionOf) falls at or after `from` and before `to` —
+ * lowerFileInit walks the window forward one top-level statement at a
+ * time, so each member binds immediately after the statement that first
+ * writes it. */
+export function expandoBindStmts(L: Lowerer, sf: ts.SourceFile, from: number, to: number): IrStmt[] {
+  const binds = L.expandoBinds.get(sf);
+  if (binds === undefined) return [];
+  const out: IrStmt[] = [];
+  for (const b of binds) {
+    const pos = bindPositionOf(sf, b);
+    if (pos === null) {
+      // Counted once, not once per window: the emitter walks the whole
+      // list on every statement boundary.
+      if (from === 0) expandoCounters.bindNoInitWrite++;
+      continue;
+    }
+    if (pos < from || pos >= to) continue;
+    const loc = locOf(b.recv);
+    // Taking the function as a VALUE can itself fence (the exact-arity
+    // value rule). A member whose function cannot be boxed keeps today's
+    // behavior rather than making the program stop compiling: drop the
+    // bind and the diagnostics it produced.
+    const before = L.diags.length;
+    let recvIr: IrExpr;
+    try {
+      recvIr = L.lowerExpr(b.recv);
+    } catch {
+      L.diags.splice(before);
+      expandoCounters.bindDeclined++;
+      continue;
+    }
+    if (L.diags.length > before) {
+      L.diags.splice(before);
+      expandoCounters.bindDeclined++;
+      continue;
+    }
+    if (recvIr.type.kind !== "func" && recvIr.type.kind !== "dyn") {
+      expandoCounters.bindDeclined++;
+      continue;
+    }
+    const box: IrExpr =
+      recvIr.type.kind === "dyn" ? recvIr : { kind: "dynFrom", value: recvIr, type: DYN, loc };
+    const accessor = (name: string, t: IrType): IrExpr => ({
+      kind: "dynFrom",
+      value: { kind: "closure", fnName: name, captures: [], type: t, loc },
+      type: DYN,
+      loc,
+    });
+    out.push({
+      kind: "exprStmt",
+      expr: {
+        kind: "libCall",
+        fn: "dyn.expandoBind",
+        args: [
+          box,
+          { kind: "strLit", value: b.key, type: { kind: "string" }, loc },
+          accessor(b.getter, EXPANDO_GET_T),
+          accessor(b.setter, EXPANDO_SET_T),
+        ],
+        type: VOID,
+        loc,
+      },
+      loc,
+    });
+  }
+  return out;
 }
 
 /** The statement lowering for `<fn>.<key> = <value>`: an ordinary global

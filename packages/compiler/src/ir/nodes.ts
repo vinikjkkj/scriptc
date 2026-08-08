@@ -1834,6 +1834,16 @@ export type IrLibFn =
    * SEMANTICS.md notes the sloppy divergence: loud, never silent). Void
    * result; in the may-throw seed set. */
   | "dyn.keySet"
+  /** Binds a compiled function value's LIFTED member (an expando
+   * member the frontend stores in a module global — lower-expando.ts) to
+   * an accessor PAIR, so a dyn box over that function reaches the same
+   * storage the name-spelled read and write use. Emitted once per member
+   * into the declaring module's %init; args are (the function value, the
+   * member key, a `() => dyn` getter, a `(dyn) => void` setter). Void
+   * result; the bind itself never throws (the ACCESSORS can — they are
+   * compiled code — but they run from the keyed read/write, which is
+   * already in the may-throw seed set). */
+  | "dyn.expandoBind"
   /** `delete d[k]` over a dyn receiver — JS's [[Delete]], which is an
    * own-property operation and an ANSWER (bool), not a void statement:
    * true when the key was absent or was removed, and V8's strict-mode
