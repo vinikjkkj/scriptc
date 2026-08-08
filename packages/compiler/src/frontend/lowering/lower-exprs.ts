@@ -1452,6 +1452,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       return { kind: "awaitExpr", value, type: value.type.inner, loc };
     }
     if (ts.isYieldExpression(expr)) return lowerYield(L, expr);
+    // `delete o.k` is an OPERATOR, not a statement form: it evaluates to
+    // a boolean, and a minifier writes every guarded delete that way
+    // (`k !== name && delete this[k]`).
+    if (ts.isDeleteExpression(expr)) return L.lowerDeleteValue(expr);
     if (ts.isPrefixUnaryExpression(expr)) return L.lowerPrefixUnary(expr);
     // `x++` / `x--` in expression position: yields the OLD value.
     if (ts.isPostfixUnaryExpression(expr)) return lowerIncDec(L, expr, false);
@@ -7918,14 +7922,37 @@ export function lowerPrefixUnary(L: Lowerer, expr: ts.PrefixUnaryExpression): Ir
             loc,
           };
         }
+        // Every OTHER field spelling the compound path can WRITE — record
+        // fields, checked-dynamic fields and checked-dynamic receivers,
+        // accessor-backed names — is the same read-modify-write that
+        // `obj.f += 1` performs as a statement. The only thing statement
+        // position never had to answer is the yielded value, and
+        // `buf[this.pos++]` — the byte reader every generated protobuf
+        // decoder is built from — is exactly that and nothing more.
+        //
+        // The admitted shapes are EXACTLY the ones statement position
+        // dispatches to lowerFieldCompound (lower-stmts' `obj.f++`
+        // desugar): a dotted access through an identifier or `this`, and
+        // the symbol-keyed element spelling of a declared class field.
+        // Anything wider would trade this fence for one of the compound
+        // path's own — the same count with a worse message.
+        const recv = expr.operand.expression;
+        if (
+          (ts.isIdentifier(recv) || recv.kind === ts.SyntaxKind.ThisKeyword) &&
+          (ts.isPropertyAccessExpression(expr.operand) || symbolFieldInfo(L, expr.operand) !== null)
+        ) {
+          return lowerFieldIncDecValue(L, expr.operand, op, prefix, expr, loc);
+        }
       }
-      // Other field/element receivers need a read-modify-write over a
-      // computed receiver — statement position has that desugar; value
-      // position does not yet. The message names the working forms.
+      // Array/typed-array ELEMENTS and computed receivers keep the fence:
+      // the element compound is a statement-only bargain (it re-lowers
+      // both receiver and index, which is only unobservable for a bare
+      // identifier and a repeatable index), and value position has its
+      // own reading of what an element slot's coercion yields.
       L.unsupported(
         "SC1045",
         expr,
-        "increment/decrement of record fields or elements in expression position",
+        "increment/decrement of array elements or computed receivers in expression position",
       );
     }
     const target = L.resolveWritable(expr.operand);
@@ -7983,6 +8010,9 @@ function seqExprSafeStmt(s: IrStmt): boolean {
     case "fieldSet":
     case "recordSet":
     case "recordKeySet":
+    // The overflow-map delete `delete r[k]` performs — a straight-line
+    // write like recordKeySet, and value-position delete needs it here.
+    case "recordKeyDelete":
     case "arraySet":
     case "bytesSet":
       return true;
@@ -12015,6 +12045,20 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
 export interface CompoundCombine {
   natural: IrExpr;
   toSlot: (v: IrExpr) => IrExpr;
+  /** The READ under the operator's own conversion, and the combination
+   * rebuilt over any expression of that (converted) type — present only
+   * on the NUMBER-context arms, which are exactly the ones a `++`/`--`
+   * desugar can reach.
+   *
+   * `natural` is `combine(read)`, so statement position and prefix
+   * `++` need nothing else. POSTFIX does: what `x++` yields is the
+   * CONVERTED OLD value, not the new one and not the old cell
+   * (`o.f = '5'; o.f++` answers 5 and leaves 6), and it cannot be
+   * recovered from the result — `(x + 1) - 1` is not `x` in doubles
+   * (0.1 comes back 0.10000000000000009). So the postfix form holds
+   * `read` in a temp and builds the store from it, which is the shape
+   * the BINDING path (lowerIncDec's dyn arm) already had. */
+  numericRead?: { read: IrExpr; combine: (converted: IrExpr) => IrExpr };
 }
 
 export function compoundCombine(
@@ -12060,7 +12104,8 @@ export function compoundCombine(
     };
   }
   if (slot.kind === "f64" && rhs.type.kind === "f64") {
-    return { natural: { kind: "bin", op, left: read, right: rhs, type: F64, loc }, toSlot: same };
+    const combine = (v: IrExpr): IrExpr => ({ kind: "bin", op, left: v, right: rhs, type: F64, loc });
+    return { natural: combine(read), toSlot: same, numericRead: { read, combine } };
   }
   // JS any-origin operands: run the operator's OWN conversion and compute
   // natively (the binary-operator stance) — the dyn slot takes the result
@@ -12099,14 +12144,17 @@ export function compoundCombine(
       (slot.kind === "dyn" || slot.kind === "f64") &&
       (rhs.type.kind === "dyn" || rhs.type.kind === "f64")
     ) {
-      const computed: IrExpr = {
-        kind: "bin", op,
-        left: toNum(read, "compound"), right: toNum(rhs, "compound"),
-        type: F64, loc,
-      };
+      // Both conversions run ONCE, here — `combine` reuses the converted
+      // right operand rather than re-lowering it, so a postfix caller that
+      // builds the store from a temp cannot double-evaluate the operand or
+      // double-count the tonumWhy note.
+      const l = toNum(read, "compound");
+      const r = toNum(rhs, "compound");
+      const combine = (v: IrExpr): IrExpr => ({ kind: "bin", op, left: v, right: r, type: F64, loc });
       return {
-        natural: computed,
+        natural: combine(l),
         toSlot: (v) => (slot.kind === "dyn" ? { kind: "dynFrom", value: v, type: DYN, loc } : v),
+        numericRead: { read: l, combine },
       };
     }
   }
@@ -12126,7 +12174,7 @@ export function compoundCombine(
   export function fieldCompoundParts(L: Lowerer, access: ts.PropertyAccessExpression | ts.ElementAccessExpression,
     op: CompoundOp,
     rhsNode: ts.Expression | null,
-    loc: SrcLoc,): { natural: IrExpr; write: (v: IrExpr) => IrStmt } {
+    loc: SrcLoc,): { natural: IrExpr; write: (v: IrExpr) => IrStmt; numericRead?: CompoundCombine["numericRead"] } {
     if (access.expression.kind === ts.SyntaxKind.SuperKeyword) {
       L.unsupported("SC1090", access, "compound assignment through 'super' (read and write separately)");
     }
@@ -12151,6 +12199,7 @@ export function compoundCombine(
         if (!combined) L.unsupported("SC1043", access);
         return {
           natural: combined.natural,
+          ...(combined.numericRead ? { numericRead: combined.numericRead } : {}),
           // Second, independent evaluation of the (side-effect-free)
           // receiver, after the value — JS's order for a compound whose
           // reference was already resolved.
@@ -12187,7 +12236,11 @@ export function compoundCombine(
     const combined = compoundCombine(L, op, read, rhs, target.fieldType, access, access, rhsNode ?? access, loc, rhsNode === null);
     if (!combined) L.unsupported("SC1043", access);
     // Second, independent evaluation of the (side-effect-free) receiver.
-    return { natural: combined.natural, write: (v) => L.fieldSetStmt(targetOf()!, combined.toSlot(v), loc, access) };
+    return {
+      natural: combined.natural,
+      ...(combined.numericRead ? { numericRead: combined.numericRead } : {}),
+      write: (v) => L.fieldSetStmt(targetOf()!, combined.toSlot(v), loc, access),
+    };
   }
 
 /** `obj.f op= e` as a STATEMENT — the parts, written straight back. */
@@ -12197,6 +12250,61 @@ export function compoundCombine(
     loc: SrcLoc,): IrStmt {
     const parts = fieldCompoundParts(L, access, op, rhsNode, loc);
     return parts.write(parts.natural);
+  }
+
+/** `obj.f++` / `--obj.f` in VALUE position (`buf[this.pos++]` — the byte
+   * reader every generated protobuf decoder is built from): the same
+   * read-modify-write the compound path performs, with BOTH values held
+   * in temps so the expression can answer either one.
+   *
+   * A postfix `++` is not `o.f += 1` used for its value: what it yields
+   * is the CONVERTED OLD value. The two agree over a number field and
+   * disagree over an untyped one (`o.f = '5'; o.f++` answers 5 and leaves
+   * 6), and the old value cannot be recovered from the new — the double
+   * subtraction is lossy. So the shape is the BINDING path's, verbatim:
+   *
+   *     %old = <ToNumeric of the read>
+   *     %new = %old ± 1
+   *     <write %new through the slot's own conversion>
+   *     yield  prefix ? %new : %old
+   *
+   * The write re-lowers the (identifier or `this`) receiver, exactly as
+   * statement position does, and it is placed after both temps so the
+   * order — read, combine, store — is JS's.
+   *
+   * `numericRead` is absent for every arm that is NOT a number context
+   * (an island slot, a bigint one, a string field): those have no
+   * ToNumeric to yield, so the fence stays and names the position. */
+  export function lowerFieldIncDecValue(L: Lowerer, access: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+    op: CompoundOp,
+    prefix: boolean,
+    blame: ts.Node,
+    loc: SrcLoc,): IrExpr {
+    const parts = fieldCompoundParts(L, access, op, null, loc);
+    const numeric = parts.numericRead;
+    if (numeric === undefined) {
+      L.unsupported(
+        "SC1045",
+        blame,
+        "increment/decrement of this field in expression position (the slot has no numeric read to yield)",
+      );
+    }
+    const t = numeric.read.type;
+    const oldTmp = L.declareHiddenLocal("%incOld", t);
+    const newTmp = L.declareHiddenLocal("%incNew", t);
+    const oldRef = (): IrExpr => ({ kind: "varRef", localId: oldTmp.id, type: t, loc });
+    const newRef = (): IrExpr => ({ kind: "varRef", localId: newTmp.id, type: t, loc });
+    return {
+      kind: "seqExpr",
+      stmts: [
+        { kind: "varDecl", localId: oldTmp.id, init: numeric.read, loc },
+        { kind: "varDecl", localId: newTmp.id, init: numeric.combine(oldRef()), loc },
+        parts.write(newRef()),
+      ],
+      result: prefix ? newRef() : oldRef(),
+      type: t,
+      loc,
+    };
   }
 
 /** `obj.f op= e` in VALUE position (`readU32(this.buf, this.pos += 4)`):

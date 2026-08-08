@@ -434,16 +434,17 @@ export const ISLAND_SURFACE = {
    * min/max/atan2/hypot/pow are declared with exactly two parameters
    * (rest/optional parameters aren't representable). */
   math: {
-    // floor, min/max (two-arg), and random are STATIC now
-    // (STATIC_MATH_FNS below).
+    // floor, min/max (two-arg), random, pow, log and clz32 are STATIC now
+    // (STATIC_MATH_FNS below); so is every number constant
+    // (STATIC_MATH_CONSTS), which is why `props` is empty.
     fns: {
       abs: ISL_N1, acos: ISL_N1, asin: ISL_N1, atan: ISL_N1, atan2: ISL_N2,
       cbrt: ISL_N1, ceil: ISL_N1, cos: ISL_N1, exp: ISL_N1,
-      hypot: ISL_N2, log: ISL_N1, log2: ISL_N1, log10: ISL_N1, pow: ISL_N2,
+      hypot: ISL_N2, log2: ISL_N1, log10: ISL_N1,
       round: ISL_N1,
       sign: ISL_N1, sin: ISL_N1, sqrt: ISL_N1, tan: ISL_N1, trunc: ISL_N1,
     } as Record<string, IslandFnEntry | undefined>,
-    props: { PI: F64, E: F64 } as Record<string, IrType | undefined>,
+    props: {} as Record<string, IrType | undefined>,
   },
   /** Methods on `number` receivers. The receiver marshals by value; the
    * engine auto-boxes primitives on method calls, so `this` binds the
@@ -499,6 +500,33 @@ export const STATIC_MATH_FNS: Record<string, { fn: IrLibFn; arity: number } | un
   min: { fn: "math.min", arity: 2 },
   max: { fn: "math.max", arity: 2 },
   random: { fn: "math.random", arity: 0 },
+  // pow/log/clz32 joined with the protobuf float codec, which is built
+  // out of them: `Math.pow(2, e - 150)` denormalizes a float32 mantissa
+  // and `Math.floor(Math.log(x) / Math.LN2)` recovers its exponent.
+  // pow is the `**` operator's own runtime entry (one spec operation, so
+  // one C symbol); log is libm's, which IS the JS function at every edge
+  // the spec names; clz32 is the ToUint32 count.
+  pow: { fn: "math.pow", arity: 2 },
+  log: { fn: "math.log", arity: 1 },
+  clz32: { fn: "math.clz32", arity: 1 },
+};
+
+/** Math's number CONSTANTS, and their exact double values — the same
+ * literals V8 carries. A constant is a literal, so there is nothing here
+ * for an engine to do: these fold to a numLit in every build, static or
+ * dynamic, where they used to demand --dynamic through the island's
+ * getProp. The two the island table already carried (PI, E) answer the
+ * same bits; the other six are new, and `Math.LN2` in particular is what
+ * a float32 exponent recovery divides by. */
+export const STATIC_MATH_CONSTS: Record<string, number | undefined> = {
+  PI: Math.PI,
+  E: Math.E,
+  LN2: Math.LN2,
+  LN10: Math.LN10,
+  LOG2E: Math.LOG2E,
+  LOG10E: Math.LOG10E,
+  SQRT2: Math.SQRT2,
+  SQRT1_2: Math.SQRT1_2,
 };
 
 /** Number prototype methods with dedicated STATIC lowering paths. The

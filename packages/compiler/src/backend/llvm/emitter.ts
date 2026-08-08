@@ -174,6 +174,11 @@ const LIB_FN_SYMS: Record<string, string> = {
   "num.parseFloat": "scr_parse_float",
   "num.fromString": "scr_string_to_number",
   "math.round": "scr_math_round",
+  // Math.pow rides the runtime wrapper, not libm's pow — the spec's
+  // NaN/±Infinity guards are exactly where C disagrees — and clz32 is the
+  // ToUint32 count. (Math.log takes the llvm.log.f64 intrinsic below.)
+  "math.pow": "scr_math_pow",
+  "math.clz32": "scr_math_clz32",
   // decodeUriComponent is NOT here: it throws (MAY_THROW_LIB_FNS), so it
   // refuses by name like the rest of the throwing tier.
   "str.encodeUriComponent": "scr_str_encode_uri_component",
@@ -534,6 +539,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   // ambient-this read never throw. The fs dyn read is the sync-fs story.
   "json.parse": "scr_json_parse",
   "dyn.keySet": "scr_dyn_key_set",
+  "dyn.keyDelete": "scr_dyn_key_delete",
   "dyn.iterPack": "scr_dyn_iter_pack",
   "dyn.arrLen": "scr_dyn_arr_len",
   "dyn.arrAt": "scr_dyn_arr_at",
@@ -4037,7 +4043,11 @@ class LlEmitter {
         const t = B.tmp();
         const arith: Record<string, string> = { "+": "fadd", "-": "fsub", "*": "fmul", "/": "fdiv" };
         const cmp: Record<string, string> = { "<": "olt", "<=": "ole", ">": "ogt", ">=": "oge", "===": "oeq", "!==": "une" };
-        const libm: Record<string, string> = { "%": "fmod", "**": "pow" };
+        // `**` IS Math.pow — one spec operation, so one runtime entry.
+        // libm's pow is NOT it (pow(1, NaN) and pow(-1, ±Infinity) are 1.0
+        // where JS answers NaN), and both lanes call the same wrapper so
+        // they cannot drift on the edges.
+        const libm: Record<string, string> = { "%": "fmod", "**": "scr_math_pow" };
         const bit: Record<string, string> = {
           "&": "scr_bit_and",
           "|": "scr_bit_or",
@@ -11989,6 +11999,15 @@ class LlEmitter {
       this.declare(`declare double @llvm.${intr}.f64(double)`);
       const t = B.tmp();
       B.line(`${t} = call double @llvm.${intr}.f64(double ${v.name})`);
+      return { name: t, type: e.type };
+    }
+    if (e.fn === "math.log") {
+      // C log() IS the JS operation at every edge the spec names, and
+      // llvm.log.f64 is that same libm call — no wrapper needed.
+      const v = this.emitExpr(e.args[0]!);
+      this.declare(`declare double @llvm.log.f64(double)`);
+      const t = B.tmp();
+      B.line(`${t} = call double @llvm.log.f64(double ${v.name})`);
       return { name: t, type: e.type };
     }
     if (e.fn === "math.abs") {
