@@ -10,6 +10,110 @@ const execFileAsync = promisify(execFile);
 
 const RUNTIME_SOURCES = ["scr_number.c", "scr_string.c", "scr_array.c", "scr_bytes.c", "scr_bytes_io.c", "scr_abort.c", "scr_map.c", "scr_closure.c", "scr_object.c", "scr_union.c", "scr_exception.c", "scr_error.c", "scr_console.c", "scr_lib.c", "scr_path.c", "scr_url.c", "scr_json.c", "scr_async.c", "scr_child.c", "scr_cycle.c", "scr_random_fill.c"];
 
+/* ---------------------- the runtime link-closure check ---------------------
+ * The selection above and the gated arms in compileC/compileLibArchive are a
+ * HAND-MAINTAINED set: each optional runtime unit rides a boolean the IR
+ * detectors turn on. Nothing forced that set to be CLOSED — a unit could be
+ * selected while a unit it calls into was not, and the only symptom was
+ *
+ *   lld-link: error: undefined symbol: scr_cipher_new_raw
+ *   >>> referenced by .../scr_asym.c:126
+ *
+ * at the very end of a build, naming a C symbol and no gate.
+ *
+ * The tables below are the MEASURED cross-unit reference graph, restricted to
+ * edges whose TARGET is an optional unit (an edge into one of RUNTIME_SOURCES
+ * or scr_win.c can never be unsatisfied — those are unconditional). To
+ * regenerate: compile every packages/runtime/src/*.c with the build's cflags,
+ * once plain and once with -DSCR_DYNAMIC, then for each object pair the `U`
+ * symbols against the `T/D/B/R` symbols of the others.
+ *
+ * Keeping the tables honest is the point of the closure test in
+ * packages/compiler/test/cc-driver.test.ts, and of this check running on the
+ * REAL argv of every build (compileC hands it the source list it is about to
+ * put on the command line, so the two cannot drift). */
+const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
+  "scr_cipher_key.c": ["scr_asym.c", "scr_cipher_value.c"],
+  "scr_cipher_value.c": ["scr_cipher.c"],
+  "scr_dc.c": ["scr_async_dyn.c"],
+  // The three readiness-poller backends are selected together and each is
+  // empty off its own platform, so naming all three is platform-neutral.
+  "scr_dgram.c": ["scr_loop_kqueue.c", "scr_loop_epoll.c", "scr_loop_wsapoll.c"],
+  "scr_dyn_invoke.c": ["scr_async_dyn.c"],
+  "scr_events_emitter.c": ["scr_dyn_handle.c"],
+  "scr_http.c": ["scr_dyn_handle.c", "scr_net.c"],
+  "scr_http2.c": ["scr_dyn_handle.c", "scr_http.c", "scr_net.c", "scr_tls.c"],
+  "scr_net.c": ["scr_dyn_handle.c", "scr_loop_kqueue.c", "scr_loop_epoll.c", "scr_loop_wsapoll.c"],
+  "scr_readline.c": ["scr_events.c"],
+  "scr_regex.c": ["scr_assert.c"],
+  "scr_stream.c": ["scr_events_emitter.c"],
+  "scr_symbol.c": ["scr_assert.c"],
+  "scr_tls.c": ["scr_dyn_handle.c", "scr_http.c", "scr_net.c", "scr_tls_ca.c"],
+  "scr_ws_client.c": ["scr_net.c", "scr_websocket.c"],
+  "scr_ws_global.c": ["scr_tls.c", "scr_ws_client.c"],
+  "scr_zlib_island.c": ["scr_zlib.c"],
+};
+
+/** The edges an SCR_DYNAMIC build ADDS (the island exists only there, and
+ * scr_regex.c's host hooks reach for its JSContext only under the define). */
+const RUNTIME_UNIT_DEPS_DYNAMIC: Readonly<Record<string, readonly string[]>> = {
+  "scr_fetch.c": ["scr_http.c", "scr_island.c", "scr_net.c", "scr_net_island.c", "scr_tls.c"],
+  "scr_fetch_curl.c": ["scr_island.c"],
+  "scr_inspect_island.c": ["scr_inspect.c", "scr_island.c"],
+  "scr_island.c": ["scr_web.c"],
+  "scr_net_island.c": ["scr_http.c", "scr_island.c", "scr_net.c", "scr_tls.c"],
+  "scr_regex.c": ["scr_island.c"],
+  "scr_web.c": ["scr_island.c"],
+  "scr_zlib_island.c": ["scr_island.c"],
+};
+
+/** Every unit either table can name — the test asserts these all exist. */
+export function runtimeUnitDeps(dynamic: boolean): Readonly<Record<string, readonly string[]>> {
+  if (!dynamic) return RUNTIME_UNIT_DEPS;
+  const merged: Record<string, string[]> = {};
+  for (const [unit, deps] of Object.entries(RUNTIME_UNIT_DEPS)) merged[unit] = [...deps];
+  for (const [unit, deps] of Object.entries(RUNTIME_UNIT_DEPS_DYNAMIC)) {
+    merged[unit] = [...new Set([...(merged[unit] ?? []), ...deps])];
+  }
+  return merged;
+}
+
+/** Fail the build at SELECTION time, with the gate story, rather than at the
+ * linker with a bare symbol name. `units` may be full paths or basenames;
+ * anything that is not a runtime `.c` is ignored (vendor sources, the
+ * program TU, cached objects). */
+export function assertRuntimeUnitsClosed(
+  units: readonly string[],
+  dynamic: boolean,
+  what: string,
+): void {
+  const table = runtimeUnitDeps(dynamic);
+  const rtDir = runtimeSrcDir();
+  const selected = new Set(
+    units
+      .filter((u) => u.endsWith(".c") && (u === basename(u) || dirname(u) === rtDir))
+      .map((u) => basename(u)),
+  );
+  const missing: string[] = [];
+  for (const unit of selected) {
+    for (const dep of table[unit] ?? []) {
+      if (!selected.has(dep)) missing.push(`${unit} needs ${dep}`);
+    }
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `scriptc bug: the runtime link set for ${what} is not closed — ` +
+        `${missing.length} unit${missing.length === 1 ? "" : "s"} would reach a symbol nobody links:\n` +
+        missing.map((m) => `  ${m}`).join("\n") +
+        `\n\nA runtime unit's link gate in backend/cc.ts must imply the gate of every unit it ` +
+        `calls into (RUNTIME_UNIT_DEPS holds the measured graph). Widen the gate that selects the ` +
+        `missing unit, or move the cross-unit call into a TU gated on both halves — the ` +
+        `scr_cipher_key.c / scr_inspect_island.c pattern. Left alone this surfaces as ` +
+        `"lld-link: undefined symbol" with no gate named.`,
+    );
+  }
+}
+
 /** The pinned quickjs-ng snapshot under packages/runtime/vendor/quickjs-ng
  * (see vendor/README.md — update both together). Keys the archive cache so
  * a vendor bump can never reuse a stale engine build. */
@@ -803,8 +907,11 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     ...(opts.bigint ? ["scr_bigint.c"] : []),
     ...(opts.asym ? ["scr_asym.c"] : []),
     ...(opts.cipher ? ["scr_cipher.c", "scr_cipher_value.c"] : []),
+    // The two-gate keyobj ↔ cipher bridge — see compileC's arm.
+    ...(opts.asym && opts.cipher ? ["scr_cipher_key.c"] : []),
     ...(opts.copying ? ["scr_copying.c"] : []),
   ];
+  assertRuntimeUnitsClosed(sources, false, "the library archive");
   const cflags = [
     "-std=c11",
     ...driver.targetArgs,
@@ -1059,9 +1166,19 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // scr_http.c unconditionally (measured -- the link fails on
   // scr_http_request_ex without it).
   const wsGlobal = opts.wsGlobal ?? false;
-  const net = (opts.net ?? false) || nativeFetch || netIsland || wsGlobal;
-  const http = (opts.http ?? false) || nativeFetch || netIsland || wsGlobal;
-  const tls = (opts.tls ?? false) || nativeFetch || netIsland || wsGlobal;
+  // The server-family gates CLOSE over each other here, not only in the IR
+  // detectors that happen to call this (ir/nodes.ts makes moduleUsesNet
+  // answer true for every http/tls/https/http2 spelling). Measured edges:
+  // scr_http.c and scr_tls.c both call into scr_net.c; scr_tls.c calls into
+  // scr_http.c; scr_http2.c calls into all three. Every combination the
+  // detectors can produce today already carried the implied units, so no
+  // currently-linking binary changes by a byte — this is what stops a
+  // FUTURE detector edge (http2Session/http2Stream reaching the IR with no
+  // http2.* libCall beside it) from becoming an lld-link error.
+  const http2 = opts.http2 ?? false;
+  const tls = (opts.tls ?? false) || http2 || nativeFetch || netIsland || wsGlobal;
+  const http = (opts.http ?? false) || tls || http2 || nativeFetch || netIsland || wsGlobal;
+  const net = (opts.net ?? false) || http || tls || http2 || nativeFetch || netIsland || wsGlobal;
   const driver = resolveCc();
   if (driver.target !== null) {
     // See the resolveCc block: these inputs are built on and for the HOST
@@ -1167,6 +1284,12 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opts.cipher
       ? [rt(join(rtDir, "scr_cipher.c")), rt(join(rtDir, "scr_cipher_value.c"))]
       : []),
+    // The keyobj ↔ cipher bridge (createCipheriv over a KeyObject): the one
+    // TU referencing BOTH optional crypto halves, linked exactly when both
+    // are — the scr_inspect_island.c pattern. The emitted call needs a
+    // keyobj argument AND produces a cipher value, so it cannot appear
+    // under only one gate.
+    ...(opts.asym && opts.cipher ? [rt(join(rtDir, "scr_cipher_key.c"))] : []),
     ...(opts.assert || regex || opts.symbol ? [rt(join(rtDir, "scr_assert.c"))] : []),
     ...(opts.inspect ? [rt(join(rtDir, "scr_inspect.c"))] : []),
     ...(opts.dynInvoke ? [rt(join(rtDir, "scr_dyn_invoke.c"))] : []),
@@ -1189,12 +1312,18 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // installer exactly then.
     ...(opts.zlib && opts.dynamic ? [rt(join(rtDir, "scr_zlib_island.c"))] : []),
     ...(opts.events ? [rt(join(rtDir, "scr_events.c")), rt(join(rtDir, "scr_readline.c"))] : []),
-    ...(opts.emitter ? [rt(join(rtDir, "scr_events_emitter.c"))] : []),
+    // scr_stream.c is an EventEmitter subclass in C — it calls
+    // scr_emitter_on/emit/release directly — so the stream gate implies
+    // this one. ir/nodes.ts already guarantees it (a stream class def
+    // drags %EventEmitter in through its base chain, so moduleUsesEmitter
+    // answers true whenever moduleUsesStream does) and no binary changes;
+    // the implication belongs where the link line is decided too.
+    ...(opts.emitter || opts.stream ? [rt(join(rtDir, "scr_events_emitter.c"))] : []),
     // The checked-dynamic HANDLE support unit (listener gate + runtime
     // adapter closures): every referencing unit is one of the emitter or
     // net families (http implies net), so handle-free binaries keep
     // their exact size class.
-    ...(opts.emitter || net ? [rt(join(rtDir, "scr_dyn_handle.c"))] : []),
+    ...(opts.emitter || opts.stream || net ? [rt(join(rtDir, "scr_dyn_handle.c"))] : []),
     ...(opts.symbol ? [rt(join(rtDir, "scr_symbol.c"))] : []),
     ...(opts.searchParams ? [rt(join(rtDir, "scr_url_params.c"))] : []),
     ...(opts.qs ? [rt(join(rtDir, "scr_qs.c"))] : []),
@@ -1213,7 +1342,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
       : []),
     ...(net ? [rt(join(rtDir, "scr_net.c"))] : []),
     ...(http ? [rt(join(rtDir, "scr_http.c"))] : []),
-    ...(opts.http2 ?? false ? [rt(join(rtDir, "scr_http2.c"))] : []),
+    ...(http2 ? [rt(join(rtDir, "scr_http2.c"))] : []),
     // The WebSocket client family. Three units, one gate: the codec is
     // transport-free (its own C test proves it), the client bolts it onto
     // scr_net, and the global unit is the only one that knows there is a
@@ -1324,6 +1453,12 @@ export async function compileC(opts: CcOptions): Promise<void> {
       );
     }
   };
+
+  // The gates above decide the link set; check it is CLOSED before spending a
+  // clang invocation on it. Reading the real command line (rather than a
+  // second copy of the conditionals) is what keeps the check from drifting
+  // away from the build it is checking.
+  assertRuntimeUnitsClosed(buildArgs((p) => p), dynamic, basename(opts.cPath));
 
   const root = cacheRootDir();
   if (root === null) {
