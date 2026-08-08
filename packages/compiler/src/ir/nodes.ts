@@ -3957,6 +3957,7 @@ export type IrLibFn =
   | "insp.error"
   | "insp.dyn"
   | "insp.dynS"
+  | "insp.fmtS"
   | "big.str"
   | "key.fromPkcs8"
   | "key.fromSpki"
@@ -4466,8 +4467,17 @@ export type IrExpr =
   /** f64|bool → string, JS-exact (Number::toString / "true"/"false").
    * Union operands dispatch through the per-union ToString helper (arms
    * fenced to unit/string/f64/bool by the frontend); a CAUGHT operand is
-   * `String(e)` over the exception snapshot (scr_caught_to_string). */
-  | { kind: "toString"; operand: IrExpr; type: IrType; loc: SrcLoc }
+   * `String(e)` over the exception snapshot (scr_caught_to_string).
+   *
+   * `hint` names WHICH ToPrimitive this conversion is, and it matters for
+   * exactly one operand shape: an untyped object carrying both `valueOf`
+   * and `toString`. The default (absent) is ECMAScript's STRING hint —
+   * `String(v)`, a template span, a computed key — which tries `toString`
+   * first. `"default"` is what `+` performs, and it tries `valueOf`
+   * first, so `"" + o` and `String(o)` answer differently for the same
+   * object. Only the `dyn` operand branch reads it; every other operand
+   * kind has one conversion. */
+  | { kind: "toString"; operand: IrExpr; hint?: "default"; type: IrType; loc: SrcLoc }
   /** Lazily-branched conditional: exactly one arm evaluates. */
   | { kind: "ternary"; cond: IrExpr; then: IrExpr; else_: IrExpr; type: IrType; loc: SrcLoc }
   /** Nullish coalescing `a ?? b` — `logical`'s lazily-branched shape with
@@ -6624,7 +6634,7 @@ export function moduleUsesAssert(mod: IrModule): boolean {
 
 /** True when the module contains any dynInvoke node or dyn.defineProps
  * libCall — the link switch that pulls scr_dyn_invoke.c (the prototype-
- * method dispatch on dyn receivers, plus scr_dyn_display and
+ * method dispatch on dyn receivers, plus scr_dyn_define_prop and
  * scr_dyn_define_props) into the binary (cc.ts; the assert gating
  * precedent — dispatch-free binaries keep their exact size class). Same
  * walk shape as moduleUsesZlib. */
@@ -7848,6 +7858,10 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // the destructuring pack throws V8's TypeError on non-iterable dyn kinds
   "dyn.iterPack",
   "dyn.toString",
+  // util.format's %s runs an object's OWN toString (Node's
+  // hasBuiltInToString test) — user code, so its throw is the
+  // program's. The REST-ARG twin insp.dynS inspects and never does.
+  "insp.fmtS",
   "dyn.defineProps",
   "dyn.defineProp",
   "process.chdir",
