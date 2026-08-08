@@ -102,7 +102,22 @@ test("node-types: path and os lower statically under @types/node's shapes", asyn
   expect(result.ok, !result.ok ? JSON.stringify(result.diagnostics, null, 2) : "").toBe(true);
   if (!result.ok) return;
   const { stdout } = await execFileAsync(result.binaryPath);
-  expect(stdout).toBe("b/c.txt\n/x/y z .gz\ntrue /\ntrue true\ntrue true\ntrue\n");
+  /* path.join's separator, path.sep and os.EOL are PLATFORM values, and the
+   * frontend lowers them per TARGET (cc.ts's targetPlatform — a win32
+   * triple compiles Node-on-Windows semantics with path.win32 behind the
+   * bare module). So the fixture's output cannot be one literal: measured
+   * under Node v25.9.0 on Windows the same program prints `b\c.txt`,
+   * `true \` and `true false` (EOL is CRLF), which is exactly what the
+   * compiled binary prints — the divergence is between the two PLATFORMS,
+   * never between scriptc and Node. */
+  const win = process.platform === "win32";
+  expect(stdout).toBe(
+    `${win ? "b\\c.txt" : "b/c.txt"}\n` +
+      `/x/y z .gz\n` +
+      `true ${win ? "\\" : "/"}\n` +
+      `true ${win ? "false" : "true"}\n` +
+      `true true\ntrue\n`,
+  );
 });
 
 test("node-types: declared-but-not-lowered surface fences, naming @types/node", async () => {

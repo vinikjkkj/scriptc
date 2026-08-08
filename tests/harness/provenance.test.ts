@@ -93,7 +93,11 @@ describe("provenance sources", () => {
     const pkg = sources.packages[0]!;
     expect(pkg.name).toBe("greeter");
     expect(pkg.version).toBe("1.2.3");
-    expect(pkg.entries["greeter"]).toMatch(/attested-src\/greeter\/src\/index\.ts$/);
+    // POSIX spelling: the resolver answers a HOST path (backslashes on
+    // win32), while the shape being asserted is the repo-relative tail.
+    expect(pkg.entries["greeter"]!.split("\\").join("/")).toMatch(
+      /attested-src\/greeter\/src\/index\.ts$/,
+    );
     setProvenanceSources(sources);
     const fromSource = await buildAndRun("greet-static", false);
     expect(fromSource).toBe(island);

@@ -35,11 +35,12 @@
  *                crosses byte-identical values (declaring a slot adds
  *                proofs and wrapper conversions, never new semantics).
  */
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compileLibrary, renderAll, validateSidecar } from "@scriptc/compiler";
+import { ccProbe, probeName, probeStdout } from "./cc.js";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const fixtureRoot = join(repoRoot, "tests/library-mode");
@@ -290,14 +291,16 @@ async function buildCase(tag: string, source: string, profile: object): Promise<
 }
 
 function buildProbe(probeSrc: string, archive: string, outDir: string, defines: string[] = []): string {
-  const bin = join(outDir, "probe");
-  execFileSync("clang", ["-std=c11", ...defines.map((d) => `-D${d}`), probeSrc, archive, "-lm", "-o", bin]);
+  // The embedder's build: cc.ts supplies the driver, the cross target, and
+  // the win32 system libs the archive's runtime units import.
+  const bin = join(outDir, probeName("probe"));
+  ccProbe(["-std=c11", ...defines.map((d) => `-D${d}`), probeSrc, archive, "-lm", "-o", bin]);
   return bin;
 }
 
 function runProbe(bin: string, args: string[] = []): { stdout: string; status: number | null; signal: string | null } {
   const r = spawnSync(bin, args, { encoding: "utf8", timeout: 60_000 });
-  return { stdout: r.stdout ?? "", status: r.status, signal: r.signal };
+  return { stdout: probeStdout(r.stdout ?? ""), status: r.status, signal: r.signal };
 }
 
 /* ── the corpus, both emissions ──────────────────────────────────────── */

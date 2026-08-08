@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compile, loadFfiProfile } from "@scriptc/compiler";
+import { ccProbe } from "./cc.js";
 import { exeName } from "./exe.js";
 
 const repoRoot = join(import.meta.dirname, "../..");
@@ -27,14 +28,21 @@ function nativeArchive(): string {
   mkdirSync(outDir, { recursive: true });
   const object = join(outDir, "native.o");
   const archive = join(outDir, "libnative.a");
-  execFileSync("clang", [
-    "-std=c11",
-    ...(sanitize ? ["-O1", "-fsanitize=address"] : ["-O2"]),
-    "-c",
-    join(fixtureRoot, "native.c"),
-    "-o",
-    object,
-  ]);
+  // The native side must be built by the SAME driver and target as the
+  // scriptc binary that links it (cc.ts) — a host clang would produce an
+  // object of the wrong format under any cross target, and does not exist
+  // at all on a zig-cc box. `link: false` because this is a -c compile.
+  ccProbe(
+    [
+      "-std=c11",
+      ...(sanitize ? ["-O1", "-fsanitize=address"] : ["-O2"]),
+      "-c",
+      join(fixtureRoot, "native.c"),
+      "-o",
+      object,
+    ],
+    { link: false },
+  );
   execFileSync("ar", ["rcs", archive, object]);
   return archive;
 }
