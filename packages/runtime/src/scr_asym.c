@@ -113,20 +113,14 @@ double scr_key_secret_size(const ScrKeyObject *k) {
  * unit cc.ts links exactly when a keyobj value reaches the IR — which is
  * exactly when this call can be emitted. scr_hmac_new_raw comes the other
  * way, out of the always-linked scr_lib.c. Only a SECRET key carries
- * material; an asymmetric one gets Node's TypeError. */
-/* createCipheriv/createDecipheriv keyed by a KeyObject — here for the
- * same reason as scr_hmac_new_key below it. */
-ScrCipher *scr_cipher_new_key(ScrStr *alg, ScrKeyObject *key, ScrBytes *iv, bool decrypt) {
-  if (!scr_keyobj_is_secret(key)) {
-    scr_asym_throw("Invalid key object type private, expected secret");
-    return NULL;
-  }
-  size_t len = 0;
-  const unsigned char *secret = scr_keyobj_secret(key, &len);
-  return scr_cipher_new_raw(alg, secret, len, iv->data, iv->len * scr_bytes_elem_size(iv->elem),
-                            decrypt);
-}
-
+ * material; an asymmetric one gets Node's TypeError.
+ *
+ * Its createCipheriv twin does NOT live here: scr_cipher_new_raw comes out
+ * of scr_cipher_value.c, which rides the CIPHER gate, and this unit rides
+ * the ASYM one — a keyobj-only program would have carried an undefined
+ * reference into the link. The bridge is its own two-gate TU
+ * (scr_cipher_key.c), the scr_inspect_island.c / scr_zlib_island.c
+ * pattern. */
 ScrHmac *scr_hmac_new_key(ScrStr *alg, ScrKeyObject *key) {
   if (!scr_keyobj_is_secret(key)) {
     scr_asym_throw("Invalid key object type private, expected secret");

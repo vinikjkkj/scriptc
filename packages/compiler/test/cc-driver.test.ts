@@ -15,12 +15,12 @@
  * PATH — the driver pins above run everywhere.
  */
 import { execFile, execFileSync } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
-import { compileC, resolveCc } from "../src/backend/cc.js";
+import { assertRuntimeUnitsClosed, compileC, resolveCc, runtimeSrcDir, runtimeUnitDeps } from "../src/backend/cc.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -258,4 +258,78 @@ describe.skipIf(!zigOnPath())("zig cc builds (zig on PATH)", () => {
     const magic = (await readFile(outPath)).subarray(0, 4);
     expect([...magic]).toEqual([0x7f, 0x45, 0x4c, 0x46]); // \x7fELF
   }, 600_000);
+});
+
+/* ------------------------- runtime link closure ---------------------------
+ * cc.ts hands the linker a HAND-PICKED subset of packages/runtime/src: each
+ * optional unit rides a boolean the IR detectors turn on. Nothing forced
+ * that subset to be CLOSED, and an unclosed one only ever announced itself
+ * as `lld-link: error: undefined symbol: <a C symbol>` at the very end of a
+ * build — which is where 2708/2717/2732 died (a KeyObject with no cipher
+ * beside it, reaching scr_cipher_new_raw through createCipheriv's KeyObject
+ * overload, which used to live in scr_asym.c).
+ *
+ * The tables are the MEASURED cross-unit reference graph; the check runs on
+ * the real argv of every build, so the two cannot drift apart. */
+describe("runtime link closure", () => {
+  test("both dependency tables name units that actually exist", async () => {
+    const present = new Set((await readdir(runtimeSrcDir())).filter((f) => f.endsWith(".c")));
+    for (const dynamic of [false, true]) {
+      for (const [unit, deps] of Object.entries(runtimeUnitDeps(dynamic))) {
+        expect(present, `${unit} (table key)`).toContain(unit);
+        for (const dep of deps) expect(present, `${unit} -> ${dep}`).toContain(dep);
+      }
+    }
+  });
+
+  test("an unclosed link set is refused by unit name, not by C symbol", () => {
+    const open = (): void => assertRuntimeUnitsClosed(["scr_http2.c", "scr_net.c"], false, "a test");
+    expect(open).toThrow(/scr_http2\.c needs scr_http\.c/);
+    expect(open).toThrow(/scr_http2\.c needs scr_tls\.c/);
+    expect(open).toThrow(/not closed/);
+    // The historical failure, in the words the build should have used.
+    expect(() => assertRuntimeUnitsClosed(["scr_cipher_key.c", "scr_asym.c"], false, "a test")).toThrow(
+      /scr_cipher_key\.c needs scr_cipher_value\.c/,
+    );
+  });
+
+  test("a closed set passes, and non-runtime inputs are not units", () => {
+    expect(() =>
+      assertRuntimeUnitsClosed(
+        ["scr_asym.c", "scr_cipher.c", "scr_cipher_value.c", "scr_cipher_key.c"],
+        false,
+        "a test",
+      ),
+    ).not.toThrow();
+    // A program TU that happens to share a name, a vendored source, and a
+    // cached object are none of them runtime units.
+    expect(() =>
+      assertRuntimeUnitsClosed([join(tmpdir(), "scr_http2.c"), "monocypher.c", "scr_net.o"], false, "a test"),
+    ).not.toThrow();
+  });
+
+  test("the island edges apply to SCR_DYNAMIC builds only", () => {
+    // scr_regex.c reaches for the island's JSContext only under the define;
+    // a static regex build forced to carry scr_island.c would be a
+    // regression, not a fix.
+    expect(() => assertRuntimeUnitsClosed(["scr_regex.c", "scr_assert.c"], false, "x")).not.toThrow();
+    expect(() => assertRuntimeUnitsClosed(["scr_regex.c", "scr_assert.c"], true, "x")).toThrow(
+      /scr_regex\.c needs scr_island\.c/,
+    );
+  });
+
+  test("compileC's own gates are closed for the units that used to be open", () => {
+    // These are the three holes the audit found. Each is asserted through
+    // the table rather than through a build so the check is free: what a
+    // build would produce for `asym` alone is {scr_asym.c}, for `stream`
+    // alone {scr_stream.c, scr_events_emitter.c, scr_dyn_handle.c}, and
+    // for `http2` alone the whole server family.
+    expect(() => assertRuntimeUnitsClosed(["scr_asym.c"], false, "x")).not.toThrow();
+    expect(() =>
+      assertRuntimeUnitsClosed(["scr_stream.c", "scr_events_emitter.c", "scr_dyn_handle.c"], false, "x"),
+    ).not.toThrow();
+    expect(() => assertRuntimeUnitsClosed(["scr_stream.c"], false, "x")).toThrow(
+      /scr_stream\.c needs scr_events_emitter\.c/,
+    );
+  });
 });
