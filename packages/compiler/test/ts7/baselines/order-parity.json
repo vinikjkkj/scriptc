@@ -6494,6 +6494,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3051-handle-kinds-are-frame-tracked.ts": {
+   "order": [
+    "<repo>/tests/corpus/3051-handle-kinds-are-frame-tracked.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/400-fib.ts": {
    "order": [
     "<repo>/tests/corpus/400-fib.ts"

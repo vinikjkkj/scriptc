@@ -38,6 +38,7 @@ static ScrBigInt *scr_big_alloc(size_t cap) {
   if (cap > (SIZE_MAX - sizeof(ScrBigInt)) / sizeof(uint32_t)) scr_big_oom();
   ScrBigInt *b = malloc(sizeof(ScrBigInt) + cap * sizeof(uint32_t));
   if (!b) scr_big_oom();
+  scr_bigint_alloc_note();
   b->rc = 1;
   b->sign = 0;
   b->n = 0;
@@ -60,7 +61,10 @@ ScrBigInt *scr_big_retain(ScrBigInt *b) {
 
 void scr_big_release(ScrBigInt *b) {
   if (!b || b->rc == SIZE_MAX) return;
-  if (--b->rc == 0) free(b);
+  if (--b->rc == 0) {
+    scr_bigint_free_note();
+    free(b);
+  }
 }
 
 ScrBigInt *scr_big_zero(void) {

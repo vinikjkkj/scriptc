@@ -718,7 +718,17 @@ export function typeEquals(a: IrType, b: IrType): boolean {
  * The single dispatch point for the backend's RC machinery: retains,
  * releases, frame/scope tracking, and NULL-initialized locals all key off
  * this — adding a refcounted kind must not grow new per-kind checks outside
- * the type-directed helpers. */
+ * the type-directed helpers.
+ *
+ * This list and emit-types.ts's `rcAdapters` answer the SAME question and
+ * must agree kind for kind: `isRefCounted(t)` iff `rcAdapters(t) !== null`.
+ * It cannot literally call the table — that lives in the backend and this
+ * is the IR layer — so a test pins the equivalence instead
+ * (llvm-runtime-abi.test.ts, over the same exhaustive kind table that
+ * test already keeps honest). It had drifted six kinds behind: bigint and
+ * the four crypto handles answered FALSE here while both backends carried
+ * working RC adapters for them, so their values got no frame tracking on
+ * either backend and every one a program made leaked. */
 export function isRefCounted(t: IrType): boolean {
   return (
     t.kind === "string" ||
@@ -760,6 +770,18 @@ export function isRefCounted(t: IrType): boolean {
     // cycles — parsed cert/key material inside only).
     t.kind === "secureCtx" ||
     t.kind === "abortSignal" ||
+    // bigint and the four crypto handles. Ordinary refcounted heap values
+    // with NULL-tolerant, immortal-tolerant releases and — decisively —
+    // NO collector header and no edge that could point back at anything
+    // (digits; a curve scalar; an accumulated message; a key schedule), so
+    // traceAdapterC answers null for all six and no container ever traces
+    // one. Tracking them is pure balance, never a cycle question.
+    t.kind === "bigint" ||
+    t.kind === "keyobj" ||
+    t.kind === "hash" ||
+    t.kind === "hmac" ||
+    t.kind === "cipher" ||
+    t.kind === "decipher" ||
     // FSWatcher handles are refcounted like child (listeners drop at
     // close, so lean allocation — see the IrType comment).
     t.kind === "fsWatcher" ||

@@ -88,6 +88,7 @@ ScrCipher *scr_cipher_new_raw(ScrStr *alg, const unsigned char *key, size_t keyl
     return NULL;
   }
   ScrCipher *c = calloc(1, sizeof(ScrCipher));
+  if (c) scr_cipher_alloc_note();
   if (!c) scr_trap("scriptc: out of memory\n");
   c->rc = 1;
   c->mode = mode;
@@ -116,6 +117,7 @@ void scr_cipher_release(ScrCipher *c) {
   if (--c->rc == 0) {
     /* The key schedule and the chaining state are secrets. */
     memset(c, 0, sizeof *c);
+    scr_cipher_free_note();
     free(c);
   }
 }
