@@ -5708,22 +5708,69 @@ let digestInputValueDispatches = 0;
       const v = processVersionsMember(L, expr);
       if (v) return v;
     }
+    // Every OTHER member of `process.versions`, in one rule, because the
+    // container is about to have a value in JavaScript sources (below) and
+    // a member the container answers quietly is a member this file no
+    // longer gets to leave unsaid. The test is the DECLARATION, and it is
+    // the honest one:
+    //
+    //  - a component the surface in play DECLARES, that nothing above
+    //    answered (v8, uv, zlib, ares, modules, http_parser under
+    //    @types/node) — Node ALWAYS has it and this binary links none of
+    //    it, so it refuses by NAME. It used to refuse at the container,
+    //    which said less.
+    //  - anything the surface does NOT declare — versions.electron
+    //    (commander's Electron probe), versions.icu, and the other-runtime
+    //    probes below — is ABSENT, and absent is a real answer: it is what
+    //    Node itself returns for a component it did not compile in, and it
+    //    is already what versions.bun/.deno answer. The fallback ambient
+    //    declares exactly the three a compiled binary can have, so under it
+    //    a read of anything else is asking after something the surface
+    //    itself says is not there.
+    //
+    // Written out rather than routed through stdlibMemberFence, whose
+    // first rule stands down for a receiver that maps to the checked-
+    // dynamic tree — which this one does, and which is precisely the case
+    // that needs the refusal once the container has a value.
+    {
+      const recv = expr.expression;
+      const name = expr.name.text;
+      if (
+        ts.isPropertyAccessExpression(recv) &&
+        recv.name.text === "versions" &&
+        L.isStdlibGlobal(recv.expression, "process")
+      ) {
+        // Resolved off the RECEIVER'S TYPE, never off the access:
+        // getSymbolAtLocation answers @types/node's `Dict<string>` INDEX
+        // SIGNATURE for an undeclared key, which would fence
+        // versions.electron — the one read this rule most needs to let
+        // through. getPropertyOfType answers declared members only, which
+        // is the question being asked.
+        const sym = L.checker.getPropertyOfType(L.typeOf(recv), name);
+        // `sqlite` is the one DECLARED component with a decided answer:
+        // the fallback ambient declares it optional precisely to say a
+        // compiled binary has no SQLite component, so it reads absent
+        // instead of refusing.
+        if (name !== "sqlite" && L.isStdlibSymbol(sym ?? undefined)) {
+          L.noLowering(
+            `process.versions.${name}`,
+            expr,
+            "a compiled binary links no such component — process.versions.node and .openssl are the " +
+              "two that answer (both report the runtime's Node compatibility target)",
+            sym,
+          );
+        }
+        return { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: locOf(expr) };
+      }
+    }
     // The capability-probe members that honestly DON'T EXIST in a
     // compiled binary — each reads undefined (their declared types carry
     // the undefined arm), so feature probes take their documented
-    // fallbacks: no OpenSSL/SQLite components (process.versions.openssl/
-    // .sqlite), no gyp build config (process.config.variables.* — no ICU,
+    // fallbacks: no gyp build config (process.config.variables.* — no ICU,
     // no QUIC — and process.config.target_defaults), no feature flags
     // (process.features.* — no inspector, not a debug build).
     if (!expr.questionDotToken && ts.isPropertyAccessExpression(expr.expression)) {
       const container = L.stdlibGlobalMember(expr.expression, "process");
-      if (container === "versions" && (expr.name.text === "sqlite" || expr.name.text === "bun" || expr.name.text === "deno")) {
-        // versions.bun / versions.deno are the OTHER-runtime probes (a
-        // formatter's config loader picks its package.json reader by
-        // them): a compiled binary is neither, so both read undefined —
-        // exactly Node's own answer.
-        return { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: locOf(expr) };
-      }
       if (container === "features") {
         return { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: locOf(expr) };
       }
@@ -5749,6 +5796,56 @@ let digestInputValueDispatches = 0;
     const loc = locOf(expr);
     if (member === "argv") {
       return { kind: "libCall", fn: "process.argv", args: [], type: arrayOf(STRING), loc };
+    }
+    // `process.versions` as a STANDALONE value, in a JavaScript source.
+    //
+    // The runtime-detection idiom reads the CONTAINER one link before the
+    // member that already lowers — protobufjs's util.isNode is
+    // `Boolean(typeof global !== "undefined" && global && global.process &&
+    // global.process.versions && global.process.versions.node)`, and every
+    // link of that chain is a value the compiled binary knows. There IS an
+    // object there: "the process global is always present in a compiled
+    // binary and its versions is always an object" is the same fact
+    // processVersionsMember's optional links already rest on, and stating
+    // it as a fence was the gap — the chain died on the container while
+    // the member it guards was a compile-time string.
+    //
+    // The object carries exactly the components that EXIST: node and
+    // openssl, from the same two constant libCalls the direct member reads
+    // answer with. Everything else is ABSENT, which is what a component
+    // that is not in the build should read as, and what the sqlite/bun/deno
+    // probes already answer — while the DECLARED components keep the loud
+    // refusal, above, so no read of a missing one turns quiet.
+    //
+    // JavaScript sources only — the identity-token rule's split, for the
+    // same reason. A TypeScript read is typed `NodeJS.ProcessVersions`,
+    // eight declared string members of which this value has two; it cannot
+    // inhabit that slot without inventing the other six, so it keeps the
+    // SC2020 fence there and the fix is to read the member directly.
+    //
+    // In the JS lane that same arithmetic is not a fence but a CHECK, and
+    // it already exists: binding the container into a slot declared
+    // `ProcessVersions` runs the checked-dynamic boundary check, which
+    // throws naming the first component the binary does not link
+    // ("expected string at $.ares"). That is the loud answer, at the line
+    // that demanded the component, and it costs the probes nothing — a
+    // truthiness chain and a member read cross no typed boundary.
+    if (member === "versions" && isJsSourceFile(expr.getSourceFile())) {
+      const component = (name: string, fn: IrLibFn) => ({
+        key: { kind: "strLit" as const, value: name, type: STRING, loc },
+        value: {
+          kind: "dynFrom" as const,
+          value: { kind: "libCall" as const, fn, args: [], type: STRING, loc },
+          type: DYN,
+          loc,
+        },
+      });
+      return {
+        kind: "dynObjLit",
+        fields: [component("node", "process.versionsNode"), component("openssl", "process.versionsOpenssl")],
+        type: DYN,
+        loc,
+      };
     }
     // process.execArgv: the extra CLI arguments Node itself consumed — a
     // compiled binary consumed none, so the honest answer is a fresh [].
