@@ -14,7 +14,6 @@ import type { IrModule, IrRecordShape, IrType } from "../../ir/nodes.js";
 import { funcOf, isRefCounted, mapOf, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, VOID } from "../../ir/nodes.js";
 import {
   mangleClassRelease,
-  mangleClassRetain,
   mangleClassTrace,
   mangleRecordGcFree,
   mangleRecordNew,
@@ -23,7 +22,7 @@ import {
   mangleRecordStruct,
   mangleRecordTrace,
 } from "../mangle.js";
-import { arrayElemIsRef } from "../emission/emit-types.js";
+import { arrayElemIsRef, rcAdapters } from "../emission/emit-types.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 
 /** What the tables need from the emitter: the extern-declaration ledger
@@ -147,165 +146,20 @@ export function computeTraced(mod: IrModule): { shapes: Set<string>; unions: Set
  * use their emitted per-shape helpers, whose signatures are already
  * `_v`-shaped. */
 export function vAdapters(host: ShapeHost, t: IrType): { retain: string; release: string } {
-  switch (t.kind) {
-    case "caught":
-      // Catch-binding snapshot boxes (ScrCaught): the runtime pair is
-      // already `_v`-shaped. Caught values never enter containers — these
-      // arms serve retainSym/releaseSym only.
-      host.declare(`declare ptr @scr_caught_retain(ptr)`);
-      host.declare(`declare void @scr_caught_release(ptr)`);
-      return { retain: "@scr_caught_retain", release: "@scr_caught_release" };
-    case "string":
-      host.declare(`declare ptr @scr_str_retain_v(ptr)`);
-      host.declare(`declare void @scr_str_release_v(ptr)`);
-      return { retain: "@scr_str_retain_v", release: "@scr_str_release_v" };
-    case "array":
-      host.declare(`declare ptr @scr_arr_retain_v(ptr)`);
-      host.declare(`declare void @scr_arr_release_v(ptr)`);
-      return { retain: "@scr_arr_retain_v", release: "@scr_arr_release_v" };
-    case "map":
-    case "set":
-      host.declare(`declare ptr @scr_map_retain_v(ptr)`);
-      host.declare(`declare void @scr_map_release_v(ptr)`);
-      return { retain: "@scr_map_retain_v", release: "@scr_map_release_v" };
-    case "union":
-      host.declare(`declare ptr @scr_union_retain_v(ptr)`);
-      host.declare(`declare void @scr_union_release_v(ptr)`);
-      return { retain: "@scr_union_retain_v", release: "@scr_union_release_v" };
-    case "promise":
-      host.declare(`declare ptr @scr_promise_retain_v(ptr)`);
-      host.declare(`declare void @scr_promise_release_v(ptr)`);
-      return { retain: "@scr_promise_retain_v", release: "@scr_promise_release_v" };
-    case "bytes":
-      host.declare(`declare ptr @scr_bytes_retain_v(ptr)`);
-      host.declare(`declare void @scr_bytes_release_v(ptr)`);
-      return { retain: "@scr_bytes_retain_v", release: "@scr_bytes_release_v" };
-    case "url":
-      host.declare(`declare ptr @scr_url_retain_v(ptr)`);
-      host.declare(`declare void @scr_url_release_v(ptr)`);
-      return { retain: "@scr_url_retain_v", release: "@scr_url_release_v" };
-    case "searchParams":
-      host.declare(`declare ptr @scr_sp_retain_v(ptr)`);
-      host.declare(`declare void @scr_sp_release_v(ptr)`);
-      return { retain: "@scr_sp_retain_v", release: "@scr_sp_release_v" };
-    case "stats":
-      host.declare(`declare ptr @scr_stats_retain_v(ptr)`);
-      host.declare(`declare void @scr_stats_release_v(ptr)`);
-      return { retain: "@scr_stats_retain_v", release: "@scr_stats_release_v" };
-    case "spawnRes":
-      host.declare(`declare ptr @scr_spawn_res_retain_v(ptr)`);
-      host.declare(`declare void @scr_spawn_res_release_v(ptr)`);
-      return { retain: "@scr_spawn_res_retain_v", release: "@scr_spawn_res_release_v" };
-    case "child":
-      host.declare(`declare ptr @scr_child_retain_v(ptr)`);
-      host.declare(`declare void @scr_child_release_v(ptr)`);
-      return { retain: "@scr_child_retain_v", release: "@scr_child_release_v" };
-    case "childStream":
-      host.declare(`declare ptr @scr_child_stream_retain_v(ptr)`);
-      host.declare(`declare void @scr_child_stream_release_v(ptr)`);
-      return { retain: "@scr_child_stream_retain_v", release: "@scr_child_stream_release_v" };
-    case "generator":
-      host.declare(`declare ptr @scr_gen_retain_v(ptr)`);
-      host.declare(`declare void @scr_gen_release_v(ptr)`);
-      return { retain: "@scr_gen_retain_v", release: "@scr_gen_release_v" };
-    case "func":
-      host.declare(`declare ptr @scr_closure_retain_v(ptr)`);
-      host.declare(`declare void @scr_closure_release_v(ptr)`);
-      return { retain: "@scr_closure_retain_v", release: "@scr_closure_release_v" };
-    case "symbol":
-      host.declare(`declare ptr @scr_sym_retain_v(ptr)`);
-      host.declare(`declare void @scr_sym_release_v(ptr)`);
-      return { retain: "@scr_sym_retain_v", release: "@scr_sym_release_v" };
-    case "regex":
-      host.declare(`declare ptr @scr_regex_retain_v(ptr)`);
-      host.declare(`declare void @scr_regex_release_v(ptr)`);
-      return { retain: "@scr_regex_retain_v", release: "@scr_regex_release_v" };
-    case "record":
-      return { retain: `@${mangleRecordRetain(t.shapeId)}`, release: `@${mangleRecordRelease(t.shapeId)}` };
-    case "object":
-      if (RUNTIME_ERROR_CLASSES.has(t.className)) {
-        host.declare(`declare ptr @scr_error_retain_v(ptr)`);
-        host.declare(`declare void @scr_error_release_v(ptr)`);
-        return { retain: "@scr_error_retain_v", release: "@scr_error_release_v" };
-      }
-      if (t.className === RUNTIME_EMITTER_CLASS) {
-        // Bare EventEmitter instances: the runtime's `_v` pair (release
-        // dispatches through the stamped vtable, so a base-typed release
-        // tears down a user subclass too).
-        host.declare(`declare ptr @scr_emitter_retain_v(ptr)`);
-        host.declare(`declare void @scr_emitter_release_v(ptr)`);
-        return { retain: "@scr_emitter_retain_v", release: "@scr_emitter_release_v" };
-      }
-      if (RUNTIME_STREAM_CLASSES.has(t.className)) {
-        // The five runtime stream classes share ONE runtime layout; the
-        // `_v` pair dispatches teardown through the stamped vtable.
-        host.declare(`declare ptr @scr_stream_retain_v(ptr)`);
-        host.declare(`declare void @scr_stream_release_v(ptr)`);
-        return { retain: "@scr_stream_retain_v", release: "@scr_stream_release_v" };
-      }
-      // Emitted per-class helpers are already `_v`-shaped (ptr → ptr /
-      // ptr → void), so the same symbols serve as container entry points.
-      return { retain: `@${mangleClassRetain(t.className)}`, release: `@${mangleClassRelease(t.className)}` };
-    case "classval":
-      // No-ops on the immortal class object; container machinery uniform.
-      host.declare(`declare ptr @scr_classobj_retain_v(ptr)`);
-      host.declare(`declare void @scr_classobj_release_v(ptr)`);
-      return { retain: "@scr_classobj_retain_v", release: "@scr_classobj_release_v" };
-    case "fsWatcher":
-      // fs.watch handles (ScrWatcher): the runtime's `_v` pair; no trace
-      // (listeners drop at close — never part of a lasting cycle).
-      host.declare(`declare ptr @scr_watcher_retain_v(ptr)`);
-      host.declare(`declare void @scr_watcher_release_v(ptr)`);
-      return { retain: "@scr_watcher_retain_v", release: "@scr_watcher_release_v" };
-    case "netServer":
-      host.declare(`declare ptr @scr_net_server_retain_v(ptr)`);
-      host.declare(`declare void @scr_net_server_release_v(ptr)`);
-      return { retain: "@scr_net_server_retain_v", release: "@scr_net_server_release_v" };
-    case "netSocket":
-      host.declare(`declare ptr @scr_net_sock_retain_v(ptr)`);
-      host.declare(`declare void @scr_net_sock_release_v(ptr)`);
-      return { retain: "@scr_net_sock_retain_v", release: "@scr_net_sock_release_v" };
-    case "dgramSocket":
-      host.declare(`declare ptr @scr_dgram_retain_v(ptr)`);
-      host.declare(`declare void @scr_dgram_release_v(ptr)`);
-      return { retain: "@scr_dgram_retain_v", release: "@scr_dgram_release_v" };
-    case "httpReq":
-      host.declare(`declare ptr @scr_http_req_retain_v(ptr)`);
-      host.declare(`declare void @scr_http_req_release_v(ptr)`);
-      return { retain: "@scr_http_req_retain_v", release: "@scr_http_req_release_v" };
-    case "httpRes":
-      host.declare(`declare ptr @scr_http_res_retain_v(ptr)`);
-      host.declare(`declare void @scr_http_res_release_v(ptr)`);
-      return { retain: "@scr_http_res_retain_v", release: "@scr_http_res_release_v" };
-    case "httpClientReq":
-      host.declare(`declare ptr @scr_http_client_retain_v(ptr)`);
-      host.declare(`declare void @scr_http_client_release_v(ptr)`);
-      return { retain: "@scr_http_client_retain_v", release: "@scr_http_client_release_v" };
-    case "secureCtx":
-      host.declare(`declare ptr @scr_secure_ctx_retain_v(ptr)`);
-      host.declare(`declare void @scr_secure_ctx_release_v(ptr)`);
-      return { retain: "@scr_secure_ctx_retain_v", release: "@scr_secure_ctx_release_v" };
-    case "testCtx":
-      host.declare(`declare ptr @scr_testctx_retain_v(ptr)`);
-      host.declare(`declare void @scr_testctx_release_v(ptr)`);
-      return { retain: "@scr_testctx_retain_v", release: "@scr_testctx_release_v" };
-    case "jsval":
-      // Island handles (the --dynamic engine boundary): the runtime's
-      // `_v` pair; UNTRACED (engine values never join static cycles).
-      host.declare(`declare ptr @scr_jsval_retain_v(ptr)`);
-      host.declare(`declare void @scr_jsval_release_v(ptr)`);
-      return { retain: "@scr_jsval_retain_v", release: "@scr_jsval_release_v" };
-    case "dyn":
-      // dyn values (the `unknown` boundary): the runtime's `_v` pair —
-      // scr_dyn_retain is a header inline, so the `_v` symbols serve both
-      // roles. UNTRACED (the dyn→closure stance: cycles through dyn are
-      // never collected, SEMANTICS.md) — traceAdapter answers null.
-      host.declare(`declare ptr @scr_dyn_retain_v(ptr)`);
-      host.declare(`declare void @scr_dyn_release_v(ptr)`);
-      return { retain: "@scr_dyn_retain_v", release: "@scr_dyn_release_v" };
-    default:
-      throw new LlvmUnsupportedError(`rc:${t.kind}`);
+  // DERIVED, not copied: emit-types.ts's rcAdapters is the one table, and
+  // this tier is a pure rewriting of it — `@` on every name, a `declare`
+  // for the runtime-provided pairs, and nothing for the per-shape helpers
+  // the program TU emits itself (already `ptr`-shaped here, so the base
+  // name IS the `_v` shape). The hand-written switch this replaces had
+  // drifted nine kinds behind its C twin; there is no longer a second
+  // list that CAN drift.
+  const a = rcAdapters(t);
+  if (a === null) throw new LlvmUnsupportedError(`rc:${t.kind}`);
+  if (a.origin !== "emitted") {
+    host.declare(`declare ptr @${a.retain}(ptr)`);
+    host.declare(`declare void @${a.release}(ptr)`);
   }
+  return { retain: `@${a.retain}`, release: `@${a.release}` };
 }
 
 /** The retain call target (ptr → ptr, +1 unless immortal) — the `_v`
@@ -393,16 +247,6 @@ export function releaseSym(host: ShapeHost, t: IrType): string {
     case "fsWatcher":
       host.declare(`declare void @scr_watcher_release_v(ptr)`);
       return "@scr_watcher_release_v";
-    case "netServer":
-    case "netSocket":
-    case "dgramSocket":
-    case "httpReq":
-    case "httpRes":
-    case "httpClientReq":
-    case "secureCtx":
-    case "testCtx":
-      // The handle kinds share their `_v` pair for both roles.
-      return vAdapters(host, t).release;
     case "jsval":
       host.declare(`declare void @scr_jsval_release_v(ptr)`);
       return "@scr_jsval_release_v";
@@ -411,7 +255,16 @@ export function releaseSym(host: ShapeHost, t: IrType): string {
       host.declare(`declare void @scr_dyn_release(ptr)`);
       return "@scr_dyn_release";
     default:
-      throw new LlvmUnsupportedError(`rc:${t.kind}`);
+      // Every remaining refcounted kind — the handle families, and the
+      // bigint/crypto values whose absence from the switch above was the
+      // whole of this tier's RC gap — shares its `_v` pair between both
+      // roles: `void scr_x_release_v(void *)` IS the direct signature once
+      // everything is `ptr`, and the thunk it forwards to is the same
+      // NULL-tolerant release the typed entry point names. So this falls
+      // through to the ONE table rather than repeating it, and a kind with
+      // no adapters at all still leaves as the same loud `rc:` refusal
+      // (rcAdapters answers null, vAdapters raises it).
+      return vAdapters(host, t).release;
   }
 }
 
@@ -538,24 +391,13 @@ export function boxNewCall(host: ShapeHost, t: IrType): string {
     host.declare(`declare ptr @scr_box_new(i32)`);
     return `call ptr @scr_box_new(i32 3)`; // SCR_BOX_ARR
   }
-  if (
-    t.kind === "record" || t.kind === "object" || t.kind === "classval" || t.kind === "union" ||
-    t.kind === "array" || t.kind === "map" || t.kind === "set" || t.kind === "symbol" || t.kind === "regex" ||
-    t.kind === "promise" || t.kind === "bytes" || t.kind === "url" || t.kind === "searchParams" ||
-    t.kind === "stats" || t.kind === "spawnRes" || t.kind === "child" || t.kind === "childStream" ||
-    t.kind === "generator" ||
-    t.kind === "netServer" || t.kind === "netSocket" || t.kind === "dgramSocket" ||
-    t.kind === "httpReq" || t.kind === "httpRes" || t.kind === "httpClientReq" ||
-    t.kind === "secureCtx" || t.kind === "testCtx" ||
-    // Island handles: the box carries scr_jsval_retain_v/release_v and
-    // no trace — the same stance as jsval array elements.
-    t.kind === "jsval" ||
-    // Checked-dynamic captures (the mustCall wrapper closing over its
-    // implicit-any `fn` param): the box carries scr_dyn_retain_v/release_v
-    // and NO trace — cycles through dyn never collect (SEMANTICS.md).
-    t.kind === "dyn" ||
-    t.kind === "fsWatcher"
-  ) {
+  // Everything else that HAS RC adapters rides an obj-box carrying them
+  // plus the payload's trace — boxNewC's rule, from boxNewC's table. The
+  // hand-written chain this replaces was the seventh copy of that list and
+  // was short the same nine kinds; `direct` (caught) has no void*-thunk to
+  // store, and a catch binding is never captured.
+  const rc = rcAdapters(t);
+  if (rc !== null && rc.origin !== "direct") {
     const v = vAdapters(host, t);
     host.declare(`declare ptr @scr_box_new_obj(ptr, ptr, ptr)`);
     return `call ptr @scr_box_new_obj(ptr ${v.retain}, ptr ${v.release}, ptr ${traceArg(host, t)})`;
@@ -573,46 +415,15 @@ export function boxAccess(t: IrType): "f64" | "bool" | "ref" {
 /** A record field's in-struct LLVM type. bool fields store as i8 (the C
  * _Bool layout); loads/stores convert at the access site. */
 export function llFieldType(t: IrType): "double" | "i8" | "ptr" {
-  switch (t.kind) {
-    case "f64":
-      return "double";
-    case "bool":
-      return "i8";
-    case "string":
-    case "array":
-    case "record":
-    case "object":
-    case "classval":
-    case "union":
-    case "func":
-    case "map":
-    case "set":
-    case "symbol":
-    case "regex":
-    case "promise":
-    case "bytes":
-    case "url":
-    case "searchParams":
-    case "stats":
-    case "spawnRes":
-    case "child":
-    case "childStream":
-    case "generator":
-    case "dyn":
-    case "jsval":
-    case "fsWatcher":
-    case "netServer":
-    case "netSocket":
-    case "dgramSocket":
-    case "httpReq":
-    case "httpRes":
-    case "httpClientReq":
-    case "secureCtx":
-    case "testCtx":
-      return "ptr";
-    default:
-      throw new LlvmUnsupportedError(`type:${t.kind}`);
-  }
+  if (t.kind === "f64") return "double";
+  if (t.kind === "bool") return "i8";
+  // Everything else a record can hold is a refcounted heap value, and
+  // "which kinds are those" is rcAdapters' question, not this table's —
+  // the hand-written case list this replaces was a third copy of it and
+  // had fallen the same nine kinds behind. A field the shape emitter can
+  // store is exactly a field it can retain and release.
+  if (rcAdapters(t) !== null) return "ptr";
+  throw new LlvmUnsupportedError(`type:${t.kind}`);
 }
 
 /* ── maps and sets ────────────────────────────────────────────────────── */

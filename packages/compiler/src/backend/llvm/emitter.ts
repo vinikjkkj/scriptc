@@ -87,6 +87,7 @@ import {
   type LlClassMeta,
 } from "./classes.js";
 import { DK, LlDyn } from "./dyn.js";
+import { rcAdapters } from "../emission/emit-types.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 import { LlWalkers } from "./walkers.js";
 import {
@@ -1169,48 +1170,27 @@ class LlEmitter {
         return "double";
       case "bool":
         return "i1";
-      case "string":
-      case "array":
-      case "record":
-      case "union":
-      case "func":
-      case "map":
-      case "set":
-      case "symbol":
-      case "regex":
-      case "promise":
-      case "bytes":
-      case "url":
-      case "searchParams":
-      case "stats":
-      case "spawnRes":
-      case "child":
-      case "childStream":
-      case "generator":
-      case "dyn":
-      case "jsval":
-      case "fsWatcher":
-      case "netServer":
-      case "netSocket":
-      case "dgramSocket":
-      case "httpReq":
-      case "httpRes":
-      case "httpClientReq":
-      case "secureCtx":
-      case "testCtx":
-        return "ptr";
       case "procStream":
         // A SCALAR kind: the stream value IS its fd (1 = stdout, 2 =
-        // stderr) — no heap, no refcount.
+        // stderr) — no heap, no refcount. Must answer BEFORE the
+        // refcounted-pointer rule below, which would otherwise never see
+        // it (rcAdapters says null, so it would refuse instead).
         return "double";
-      case "object":
-        return "ptr";
-      case "classval":
-      case "caught": // catch bindings: ScrCaught snapshot boxes
-        return "ptr";
       case "void":
         return "void";
       default:
+        // Every other kind the tier can represent is a refcounted heap
+        // value, and it is ONE `ptr` here whichever it is. "Which kinds
+        // are those" is emit-types.ts's rcAdapters — the same table the
+        // RC dispatch, the release dispatch and the record-field layout
+        // now answer from. This case list used to be a sixth hand-written
+        // copy of it and was the one that actually gated the tier: a local
+        // of a missing kind could not be spelled at all, so `bigint`,
+        // `keyobj`, `hash`, `hmac`, `cipher`, `decipher`, `http2Session`,
+        // `http2Stream` and `abortSignal` refused here even once their RC
+        // adapters existed. A kind we can retain and release is a kind we
+        // can hold in a register.
+        if (rcAdapters(t) !== null) return "ptr";
         throw new LlvmUnsupportedError(`type:${t.kind}`);
     }
   }
