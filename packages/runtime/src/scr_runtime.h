@@ -3374,8 +3374,15 @@ ScrStr *scr_dyn_to_string_method(const ScrDyn *d, const ScrStr *enc, const ScrSt
 ScrStr *scr_dyn_string_coerce(const ScrDyn *d);
 /* JS ToString WITH the object protocol (user toString/valueOf members
  * called, their throws propagating) — the WHATWG USVString conversions.
+ * ToPrimitive's STRING hint: toString first, valueOf second.
  * Borrows; +1 or NULL with the exception pending. */
 ScrStr *scr_dyn_string_coerce_js(const ScrDyn *d);
+/* The same protocol with ToPrimitive's DEFAULT hint — valueOf FIRST,
+ * toString second — which is what `+` performs on an untyped operand
+ * when the other side is a string. `"" + o` and `String(o)` are
+ * different conversions and answer differently for an object carrying
+ * both methods. Borrows; +1 or NULL with the exception pending. */
+ScrStr *scr_dyn_to_primitive_string(const ScrDyn *d);
 
 /* `d instanceof TypeError` (and the other builtin error classes) on a
  * checked-dynamic value: the from_error cache resolves the dyn encoding
@@ -3437,9 +3444,6 @@ bool scr_dyn_lt(const ScrDyn *a, const ScrDyn *b);
 bool scr_dyn_le(const ScrDyn *a, const ScrDyn *b);
 bool scr_dyn_gt(const ScrDyn *a, const ScrDyn *b);
 bool scr_dyn_ge(const ScrDyn *a, const ScrDyn *b);
-/* JS String() over a dyn value (arrays join, [object Object], the error
- * encoding renders "name: message"); borrowed, result +1, never throws. */
-ScrStr *scr_dyn_display(const ScrDyn *d);
 /* JS === over two dyn values: scalars by value, units by kind, everything
  * reference-shaped by node identity. Borrowed; never throws. */
 bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b);
@@ -3868,7 +3872,7 @@ void scr_jb_put_f64(ScrJsonBuf *b, double v);
  * JSON.stringify escape set for well-formed strings. */
 void scr_jb_put_json_str(ScrJsonBuf *b, const ScrStr *s);
 /* String(v) of a JSVAL node appended into b (the emitted sc_ds display
- * walkers' arm; scr_dyn_display/to_string route here too): the engine's
+ * walkers' arm; scr_dyn_to_string routes here too): the engine's
  * ToString. A bridged failure (throwing user toString, a symbol) leaves
  * the exception PENDING and appends nothing — the loud path, never a
  * fabricated rendering. */
@@ -5283,8 +5287,13 @@ ScrStr *scr_insp_error(ScrError *e, double recurse, double depth);
  * traversal is here. dyn-boxed bytes render in the checked-dynamic tree's documented
  * Uint8Array identity. */
 ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth);
-/* format's %s / rest-args twin: dyn strings pass verbatim. */
+/* A format argument's REST-ARG conversion: dyn strings pass verbatim,
+ * everything else inspects. Never throws (console.log's conversion). */
 ScrStr *scr_insp_dyn_s(ScrDyn *d, double depth);
+/* format's %s conversion, which is NOT the one above: an object carrying
+ * its OWN toString is String()-converted rather than inspected (Node's
+ * hasBuiltInToString test). MAY THROW — the toString is user code. */
+ScrStr *scr_insp_fmt_s(ScrDyn *d, double depth);
 /* ── BigInt ────────────────────── */
 /* Arbitrary-precision integers, sign-magnitude over base-2^32 limbs (little
  * endian, no leading zero limbs, sign 0 iff n == 0). Refcounted like every

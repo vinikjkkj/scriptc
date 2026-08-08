@@ -927,11 +927,52 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
   return scr_str_new("undefined", 9); /* unreachable */
 }
 
-/* util.format's %s over a dyn value: strings pass VERBATIM (Node's
- * `typeof arg === 'string' ? arg : inspect(arg)` — the %s depth is 0,
- * the rest-args depth 2); everything else inspects at the given depth. */
+/* A format argument's REST-ARG conversion over a dyn value: strings pass
+ * VERBATIM (Node's `typeof arg === 'string' ? arg : inspect(arg)`);
+ * everything else inspects at the given depth (0 for a %s position, 2
+ * for a trailing argument). Never throws — this is the conversion
+ * console.log gives its non-format arguments, and Node's console.log
+ * never runs a user toString. */
 ScrStr *scr_insp_dyn_s(ScrDyn *d, double depth) {
   if (d->kind == SCR_DYN_STR) return scr_str_retain(d->v.str);
+  return scr_insp_dyn(d, 0, depth);
+}
+
+/* util.format's %s conversion, which is NOT the rest-arg conversion
+ * above. Node's formatter (lib/internal/util/inspect.js):
+ *
+ *     typeof arg !== 'object' || arg === null || !hasBuiltInToString(arg)
+ *       ? String(arg)
+ *       : inspect(arg, ...)
+ *
+ * so an object whose `toString` is its own — rather than one it
+ * inherited from a built-in prototype — is CONVERTED, not inspected.
+ * Measured, Node v25.9.0:
+ *
+ *     util.format("%s", {toString(){return "USER"}})  ->  "USER"
+ *     util.format("%s", {a: 1})                       ->  "{ a: 1 }"
+ *     console.log(     {toString(){return "USER"}})   ->  "{ toString: … }"
+ *
+ * The third line is why this cannot simply become scr_insp_dyn_s's
+ * behaviour: the same runtime call served both, and console.log's
+ * arguments must keep inspecting.
+ *
+ * The dyn tree models no built-in prototypes, so any `toString` found on
+ * an OBJ's own members or its prototype chain is by construction a user
+ * one and hasBuiltInToString is false for it. Every other kind — arrays,
+ * dates, regexps, errors, buffers — inherits its toString from a
+ * built-in and inspects, which is what the fall-through already does.
+ *
+ * MAY THROW: the user toString is user code (scr_dyn_to_string leaves
+ * the exception pending and answers the empty dummy, and this libCall
+ * is in MAY_THROW_LIB_FNS so the call site checks). */
+ScrStr *scr_insp_fmt_s(ScrDyn *d, double depth) {
+  if (d->kind == SCR_DYN_STR) return scr_str_retain(d->v.str);
+  if (d->kind == SCR_DYN_OBJ) {
+    const ScrDyn *m = scr_dyn_obj_get(d, "toString", 8);
+    if (m == NULL) m = scr_dyn_proto_get(d, "toString", 8);
+    if (m != NULL && m->kind == SCR_DYN_FUNC) return scr_dyn_to_string(d, NULL);
+  }
   return scr_insp_dyn(d, 0, depth);
 }
 

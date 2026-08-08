@@ -2017,6 +2017,64 @@ ScrStr *scr_dyn_string_coerce_js(const ScrDyn *d) {
   return scr_dyn_string_coerce(d);
 }
 
+/* ToPrimitive with the DEFAULT hint, then ToString — which is what `+`
+ * does to an untyped operand when the other side is a string, and it is
+ * the OPPOSITE ORDER from String(v).
+ *
+ * OrdinaryToPrimitive runs "valueOf" then "toString" for hints `number`
+ * and `default`, and "toString" then "valueOf" for hint `string`; `+`
+ * (ApplyStringOrNumericBinaryOperator) passes no hint, which IS default.
+ * So one object answers two different strings depending on which
+ * conversion reached it, and that is not a bug to be smoothed over — it
+ * is the language. Measured, Node v25.9.0:
+ *
+ *   var o = {valueOf(){return 42}, toString(){return "TS"}};
+ *   "" + o    ->  "42"        String(o)  ->  "TS"      `${o}` -> "TS"
+ *
+ * A template literal is ToString, hint string — the same order as
+ * String(v) — so only `+` takes this entry point.
+ *
+ * Only a USER valueOf is modelled, and that is not an approximation: JS's
+ * Object.prototype.valueOf answers the OBJECT, which is not a primitive,
+ * so ToPrimitive falls through it every time. Its absence here means the
+ * same thing. The toString half is then exactly scr_dyn_to_string's OBJ
+ * arm — the user toString, Error.prototype's encoded form, and the
+ * "[object Object]" constant, in that order — so this DELEGATES rather
+ * than growing another copy of the ToString table. Measured: `"" + {a:1}`
+ * is "[object Object]" and `"" + caughtError` is "TypeError: kaboom",
+ * both of which an "exhausted the protocol" TypeError would have broken.
+ *
+ * Borrows; +1, or NULL with the exception pending (a method's throw
+ * propagates, and a null-prototype object — which really does have no
+ * toString to fall back to — raises the spec's TypeError). */
+ScrStr *scr_dyn_to_primitive_string(const ScrDyn *d) {
+  if (d->kind != SCR_DYN_OBJ) return scr_dyn_string_coerce(d);
+  ScrDyn *m = scr_dyn_obj_get(d, "valueOf", 7); /* borrowed */
+  if (!m) m = scr_dyn_proto_get(d, "valueOf", 7);
+  if (m != NULL && m->kind == SCR_DYN_FUNC) {
+    /* JS calls it with the OBJECT as the receiver. */
+    scr_dyn_this_push_dyn(d);
+    ScrDyn *r = scr_dyn_call(m, NULL, 0, "valueOf");
+    scr_dyn_this_pop();
+    if (!r) return NULL; /* threw — pending */
+    if (r->kind != SCR_DYN_OBJ && r->kind != SCR_DYN_ARR && r->kind != SCR_DYN_FUNC &&
+        r->kind != SCR_DYN_HANDLE && r->kind != SCR_DYN_PROMISE) {
+      ScrStr *s = scr_dyn_string_coerce(r);
+      scr_dyn_release(r);
+      return s;
+    }
+    scr_dyn_release(r); /* non-primitive answer: OrdinaryToPrimitive tries toString */
+  }
+  if (d->null_proto && scr_dyn_obj_get(d, "toString", 8) == NULL) {
+    /* Object.create(null) inherits neither method, so the protocol
+     * really is exhausted — this is the one arm where JS throws. */
+    static const char msg[] = "Cannot convert object to primitive value";
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    return NULL;
+  }
+  return scr_dyn_to_string(d, NULL);
+}
+
 /* ── ACCESSOR PROPERTIES ───────────────────────────────────────────────
  *
  * `Object.defineProperty(o, k, { get, set })`. The pair lives in the OBJ

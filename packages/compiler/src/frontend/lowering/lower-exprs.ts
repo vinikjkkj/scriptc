@@ -7572,6 +7572,19 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     return { kind: "arraySet", arr, index, value, loc: locOf(expr) };
   }
 
+/** The `+` operand conversion. Identical to ensureString except over an
+ * UNTYPED operand, where ECMAScript's `+` is ToPrimitive with the DEFAULT
+ * hint — `valueOf` before `toString` — and String()/`${}` are the STRING
+ * hint, the other way round. Measured on Node v25.9.0:
+ * `"" + {valueOf:()=>42, toString:()=>"TS"}` is "42" and `String(...)` of
+ * the same object is "TS". */
+export function ensureStringForPlus(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
+  if (e.type.kind === "dyn") {
+    return { kind: "toString", operand: e, hint: "default", type: STRING, loc: e.loc };
+  }
+  return ensureString(L, e, node);
+}
+
 export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
     if (e.type.kind === "string") return e;
     if (e.type.kind === "dyn") {
@@ -9016,12 +9029,13 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             return { kind: "libCall", fn: "dyn.add", args: [asDyn(left), asDyn(right)], type: DYN, loc };
           }
           if (other.type.kind === "string") {
-            // String-context `+`: JS's answer is String(unknown) — the
-            // JS-exact dyn walker (numbers format, arrays join, objects
-            // print [object Object], handles the same) — never a checked
-            // cast: `'status ' + res.statusCode` concatenates like Node.
+            // String-context `+`: JS's answer is ToPrimitive with the
+            // DEFAULT hint and then ToString — numbers format, arrays
+            // join, an object's own `valueOf` runs BEFORE its `toString`
+            // (the opposite of String(v)) — never a checked cast:
+            // `'status ' + res.statusCode` concatenates like Node.
             const strOf = (e: IrExpr): IrExpr =>
-              e.type.kind === "dyn" ? { kind: "toString", operand: e, type: STRING, loc: e.loc } : e;
+              e.type.kind === "dyn" ? ensureStringForPlus(L, e, expr) : e;
             return { kind: "strConcat", left: strOf(left), right: strOf(right), type: STRING, loc };
           }
         }
@@ -9125,8 +9139,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         if (left.type.kind === "string" || right.type.kind === "string") {
           return {
             kind: "strConcat",
-            left: L.ensureString(left, expr.left),
-            right: L.ensureString(right, expr.right),
+            left: ensureStringForPlus(L, left, expr.left),
+            right: ensureStringForPlus(L, right, expr.right),
             type: STRING, loc,
           };
         }
@@ -12228,7 +12242,7 @@ export function compoundCombine(
   }
   if (op === "+" && slot.kind === "string" && !numeric) {
     return {
-      natural: { kind: "strConcat", left: read, right: L.ensureString(rhs, rhsNode), type: STRING, loc },
+      natural: { kind: "strConcat", left: read, right: ensureStringForPlus(L, rhs, rhsNode), type: STRING, loc },
       toSlot: same,
     };
   }
