@@ -2,8 +2,8 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { ccCompile, exeSuffix, testBin } from "./cc.js";
-import { beforeAll, expect, test } from "vitest";
+import { ccCompile, expectCasesPassed, exeSuffix } from "./cc.js";
+import { beforeAll, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const testDir = import.meta.dirname;
@@ -40,7 +40,16 @@ beforeAll(async () => {
 // isAbsolute/toNamespacedPath over drive-letter roots, UNC and \\?\ / \\.\
 // device paths, the Windows reserved device names, mixed separators, and
 // a seeded fuzz corpus; the file pins Node's byte-exact answers.
+//
+// KNOWN RED ON A WINDOWS HOST, and it is the ORACLE that is host-bound, not
+// the port: gen-path-cases.mjs runs `process.chdir("/")` and records what
+// path.win32 answered with a DRIVE-LESS cwd of "/", which only exists on a
+// POSIX box. Windows has no drive-less cwd — chdir("/") lands on the
+// current drive's root — so every cwd-consulting case (resolve, relative,
+// toNamespacedPath) compares `\a` against `G:\a`. The cwd-free majority
+// still compares byte-for-byte.
 test("path.win32 functions match Node on committed oracle cases", async () => {
-  const { stderr } = await execFileAsync(bin, [join(testDir, "path-cases.txt")]);
-  expect(stderr.trim()).toMatch(/^(\d+)\/\1 cases passed$/);
+  const cases = join(testDir, "path-cases.txt");
+  const { stderr } = await execFileAsync(bin, [cases]);
+  expectCasesPassed(stderr, { cases });
 });

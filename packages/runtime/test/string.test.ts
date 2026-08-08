@@ -2,12 +2,16 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { ccCompile, expectAbort, exeSuffix, testBin } from "./cc.js";
+import { caseFileSize, ccCompile, expectAbort, expectCasesPassed, exeSuffix } from "./cc.js";
 import { beforeAll, expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const testDir = import.meta.dirname;
 const bin = join(testDir, "build", "test_string" + exeSuffix);
+const casesFile = join(testDir, "string-cases.txt");
+/** test_string.c's divergence_asserts() runs 8 checks the case file does
+ * not carry, so the oracle's denominator is the file plus these. */
+const BUILTIN_CASES = 8;
 
 // Compiles the C-side oracle test once for both tests below. Built with
 // ASan + the RC audit so the oracle run also proves the new string
@@ -65,13 +69,13 @@ const LINUX_PARSEINT_ULP: ReadonlyMap<string, string> = new Map([
 ]);
 
 test("string methods match Node on committed oracle cases", async () => {
-  const r = await execFileAsync(bin, [join(testDir, "string-cases.txt")]).then(
+  const r = await execFileAsync(bin, [casesFile]).then(
     (v) => ({ stderr: v.stderr }),
     (e: Error & { stderr?: string }) => ({ stderr: e.stderr ?? "" }),
   );
   const stderr = r.stderr.trim();
   if (process.platform !== "linux") {
-    expect(stderr).toMatch(/^(\d+)\/\1 cases passed$/);
+    expectCasesPassed(stderr, { cases: casesFile, extra: BUILTIN_CASES });
     return;
   }
   const lines = stderr.split("\n");
@@ -86,6 +90,10 @@ test("string methods match Node on committed oracle cases", async () => {
   // failed.
   const t = /^(\d+)\/(\d+) cases passed$/.exec(lines.at(-1) ?? "");
   expect(t, `missing pass-count line: ${lines.at(-1)}`).not.toBeNull();
+  // ...and the DENOMINATOR is the ground truth that the run covered the
+  // corpus. Without this the allowlist above is checked against whatever
+  // subset the harness happened to reach.
+  expect(Number(t![2]), "cases run vs the committed corpus").toBe(caseFileSize(casesFile) + BUILTIN_CASES);
   expect(Number(t![2]) - Number(t![1]), "failed-case count").toBe(mismatches.length);
   expect(mismatches.length).toBeLessThanOrEqual(LINUX_PARSEINT_ULP.size);
 });

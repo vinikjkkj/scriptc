@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
 import { emitModule } from "../src/backend/emission/emitter.js";
-import { compileC } from "../src/backend/cc.js";
+import { compileC, resolveCc } from "../src/backend/cc.js";
 import { validateModule } from "../src/ir/validate.js";
 import { fibModule } from "./fixtures/fib-ir.js";
 import { BOOL, F64, STRING, VOID, type IrExpr, type IrModule } from "../src/ir/nodes.js";
@@ -19,15 +19,57 @@ const execFileAsync = promisify(execFile);
  * explanation but lives in another package. */
 const EXE = process.platform === "win32" ? ".exe" : "";
 
+/* -DSCR_RC_AUDIT and -fsanitize=address are SEPARATE dials (cc.ts's
+ * rcAuditRequested comment), and the reason they were split is the very
+ * toolchain this file used to die on: zig's mingw target compiles ASan
+ * instrumentation and then has no asan runtime to link it against, so every
+ * test here failed at `lld-link: error: undefined symbol: __asan_memcpy` —
+ * four red tests that never once ran the emitted program. The audit define
+ * is pure C and links everywhere, so the RC-cleanliness half of the claim
+ * survives on a box where the sanitizer cannot; only the memory-error half
+ * is lost, and it is lost LOUDLY. */
+let asanProbe: Promise<boolean> | undefined;
+function asanLinks(): Promise<boolean> {
+  return (asanProbe ??= (async () => {
+    const dir = await mkdtemp(join(tmpdir(), "scriptc-emit-asan-"));
+    const c = join(dir, "p.c");
+    await writeFile(c, "int main(void){return 0;}\n");
+    const d = resolveCc(process.env);
+    try {
+      await execFileAsync(d.argv[0]!, [
+        ...d.argv.slice(1), ...d.targetArgs,
+        "-fsanitize=address", "-o", join(dir, `p${EXE}`), c, ...d.linkArgs,
+      ]);
+      return true;
+    } catch {
+      console.warn(
+        `[emit-c] ${d.argv.join(" ")} cannot link -fsanitize=address here; building these programs ` +
+          `UNSANITIZED with SCRIPTC_RC_AUDIT=1. Refcount leaks are still caught, memory errors are not.`,
+      );
+      return false;
+    }
+  })());
+}
+
 async function emitCompileRun(mod: IrModule, sanitize = true): Promise<string> {
   expect(validateModule(mod)).toEqual([]);
   const dir = await mkdtemp(join(tmpdir(), "scriptc-emit-"));
   const cPath = join(dir, "program.c");
   await writeFile(cPath, emitModule(mod));
   const outPath = join(dir, `program${EXE}`);
-  await compileC({ cPath, outPath, sanitize });
+  const asan = sanitize && (await asanLinks());
+  const prev = process.env["SCRIPTC_RC_AUDIT"];
+  if (sanitize && !asan) process.env["SCRIPTC_RC_AUDIT"] = "1";
+  try {
+    await compileC({ cPath, outPath, sanitize: asan });
+  } finally {
+    if (prev === undefined) delete process.env["SCRIPTC_RC_AUDIT"];
+    else process.env["SCRIPTC_RC_AUDIT"] = prev;
+  }
   const { stdout } = await execFileAsync(outPath);
-  return stdout;
+  // C's printf("\n") is CRLF on a Windows stdio stream (CRT text-mode
+  // translation), which is not something the emitter chose.
+  return stdout.split("\r\n").join("\n");
 }
 
 test("hand-built fib IR compiles and prints 55", async () => {

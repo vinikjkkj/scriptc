@@ -2,8 +2,8 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { ccCompile, exeSuffix, testBin } from "./cc.js";
-import { beforeAll, expect, test } from "vitest";
+import { ccCompile, expectCasesPassed, exeSuffix } from "./cc.js";
+import { beforeAll, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const testDir = import.meta.dirname;
@@ -39,5 +39,5 @@ beforeAll(async () => {
 
 test("map runtime: SameValueZero, RC accounting, churn, live iteration", async () => {
   const { stderr } = await execFileAsync(bin, []);
-  expect(stderr.trim()).toMatch(/^(\d+)\/\1 cases passed$/);
+  expectCasesPassed(stderr);
 });

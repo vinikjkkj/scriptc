@@ -2,8 +2,8 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { ccCompile, exeSuffix, testBin } from "./cc.js";
-import { beforeAll, expect, test } from "vitest";
+import { ccCompile, expectCasesPassed, exeSuffix } from "./cc.js";
+import { beforeAll, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const testDir = import.meta.dirname;
@@ -47,5 +47,5 @@ beforeAll(async () => {
 // byte-exact answers.
 test("util.inspect engine matches Node on committed oracle cases", async () => {
   const { stderr } = await execFileAsync(bin, [join(testDir, "inspect-cases.txt")]);
-  expect(stderr.trim()).toMatch(/^(\d+)\/\1 cases passed$/);
+  expectCasesPassed(stderr, { cases: join(testDir, "inspect-cases.txt") });
 });
