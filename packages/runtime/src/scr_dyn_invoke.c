@@ -173,6 +173,22 @@ static void dyn_str_buf(ScrJsonBuf *b, const ScrDyn *d, bool protocol) {
     }
     scr_jb_puts(b, "[object Object]");
     return;
+  case SCR_DYN_OBJINST:
+    /* A class instance may OVERRIDE toString and the box carries no
+     * member table to dispatch it through, so DISPLAY asks the runtime
+     * (whose arm is the loud ladder — the honest answer, since
+     * "[object Object]" would be wrong for exactly the classes that
+     * define one). The diagnostic mode keeps the constant: naming a
+     * value inside an error message must not raise a second exception
+     * over the first, which is the HANDLE arm's rule above. */
+    if (protocol) {
+      ScrStr *is = scr_dyn_to_string(d, NULL);
+      for (size_t i = 0; i < is->len; i++) scr_jb_putc(b, is->data[i]);
+      scr_str_release(is);
+      return;
+    }
+    scr_jb_puts(b, "[object Object]");
+    return;
   case SCR_DYN_PROMISE:
     /* Object.prototype.toString — promises carry no own toString, and
      * their @@toStringTag is not modeled here; Node's String() answer
@@ -308,6 +324,7 @@ static void dyn_notfn_buf(ScrJsonBuf *b, const ScrDyn *cb) {
   case SCR_DYN_OBJ:
   case SCR_DYN_BYTES:
   case SCR_DYN_HANDLE:
+  case SCR_DYN_OBJINST:
   case SCR_DYN_PROMISE: scr_jb_puts(b, "object"); return;
   }
 }

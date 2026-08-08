@@ -49,7 +49,7 @@ import {
 } from "../mangle.js";
 import { cType, releaseCallC, cStringLiteral, cDecl } from "./emit-types.js";
 import { computeMayThrow } from "./may-throw.js";
-import { dynDesc, unionTruthyHelper, unionEqHelper, unionToStrHelper, unionJoinHelper, jsonWriteHelper, jsonIndentHelper, dynMatchHelper, dynCheckHelper, dynFuncBoxHelper, dynToStrHelper, caughtToDynHelper, toDynHelper, recordKeyGetHelper, recordKeySetHelper } from "./emit-walkers.js";
+import { dynDesc, unionTruthyHelper, unionEqHelper, unionToStrHelper, unionJoinHelper, jsonWriteHelper, jsonIndentHelper, dynMatchHelper, dynCheckHelper, dynFuncBoxHelper, dynToStrHelper, caughtToDynHelper, toDynHelper, dynClassDesc, recordKeyGetHelper, recordKeySetHelper } from "./emit-walkers.js";
 import { VtSlot, ClassMeta, emitStructDefs, vtEntriesFor, vtSlotParams, emitVtableDecls, emitVtableInstances, emitVtAdapterDefs, emitHierarchyClassHelpers, emitClassObjs, emitCtorThunkDefs, errorVtStampLines, emitterVtStampLines, streamVtStampLines, traceAdapterC, traceArgC, boxNewC, arrNewC } from "./emit-shapes.js";
 import { emitAsyncScaffolding, childDataThunkFor, childExitThunkFor, childExitThunkFor2, closeBindThunkFor, connectSockThunkFor, closeOverrideWrapFor, dgramMsgThunkFor, dnsLookupThunkFor, netLookupAnswerThunkFor, emitterInvokeThunkFor, streamCbThunkFor, streamDataThunkFor, raceAdapterFor, resolveThunkFor, sniAnswerThunkFor } from "./emit-async.js";
 import { emitNpmEmbedding, islandAdapter, islandTypedAdapter } from "./emit-island.js";
@@ -237,6 +237,12 @@ export class CEmitter {
    * typed fulfillment payload into the boxed destination's dyn payload
    * (scr_dyn_new_promise_adapting's callback — toDynHelper's promise arm). */
   readonly promiseDynAdapters = new Map<string, string>();
+  /** SCR_DYN_OBJINST boxing descriptors (sc_dcl_*), interned per class
+   * name: one `static const ScrDynClass` per class the program ever boxes
+   * into an `unknown` slot. Emitted with the walker prototypes — after
+   * emitStructDefs, so the `_v` RC thunks the descriptor points at are
+   * already declared. See dynClassDesc (emit-walkers.ts). */
+  readonly dynClassDescs = new Map<string, string>();
   readonly recordKeyGetFns = new Map<string, string>();
   readonly recordKeySetFns = new Map<string, string>();
   readonly walkerProtos: string[] = [];
@@ -1277,6 +1283,10 @@ export class CEmitter {
 
   toDynHelper(t: IrType): string {
     return toDynHelper(this, t);
+  }
+
+  dynClassDesc(className: string): string {
+    return dynClassDesc(this, className);
   }
 
   dynFuncBoxHelper(t: IrType & { kind: "func" }): string {
