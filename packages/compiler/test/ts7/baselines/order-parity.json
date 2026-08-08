@@ -5476,9 +5476,33 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2738-array-in-place-mutators.ts": {
+   "order": [
+    "<repo>/tests/corpus/2738-array-in-place-mutators.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/300-if-else.ts": {
    "order": [
     "<repo>/tests/corpus/300-if-else.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3001-tojson-is-consulted-before-anything-else.js": {
+   "order": [
+    "<repo>/tests/corpus/3001-tojson-is-consulted-before-anything-else.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3002-a-throwing-tojson-is-the-programs-throw.js": {
+   "order": [
+    "<repo>/tests/corpus/3002-a-throwing-tojson-is-the-programs-throw.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3003-an-inherited-tojson-counts-and-binds-the-instance.js": {
+   "order": [
+    "<repo>/tests/corpus/3003-an-inherited-tojson-counts-and-binds-the-instance.js"
    ],
    "diags": []
   },
