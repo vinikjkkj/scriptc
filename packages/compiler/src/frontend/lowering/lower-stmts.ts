@@ -22,6 +22,7 @@ import { lowerStreamUnderscoreAssign, streamClassAliasDecl, streamSidesOf } from
 import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment } from "./lower-server.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
+import { ctorObjectGlobalValue } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
@@ -2618,16 +2619,23 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
     const out: IrStmt[] = [];
     for (const b of binds) {
       const loc = locOf(b.name);
-      const token: IrExpr = { kind: "strLit", value: b.token, type: STRING, loc };
       if (b.alias !== null) {
         const symbol = L.checker.getSymbolAtLocation(b.name);
         if (symbol) L.stdlibGlobalAliases.set(symbol, b.alias);
       }
+      // A global whose VALUE is a real object rather than a token binds
+      // that object here too. `const { Uint8Array } = globalThis` and the
+      // bare `Uint8Array` are ONE global; a token here would make
+      // `typeof` answer "string" through one spelling and "function"
+      // through the other, which is the identity divergence this rule
+      // exists to prevent.
+      const obj = b.alias !== null ? ctorObjectGlobalValue(L, b.alias, loc) : null;
+      const value: IrExpr = obj ?? { kind: "strLit", value: b.token, type: STRING, loc };
       if (b.g !== undefined) {
-        out.push({ kind: "assign", localId: b.g.id, value: L.coerceInto(b.name, token, b.g.type), loc });
+        out.push({ kind: "assign", localId: b.g.id, value: L.coerceInto(b.name, value, b.g.type), loc });
       } else {
-        const local = L.declareLocal(b.name, b.name.text, STRING, isLet);
-        out.push({ kind: "varDecl", localId: local.id, init: token, loc });
+        const local = L.declareLocal(b.name, b.name.text, value.type, isLet);
+        out.push({ kind: "varDecl", localId: local.id, init: value, loc });
       }
     }
     return out;

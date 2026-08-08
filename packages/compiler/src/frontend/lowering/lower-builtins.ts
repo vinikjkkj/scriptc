@@ -5613,6 +5613,31 @@ let digestInputValueDispatches = 0;
     return { kind: "libCall", fn: "dyn.errorProto", args: [], type: DYN, loc: locOf(expr) };
   }
 
+/** `Uint8Array.prototype` as a VALUE — the process singleton
+   * (`dyn.u8Proto`), the same object `Uint8Array`'s own `prototype` is
+   * pinned to.
+   *
+   * The spelling that MATTERS in protobufjs is not this one: the bundle
+   * reads `util.Array.prototype.subarray`, through a property, so the
+   * access is a runtime dyn keyed read and never reaches a lowering at
+   * all. This claims the STATIC spelling so the two cannot answer
+   * different objects — `Uint8Array.prototype === Uint8Array.prototype`,
+   * and an instance's [[Prototype]] link, both read identity.
+   *
+   * The other members of the `Uint8Array` global (`BYTES_PER_ELEMENT`,
+   * `from`, `of`) keep their fences; the value `Uint8Array` itself is the
+   * identifier chokepoint's business, and in a TypeScript source it stays
+   * SC2020 while this member lowers — exactly the split `Error.prototype`
+   * has. Under --dynamic the engine owns the real one.
+   *
+   * Null for every other receiver, so the property chain keeps trying. */
+  export function lowerUint8ArrayPrototypeProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+    if (expr.questionDotToken) return null;
+    if (L.dynamic) return null;
+    if (L.stdlibGlobalMember(expr, "Uint8Array") !== "prototype") return null;
+    return { kind: "libCall", fn: "dyn.u8Proto", args: [], type: DYN, loc: locOf(expr) };
+  }
+
 /** `JSON.parse` / `JSON.stringify` referenced without a call: rejected
    * specifically, like process methods as values. Null for non-JSON
    * receivers (the property chain keeps trying other lowerings). */

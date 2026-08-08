@@ -3617,6 +3617,38 @@ export type IrLibFn =
    * only — under --dynamic the engine owns the real one, and the member
    * read keeps its fence. */
   | "dyn.errorProto"
+  /** `Uint8Array` as a VALUE in a JavaScript source (scr_json.c): the
+   * process singleton standing for the CONSTRUCTOR FUNCTION object.
+   *
+   * Every other stdlib global in that position is the identifier
+   * chokepoint's opaque identity token — an interned string naming it —
+   * and this one cannot be, because programs read THROUGH it. protobufjs
+   * stores it (`util.Array = typeof Uint8Array !== "undefined" ?
+   * Uint8Array : Array`) and then reads `util.Array.prototype.subarray`
+   * at module init, in both halves of the codec. A string has no
+   * `prototype`, so the read answered `undefined` with no diagnostic and
+   * the failure surfaced two reads later — the silent kind of wrong the
+   * token rule's per-site fences cannot catch. It is a VALUE and not a
+   * lowered member because the access is on a runtime dyn by then: no
+   * frontend lift can see it at all.
+   *
+   * typeof "function", `name`, `length` 3, `BYTES_PER_ELEMENT` 1, a
+   * PINNED `prototype`, Node's requires-'new' TypeError for a plain
+   * call, and `new` through it building a typed array. One node per
+   * PROCESS — `===`, the pinned prototype and the chain all read
+   * identity. Never throws. Static builds only; under --dynamic the
+   * engine owns the real one. */
+  | "dyn.u8Ctor"
+  /** `Uint8Array.prototype` as a VALUE (scr_json.c): the same process
+   * singleton `dyn.u8Ctor`'s `prototype` is pinned to, so the two
+   * spellings answer ONE object and `Uint8Array.prototype ===
+   * Uint8Array.prototype` holds. Node's own members and no others
+   * (`constructor`, `BYTES_PER_ELEMENT`, and v25's four base64/hex
+   * methods); every other method is INHERITED from a
+   * %TypedArray%.prototype singleton, which is what makes
+   * `Object.hasOwn(Uint8Array.prototype, "subarray")` Node's false while
+   * `in` stays Node's true. Never throws. Static builds only. */
+  | "dyn.u8Proto"
   /** `Object.create(<proto>)` over a dyn prototype (scr_json.c): a fresh
    * OBJ whose [[Prototype]] link is the argument. The link is the SAME
    * one `new` installs, so delegation is LIVE — a member added to the

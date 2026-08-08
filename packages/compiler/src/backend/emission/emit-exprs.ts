@@ -5537,6 +5537,16 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // Object.create(null): the fresh null-prototype dictionary
             // (+1). Never throws.
             return finish(`scr_dyn_new_obj_null_proto()`);
+          case "dyn.u8Proto":
+            // `Uint8Array.prototype`: the same process singleton the
+            // constructor's `prototype` is pinned to (+1). Never throws.
+            return finish(`scr_dyn_uint8array_prototype()`);
+          case "dyn.u8Ctor":
+            // `Uint8Array` as a value: the process singleton constructor
+            // object (+1 per read, one node per process — the pinned
+            // `prototype` and `===` both depend on identity). Never
+            // throws.
+            return finish(`scr_dyn_uint8array_ctor()`);
           case "dyn.errorProto":
             // `Error.prototype`: the process singleton (+1 per read, one
             // node per process — identity is what the chain walk and

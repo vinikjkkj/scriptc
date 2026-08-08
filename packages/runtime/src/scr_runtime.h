@@ -3216,6 +3216,57 @@ bool scr_dyn_instanceof_error(const ScrDyn *d);
  * this one names the more specific reason). */
 void scr_dyn_error_ctor_fence(void);
 
+/* ── %Uint8Array% ─────────────────────────────────────────────────────────────
+ *
+ * `Uint8Array` taken as a VALUE: the constructor FUNCTION object, not
+ * the identifier chokepoint's opaque identity token. A process
+ * singleton, like %Error.prototype% and for the same reason — identity
+ * is what `===`, `.prototype`'s pinning and the chain walk all read.
+ *
+ * It exists because protobufjs stores the constructor in a property and
+ * reads THROUGH it at module init (`util.Array = ... Uint8Array ...;`
+ * then `util.Array.prototype.subarray`), so by the time `.prototype` is
+ * asked for the receiver is a runtime dyn value that no frontend lift
+ * can see. A string token answered `undefined` there, silently.
+ *
+ * typeof "function"; `name` "Uint8Array"; `length` 3; `prototype` PINNED
+ * to %Uint8Array.prototype% (whose methods delegate to a
+ * %TypedArray%.prototype singleton, so `Object.hasOwn(Uint8Array
+ * .prototype, "subarray")` is Node's false while `in` is Node's true);
+ * `BYTES_PER_ELEMENT` 1, answered off the box rather than out of its
+ * property table so `Object.keys(Uint8Array)` stays Node's `[]`. Calling
+ * it without `new` throws Node's "Constructor Uint8Array requires
+ * 'new'"; `new` is routed by pointer identity inside scr_dyn_construct.
+ * +1 per call, never NULL. Static builds only — under --dynamic the
+ * engine owns the real one and the value keeps its fence. */
+ScrDyn *scr_dyn_uint8array_ctor(void);
+/* %Uint8Array.prototype% itself — the same object `Uint8Array.prototype`
+ * answers, for the spelling that reaches the member statically. +1. */
+ScrDyn *scr_dyn_uint8array_prototype(void);
+/* `b.constructor` on a typed array — the constructor above for a plain
+ * Uint8Array, and a LOUD refusal for a Buffer or a non-u8 element kind,
+ * whose constructors are different functions this tier does not hold.
+ * Answering the Uint8Array one for a Buffer would be a silent wrong
+ * answer (`new b.constructor(0)` is protobufjs's Reader.prototype.raw).
+ * Borrows; +1, or NULL with the refusal pending. */
+ScrDyn *scr_dyn_bytes_constructor(const ScrDyn *d);
+/* ToIntegerOrInfinity over an OPTIONAL index argument of a dynamic
+ * method call (missing/undefined -> dflt, a NUM truncates toward zero,
+ * any other kind throws the loud fence). Shared by scr_dyn_invoke.c and
+ * the typed-array dispatch below, which is why it lives in the
+ * always-linked unit. */
+double scr_dyn_index_arg(ScrDyn *const *args, size_t argc, size_t i, double dflt,
+                         const char *what);
+/* Every typed-array METHOD over a BYTES receiver — the ONE body behind
+ * both `b.m(...)` (scr_dyn_invoke's BYTES arm) and
+ * `Uint8Array.prototype.m.call(b, ...)` (the prototype singleton's
+ * thunks), so the two spellings cannot answer differently. `*known` is
+ * false when the name is no method of this kind at all, which leaves the
+ * caller JS's own is-not-a-function; true with NULL means the refusal or
+ * the coercion threw. +1 on success. */
+ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *args,
+                             size_t argc, const char *what, bool *known);
+
 /* ── ACCESSOR PROPERTIES (Object.defineProperty's get/set half) ────────
  *
  * scr_dyn_obj_key_get is JS's [[Get]] on an OBJ receiver, WHOLE: own
