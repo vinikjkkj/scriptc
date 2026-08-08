@@ -1,7 +1,7 @@
 /* Async C emission: the per-async-function argpack/trampoline/spawn-wrapper
  * scaffolding, plus the interned resolve/child-exit thunks that adapt typed
  * payloads onto the runtime's promise and child-process machinery. */
-import type { CEmitter } from "./emitter.js";
+import { appendLines, type CEmitter } from "./emitter.js";
 import { mangleArgPack, mangleAsyncSpawn, mangleChildDataThunk, mangleChildExitThunk, mangleCloseBindThunk, mangleCloseOverrideWrap, mangleConnectSockThunk, mangleDgramMsgThunk, mangleDnsLookupThunk, mangleField, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRaceThunk, mangleRawParam, mangleNetLookupAnswerThunk, mangleEmitterInvokeThunk, mangleStreamCbThunk, mangleStreamDoneFn, mangleRecordNew, mangleRecordRelease, mangleRecordStruct, mangleResolveThunk, mangleSniAnswerThunk, mangleTrampoline } from "../mangle.js";
 import { cDecl, cType, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { IrType, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
@@ -67,7 +67,8 @@ import { IrType, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/
         lines.push(`  else { ${releaseCallC(ret, "sc_r")}; }`);
       }
       lines.push(`}`);
-      out.push(...lines);
+      // A whole function body: unbounded, so never spread (appendLines).
+      appendLines(out, lines);
 
       const spawnParams = [
         ...(lifted ? ["ScrClosure *sc_env"] : []),
@@ -191,7 +192,8 @@ import { IrType, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/
         `  }`,
         `}`,
       );
-      out.push(...lines);
+      // A whole function body: unbounded, so never spread (appendLines).
+      appendLines(out, lines);
 
       const spawnParams = [
         ...(lifted ? ["ScrClosure *sc_env"] : []),

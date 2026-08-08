@@ -1212,59 +1212,18 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
     if (ts.isLabeledStatement(stmt)) return lowerLabeled(L, stmt);
     if (ts.isReturnStatement(stmt)) {
       L.rejectJumpCrossingFinally("return", stmt);
-      // Implicit-any instance RETURN INFERENCE (lower-calls'
-      // resolveInferredReturn): the value lowers BARE and the statement
-      // records itself — the post-pass settles the instance's return type
-      // over every recorded return and wraps them in place. A VOID-typed
-      // value (`return log(x)`) evaluates for effect and returns JS's
-      // undefined: the expression statement plus a recorded bare return.
-      if (L.ctx.inferReturn) {
-        const value = stmt.expression ? L.lowerExpr(stmt.expression) : null;
-        if (value !== null && value.type.kind === "void") {
-          const bare: IrStmt = { kind: "return", value: null, loc: locOf(stmt) };
-          L.ctx.inferReturn.entries.push({ stmt: bare, node: null });
-          return {
-            kind: "block",
-            body: [{ kind: "exprStmt", expr: value, loc: locOf(stmt) }, bare],
-            loc: locOf(stmt),
-          };
+      // `return a, b, v;` — the returned expression is a COMMA SEQUENCE, so
+      // the leading operands run for effect in real statement position and
+      // only the tail is the returned value. See returnSequenceOf.
+      if (stmt.expression !== undefined) {
+        const seq = returnSequenceOf(stmt.expression);
+        if (seq !== null) {
+          const body: IrStmt[] = seq.effects.map((leaf) => L.lowerExprStatement(leaf));
+          body.push(lowerReturnOf(L, stmt, seq.value));
+          return { kind: "block", body, loc: locOf(stmt) };
         }
-        const rec: IrStmt = { kind: "return", value, loc: locOf(stmt) };
-        L.ctx.inferReturn.entries.push({ stmt: rec, node: stmt.expression ?? null });
-        return rec;
       }
-      // A bare `return;` in a union-returning function yields undefined
-      // (JS), which the undefined arm carries — tsc only allows the bare
-      // form when the return type includes undefined/void. A CHECKED-
-      // DYNAMIC return slot holds the dyn undefined directly (the
-      // appendImplicitUndefinedReturn rule). What remains is JS-only —
-      // a JSDoc return claim the body contradicts (ms's parse: `@return
-      // {Number}` with a bare early `return;`): no undefined fits the
-      // declared representation, so the statement fences honestly (the
-      // per-statement JS deferral — the claimed paths still run) instead
-      // of slipping an empty return past the validator.
-      let value: IrExpr | null = null;
-      if (stmt.expression) {
-        return L.lowerReturnStmt(stmt.expression, locOf(stmt));
-      } else if (L.ctx.returnType.kind === "union") {
-        value = L.wrappedUndefined(L.ctx.returnType, locOf(stmt));
-        if (value === null) {
-          L.unsupported(
-            "SC1090",
-            stmt,
-            `bare 'return' where the declared return type is '${L.fmt(L.ctx.returnType)}' (JS hands the caller undefined, which this representation cannot hold — return a value, or widen the declared return type with undefined)`,
-          );
-        }
-      } else if (L.ctx.returnType.kind === "dyn") {
-        value = dynUndefinedExpr(locOf(stmt));
-      } else if (L.ctx.returnType.kind !== "void") {
-        L.unsupported(
-          "SC1090",
-          stmt,
-          `bare 'return' where the declared return type is '${L.fmt(L.ctx.returnType)}' (JS hands the caller undefined, which this representation cannot hold — return a value, or widen the declared return type with undefined)`,
-        );
-      }
-      return { kind: "return", value, loc: locOf(stmt) };
+      return lowerReturnOf(L, stmt, stmt.expression);
     }
     if (ts.isBreakStatement(stmt) || ts.isContinueStatement(stmt)) {
       const kw = ts.isBreakStatement(stmt) ? ("break" as const) : ("continue" as const);
@@ -3411,6 +3370,116 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
     if (!lowered) throw new Error("lowerer bug: for-init declarator resolved to a global");
     return lowered;
   }
+
+/** The independently sequenced parts of `return a, b, v;`.
+ *
+ * A comma chain associates left, so the returned expression is
+ * `((a, b), v)`: every EFFECT lives in the outermost comma's left subtree
+ * and the value is its right operand. Null when the expression is not a
+ * chain — the statement then lowers exactly as it did before.
+ *
+ * WHY THE SPLIT IS EXACT, and why it needs none of the guards the sequence-
+ * ASSIGNMENT split next to it needs. A ReturnStatement evaluates its
+ * Expression and nothing else: there is no target Reference that JS
+ * evaluates first and that the split would move past (inertAssignTargetRef's
+ * hazard has no analogue here), no sibling operand, no re-evaluation. The
+ * comma operator evaluates its left operand, GetValues it, throws the value
+ * away, then evaluates the right — so `a; b; return v;` runs the same
+ * expressions, in the same order, for the same values, and an abrupt
+ * completion in `a` still skips `b` and the return. Nothing is duplicated,
+ * nothing is dropped, nothing moves.
+ *
+ * WHAT IT BUYS, and this is the whole point. Each effect leaf is lowered by
+ * `lowerExprStatement` — the IDENTICAL call the value-position comma branch
+ * already makes on it (lower-exprs.ts, `const effect =
+ * L.lowerExprStatement(expr.left)`), so no leaf lowers differently and no
+ * new refusal can appear. What changes is only WHERE the resulting
+ * statements land: real statement position instead of inside a seqExpr,
+ * whose C emission point is mid-expression and therefore admits only
+ * straight-line writes (seqExprSafeStmt). A leaf that needs genuine control
+ * flow — a void `cond ? f() : g()`, which lowerExprStatement renders as an
+ * `if` — is exactly what that contract had to refuse, and it is what terser
+ * leaves behind wherever the source had statements followed by a return.
+ *
+ * protobufjs's `float.js` is one line of it, and it is the IEEE-754
+ * reader/writer install that runs at module load in every protobufjs build
+ * before any message type exists:
+ *
+ *     return "undefined" != typeof Float32Array ? function(){…}() : function(){…}(),
+ *            "undefined" != typeof Float64Array ? function(){…}() : function(){…}(),
+ *            exports
+ */
+function returnSequenceOf(
+  expr: ts.Expression,
+): { readonly effects: readonly ts.Expression[]; readonly value: ts.Expression } | null {
+  const leaves = commaLeaves(expr);
+  if (leaves.length < 2) return null;
+  return { effects: leaves.slice(0, -1), value: leaves[leaves.length - 1]! };
+}
+
+/** `return <expr>;` against the enclosing function's return slot, with the
+ * returned expression supplied separately: the comma split above hands in
+ * the sequence's TAIL, every other caller hands in the statement's own
+ * expression (undefined for a bare `return;`). */
+function lowerReturnOf(
+  L: Lowerer,
+  stmt: ts.ReturnStatement,
+  retExpr: ts.Expression | undefined,
+): IrStmt {
+  // Implicit-any instance RETURN INFERENCE (lower-calls'
+  // resolveInferredReturn): the value lowers BARE and the statement
+  // records itself — the post-pass settles the instance's return type
+  // over every recorded return and wraps them in place. A VOID-typed
+  // value (`return log(x)`) evaluates for effect and returns JS's
+  // undefined: the expression statement plus a recorded bare return.
+  if (L.ctx.inferReturn) {
+    const value = retExpr ? L.lowerExpr(retExpr) : null;
+    if (value !== null && value.type.kind === "void") {
+      const bare: IrStmt = { kind: "return", value: null, loc: locOf(stmt) };
+      L.ctx.inferReturn.entries.push({ stmt: bare, node: null });
+      return {
+        kind: "block",
+        body: [{ kind: "exprStmt", expr: value, loc: locOf(stmt) }, bare],
+        loc: locOf(stmt),
+      };
+    }
+    const rec: IrStmt = { kind: "return", value, loc: locOf(stmt) };
+    L.ctx.inferReturn.entries.push({ stmt: rec, node: retExpr ?? null });
+    return rec;
+  }
+  // A bare `return;` in a union-returning function yields undefined
+  // (JS), which the undefined arm carries — tsc only allows the bare
+  // form when the return type includes undefined/void. A CHECKED-
+  // DYNAMIC return slot holds the dyn undefined directly (the
+  // appendImplicitUndefinedReturn rule). What remains is JS-only —
+  // a JSDoc return claim the body contradicts (ms's parse: `@return
+  // {Number}` with a bare early `return;`): no undefined fits the
+  // declared representation, so the statement fences honestly (the
+  // per-statement JS deferral — the claimed paths still run) instead
+  // of slipping an empty return past the validator.
+  let value: IrExpr | null = null;
+  if (retExpr) {
+    return L.lowerReturnStmt(retExpr, locOf(stmt));
+  } else if (L.ctx.returnType.kind === "union") {
+    value = L.wrappedUndefined(L.ctx.returnType, locOf(stmt));
+    if (value === null) {
+      L.unsupported(
+        "SC1090",
+        stmt,
+        `bare 'return' where the declared return type is '${L.fmt(L.ctx.returnType)}' (JS hands the caller undefined, which this representation cannot hold — return a value, or widen the declared return type with undefined)`,
+      );
+    }
+  } else if (L.ctx.returnType.kind === "dyn") {
+    value = dynUndefinedExpr(locOf(stmt));
+  } else if (L.ctx.returnType.kind !== "void") {
+    L.unsupported(
+      "SC1090",
+      stmt,
+      `bare 'return' where the declared return type is '${L.fmt(L.ctx.returnType)}' (JS hands the caller undefined, which this representation cannot hold — return a value, or widen the declared return type with undefined)`,
+    );
+  }
+  return { kind: "return", value, loc: locOf(stmt) };
+}
 
 /** `arrT` when the DECLARED type is a tuple whose every field is the array's
  * element type — the promise combinators' shape, where the checker's tuple

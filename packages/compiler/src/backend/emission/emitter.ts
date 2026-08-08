@@ -60,6 +60,23 @@ export function emitModule(mod: IrModule, sourceText?: string): string {
   return new CEmitter(mod, sourceText).emit();
 }
 
+/** `dst.push(...src)` for a WHOLE FUNCTION BODY, which is unbounded.
+ *
+ * A spread call passes one argument per element, and an engine's argument
+ * list is finite: V8 throws `RangeError: Maximum call stack size exceeded`
+ * somewhere north of a hundred thousand. Every other spread-push in the
+ * emitter appends a fixed handful of lines and can never reach that, but a
+ * function body's line count is the size of the user's function — and a
+ * bundler's module initialiser is ONE function holding the whole module.
+ * zapo's shipped `spec/proto/index.js` is 1.87 MB of exactly that, so the
+ * emitter aborted the build (no `.c` at all, no diagnostic, a stack trace
+ * out of the compiler) at the point where the init finally lowered.
+ *
+ * A loop has no argument list, so the append is bounded only by memory. */
+export function appendLines(dst: string[], src: readonly string[]): void {
+  for (const line of src) dst.push(line);
+}
+
 // Box construction moved onto CEmitter (boxNewC method): obj-kind boxes now
 // also carry the payload type's trace entry point, which is type-directed
 // through the emitter's cycle analysis.
@@ -539,7 +556,7 @@ export class CEmitter {
     // table is complete; the file is then assembled around them.
     for (const fn of this.mod.functions) {
       this.emitFunction(fn);
-      body.push(...this.lines);
+      appendLines(body, this.lines);
       this.lines.length = 0;
     }
 
