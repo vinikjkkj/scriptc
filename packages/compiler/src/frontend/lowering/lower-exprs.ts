@@ -1922,6 +1922,13 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         // the prototype LINK is the whole point).
         const up = L.lowerUint8ArrayPrototypeProperty(expr);
         if (up) return up;
+        // `Uint8Array.from` / `Uint8Array.of` — the two static methods,
+        // and the pair protobufjs reads. Here, above `handled`, because
+        // the generic-method-as-value fence in lowerFieldRead would
+        // otherwise claim `from` on the checker type alone (SC1090) and
+        // never reach the singleton the runtime holds.
+        const us = L.lowerUint8ArrayStaticProperty(expr);
+        if (us) return us;
       }
       const handled =
         // A stdlib global's declared METHOD read where ToBoolean is the
@@ -7448,7 +7455,16 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
             litKey !== null
               ? { kind: "strLit", value: litKey, type: STRING, loc: locOf(target.argumentExpression) }
               : L.lowerExpr(target.argumentExpression);
-          if (key.type.kind === "f64") key = L.ensureString(key, target.argumentExpression);
+          // Number AND checked-dynamic keys ride the JS-exact formatter,
+          // exactly as the READ of the same receiver already does
+          // (dynKeyGet's arm above): property keys ARE strings, so
+          // `o[k] = v` is `o[String(k)] = v`. The write arm handled only
+          // f64, so a runtime dyn key refused where the read of the very
+          // same expression lowered — protobufjs's `util.oneOfGetter`
+          // builds its field map with `fieldMap[fieldNames[i]] = 1` and
+          // then READS it back with `fieldMap[keys[i]]`, one dyn key
+          // each, and only the write was a trap.
+          if (key.type.kind === "f64" || key.type.kind === "dyn") key = L.ensureString(key, target.argumentExpression);
           if (key.type.kind !== "string") {
             L.unsupported("SC1090", target.argumentExpression, "indexing records with non-string or non-number keys");
           }
@@ -8260,6 +8276,23 @@ export function checkedJsNumber(L: Lowerer, node: ts.Node, value: IrExpr): IrExp
   return null;
 }
 
+/** The RHS of a VALUE-position member assignment, in a shape a hidden
+ * local can hold.
+ *
+ * A BARE unit has no standalone representation here — locals and results
+ * may not carry one (validate.ts refuses; the emitters call it a bug) —
+ * so it rides the unit-only union, the same slot `const x = null` and
+ * `await null` take. Everything else is itself, with its own type, so
+ * the consumer still sees exactly what the checker typed.
+ *
+ * The shape that asks is a CHAIN: `h.a = h.b = null`, which protobufjs's
+ * `util._configure` writes in its no-Buffer arm. The inner assignment is
+ * in value position, its value is `null`, and the outer one wants a temp
+ * to hold it. */
+function setValRhs(L: Lowerer, value: IrExpr): IrExpr {
+  return isUnitType(value.type) ? L.coerceToExpected(value, unitOnlyUnion(L.unions)) : value;
+}
+
 export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const loc = locOf(expr);
     const op = expr.operatorToken.kind;
@@ -8346,7 +8379,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         if (ts.isPropertyAccessExpression(expr.left) && !expr.left.questionDotToken && L.isIslandExpr(expr.left.expression)) {
           const recv = L.lowerExpr(expr.left.expression);
           const recvTmp = L.declareHiddenLocal("%setRecv", recv.type);
-          const rhsVal = L.lowerExpr(expr.right);
+          const rhsVal = setValRhs(L, L.lowerExpr(expr.right));
           const valTmp = L.declareHiddenLocal("%setVal", rhsVal.type);
           const valRef = (): IrExpr => ({ kind: "varRef", localId: valTmp.id, type: rhsVal.type, loc });
           return {
@@ -8381,7 +8414,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           const recv = probeLower(L, expr.left.expression);
           if (recv && recv.type.kind === "dyn") {
             const recvTmp = L.declareHiddenLocal("%setRecv", DYN);
-            const rhsVal = L.lowerExpr(expr.right);
+            const rhsVal = setValRhs(L, L.lowerExpr(expr.right));
             const valTmp = L.declareHiddenLocal("%setVal", rhsVal.type);
             const valRef = (): IrExpr => ({ kind: "varRef", localId: valTmp.id, type: rhsVal.type, loc });
             const stored = L.coerceToExpected(valRef(), DYN);
@@ -8443,7 +8476,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
               L.unsupported("SC1090", keyNode, "indexing checked-dynamic values with non-string or non-number keys");
             }
             const keyTmp = L.declareHiddenLocal("%setKey", STRING);
-            const rhsVal = L.lowerExpr(expr.right);
+            const rhsVal = setValRhs(L, L.lowerExpr(expr.right));
             const valTmp = L.declareHiddenLocal("%setVal", rhsVal.type);
             const valRef = (): IrExpr => ({ kind: "varRef", localId: valTmp.id, type: rhsVal.type, loc });
             const stored = L.coerceToExpected(valRef(), DYN);
@@ -8555,7 +8588,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           const boxed = fnOwnPropBox(L, expr.left.expression, locOf(expr.left.expression));
           if (boxed) {
             const recvTmp = L.declareHiddenLocal("%setRecv", DYN);
-            const rhsVal = L.lowerExpr(expr.right);
+            const rhsVal = setValRhs(L, L.lowerExpr(expr.right));
             const valTmp = L.declareHiddenLocal("%setVal", rhsVal.type);
             const valRef = (): IrExpr => ({ kind: "varRef", localId: valTmp.id, type: rhsVal.type, loc });
             const stored = L.coerceToExpected(valRef(), DYN);
