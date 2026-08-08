@@ -2,8 +2,8 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { ccCompile, expectCasesPassed, exeSuffix } from "./cc.js";
-import { beforeAll, test } from "vitest";
+import { ccCompile, expectCasesPassed, exeSuffix, materializeHostCases } from "./cc.js";
+import { beforeAll, expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const testDir = import.meta.dirname;
@@ -41,15 +41,31 @@ beforeAll(async () => {
 // device paths, the Windows reserved device names, mixed separators, and
 // a seeded fuzz corpus; the file pins Node's byte-exact answers.
 //
-// KNOWN RED ON A WINDOWS HOST, and it is the ORACLE that is host-bound, not
-// the port: gen-path-cases.mjs runs `process.chdir("/")` and records what
-// path.win32 answered with a DRIVE-LESS cwd of "/", which only exists on a
-// POSIX box. Windows has no drive-less cwd — chdir("/") lands on the
-// current drive's root — so every cwd-consulting case (resolve, relative,
-// toNamespacedPath) compares `\a` against `G:\a`. The cwd-free majority
-// still compares byte-for-byte.
+// The cwd-consulting cases (resolve, relative, toNamespacedPath) cannot be
+// pinned as bytes across hosts — gen-path-cases.mjs and test_path.c both
+// chdir("/"), which is "/" on a POSIX box and the current DRIVE'S ROOT
+// ("G:\") on Windows, and path.win32 correctly answers differently for each.
+// materializeHostCases keeps the committed bytes for every case that does
+// NOT consult the cwd (asserting they still hold) and re-derives the rest
+// from this host's Node. See the long note in cc.ts. On a POSIX host the
+// materialised file is the committed one byte for byte.
 test("path.win32 functions match Node on committed oracle cases", async () => {
-  const cases = join(testDir, "path-cases.txt");
+  const cases = join(testDir, "build", "path-cases-host.txt");
+  const { total, rederived } = await materializeHostCases(
+    join(testDir, "gen-path-cases.mjs"),
+    join(testDir, "path-cases.txt"),
+    cases,
+  );
+  // Floors, in both directions. A corpus that shrinks to nothing passes
+  // vacuously; a re-derived set that shrinks to nothing means the probe
+  // stopped finding the cwd-bound cases and this quietly became "trust the
+  // committed bytes" again — which is exactly the bug being fixed.
+  expect(total, "oracle population").toBeGreaterThan(30000);
+  if (process.platform === "win32") {
+    expect(rederived, "cwd-bound cases re-derived for this host").toBeGreaterThan(8000);
+  } else {
+    expect(rederived, "a POSIX host generated the committed file: nothing to re-derive").toBe(0);
+  }
   const { stderr } = await execFileAsync(bin, [cases]);
   expectCasesPassed(stderr, { cases });
 });

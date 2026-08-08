@@ -229,6 +229,41 @@ static void scr_path_cwd(PathBuf *out) {
   pb_append(out, buf, strlen(buf));
 }
 
+/* The cwd the POSIX family sees. Node keeps `path.posix` usable on Windows
+ * by rewriting the process cwd before it ever reaches posix.resolve — its
+ * `posixCwd()`:
+ *
+ *     const cwd = process.cwd().replace(/\\/g, '/');
+ *     return cwd.slice(cwd.indexOf('/'));
+ *
+ * i.e. flip the separators and DROP THE DRIVE INDICATOR, so posix.resolve()
+ * answers "/" on `G:\` and posix.resolve("a") answers "/a" — the same
+ * drive-less shape it answers on a POSIX host. Without this the posix arm
+ * on a Windows target concatenates a `G:\` cwd into its output and every
+ * result stops being absolute (`posix.isAbsolute(posix.resolve("a"))` goes
+ * false), which is not a shape Node can produce anywhere.
+ *
+ * `indexOf('/') === -1` is `slice(-1)` in Node — the LAST byte. getcwd on
+ * Windows always returns at least `X:\`, so it is unreachable; mirrored
+ * anyway rather than invented. Identity off win32. */
+static void scr_path_posix_cwd(PathBuf *out) {
+#ifdef _WIN32
+  char buf[4096];
+  if (!getcwd(buf, sizeof buf)) {
+    scr_trap("scriptc: path.resolve: getcwd failed\n");
+  }
+  size_t n = strlen(buf);
+  for (size_t i = 0; i < n; i++) {
+    if (buf[i] == '\\') buf[i] = '/';
+  }
+  const char *slash = memchr(buf, '/', n);
+  if (slash) pb_append(out, slash, n - (size_t)(slash - buf));
+  else if (n > 0) pb_append(out, buf + n - 1, 1);
+#else
+  scr_path_cwd(out);
+#endif
+}
+
 ScrStr *scr_path_resolve(ScrArr *parts) {
   /* Node walks the args LAST-first, prepending, until one is absolute;
    * the cwd is a final virtual argument. Build the concatenation by
@@ -245,7 +280,7 @@ ScrStr *scr_path_resolve(ScrArr *parts) {
       pb_append(&seg, arg->data, arg->len);
       scr_str_release(arg);
     } else {
-      scr_path_cwd(&seg);
+      scr_path_posix_cwd(&seg);
     }
     if (seg.len == 0) {
       free(seg.data);

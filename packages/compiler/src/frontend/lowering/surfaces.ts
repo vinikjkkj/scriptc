@@ -947,6 +947,19 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
     fns: ["date.toISOString"],
     note: "the composed new Date(ms?).toISOString() form",
   },
+  // ── crypto.randomFill (lowerCryptoModuleCall's dedicated arm): the only
+  // CSPRNG member with no lowering-table row, because the fill writes into
+  // a caller-owned buffer and hands control to a deferred callback rather
+  // than returning a value. Its own id, not an alias of randomBytes: a
+  // profile that permits randomBytes has said nothing about randomFill,
+  // and folding them would let one declaration open both.
+  {
+    id: "node-builtin.crypto.randomFill",
+    kind: "node-builtin",
+    name: "crypto.randomFill",
+    fns: ["crypto.randomFillDeferred"],
+    note: "the CSPRNG fill of a caller-owned buffer; the callback form is the only spelling that lowers",
+  },
   // ── perf_hooks (lowerPerfHooksCall): the monotonic clock.
   {
     id: "node-builtin.perf_hooks.performance.now",

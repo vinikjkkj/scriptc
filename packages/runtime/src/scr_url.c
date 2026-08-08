@@ -890,11 +890,16 @@ ScrUrl *scr_url_from_path(ScrStr *path) {
 #endif
 }
 
-/* The win32 arms as real entry points: the host-side differential tests
- * (test_url.c) exercise the Windows behavior from any platform, the same
- * way Node exposes { windows: true } options on the bridge pair. */
+/* Both arms as real entry points: the host-side differential tests
+ * (test_url.c) exercise either behavior from any platform, the same way
+ * Node exposes { windows: true } / { windows: false } on the bridge pair.
+ * The _posix pair exists for the same reason the _w32 pair does — a test
+ * that reaches for "the posix arm" through the PUBLIC pair gets the win32
+ * arm on a Windows host and silently checks the wrong implementation. */
 ScrStr *scr_url_to_path_w32(ScrUrl *u) { return scr_url_to_path_impl(u, true); }
 ScrUrl *scr_url_from_path_w32(ScrStr *path) { return scr_url_from_path_impl(path, true); }
+ScrStr *scr_url_to_path_posix(ScrUrl *u) { return scr_url_to_path_impl(u, false); }
+ScrUrl *scr_url_from_path_posix(ScrStr *path) { return scr_url_from_path_impl(path, false); }
 
 /* WHATWG search getter: "" for no query AND for the bare-'?' query;
  * "?..." verbatim otherwise. */

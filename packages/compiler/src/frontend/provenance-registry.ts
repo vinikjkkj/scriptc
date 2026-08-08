@@ -1,5 +1,3 @@
-import { readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
 /* The provenance-sources registry — the flag-gated state `--provenance-
  * sources` compiles against (EXPERIMENTAL prototype).
  *
@@ -20,6 +18,9 @@ import { join } from "node:path";
  *
  * Empty registry (the default — the flag off) = every chokepoint answers
  * exactly as before; nothing in the production npm/island path changes. */
+import { readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { tsgoPath } from "./shared.js";
 
 export interface ProvenancePackageSource {
   /** Package name ("cookie"). */
@@ -105,7 +106,10 @@ export function setProvenanceSources(sources: ProvenanceSources | null): void {
   const externalPaths: Record<string, string[]> = {};
   for (const pkg of sources.packages) {
     for (const [spec, file] of Object.entries(pkg.external ?? {})) externalPaths[spec] = [file];
-    packageDirs.push(pkg.dir.endsWith("/") ? pkg.dir : `${pkg.dir}/`);
+    // Slash-spelled and slash-terminated: the prefix compares in
+    // isProvenanceSourceFile/provenancePackageOfFile run against TypeScript
+    // file names, which are slash-spelled on every host.
+    packageDirs.push(provenanceDirPrefix(pkg.dir));
     for (const [spec, file] of Object.entries(pkg.entries)) {
       bySpecifier.set(spec, file);
     }
@@ -196,13 +200,38 @@ export function isProvenanceSpecifier(specifier: string): boolean {
   return state.bySpecifier.has(specifier) || provenanceAliasTargets(specifier).length > 0;
 }
 
+/* Both predicates below are a PREFIX COMPARE between two path spellings,
+ * and on Windows the two sides do not agree by default: the resolver
+ * answers host paths (`G:\…\greeter`, from node:path's join) while every
+ * caller holds a TypeScript file name, which is always slash-spelled
+ * (`G:/…/greeter/src/index.ts`). `startsWith` then answered false for
+ * EVERY file, and the registry silently reported that a registered
+ * package owns nothing — the @__PURE__ dead-const elision never fired and
+ * per-file attribution came back empty, on Windows only.
+ *
+ * Normalising at this boundary, on both sides, is the fix: the callers
+ * cannot each be trusted to remember (resolve.ts already spelled its own
+ * tsgoPath at the call site; lower-stmts.ts passed sf.fileName raw).
+ * `packageDirs` is stored slash-spelled — see setProvenanceSources.
+ *
+ * provenanceDirPrefix is that normalisation as ONE definition: the
+ * registry builds packageDirs with it and the coverage report buckets
+ * statsByFile with it, so "how a package dir is compared" cannot drift
+ * into two answers (it already had — report.ts carried its own copy of
+ * the `endsWith("/") ? … : …` line and the same Windows blind spot). */
+export function provenanceDirPrefix(dir: string): string {
+  const d = tsgoPath(dir);
+  return d.endsWith("/") ? d : `${d}/`;
+}
+
 /** True when `fileName` lives inside a registered package's source tree —
  * the gate for the third-party-source policies (the pure-annotated
  * dead-const elision, the per-file statement attribution). */
 export function isProvenanceSourceFile(fileName: string): boolean {
   if (state === null) return false;
+  const f = tsgoPath(fileName);
   for (const dir of state.packageDirs) {
-    if (fileName.startsWith(dir)) return true;
+    if (f.startsWith(dir)) return true;
   }
   return false;
 }
@@ -210,8 +239,9 @@ export function isProvenanceSourceFile(fileName: string): boolean {
 /** The registered package owning `fileName`, or null. */
 export function provenancePackageOfFile(fileName: string): ProvenancePackageSource | null {
   if (state === null) return null;
+  const f = tsgoPath(fileName);
   for (let i = 0; i < state.packageDirs.length; i++) {
-    if (fileName.startsWith(state.packageDirs[i]!)) return state.sources.packages[i]!;
+    if (f.startsWith(state.packageDirs[i]!)) return state.sources.packages[i]!;
   }
   return null;
 }
