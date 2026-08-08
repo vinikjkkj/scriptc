@@ -2,7 +2,8 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { caseFileSize, ccCompile, expectCasesPassed, exeSuffix } from "./cc.js";
+import type { CaseException } from "./cc.js";
+import { caseFileSize, ccCompile, expectCasesPassed, exeSuffix, materializeHostCases } from "./cc.js";
 import { beforeAll, expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
@@ -39,54 +40,49 @@ beforeAll(async () => {
 // the excluded documented divergences). Covers the win32 arm's drive
 // letters, UNC hosts, \\?\UNC\ prefixes, encoded-separator TypeErrors,
 // and the UNC-malformation TypeErrors, plus posix-arm legs pinning the
-// shared encoding rework.
-// One committed case bakes the GENERATING platform into its bytes: Node's
-// non-localhost file-URL host TypeError names the host OS, the oracle was
-// generated on darwin, and scr_url.c mirrors Node by naming the RUNTIME
-// platform. On Linux the native message is byte-exact against what Linux
-// Node itself says — pin exactly that one darwin→linux substitution and
-// nothing else.
-const LINUX_PLATFORM_MESSAGE_CASES: ReadonlyMap<string, string> = new Map([
-  [
-    // u2p-posix("file://host/a")
-    "u2p-posix(66696c653a2f2f686f73742f61)",
-    Buffer.from('ERR:TypeError: File URL host must be "localhost" or empty on linux').toString("hex"),
-  ],
+// shared encoding rework. Both arms are NAMED on both sides now: the
+// generator always said { windows: true/false }, but test_url.c reached
+// for the posix arm through the target-dispatched PUBLIC pair, which is
+// the win32 arm on a Windows host — 20 of the 21 "-posix" legs were
+// checking the wrong implementation there.
+// Two committed cases bake the GENERATING platform (darwin) into their
+// bytes, and they are NOT the same kind of thing — see CaseException.
+const PLATFORM_CASES: ReadonlyMap<string, CaseException> = new Map([
+  // u2p-posix("file://host/a"): Node's non-localhost file-URL host
+  // TypeError names process.platform ("… or empty on darwin"), and
+  // scr_url.c mirrors Node by naming the RUNTIME platform. Whatever host
+  // runs this says its own name on both sides — take the host's bytes.
+  ["u2p-posix\t66696c653a2f2f686f73742f61", "host"],
+  // p2u-posix("/"): pathToFileURL re-adds the trailing separator that
+  // resolve stripped by comparing against `path.sep` — the PLATFORM's
+  // separator, not the arm's — so Node on Windows answers `file:////` for
+  // a posix-arm root. scr_url.c uses the ARM's separator (win32 ? '\\' :
+  // '/'), which is what Node itself answers on a POSIX host and what the
+  // committed file holds. The port is right; keep the committed bytes.
+  ["p2u-posix\t2f", "committed"],
 ]);
 
-// KNOWN RED ON A WINDOWS HOST, for two reasons that are both the oracle's
-// and neither the bridge's: gen-url-cases.mjs chdir's to "/" and records
-// pathToFileURL's answers against a DRIVE-LESS cwd (Windows has none — the
-// C side's chdir("/") lands on the current drive's root, so `file:///rel/x`
-// comes back `file:///G:/rel/x`), and the "-posix" legs are generated on
-// the assumption, spelled in test_url.c, that the PUBLIC pair is the posix
-// arm "on this (posix) host" — on win32 the public pair dispatches to the
-// win32 arm and answers different, correct, Windows things.
+// The cwd-consulting cases (pathToFileURL of a relative path) cannot be
+// pinned as bytes across hosts: gen-url-cases.mjs and test_url.c both
+// chdir("/"), which is "/" on a POSIX box and the current DRIVE'S ROOT on
+// Windows. materializeHostCases re-derives exactly those from this host's
+// Node and asserts the committed bytes still hold everywhere else.
 test("file-URL bridge win32 arm matches Node on committed oracle cases", async () => {
-  const cases = join(testDir, "url-cases.txt");
+  const cases = join(testDir, "build", "url-cases-host.txt");
+  const { total, rederived } = await materializeHostCases(
+    join(testDir, "gen-url-cases.mjs"),
+    join(testDir, "url-cases.txt"),
+    cases,
+    PLATFORM_CASES,
+  );
+  expect(total, "oracle population").toBe(caseFileSize(join(testDir, "url-cases.txt")));
+  if (process.platform === "win32") {
+    // 7 cwd-bound pathToFileURL cases + the platform-named host TypeError.
+    expect(rederived, "cases re-derived for this host").toBeGreaterThanOrEqual(7);
+  }
   const r = await execFileAsync(bin, [cases]).then(
     (v) => ({ stderr: v.stderr }),
     (e: Error & { stderr?: string }) => ({ stderr: e.stderr ?? "" }),
   );
-  const stderr = r.stderr.trim();
-  if (process.platform !== "linux") {
-    expectCasesPassed(stderr, { cases });
-    return;
-  }
-  const lines = stderr.split("\n");
-  const mismatches = lines.filter((l) => l.startsWith("MISMATCH "));
-  for (const line of mismatches) {
-    const m = /^MISMATCH (.+) expected=[0-9a-f]* got=([0-9a-f]*)$/.exec(line);
-    expect(m, `unparseable mismatch line: ${line}`).not.toBeNull();
-    expect(LINUX_PLATFORM_MESSAGE_CASES.get(m![1]!), line).toBe(m![2]);
-  }
-  // The pass-count tail proves nothing beyond the printed (allowlisted)
-  // set failed (the harness caps mismatch printing at 20 lines).
-  const t = /^(\d+)\/(\d+) cases passed$/.exec(lines.at(-1) ?? "");
-  expect(t, `missing pass-count line: ${lines.at(-1)}`).not.toBeNull();
-  // ...and the DENOMINATOR is the ground truth that the run covered the
-  // corpus at all: equal pass/total says nothing about skipped cases.
-  expect(Number(t![2]), "cases run vs the committed corpus").toBe(caseFileSize(cases));
-  expect(Number(t![2]) - Number(t![1]), "failed-case count").toBe(mismatches.length);
-  expect(mismatches.length).toBeLessThanOrEqual(LINUX_PLATFORM_MESSAGE_CASES.size);
+  expectCasesPassed(r.stderr.trim(), { cases });
 });

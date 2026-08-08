@@ -11,6 +11,7 @@ import { renderAll } from "../diagnostics/render.js";
 import type { LowerStats } from "../frontend/lowering/lowerer.js";
 import type { NpmBuiltinUse, NpmLazyTrap } from "../frontend/npm.js";
 import type { ProvenanceSources } from "../frontend/provenance-registry.js";
+import { provenanceDirPrefix } from "../frontend/provenance-registry.js";
 
 export interface CoverageInput {
   file: string;
@@ -273,7 +274,10 @@ export function renderCoverageLines(input: CoverageInput, opts: { color?: boolea
       let pTotal = 0;
       let pFailed = 0;
       let pIsland = 0;
-      const dir = pkg.dir.endsWith("/") ? pkg.dir : `${pkg.dir}/`;
+      // Slash-spelled: statsByFile and diagnostic locs are TypeScript
+      // file names, pkg.dir is a HOST path. provenanceDirPrefix is the one
+      // definition of that comparison (see provenance-registry.ts).
+      const dir = provenanceDirPrefix(pkg.dir);
       for (const [file, s] of input.statsByFile ?? []) {
         if (!file.startsWith(dir)) continue;
         pTotal += s.total;

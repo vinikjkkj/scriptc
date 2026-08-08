@@ -31,6 +31,13 @@ import { stdout } from "node:process";
 
 process.chdir("/");
 
+// pathToFileURL resolves relative inputs against the cwd, so those cases
+// are only pinnable on the generating host — see the long note in
+// gen-path-cases.mjs. Same probe hook, same reason: the harness diffs
+// several synthetic cwds to learn which cases consult it.
+const probeCwd = process.env.SCR_ORACLE_PROBE_CWD;
+if (probeCwd !== undefined) process.cwd = () => probeCwd;
+
 const hex = (str) => {
   const b = Buffer.from(str, "utf8");
   return b.length ? b.toString("hex") : "-";
