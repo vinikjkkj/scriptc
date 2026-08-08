@@ -23,7 +23,7 @@
  * miscomparing. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { jsFuncNameOf, own } from "./lowerer.js";
+import { jsFuncValueNameOf, own } from "./lowerer.js";
 import { NARROW_FIRST } from "./surfaces.js";
 import { typeReachesItself } from "./lower-inspect.js";
 import { BOOL, CAUGHT, DYN, DYN_HANDLE_KINDS, F64, IrExpr, IrLibFn, IrStmt, IrType, REGEX, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
@@ -294,10 +294,10 @@ function lowerAssertEqual(
               : "the static side must convert into the checked-dynamic tree (numbers, strings, booleans, null/undefined, boxable functions, or JSON-safe structures under the deep forms) — narrow the unknown side instead";
         L.noLowering(`${surface} of 'unknown' and '${L.fmt(e.type)}' values`, node, hint);
       }
-      // A boxed closure takes its best-effort JS name from the source
-      // node (the coerceInto convention) — the failure message renders
+      // A boxed closure takes its JS name from the value's CREATION site
+      // (the coerceInto convention) — the failure message renders
       // [Function: name] like Node.
-      const fnName = k === "func" ? jsFuncNameOf(node) : null;
+      const fnName = k === "func" ? jsFuncValueNameOf(L, node) : null;
       return { kind: "dynFrom", value: e, ...(fnName !== null ? { fnName } : {}), type: DYN, loc: e.loc };
     };
     return {
