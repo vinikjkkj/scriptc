@@ -3059,6 +3059,7 @@ static int scr_alg_id(const ScrStr *alg) {
 ScrHash *scr_hash_new(ScrStr *alg) {
   ScrHash *h = malloc(sizeof(ScrHash));
   if (!h) scr_trap("scriptc: out of memory\n");
+  scr_hash_alloc_note();
   h->rc = 1;
   h->alg = scr_alg_id(alg); /* only the three the compiler admits reach here */
   h->msg = NULL;
@@ -3075,6 +3076,7 @@ ScrHash *scr_hash_retain(ScrHash *h) {
 void scr_hash_release(ScrHash *h) {
   if (!h || h->rc == SIZE_MAX) return;
   if (--h->rc == 0) {
+    scr_hash_free_note();
     free(h->msg);
     free(h);
   }
@@ -3134,6 +3136,7 @@ ScrHmac *scr_hmac_new_str(ScrStr *alg, ScrStr *key) {
 ScrHmac *scr_hmac_new_raw(ScrStr *alg, const unsigned char *key, size_t keylen) {
   ScrHmac *h = malloc(sizeof(ScrHmac));
   if (!h) scr_trap("scriptc: out of memory\n");
+  scr_hmac_alloc_note();
   h->rc = 1;
   h->alg = scr_alg_id(alg);
   h->msg = NULL;
@@ -3157,6 +3160,7 @@ ScrHmac *scr_hmac_retain(ScrHmac *h) {
 void scr_hmac_release(ScrHmac *h) {
   if (!h || h->rc == SIZE_MAX) return;
   if (--h->rc == 0) {
+    scr_hmac_free_note();
     if (h->key) {
       memset(h->key, 0, h->keylen); /* the key is a secret: wipe, then free */
       free(h->key);

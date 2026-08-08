@@ -3993,6 +3993,53 @@ void scr_obj_free_note(void);
 long scr_obj_live_count(void);
 #endif
 
+/* -- handle-kind RC-audit counters ------------------------------------
+ * bigint and the four crypto handles (KeyObject, Hash, Hmac, Cipher) are
+ * refcounted heap values like any other, but the audit could not SEE them:
+ * scr_rc_audit_at_exit had ten counters and none covered these five, so a
+ * leaked Hash was invisible where a leaked string was not.
+ *
+ * The counters cannot live beside the values. Three of the five sit in
+ * OPTIONAL link units (scr_bigint.c, scr_asym.c, scr_cipher_value.c) that
+ * a program using none of them never links, while the audit reads every
+ * counter unconditionally -- so a counter defined there would be an
+ * undefined symbol on most programs. They live in scr_object.c, which is
+ * in RUNTIME_SOURCES and therefore always linked, exactly like the
+ * emitted class objects' pair above.
+ *
+ * OFF the audit lane the notes are not functions at all: they expand to
+ * nothing, so the default build emits no call and no symbol. bigint
+ * arithmetic allocates on nearly every operation and must not pay for a
+ * detector it is not running. */
+#ifdef SCR_RC_AUDIT
+void scr_bigint_alloc_note(void);
+void scr_bigint_free_note(void);
+long scr_bigint_live_count(void);
+void scr_keyobj_alloc_note(void);
+void scr_keyobj_free_note(void);
+long scr_keyobj_live_count(void);
+void scr_hash_alloc_note(void);
+void scr_hash_free_note(void);
+long scr_hash_live_count(void);
+void scr_hmac_alloc_note(void);
+void scr_hmac_free_note(void);
+long scr_hmac_live_count(void);
+void scr_cipher_alloc_note(void);
+void scr_cipher_free_note(void);
+long scr_cipher_live_count(void);
+#else
+#define scr_bigint_alloc_note() ((void)0)
+#define scr_bigint_free_note() ((void)0)
+#define scr_keyobj_alloc_note() ((void)0)
+#define scr_keyobj_free_note() ((void)0)
+#define scr_hash_alloc_note() ((void)0)
+#define scr_hash_free_note() ((void)0)
+#define scr_hmac_alloc_note() ((void)0)
+#define scr_hmac_free_note() ((void)0)
+#define scr_cipher_alloc_note() ((void)0)
+#define scr_cipher_free_note() ((void)0)
+#endif
+
 /* ── async: promises, fibers, event loop ────────────────────────────
  * Async function bodies run on stackful fibers; `await` parks the fiber on
  * a promise; a dependency-free loop (microtasks before timers, FIFO

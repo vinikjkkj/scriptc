@@ -33,6 +33,7 @@ static void scr_asym_throw(const char *msg);
 ScrKeyObject *scr_keyobj_new(int curve, bool is_private, const unsigned char raw[32]) {
   ScrKeyObject *k = malloc(sizeof(ScrKeyObject));
   if (!k) scr_trap("scriptc: out of memory\n");
+  scr_keyobj_alloc_note();
   k->rc = 1;
   k->curve = curve;
   k->is_private = is_private;
@@ -55,6 +56,7 @@ void scr_keyobj_release(ScrKeyObject *k) {
       crypto_wipe(k->secret, k->secret_len);
       free(k->secret);
     }
+    scr_keyobj_free_note();
     free(k);
   }
 }
@@ -69,6 +71,7 @@ void scr_keyobj_release(ScrKeyObject *k) {
 static ScrKeyObject *scr_keyobj_secret_new(const unsigned char *key, size_t len) {
   ScrKeyObject *k = malloc(sizeof(ScrKeyObject));
   if (!k) scr_trap("scriptc: out of memory\n");
+  scr_keyobj_alloc_note();
   k->rc = 1;
   k->curve = SCR_KEY_SECRET;
   k->is_private = true; /* Node reports type 'secret'; never a public half. */

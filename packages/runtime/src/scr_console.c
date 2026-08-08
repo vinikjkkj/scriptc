@@ -52,16 +52,28 @@ static void scr_rc_audit_at_exit(void) {
 #else
   long jsvals = 0;
 #endif
+  /* The handle kinds. Counted in scr_object.c because three of the five
+   * live in optional link units -- see scr_runtime.h. The ten counters
+   * above keep their order and spelling, so a snapshot taken before these
+   * five existed still reads field for field. */
+  long bigints = scr_bigint_live_count();
+  long keyobjs = scr_keyobj_live_count();
+  long hashes = scr_hash_live_count();
+  long hmacs = scr_hmac_live_count();
+  long ciphers = scr_cipher_live_count();
   if (strings != 0 || arrays != 0 || maps != 0 || boxes != 0 || closures != 0 ||
-      objects != 0 || unions != 0 || dyns != 0 || bytes != 0 || jsvals != 0) {
+      objects != 0 || unions != 0 || dyns != 0 || bytes != 0 || jsvals != 0 ||
+      bigints != 0 || keyobjs != 0 || hashes != 0 || hmacs != 0 ||
+      ciphers != 0) {
     fflush(stdout);
     fprintf(stderr,
             "scriptc RC AUDIT FAILED: %ld heap string(s), %ld array(s), "
             "%ld map(s), %ld box(es), %ld closure(s), %ld object(s), "
             "%ld union(s), %ld dyn value(s), %ld bytes value(s), "
-            "%ld island value(s) live at exit\n",
+            "%ld island value(s), %ld bigint(s), %ld key object(s), "
+            "%ld hash(es), %ld hmac(s), %ld cipher(s) live at exit\n",
             strings, arrays, maps, boxes, closures, objects, unions, dyns,
-            bytes, jsvals);
+            bytes, jsvals, bigints, keyobjs, hashes, hmacs, ciphers);
     _Exit(99);
   }
 }
