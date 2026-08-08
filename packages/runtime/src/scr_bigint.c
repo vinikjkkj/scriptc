@@ -20,6 +20,7 @@
 #include "scr_runtime.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -281,7 +282,12 @@ ScrBigInt *scr_big_rem(const ScrBigInt *a, const ScrBigInt *b) {
 
 ScrBigInt *scr_big_pow(const ScrBigInt *a, const ScrBigInt *b) {
   if (b->sign < 0) {
-    scr_throw_error_msg(SCR_ERR_RANGE, "Exponent must be non-negative", 29);
+    /* V8's wording, which is what Node prints: "positive", not
+     * "non-negative" — the zero exponent is handled below and never
+     * reaches here, so the two phrasings describe the same guard and
+     * only one of them matches the oracle. Invisible until the
+     * may-throw seed made the message reachable by a `catch`. */
+    scr_throw_error_msg(SCR_ERR_RANGE, "Exponent must be positive", 25);
     return scr_big_zero();
   }
   if (b->sign == 0) return scr_big_from_u64_signed(1, 1);
@@ -566,8 +572,18 @@ ScrBigInt *scr_big_parse(const char *s, size_t len) {
 /* BigInt(number): integral doubles only — Node throws RangeError otherwise. */
 ScrBigInt *scr_big_from_f64(double v) {
   if (!isfinite(v) || v != trunc(v)) {
-    scr_throw_error_msg(SCR_ERR_RANGE,
-                        "The number is not a safe integer and cannot be converted to a BigInt", 68);
+    /* V8 names the offending value and the reason, and the reason is
+     * "not an integer" — NOT "not a safe integer": BigInt(2**60 + 0.0)
+     * is fine and BigInt(1.5) is not, so safety never enters it. The
+     * number renders shortest-roundtrip, so Infinity/NaN print by name
+     * exactly as the oracle does. */
+    char num[32];
+    size_t numlen = scr_f64_to_str(v, num);
+    char msg[112];
+    int mlen = snprintf(msg, sizeof msg,
+                        "The number %.*s cannot be converted to a BigInt because it is not an integer",
+                        (int)numlen, num);
+    scr_throw_error_msg(SCR_ERR_RANGE, msg, (size_t)mlen);
     return scr_big_zero();
   }
   int sign = v < 0 ? -1 : (v > 0 ? 1 : 0);

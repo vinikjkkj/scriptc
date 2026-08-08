@@ -8003,4 +8003,51 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "crypto.x509ValidFromStr",
   "crypto.x509ValidTo",
   "crypto.x509ValidToStr",
+  // ── the BigInt family's four RangeErrors (scr_bigint.c) ────────────
+  // ECMA-262 raises on `1n / 0n`, `1n % 0n`, a negative exponent, and
+  // BigInt(non-integer). The runtime raises all four catchably and then
+  // returns a zero BigInt so the C signature stays total — which is
+  // exactly why the missing seed was invisible: with no pending check
+  // the emitted call site USED the zero, printed `0`, and the `catch`
+  // never ran. The whole family was outside this set; only the four
+  // that actually raise join it.
+  "big.div",
+  "big.rem",
+  "big.pow",
+  "big.fromF64",
+  // ── the platform-conditional process members ───────────────────────
+  // On a Windows target Node's process object has no getuid/getgid, so
+  // the runtime raises the property-access TypeError those calls really
+  // produce (scr_lib.c). It then `return 0`, and with no pending check
+  // the 0 was the answer: a deliberate refusal turned into a wrong
+  // value. Same target-conditional shape as url.pathToFileURL below.
+  "process.getuid",
+  "process.getgid",
+  // process.on("warning", x) rejects a non-function listener and
+  // emitWarning's argument grammar rejects wrong kinds, both with
+  // ERR_INVALID_ARG_TYPE; emitWarning additionally runs the registered
+  // listeners SYNCHRONOUSLY, so a listener's throw lands here too (the
+  // emitter.emit stance).
+  "process.onWarning",
+  "process.emitWarning",
+  // The chaining spelling of http2's setEncoding. Its void twin
+  // (http2.streamSetEncoding) has been seeded since it landed; the
+  // `-Ret` variant calls the SAME function and was missed — the
+  // ERR_UNKNOWN_ENCODING it raises was dropped and the receiver
+  // returned as if the encoding had been accepted.
+  "http2.streamSetEncodingRet",
+  // The two h2 settings members that take a dyn LISTENER: both walk it
+  // through scr_dyn_check_listener, which raises Node's
+  // ERR_INVALID_ARG_TYPE for a non-function. Neither was seeded and
+  // neither is in the LLVM backend's table, so the C lane was the only
+  // one that reached them at all — and it dropped the TypeError.
+  "http2.sessionSettingsDynCb",
+  "http2.sessionOnSettingsDyn",
+  // url.pathToFileURL dispatches on the HOST at runtime: on Windows it
+  // is scr_url_from_path_impl(path, true), which raises Node's
+  // ERR_INVALID_ARG_VALUE for a malformed UNC path. The explicitly
+  // win32-flavored entry point (url.pathToFileURLWin32) was seeded; the
+  // target-dispatching one was not, so the same throw was catchable
+  // through one spelling and swallowed through the other.
+  "url.pathToFileURL",
 ]);
