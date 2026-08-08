@@ -112,6 +112,8 @@ const PROBES: Probe[] = [
   { id: "stdlib.string.charCodeAt", source: 'console.log("abc".charCodeAt(0));\n' },
   { id: "stdlib.array.push", source: "const xs: number[] = [1];\nxs.push(2);\nconsole.log(xs.length);\n" },
   { id: "stdlib.math.floor", source: "console.log(Math.floor(1.5));\n" },
+  { id: "stdlib.math.pow", source: "console.log(Math.pow(2, 10));\n" },
+  { id: "stdlib.math.PI", source: "console.log(Math.PI);\n" },
   { id: "stdlib.map.has", source: 'const m = new Map<string, number>();\nm.set("a", 1);\nconsole.log(m.has("a"));\n' },
   { id: "stdlib.date.now", source: "console.log(Date.now() > 0);\n" },
   { id: "stdlib.number.toFixed", source: "const n = 1.2345;\nconsole.log(n.toFixed(2));\n" },
@@ -122,7 +124,8 @@ const PROBES: Probe[] = [
   // status dynamic-only — refused with the entry's code statically,
   // analyzed clean under --dynamic
   { id: "stdlib.math.sqrt", source: "console.log(Math.sqrt(2));\n" },
-  { id: "stdlib.math.PI", source: "console.log(Math.PI);\n" },
+  { id: "stdlib.math.cbrt", source: "console.log(Math.cbrt(27));\n" },
+  { id: "stdlib.number.toPrecision", source: "const p = 19.99;\nconsole.log(p.toPrecision(4));\n" },
   { id: "stdlib.string.replace", source: 'console.log("aa".replace("a", "b"));\n' },
   { id: "diagnostic.sc2011", source: "const y: any = 1;\nconst z = y * 2;\nconsole.log(0);\n" },
   // status unsupported — refused with the entry's code

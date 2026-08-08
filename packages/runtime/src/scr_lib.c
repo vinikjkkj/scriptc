@@ -2513,6 +2513,34 @@ double scr_math_round(double x) {
   return (r == 0.0 && x < 0.0) ? -0.0 : r;
 }
 
+/* Math.pow / the `**` operator — ECMA-262 Number::exponentiate, which C
+ * pow() is NOT in three places. C says pow(x, y) is 1.0 whenever x is 1.0
+ * (any y, NaN included) and whenever |x| is 1.0 with y infinite; ECMA
+ * says NaN for both, and it says NaN for a NaN exponent before it looks
+ * at the base at all. The exponent-is-zero rule comes FIRST in both (even
+ * NaN ** 0 is 1), so the three guards are ordered exactly as the spec's
+ * steps are, and everything after them — the signed zeros, the infinite
+ * bases, the negative base with a fractional exponent — C already answers
+ * the way ECMA does. */
+double scr_math_pow(double x, double y) {
+  if (y == 0.0) return 1.0;             /* step 2: ±0 exponent, even NaN ** 0 */
+  if (isnan(y)) return (double)NAN;     /* step 1: 1 ** NaN is NaN, not 1 */
+  if (isinf(y) && fabs(x) == 1.0) return (double)NAN; /* steps 8/9: (-1) ** ±Infinity */
+  return pow(x, y);
+}
+
+/* Math.clz32 — the leading-zero count of ToUint32(x) as a 32-bit value
+ * (32 for zero). scr_bit_or with 0 IS ToUint32-then-ToInt32; the unsigned
+ * reinterpretation below is the ToUint32 the spec asks for, and the loop
+ * is the count no C standard function provides portably. */
+double scr_math_clz32(double x) {
+  uint32_t u = (uint32_t)(int32_t)scr_bit_or(x, 0.0);
+  if (u == 0) return 32.0;
+  int n = 0;
+  while ((u & 0x80000000u) == 0) { u <<= 1; n++; }
+  return (double)n;
+}
+
 double scr_math_random(void) {
   uint64_t r;
   arc4random_buf(&r, sizeof r);

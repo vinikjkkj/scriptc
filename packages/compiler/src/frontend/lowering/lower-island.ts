@@ -5,7 +5,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, islandPromisePayloadTag, isUnitType } from "../../ir/nodes.js";
-import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
+import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_CONSTS, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
 import { canonicalBuiltinModule, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf, npmStaticDepSf7 } from "../program.js";
 import { isRelativeSpecifier } from "../shared.js";
@@ -998,14 +998,23 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
     return finish(L.jsvalIn(L.lowerExpr(access.expression), access.expression), entry);
   }
 
-/** `Math.PI` / `Math.E` property READS: getProp off globalGet("Math"),
-   * exiting to the declared number type. Math methods referenced without a
-   * call are rejected specifically (no value form exists, --dynamic or
-   * not). Null for non-Math receivers (the property chain keeps trying). */
+/** `Math.PI` / `Math.LN2` / … property READS. A Math constant is a
+   * LITERAL — the spec pins each one to a double, and the same double is
+   * what Node answers — so it folds to a numLit in every build. It used
+   * to go through the island's getProp, which meant `Math.PI` needed
+   * --dynamic and `Math.LN2` (declared but untabled) fell through to the
+   * lib fence; both were accidents of the table, not of the value.
+   *
+   * Math methods referenced without a call are rejected specifically (no
+   * value form exists, --dynamic or not). Null for non-Math receivers
+   * (the property chain keeps trying), and null for any island-tabled
+   * property the constants table does not name. */
   export function lowerMathProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     const member = L.stdlibGlobalMember(expr, "Math");
     if (member === null) return null;
     const loc = locOf(expr);
+    const constant = own(STATIC_MATH_CONSTS, member);
+    if (constant !== undefined) return { kind: "numLit", value: constant, type: F64, loc };
     const propType = own(ISLAND_SURFACE.math.props, member);
     if (propType !== undefined) {
       L.requireDynamicApi(`'Math.${member}'`, expr);

@@ -2024,6 +2024,80 @@ void scr_dyn_obj_drop_accessor(ScrDyn *recv, const char *key, size_t key_len) {
   scr_dyn_obj_unset(recv->v.obj.accessors, key, key_len);
 }
 
+/* `delete recv[key]` over a dyn receiver — JS's [[Delete]], which is an
+ * OWN-property operation and an ANSWER, not a void statement.
+ *
+ * The three outcomes, in the spec's order:
+ *   - no own property of that name (the chain is irrelevant — deleting
+ *     through an object never touches its prototype) → true, nothing
+ *     removed. `delete {}.x` is true in JS.
+ *   - an own DATA member → removed, true. Order-preserving, because own
+ *     key order is insertion order and the survivors keep theirs.
+ *   - an own ACCESSOR → removed if it was defined CONFIGURABLE, else
+ *     V8's strict-mode TypeError, verbatim. The accessors
+ *     Object.defineProperty installs here default to non-configurable, so
+ *     this path is reachable; sloppy mode would answer a quiet `false`
+ *     instead, and this runtime does not do quiet (the stance
+ *     scr_dyn_key_set already takes for the setter-less write).
+ *
+ * The two tables are consulted separately on purpose: `entries` and
+ * `accessors` never both hold one key (define converts, and this drops
+ * from whichever holds it), so "delete from the right one" is a lookup,
+ * not a policy.
+ *
+ * ARR: a canonical index becomes a HOLE, which this representation has
+ * no way to spell — it would have to shorten the array and renumber
+ * every later element, which is not what JS does. Refused loudly rather
+ * than answered wrongly. Other kinds carry no own properties a delete
+ * could remove, so they answer true like JS. Both borrowed. */
+bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
+  if (recv == NULL || recv->kind == SCR_DYN_UNDEF || recv->kind == SCR_DYN_NULL) {
+    ScrJsonBuf sb;
+    scr_jb_init(&sb);
+    scr_jb_puts(&sb, "Cannot convert undefined or null to object");
+    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&sb));
+    return false;
+  }
+  if (recv->kind == SCR_DYN_OBJ) {
+    if (scr_dyn_obj_get(recv, key->data, key->len) != NULL) {
+      scr_dyn_obj_unset(recv, key->data, key->len);
+      return true;
+    }
+    if (recv->v.obj.accessors != NULL &&
+        scr_dyn_obj_get(recv->v.obj.accessors, key->data, key->len) != NULL) {
+      if (scr_dyn_obj_accessor_sealed(recv, key->data, key->len)) {
+        ScrJsonBuf sb;
+        scr_jb_init(&sb);
+        scr_jb_puts(&sb, "Cannot delete property '");
+        scr_jb_write(&sb, key->data, key->len);
+        scr_jb_puts(&sb, "' of #<Object>");
+        scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&sb));
+        return false;
+      }
+      scr_dyn_obj_unset(recv->v.obj.accessors, key->data, key->len);
+      return true;
+    }
+    return true;
+  }
+  if (recv->kind == SCR_DYN_ARR) {
+    size_t idx = 0;
+    int is_index = key->len > 0 && key->len < 16 && !(key->len > 1 && key->data[0] == '0');
+    for (size_t i = 0; is_index && i < key->len; i++) {
+      if (key->data[i] < '0' || key->data[i] > '9') is_index = 0;
+      else idx = idx * 10 + (size_t)(key->data[i] - '0');
+    }
+    if (is_index && idx < recv->v.arr.len) {
+      ScrJsonBuf sb;
+      scr_jb_init(&sb);
+      scr_jb_puts(&sb, "'delete' of an array element leaves a hole, which this runtime cannot represent (assign undefined, or splice)");
+      scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&sb));
+      return false;
+    }
+    return true;
+  }
+  return true;
+}
+
 /* The checked-dynamic keyed WRITE (`h.k = v` on a dyn receiver): OBJ sets
  * the member (later writes win, insertion order — JS); undefined/null
  * throws Node's "Cannot set properties of ..."; every other kind throws
