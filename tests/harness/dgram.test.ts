@@ -103,7 +103,11 @@ async function build(entry: string): Promise<string> {
   return result.binaryPath;
 }
 
+/* POSIX spelling first: globSync answers backslashes on win32, where
+ * `split("/").at(-2)` is `undefined` and every case reports under that one
+ * name. No-op elsewhere. */
 const cases = globSync(join(fixturesRoot, "cases/*/main.ts"))
+  .map((entry) => entry.split("\\").join("/"))
   .sort()
   .map((entry) => ({
     name: entry.split("/").at(-2)!,

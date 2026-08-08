@@ -13,9 +13,19 @@ export interface NpmCase {
   argvs?: string[][];
 }
 
+/* POSIX spelling of a globbed path. globSync hands back backslashes on
+ * win32, and BOTH readers below are `/`-shaped: the 2465../2556.. exclusion
+ * regex silently matched nothing there (so seven --npm-static-only cases
+ * ran in the flagless island lane and four of them failed as "SC0001 …
+ * has no exported member" / "SC1090 console.log of 'any'"), and
+ * `split("/").at(-2)` answered `undefined`, which is the name vitest then
+ * printed for every case in the file. No-op off win32. */
+const posix = (s: string): string => s.split("\\").join("/");
+
 export function npmCases(fixturesRoot: string): NpmCase[] {
   return [
     ...globSync(join(fixturesRoot, "npm/cases/*/main.ts"))
+      .map(posix)
       .sort()
       // 2465-2469 and 2556-2557 are the --npm-static bundler-emitted-CJS
       // cases (npm-static.test.ts drives them with the opt-in): their

@@ -119,8 +119,13 @@ async function build(entry: string): Promise<string> {
 // server surface (the ambient receiver, the dyn-binding handle) — both
 // lanes run the identical three-leg comparison. SCRIPTC_TEST_SHARD (CI's
 // matrix) keeps only this shard's slice, keyed by case name.
+/* POSIX spelling before the name is cut out of the path: globSync answers
+ * backslashes on win32, where `split("/").at(-2)` is `undefined` — and the
+ * name is the SHARD KEY, so every case would hash to one shard and CI's
+ * other two would silently run none of them. No-op elsewhere. */
 const cases = shardSelect(
   [...globSync(join(fixturesRoot, "cases/*/main.ts")), ...globSync(join(fixturesRoot, "cases/*/main.js"))]
+    .map((entry) => entry.split("\\").join("/"))
     .sort()
     .map((entry) => ({
       name: entry.split("/").at(-2)!,
