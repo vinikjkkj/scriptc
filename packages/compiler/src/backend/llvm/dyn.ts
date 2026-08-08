@@ -70,12 +70,18 @@ export const DK = {
   HANDLE: 9,
   PROMISE: 10,
   JSVAL: 11, /* SCR_DYN_JSVAL — island values held by reference */
+  OBJINST: 12, /* SCR_DYN_OBJINST — class instances held by reference */
 } as const;
 
 /** What the dyn helpers need beyond the walker host: interned immortal
  * unit instances (undefined-armed dynCheck targets build them). */
 export interface DynHost extends WalkerHost {
   unitInstanceRef(unionId: string, tag: number): string;
+  /** `@`-ref of the interned SCR_DYN_OBJINST descriptor for a class. */
+  dynClassDesc(className: string): string;
+  /** The class's preorder interval and hierarchy membership — the same
+   * numbers `instanceof` compares against. */
+  classInterval(className: string): { pre: number; post: number };
 }
 
 /** Exact double literal (the emitter's f64Lit — the walkers' copy). */
@@ -553,6 +559,18 @@ export class LlDyn {
         B.terminate(`ret i1 false`);
         break;
       }
+      case "object": {
+        // "Is this dyn an instance of C?" — the same preorder-interval
+        // test `x instanceof C` compiles to, run inside the runtime helper
+        // so both lanes ask it exactly once. The C walker's arm.
+        this.host.declare(`declare zeroext i1 @scr_dyn_objinst_is(ptr, i64, i64)`);
+        this.host.dynClassDesc(t.className); // interned even when only matched
+        const iv = this.host.classInterval(t.className);
+        const r = B.tmp();
+        B.line(`${r} = call zeroext i1 @scr_dyn_objinst_is(ptr %d, i64 ${iv.pre}, i64 ${iv.post})`);
+        B.terminate(`ret i1 ${r}`);
+        break;
+      }
       default:
         throw new LlvmUnsupportedError(`dynMatch:${t.kind}`);
     }
@@ -643,7 +661,18 @@ export class LlDyn {
         // %error objects rebuild once and cache the pair. The C walker's
         // arm exactly.
         if (t.className !== "%Error") {
-          throw new Error(`llvm emitter bug: dynCheck of class ${t.className} (only %Error extracts from the checked-dynamic tree)`);
+          // The interval-checked REFERENCE unwrap: the same pointer back
+          // (+1), so identity survives the round trip. The C walker's arm.
+          host.declare(`declare ptr @scr_dyn_objinst_unbox(ptr, i64, i64, ptr, ptr)`);
+          host.dynClassDesc(t.className); // interned even when only narrowed to
+          const iv = host.classInterval(t.className);
+          const r = B.tmp();
+          B.line(
+            `${r} = call ptr @scr_dyn_objinst_unbox(ptr %d, i64 ${iv.pre}, i64 ${iv.post}, ` +
+              `ptr %path, ptr ${want})`,
+          );
+          B.terminate(`ret ptr ${r}`);
+          break;
         }
         const kd = this.kindOf(B, "%d");
         const isObj = B.tmp();
@@ -1060,9 +1089,16 @@ export class LlDyn {
         break;
       }
       case "object": {
-        // %Error only (canConvertToDyn's gate): the checked-dynamic tree's error encoding.
+        // %Error keeps the checked-dynamic tree's ERROR ENCODING; every
+        // other class boxes BY REFERENCE through its emitted descriptor —
+        // the C walker's arm exactly.
         if (t.className !== "%Error") {
-          throw new Error(`llvm emitter bug: to-dyn of class ${t.className}`);
+          host.declare(`declare ptr @scr_dyn_new_objinst(ptr, ptr)`);
+          const desc = host.dynClassDesc(t.className);
+          const r = B.tmp();
+          B.line(`${r} = call ptr @scr_dyn_new_objinst(ptr %v, ptr ${desc})`);
+          B.terminate(`ret ptr ${r}`);
+          break;
         }
         host.declare(`declare ptr @scr_dyn_from_error(ptr)`);
         const r = B.tmp();
@@ -1537,7 +1573,7 @@ export class LlDyn {
       const kd = this.kindOf(B, "%d");
       const done = B.newLabel("ds.d");
       const labels = new Map<number, string>();
-      for (const k of [DK.NULL, DK.BOOL, DK.NUM, DK.STR, DK.ARR, DK.OBJ, DK.UNDEF, DK.BYTES, DK.FUNC, DK.HANDLE, DK.PROMISE, DK.JSVAL]) {
+      for (const k of [DK.NULL, DK.BOOL, DK.NUM, DK.STR, DK.ARR, DK.OBJ, DK.UNDEF, DK.BYTES, DK.FUNC, DK.HANDLE, DK.PROMISE, DK.JSVAL, DK.OBJINST]) {
         labels.set(k, B.newLabel(`ds.k${k}`));
       }
       B.terminate(
@@ -1717,6 +1753,19 @@ export class LlDyn {
       // its own — so this arm delegates to the runtime entry point exactly
       // as the OBJ arm above does, rather than repeating a constant that
       // is right for some tags and wrong for others.
+      {
+        const s = B.tmp();
+        B.line(`${s} = call ptr @scr_dyn_to_string(ptr %d, ptr null)`);
+        this.putScrStr(B, "%b", s);
+        B.line(`call void @scr_str_release(ptr ${s})`);
+      }
+      B.br(done);
+      B.startBlock(labels.get(DK.OBJINST)!);
+      // A class instance may OVERRIDE toString and the box carries no
+      // member table to dispatch it through, so the runtime's arm is the
+      // loud ladder rather than "[object Object]". Delegated for the same
+      // reason the HANDLE arm above is: the copy must not answer a kind
+      // differently from the original.
       {
         const s = B.tmp();
         B.line(`${s} = call ptr @scr_dyn_to_string(ptr %d, ptr null)`);
@@ -1984,6 +2033,22 @@ export class LlDyn {
       const r = B.tmp();
       B.line(`${r} = call ptr @scr_dyn_obj_key_get(ptr %d, ptr ${kParts.data}, i64 ${kParts.len})`);
       B.terminate(`ret ptr ${r}`);
+      B.startBlock(lNext);
+    }
+    // OBJINST: a class instance's members are struct fields the box has no
+    // table for. Falling through to the undefined tail would be a SILENT
+    // wrong answer for a property Node reads fine, so the read is the loud
+    // ladder — the C emitter's arm, same runtime entry point.
+    {
+      const isCi = B.tmp();
+      B.line(`${isCi} = icmp eq i32 ${kd}, ${DK.OBJINST}`);
+      const lCi = B.newLabel("kg.ci");
+      const lNext = B.newLabel("kg.n");
+      B.condBr(isCi, lCi, lNext);
+      B.startBlock(lCi);
+      host.declare(`declare zeroext i1 @scr_dyn_objinst_fence(ptr, ptr)`);
+      B.line(`call zeroext i1 @scr_dyn_objinst_fence(ptr %d, ptr ${host.cstr("a property read")})`);
+      B.terminate(`ret ptr null`);
       B.startBlock(lNext);
     }
     // HANDLE: the tag's modeled properties through the installed ops.
