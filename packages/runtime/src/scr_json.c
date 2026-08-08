@@ -2823,6 +2823,8 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
  * ignore silently — the loud choice, SEMANTICS.md). Receiver, key, and
  * value are all BORROWED (the member retains the value in). */
 static const char *scr_dyn_kind_name(const ScrDyn *d);
+/* Is this box the %Uint8Array% singleton? Defined with it, below. */
+static bool scr_u8_is_ctor(const ScrDyn *d);
 /* Own-property presence on a FUNC node, for `in` and Object.hasOwn. It
  * asks scr_dyn_fn_get, so presence can never disagree with what the READ
  * answers: the property table first, then the name/length built-ins.
@@ -3904,6 +3906,13 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
   if (key_len == 6 && memcmp(key, "length", 6) == 0) {
     return scr_dyn_new_num((double)d->v.fn.arity);
   }
+  /* `Uint8Array.BYTES_PER_ELEMENT`. Answered off the BOX rather than out
+   * of the property table because a FUNC box's table has no
+   * non-enumerable half: a table entry would put the key into
+   * `Object.keys(Uint8Array)`, where Node answers []. */
+  if (key_len == 17 && memcmp(key, "BYTES_PER_ELEMENT", 17) == 0 && scr_u8_is_ctor(d)) {
+    return scr_dyn_new_num(1);
+  }
   /* `F.prototype` on a function that never assigned one: JS has ALREADY
    * created that object (a function declaration owns a writable
    * `prototype` own property from the moment it exists), so answering
@@ -4093,6 +4102,509 @@ ScrDyn *scr_dyn_obj_create_proto(const ScrDyn *proto) {
   return o;
 }
 
+/* ToIntegerOrInfinity over an OPTIONAL index argument: missing or
+ * undefined answers dflt; a NUM truncates toward zero (NaN -> 0, like
+ * JS); any other kind throws the loud fence (Node would ToNumber-coerce
+ * — a documented gap, never a silent misread).
+ *
+ * The ONE body, here rather than in scr_dyn_invoke.c, because the
+ * typed-array dispatch below is shared with that unit and an OPTIONAL
+ * unit cannot be called from this always-linked one. */
+double scr_dyn_index_arg(ScrDyn *const *args, size_t argc, size_t i, double dflt,
+                         const char *what) {
+  if (i >= argc || args[i]->kind == SCR_DYN_UNDEF) return dflt;
+  if (args[i]->kind == SCR_DYN_NUM) {
+    double n = args[i]->v.num;
+    if (n != n) return 0;
+    return trunc(n);
+  }
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_jb_puts(&b, what);
+  scr_jb_puts(&b, ": non-number index arguments on a dynamic receiver are not supported yet");
+  scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+  return 0;
+}
+
+/* Names Uint8Array.prototype and %TypedArray%.prototype declare BEYOND
+ * what scr_dyn_bytes_method implements — these fence loudly instead of
+ * mis-answering Node's is-not-a-function for a method Node HAS. */
+static bool scr_dyn_bytes_proto_name(const char *m) {
+  static const char *names[] = { "slice", "at", "indexOf", "lastIndexOf", "includes", "join",
+    "forEach", "map", "filter", "some", "every", "find", "findIndex", "findLast",
+    "findLastIndex", "reverse", "fill", "set", "subarray", "sort", "keys", "values", "entries",
+    "reduce", "reduceRight", "copyWithin", "toReversed", "toSorted", "with", "toString",
+    "toLocaleString", "toBase64", "setFromBase64", "toHex", "setFromHex", NULL };
+  for (size_t i = 0; names[i]; i++) if (strcmp(m, names[i]) == 0) return true;
+  return false;
+}
+
+/* Every typed-array METHOD, over a BYTES receiver — the ONE body, and
+ * the reason it lives in this unit rather than in scr_dyn_invoke.c: the
+ * %TypedArray%.prototype thunks below are reachable from an
+ * always-linked object, and an edge into an OPTIONAL unit would drag
+ * scr_dyn_invoke.c into every binary that has a dyn keyed read.
+ *
+ * `b.m(...)` (scr_dyn_invoke's BYTES arm) and
+ * `Uint8Array.prototype.m.call(b, ...)` both land here, so the two
+ * spellings cannot answer differently. `*known` reports whether the name
+ * is a method of this kind at ALL — false leaves the caller its own
+ * is-not-a-function answer, which is JS's for a name no prototype
+ * declares. */
+ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *args,
+                             size_t argc, const char *what, bool *known) {
+  ScrBytes *bytes = recv->v.bytes;
+  size_t blen = bytes->len;
+  *known = true;
+  if (strcmp(method, "at") == 0) {
+    double iD = scr_dyn_index_arg(args, argc, 0, 0, what);
+    if (scr_exc_pending()) return NULL;
+    double idx = iD < 0 ? (double)blen + iD : iD;
+    if (idx < 0 || idx >= (double)blen) return scr_dyn_retain(scr_dyn_undefined());
+    return scr_dyn_new_num((double)bytes->data[(size_t)idx]);
+  }
+  if (strcmp(method, "slice") == 0 || strcmp(method, "subarray") == 0) {
+    /* slice COPIES and subarray is a VIEW — JS's own split, and the one
+     * the STATIC spelling has always taken (scr_bytes_subarray, chain
+     * depth 1). The dyn arm used to copy for BOTH, so
+     * `q.v.subarray(2, 4)[0] = 77` was lost while `b.subarray(2, 4)[0] =
+     * 77` landed: one silent wrong answer per spelling, from the same
+     * source text. Both results keep the receiver's Buffer flavor
+     * (Buffer sets no Symbol.species, so a Buffer's slice IS a Buffer,
+     * verified against Node both ways). */
+    double startD = scr_dyn_index_arg(args, argc, 0, 0, what);
+    if (scr_exc_pending()) return NULL;
+    double endD = scr_dyn_index_arg(args, argc, 1, (double)blen, what);
+    if (scr_exc_pending()) return NULL;
+    if (method[0] == 's' && method[1] == 'u') {
+      ScrBytes *view = scr_bytes_subarray(bytes, startD, endD); /* +1, aliasing */
+      ScrDyn *d = scr_dyn_new_bytes_ref(view);                  /* +1 on view */
+      d->buffer = recv->buffer;
+      scr_bytes_release(view);
+      return d;
+    }
+    ScrBytes *out = scr_bytes_slice(bytes, startD, endD);
+    ScrDyn *d = recv->buffer ? scr_dyn_new_buffer_copy(out) : scr_dyn_new_bytes_copy(out);
+    scr_bytes_release(out);
+    return d;
+  }
+  if (scr_dyn_bytes_proto_name(method)) {
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "'Uint8Array.prototype.");
+    scr_jb_puts(&b, method);
+    scr_jb_puts(&b, "' on a dynamic value is not supported yet");
+    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+    return NULL;
+  }
+  *known = false;
+  return NULL;
+}
+
+/* ── %Uint8Array%, %Uint8Array.prototype% and %TypedArray%.prototype ───
+ *
+ * `Uint8Array` in a VALUE position. It used to be the identifier
+ * chokepoint's opaque IDENTITY TOKEN — the interned string "[builtin
+ * Uint8Array]" — and a string has no `prototype`, so the read answered
+ * `undefined` with no diagnostic at all. protobufjs stores the
+ * constructor in a property and then reads THROUGH it, at module init,
+ * in both halves of the codec:
+ *
+ *     util.Array = typeof Uint8Array !== "undefined" ? Uint8Array : Array;
+ *     Writer.alloc = util.pool(Writer.alloc, util.Array.prototype.subarray);
+ *     Reader.prototype._slice = util.Array.prototype.subarray
+ *                            || util.Array.prototype.slice;
+ *
+ * By the time `.prototype` is asked for, `util.Array` is a RUNTIME dyn
+ * value: no frontend lift can see the access, which is why this is a
+ * value the runtime HOLDS rather than a lowered member like
+ * `String.prototype.charCodeAt`.
+ *
+ * THREE process singletons, mirroring Node's own three objects, because
+ * `===`, the [[Prototype]] chain and `Object.hasOwn` all read IDENTITY:
+ *
+ *   %Uint8Array%              a FUNC box — typeof "function", `name`
+ *                             "Uint8Array", `length` 3, `prototype`
+ *                             PINNED to the object below, and
+ *                             Function.prototype.toString answering
+ *                             Node's "function Uint8Array() { [native
+ *                             code] }". Calling it WITHOUT `new` throws
+ *                             Node's "Constructor Uint8Array requires
+ *                             'new'"; `new` is routed by pointer
+ *                             identity in scr_dyn_construct.
+ *   %Uint8Array.prototype%    Node's OWN members and no others:
+ *                             `constructor`, `BYTES_PER_ELEMENT` 1, and
+ *                             the four base64/hex methods v25 added.
+ *   %TypedArray%.prototype    where every other METHOD actually lives,
+ *                             reached by delegation.
+ *
+ * The split is not decoration. `Object.hasOwn(Uint8Array.prototype,
+ * "subarray")` is FALSE in Node while `"subarray" in Uint8Array
+ * .prototype` is true, and one flat object would have to answer one of
+ * those two wrongly.
+ *
+ * Every method is ONE generic thunk: it takes its receiver from the
+ * ambient-receiver window (which `f.call(recv, …)` opens — scr_dyn_invoke
+ * .c's FUNC arm) and forwards to `scr_dyn_invoke`, the very dispatch the
+ * ordinary `b.m(…)` spelling lands on. So `Uint8Array.prototype.subarray
+ * .call(b, 1, 3)` and `b.subarray(1, 3)` cannot drift: the implemented
+ * names do the same work, and the ones this runtime does not implement
+ * raise the same loud "Uint8Array.<m> is not supported yet" they already
+ * raise in call position — a member Node HAS answers a function here
+ * too, and the refusal happens where the work would.
+ *
+ * REFCOUNTS, by hand. Unlike %Error.prototype%, this graph has a CYCLE:
+ * `%Uint8Array.prototype%.constructor` points at the FUNC box and the
+ * box's own-property table points back at the prototype. Both nodes are
+ * immortal for the process, so the cycle costs nothing while running;
+ * the teardown DROPS the back-link first so the two really die instead
+ * of merely becoming unreachable. Each method and accessor box is a
+ * ZERO-capture closure, so none of them holds a reference back to the
+ * object it is defined on. */
+static ScrDyn *scr_u8_ctor;  /* %Uint8Array% */
+static ScrDyn *scr_u8_proto; /* %Uint8Array.prototype% */
+static ScrDyn *scr_ta_proto; /* %TypedArray%.prototype */
+
+static void scr_u8_teardown(void) {
+  if (scr_u8_proto != NULL) scr_dyn_obj_drop_hidden(scr_u8_proto, "constructor", 11);
+  scr_dyn_release(scr_u8_ctor);
+  scr_u8_ctor = NULL;
+  scr_dyn_release(scr_u8_proto);
+  scr_u8_proto = NULL;
+  scr_dyn_release(scr_ta_proto);
+  scr_ta_proto = NULL;
+}
+
+/* Node spells the offending receiver into the message. Two renderings,
+ * both V8's and both verified against v25: the METHOD form says
+ * `#<Object>` for a plain object, the ACCESSOR form says `[object
+ * Object]`, and both spell the scalars with the plain string coercion
+ * (`undefined`, `null`, `5`, `ab`, a function's source). Only the
+ * coercions that CANNOT throw are taken — a receiver's own valueOf must
+ * not run while an exception is being built. */
+static void scr_u8_put_recv(ScrJsonBuf *b, const ScrDyn *self, bool accessor) {
+  switch (self->kind) {
+  case SCR_DYN_UNDEF:
+    scr_jb_puts(b, "undefined");
+    return;
+  case SCR_DYN_NULL:
+    scr_jb_puts(b, "null");
+    return;
+  case SCR_DYN_ARR:
+    scr_jb_puts(b, "[object Array]");
+    return;
+  case SCR_DYN_NUM:
+  case SCR_DYN_BOOL:
+  case SCR_DYN_STR:
+  case SCR_DYN_FUNC: {
+    ScrStr *s = scr_dyn_string_coerce_js(self); /* +1; never throws for these */
+    if (s == NULL) break;
+    scr_jb_write(b, s->data, s->len);
+    scr_str_release(s);
+    return;
+  }
+  default:
+    break;
+  }
+  scr_jb_puts(b, accessor ? "[object Object]" : "#<Object>");
+}
+
+/* The one method body. `this` comes from the ambient-receiver window,
+ * resolved per call — a detached method remembers no receiver, exactly
+ * as in Node, where `Uint8Array.prototype.subarray` and `b.subarray` are
+ * the same function object and neither is bound. */
+static ScrDyn *scr_u8_proto_forward(const char *method, ScrDyn *const *args, size_t argc) {
+  ScrDyn *self = scr_dyn_this_get(); /* +1; the undefined singleton with no binding */
+  if (self->kind != SCR_DYN_BYTES) {
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "Method %TypedArray%.prototype.");
+    scr_jb_puts(&b, method);
+    scr_jb_puts(&b, " called on incompatible receiver ");
+    scr_u8_put_recv(&b, self, false);
+    scr_dyn_release(self);
+    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+    return NULL;
+  }
+  bool known = false;
+  ScrDyn *r = scr_dyn_bytes_method(self, method, args, argc, method, &known);
+  scr_dyn_release(self);
+  if (known) return r; /* +1, or NULL with the exception pending */
+  /* A name %TypedArray%.prototype declares that scr_dyn_bytes_method
+   * does not know at all cannot reach here — the two lists are the same
+   * list. Kept as a real answer rather than an assert so a future member
+   * added to one and not the other refuses loudly. */
+  {
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "'Uint8Array.prototype.");
+    scr_jb_puts(&b, method);
+    scr_jb_puts(&b, "' on a dynamic value is not supported yet");
+    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+  }
+  return NULL;
+}
+
+/* The names %TypedArray%.prototype declares, with Node's arity for each
+ * (`Uint8Array.prototype.subarray.length` is 2), and the four v25 added
+ * to Uint8Array.prototype itself. Implemented-ness is NOT this list's
+ * business — scr_dyn_invoke owns that, and owning it in one place is
+ * what keeps the two spellings from disagreeing. */
+#define SCR_TA_PROTO_METHODS(X)                                                             \
+  X(entries, 0) X(keys, 0) X(values, 0) X(at, 1) X(copyWithin, 2) X(every, 1) X(fill, 1)    \
+  X(filter, 1) X(find, 1) X(findIndex, 1) X(findLast, 1) X(findLastIndex, 1)                \
+  X(forEach, 1) X(includes, 1) X(indexOf, 1) X(join, 1) X(lastIndexOf, 1) X(map, 1)         \
+  X(reverse, 0) X(reduce, 1) X(reduceRight, 1) X(set, 1) X(slice, 2) X(some, 1) X(sort, 1)  \
+  X(subarray, 2) X(toReversed, 0) X(toSorted, 1) X(with, 2) X(toLocaleString, 0)            \
+  X(toString, 0)
+#define SCR_U8_PROTO_METHODS(X) X(toBase64, 0) X(setFromBase64, 1) X(toHex, 0) X(setFromHex, 1)
+
+#define SCR_U8_THUNK(m, n)                                                         \
+  static ScrDyn *scr_u8_m_##m(ScrClosure *clo, ScrDyn *const *args, size_t argc) { \
+    (void)clo;                                                                     \
+    return scr_u8_proto_forward(#m, args, argc);                                   \
+  }
+SCR_TA_PROTO_METHODS(SCR_U8_THUNK)
+SCR_U8_PROTO_METHODS(SCR_U8_THUNK)
+#undef SCR_U8_THUNK
+
+/* The four ACCESSORS %TypedArray%.prototype declares. They matter for
+ * the same reason the methods do: read off the PROTOTYPE — the only
+ * receiver that can reach them here, since a typed array is a BYTES
+ * value and walks no chain — Node THROWS, and a plain undefined would be
+ * the silent kind of wrong. A BYTES receiver, which only an explicit
+ * `.call` can supply, gets the real answer. */
+static ScrDyn *scr_u8_accessor(const char *name, int which) {
+  ScrDyn *self = scr_dyn_this_get(); /* +1 */
+  if (self->kind != SCR_DYN_BYTES) {
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "Method get TypedArray.prototype.");
+    scr_jb_puts(&b, name);
+    scr_jb_puts(&b, " called on incompatible receiver ");
+    scr_u8_put_recv(&b, self, true);
+    scr_dyn_release(self);
+    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+    return NULL;
+  }
+  ScrBytes *bytes = self->v.bytes;
+  ScrDyn *r;
+  switch (which) {
+  case 0:
+    r = scr_dyn_new_num((double)bytes->len);
+    break;
+  case 1:
+    r = scr_dyn_new_num((double)(bytes->len * scr_bytes_elem_size(bytes->elem)));
+    break;
+  case 2:
+    r = scr_dyn_new_num(scr_bytes_byte_offset(bytes));
+    break;
+  default:
+    /* `.buffer`: there is no free-standing ArrayBuffer VALUE in a static
+     * build — typed arrays own their storage — which is the refusal the
+     * static spelling already gives, in the same words. */
+    scr_dyn_release(self);
+    {
+      static const char msg[] =
+          "reading 'buffer' off a typed array is not supported yet"
+          " (no free-standing ArrayBuffer value exists here; typed arrays own their"
+          " storage, and subarray() answers an aliasing view directly)";
+      scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
+    }
+    return NULL;
+  }
+  scr_dyn_release(self);
+  return r;
+}
+
+#define SCR_U8_ACCESSOR(m, w)                                                      \
+  static ScrDyn *scr_u8_g_##m(ScrClosure *clo, ScrDyn *const *args, size_t argc) { \
+    (void)clo;                                                                     \
+    (void)args;                                                                    \
+    (void)argc;                                                                    \
+    return scr_u8_accessor(#m, w);                                                 \
+  }
+SCR_U8_ACCESSOR(length, 0)
+SCR_U8_ACCESSOR(byteLength, 1)
+SCR_U8_ACCESSOR(byteOffset, 2)
+SCR_U8_ACCESSOR(buffer, 3)
+#undef SCR_U8_ACCESSOR
+
+/* Calling %Uint8Array% without `new`. `new` never reaches this thunk —
+ * scr_dyn_construct routes on pointer identity — so the throw is the
+ * body's whole job, and it is Node's. */
+static ScrDyn *scr_u8_ctor_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  (void)args;
+  (void)argc;
+  static const char msg[] = "Constructor Uint8Array requires 'new'";
+  scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+  return NULL;
+}
+
+static ScrDyn *scr_u8_new_func(const char *name, ScrDynThunk thunk, uint32_t arity) {
+  /* ZERO captures — the box holds no reference back to the object it is
+   * about to be defined on. `name` is a static literal, which is what
+   * scr_dyn_new_func's contract requires (the box never frees it). */
+  return scr_dyn_new_func(scr_closure_new((void *)thunk, 0), thunk, arity, "()", name);
+}
+
+static void scr_u8_define_method(ScrDyn *target, const char *name, ScrDynThunk thunk,
+                                 uint32_t arity) {
+  ScrDyn *f = scr_u8_new_func(name, thunk, arity); /* +1 */
+  /* Non-enumerable, writable, configurable — the attributes every one of
+   * these has in Node, so `Object.keys(Uint8Array.prototype)` is `[]`
+   * for the REASON Node's is rather than by luck. */
+  scr_dyn_obj_define_hidden_data(target, name, strlen(name), f, true, true);
+  scr_dyn_release(f);
+}
+
+static void scr_u8_define_getter(ScrDyn *target, const char *name, ScrDynThunk thunk) {
+  ScrDyn *g = scr_u8_new_func(name, thunk, 0); /* +1 */
+  scr_dyn_obj_define_accessor(target, name, strlen(name), g, scr_dyn_undefined(), true);
+  scr_dyn_release(g);
+}
+
+static void scr_u8_build(void) {
+  if (scr_u8_ctor != NULL) return;
+  ScrDyn *ta = scr_dyn_new_obj(); /* %TypedArray%.prototype */
+#define X(m, n) scr_u8_define_method(ta, #m, scr_u8_m_##m, n);
+  SCR_TA_PROTO_METHODS(X)
+#undef X
+  scr_u8_define_getter(ta, "buffer", scr_u8_g_buffer);
+  scr_u8_define_getter(ta, "byteLength", scr_u8_g_byteLength);
+  scr_u8_define_getter(ta, "byteOffset", scr_u8_g_byteOffset);
+  scr_u8_define_getter(ta, "length", scr_u8_g_length);
+
+  ScrDyn *p = scr_dyn_new_obj(); /* %Uint8Array.prototype% */
+  scr_dyn_obj_set_proto(p, ta);
+#define X(m, n) scr_u8_define_method(p, #m, scr_u8_m_##m, n);
+  SCR_U8_PROTO_METHODS(X)
+#undef X
+  ScrDyn *bpe = scr_dyn_new_num(1);
+  scr_dyn_obj_define_hidden_data(p, "BYTES_PER_ELEMENT", 17, bpe, false, false);
+  scr_dyn_release(bpe);
+
+  ScrDyn *c = scr_u8_new_func("Uint8Array", scr_u8_ctor_thunk, 3); /* +1 */
+  /* PINNED before anything can read it, so scr_dyn_fn_prototype answers
+   * this object instead of minting the anonymous one it makes for a user
+   * function on first demand. `Uint8Array.prototype === Uint8Array
+   * .prototype` and the chain `new` installs both depend on it. The key
+   * is skipped by the own-keys walk (like `name` and `length`), so
+   * `Object.keys(Uint8Array)` stays Node's `[]`. */
+  ScrDyn *table = scr_dyn_fn_props(c); /* +1 */
+  scr_dyn_obj_set(table, "prototype", 9, scr_dyn_retain(p));
+  scr_dyn_release(table);
+  scr_dyn_obj_define_hidden_data(p, "constructor", 11, c, true, true);
+
+  scr_ta_proto = ta;
+  scr_u8_proto = p;
+  scr_u8_ctor = c;
+  scr_atexit(scr_u8_teardown);
+}
+
+ScrDyn *scr_dyn_uint8array_ctor(void) {
+  scr_u8_build();
+  return scr_dyn_retain(scr_u8_ctor);
+}
+
+static bool scr_u8_is_ctor(const ScrDyn *d) {
+  return scr_u8_ctor != NULL && d == scr_u8_ctor;
+}
+
+ScrDyn *scr_dyn_uint8array_prototype(void) {
+  scr_u8_build();
+  return scr_dyn_retain(scr_u8_proto);
+}
+
+/* `b.constructor` on a typed array. Node answers the constructor
+ * FUNCTION, and protobufjs's `Reader.prototype.raw` builds through it
+ * (`new this.buf.constructor(0)`); undefined would be the silent kind of
+ * wrong. A BUFFER-flavored value's constructor is `Buffer`, a different
+ * function this tier does not hold, so it refuses by name rather than
+ * answering the Uint8Array one — the two disagree about `toString`,
+ * `inspect` and their own `.constructor`. */
+ScrDyn *scr_dyn_bytes_constructor(const ScrDyn *d) {
+  if (d->buffer || d->v.bytes->flavor == SCR_BF_BUFFER) {
+    static const char msg[] =
+        "reading 'constructor' off a Buffer is not supported yet"
+        " (the Buffer constructor is not a value in a static build; the Uint8Array one"
+        " is, and a Buffer is not one of its instances — Buffer.alloc/Buffer.from build"
+        " the flavored value this tier can make)";
+    scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
+    return NULL;
+  }
+  if (d->v.bytes->elem != SCR_BYTES_U8) {
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "reading 'constructor' off a ");
+    scr_jb_puts(&b, scr_dyn_kind_name(d));
+    scr_jb_puts(&b, " is not supported yet"
+                    " (only the Uint8Array constructor is a value in this tier — the other"
+                    " typed-array constructors have no object to point at)");
+    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+    return NULL;
+  }
+  return scr_dyn_uint8array_ctor();
+}
+
+/* `new Uint8Array(…)` through the singleton. scr_dyn_construct routes
+ * here by POINTER IDENTITY instead of running the thunk, whose only job
+ * is the requires-'new' throw. The argument forms are Node's, minus the
+ * two with no representation here (an ArrayBuffer, and the (buffer,
+ * byteOffset, length) triple), which refuse by name. */
+static ScrDyn *scr_u8_construct(const ScrDyn *args) {
+  size_t argc = (args != NULL && args->kind == SCR_DYN_ARR) ? args->v.arr.len : 0;
+  const ScrDyn *a0 = argc > 0 ? args->v.arr.items[0] : NULL;
+  if (a0 == NULL || a0->kind == SCR_DYN_UNDEF || a0->kind == SCR_DYN_NULL ||
+      a0->kind == SCR_DYN_NUM || a0->kind == SCR_DYN_BOOL || a0->kind == SCR_DYN_STR) {
+    /* ToIndex — NaN and a non-numeric string are 0, a negative or
+     * oversized length throws Node's RangeError (scr_bytes_new's). */
+    double n = a0 == NULL ? 0 : scr_dyn_to_number(a0);
+    if (scr_exc_pending()) return NULL;
+    ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, n != n ? 0 : n); /* +1, or NULL pending */
+    if (b == NULL) return NULL;
+    scr_bytes_stamp_plain(b);
+    ScrDyn *d = scr_dyn_new_bytes_ref(b); /* +1 on b */
+    scr_bytes_release(b);
+    return d;
+  }
+  if (a0->kind == SCR_DYN_BYTES) {
+    ScrBytes *b = scr_bytes_copy(a0->v.bytes); /* +1; a same-elem copy, like Node */
+    scr_bytes_stamp_plain(b);
+    ScrDyn *d = scr_dyn_new_bytes_ref(b);
+    scr_bytes_release(b);
+    return d;
+  }
+  if (a0->kind == SCR_DYN_ARR) {
+    ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)a0->v.arr.len);
+    if (b == NULL) return NULL;
+    scr_bytes_stamp_plain(b);
+    for (size_t i = 0; i < a0->v.arr.len; i++) {
+      double v = scr_dyn_to_number(a0->v.arr.items[i]);
+      if (scr_exc_pending()) { /* a Symbol element, a throwing valueOf */
+        scr_bytes_release(b);
+        return NULL;
+      }
+      scr_bytes_set(b, (double)i, v);
+    }
+    ScrDyn *d = scr_dyn_new_bytes_ref(b);
+    scr_bytes_release(b);
+    return d;
+  }
+  {
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "new Uint8Array(<");
+    scr_jb_puts(&b, scr_dyn_kind_name(a0));
+    scr_jb_puts(&b, ">) is not supported yet"
+                    " (a length, an array of numbers, or another typed array — there is no"
+                    " free-standing ArrayBuffer value here to build a view over)");
+    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+  }
+  return NULL;
+}
+
 ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *what) {
   if (fn->kind != SCR_DYN_FUNC) {
     ScrJsonBuf b;
@@ -4102,6 +4614,12 @@ ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *wh
     scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
     return NULL;
   }
+  /* %Uint8Array%: routed by POINTER IDENTITY rather than through the
+   * ordinary [[Construct]] below, because the value it must answer is a
+   * BYTES payload rather than an OBJ linked to a prototype — and because
+   * its thunk's only job is the requires-'new' throw the plain call form
+   * needs. Every other function keeps the ordinary path. */
+  if (fn == scr_u8_ctor) return scr_u8_construct(args);
   ScrDyn *proto = scr_dyn_fn_prototype((ScrDyn *)fn); /* +1 */
   ScrDyn *inst = scr_dyn_new_obj();                   /* +1 */
   /* OrdinaryCreateFromConstructor: a `prototype` that is not an OBJECT

@@ -98,7 +98,7 @@ import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bindingNeverReassign
 import { lowerArrayMethodCall, lowerBufferStaticCall, lowerBytesMethodCall, lowerBytesNew, lowerMapMethodCall, lowerMapForEachCall, buildMapForEachFn, lowerRecordOvfCaptureHelper, ovfCapturePlannable, lowerEnvToPairsHelper, lowerSetMethodCall, lowerSetForEachCall, buildSetForEachFn, lowerRegexMethodCall, lowerStringMethodCall } from "./lower-containers.js";
 import { lowerStreamModuleCall } from "./lower-stream.js";
 import { lowerEmitOverrideSpec, type EmitSpecCtx, type EmitSpecRequest } from "./lower-emitter.js";
-import { builtinImportOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, stripTypeCasts, lowerBuiltinModuleCall, lowerFsToUnixTimestampCall, lowerFsLadderCall, lowerChildArgsArg, lowerSpawnSyncCall, lowerSpawnCall, lowerExecSyncCall, recordToEnvPairs, lowerJsonMethodCall, fencedBuiltinImportOf, lowerCryptoComposedCall, lowerUrlMethodCall, lowerSearchParamsMethodCall, lowerStatsMethodCall, lowerChildMethodCall, lowerAtomicsCall, lowerBuiltinExtraProperty, promisifiedExecFileDecl, lowerPromisifiedSettledCall, type PromisifiedTarget, lowerExecFileAsyncCall, execFileAsyncHelper, lowerStringDecoderMethodCall, strdecHelper, lowerReadlineMethodCall, lowerDcChannelMethodCall, lowerDcChannelProperty, lowerAlsMethodCall, lowerDcTracingChannelMethodCall, lowerDcTracingChannelProperty, lowerJsonProperty, lowerErrorCodeProperty, lowerErrorPrototypeProperty, lowerProcessProperty, processVersionsMember, isProcessEnv, envValueType, lowerProcessEnvGet, lowerProcessMethodCall, lowerProcessOptionalMethodCall, lowerTimeoutMethodCall, envSnapshotHelper, isConsoleLog, consoleCallMember, lowerNumberStaticCall, lowerNumberStaticProperty, lowerDateCall, lowerTextCodecCall, lowerCryptoModuleCall, lowerFsConstantsProperty, lowerBuiltinConstantsProperty, builtinConstantBindingOf, builtinConstantsDestructureDecl, lowerProcessStreamProperty, lowerStringStaticCall, lowerStringLastIndexOfCall, lowerPromiseStaticCall } from "./lower-builtins.js";
+import { builtinImportOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, stripTypeCasts, lowerBuiltinModuleCall, lowerFsToUnixTimestampCall, lowerFsLadderCall, lowerChildArgsArg, lowerSpawnSyncCall, lowerSpawnCall, lowerExecSyncCall, recordToEnvPairs, lowerJsonMethodCall, fencedBuiltinImportOf, lowerCryptoComposedCall, lowerUrlMethodCall, lowerSearchParamsMethodCall, lowerStatsMethodCall, lowerChildMethodCall, lowerAtomicsCall, lowerBuiltinExtraProperty, promisifiedExecFileDecl, lowerPromisifiedSettledCall, type PromisifiedTarget, lowerExecFileAsyncCall, execFileAsyncHelper, lowerStringDecoderMethodCall, strdecHelper, lowerReadlineMethodCall, lowerDcChannelMethodCall, lowerDcChannelProperty, lowerAlsMethodCall, lowerDcTracingChannelMethodCall, lowerDcTracingChannelProperty, lowerJsonProperty, lowerErrorCodeProperty, lowerErrorPrototypeProperty, lowerUint8ArrayPrototypeProperty, lowerProcessProperty, processVersionsMember, isProcessEnv, envValueType, lowerProcessEnvGet, lowerProcessMethodCall, lowerProcessOptionalMethodCall, lowerTimeoutMethodCall, envSnapshotHelper, isConsoleLog, consoleCallMember, lowerNumberStaticCall, lowerNumberStaticProperty, lowerDateCall, lowerTextCodecCall, lowerCryptoModuleCall, lowerFsConstantsProperty, lowerBuiltinConstantsProperty, builtinConstantBindingOf, builtinConstantsDestructureDecl, lowerProcessStreamProperty, lowerStringStaticCall, lowerStringLastIndexOfCall, lowerPromiseStaticCall } from "./lower-builtins.js";
 import { isIslandExpr, islandFuncValueFence, islandRegexpOf, jsvalIn, requireDynamicApi, islandGlobalFnOf, lowerDynamicImportCall, lowerFetchCall, lowerIslandMethodCall, lowerMathProperty, npmPackageOf, npmMemberFence, npmPackageOfSymbol } from "./lower-island.js";
 import { lowerHttpHeadersElement, lowerNetModuleCall, lowerServerMethodCall, lowerServerProperty, lowerTlsRootCertificates } from "./lower-server.js";
 import { lowerDgramDnsModuleCall, lowerDgramMethodCall } from "./lower-dgram.js";
@@ -3035,6 +3035,30 @@ export class Lowerer {
    * singleton, not an %Error struct — see typeOf. A binding with an
    * explicit `: Error` annotation is NOT this: the program asked for the
    * struct, and it keeps the dynCheck that refuses to fake one. */
+  /** ...and the same question for `Uint8Array.prototype`. Split from
+   * errorProtoBinding rather than parameterised because the two differ
+   * in the ONE place that matters: the checker type to test for before
+   * asking (`Error` there, `Uint8Array` here), and a shared helper that
+   * takes both would be read as claiming they are interchangeable. */
+  u8ProtoBinding(node: ts.Identifier): boolean {
+    const sym = this.checker.getSymbolAtLocation(node);
+    if (sym === undefined) return false;
+    const decls = this.checker.declarationsOf(sym);
+    if (decls.length !== 1) return false;
+    const decl = decls[0]!;
+    if (!ts.isVariableDeclaration(decl) || decl.type !== undefined) return false;
+    let init: ts.Expression | undefined = decl.initializer;
+    while (init !== undefined && (ts.isParenthesizedExpression(init) || ts.isAsExpression(init))) {
+      init = init.expression;
+    }
+    return (
+      init !== undefined &&
+      ts.isPropertyAccessExpression(init) &&
+      init.name.text === "prototype" &&
+      stdlibGlobalMember(this, init, "Uint8Array") === "prototype"
+    );
+  }
+
   errorProtoBinding(node: ts.Identifier): boolean {
     const sym = this.checker.getSymbolAtLocation(node);
     if (sym === undefined) return false;
@@ -3078,7 +3102,12 @@ export class Lowerer {
       !this.dynamic &&
       ts.isPropertyAccessExpression(node) &&
       node.name.text === "prototype" &&
-      stdlibGlobalMember(this, node, "Error") === "prototype"
+      (stdlibGlobalMember(this, node, "Error") === "prototype" ||
+        // The same, for %Uint8Array.prototype% — tsc types it
+        // `Uint8Array`, which would put a %bytes dynCheck between every
+        // consumer and an object that is not a typed array in Node
+        // either.
+        stdlibGlobalMember(this, node, "Uint8Array") === "prototype")
     ) {
       return this.checker.getUnknownType();
     }
@@ -3092,6 +3121,17 @@ export class Lowerer {
     if (ts.isIdentifier(node) && !this.dynamic) {
       const t0 = this.checker.getTypeAtLocation(node);
       if (t0.getSymbol()?.name === "Error" && this.errorProtoBinding(node)) {
+        return this.checker.getUnknownType();
+      }
+      // `var P = Uint8Array.prototype` is the same trap one constructor
+      // over, and a LOUDER one: tsc types `Uint8ArrayConstructor
+      // .prototype` as `Uint8Array`, so the binding wanted a %bytes
+      // local fed by a dynCheck, and the dynCheck threw "expected
+      // Uint8Array at $, got object" on the one value that IS right.
+      // Node's Uint8Array.prototype is not a typed array either (it has
+      // no [[TypedArrayName]] — reading its own `.length` THROWS there),
+      // so `unknown` is not a concession, it is the honest type.
+      if (t0.getSymbol()?.name === "Uint8Array" && this.u8ProtoBinding(node)) {
         return this.checker.getUnknownType();
       }
     }
@@ -10032,6 +10072,10 @@ export class Lowerer {
 
   lowerErrorPrototypeProperty(expr: ts.PropertyAccessExpression): IrExpr | null {
     return lowerErrorPrototypeProperty(this, expr);
+  }
+
+  lowerUint8ArrayPrototypeProperty(expr: ts.PropertyAccessExpression): IrExpr | null {
+    return lowerUint8ArrayPrototypeProperty(this, expr);
   }
 
   lowerStringDecoderMethodCall(call: ts.CallExpression, access: ts.PropertyAccessExpression): IrExpr | null {

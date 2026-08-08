@@ -1093,6 +1093,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`    if (k->len == 6 && memcmp(k->data, "length", 6) == 0) {`);
     d.push(`      return scr_dyn_new_num((double)d->v.bytes->len);`);
     d.push(`    }`);
+    // `b.constructor` — the %Uint8Array% singleton, which is what makes
+    // protobufjs's `new this.buf.constructor(0)` (Reader.prototype.raw)
+    // build a typed array instead of throwing on undefined. A Buffer or
+    // a non-u8 element kind refuses by name there rather than answering
+    // the wrong constructor. The LLVM lane calls the same function.
+    d.push(`    if (k->len == 11 && memcmp(k->data, "constructor", 11) == 0) {`);
+    d.push(`      return scr_dyn_bytes_constructor(d);`);
+    d.push(`    }`);
     d.push(`    if (k->len > 0 && !(k->len > 1 && k->data[0] == '0')) {`);
     d.push(`      size_t idx = 0; bool digits = true;`);
     d.push(`      for (size_t i = 0; i < k->len; i++) {`);

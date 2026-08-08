@@ -276,6 +276,46 @@ export function lowerExpr(L: Lowerer, expr: ts.Expression): IrExpr {
     }
   }
 
+/** The stdlib globals whose VALUE is a real OBJECT here rather than the
+ * identifier chokepoint's opaque identity token — today exactly one.
+ *
+ * The token rule (an interned string naming the global) is sound for a
+ * value programs only ever COMPARE, and the two things a string cannot
+ * do — be called, answer a member — were supposed to meet per-site
+ * fences. `Uint8Array` breaks that: programs read THROUGH it, and a
+ * member read off a string is not a fence, it is `undefined`. protobufjs
+ * does it twice at module init, on both halves of the codec:
+ *
+ *     util.Array = typeof Uint8Array !== "undefined" ? Uint8Array : Array;
+ *     Writer.alloc = util.pool(Writer.alloc, util.Array.prototype.subarray);
+ *     Reader.prototype._slice = util.Array.prototype.subarray
+ *                            || util.Array.prototype.slice;
+ *
+ * and the program died three reads downstream, on `.subarray` of
+ * undefined, with ZERO traps emitted. The honest answer is the object
+ * Node has (scr_dyn_uint8array_ctor: typeof "function", a pinned
+ * `prototype`, `new` through it), and it must be a runtime VALUE rather
+ * than a lowered member like `String.prototype.charCodeAt` because by
+ * the time `.prototype` is read the receiver is a dyn property nobody
+ * can see statically.
+ *
+ * It is NOT the token generalisation the sibling measurement refuted:
+ * that one hands every global an object and makes the ones that are
+ * genuinely uncallable here lie about it. This is one global, whose
+ * whole surface — construction included — the runtime really has.
+ *
+ * JavaScript sources only, like the token rule it replaces; a TypeScript
+ * source keeps the SC2020 fence on the value (the checker types the
+ * expression `Uint8ArrayConstructor`, and every consumer of that mapping
+ * would need the `Error.prototype` typeOf treatment for no site that
+ * exists). Static builds only — under --dynamic the engine owns the real
+ * constructor, and a second static one would be a different object from
+ * the one every engine-side typed array is linked to. */
+export function ctorObjectGlobalValue(L: Lowerer, canonical: string, loc: SrcLoc): IrExpr | null {
+  if (canonical !== "Uint8Array" || L.dynamic) return null;
+  return { kind: "libCall", fn: "dyn.u8Ctor", args: [], type: DYN, loc };
+}
+
 function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     const loc = locOf(expr);
 
@@ -1120,7 +1160,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         if (L.isStdlibSymbol(sym) || expr.text === "globalThis") {
           if (isJsSourceFile(expr.getSourceFile())) {
             const canonical = stdlibGlobalNameOf(L, expr) ?? expr.text;
-            return { kind: "strLit", value: `[builtin ${canonical}]`, type: STRING, loc };
+            return (
+              ctorObjectGlobalValue(L, canonical, loc) ??
+              { kind: "strLit", value: `[builtin ${canonical}]`, type: STRING, loc }
+            );
           }
           // The families with a WHY: each hint states what makes the
           // surface genuinely non-static (or what to use instead).
@@ -1873,6 +1916,12 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       {
         const ep = L.lowerErrorPrototypeProperty(expr);
         if (ep) return ep;
+        // `Uint8Array.prototype` — the same shape, and returned without
+        // maybeNarrow for the same reason (tsc types it `Uint8Array`, and
+        // a %bytes dynCheck would answer a COPY with no identity where
+        // the prototype LINK is the whole point).
+        const up = L.lowerUint8ArrayPrototypeProperty(expr);
+        if (up) return up;
       }
       const handled =
         // A stdlib global's declared METHOD read where ToBoolean is the
@@ -1944,7 +1993,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       ) {
         const canonical = stdlibGlobalNameOf(L, expr);
         if (canonical !== null) {
-          return { kind: "strLit", value: `[builtin ${canonical}]`, type: STRING, loc };
+          return (
+            ctorObjectGlobalValue(L, canonical, loc) ??
+            { kind: "strLit", value: `[builtin ${canonical}]`, type: STRING, loc }
+          );
         }
       }
       // A JS receiver whose CHECKER type has no mapping (`mustCallChecks
