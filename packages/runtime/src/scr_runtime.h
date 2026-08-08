@@ -2964,10 +2964,71 @@ typedef enum {
    * a silent wrong answer. The dyn→cell edge is NOT visible to the cycle
    * collector (the dyn→closure stance): a cycle dyn → cell → engine
    * object → host closure → dyn is merely never collected (the
-   * documented cross-boundary-cycle divergence). Enum position: LAST —
-   * the LLVM backend hardcodes the preceding kind numbers. */
+   * documented cross-boundary-cycle divergence). */
   SCR_DYN_JSVAL,
+  /* A CLASS INSTANCE held by reference — the `object` kind's crossing
+   * (`const u: unknown = new Thing()`, a class-armed union handed to a
+   * user type predicate's `unknown` parameter). Never produced by the
+   * parser; it enters through the compiler's static→dyn converters.
+   *
+   * Boxes by REFERENCE, exactly the HANDLE stance and for the same
+   * reason: a class instance is a mutable, refcounted JS object, so the
+   * boundary must not copy it. Identity is the INSTANCE — strict
+   * equality compares the object pointers, and dynCheck against a class
+   * the instance is an instance OF unwraps that very pointer (+1). The
+   * round trip unbox(box(x)) == x therefore holds, which is what makes
+   * `if (this.inFlight.get(key) === created)` answer the way Node does.
+   *
+   * `cls` is a compiler-emitted STATIC descriptor (never freed, never
+   * owned) carrying the class's preorder interval, whether its instances
+   * carry the rc+vt hierarchy prefix, its display name, and its `_v` RC
+   * adapters — the same facts (ClassMeta's pre/post/hierarchy and the
+   * rcAdapters table) every other class lowering reads, so the box
+   * cannot disagree with `instanceof` or with a static release.
+   *
+   * The instance is OPAQUE through the box: the checked-dynamic tree has
+   * no member table for a C struct, so keyed reads/writes, calls,
+   * iteration, JSON, structuredClone, util.inspect and String() all meet
+   * the loud "not supported yet" ladder rather than a fabricated shape,
+   * or a wrong "[object Object]" for a class that overrides toString.
+   * typeof answers "object" and truthiness is true — the two answers no
+   * layout is needed for. What the box IS for is CARRYING the value
+   * across a boundary and handing it back narrowed.
+   *
+   * The dyn→instance edge is NOT visible to the cycle collector (the
+   * dyn→closure stance — ScrDyn has no trace header): trial deletion
+   * treats it as an external root, so nothing dangles, and a cycle
+   * THROUGH a dyn-boxed instance is merely never collected (documented
+   * divergence). A BORROWED pointer was the alternative and is unsound
+   * here: a dyn value outlives no particular scope — it can be stored in
+   * a global, returned, or captured — so the box owns a strong
+   * reference.
+   *
+   * Enum position: LAST — the LLVM backend hardcodes the kind numbers,
+   * so a new kind APPENDS and nothing renumbers. */
+  SCR_DYN_OBJINST,
 } ScrDynKind;
+
+/* The per-class BOXING DESCRIPTOR carried by a SCR_DYN_OBJINST box: one
+ * compiler-emitted static per class that is ever boxed, in the emitted
+ * TU. Every field is derived from a fact the class lowering already owns
+ * — pre/post/vt from the emitter's ClassMeta (the same preorder
+ * numbering `instanceof` compares against) and retain/release from the
+ * rcAdapters table (the same pair a container slot would use) — so there
+ * is no second copy of the class's facts to drift. */
+typedef struct ScrDynClass {
+  const char *name;  /* display name for error texts ("Readable") */
+  size_t pre, post;  /* the class's own preorder interval */
+  /* True when instances carry the two-word rc+vt hierarchy prefix, i.e.
+   * the class has a base, has a subclass, or is the runtime emitter.
+   * Then the instance's OWN position is read from its vtable, so a
+   * base-typed box of a derived instance still narrows to the derived
+   * class; a standalone class has no vt word and no subclasses, so
+   * `pre` IS the position. */
+  bool vt;
+  void *(*retain)(void *);
+  void (*release)(void *);
+} ScrDynClass;
 
 /* The handle-type tags the checked-dynamic tree can carry. The set is deliberately the
  * HANDLE kinds whose member surfaces already have complete static
@@ -3140,6 +3201,10 @@ struct ScrDyn {
      * comment). Released through the installed ops so this always-linked
      * core never references the gated island unit. */
     struct { ScrJsval *cell; } jsval;
+    /* SCR_DYN_OBJINST: the retained class instance + its compiler-emitted
+     * static descriptor. `o` is the SAME pointer the static side holds
+     * (identity survives the round trip); `cls` is never owned. */
+    struct { void *o; const ScrDynClass *cls; } inst;
   } v;
 };
 
@@ -3628,6 +3693,12 @@ ScrError *scr_errdyn_err_of(const ScrDyn *d); /* +1 or NULL */
 void scr_errdyn_put(ScrError *e, ScrDyn *d);  /* retains both sides */
 /* ToBoolean over the dyn kind (JS-exact); borrowed, never throws. */
 bool scr_dyn_truthy(const ScrDyn *d);
+/* `typeof v === "object"` over a dyn value — the emitted test both
+ * backends call. Reads the SAME kind table scr_dyn_typeof does (one list,
+ * scr_json.c), which is what keeps "what counts as an object" from
+ * drifting between the two lanes and the string form. Borrowed; never
+ * throws, never allocates. */
+bool scr_dyn_typeof_is_object(const ScrDyn *d);
 /* The JS operator conversions over checked-dynamic operands — what an
  * arithmetic, bitwise, relational or `+` operator does to an UNTYPED
  * operand before it computes (scr_json.c):
@@ -3842,6 +3913,35 @@ void *scr_dyn_handle_unbox(const ScrDyn *d, ScrDynHandleTag tag, const ScrDynPat
  * the undefined singleton (the checked-dynamic tree's own-property stance — SEMANTICS.md)
  * unless the ops fence it loudly. +1, or NULL with a pending exception. */
 ScrDyn *scr_dyn_handle_key_get(const ScrDyn *d, const ScrStr *k);
+
+/* ── class instances in the checked-dynamic tree (SCR_DYN_OBJINST) ────
+ * Boxes by REFERENCE (+1 box; retains o through the descriptor's `_v`
+ * adapters). `cls` is a static compiler-emitted descriptor; the box does
+ * not own it. */
+ScrDyn *scr_dyn_new_objinst(void *o, const ScrDynClass *cls);
+/* The instance's OWN preorder position — its vtable's when the class is a
+ * hierarchy member (so a base-typed box of a derived instance still
+ * answers the derived position, exactly like `x instanceof C`), the
+ * descriptor's `pre` for a standalone class. */
+size_t scr_dyn_objinst_pre(const ScrDyn *d);
+/* `dynMatch` against a class target: an OBJINST box whose instance sits
+ * inside [pre, post]. False for every other kind — never throws. */
+bool scr_dyn_objinst_is(const ScrDyn *d, size_t pre, size_t post);
+/* `dynCheck` extraction (`u as Thing`, a boxed predicate's narrowed
+ * result): an in-interval instance answers the RETAINED pointer (+1 —
+ * the SAME object, no copy, so identity survives the round trip);
+ * anything else throws the path-annotated catchable TypeError and
+ * returns NULL. */
+void *scr_dyn_objinst_unbox(const ScrDyn *d, size_t pre, size_t post,
+                            const ScrDynPath *path, const char *want);
+/* The boxed class's display name — error texts across units. */
+const char *scr_dyn_objinst_cls(const ScrDyn *d);
+/* The loud ladder for every operation the box has no layout to answer
+ * (keyed access, calls, iteration, JSON, structuredClone, inspect,
+ * String()): "<what> on a dynamic <Class> is not supported yet". Always
+ * throws catchably; returns false so callers can `return
+ * scr_dyn_objinst_fence(...)` from a bool tail. */
+bool scr_dyn_objinst_fence(const ScrDyn *d, const char *what);
 
 /* ── promises in the checked-dynamic tree (SCR_DYN_PROMISE) ────────────────────────────
  * Boxes by REFERENCE (+1 box; retains p). The boundary contract: p

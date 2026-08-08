@@ -6500,11 +6500,47 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3061-uint8array-from-and-of-as-values.js": {
+   "order": [
+    "<repo>/tests/corpus/3061-uint8array-from-and-of-as-values.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/3101-benign-cycle-through-the-entered-module/main.ts": {
    "order": [
     "<repo>/tests/corpus/3101-benign-cycle-through-the-entered-module/b.ts",
     "<repo>/tests/corpus/3101-benign-cycle-through-the-entered-module/a.ts",
     "<repo>/tests/corpus/3101-benign-cycle-through-the-entered-module/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3111-this-constructor-through-an-implicit-prototype.js": {
+   "order": [
+    "<repo>/tests/corpus/3111-this-constructor-through-an-implicit-prototype.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3161-path-posix-namespace-cwd-on-any-target.ts": {
+   "order": [
+    "<repo>/tests/corpus/3161-path-posix-namespace-cwd-on-any-target.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3171-class-instance-into-unknown-round-trip.ts": {
+   "order": [
+    "<repo>/tests/corpus/3171-class-instance-into-unknown-round-trip.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3172-class-armed-union-through-unknown-predicates.ts": {
+   "order": [
+    "<repo>/tests/corpus/3172-class-armed-union-through-unknown-predicates.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3173-class-hierarchy-and-runtime-class-through-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/3173-class-hierarchy-and-runtime-class-through-unknown.ts"
    ],
    "diags": []
   },

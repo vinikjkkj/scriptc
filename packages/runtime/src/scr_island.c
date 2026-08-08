@@ -996,6 +996,11 @@ static const char *isl_dyn_unmarshalable(const ScrDyn *d) {
    * uniform argument conversion. */
   case SCR_DYN_HANDLE:
     return "a runtime handle";
+  case SCR_DYN_OBJINST:
+    /* A class instance held by reference: the engine has no cell for a
+     * compiled struct, so the crossing names the world honestly rather
+     * than falling into the generic tail. */
+    return "a class instance";
   case SCR_DYN_PROMISE:
     return "a promise";
   case SCR_DYN_ARR:
