@@ -6225,12 +6225,19 @@ class LlEmitter {
         if (v.type.kind === "func") {
           // A closure boxes as the checked-dynamic tree's function kind: retained closure +
           // the per-signature call thunk + the interned signature key. The
-          // best-effort name rides along (null when the lowering had none).
+          // best-effort name rides along (null when the lowering had none),
+          // and so does the creation site's SOURCE TEXT for
+          // Function.prototype.toString — the C emitter's twin.
           const name =
             e.fnName !== undefined && e.fnName !== "" ? this.cstr(e.fnName) : "null";
+          const src =
+            e.fnSrc === undefined ? "null"
+            : e.fnSrc === "bound" ? "@SCR_FN_SRC_BOUND"
+            : this.cstr(e.fnSrc.text);
+          if (e.fnSrc === "bound") this.declare(`@SCR_FN_SRC_BOUND = external constant i8`);
           const box = this.dyn.dynFuncBoxHelper(v.type);
           const t = B.tmp();
-          B.line(`${t} = call ptr @${box}(ptr ${v.name}, ptr ${name})`);
+          B.line(`${t} = call ptr @${box}(ptr ${v.name}, ptr ${name}, ptr ${src})`);
           return this.own({ name: t, type: e.type });
         }
         const conv = this.dyn.toDynHelper(v.type);
