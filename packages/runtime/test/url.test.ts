@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { ccCompile, exeSuffix, testBin } from "./cc.js";
+import { caseFileSize, ccCompile, expectCasesPassed, exeSuffix } from "./cc.js";
 import { beforeAll, expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
@@ -54,14 +54,23 @@ const LINUX_PLATFORM_MESSAGE_CASES: ReadonlyMap<string, string> = new Map([
   ],
 ]);
 
+// KNOWN RED ON A WINDOWS HOST, for two reasons that are both the oracle's
+// and neither the bridge's: gen-url-cases.mjs chdir's to "/" and records
+// pathToFileURL's answers against a DRIVE-LESS cwd (Windows has none — the
+// C side's chdir("/") lands on the current drive's root, so `file:///rel/x`
+// comes back `file:///G:/rel/x`), and the "-posix" legs are generated on
+// the assumption, spelled in test_url.c, that the PUBLIC pair is the posix
+// arm "on this (posix) host" — on win32 the public pair dispatches to the
+// win32 arm and answers different, correct, Windows things.
 test("file-URL bridge win32 arm matches Node on committed oracle cases", async () => {
-  const r = await execFileAsync(bin, [join(testDir, "url-cases.txt")]).then(
+  const cases = join(testDir, "url-cases.txt");
+  const r = await execFileAsync(bin, [cases]).then(
     (v) => ({ stderr: v.stderr }),
     (e: Error & { stderr?: string }) => ({ stderr: e.stderr ?? "" }),
   );
   const stderr = r.stderr.trim();
   if (process.platform !== "linux") {
-    expect(stderr).toMatch(/^(\d+)\/\1 cases passed$/);
+    expectCasesPassed(stderr, { cases });
     return;
   }
   const lines = stderr.split("\n");
@@ -75,6 +84,9 @@ test("file-URL bridge win32 arm matches Node on committed oracle cases", async (
   // set failed (the harness caps mismatch printing at 20 lines).
   const t = /^(\d+)\/(\d+) cases passed$/.exec(lines.at(-1) ?? "");
   expect(t, `missing pass-count line: ${lines.at(-1)}`).not.toBeNull();
+  // ...and the DENOMINATOR is the ground truth that the run covered the
+  // corpus at all: equal pass/total says nothing about skipped cases.
+  expect(Number(t![2]), "cases run vs the committed corpus").toBe(caseFileSize(cases));
   expect(Number(t![2]) - Number(t![1]), "failed-case count").toBe(mismatches.length);
   expect(mismatches.length).toBeLessThanOrEqual(LINUX_PLATFORM_MESSAGE_CASES.size);
 });

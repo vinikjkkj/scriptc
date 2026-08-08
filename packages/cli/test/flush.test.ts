@@ -9,6 +9,7 @@ import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
 
@@ -16,7 +17,14 @@ const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 const repoRoot = join(import.meta.dirname, "../../..");
 const cliEntry = join(repoRoot, "packages/cli/src/main.ts");
-const tsxLoader = join(dirname(require.resolve("tsx/package.json")), "dist/loader.mjs");
+/* `--import` takes a module SPECIFIER, and node parses it as a URL first:
+ * a win32 absolute path starts with a drive letter, so "G:\...\loader.mjs"
+ * parses as the scheme "g:" and node refuses the whole process with
+ * ERR_UNSUPPORTED_ESM_URL_SCHEME before the CLI runs at all. The child then
+ * exits 1 with ~1KB of node's own stack trace, which this test read as "the
+ * render was truncated" — the exact misdiagnosis it exists to prevent. A
+ * file:// URL is unambiguous on both platforms. */
+const tsxLoader = pathToFileURL(join(dirname(require.resolve("tsx/package.json")), "dist/loader.mjs")).href;
 
 test("a >64KB diagnostic render survives a piped stderr intact", async () => {
   const dir = join(repoRoot, "node_modules/.cache/scriptc-tests/cli-flush");
