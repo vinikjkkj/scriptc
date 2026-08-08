@@ -853,6 +853,17 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       }
       return ib_take(&out);
     }
+    case SCR_DYN_OBJINST: {
+      /* Node prints `Thing { a: 1 }` — the instance's own properties,
+       * which the box has no member table to enumerate. Same fence, same
+       * reason as the handle arm below. */
+      InspBuf out = {0};
+      ib_cstr(&out, "util.inspect of a dynamic ");
+      ib_cstr(&out, scr_dyn_objinst_cls(d));
+      ib_cstr(&out, " is not supported yet");
+      scr_throw_error(SCR_ERR_ERROR, ib_take(&out));
+      return scr_str_new("", 0); /* the pending throw wins */
+    }
     case SCR_DYN_HANDLE: {
       /* Node prints the class's full property dump (ServerResponse {
        * ... }) — internals we do not model. Fence loudly instead of a

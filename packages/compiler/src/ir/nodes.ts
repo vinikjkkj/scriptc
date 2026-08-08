@@ -6021,10 +6021,32 @@ export const DYN_HANDLE_KINDS: ReadonlyMap<string, { tag: string; cls: string }>
   ["regex", { tag: "SCR_DYNH_REGEX", cls: "RegExp" }],
 ]);
 
+/** A CLASS INSTANCE that crosses the checked-dynamic boundary as the
+ * tree's instance kind (SCR_DYN_OBJINST): boxed by REFERENCE, narrowed
+ * back by the same preorder-interval test `instanceof` uses, opaque in
+ * between. THE single source for "may this class box" — both directions
+ * (canConvertToDyn / canDynCheckTo) and both backends read it, so the
+ * two lanes cannot admit different sets, and `dynClassDescs`' accounting
+ * test fails if an emitter ever boxes a class this refuses.
+ *
+ * The ERROR hierarchy stays out, and not because it could not box. It
+ * ALREADY has a dyn representation — `%Error` converts to the checked-
+ * dynamic tree's error encoding ({%error, name, message, code?}: the
+ * caughtToDyn shape every `catch (e)` payload and every rejection
+ * reason arrives as) and dynCheck extracts a real ScrError back out of
+ * it. Admitting the hierarchy here would give one value two
+ * representations chosen by which conversion site it happened to reach,
+ * and `u as Error` would then work or fail depending on that history.
+ * One encoding per value is worth more than the two extra classes. */
+export function canBoxClassIntoDyn(className: string): boolean {
+  return !RUNTIME_ERROR_CLASSES.has(className);
+}
+
 /** A static type that CONVERTS into a dyn value — the dynFrom domain:
  * JSON-safe data, bytes<u8> (payload copied), undefined-armed unions of
  * JSON-safe arms, boxable function types, and the runtime HANDLE kinds
- * (boxed by reference — DYN_HANDLE_KINDS). */
+ * (boxed by reference — DYN_HANDLE_KINDS), and CLASS INSTANCES
+ * (boxed by reference too — canBoxClassIntoDyn). */
 export function canConvertToDyn(
   t: IrType,
   getRecord: (shapeId: string) => IrRecordShape | undefined,
@@ -6044,6 +6066,13 @@ export function canConvertToDyn(
   // code?} — the caughtToDyn shape, scr_dyn_from_error): the dyn 'error'
   // listener boundary (a mustCall-wrapped handler receiving the payload).
   if (t.kind === "object" && t.className === "%Error") return true;
+  // Every OTHER class instance boxes by REFERENCE (SCR_DYN_OBJINST): the
+  // object pointer plus its emitted descriptor, no copy, identity
+  // preserved through the round trip. Nested leaves ride the same rule —
+  // a record field or union arm of class type boxes exactly as the bare
+  // type does, which is what lets a deep-copying record carry a class
+  // member without the copy lying about it.
+  if (t.kind === "object" && canBoxClassIntoDyn(t.className)) return true;
   if (t.kind === "func") return canBoxFuncIntoDyn(t, getRecord, getUnion);
   if (DYN_HANDLE_KINDS.has(t.kind)) return true;
   // Promises box by REFERENCE (SCR_DYN_PROMISE): promise<dyn> carries its
@@ -6182,7 +6211,9 @@ function canBoxBytesComposite(
 /** A type a dyn value can be VALIDATED into — the dynCheck domain:
  * JSON-safe data, bytes<u8> (a fresh copy out), the %Error extraction,
  * undefined-armed unions of JSON-safe arms, adaptable function types,
- * and the runtime HANDLE kinds (a tag-checked reference unwrap —
+ * CLASS INSTANCES (an interval-checked reference unwrap — the widening
+ * direction's twin, so nothing crosses in and is stranded), and the
+ * runtime HANDLE kinds (a tag-checked reference unwrap —
  * DYN_HANDLE_KINDS). */
 export function canDynCheckTo(
   t: IrType,
@@ -6193,6 +6224,13 @@ export function canDynCheckTo(
   if (isJsonSafeType(t, getRecord, getUnion)) return true;
   if (t.kind === "bytes" && t.elem === "u8") return true;
   if (t.kind === "object" && t.className === "%Error") return true;
+  // The OUT direction of the instance box: an interval-checked
+  // reference unwrap against the class's preorder interval (+1 — the
+  // same object, never a copy, so identity survives the round trip).
+  // Unlike the runtime handle kinds this is admitted NESTED as well (the
+  // walker below): the emitted matcher has an interval test to answer a
+  // class leaf with, which is exactly what the handle kinds lack.
+  if (t.kind === "object" && canBoxClassIntoDyn(t.className)) return true;
   if (t.kind === "func") return canAdaptDynFuncTo(t, getRecord, getUnion);
   if (DYN_HANDLE_KINDS.has(t.kind)) return true;
   if (t.kind === "union") {
@@ -6202,11 +6240,12 @@ export function canDynCheckTo(
     }
   }
   // Containers whose every leaf is one the nested walkers can emit:
-  // JSON-safe data, bytes<u8>, a dyn ('unknown') leaf, or a FUNCTION
-  // leaf (dynMatch tests the boxed signature, dynCheck unwraps or adapts
-  // it). Runtime HANDLE leaves are still refused — canDynCheckTo grants
-  // those STANDING ALONE, but dynMatch has no tag test for one, so
-  // admitting them here would trade a fence for an emitter crash.
+  // JSON-safe data, bytes<u8>, a dyn ('unknown') leaf, a CLASS INSTANCE
+  // leaf, or a FUNCTION leaf (dynMatch tests the boxed signature,
+  // dynCheck unwraps or adapts it). Runtime HANDLE leaves are still
+  // refused — canDynCheckTo grants those STANDING ALONE, but dynMatch has
+  // no tag test for one, so admitting them here would trade a fence for
+  // an emitter crash.
   //
   // `seen` guards the walk: a self-referential shape would recurse
   // forever. A shape already on the stack answers TRUE, since the check
@@ -6222,6 +6261,19 @@ export function canDynCheckTo(
     // value, JS's own missing-property read). Only the predicate had no
     // case for it.
     if (x.kind === "dyn") return true;
+    // A CLASS INSTANCE leaf — the record field or union arm a widened
+    // value carries one container down (a media union's `Readable` arm
+    // inside a message record). It is admitted here for the same reason
+    // the func leaf is, and the walkers can emit it for the same reason:
+    // dynMatch has the interval test (scr_dyn_objinst_is) and dynCheck
+    // has the interval-checked unwrap, both added with the kind.
+    //
+    // The symmetry is the point, not a bonus. canConvertToDyn admits a
+    // class leaf through its record and array rules, so refusing it here
+    // would let the value IN and strand it — the method-bundle lesson the
+    // union-arm comment above records, where the fence merely moved to
+    // the declaration that asked for the value back.
+    if (x.kind === "object") return canBoxClassIntoDyn(x.className);
     if (stack.has(x)) return true;
     const deeper = new Set(stack).add(x);
     // A FUNCTION leaf — a callable record field, which is how every

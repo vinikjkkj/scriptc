@@ -436,6 +436,9 @@ static bool scr_assert_dyn_same_value(const ScrDyn *a, const ScrDyn *b) {
     case SCR_DYN_HANDLE:
       /* Identity is the HANDLE (the strict_eq stance). */
       return a->v.handle.tag == b->v.handle.tag && a->v.handle.ptr == b->v.handle.ptr;
+    case SCR_DYN_OBJINST:
+      /* Identity is the INSTANCE (the strict_eq stance). */
+      return a->v.inst.o == b->v.inst.o;
     case SCR_DYN_PROMISE:
       /* Identity is the PROMISE (the strict_eq stance). */
       return a->v.promise == b->v.promise;
@@ -487,6 +490,11 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
        * enumerable props we do not model; same-handle is the only case a
        * compiled test can honestly answer (documented). */
       return a->v.handle.tag == b->v.handle.tag && a->v.handle.ptr == b->v.handle.ptr;
+    case SCR_DYN_OBJINST:
+      /* Same story for a boxed class instance: the own-property walk Node
+       * runs needs a member table the box does not carry, so identity is
+       * the only honest answer (documented with the handle stance). */
+      return a->v.inst.o == b->v.inst.o;
     case SCR_DYN_PROMISE:
       /* Node compares promises structurally (no own props → equal); the
        * honest arm here is identity — two distinct promises with equal
@@ -627,6 +635,14 @@ static void scr_assert_cf_value(ScrAssertBuf *b, const ScrDyn *d, size_t indent,
        * report format. */
       ab_char(b, '[');
       ab_cstr(b, scr_dyn_handle_cls(d));
+      ab_char(b, ']');
+      return;
+    }
+    case SCR_DYN_OBJINST: {
+      /* The depth-elided class form ([Readable]) — the handle arm's
+       * story, and it too only appears inside FAILURE diffs. */
+      ab_char(b, '[');
+      ab_cstr(b, scr_dyn_objinst_cls(d));
       ab_char(b, ']');
       return;
     }
@@ -932,7 +948,8 @@ static bool scr_assert_print_myers(ScrAssertBuf *b, const ScrDiffOp *diff, size_
 /* Is this dyn kind `typeof == "object" && != null` to assertion_error.js? */
 static bool scr_assert_dyn_is_object(const ScrDyn *d) {
   return d->kind == SCR_DYN_ARR || d->kind == SCR_DYN_OBJ || d->kind == SCR_DYN_BYTES ||
-         d->kind == SCR_DYN_HANDLE || d->kind == SCR_DYN_PROMISE ||
+         d->kind == SCR_DYN_HANDLE || d->kind == SCR_DYN_OBJINST ||
+         d->kind == SCR_DYN_PROMISE ||
          scr_dyn_isl_typeof_is(d, "object"); /* engine-held: the engine's typeof */
 }
 

@@ -2286,17 +2286,22 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           e.test === "nullish"
             ? `(${d.name}->kind == SCR_DYN_UNDEF || ${d.name}->kind == SCR_DYN_NULL)`
             : e.test === "object"
-              ? // `typeof v === "object"`: objects, arrays, bytes, native
-                // handles, promises, AND null — engine-held objects by the
-                // engine's own typeof.
-                `(${d.name}->kind == SCR_DYN_OBJ || ${d.name}->kind == SCR_DYN_ARR || ${d.name}->kind == SCR_DYN_BYTES || ${d.name}->kind == SCR_DYN_HANDLE || ${d.name}->kind == SCR_DYN_PROMISE || ${d.name}->kind == SCR_DYN_NULL || scr_dyn_isl_typeof_is(${d.name}, "object"))`
+              ? // `typeof v === "object"`: the runtime's ONE typeof table
+                // (objects, arrays, bytes, handles, class instances,
+                // promises, AND null — engine-held values by the engine's
+                // own typeof). Spelled inline here for years, which is how
+                // a new kind reached `typeof v` and missed this test: the
+                // list said "string" for a value scr_dyn_typeof called an
+                // object. The LLVM lane calls the same function.
+                `scr_dyn_typeof_is_object(${d.name})`
               : e.test === "truthy"
-                ? // ToBoolean over the checked-dynamic tree: bool by value; number falsy for
-                  // 0, -0 (== 0 in C), and NaN (self-inequality); string
-                  // falsy when empty; obj/arr/bytes/func/handle always true;
-                  // JSVAL through the runtime's routed arm (the bigint 0n
-                  // edge); the remaining kinds (undefined, null) always false.
-                  `(${d.name}->kind == SCR_DYN_BOOL ? ${d.name}->v.b : ${d.name}->kind == SCR_DYN_NUM ? (${d.name}->v.num == ${d.name}->v.num && ${d.name}->v.num != 0) : ${d.name}->kind == SCR_DYN_STR ? ${d.name}->v.str->len != 0 : ${d.name}->kind == SCR_DYN_JSVAL ? scr_dyn_truthy(${d.name}) : (${d.name}->kind == SCR_DYN_OBJ || ${d.name}->kind == SCR_DYN_ARR || ${d.name}->kind == SCR_DYN_BYTES || ${d.name}->kind == SCR_DYN_FUNC || ${d.name}->kind == SCR_DYN_HANDLE || ${d.name}->kind == SCR_DYN_PROMISE))`
+                ? // ToBoolean over the checked-dynamic tree — the runtime's
+                  // own scr_dyn_truthy, which is what the LLVM lane has
+                  // always called. The inline copy this replaces enumerated
+                  // the truthy kinds a second time and had already fallen a
+                  // kind behind (a boxed class instance read FALSY here and
+                  // true through every other entry point).
+                  `scr_dyn_truthy(${d.name})`
                 : e.test === "error"
                   ? // `u instanceof Error`: the ONE runtime predicate, which
                     // both backends call so the two keyed lanes cannot

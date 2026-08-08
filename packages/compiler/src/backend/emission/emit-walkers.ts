@@ -6,10 +6,49 @@
  * interning ORDER is part of the emitted C, so the registries stay on
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
-import { canAdaptDynFuncTo, canBoxFuncIntoDyn, DYN_HANDLE_KINDS, IrType, isRefCounted, typeEquals, typeKey } from "../../ir/nodes.js";
+import { canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, DYN_HANDLE_KINDS, IrType, isRefCounted, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { OVERFLOW_MEMBER } from "./emit-shapes.js";
+
+/** The SCR_DYN_OBJINST boxing descriptor for one class:
+ * `static const ScrDynClass sc_dcl_<n>` in the emitted TU, interned per
+ * class name and referenced by address from the to-dyn converter.
+ *
+ * Every field is READ, not restated. `pre`/`post`/`hierarchy` come from
+ * the emitter's ClassMeta — the same preorder numbering `instanceof`
+ * compares against, so a box can never disagree with a static
+ * `x instanceof C`; `retain`/`release` come from vAdapters, i.e. from
+ * the rcAdapters table, so a boxed instance is torn down by exactly the
+ * pair a container slot would have used (which for a hierarchy class
+ * dispatches on the vtable, so a base-typed box still frees the derived
+ * object). Nothing here is a second copy of a class fact.
+ *
+ * The runtime error hierarchy never reaches this — canBoxClassIntoDyn
+ * keeps it on the error encoding — and the guard says so out loud rather
+ * than emitting a descriptor the OUT direction would refuse to match. */
+  export function dynClassDesc(E: CEmitter, className: string): string {
+    const existing = E.dynClassDescs.get(className);
+    if (existing) return existing;
+    if (!canBoxClassIntoDyn(className)) {
+      throw new Error(`emitter bug: dyn box descriptor for non-boxable class ${className}`);
+    }
+    const meta = E.classMeta.get(className);
+    if (!meta) throw new Error(`emitter bug: dyn box descriptor for unknown class ${className}`);
+    const name = `sc_dcl_${E.dynClassDescs.size}`;
+    E.dynClassDescs.set(className, name);
+    const rc = vAdapters({ kind: "object", className });
+    const display = className.startsWith("%") ? className.slice(1) : className;
+    // A static const with internal linkage, beside the walker prototypes:
+    // emitStructDefs has already declared the `_v` thunks by then, and the
+    // converters that take its address are emitted after.
+    E.walkerProtos.push(
+      `static const ScrDynClass ${name} = { ${cStringLiteral(Buffer.from(display, "utf8"))}, ` +
+        `${meta.pre}, ${meta.post}, ${meta.hierarchy ? "true" : "false"}, ` +
+        `&${rc.retain}, &${rc.release} }; /* dyn box: class ${className} */`,
+    );
+    return name;
+  }
 
 /** Short human description of a dynCheck target for error messages
    * ("expected number | string at $.items[2]"). Records read as "object" —
@@ -41,8 +80,10 @@ import { OVERFLOW_MEMBER } from "./emit-shapes.js";
         return "unknown";
       case "bytes":
         return "Uint8Array";
-      // The %Error extraction (an instanceof-Error narrow / cast on an
-      // unknown value): the failure names the class, like caughtCheck's.
+      // A class target — the %Error extraction (an instanceof-Error
+      // narrow / cast on an unknown value) or the instance box's
+      // interval-checked unwrap: the failure names the class, like
+      // caughtCheck's.
       case "object":
         return t.className.replace(/^%/, "");
       case "union": {
@@ -390,6 +431,20 @@ import { OVERFLOW_MEMBER } from "./emit-shapes.js";
       `    ScrStr *hs = scr_dyn_to_string(d, NULL);`,
       `    for (size_t i = 0; i < hs->len; i++) scr_jb_putc(b, hs->data[i]);`,
       `    scr_str_release(hs);`,
+      `    break;`,
+      `  }`,
+      `  case SCR_DYN_OBJINST: {`,
+      `    /* A class instance may OVERRIDE toString, and the box carries no`,
+      `     * member table to dispatch the override through — so the honest`,
+      `     * answer is the loud ladder, not "[object Object]". Delegated to`,
+      `     * the runtime like the OBJ, HANDLE and FUNC arms: this walker is`,
+      `     * a per-program COPY of the ToString table, and the copy having`,
+      `     * no arm at all for a kind is how a value came out EMPTY here`,
+      `     * while every other spelling threw. The throw is left pending,`,
+      `     * the JSVAL arm's convention. */`,
+      `    ScrStr *is = scr_dyn_to_string(d, NULL);`,
+      `    for (size_t i = 0; i < is->len; i++) scr_jb_putc(b, is->data[i]);`,
+      `    scr_str_release(is);`,
       `    break;`,
       `  }`,
       `  case SCR_DYN_PROMISE:`,
@@ -903,6 +958,24 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         d.push(`  return strcmp(d->v.fn.sig, ${sigLit}) == 0;`);
         break;
       }
+      case "object": {
+        // "Is this dyn an instance of C?" — the SAME preorder-interval
+        // test `x instanceof C` compiles to, asked of the box's instance
+        // rather than of a static pointer. A hierarchy class reads the
+        // instance's OWN vtable inside the runtime helper, so a box made
+        // from a base-typed slot still matches the derived arm; a
+        // standalone class has no subclasses and matches only itself.
+        // %Error keeps its encoding and never reaches here.
+        const meta = E.classMeta.get(t.className);
+        if (!meta) throw new Error(`emitter bug: dynMatch of unknown class ${t.className}`);
+        // The descriptor is interned here as well as at the to-dyn site:
+        // a program may narrow to a class it never widens FROM (an arm
+        // matched out of a union it received), and the accounting stays
+        // per class either way.
+        E.dynClassDesc(t.className);
+        d.push(`  return scr_dyn_objinst_is(d, ${meta.pre}, ${meta.post});`);
+        break;
+      }
       default:
         throw new Error(`emitter bug: dynMatch of non-JSON type ${t.kind}`);
     }
@@ -1110,6 +1183,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`      if (digits && idx < d->v.bytes->len) return scr_dyn_new_num((double)d->v.bytes->data[idx]);`);
     d.push(`    }`);
     d.push(`  }`);
+    d.push(`  if (d->kind == SCR_DYN_OBJINST) {`);
+    d.push(`    /* A class instance's members are struct fields the box has`);
+    d.push(`     * no table for. Falling through to the undefined tail would`);
+    d.push(`     * be a SILENT wrong answer for a property Node reads fine,`);
+    d.push(`     * so the read is the loud ladder, named by class. */`);
+    d.push(`    scr_dyn_objinst_fence(d, "a property read");`);
+    d.push(`    return NULL;`);
+    d.push(`  }`);
     d.push(`  if (d->kind == SCR_DYN_FUNC) {`);
     d.push(`    /* own props (defineProperties writes), then name/length —`);
     d.push(`     * the function-instance members test/common copies. */`);
@@ -1189,6 +1270,22 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         d.push(`  return scr_dyn_bytes_copy_out(d);`);
         break;
       case "object":
+        // A CLASS TARGET, two representations apart. Everything but
+        // %Error is the instance box's interval-checked unwrap;
+        // %Error is the checked-dynamic tree's error encoding, whose
+        // story is on its own branch below.
+        if (t.className !== "%Error") {
+          // Every other class: an interval-checked REFERENCE unwrap. The
+          // pointer that comes back is the one that went in (+1), so
+          // `unbox(box(x)) === x` — which is the half of this kind that
+          // makes it worth having. A miss is the usual path-annotated
+          // TypeError.
+          const meta = E.classMeta.get(t.className);
+          if (!meta) throw new Error(`emitter bug: dynCheck of unknown class ${t.className}`);
+          E.dynClassDesc(t.className);
+          d.push(`  return (${cType(t).trim()})scr_dyn_objinst_unbox(d, ${meta.pre}, ${meta.post}, path, ${want});`);
+          break;
+        }
         // The %Error extraction (an instanceof-Error narrow on unknown):
         // validate the checked-dynamic tree's error encoding — the reserved "%error" marker
         // caughtToDyn builds — and extract through the runtime's IDENTITY
@@ -1196,9 +1293,6 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // ScrError answers that very instance, so out-and-back crossings
         // compare reference-equal (the tracing suite's shape); alien
         // %error objects rebuild once and cache the pair.
-        if (t.className !== "%Error") {
-          throw new Error(`emitter bug: dynCheck of class ${t.className} (only %Error extracts from the checked-dynamic tree)`);
-        }
         d.push(`  if (d->kind != SCR_DYN_OBJ || !scr_dyn_obj_get(d, "%error", 6)) { scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
         d.push(`  return scr_error_from_dyn(d);`);
         break;
@@ -1438,11 +1532,20 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         d.push(`  (void)v; return scr_dyn_new_null();`);
         break;
       case "object":
-        // %Error only (canConvertToDyn's gate): the checked-dynamic tree's error encoding.
-        if (t.className !== "%Error") {
-          throw new Error(`emitter bug: to-dyn of class ${t.className}`);
+        // %Error keeps the checked-dynamic tree's ERROR ENCODING ({%error,
+        // name, message, code?}), the representation every caught value
+        // and rejection reason already arrives as.
+        if (t.className === "%Error") {
+          d.push(`  return scr_dyn_from_error(v);`);
+          break;
         }
-        d.push(`  return scr_dyn_from_error(v);`);
+        // Every other class instance boxes BY REFERENCE — no copy, so the
+        // dyn value and the static one are the same object and a write
+        // through either is seen by both (the bytes arm's aliasing, for
+        // the same reason: one representation, not two). The descriptor
+        // carries the class's own RC pair, so the box's +1 is the
+        // ordinary one and the operand stays borrowed.
+        d.push(`  return scr_dyn_new_objinst(v, &${E.dynClassDesc(t.className)});`);
         break;
       case "dyn":
         // A dyn member of a converting composite (a dyn record field): the

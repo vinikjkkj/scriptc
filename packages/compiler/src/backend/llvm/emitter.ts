@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
@@ -983,6 +983,10 @@ class LlEmitter {
   /** Interned NUL-terminated C-string constants (scr_jb_puts labels, the
    * stringify indent text): UTF-8 text → { symbol, byte length }. */
   private readonly cstrs = new Map<string, { sym: string; len: number }>();
+  /** SCR_DYN_OBJINST boxing descriptors, interned per class name — the C
+   * emitter's dynClassDescs, ported. Emitted as internal constants beside
+   * the other interned globals; see dynClassDesc. */
+  private readonly dynClassDescSyms = new Map<string, { sym: string; body: string }>();
   /** Type-directed walker functions (JSON serializers, the indent
    * rewriter, union ToString/join) — interned per typeKey/unionId, defs
    * flushed with the shape helpers. */
@@ -1406,6 +1410,12 @@ class LlEmitter {
       // builtin errors and classval loads GEP through these.
       `%ScrError = type { i64, ptr, ptr, ptr, ptr }`,
       `%ScrClassObj = type { i64, i64, i64, ptr, ptr }`,
+      // The SCR_DYN_OBJINST boxing descriptor { name, pre, post, vt,
+      // retain, release } — one internal constant per boxed class
+      // (dynClassDesc), handed to scr_dyn_new_objinst by address. The C
+      // struct's `bool vt` occupies an i8 with 7 bytes of tail padding
+      // before the two function pointers, which is what this mirrors.
+      `%ScrDynClass = type { ptr, i64, i64, i8, ptr, ptr }`,
       // The runtime emitter prefix { rc, vt, reg, cls } — user subclasses
       // embed it (classes.ts), and bare-emitter GEPs address through it.
       `%ScrEmitter = type { i64, ptr, ptr, ptr }`,
@@ -1485,6 +1495,10 @@ class LlEmitter {
       );
     }
     if (this.cstrs.size > 0) out.push(``);
+    for (const [className, d] of this.dynClassDescSyms) {
+      out.push(`@${d.sym} = internal constant ${d.body} ; dyn box: class ${className}`);
+    }
+    if (this.dynClassDescSyms.size > 0) out.push(``);
     for (const g of globals) {
       const ty = this.llType(g.type);
       const zero = ty === "double" ? f64Lit(0) : ty === "ptr" ? "null" : "false";
@@ -2396,6 +2410,39 @@ class LlEmitter {
       this.unitInstances.set(key, sym);
     }
     return `@${sym}`;
+  }
+
+  /** The SCR_DYN_OBJINST boxing descriptor for one class, as an `@`-ref.
+   * The C emitter's dynClassDesc, field for field: pre/post/hierarchy off
+   * the ported class graph (the same numbering `instanceof` compares
+   * against) and retain/release off vAdapters, i.e. off the shared
+   * rcAdapters table. Neither lane restates a class fact, so the two
+   * cannot disagree about what a box contains. */
+  dynClassDesc(className: string): string {
+    const existing = this.dynClassDescSyms.get(className);
+    if (existing) return `@${existing.sym}`;
+    if (!canBoxClassIntoDyn(className)) {
+      throw new Error(`llvm emitter bug: dyn box descriptor for non-boxable class ${className}`);
+    }
+    const meta = this.classMetaOf(className);
+    const sym = `sc_dcl_${this.dynClassDescSyms.size}`;
+    // The whole initialiser is built HERE, at the call site's interning
+    // moment, not at emission time: the display-name cstr and the RC
+    // declares it depends on must be registered while those pools are
+    // still open. Building it late emitted a reference to a cstr that was
+    // never defined, and llc names the token rather than the cause.
+    const rc = vAdapters(this, { kind: "object", className });
+    const display = className.startsWith("%") ? className.slice(1) : className;
+    const body =
+      `%ScrDynClass { ptr ${this.cstr(display)}, i64 ${meta.pre}, i64 ${meta.post}, ` +
+      `i8 ${meta.hierarchy ? 1 : 0}, ptr ${rc.retain}, ptr ${rc.release} }`;
+    this.dynClassDescSyms.set(className, { sym, body });
+    return `@${sym}`;
+  }
+
+  classInterval(className: string): { pre: number; post: number } {
+    const meta = this.classMetaOf(className);
+    return { pre: meta.pre, post: meta.post };
   }
 
   /** The undefined arm's tag of a union type, or -1 (not a union / no
@@ -6655,10 +6702,14 @@ class LlEmitter {
           if (e.test === "nullish") {
             test = oneOf([DK.UNDEF, DK.NULL]);
           } else if (e.test === "object") {
-            // `typeof v === "object"`: objects, arrays, bytes, native
-            // handles, promises, AND null — engine-held objects by the
-            // engine's own typeof.
-            test = orIsl(oneOf([DK.OBJ, DK.ARR, DK.BYTES, DK.HANDLE, DK.PROMISE, DK.NULL]), "scr_dyn_isl_typeof_is", this.cstr("object"));
+            // `typeof v === "object"`: the runtime's ONE typeof table
+            // (objects, arrays, bytes, handles, class instances, promises,
+            // AND null — engine-held values by the engine's own typeof).
+            // The C lane calls the same function, the way both lanes
+            // already share scr_dyn_truthy.
+            this.declare(`declare zeroext i1 @scr_dyn_typeof_is_object(ptr)`);
+            test = B.tmp();
+            B.line(`${test} = call zeroext i1 @scr_dyn_typeof_is_object(ptr ${d.name})`);
           } else if (e.test === "array") {
             // Array.isArray: the checked-dynamic tree's array kind, or the engine's own
             // answer for an engine-held value.

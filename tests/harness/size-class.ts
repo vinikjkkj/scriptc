@@ -22,16 +22,32 @@
  *           one because mingw's CRT links statically; that is a constant
  *           of the container format, not runtime growth, and it cannot
  *           hide an engine-sized jump any more than the other two can.
+ *
+ * RECALIBRATED 2026-08-08, same toolchain, after SCR_DYN_OBJINST (the
+ * class-instance dyn kind) landed in the always-linked dyn core: 632,320
+ * static. Measured A/B on the same tree, the kind itself is +2,048 — one
+ * page — and the other +3,584 is drift the win32 ceiling had already
+ * absorbed since the calibration above (main measured 630,272 immediately
+ * before this change, 1,728 under the old bound). Recording both halves
+ * because the second is the one that will bite the next feature: the
+ * headroom was nearly gone and the number did not say so.
+ *
+ * What these bounds protect is the DISTANCE between classes, and the
+ * distances are untouched — a 2 KB kind cannot hide a 135 KB library or a
+ * 620 KB engine. linux and darwin cannot be re-measured from this box, so
+ * they move by exactly the +2,048 this change costs everywhere, which
+ * preserves whatever headroom each had rather than inventing new headroom
+ * for a platform nobody weighed.
  */
 const platform = process.platform;
 
 /** A default-built hello-world: no regex, no engine. */
 export const STATIC_CLASS_MAX =
-  platform === "linux" ? 392_000 : platform === "win32" ? 632_000 : 361_000;
+  platform === "linux" ? 394_048 : platform === "win32" ? 637_000 : 363_048;
 
 /** A program that uses regex: libregexp + libunicode, never the engine. */
 export const REGEX_CLASS_MAX =
-  platform === "linux" ? 545_000 : platform === "win32" ? 769_000 : 512_000;
+  platform === "linux" ? 547_048 : platform === "win32" ? 774_000 : 514_048;
 
 /** An --dynamic build that actually enters an island carries the engine.
  * A floor rather than a ceiling — the assertion is that the engine IS

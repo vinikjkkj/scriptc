@@ -403,6 +403,13 @@ void scr_dyn_release(ScrDyn *d) {
      * only producer) — same story as the promise arm. */
     scr_dyn_jsval_ops()->release(d->v.jsval.cell);
     break;
+  case SCR_DYN_OBJINST:
+    /* The strong reference the box took at construction, given back
+     * through the class's own `_v` release — which for a hierarchy class
+     * dispatches on the instance's vtable, so a base-typed box still
+     * tears down the derived object. */
+    d->v.inst.cls->release(d->v.inst.o);
+    break;
   default:
     break; /* null/bool/num have no children */
   }
@@ -1186,6 +1193,9 @@ const char *scr_dyn_specific_type(const ScrDyn *cb, char *detail, size_t cap) {
   case SCR_DYN_HANDLE:
     snprintf(detail, cap, "an instance of %s", scr_dyn_handle_cls(cb));
     break;
+  case SCR_DYN_OBJINST:
+    snprintf(detail, cap, "an instance of %s", scr_dyn_objinst_cls(cb));
+    break;
   case SCR_DYN_PROMISE: d = "an instance of Promise"; break;
   case SCR_DYN_JSVAL:
     /* Engine-held: only objects/arrays/functions survive wrap-time scalar
@@ -1328,6 +1338,60 @@ ScrDyn *scr_dyn_new_handle(void *h, ScrDynHandleTag tag) {
   d->v.handle.ptr = scr_dyn_handle_ops(tag)->retain(h);
   d->v.handle.tag = tag;
   return d;
+}
+
+/* ── class instances in the checked-dynamic tree (SCR_DYN_OBJINST) ────
+ * The whole kind is five functions, and that is the point: the box
+ * CARRIES an instance and hands it back, and every question that would
+ * need the instance's LAYOUT is answered by the loud ladder rather than
+ * by a fabricated shape. The descriptor is compiler-emitted, so nothing
+ * here needs an install hook the way handles do. */
+
+ScrDyn *scr_dyn_new_objinst(void *o, const ScrDynClass *cls) {
+  ScrDyn *d = scr_dyn_alloc(SCR_DYN_OBJINST);
+  d->v.inst.o = cls->retain(o);
+  d->v.inst.cls = cls;
+  return d;
+}
+
+size_t scr_dyn_objinst_pre(const ScrDyn *d) {
+  /* Every hierarchy class shares the rc+vt prefix; ScrError names it —
+   * the same reinterpret scr_caught_instanceof does, for the same
+   * reason. A standalone class carries no vt word and can have no
+   * subclass, so its descriptor's `pre` IS the instance's position. */
+  if (!d->v.inst.cls->vt) return d->v.inst.cls->pre;
+  return ((const ScrError *)d->v.inst.o)->vt->pre;
+}
+
+bool scr_dyn_objinst_is(const ScrDyn *d, size_t pre, size_t post) {
+  if (d->kind != SCR_DYN_OBJINST) return false;
+  size_t p = scr_dyn_objinst_pre(d);
+  return pre <= p && p <= post;
+}
+
+void *scr_dyn_objinst_unbox(const ScrDyn *d, size_t pre, size_t post,
+                            const ScrDynPath *path, const char *want) {
+  if (!scr_dyn_objinst_is(d, pre, post)) {
+    scr_dyn_check_fail(path, want, d);
+    return NULL;
+  }
+  /* The SAME pointer, retained — identity survives box/unbox. */
+  return d->v.inst.cls->retain(d->v.inst.o);
+}
+
+const char *scr_dyn_objinst_cls(const ScrDyn *d) {
+  return d->v.inst.cls->name;
+}
+
+bool scr_dyn_objinst_fence(const ScrDyn *d, const char *what) {
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_jb_puts(&b, what);
+  scr_jb_puts(&b, " on a dynamic ");
+  scr_jb_puts(&b, scr_dyn_objinst_cls(d));
+  scr_jb_puts(&b, " is not supported yet");
+  scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+  return false;
 }
 
 /* The gated promise boxes (scr_async_dyn.c) build through this thin
@@ -1535,6 +1599,7 @@ bool scr_dyn_truthy(const ScrDyn *d) {
   case SCR_DYN_BYTES:
   case SCR_DYN_FUNC:
   case SCR_DYN_HANDLE:
+  case SCR_DYN_OBJINST: /* a class instance is a JS object: always truthy */
   case SCR_DYN_PROMISE: return true;
   case SCR_DYN_JSVAL:
     /* Route to the engine's ToBoolean: objects/arrays/functions are
@@ -1673,29 +1738,48 @@ bool scr_dyn_le(const ScrDyn *a, const ScrDyn *b) { return scr_dyn_rel(a, b, 1);
 bool scr_dyn_gt(const ScrDyn *a, const ScrDyn *b) { return scr_dyn_rel(a, b, 2); }
 bool scr_dyn_ge(const ScrDyn *a, const ScrDyn *b) { return scr_dyn_rel(a, b, 3); }
 
-/* Bare `typeof v` on a dyn value: the dyn kind's JS answer (+1 string).
- * null answers "object" — JS's oldest wart, preserved. */
-ScrStr *scr_dyn_typeof(const ScrDyn *d) {
-  const char *s;
-  /* An island value answers the ENGINE's typeof — "object" for the
-   * wrapped objects/arrays, "function" for engine functions (row 1 of
-   * the jsval→dyn op table; scalars normalized away at wrap time). */
-  if (d->kind == SCR_DYN_JSVAL) return scr_dyn_jsval_ops()->type_of(d->v.jsval.cell);
+/* THE typeof table for the native dyn kinds — one list, no allocation.
+ * `typeof v` and `typeof v === "object"` are the same question asked two
+ * ways, and both emitters ask the second one constantly (every predicate
+ * that probes an unknown value opens with it). Before this they each
+ * spelled their own kind list inline, three copies of the table below,
+ * and adding SCR_DYN_OBJINST to two of them left the third answering
+ * "string" for a boxed class instance. Now there is one list. JSVAL is
+ * absent on purpose: an island value's answer is the ENGINE's, which
+ * needs the ops call the two callers below make. */
+static const char *scr_dyn_typeof_native(const ScrDyn *d) {
   switch (d->kind) {
-  case SCR_DYN_UNDEF: s = "undefined"; break;
-  case SCR_DYN_NULL:
+  case SCR_DYN_UNDEF: return "undefined";
+  case SCR_DYN_NULL:      /* JS's oldest wart, preserved */
   case SCR_DYN_OBJ:
   case SCR_DYN_ARR:
   case SCR_DYN_BYTES:
   case SCR_DYN_HANDLE:
-  case SCR_DYN_PROMISE: s = "object"; break;
-  case SCR_DYN_BOOL: s = "boolean"; break;
-  case SCR_DYN_NUM: s = "number"; break;
-  case SCR_DYN_STR: s = "string"; break;
-  case SCR_DYN_FUNC: s = "function"; break;
-  default: s = "undefined"; break;
+  case SCR_DYN_OBJINST:
+  case SCR_DYN_PROMISE: return "object";
+  case SCR_DYN_BOOL: return "boolean";
+  case SCR_DYN_NUM: return "number";
+  case SCR_DYN_STR: return "string";
+  case SCR_DYN_FUNC: return "function";
+  default: return "undefined";
   }
+}
+
+/* Bare `typeof v` on a dyn value: the dyn kind's JS answer (+1 string). */
+ScrStr *scr_dyn_typeof(const ScrDyn *d) {
+  /* An island value answers the ENGINE's typeof — "object" for the
+   * wrapped objects/arrays, "function" for engine functions (row 1 of
+   * the jsval→dyn op table; scalars normalized away at wrap time). */
+  if (d->kind == SCR_DYN_JSVAL) return scr_dyn_jsval_ops()->type_of(d->v.jsval.cell);
+  const char *s = scr_dyn_typeof_native(d);
   return scr_str_new(s, strlen(s));
+}
+
+/* `typeof v === "object"` — the emitted form both backends call, reading
+ * the one table above. Borrowed; never throws, never allocates. */
+bool scr_dyn_typeof_is_object(const ScrDyn *d) {
+  if (d->kind == SCR_DYN_JSVAL) return scr_dyn_isl_typeof_is(d, "object");
+  return scr_dyn_typeof_native(d)[0] == 'o'; /* only "object" starts with 'o' */
 }
 
 /* ── JS own-key order over a checked-dynamic object ───────────────────
@@ -2008,6 +2092,10 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
     scr_str_release(j);
     return true;
   }
+  case SCR_DYN_OBJINST:
+    /* Named by its class, like every other OBJINST refusal. */
+    scr_dyn_objinst_fence(d, "JSON.stringify");
+    return true; /* pending exception; caller checks */
   case SCR_DYN_HANDLE:
   default: {
     const char *msg = "JSON.stringify of a runtime handle is not supported yet";
@@ -2463,6 +2551,15 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
       return s;
     }
     return scr_str_new("[object Object]", 15);
+  case SCR_DYN_OBJINST:
+    /* NOT "[object Object]". A class instance may override toString, and
+     * its static twin calls the override — answering the default here
+     * would make one value render two ways depending on whether it
+     * crossed the boundary, which is the wrong-answer shape this tree
+     * refuses. The box carries no member table to dispatch the override
+     * through, so the honest answer is the loud ladder. */
+    scr_dyn_objinst_fence(d, "String()");
+    return scr_str_new("", 0); /* the pending throw wins */
   case SCR_DYN_PROMISE:
     /* Object.prototype.toString with the Promise @@toStringTag. */
     return scr_str_new("[object Promise]", 16);
@@ -2572,7 +2669,7 @@ ScrStr *scr_dyn_string_coerce_js(const ScrDyn *d) {
       if (!r) return NULL; /* the method threw — pending */
       if (r->kind == SCR_DYN_OBJ || r->kind == SCR_DYN_ARR ||
           r->kind == SCR_DYN_FUNC || r->kind == SCR_DYN_HANDLE ||
-          r->kind == SCR_DYN_PROMISE) {
+          r->kind == SCR_DYN_OBJINST || r->kind == SCR_DYN_PROMISE) {
         scr_dyn_release(r); /* non-primitive answer: try the next method */
         continue;
       }
@@ -2628,7 +2725,8 @@ ScrStr *scr_dyn_to_primitive_string(const ScrDyn *d) {
     scr_dyn_this_pop();
     if (!r) return NULL; /* threw — pending */
     if (r->kind != SCR_DYN_OBJ && r->kind != SCR_DYN_ARR && r->kind != SCR_DYN_FUNC &&
-        r->kind != SCR_DYN_HANDLE && r->kind != SCR_DYN_PROMISE) {
+        r->kind != SCR_DYN_HANDLE && r->kind != SCR_DYN_OBJINST &&
+        r->kind != SCR_DYN_PROMISE) {
       ScrStr *s = scr_dyn_string_coerce(r);
       scr_dyn_release(r);
       return s;
@@ -3248,6 +3346,13 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
     scr_dyn_handle_key_set(recv, key, value);
     return;
   }
+  if (recv->kind == SCR_DYN_OBJINST) {
+    /* Node writes the instance's real field. The box has no member table
+     * to reach it, and a write that silently went nowhere is the one
+     * answer worse than a refusal (the static_copy stance). */
+    scr_dyn_objinst_fence(recv, "a property write");
+    return;
+  }
   if (recv->kind == SCR_DYN_JSVAL) {
     /* The write lands on the REAL engine object (aliasing preserved —
      * island-side readers see it); the value crosses through the uniform
@@ -3446,6 +3551,14 @@ static void scr_jb_put_dyn_raw(ScrJsonBuf *b, const ScrDyn *d) {
     scr_jb_puts(b, "null"); /* the buffer never surfaces: the pending throw wins */
     return;
   }
+  case SCR_DYN_OBJINST: {
+    /* Node serializes an instance's own enumerable properties; the box
+     * has no member table to enumerate, so a fabricated {} would be a
+     * silent wrong shape. Loud fence, like the handle arm above. */
+    scr_dyn_objinst_fence(d, "JSON.stringify");
+    scr_jb_puts(b, "null"); /* the buffer never surfaces: the throw wins */
+    return;
+  }
   case SCR_DYN_JSVAL: {
     /* The ENGINE's own JSON.stringify text splices in (toJSON protocols,
      * cycle TypeErrors — all the engine's, bridged catchably). An engine
@@ -3544,6 +3657,7 @@ static const char *scr_dyn_kind_name(const ScrDyn *d) {
   case SCR_DYN_BYTES: return "Uint8Array";
   case SCR_DYN_FUNC: return "function";
   case SCR_DYN_HANDLE: return scr_dyn_handle_cls(d); /* "got IncomingMessage" */
+  case SCR_DYN_OBJINST: return scr_dyn_objinst_cls(d); /* "got Readable" */
   case SCR_DYN_PROMISE: return "Promise"; /* "got Promise" */
   case SCR_DYN_JSVAL: return "an island value"; /* "got an island value" — validated
     * extraction of engine-held values has no armed route yet (lane
@@ -4118,6 +4232,11 @@ bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b) {
   case SCR_DYN_PROMISE:
     /* And the PROMISE: one promise crossing twice is one JS value. */
     return a->v.promise == b->v.promise;
+  case SCR_DYN_OBJINST:
+    /* And the class INSTANCE: the box is a boundary artifact, the object
+     * is the JS value. Two boxes of one instance compare ===-equal, and
+     * `unbox(box(x)) == x` holds by the same pointer. */
+    return a->v.inst.o == b->v.inst.o;
   case SCR_DYN_JSVAL:
     /* Identity is the ENGINE VALUE, not the box or even the cell: two
      * wraps of one engine value compare ===-equal (the engine's own
@@ -5417,7 +5536,7 @@ ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *wh
   if (r != NULL && (r->kind == SCR_DYN_OBJ || r->kind == SCR_DYN_ARR ||
                     r->kind == SCR_DYN_FUNC || r->kind == SCR_DYN_BYTES ||
                     r->kind == SCR_DYN_HANDLE || r->kind == SCR_DYN_PROMISE ||
-                    r->kind == SCR_DYN_JSVAL)) {
+                    r->kind == SCR_DYN_JSVAL || r->kind == SCR_DYN_OBJINST)) {
     scr_dyn_release(inst);
     return r;
   }
@@ -5523,6 +5642,12 @@ static ScrDyn *scr_sc_clone(const ScrDyn *v, const ScrScParent *up) {
      * below would be a wrong claim, and fabricating a shape would be a
      * silent wrong answer. Loud fence (lane dom-jsval-long-tail). */
     scr_dyn_isl_fence(v, "structuredClone");
+    return NULL;
+  case SCR_DYN_OBJINST:
+    /* Node clones an instance's own properties as a PLAIN object; the box
+     * cannot enumerate them, and a fabricated {} would be a silent wrong
+     * answer (the JSVAL arm's reasoning). */
+    scr_dyn_objinst_fence(v, "structuredClone");
     return NULL;
   case SCR_DYN_FUNC:
   case SCR_DYN_HANDLE:
