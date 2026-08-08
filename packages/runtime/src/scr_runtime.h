@@ -985,6 +985,15 @@ ScrArr *scr_regex_match_all(ScrStr *s, ScrRegex *re);
  * desugar reads. Same throw/result contract as scr_regex_match_all. */
 ScrArr *scr_regex_match_all_into(ScrStr *s, ScrRegex *re, ScrArr *indices);
 
+/* Registers the RegExp handle-dispatch ops (SCR_DYNH_REGEX) so a regex
+ * can cross into the checked-dynamic tree BY REFERENCE — the emitted
+ * main() calls this exactly when scr_regex.c is linked (the same
+ * moduleUsesRegex switch cc.ts gates the unit on, so the symbol and the
+ * call appear together or not at all). A regex is an immutable
+ * pattern+flags pair here (no lastIndex state is modeled), so boxing it
+ * is a retain and nothing else. */
+void scr_regex_dyn_install(void);
+
 /* ── maps (scr_map.c) ───────────────────────────────────────────────
  * ES Map<K, V> with the compact-dict layout: a dense, insertion-ordered
  * entries array (deletions become tombstones; compaction happens on growth,
@@ -2931,6 +2940,7 @@ typedef enum {
   SCR_DYNH_H2_STREAM,  /* ScrH2Stream — Http2Stream (client & server) */
   SCR_DYNH_HTTP_CLIENT, /* ScrHttpClientReq — http.ClientRequest */
   SCR_DYNH_HTTP_AGENT,  /* ScrHttpAgent — http.Agent / https.Agent */
+  SCR_DYNH_REGEX,       /* ScrRegex — RegExp (immutable pattern+flags, by reference) */
   SCR_DYNH_COUNT,
 } ScrDynHandleTag;
 

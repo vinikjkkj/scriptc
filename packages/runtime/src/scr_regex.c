@@ -1102,3 +1102,172 @@ ScrStr *scr_regexp_escape(ScrStr *s) {
   out->data[out_len] = '\0';
   return out;
 }
+
+/* ── the checked-dynamic RegExp handle (SCR_DYNH_REGEX) ─────────────────
+ * A regex crosses into the checked-dynamic tree BY REFERENCE, like the
+ * socket/stream handles: the value is an immutable (pattern, flags) pair
+ * — no lastIndex state is modeled here at all — so boxing is a retain and
+ * identity survives the round trip with nothing to copy and nothing to
+ * alias.
+ *
+ * The MODELED surface is the part with a complete static lowering:
+ * `test`, `toString`, and the read-only literal properties (source,
+ * flags, and the flag booleans, which are derived from the flags text
+ * exactly as the static reads derive them). Everything else — `exec`
+ * (Node's result is an array carrying `index`/`input`/`groups`, which the
+ * dyn tree's plain arrays cannot carry), `compile`, and `lastIndex` in
+ * either direction — throws the loud not-supported ladder rather than
+ * answering approximately. A regex reached through a dyn value must not
+ * be able to say something a regex reached statically would not.
+ *
+ * `test` on a /g or /y regex is the one place this matters for safety:
+ * the static entry point ABORTS the process there (stateful lastIndex is
+ * out of the slice), and an abort behind a dynamic member call is a
+ * process death with no stack the program could have caught. The flags
+ * are checked here first so the dynamic spelling throws the same
+ * catchable refusal the frontend gives the static one. */
+
+static bool scr_regex_dynh_stateful(const ScrRegex *re) {
+  for (size_t i = 0; i < re->flags->len; i++) {
+    const char c = re->flags->data[i];
+    if (c == 'g' || c == 'y') return true;
+  }
+  return false;
+}
+
+static bool scr_regex_dynh_has_flag(const ScrRegex *re, char f) {
+  for (size_t i = 0; i < re->flags->len; i++) {
+    if (re->flags->data[i] == f) return true;
+  }
+  return false;
+}
+
+static void scr_regex_dynh_unsupported(const char *member, const char *why) {
+  char msg[240];
+  const int n = snprintf(msg, sizeof msg,
+                         "'RegExp.prototype.%s' on a dynamic value is not supported yet%s%s",
+                         member, why ? " — " : "", why ? why : "");
+  scr_throw_error_msg(SCR_ERR_ERROR, msg, (size_t)n);
+}
+
+/* `/source/flags` — the spec's RegExp.prototype.toString, which is the
+ * source text verbatim (already the spec's escaped form: scr_regex_new
+ * stores "(?:)" for an empty pattern) between slashes. */
+static ScrDyn *scr_regex_dynh_to_string(const ScrRegex *re) {
+  const size_t len = re->source->len + re->flags->len + 2;
+  ScrStr *out = scr_str_alloc_raw(len, len);
+  char *w = out->data;
+  *w++ = '/';
+  memcpy(w, re->source->data, re->source->len);
+  w += re->source->len;
+  *w++ = '/';
+  memcpy(w, re->flags->data, re->flags->len);
+  out->len = len;
+  out->data[len] = '\0';
+  ScrDyn *d = scr_dyn_new_str(out);
+  scr_str_release(out);
+  return d;
+}
+
+static ScrDyn *scr_regex_dynh_invoke(void *h, ScrDyn *self, const char *method,
+                                     ScrDyn *const *args, size_t argc, const char *what) {
+  ScrRegex *re = (ScrRegex *)h;
+  (void)self;
+  if (strcmp(method, "test") == 0) {
+    if (scr_regex_dynh_stateful(re)) {
+      scr_regex_dynh_unsupported(
+          "test", "a 'g' or 'y' regex reads and writes lastIndex, which this slice does not model "
+                  "(drop the flag, or use replace/replaceAll/split)");
+      return NULL;
+    }
+    const ScrDyn *a = argc > 0 ? args[0] : scr_dyn_undefined();
+    ScrStr *s = scr_dyn_string_coerce_js(a); /* JS ToString, throws propagate */
+    if (!s) return NULL;
+    const bool r = scr_regex_test(re, s);
+    scr_str_release(s);
+    if (scr_exc_pending()) return NULL;
+    return scr_dyn_new_bool(r);
+  }
+  if (strcmp(method, "toString") == 0) return scr_regex_dynh_to_string(re);
+  {
+    /* Real members of the class whose dynamic answer would have to be
+     * approximate — loud, not silent. */
+    static const char *const known[] = { "exec", "compile", NULL };
+    for (size_t i = 0; known[i]; i++) {
+      if (strcmp(method, known[i]) == 0) {
+        scr_regex_dynh_unsupported(
+            method, strcmp(known[i], "exec") == 0
+                        ? "its result is an array carrying index/input/groups, which the "
+                          "checked-dynamic tree's arrays do not carry (use test, or match "
+                          "statically)"
+                        : NULL);
+        return NULL;
+      }
+    }
+  }
+  {
+    char msg[160];
+    const int n = snprintf(msg, sizeof msg, "%s is not a function", what);
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
+  }
+  return NULL;
+}
+
+static ScrDyn *scr_regex_dynh_get(void *h, const char *key, size_t key_len) {
+  ScrRegex *re = (ScrRegex *)h;
+  (void)key_len;
+  if (strcmp(key, "source") == 0) {
+    ScrStr *s = scr_regex_source(re); /* +1 */
+    ScrDyn *d = scr_dyn_new_str(s);
+    scr_str_release(s);
+    return d;
+  }
+  if (strcmp(key, "flags") == 0) {
+    ScrStr *s = scr_regex_flags(re); /* +1 */
+    ScrDyn *d = scr_dyn_new_str(s);
+    scr_str_release(s);
+    return d;
+  }
+  /* The flag booleans are derived from the flags text, exactly as the
+   * static property reads derive them. */
+  if (strcmp(key, "global") == 0) return scr_dyn_new_bool(scr_regex_dynh_has_flag(re, 'g'));
+  if (strcmp(key, "ignoreCase") == 0) return scr_dyn_new_bool(scr_regex_dynh_has_flag(re, 'i'));
+  if (strcmp(key, "multiline") == 0) return scr_dyn_new_bool(scr_regex_dynh_has_flag(re, 'm'));
+  if (strcmp(key, "dotAll") == 0) return scr_dyn_new_bool(scr_regex_dynh_has_flag(re, 's'));
+  if (strcmp(key, "unicode") == 0) return scr_dyn_new_bool(scr_regex_dynh_has_flag(re, 'u'));
+  if (strcmp(key, "sticky") == 0) return scr_dyn_new_bool(scr_regex_dynh_has_flag(re, 'y'));
+  if (strcmp(key, "hasIndices") == 0) return scr_dyn_new_bool(scr_regex_dynh_has_flag(re, 'd'));
+  if (strcmp(key, "lastIndex") == 0) {
+    /* Answering 0 would be right only until someone matched — and this
+     * slice never advances it, so a read is a promise the runtime cannot
+     * keep. */
+    scr_regex_dynh_unsupported("lastIndex", "no lastIndex state is modeled");
+    return NULL;
+  }
+  return NULL; /* not a modeled property — the caller answers undefined */
+}
+
+static bool scr_regex_dynh_set(void *h, const char *key, size_t key_len, const ScrDyn *value) {
+  (void)h;
+  (void)key_len;
+  (void)value;
+  if (strcmp(key, "lastIndex") == 0) {
+    scr_regex_dynh_unsupported("lastIndex", "no lastIndex state is modeled");
+    return true; /* handled, with the exception pending */
+  }
+  return false; /* the caller throws the loud ladder */
+}
+
+static const ScrDynHandleOps scr_regex_dynh_ops = {
+  "RegExp",
+  &scr_regex_retain_v,
+  &scr_regex_release_v,
+  &scr_regex_dynh_invoke,
+  &scr_regex_dynh_get,
+  &scr_regex_dynh_set,
+  NULL, /* no pipe destination */
+};
+
+void scr_regex_dyn_install(void) {
+  scr_dyn_handle_install(SCR_DYNH_REGEX, &scr_regex_dynh_ops);
+}
