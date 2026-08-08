@@ -1789,7 +1789,24 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
   }
   case SCR_DYN_HANDLE:
     /* IncomingMessage/ServerResponse/Socket inherit
-     * Object.prototype.toString — Node's String() answer exactly. */
+     * Object.prototype.toString — Node's String() answer exactly.
+     *
+     * RegExp does NOT: it owns RegExp.prototype.toString, whose answer is
+     * `/source/flags`. Admitting the kind into the tree without saying so
+     * here would make `String(u)` answer "[object Object]" for a value
+     * whose static twin answers "/x/" — the same value, two answers,
+     * decided by whether it crossed the boundary. Only the tag that
+     * differs asks its ops: routing the whole set through invoke would
+     * change the I/O tags, whose invoke has no toString arm to answer
+     * with, into a "not a function" throw. */
+    if (d->v.handle.tag == SCR_DYNH_REGEX) {
+      const ScrDynHandleOps *ops = scr_dyn_handle_ops_of(d);
+      ScrDyn *r = ops->invoke(d->v.handle.ptr, (ScrDyn *)d, "toString", NULL, 0, "toString");
+      if (r == NULL) return scr_str_new("", 0); /* threw — pending */
+      ScrStr *s = r->kind == SCR_DYN_STR ? scr_str_retain(r->v.str) : scr_str_new("", 0);
+      scr_dyn_release(r);
+      return s;
+    }
     return scr_str_new("[object Object]", 15);
   case SCR_DYN_PROMISE:
     /* Object.prototype.toString with the Promise @@toStringTag. */
@@ -3063,7 +3080,23 @@ bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b) {
     return a == b || a->v.fn.clo == b->v.fn.clo;
   case SCR_DYN_HANDLE:
     /* Same story: identity is the HANDLE — one req boxed into two
-     * listeners is still one JS object. */
+     * listeners is still one JS object.
+     *
+     * REGEX is the exception, and the reason is the emitter, not the
+     * tree: regex literals are INTERNED one static per (pattern, flags)
+     * pair, so two distinct `/x/` literals arrive as one pointer where
+     * JS has two objects. Pointer identity would answer true for them —
+     * a wrong boolean, not an approximate one — and the frontend keeps
+     * the matching `===` on two static regexes fenced (SC1043) for the
+     * same reason. Refuse loudly here rather than let the dynamic
+     * spelling answer what the static spelling refuses to. */
+    if (a->v.handle.tag == SCR_DYNH_REGEX && b->v.handle.tag == SCR_DYNH_REGEX) {
+      const char *msg =
+          "'===' on two dynamic RegExp values is not supported yet (regex literals sharing a "
+          "pattern and flags are interned, so reference identity cannot answer JS-exactly)";
+      scr_throw_error_msg(SCR_ERR_ERROR, msg, strlen(msg));
+      return false;
+    }
     return a->v.handle.tag == b->v.handle.tag && a->v.handle.ptr == b->v.handle.ptr;
   case SCR_DYN_PROMISE:
     /* And the PROMISE: one promise crossing twice is one JS value. */
