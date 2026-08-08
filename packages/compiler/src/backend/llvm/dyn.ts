@@ -990,7 +990,10 @@ export class LlDyn {
         const box = B.tmp();
         B.line(`${box} = call ptr @scr_box_new_obj(ptr @scr_dyn_retain_v, ptr @scr_dyn_release_v, ptr null)`);
         const capp = B.tmp();
-        B.line(`${capp} = getelementptr inbounds i8, ptr ${a}, i64 32 ; caps[0]`);
+        // caps[0] is one WHOLE %ScrClosure past the base — never a byte
+        // literal: the struct grew a field and every hardcoded 32 in this
+        // backend became a write into it instead.
+        B.line(`${capp} = getelementptr inbounds %ScrClosure, ptr ${a}, i64 1 ; caps[0]`);
         B.line(`store ptr ${box}, ptr ${capp}`);
         const rd = this.retainDyn(B, "%d");
         B.line(`call void @scr_box_set_ref(ptr ${box}, ptr ${rd})`);
@@ -2848,7 +2851,7 @@ export class LlDyn {
       t.ret.kind === "void" ? "void" : retTy === "double" ? `double ${f64Lit(0)}` : retTy === "i1" ? "i1 false" : "ptr null";
     const capp = B.tmp();
     const box = B.tmp();
-    B.line(`${capp} = getelementptr inbounds i8, ptr %sc_env, i64 32 ; caps[0]`);
+    B.line(`${capp} = getelementptr inbounds %ScrClosure, ptr %sc_env, i64 1 ; caps[0]`);
     B.line(`${box} = load ptr, ptr ${capp}`);
     const fnv = B.tmp();
     B.line(`${fnv} = call ptr @scr_box_get_ref(ptr ${box}) ; +1`);
