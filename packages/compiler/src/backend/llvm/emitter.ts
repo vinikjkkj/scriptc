@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { canMarshalFuncIntoIsland, CAUGHT, DYN, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleUsesDynInvoke, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleUsesDynInvoke, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
@@ -6199,6 +6199,15 @@ class LlEmitter {
         const valTy = v.type.kind === "f64" ? "double" : v.type.kind === "bool" ? "i1" : "ptr";
         const t = B.tmp();
         B.line(`${t} = call ptr @${conv}(${valTy} ${v.name})`);
+        // The C emitter's twin: mark a copy whose loss would be visible, so
+        // the mutating dyn entry points refuse loudly instead of dropping
+        // the write.
+        if (dynCopyIsObservable(e.value)) {
+          this.declare(`declare ptr @scr_dyn_mark_static_copy(ptr)`);
+          const m = B.tmp();
+          B.line(`${m} = call ptr @scr_dyn_mark_static_copy(ptr ${t})`);
+          return this.own({ name: m, type: e.type });
+        }
         return this.own({ name: t, type: e.type });
       }
       case "dynFromJsval": {
