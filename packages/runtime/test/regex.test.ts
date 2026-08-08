@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { ccCompile, expectAbort, exeSuffix, testBin } from "./cc.js";
+import { ccCompile, expectAbort, expectCasesPassed, exeSuffix } from "./cc.js";
 import { beforeAll, expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
@@ -50,7 +50,7 @@ beforeAll(async () => {
 
 test("regex runtime: matching, substitutions, split, throws, RC accounting", async () => {
   const { stderr } = await execFileAsync(bin, []);
-  expect(stderr.trim()).toMatch(/^(\d+)\/\1 cases passed$/);
+  expectCasesPassed(stderr);
 });
 
 test("test() on a g-flagged regex aborts with the statefulness fence", async () => {

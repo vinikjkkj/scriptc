@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { ccCompile, expectAbort, exeSuffix, testBin } from "./cc.js";
+import { ccCompile, expectAbort, expectCasesPassed, exeSuffix } from "./cc.js";
 import { afterAll, beforeAll, expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
@@ -58,7 +58,7 @@ afterAll(async () => {
 
 test("bytes runtime: coercions, encodings, zlib, fs, RC", async () => {
   const { stderr } = await execFileAsync(bin, [scratch]);
-  expect(stderr.trim().split("\n").pop()).toMatch(/^(\d+)\/\1 cases passed$/);
+  expectCasesPassed(stderr);
 });
 
 // JS reads undefined / ignores writes out of bounds on typed arrays; both
