@@ -1554,6 +1554,97 @@ size_t *scr_dyn_obj_key_order(const ScrDyn *v) {
   return order;
 }
 
+/* ── the toJSON protocol over a dyn value ─────────────────────────────
+ * SerializeJSONProperty's FIRST step, before anything else looks at the
+ * value: an OBJECT whose [[Get]] of "toJSON" answers a CALLABLE runs it
+ * with the value as the receiver and the property key as its one
+ * argument, and the RESULT is what serializes from there on.
+ *
+ * Three spec details this encodes, each observable:
+ *  - the lookup is a [[Get]], so an inherited toJSON counts (the
+ *    `F.prototype.toJSON = ...` pre-class shape scr_dyn_invoke already
+ *    dispatches);
+ *  - a toJSON that is NOT callable is an ordinary member and serializes
+ *    as one (`{a:1, toJSON:5}` is `{"a":1,"toJSON":5}`, not `5`);
+ *  - the hook runs ONCE per position. The result is serialized RAW — its
+ *    own toJSON is not consulted again — while its MEMBERS get their own
+ *    hook, exactly the spec's recursion.
+ * The key is JS's: a property name, an array index as a decimal string,
+ * and the EMPTY string at the root.
+ *
+ * Only SCR_DYN_OBJ can carry the member; every other kind answers NULL
+ * after one comparison, so the walk pays nothing for scalars and arrays.
+ * Buffer's toJSON is not this — SCR_DYN_BYTES spells Node's
+ * {"type":"Buffer","data":[...]} shape directly below.
+ *
+ * Returns the hook's result (+1, the CALLER releases) or NULL. NULL is
+ * two answers — "no hook ran, serialize `d` itself" and "the hook THREW"
+ * — which scr_exc_pending() separates; every caller already runs a
+ * pending check, so a throwing toJSON propagates instead of being
+ * swallowed into a `{}`.
+ *
+ * ── SCR_JSON_REENTRANCY ───────────────────────────────────────────────
+ * This is the first thing in either dyn walker that runs USER CODE mid-
+ * walk, so both walks now have to survive their own callee mutating the
+ * tree they are standing on (a hook closed over an ancestor doing
+ * `delete parent.k` or `arr.pop()`). Every member/slot loop therefore:
+ *  - COPIES the key bytes into a ScrStr and RETAINS the value BEFORE
+ *    calling, and never touches the ScrDynEntry again — a delete frees
+ *    both, and the entry table itself reallocates;
+ *  - re-bounds against the CURRENT entry count each iteration, because
+ *    the key-order array was sized to the old one.
+ * ARRAYS are exact under this: the length is read ONCE and a slot past
+ * the shrunk end reads undefined, which is `null` — V8's
+ * SerializeJSONArray to the letter. OBJECTS are not: V8 snapshots the
+ * key list and re-[[Get]]s each key, so a member added mid-walk is
+ * absent and one deleted drops, while this walk stops at the resize.
+ * Matching that costs a key snapshot plus an O(n) lookup per key —
+ * O(n^2) on a walk that is otherwise linear — to buy a case that needs a
+ * toJSON closed over an ancestor. Declared, not silent. MEMORY safety is
+ * claimed in both. */
+static ScrDyn *scr_dyn_json_tojson(const ScrDyn *d, const char *key, size_t key_len) {
+  if (d->kind != SCR_DYN_OBJ) return NULL;
+  static const char name[] = "toJSON";
+  const size_t name_len = sizeof name - 1;
+  /* BORROWED both — own member first, then the prototype chain: JS's
+   * [[Get]], and scr_dyn_invoke's OBJ dispatch order. Open-coded rather
+   * than delegated to scr_dyn_invoke so that (a) a missing or
+   * non-callable toJSON stays an ordinary member instead of taking
+   * invoke's "is not a function" throw, and (b) scr_json.c — which every
+   * binary links — does not acquire an edge to scr_dyn_invoke.c and drag
+   * the whole prototype-dispatch module into programs that never call a
+   * dyn method. Everything used below already lives in this file. */
+  const ScrDyn *m = scr_dyn_obj_get(d, name, name_len);
+  if (m == NULL) m = scr_dyn_proto_get(d, name, name_len);
+  if (m == NULL) return NULL;
+  if (m->kind != SCR_DYN_FUNC &&
+      !(m->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(m, "function"))) {
+    return NULL; /* a non-callable toJSON is data, like JS */
+  }
+  /* The key argument is built only now that the hook is known to run —
+   * scalars and hookless objects allocate nothing. */
+  ScrStr *ks = scr_str_new(key, key_len); /* +1 */
+  ScrDyn *karg = scr_dyn_new_str(ks);     /* +1; RETAINS ks */
+  scr_str_release(ks);                    /* karg holds the only reference now */
+  /* JS binds the receiver for `v.toJSON(key)` — the ambient-receiver
+   * window, exactly scr_dyn_invoke's OBJ arm. args are BORROWED by the
+   * call; the result is +1, or NULL with the exception pending. */
+  scr_dyn_this_push_dyn(d);
+  ScrDyn *r = scr_dyn_call(m, &karg, 1, "toJSON");
+  scr_dyn_this_pop();
+  scr_dyn_release(karg);
+  return r;
+}
+
+/* Is this dyn value ABSENT under stringify — the undefined/function rule
+ * that drops an object member and prints null in an array slot? Decided
+ * from the KIND alone, so the answer is available BEFORE anything is
+ * written and the two walkers below need no speculative buffer. */
+static bool scr_dyn_json_absent(const ScrDyn *d) {
+  return d->kind == SCR_DYN_UNDEF || d->kind == SCR_DYN_FUNC ||
+         (d->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(d, "function"));
+}
+
 /* ── JSON.stringify over a dyn value (util.format's %j) ───────────────
  * The RUNTIME walk the type-directed serializers deliberately avoid for
  * static values — a dyn value has no static type, so the checked-dynamic tree's own kinds
@@ -1564,8 +1655,14 @@ size_t *scr_dyn_obj_key_order(const ScrDyn *v) {
  * strings. HANDLE values fence loudly (Node walks own enumerable props
  * this runtime does not model). Returns false when the VALUE ITSELF is
  * absent under stringify (root undefined/function — %j prints
- * "undefined" there, Node's tryStringify tail). */
-static bool scr_dyn_json_write(ScrJsonBuf *b, const ScrDyn *d) {
+ * "undefined" there, Node's tryStringify tail).
+ *
+ * `_raw` is the walk with the toJSON protocol ALREADY applied at this
+ * position (so a hook's result is not re-hooked); scr_dyn_json_write is
+ * the keyed entry every recursion goes through. */
+static bool scr_dyn_json_write(ScrJsonBuf *b, const ScrDyn *d, const char *key, size_t key_len);
+
+static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
   switch (d->kind) {
   case SCR_DYN_UNDEF:
   case SCR_DYN_FUNC:
@@ -1575,10 +1672,28 @@ static bool scr_dyn_json_write(ScrJsonBuf *b, const ScrDyn *d) {
   case SCR_DYN_NUM: scr_jb_put_f64(b, d->v.num); return true;
   case SCR_DYN_STR: scr_jb_put_json_str(b, d->v.str); return true;
   case SCR_DYN_ARR: {
+    /* SCR_JSON_REENTRANCY: the length is read ONCE, like V8's
+     * SerializeJSONArray — a hook that shrinks the array mid-walk leaves
+     * the remaining slots reading undefined, which is `null`. */
+    const size_t alen = d->v.arr.len;
     scr_jb_putc(b, '[');
-    for (size_t i = 0; i < d->v.arr.len; i++) {
+    for (size_t i = 0; i < alen; i++) {
       if (i > 0) scr_jb_putc(b, ',');
-      if (!scr_dyn_json_write(b, d->v.arr.items[i])) scr_jb_puts(b, "null");
+      if (i >= d->v.arr.len) { /* the walk's own user code shrank it */
+        scr_jb_puts(b, "null");
+        continue;
+      }
+      /* The slot's toJSON key is its INDEX as a decimal string. */
+      char ik[24];
+      int ikn = snprintf(ik, sizeof ik, "%zu", i);
+      /* PINNED across the hook: the hook is user code and can reach this
+       * array through a closure, and a splice/pop would release the slot
+       * out from under the walk. */
+      ScrDyn *el = scr_dyn_retain(d->v.arr.items[i]);
+      bool present = scr_dyn_json_write(b, el, ik, (size_t)ikn);
+      scr_dyn_release(el);
+      if (!present) scr_jb_puts(b, "null");
+      if (scr_exc_pending()) return true; /* a slot threw; the caller unwinds */
     }
     scr_jb_putc(b, ']');
     return true;
@@ -1587,23 +1702,47 @@ static bool scr_dyn_json_write(ScrJsonBuf *b, const ScrDyn *d) {
     scr_jb_putc(b, '{');
     bool first = true;
     size_t *ord = scr_dyn_obj_key_order(d); /* JS own-key order, NULL when stored order is it */
-    for (size_t oi = 0; oi < d->v.obj.len; oi++) {
+    const size_t n = d->v.obj.len;          /* SCR_JSON_REENTRANCY: `ord` is sized to this */
+    for (size_t oi = 0; oi < n; oi++) {
+      if (d->v.obj.len != n) break; /* the walk's own user code resized the table */
       const ScrDynEntry *ent = &d->v.obj.entries[ord ? ord[oi] : oi];
-      ScrJsonBuf probe;
-      scr_jb_init(&probe);
-      if (!scr_dyn_json_write(&probe, ent->value)) {
-        scr_jb_dispose(&probe);
+      /* SNAPSHOT before any user code runs: the hook below can reach this
+       * object through a closure, and a `delete` of this key frees both
+       * the key bytes and the value. `ent` is not read again after this
+       * pair. */
+      ScrStr *k = scr_str_new(ent->key, ent->key_len); /* +1 */
+      ScrDyn *mv = scr_dyn_retain(ent->value);         /* +1 */
+      /* The toJSON protocol runs BEFORE the drop test — an omitted member
+       * is decided by what toJSON ANSWERED, not by the raw member (a hook
+       * returning undefined drops the key; a hook on an undefined-looking
+       * member cannot exist, since only objects carry one). */
+      ScrDyn *sub = scr_dyn_json_tojson(mv, k->data, k->len); /* +1 or NULL */
+      if (scr_exc_pending()) { /* the hook threw: propagate, do not swallow */
+        if (sub) scr_dyn_release(sub);
+        scr_dyn_release(mv);
+        scr_str_release(k);
+        free(ord);
+        return true; /* pending exception; caller checks */
+      }
+      const ScrDyn *val = sub ? sub : mv;
+      if (scr_dyn_json_absent(val)) {
+        if (sub) scr_dyn_release(sub);
+        scr_dyn_release(mv);
+        scr_str_release(k);
         continue; /* undefined/function members drop, like Node */
       }
       if (!first) scr_jb_putc(b, ',');
       first = false;
-      ScrStr *k = scr_str_new(ent->key, ent->key_len);
       scr_jb_put_json_str(b, k);
-      scr_str_release(k);
       scr_jb_putc(b, ':');
-      ScrStr *body = scr_jb_finish(&probe);
-      scr_jb_write(b, body->data, body->len);
-      scr_str_release(body);
+      scr_dyn_json_write_raw(b, val); /* absence already decided above */
+      if (sub) scr_dyn_release(sub);
+      scr_dyn_release(mv);
+      scr_str_release(k);
+      if (scr_exc_pending()) { /* a nested member threw */
+        free(ord);
+        return true;
+      }
     }
     free(ord);
     scr_jb_putc(b, '}');
@@ -1652,13 +1791,30 @@ static bool scr_dyn_json_write(ScrJsonBuf *b, const ScrDyn *d) {
   }
 }
 
+/* The keyed entry: apply the position's toJSON hook, then serialize what
+ * it answered. A hook that answers undefined (or a function) makes THIS
+ * POSITION absent — the object member drops, the array slot prints null,
+ * and the root spells "undefined" — which is the whole point of running
+ * the drop test on the hook's RESULT rather than on the raw value. */
+static bool scr_dyn_json_write(ScrJsonBuf *b, const ScrDyn *d, const char *key, size_t key_len) {
+  ScrDyn *sub = scr_dyn_json_tojson(d, key, key_len); /* +1 or NULL */
+  if (sub == NULL) {
+    if (scr_exc_pending()) return true; /* the hook threw; caller checks */
+    return scr_dyn_json_write_raw(b, d);
+  }
+  bool present = !scr_dyn_json_absent(sub) && scr_dyn_json_write_raw(b, sub);
+  scr_dyn_release(sub);
+  return present;
+}
+
 /* util.format's %j argument (+1): the stringify text, "undefined" for a
  * root the stringify drops, or NULL with a pending exception (a handle
- * inside the tree). */
+ * inside the tree, or a throwing toJSON). */
 ScrStr *scr_dyn_format_j(const ScrDyn *d) {
   ScrJsonBuf b;
   scr_jb_init(&b);
-  bool present = scr_dyn_json_write(&b, d);
+  /* JSON's root key is the empty string — what a root toJSON receives. */
+  bool present = scr_dyn_json_write(&b, d, "", 0);
   if (scr_exc_pending()) {
     scr_jb_dispose(&b);
     return NULL;
@@ -2548,8 +2704,44 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
 
 /* Node's JSON.stringify over a dyn: object members holding undefined DROP,
  * array slots holding undefined print null. A bare undefined never arrives
- * (the record serializer drops the entry first); print null defensively. */
+ * (the record serializer drops the entry first); print null defensively.
+ *
+ * The nested twin of scr_dyn_json_write above — this one is reached only
+ * from an emitted record serializer's OVERFLOW entries (an `unknown` index
+ * signature), so it writes into an already-open object and answers void
+ * instead of a presence flag. `_raw` is the walk with this position's
+ * toJSON already applied; _keyed is the entry every recursion goes
+ * through.
+ *
+ * DECLARED RESIDUAL: an overflow entry whose own toJSON answers undefined
+ * prints `"k":null` where Node DROPS the key. The emitted walker writes
+ * the key and colon before calling (its drop test is the raw entry's
+ * SCR_DYN_UNDEF kind, which a hook's answer cannot reach from here), so
+ * closing it means threading a presence flag back through two backends'
+ * refcounted overflow loops. Nested positions INSIDE the entry are exact;
+ * only the entry itself, only when it carries a toJSON, and only when that
+ * toJSON answers undefined. */
+static void scr_jb_put_dyn_raw(ScrJsonBuf *b, const ScrDyn *d);
+
+static void scr_jb_put_dyn_keyed(ScrJsonBuf *b, const ScrDyn *d, const char *key, size_t key_len) {
+  ScrDyn *sub = scr_dyn_json_tojson(d, key, key_len); /* +1 or NULL */
+  if (sub == NULL) {
+    if (scr_exc_pending()) return; /* the hook threw; the caller's check wins */
+    scr_jb_put_dyn_raw(b, d);
+    return;
+  }
+  /* Absent here is nested-position absent: null, the array-slot spelling
+   * (see the DECLARED RESIDUAL above for the object-member spelling). */
+  if (scr_dyn_json_absent(sub)) scr_jb_puts(b, "null");
+  else scr_jb_put_dyn_raw(b, sub);
+  scr_dyn_release(sub);
+}
+
 void scr_jb_put_dyn(ScrJsonBuf *b, const ScrDyn *d) {
+  scr_jb_put_dyn_keyed(b, d, "", 0); /* JSON's root key */
+}
+
+static void scr_jb_put_dyn_raw(ScrJsonBuf *b, const ScrDyn *d) {
   switch (d->kind) {
   case SCR_DYN_NULL:
   case SCR_DYN_UNDEF:
@@ -2578,14 +2770,28 @@ void scr_jb_put_dyn(ScrJsonBuf *b, const ScrDyn *d) {
     scr_jb_putc(b, '}');
     return;
   }
-  case SCR_DYN_ARR:
+  case SCR_DYN_ARR: {
+    /* SCR_JSON_REENTRANCY: length read once, like V8 — as above. */
+    const size_t alen = d->v.arr.len;
     scr_jb_putc(b, '[');
-    for (size_t i = 0; i < d->v.arr.len; i++) {
+    for (size_t i = 0; i < alen; i++) {
       if (i > 0) scr_jb_putc(b, ',');
-      scr_jb_put_dyn(b, d->v.arr.items[i]);
+      if (i >= d->v.arr.len) { /* the walk's own user code shrank it */
+        scr_jb_puts(b, "null");
+        continue;
+      }
+      /* The slot's toJSON key is its INDEX as a decimal string. */
+      char ik[24];
+      int ikn = snprintf(ik, sizeof ik, "%zu", i);
+      /* PINNED across the hook — SCR_JSON_REENTRANCY, as above. */
+      ScrDyn *el = scr_dyn_retain(d->v.arr.items[i]);
+      scr_jb_put_dyn_keyed(b, el, ik, (size_t)ikn);
+      scr_dyn_release(el);
+      if (scr_exc_pending()) return; /* a slot threw; the caller unwinds */
     }
     scr_jb_putc(b, ']');
     return;
+  }
   case SCR_DYN_PROMISE:
     /* No own enumerable properties — Node stringifies a promise as {}. */
     scr_jb_puts(b, "{}");
@@ -2625,18 +2831,42 @@ void scr_jb_put_dyn(ScrJsonBuf *b, const ScrDyn *d) {
      * table's integer keys serialize first, ascending, exactly as Node
      * does (scr_dyn_obj_key_order). */
     size_t *ord = scr_dyn_obj_key_order(d);
-    for (size_t oi = 0; oi < d->v.obj.len; oi++) {
+    const size_t n = d->v.obj.len; /* SCR_JSON_REENTRANCY: `ord` is sized to this */
+    for (size_t oi = 0; oi < n; oi++) {
+      if (d->v.obj.len != n) break; /* the walk's own user code resized the table */
       const ScrDynEntry *e = &d->v.obj.entries[ord ? ord[oi] : oi];
-      if (e->value->kind == SCR_DYN_UNDEF || e->value->kind == SCR_DYN_FUNC) continue; /* dropped, like Node */
-      if (e->value->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(e->value, "function")) continue; /* engine functions drop too */
+      /* SNAPSHOT before any user code runs — `e` is not read again.
+       * Keys escape exactly like string values (put_json_str quotes). */
+      ScrStr *k = scr_str_new(e->key, e->key_len); /* +1 */
+      ScrDyn *mv = scr_dyn_retain(e->value);       /* +1 */
+      /* toJSON first, then the drop test on what it ANSWERED. */
+      ScrDyn *sub = scr_dyn_json_tojson(mv, k->data, k->len); /* +1 or NULL */
+      if (scr_exc_pending()) { /* the hook threw: propagate, do not swallow */
+        if (sub) scr_dyn_release(sub);
+        scr_dyn_release(mv);
+        scr_str_release(k);
+        free(ord);
+        return;
+      }
+      const ScrDyn *val = sub ? sub : mv;
+      if (scr_dyn_json_absent(val)) { /* undefined/function members drop, like Node */
+        if (sub) scr_dyn_release(sub);
+        scr_dyn_release(mv);
+        scr_str_release(k);
+        continue;
+      }
       if (!first) scr_jb_putc(b, ',');
       first = false;
-      /* Keys escape exactly like string values (put_json_str quotes). */
-      ScrStr *k = scr_str_new(e->key, e->key_len);
       scr_jb_put_json_str(b, k);
-      scr_str_release(k);
       scr_jb_putc(b, ':');
-      scr_jb_put_dyn(b, e->value);
+      scr_jb_put_dyn_raw(b, val); /* absence already decided above */
+      if (sub) scr_dyn_release(sub);
+      scr_dyn_release(mv);
+      scr_str_release(k);
+      if (scr_exc_pending()) { /* a nested member threw */
+        free(ord);
+        return;
+      }
     }
     free(ord);
     scr_jb_putc(b, '}');
