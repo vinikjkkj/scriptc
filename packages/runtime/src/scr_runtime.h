@@ -1250,8 +1250,42 @@ typedef struct ScrClosure {
    * (like the dyn→closure edge): a cycle through it is merely never
    * collected. */
   ScrBox *props;
+  /* The IMPLICIT prototype object this function value minted, OWNED (+1)
+   * and opaque here (an OBJ ScrDyn — this unit stays dyn-free). NULL until
+   * scr_dyn_fn_prototype mints one.
+   *
+   * It is the closure's OWN edge rather than a second reference through
+   * `props` because the props table's `prototype` member can be REPLACED
+   * (`F.prototype = Object.create(P)`) while instances built before the
+   * replacement still inherit from the minted object — and that object is
+   * the key the `constructor` registry is indexed by, so it must stay
+   * addressable and un-recycled for exactly as long as this closure can
+   * still be named. Dropped by scr_closure_ctor_unlink at teardown, which
+   * is what keeps the registry's borrowed closure pointer from dangling. */
+  void *implicit_proto;
   ScrBox *caps[];
 } ScrClosure;
+
+/* Installed by the dyn unit the first time it mints an implicit prototype
+ * (scr_dyn_fn_prototype), NULL in a program that never does. Called from
+ * BOTH closure teardown paths — the refcount one and the cycle
+ * collector's — before `props` is released, and only when
+ * `implicit_proto` is non-NULL, so a closure that never had one pays a
+ * single pointer test. It erases the closure's `constructor` registry
+ * entry and releases the prototype object.
+ *
+ * A function pointer rather than a direct call because this unit is
+ * deliberately dyn-free (the ScrBox `props` story above), the same shape
+ * the island ops use to keep the always-linked core off the gated unit. */
+extern void (*scr_closure_ctor_unlink)(ScrClosure *c);
+
+/* Exit teardown for an INTERNED (immortal, rc == SIZE_MAX) function-value
+ * closure: an emitted static literal that neither release path can reach,
+ * so its two lazily-created owned edges — the own-property table and the
+ * minted implicit prototype — are dropped here or the RC audit sees them
+ * live at exit. Idempotent and NULL-tolerant; the emitters call exactly
+ * this, so an edge added to ScrClosure later needs no backend edit. */
+void scr_closure_static_teardown(ScrClosure *c);
 
 ScrClosure *scr_closure_new(void *fn, size_t ncaps); /* +1; caller fills caps with +1 box refs */
 
@@ -3155,18 +3189,34 @@ void scr_dyn_obj_set_proto(ScrDyn *obj, ScrDyn *proto);
  * closure, not one per dyn boundary crossing) and a later
  * `F.prototype = Object.create(P)` simply overwrites the member. +1.
  *
- * It carries NO `constructor` member. Node's does, and storing one would
- * mean the prototype object retaining a FUNC box retaining the closure
- * retaining the property table retaining the prototype object — a cycle
- * refcounting cannot break and the cycle collector cannot see (the
- * documented dyn→closure stance). So an UNASSIGNED `constructor` read
- * through this object throws the loud not-supported-yet fence instead of
- * answering undefined; an explicitly assigned one
- * (`F.prototype.constructor = F`, which is how the shipped protobufjs
- * bundle spells it) is a plain own member and answers exactly. */
+ * It STORES no `constructor` member, and it never will: storing one
+ * would mean the prototype object retaining a FUNC box retaining the
+ * closure retaining the property table retaining the prototype object —
+ * a cycle refcounting cannot break and the cycle collector cannot see
+ * (the documented dyn→closure stance).
+ *
+ * The read is answered anyway, and the reason is that a stored property
+ * is more than the read needs. A FUNC box is a borrowed-able closure
+ * pointer plus five static literals, so the runtime keeps a side
+ * REGISTRY from minted prototype object to that descriptor (scr_json.c's
+ * `constructor` back-link section) and mints a fresh box per read. The
+ * borrowed closure pointer is made safe by construction, not by
+ * counting: the closure OWNS its minted prototype (`implicit_proto`
+ * above), so the registry key cannot be freed or its address recycled;
+ * and both closure teardown paths erase the entry first
+ * (scr_closure_ctor_unlink). The one direction that would cycle —
+ * prototype OWNING the function — is the one direction nothing stores.
+ *
+ * `constructor` therefore answers exactly for as long as the function is
+ * reachable at all, and reverts to the loud not-supported-yet fence only
+ * for a prototype object that OUTLIVED its function. An explicitly
+ * assigned one (`F.prototype.constructor = F`, which is how the shipped
+ * protobufjs bundle spells its BufferWriter) is a plain own member found
+ * by the walk before any of this. */
 ScrDyn *scr_dyn_fn_prototype(ScrDyn *fn);
 /* True when `d`'s chain reaches such an object (the emitted keyed read
- * asks before turning a missed `constructor` into the fence below). */
+ * asks before turning a missed `constructor` into the fence below —
+ * after the registry has already failed to name the function). */
 bool scr_dyn_proto_chain_is_fn_pub(const ScrDyn *d);
 /* Throws that fence (the emitted keyed read calls it). */
 void scr_dyn_proto_ctor_fence(void);

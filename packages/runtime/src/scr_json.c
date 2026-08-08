@@ -490,11 +490,17 @@ ScrDyn *scr_dyn_proto_get(const ScrDyn *d, const char *key, size_t key_len) {
 /* True when the chain above `d` reaches a prototype object that a
  * FUNCTION value minted (scr_dyn_fn_prototype) — the one place where
  * Node has a `constructor` member and this runtime deliberately does
- * not. Used to turn that read into a loud fence instead of undefined. */
+ * not carry one as a STORED property. Used to turn that read into a loud
+ * fence instead of undefined when the registry below cannot name the
+ * function either. */
 bool scr_dyn_proto_chain_is_fn_pub(const ScrDyn *d) {
-  if (d->kind != SCR_DYN_OBJ) return false;
-  const ScrDyn *p = d->v.obj.proto;
-  for (size_t steps = 0; p != NULL && steps < SCR_PROTO_MAX_DEPTH; steps++) {
+  /* From `d` ITSELF, not from its [[Prototype]]: an escaped prototype
+   * object whose function is gone is exactly the receiver this fence
+   * exists for, and starting one link up answered it a silent
+   * `undefined`. Only a minted prototype and an INSTANCE of one carry a
+   * `cname`, so no plain literal reaches the fence through this. */
+  const ScrDyn *p = d;
+  for (size_t steps = 0; p != NULL && steps <= SCR_PROTO_MAX_DEPTH; steps++) {
     if (p->kind != SCR_DYN_OBJ) return false;
     if (p->v.obj.cname != NULL) return true;
     p = p->v.obj.proto;
@@ -502,14 +508,202 @@ bool scr_dyn_proto_chain_is_fn_pub(const ScrDyn *d) {
   return false;
 }
 
+/* ── the `constructor` back-link, without the cycle ────────────────────
+ *
+ * Node's `F.prototype.constructor` is F. Storing that as a PROPERTY here
+ * is what cannot be done: the prototype object would hold a FUNC box
+ * holding the closure holding the property table holding the prototype
+ * object — a cycle refcounting cannot break and the collector cannot see
+ * (ScrDyn carries no trace header, so the dyn→closure edge is an
+ * external root by construction). Two agents refused it on exactly that
+ * ground and both were right.
+ *
+ * What the read actually needs is smaller than a stored property: the
+ * IDENTITY of the closure, plus the five STATIC literals a FUNC box is
+ * otherwise made of (thunk, sig, name, src, arity). None of those five
+ * is owned by anything, so the only edge in question is the closure
+ * pointer — and that one is BORROWED here and made safe by construction
+ * rather than by counting:
+ *
+ *   - the closure OWNS its minted prototype object (ScrClosure's
+ *     `implicit_proto`, +1 at mint), so the key of this table cannot be
+ *     freed and its address cannot be recycled while the entry lives;
+ *   - closure teardown — both the refcount path and the collector's —
+ *     erases the entry BEFORE anything else (scr_closure_ctor_unlink),
+ *     so the borrowed pointer cannot outlive its closure.
+ *
+ * The direction that would cycle (prototype → function) is therefore the
+ * one direction this table does NOT store. Reading `constructor` MINTS a
+ * fresh FUNC box over the closure with an ordinary +1, exactly like every
+ * other boundary crossing of a function value — and because a FUNC box's
+ * own-property table hangs off the CLOSURE, the box a read answers shares
+ * `F.alloc` and every other static with the box the program already had.
+ * That is the whole of what `this.constructor.alloc(this.len)` needs.
+ *
+ * An explicitly assigned `constructor` still shadows all of this: it is
+ * an ordinary own member found by the walk long before the read gets
+ * here.
+ *
+ * Open addressing with linear probing over power-of-two buckets. Live
+ * entries are one per closure that ever had its `prototype` DEMANDED, so
+ * the table is small (protobufjs's bundle: tens); erasure is tombstone-
+ * free because it re-inserts the probe run behind the hole. */
+typedef struct {
+  ScrClosure *clo;    /* BORROWED — see above */
+  ScrDynThunk thunk;  /* the remaining five are static literals */
+  const char *sig;
+  const char *name;
+  const char *src;
+  uint32_t arity;
+} ScrCtorDesc;
+
+typedef struct {
+  const ScrDyn *proto; /* NULL = empty bucket; owned by clo->implicit_proto */
+  ScrCtorDesc d;
+} ScrCtorSlot;
+
+static ScrCtorSlot *scr_ctor_tab = NULL;
+static size_t scr_ctor_cap = 0;  /* power of two, 0 = unallocated */
+static size_t scr_ctor_len = 0;
+
+static size_t scr_ctor_hash(const ScrDyn *p) {
+  /* Fibonacci hashing of the pointer: the low bits of a heap address are
+   * alignment zeros, so the raw value is a poor bucket index. */
+  uint64_t h = (uint64_t)(uintptr_t)p;
+  h *= 0x9e3779b97f4a7c15ULL;
+  return (size_t)(h >> 32);
+}
+
+static void scr_ctor_insert(ScrCtorSlot *tab, size_t cap, const ScrDyn *p, ScrCtorDesc d) {
+  size_t i = scr_ctor_hash(p) & (cap - 1);
+  while (tab[i].proto != NULL) i = (i + 1) & (cap - 1);
+  tab[i].proto = p;
+  tab[i].d = d;
+}
+
+/* The BUCKET ARRAY itself, at exit. It holds no counted references — the
+ * entries are a borrowed closure pointer and five static literals — so
+ * this is purely so a sanitized lane sees no stray malloc, and so the
+ * library lane (scr_atexit is a session reset there) starts each session
+ * with an empty table rather than one indexed by freed addresses. */
+static void scr_ctor_teardown(void) {
+  free(scr_ctor_tab);
+  scr_ctor_tab = NULL;
+  scr_ctor_cap = 0;
+  scr_ctor_len = 0;
+}
+
+static void scr_ctor_grow(void) {
+  if (scr_ctor_cap == 0) scr_atexit(scr_ctor_teardown);
+  size_t cap = scr_ctor_cap ? scr_ctor_cap * 2 : 16;
+  ScrCtorSlot *tab = calloc(cap, sizeof *tab);
+  if (!tab) scr_json_oom();
+  for (size_t i = 0; i < scr_ctor_cap; i++) {
+    if (scr_ctor_tab[i].proto != NULL) {
+      scr_ctor_insert(tab, cap, scr_ctor_tab[i].proto, scr_ctor_tab[i].d);
+    }
+  }
+  free(scr_ctor_tab);
+  scr_ctor_tab = tab;
+  scr_ctor_cap = cap;
+}
+
+/* The descriptor registered for this exact prototype OBJECT, or NULL.
+ * Identity, never shape — two functions with identical bodies are
+ * different constructors, the stance scr_dyn_instance_of already takes. */
+static const ScrCtorDesc *scr_ctor_find(const ScrDyn *p) {
+  if (scr_ctor_cap == 0) return NULL;
+  size_t i = scr_ctor_hash(p) & (scr_ctor_cap - 1);
+  for (size_t steps = 0; steps < scr_ctor_cap; steps++) {
+    if (scr_ctor_tab[i].proto == NULL) return NULL;
+    if (scr_ctor_tab[i].proto == p) return &scr_ctor_tab[i].d;
+    i = (i + 1) & (scr_ctor_cap - 1);
+  }
+  return NULL;
+}
+
+static void scr_ctor_erase(const ScrDyn *p) {
+  if (scr_ctor_cap == 0) return;
+  size_t i = scr_ctor_hash(p) & (scr_ctor_cap - 1);
+  for (size_t steps = 0; steps < scr_ctor_cap; steps++) {
+    if (scr_ctor_tab[i].proto == NULL) return;
+    if (scr_ctor_tab[i].proto == p) break;
+    i = (i + 1) & (scr_ctor_cap - 1);
+    if (steps + 1 == scr_ctor_cap) return;
+  }
+  /* Backward-shift deletion: clear the slot, then re-insert the rest of
+   * the probe run so no lookup stops short at the hole. */
+  scr_ctor_tab[i].proto = NULL;
+  scr_ctor_len--;
+  size_t j = (i + 1) & (scr_ctor_cap - 1);
+  while (scr_ctor_tab[j].proto != NULL) {
+    ScrCtorSlot moved = scr_ctor_tab[j];
+    scr_ctor_tab[j].proto = NULL;
+    scr_ctor_insert(scr_ctor_tab, scr_ctor_cap, moved.proto, moved.d);
+    j = (j + 1) & (scr_ctor_cap - 1);
+  }
+}
+
+/* Closure teardown's half of the contract (scr_runtime.h): erase the
+ * entry, then drop the prototype object the closure owned. Installed as
+ * scr_closure_ctor_unlink the first time a prototype is minted, and
+ * reached only for a closure that has one. */
+static void scr_dyn_ctor_unlink(ScrClosure *c) {
+  ScrDyn *proto = (ScrDyn *)c->implicit_proto;
+  c->implicit_proto = NULL;
+  scr_ctor_erase(proto);
+  scr_dyn_release(proto);
+}
+
+/* The FUNCTION value `d`'s chain names as its `constructor`, or NULL when
+ * no prototype on it was minted by one. +1 — a fresh box over the same
+ * closure, so `===` against the program's own box answers true
+ * (scr_dyn_strict_eq compares FUNC nodes by closure) and the shared
+ * own-property table answers its statics.
+ *
+ * The walk does not stop at the first object carrying a `cname`: an
+ * INSTANCE copies that name for util.inspect, so a chain built by
+ * `Object.create(new F())` passes through one on the way to the
+ * prototype that was actually minted. */
+static ScrDyn *scr_dyn_proto_chain_ctor(const ScrDyn *d) {
+  if (d->kind != SCR_DYN_OBJ) return NULL;
+  /* The receiver ITSELF first. `F.prototype.constructor` names the
+   * prototype object directly — the OWN property in Node — and a walk
+   * that started one link up answered a silent `undefined` there while
+   * answering the same question exactly for every instance below it. */
+  const ScrDyn *p = d;
+  for (size_t steps = 0; p != NULL && steps <= SCR_PROTO_MAX_DEPTH; steps++) {
+    if (p->kind != SCR_DYN_OBJ) return NULL;
+    const ScrCtorDesc *c = scr_ctor_find(p);
+    if (c != NULL) {
+      return scr_dyn_new_func_src(scr_closure_retain(c->clo), c->thunk, c->arity,
+                                  c->sig, c->name, c->src);
+    }
+    p = p->v.obj.proto;
+  }
+  return NULL;
+}
+
+/* Is this object a minted implicit prototype? `constructor` is an OWN
+ * property of one in Node, so `in` and Object.hasOwn must say so even
+ * though the value is computed rather than stored. */
+static bool scr_dyn_is_minted_proto(const ScrDyn *d) {
+  return d != NULL && d->kind == SCR_DYN_OBJ && scr_ctor_find(d) != NULL;
+}
+
 /* The `constructor` fence (see scr_dyn_fn_prototype's header): loud,
- * never a silent undefined. Throws; callers return NULL after. */
+ * never a silent undefined. Reached only when the registry above could
+ * NOT name the function — which today means the minting closure is
+ * already gone, so the prototype object outlived the only value that
+ * could answer. Throws; callers return NULL after. */
 void scr_dyn_proto_ctor_fence(void) {
   static const char msg[] =
       "reading 'constructor' through a function's implicit prototype object is not supported yet"
-      " (the implicit prototype carries no constructor back-link here: it would retain the"
-      " function, which retains the prototype — a cycle reference counting cannot break;"
-      " assign it explicitly, `F.prototype.constructor = F`, and the read answers exactly)";
+      " when the function itself is already unreachable (the prototype object carries no OWNED"
+      " back-link — that would retain the function, which retains the prototype, a cycle"
+      " reference counting cannot break — and the borrowed one was dropped when the last"
+      " reference to the function went away; assign it explicitly,"
+      " `F.prototype.constructor = F`, and the read answers exactly)";
   scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
 }
 
@@ -2566,9 +2760,14 @@ ScrDyn *scr_dyn_obj_key_get(ScrDyn *recv, const char *key, size_t key_len) {
       scr_dyn_error_ctor_fence();
       return NULL;
     }
-    /* The one member Node's implicit prototype has and this one
-     * deliberately does not (the back-link would be an uncollectable
-     * cycle): loud, never a silent undefined. */
+    /* The one member Node's implicit prototype has and this one does not
+     * STORE (the stored back-link would be an uncollectable cycle): the
+     * registry answers it from a borrowed closure pointer instead, and
+     * mints the box on the spot. */
+    ScrDyn *ctor = scr_dyn_proto_chain_ctor(recv);
+    if (ctor != NULL) return ctor;
+    /* Reached only when the minting closure is already gone: loud, never
+     * a silent undefined. */
     if (scr_dyn_proto_chain_is_fn_pub(recv)) {
       scr_dyn_proto_ctor_fence();
       return NULL;
@@ -2587,10 +2786,20 @@ bool scr_dyn_obj_key_present(const ScrDyn *d, const char *key, size_t key_len) {
    * this tier cannot produce its VALUE (scr_dyn_error_ctor_fence) is no
    * reason to claim the property does not exist: `in` asks about
    * existence, and answering false would be a silent wrong answer where
-   * the read is a loud refusal. Own-or-inherited, like the rest of the
-   * walk. */
-  return key_len == 11 && memcmp(key, "constructor", 11) == 0 &&
-         scr_dyn_error_proto_in_chain(d);
+   * the read is a loud refusal. A function's minted prototype has one
+   * too — computed rather than stored, but `in` asks about existence and
+   * the read now answers. Own-or-inherited, like the rest of the walk. */
+  if (key_len != 11 || memcmp(key, "constructor", 11) != 0) return false;
+  if (scr_dyn_error_proto_in_chain(d)) return true;
+  if (d->kind != SCR_DYN_OBJ) return false;
+  if (scr_dyn_is_minted_proto(d)) return true;
+  const ScrDyn *p = d->v.obj.proto;
+  for (size_t steps = 0; p != NULL && steps < SCR_PROTO_MAX_DEPTH; steps++) {
+    if (p->kind != SCR_DYN_OBJ) return false;
+    if (scr_dyn_is_minted_proto(p)) return true;
+    p = p->v.obj.proto;
+  }
+  return false;
 }
 
 /* OWN presence, hidden table included — Object.hasOwn's question. Node
@@ -2603,10 +2812,12 @@ bool scr_dyn_obj_has_own_prop(const ScrDyn *d, const char *key, size_t key_len) 
     return true;
   }
   /* `constructor` is an OWN property of %Error.prototype% in Node — of
-   * that object and of no descendant. The value is a loud refusal; the
-   * existence is a plain true (scr_dyn_obj_key_present's note). */
+   * that object and of no descendant — and of a function's minted
+   * prototype OBJECT, again of that object and of no instance below it.
+   * The Error one's value is a loud refusal and the function one's is
+   * computed; both EXIST (scr_dyn_obj_key_present's note). */
   return key_len == 11 && memcmp(key, "constructor", 11) == 0 &&
-         d == scr_error_proto;
+         (d == scr_error_proto || scr_dyn_is_minted_proto(d));
 }
 
 /* `Object.getOwnPropertyNames`'s guard. The emitted own-names walk is
@@ -3991,6 +4202,21 @@ ScrDyn *scr_dyn_fn_prototype(ScrDyn *fn) {
   proto->v.obj.cname = fn->v.fn.name;
   scr_dyn_obj_set(table, "prototype", 9, scr_dyn_retain(proto)); /* table owns one */
   scr_dyn_release(table);
+  /* Register the `constructor` answer (see the registry's header). The
+   * CLOSURE takes its own +1 on the prototype so the registry's key can
+   * never be freed or its address recycled underneath the entry, and the
+   * teardown hook that drops both is installed here — it can only be
+   * reached by a closure that got this far. */
+  ScrClosure *clo = fn->v.fn.clo;
+  if (clo->implicit_proto == NULL) {
+    if (scr_ctor_len * 2 >= scr_ctor_cap) scr_ctor_grow();
+    ScrCtorDesc d = {clo, fn->v.fn.thunk, fn->v.fn.sig, fn->v.fn.name, fn->v.fn.src,
+                     fn->v.fn.arity};
+    scr_ctor_insert(scr_ctor_tab, scr_ctor_cap, proto, d);
+    scr_ctor_len++;
+    clo->implicit_proto = scr_dyn_retain(proto);
+    scr_closure_ctor_unlink = &scr_dyn_ctor_unlink;
+  }
   return proto; /* the caller's +1 */
 }
 
