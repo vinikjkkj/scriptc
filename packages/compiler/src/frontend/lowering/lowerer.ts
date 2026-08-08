@@ -829,6 +829,83 @@ export function jsFuncNameOf(node: ts.Node): string | null {
   return null;
 }
 
+/** The JS `Function.prototype.name` of a function VALUE, resolved at the
+ * value's CREATION site instead of the reference site jsFuncNameOf reads.
+ *
+ * JS names a function once, when it is created, and every later binding
+ * carries that one name: `function f(){}; var g = f; g.name === "f"`.
+ * jsFuncNameOf answers the SPELLING at the point of use, so it said `"g"` —
+ * a silent wrong answer for every aliased function value in the program,
+ * and the reason `f.bind(o).name` could never be right either (the bound
+ * name is derived from the TARGET's name, so the model has to know what a
+ * value IS before it can prefix anything).
+ *
+ * Three creation forms are provable without running the program, and they
+ * are the ones JS's own naming rules are written in terms of:
+ *
+ *   - a `.bind(...)` call — the bound function's name is `"bound "` plus
+ *     the target's, and a rebind stacks the prefix (`"bound bound f"`);
+ *   - an identifier whose symbol has ONE declaration that is a function or
+ *     class declaration — the declaration's name;
+ *   - an identifier bound by a `const` (or a `let`/`var` this file never
+ *     writes again) whose initializer is itself one of these forms —
+ *     followed to its own creation site.
+ *
+ * Anything else — a reassigned binding, a parameter, an element read, a
+ * call result — has no creation site a compiler can see, and falls back to
+ * jsFuncNameOf's reference-site spelling. That fallback is the documented
+ * pre-existing approximation (SEMANTICS.md), NOT a new guess: this function
+ * only ever replaces it where the real name is provable.
+ *
+ * `seen` breaks `var a = b, b = a` cycles; the walk is otherwise bounded by
+ * the declaration chain. */
+export function jsFuncValueNameOf(L: Lowerer, node: ts.Node, seen?: Set<ts.Symbol>): string | null {
+  let n: ts.Node = node;
+  while (ts.isParenthesizedExpression(n)) n = n.expression;
+
+  // `target.bind(...)`. The receiver's own name resolves the same way, so a
+  // rebind composes without a special case. An anonymous target gives
+  // Node's `"bound "` WITH the trailing space — that is the answer, not a
+  // missing one, so the empty tail is kept rather than turned into null.
+  if (
+    ts.isCallExpression(n) &&
+    ts.isPropertyAccessExpression(n.expression) &&
+    n.expression.name.text === "bind" &&
+    n.expression.questionDotToken === undefined
+  ) {
+    return `bound ${jsFuncValueNameOf(L, n.expression.expression, seen) ?? ""}`;
+  }
+
+  if (ts.isIdentifier(n)) {
+    return declaredFuncValueName(L, n, seen ?? new Set()) ?? jsFuncNameOf(n);
+  }
+  return jsFuncNameOf(n);
+}
+
+/** The creation-site name reachable through an identifier's DECLARATION,
+ * or null when the binding names no one function value. See
+ * jsFuncValueNameOf. */
+function declaredFuncValueName(L: Lowerer, id: ts.Identifier, seen: Set<ts.Symbol>): string | null {
+  const sym = L.resolveValueSymbol(id);
+  if (!sym || seen.has(sym)) return null;
+  seen.add(sym);
+  const decls = L.checker.declarationsOf(sym);
+  // Two declarations means two possible values behind one name (a
+  // redeclared `var`, a declaration/implementation pair): nothing here can
+  // say which one a use sees.
+  if (decls.length !== 1) return null;
+  const d = decls[0];
+  if (!d) return null;
+  if ((ts.isFunctionDeclaration(d) || ts.isClassDeclaration(d)) && d.name) return d.name.text;
+  if (!ts.isVariableDeclaration(d) || !ts.isIdentifier(d.name) || !d.initializer) return null;
+  // A binding written again after its initializer can hold a different
+  // function at the point of use — the reference-site spelling is then the
+  // only honest thing left, so decline and let the caller fall back.
+  const isConst = (ts.getCombinedNodeFlags(d) & ts.NodeFlags.Const) !== 0;
+  if (!isConst && !bindingNeverReassigned(L, sym, d)) return null;
+  return jsFuncValueNameOf(L, d.initializer, seen);
+}
+
 export class Lowerer {
   readonly checker: ts.TypeChecker;
   readonly diags: ScrDiagnostic[] = [];
@@ -6997,12 +7074,13 @@ export class Lowerer {
         );
       }
     }
-    // A closure that just BOXED into dyn takes its best-effort JS name
-    // from the source node (identifier reads, named function expressions,
-    // NamedEvaluation through a variable initializer) — inspect prints
-    // [Function: name] and call errors spell it, like Node.
+    // A closure that just BOXED into dyn takes its JS name from the value's
+    // CREATION site (jsFuncValueNameOf: through an alias to the declaration
+    // that made it, and `"bound "`-prefixed through a bind), falling back to
+    // the source node's own spelling where no creation site is provable —
+    // inspect prints [Function: name] and call errors spell it, like Node.
     if (e.kind === "dynFrom" && e.value.type.kind === "func" && e.fnName === undefined) {
-      const name = jsFuncNameOf(node);
+      const name = jsFuncValueNameOf(this, node);
       if (name !== null) e = { ...e, fnName: name };
     }
     // A union the plain re-tag declined (stranded NON-unit arms): when the
