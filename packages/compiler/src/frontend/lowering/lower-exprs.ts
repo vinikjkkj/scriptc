@@ -197,12 +197,23 @@ export function abstractPropertyDeclOf(L: Lowerer, expr: ts.PropertyAccessExpres
  * Only genuine literals answer. A literal has no side effects, so a caller
  * that skips evaluating it — which is what the short-circuit folds do —
  * drops nothing observable; anything computed keeps its runtime test. The
- * falsy set is JS's own: `false`, `0`/`-0`/`NaN`, `""`, and the units. */
+ * falsy set is JS's own: `false`, `0`/`-0`/`NaN`, `""`, and the units.
+ *
+ * A materialized FUNCTION VALUE joins them on the true side. ToBoolean of
+ * every function object is `true` — the one exception in the language,
+ * an [[IsHTMLDDA]] object (`document.all`), is a DOM host object no
+ * lowering here can produce — and a `closure` node is effect-free by
+ * construction: its captures are local IDs, not expressions. So it meets
+ * both conditions this fold asks of a literal. This is what makes
+ * `Number.isInteger || function (value) { ... }` — protobufjs's util,
+ * where a lifted static lands in an operand — yield the static and never
+ * lower the fallback, JS's own rule for a truthy left operand. */
 function staticTruth(e: IrExpr): boolean | null {
   if (e.kind === "boolLit") return e.value;
   if (e.kind === "numLit") return e.value !== 0 && !Number.isNaN(e.value);
   if (e.kind === "strLit") return e.value.length > 0;
   if (e.kind === "unitLit") return false;
+  if (e.kind === "closure") return true;
   return null;
 }
 
