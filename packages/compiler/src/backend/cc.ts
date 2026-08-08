@@ -437,6 +437,32 @@ async function fileExists(path: string): Promise<boolean> {
   );
 }
 
+/** -DSCR_RC_AUDIT is a SEPARATE dial from -fsanitize=address, and the two
+ * were only ever spelled together because the sanitized lane wanted both.
+ * The define costs a live counter per refcounted kind plus an atexit
+ * assertion (scr_console.c's scr_rc_audit_at_exit, _Exit(99) on a nonzero
+ * count) — pure C with no runtime library behind it, so it LINKS on every
+ * toolchain, including the ones that compile ASan instrumentation and then
+ * have no asan runtime to link it against (zig's mingw target: the whole
+ * reason the win32 lane runs unsanitized). Coupling the two left that lane
+ * with no leak detector at all; SCRIPTC_RC_AUDIT=1 turns the audit on by
+ * itself. Unset/empty/"0" keeps the historical command line byte for byte,
+ * and when it IS set the extra define lands in the build-cache key like any
+ * other flag, so audited and unaudited binaries never share an entry. */
+function rcAuditRequested(): boolean {
+  const v = process.env.SCRIPTC_RC_AUDIT;
+  return v !== undefined && v !== "" && v !== "0";
+}
+
+/** The optimization + audit flags every compile shares: the sanitized lane
+ * unchanged, plain builds at -O2 plus the audit define only when asked.
+ * compileC's two option sets and compileLibArchive must stay in lockstep —
+ * see buildArgs' -fno-strict-aliasing note. */
+function optAuditArgs(sanitize: boolean): string[] {
+  if (sanitize) return ["-O1", "-fsanitize=address", "-DSCR_RC_AUDIT"];
+  return rcAuditRequested() ? ["-O2", "-DSCR_RC_AUDIT"] : ["-O2"];
+}
+
 /** The engine archive for one flavor, built lazily on the first --dynamic
  * compile (~10s) and cached under vendor/.cache/<commit>-<flavor>/ — unlike
  * the runtime's own sources (recompiled every build, ~100ms), the engine is
@@ -915,7 +941,7 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
   const cflags = [
     "-std=c11",
     ...driver.targetArgs,
-    ...(sanitize ? ["-O1", "-fsanitize=address", "-DSCR_RC_AUDIT"] : ["-O2"]),
+    ...optAuditArgs(sanitize),
     "-fno-math-errno",
     "-fno-strict-aliasing", // the emitted object model type-puns — see compileC's buildArgs
     "-Wno-deprecated-declarations",
@@ -1239,9 +1265,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
   const buildArgs = (rt: (path: string) => string): string[] => [
     "-std=c11",
     ...driver.targetArgs,
-    ...(opts.sanitize
-      ? ["-O1", "-fsanitize=address", "-DSCR_RC_AUDIT"]
-      : ["-O2"]),
+    ...optAuditArgs(opts.sanitize ?? false),
     "-fno-math-errno",
     // The emitted object model is deliberately type-punned C: a hierarchy
     // upcast is a raw pointer cast, so one object's header (rc, vt) and
@@ -1517,9 +1541,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
   const cflags = [
     "-std=c11",
     ...driver.targetArgs,
-    ...(opts.sanitize
-      ? ["-O1", "-fsanitize=address", "-DSCR_RC_AUDIT"]
-      : ["-O2"]),
+    ...optAuditArgs(opts.sanitize ?? false),
     "-fno-math-errno",
     "-fno-strict-aliasing", // the emitted object model type-puns — see buildArgs
     "-Wno-deprecated-declarations",
