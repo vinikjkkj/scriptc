@@ -173,6 +173,23 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
           if (vt === "dyn" || vt === "record" || vt === "array" || vt === "union") f.throws = true;
           break;
         }
+        case "toString": {
+          // The DISPLAY spelling — String(v), `${v}`, "" + v — over a
+          // checked-dynamic operand runs the VALUE'S OWN toString: an OBJ
+          // whose own members or prototype chain carry a callable one, a
+          // RegExp handle's own renderer, the engine's ToString for an
+          // island value. Every one of those can throw catchably, and
+          // Node propagates it (`String(v)` inside a try/catch is caught,
+          // outside it exits 1). The METHOD spelling `v.toString()` was
+          // always seeded — it is the `dyn.toString` libCall — so before
+          // this the SAME user function propagated through one spelling
+          // and was swallowed by the other. Kind-level conservatism, like
+          // jsonStringify above: a dyn that turns out to be a number pays
+          // one flag read.
+          const ot = (rec["operand"] as { type?: { kind?: string } } | undefined)?.type?.kind;
+          if (ot === "dyn") f.throws = true;
+          break;
+        }
         case "jsOp":
         case "jsExit":
         case "jsMarshal":

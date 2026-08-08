@@ -4327,10 +4327,15 @@ class LlEmitter {
         if (v.type.kind === "dyn") {
           // String(unknown): dispatch over the dyn kind (dyn.ts's sc_ds —
           // Node's String() incl. arrays-join and "[object Object]").
+          // The walker runs the value's OWN toString where the tree
+          // carries one, so it can leave a catchable exception pending —
+          // the result joins the frame BEFORE the check, like caughtCheck.
           const helper = this.dyn.dynToStrHelper();
           const t = B.tmp();
           B.line(`${t} = call ptr @${helper}(ptr ${v.name})`);
-          return this.own({ name: t, type: e.type });
+          const out = this.own({ name: t, type: e.type });
+          this.emitPendingCheck();
+          return out;
         }
         const t = B.tmp();
         if (v.type.kind === "f64") {
