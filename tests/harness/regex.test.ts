@@ -21,7 +21,9 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
+import { expectAbort } from "./cc.js";
 import { exeName } from "./exe.js";
+import { REGEX_CLASS_MAX, STATIC_CLASS_MAX } from "./size-class.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -82,7 +84,7 @@ console.log(check(/a/g, "abc"));
       },
       (e: Error & { signal?: string; stdout?: string; stderr?: string }) => e,
     );
-    expect(err.signal).toBe("SIGABRT");
+    expectAbort(err);
     expect(err.stdout).toContain("before");
     expect(err.stderr).toContain(
       "test() on a regex with the 'g' or 'y' flag is not supported",
@@ -122,7 +124,7 @@ console.log(/${"(a)".repeat(300)}/.test("a"));
       },
       (e: Error & { signal?: string; stdout?: string; stderr?: string }) => e,
     );
-    expect(err.signal).toBe("SIGABRT");
+    expectAbort(err);
     expect(err.stdout).toContain("before");
     expect(err.stderr).toContain("SyntaxError: Invalid regular expression:");
   });
@@ -162,15 +164,9 @@ console.log(/${"(a)".repeat(300)}/.test("a"));
     // the %j dyn stringify walk, and the runtime-encoding readFileSync
     // form (all in always-linked TUs) tipped the regex class one more
     // page.
-    // The canonical Ubuntu 24.04/clang Sandbox measures 387,600 bytes for
-    // the plain binary and 540,232 with regex linked. The Linux bounds leave
-    // roughly one ELF page of growth. Mach-O keeps its independently
-    // calibrated bounds; neither cushion can hide an engine-sized jump.
-    expect(statSync(plainBuild.binaryPath).size).toBeLessThan(
-      process.platform === "linux" ? 392_000 : 361_000,
-    );
-    expect(statSync(regexBuild.binaryPath).size).toBeLessThan(
-      process.platform === "linux" ? 545_000 : 512_000,
-    );
+    // The per-platform calibration and its measurements live in
+    // size-class.ts — island.test.ts weighs the same classes.
+    expect(statSync(plainBuild.binaryPath).size).toBeLessThan(STATIC_CLASS_MAX);
+    expect(statSync(regexBuild.binaryPath).size).toBeLessThan(REGEX_CLASS_MAX);
   });
 });

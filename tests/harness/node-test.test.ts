@@ -102,11 +102,25 @@ async function build(entry: string): Promise<string> {
   return result.binaryPath;
 }
 
+/* POSIX spelling: globSync hands back backslashes on win32, so
+ * `split("/").at(-1)` returned the whole absolute path and every case in
+ * this file reported under a G:\… name. No-op elsewhere. */
 const cases = globSync(join(fixturesRoot, "cases/*.ts"))
+  .map((entry) => entry.split("\\").join("/"))
   .sort()
   .map((entry) => ({ name: entry.split("/").at(-1)!.replace(/\.ts$/, ""), entry }));
 
 describe(`node:test differential (${cases.length} programs${sanitize ? ", sanitized" : ""})`, () => {
+  /* The population is the denominator. `test.for([])` registers nothing and
+   * reports green, so a glob that silently answers nothing (a moved fixture
+   * dir, a separator bug in the pattern) would retire this whole lane
+   * without a single red line — the "0/0 cases passed" shape cc.ts's
+   * expectCasesPassed closes for the C oracles. Nothing else globs this
+   * directory, so the floor has to live here. */
+  test("the fixture set is not empty", () => {
+    expect(cases.length).toBeGreaterThan(0);
+  });
+
   test.for(cases.map((c) => [c.name, c] as const))("%s", async ([, c]) => {
     const binary = await build(c.entry);
     const [nodeRes, nativeRes] = await Promise.all([

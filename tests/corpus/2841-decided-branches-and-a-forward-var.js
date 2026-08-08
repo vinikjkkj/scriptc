@@ -1,3 +1,4 @@
+// @deferred-fences: 2
 // Two halves of one rule: a branch the compiler can DECIDE is a branch it
 // must not lower, and a `var` read before its declarator is `undefined`.
 //

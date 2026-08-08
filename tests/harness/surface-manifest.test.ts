@@ -121,6 +121,19 @@ const PROBES: Probe[] = [
   { id: "node-builtin.perf_hooks.performance.now", source: "console.log(performance.now() >= 0);\n" },
   { id: "node-builtin.path.join", source: 'import { join } from "node:path";\nconsole.log(join("a", "b"));\n' },
   { id: "node-builtin.os.EOL", source: 'import { EOL } from "node:os";\nconsole.log(EOL.length);\n' },
+  // The gzip container family GRADUATED in 04eebba ("compile zlib's
+  // gzip-container twins") and the manifest entry followed; the probe did
+  // not, and kept the pre-graduation spelling `gzipSync("data")` — which
+  // this suite then read as "listed static but did not compile". zlib's
+  // lowered surface takes Buffers (the compiler's own hint says so), so
+  // the static probe is spelled the supported way; the STRING-argument
+  // fence keeps its own record in tests/diagnostics/… and in the
+  // node-types fenced snapshot.
+  {
+    id: "node-builtin.zlib.gzipSync",
+    source:
+      'import { gzipSync, gunzipSync } from "node:zlib";\nconsole.log(gunzipSync(gzipSync(Buffer.from("data", "utf8"))).toString("utf8"));\n',
+  },
   // status dynamic-only — refused with the entry's code statically,
   // analyzed clean under --dynamic
   { id: "stdlib.math.sqrt", source: "console.log(Math.sqrt(2));\n" },
@@ -139,10 +152,11 @@ const PROBES: Probe[] = [
   // METHOD-extraction refusal carries the sample now.
   { id: "diagnostic.sc1031", source: "class C {\n  f = 1;\n  m(): number {\n    return this.f;\n  }\n}\nconst { m } = new C();\nconsole.log(m());\n" },
   { id: "diagnostic.sc1121", source: 'console.log(/ab/g.test("abab"));\n' },
-  {
-    id: "node-builtin.zlib.gzipSync",
-    source: 'import { gzipSync } from "node:zlib";\ngzipSync("data");\nconsole.log(0);\n',
-  },
+  // (The zlib sample moved to the static group above when the gzip
+  // container family graduated in 04eebba; the unsupported class keeps its
+  // four samples. brotliCompressSync is NOT a replacement sample: the
+  // fallback declarations do not declare it at all, so its probe fails
+  // PREFLIGHT instead of reaching the lowering this harness measures.)
 ];
 
 const probeRoot = mkdtempSync(join(tmpdir(), "scr-surface-manifest-"));

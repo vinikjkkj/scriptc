@@ -26,6 +26,7 @@ import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { exeName } from "./exe.js";
+import { ENGINE_CLASS_MIN, STATIC_CLASS_MAX } from "./size-class.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -351,8 +352,13 @@ console.log(greet("world"), 6 * 7);
       build("same-c", source, { dynamic: false }),
       build("same-c", source, { dynamic: true }),
     ]);
+    /* POSIX spelling: the emitted C renders forward-slash paths on every
+     * host, while dirname() hands back backslashes on win32 — so a
+     * backslash-spelled needle replaced nothing and the two files differed
+     * only by their (hashed, per-build) cache directory. Same shape as the
+     * four path-stripping harnesses c3c35d2 normalized; no-op elsewhere. */
     const body = (r: BuildResult) =>
-      readFileSync(r.cPath, "utf8").replaceAll(dirname(r.cPath), "OUTDIR");
+      readFileSync(r.cPath, "utf8").replaceAll(dirname(r.cPath).split("\\").join("/"), "OUTDIR");
     expect(body(dyn)).toBe(body(stat));
   });
 
@@ -374,12 +380,11 @@ console.log(greet("world"), 6 * 7);
     ]);
     const staticSize = statSync(stat.binaryPath).size;
     const dynamicSize = statSync(dyn.binaryPath).size;
-    // The class is toolchain-specific and page-granular. The canonical
-    // Ubuntu 24.04/clang Sandbox measures 387,600 bytes; Mach-O measures
-    // about 353KB. Each bound leaves roughly one native page of growth,
-    // far below the >1MB jump measured when the engine is linked.
-    expect(staticSize).toBeLessThan(process.platform === "linux" ? 392_000 : 361_000);
-    expect(dynamicSize).toBeGreaterThan(500_000);
+    // The class is toolchain-specific and page-granular; the per-platform
+    // calibration and its measurements live in size-class.ts, shared with
+    // regex.test.ts's regex-class pin.
+    expect(staticSize).toBeLessThan(STATIC_CLASS_MAX);
+    expect(dynamicSize).toBeGreaterThan(ENGINE_CLASS_MIN);
   });
 
   /* ── the `any` boundary (validated exits) ─────────────────────────────

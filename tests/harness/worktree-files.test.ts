@@ -35,7 +35,16 @@ test("archive path filtering omits unstaged deletions across stream chunks", asy
   expect(Buffer.concat(chunks)).toEqual(Buffer.from("kept.ts\0"));
 });
 
-test("workspace reset removes image manifests but retains the dependency cache", async () => {
+/* The one leg that EXECUTES the command instead of inspecting it. Its
+ * subject is a Linux-Sandbox recipe by construction — the sibling test
+ * below pins that workspaceResetCommand must keep POSIX paths on every
+ * host, and it refuses a root that is not POSIX-absolute — so on win32
+ * there is no host path to feed it: `G:\…` is not POSIX-absolute and the
+ * builder rejects it before `find` is ever spawned. The shape assertions
+ * (POSIX spelling, filesystem-root refusal) run everywhere. */
+const posixHostTest = process.platform === "win32" ? test.skip : test;
+
+posixHostTest("workspace reset removes image manifests but retains the dependency cache", async () => {
   const root = await mkdtemp(join(tmpdir(), "scriptc-worktree-reset-"));
   roots.push(root);
   mkdirSync(join(root, "packages", "cli"), { recursive: true });

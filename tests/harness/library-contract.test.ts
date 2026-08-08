@@ -29,6 +29,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compileLibrary, validateSidecar, wyhash64, type SidecarDoc } from "@scriptc/compiler";
+import { ccProbe, NM_DEFINED_ONLY, probeName, probeStdout } from "./cc.js";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const fixtureRoot = join(repoRoot, "tests/library-mode");
@@ -99,7 +100,7 @@ async function buildContract(
 }
 
 function nmDefined(archive: string, prefix: string): string[] {
-  const out = execFileSync("nm", ["-gU", archive], { encoding: "utf8" });
+  const out = execFileSync("nm", [...NM_DEFINED_ONLY, archive], { encoding: "utf8" });
   const set = new Set<string>();
   for (const line of out.split("\n")) {
     const sym = line.trim().split(/\s+/).pop();
@@ -239,12 +240,12 @@ describe.each(EMISSIONS)("contract sidecar, %s emission", (emission) => {
     // V12 + the poisoned-guard exemption, end to end: the probe reads the
     // getters before init and after a trap; both reads equal the
     // sidecar's build_id.
-    const probe = join(outDir, "probe");
-    execFileSync("clang", ["-std=c11", join(fixtureRoot, "contract/probe.c"), archive, "-lm", "-o", probe]);
+    const probe = join(outDir, probeName("probe"));
+    ccProbe(["-std=c11", join(fixtureRoot, "contract/probe.c"), archive, "-lm", "-o", probe]);
     const run = spawnSync(probe, [], { encoding: "utf8", timeout: 60_000 });
     expect(run.signal).toBeNull();
     expect(run.status).toBe(0);
-    expect(run.stdout).toBe(
+    expect(probeStdout(run.stdout)).toBe(
       `pre build_id: ${doc.build_id} abi 7
 contract ready
 title: atlas
