@@ -5538,6 +5538,22 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // prototype (+1); a primitive argument throws Node's
             // catchable TypeError (may-throw seed set).
             return finish(`scr_dyn_obj_create_proto(${arg(0)})`);
+          case "dyn.objCreateDescs":
+            // Object.create(<proto>, <descriptors>): create, then run
+            // ObjectDefineProperties over the map through the EXACT
+            // installer (+1 on the created object). Both borrowed; a bad
+            // prototype, a bad descriptor and every refusal the
+            // installer names all throw catchably (may-throw seed set).
+            return finish(`scr_dyn_obj_create_descs(${arg(0)}, ${arg(1)})`);
+          case "dyn.objCreateNullDescs":
+            // Object.create(null, <descriptors>): the same, over the
+            // null-prototype dictionary.
+            return finish(`scr_dyn_obj_create_null_descs(${arg(0)})`);
+          case "dyn.ownNamesFence":
+            // Object.getOwnPropertyNames's guard: void, borrowed, and a
+            // throw only for a receiver carrying non-enumerable own
+            // properties (may-throw seed set).
+            return finish(`scr_dyn_own_names_fence(${arg(0)})`);
           case "dyn.hasOwn":
             // Object.hasOwn over a dyn receiver (throws on nullish, like
             // Node's ToObject).

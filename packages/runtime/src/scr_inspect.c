@@ -969,7 +969,7 @@ ScrStr *scr_insp_dyn_s(ScrDyn *d, double depth) {
 ScrStr *scr_insp_fmt_s(ScrDyn *d, double depth) {
   if (d->kind == SCR_DYN_STR) return scr_str_retain(d->v.str);
   if (d->kind == SCR_DYN_OBJ) {
-    const ScrDyn *m = scr_dyn_obj_get(d, "toString", 8);
+    const ScrDyn *m = scr_dyn_obj_own_data(d, "toString", 8);
     if (m == NULL) m = scr_dyn_proto_get(d, "toString", 8);
     if (m != NULL && m->kind == SCR_DYN_FUNC) return scr_dyn_to_string(d, NULL);
   }
