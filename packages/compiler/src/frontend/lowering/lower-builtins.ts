@@ -2388,7 +2388,11 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         loc,
       });
     }
-    if (stdioT.kind !== "union") throw new Error("emitter bug: exec-options stdio is not a union");
+    // Not an "emitter bug": this is frontend code, and the type it asserts
+    // on is one the frontend itself minted (types.ts builds the exec-options
+    // stdio slot as `string[] | string | undefined`). Blaming the backend
+    // sent anyone who hit it to the wrong file.
+    if (stdioT.kind !== "union") throw new Error("lowering bug: exec-options stdio is not a union");
     const uTag = L.armTag(stdioT.unionId, UNDEFINED_T);
     const sTag = L.armTag(stdioT.unionId, STRING);
     const aTag = L.armTag(stdioT.unionId, arrayOf(STRING));
