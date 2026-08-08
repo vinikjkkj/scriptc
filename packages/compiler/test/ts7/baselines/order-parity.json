@@ -2256,6 +2256,14 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/1714-cjs-whole-export-root/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/1714-cjs-whole-export-root/bundled.cjs",
+    "<repo>/tests/corpus/1714-cjs-whole-export-root/plain.cjs",
+    "<repo>/tests/corpus/1714-cjs-whole-export-root/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/1720-assert-throws-shape.ts": {
    "order": [
     "<repo>/tests/corpus/1720-assert-throws-shape.ts"
@@ -5476,9 +5484,923 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2672-http-request-response-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/2672-http-request-response-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2673-generic-class-two-record-instantiations.ts": {
+   "order": [
+    "<repo>/tests/corpus/2673-generic-class-two-record-instantiations.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2674-generic-overload-implementation.ts": {
+   "order": [
+    "<repo>/tests/corpus/2674-generic-overload-implementation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2675-mapped-alias-over-bound-type-param.ts": {
+   "order": [
+    "<repo>/tests/corpus/2675-mapped-alias-over-bound-type-param.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2676-promise-payload-coercion.ts": {
+   "order": [
+    "<repo>/tests/corpus/2676-promise-payload-coercion.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2677-await-settle-or-value-union.ts": {
+   "order": [
+    "<repo>/tests/corpus/2677-await-settle-or-value-union.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2678-bytes-as-container-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/2678-bytes-as-container-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2679-then-two-handlers.ts": {
+   "order": [
+    "<repo>/tests/corpus/2679-then-two-handlers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2680-nested-container-map-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/2680-nested-container-map-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2681-promise-allsettled.ts": {
+   "order": [
+    "<repo>/tests/corpus/2681-promise-allsettled.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2682-uniform-tuple-binding-is-an-array.ts": {
+   "order": [
+    "<repo>/tests/corpus/2682-uniform-tuple-binding-is-an-array.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2683-array-from-immediate-drain.ts": {
+   "order": [
+    "<repo>/tests/corpus/2683-array-from-immediate-drain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2684-generic-instantiated-at-void.ts": {
+   "order": [
+    "<repo>/tests/corpus/2684-generic-instantiated-at-void.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2685-class-instance-as-interface-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/2685-class-instance-as-interface-record.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2686-new-array-counting-loop-fill.ts": {
+   "order": [
+    "<repo>/tests/corpus/2686-new-array-counting-loop-fill.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2687-record-method-omitted-optional-arg.ts": {
+   "order": [
+    "<repo>/tests/corpus/2687-record-method-omitted-optional-arg.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2688-record-with-methods-into-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/2688-record-with-methods-into-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2689-filter-written-type-predicate.ts": {
+   "order": [
+    "<repo>/tests/corpus/2689-filter-written-type-predicate.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2690-bind-on-a-function-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/2690-bind-on-a-function-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2691-published-class-behind-interface.ts": {
+   "order": [
+    "<repo>/tests/corpus/2691-published-class-behind-interface.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2692-type-only-super-override.ts": {
+   "order": [
+    "<repo>/tests/corpus/2692-type-only-super-override.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2693-compound-element-assign.ts": {
+   "order": [
+    "<repo>/tests/corpus/2693-compound-element-assign.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2694-rejection-payload-to-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/2694-rejection-payload-to-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2695-const-lookup-table.ts": {
+   "order": [
+    "<repo>/tests/corpus/2695-const-lookup-table.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2696-spread-computed-source.ts": {
+   "order": [
+    "<repo>/tests/corpus/2696-spread-computed-source.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2697-nested-literal-recursive-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/2697-nested-literal-recursive-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2698-promise-all-heterogeneous.ts": {
+   "order": [
+    "<repo>/tests/corpus/2698-promise-all-heterogeneous.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2699-map-unknown-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/2699-map-unknown-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2700-interface-returning-constructable.ts": {
+   "order": [
+    "<repo>/tests/corpus/2700-interface-returning-constructable.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2701-union-collapses-into-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/2701-union-collapses-into-record.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2702-number-static-parsers.ts": {
+   "order": [
+    "<repo>/tests/corpus/2702-number-static-parsers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2703-record-identity-keys.ts": {
+   "order": [
+    "<repo>/tests/corpus/2703-record-identity-keys.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2704-promise-all-uniform-declines.ts": {
+   "order": [
+    "<repo>/tests/corpus/2704-promise-all-uniform-declines.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2705-instanceof-bytes-flavor.ts": {
+   "order": [
+    "<repo>/tests/corpus/2705-instanceof-bytes-flavor.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2706-array-of-containers.ts": {
+   "order": [
+    "<repo>/tests/corpus/2706-array-of-containers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2706-class-into-construct-signature-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/2706-class-into-construct-signature-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2707-callback-arity-into-union-arm.ts": {
+   "order": [
+    "<repo>/tests/corpus/2707-callback-arity-into-union-arm.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2707-dynamic-import-const-specifier.ts": {
+   "order": [
+    "<repo>/tests/corpus/2707-dynamic-import-const-specifier/mod.ts",
+    "<repo>/tests/corpus/2707-dynamic-import-const-specifier.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2708-checked-cast-unknown-func-unwrap.ts": {
+   "order": [
+    "<repo>/tests/corpus/2708-checked-cast-unknown-func-unwrap.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2708-diffie-hellman-bound-options.ts": {
+   "order": [
+    "<repo>/tests/corpus/2708-diffie-hellman-bound-options.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2709-dynamic-import-rejects-uncompiled-npm.ts": {
+   "order": [
+    "<repo>/tests/corpus/2709-dynamic-import-rejects-uncompiled-npm.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2709-self-capturing-promise-const.ts": {
+   "order": [
+    "<repo>/tests/corpus/2709-self-capturing-promise-const.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2710-union-literal-key-dispatch.ts": {
+   "order": [
+    "<repo>/tests/corpus/2710-union-literal-key-dispatch.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2711-nested-empty-record-into-index-signature.ts": {
+   "order": [
+    "<repo>/tests/corpus/2711-nested-empty-record-into-index-signature.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2712-number-tostring-radix.ts": {
+   "order": [
+    "<repo>/tests/corpus/2712-number-tostring-radix.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2713-array-from-iterable-mapper.ts": {
+   "order": [
+    "<repo>/tests/corpus/2713-array-from-iterable-mapper.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2714-data-only-decl-file-interface.ts": {
+   "order": [
+    "<repo>/tests/corpus/2714-data-only-decl-file-interface.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2715-data-only-decl-file-class-intersection.ts": {
+   "order": [
+    "<repo>/tests/corpus/2715-data-only-decl-file-class-intersection.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2716-bigint-into-union.ts": {
+   "order": [
+    "<repo>/tests/corpus/2716-bigint-into-union.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2717-diffie-hellman-as-a-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/2717-diffie-hellman-as-a-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2719-freeze-builder-binding.ts": {
+   "order": [
+    "<repo>/tests/corpus/2719-freeze-builder-binding.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2720-union-of-tuples-as-array.ts": {
+   "order": [
+    "<repo>/tests/corpus/2720-union-of-tuples-as-array.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2721-map-callback-returning-map.ts": {
+   "order": [
+    "<repo>/tests/corpus/2721-map-callback-returning-map.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2722-emitter-subclass-as-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/2722-emitter-subclass-as-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2723-checked-cast-bytes-in-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/2723-checked-cast-bytes-in-record.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2724-set-of-promises.ts": {
+   "order": [
+    "<repo>/tests/corpus/2724-set-of-promises.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2725-factory-returning-class-instance.ts": {
+   "order": [
+    "<repo>/tests/corpus/2725-factory-returning-class-instance.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2726-witness-optional-method.ts": {
+   "order": [
+    "<repo>/tests/corpus/2726-witness-optional-method.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2727-getter-materialize-stable-base.ts": {
+   "order": [
+    "<repo>/tests/corpus/2727-getter-materialize-stable-base.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2728-instantiated-empty-mapped-type.ts": {
+   "order": [
+    "<repo>/tests/corpus/2728-instantiated-empty-mapped-type.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2729-primitive-object-intersection.ts": {
+   "order": [
+    "<repo>/tests/corpus/2729-primitive-object-intersection.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2730-getter-producer-accessor-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/2730-getter-producer-accessor-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2731-crypto-hash-handle.ts": {
+   "order": [
+    "<repo>/tests/corpus/2731-crypto-hash-handle.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2732-create-secret-key.ts": {
+   "order": [
+    "<repo>/tests/corpus/2732-create-secret-key.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2732-empty-array-return-takes-the-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/2732-empty-array-return-takes-the-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2732-guarded-optional-method-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/2732-guarded-optional-method-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2733-aes-cipher-handle.ts": {
+   "order": [
+    "<repo>/tests/corpus/2733-aes-cipher-handle.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2733-emit-one-arm-of-the-listener-union.ts": {
+   "order": [
+    "<repo>/tests/corpus/2733-emit-one-arm-of-the-listener-union.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2734-deferred-call-typed-argument.ts": {
+   "order": [
+    "<repo>/tests/corpus/2734-deferred-call-typed-argument.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2734-dyncheck-func-leaf.ts": {
+   "order": [
+    "<repo>/tests/corpus/2734-dyncheck-func-leaf.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2735-random-fill-deferred-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/2735-random-fill-deferred-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2736-forward-captured-asserted-let.ts": {
+   "order": [
+    "<repo>/tests/corpus/2736-forward-captured-asserted-let.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2737-arrow-over-constraint-erased-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/2737-arrow-over-constraint-erased-slot.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2738-array-in-place-mutators.ts": {
    "order": [
     "<repo>/tests/corpus/2738-array-in-place-mutators.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2738-caught-shorthand-property.ts": {
+   "order": [
+    "<repo>/tests/corpus/2738-caught-shorthand-property.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2738-index-signature-source-width-copy.ts": {
+   "order": [
+    "<repo>/tests/corpus/2738-index-signature-source-width-copy.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2738-spread-after-explicit-properties.ts": {
+   "order": [
+    "<repo>/tests/corpus/2738-spread-after-explicit-properties.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2739-and-short-circuit-retag.ts": {
+   "order": [
+    "<repo>/tests/corpus/2739-and-short-circuit-retag.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2739-number-statics-over-nullish-unions.ts": {
+   "order": [
+    "<repo>/tests/corpus/2739-number-statics-over-nullish-unions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2740-generic-slot-tuple-length.ts": {
+   "order": [
+    "<repo>/tests/corpus/2740-generic-slot-tuple-length.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2741-generic-union-arm-flattens.ts": {
+   "order": [
+    "<repo>/tests/corpus/2741-generic-union-arm-flattens.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2742-script-dts-global-ambient.ts": {
+   "order": [
+    "<repo>/tests/corpus/2742-script-dts-global-ambient.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2743-cond-spread-index-value-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/2743-cond-spread-index-value-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2743-fill-loop-past-a-same-named-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/2743-fill-loop-past-a-same-named-field.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2743-md5-digest.ts": {
+   "order": [
+    "<repo>/tests/corpus/2743-md5-digest.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2743-void-undefined-union-is-void.ts": {
+   "order": [
+    "<repo>/tests/corpus/2743-void-undefined-union-is-void.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2744-cond-spread-over-earlier-contributor.ts": {
+   "order": [
+    "<repo>/tests/corpus/2744-cond-spread-over-earlier-contributor.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2745-digest-input-isarray-narrowed.ts": {
+   "order": [
+    "<repo>/tests/corpus/2745-digest-input-isarray-narrowed.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2745-uint8array-view-over-a-buffer.ts": {
+   "order": [
+    "<repo>/tests/corpus/2745-uint8array-view-over-a-buffer.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2746-hkdf-sha256.ts": {
+   "order": [
+    "<repo>/tests/corpus/2746-hkdf-sha256.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2747-bytes-constructor-flavor.ts": {
+   "order": [
+    "<repo>/tests/corpus/2747-bytes-constructor-flavor.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2747-void-ternary-statement.ts": {
+   "order": [
+    "<repo>/tests/corpus/2747-void-ternary-statement.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2747-websocket-global.ts": {
+   "order": [
+    "<repo>/tests/corpus/2747-websocket-global.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2748-freeze-fresh-local.ts": {
+   "order": [
+    "<repo>/tests/corpus/2748-freeze-fresh-local.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2749-async-lambda-into-union-promise-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/2749-async-lambda-into-union-promise-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2750-process-global-behind-a-cast.ts": {
+   "order": [
+    "<repo>/tests/corpus/2750-process-global-behind-a-cast.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2751-nullish-default-width-subset.ts": {
+   "order": [
+    "<repo>/tests/corpus/2751-nullish-default-width-subset.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2752-chained-property-assignment.ts": {
+   "order": [
+    "<repo>/tests/corpus/2752-chained-property-assignment.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2753-intl-default-locale.ts": {
+   "order": [
+    "<repo>/tests/corpus/2753-intl-default-locale.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2760-declarator-and-comma-sequencing.js": {
+   "order": [
+    "<repo>/tests/corpus/2760-declarator-and-comma-sequencing.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2761-function-own-properties.js": {
+   "order": [
+    "<repo>/tests/corpus/2761-function-own-properties.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2761-untyped-operator-conversions.js": {
+   "order": [
+    "<repo>/tests/corpus/2761-untyped-operator-conversions.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2762-prototype-chain.js": {
+   "order": [
+    "<repo>/tests/corpus/2762-prototype-chain.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2762-this-in-an-object-literal-method.js": {
+   "order": [
+    "<repo>/tests/corpus/2762-this-in-an-object-literal-method.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2763-construct-and-instanceof.js": {
+   "order": [
+    "<repo>/tests/corpus/2763-construct-and-instanceof.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2764-evolving-object-and-value-position-keyed-writes.js": {
+   "order": [
+    "<repo>/tests/corpus/2764-evolving-object-and-value-position-keyed-writes.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2765-define-property-accessors.js": {
+   "order": [
+    "<repo>/tests/corpus/2765-define-property-accessors.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2765-error-ctor-called-without-new.ts": {
+   "order": [
+    "<repo>/tests/corpus/2765-error-ctor-called-without-new.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2765-own-key-order-across-every-enumeration.js": {
+   "order": [
+    "<repo>/tests/corpus/2765-own-key-order-across-every-enumeration.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2766-string-split-limit.ts": {
+   "order": [
+    "<repo>/tests/corpus/2766-string-split-limit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2767-arguments-with-declared-parameters.cjs": {
+   "order": [
+    "<repo>/tests/corpus/2767-arguments-with-declared-parameters.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2767-bound-function-values.js": {
+   "order": [
+    "<repo>/tests/corpus/2767-bound-function-values.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2768-arguments-declared-parameters-sloppy.cjs": {
+   "order": [
+    "<repo>/tests/corpus/2768-arguments-declared-parameters-sloppy.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2768-call-and-apply-on-a-function-value.js": {
+   "order": [
+    "<repo>/tests/corpus/2768-call-and-apply-on-a-function-value.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2771-new-array-in-a-javascript-source.js": {
+   "order": [
+    "<repo>/tests/corpus/2771-new-array-in-a-javascript-source.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2772-new-array-into-a-dynamic-array-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/2772-new-array-into-a-dynamic-array-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2781-arguments-inside-an-arrow-function.cjs": {
+   "order": [
+    "<repo>/tests/corpus/2781-arguments-inside-an-arrow-function.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2791-compound-assignment-in-value-position.js": {
+   "order": [
+    "<repo>/tests/corpus/2791-compound-assignment-in-value-position.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2792-compound-assignment-over-untyped-slots.js": {
+   "order": [
+    "<repo>/tests/corpus/2792-compound-assignment-over-untyped-slots.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2811-incdec-of-fields-in-value-position.js": {
+   "order": [
+    "<repo>/tests/corpus/2811-incdec-of-fields-in-value-position.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2812-math-pow-log-and-the-exponent-operator.js": {
+   "order": [
+    "<repo>/tests/corpus/2812-math-pow-log-and-the-exponent-operator.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2813-delete-over-untyped-receivers.js": {
+   "order": [
+    "<repo>/tests/corpus/2813-delete-over-untyped-receivers.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2821-bound-function-name.js": {
+   "order": [
+    "<repo>/tests/corpus/2821-bound-function-name.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2822-generic-partial-two-instantiations.ts": {
+   "order": [
+    "<repo>/tests/corpus/2822-generic-partial-two-instantiations.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2831-comma-sequence-in-return-position.js": {
+   "order": [
+    "<repo>/tests/corpus/2831-comma-sequence-in-return-position.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2841-decided-branches-and-a-forward-var.js": {
+   "order": [
+    "<repo>/tests/corpus/2841-decided-branches-and-a-forward-var.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2851-js-bytes-alias-untyped-param.js": {
+   "order": [
+    "<repo>/tests/corpus/2851-js-bytes-alias-untyped-param.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2852-ts-bytes-dyn-element-write.ts": {
+   "order": [
+    "<repo>/tests/corpus/2852-ts-bytes-dyn-element-write.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2861-the-pre-declaration-window-of-a-module-binding.js": {
+   "order": [
+    "<repo>/tests/corpus/2861-the-pre-declaration-window-of-a-module-binding.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2871-string-method-values.js": {
+   "order": [
+    "<repo>/tests/corpus/2871-string-method-values.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2881-bigint-throwing-operators.js": {
+   "order": [
+    "<repo>/tests/corpus/2881-bigint-throwing-operators.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2882-process-getuid-and-warning-throws.js": {
+   "order": [
+    "<repo>/tests/corpus/2882-process-getuid-and-warning-throws.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2891-regex-into-the-checked-dynamic-tree.ts": {
+   "order": [
+    "<repo>/tests/corpus/2891-regex-into-the-checked-dynamic-tree.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2901-process-versions-container-js.cjs": {
+   "order": [
+    "<repo>/tests/corpus/2901-process-versions-container-js.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2911-function-tostring-is-the-source-text/main.js": {
+   "order": [
+    "<repo>/tests/corpus/2911-function-tostring-is-the-source-text/mod.js",
+    "<repo>/tests/corpus/2911-function-tostring-is-the-source-text/main.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2921-weakmap-js-opaque.cjs": {
+   "order": [
+    "<repo>/tests/corpus/2921-weakmap-js-opaque.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2931-stdlib-existence-test-js.cjs": {
+   "order": [
+    "<repo>/tests/corpus/2931-stdlib-existence-test-js.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2941-a-throwing-tostring-in-the-display-path.js": {
+   "order": [
+    "<repo>/tests/corpus/2941-a-throwing-tostring-in-the-display-path.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2942-an-uncaught-display-throw-ends-the-program.js": {
+   "order": [
+    "<repo>/tests/corpus/2942-an-uncaught-display-throw-ends-the-program.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2943-one-value-one-tostring-answer.js": {
+   "order": [
+    "<repo>/tests/corpus/2943-one-value-one-tostring-answer.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2951-key-object-without-a-cipher.ts": {
+   "order": [
+    "<repo>/tests/corpus/2951-key-object-without-a-cipher.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2961-number-predicate-static-as-value-js.cjs": {
+   "order": [
+    "<repo>/tests/corpus/2961-number-predicate-static-as-value-js.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2971-join-and-sort-run-the-elements-tostring.js": {
+   "order": [
+    "<repo>/tests/corpus/2971-join-and-sort-run-the-elements-tostring.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2971-number-predicate-static-as-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/2971-number-predicate-static-as-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2972-a-throwing-tostring-in-join-and-sort-is-the-programs-throw.js": {
+   "order": [
+    "<repo>/tests/corpus/2972-a-throwing-tostring-in-join-and-sort-is-the-programs-throw.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2973-the-join-separator-converts-once-and-first.js": {
+   "order": [
+    "<repo>/tests/corpus/2973-the-join-separator-converts-once-and-first.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2974-plus-asks-valueof-first-and-string-asks-tostring-first.js": {
+   "order": [
+    "<repo>/tests/corpus/2974-plus-asks-valueof-first-and-string-asks-tostring-first.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2975-format-percent-s-converts-where-console-log-inspects.js": {
+   "order": [
+    "<repo>/tests/corpus/2975-format-percent-s-converts-where-console-log-inspects.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2981-object-create-with-descriptors.js": {
+   "order": [
+    "<repo>/tests/corpus/2981-object-create-with-descriptors.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2991-a-key-ring-is-an-array-of-keyobjects.ts": {
+   "order": [
+    "<repo>/tests/corpus/2991-a-key-ring-is-an-array-of-keyobjects.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2992-an-array-of-bigints.ts": {
+   "order": [
+    "<repo>/tests/corpus/2992-an-array-of-bigints.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2993-arrays-of-hash-and-hmac-handles.ts": {
+   "order": [
+    "<repo>/tests/corpus/2993-arrays-of-hash-and-hmac-handles.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2994-arrays-of-cipher-and-decipher-handles.ts": {
+   "order": [
+    "<repo>/tests/corpus/2994-arrays-of-cipher-and-decipher-handles.ts"
    ],
    "diags": []
   },
@@ -5512,9 +6434,27 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3011-error-prototype.js": {
+   "order": [
+    "<repo>/tests/corpus/3011-error-prototype.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/302-for.ts": {
    "order": [
     "<repo>/tests/corpus/302-for.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3021-hash-handles-through-containers.ts": {
+   "order": [
+    "<repo>/tests/corpus/3021-hash-handles-through-containers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3022-bigint-and-cipher-in-capture-boxes.ts": {
+   "order": [
+    "<repo>/tests/corpus/3022-bigint-and-cipher-in-capture-boxes.ts"
    ],
    "diags": []
   },
@@ -5527,6 +6467,12 @@
   "<repo>/tests/corpus/3031-a-top-level-constructor-owns-its-prototype-table.js": {
    "order": [
     "<repo>/tests/corpus/3031-a-top-level-constructor-owns-its-prototype-table.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3031-uint8array-as-a-value.js": {
+   "order": [
+    "<repo>/tests/corpus/3031-uint8array-as-a-value.js"
    ],
    "diags": []
   },
@@ -6743,6 +7689,14 @@
   "<repo>/tests/diagnostics/destructuring-fences.ts": {
    "order": [
     "<repo>/tests/diagnostics/destructuring-fences.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/dts-module-without-twin/main.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/dts-module-without-twin/outofrealm/index.d.ts",
+    "<repo>/tests/diagnostics/dts-module-without-twin/noimpl.d.ts",
+    "<repo>/tests/diagnostics/dts-module-without-twin/main.ts"
    ],
    "diags": []
   },
