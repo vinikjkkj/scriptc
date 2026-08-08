@@ -702,6 +702,13 @@
       "status": "static"
     },
     {
+      "id": "node-builtin.crypto.randomFill",
+      "kind": "node-builtin",
+      "name": "crypto.randomFill",
+      "status": "static",
+      "note": "the CSPRNG fill of a caller-owned buffer; the callback form is the only spelling that lowers"
+    },
+    {
       "id": "node-builtin.crypto.randomInt",
       "kind": "node-builtin",
       "name": "crypto.randomInt",

@@ -11,7 +11,7 @@
 // runtime's libc shim TU (stpcpy, arc4random_buf) is a separate translation
 // unit that the real build driver links in -- see backend/cc.ts.
 import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -200,6 +200,163 @@ export function expectCasesPassed(
         bad.slice(0, 20).join("\n"),
     );
   }
+}
+
+/* ---------------------- cwd-bound cases in an oracle ----------------------
+ * A committed case file is a promise that Node answers these exact bytes.
+ * For the cases that consult the CURRENT DIRECTORY that promise cannot be
+ * kept across hosts: both the generator and the C oracle chdir("/"), and
+ * that is "/" on a POSIX box but the current DRIVE'S ROOT ("G:\") on
+ * Windows. path.win32.resolve("a") is "\a" under the first and "G:\a" under
+ * the second; BOTH are what Node says there. 8607 of path-cases.txt's 38214
+ * lines are in that class.
+ *
+ * Re-recording the file on Windows would only move the lie to the other
+ * host. Dropping the cases would delete a fifth of the corpus. So: the cases
+ * that consult the cwd are re-derived from the RUNNING host's Node, and the
+ * rest stay pinned to the committed bytes.
+ *
+ * Which cases those are is MEASURED, not listed: the generator is run over
+ * several synthetic cwds (it takes SCR_ORACLE_PROBE_CWD) and a case counts
+ * as cwd-bound when the answers disagree. A written-down list would be a
+ * second copy of a fact the generator already knows, and would go stale the
+ * first time the corpus grew.
+ *
+ * The probe set is not arbitrary. It covers every shape a real cwd can have
+ * -- root and deep, drive-less and drive-ful -- because a case can consult
+ * the cwd and still answer the same under two cwds that happen to share the
+ * feature that decides it. And it spells the drive-less ones BOTH ways,
+ * because Node has one genuinely host-conditional line: win32.resolve's
+ * current-directory fast path returns the cwd verbatim on Windows and
+ * slash-flipped on POSIX,
+ *
+ *     if (!isWindows) path = StringPrototypeReplace(path, forwardSlashRegExp, '\\');
+ *
+ * and `isWindows` is frozen at module load, so no cwd can make a Windows
+ * Node take the POSIX branch. A backslash-spelled cwd reaches the same
+ * OUTPUT the POSIX branch produces, which is all the probe needs. Without
+ * "\\" in this list twelve `relative(".", …)` cases come back unexplained. */
+const PROBE_CWDS = ["/", "/zz/yy", "\\", "\\zz\\yy", "Q:\\", "Q:\\zz\\yy"] as const;
+
+/**
+ * A committed/host disagreement on a case the cwd probe says is cwd-free.
+ * These are Node behaviours that name or leak `process.platform` itself, so
+ * no cwd can reproduce them; each one is a decision about who is right:
+ *
+ *   "host"      Node names the running platform and so does the port
+ *               (`… must be "localhost" or empty on win32`). Take this
+ *               host's bytes.
+ *   "committed" Node leaked the HOST's platform into an arm that should not
+ *               have one and the port is deliberately arm-faithful. Keep the
+ *               committed bytes -- the port already matches them.
+ *
+ * Anything not listed is a real disagreement and throws.
+ */
+export type CaseException = "host" | "committed";
+
+/** A case line's identity: everything but the trailing expected-value field. */
+function caseKey(line: string): string {
+  return line.slice(0, line.lastIndexOf("\t"));
+}
+
+async function generateCases(gen: string, probeCwd?: string): Promise<string[]> {
+  const env = { ...process.env };
+  if (probeCwd === undefined) delete env["SCR_ORACLE_PROBE_CWD"];
+  else env["SCR_ORACLE_PROBE_CWD"] = probeCwd;
+  const { stdout } = await execFileAsync(process.execPath, [gen], {
+    env,
+    maxBuffer: 1 << 28,
+  });
+  return stdout.split("\n").filter((l) => l !== "");
+}
+
+/**
+ * Materialise the case file this host's C oracle should be checked against.
+ *
+ * Writes `out` with the committed expected values for every cwd-free case
+ * and this host's Node's answers for the cwd-bound ones, and asserts along
+ * the way that the committed file still holds for everything cwd-free --
+ * which is the whole point of committing it. On a POSIX host nothing is
+ * rewritten and `out` is the committed file byte for byte.
+ *
+ * Returns the population and how much of it was re-derived, so the caller
+ * can put a floor under both: a probe that stops finding cwd-bound cases
+ * has silently turned back into "trust the committed bytes".
+ */
+export async function materializeHostCases(
+  gen: string,
+  committedFile: string,
+  out: string,
+  exceptions: ReadonlyMap<string, CaseException> = new Map(),
+): Promise<{ total: number; rederived: number }> {
+  const committed = readFileSync(committedFile, "utf8").split("\n").filter((l) => l !== "");
+  const [host, ...probes] = await Promise.all([
+    generateCases(gen),
+    ...PROBE_CWDS.map((c) => generateCases(gen, c)),
+  ]);
+
+  const runs = [host!, ...probes];
+  for (const [i, run] of runs.entries()) {
+    if (run.length !== committed.length) {
+      throw new Error(
+        `${gen} emitted ${run.length} cases (run ${i}) but ${committedFile} holds ` +
+          `${committed.length}. The generator and the committed corpus have drifted apart; ` +
+          `re-run the generator into the case file and review the diff.`,
+      );
+    }
+  }
+
+  const lines: string[] = [];
+  let rederived = 0;
+  const stale: string[] = [];
+  const unseen = new Set(exceptions.keys());
+  for (let i = 0; i < committed.length; i++) {
+    const key = caseKey(committed[i]!);
+    unseen.delete(key);
+    for (const run of runs) {
+      if (caseKey(run[i]!) !== key) {
+        throw new Error(
+          `case ${i} is ${JSON.stringify(caseKey(run[i]!))} in a fresh run but ` +
+            `${JSON.stringify(key)} in ${committedFile}: the generator's case ORDER changed, so ` +
+            `line-for-line comparison is meaningless. Regenerate the committed file.`,
+        );
+      }
+    }
+    const cwdBound = probes.some((p) => p[i] !== probes[0]![i]);
+    // A signed decision outranks the automatic classifier in both
+    // directions: "committed" means someone read the divergence and found
+    // the PORT right, so the probe must not overrule it later.
+    const ex = exceptions.get(key);
+    const takeHost = ex === "committed" ? false : cwdBound || ex === "host";
+    if (takeHost) {
+      lines.push(host![i]!);
+      if (host![i] !== committed[i]) rederived++;
+    } else {
+      lines.push(committed[i]!);
+      if (host![i] !== committed[i] && ex !== "committed" && stale.length < 20) {
+        stale.push(`  committed ${committed[i]}\n  this host ${host![i]}`);
+      }
+    }
+  }
+  if (unseen.size > 0) {
+    // An excuse for a case that no longer exists is an excuse nobody is
+    // reading -- and the next case to need one will look excused when it
+    // is not. Same accounting rule as expectCasesPassed's denominator.
+    throw new Error(
+      `these documented platform exceptions match no case in ${committedFile} — the corpus moved ` +
+        `and the excuse did not: ${[...unseen].map((k) => JSON.stringify(k)).join(", ")}`,
+    );
+  }
+  if (stale.length > 0) {
+    throw new Error(
+      `${committedFile} disagrees with this host's Node on ${stale.length}+ cases that do NOT ` +
+        `consult the cwd, so the platform excuse does not cover them. Either Node changed ` +
+        `behaviour or the port's oracle is wrong -- read the diff, do not re-record:\n` +
+        stale.join("\n"),
+    );
+  }
+  writeFileSync(out, lines.join("\n") + "\n");
+  return { total: lines.length, rederived };
 }
 
 /**

@@ -2541,7 +2541,13 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     pairGen?: true;
   }
 
-  const PROMISIFY_SETTLED: Record<string, PromisifiedTarget | undefined> = {
+  /* Exported because it is also the ANSWER to "which libCall spelling is
+   * this member's promisified form" — the determinism attestation's fence
+   * detector needs exactly that (library/fence-eval.ts reads it), and
+   * copying the pairs into BUILTIN_MODULE_FN_ALIASES is how
+   * crypto.randomIntAsync and crypto.randomBytesAsync ended up demoting
+   * an attestation that no declarable fence could deny. */
+  export const PROMISIFY_SETTLED: Record<string, PromisifiedTarget | undefined> = {
     "zlib.deflate": { fn: "zlib.deflateAsync", params: [BYTES_U8], inner: BYTES_U8 },
     "zlib.unzip": { fn: "zlib.unzipAsync", params: [BYTES_U8], inner: BYTES_U8 },
     "zlib.deflateRaw": { fn: "zlib.deflateRawAsync", params: [BYTES_U8], inner: BYTES_U8 },

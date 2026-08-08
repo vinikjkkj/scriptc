@@ -59,6 +59,7 @@ import {
   STATIC_NUMBER_METHODS,
   STR_METHODS,
 } from "../frontend/lowering/surfaces.js";
+import { PROMISIFY_SETTLED } from "../frontend/lowering/lower-builtins.js";
 import type { IrModule, SrcLoc } from "../ir/nodes.js";
 import { compilerReleaseVersion } from "./sidecar.js";
 
@@ -152,6 +153,13 @@ function fenceTaxonomy(): FenceTaxonomy {
       // Alternate spellings the dispatch special-cases around the table
       // row (Buffer/fd/options forms) are the same surface.
       for (const alias of BUILTIN_MODULE_FN_ALIASES[mod]?.[member] ?? []) fns.add(alias);
+      // util.promisify(mod.member) lowers the SAME member through a
+      // different libCall. Read that off the lowering's own table rather
+      // than restating the pairs here: a second copy is how
+      // crypto.randomIntAsync and crypto.randomBytesAsync came to demote
+      // the attestation with no fence able to deny them.
+      const promisified = PROMISIFY_SETTLED[`${mod}.${member}`];
+      if (promisified !== undefined) fns.add(promisified.fn);
       builtinFns.set(`${builtinRootId(mod)}.${member}`, [...fns]);
       for (const f of fns) root.add(f);
     }

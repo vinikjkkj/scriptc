@@ -2644,7 +2644,11 @@ ScrStr *scr_crypto_x509_valid_to_str(ScrStr *pem);
  * the call's variadic arguments packed into ONE string[] (the compiler
  * builds the array literal); the resolves consult getcwd like Node
  * (failure aborts, like process.cwd), the win32 one after the per-drive
- * "=X:" env vars. basename always receives a suffix — "" (a Node no-op)
+ * "=X:" env vars and the posix one through Node's posixCwd() rewrite — on
+ * a win32 TARGET that drops the drive indicator, so posix.resolve("a") is
+ * "/a" under a `G:\` cwd exactly as it is under "/" (the path.posix
+ * namespace is live on every target, so the rule has to be too).
+ * basename always receives a suffix — "" (a Node no-op)
  * when the call omitted it. */
 ScrStr *scr_path_join(ScrArr *parts);
 ScrStr *scr_path_resolve(ScrArr *parts);
@@ -2711,12 +2715,16 @@ ScrStr *scr_url_href(ScrUrl *u);     /* +1; also toString() */
 ScrStr *scr_url_to_path(ScrUrl *u);      /* +1, or throws */
 ScrStr *scr_url_str_to_path(ScrStr *s);  /* +1, or throws */
 ScrUrl *scr_url_from_path(ScrStr *path); /* +1; throws on win32 UNC malformations only */
-/* The bridge pair's win32 arms as direct entry points (the public pair
+/* Both of the bridge pair's arms as direct entry points (the public pair
  * selects by TARGET at compile time — Node's isWindows): the host-side
- * differential tests exercise the Windows behavior from any platform,
- * like Node's { windows: true } options on fileURLToPath/pathToFileURL. */
-ScrStr *scr_url_to_path_w32(ScrUrl *u);      /* +1, or throws */
-ScrUrl *scr_url_from_path_w32(ScrStr *path); /* +1, or throws */
+ * differential tests exercise either behavior from any platform, like
+ * Node's { windows: true } / { windows: false } options on
+ * fileURLToPath/pathToFileURL. Reaching for one arm through the PUBLIC
+ * pair only works on the host whose target it happens to be. */
+ScrStr *scr_url_to_path_w32(ScrUrl *u);        /* +1, or throws */
+ScrUrl *scr_url_from_path_w32(ScrStr *path);   /* +1, or throws */
+ScrStr *scr_url_to_path_posix(ScrUrl *u);      /* +1, or throws */
+ScrUrl *scr_url_from_path_posix(ScrStr *path); /* +1; never throws */
 
 /* ── URLSearchParams (scr_url.c) ─────────────────────────────────────
  * A refcounted, MUTABLE ordered list of decoded (name, value) pairs —
