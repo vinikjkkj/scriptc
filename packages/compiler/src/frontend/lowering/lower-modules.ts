@@ -20,7 +20,7 @@ import { isVarDeclared, jsEvolvingObjectLiteralInit, numericIteratorSourceOf, pr
 import { streamClassAliasDecl } from "./lower-stream.js";
 import { objectStaticFnValueDeclType, stdlibGlobalAliasDecl } from "./surfaces.js";
 import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-namespaces.js";
-import { collectExpandoMembers } from "./lower-expando.js";
+import { collectExpandoMembers, expandoBindStmts } from "./lower-expando.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { decoratorNodesOf, genericIfaceBindingKeepsClass, guaranteedDecorationThrow, castAliasedClassRefOf, constructedClassInfoOf} from "./lower-classes.js";
@@ -2550,7 +2550,16 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
         if (ms && ms.sf === sf) statics.push({ pos: ms.pos, info: c });
       }
       statics.sort((a, b) => a.pos - b.pos);
-      const body = [...header, ...prelude];
+      // Expando accessor BINDS (lower-expando.ts): a lifted member's
+      // module global is invisible to a dyn box over the function value,
+      // so each member binds a getter/setter pair to the closure here —
+      // immediately after the top-level statement that FIRST writes it,
+      // never earlier. Binding at module entry would make a box read of
+      // an unwritten member dereference the NULL slot (measured: a
+      // segfault where Node answers undefined); bound at the write, the
+      // box simply finds no accessor until the slot is real.
+      const body = [...header, ...prelude, ...expandoBindStmts(L, sf, 0, 1)];
+      let bindFrom = 1;
       let at = 0;
       for (const stmt of stmts) {
         // `<=`: a mixin instantiation's position IS its statement's start
@@ -2567,7 +2576,11 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
         // inits while it lowered: they land immediately before it — JS's
         // order for the supported whole-initializer positions.
         body.push(...L.pendingClassExprInits.splice(0), ...stmtIr);
+        const bindTo = stmt.getEnd() + 1;
+        body.push(...expandoBindStmts(L, sf, bindFrom, bindTo));
+        bindFrom = bindTo;
       }
+      body.push(...expandoBindStmts(L, sf, bindFrom, Number.MAX_SAFE_INTEGER));
       while (at < statics.length) {
         body.push(...L.lowerStaticFieldInits(statics[at]!.info));
         at++;

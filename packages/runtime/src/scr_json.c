@@ -3294,6 +3294,13 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
       scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&fb));
       return;
     }
+    /* A LIFTED member (scr_dyn_expando_bind): the storage is the module
+     * global the name-spelled read and write already use, so the write
+     * goes THERE and not into the table beside it. Without this the two
+     * spellings would each keep their own answer — which is exactly the
+     * split this registry exists to close, and the worse half of it: a
+     * write nothing static could ever see. */
+    if (scr_dyn_expando_set(recv->v.fn.clo, key->data, key->len, value)) return;
     ScrDyn *table = scr_dyn_fn_props(recv); /* +1 */
     scr_dyn_obj_set(table, key->data, key->len, scr_dyn_retain(value));
     scr_dyn_release(table);
@@ -4121,8 +4128,148 @@ bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b) {
   }
 }
 
+/* ── the LIFTED-member accessor registry (see scr_runtime.h) ──────────
+ *
+ * Open addressing over (closure, key), the ctor table's shape and for the
+ * same reasons: the key is a BORROWED module-lifetime closure pointer, so
+ * nothing here owns a function, and the only counted references are the
+ * two accessor boxes — which wrap immortal accessor closures and can
+ * therefore never take part in a cycle.
+ *
+ * Borrowing is safe by construction rather than by counting, in both
+ * shapes the compiler binds: a top-level function declaration's closure
+ * is the INTERNED IMMORTAL one (it can never be freed), and a
+ * module-level callable const's lives in a global released only at exit.
+ * The teardown below never dereferences a key, so the window between
+ * global release and teardown holds nothing that could be read.
+ *
+ * One entry per lifted member that a box can reach; the bind calls are
+ * emitted once each into the declaring module's %init, so the table is
+ * sized by the program's expando members (tens), not by uses. */
+typedef struct {
+  ScrClosure *clo; /* NULL = empty bucket; BORROWED */
+  char *key;       /* owned copy — the emitted key string is a literal, but
+                    * the library lane resets between sessions */
+  size_t key_len;
+  ScrDyn *get; /* owned +1 */
+  ScrDyn *set; /* owned +1 */
+} ScrExpSlot;
+
+static ScrExpSlot *scr_exp_tab = NULL;
+static size_t scr_exp_cap = 0; /* power of two, 0 = unallocated */
+static size_t scr_exp_len = 0;
+
+static size_t scr_exp_hash(const ScrClosure *c, const char *key, size_t key_len) {
+  /* The closure pointer through the ctor table's Fibonacci mix, then the
+   * key bytes folded in: two members of ONE function must land in
+   * different buckets or every read walks the whole probe run. */
+  uint64_t h = (uint64_t)(uintptr_t)c;
+  h *= 0x9e3779b97f4a7c15ULL;
+  for (size_t i = 0; i < key_len; i++) {
+    h ^= (unsigned char)key[i];
+    h *= 0x100000001b3ULL;
+  }
+  return (size_t)(h >> 32);
+}
+
+static void scr_exp_place(ScrExpSlot *tab, size_t cap, ScrExpSlot s) {
+  size_t i = scr_exp_hash(s.clo, s.key, s.key_len) & (cap - 1);
+  while (tab[i].clo != NULL) i = (i + 1) & (cap - 1);
+  tab[i] = s;
+}
+
+/* At exit: drop the two accessor boxes per entry (the closure key is
+ * borrowed, the key string is ours) and free the bucket array. Registered
+ * through scr_atexit, which is LIFO against scr_init's three — so this
+ * runs BEFORE the cycle collection and the RC audit, and a bound program
+ * audits exactly like an unbound one. */
+static void scr_exp_teardown(void) {
+  for (size_t i = 0; i < scr_exp_cap; i++) {
+    if (scr_exp_tab[i].clo == NULL) continue;
+    free(scr_exp_tab[i].key);
+    scr_dyn_release(scr_exp_tab[i].get);
+    scr_dyn_release(scr_exp_tab[i].set);
+  }
+  free(scr_exp_tab);
+  scr_exp_tab = NULL;
+  scr_exp_cap = 0;
+  scr_exp_len = 0;
+}
+
+static void scr_exp_grow(void) {
+  if (scr_exp_cap == 0) scr_atexit(scr_exp_teardown);
+  size_t cap = scr_exp_cap ? scr_exp_cap * 2 : 16;
+  ScrExpSlot *tab = calloc(cap, sizeof *tab);
+  if (!tab) scr_json_oom();
+  for (size_t i = 0; i < scr_exp_cap; i++) {
+    if (scr_exp_tab[i].clo != NULL) scr_exp_place(tab, cap, scr_exp_tab[i]);
+  }
+  free(scr_exp_tab);
+  scr_exp_tab = tab;
+  scr_exp_cap = cap;
+}
+
+static ScrExpSlot *scr_exp_find(const ScrClosure *clo, const char *key, size_t key_len) {
+  if (scr_exp_cap == 0) return NULL;
+  size_t i = scr_exp_hash(clo, key, key_len) & (scr_exp_cap - 1);
+  for (size_t steps = 0; steps < scr_exp_cap; steps++) {
+    if (scr_exp_tab[i].clo == NULL) return NULL;
+    if (scr_exp_tab[i].clo == clo && scr_exp_tab[i].key_len == key_len &&
+        memcmp(scr_exp_tab[i].key, key, key_len) == 0) {
+      return &scr_exp_tab[i];
+    }
+    i = (i + 1) & (scr_exp_cap - 1);
+  }
+  return NULL;
+}
+
+void scr_dyn_expando_bind(ScrDyn *fn, ScrStr *key, ScrDyn *get, ScrDyn *set) {
+  if (fn->kind != SCR_DYN_FUNC) return; /* unreachable from the emitted call */
+  const char *kd = key->data;
+  size_t kl = key->len;
+  ScrClosure *clo = fn->v.fn.clo;
+  ScrExpSlot *existing = scr_exp_find(clo, kd, kl);
+  if (existing != NULL) {
+    /* Re-binding one member is a module %init that ran twice; the run-once
+     * guard makes that impossible, but keeping the FIRST pair costs a
+     * branch and removes a leak from the answer. */
+    return;
+  }
+  if ((scr_exp_len + 1) * 4 >= scr_exp_cap * 3) scr_exp_grow();
+  char *copy = malloc(kl + 1);
+  if (!copy) scr_json_oom();
+  memcpy(copy, kd, kl);
+  copy[kl] = '\0';
+  ScrExpSlot s = {clo, copy, kl, scr_dyn_retain(get), scr_dyn_retain(set)};
+  scr_exp_place(scr_exp_tab, scr_exp_cap, s);
+  scr_exp_len++;
+}
+
+bool scr_dyn_expando_get(const ScrClosure *clo, const char *key, size_t key_len, ScrDyn **out) {
+  ScrExpSlot *s = scr_exp_find(clo, key, key_len);
+  if (s == NULL) return false;
+  /* The answer is reported through `out` and the RETURN says only whether
+   * an accessor existed. A bool "did the getter run" cannot be recovered
+   * from the result: NULL-with-an-exception is what a throwing accessor
+   * answers, and `scr_dyn_fn_get`'s caller may already have had one
+   * pending — reading scr_exc_pending() to tell those apart would make an
+   * unrelated in-flight throw silently swallow `name`/`length`. */
+  *out = scr_dyn_call(s->get, NULL, 0, "expando getter"); /* +1, may throw */
+  return true;
+}
+
+bool scr_dyn_expando_set(ScrClosure *clo, const char *key, size_t key_len, ScrDyn *value) {
+  ScrExpSlot *s = scr_exp_find(clo, key, key_len);
+  if (s == NULL) return false;
+  ScrDyn *args[1] = {value};
+  ScrDyn *r = scr_dyn_call(s->set, args, 1, "expando setter"); /* +1, may throw */
+  scr_dyn_release(r);
+  return true;
+}
+
 /* Keyed read on a FUNC node (see scr_runtime.h): own props first, then
- * the function-instance built-ins name/length. +1 or NULL. */
+ * the lifted-member accessors, then the function-instance built-ins
+ * name/length. +1 or NULL. */
 ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
   if (d->v.fn.clo->props) {
     ScrDyn *table = (ScrDyn *)scr_box_get_ref(d->v.fn.clo->props); /* +1 */
@@ -4130,6 +4277,14 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
     ScrDyn *r = m ? scr_dyn_retain(m) : NULL;
     scr_dyn_release(table);
     if (r) return r;
+  }
+  /* The LIFTED members. After the table so a `defineProperty` write still
+   * shadows (the table is where every OTHER member of a function value
+   * lives), before name/length so a member spelled `name` cannot be eaten
+   * by the built-in — the compiler fences that write anyway. */
+  {
+    ScrDyn *lifted = NULL; /* +1 when an accessor answered */
+    if (scr_dyn_expando_get(d->v.fn.clo, key, key_len, &lifted)) return lifted;
   }
   if (key_len == 4 && memcmp(key, "name", 4) == 0) {
     const char *n = d->v.fn.name ? d->v.fn.name : "";
