@@ -28,6 +28,7 @@ import {
 } from "./surfaces.js";
 import { conditionalSpreadOf, lowerDynObjectLiteral, probeLower } from "./lower-exprs.js";
 import { HTTP2_CONSTANTS } from "./http2-constants.js";
+import { unitOnlyUnion } from "../types.js";
 
 /** SCRIPTC_HKDF_WHY probe: how many hkdfSync calls the sha256 lowering took.
  * Read in the SAME run as the trap count — "nothing changed" and "the branch
@@ -8700,12 +8701,92 @@ export function isConsoleLog(L: Lowerer, call: ts.CallExpression): boolean {
 `);
       return null;
     };
-    if (parts.length === 0 || parts.some((e) => e.type.kind !== "promise")) return no("an entry is not a promise");
+    if (parts.length === 0) return no("no entries");
+    // An entry that is a promise OR NOT. `Promise.all` takes an iterable of
+    // AWAITABLES, and a plain value is resolved as itself — which is why
+    // zapo writes `Promise.all([meUserJid ? this.resolveUserIcdc(me) : null,
+    // …])` and `Promise.all([thumbTask, probeTask])` over `Promise<T> | null`
+    // consts. The checker awaits each position (`Awaited<Promise<T> | null>`
+    // is `T | null`), so the entry contributes ITS OWN null arm to the
+    // position's payload alongside the promise's.
+    //
+    // ONE promise arm and ONE unit arm is the admitted shape: the adapter
+    // has to know at runtime which side it holds, and a second promise arm
+    // would make the payload a guess (widthLiftPlan's stance, and the same
+    // one the promise-into-union coercion above takes). Everything else
+    // keeps the fence.
+    const maybeArms = (t: IrType): { p: IrType & { kind: "promise" }; unit: IrType } | null => {
+      if (t.kind !== "union") return null;
+      const def = L.unions.get(t.unionId);
+      if (!def || def.arms.length !== 2) return null;
+      const p = def.arms.find((a) => a.kind === "promise");
+      const unit = def.arms.find((a) => isUnitType(a));
+      if (!p || p.kind !== "promise" || !unit) return null;
+      return { p, unit };
+    };
+    const maybes = parts.map((e) => (e.type.kind === "promise" ? null : maybeArms(e.type)));
+    if (parts.some((e, i) => e.type.kind !== "promise" && maybes[i] === null)) {
+      return no("an entry is neither a promise nor a promise-or-unit union");
+    }
 
-    const payloads = parts.map((e) => (e.type as IrType & { kind: "promise" }).inner);
-    if (payloads.some((t) => t.kind === "void" || t.kind === "jsval" || t.kind === "dyn")) return no("a payload is void or lives in the island");
-    // A uniform tuple is the ordinary array path's business.
-    if (payloads.every((t) => typeEquals(t, payloads[0]!))) return no("the payloads are uniform (the array path owns it)");
+    const inners = parts.map((e, i) =>
+      e.type.kind === "promise" ? e.type.inner : maybes[i]!.p.inner,
+    );
+    if (inners.some((t) => t.kind === "jsval" || t.kind === "dyn")) return no("a payload lives in the island");
+    if (inners.some((t, i) => t.kind === "void" && maybes[i] !== null)) {
+      return no("a promise-or-unit entry carries a void payload");
+    }
+    // A `Promise<void>` ENTRY is the ordinary shape here, not a corner:
+    // `const [padded] = await Promise.all([pad(x), ensureSession(a)])` and
+    // `const [, session] = await Promise.all([markStale(r), getSession(a)])`
+    // are the two spellings zapo writes, and BOTH pair a value-carrying
+    // entry with a void one. Its fulfillment IS `undefined` in JS, and the
+    // checker agrees: it types the result tuple's position `void`, which
+    // the type mapping already spells as the unit-only union in a tuple
+    // FIELD (types.ts mapTupleType). So the position's payload here is
+    // that same union — not `void` — and the result-shape check below
+    // compares like with like.
+    //
+    // `void` is a statement kind, not a value kind, so a void entry cannot
+    // reach the shared union through the ordinary payload adapter (there
+    // is no value to coerce). It rides a purpose-built async helper
+    // instead: `async (p) => { await p; return undefined; }` — the await
+    // keeps the sequencing and the rejection, and the fulfillment is the
+    // `undefined` Node produces.
+    const voidEntry = inners.map((t) => t.kind === "void");
+    const payloads: IrType[] = inners.map((t, i): IrType => {
+      if (t.kind === "void") return unitOnlyUnion(L.unions);
+      const m = maybes[i];
+      if (!m) return t;
+      // `Awaited<Promise<P> | null>` is `P | null` — the entry's own unit
+      // arm joins the promise's payload arms.
+      const inner = m.p.inner;
+      const armList = inner.kind === "union" ? (L.unions.get(inner.unionId)?.arms ?? [inner]) : [inner];
+      const seenArm = new Set<string>();
+      const merged = [...armList, m.unit].filter((a) => {
+        const k = typeKey(a);
+        if (seenArm.has(k)) return false;
+        seenArm.add(k);
+        return true;
+      });
+      // Sorted by typeKey, the type mapper's own arm order — this payload
+      // is compared against the checker's tuple FIELD below, and a union
+      // is interned by its arm sequence, so an unsorted merge would build
+      // a different union id for the same type and decline every time.
+      merged.sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
+      return merged.length === 1 ? merged[0]! : { kind: "union", unionId: L.unions.intern(merged) };
+    });
+    // A uniform tuple whose entries are ALL plain, non-void promises is the
+    // ordinary array path's business (and the uniform-literal fast path
+    // above already took it). Uniform payloads reached through an ADAPTER
+    // are not — `Promise.all([a ? f() : null, b ? g() : null])` types as a
+    // mutable tuple, so the positional record below is its representation.
+    const plainEntries = parts.every((e, i) => e.type.kind === "promise" && !voidEntry[i]);
+    if (plainEntries && payloads.every((t) => typeEquals(t, payloads[0]!))) {
+      return no("the payloads are uniform (the array path owns it)");
+    }
+    // All-void is the array path's too (`Promise<void>` result, no tuple).
+    if (voidEntry.every((v) => v)) return no("every entry is void (the array path owns it)");
 
     const arms: IrType[] = [];
     for (const t of payloads) {
@@ -8737,11 +8818,26 @@ export function isConsoleLog(L: Lowerer, call: ts.CallExpression): boolean {
       if (!typeEquals(outShape.fields.find((f) => f.name === String(i))?.type ?? VOID, payloads[i]!)) return no("a result position does not match its payload");
     }
 
-    // Each entry widens into promise<U> through the ordinary payload
-    // adapter; if any declines, so does the whole form.
+    // Each entry widens into promise<U>: a value-carrying one through the
+    // ordinary payload adapter, a void one through the await-then-undefined
+    // helper. If any declines, so does the whole form.
     const wrapT: IrType = { kind: "promise", inner: uT };
     const wrapped: IrExpr[] = [];
-    for (const e of parts) {
+    for (let i = 0; i < parts.length; i++) {
+      const e = parts[i]!;
+      if (voidEntry[i]) {
+        const adapter = voidEntryAdapter(L, uT, loc);
+        if (adapter === null) return no("undefined does not fit the shared union");
+        wrapped.push({ kind: "call", callee: adapter, args: [e], type: wrapT, loc });
+        continue;
+      }
+      const m = maybes[i];
+      if (m) {
+        const adapter = maybeEntryAdapter(L, e.type as IrType & { kind: "union" }, m.p, m.unit, uT, loc);
+        if (adapter === null) return no("a promise-or-unit entry does not widen into the shared union");
+        wrapped.push({ kind: "call", callee: adapter, args: [e], type: wrapT, loc });
+        continue;
+      }
       const w = L.coerceToExpected(e, wrapT);
       if (!typeEquals(w.type, wrapT)) return no("an entry does not widen into the shared union");
       wrapped.push(w);
@@ -8847,5 +8943,162 @@ export function isConsoleLog(L: Lowerer, call: ts.CallExpression): boolean {
       type: { kind: "promise", inner: outT },
       loc,
     };
+  }
+
+  /** A `Promise<P> | null` entry of a heterogeneous `Promise.all` widened
+   * into the combinator's shared union: `async (v) => v is the promise arm
+   * ? await it : the unit`.
+   *
+   * `Promise.all` resolves a non-promise entry AS ITSELF, so the two arms
+   * genuinely settle differently and the branch is the semantics, not an
+   * optimization. The `await` sits inside the promise branch only: taking
+   * it on the unit arm would be harmless for the value but would cost the
+   * position a microtask turn it does not take in Node, and the unit arm
+   * is the one that fulfills IMMEDIATELY.
+   *
+   * Rejection rides through the awaited arm untouched, so the combinator
+   * still sees the first rejection in TIME. Interned per (entry type,
+   * shared union) pair. */
+  function maybeEntryAdapter(
+    L: Lowerer,
+    srcT: IrType & { kind: "union" },
+    promiseArm: IrType & { kind: "promise" },
+    unitArm: IrType,
+    uT: IrType,
+    loc: SrcLoc,
+  ): string | null {
+    const key = `pall.maybeentry:${typeKey(srcT)}:${typeKey(uT)}`;
+    const existing = L.retagHelpers.get(key);
+    if (existing !== undefined) return existing;
+    const pTag = L.armTag(srcT.unionId, promiseArm);
+    if (pTag < 0) return null;
+    const name = `%promise.all.maybe.${L.retagHelpers.size}`;
+    // Claimed before the body is built, so a coercion that interns its own
+    // helper cannot be handed this name; released again if the body
+    // declines (the tuple helper's convention).
+    L.retagHelpers.set(key, name);
+    let built = false;
+    const funcType: IrType & { kind: "func" } = {
+      kind: "func",
+      params: [srcT],
+      ret: { kind: "promise", inner: uT },
+    };
+    const fnCtx = newFnCtx(true, null, funcType, uT);
+    fnCtx.isAsync = true;
+    L.fnStack.push(fnCtx);
+    try {
+      const vLocal = L.declareHiddenLocal("v", srcT);
+      const vRef: IrExpr = { kind: "varRef", localId: vLocal.id, type: srcT, loc };
+      const fromPromise = L.coerceToExpected(
+        {
+          kind: "awaitExpr",
+          value: { kind: "unionNarrow", unionId: srcT.unionId, tag: pTag, value: vRef, type: promiseArm, loc },
+          type: promiseArm.inner,
+          loc,
+        },
+        uT,
+      );
+      if (!typeEquals(fromPromise.type, uT)) return null;
+      const fromUnit = L.coerceToExpected(
+        { kind: "unitLit", unit: unitArm.kind === "nullT" ? "null" : "undefined", type: unitArm, loc },
+        uT,
+      );
+      if (!typeEquals(fromUnit.type, uT)) return null;
+      const body: IrStmt[] = [
+        {
+          kind: "if",
+          cond: { kind: "unionIsTag", unionId: srcT.unionId, tag: pTag, negated: false, value: vRef, type: BOOL, loc },
+          then: [{ kind: "return", value: fromPromise, loc }],
+          else_: null,
+          loc,
+        },
+        { kind: "return", value: fromUnit, loc },
+      ];
+      const ctx = L.fnStack[L.fnStack.length - 1]!;
+      L.liftedFns.push({
+        name,
+        params: [{ localId: vLocal.id, name: vLocal.name, type: srcT }],
+        returnType: uT,
+        locals: ctx.locals,
+        body,
+        async: true,
+        loc,
+      });
+      built = true;
+      return name;
+    } finally {
+      L.fnStack.pop();
+      if (!built) L.retagHelpers.delete(key);
+    }
+  }
+
+  /** A `Promise<void>` entry of a heterogeneous `Promise.all` widened into
+   * the combinator's shared union: `async (p) => { await p; return
+   * undefined; }`.
+   *
+   * The await is the whole point and cannot be dropped. Returning
+   * `undefined` without it would settle the position before the entry had
+   * run — Promise.all waits for every entry, and a void entry's WORK (the
+   * session it ensures, the sender key it marks stale) is the only reason
+   * it is in the array. Awaiting also carries the rejection: a rejected
+   * void entry rethrows inside the helper and rejects its adapted promise,
+   * so the combinator sees the rejection in the same TIME order Node does.
+   *
+   * Interned per shared union, like every other helper here. Null when
+   * `undefined` is not an arm of that union — impossible for a union built
+   * from a void entry's own unit-only payload, but the caller fences
+   * rather than assume it. */
+  function voidEntryAdapter(L: Lowerer, uT: IrType, loc: SrcLoc): string | null {
+    const fromT: IrType = { kind: "promise", inner: VOID };
+    const key = `pall.voidentry:${typeKey(uT)}`;
+    const existing = L.retagHelpers.get(key);
+    if (existing !== undefined) return existing;
+    const name = `%promise.all.void.${L.retagHelpers.size}`;
+    L.retagHelpers.set(key, name);
+    let built = false;
+    const funcType: IrType & { kind: "func" } = {
+      kind: "func",
+      params: [fromT],
+      ret: { kind: "promise", inner: uT },
+    };
+    const fnCtx = newFnCtx(true, null, funcType, uT);
+    fnCtx.isAsync = true;
+    L.fnStack.push(fnCtx);
+    try {
+      const pLocal = L.declareHiddenLocal("p", fromT);
+      const undef = L.coerceToExpected(
+        { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc },
+        uT,
+      );
+      if (!typeEquals(undef.type, uT)) return null;
+      const body: IrStmt[] = [
+        {
+          kind: "exprStmt",
+          expr: {
+            kind: "awaitExpr",
+            value: { kind: "varRef", localId: pLocal.id, type: fromT, loc },
+            type: VOID,
+            loc,
+          },
+          loc,
+        },
+        { kind: "return", value: undef, loc },
+      ];
+      const ctx = L.fnStack[L.fnStack.length - 1]!;
+      L.liftedFns.push({
+        name,
+        params: [{ localId: pLocal.id, name: pLocal.name, type: fromT }],
+        returnType: uT,
+        locals: ctx.locals,
+        body,
+        async: true,
+        loc,
+      });
+      built = true;
+      return name;
+    } finally {
+      L.fnStack.pop();
+      if (!built) L.retagHelpers.delete(key);
+    }
   }
 
