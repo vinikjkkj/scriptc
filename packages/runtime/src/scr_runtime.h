@@ -2865,6 +2865,11 @@ void scr_os_ifaddrs_free(ScrIfaddrs *s);
  * member (the compiler's builders retain what they extract themselves).
  */
 
+/* The bigint payload a SCR_DYN_BIG box carries (full definition far
+ * below — the C11 repeated typedef this file already uses for the
+ * DataView setter). Declared HERE because ScrDyn names it. */
+typedef struct ScrBigInt ScrBigInt;
+
 typedef enum {
   SCR_DYN_NULL,
   SCR_DYN_BOOL,
@@ -3049,6 +3054,49 @@ typedef enum {
    * Enum position: LAST — the LLVM backend hardcodes the kind numbers,
    * so a new kind APPENDS and nothing renumbers. */
   SCR_DYN_ARRBUF,
+  /* A BIGINT value. Never produced by the parser (JSON text has no
+   * bigint) — it enters the checked-dynamic tree through the compiler's
+   * static→dyn converters: a `bigint` value flowing into an
+   * `unknown` slot, the return of a dyn-boxed `() => bigint`, and a
+   * `bigint`-armed union re-entered from a dyn.
+   *
+   * A PRIMITIVE, and that is the whole design note. The four kinds added
+   * before this one (HANDLE, PROMISE, OBJINST, ARRBUF) are all reference
+   * values, and the stance they share — identity is the pointer, the
+   * payload is opaque, everything unmodeled fences — is WRONG here in
+   * three places that answer rather than refuse:
+   *
+   *   • truthiness is VALUE-dependent: `0n` is falsy. Every other
+   *     non-scalar kind is unconditionally true, so inheriting that
+   *     answer would make `if (u)` take the wrong branch in silence.
+   *   • `===` compares by VALUE: `box(1n) === box(1n)` is true in
+   *     Node. The reference kinds compare pointers, and two boxes of one
+   *     digit string are two pointers, so the pointer answer is a wrong
+   *     boolean rather than an approximate one.
+   *   • `typeof` is "bigint" — its own answer, shared with no
+   *     other kind, which is precisely why this is a kind and not a flag
+   *     on an existing one.
+   *
+   * String() renders the DIGITS ("5", not "5n" — String(5n) drops the
+   * suffix; util.inspect keeps it). JSON.stringify THROWS Node's
+   * "Do not know how to serialize a BigInt" TypeError, which is why
+   * bigint is absent from isJsonSafeType and must stay absent.
+   * structuredClone copies the value (bigints are cloneable).
+   * A property READ meets the loud ladder: an unknown property really is
+   * undefined in Node, but `toString`/`valueOf`/`constructor` are not,
+   * and the box carries no prototype to tell them apart — answering
+   * undefined for a method Node returns would be the silent wrong answer.
+   *
+   * The payload is a RETAINED ScrBigInt, released — like the JSVAL
+   * cell and the PROMISE — through an INSTALLED ops table
+   * (ScrDynBigOps, scr_bigint.c), so this always-linked core never
+   * references the gated bigint unit. The gating is exact rather than
+   * lucky: a program cannot hold a SCR_DYN_BIG without having produced a
+   * bigint, and producing one links scr_bigint.c.
+   *
+   * Enum position: LAST — the LLVM backend hardcodes the kind numbers,
+   * so a new kind APPENDS and nothing renumbers. */
+  SCR_DYN_BIG,
 } ScrDynKind;
 
 /* The per-class BOXING DESCRIPTOR carried by a SCR_DYN_OBJINST box: one
@@ -3251,6 +3299,10 @@ struct ScrDyn {
      * static descriptor. `o` is the SAME pointer the static side holds
      * (identity survives the round trip); `cls` is never owned. */
     struct { void *o; const ScrDynClass *cls; } inst;
+    /* SCR_DYN_BIG: the retained digits. Released through the installed
+     * ops so this always-linked core never references the gated bigint
+     * unit (the jsval cell's stance, same reason). */
+    ScrBigInt *big;
   } v;
 };
 
@@ -4057,6 +4109,53 @@ const char *scr_dyn_objinst_cls(const ScrDyn *d);
  * throws catchably; returns false so callers can `return
  * scr_dyn_objinst_fence(...)` from a bool tail. */
 bool scr_dyn_objinst_fence(const ScrDyn *d, const char *what);
+
+/* ── bigints in the checked-dynamic tree (SCR_DYN_BIG) ────────
+ * The five value questions this always-linked core must ask a bigint,
+ * routed through a table the GATED unit installs — the ScrDynJsvalOps
+ * arrangement and for its reason: scr_json.c is always linked and
+ * scr_bigint.c is not, so a direct call to scr_big_release here would
+ * make every bigint-free link fail on it (measured: that is exactly how
+ * scr_big_low_u64 broke the LLVM lane one change ago). BIG nodes exist
+ * only after scr_dyn_from_big ran, so the table is always installed when
+ * a dispatch arm meets the kind.
+ *
+ * Every entry is an EXISTING scr_big_* entry point rather than a new
+ * behaviour: the table is a link-time indirection, not a second
+ * implementation, so the dyn answers cannot drift from the static ones. */
+typedef struct ScrDynBigOps {
+  ScrBigInt *(*retain)(ScrBigInt *b);
+  void (*release)(ScrBigInt *b);
+  bool (*truthy)(const ScrBigInt *b);                  /* 0n is FALSE */
+  bool (*eq)(const ScrBigInt *a, const ScrBigInt *b);  /* === by VALUE */
+  ScrStr *(*to_str)(const ScrBigInt *b, double radix); /* +1, never throws at radix 10 */
+} ScrDynBigOps;
+
+/* The boxing constructor, DEFINED IN THE GATED UNIT (scr_bigint.c): it
+ * installs the ops and hands the allocation below the retained digits.
+ * The emitted converters call this one. */
+ScrDyn *scr_dyn_from_big(ScrBigInt *b);
+/* ToBigInt over an untyped operand (`BigInt(u)`) — scr_bigint.c. +1, or
+ * NULL with a catchable exception pending. */
+ScrBigInt *scr_big_from_dyn(const ScrDyn *d);
+/* The allocator view the gated constructor uses (runtime-internal). */
+ScrDyn *scr_dyn_alloc_big(ScrBigInt *b, const ScrDynBigOps *ops);
+/* The installed table; traps if a BIG node exists without one. */
+const ScrDynBigOps *scr_dyn_big_ops(void);
+/* BORROWED peek at the digits; NULL when d is not a bigint box. */
+ScrBigInt *scr_dyn_big_of(const ScrDyn *d);
+/* `dynCheck` extraction (`u as bigint`, a bigint-armed union arm): a BIG
+ * box answers the RETAINED digits (+1); anything else throws the
+ * path-annotated catchable TypeError and returns NULL. */
+ScrBigInt *scr_dyn_big_unbox(const ScrDyn *d, const ScrDynPath *path, const char *want);
+/* The loud ladder for the operations a bigint box has no prototype to
+ * answer (property reads, calls, iteration). Always throws catchably;
+ * returns false so a bool tail can `return scr_dyn_big_fence(...)`. */
+bool scr_dyn_big_fence(const ScrDyn *d, const char *what);
+/* V8's own "Do not know how to serialize a BigInt" TypeError — the
+ * ANSWER JSON.stringify gives a bigint, not a gap in the tier, which is
+ * why both writers call this instead of a fence. */
+void scr_dyn_big_json_throw(void);
 
 /* ── promises in the checked-dynamic tree (SCR_DYN_PROMISE) ────────────────────────────
  * Boxes by REFERENCE (+1 box; retains p). The boundary contract: p

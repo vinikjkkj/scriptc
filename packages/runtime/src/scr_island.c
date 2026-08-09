@@ -1009,6 +1009,12 @@ static const char *isl_dyn_unmarshalable(const ScrDyn *d) {
     return "an ArrayBuffer";
   case SCR_DYN_PROMISE:
     return "a promise";
+  case SCR_DYN_BIG:
+    /* The engine has its own BigInt and this bridge does not model the
+     * digit transfer. Named rather than dropped into the marshalable
+     * tail, which would have handed isl_from_dyn a kind it has no arm
+     * for — a silent JS_UNDEFINED where the program passed a value. */
+    return "a bigint";
   case SCR_DYN_ARR:
     for (size_t i = 0; i < d->v.arr.len; i++) {
       const char *r = isl_dyn_unmarshalable(d->v.arr.items[i]);

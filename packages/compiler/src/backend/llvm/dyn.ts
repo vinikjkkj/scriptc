@@ -73,6 +73,8 @@ export const DK = {
   JSVAL: 11, /* SCR_DYN_JSVAL — island values held by reference */
   OBJINST: 12, /* SCR_DYN_OBJINST — class instances held by reference */
   ARRBUF: 13, /* SCR_DYN_ARRBUF — ArrayBuffer, payload shared by reference */
+  BIG: 14, /* SCR_DYN_BIG — a bigint, the digits shared by reference and
+            * compared BY VALUE (a primitive, unlike the four above) */
 } as const;
 
 /** What the dyn helpers need beyond the walker host: interned immortal
@@ -336,6 +338,8 @@ export class LlDyn {
         return "unknown";
       case "bytes":
         return "Uint8Array";
+      case "bigint":
+        return "bigint";
       case "object":
         return t.className.replace(/^%/, "");
       case "union": {
@@ -388,6 +392,11 @@ export class LlDyn {
       case "dyn":
         // An `unknown` target: every dyn value fits, undefined included.
         B.terminate(`ret i1 true`);
+        break;
+      case "bigint":
+        // A KIND test — bigint is its own kind, so nothing else wears
+        // the tag. The C twin's note has the argument.
+        kindIs(DK.BIG);
         break;
       case "bytes": {
         // A KIND test, sound because `u8` and `buf` are two kinds — the
@@ -644,6 +653,17 @@ export class LlDyn {
       case "dyn": {
         // An `unknown` slot: the checked-dynamic tree subtree passes through as-is.
         const r = this.retainDyn(B, "%d");
+        B.terminate(`ret ptr ${r}`);
+        break;
+      }
+      case "bigint": {
+        // `u as bigint`: the SAME digits back, retained. The runtime does
+        // the kind check and the throw, so there is no requireKind here —
+        // the ARRBUF arm's shape, and the C twin's note has the reason a
+        // bigint shares rather than copies.
+        host.declare(`declare ptr @scr_dyn_big_unbox(ptr, ptr, ptr)`);
+        const r = B.tmp();
+        B.line(`${r} = call ptr @scr_dyn_big_unbox(ptr %d, ptr %path, ptr ${want})`);
         B.terminate(`ret ptr ${r}`);
         break;
       }
@@ -1125,6 +1145,17 @@ export class LlDyn {
       }
       case "dyn": {
         const r = this.retainDyn(B, "%v");
+        B.terminate(`ret ptr ${r}`);
+        break;
+      }
+      case "bigint": {
+        // The digits, retained into the box. The constructor is the
+        // GATED unit's — it installs the ops table the always-linked dyn
+        // core dispatches through — and a program reaching this line
+        // necessarily links that unit. The C twin's arm.
+        host.declare(`declare ptr @scr_dyn_from_big(ptr)`);
+        const r = B.tmp();
+        B.line(`${r} = call ptr @scr_dyn_from_big(ptr %v)`);
         B.terminate(`ret ptr ${r}`);
         break;
       }
@@ -2072,6 +2103,23 @@ export class LlDyn {
       const r = B.tmp();
       B.line(`${r} = call ptr @scr_dyn_obj_key_get(ptr %d, ptr ${kParts.data}, i64 ${kParts.len})`);
       B.terminate(`ret ptr ${r}`);
+      B.startBlock(lNext);
+    }
+    // BIG: a primitive with a real prototype — (5n).toString is a
+    // function and (5n).nope is undefined, and the box has no table to
+    // tell them apart. The undefined tail would answer undefined for the
+    // methods Node returns, so the read is the loud ladder. The C
+    // emitter's arm, same runtime entry point.
+    {
+      const isBg = B.tmp();
+      B.line(`${isBg} = icmp eq i32 ${kd}, ${DK.BIG}`);
+      const lBg = B.newLabel("kg.bg");
+      const lNext = B.newLabel("kg.n");
+      B.condBr(isBg, lBg, lNext);
+      B.startBlock(lBg);
+      host.declare(`declare zeroext i1 @scr_dyn_big_fence(ptr, ptr)`);
+      B.line(`call zeroext i1 @scr_dyn_big_fence(ptr %d, ptr ${host.cstr("a property read")})`);
+      B.terminate(`ret ptr null`);
       B.startBlock(lNext);
     }
     // OBJINST: a class instance's members are struct fields the box has no

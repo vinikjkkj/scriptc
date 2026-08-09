@@ -189,6 +189,17 @@ static void dyn_str_buf(ScrJsonBuf *b, const ScrDyn *d, bool protocol) {
     }
     scr_jb_puts(b, "[object Object]");
     return;
+  case SCR_DYN_BIG: {
+    /* The DIGITS, in BOTH modes. The protocol/diagnostic split exists
+     * for kinds whose toString might be user code; BigInt.prototype
+     * .toString is native and cannot throw, so the diagnostic mode's
+     * no-user-code rule is satisfied by the value itself — the BYTES
+     * and ARRBUF stance. */
+    ScrStr *s = scr_dyn_big_ops()->to_str(d->v.big, 10);
+    for (size_t i = 0; i < s->len; i++) scr_jb_putc(b, s->data[i]);
+    scr_str_release(s);
+    return;
+  }
   case SCR_DYN_ARRBUF:
     /* Object.prototype.toString with the ArrayBuffer tag — a constant in
      * both modes, because an ArrayBuffer has no own toString for a user
@@ -326,6 +337,11 @@ static void dyn_notfn_buf(ScrJsonBuf *b, const ScrDyn *cb) {
      * an engine OBJECT; asking the engine for a value image would run
      * its ToString, which this message must not do. */
     scr_jb_puts(b, "object");
+    return;
+  case SCR_DYN_BIG:
+    /* The bare type word — measured, and NOT the "number 5" shape the
+     * NUM arm above uses; see the sibling template in scr_json.c. */
+    scr_jb_puts(b, "bigint");
     return;
   case SCR_DYN_ARR:
   case SCR_DYN_OBJ:
