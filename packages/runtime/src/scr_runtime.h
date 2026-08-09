@@ -2393,6 +2393,11 @@ void scr_child_stream_on_data(ScrChildStream *s, ScrClosure *cb /*moves*/,
 void scr_child_stream_on_end(ScrChildStream *s, ScrClosure *cb /*moves*/, bool once);
 void scr_child_stream_thunk0(ScrClosure *cb, ScrBytes *chunk);
 void scr_child_stream_thunk_bytes(ScrClosure *cb, ScrBytes *chunk);
+/* Registers the child-stdio handle-dispatch ops (SCR_DYNH_CHILD_STREAM)
+ * so a `child.stdout` crossing into `unknown` can be boxed and its
+ * on/once("data" | "end") dispatched — emitted main() calls this exactly
+ * when the child unit is linked, the scr_net_install story. */
+void scr_child_stream_dyn_install(void);
 /* The lifecycle members, Node's exact shapes (pinned by the corpus):
  * pid is undefined (has_pid false) exactly on spawn failure; exitCode is
  * null while running / after a signal death, the code after a normal
@@ -3007,6 +3012,43 @@ typedef enum {
    * Enum position: LAST — the LLVM backend hardcodes the kind numbers,
    * so a new kind APPENDS and nothing renumbers. */
   SCR_DYN_OBJINST,
+  /* An ARRAYBUFFER value. Never produced by the parser — it enters the
+   * checked-dynamic tree through the compiler's static→dyn converters (a
+   * `bytes<buf>` value flowing into an `unknown` slot: the `ArrayBuffer`
+   * arm of a media union). Holds a RETAINED ScrBytes payload whose
+   * `elem` is SCR_BYTES_BUF — the SAME object the static side holds, so
+   * the crossing SHARES exactly as SCR_DYN_BYTES does and a
+   * `new Uint8Array(buf)` view taken on either side aliases the other.
+   *
+   * A DISTINCT KIND from SCR_DYN_BYTES rather than an `elem` tag on it,
+   * and the reason is worth stating where the next reader will meet it.
+   * An ArrayBuffer answers almost nothing a typed array answers: it has
+   * no `length` (only `byteLength`), no index properties, no elements to
+   * join, it is not iterable, and it is not a valid chunk for any write
+   * on any handle. SCR_DYN_BYTES is asked those questions in some sixty
+   * places, and every one of them would have needed an element test it
+   * could silently forget. Two kinds make the sixty exclude an
+   * ArrayBuffer by construction and make the handful that SHOULD accept
+   * one say so by name. dynMatch is the sharp case: it tests the KIND
+   * only, so one shared kind would have let a `Uint8Array` match an
+   * `ArrayBuffer` union arm and given the union the wrong tag — a wrong
+   * answer, not a fence.
+   *
+   * typeof answers "object", truthiness is true, String() renders
+   * "[object ArrayBuffer]" (Object.prototype.toString — ArrayBuffer has
+   * no own toString), JSON serializes {} (no own enumerable
+   * properties), util.inspect prints Node's
+   * `ArrayBuffer { [Uint8Contents]: <..>, [byteLength]: n }`, the only
+   * modeled keyed read is `byteLength` (everything else, `length` and
+   * every index included, is the undefined singleton — exactly Node),
+   * iteration throws Node's not-iterable TypeError, structuredClone
+   * copies, and dynCheck against an ArrayBuffer target hands back the
+   * SAME payload retained (identity survives, the reference stance the
+   * shared representation already commits to).
+   *
+   * Enum position: LAST — the LLVM backend hardcodes the kind numbers,
+   * so a new kind APPENDS and nothing renumbers. */
+  SCR_DYN_ARRBUF,
 } ScrDynKind;
 
 /* The per-class BOXING DESCRIPTOR carried by a SCR_DYN_OBJINST box: one
@@ -3044,6 +3086,7 @@ typedef enum {
   SCR_DYNH_HTTP_CLIENT, /* ScrHttpClientReq — http.ClientRequest */
   SCR_DYNH_HTTP_AGENT,  /* ScrHttpAgent — http.Agent / https.Agent */
   SCR_DYNH_REGEX,       /* ScrRegex — RegExp (immutable pattern+flags, by reference) */
+  SCR_DYNH_CHILD_STREAM, /* ScrChildStream — child stdio (Readable), on/once("data"|"end") */
   SCR_DYNH_COUNT,
 } ScrDynHandleTag;
 
@@ -3105,7 +3148,10 @@ struct ScrDyn {
     bool b;
     double num;
     ScrStr *str; /* owned */
-    ScrBytes *bytes; /* owned (SCR_DYN_BYTES) */
+    ScrBytes *bytes; /* owned (SCR_DYN_BYTES, and SCR_DYN_ARRBUF — one
+                      * representation, two kinds; the ARRBUF payload's
+                      * `elem` is always SCR_BYTES_BUF and its `len`
+                      * counts BYTES) */
     struct { size_t len; size_t cap; ScrDyn **items; } arr;      /* owned */
     /* SCR_DYN_OBJ: the own DATA members (owned), plus the three fields
      * that make the object a member of a PROTOTYPE CHAIN and a carrier of
@@ -3596,6 +3642,20 @@ ScrDyn *scr_dyn_new_buffer_copy(const ScrBytes *b);
 /* A fresh u8 COPY of a SCR_DYN_BYTES payload (+1) — the dynCheck
  * extraction (`u as Uint8Array`). */
 ScrBytes *scr_dyn_bytes_copy_out(const ScrDyn *d);
+
+/* ── ArrayBuffer in the checked-dynamic tree (SCR_DYN_ARRBUF) ──────────
+ * The static→dyn BOUNDARY constructor: wraps the SAME ScrBytes payload,
+ * retained (+1 on b; b stays borrowed by the caller). `b->elem` must be
+ * SCR_BYTES_BUF — the only caller is the emitted converter for a
+ * `bytes<buf>` slot, and no other element kind reaches this kind.
+ * (scr_dyn_arrbuf_unbox needs ScrDynPath and so lives with the rest of
+ * the checked extractions, beside scr_dyn_check_fail.) */
+ScrDyn *scr_dyn_new_arrbuf_ref(ScrBytes *b);
+/* The keyed READ on an ARRBUF box: `byteLength` answers the size and
+ * EVERY other key — `length`, every index — answers the undefined
+ * singleton, which is Node exactly (an ArrayBuffer has no index
+ * signature and no length). +1, never throws, never NULL. */
+ScrDyn *scr_dyn_arrbuf_key_get(const ScrDyn *d, const ScrStr *k);
 void scr_dyn_arr_push(ScrDyn *arr, ScrDyn *item);
 /* Spread completion for a runtime-arity argument list (`f(...xs)` in the
  * checked-dynamic tier): flattens `src` into `arr` per JS's spread over the
@@ -3901,6 +3961,14 @@ typedef struct ScrDynPath {
  * prints as "Uncaught TypeError: ..." and exits 1). This is
  * scriptc-specific behavior — JS `as` never checks (SEMANTICS.md). */
 void scr_dyn_check_fail(const ScrDynPath *path, const char *want, const ScrDyn *got);
+
+/* dynCheck extraction for an ArrayBuffer target (`u as ArrayBuffer`): an
+ * ARRBUF box answers the RETAINED payload (+1 — the same buffer, never a
+ * copy, so a view taken through the round trip still aliases the
+ * original, which is the whole point of carrying an ArrayBuffer at all);
+ * anything else throws the path-annotated catchable TypeError and
+ * returns NULL. The rest of the kind is up beside scr_dyn_new_bytes_ref. */
+ScrBytes *scr_dyn_arrbuf_unbox(const ScrDyn *d, const ScrDynPath *path, const char *want);
 
 /* ── native handles in the checked-dynamic tree (SCR_DYN_HANDLE) ────────────────────────
  * Per-tag dispatch ops, registered by the handle's owning unit

@@ -1001,6 +1001,12 @@ static const char *isl_dyn_unmarshalable(const ScrDyn *d) {
      * compiled struct, so the crossing names the world honestly rather
      * than falling into the generic tail. */
     return "a class instance";
+  case SCR_DYN_ARRBUF:
+    /* The engine's ArrayBuffer is its own allocation, so handing it the
+     * compiled payload would need a transfer this bridge does not
+     * model. Named, not silently copied — a copy would break the
+     * aliasing every holder of a view over it is relying on. */
+    return "an ArrayBuffer";
   case SCR_DYN_PROMISE:
     return "a promise";
   case SCR_DYN_ARR:

@@ -94,3 +94,148 @@ ScrClosure *scr_dyn_listener_closure_err(const ScrDyn *cb) {
   return scr_dyn_listener_closure(cb, (void *)&scr_dyn_listener_fire_err);
 }
 
+/* ── the checked-dynamic child-stdio handle (SCR_DYNH_CHILD_STREAM) ────
+ *
+ * A child's stdout/stderr crosses into the checked-dynamic tree BY
+ * REFERENCE, like the socket handles: it is a stateful I/O object, so
+ * boxing is a retain and identity survives the round trip.
+ *
+ * This is the kind zapo's SC1101 actually fences on, and it arrives
+ * under a name that hides it. `Readable` from "node:stream" maps to THIS
+ * kind under @types/node (types.ts's childStream branch) and to the
+ * runtime stream CLASS under the shipped fallback declarations — so a
+ * reproducer written against the fallback exercises SCR_DYN_OBJINST and
+ * proves nothing about a record field spelled the same way in a
+ * @types/node build.
+ *
+ * WHY HERE and not in scr_child.c, where the stream itself lives: this
+ * unit is GATED (cc.ts links it with the emitter/stream/net families and
+ * now with childStream), while scr_child.c is ALWAYS linked. The ops
+ * need the listener adapters directly above, so putting them next to
+ * the stream would have made an always-linked TU reference a gated one
+ * — an undefined symbol in every handle-free binary, which is exactly
+ * what the link tried first. Gated→always-linked is the direction that
+ * works, so the ops sit on this side and call scr_child_stream_on_*
+ * across.
+ *
+ * The MODELED surface is exactly the static lowering's:
+ * on/once("data" | "end"). That is the whole of what
+ * lowerChildStreamMethodCall accepts, so the dynamic spelling reaches
+ * every entry point the static one can and no more. */
+
+static bool scr_cs_dynh_name_is(const ScrDyn *name, const char *lit) {
+  size_t n = strlen(lit);
+  return name->kind == SCR_DYN_STR && name->v.str->len == n &&
+         memcmp(name->v.str->data, lit, n) == 0;
+}
+
+static void scr_cs_dynh_unsupported(const char *member, const char *why) {
+  char msg[240];
+  const int n = snprintf(msg, sizeof msg,
+                         "'Readable.prototype.%s' on a dynamic value is not supported yet%s%s",
+                         member, why ? " — " : "", why ? why : "");
+  scr_throw_error_msg(SCR_ERR_ERROR, msg, (size_t)n);
+}
+
+static ScrDyn *scr_cs_dynh_invoke(void *h, ScrDyn *self, const char *method,
+                                  ScrDyn *const *args, size_t argc, const char *what) {
+  ScrChildStream *s = (ScrChildStream *)h;
+  bool reg = false, once = false;
+  if (strcmp(method, "on") == 0 || strcmp(method, "addListener") == 0) reg = true;
+  else if (strcmp(method, "once") == 0) { reg = true; once = true; }
+  if (reg) {
+    const ScrDyn *name = argc > 0 ? args[0] : scr_dyn_undefined();
+    const ScrDyn *cb = argc > 1 ? args[1] : scr_dyn_undefined();
+    scr_dyn_check_listener(cb, "listener");
+    if (scr_exc_pending()) return NULL;
+    if (scr_cs_dynh_name_is(name, "data")) {
+      scr_child_stream_on_data(s, scr_dyn_listener_closure_data(cb),
+                               (ScrChildStreamDataFn)&scr_dyn_listener_fire_data, once);
+    } else if (scr_cs_dynh_name_is(name, "end")) {
+      scr_child_stream_on_end(s, scr_dyn_listener_closure0(cb), once);
+    } else {
+      /* Every other event name — 'error', 'close', 'readable' — is a
+       * REAL Readable event this surface never fires. Accepting the
+       * registration would be worse than refusing it: the listener would
+       * simply never run, which reads as a hang rather than as a missing
+       * feature. */
+      ScrJsonBuf b;
+      scr_jb_init(&b);
+      scr_jb_puts(&b, "listening for '");
+      if (name->kind == SCR_DYN_STR) {
+        for (size_t i = 0; i < name->v.str->len; i++) scr_jb_putc(&b, name->v.str->data[i]);
+      }
+      scr_jb_puts(&b, "' on a dynamic child stream is not supported yet"
+                      " (\"data\" and \"end\" are the modeled events)");
+      scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+      return NULL;
+    }
+    return scr_dyn_retain(self); /* Node returns the stream for chaining */
+  }
+  {
+    /* Real members whose dynamic answer would have to be approximate —
+     * loud, and each named so the message says what is missing. */
+    static const char *const known[] = {
+      "pipe", "read", "setEncoding", "pause", "resume", "destroy",
+      "removeListener", "off", "unpipe", NULL,
+    };
+    for (size_t i = 0; known[i]; i++) {
+      if (strcmp(method, known[i]) == 0) {
+        scr_cs_dynh_unsupported(method, NULL);
+        return NULL;
+      }
+    }
+  }
+  {
+    /* A name Readable never had: Node's own TypeError, not our ladder. */
+    char msg[160];
+    const int n = snprintf(msg, sizeof msg, "%s is not a function", what);
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
+  }
+  return NULL;
+}
+
+static ScrDyn *scr_cs_dynh_get(void *h, const char *key, size_t key_len) {
+  (void)h;
+  (void)key_len;
+  /* The stream's state flags are real properties with real answers this
+   * surface does not track (nothing here records whether the pipe has
+   * ended, only that an 'end' listener was asked for). Answering
+   * `undefined` for `readable` would read as "not a stream"; answering
+   * false would be a claim. Refuse by name. */
+  static const char *const known[] = {
+    "readable", "readableEnded", "readableFlowing", "readableLength",
+    "readableHighWaterMark", "readableObjectMode", "destroyed", "closed",
+    "errored", "readableEncoding", NULL,
+  };
+  for (size_t i = 0; known[i]; i++) {
+    if (strcmp(key, known[i]) == 0) {
+      scr_cs_dynh_unsupported(key, "this surface tracks no stream state");
+      return NULL;
+    }
+  }
+  return NULL; /* not a modeled property — the caller answers undefined */
+}
+
+static bool scr_cs_dynh_set(void *h, const char *key, size_t key_len, const ScrDyn *value) {
+  (void)h;
+  (void)key;
+  (void)key_len;
+  (void)value;
+  return false; /* nothing is writable here — the caller throws the loud ladder */
+}
+
+static const ScrDynHandleOps scr_cs_dynh_ops = {
+  "Readable",
+  &scr_child_stream_retain_v,
+  &scr_child_stream_release_v,
+  &scr_cs_dynh_invoke,
+  &scr_cs_dynh_get,
+  &scr_cs_dynh_set,
+  NULL, /* no pipe destination */
+};
+
+void scr_child_stream_dyn_install(void) {
+  scr_dyn_handle_install(SCR_DYNH_CHILD_STREAM, &scr_cs_dynh_ops);
+}
+

@@ -365,6 +365,7 @@ void scr_dyn_release(ScrDyn *d) {
     scr_str_release(d->v.str);
     break;
   case SCR_DYN_BYTES:
+  case SCR_DYN_ARRBUF: /* one representation, so one release */
     scr_bytes_release(d->v.bytes);
     break;
   case SCR_DYN_ARR:
@@ -1196,6 +1197,7 @@ const char *scr_dyn_specific_type(const ScrDyn *cb, char *detail, size_t cap) {
   case SCR_DYN_OBJINST:
     snprintf(detail, cap, "an instance of %s", scr_dyn_objinst_cls(cb));
     break;
+  case SCR_DYN_ARRBUF: d = "an instance of ArrayBuffer"; break;
   case SCR_DYN_PROMISE: d = "an instance of Promise"; break;
   case SCR_DYN_JSVAL:
     /* Engine-held: only objects/arrays/functions survive wrap-time scalar
@@ -1392,6 +1394,48 @@ bool scr_dyn_objinst_fence(const ScrDyn *d, const char *what) {
   scr_jb_puts(&b, " is not supported yet");
   scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
   return false;
+}
+
+/* ── ArrayBuffer in the checked-dynamic tree (SCR_DYN_ARRBUF) ──────────
+ * Three functions, because an ArrayBuffer is an OPAQUE box of bytes in
+ * JS too: it carries a payload and answers `byteLength`, and every other
+ * question either has a constant answer (typeof, truthiness, String(),
+ * JSON) or is genuinely undefined in Node (length, indices). The arms
+ * for those live beside their SCR_DYN_BYTES neighbours so the two kinds'
+ * answers can be read against each other.
+ *
+ * The payload is the SAME ScrBytes the static side holds. That is not an
+ * optimisation, it is the semantics: `new Uint8Array(buf)` taken on
+ * either side of the boundary must see the other's writes, and Node has
+ * no copy here at all. */
+
+ScrDyn *scr_dyn_new_arrbuf_ref(ScrBytes *b) {
+  ScrDyn *d = scr_dyn_alloc(SCR_DYN_ARRBUF);
+  d->v.bytes = scr_bytes_retain(b);
+  return d;
+}
+
+ScrBytes *scr_dyn_arrbuf_unbox(const ScrDyn *d, const ScrDynPath *path, const char *want) {
+  if (d->kind != SCR_DYN_ARRBUF) {
+    scr_dyn_check_fail(path, want, d);
+    return NULL;
+  }
+  /* The SAME payload, retained — a view taken after the round trip still
+   * aliases the buffer that went in. */
+  return scr_bytes_retain(d->v.bytes);
+}
+
+ScrDyn *scr_dyn_arrbuf_key_get(const ScrDyn *d, const ScrStr *k) {
+  if (k->len == 10 && memcmp(k->data, "byteLength", 10) == 0) {
+    return scr_dyn_new_num((double)d->v.bytes->len);
+  }
+  /* `length`, every index, and every other name: undefined, and that is
+   * Node's real answer rather than a fence standing in for one. An
+   * ArrayBuffer has no index signature and no length — the typed-array
+   * arm's `.length` and canonical-index reads would each have been a
+   * confident wrong number here, which is exactly why this kind is not
+   * SCR_DYN_BYTES with a flag. */
+  return scr_dyn_retain(scr_dyn_undefined());
 }
 
 /* The gated promise boxes (scr_async_dyn.c) build through this thin
@@ -1597,6 +1641,7 @@ bool scr_dyn_truthy(const ScrDyn *d) {
   case SCR_DYN_OBJ:
   case SCR_DYN_ARR:
   case SCR_DYN_BYTES:
+  case SCR_DYN_ARRBUF: /* an ArrayBuffer is a JS object — a zero-byte one too */
   case SCR_DYN_FUNC:
   case SCR_DYN_HANDLE:
   case SCR_DYN_OBJINST: /* a class instance is a JS object: always truthy */
@@ -1754,6 +1799,7 @@ static const char *scr_dyn_typeof_native(const ScrDyn *d) {
   case SCR_DYN_OBJ:
   case SCR_DYN_ARR:
   case SCR_DYN_BYTES:
+  case SCR_DYN_ARRBUF:
   case SCR_DYN_HANDLE:
   case SCR_DYN_OBJINST:
   case SCR_DYN_PROMISE: return "object";
@@ -2092,6 +2138,12 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
     scr_str_release(j);
     return true;
   }
+  case SCR_DYN_ARRBUF:
+    /* An ArrayBuffer has no own enumerable properties, so Node writes
+     * {} — a real answer, not an approximation, and NOT the typed
+     * array's index-keyed form. */
+    scr_jb_puts(b, "{}");
+    return true;
   case SCR_DYN_OBJINST:
     /* Named by its class, like every other OBJINST refusal. */
     scr_dyn_objinst_fence(d, "JSON.stringify");
@@ -2560,6 +2612,12 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
      * through, so the honest answer is the loud ladder. */
     scr_dyn_objinst_fence(d, "String()");
     return scr_str_new("", 0); /* the pending throw wins */
+  case SCR_DYN_ARRBUF:
+    /* Object.prototype.toString with the ArrayBuffer @@toStringTag —
+     * measured, not assumed: ArrayBuffer has no own toString, so
+     * String(buf) really is "[object ArrayBuffer]" and NOT the element
+     * join a typed array gives. */
+    return scr_str_new("[object ArrayBuffer]", 20);
   case SCR_DYN_PROMISE:
     /* Object.prototype.toString with the Promise @@toStringTag. */
     return scr_str_new("[object Promise]", 16);
@@ -2669,6 +2727,7 @@ ScrStr *scr_dyn_string_coerce_js(const ScrDyn *d) {
       if (!r) return NULL; /* the method threw — pending */
       if (r->kind == SCR_DYN_OBJ || r->kind == SCR_DYN_ARR ||
           r->kind == SCR_DYN_FUNC || r->kind == SCR_DYN_HANDLE ||
+          r->kind == SCR_DYN_ARRBUF ||
           r->kind == SCR_DYN_OBJINST || r->kind == SCR_DYN_PROMISE) {
         scr_dyn_release(r); /* non-primitive answer: try the next method */
         continue;
@@ -2726,7 +2785,7 @@ ScrStr *scr_dyn_to_primitive_string(const ScrDyn *d) {
     if (!r) return NULL; /* threw — pending */
     if (r->kind != SCR_DYN_OBJ && r->kind != SCR_DYN_ARR && r->kind != SCR_DYN_FUNC &&
         r->kind != SCR_DYN_HANDLE && r->kind != SCR_DYN_OBJINST &&
-        r->kind != SCR_DYN_PROMISE) {
+        r->kind != SCR_DYN_ARRBUF && r->kind != SCR_DYN_PROMISE) {
       ScrStr *s = scr_dyn_string_coerce(r);
       scr_dyn_release(r);
       return s;
@@ -3353,6 +3412,17 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
     scr_dyn_objinst_fence(recv, "a property write");
     return;
   }
+  if (recv->kind == SCR_DYN_ARRBUF) {
+    /* Node takes an EXPANDO here (an ArrayBuffer is an ordinary
+     * extensible object), and `buf[0] = 1` is a silent no-op because
+     * there is no index signature to write through. This tier has
+     * nowhere to keep an expando and no index to write, so both
+     * spellings would go nowhere — the refusal the static_copy stance
+     * asks for rather than a write that quietly vanished. */
+    const char *msg = "assigning a property on a dynamic ArrayBuffer is not supported yet";
+    scr_throw_error_msg(SCR_ERR_ERROR, msg, strlen(msg));
+    return;
+  }
   if (recv->kind == SCR_DYN_JSVAL) {
     /* The write lands on the REAL engine object (aliasing preserved —
      * island-side readers see it); the value crosses through the uniform
@@ -3551,6 +3621,12 @@ static void scr_jb_put_dyn_raw(ScrJsonBuf *b, const ScrDyn *d) {
     scr_jb_puts(b, "null"); /* the buffer never surfaces: the pending throw wins */
     return;
   }
+  case SCR_DYN_ARRBUF:
+    /* {} — an ArrayBuffer's own enumerable properties, of which there
+     * are none. Unlike the OBJINST arm below this is not a fence
+     * standing in for an unknown shape: the shape is known and empty. */
+    scr_jb_puts(b, "{}");
+    return;
   case SCR_DYN_OBJINST: {
     /* Node serializes an instance's own enumerable properties; the box
      * has no member table to enumerate, so a fabricated {} would be a
@@ -3656,6 +3732,7 @@ static const char *scr_dyn_kind_name(const ScrDyn *d) {
   case SCR_DYN_UNDEF: return "undefined";
   case SCR_DYN_BYTES: return "Uint8Array";
   case SCR_DYN_FUNC: return "function";
+  case SCR_DYN_ARRBUF: return "ArrayBuffer"; /* "got ArrayBuffer" */
   case SCR_DYN_HANDLE: return scr_dyn_handle_cls(d); /* "got IncomingMessage" */
   case SCR_DYN_OBJINST: return scr_dyn_objinst_cls(d); /* "got Readable" */
   case SCR_DYN_PROMISE: return "Promise"; /* "got Promise" */
@@ -4237,6 +4314,11 @@ bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b) {
      * is the JS value. Two boxes of one instance compare ===-equal, and
      * `unbox(box(x)) == x` holds by the same pointer. */
     return a->v.inst.o == b->v.inst.o;
+  case SCR_DYN_ARRBUF:
+    /* And the ARRAYBUFFER: the payload is the JS value, so two boxes of
+     * one buffer compare ===-equal — the same stance the shared
+     * representation already forces on aliasing. */
+    return a->v.bytes == b->v.bytes;
   case SCR_DYN_JSVAL:
     /* Identity is the ENGINE VALUE, not the box or even the cell: two
      * wraps of one engine value compare ===-equal (the engine's own
@@ -5601,6 +5683,7 @@ ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *wh
    * anything else (the overwhelmingly common `return;`) is discarded. */
   if (r != NULL && (r->kind == SCR_DYN_OBJ || r->kind == SCR_DYN_ARR ||
                     r->kind == SCR_DYN_FUNC || r->kind == SCR_DYN_BYTES ||
+                    r->kind == SCR_DYN_ARRBUF ||
                     r->kind == SCR_DYN_HANDLE || r->kind == SCR_DYN_PROMISE ||
                     r->kind == SCR_DYN_JSVAL || r->kind == SCR_DYN_OBJINST)) {
     scr_dyn_release(inst);
@@ -5715,6 +5798,16 @@ static ScrDyn *scr_sc_clone(const ScrDyn *v, const ScrScParent *up) {
      * answer (the JSVAL arm's reasoning). */
     scr_dyn_objinst_fence(v, "structuredClone");
     return NULL;
+  case SCR_DYN_ARRBUF: {
+    /* An ArrayBuffer is a transferable, and structuredClone COPIES it —
+     * the one place this kind must not share its payload, since the
+     * whole point of the call is a buffer the caller can mutate
+     * independently. */
+    ScrBytes *cp = scr_bytes_copy(v->v.bytes);
+    ScrDyn *out = scr_dyn_new_arrbuf_ref(cp);
+    scr_bytes_release(cp);
+    return out;
+  }
   case SCR_DYN_FUNC:
   case SCR_DYN_HANDLE:
   default: {

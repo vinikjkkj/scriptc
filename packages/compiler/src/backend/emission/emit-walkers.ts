@@ -6,7 +6,7 @@
  * interning ORDER is part of the emitted C, so the registries stay on
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
-import { canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, DYN_HANDLE_KINDS, IrType, isRefCounted, typeEquals, typeKey } from "../../ir/nodes.js";
+import { canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { OVERFLOW_MEMBER } from "./emit-shapes.js";
@@ -78,8 +78,13 @@ import { OVERFLOW_MEMBER } from "./emit-shapes.js";
       // sibling of a failing field, never as the failure itself.
       case "dyn":
         return "unknown";
-      case "bytes":
-        return "Uint8Array";
+      case "bytes": {
+        const bk = DYN_BYTES_KINDS.get(t.elem);
+        // The other element widths never reach a dynCheck target (the
+        // predicates refuse them), so naming Uint8Array for them would
+        // only ever mislead a future reader of this line.
+        return bk ? bk.cls : "Uint8Array";
+      }
       // A class target — the %Error extraction (an instanceof-Error
       // narrow / cast on an unknown value) or the instance box's
       // interval-checked unwrap: the failure names the class, like
@@ -455,6 +460,27 @@ import { OVERFLOW_MEMBER } from "./emit-shapes.js";
       `    /* Island-held: the engine's own ToString (a bridged failure`,
       `     * leaves the exception pending and appends nothing). */`,
       `    scr_dyn_isl_tostr_buf(b, d);`,
+      `    break;`,
+      `  default:`,
+      `    /* EVERY kind with no arm above — today SCR_DYN_ARRBUF, whose`,
+      `     * answer is "[object ArrayBuffer]", and tomorrow whatever gets`,
+      `     * appended to ScrDynKind next.`,
+      `     *`,
+      `     * This default is the point, more than the kind that prompted`,
+      `     * it. The switch had none, so a kind the emitter did not know`,
+      `     * about appended NOTHING and String(u) quietly answered "" —`,
+      `     * while every other spelling of the same question threw or`,
+      `     * printed. That is not a missing feature, it is one value with`,
+      `     * two answers, and it went unnoticed because a silent wrong`,
+      `     * answer has no symptom. A per-program COPY of the runtime's`,
+      `     * ToString table must fall back to the ORIGINAL, never to`,
+      `     * nothing; then the worst a forgotten kind can cost is the`,
+      `     * inlining, not the semantics. */`,
+      `    {`,
+      `      ScrStr *ds = scr_dyn_to_string(d, NULL);`,
+      `      for (size_t i = 0; i < ds->len; i++) scr_jb_putc(b, ds->data[i]);`,
+      `      scr_str_release(ds);`,
+      `    }`,
       `    break;`,
       `  }`,
       `}`,
@@ -853,11 +879,20 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         d.push(`  (void)d;`);
         d.push(`  return true;`);
         break;
-      case "bytes":
-        // A Uint8Array target (the checked-dynamic tree carries u8 payloads only).
-        if (t.elem !== "u8") throw new Error(`emitter bug: dynMatch of bytes<${t.elem}>`);
-        d.push(`  return d->kind == SCR_DYN_BYTES;`);
+      case "bytes": {
+        // A KIND test, and it is a sound one again only because the two
+        // admitted element kinds are two kinds. While `bytes<buf>` was
+        // going to ride SCR_DYN_BYTES with an element tag, this line was
+        // the sharpest hazard in the whole change: an `ArrayBuffer` arm
+        // would have matched a `Uint8Array` value, the union would have
+        // taken the ArrayBuffer tag, and every later read of it would
+        // have been confidently wrong. Distinct kinds make the obvious
+        // test the correct one.
+        const bk = DYN_BYTES_KINDS.get(t.elem);
+        if (!bk) throw new Error(`emitter bug: dynMatch of bytes<${t.elem}>`);
+        d.push(`  return d->kind == ${bk.kind};`);
         break;
+      }
       case "record": {
         const shape = E.recordsById.get(t.shapeId);
         if (!shape) throw new Error(`emitter bug: dynCheck of unknown shape ${t.shapeId}`);
@@ -1160,6 +1195,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`     * loud not-supported ladder (scr_json.c). */`);
     d.push(`    return scr_dyn_handle_key_get(d, k);`);
     d.push(`  }`);
+    d.push(`  if (d->kind == SCR_DYN_ARRBUF) {`);
+    d.push(`    /* ArrayBuffer: 'byteLength' answers, and 'length' and every`);
+    d.push(`     * index answer UNDEFINED — Node's real answers, not a fence`);
+    d.push(`     * standing in for one. This is the arm the typed-array`);
+    d.push(`     * branch below would have gotten wrong in three ways at`);
+    d.push(`     * once had the two shared a kind. */`);
+    d.push(`    return scr_dyn_arrbuf_key_get(d, k);`);
+    d.push(`  }`);
     d.push(`  if (d->kind == SCR_DYN_BYTES) {`);
     d.push(`    /* Buffer-shaped dyn (a stream's 'data' chunk in the JS lane):`);
     d.push(`     * .length and canonical-index byte reads answer like Node. */`);
@@ -1262,13 +1305,23 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         d.push(`  (void)path;`);
         d.push(`  return scr_dyn_retain((ScrDyn *)d);`);
         break;
-      case "bytes":
+      case "bytes": {
+        const bk = DYN_BYTES_KINDS.get(t.elem);
+        if (!bk) throw new Error(`emitter bug: dynCheck of bytes<${t.elem}>`);
+        if (bk.dk === "ARRBUF") {
+          // `u as ArrayBuffer`: the SAME payload back, retained — the
+          // opposite of the u8 arm below, and deliberately. A copy would
+          // silently detach every view already taken over the buffer,
+          // and an ArrayBuffer with no views is a value nobody wants.
+          d.push(`  return scr_dyn_arrbuf_unbox(d, path, ${want});`);
+          break;
+        }
         // `u as Uint8Array`: kind check, then a fresh COPY out (the
         // boundary's aliasing stance in both directions).
-        if (t.elem !== "u8") throw new Error(`emitter bug: dynCheck of bytes<${t.elem}>`);
         d.push(`  if (d->kind != SCR_DYN_BYTES) { scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
         d.push(`  return scr_dyn_bytes_copy_out(d);`);
         break;
+      }
       case "object":
         // A CLASS TARGET, two representations apart. Everything but
         // %Error is the instance box's interval-checked unwrap;
@@ -1562,8 +1615,19 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // `write(val, buf, pos) { buf[pos] = val }` writes the CALLER's
         // buffer. Retaining keeps the deep-copy stance's ownership
         // contract (the operand stays borrowed) and adds Node's aliasing.
-        if (t.elem !== "u8") throw new Error(`emitter bug: to-dyn of bytes<${t.elem}>`);
-        d.push(`  return scr_dyn_new_bytes_ref(v);`);
+        // bytes<buf> (ArrayBuffer) shares that argument exactly — same
+        // ScrBytes, same aliasing, so `new Uint8Array(buf)` taken on
+        // either side sees the other's writes — and lands in its OWN dyn
+        // kind rather than this one. Not a stylistic split: an
+        // ArrayBuffer has no length, no indices and no elements, and
+        // every reader of SCR_DYN_BYTES assumes all three.
+        {
+          const bk = DYN_BYTES_KINDS.get(t.elem);
+          if (!bk) throw new Error(`emitter bug: to-dyn of bytes<${t.elem}>`);
+          d.push(bk.dk === "ARRBUF"
+            ? `  return scr_dyn_new_arrbuf_ref(v);`
+            : `  return scr_dyn_new_bytes_ref(v);`);
+        }
         break;
       case "record": {
         const shape = E.recordsById.get(t.shapeId);
