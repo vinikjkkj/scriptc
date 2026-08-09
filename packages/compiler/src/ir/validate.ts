@@ -5093,6 +5093,22 @@ function validateFunction(
         }
         break;
       }
+      case "arrayClear": {
+        // The tombstone write. No value node: the ABSENT slot value is the
+        // element type's, and only refcounted elements have one — a scalar
+        // slot's zero would read 0/false where the hole reads undefined,
+        // and the dyn/union kinds carry a real null/undefined VALUE, so
+        // they take the ordinary arraySet instead.
+        checkExpr(s.arr);
+        checkExpr(s.index);
+        expectType(s.index, F64, "arrayClear index");
+        if (s.arr.type.kind !== "array") {
+          err(`arrayClear on non-array ${s.arr.type.kind}`, s.loc);
+        } else if (!isRefCounted(s.arr.type.elem)) {
+          err(`arrayClear over ${s.arr.type.elem.kind} elements (no absent value)`, s.loc);
+        }
+        break;
+      }
       case "bytesSet": {
         checkExpr(s.arr);
         checkExpr(s.index);

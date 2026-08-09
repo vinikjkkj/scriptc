@@ -846,7 +846,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             const n = `sc_i${E.tempCounter++}`;
             E.line(`for (size_t ${n} = 0, ${n}_len = (size_t)scr_arr_len(${v.name}); ${n} < ${n}_len; ${n}++) {`);
             E.indent++;
-            E.line(`scr_arr_push_${acc}(${arr.name}, scr_arr_get_${acc}(${v.name}, (double)${n}));`);
+            // A COPY: an ABSENT slot copies through as absent (JS spreads
+            // holes too), which is what scr_arr_copy_ref does and what
+            // scr_arr_get_ref refuses.
+            E.line(`scr_arr_push_${acc}(${arr.name}, ${acc === "ref" ? "scr_arr_copy_ref" : `scr_arr_get_${acc}`}(${v.name}, (double)${n}));`);
             E.indent--;
             E.line(`}`);
             return;
@@ -867,19 +870,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const elem = e.type.elem;
         const n = E.emitExpr(e.length);
         const arr = E.newTemp(e.type, E.arrNewC(elem, 0));
-        let fill = "NULL";
-        if (elem.kind === "union") {
-          const def = E.unionsById.get(elem.unionId);
-          const tag = def ? def.arms.findIndex((a) => a.kind === "undefinedT") : -1;
-          if (tag >= 0) fill = E.unitInstanceRef(elem.unionId, tag);
-        }
+        // The ABSENT value, one spelling for all three producers (this
+        // node, setLength's growth arm, and arrayClear's tombstone write).
+        const fill = E.absentElemC(elem);
         // SCALAR slots take their zero. They have no absent value that
         // isn't a lie on read, so the frontend only builds this node for
         // them when it has PROVEN every slot is written before any read
         // (the whole-range fill and the counting-loop fill) — the zero is
         // never observed.
-        if (elem.kind === "f64") fill = "0";
-        else if (elem.kind === "bool") fill = "false";
         const i = `sc_i${E.tempCounter++}`;
         E.line(`for (double ${i} = 0; ${i} <= ${n.name} - 1; ${i} += 1) {`);
         E.indent++;
@@ -975,12 +973,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // runtime fact, so both are emitted.
             const want = E.emitExpr(e.args[0]!);
             const elemT = e.receiver.type.elem;
-            let fill = "NULL";
-            if (elemT.kind === "union") {
-              const def = E.unionsById.get(elemT.unionId);
-              const tag = def ? def.arms.findIndex((a) => a.kind === "undefinedT") : -1;
-              if (tag >= 0) fill = E.unitInstanceRef(elemT.unionId, tag);
-            }
+            const fill = E.absentElemC(elemT);
             E.line(`scr_arr_truncate(${r.name}, ${want.name});`);
             const g = `sc_i${E.tempCounter++}`;
             E.line(`for (double ${g} = scr_arr_len(${r.name}); ${g} <= ${want.name} - 1; ${g} += 1) {`);
@@ -999,7 +992,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             const n = `sc_i${E.tempCounter++}`;
             E.line(`for (size_t ${n} = 0, ${n}_len = (size_t)scr_arr_len(${src.name}); ${n} < ${n}_len; ${n}++) {`);
             E.indent++;
-            E.line(`scr_arr_push_${acc}(${r.name}, scr_arr_get_${acc}(${src.name}, (double)${n}));`);
+            E.line(`scr_arr_push_${acc}(${r.name}, ${acc === "ref" ? "scr_arr_copy_ref" : `scr_arr_get_${acc}`}(${src.name}, (double)${n}));`);
             E.indent--;
             E.line(`}`);
             return E.newTemp(e.type, `scr_arr_len(${r.name})`);

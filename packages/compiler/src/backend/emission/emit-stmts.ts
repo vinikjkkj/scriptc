@@ -365,6 +365,20 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         E.line(`scr_arr_set_${acc}(${arr.name}, ${idx.name}, ${v.name});${E.srcComment(s.loc)}`);
         break;
       }
+      case "arrayClear": {
+        // The tombstone write `a[i] = null as unknown as T`: the slot takes
+        // the element type's ABSENT value — the same one arrayNewLen and
+        // the growth half of setLength push — and scr_arr_set_ref releases
+        // whatever it displaced. Evaluation order is arraySet's minus the
+        // value (a unit source is pure; JS evaluates nothing either).
+        const arr = E.emitExpr(s.arr);
+        const idx = E.emitExpr(s.index);
+        if (s.arr.type.kind !== "array") throw new Error("emitter bug: arrayClear on non-array");
+        E.line(
+          `scr_arr_set_ref(${arr.name}, ${idx.name}, ${E.absentElemC(s.arr.type.elem)});${E.srcComment(s.loc)}`,
+        );
+        break;
+      }
       case "bytesSet": {
         // Typed-array element write: same evaluation order as arraySet;
         // the value is a scalar (the runtime coerces JS-exactly), so no
