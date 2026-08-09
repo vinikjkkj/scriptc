@@ -12078,6 +12078,40 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         if (!armed) L.badType(blame, L.typeOf(blame));
         t = armed;
       }
+      // The receiver's CHECKER shape and the shape its VALUE lowered can
+      // DISAGREE, exactly as they can on the bracket read: `x as
+      // Record<string, unknown>` retypes a value without reshaping it, so
+      // the index signature that made this an overflow read belongs to the
+      // ASSERTED type while the value underneath is still a union (or some
+      // other record). Emitting the overflow read anyway builds a
+      // recordKeyGet whose receiver is not that shape, and the validator
+      // rejects it as an internal error — a compiler crash where the
+      // program deserved either an answer or a named fence.
+      //
+      // This is the bracket path's rule, moved to its dot-access twin
+      // because they are the same read: `(c as Record<string, unknown>).k`
+      // and `(c as Record<string, unknown>)["k"]` differ only in spelling.
+      // The bracket path has had the guard since the `Object.keys(o)`
+      // iteration idiom needed it; the dot path never grew one, and
+      // nothing reached it until a union became dyn-convertible.
+      if (target.obj.type.kind !== "record" || target.obj.type.shapeId !== target.shapeId) {
+        if (L.dynConvertible(target.obj.type)) {
+          // Read the key in the checked-dynamic tree: a missing key answers
+          // undefined, exactly JS, and `unknown` is what the cast promised.
+          return {
+            kind: "dynKeyGet",
+            key: { kind: "strLit", value: target.field, type: STRING, loc },
+            value: { kind: "dynFrom", value: target.obj, type: DYN, loc },
+            type: DYN,
+            loc,
+          };
+        }
+        L.unsupported(
+          "SC1090",
+          blame,
+          `reading '${target.field}' through a receiver whose value shape differs from its asserted type (a '… as T' cast retypes but does not reshape the value — read the property on each arm, or index a single concrete record)`,
+        );
+      }
       return {
         kind: "recordKeyGet",
         obj: target.obj,
