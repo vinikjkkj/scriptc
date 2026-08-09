@@ -6019,7 +6019,59 @@ export const DYN_HANDLE_KINDS: ReadonlyMap<string, { tag: string; cls: string }>
   ["http2Stream", { tag: "SCR_DYNH_H2_STREAM", cls: "Http2Stream" }],
   ["httpClientReq", { tag: "SCR_DYNH_HTTP_CLIENT", cls: "ClientRequest" }],
   ["regex", { tag: "SCR_DYNH_REGEX", cls: "RegExp" }],
+  // child stdio (`child.stdout` / `child.stderr`, and NodeJS.ReadableStream
+  // under @types/node — types.ts maps the SPELLING `Readable` here, while
+  // the shipped fallback declarations map the same name to the runtime
+  // stream CLASS. A record field typed `Readable` inside a wide union is
+  // therefore this kind, not `object:%Readable`, which is why a minimal
+  // reproducer written against the fallback proves nothing about a site
+  // reached through @types/node.) Its whole modeled surface is
+  // on/once("data" | "end"), and the dyn dispatch reaches the SAME
+  // scr_child_stream_on_* entry points the static lowering does.
+  ["childStream", { tag: "SCR_DYNH_CHILD_STREAM", cls: "Readable" }],
 ]);
+
+/** The bytes ELEMENT kinds that cross the checked-dynamic boundary, each
+ * with the dyn KIND that carries it. THE single source: both directions
+ * (canConvertToDyn / canDynCheckTo, and their nested walkers) and both
+ * backends read this map, so no lane can admit an element the other
+ * refuses and no emitter can name a kind the predicates never let reach
+ * it. `dynBytesAccounting`'s test fails if the map and the predicates
+ * stop agreeing.
+ *
+ * `u8` and `buf` share ONE runtime representation (ScrBytes) and are
+ * nonetheless two dyn KINDS rather than one kind carrying an element
+ * tag. That is the whole safety argument for the pair. Sixty places in
+ * the runtime ask `d->kind == SCR_DYN_BYTES` and then read `len`, index
+ * bytes, join elements, or hand the payload to a socket write — every
+ * one of them correct for a typed array and wrong for an ArrayBuffer,
+ * which in Node has no length, no indices, no elements and is not a
+ * valid chunk. A shared kind would have made each of those sixty a site
+ * to audit and re-audit; a distinct kind makes them all exclude an
+ * ArrayBuffer by construction, and the ones that SHOULD accept one opt
+ * in by name. dynMatch is the sharpest case: it tests the KIND only, so
+ * with a shared kind a `Uint8Array` would have matched an `ArrayBuffer`
+ * union arm and the union would have worn the wrong tag — a silent
+ * wrong answer, not a fence. With two kinds the existing test is right
+ * again for free.
+ *
+ * The other typed-array elements (u32/i32/f32/f64/i8) stay out: the
+ * checked-dynamic tree's element story is byte-shaped, and a wider
+ * element would need its own read/write coercions to answer anything.
+ * They keep the honest cannot-box fence. */
+export const DYN_BYTES_KINDS: ReadonlyMap<IrBytesElem, { kind: string; dk: "BYTES" | "ARRBUF"; cls: string }> =
+  new Map([
+    ["u8", { kind: "SCR_DYN_BYTES", dk: "BYTES", cls: "Uint8Array" }],
+    ["buf", { kind: "SCR_DYN_ARRBUF", dk: "ARRBUF", cls: "ArrayBuffer" }],
+  ]);
+
+/** Whether a `bytes` type crosses the boundary at all — the one spelling
+ * of the element test, so a new element kind is admitted in one place
+ * rather than in the five predicates and two emitters that used to write
+ * `t.elem === "u8"` out longhand. */
+export function isDynBytes(t: IrType): boolean {
+  return t.kind === "bytes" && DYN_BYTES_KINDS.has(t.elem);
+}
 
 /** A CLASS INSTANCE that crosses the checked-dynamic boundary as the
  * tree's instance kind (SCR_DYN_OBJINST): boxed by REFERENCE, narrowed
@@ -6061,7 +6113,7 @@ export function canConvertToDyn(
   // can build the dyn value, which it can — so canConvertToDyn folds the
   // bytes-bearing composites in beyond the JSON-safe core.
   if (canBoxBytesComposite(t, getRecord, getUnion)) return true;
-  if (t.kind === "bytes" && t.elem === "u8") return true;
+  if (isDynBytes(t)) return true;
   // %Error converts as the checked-dynamic tree's error encoding ({%error, name, message,
   // code?} — the caughtToDyn shape, scr_dyn_from_error): the dyn 'error'
   // listener boundary (a mustCall-wrapped handler receiving the payload).
@@ -6184,7 +6236,7 @@ function canBoxBytesComposite(
     case "nullT":
       return true;
     case "bytes":
-      return t.elem === "u8";
+      return DYN_BYTES_KINDS.has(t.elem);
     case "array":
       return canBoxBytesComposite(t.elem, getRecord, getUnion, visiting);
     case "record": {
@@ -6222,7 +6274,7 @@ export function canDynCheckTo(
   seen: ReadonlySet<IrType> = new Set(),
 ): boolean {
   if (isJsonSafeType(t, getRecord, getUnion)) return true;
-  if (t.kind === "bytes" && t.elem === "u8") return true;
+  if (isDynBytes(t)) return true;
   if (t.kind === "object" && t.className === "%Error") return true;
   // The OUT direction of the instance box: an interval-checked
   // reference unwrap against the class's preorder interval (+1 — the
@@ -6252,7 +6304,7 @@ export function canDynCheckTo(
   // being built for it is the one that will validate it.
   const nestedOk = (x: IrType, stack: ReadonlySet<IrType>): boolean => {
     if (isJsonSafeType(x, getRecord, getUnion)) return true;
-    if (x.kind === "bytes" && x.elem === "u8") return true;
+    if (isDynBytes(x)) return true;
     // A dyn ('unknown') LEAF: the target itself says "anything fits here",
     // so there is nothing to validate. Both walkers have said so since
     // they were written — dynMatch's record case skips dyn fields
@@ -6418,6 +6470,34 @@ export function canExitIslandToType(
     return dataArms.length === 1 && dataArms[0]!.kind === "array" && dataArms[0]!.elem.kind === "jsval";
   }
   return false;
+}
+
+/** True when the module contains a `childStream`-typed slot anywhere —
+ * the gate for stamping the child-stdio handle-dispatch ops into the dyn
+ * core (SCR_DYNH_CHILD_STREAM). Unlike the regex switch this is not a
+ * LINK gate: scr_child.c is always linked (cc.ts's RUNTIME_SOURCES), so
+ * the only thing riding this predicate is the install call itself. The
+ * gate is still exact for the reason that matters — a program that can
+ * BOX a child stream necessarily has one in its types, so the call and
+ * the boxing site appear together or not at all. Same generic JSON walk
+ * as moduleUsesRegex: `kind` discriminants live only on IR objects, so
+ * user string VALUES can never false-positive. */
+export function moduleUsesChildStream(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    if ((v as { kind?: unknown }).kind === "childStream") {
+      found = true;
+      return;
+    }
+    for (const x of Object.values(v as Record<string, unknown>)) visit(x);
+  };
+  visit(mod);
+  return found;
 }
 
 /** True when the module contains any regex construct — a regexLit /

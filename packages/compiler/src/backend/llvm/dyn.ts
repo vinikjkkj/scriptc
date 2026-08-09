@@ -22,7 +22,7 @@
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrType } from "../../ir/nodes.js";
-import { canAdaptDynFuncTo, canBoxFuncIntoDyn, DYN_HANDLE_KINDS, isRefCounted, typeKey } from "../../ir/nodes.js";
+import { canAdaptDynFuncTo, canBoxFuncIntoDyn, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, typeKey } from "../../ir/nodes.js";
 import { mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
 import { arrNewCall, elemAccess, llFieldType, releaseSym, traceAdapter, traceArg, vAdapters } from "./shapes.js";
@@ -40,6 +40,7 @@ export const DYN_HANDLE_TAG_NUM: Record<string, number> = {
   // this lane has never emitted one, and a WRONG number here is a
   // mis-tagged handle rather than a build error. See dynHandleTagNum.
   regex: 8,
+  childStream: 9,
 };
 
 /** The tag's numeric value, or the LLVM lane's honest miss.
@@ -71,6 +72,7 @@ export const DK = {
   PROMISE: 10,
   JSVAL: 11, /* SCR_DYN_JSVAL — island values held by reference */
   OBJINST: 12, /* SCR_DYN_OBJINST — class instances held by reference */
+  ARRBUF: 13, /* SCR_DYN_ARRBUF — ArrayBuffer, payload shared by reference */
 } as const;
 
 /** What the dyn helpers need beyond the walker host: interned immortal
@@ -387,10 +389,14 @@ export class LlDyn {
         // An `unknown` target: every dyn value fits, undefined included.
         B.terminate(`ret i1 true`);
         break;
-      case "bytes":
-        if (t.elem !== "u8") throw new Error(`llvm emitter bug: dynMatch of bytes<${t.elem}>`);
-        kindIs(DK.BYTES);
+      case "bytes": {
+        // A KIND test, sound because `u8` and `buf` are two kinds — the
+        // C twin's note has the argument.
+        const bk = DYN_BYTES_KINDS.get(t.elem);
+        if (!bk) throw new Error(`llvm emitter bug: dynMatch of bytes<${t.elem}>`);
+        kindIs(DK[bk.dk]);
         break;
+      }
       case "record": {
         const shape = this.host.recordsById.get(t.shapeId);
         if (!shape) throw new Error(`llvm emitter bug: dynCheck of unknown shape ${t.shapeId}`);
@@ -642,8 +648,19 @@ export class LlDyn {
         break;
       }
       case "bytes": {
+        const bk = DYN_BYTES_KINDS.get(t.elem);
+        if (!bk) throw new Error(`llvm emitter bug: dynCheck of bytes<${t.elem}>`);
+        if (bk.dk === "ARRBUF") {
+          // `u as ArrayBuffer`: the SAME payload back, retained. The
+          // runtime does the kind check and the throw, so there is no
+          // requireKind here — see the C twin.
+          host.declare(`declare ptr @scr_dyn_arrbuf_unbox(ptr, ptr, ptr)`);
+          const r = B.tmp();
+          B.line(`${r} = call ptr @scr_dyn_arrbuf_unbox(ptr %d, ptr %path, ptr ${want})`);
+          B.terminate(`ret ptr ${r}`);
+          break;
+        }
         // `u as Uint8Array`: kind check, then a fresh COPY out.
-        if (t.elem !== "u8") throw new Error(`llvm emitter bug: dynCheck of bytes<${t.elem}>`);
         requireKind(DK.BYTES, "dc");
         host.declare(`declare ptr @scr_dyn_bytes_copy_out(ptr)`);
         const r = B.tmp();
@@ -1115,11 +1132,17 @@ export class LlDyn {
         // Shared by REFERENCE, not copied — see the C emitter's twin: a
         // typed array's static and dyn representations are the same
         // refcounted ScrBytes, so the boundary aliases like Node.
-        if (t.elem !== "u8") throw new Error(`llvm emitter bug: to-dyn of bytes<${t.elem}>`);
-        host.declare(`declare ptr @scr_dyn_new_bytes_ref(ptr)`);
-        const r = B.tmp();
-        B.line(`${r} = call ptr @scr_dyn_new_bytes_ref(ptr %v)`);
-        B.terminate(`ret ptr ${r}`);
+        // bytes<buf> (ArrayBuffer) shares the payload the same way and
+        // lands in its OWN kind — the C twin's note has the argument.
+        {
+          const bk = DYN_BYTES_KINDS.get(t.elem);
+          if (!bk) throw new Error(`llvm emitter bug: to-dyn of bytes<${t.elem}>`);
+          const fn = bk.dk === "ARRBUF" ? "scr_dyn_new_arrbuf_ref" : "scr_dyn_new_bytes_ref";
+          host.declare(`declare ptr @${fn}(ptr)`);
+          const r = B.tmp();
+          B.line(`${r} = call ptr @${fn}(ptr %v)`);
+          B.terminate(`ret ptr ${r}`);
+        }
         break;
       }
       case "record": {
@@ -1572,13 +1595,29 @@ export class LlDyn {
       const B = new BlockBuilder();
       const kd = this.kindOf(B, "%d");
       const done = B.newLabel("ds.d");
+      // The switch's DEFAULT used to be `done` — a kind with no arm
+      // appended nothing and String(u) answered "" while every other
+      // spelling of the question threw or printed. It now falls back to
+      // the runtime's own ToString, the C twin's fix and for the same
+      // reason: this walker is a per-program COPY of that table, and a
+      // copy must degrade to the original rather than to silence.
+      // SCR_DYN_ARRBUF is the first kind to arrive through it.
+      const dflt = B.newLabel("ds.dflt");
       const labels = new Map<number, string>();
       for (const k of [DK.NULL, DK.BOOL, DK.NUM, DK.STR, DK.ARR, DK.OBJ, DK.UNDEF, DK.BYTES, DK.FUNC, DK.HANDLE, DK.PROMISE, DK.JSVAL, DK.OBJINST]) {
         labels.set(k, B.newLabel(`ds.k${k}`));
       }
       B.terminate(
-        `switch i32 ${kd}, label %${done} [ ${[...labels].map(([k, l]) => `i32 ${k}, label %${l}`).join(" ")} ]`,
+        `switch i32 ${kd}, label %${dflt} [ ${[...labels].map(([k, l]) => `i32 ${k}, label %${l}`).join(" ")} ]`,
       );
+      B.startBlock(dflt);
+      {
+        const s = B.tmp();
+        B.line(`${s} = call ptr @scr_dyn_to_string(ptr %d, ptr null)`);
+        this.putScrStr(B, "%b", s);
+        B.line(`call void @scr_str_release(ptr ${s})`);
+        B.br(done);
+      }
       B.startBlock(labels.get(DK.JSVAL)!);
       {
         // Island-held: the engine's own ToString (a bridged failure
@@ -2062,6 +2101,21 @@ export class LlDyn {
       host.declare(`declare ptr @scr_dyn_handle_key_get(ptr, ptr)`);
       const r = B.tmp();
       B.line(`${r} = call ptr @scr_dyn_handle_key_get(ptr %d, ptr %k)`);
+      B.terminate(`ret ptr ${r}`);
+      B.startBlock(lNext);
+    }
+    // ARRBUF: 'byteLength' answers; 'length' and every index are
+    // undefined, which is Node. The C twin's arm.
+    {
+      const isAb = B.tmp();
+      B.line(`${isAb} = icmp eq i32 ${kd}, ${DK.ARRBUF}`);
+      const lAb = B.newLabel("kg.ab");
+      const lNext = B.newLabel("kg.n");
+      B.condBr(isAb, lAb, lNext);
+      B.startBlock(lAb);
+      host.declare(`declare ptr @scr_dyn_arrbuf_key_get(ptr, ptr)`);
+      const r = B.tmp();
+      B.line(`${r} = call ptr @scr_dyn_arrbuf_key_get(ptr %d, ptr %k)`);
       B.terminate(`ret ptr ${r}`);
       B.startBlock(lNext);
     }

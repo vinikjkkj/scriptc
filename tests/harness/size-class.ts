@@ -38,16 +38,54 @@
  * they move by exactly the +2,048 this change costs everywhere, which
  * preserves whatever headroom each had rather than inventing new headroom
  * for a platform nobody weighed.
+ *
+ * RECALIBRATED AGAIN 2026-08-09, same toolchain, after SCR_DYN_ARRBUF (the
+ * ArrayBuffer dyn kind) joined the same always-linked core: 637,440 static,
+ * over the 637,000 above. Measured A/B on two worktrees at the same commit,
+ * the arithmetic is:
+ *
+ *   main (b165184)   635,904        <- 3,584 above the last calibration
+ *   this change      637,440        <- +1,536 for the kind itself
+ *
+ * so of the 4,680 bytes of headroom the last recalibration left, 3,584 were
+ * gone to unrelated merges BEFORE this change compiled a line, and the kind
+ * spent the remaining 1,096 and 440 more. That is the second time running
+ * that the ceiling was reached mostly by drift, which is the number worth
+ * carrying forward: a dyn kind costs one page or less (+2,048 then, +1,536
+ * now — this one is cheaper because only the ArrayBuffer half is always
+ * linked; the child-stream handle ops live in the gated scr_dyn_handle.c
+ * and a hello-world never links them), while the gap between calibrations
+ * costs two.
+ *
+ * The REGEX class was measured SEPARATELY rather than moved by the static
+ * delta, and it is as well, because it does not grow by the same amount:
+ *
+ *   main (b165184)   773,632        <- 368 bytes under the old 774,000
+ *   this change      776,704        <- +3,072, TWICE the static delta
+ *
+ * Assuming the two classes move together would have set this bound 1,536
+ * bytes too low and turned a green canary red for the next reader. Note
+ * also how little room the regex ceiling had left: 368 bytes, against the
+ * static one's 4,680 — the tighter of the two, and nothing said so.
+ *
+ * win32 therefore gets one honest page over each new measurement:
+ * 637,440 + 4,096 -> 642,000 static, 776,704 + 4,096 -> 781,000 regex.
+ * linux and darwin cannot be weighed from this box, so they move by
+ * exactly what this change costs here — +1,536 static, +3,072 regex —
+ * which preserves whatever headroom each had rather than inventing new
+ * headroom for a platform nobody measured. The static->regex DISTANCE the
+ * pair actually protects is untouched: a 3 KB kind cannot hide a 135 KB
+ * library or a 620 KB engine.
  */
 const platform = process.platform;
 
 /** A default-built hello-world: no regex, no engine. */
 export const STATIC_CLASS_MAX =
-  platform === "linux" ? 394_048 : platform === "win32" ? 637_000 : 363_048;
+  platform === "linux" ? 395_584 : platform === "win32" ? 642_000 : 364_584;
 
 /** A program that uses regex: libregexp + libunicode, never the engine. */
 export const REGEX_CLASS_MAX =
-  platform === "linux" ? 547_048 : platform === "win32" ? 774_000 : 514_048;
+  platform === "linux" ? 550_120 : platform === "win32" ? 781_000 : 517_120;
 
 /** An --dynamic build that actually enters an island carries the engine.
  * A floor rather than a ceiling — the assertion is that the engine IS

@@ -33,7 +33,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesDgram, moduleEmbedsBuiltin, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID } from "../../ir/nodes.js";
+import { funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID } from "../../ir/nodes.js";
 import {
   mangleAsyncSpawn,
   mangleGenSpawn,
@@ -872,6 +872,11 @@ export class CEmitter {
       // on — so the call and the symbol appear together or not at all
       // (a program that boxes a regex necessarily contains one).
       ...(moduleUsesRegex(this.mod) ? [`  scr_regex_dyn_install();`] : []),
+      // Child-stdio programs stamp the child-stream handle-dispatch ops so
+      // `child.stdout` can cross into the checked-dynamic tree by
+      // reference. scr_child.c is always linked, so this is a plain
+      // install gate rather than a link switch.
+      ...(moduleUsesChildStream(this.mod) ? [`  scr_child_stream_dyn_install();`] : []),
       // Stream-surface programs fill the loop's stream hook (the deferred
       // next-tick emissions) before %main — scr_stream.c links only when
       // this line is emitted (cc.ts gates on the same predicate).

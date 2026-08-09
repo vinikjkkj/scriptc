@@ -6520,6 +6520,13 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3141-expando-statics-through-a-dynamic-reference/main.js": {
+   "order": [
+    "<repo>/tests/corpus/3141-expando-statics-through-a-dynamic-reference/codec.cjs",
+    "<repo>/tests/corpus/3141-expando-statics-through-a-dynamic-reference/main.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/3161-path-posix-namespace-cwd-on-any-target.ts": {
    "order": [
     "<repo>/tests/corpus/3161-path-posix-namespace-cwd-on-any-target.ts"
@@ -6541,6 +6548,30 @@
   "<repo>/tests/corpus/3173-class-hierarchy-and-runtime-class-through-unknown.ts": {
    "order": [
     "<repo>/tests/corpus/3173-class-hierarchy-and-runtime-class-through-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3191-arraybuffer-into-unknown-round-trip.ts": {
+   "order": [
+    "<repo>/tests/corpus/3191-arraybuffer-into-unknown-round-trip.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3192-media-union-arraybuffer-arm-through-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/3192-media-union-arraybuffer-arm-through-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3193-child-stream-into-unknown-round-trip.ts": {
+   "order": [
+    "<repo>/tests/corpus/3193-child-stream-into-unknown-round-trip.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3194-asserted-index-signature-dot-read-on-a-union.ts": {
+   "order": [
+    "<repo>/tests/corpus/3194-asserted-index-signature-dot-read-on-a-union.ts"
    ],
    "diags": []
   },
