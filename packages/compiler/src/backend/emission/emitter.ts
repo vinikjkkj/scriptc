@@ -1545,6 +1545,26 @@ export class CEmitter {
     return `(ScrUnion *)&${this.internUnitInstance(unionId, tag)}`;
   }
 
+  /** The ABSENT element value for an array slot, in C — the one spelling of
+   * it. Three producers push it: arrayNewLen (`Array.from({length: n})`),
+   * the growth half of `a.length = n`, and arrayClear (the tombstone write
+   * `a[i] = null as unknown as T`). A union carrying an undefined arm holds
+   * the interned immortal unit instance, so the slot reads JS-exactly;
+   * every other refcounted element kind holds NULL, a hole that
+   * scr_arr_get_ref refuses on read. Scalars have no absent value that is
+   * not a lie — their zero — so the frontend only builds those nodes where
+   * it has proven every slot is written first. */
+  absentElemC(elem: IrType): string {
+    if (elem.kind === "union") {
+      const def = this.unionsById.get(elem.unionId);
+      const tag = def ? def.arms.findIndex((a) => a.kind === "undefinedT") : -1;
+      if (tag >= 0) return this.unitInstanceRef(elem.unionId, tag);
+    }
+    if (elem.kind === "f64") return "0";
+    if (elem.kind === "bool") return "false";
+    return "NULL";
+  }
+
   /** The class-newFn initialization line for a field whose type ADMITS
    * undefined — such fields start as JS's `undefined`, never the calloc
    * NULL: tsc's strictPropertyInitialization accepts them with no

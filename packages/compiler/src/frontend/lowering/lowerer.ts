@@ -289,7 +289,7 @@ export interface LowerStats {
  * always visited. */
 export const IR_STMT_KINDS = new Set([
   "varDecl", "assign", "exprStmt", "if", "while", "doWhile", "switch",
-  "arraySet", "forOf", "return", "fieldSet", "recordSet", "break",
+  "arraySet", "arrayClear", "forOf", "return", "fieldSet", "recordSet", "break",
   "continue", "block", "tryCatch", "throw", "rethrow", "runtimeFence",
 ]);
 

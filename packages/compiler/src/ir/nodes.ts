@@ -1314,6 +1314,24 @@ export type IrStmt =
    * scriptc traps instead, see SEMANTICS.md). Ownership of a refcounted
    * value MOVES into the array; the replaced element is released. */
   | { kind: "arraySet"; arr: IrExpr; index: IrExpr; value: IrExpr; loc: SrcLoc }
+  /** The TOMBSTONE write `a[i] = null as unknown as T` — arraySet with the
+   * element type's ABSENT value, the one arrayNewLen fills with (the
+   * interned undefined arm for unions carrying one, NULL for every other
+   * refcounted element kind). The GC-drop idiom: read the item out, then
+   * clear the slot so the array stops retaining it.
+   *
+   * It is a statement of its own rather than an arraySet with a unit value
+   * because there is no unit VALUE of type T to write — the coercion that
+   * would build one is exactly Lowerer.strandedUnitTrap, the catchable
+   * throw. Nothing about the slot's TYPE changes here: a hole is already
+   * representable in a refcounted element slot (arrayNewLen makes n of
+   * them, `a.length = n` grows more) and the read is what refuses it —
+   * scr_arr_get_ref traps on an absent slot, so the trap moves from the
+   * write, where JS is happy, to the read, where JS reads undefined and
+   * scriptc's dense arrays have nothing to answer. The frontend only
+   * builds this for a REFCOUNTED, non-union, non-dyn element type; every
+   * other shape still meets the stranded-unit trap. */
+  | { kind: "arrayClear"; arr: IrExpr; index: IrExpr; loc: SrcLoc }
   /** Typed-array element write `b[i] = v` — arraySet's sibling for bytes
    * receivers: statement-only, receiver and index like bytesIntrinsic
    * `get` (any invalid index TRAPS — JS would ignore the write, a

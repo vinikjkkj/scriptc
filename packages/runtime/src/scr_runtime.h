@@ -815,7 +815,10 @@ double scr_math_clz32(double x);
 
 double scr_arr_get_f64(ScrArr *a, double i); /* trap OOB */
 bool scr_arr_get_bool(ScrArr *a, double i);  /* trap OOB */
-void *scr_arr_get_ref(ScrArr *a, double i);  /* trap OOB; returns +1 */
+void *scr_arr_get_ref(ScrArr *a, double i);  /* trap OOB/ABSENT; returns +1 */
+/* get_ref's copy twin: an ABSENT slot copies through as absent instead of
+ * trapping. Only the emitters' spread / pushSpread loops use it. +1. */
+void *scr_arr_copy_ref(ScrArr *a, double i);
 
 /* i == len appends; the _ref variant releases the old element (when
  * replacing) and takes ownership of the new one. */

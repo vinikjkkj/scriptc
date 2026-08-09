@@ -894,6 +894,12 @@ class FnAnalyzer {
         this.evalExpr(s.value, env);
         clearPathFacts(env);
         return env;
+      case "arrayClear":
+        // The tombstone write: arraySet with no value operand.
+        this.evalExpr(s.arr, env);
+        this.evalExpr(s.index, env);
+        clearPathFacts(env);
+        return env;
       case "fieldSet":
         this.evalExpr(s.obj, env);
         this.evalExpr(s.value, env);

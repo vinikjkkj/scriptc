@@ -7,7 +7,7 @@
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer } from "./lowerer.js";
-import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
+import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, diffieHellmanFnValueOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import { UNSUPPORTED, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
@@ -7669,6 +7669,24 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     if (index === null) {
       L.unsupported("SC1090", target.argumentExpression, "indexing with non-number keys");
     }
+    // The TOMBSTONE write, `a[i] = null as unknown as T` — the GC-drop
+    // idiom (read the item, clear the slot so the array stops retaining
+    // it). The value would otherwise reach Lowerer.strandedUnitTrap and
+    // become the catchable throw, because there is no unit VALUE of type
+    // T; but the SLOT has an absent value and always has (arrayNewLen
+    // fills n of them, `a.length = n` grows more), so the write stores
+    // that and scr_arr_get_ref refuses the slot on READ instead. The
+    // element-type test is strandedUnitTrap's own refusal set, narrowed to
+    // the refcounted kinds: a scalar slot has no absent value that is not
+    // a lie, and dyn/jsval/union slots carry a real null or undefined
+    // VALUE, so those keep the ordinary coercion.
+    const elemT = receiverIr.elem;
+    if (
+      isRefCounted(elemT) && elemT.kind !== "union" && elemT.kind !== "dyn" &&
+      elemT.kind !== "jsval" && !isUnitType(elemT) && tombstoneSource(expr.right)
+    ) {
+      return { kind: "arrayClear", arr, index, loc: locOf(expr) };
+    }
     // The value flows into the element slot like an assignment: union
     // elements wrap plain arm values.
     const value = L.lowerExprExpecting(expr.right, receiverIr.elem);
@@ -7677,6 +7695,29 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     }
     return { kind: "arraySet", arr, index, value, loc: locOf(expr) };
   }
+
+/** Is this right-hand side a bare `null` / `undefined` wearing the
+ * assertions that got it past the checker — `null!`, `null as unknown as
+ * T`, parentheses, `satisfies`? Only those: a unit LITERAL is pure, so
+ * declining to evaluate it (arrayClear has no value operand) cannot lose
+ * an effect. `void expr` is deliberately NOT here — its operand runs.
+ * The `undefined` spelling is the bare name, the one this tree already uses
+ * everywhere it has to recognise the value in source. */
+function tombstoneSource(node: ts.Expression): boolean {
+  let n: ts.Node = node;
+  for (;;) {
+    if (
+      ts.isParenthesizedExpression(n) || ts.isAsExpression(n) ||
+      ts.isNonNullExpression(n) || ts.isTypeAssertion(n) ||
+      ts.isSatisfiesExpression(n)
+    ) {
+      n = n.expression;
+      continue;
+    }
+    return n.kind === ts.SyntaxKind.NullKeyword ||
+      (ts.isIdentifier(n) && n.text === "undefined");
+  }
+}
 
 /** The `+` operand conversion. Identical to ensureString except over an
  * UNTYPED operand, where ECMAScript's `+` is ToPrimitive with the DEFAULT
