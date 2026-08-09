@@ -897,6 +897,18 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       scr_throw_error(SCR_ERR_ERROR, ib_take(&out));
       return scr_str_new("", 0);
     }
+    case SCR_DYN_BIG: {
+      /* util.inspect(5n) is `5n` — the digits WITH the suffix, where
+       * String(5n) drops it. Rendered rather than fenced for the ARRBUF
+       * arm's reason and more strongly: a bigint has no own properties
+       * at all, so there is nothing this tier fails to model. */
+      ScrStr *s = scr_dyn_big_ops()->to_str(d->v.big, 10);
+      InspBuf out = {0};
+      ib_bytes(&out, s->data, s->len);
+      ib_char(&out, 'n');
+      scr_str_release(s);
+      return ib_take(&out);
+    }
     case SCR_DYN_ARRBUF: {
       /* Node's real form, RENDERED rather than fenced — and it can be,
        * because unlike a handle or an instance an ArrayBuffer has no own

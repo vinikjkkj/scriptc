@@ -1099,6 +1099,11 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "big.cmp": { argTypes: [BIGINT_T, BIGINT_T], result: F64 },
   "big.eq": { argTypes: [BIGINT_T, BIGINT_T], result: BOOL },
   "big.fromF64": { argTypes: [F64], result: BIGINT_T },
+  // ToBigInt over an UNTYPED operand — `BigInt(u)`. The typed spellings
+  // stay above; this one exists because BigInt's declared parameter is
+  // `bigint | boolean | number | string`, so an 'unknown' reaching it
+  // has no single static arm to be coerced into first.
+  "big.fromDyn": { argTypes: [DYN], result: BIGINT_T },
   "big.toF64": { argTypes: [BIGINT_T], result: F64 },
   // (bits, value) — the declared argument ORDER, which is the spec's.
   "big.asIntN": { argTypes: [F64, BIGINT_T], result: BIGINT_T },

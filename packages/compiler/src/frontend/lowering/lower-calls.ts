@@ -3738,7 +3738,15 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       !expr.arguments.some((a) => ts.isSpreadElement(a))
     ) {
       const bits = L.lowerExprExpecting(expr.arguments[0]!, F64);
-      const value = L.lowerExpr(expr.arguments[1]!);
+      const raw = L.lowerExpr(expr.arguments[1]!);
+      // An 'unknown' value is RECOVERED rather than refused now that a
+      // bigint has a checked-dynamic representation: the checked cast is
+      // the same one `u as bigint` emits, so a non-bigint arrives as the
+      // usual path-annotated TypeError instead of a compile-time fence.
+      // This is `long`'s fromBigInt, whose parameter JS leaves untyped.
+      const value: IrExpr = raw.type.kind === "dyn"
+        ? { kind: "dynCheck", value: raw, type: BIGINT, loc: raw.loc }
+        : raw;
       if (bits.type.kind === "f64" && value.type.kind === "bigint") {
         return {
           kind: "libCall",
@@ -3751,8 +3759,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       L.noLowering(
         `BigInt.${expr.expression.name.text}(${L.fmt(bits.type)}, ${L.fmt(value.type)})`,
         expr,
-        "a number width and a bigint value are the lowered forms — a bigint has no " +
-          "checked-dynamic representation yet, so one arriving through 'unknown' cannot be recovered",
+        "a number width and a bigint value are the lowered forms",
       );
     }
     if (
@@ -3761,10 +3768,51 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       expr.arguments.length === 1 &&
       L.isStdlibSymbol(L.resolveValueSymbol(expr.expression) ?? undefined)
     ) {
-      const arg = L.lowerExpr(expr.arguments[0]!);
+      // A CONDITIONAL argument is asked for as a dyn rather than lowered
+      // bare, and the reason is a lowering asymmetry rather than anything
+      // about bigint: with no contextual type, `c ? a : b` over two dyn
+      // arms widens to the ISLAND, while the same expression bound to a
+      // variable first widens to dyn. Measured, three ways —
+      //
+      //   BigInt(o.f ? o.n : o.m)          fences (island)
+      //   const x = o.f ? o.n : o.m; BigInt(x)   compiles
+      //   String(o.f ? o.n : o.m)          compiles
+      //
+      // — so the value has a perfectly good dyn form and only this
+      // position failed to ask for it. zapo's is exactly this spelling:
+      // `BigInt(this.unsigned ? this.high >>> 0 : this.high)` in `long`'s
+      // toBigInt. Restricted to the conditional shape on purpose: every
+      // other argument keeps the untouched lowering, so a bare number or
+      // bigint cannot be routed through the dyn path by accident.
+      const bigArgNode = expr.arguments[0]!;
+      const bigUnparen = (e: ts.Expression): ts.Expression => {
+        while (ts.isParenthesizedExpression(e)) e = e.expression;
+        return e;
+      };
+      const bigArgChecked = L.mapTypeOf(L.typeOf(bigArgNode));
+      const arg =
+        ts.isConditionalExpression(bigUnparen(bigArgNode)) &&
+        bigArgChecked?.kind !== "bigint" && bigArgChecked?.kind !== "f64"
+          ? L.lowerExprExpecting(bigArgNode, DYN)
+          : L.lowerExpr(bigArgNode);
       if (arg.type.kind === "bigint") return arg;
       if (arg.type.kind === "f64") {
         return { kind: "libCall", fn: "big.fromF64", args: [arg], type: BIGINT, loc };
+      }
+      // An UNTYPED operand — `BigInt(this.high)` where `this` is a dyn
+      // prototype object. Intercepted HERE, before the argument is
+      // coerced to BigInt's declared `bigint | boolean | number | string`
+      // parameter: that union is dyn-checkable now, so leaving it to the
+      // boundary would build the union only for this lowering to find no
+      // arm for it, trading SC1100 for SC2020 and moving nothing.
+      //
+      // ToBigInt is a RUNTIME question over the kind, and three of its
+      // four arms answer (number with the integrality RangeError, boolean,
+      // bigint); the STRING arm fences loudly rather than reusing the
+      // literal parser, which skips characters it does not know and would
+      // read BigInt("12abc") as 12n where Node throws SyntaxError.
+      if (arg.type.kind === "dyn") {
+        return { kind: "libCall", fn: "big.fromDyn", args: [arg], type: BIGINT, loc };
       }
     }
     if (

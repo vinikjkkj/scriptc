@@ -444,6 +444,11 @@ static bool scr_assert_dyn_same_value(const ScrDyn *a, const ScrDyn *b) {
        * content plays no part here even though deepStrictEqual below
        * compares bytes. */
       return a->v.bytes == b->v.bytes;
+    case SCR_DYN_BIG:
+      /* And NOT identity: SameValue over a PRIMITIVE is the VALUE, so
+       * two boxes of 1n are the same value — the strict_eq stance for a
+       * bigint, which is the opposite of the four arms above it. */
+      return scr_dyn_big_ops()->eq(a->v.big, b->v.big);
     case SCR_DYN_PROMISE:
       /* Identity is the PROMISE (the strict_eq stance). */
       return a->v.promise == b->v.promise;
@@ -512,6 +517,10 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
       size_t nbytes = x->len * scr_bytes_elem_size(x->elem);
       return nbytes == 0 || memcmp(x->data, y->data, nbytes) == 0;
     }
+    case SCR_DYN_BIG:
+      /* Value again, for the same reason, and measured:
+       * assert.deepStrictEqual(5n, 5n) passes in Node v25.9.0. */
+      return scr_dyn_big_ops()->eq(a->v.big, b->v.big);
     case SCR_DYN_ARRBUF: {
       /* CONTENT, not identity — and this arm is the reason to check
        * rather than assume. Two distinct ArrayBuffers holding the same
@@ -666,6 +675,16 @@ static void scr_assert_cf_value(ScrAssertBuf *b, const ScrDyn *d, size_t indent,
       /* The depth-elided form (Node renders Promise { <state> }; failure
        * diffs already diverge in report format — the handle stance). */
       ab_cstr(b, "[Promise]");
+      return;
+    }
+    case SCR_DYN_BIG: {
+      /* The literal, suffix included — what Node's diff shows for a
+       * bigint, and unlike the elided class forms above it is the whole
+       * value rather than a token standing in for one. */
+      ScrStr *s = scr_dyn_big_ops()->to_str(d->v.big, 10);
+      ab_bytes(b, s->data, s->len);
+      ab_char(b, 'n');
+      scr_str_release(s);
       return;
     }
     case SCR_DYN_ARRBUF: {

@@ -9075,6 +9075,37 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         const asDyn = (e: IrExpr): IrExpr =>
           e.type.kind === "dyn" ? e : { kind: "dynFrom", value: e, type: DYN, loc: e.loc };
         const other = left.type.kind === "dyn" ? right : left;
+        // A BIGINT on the other side settles the operator completely, and
+        // it is the one case on this path where the dyn side is NOT a
+        // number context. JS refuses to mix: `5n >> 2` throws
+        // "Cannot mix BigInt and other types", so an expression that runs
+        // at all has a bigint on BOTH sides. The bigint arm further down
+        // already states that ("tsc has already proved BOTH sides are
+        // bigint wherever one is") — it just could not see it here,
+        // because an untyped JS operand arrives as a dyn and the static
+        // proof is the checker's, not this value's.
+        //
+        // The checked cast IS that proof, made at runtime: a bigint
+        // unwraps (+1) and anything else throws, which is the same
+        // outcome JS gives and the same one the ToNumber path below
+        // could not give — that path would answer a NUMBER for
+        // `e >> 32n`, silently, which is why this rule has to come
+        // before it. zapo's site is `long`'s fromBigInt:
+        // `BigInt.asIntN(32, e >> BigInt(32))`.
+        //
+        // Narrowed IN PLACE so the shared bigint arm below emits the
+        // call: restating its table here would be a second copy of the
+        // operator map, which is the recurring root cause in this tier.
+        if (other.type.kind === "bigint") {
+          const asBig = (e: IrExpr): IrExpr =>
+            e.type.kind === "dyn" ? { kind: "dynCheck", value: e, type: BIGINT, loc: e.loc } : e;
+          const bb = bigintBinary(asBig(left), asBig(right));
+          // An operator the bigint table does not carry keeps every fence
+          // it had: the narrowing is only applied when it produces an
+          // answer, so nothing is silently reinterpreted on the way to a
+          // refusal.
+          if (bb) return bb;
+        }
         const NUM_BIN: Partial<Record<ts.SyntaxKind, "-" | "*" | "/" | "%" | "**">> = {
           [ts.SyntaxKind.MinusToken]: "-",
           [ts.SyntaxKind.AsteriskToken]: "*",
@@ -9205,6 +9236,19 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     // so tsc has already proved BOTH sides are bigint wherever one is — no
     // coercion can be needed, and every operator maps to one runtime call.
     if (left.type.kind === "bigint" && right.type.kind === "bigint") {
+      const bb = bigintBinary(left, right);
+      if (bb) return bb;
+    }
+    /* The operator table for two bigint operands, in ONE place because it
+     * has TWO callers: the arm above, where the checker proved both sides
+     * static, and the JS-source dyn rule further up, where an untyped
+     * operand is narrowed with a checked cast and the proof is made at
+     * runtime instead. A second copy of an eleven-operator map is the
+     * duplication this tier keeps paying for. Declared as a hoisted
+     * function so the earlier caller can reach it. */
+    function bigintBinary(l: IrExpr, r: IrExpr): IrExpr | null {
+      const left = l;
+      const right = r;
       const arith: Partial<Record<ts.SyntaxKind, IrLibFn>> = {
         [ts.SyntaxKind.PlusToken]: "big.add",
         [ts.SyntaxKind.MinusToken]: "big.sub",
@@ -9245,6 +9289,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         const negated = op === ts.SyntaxKind.ExclamationEqualsEqualsToken;
         return negated ? { kind: "unary", op: "!", operand: eq, type: BOOL, loc } : eq;
       }
+      return null;
     }
     const bothNum = left.type.kind === "f64" && right.type.kind === "f64";
     const bothStr = left.type.kind === "string" && right.type.kind === "string";
@@ -9909,14 +9954,41 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           loc,
         };
       }
-      // Kinds a dyn box can NEVER hold — no conversion into 'unknown'
-      // exists for bigints or symbols (dynFrom's domain is JSON-safe data
-      // + bytes + Error + functions), so the test's answer is a
-      // compile-time constant: false for ===, true for !==. The capability
-      // probes this settles (`typeof ms === 'bigint'` in dual-mode number
-      // helpers) then FOLD their impossible arm (lowerTernary), which is
-      // what lets the reachable arm compile statically.
-      if (b.text === "bigint" || b.text === "symbol") {
+      // `typeof v === "bigint"`: a REAL runtime test since SCR_DYN_BIG
+      // exists. It used to fold to the constant `false` beside "symbol",
+      // on the premise — true when it was written — that no conversion
+      // into 'unknown' could produce a bigint.
+      //
+      // That premise going stale is not a missed optimisation, it is a
+      // SILENT WRONG ANSWER, and at the worst possible site: protobufjs's
+      // `long` dispatches on exactly this test —
+      //
+      //     Long.fromValue = (v, u) => typeof v === "bigint"
+      //                                  ? Long.fromBigInt(v, u) : ...
+      //
+      // — so a folded `false` sends a real bigint down the NUMBER branch
+      // and decodes it wrong, quietly. The fold is also self-concealing:
+      // the reachable arm still compiles, so the program gets greener
+      // while getting less correct, and the bare `typeof v` value form a
+      // line away kept answering "bigint" the whole time. Two spellings
+      // of one question, two answers.
+      if (b.text === "bigint") {
+        return {
+          kind: "dynTest",
+          test: "bigint",
+          ...(negated ? { negated: true as const } : {}),
+          value,
+          type: BOOL,
+          loc,
+        };
+      }
+      // "symbol" keeps the fold, and keeps it on the ORIGINAL argument:
+      // the checked-dynamic tree still has no symbol kind, so no
+      // conversion into 'unknown' can produce one and the answer really
+      // is a constant. The capability probes this settles then FOLD their
+      // impossible arm (lowerTernary), which is what lets the reachable
+      // arm compile statically.
+      if (b.text === "symbol") {
         return { kind: "boolLit", value: negated, type: BOOL, loc };
       }
       L.unsupported(
