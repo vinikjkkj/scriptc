@@ -5268,8 +5268,18 @@ export type IrExpr =
    * dynCheck against %Error extracts it. `"function"` is `typeof v ===
    * "function"` — true exactly for the checked-dynamic tree's function kind (boxed
    * closures); function values are truthy and answer FALSE to the
-   * `"object"` test, JS-exact. */
-  | { kind: "dynTest"; test: "string" | "number" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "object" | "array" | "truthy" | "error" | "function" | "bigint"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
+   * `"object"` test, JS-exact.
+   *
+   * `"arraybuffer"` is `v instanceof ArrayBuffer` on an unknown value —
+   * the SIBLING of `"bytes"`, and it exists for the reason the two dyn
+   * kinds exist at all. `bytes<buf>` boxes into its OWN kind
+   * (SCR_DYN_ARRBUF; DYN_BYTES_KINDS), precisely so that an ArrayBuffer
+   * cannot answer a Uint8Array test, so the test for it is the compare
+   * against that kind. Without this arm the `unknown`-typed
+   * `data instanceof ArrayBuffer` that every WebSocket message handler
+   * writes was a refusal, and the `instanceof Uint8Array` line ABOVE it
+   * silently decided the dispatch on its own. */
+  | { kind: "dynTest"; test: "string" | "number" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "arraybuffer" | "object" | "array" | "truthy" | "error" | "function" | "bigint"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
   /** Keyed read on a dyn value — `pkg.name` / `pkg["k"]` / the
    * `pkg?.scripts` chain step on a JSON.parse result. `key` is
    * string-typed (a strLit for the dot form); `type` is always dyn. An
