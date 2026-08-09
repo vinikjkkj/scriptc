@@ -189,6 +189,13 @@ static void dyn_str_buf(ScrJsonBuf *b, const ScrDyn *d, bool protocol) {
     }
     scr_jb_puts(b, "[object Object]");
     return;
+  case SCR_DYN_ARRBUF:
+    /* Object.prototype.toString with the ArrayBuffer tag — a constant in
+     * both modes, because an ArrayBuffer has no own toString for a user
+     * to override (the OBJINST arm's split exists only for classes that
+     * might). */
+    scr_jb_puts(b, "[object ArrayBuffer]");
+    return;
   case SCR_DYN_PROMISE:
     /* Object.prototype.toString — promises carry no own toString, and
      * their @@toStringTag is not modeled here; Node's String() answer
@@ -323,6 +330,7 @@ static void dyn_notfn_buf(ScrJsonBuf *b, const ScrDyn *cb) {
   case SCR_DYN_ARR:
   case SCR_DYN_OBJ:
   case SCR_DYN_BYTES:
+  case SCR_DYN_ARRBUF:
   case SCR_DYN_HANDLE:
   case SCR_DYN_OBJINST:
   case SCR_DYN_PROMISE: scr_jb_puts(b, "object"); return;

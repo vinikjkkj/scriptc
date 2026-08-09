@@ -262,6 +262,14 @@ export interface CcOptions {
    * compiles scr_net.c into the binary — the events gating precedent, so
    * net-free binaries keep their exact link line. */
   net?: boolean;
+  /** The program has a `childStream`-typed slot (moduleUsesChildStream on
+   * the IR): pulls in scr_dyn_handle.c, whose child-stdio ops let
+   * `child.stdout` cross into the checked-dynamic tree. The STREAM itself
+   * lives in the always-linked scr_child.c; only the dyn ops are gated,
+   * and they must be, because they use that units listener adapters 
+   * an always-linked TU referencing a gated one is an undefined symbol in
+   * every handle-free binary. */
+  childStream?: boolean;
   /** The program uses the node:http server surface (moduleUsesHttpServer
    * on the IR): compiles scr_http.c — always alongside scr_net.c, which
    * moduleUsesNet answers true for whenever this does. */
@@ -1347,7 +1355,9 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // adapter closures): every referencing unit is one of the emitter or
     // net families (http implies net), so handle-free binaries keep
     // their exact size class.
-    ...(opts.emitter || opts.stream || net ? [rt(join(rtDir, "scr_dyn_handle.c"))] : []),
+    ...(opts.emitter || opts.stream || net || opts.childStream
+      ? [rt(join(rtDir, "scr_dyn_handle.c"))]
+      : []),
     ...(opts.symbol ? [rt(join(rtDir, "scr_symbol.c"))] : []),
     ...(opts.searchParams ? [rt(join(rtDir, "scr_url_params.c"))] : []),
     ...(opts.qs ? [rt(join(rtDir, "scr_qs.c"))] : []),

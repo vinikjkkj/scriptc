@@ -439,6 +439,11 @@ static bool scr_assert_dyn_same_value(const ScrDyn *a, const ScrDyn *b) {
     case SCR_DYN_OBJINST:
       /* Identity is the INSTANCE (the strict_eq stance). */
       return a->v.inst.o == b->v.inst.o;
+    case SCR_DYN_ARRBUF:
+      /* Identity is the PAYLOAD (the strict_eq stance) — SameValue, so
+       * content plays no part here even though deepStrictEqual below
+       * compares bytes. */
+      return a->v.bytes == b->v.bytes;
     case SCR_DYN_PROMISE:
       /* Identity is the PROMISE (the strict_eq stance). */
       return a->v.promise == b->v.promise;
@@ -506,6 +511,17 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
       if (x->elem != y->elem || x->len != y->len) return false;
       size_t nbytes = x->len * scr_bytes_elem_size(x->elem);
       return nbytes == 0 || memcmp(x->data, y->data, nbytes) == 0;
+    }
+    case SCR_DYN_ARRBUF: {
+      /* CONTENT, not identity — and this arm is the reason to check
+       * rather than assume. Two distinct ArrayBuffers holding the same
+       * bytes ARE deepStrictEqual in Node (measured), unlike the handle
+       * and instance arms above, whose own-property walks this tier
+       * cannot run. Here there are no own properties to walk: the bytes
+       * are the whole value. */
+      const ScrBytes *x = a->v.bytes, *y = b->v.bytes;
+      if (x->len != y->len) return false;
+      return x->len == 0 || memcmp(x->data, y->data, x->len) == 0;
     }
     case SCR_DYN_ARR: {
       if (a->v.arr.len != b->v.arr.len) return false;
@@ -650,6 +666,41 @@ static void scr_assert_cf_value(ScrAssertBuf *b, const ScrDyn *d, size_t indent,
       /* The depth-elided form (Node renders Promise { <state> }; failure
        * diffs already diverge in report format — the handle stance). */
       ab_cstr(b, "[Promise]");
+      return;
+    }
+    case SCR_DYN_ARRBUF: {
+      /* Node's two bracketed pseudo-keys, one per line like every other
+       * composite in this compact:false renderer. This text only appears
+       * inside FAILURE diffs, which already diverge in report format —
+       * but the SHAPE is Node's, so a diff that shows two unequal
+       * buffers points at the bytes rather than at an opaque token. */
+      const ScrBytes *bs = d->v.bytes;
+      ab_cstr(b, "ArrayBuffer {");
+      ab_char(b, '\n');
+      scr_assert_cf_pad(b, indent + 2);
+      ab_cstr(b, "[Uint8Contents]: <");
+      size_t shown = bs->len < 100 ? bs->len : 100;
+      for (size_t i = 0; i < shown; i++) {
+        char hex[4];
+        snprintf(hex, sizeof hex, "%02x", ((const unsigned char *)bs->data)[i]);
+        if (i) ab_char(b, ' ');
+        ab_bytes(b, hex, 2);
+      }
+      if (bs->len > 100) {
+        char more[48];
+        size_t rem = bs->len - 100;
+        int n = snprintf(more, sizeof more, " ... %zu more byte%s", rem, rem > 1 ? "s" : "");
+        ab_bytes(b, more, (size_t)n);
+      }
+      ab_cstr(b, ">,");
+      ab_char(b, '\n');
+      scr_assert_cf_pad(b, indent + 2);
+      char bl[48];
+      int bn = snprintf(bl, sizeof bl, "[byteLength]: %zu", bs->len);
+      ab_bytes(b, bl, (size_t)bn);
+      ab_char(b, '\n');
+      scr_assert_cf_pad(b, indent);
+      ab_char(b, '}');
       return;
     }
     case SCR_DYN_BYTES: {
@@ -945,12 +996,18 @@ static bool scr_assert_print_myers(ScrAssertBuf *b, const ScrDiffOp *diff, size_
 
 /* ── the dyn entry point ─────────────────────────────────────────────── */
 
-/* Is this dyn kind `typeof == "object" && != null` to assertion_error.js? */
+/* Is this dyn kind `typeof == "object" && != null` to assertion_error.js?
+ *
+ * DERIVED, not restated. This used to be its own kind list — a FOURTH
+ * copy of "what counts as an object", after the three scr_json.c already
+ * collapsed into scr_dyn_typeof_native. A copy of that table is exactly
+ * the thing that goes stale silently: a kind added to the runtime's list
+ * and missed here does not fail to build, it just makes the assertion
+ * differ from `typeof` about one value. So ask the one table, and spell
+ * only the part that is genuinely this caller's own — JS's null wart,
+ * which assertion_error.js excludes and `typeof` does not. */
 static bool scr_assert_dyn_is_object(const ScrDyn *d) {
-  return d->kind == SCR_DYN_ARR || d->kind == SCR_DYN_OBJ || d->kind == SCR_DYN_BYTES ||
-         d->kind == SCR_DYN_HANDLE || d->kind == SCR_DYN_OBJINST ||
-         d->kind == SCR_DYN_PROMISE ||
-         scr_dyn_isl_typeof_is(d, "object"); /* engine-held: the engine's typeof */
+  return d->kind != SCR_DYN_NULL && scr_dyn_typeof_is_object(d);
 }
 
 /* The failing EQUAL operators over dyn operands — createErrDiff. */

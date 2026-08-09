@@ -897,6 +897,69 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       scr_throw_error(SCR_ERR_ERROR, ib_take(&out));
       return scr_str_new("", 0);
     }
+    case SCR_DYN_ARRBUF: {
+      /* Node's real form, RENDERED rather than fenced — and it can be,
+       * because unlike a handle or an instance an ArrayBuffer has no own
+       * properties this tier fails to model. Two bracketed pseudo-keys
+       * over the standard entry machinery, so the 80-column wrap and the
+       * depth elision come out identical to every other composite:
+       *
+       *   ArrayBuffer { [Uint8Contents]: <01 02>, [byteLength]: 2 }
+       *
+       * The byte cap is maxArrayLength (100), not INSPECT_MAX_BYTES (50
+       * — the Buffer custom inspector's), measured against v25.9.0. */
+      ScrBytes *b = d->v.bytes;
+      if (recurse > depth) return scr_str_new("[ArrayBuffer]", 13);
+      scr_insp_begin(recurse + 1);
+      {
+        InspBuf hex = {0};
+        ib_cstr(&hex, "[Uint8Contents]: <");
+        size_t shown = b->len < 100 ? b->len : 100;
+        for (size_t i = 0; i < shown; i++) {
+          char h[4];
+          snprintf(h, sizeof h, "%02x", ((const unsigned char *)b->data)[i]);
+          if (i) ib_char(&hex, ' ');
+          ib_bytes(&hex, h, 2);
+        }
+        if (b->len > 100) {
+          char more[48];
+          size_t rem = b->len - 100;
+          int n = snprintf(more, sizeof more, " ... %zu more byte%s", rem,
+                           rem > 1 ? "s" : "");
+          ib_bytes(&hex, more, (size_t)n);
+        }
+        ib_char(&hex, '>');
+        ScrStr *e = ib_take(&hex);
+        scr_insp_entry(e, false);
+        scr_str_release(e);
+      }
+      {
+        char bl[48];
+        int n = snprintf(bl, sizeof bl, "[byteLength]: %zu", b->len);
+        ScrStr *e = scr_str_new(bl, (size_t)n);
+        scr_insp_entry(e, false);
+        scr_str_release(e);
+      }
+      /* The constructor prefix goes in braces[0], NOT in `base`, and the
+       * distinction is load-bearing rather than stylistic: reduceToSingleString
+       * computes its wrap budget as
+       * `output.length + indent + braces[0].length + base.length + 10`,
+       * and Node builds `braces[0] = "ArrayBuffer {"` with an empty base
+       * for this shape. Splitting it the other way (base "ArrayBuffer",
+       * braces[0] "{") renders the same text but budgets one character
+       * more, which flips the line break for a buffer that lands exactly
+       * on 80 columns. Measured: 4 bytes stay on one line, 8 bytes wrap.
+       * (The ERROR path really does use `base` — there Node's base is the
+       * bracket form and braces[0] is a bare "{".) */
+      ScrStr *base = scr_str_new("", 0);
+      ScrStr *b0 = scr_str_new("ArrayBuffer {", 13);
+      ScrStr *b1 = scr_str_new("}", 1);
+      ScrStr *out = scr_insp_end(base, b0, b1, recurse + 1, false, false);
+      scr_str_release(base);
+      scr_str_release(b0);
+      scr_str_release(b1);
+      return out;
+    }
     case SCR_DYN_BYTES: {
       ScrBytes *b = d->v.bytes;
       if (d->buffer) {
