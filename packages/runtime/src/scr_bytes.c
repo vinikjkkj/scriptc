@@ -196,6 +196,31 @@ double scr_bytes_get(const ScrBytes *b, double i) {
     }
     case SCR_BYTES_I8:
       return (double)(int8_t)b->data[idx];
+    case SCR_BYTES_BUF:
+      /* An ArrayBuffer has no index signature, so no CORRECT program
+       * reaches this arm and the type world never emits an element read
+       * against bytes<buf>. Reaching it means a producer built a BUF
+       * payload and handed it on wearing a typed array's type — the one
+       * mistake this switch can be asked to make.
+       *
+       * It used to be the `return 0` below, and that is how a WebSocket
+       * frame became an empty protobuf message with no diagnostic
+       * anywhere: the ArrayBuffer the socket delivers was boxed into the
+       * dyn tree's BYTES kind instead of its ARRBUF kind, so
+       * `data instanceof Uint8Array` said true, the buffer travelled on
+       * as a Uint8Array, and its `length` still answered (it is just
+       * b->len) while every INDEX answered zero. A 3-byte big-endian
+       * frame header read 0/0/0, the frame length computed to 0, and the
+       * decoder was handed an empty view of a 347-byte reply — whose
+       * honest answer to an empty buffer is an empty message.
+       *
+       * Loud beats lost, the same stance ScrBytesFlavor's UNKNOWN takes
+       * one field over: a missed producer is a fence at a named site. */
+      scr_trap_fmt("scriptc: internal error: element read at index %zu on an ArrayBuffer "
+                   "payload (length %zu) -- an ArrayBuffer has no elements; the value "
+                   "reached a typed-array read wearing the wrong kind\n",
+                   idx, b->len);
+      return 0;
   }
   return 0; /* unreachable */
 }
@@ -233,6 +258,15 @@ void scr_bytes_set(ScrBytes *b, double i, double v) {
       memcpy(b->data + idx * 4, &s, 4);
       break;
     }
+    case SCR_BYTES_BUF:
+      /* The write twin of the read arm above, and the worse half: a
+       * silent no-op here loses the caller's data instead of merely
+       * answering zero. Same cause, same fence. */
+      scr_trap_fmt("scriptc: internal error: element write at index %zu on an ArrayBuffer "
+                   "payload (length %zu) -- an ArrayBuffer has no elements; the value "
+                   "reached a typed-array write wearing the wrong kind\n",
+                   idx, b->len);
+      break;
   }
 }
 

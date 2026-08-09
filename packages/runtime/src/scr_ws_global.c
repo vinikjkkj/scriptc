@@ -279,7 +279,19 @@ ScrDyn *scr_ws_global_message_data(const ScrStr *binary_type, const uint8_t *d, 
     ScrBytes *b = scr_bytes_new(SCR_BYTES_BUF, (double)n);
     if (b == NULL) return scr_dyn_undefined(); /* pending */
     if (n > 0) memcpy(b->data, d, n);
-    ScrDyn *v = scr_dyn_new_bytes_copy(b);
+    /* SCR_DYN_ARRBUF, not SCR_DYN_BYTES. The payload is an ArrayBuffer --
+     * its elem tag says so -- and the checked-dynamic tree gives that
+     * flavor its OWN kind for the one reason that matters here: every
+     * reader of SCR_DYN_BYTES assumes length, indices and elements, and
+     * an ArrayBuffer has none of the three. Boxing it as SCR_DYN_BYTES
+     * made `data instanceof Uint8Array` -- a bare kind compare, sound
+     * only while the invariant holds -- answer TRUE for the frame this
+     * function hands to every WebSocket 'message' handler, so the
+     * handler's own `instanceof ArrayBuffer` line was never reached and
+     * the raw buffer travelled on wearing a Uint8Array's type. It read
+     * back a length of undefined four layers later, inside a protobuf
+     * decoder, as an empty message and no diagnostic at all. */
+    ScrDyn *v = scr_dyn_new_arrbuf_ref(b);
     scr_bytes_release(b);
     return v;
   }

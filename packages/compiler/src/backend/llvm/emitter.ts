@@ -6737,6 +6737,9 @@ class LlEmitter {
               undefined: DK.UNDEF,
               null: DK.NULL,
               bytes: DK.BYTES,
+              // `instanceof ArrayBuffer` — the sibling kind, and the
+              // reason DYN_BYTES_KINDS keeps bytes<buf> out of DK.BYTES.
+              arraybuffer: DK.ARRBUF,
               bigint: DK.BIG,
             };
             test = oneOf([kindOf[e.test]!]);
