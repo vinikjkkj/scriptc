@@ -54,7 +54,15 @@ const PB_EXPECTED =
   // '…/index.d.ts' compiled, but no body for this member lowers out of
   // it)" — with 1.8 MB of compiled twin sitting beside the declaration and
   // nothing able to reach it.
-  "f:42 wire-2 6\n";
+  "f:42 wire-2 6\n" +
+  // The same edge in the BUNDLER's spelling (spec/bundle): a merged `var`
+  // declarator list whose root the twin keeps as an init LOCAL, and the
+  // export parked in a comma operand of the last expression statement.
+  // Nothing there has a binding a bridge could root at — not the declared
+  // export, not the root — so the bridge reads the declared exports off the
+  // module's own export OBJECT, which is the value a requirer gets. This is
+  // zapo's `spec/proto/index.js` shape exactly.
+  "b#123 bundle-7 8\n";
 
 async function buildAndRun(name: string, dynamic: boolean, from = entry): Promise<string> {
   mkdirSync(outDir, { recursive: true });

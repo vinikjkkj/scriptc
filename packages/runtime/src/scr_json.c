@@ -4722,6 +4722,72 @@ ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *ar
     scr_bytes_release(out);
     return d;
   }
+  if (strcmp(method, "set") == 0 && bytes->elem != SCR_BYTES_BUF) {
+    /* %TypedArray%.prototype.set(source[, offset]) — the BULK WRITE, and
+     * the one protobufjs's Writer cannot do without: its `writeBytes`
+     * chunk is literally `function (val, buf, pos) { buf.set(val, pos); }`,
+     * run once per bytes field, so every `encode` of a message carrying
+     * bytes lands here. Nothing else in the typed-array surface copies a
+     * whole run in.
+     *
+     * ES 23.2.3.26 in the two shapes that exist here: a TYPED-ARRAY
+     * source, and an ARRAY-LIKE one (which for this tier means a dyn
+     * array — the only other indexable dyn kind). Both take the same
+     * bounds rule, and it is a RangeError BEFORE any element moves, so a
+     * short target is never left half-written.
+     *
+     * An ArrayBuffer receiver is excluded above rather than handled: it
+     * declares no `set` in Node either, so it keeps the loud refusal
+     * below instead of silently gaining a method. */
+    double offD = scr_dyn_index_arg(args, argc, 1, 0, what);
+    if (scr_exc_pending()) return NULL;
+    ScrDyn *src = argc > 0 ? args[0] : scr_dyn_undefined(); /* borrowed */
+    bool srcIsBytes = src->kind == SCR_DYN_BYTES && src->v.bytes->elem != SCR_BYTES_BUF;
+    bool srcIsArr = src->kind == SCR_DYN_ARR;
+    if (srcIsBytes || srcIsArr) {
+      double srcLen = srcIsBytes ? (double)src->v.bytes->len : scr_dyn_arr_len(src);
+      /* Node checks the offset and the fit together, and reports both as
+       * "offset is out of bounds" — a negative offset included. */
+      if (offD < 0 || srcLen + offD > (double)blen) {
+        scr_throw_error_msg(SCR_ERR_RANGE, "offset is out of bounds", 23);
+        return NULL;
+      }
+      size_t off = (size_t)offD;
+      size_t n = (size_t)srcLen;
+      if (srcIsBytes && src->v.bytes->elem == bytes->elem) {
+        /* Same element type: a byte move, and memmove rather than memcpy
+         * because ES clones an overlapping source first — `b.set(b.subarray(1))`
+         * has to read what was there, not what this loop just wrote. */
+        size_t esz = scr_bytes_elem_size(bytes->elem);
+        if (n > 0) memmove(bytes->data + off * esz, src->v.bytes->data, n * esz);
+      } else if (srcIsBytes) {
+        /* Different element types over possibly the SAME buffer: read the
+         * whole source out before writing anything, for the same reason. */
+        double *tmp = n > 0 ? (double *)malloc(n * sizeof(double)) : NULL;
+        if (n > 0 && tmp == NULL) scr_json_oom();
+        for (size_t i = 0; i < n; i++) tmp[i] = scr_bytes_get(src->v.bytes, (double)i);
+        for (size_t i = 0; i < n; i++) scr_bytes_set(bytes, (double)(off + i), tmp[i]);
+        free(tmp);
+      } else {
+        /* An array source cannot alias the target's storage, so it reads
+         * and writes in one pass. Each element takes ToNumber, which is
+         * what makes `set(["1", null, undefined])` write 1, 0, 0. */
+        for (size_t i = 0; i < n; i++) {
+          ScrDyn *e = scr_dyn_arr_at(src, (double)i); /* +1 */
+          double v = scr_dyn_to_number(e);
+          scr_dyn_release(e);
+          scr_bytes_set(bytes, (double)(off + i), v);
+          if (scr_exc_pending()) return NULL;
+        }
+      }
+      return scr_dyn_retain(scr_dyn_undefined());
+    }
+    /* Every other source kind (undefined, null, a plain object with a
+     * `length`, a string) falls through to the refusal below rather than
+     * guessing: Node converts them through ToObject and reads a `length`
+     * property, and answering that from here would be a shape claim this
+     * tier has not measured. */
+  }
   if (scr_dyn_bytes_proto_name(method)) {
     ScrJsonBuf b;
     scr_jb_init(&b);
