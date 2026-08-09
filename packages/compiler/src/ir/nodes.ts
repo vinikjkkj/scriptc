@@ -1697,7 +1697,53 @@ export type IrBytesIntrinsicMethod =
   | "dvSetUint32"
   | "dvSetInt32"
   | "dvSetFloat32"
-  | "dvSetFloat64";
+  | "dvSetFloat64"
+  | "dvSetBigUint64"
+  | "dvSetBigInt64";
+
+/** The dvSet* methods whose VALUE is a bigint rather than a double. They
+ * are the one bytesIntrinsic pair with a non-scalar argument, and the one
+ * pair with no ScrDataViewGet kind tag: setBigUint64 and setBigInt64
+ * store the same eight bytes (the modulus is shared), so both backends
+ * route them to a single runtime entry that takes no tag.
+ *
+ * Declared here because the fact is otherwise written in four places —
+ * the two backends' kind maps, the validator's argument signature, and
+ * the frontend's setter table — and a fifth place forgetting it is a
+ * silent miscompile, not a compile error: an absent kind-map entry
+ * stringifies as `undefined` straight into the emitted C. The
+ * table-accounting suite reads THIS set and requires every other dvSet*
+ * to carry a tag in both backends. */
+export const DV_BIG_SET_METHODS: ReadonlySet<IrBytesIntrinsicMethod> = new Set([
+  "dvSetBigUint64",
+  "dvSetBigInt64",
+]);
+
+/** Every bytesIntrinsic method, as a VALUE — the union above is a type,
+ * and a type cannot be iterated. A `Record<IrBytesIntrinsicMethod, true>`
+ * is TOTAL by construction: adding a member to the union without adding
+ * it here fails to typecheck, which is what makes the derived list (and
+ * everything the table-accounting suite concludes from it) trustworthy
+ * rather than a second hand-maintained copy. */
+const BYTES_INTRINSIC_METHOD_SET: Record<IrBytesIntrinsicMethod, true> = {
+  length: true, byteLength: true, get: true, slice: true,
+  subarray: true, toReversed: true, with: true, join: true,
+  toArray: true, setFrom: true, toString: true, readNum: true,
+  writeNum: true, readNumVar: true, writeNumVar: true, equals: true,
+  compareBuf: true, indexOf: true, lastIndexOf: true, includes: true,
+  indexOfNum: true, lastIndexOfNum: true, includesNum: true, fill: true,
+  fillNum: true, fillStr: true, fillElem: true, copy: true,
+  swap16: true, swap32: true, swap64: true, writeStr: true,
+  byteOffset: true, dataViewNew: true, dvGetUint8: true, dvGetInt8: true,
+  dvGetUint16: true, dvGetInt16: true, dvGetUint32: true, dvGetInt32: true,
+  dvGetFloat32: true, dvGetFloat64: true, dvGetBigUint64Number: true, dvGetBigInt64Number: true,
+  dvSetUint8: true, dvSetInt8: true, dvSetUint16: true, dvSetInt16: true,
+  dvSetUint32: true, dvSetInt32: true, dvSetFloat32: true, dvSetFloat64: true,
+  dvSetBigUint64: true, dvSetBigInt64: true,
+};
+
+export const BYTES_INTRINSIC_METHODS: readonly IrBytesIntrinsicMethod[] =
+  Object.keys(BYTES_INTRINSIC_METHOD_SET) as IrBytesIntrinsicMethod[];
 
 /** The bytesIntrinsic methods that can raise a catchable error — backends'
  * may-throw analyses seed on these exactly like MAY_THROW_LIB_FNS. */
@@ -1736,6 +1782,8 @@ export const MAY_THROW_BYTES_METHODS: ReadonlySet<IrBytesIntrinsicMethod> = new 
   "dvSetInt32",
   "dvSetFloat32",
   "dvSetFloat64",
+  "dvSetBigUint64",
+  "dvSetBigInt64",
 ]);
 
 /** The regex operation surface. Receiver/arg conventions (validated):
@@ -4134,6 +4182,8 @@ export type IrLibFn =
   | "big.eq"
   | "big.fromF64"
   | "big.toF64"
+  | "big.asIntN"
+  | "big.asUintN"
   | "insp.dynSpread"
   | "insp.jsval"
   | "insp.begin"
@@ -8334,6 +8384,10 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "big.rem",
   "big.pow",
   "big.fromF64",
+  // asIntN/asUintN raise the same way on a width outside ToIndex, and on
+  // the one width that would need a bigger BigInt than V8 will build.
+  "big.asIntN",
+  "big.asUintN",
   // ── the platform-conditional process members ───────────────────────
   // On a Windows target Node's process object has no getuid/getgid, so
   // the runtime raises the property-access TypeError those calls really

@@ -593,6 +593,11 @@ const LIB_FN_SYMS: Record<string, string> = {
   "big.eq": "scr_big_eq",
   "big.fromF64": "scr_big_from_f64",
   "big.toF64": "scr_big_to_f64",
+  // Argument-reordered against the runtime (value, bits) — this tier has
+  // no ScrBigInt ABI, so no call is ever emitted; the entry exists so the
+  // name table stays total.
+  "big.asIntN": "scr_big_as_n",
+  "big.asUintN": "scr_big_as_n",
   "insp.dynSpread": "scr_insp_dyn_spread",
   "fs.readFileSyncDyn": "scr_fs_read_file_sync_dyn",
   // Loose generic-shaped stragglers the burn-down surfaced alongside the
@@ -934,8 +939,10 @@ const BYTES_NUM_VAR: Record<string, { sign: boolean; le: boolean } | undefined> 
   ile: { sign: true, le: true },
 };
 
-/** ScrDataViewGet per dvGet* method (U8..BIGI64 = 0..9). */
-const DV_GET_KIND: Record<string, number> = {
+/** ScrDataViewGet per dvGet* method (U8..BIGI64 = 0..9). Exported for the
+ * table-accounting suite, which holds these integers to the C backend's
+ * symbolic tags AND to the ScrDataViewGet enum they index. */
+export const DV_GET_KIND: Record<string, number> = {
   dvGetUint8: 0,
   dvGetInt8: 1,
   dvGetUint16: 2,
@@ -948,9 +955,9 @@ const DV_GET_KIND: Record<string, number> = {
   dvGetBigInt64Number: 9,
 };
 
-/** ScrDataViewGet per dvSet* method (the setters reuse the getter kinds;
- * no BIG setters exist). */
-const DV_SET_KIND: Record<string, number> = {
+/** ScrDataViewGet per dvSet* method (the setters reuse the getter kinds).
+ * The BIG pair is absent BY DESIGN — DV_BIG_SET_METHODS names it. */
+export const DV_SET_KIND: Record<string, number> = {
   dvSetUint8: 0,
   dvSetInt8: 1,
   dvSetUint16: 2,
@@ -9895,6 +9902,20 @@ class LlEmitter {
           "void (ptr, double, double, i32, i1 zeroext)",
           `ptr ${r.name}, double ${args[0]!.name}, double ${args[1]!.name}, ` +
             `i32 ${DV_SET_KIND[method]}, i1 ${args[2]?.name ?? "false"}`,
+          false,
+          true,
+        );
+      // AFTER the scalar group, never between its labels — see the C
+      // emitter's twin comment.
+      case "dvSetBigUint64":
+      case "dvSetBigInt64":
+        // The BIG setters: a ScrBigInt* value, one runtime entry for both
+        // spellings (they store the same bits).
+        return call(
+          "scr_dataview_set_big",
+          "void (ptr, double, ptr, i1 zeroext)",
+          `ptr ${r.name}, double ${args[0]!.name}, ptr ${args[1]!.name}, ` +
+            `i1 ${args[2]?.name ?? "false"}`,
           false,
           true,
         );

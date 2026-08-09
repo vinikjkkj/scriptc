@@ -4300,6 +4300,9 @@ void scr_dyn_from_enter(const void *v);
 void scr_dyn_from_leave(void);
 void scr_jb_putc(ScrJsonBuf *b, char c);
 void scr_jb_puts(ScrJsonBuf *b, const char *s);
+/* n RAW bytes — the NUL-tolerant sibling of scr_jb_puts, for ScrStr
+ * payloads (a JS string may contain U+0000, which strlen would cut). */
+void scr_jb_write(ScrJsonBuf *b, const char *s, size_t n);
 /* JS JSON.stringify number rules: NaN/±Infinity → null, -0 → 0, else
  * shortest-roundtrip via scr_f64_to_str. */
 void scr_jb_put_f64(ScrJsonBuf *b, double v);
@@ -5589,6 +5592,11 @@ double scr_dataview_get(const ScrBytes *b, double byte_off, ScrDataViewGet kind,
  * F32 by double→float round-to-nearest-even. Offsets go through ToIndex
  * with the getters' one RangeError. */
 void scr_dataview_set(ScrBytes *b, double byte_off, double value, ScrDataViewGet kind, bool le);
+/* setBigUint64/setBigInt64: the same eight-byte scatter over a BigInt
+ * value taken modulo 2^64 (both spellings store the same bits). Throws
+ * the getters' constant RangeError on a bad offset. */
+typedef struct ScrBigInt ScrBigInt; /* full definition below (C11 repeat) */
+void scr_dataview_set_big(ScrBytes *b, double byte_off, const ScrBigInt *value, bool le);
 
 /* Element read/write. Any invalid index — negative, fractional, NaN, or
  * out of bounds — TRAPS like the array runtime (SEMANTICS.md documents
@@ -5815,6 +5823,13 @@ ScrBigInt *scr_big_and(const ScrBigInt *a, const ScrBigInt *b);
 ScrBigInt *scr_big_or(const ScrBigInt *a, const ScrBigInt *b);
 ScrBigInt *scr_big_xor(const ScrBigInt *a, const ScrBigInt *b);
 ScrBigInt *scr_big_not(const ScrBigInt *a);
+/* BigInt.asIntN / BigInt.asUintN — the value modulo 2^bits, read signed
+ * or unsigned. `bits` is ToIndex (RangeError outside it); throws
+ * catchably and answers zero, the family's convention. */
+ScrBigInt *scr_big_as_n(const ScrBigInt *a, double bits, bool is_signed);
+/* The low 64 bits of the infinite two's complement — ToBigUint64 and
+ * ToBigInt64 both, which store the same bits. Never throws. */
+uint64_t scr_big_low_u64(const ScrBigInt *a);
 int scr_big_cmp(const ScrBigInt *a, const ScrBigInt *b);
 bool scr_big_eq(const ScrBigInt *a, const ScrBigInt *b);
 bool scr_big_truthy(const ScrBigInt *a);

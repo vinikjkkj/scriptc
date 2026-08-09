@@ -3722,6 +3722,39 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // BigInt(x) over a NUMBER: integral doubles only — the runtime throws
     // Node's RangeError otherwise. A bigint argument is the identity, and
     // the string form keeps its fence (no parse surface exists yet).
+    // BigInt.asIntN(bits, v) / BigInt.asUintN(bits, v) — the value modulo
+    // 2^bits read signed or unsigned, which is the operation a 32-bit-half
+    // integer library is BUILT out of (`long`'s fromBigInt splits a bigint
+    // with asIntN(32, v) and asIntN(32, v >> 32n)). `bits` is ToIndex, so
+    // a number argument is the only lowered spelling; the value must
+    // already be a bigint (JS itself refuses to mix, and there is no
+    // implicit conversion that could be right).
+    if (
+      ts.isPropertyAccessExpression(expr.expression) &&
+      (expr.expression.name.text === "asIntN" || expr.expression.name.text === "asUintN") &&
+      L.stdlibGlobalMember(expr.expression, "BigInt") === expr.expression.name.text &&
+      !expr.questionDotToken && !expr.expression.questionDotToken &&
+      expr.arguments.length === 2 &&
+      !expr.arguments.some((a) => ts.isSpreadElement(a))
+    ) {
+      const bits = L.lowerExprExpecting(expr.arguments[0]!, F64);
+      const value = L.lowerExpr(expr.arguments[1]!);
+      if (bits.type.kind === "f64" && value.type.kind === "bigint") {
+        return {
+          kind: "libCall",
+          fn: expr.expression.name.text === "asIntN" ? "big.asIntN" : "big.asUintN",
+          args: [bits, value],
+          type: BIGINT,
+          loc,
+        };
+      }
+      L.noLowering(
+        `BigInt.${expr.expression.name.text}(${L.fmt(bits.type)}, ${L.fmt(value.type)})`,
+        expr,
+        "a number width and a bigint value are the lowered forms — a bigint has no " +
+          "checked-dynamic representation yet, so one arriving through 'unknown' cannot be recovered",
+      );
+    }
     if (
       ts.isIdentifier(expr.expression) &&
       expr.expression.text === "BigInt" &&
@@ -5154,12 +5187,38 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     };
   }
 
+/** The Annex B B.2.2 "HTML wrapper" half of String.prototype — thirteen
+ * methods that are ONE operation (CreateHTML: wrap the receiver in a tag,
+ * optionally with one attribute whose value has its `"` escaped).
+ *
+ * They matter far out of proportion to their usefulness because their
+ * NAMES are ordinary. `sub` is `mul`'s partner in every 64-bit integer
+ * library; `link`, `big`, `small`, `fixed` and `bold` collide just as
+ * easily. A dyn receiver calling one of these is almost never a string —
+ * it is `Long.prototype.sub` reached through the prototype chain — and
+ * while the name appeared ONLY in the fence set below, every such call
+ * refused on the name alone. Six of zapo's traps were exactly that: the
+ * bundled `long` library's `this.sub(e)`, `r.sub(f)`, `n.mul(t).sub(this)`,
+ * refused because `String.prototype.sub` exists. Renaming the method to
+ * `zub` in an otherwise byte-identical program compiled clean — that is
+ * the whole control, and nothing about 64-bit arithmetic is in it.
+ *
+ * So they take the receiver-kind dispatch instead (DYN_DISPATCH_METHODS):
+ * on a dyn STRING the runtime runs the REAL Annex B method, on every
+ * other kind the own-member/prototype-chain call JS specifies. Declared
+ * once here and spread into both sets — the fence set still lists them
+ * (the dispatch claim runs first), exactly as filter/flatMap are. */
+export const STRING_HTML_METHODS = [
+  "anchor", "big", "blink", "bold", "fixed", "fontcolor", "fontsize",
+  "italics", "link", "small", "strike", "sub", "sup",
+] as const;
+
 /** Prototype method names of the checked-dynamic tree-representable kinds (String, Array,
  * Object, Function, Number prototypes): a dyn receiver call on one of
  * these could be a REAL method on a real value, which a stored-member
  * read would silently mis-answer — they keep the fence. Everything else
  * is own-property-or-throw for every dyn value (the honest dynCall). */
-const DYN_PROTO_METHOD_NAMES = new Set([
+const DYN_PROTO_METHOD_NAMES = new Set<string>([
   // Object.prototype
   "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "toLocaleString", "toString", "valueOf",
   // Function.prototype
@@ -5168,8 +5227,11 @@ const DYN_PROTO_METHOD_NAMES = new Set([
   // the claim above runs first)
   "at", "concat", "copyWithin", "entries", "every", "fill", "filter", "find", "findIndex", "findLast", "findLastIndex", "flat", "flatMap", "forEach", "includes", "indexOf", "join", "keys", "lastIndexOf", "map", "pop", "push", "reduce", "reduceRight", "reverse", "shift", "slice", "some", "sort", "splice", "toReversed", "toSorted", "toSpliced", "unshift", "values", "with",
   // String.prototype (the shared-name remainder — the string-only set
-  // was claimed above)
-  "anchor", "big", "blink", "bold", "codePointAt", "fixed", "fontcolor", "fontsize", "isWellFormed", "italics", "link", "localeCompare", "normalize", "small", "strike", "sub", "sup", "toLocaleLowerCase", "toLocaleUpperCase", "toWellFormed",
+  // was claimed above). The Annex B HTML wrappers are listed through the
+  // shared constant: they are dyn-CLAIMED (the dispatch set below) and
+  // the claim runs first — the filter/flatMap arrangement.
+  ...STRING_HTML_METHODS,
+  "codePointAt", "isWellFormed", "localeCompare", "normalize", "toLocaleLowerCase", "toLocaleUpperCase", "toWellFormed",
   // Number.prototype
   "toExponential", "toFixed", "toPrecision",
 ]);
@@ -5179,7 +5241,12 @@ const DYN_PROTO_METHOD_NAMES = new Set([
  * runtime runs the real method for the receiver's kind, throws Node's
  * is-not-a-function where the kind's prototype lacks the name, and
  * fences LOUDLY on real-but-unimplemented pairs. */
-export const DYN_DISPATCH_METHODS = new Set([
+export const DYN_DISPATCH_METHODS = new Set<string>([
+  // The Annex B String.prototype HTML wrappers: the real method on a dyn
+  // STRING receiver (scr_dyn_invoke's CreateHTML), the ordinary
+  // own-member/prototype-chain call on every other kind — which is what
+  // `Long.prototype.sub` needs and what the fence-only listing denied it.
+  ...STRING_HTML_METHODS,
   "apply", "call",
   "push", "pop", "shift", "unshift", "slice", "at",
   "indexOf", "lastIndexOf", "includes", "join", "concat", "reverse", "sort",
