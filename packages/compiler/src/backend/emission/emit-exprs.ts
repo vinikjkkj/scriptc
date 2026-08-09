@@ -2335,8 +2335,16 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
                       `(${d.name}->kind == SCR_DYN_ARR || scr_dyn_isl_is_array(${d.name}))`
                     : e.test === "function"
                       ? `(${d.name}->kind == SCR_DYN_FUNC || scr_dyn_isl_typeof_is(${d.name}, "function"))`
-                      : `${d.name}->kind == ${
-                          { string: "SCR_DYN_STR", number: "SCR_DYN_NUM", boolean: "SCR_DYN_BOOL", undefined: "SCR_DYN_UNDEF", null: "SCR_DYN_NULL", bytes: "SCR_DYN_BYTES", bigint: "SCR_DYN_BIG" }[e.test]
+                      : // `bytes` and `arraybuffer` are two kind compares
+                        // BECAUSE they are two kinds — DYN_BYTES_KINDS
+                        // boxes bytes<u8> as SCR_DYN_BYTES and bytes<buf>
+                        // as SCR_DYN_ARRBUF so that neither can answer the
+                        // other's `instanceof`. That soundness argument is
+                        // the emitter's (dynMatch says it at length), and
+                        // it holds only while every PRODUCER of a dyn
+                        // ArrayBuffer builds the ARRBUF kind.
+                        `${d.name}->kind == ${
+                          { string: "SCR_DYN_STR", number: "SCR_DYN_NUM", boolean: "SCR_DYN_BOOL", undefined: "SCR_DYN_UNDEF", null: "SCR_DYN_NULL", bytes: "SCR_DYN_BYTES", arraybuffer: "SCR_DYN_ARRBUF", bigint: "SCR_DYN_BIG" }[e.test]
                         }`;
         return E.newTemp(e.type, e.negated ? `!(${test})` : test);
       }

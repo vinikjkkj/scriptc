@@ -7,7 +7,7 @@
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer } from "./lowerer.js";
-import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
+import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, diffieHellmanFnValueOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import { UNSUPPORTED, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
@@ -2544,8 +2544,15 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // An `instanceof Uint8Array` narrow: the checked-dynamic tree's bytes kind, extracted
       // with the same validated copy the checked cast uses (a Buffer that
       // crossed in rides the kind too — it IS a Uint8Array in Node).
-      if (narrowed?.kind === "bytes" && narrowed.elem === "u8") {
-        return { kind: "dynCheck", value: expr, type: narrowed, loc: expr.loc };
+      //
+      // `instanceof ArrayBuffer` narrows to the OTHER dyn bytes flavor and
+      // bridges the same way — through scr_dyn_arrbuf_unbox, which hands
+      // back the SAME payload rather than a copy (a copy would detach
+      // every view already taken over the buffer). isDynBytes is the one
+      // spelling of "this flavor crosses", so admitting a third would not
+      // have to be remembered here.
+      if (isDynBytes(narrowed ?? VOID)) {
+        return { kind: "dynCheck", value: expr, type: narrowed!, loc: expr.loc };
       }
       // An `instanceof Error` narrow: the checked-dynamic tree's error encoding rebuilds a
       // fresh %Error (name/message/code from the marker object — a COPY,
@@ -10275,6 +10282,40 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         const left = L.lowerExpr(expr.left);
         if (left.type.kind === "dyn") {
           return { kind: "dynTest", test: "bytes", value: left, type: BOOL, loc };
+        }
+      }
+      // `u instanceof ArrayBuffer` on an `unknown` value: the SIBLING of
+      // the Uint8Array test above, and it has to be written HERE or the
+      // line above answers for both.
+      //
+      // The checked-dynamic tree does carry the flavor: `bytes<buf>` boxes
+      // into SCR_DYN_ARRBUF, its own kind, exactly so an ArrayBuffer
+      // cannot match a Uint8Array arm (DYN_BYTES_KINDS, and dynMatch's
+      // note calls that split "the sharpest hazard in the whole change").
+      // So the test is one kind compare, the same shape as `"bytes"`, and
+      // tsc's narrowing types the true branch — reads bridge through
+      // maybeNarrow's validated extraction (scr_dyn_arrbuf_unbox), which
+      // hands back the SAME payload so a view taken after the narrow
+      // still aliases the buffer.
+      //
+      // The idiom this unblocks is the one every WebSocket message
+      // handler writes:
+      //
+      //     if (data instanceof Uint8Array) return data
+      //     if (data instanceof ArrayBuffer) return toBytesView(data)
+      //
+      // over a `data: unknown`. While this arm was missing, the refusal
+      // landed on the SECOND line and the first line decided the dispatch
+      // alone — and it is not a refusal a program ever reaches, because
+      // control only arrives there when the Uint8Array test said false.
+      if (
+        ts.isIdentifier(expr.right) &&
+        L.isStdlibGlobal(expr.right, "ArrayBuffer") &&
+        !L.caughtLocalOf(expr.left)
+      ) {
+        const left = L.lowerExpr(expr.left);
+        if (left.type.kind === "dyn") {
+          return { kind: "dynTest", test: "arraybuffer", value: left, type: BOOL, loc };
         }
       }
       // `x instanceof RegExp` over a union with a regex arm (the
