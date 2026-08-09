@@ -2336,7 +2336,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
                     : e.test === "function"
                       ? `(${d.name}->kind == SCR_DYN_FUNC || scr_dyn_isl_typeof_is(${d.name}, "function"))`
                       : `${d.name}->kind == ${
-                          { string: "SCR_DYN_STR", number: "SCR_DYN_NUM", boolean: "SCR_DYN_BOOL", undefined: "SCR_DYN_UNDEF", null: "SCR_DYN_NULL", bytes: "SCR_DYN_BYTES" }[e.test]
+                          { string: "SCR_DYN_STR", number: "SCR_DYN_NUM", boolean: "SCR_DYN_BOOL", undefined: "SCR_DYN_UNDEF", null: "SCR_DYN_NULL", bytes: "SCR_DYN_BYTES", bigint: "SCR_DYN_BIG" }[e.test]
                         }`;
         return E.newTemp(e.type, e.negated ? `!(${test})` : test);
       }
@@ -6352,6 +6352,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_big_eq(${arg(0)}, ${arg(1)})`);
           case "big.fromF64":
             return finish(`scr_big_from_f64(${arg(0)})`);
+          case "big.fromDyn":
+            return finish(`scr_big_from_dyn(${arg(0)})`);
           case "big.toF64":
             return finish(`scr_big_to_f64(${arg(0)})`);
           case "big.asIntN":

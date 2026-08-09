@@ -68,6 +68,40 @@
  * also how little room the regex ceiling had left: 368 bytes, against the
  * static one's 4,680 — the tighter of the two, and nothing said so.
  *
+ * MEASURED AGAIN 2026-08-09, same toolchain, after SCR_DYN_BIG (the
+ * bigint dyn kind) joined the same always-linked core — and this time
+ * NOTHING MOVES, which is the point of writing it down:
+ *
+ *   this change   638,976 static   (+1,536 over the 637,440 above)
+ *                 778,752 regex    (+2,048 over the 776,704 above)
+ *
+ * Both are UNDER the bounds already set (3,024 and 2,248 of headroom
+ * left), so the win32 numbers stay where they are. Raising a ceiling one
+ * has not reached only loosens the canary, and the previous two
+ * recalibrations raised because they TIPPED, not as a ritual.
+ *
+ * The third dyn kind in a row costs a page or less (+2,048, +1,536,
+ * +1,536), which is now enough of a series to plan against — and this
+ * one is at the cheap end for a reason worth copying rather than
+ * rediscovering: the bigint PAYLOAD behaviour (766 lines of digits) is
+ * not here at all. scr_bigint.c stays gated on `opts.bigint`, and the
+ * always-linked core reaches it through an installed five-entry ops
+ * table (ScrDynBigOps), the arrangement scr_dyn_jsval_ops already used.
+ * What a hello-world pays for is the switch arms and one static pointer.
+ * That the gating is real rather than assumed is not a matter of taste
+ * either: the first attempt called the GATED constructor from the
+ * always-linked structuredClone arm, and this very hello-world failed to
+ * link on `undefined symbol: scr_dyn_from_big` — the same failure mode
+ * scr_big_low_u64 produced one change earlier. The accounting suite now
+ * asserts it (bytes-table-accounting.test.ts).
+ *
+ * linux and darwin cannot be weighed from this box, so they DO move by
+ * exactly what the kind costs here — +1,536 static, +2,048 regex — which
+ * preserves whatever headroom each had rather than silently spending it
+ * on a platform nobody can re-measure. Same rule the two calibrations
+ * above applied, applied to the platforms that need it and not to the
+ * one that does not.
+ *
  * win32 therefore gets one honest page over each new measurement:
  * 637,440 + 4,096 -> 642,000 static, 776,704 + 4,096 -> 781,000 regex.
  * linux and darwin cannot be weighed from this box, so they move by
@@ -81,11 +115,11 @@ const platform = process.platform;
 
 /** A default-built hello-world: no regex, no engine. */
 export const STATIC_CLASS_MAX =
-  platform === "linux" ? 395_584 : platform === "win32" ? 642_000 : 364_584;
+  platform === "linux" ? 397_120 : platform === "win32" ? 642_000 : 366_120;
 
 /** A program that uses regex: libregexp + libunicode, never the engine. */
 export const REGEX_CLASS_MAX =
-  platform === "linux" ? 550_120 : platform === "win32" ? 781_000 : 517_120;
+  platform === "linux" ? 552_168 : platform === "win32" ? 781_000 : 519_168;
 
 /** An --dynamic build that actually enters an island carries the engine.
  * A floor rather than a ceiling — the assertion is that the engine IS

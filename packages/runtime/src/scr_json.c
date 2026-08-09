@@ -404,6 +404,12 @@ void scr_dyn_release(ScrDyn *d) {
      * only producer) — same story as the promise arm. */
     scr_dyn_jsval_ops()->release(d->v.jsval.cell);
     break;
+  case SCR_DYN_BIG:
+    /* Installed by scr_dyn_from_big (the gated constructor is the only
+     * producer) — the jsval arm's story, and the reason this core can
+     * hold digits it cannot link against. */
+    scr_dyn_big_ops()->release(d->v.big);
+    break;
   case SCR_DYN_OBJINST:
     /* The strong reference the box took at construction, given back
      * through the class's own `_v` release — which for a hierarchy class
@@ -735,6 +741,44 @@ void scr_dyn_arr_push(ScrDyn *arr, ScrDyn *item) {
   arr->v.arr.items[arr->v.arr.len++] = item; /* ownership moves in */
 }
 
+/* The value-describing prefix of the "... is not iterable" TypeError —
+ * "undefined", "object null", "boolean true", "number 5", "bigint 5n",
+ * "function", else "object". Node splices the SOURCE TEXT of the
+ * expression here, which a compiled tier does not have, so this word is
+ * a documented approximation (SEMANTICS.md). It is ONE function because
+ * it was two: the spread path and the iterated destructuring path each
+ * spelled the table inline, and the two had already drifted (the second
+ * ordered its arms differently and rendered the number through a
+ * different formatter). Two copies of a kind table is the shape of bug
+ * this tier keeps finding — a kind added to one copy and not the other
+ * answers two ways for one value. */
+static void scr_dyn_iter_kind_word(ScrJsonBuf *b, const ScrDyn *src) {
+  switch (src->kind) {
+  case SCR_DYN_UNDEF: scr_jb_puts(b, "undefined"); break;
+  case SCR_DYN_NULL: scr_jb_puts(b, "object null"); break;
+  case SCR_DYN_BOOL: scr_jb_puts(b, src->v.b ? "boolean true" : "boolean false"); break;
+  case SCR_DYN_NUM: {
+    char buf[32];
+    scr_jb_puts(b, "number ");
+    size_t n = scr_f64_to_str(src->v.num, buf);
+    scr_jb_write(b, buf, n);
+    break;
+  }
+  case SCR_DYN_BIG: {
+    /* The inspect form, suffix included — Node describes a primitive by
+     * its literal, and 5n is how a bigint spells itself. */
+    ScrStr *s = scr_dyn_big_ops()->to_str(src->v.big, 10);
+    scr_jb_puts(b, "bigint ");
+    scr_jb_write(b, s->data, s->len);
+    scr_jb_putc(b, 'n');
+    scr_str_release(s);
+    break;
+  }
+  case SCR_DYN_FUNC: scr_jb_puts(b, "function"); break;
+  default: scr_jb_puts(b, "object"); break; /* OBJ/HANDLE/PROMISE/... */
+  }
+}
+
 /* Spread completion for a runtime-arity argument list (`f(...xs)` in the
  * checked-dynamic tier): JS's spread over the checked-dynamic tree's iterable kinds —
  * arrays element-by-element (retained), strings by code POINT (the string
@@ -827,20 +871,7 @@ ScrDyn *scr_dyn_iter_pack(const ScrDyn *src, const ScrStr *msg) {
   }
   ScrJsonBuf b;
   scr_jb_init(&b);
-  switch (src->kind) {
-  case SCR_DYN_UNDEF: scr_jb_puts(&b, "undefined"); break;
-  case SCR_DYN_NULL: scr_jb_puts(&b, "object null"); break;
-  case SCR_DYN_BOOL: scr_jb_puts(&b, src->v.b ? "boolean true" : "boolean false"); break;
-  case SCR_DYN_NUM: {
-    char buf[32];
-    scr_jb_puts(&b, "number ");
-    size_t n = scr_f64_to_str(src->v.num, buf);
-    scr_jb_write(&b, buf, n);
-    break;
-  }
-  case SCR_DYN_FUNC: scr_jb_puts(&b, "function"); break;
-  default: scr_jb_puts(&b, "object"); break;
-  }
+  scr_dyn_iter_kind_word(&b, src);
   scr_jb_puts(&b, " is not iterable (cannot read property Symbol(Symbol.iterator))");
   scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
   return NULL;
@@ -1198,6 +1229,16 @@ const char *scr_dyn_specific_type(const ScrDyn *cb, char *detail, size_t cap) {
     snprintf(detail, cap, "an instance of %s", scr_dyn_objinst_cls(cb));
     break;
   case SCR_DYN_ARRBUF: d = "an instance of ArrayBuffer"; break;
+  case SCR_DYN_BIG: {
+    /* "type bigint (5n)" — a PRIMITIVE row, like the boolean and number
+     * rows below and unlike every reference kind above. Measured
+     * against Node v25.9.0: Buffer.from(5n) says
+     * "Received type bigint (5n)". */
+    ScrStr *s = scr_dyn_big_ops()->to_str(cb->v.big, 10);
+    snprintf(detail, cap, "type bigint (%.*sn)", (int)s->len, s->data);
+    scr_str_release(s);
+    break;
+  }
   case SCR_DYN_PROMISE: d = "an instance of Promise"; break;
   case SCR_DYN_JSVAL:
     /* Engine-held: only objects/arrays/functions survive wrap-time scalar
@@ -1304,6 +1345,13 @@ const char *scr_dyn_inspect_lite(const ScrDyn *v, char *buf, size_t cap) {
   case SCR_DYN_ARR: return "[ ... ]";
   case SCR_DYN_OBJ: return "{ ... }";
   case SCR_DYN_BYTES: return "<Buffer ...>";
+  case SCR_DYN_BIG: {
+    /* util.inspect KEEPS the suffix where String() drops it — 5n. */
+    ScrStr *s = scr_dyn_big_ops()->to_str(v->v.big, 10);
+    snprintf(buf, cap, "%.*sn", (int)s->len, s->data);
+    scr_str_release(s);
+    return buf;
+  }
   default: return "[object]";
   }
 }
@@ -1392,6 +1440,66 @@ bool scr_dyn_objinst_fence(const ScrDyn *d, const char *what) {
   scr_jb_puts(&b, " on a dynamic ");
   scr_jb_puts(&b, scr_dyn_objinst_cls(d));
   scr_jb_puts(&b, " is not supported yet");
+  scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+  return false;
+}
+
+/* ── bigints in the checked-dynamic tree (SCR_DYN_BIG) ────────────────
+ *
+ * The ops table is installed by the GATED constructor (scr_dyn_from_big,
+ * scr_bigint.c) exactly as scr_dyn_alloc_jsval installs the island's, and
+ * for the identical link-time reason: this file is always linked and
+ * scr_bigint.c is not, so a direct scr_big_release() here would leave an
+ * undefined symbol in every bigint-free binary. The gating is exact
+ * rather than lucky — a program cannot hold a BIG node without having
+ * produced a bigint, and producing one links the unit that installs the
+ * table.
+ *
+ * Every entry routes to an existing scr_big_* entry point, so the dyn
+ * answers and the static answers are the same code and cannot drift. */
+static const ScrDynBigOps *scr_dynbig_ops = NULL;
+
+ScrDyn *scr_dyn_alloc_big(ScrBigInt *b, const ScrDynBigOps *ops) {
+  scr_dynbig_ops = ops;
+  ScrDyn *d = scr_dyn_alloc(SCR_DYN_BIG);
+  d->v.big = ops->retain(b); /* the box owns a strong reference */
+  return d;
+}
+
+const ScrDynBigOps *scr_dyn_big_ops(void) {
+  if (!scr_dynbig_ops) {
+    scr_trap("scriptc: internal error: dyn bigint ops not installed\n");
+  }
+  return scr_dynbig_ops;
+}
+
+ScrBigInt *scr_dyn_big_of(const ScrDyn *d) {
+  return d != NULL && d->kind == SCR_DYN_BIG ? d->v.big : NULL;
+}
+
+ScrBigInt *scr_dyn_big_unbox(const ScrDyn *d, const ScrDynPath *path, const char *want) {
+  if (d == NULL || d->kind != SCR_DYN_BIG) {
+    scr_dyn_check_fail(path, want, d);
+    return NULL;
+  }
+  /* +1, and the SAME digits: a bigint is immutable, so sharing them is
+   * unobservable and `unbox(box(x))` compares === to x either way. */
+  return scr_dyn_big_ops()->retain(d->v.big);
+}
+
+/* V8's own wording, and a TypeError rather than a scriptc fence: this is
+ * the ANSWER JSON.stringify gives a bigint, not a gap in the tier. */
+void scr_dyn_big_json_throw(void) {
+  static const char msg[] = "Do not know how to serialize a BigInt";
+  scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+}
+
+bool scr_dyn_big_fence(const ScrDyn *d, const char *what) {
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_jb_puts(&b, what);
+  scr_jb_puts(&b, " on a dynamic bigint is not supported yet");
+  (void)d;
   scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
   return false;
 }
@@ -1646,6 +1754,12 @@ bool scr_dyn_truthy(const ScrDyn *d) {
   case SCR_DYN_HANDLE:
   case SCR_DYN_OBJINST: /* a class instance is a JS object: always truthy */
   case SCR_DYN_PROMISE: return true;
+  case SCR_DYN_BIG:
+    /* The ONE non-scalar kind whose truthiness is not constant: 0n is
+     * FALSE. Inheriting the reference kinds' unconditional true — or the
+     * default's unconditional false, which is what an unadded kind gets
+     * here — is a wrong branch in silence, not a fence. */
+    return scr_dyn_big_ops()->truthy(d->v.big);
   case SCR_DYN_JSVAL:
     /* Route to the engine's ToBoolean: objects/arrays/functions are
      * true, but the symbol/bigint edge (0n is falsy) needs the engine. */
@@ -1656,12 +1770,25 @@ bool scr_dyn_truthy(const ScrDyn *d) {
 
 /* ── JS operator semantics over checked-dynamic operands ───────────────── */
 
-/* True for the dyn kinds whose ToPrimitive is the IDENTITY — every
- * primitive. The reference kinds answer false: their ToPrimitive calls a
- * user valueOf/toString, and the dyn model holds no prototype chain to
- * call one from, so the operators below refuse them loudly instead of
- * guessing (a guess there would be the silent wrong value the whole
- * checked-dynamic tier exists to avoid). */
+/* True for the dyn kinds whose ToPrimitive is the IDENTITY and whose
+ * operator semantics are the NUMBER-or-STRING pair below. The reference
+ * kinds answer false: their ToPrimitive calls a user valueOf/toString,
+ * and the dyn model holds no prototype chain to call one from, so the
+ * operators below refuse them loudly instead of guessing (a guess there
+ * would be the silent wrong value the whole checked-dynamic tier exists
+ * to avoid).
+ *
+ * SCR_DYN_BIG is a primitive and is deliberately NOT here. A bigint's
+ * ToPrimitive is the identity, but its OPERATORS are a third algebra
+ * this pair does not implement: 5n + 1 is a TypeError in JS ("Cannot mix
+ * BigInt and other types"), 5n + 5n is bigint addition rather than
+ * double addition, and 5n < 6 compares exactly rather than through
+ * ToNumber. Admitting the kind here would route all three into the
+ * double path and answer a wrong NUMBER; leaving it out routes them into
+ * scr_dyn_check_fail, which is a loud catchable refusal. A refusal is a
+ * gap; a wrong number is a bug. (String concatenation, "x" + 5n, is the
+ * one case the refusal costs a real answer — spelled String(u) it works,
+ * because scr_dyn_string_coerce has the arm.) */
 static bool scr_dyn_is_prim(const ScrDyn *d) {
   if (!d) return false;
   switch (d->kind) {
@@ -1807,6 +1934,11 @@ static const char *scr_dyn_typeof_native(const ScrDyn *d) {
   case SCR_DYN_NUM: return "number";
   case SCR_DYN_STR: return "string";
   case SCR_DYN_FUNC: return "function";
+  case SCR_DYN_BIG: return "bigint"; /* its own answer, shared with no
+    * other kind — the whole reason this is a kind and not a flag. The
+    * "starts with 'o'" test in scr_dyn_typeof_is_object below still
+    * holds: "bigint" starts with 'b', like "boolean", and only "object"
+    * starts with 'o'. */
   default: return "undefined";
   }
 }
@@ -2144,6 +2276,13 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
      * array's index-keyed form. */
     scr_jb_puts(b, "{}");
     return true;
+  case SCR_DYN_BIG:
+    /* Node THROWS here, and the throw IS the answer rather than a fence
+     * standing in for one: JSON has no bigint and JSON.stringify(5n) is
+     * a TypeError in V8. This is also why bigint is absent from
+     * isJsonSafeType and must stay absent. */
+    scr_dyn_big_json_throw();
+    return true; /* pending exception; caller checks */
   case SCR_DYN_OBJINST:
     /* Named by its class, like every other OBJINST refusal. */
     scr_dyn_objinst_fence(d, "JSON.stringify");
@@ -2612,6 +2751,12 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
      * through, so the honest answer is the loud ladder. */
     scr_dyn_objinst_fence(d, "String()");
     return scr_str_new("", 0); /* the pending throw wins */
+  case SCR_DYN_BIG:
+    /* The DIGITS, with no suffix: String(5n) is "5" and only
+     * util.inspect prints 5n. A bigint has a real BigInt.prototype
+     * .toString, so unlike the OBJINST arm above this is an ANSWER
+     * rather than a fence standing in for one. */
+    return scr_dyn_big_ops()->to_str(d->v.big, 10);
   case SCR_DYN_ARRBUF:
     /* Object.prototype.toString with the ArrayBuffer @@toStringTag —
      * measured, not assumed: ArrayBuffer has no own toString, so
@@ -3412,6 +3557,14 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
     scr_dyn_objinst_fence(recv, "a property write");
     return;
   }
+  if (recv->kind == SCR_DYN_BIG) {
+    /* A primitive takes no properties at all: (5n).x = 1 is a silent
+     * no-op in sloppy mode and a TypeError under strict. Neither of
+     * those is "the write landed", so refuse loudly rather than let it
+     * vanish — the static_copy stance. */
+    scr_dyn_big_fence(recv, "a property write");
+    return;
+  }
   if (recv->kind == SCR_DYN_ARRBUF) {
     /* Node takes an EXPANDO here (an ArrayBuffer is an ordinary
      * extensible object), and `buf[0] = 1` is a silent no-op because
@@ -3627,6 +3780,11 @@ static void scr_jb_put_dyn_raw(ScrJsonBuf *b, const ScrDyn *d) {
      * standing in for an unknown shape: the shape is known and empty. */
     scr_jb_puts(b, "{}");
     return;
+  case SCR_DYN_BIG:
+    /* V8's own TypeError, not a scriptc fence — see the sibling writer. */
+    scr_dyn_big_json_throw();
+    scr_jb_puts(b, "null"); /* the buffer never surfaces: the throw wins */
+    return;
   case SCR_DYN_OBJINST: {
     /* Node serializes an instance's own enumerable properties; the box
      * has no member table to enumerate, so a fabricated {} would be a
@@ -3733,6 +3891,8 @@ static const char *scr_dyn_kind_name(const ScrDyn *d) {
   case SCR_DYN_BYTES: return "Uint8Array";
   case SCR_DYN_FUNC: return "function";
   case SCR_DYN_ARRBUF: return "ArrayBuffer"; /* "got ArrayBuffer" */
+  case SCR_DYN_BIG: return "bigint"; /* "got bigint" — the typeof word,
+    * because a bigint is a primitive with no class to name */
   case SCR_DYN_HANDLE: return scr_dyn_handle_cls(d); /* "got IncomingMessage" */
   case SCR_DYN_OBJINST: return scr_dyn_objinst_cls(d); /* "got Readable" */
   case SCR_DYN_PROMISE: return "Promise"; /* "got Promise" */
@@ -4319,6 +4479,13 @@ bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b) {
      * one buffer compare ===-equal — the same stance the shared
      * representation already forces on aliasing. */
     return a->v.bytes == b->v.bytes;
+  case SCR_DYN_BIG:
+    /* And NOT the bigint: it is a PRIMITIVE, so === compares the VALUE.
+     * The four kinds above answer with a pointer and the default tail
+     * below answers with a pointer too, so an unadded kind would make
+     * box(1n) === box(1n) FALSE where Node says true — a wrong boolean,
+     * not an approximate one. */
+    return scr_dyn_big_ops()->eq(a->v.big, b->v.big);
   case SCR_DYN_JSVAL:
     /* Identity is the ENGINE VALUE, not the box or even the cell: two
      * wraps of one engine value compare ===-equal (the engine's own
@@ -4576,23 +4743,30 @@ ScrDyn *scr_dyn_fn_prototype(ScrDyn *fn) {
   return proto; /* the caller's +1 */
 }
 
-/* Is this dyn value an OBJECT to JavaScript? The five scalar kinds are
- * not; everything else is (a function, an array, a Buffer, a native
- * handle, a promise and an engine value all answer "object" or
- * "function" to typeof, and all are Objects to the spec's Type()).
+/* Is this dyn value an OBJECT to JavaScript? DERIVED from the typeof
+ * table rather than spelled as a second list of scalar kinds, and the
+ * derivation is the point: an Object is exactly a value whose typeof is
+ * "object" or "function", minus JS's null wart. Written as its own list
+ * this was the THIRD copy of "which kinds are primitive" in the file,
+ * and the only one whose default answered TRUE — so a newly added scalar
+ * kind did not merely miss an arm here, it was actively classified as an
+ * Object. SCR_DYN_BIG is what proved it: `5n instanceof F` must be false
+ * at step 3 of OrdinaryHasInstance BEFORE the step-4 throw for a
+ * non-object prototype, and an Object-classified bigint reversed those
+ * two and threw where Node answers false.
+ *
  * `instanceof` asks the question three times, in three different places,
  * and gets a different wrong answer each time if it guesses. */
 static bool scr_dyn_is_object_kind(const ScrDyn *d) {
-  switch (d->kind) {
-    case SCR_DYN_NULL:
-    case SCR_DYN_BOOL:
-    case SCR_DYN_NUM:
-    case SCR_DYN_STR:
-    case SCR_DYN_UNDEF:
-      return false;
-    default:
-      return true;
-  }
+  /* typeof null is "object" and Type(null) is Null — the one row where
+   * the derivation cannot follow typeof. */
+  if (d->kind == SCR_DYN_NULL) return false;
+  /* An island value is an engine OBJECT by construction: the wrapping
+   * constructor scalar-normalizes every primitive away, which is also
+   * why JSVAL is absent from the typeof table below. */
+  if (d->kind == SCR_DYN_JSVAL) return true;
+  const char *t = scr_dyn_typeof_native(d);
+  return t[0] == 'o' || t[0] == 'f'; /* "object" | "function" */
 }
 
 /* JS's OrdinaryHasInstance, `v instanceof f`: walk v's [[Prototype]]
@@ -4988,6 +5162,7 @@ static void scr_u8_put_recv(ScrJsonBuf *b, const ScrDyn *self, bool accessor) {
   case SCR_DYN_NUM:
   case SCR_DYN_BOOL:
   case SCR_DYN_STR:
+  case SCR_DYN_BIG: /* measured: "incompatible receiver 5", the digits */
   case SCR_DYN_FUNC: {
     ScrStr *s = scr_dyn_string_coerce_js(self); /* +1; never throws for these */
     if (s == NULL) break;
@@ -5197,6 +5372,13 @@ static void scr_u8_throw_not_fn(const ScrDyn *f) {
     if (f->kind == SCR_DYN_STR) scr_jb_puts(&b, "\"");
     break;
   }
+  case SCR_DYN_BIG:
+    /* Measured against Node v25.9.0: `Uint8Array.from([1], 5n)` says
+     * "bigint is not a function" — the bare TYPE word, where a number
+     * gets "number 5" and a string gets 'string "x"'. Guessing the
+     * symmetric "bigint 5n" would have been wrong. */
+    scr_jb_puts(&b, "bigint");
+    break;
   default:
     scr_jb_puts(&b, "object");
     break;
@@ -5228,6 +5410,10 @@ static bool scr_u8_from_source_ok(const ScrDyn *d) {
   case SCR_DYN_FUNC:
   case SCR_DYN_NUM:
   case SCR_DYN_BOOL:
+  case SCR_DYN_BIG:
+    /* Measured: Uint8Array.from(5n) is [], exactly Uint8Array.from(5).
+     * A bigint has no `length`, so the length switch's zero default is
+     * already Node's answer and the element loop never runs. */
     return true;
   default:
     return false;
@@ -5798,6 +5984,18 @@ static ScrDyn *scr_sc_clone(const ScrDyn *v, const ScrScParent *up) {
      * answer (the JSVAL arm's reasoning). */
     scr_dyn_objinst_fence(v, "structuredClone");
     return NULL;
+  case SCR_DYN_BIG:
+    /* Bigints ARE cloneable (measured: structuredClone(5n) is 5n), so
+     * the DataCloneError default below would be a wrong claim. The
+     * digits are immutable, so "copy" and "retain" are the same
+     * observation.
+     *
+     * scr_dyn_alloc_big with the ALREADY-INSTALLED table, not the gated
+     * scr_dyn_from_big: this file is always linked, so naming the
+     * constructor here left `undefined symbol: scr_dyn_from_big` in
+     * every bigint-free binary — a hello-world caught it. Reaching this
+     * arm means a BIG node exists, which means the table is installed. */
+    return scr_dyn_alloc_big(v->v.big, scr_dyn_big_ops());
   case SCR_DYN_ARRBUF: {
     /* An ArrayBuffer is a transferable, and structuredClone COPIES it —
      * the one place this kind must not share its payload, since the
@@ -6187,20 +6385,7 @@ void scr_dyn_pack_push_spread_iter(ScrDyn *pack, const ScrDyn *src) {
   }
   ScrJsonBuf b;
   scr_jb_init(&b);
-  switch (src->kind) {
-  case SCR_DYN_UNDEF: scr_jb_puts(&b, "undefined"); break;
-  case SCR_DYN_NULL: scr_jb_puts(&b, "object null"); break;
-  case SCR_DYN_NUM: {
-    scr_jb_puts(&b, "number ");
-    ScrStr *s = scr_f64_to_scrstr(src->v.num);
-    for (size_t i = 0; i < s->len; i++) scr_jb_putc(&b, s->data[i]);
-    scr_str_release(s);
-    break;
-  }
-  case SCR_DYN_BOOL: scr_jb_puts(&b, src->v.b ? "boolean true" : "boolean false"); break;
-  case SCR_DYN_FUNC: scr_jb_puts(&b, "function"); break;
-  default: scr_jb_puts(&b, "object"); break; /* OBJ/HANDLE/PROMISE */
-  }
+  scr_dyn_iter_kind_word(&b, src);
   scr_jb_puts(&b, " is not iterable (cannot read property Symbol(Symbol.iterator))");
   scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
 }

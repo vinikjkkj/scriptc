@@ -4181,6 +4181,7 @@ export type IrLibFn =
   | "big.cmp"
   | "big.eq"
   | "big.fromF64"
+  | "big.fromDyn"
   | "big.toF64"
   | "big.asIntN"
   | "big.asUintN"
@@ -5263,7 +5264,7 @@ export type IrExpr =
    * "function"` — true exactly for the checked-dynamic tree's function kind (boxed
    * closures); function values are truthy and answer FALSE to the
    * `"object"` test, JS-exact. */
-  | { kind: "dynTest"; test: "string" | "number" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "object" | "array" | "truthy" | "error" | "function"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
+  | { kind: "dynTest"; test: "string" | "number" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "object" | "array" | "truthy" | "error" | "function" | "bigint"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
   /** Keyed read on a dyn value — `pkg.name` / `pkg["k"]` / the
    * `pkg?.scripts` chain step on a JSON.parse result. `key` is
    * string-typed (a strLit for the dot form); `type` is always dyn. An
@@ -6164,6 +6165,13 @@ export function canConvertToDyn(
   // bytes-bearing composites in beyond the JSON-safe core.
   if (canBoxBytesComposite(t, getRecord, getUnion)) return true;
   if (isDynBytes(t)) return true;
+  // A BIGINT boxes as SCR_DYN_BIG — the digits retained, the value
+  // shared. Admitted here and NOT in isJsonSafeType, and the split is
+  // the whole story of the kind: a bigint has a perfectly good dynamic
+  // representation and NO JSON one, because JSON.stringify(5n) throws in
+  // V8. Folding it into the JSON-safe core would have made the emitted
+  // stringify walkers claim a serialization that does not exist.
+  if (t.kind === "bigint") return true;
   // %Error converts as the checked-dynamic tree's error encoding ({%error, name, message,
   // code?} — the caughtToDyn shape, scr_dyn_from_error): the dyn 'error'
   // listener boundary (a mustCall-wrapped handler receiving the payload).
@@ -6325,6 +6333,13 @@ export function canDynCheckTo(
 ): boolean {
   if (isJsonSafeType(t, getRecord, getUnion)) return true;
   if (isDynBytes(t)) return true;
+  // The OUT direction of the bigint box: a kind test and a retained
+  // unwrap. Admitted in lockstep with canConvertToDyn above, and the
+  // lockstep is load-bearing rather than tidy — letting a bigint IN
+  // without letting it back OUT is what stranded the method bundles, and
+  // it would have stranded exactly the value `BigInt.asIntN(32, e)`
+  // needs to read back out of an 'unknown' parameter.
+  if (t.kind === "bigint") return true;
   if (t.kind === "object" && t.className === "%Error") return true;
   // The OUT direction of the instance box: an interval-checked
   // reference unwrap against the class's preorder interval (+1 — the
@@ -6363,6 +6378,11 @@ export function canDynCheckTo(
     // value, JS's own missing-property read). Only the predicate had no
     // case for it.
     if (x.kind === "dyn") return true;
+    // A BIGINT leaf — the union arm that `bigint | boolean | number |
+    // string` (BigInt's own parameter type) is made of, and a record
+    // field carrying one. dynMatch tests the kind and dynCheck unwraps
+    // it, so a leaf is exactly as emittable as the bare type.
+    if (x.kind === "bigint") return true;
     // A CLASS INSTANCE leaf — the record field or union arm a widened
     // value carries one container down (a media union's `Readable` arm
     // inside a message record). It is admitted here for the same reason
@@ -8384,6 +8404,10 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "big.rem",
   "big.pow",
   "big.fromF64",
+  // ToBigInt over a dyn: RangeError on a non-integral number, Node's
+  // TypeError on a kind with no conversion, and the loud fence on the
+  // string arm — three ways out, so a may-throw seed.
+  "big.fromDyn",
   // asIntN/asUintN raise the same way on a width outside ToIndex, and on
   // the one width that would need a bigger BigInt than V8 will build.
   "big.asIntN",

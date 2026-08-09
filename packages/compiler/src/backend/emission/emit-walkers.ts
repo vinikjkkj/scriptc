@@ -78,6 +78,10 @@ import { OVERFLOW_MEMBER } from "./emit-shapes.js";
       // sibling of a failing field, never as the failure itself.
       case "dyn":
         return "unknown";
+      // "expected bigint at $.v, got number" — the typeof word, since a
+      // bigint is a primitive with no class name to give.
+      case "bigint":
+        return "bigint";
       case "bytes": {
         const bk = DYN_BYTES_KINDS.get(t.elem);
         // The other element widths never reach a dynCheck target (the
@@ -879,6 +883,15 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         d.push(`  (void)d;`);
         d.push(`  return true;`);
         break;
+      case "bigint":
+        // A KIND test, and a sound one for the reason the bytes arm
+        // below spells out: bigint is its OWN kind, so no other value
+        // can wear its tag. Riding SCR_DYN_NUM with a flag — the cheap
+        // alternative — would have let a plain 5 match a `bigint` arm of
+        // `bigint | number`, and the union would then have carried a
+        // double under a bigint tag.
+        d.push(`  return d->kind == SCR_DYN_BIG;`);
+        break;
       case "bytes": {
         // A KIND test, and it is a sound one again only because the two
         // admitted element kinds are two kinds. While `bytes<buf>` was
@@ -1226,6 +1239,16 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`      if (digits && idx < d->v.bytes->len) return scr_dyn_new_num((double)d->v.bytes->data[idx]);`);
     d.push(`    }`);
     d.push(`  }`);
+    d.push(`  if (d->kind == SCR_DYN_BIG) {`);
+    d.push(`    /* A primitive with a real prototype: (5n).toString is a`);
+    d.push(`     * function and (5n).nope is undefined, and the box carries`);
+    d.push(`     * no table to tell those apart. Falling through to the`);
+    d.push(`     * undefined tail would answer undefined for the methods`);
+    d.push(`     * Node returns — the silent wrong answer the OBJINST arm`);
+    d.push(`     * below refuses for the same reason. */`);
+    d.push(`    scr_dyn_big_fence(d, "a property read");`);
+    d.push(`    return NULL;`);
+    d.push(`  }`);
     d.push(`  if (d->kind == SCR_DYN_OBJINST) {`);
     d.push(`    /* A class instance's members are struct fields the box has`);
     d.push(`     * no table for. Falling through to the undefined tail would`);
@@ -1304,6 +1327,13 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // through as-is — nothing to validate, nothing to build.
         d.push(`  (void)path;`);
         d.push(`  return scr_dyn_retain((ScrDyn *)d);`);
+        break;
+      case "bigint":
+        // `u as bigint`, and the bigint arm of a checked union: the SAME
+        // digits back, retained. Not a copy — the u8 arm below copies
+        // because a typed array is mutable and the two sides must not
+        // alias, and neither reason applies to an immutable value.
+        d.push(`  return scr_dyn_big_unbox(d, path, ${want});`);
         break;
       case "bytes": {
         const bk = DYN_BYTES_KINDS.get(t.elem);
@@ -1605,6 +1635,17 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // dyn value passes through by reference — already a dyn, already
         // immutable-through-copies.
         d.push(`  return scr_dyn_retain(v);`);
+        break;
+      case "bigint":
+        // The digits, RETAINED rather than copied. Sharing is
+        // unobservable here in a way it is not for arrays and records: a
+        // bigint is immutable, so there is no write through either side
+        // for the other to miss. The constructor lives in the GATED
+        // bigint unit (it installs the ops table the always-linked dyn
+        // core dispatches through), which is sound because a program
+        // that can reach this line necessarily uses bigint and therefore
+        // links that unit.
+        d.push(`  return scr_dyn_from_big(v);`);
         break;
       case "bytes":
         // bytes<u8> → the checked-dynamic tree's bytes kind, payload SHARED
