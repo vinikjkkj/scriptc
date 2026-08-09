@@ -1363,6 +1363,23 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             E.emitPendingCheck();
             return { name: "", type: e.type };
           }
+          // AFTER the scalar group's body, never between its labels: these
+          // two take a ScrBigInt value and no kind tag, and a label placed
+          // one line earlier silently hands every scalar setter's double to
+          // scr_dataview_set_big (both bodies return, so nothing in the
+          // language complains).
+          case "dvSetBigUint64":
+          case "dvSetBigInt64": {
+            // The BIG setters: the value is a BigInt, and both spellings
+            // store the same bits (the modulus is shared) — one runtime
+            // entry, no kind tag.
+            E.line(
+              `scr_dataview_set_big(${r.name}, ${args[0]!.name}, ${args[1]!.name}, ` +
+                `${args[2]?.name ?? "false"});${E.srcComment(e.loc)}`,
+            );
+            E.emitPendingCheck();
+            return { name: "", type: e.type };
+          }
           default: {
             const _exhaustive: never = method;
             void _exhaustive;
@@ -6337,6 +6354,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_big_from_f64(${arg(0)})`);
           case "big.toF64":
             return finish(`scr_big_to_f64(${arg(0)})`);
+          case "big.asIntN":
+            return finish(`scr_big_as_n(${arg(1)}, ${arg(0)}, true)`);
+          case "big.asUintN":
+            return finish(`scr_big_as_n(${arg(1)}, ${arg(0)}, false)`);
           case "insp.dynSpread":
             return finish(`scr_insp_dyn_spread(${arg(0)})`);
           case "insp.jsval":
