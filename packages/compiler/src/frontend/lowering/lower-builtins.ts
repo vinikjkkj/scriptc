@@ -5101,10 +5101,14 @@ let digestInputValueDispatches = 0;
     const name = expr.name.text;
     const loc = locOf(expr);
     // child.stdout / child.stderr — the piped-output streams: the
-    // checker's `Readable | null` (null exactly when the slot was not
-    // piped), constructed type-directedly in the backend over the
-    // +1-or-NULL runtime pair.
-    if (kind === "child" && (name === "stdout" || name === "stderr")) {
+    // checker's `NodeJS.ReadableStream | null` (fallback) or `Readable |
+    // null` (@types/node), null exactly when the slot was not piped,
+    // constructed type-directedly in the backend over the +1-or-NULL
+    // runtime pair. The IR type is childStream under BOTH spellings —
+    // isChildStdioAccess, not the checker type, is what identifies these
+    // slots, so @types/node's `Readable` stays free to mean the runtime
+    // stream class everywhere else.
+    if (isChildStdioAccess(L, expr)) {
       const receiver = L.lowerExpr(expr.expression);
       const type: IrType = {
         kind: "union",
@@ -5289,6 +5293,27 @@ let digestInputValueDispatches = 0;
     );
   }
 
+/** True when `node` READS child.stdout / child.stderr off a child-kinded
+   * receiver — the only expressions in a static program that produce a
+   * piped child-output stream. THE ONE answer to "is this child stdio",
+   * consulted by the producing site (which mints the childStream IR type)
+   * and by the method spoke (which must recognise the receiver even when
+   * the checker calls it `stream.Readable`, as @types/node does).
+   * Parentheses, `!`, and the `?.` link are transparent. */
+  export function isChildStdioAccess(L: Lowerer, node: ts.Expression): boolean {
+    let e: ts.Expression = node;
+    for (;;) {
+      if (ts.isParenthesizedExpression(e)) { e = e.expression; continue; }
+      if (ts.isNonNullExpression(e)) { e = e.expression; continue; }
+      break;
+    }
+    if (!ts.isPropertyAccessExpression(e)) return false;
+    const name = e.name.text;
+    if (name !== "stdout" && name !== "stderr") return false;
+    if (L.mapTypeOf(L.typeOf(e.expression))?.kind !== "child") return false;
+    return isChildSurfaceMember(L, e);
+  }
+
 /** Method calls on piped child-output stream receivers (child.stdout /
    * child.stderr — the childStream kind): on/once("data" | "end").
    * 'data' listeners take zero parameters, `(chunk: Buffer)`, or a
@@ -5299,11 +5324,24 @@ let digestInputValueDispatches = 0;
    * the result is void). Chained receivers (`child.stdout?.on(...)`)
    * ride the optional-chain re-dispatch (chainBlocked). Everything else
    * @types/node declares on Readable fences member-qualified. Null for
-   * non-stream receivers. */
+   * non-stream receivers.
+   *
+   * The receiver test is TWO-SOURCED because the two declaration sources
+   * disagree about the slot's type. Under the shipped fallback
+   * ChildProcess.stdout is NodeJS.ReadableStream, which maps to the
+   * childStream kind. Under @types/node it is `stream.Readable`, which now
+   * maps to the runtime %Readable class (so real user streams compile) —
+   * the type no longer identifies child stdio, so the PRODUCING SYNTAX
+   * does: a stdout/stderr read off a child-kinded receiver. Both answers
+   * come from isChildStdioAccess, which is also what the producing site
+   * uses to mint the childStream IR type. */
   export function lowerChildStreamMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(call, access)) return null;
-    if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "childStream") return null;
+    if (
+      L.mapTypeOf(L.typeOf(access.expression))?.kind !== "childStream" &&
+      !isChildStdioAccess(L, access.expression)
+    ) return null;
     if (!L.isStdlibMember(access)) return null;
     const name = access.name.text;
     const loc = locOf(call);
