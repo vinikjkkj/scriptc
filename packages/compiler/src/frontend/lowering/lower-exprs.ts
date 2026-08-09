@@ -10339,6 +10339,49 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           );
         }
       }
+      // `x instanceof String` / `Number` / `Boolean` — the BOXED WRAPPER
+      // test, and the answer is a constant because the constructor that
+      // would make it true has no lowering.
+      //
+      // `new String(…)`, `new Number(…)` and `new Boolean(…)` are refused
+      // by name in lower-classes ("boxed wrapper objects have no lowering
+      // — use the string primitive"), everywhere except a ToString span
+      // where the wrapper immediately collapses to its primitive. So no
+      // wrapper OBJECT exists anywhere in a compiled program, and for
+      // every value a compiled program CAN produce — primitive, record,
+      // class instance, dyn — Node answers false too. That is what makes
+      // this Node-exact rather than a widening: the constant is licensed
+      // by the constructor fence, and if that fence ever lifts, this arm
+      // has to lift with it.
+      //
+      // The idiom this unblocks is protobufjs's `util.isString`:
+      // `typeof e === "string" || e instanceof String`, which the Writer
+      // evaluates for EVERY bytes field it encodes — the first thing
+      // zapo's noise handshake reaches once the codec is bound.
+      //
+      // Folding drops the operand's evaluation, so it is restricted to a
+      // pure read, the same rule the class-target and bytes-flavor folds
+      // above use. A catch binding stays out: its payload is a typed
+      // snapshot handled below.
+      if (
+        ts.isIdentifier(expr.right) &&
+        (L.isStdlibGlobal(expr.right, "String") ||
+          L.isStdlibGlobal(expr.right, "Number") ||
+          L.isStdlibGlobal(expr.right, "Boolean")) &&
+        !L.caughtLocalOf(expr.left)
+      ) {
+        const wrapper = expr.right.text;
+        const left = L.lowerExpr(expr.left);
+        const pureRead =
+          left.kind === "varRef" ||
+          (left.kind === "unionNarrow" && left.value.kind === "varRef");
+        if (pureRead) return { kind: "boolLit", value: false, type: BOOL, loc };
+        L.unsupported(
+          "SC1090",
+          expr,
+          `'instanceof ${wrapper}' on a computed operand (bind it to a variable first — no boxed ${wrapper} object can exist, because 'new ${wrapper}(…)' has no lowering, so the answer is constantly false; the operand still has to evaluate)`,
+        );
+      }
       // `x instanceof Klass` where Klass is a plain FUNCTION value in a
       // JavaScript file — the completion of the pre-class constructor
       // idiom: `new Klass()` links the instance to `Klass.prototype`, and
