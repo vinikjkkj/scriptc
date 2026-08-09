@@ -1978,6 +1978,11 @@ export type IrLibFn =
    * numbers, booleans, arrays, objects answer JS-exactly; undefined and
    * null throw the catchable TypeError). */
   | "dyn.toString"
+  /** `d.toString(enc, start[, end])` — the Buffer decode-a-window form
+   * over a dyn receiver. A Buffer decodes the clamped [start, end); a
+   * NUMBER takes V8's radix RangeError (an encoding is not a radix);
+   * every other kind ignores both extra arguments, exactly Node. */
+  | "dyn.toStringRange"
   | "fs.readFileSync"
   /** readFileSync(path) — the Buffer read (+1 bytes); throws catchably
    * like the utf8 form. */
@@ -8209,6 +8214,9 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // the destructuring pack throws V8's TypeError on non-iterable dyn kinds
   "dyn.iterPack",
   "dyn.toString",
+  // the range twin throws the same nullish/null-prototype TypeErrors,
+  // plus the number receiver's radix RangeError
+  "dyn.toStringRange",
   // util.format's %s runs an object's OWN toString (Node's
   // hasBuiltInToString test) — user code, so its throw is the
   // program's. The REST-ARG twin insp.dynS inspects and never does.

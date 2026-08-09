@@ -2682,6 +2682,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // TypeError on null-prototype dictionaries (may-throw seed
             // set) — args[2] carries the call's source spelling.
             return finish(`scr_dyn_to_string_method(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "dyn.toStringRange":
+            // The RANGE form (+1): args[2]/args[3] are the dyn start/end
+            // (an omitted end is the undefined literal — the runtime
+            // supplies the receiver's length), args[4] the spelling.
+            return finish(
+              `scr_dyn_to_string_range(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)})`,
+            );
           case "fs.readFileSync":
             // args[1] is the (always-"utf8") encoding: evaluated for
             // JS-exact side-effect order, ignored by the runtime.

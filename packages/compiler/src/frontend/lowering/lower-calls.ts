@@ -4798,6 +4798,11 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           );
         }
       }
+      {
+        const recvNode = expr.expression.expression;
+        mcallWhy("fence", expr.expression, expr.expression.name.text,
+          () => L.checker.typeToString(L.typeOf(recvNode)));
+      }
       L.unsupported("SC1090", expr, `method calls like '${expr.expression.getText()}'`);
     }
 
@@ -5149,6 +5154,33 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         loc: locOf(call),
       };
     }
+    // The Buffer RANGE form `b.toString(enc, start[, end])` — the two
+    // extra arguments belong to exactly one receiver kind, so the
+    // dispatch is the runtime's (scr_dyn_to_string_range) exactly as the
+    // one-argument form's is. protobufjs's BufferReader reads every
+    // string field through it: `this.buf.utf8Slice ? … :
+    // this.buf.toString("utf-8", start, end)`. The encoding is still a
+    // LITERAL (bufEncoding fences the rest); start/end stay dyn and take
+    // ToIntegerOrInfinity in the runtime, because JS coerces them where a
+    // static f64 conversion would throw.
+    if (access.name.text === "toString" && call.arguments.length >= 2 &&
+        call.arguments.length <= 3 && !call.questionDotToken && !access.questionDotToken &&
+        !call.arguments.some((a) => ts.isSpreadElement(a))) {
+      const encName = bufEncoding(L, "toString", call.arguments[0]!);
+      return {
+        kind: "libCall",
+        fn: "dyn.toStringRange",
+        args: [
+          recv,
+          { kind: "strLit", value: encName, type: STRING, loc: locOf(call) },
+          L.lowerExprExpecting(call.arguments[1]!, DYN),
+          call.arguments[2] ? L.lowerExprExpecting(call.arguments[2], DYN) : dynUndefinedExpr(locOf(call)),
+          { kind: "strLit", value: access.getText(), type: STRING, loc: locOf(call) },
+        ],
+        type: STRING,
+        loc: locOf(call),
+      };
+    }
     // SHARED prototype names with a runtime dispatch (scr_dyn_invoke):
     // push/slice/join/forEach/map/apply/... dispatch on the receiver's
     // RUNTIME kind — the honest answer for names more than one dyn-
@@ -5195,10 +5227,10 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // DYN_PROTO_METHOD_NAMES fences the rest, because on a real dyn
     // array/string Node would run the METHOD, which no stored member
     // models.
-    if (DYN_PROTO_METHOD_NAMES.has(access.name.text)) return null;
+    if (DYN_PROTO_METHOD_NAMES.has(access.name.text)) { mcallWhy("byname", access, access.name.text); return null; }
     // Optional forms (`obj.cb?.()`, `obj?.cb()`) belong to the chain
     // machinery's short-circuit semantics — not modeled here yet.
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (call.questionDotToken || access.questionDotToken) { mcallWhy("optchain", access, access.name.text); return null; }
     const loc = locOf(call);
     if (call.arguments.some((a) => ts.isSpreadElement(a))) {
       L.unsupported("SC1090", call, "spread arguments in calls through 'unknown' values");
@@ -5234,6 +5266,25 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       loc,
     };
   }
+
+/** SCRIPTC_MCALL_WHY probe: which arm declined a dyn-receiver method call,
+ * and where. The two arms that matter are `byname` (the receiver IS a dyn
+ * value and the fence set claimed the name — the shape that hid
+ * `Long.prototype.sub`, `splice` and `hasOwnProperty` behind a
+ * not-supported message for a capability the runtime had) and `fence`
+ * (the terminal method-call refusal, with the receiver's checker type).
+ * Reading the two together on a real build is what tells a by-NAME
+ * refusal apart from a by-CAPABILITY one, which the diagnostic text
+ * cannot. */
+function mcallWhy(arm: string, node: ts.Node, key: string, extra?: () => string): void {
+  if (process.env["SCRIPTC_MCALL_WHY"] === undefined) return;
+  const sf = node.getSourceFile();
+  const lc = sf.getLineAndCharacterOfPosition(node.getStart());
+  const tail = extra ? ` recv=${extra()}` : "";
+  process.stderr.write(
+    `MCALL ${arm} ${key} ${sf.fileName}:${lc.line + 1}:${lc.character + 1}${tail} :: ${node.getText().slice(0, 60).replace(/\s+/g, " ")}\n`,
+  );
+}
 
 /** The Annex B B.2.2 "HTML wrapper" half of String.prototype — thirteen
  * methods that are ONE operation (CreateHTML: wrap the receiver in a tag,
@@ -5296,7 +5347,14 @@ export const DYN_DISPATCH_METHODS = new Set<string>([
   // `Long.prototype.sub` needs and what the fence-only listing denied it.
   ...STRING_HTML_METHODS,
   "apply", "call",
-  "push", "pop", "shift", "unshift", "slice", "at",
+  // Object.prototype.hasOwnProperty — the one Object.prototype METHOD
+  // every dyn kind inherits, and the same question Object.hasOwn(o, k)
+  // already answers statically (scr_dyn_has_own is the shared body). An
+  // OBJ whose own table holds a `hasOwnProperty` shadows it, and a
+  // null-prototype dictionary inherits nothing, which is why the claim
+  // is a runtime DISPATCH and not a fold.
+  "hasOwnProperty",
+  "push", "pop", "shift", "unshift", "slice", "splice", "at",
   "indexOf", "lastIndexOf", "includes", "join", "concat", "reverse", "sort",
   "forEach", "map", "filter", "some", "every", "find", "findIndex",
   // The native-handle receiver surface (SCR_DYN_HANDLE — req/res/socket
