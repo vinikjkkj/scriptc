@@ -47,7 +47,7 @@ Run `scriptc build` on a file to get the full, current list for that program —
 
 A static-tier program otherwise produces byte-identical stdout and the same exit code as Node. Every known divergence is deliberate and pinned by the differential test suite; these are the ones with real consequences:
 
-**Arrays are dense — invalid indices trap.** scriptc arrays have no holes and no `undefined` elements. Where JS would produce `undefined` (out-of-bounds read, `pop()` on empty), the runtime prints a `RangeError` message and aborts. This catches real bugs — but it means `process.argv[2]` with no third argument is a trap, not `undefined`:
+**Arrays are dense — invalid indices trap.** scriptc arrays have no `undefined` elements. Where JS would produce `undefined` (out-of-bounds read, `pop()` on empty), the runtime prints a `RangeError` message and aborts. A slot can be EMPTY — `Array.from({ length: n })` makes n of them, growing `a.length` appends more, and the queue idiom `a[i] = null as unknown as T` clears one so the array stops retaining the item — and copies carry an empty slot through (`slice`, spreads, `copyWithin`, `fill` over it), but READING one is a trap naming the index and the length, not `undefined`. This catches real bugs — but it means `process.argv[2]` with no third argument is a trap, not `undefined`:
 
 ```ts
 // JS habit — traps when argv[2] doesn't exist:

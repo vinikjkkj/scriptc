@@ -2466,6 +2466,21 @@ class LlEmitter {
     return def ? def.arms.findIndex((a) => a.kind === "undefinedT") : -1;
   }
 
+  /** The ABSENT element value for an array slot — CEmitter.absentElemC's
+   * twin, and the reason the two lanes cannot drift on it. Three producers
+   * push it: arrayNewLen, the growth half of `a.length = n`, and arrayClear
+   * (the tombstone write `a[i] = null as unknown as T`). Unions carrying an
+   * undefined arm hold the interned immortal unit instance; every other
+   * refcounted element kind holds `null`, a hole scr_arr_get_ref refuses on
+   * read. Scalars take their zero, which the frontend only allows where
+   * every slot is provably written first. */
+  absentElemLl(elem: IrType): string {
+    const tag = this.undefinedArmTag(elem);
+    if (tag >= 0 && elem.kind === "union") return this.unitInstanceRef(elem.unionId, tag);
+    const acc = elemAccess(elem);
+    return acc === "f64" ? f64Lit(0) : acc === "bool" ? "false" : "null";
+  }
+
   declare(decl: string): void {
     this.decls.add(decl);
   }
@@ -3333,6 +3348,20 @@ class LlEmitter {
         const argTy = acc === "f64" ? "double" : acc === "bool" ? "i1" : "ptr";
         this.declare(`declare void @scr_arr_set_${acc}(ptr, double, ${argTy === "i1" ? "i1 zeroext" : argTy})`);
         B.line(`call void @scr_arr_set_${acc}(ptr ${arr.name}, double ${idx.name}, ${argTy} ${v.name})`);
+        break;
+      }
+      case "arrayClear": {
+        // The tombstone write `a[i] = null as unknown as T`: the slot takes
+        // the element type's ABSENT value — arrayNewLen's and setLength's
+        // — and scr_arr_set_ref releases whatever it displaced. A unit
+        // source is pure, so there is no value operand to evaluate.
+        const arr = this.emitExpr(s.arr);
+        const idx = this.emitExpr(s.index);
+        if (s.arr.type.kind !== "array") throw new Error("llvm emitter bug: arrayClear on non-array");
+        this.declare(`declare void @scr_arr_set_ref(ptr, double, ptr)`);
+        B.line(
+          `call void @scr_arr_set_ref(ptr ${arr.name}, double ${idx.name}, ptr ${this.absentElemLl(s.arr.type.elem)})`,
+        );
         break;
       }
       case "bytesSet": {
@@ -4460,11 +4489,7 @@ class LlEmitter {
         B.line(`${arr} = ${arrNewCall(this, elem, "0")}`);
         const out = this.own({ name: arr, type: e.type });
         const acc = elemAccess(elem);
-        let fill = acc === "f64" ? f64Lit(0) : acc === "bool" ? "false" : "null";
-        if (elem.kind === "union") {
-          const tag = this.undefinedArmTag(elem);
-          if (tag >= 0) fill = this.unitInstanceRef(elem.unionId, tag);
-        }
+        const fill = this.absentElemLl(elem);
         const iSlot = B.slot();
         B.entryAllocas.push(`${iSlot} = alloca double`);
         B.line(`store double ${f64Lit(0)}, ptr ${iSlot}`);
@@ -8866,7 +8891,11 @@ class LlEmitter {
     const B = this.B;
     this.declare(`declare double @scr_arr_len(ptr)`);
     const accTy = acc === "f64" ? "double" : acc === "bool" ? "i1" : "ptr";
-    this.declare(`declare ${acc === "bool" ? "zeroext i1" : accTy} @scr_arr_get_${acc}(ptr, double)`);
+    // A COPY, so an ABSENT slot copies through as absent (JS spreads holes
+    // too); scr_arr_get_ref would refuse it. The C backend's two spread
+    // sites make the same swap.
+    const readFn = acc === "ref" ? "scr_arr_copy_ref" : `scr_arr_get_${acc}`;
+    this.declare(`declare ${acc === "bool" ? "zeroext i1" : accTy} @${readFn}(ptr, double)`);
     const len = B.tmp();
     B.line(`${len} = call double @scr_arr_len(ptr ${src})`);
     const iSlot = B.slot();
@@ -8884,7 +8913,7 @@ class LlEmitter {
     B.condBr(cont, lb, le);
     B.startBlock(lb);
     const v = B.tmp();
-    B.line(`${v} = call ${accTy} @scr_arr_get_${acc}(ptr ${src}, double ${i})`);
+    B.line(`${v} = call ${accTy} @${readFn}(ptr ${src}, double ${i})`);
     this.arrPush(dst, acc, v);
     const i2 = B.tmp();
     B.line(`${i2} = fadd double ${i}, ${f64Lit(1)}`);
@@ -9103,12 +9132,7 @@ class LlEmitter {
         // so both are emitted: truncate first, then the grow loop, whose
         // bound is already satisfied when the truncate did the work.
         const want = this.emitExpr(e.args[0]!);
-        const elemT = e.receiver.type.elem;
-        let fill = acc === "f64" ? f64Lit(0) : acc === "bool" ? "false" : "null";
-        if (elemT.kind === "union") {
-          const utag = this.undefinedArmTag(elemT);
-          if (utag >= 0) fill = this.unitInstanceRef(elemT.unionId, utag);
-        }
+        const fill = this.absentElemLl(e.receiver.type.elem);
         this.declare(`declare void @scr_arr_truncate(ptr, double)`);
         B.line(`call void @scr_arr_truncate(ptr ${r.name}, double ${want.name})`);
         this.declare(`declare double @scr_arr_len(ptr)`);

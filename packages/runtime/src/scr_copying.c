@@ -31,6 +31,10 @@ static ScrArr *copying_arr_new_like(const ScrArr *a, size_t cap) {
 static uint64_t copying_arr_retain_slot(const ScrArr *a, uint64_t slot) {
   if (!copying_elem_is_ref(a->elem)) return slot;
   void *p = copying_slot_to_ptr(slot);
+  /* An ABSENT slot copies through as absent (scr_array.c's
+   * scr_elem_retain_p rule): toReversed/toSpliced/toSorted/with are copies,
+   * and every retain below dereferences its operand. */
+  if (p == NULL) return slot;
   if (a->elem == SCR_ELEM_STR) p = scr_str_retain((ScrStr *)p);
   else if (a->elem == SCR_ELEM_ARR) p = scr_arr_retain((ScrArr *)p);
   else if (a->elem == SCR_ELEM_BYTES) p = scr_bytes_retain((ScrBytes *)p);

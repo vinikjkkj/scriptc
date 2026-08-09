@@ -26,6 +26,25 @@ static void scr_arr_trap_oob(double i, size_t len) {
                buf, len);
 }
 
+/* An ABSENT reference slot read as a value. A ref-element slot holds NULL
+ * when nothing has been written to it (arrayNewLen / `Array.from({length:
+ * n})` / the growth half of `a.length = n`) or when the tombstone store
+ * cleared it (`a[i] = null as unknown as T` — the GC-drop idiom). JS reads
+ * undefined from a hole; scriptc arrays are dense, so the read REFUSES,
+ * the same stance and the same shape as the out-of-bounds trap above.
+ *
+ * Before this fence the three readers that reach a NULL slot — the indexed
+ * read, for-of, and the console.log/JSON walkers — handed the NULL on and
+ * the program died on a field load, with no index, no length and no line;
+ * `pop()` handed it to a typed local where `=== null` folds to the
+ * constant false, which is a silent wrong answer rather than a crash. */
+static void scr_arr_trap_absent(size_t i, size_t len) {
+  scr_trap_fmt("scriptc: TypeError: array element %zu is absent (length %zu) "
+               "-- the slot was never assigned, or was cleared with null; "
+               "JS reads undefined from a hole\n",
+               i, len);
+}
+
 /* Validate i as an element index. limit is a->len for reads, a->len + 1 for
  * writes (i == len appends). NaN fails the >= 0 test; fractional indices
  * fail the trunc test. */
@@ -62,10 +81,25 @@ static bool scr_elem_is_ref(ScrElemKind k) {
 
 static void scr_elem_release(const ScrArr *a, uint64_t slot) {
   void *p = scr_slot_to_ptr(slot);
+  if (p == NULL) return; /* an ABSENT slot owns nothing */
   if (a->elem == SCR_ELEM_STR) scr_str_release((ScrStr *)p);
   else if (a->elem == SCR_ELEM_ARR) scr_arr_release((ScrArr *)p);
   else if (a->elem == SCR_ELEM_BYTES) scr_bytes_release((ScrBytes *)p);
   else if (a->elem == SCR_ELEM_REF) a->elem_release(p);
+}
+
+/* The retain half, and the ONE spelling of it: every element copy in this
+ * file (get, the spread copy, slice, fill, copyWithin) went through its own
+ * inline ladder, and only two of the five had the NULL guard an ABSENT slot
+ * needs. Copies PROPAGATE absence — a hole survives a slice or a spread in
+ * JS too; only a READ refuses it. */
+static void *scr_elem_retain_p(const ScrArr *a, void *p) {
+  if (p == NULL) return NULL; /* an ABSENT slot copies as absent */
+  if (a->elem == SCR_ELEM_STR) return scr_str_retain((ScrStr *)p);
+  if (a->elem == SCR_ELEM_ARR) return scr_arr_retain((ScrArr *)p);
+  if (a->elem == SCR_ELEM_BYTES) return scr_bytes_retain((ScrBytes *)p);
+  if (a->elem == SCR_ELEM_REF) return a->elem_retain(p);
+  return p;
 }
 
 /* ── lifecycle ─────────────────────────────────────────────────────────── */
@@ -107,7 +141,10 @@ ScrArr *scr_arr_new(ScrElemKind elem, size_t initial_cap) {
  * below releases none — the complement contract in scr_runtime.h. */
 void scr_arr_trace_v(void *a0, ScrTraceVisit visit, void *ctx) {
   ScrArr *a = (ScrArr *)a0;
-  for (size_t i = 0; i < a->len; i++) visit(scr_slot_to_ptr(a->data[i]), ctx);
+  for (size_t i = 0; i < a->len; i++) {
+    void *p = scr_slot_to_ptr(a->data[i]);
+    if (p != NULL) visit(p, ctx); /* an ABSENT slot is not an edge */
+  }
 }
 
 static void scr_arr_gc_free(void *a0) {
@@ -202,12 +239,21 @@ bool scr_arr_get_bool(ScrArr *a, double i) {
 }
 
 void *scr_arr_get_ref(ScrArr *a, double i) {
+  size_t idx = scr_arr_check_index(a, i, false);
+  void *p = scr_slot_to_ptr(a->data[idx]);
+  if (p == NULL) scr_arr_trap_absent(idx, a->len);
+  return scr_elem_retain_p(a, p);
+}
+
+/* The COPY read: same +1, but an ABSENT slot copies through as absent
+ * instead of refusing. Used by the spread and pushSpread loops the
+ * emitters build, which are element-for-element copies — `[...a]` and
+ * `b.push(...a)` over a holey array answer holes in JS, exactly like
+ * `a.slice()`, and it would be incoherent for slice to survive a hole
+ * while the spread beside it trapped. Bounds are still checked. */
+void *scr_arr_copy_ref(ScrArr *a, double i) {
   void *p = scr_slot_to_ptr(a->data[scr_arr_check_index(a, i, false)]);
-  if (a->elem == SCR_ELEM_STR) scr_str_retain((ScrStr *)p);
-  else if (a->elem == SCR_ELEM_BYTES) scr_bytes_retain((ScrBytes *)p);
-  else if (a->elem == SCR_ELEM_REF) p = a->elem_retain(p);
-  else scr_arr_retain((ScrArr *)p);
-  return p;
+  return scr_elem_retain_p(a, p);
 }
 
 /* ── writes: i == len appends ──────────────────────────────────────────── */
@@ -339,14 +385,8 @@ ScrArr *scr_arr_copy_within(ScrArr *a, double target, double start,
   uint64_t *tmp = malloc(count * sizeof(uint64_t));
   if (!tmp) scr_arr_oom();
   for (size_t i = 0; i < count; i++) {
-    void *p = scr_slot_to_ptr(a->data[from + i]);
-    if (p != NULL) {
-      if (a->elem == SCR_ELEM_STR) scr_str_retain((ScrStr *)p);
-      else if (a->elem == SCR_ELEM_BYTES) scr_bytes_retain((ScrBytes *)p);
-      else if (a->elem == SCR_ELEM_REF) p = a->elem_retain(p);
-      else scr_arr_retain((ScrArr *)p);
-    }
-    tmp[i] = scr_slot_from_ptr(p);
+    tmp[i] = scr_slot_from_ptr(
+        scr_elem_retain_p(a, scr_slot_to_ptr(a->data[from + i])));
   }
   for (size_t i = 0; i < count; i++) {
     uint64_t old = a->data[to + i];
@@ -368,7 +408,16 @@ double scr_arr_pop_f64(ScrArr *a) { return scr_slot_to_f64(scr_arr_pop_slot(a));
 
 bool scr_arr_pop_bool(ScrArr *a) { return scr_arr_pop_slot(a) != 0; }
 
-void *scr_arr_pop_ref(ScrArr *a) { return scr_slot_to_ptr(scr_arr_pop_slot(a)); }
+/* pop/shift hand the element OUT to a typed slot, so an ABSENT one refuses
+ * here for the same reason the indexed read does — and for one more: the
+ * receiving slot's type has no null, so `p === null` on the result folds to
+ * the constant false and the hole reads as a live object. */
+void *scr_arr_pop_ref(ScrArr *a) {
+  size_t idx = a->len ? a->len - 1 : 0;
+  void *p = scr_slot_to_ptr(scr_arr_pop_slot(a));
+  if (p == NULL) scr_arr_trap_absent(idx, a->len + 1);
+  return p;
+}
 
 /* ── shift ─────────────────────────────────────────────────────────────
  * The first element out, tail sliding down. The EMITTER guards the empty
@@ -389,7 +438,11 @@ double scr_arr_shift_f64(ScrArr *a) { return scr_slot_to_f64(scr_arr_shift_slot(
 
 bool scr_arr_shift_bool(ScrArr *a) { return scr_arr_shift_slot(a) != 0; }
 
-void *scr_arr_shift_ref(ScrArr *a) { return scr_slot_to_ptr(scr_arr_shift_slot(a)); }
+void *scr_arr_shift_ref(ScrArr *a) {
+  void *p = scr_slot_to_ptr(scr_arr_shift_slot(a));
+  if (p == NULL) scr_arr_trap_absent(0, a->len + 1);
+  return p;
+}
 
 /* ── splice (the removal forms) ────────────────────────────────────────
  * a.splice(start, deleteCount) with Node's exact index handling: start
@@ -429,6 +482,9 @@ ScrArr *scr_arr_splice(ScrArr *a, double start, double deleteCount) {
 
 static bool scr_arr_ref_eq(const ScrArr *a, uint64_t slot, void *v) {
   void *p = scr_slot_to_ptr(slot);
+  /* An ABSENT slot matches only an absent needle: scr_str_eq dereferences
+   * both sides, so the STR arm cannot be handed a hole. */
+  if (p == NULL || v == NULL) return p == v;
   if (a->elem == SCR_ELEM_STR) return scr_str_eq((ScrStr *)p, (ScrStr *)v);
   return p == v;
 }
@@ -511,12 +567,7 @@ ScrArr *scr_arr_slice(ScrArr *a, double start, double end) {
   for (size_t i = 0; i < n; i++) {
     uint64_t slot = a->data[from + i];
     if (scr_elem_is_ref(a->elem)) {
-      void *pv = scr_slot_to_ptr(slot);
-      if (a->elem == SCR_ELEM_STR) scr_str_retain((ScrStr *)pv);
-      else if (a->elem == SCR_ELEM_ARR) scr_arr_retain((ScrArr *)pv);
-      else if (a->elem == SCR_ELEM_BYTES) scr_bytes_retain((ScrBytes *)pv);
-      else pv = a->elem_retain(pv);
-      slot = scr_slot_from_ptr(pv);
+      slot = scr_slot_from_ptr(scr_elem_retain_p(a, scr_slot_to_ptr(slot)));
     }
     out->data[out->len++] = slot;
   }
@@ -623,16 +674,7 @@ ScrArr *scr_arr_fill_ref(ScrArr *a, void *v, double start, double end) {
   if (s > len) s = len;
   if (!(e >= 0)) e = 0;
   if (e > len) e = len;
-  for (double i = s; i < e; i += 1) {
-    void *p = v;
-    if (p != NULL) {
-      if (a->elem == SCR_ELEM_STR) scr_str_retain((ScrStr *)p);
-      else if (a->elem == SCR_ELEM_BYTES) scr_bytes_retain((ScrBytes *)p);
-      else if (a->elem == SCR_ELEM_REF) p = a->elem_retain(p);
-      else scr_arr_retain((ScrArr *)p);
-    }
-    scr_arr_set_ref(a, i, p);
-  }
+  for (double i = s; i < e; i += 1) scr_arr_set_ref(a, i, scr_elem_retain_p(a, v));
   return scr_arr_retain(a);
 }
 
