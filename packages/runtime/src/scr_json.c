@@ -88,7 +88,7 @@ void scr_jb_putc(ScrJsonBuf *b, char c) {
   b->data[b->len++] = c;
 }
 
-static void scr_jb_write(ScrJsonBuf *b, const char *s, size_t n) {
+void scr_jb_write(ScrJsonBuf *b, const char *s, size_t n) {
   scr_jb_grow(b, n);
   memcpy(b->data + b->len, s, n);
   b->len += n;

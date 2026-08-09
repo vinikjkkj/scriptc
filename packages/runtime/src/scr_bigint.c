@@ -456,6 +456,71 @@ static ScrBigInt *scr_big_from_twos(const uint32_t *buf, size_t w) {
   return r;
 }
 
+/* BigInt.asIntN(bits, v) / BigInt.asUintN(bits, v): v MODULO 2^bits, read
+ * as two's complement or unsigned. One operation, the signedness apart.
+ *
+ * It is how a 64-bit integer library splits a bigint into 32-bit halves —
+ * `long`'s own constructor, which is why this exists:
+ *
+ *     Long.fromBigInt = (v, u) => fromBits(Number(BigInt.asIntN(32, v)),
+ *                                          Number(BigInt.asIntN(32, v >> 32n)), u)
+ *
+ * `bits` is the spec's ToIndex: NaN is 0, a fraction truncates, and
+ * negative or above 2^53-1 is Node's "Invalid value: not (convertible to)
+ * a safe integer" RangeError.
+ *
+ * A width the value ALREADY fits in is the identity, answered before any
+ * allocation: V8 gives BigInt.asIntN(2**31, 5n) as 5n without building a
+ * two-gigabit window, and so does this. Past that the window is at most
+ * one limb wider than the operand — except a NEGATIVE operand read
+ * unsigned, which genuinely has 2^bits digits, and which takes V8's own
+ * "Maximum BigInt size exceeded" RangeError above 2^30 bits (measured on
+ * Node v25.9.0: asUintN(2**30 + 1, -1n) throws exactly that).
+ *
+ * Throws catchably and answers zero — the family's total-C-signature
+ * convention (see scr_big_div). */
+ScrBigInt *scr_big_as_n(const ScrBigInt *a, double bits_d, bool is_signed) {
+  double bd = (bits_d != bits_d) ? 0 : trunc(bits_d);
+  if (!(bd >= 0) || bd > 9007199254740991.0) {
+    static const char msg[] = "Invalid value: not (convertible to) a safe integer";
+    scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
+    return scr_big_zero();
+  }
+  /* a's whole two's complement — magnitude limbs plus one sign bit — fits
+   * in a->n * 32 + 1 bits, so a width at least that wide changes nothing
+   * (signed), and changes nothing for a NON-NEGATIVE value either way. */
+  if (bd >= (double)a->n * 32.0 + 1.0 && (is_signed || a->sign >= 0)) {
+    return scr_big_retain((ScrBigInt *)a);
+  }
+  if (bd > 1073741824.0) { /* 2^30 — V8's maximum BigInt width */
+    static const char msg[] = "Maximum BigInt size exceeded";
+    scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
+    return scr_big_zero();
+  }
+  uint64_t bits = (uint64_t)bd;
+  if (bits == 0) return scr_big_zero();
+  size_t w = (size_t)((bits + 31) / 32); /* limbs covering bits 0..bits-1 */
+  size_t wz = w + 1;                     /* +1: a sign limb the mask owns */
+  uint32_t *t = malloc(wz * sizeof(uint32_t));
+  if (!t) scr_big_oom();
+  scr_big_to_twos(a, wz, t);
+  /* Clear every bit at or above `bits` — the modulus. */
+  unsigned top = (unsigned)(bits & 31u); /* 0 means the last limb is full */
+  if (top != 0) t[w - 1] &= (uint32_t)((1u << top) - 1u);
+  t[wz - 1] = 0;
+  if (is_signed) {
+    /* Bit bits-1 IS the sign of the window; a set one means every bit
+     * from `bits` up is set in the value scr_big_from_twos must read. */
+    if (((t[(size_t)((bits - 1) / 32)] >> (unsigned)((bits - 1) & 31u)) & 1u) != 0) {
+      if (top != 0) t[w - 1] |= (uint32_t) ~(uint32_t)((1u << top) - 1u);
+      t[wz - 1] = SCR_BIG_LIMB_MAX;
+    }
+  }
+  ScrBigInt *r = scr_big_from_twos(t, wz);
+  free(t);
+  return r;
+}
+
 typedef enum { SCR_BIG_AND, SCR_BIG_OR, SCR_BIG_XOR } ScrBigBitOp;
 
 static ScrBigInt *scr_big_bitop(const ScrBigInt *a, const ScrBigInt *b, ScrBigBitOp op) {
@@ -494,6 +559,43 @@ ScrBigInt *scr_big_not(const ScrBigInt *a) {
   scr_big_release(neg);
   scr_big_release(one);
   return r;
+}
+
+/* The low 64 bits of the INFINITE two's-complement representation — the
+ * spec's ToBigUint64/ToBigInt64 in the only form a caller needs, since
+ * the two produce the same bits and differ only in how they read back.
+ * Never allocates and never throws: negative values are complemented in
+ * place, and a value wider than 64 bits simply loses its high limbs,
+ * which IS the modulus. */
+uint64_t scr_big_low_u64(const ScrBigInt *a) {
+  uint64_t mag = 0;
+  if (a->n > 0) mag = a->limbs[0];
+  if (a->n > 1) mag |= (uint64_t)a->limbs[1] << 32;
+  return a->sign < 0 ? (uint64_t)(~mag + 1u) : mag;
+}
+
+/* setBigUint64/setBigInt64 — the same eight-byte scatter, over a value
+ * that is a BigInt rather than a double. The spec's coercion is
+ * ToBigUint64/ToBigInt64: the value modulo 2^64. The two differ only in
+ * how the RESULT would read back, and the stored bits are identical, so
+ * one path serves both.
+ *
+ * Bounds are the getters' — ToIndex on the offset, then the view-relative
+ * check, with Node's ONE constant message. It runs BEFORE the modulus,
+ * which is also Node's order (the value was already coerced by the caller
+ * evaluating BigInt(...); nothing here can throw for it). */
+void scr_dataview_set_big(ScrBytes *b, double byte_off, const ScrBigInt *value, bool le) {
+  double off = (byte_off != byte_off) ? 0 : trunc(byte_off);
+  if (!(off >= 0) || off > 9007199254740991.0 || off + 8.0 > (double)b->len) {
+    static const char msg[] = "Offset is outside the bounds of the DataView";
+    scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
+    return;
+  }
+  uint64_t u = scr_big_low_u64(value);
+  uint8_t *p = b->data + (size_t)off;
+  for (size_t i = 0; i < 8; i++) {
+    p[le ? i : 8 - 1 - i] = (uint8_t)(u >> (8 * i));
+  }
 }
 
 /* ── comparison ───────────────────────────────────────────────────────── */
