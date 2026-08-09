@@ -458,6 +458,80 @@ static bool dyn_arr_sort(ScrDyn *recv, ScrDyn *cmp) {
   return ok;
 }
 
+/* ── Annex B B.2.2: the String.prototype HTML wrappers ─────────────────
+ *
+ * Thirteen names (sub, sup, big, small, bold, link, ...) that are ONE
+ * operation, CreateHTML(S, tag, attribute, value):
+ *
+ *   "<" tag [ " " attr "=\"" ToString(value), each '"' -> &quot; "\"" ]
+ *   ">" S "</" tag ">"
+ *
+ * The `"` substitution is the ONLY escaping the spec performs — the
+ * receiver and the tag go in verbatim, `<` and `&` included — and a
+ * missing argument stringifies as "undefined" like any other ToString.
+ *
+ * They are here because their NAMES are ordinary. `sub` is
+ * Long.prototype.sub in every 64-bit integer library; `link`, `big`,
+ * `fixed` and `bold` collide just as easily. The dispatch has to answer
+ * for a dyn STRING receiver before the compiler can let those names
+ * through to the prototype-chain call every non-string receiver wants
+ * (DYN_DISPATCH_METHODS, lower-calls.ts). */
+typedef struct { const char *name, *tag, *attr; } ScrHtmlWrap;
+
+static const ScrHtmlWrap SCR_STR_HTML[] = {
+  { "anchor", "a", "name" },      { "big", "big", NULL },
+  { "blink", "blink", NULL },     { "bold", "b", NULL },
+  { "fixed", "tt", NULL },        { "fontcolor", "font", "color" },
+  { "fontsize", "font", "size" }, { "italics", "i", NULL },
+  { "link", "a", "href" },        { "small", "small", NULL },
+  { "strike", "strike", NULL },   { "sub", "sub", NULL },
+  { "sup", "sup", NULL },         { NULL, NULL, NULL },
+};
+
+static const ScrHtmlWrap *dyn_str_html_wrap(const char *m) {
+  for (size_t i = 0; SCR_STR_HTML[i].name; i++) {
+    if (strcmp(m, SCR_STR_HTML[i].name) == 0) return &SCR_STR_HTML[i];
+  }
+  return NULL;
+}
+
+static ScrDyn *dyn_str_create_html(const ScrStr *s, const ScrHtmlWrap *w,
+                                   ScrDyn *const *args, size_t argc) {
+  ScrStr *v = NULL;
+  if (w->attr) {
+    /* ToString(value) runs FIRST and can throw (a user toString on a dyn
+     * object argument) — the spec's order, and the loud path here. A
+     * MISSING argument is undefined, which stringifies to "undefined"
+     * exactly as Node's `"x".fontcolor()` does. */
+    v = scr_dyn_string_coerce_js(argc > 0 ? args[0] : scr_dyn_undefined());
+    if (v == NULL) return NULL; /* a throwing toString stays pending */
+  }
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_jb_putc(&b, '<');
+  scr_jb_puts(&b, w->tag);
+  if (w->attr) {
+    scr_jb_putc(&b, ' ');
+    scr_jb_puts(&b, w->attr);
+    scr_jb_puts(&b, "=\"");
+    for (size_t i = 0; i < v->len; i++) {
+      if (v->data[i] == '"') scr_jb_puts(&b, "&quot;");
+      else scr_jb_putc(&b, v->data[i]);
+    }
+    scr_jb_putc(&b, '"');
+    scr_str_release(v);
+  }
+  scr_jb_putc(&b, '>');
+  scr_jb_write(&b, s->data, s->len);
+  scr_jb_puts(&b, "</");
+  scr_jb_puts(&b, w->tag);
+  scr_jb_putc(&b, '>');
+  ScrStr *out = scr_jb_finish(&b);
+  ScrDyn *r = scr_dyn_new_str(out); /* retains */
+  scr_str_release(out);
+  return r;
+}
+
 /* Names each prototype declares BEYOND what's implemented here — these
  * fence loudly instead of mis-answering "is not a function". */
 static bool dyn_arr_proto_unimpl(const char *m) {
@@ -590,6 +664,10 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
 
   if (recv->kind == SCR_DYN_STR) {
     ScrStr *s = recv->v.str;
+    {
+      const ScrHtmlWrap *w = dyn_str_html_wrap(method);
+      if (w) return dyn_str_create_html(s, w, args, argc);
+    }
     if (dyn_name_is(method, "slice")) {
       double start = dyn_index_arg(args, argc, 0, 0, what);
       if (scr_exc_pending()) return NULL;

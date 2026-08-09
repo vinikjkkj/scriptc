@@ -4,7 +4,7 @@
  * method surfaces. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, BYTES_U8, CAUGHT, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { BOOL, BYTES_U8, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
 import { checkedJsNumber, droppableStatic, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable } from "./lower-exprs.js";
 import { forOfVarTarget, lowerDestructuringAssign } from "./lower-stmts.js";
@@ -5958,20 +5958,42 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
     // DataView setters — the getters' mirror: (byteOffset, value) plus the
     // optional littleEndian bool on the multi-byte kinds. Void results;
     // the same constant Node RangeError on a bad offset (may-throw seeds).
-    // setBigUint64/setBigInt64 never lower (bigint ARGUMENTS have no
-    // representation and no composed form exists) — they keep the member
-    // fence, as does setFloat16.
+    // setFloat16 keeps the member fence.
+    //
+    // setBigUint64/setBigInt64 take a BIGINT value, which the getters
+    // could not mirror: a bigint RESULT has no home in an f64-typed
+    // intrinsic, so `Number(view.getBigUint64(...))` is the getter's only
+    // lowered spelling. An ARGUMENT has a home — ScrBigInt is a real
+    // representation on both tiers — and the value stores as its low 64
+    // bits (ToBigUint64 and ToBigInt64 write the same eight bytes).
+    //
+    // Passing the bigint through rather than peeling `BigInt(n)` back to
+    // its double is what keeps the ORDER exact: zapo spells these
+    // `dv.setBigUint64(0, BigInt(Date.now()), false)`, and BigInt(x)'s own
+    // RangeError on a non-integral x must fire while the argument is
+    // evaluated — before the offset is bounds-checked, exactly as Node
+    // sequences it.
     const dvSetter = own(DV_SETTERS, name);
     if (dvSetter !== undefined && receiverIr.elem === "u8") {
       const maxArgs = dvSetter.le ? 3 : 2;
       if (nArgs < 2 || nArgs > maxArgs) {
         L.noLowering(`.${name} with ${nArgs} arguments`, call);
       }
+      const isBig = DV_BIG_SET_METHODS.has(dvSetter.method);
       const receiver = L.lowerExpr(access.expression);
-      const args = [
-        L.lowerExprExpecting(call.arguments[0]!, F64),
-        L.lowerExprExpecting(call.arguments[1]!, F64),
-      ];
+      // Left to right, like every other call: receiver, offset, value.
+      const offset = L.lowerExprExpecting(call.arguments[0]!, F64);
+      const value = isBig
+        ? L.lowerExpr(call.arguments[1]!)
+        : L.lowerExprExpecting(call.arguments[1]!, F64);
+      if (isBig && value.type.kind !== "bigint") {
+        L.noLowering(
+          `.${name} over a '${L.fmt(value.type)}' value`,
+          call,
+          "the value is a bigint in JS too — BigInt(n) is the conversion",
+        );
+      }
+      const args = [offset, value];
       if (nArgs === 3) args.push(L.lowerExprExpecting(call.arguments[2]!, BOOL));
       return { kind: "bytesIntrinsic", method: dvSetter.method, receiver, args, type: VOID, loc };
     }
@@ -6276,6 +6298,8 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
   setInt32: { method: "dvSetInt32", le: true },
   setFloat32: { method: "dvSetFloat32", le: true },
   setFloat64: { method: "dvSetFloat64", le: true },
+  setBigUint64: { method: "dvSetBigUint64", le: true },
+  setBigInt64: { method: "dvSetBigInt64", le: true },
 };
 
 /** The Buffer statics — `Buffer.from(...)`, `Buffer.alloc(n)`,

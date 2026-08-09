@@ -4,7 +4,7 @@
  * package boundary fences for node_modules-declared symbols. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, islandPromisePayloadTag, isUnitType } from "../../ir/nodes.js";
+import { DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, funcOf, islandPromisePayloadTag, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_CONSTS, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
 import { canonicalBuiltinModule, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf, npmStaticDepSf7 } from "../program.js";
@@ -1022,6 +1022,10 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
       const read: IrExpr = { kind: "jsOp", op: "getProp", name: member, args: [math], type: JSVAL, loc };
       return { kind: "jsExit", value: read, type: propType, loc };
     }
+    {
+      const lifted = mathStaticFnValueOf(L, expr, member);
+      if (lifted) return lifted;
+    }
     if (
       own(ISLAND_SURFACE.math.fns, member) !== undefined ||
       own(STATIC_MATH_FNS, member) !== undefined
@@ -1029,6 +1033,84 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
       L.unsupported("SC1090", expr, `Math methods as values (call '${member}' directly)`);
     }
     return null; // declared-but-untabled members fall through generically
+  }
+
+/** A Math static with a STATIC lowering — `pow`, `floor`, `abs`, `log`,
+   * … — taken as a VALUE rather than called, as a memoized lifted
+   * function. The `numberStaticPredicateFnValueOf` lift (lower-builtins.ts),
+   * one surface over, and for the same reason: a builtin lowers to a
+   * libCall at its CALL sites, so it has no closure to hand out and the
+   * bare member read fenced.
+   *
+   * The bundled `long` library is the caller that matters:
+   *
+   *     var pow = Math.pow;                       // long/umd/index.js
+   *     ... s = a <= 48 ? 1 : pow(2, a - 48);     // Long.prototype.divide
+   *     ... radixToPower = fromNumber(pow(radix, 6));
+   *
+   * — the static bound once at module scope and called through the
+   * binding, which is how a minifier spells any repeated builtin.
+   *
+   * The admission rule is the CHECKER's type, not a table of arities: the
+   * lift is built only when the declared type maps to exactly
+   * `(f64 × arity) => f64`, which is what `lib.es5.d.ts` declares for
+   * every fixed-arity entry of STATIC_MATH_FNS. `min`/`max` are declared
+   * `(...values: number[]) => number`, which does not map to that shape,
+   * so they keep the fence rather than silently becoming binary — the
+   * one place where the n-ary call form and a value form would disagree.
+   *
+   * One divergence, stated (the Number lift's, verbatim): the closure is
+   * a fresh allocation per read, so `Math.pow === Math.pow` is false
+   * where Node says true. No lowered function value in this compiler
+   * carries JS's identity.
+   *
+   * STATIC builds only — under --dynamic the island owns the value
+   * position, exactly as the Number lift does. Memoized per program, per
+   * member. Null for everything else. */
+  function mathStaticFnValueOf(
+    L: Lowerer,
+    expr: ts.PropertyAccessExpression,
+    member: string,
+  ): IrExpr | null {
+    if (expr.questionDotToken) return null;
+    if (L.dynamic) return null;
+    // The CALL form is lowerMathCall's — including the arities and the
+    // n-ary min/max fold it handles, which must keep their own paths.
+    const parent = expr.parent;
+    if (parent && ts.isCallExpression(parent) && parent.expression === expr) return null;
+    const entry = own(STATIC_MATH_FNS, member);
+    if (entry === undefined) return null;
+    const params: IrType[] = [];
+    for (let i = 0; i < entry.arity; i++) params.push(F64);
+    const fnT = funcOf(params, F64);
+    const ft = L.mapTypeOf(L.typeOf(expr));
+    if (ft === null || ft === undefined || !typeEquals(ft, fnT)) return null;
+    const loc = locOf(expr);
+    const name = `%math.${member}.value`;
+    if (!L.liftedFns.some((f) => f.name === name)) {
+      const ids = params.map((_, i) => `v.${i}`);
+      L.liftedFns.push({
+        name,
+        params: ids.map((id, i) => ({ localId: id, name: `v${i}`, type: F64 })),
+        returnType: F64,
+        locals: ids.map((id, i) => ({ id, name: `v${i}`, type: F64, mutable: false })),
+        body: [
+          {
+            kind: "return",
+            value: {
+              kind: "libCall",
+              fn: entry.fn,
+              args: ids.map((id) => ({ kind: "varRef", localId: id, type: F64, loc }) as IrExpr),
+              type: F64,
+              loc,
+            },
+            loc,
+          },
+        ],
+        loc,
+      });
+    }
+    return { kind: "closure", fnName: name, captures: [], type: fnT, loc };
   }
 
 /** The npm package a type is declared by ("commander", "@scope/pkg"),

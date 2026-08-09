@@ -467,7 +467,7 @@ void scr_dataview_set(ScrBytes *b, double byte_off, double value, ScrDataViewGet
       memcpy(&u, &value, 8);
       break;
     default:
-      return; /* BIG kinds never lower (bigint arguments) */
+      return; /* the BIG kinds carry a bigint — scr_dataview_set_big */
   }
   /* Scatter host-independently; le false is the JS big-endian default. */
   uint8_t *p = b->data + (size_t)off;
