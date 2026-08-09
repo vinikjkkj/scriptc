@@ -3688,8 +3688,10 @@ ScrDyn *scr_dyn_mark_static_copy(ScrDyn *d);
  * boundary copy. `what` names the operation ("assigning a property",
  * "deleting a property", "'push'") and leads the message. */
 void scr_dyn_static_copy_refuse(const char *what);
-/* The Buffer-flavored twin (stream chunks): string coercion/toString
- * decode utf8 instead of joining elements. */
+/* The Buffer-flavored twin: FORCES the flag on rather than reading the
+ * payload's flavor, for producers whose ScrBytes is stamped UNKNOWN but
+ * whose Node value is a Buffer regardless (stream 'data' chunks). The two
+ * constructors above already carry a stamped flavor across on their own. */
 ScrDyn *scr_dyn_new_buffer_copy(const ScrBytes *b);
 /* A fresh u8 COPY of a SCR_DYN_BYTES payload (+1) — the dynCheck
  * extraction (`u as Uint8Array`). */
@@ -3757,6 +3759,12 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc);
  * null-prototype dictionary throws "<what> is not a function" — its
  * prototype chain has no toString (Node's answer). */
 ScrStr *scr_dyn_to_string_method(const ScrDyn *d, const ScrStr *enc, const ScrStr *what);
+/* The RANGE spelling `d.toString(enc, start[, end])`: a Buffer receiver
+ * decodes the clamped window, a NUMBER takes the radix RangeError (the
+ * encoding is not a radix), and every other kind ignores both extra
+ * arguments — Node's split, measured. +1. */
+ScrStr *scr_dyn_to_string_range(const ScrDyn *d, const ScrStr *enc, ScrDyn *start,
+                                ScrDyn *end, const ScrStr *what);
 /* JS String() over the dyn kind (units render "null"/"undefined" where
  * scr_dyn_to_string throws) — the web globals' WebIDL ToString. +1. */
 ScrStr *scr_dyn_string_coerce(const ScrDyn *d);

@@ -548,10 +548,40 @@ static ScrDyn *dyn_str_create_html(const ScrStr *s, const ScrHtmlWrap *w,
   return r;
 }
 
+/* Object.prototype's METHODS — the ones every dyn kind inherits, reached
+ * only after the receiver's own/prototype lookup has found nothing (JS
+ * looks up the chain, so an OBJ that stores its own `hasOwnProperty`
+ * shadows this and a null-prototype dictionary never reaches it at all).
+ *
+ * It replaces `dyn_throw_not_fn` at the END of every kind arm rather than
+ * being tested at the top: that ordering IS the prototype chain this
+ * runtime does not otherwise model, and putting it first would let
+ * Object.prototype beat an own member, which is backwards.
+ *
+ * hasOwnProperty is scr_dyn_has_own — the SAME body Object.hasOwn(o, k)
+ * takes. The two spellings are one question and answered from one place;
+ * protobufjs writes both (`util.isset` uses the method form,
+ * `Object.hasOwn` the static), and they must not disagree. */
+static ScrDyn *dyn_object_proto_method(ScrDyn *recv, const char *method,
+                                       ScrDyn *const *args, size_t argc, const char *what) {
+  if (dyn_name_is(method, "hasOwnProperty")) {
+    /* ToPropertyKey: a missing argument is the STRING "undefined", which
+     * is a real key ({ undefined: 1 }.hasOwnProperty() is true in Node). */
+    ScrStr *k = argc >= 1 ? scr_dyn_string_coerce(args[0]) : scr_str_new("undefined", 9);
+    if (scr_exc_pending()) { scr_str_release(k); return NULL; }
+    bool r = scr_dyn_has_own(recv, k);
+    scr_str_release(k);
+    if (scr_exc_pending()) return NULL;
+    return scr_dyn_new_bool(r);
+  }
+  dyn_throw_not_fn(what);
+  return NULL;
+}
+
 /* Names each prototype declares BEYOND what's implemented here — these
  * fence loudly instead of mis-answering "is not a function". */
 static bool dyn_arr_proto_unimpl(const char *m) {
-  static const char *names[] = { "splice", "reduce", "reduceRight", "flat",
+  static const char *names[] = { "reduce", "reduceRight", "flat",
     "fill", "copyWithin", "keys", "values", "entries", "toReversed", "toSorted", "toSpliced",
     "with", "toString", "toLocaleString", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
@@ -619,9 +649,17 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       scr_dyn_release(m);
       return r;
     }
+    bool found = m->kind != SCR_DYN_UNDEF ||
+                 scr_dyn_obj_key_present(recv, method, strlen(method));
     scr_dyn_release(m);
-    dyn_throw_not_fn(what);
-    return NULL;
+    /* A null-prototype dictionary inherits NOTHING: Object.create(null)
+     * .hasOwnProperty("a") is "d.hasOwnProperty is not a function" in
+     * Node, and protobufjs's `_listeners` maps are exactly that shape. */
+    if (found || recv->null_proto) {
+      dyn_throw_not_fn(what);
+      return NULL;
+    }
+    return dyn_object_proto_method(recv, method, args, argc, what);
   }
 
   if (recv->kind == SCR_DYN_FUNC) {
@@ -674,8 +712,7 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
         scr_dyn_release(own);
       }
     }
-    dyn_throw_not_fn(what);
-    return NULL;
+    return dyn_object_proto_method(recv, method, args, argc, what);
   }
 
   if (recv->kind == SCR_DYN_STR) {
@@ -707,8 +744,7 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       dyn_throw_unsupported("String", method);
       return NULL;
     }
-    dyn_throw_not_fn(what);
-    return NULL;
+    return dyn_object_proto_method(recv, method, args, argc, what);
   }
 
   if (recv->kind == SCR_DYN_ARR) {
@@ -954,12 +990,53 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       if (len > 1 && !dyn_arr_sort(recv, cmp->kind == SCR_DYN_FUNC ? cmp : NULL)) return NULL;
       return scr_dyn_retain(recv);
     }
+    if (dyn_name_is(method, "splice")) {
+      /* ES 23.1.3.36. The three argument counts are genuinely different
+       * operations and Node's own answers, measured: splice() deletes
+       * NOTHING (actualDeleteCount 0), splice(start) deletes the whole
+       * TAIL, and splice(start, n) deletes n. An in-band default for the
+       * count cannot express that split, so argc decides it. */
+      double startD = dyn_index_arg(args, argc, 0, 0, what);
+      if (scr_exc_pending()) return NULL;
+      size_t start = dyn_rel_index(startD, len);
+      size_t del;
+      if (argc == 0) {
+        del = 0;
+      } else if (argc == 1) {
+        del = len - start;
+      } else {
+        double dc = dyn_index_arg(args, argc, 1, 0, what);
+        if (scr_exc_pending()) return NULL;
+        double cap = (double)(len - start);
+        del = dc <= 0 ? 0 : (dc >= cap ? len - start : (size_t)dc);
+      }
+      size_t ins = argc > 2 ? argc - 2 : 0;
+      size_t tail = len - start - del;
+      size_t newLen = len - del + ins;
+      /* The removed run leaves FIRST, and its references TRANSFER to the
+       * result — nothing below releases those slots, which is what makes
+       * the moves that follow reference-neutral. */
+      ScrDyn *out = scr_dyn_new_arr();
+      for (size_t i = 0; i < del; i++) scr_dyn_arr_push(out, recv->v.arr.items[start + i]);
+      /* Room for a longer array comes from the ordinary push path (it owns
+       * capacity growth). EVERY slot above the old length is overwritten below
+       * — [start, start+ins) by the inserts and [start+ins, newLen) by the
+       * tail — so the placeholders are dropped rather than read, and the
+       * release below is what balances the push's +1 without leaning on
+       * the fact that undefined happens to be immortal. */
+      while (recv->v.arr.len < newLen) scr_dyn_arr_push(recv, scr_dyn_retain(scr_dyn_undefined()));
+      for (size_t i = len; i < newLen; i++) scr_dyn_release(recv->v.arr.items[i]);
+      memmove(recv->v.arr.items + start + ins, recv->v.arr.items + start + del,
+              tail * sizeof(ScrDyn *));
+      for (size_t i = 0; i < ins; i++) recv->v.arr.items[start + i] = scr_dyn_retain(args[i + 2]);
+      recv->v.arr.len = newLen;
+      return out;
+    }
     if (dyn_arr_proto_unimpl(method)) {
       dyn_throw_unsupported("Array", method);
       return NULL;
     }
-    dyn_throw_not_fn(what);
-    return NULL;
+    return dyn_object_proto_method(recv, method, args, argc, what);
   }
 
   /* PROMISE receivers: the then/catch/finally reactions ride the fiber
@@ -977,8 +1054,7 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
     if (dyn_name_is(method, "finally")) {
       return scr_dyn_promise_then(recv->v.promise, NULL, NULL, argc >= 1 ? args[0] : NULL);
     }
-    dyn_throw_not_fn(what);
-    return NULL;
+    return dyn_object_proto_method(recv, method, args, argc, what);
   }
 
   if (recv->kind == SCR_DYN_BYTES) {
@@ -992,10 +1068,10 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
     if (known) return r;
   }
 
-  /* NUM/BOOL/BYTES-remainder: the name is no method of this kind — JS's
-   * own answer. */
-  dyn_throw_not_fn(what);
-  return NULL;
+  /* NUM/BOOL/BYTES-remainder: no method of this KIND — but every one of
+   * them still inherits Object.prototype, so the is-not-a-function answer
+   * is the fallback inside, not this line. */
+  return dyn_object_proto_method(recv, method, args, argc, what);
 }
 
 /* The attribute half of ES's ValidateAndApplyPropertyDescriptor, which is
