@@ -559,6 +559,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "insp.dynS": "scr_insp_dyn_s",
   "insp.fmtS": "scr_insp_fmt_s",
   "big.str": "scr_big_to_str",
+  "big.fromDyn": "scr_big_from_dyn",
   "key.fromPkcs8": "scr_key_from_pkcs8",
   "key.fromSpki": "scr_key_from_spki",
   "key.secretBytes": "scr_key_secret_bytes",
@@ -596,8 +597,6 @@ const LIB_FN_SYMS: Record<string, string> = {
   // Argument-reordered against the runtime (value, bits) — this tier has
   // no ScrBigInt ABI, so no call is ever emitted; the entry exists so the
   // name table stays total.
-  "big.asIntN": "scr_big_as_n",
-  "big.asUintN": "scr_big_as_n",
   "insp.dynSpread": "scr_insp_dyn_spread",
   "fs.readFileSyncDyn": "scr_fs_read_file_sync_dyn",
   // Loose generic-shaped stragglers the burn-down surfaced alongside the
@@ -6737,6 +6736,7 @@ class LlEmitter {
               undefined: DK.UNDEF,
               null: DK.NULL,
               bytes: DK.BYTES,
+              bigint: DK.BIG,
             };
             test = oneOf([kindOf[e.test]!]);
           }
@@ -10394,6 +10394,34 @@ class LlEmitter {
       const out = this.own({ name: dummy, type: e.type });
       this.emitPendingCheck();
       return out;
+    }
+    if (e.fn === "big.asIntN" || e.fn === "big.asUintN") {
+      // NOT a by-name row, and the two it replaces were wrong in two ways
+      // at once. scr_big_as_n's C signature is
+      // (value, bits, is_signed) while the IR node's arguments are
+      // (bits, value) -- the DECLARED order, which is the spec's -- so
+      // the generic map passed a double where a ScrBigInt* was expected
+      // (an immediate segfault) and dropped the is_signed flag entirely,
+      // which would have made asIntN and asUintN the same function.
+      //
+      // It had never run. The only corpus program spelling these is
+      // 3213, whose bigint LITERALS put it outside the LLVM tier, so the
+      // lane skipped it and scored the C fallback. Reaching asIntN with
+      // an 'unknown' operand -- which is the whole point of the bigint
+      // dyn kind -- needs no literal, and the first program that did it
+      // crashed. The C twin has had the swap and the flag all along.
+      const args = e.args.map((a) => this.emitExpr(a));
+      const bits = args[0]!;
+      const value = args[1]!;
+      this.declare(`declare ptr @scr_big_as_n(ptr, double, i1 zeroext)`);
+      const out = B.tmp();
+      B.line(
+        `${out} = call ptr @scr_big_as_n(ptr ${value.name}, double ${bits.name}, ` +
+          `i1 ${e.fn === "big.asIntN" ? "true" : "false"})`,
+      );
+      const r = this.own({ name: out, type: e.type });
+      this.emitPendingCheck();
+      return r;
     }
     if (e.fn === "global.undefRead") {
       // A declare-d const nothing defines: Node's catchable

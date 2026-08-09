@@ -764,3 +764,106 @@ ScrStr *scr_big_to_str(const ScrBigInt *a, double radix) {
 /* The void* adapters ScrArr/ScrMap element tables call through. */
 void *scr_big_retain_v(void *b) { return scr_big_retain((ScrBigInt *)b); }
 void scr_big_release_v(void *b) { scr_big_release((ScrBigInt *)b); }
+
+/* ToBigInt (ECMA-262 7.1.13) over an UNTYPED operand — `BigInt(u)`.
+ * Lives here rather than in scr_json.c for the gating reason the boxing
+ * ops below spell out, and it may call INTO the always-linked core
+ * freely: the dependency this file must not create is the other
+ * direction.
+ *
+ * Node's four answers, measured against v25.9.0:
+ *   BigInt(5)      -> 5n            BigInt(5.5) -> RangeError
+ *   BigInt(true)   -> 1n            BigInt(null) -> TypeError
+ *   BigInt(5n)     -> 5n            BigInt("5") -> 5n
+ *
+ * The STRING arm is the one this refuses, and deliberately. The only
+ * digit parser in this file is scr_big_parse, which serves LITERALS —
+ * the tokenizer has already validated those, so it skips any character
+ * it does not recognise instead of failing. Pointing it at user text
+ * would read BigInt("12abc") as 12n where Node throws SyntaxError, and a
+ * silent wrong number is the one answer worse than a refusal. */
+ScrBigInt *scr_big_from_dyn(const ScrDyn *d) {
+  if (d != NULL) {
+    switch (d->kind) {
+    case SCR_DYN_BIG:
+      /* The identity, exactly as the static BigInt(bigint) spelling. */
+      return scr_big_retain(scr_dyn_big_of((ScrDyn *)d));
+    case SCR_DYN_NUM:
+      /* scr_big_from_f64 owns the integrality RangeError, so the number
+       * arm and the static BigInt(number) arm are literally one code
+       * path and cannot disagree. */
+      return scr_big_from_f64(d->v.num);
+    case SCR_DYN_BOOL:
+      /* ToBigInt(true) is 1n and ToBigInt(false) is 0n — the one arm with
+       * no shared code path, because there is no static BigInt(boolean)
+       * spelling for it to share with. */
+      return d->v.b ? scr_big_from_f64(1) : scr_big_zero();
+    case SCR_DYN_STR: {
+      static const char m[] =
+          "BigInt() of a dynamic string is not supported yet (a Node-exact digit parser "
+          "with its SyntaxError does not exist yet; convert with Number() first)";
+      scr_throw_error_msg(SCR_ERR_ERROR, m, sizeof m - 1);
+      return NULL;
+    }
+    default:
+      break;
+    }
+  }
+  /* The two units get Node MESSAGE-EXACT TypeErrors (measured:
+   * "Cannot convert null to a BigInt"). Everything else — objects,
+   * arrays, functions — reaches a BigInt only through ToPrimitive and
+   * then the same digit parse the string arm refuses, and Node reports
+   * those as SyntaxError over the value's String() rendering. Rather
+   * than half-render that, the fence names the kind. */
+  if (d == NULL || d->kind == SCR_DYN_UNDEF || d->kind == SCR_DYN_NULL) {
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "Cannot convert ");
+    scr_jb_puts(&b, (d == NULL || d->kind == SCR_DYN_UNDEF) ? "undefined" : "null");
+    scr_jb_puts(&b, " to a BigInt");
+    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+    return NULL;
+  }
+  {
+    ScrStr *t = scr_dyn_typeof(d); /* +1 */
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "BigInt() of a dynamic ");
+    scr_jb_write(&b, t->data, t->len);
+    scr_jb_puts(&b, " is not supported yet (ToPrimitive then a digit parse, neither modeled)");
+    scr_str_release(t);
+    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+  }
+  return NULL;
+}
+
+/* ── the checked-dynamic crossing (SCR_DYN_BIG) ───────────────────────
+ *
+ * A bigint flowing into an `unknown` slot. The five value questions the
+ * always-linked dyn core has to ask a bigint live HERE, in the gated
+ * unit, and reach the core through a table it installs — the
+ * ScrDynJsvalOps arrangement, adopted for its link-time reason rather
+ * than its style: scr_json.c is always linked and this file is not, so a
+ * scr_big_release() called from there would be an undefined symbol in
+ * every bigint-free binary. That is not hypothetical — it is exactly how
+ * scr_big_low_u64 broke the LLVM lane one change ago, and the accounting
+ * test now asserts this file's gating stays intact.
+ *
+ * Not one line of behaviour is new: every entry is an existing scr_big_*
+ * export, so `String(u)` on a boxed bigint runs the same digits routine
+ * as `String(x)` on a static one and the two cannot answer differently.
+ *
+ * A LITERAL retain, not a copy: bigints are immutable, so the box and the
+ * static value sharing digits is unobservable, and === over two boxes
+ * compares VALUES anyway (scr_dyn_strict_eq's BIG arm). */
+static const ScrDynBigOps scr_big_dyn_ops = {
+  scr_big_retain,
+  scr_big_release,
+  scr_big_truthy,
+  scr_big_eq,
+  scr_big_to_str,
+};
+
+ScrDyn *scr_dyn_from_big(ScrBigInt *b) {
+  return scr_dyn_alloc_big(b, &scr_big_dyn_ops);
+}
