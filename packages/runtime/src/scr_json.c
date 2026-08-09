@@ -1000,9 +1000,30 @@ ScrDyn *scr_dyn_new_obj_null_proto(void) {
   return d;
 }
 
+/* Buffer-ness is ONE fact with two homes: the PAYLOAD carries it
+ * (ScrBytes.flavor, stamped by whichever constructor made the value) and
+ * the dyn node re-asks it (ScrDyn.buffer, which every toString/coercion
+ * branch reads). Deriving the second from the first is what keeps a
+ * Buffer a Buffer across the boundary.
+ *
+ * It was NOT derived, and that was a silent wrong answer already on the
+ * live path: `function f(b) { return b.toString("hex"); }` called with a
+ * real Buffer answered "104,105" — the Uint8Array element join — where
+ * Node answers "6869", with no diagnostic anywhere. The static spelling
+ * of the same call was always right, so the two disagreed by which side
+ * of an untyped parameter the value happened to be read on.
+ *
+ * SCR_BF_UNKNOWN stays PLAIN here rather than guessing: it is the
+ * deliberate default for a producer nobody has classified (see the
+ * header), and a guess would turn a named fence into a wrong string. */
+static bool dyn_bytes_is_buffer(const ScrBytes *b) {
+  return b != NULL && b->flavor == SCR_BF_BUFFER;
+}
+
 ScrDyn *scr_dyn_new_bytes_copy(const ScrBytes *b) {
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_BYTES);
-  d->v.bytes = scr_bytes_copy(b); /* the CLONING constructor */
+  d->v.bytes = scr_bytes_copy(b); /* the CLONING constructor (flavor rides along) */
+  d->buffer = dyn_bytes_is_buffer(d->v.bytes);
   return d;
 }
 
@@ -1012,6 +1033,7 @@ ScrDyn *scr_dyn_new_bytes_ref(ScrBytes *b) {
    * through an untyped parameter reach the caller's buffer. */
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_BYTES);
   d->v.bytes = scr_bytes_retain(b);
+  d->buffer = dyn_bytes_is_buffer(b);
   return d;
 }
 
@@ -2834,6 +2856,52 @@ ScrStr *scr_dyn_to_string_method(const ScrDyn *d, const ScrStr *enc, const ScrSt
   return scr_dyn_to_string(d, enc);
 }
 
+/* The RANGE spelling `d.toString(enc, start[, end])` — Buffer's
+ * decode-a-window form, and the one protobufjs's BufferReader reads every
+ * string field through (`this.buf.utf8Slice ? … : this.buf.toString(
+ * "utf-8", start, end)`).
+ *
+ * The extra arguments belong to exactly ONE receiver kind. Measured
+ * against Node v25.9.0 rather than assumed:
+ *
+ *   Buffer            decodes the clamped [start, end) window;
+ *   plain Uint8Array  toString is ARRAY's — the element join, arguments
+ *                     ignored ((new Uint8Array([104,105])).toString(
+ *                     "utf8", 0, 1) is "104,105", not "h");
+ *   string/boolean/   the arguments are ignored ("abc".toString("utf8",
+ *   array/object/…    1, 2) is "abc", [1,2,3].toString(…) is "1,2,3");
+ *   NUMBER            argument 0 is a RADIX, not an encoding. Every
+ *                     spelling that reaches here is one of the nine
+ *                     literal Buffer encodings (the frontend's
+ *                     bufEncoding fences the rest), and ToIntegerOrInfinity
+ *                     of any of them is 0 — so a number receiver in this
+ *                     form is always V8's RangeError, never a digit
+ *                     string.
+ *
+ * start/end stay DYN and take ToIntegerOrInfinity here (JS coerces them;
+ * a static f64 conversion would throw where Node converts). */
+ScrStr *scr_dyn_to_string_range(const ScrDyn *d, const ScrStr *enc, ScrDyn *start,
+                                ScrDyn *end, const ScrStr *what) {
+  if (d->kind == SCR_DYN_BYTES && d->buffer) {
+    ScrDyn *a[2] = { start, end };
+    double s = scr_dyn_index_arg(a, 2, 0, 0, "toString");
+    if (scr_exc_pending()) return scr_str_new("", 0);
+    double e = scr_dyn_index_arg(a, 2, 1, (double)d->v.bytes->len, "toString");
+    if (scr_exc_pending()) return scr_str_new("", 0);
+    return scr_bytes_to_str_range(d->v.bytes, enc, s, e);
+  }
+  if (d->kind == SCR_DYN_NUM) {
+    static const char msg[] = "toString() radix argument must be between 2 and 36";
+    scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
+    return scr_str_new("", 0);
+  }
+  /* Every remaining kind ignores the extra arguments — and ignores the
+   * ENCODING with them, which is why NULL goes down rather than `enc`:
+   * [buf].toString("hex", 0, 1) is the array join of String(buf), not a
+   * hex render of the element. */
+  return scr_dyn_to_string_method(d, NULL, what);
+}
+
 /* JS String() over the dyn kind — the WebIDL ToString the web globals
  * (atob/btoa, DOMException's name resolution) run on their arguments:
  * the unit kinds RENDER ("null"/"undefined") where the .toString() twin
@@ -3376,6 +3444,25 @@ bool scr_dyn_fn_has_own(const ScrDyn *v, const char *key, size_t key_len) {
   }
   return scr_dyn_fn_has(v, key, key_len);
 }
+/* A CANONICAL array-index key — the one question `in`, Object.hasOwn and
+ * the index arms of every indexable dyn kind all ask, written ONCE. ES's
+ * rule: the key must be the decimal spelling of the integer it names, so
+ * "01", "1.0", "-1" and " 1" are ORDINARY string keys, not indices. The
+ * digit cap keeps the accumulator inside size_t; a longer run of digits
+ * cannot be a valid index of anything this runtime can hold. */
+static bool dyn_canonical_index(const ScrStr *key, size_t *out) {
+  if (key->len == 0 || key->len > 15) return false;
+  if (key->len > 1 && key->data[0] == '0') return false;
+  size_t idx = 0;
+  for (size_t i = 0; i < key->len; i++) {
+    char c = key->data[i];
+    if (c < '0' || c > '9') return false;
+    idx = idx * 10 + (size_t)(c - '0');
+  }
+  *out = idx;
+  return true;
+}
+
 /* `key in v` with a RUNTIME key (the compile-time dynHasKey fold, per
  * value): OBJ answers own-member presence AND the prototype chain (`in`
  * is one of the two JS operators that walks it — `"m" in new F()` is
@@ -3395,15 +3482,8 @@ bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
   }
   if (v->kind == SCR_DYN_ARR) {
     if (key->len == 6 && memcmp(key->data, "length", 6) == 0) return true;
-    if (key->len == 0 || key->len > 15) return false;
     size_t idx = 0;
-    for (size_t i = 0; i < key->len; i++) {
-      char c = key->data[i];
-      if (c < '0' || c > '9') return false;
-      if (i > 0 && idx == 0) return false; /* a leading zero is no canonical index */
-      idx = idx * 10 + (size_t)(c - '0');
-    }
-    return idx < v->v.arr.len;
+    return dyn_canonical_index(key, &idx) && idx < v->v.arr.len;
   }
   /* A function value carries own properties (assignment and
    * defineProperties both land in one table), so `k in f` answers from
@@ -6431,14 +6511,40 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
   if (v->kind == SCR_DYN_ARR) {
     if (key->len == 6 && memcmp(key->data, "length", 6) == 0) return true;
     size_t idx = 0;
-    int is_index = key->len > 0 && !(key->len > 1 && key->data[0] == '0');
-    for (size_t i = 0; is_index && i < key->len; i++) {
-      if (key->data[i] < '0' || key->data[i] > '9') is_index = 0;
-      else idx = idx * 10 + (size_t)(key->data[i] - '0');
-    }
-    return is_index != 0 && idx < v->v.arr.len;
+    return dyn_canonical_index(key, &idx) && idx < v->v.arr.len;
+  }
+  /* A STRING exotic object's own properties are its INDICES plus a
+   * non-writable own `length` — measured, not assumed:
+   * Object.hasOwn("abc", "1") and Object.hasOwn("abc", "length") are both
+   * true in Node. The index is a UTF-16 code-unit position, which is the
+   * same unit the keyed read uses. */
+  if (v->kind == SCR_DYN_STR) {
+    if (key->len == 6 && memcmp(key->data, "length", 6) == 0) return true;
+    size_t idx = 0;
+    return dyn_canonical_index(key, &idx) && idx < scr_str_utf16_len(v->v.str);
+  }
+  /* A TYPED ARRAY's indices are own; its `length` is NOT — that one is an
+   * accessor on %TypedArray%.prototype, so Object.hasOwn(u8, "length") is
+   * FALSE in Node where the string above answers true. The two kinds
+   * really do differ, which is why they are separate arms. */
+  if (v->kind == SCR_DYN_BYTES) {
+    size_t idx = 0;
+    return dyn_canonical_index(key, &idx) && idx < v->v.bytes->len;
   }
   if (v->kind == SCR_DYN_FUNC) return scr_dyn_fn_has_own(v, key->data, key->len);
+  /* A CLASS INSTANCE box carries no member table — the whole kind is a
+   * pointer plus a descriptor, and every OTHER property question on it
+   * takes the loud ladder (a read, a write, JSON.stringify). Answering
+   * false here would be the one that did not: an instance field IS own in
+   * Node, so false is a wrong ANSWER where the neighbours refuse. The
+   * method spelling `inst.hasOwnProperty(k)` lands here too. */
+  if (v->kind == SCR_DYN_OBJINST) return scr_dyn_objinst_fence(v, "Object.hasOwn");
+  /* HANDLE keeps FALSE, and it is the answer `in` already gives over the
+   * same value: which members a native handle OWNS rather than inherits
+   * is a distinction this tier has not measured, and the two spellings
+   * agreeing is worth more than one of them guessing. BIG, ARRBUF and
+   * PROMISE are exact — none of the three has an own property of any name
+   * in Node. */
   return false;
 }
 ScrDyn *scr_dyn_obj_values(const ScrDyn *v) { return scr_dyn_objwalk(v, SCR_OBJWALK_VALUES); }

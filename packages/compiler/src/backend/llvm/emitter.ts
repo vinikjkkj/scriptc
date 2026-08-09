@@ -552,6 +552,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.defineProp": "scr_dyn_define_prop",
   "dyn.typeof": "scr_dyn_typeof",
   "dyn.toString": "scr_dyn_to_string_method",
+  "dyn.toStringRange": "scr_dyn_to_string_range",
   "dyn.this": "scr_dyn_this_get",
   "dyn.thisPush": "scr_dyn_this_push_dyn",
   "dyn.thisPop": "scr_dyn_this_pop",
