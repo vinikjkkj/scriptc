@@ -2,8 +2,16 @@
 // member lowers through the SAME tables as the named-import form — calls,
 // constants (path.sep, os.EOL), fs.constants access bits, and the nested
 // fs.promises module object (the same module as node:fs/promises, Node's
-// rule). Scratch names derive from argv[1]'s tail so the concurrently
-// running Node and native sides never collide (see 992).
+// rule). Scratch names derive from argv[1]'s tail AND the pid so the
+// concurrently running Node and native sides never collide (see 992).
+// The tail alone was not enough: differential.test.ts and
+// llvm-differential.test.ts each run `node <this file>` as their oracle,
+// CONCURRENTLY, with the same argv[1] — so the two Node runs shared one
+// scratch directory, and whichever lost the rmSync/mkdirSync race threw
+// before its first console.log. That reads as an empty-stdout mismatch
+// against a native side that is byte-exact, and it fires only when the
+// two lanes line up — so it looks like a compiler regression every time
+// an unrelated change shifts the timing.
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -17,7 +25,7 @@ function tail(p: string): string {
   return p.slice(i + 1);
 }
 
-const scratch = "tmp-957-" + tail(process.argv[1]);
+const scratch = "tmp-957-" + tail(process.argv[1]) + "-" + String(process.pid);
 if (fs.existsSync(scratch)) {
   fs.rmSync(scratch + "/a.txt");
   fs.rmdirSync(scratch);
