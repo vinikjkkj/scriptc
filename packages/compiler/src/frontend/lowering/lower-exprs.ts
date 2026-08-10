@@ -2580,16 +2580,19 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       }
       return expr;
     }
-    // instanceof narrowing for classes: tsc types this USE as a subclass of
-    // the IR value's class (only a dynamic instanceof test narrows a class
-    // type), so the read bridges with an unchecked static downcast. This
-    // is now the LAST trust-the-checker bridge in maybeNarrow — the union
-    // bridge below is tag-checked and the dyn bridge above is validated.
-    // It is a smaller bet than the union one was (an instanceof narrowing
-    // rides a real runtime test, and a downcast reads a prefix layout the
-    // subclass shares by construction rather than a sibling's slot), but
-    // it is still a bet, and `x as Sub` after a lying predicate is its
-    // open edge.
+    // Checker-driven narrowing for classes: tsc types this USE as a
+    // subclass of the IR value's class, and the read bridges with a
+    // downcast. That downcast is INSTANCEOF-CHECKED (checkedDowncastBridge)
+    // for the same reason the union bridge below is tag-checked: the
+    // narrowing is not always an instanceof test the runtime performed. A
+    // user type predicate (`a is Dog`) and an assertion function
+    // (`asserts a is Dog`) are tsc's word alone, and a bare reinterpret
+    // believes them. Sibling subclasses share the base's prefix and place
+    // their own fields at the SAME offsets, so believing a lie serves one
+    // subclass's slot as another's; a base instance is shorter than the
+    // subclass struct, so it runs off the end of the allocation. Where the
+    // narrowing is honest the check is one predictable interval compare
+    // that always passes.
     if (expr.type.kind === "object") {
       const narrowed = L.mapTypeOf(L.typeOf(node));
       if (
@@ -2597,7 +2600,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         narrowed.className !== expr.type.className &&
         L.isSubclassOf(narrowed.className, expr.type.className)
       ) {
-        return { kind: "downcast", value: expr, type: narrowed, loc: expr.loc };
+        return checkedDowncastBridge(L, expr, narrowed, expr.loc);
       }
       return expr;
     }
@@ -2663,11 +2666,43 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     return { kind: "call", callee: helper, args: [value], type: arm, narrowBridge: true, loc };
   }
 
-/** The value behind a checker-driven union arm bridge, or null. The bridge
- * is a CALL now, so every predicate that used to recognise the unionNarrow
- * node — purity, the instanceof folds, the volatile env read, integer
- * refinement — asks this instead. The call is over one argument and cannot
- * be re-associated; only `args[0]` is the pre-narrowing value. */
+/** The checker-driven CLASS bridge's one reinterpret, instanceof-checked.
+ *
+ * tsc proved the subclass; the runtime never did. The two failure shapes
+ * are the union bridge's two exactly (`estado-maybenarrow.md` §2), one
+ * layer down: a SIBLING subclass has the same width and different field
+ * names, so a lying narrowing answers with the wrong field and nothing
+ * crashes (probe d01 prints a Cat's `sound` as `Dog.breed`); the BASE
+ * itself is narrower than the subclass struct, so the read leaves the
+ * allocation (probe d02 segfaults under LLVM). The check is the preorder
+ * interval `instanceof` already uses — the class carries its vtable, the
+ * target's interval is a compile-time constant, and an honest narrowing
+ * pays one always-true compare.
+ *
+ * Marked `narrowBridge` for the same reason the union bridge is: every
+ * predicate that has to see the read underneath a bridge — purity, the
+ * instanceof folds, integer refinement's five transparency points — asks
+ * narrowBridgeArm / narrowBridgeArg, and a bridge that did not carry the
+ * marker would be havoc'd by the generic `call` case instead.
+ *
+ * Falls back to the UN-NARROWED value when the helper declines (a class
+ * outside an extends hierarchy carries no vtable word). That fences
+ * loudly at the first subclass member read rather than admitting an
+ * unchecked reinterpret. */
+  function checkedDowncastBridge(L: Lowerer, value: IrExpr, target: IrType & { kind: "object" }, loc: SrcLoc): IrExpr {
+    if (value.type.kind !== "object") return value;
+    const helper = L.narrowedClassHelper(value.type.className, target.className, loc);
+    if (!helper) return value;
+    return { kind: "call", callee: helper, args: [value], type: target, narrowBridge: true, loc };
+  }
+
+/** The value behind a checker-driven narrowing bridge, or null — the union
+ * arm bridge (%union.narrow) and the class downcast bridge (%class.narrow)
+ * alike. Both are CALLS now, so every predicate that used to recognise the
+ * unionNarrow or downcast node — purity, the instanceof folds, the
+ * volatile env read, integer refinement — asks this instead. The call is
+ * over one argument and cannot be re-associated; only `args[0]` is the
+ * pre-narrowing value. */
   export function narrowBridgeArm(e: IrExpr): IrExpr | null {
     if (e.kind !== "call" || e.narrowBridge !== true) return null;
     return e.args[0] ?? null;
