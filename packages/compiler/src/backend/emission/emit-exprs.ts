@@ -1893,6 +1893,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               : "scr_dyn_new_null()",
           );
         }
+        // A VOID operand (a void call or `await` of a promise<void> landing
+        // in an 'unknown' slot): there is no value to convert — evaluate for
+        // EFFECTS, then produce the undefined dyn value, exactly what JS's
+        // void result is. The unionWrap void-payload rule, one kind over.
+        if (e.value.type.kind === "void") {
+          E.emitExpr(e.value);
+          return E.newTemp(e.type, "scr_dyn_retain(scr_dyn_undefined())");
+        }
         const v = E.emitExpr(e.value);
         if (v.type.kind === "func") {
           // A closure boxes as the checked-dynamic tree's function kind: retained closure +
