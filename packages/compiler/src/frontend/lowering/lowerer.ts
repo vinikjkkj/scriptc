@@ -3747,6 +3747,19 @@ export class Lowerer {
       return { kind: "promiseVoidWiden", value: expr, type: expected, loc: expr.loc };
     }
     if (expected.kind === "dyn" && expr.type.kind !== "dyn") {
+      // A VOID RESULT flowing into an 'unknown' slot (`return v()` in an
+      // `async (): Promise<unknown>`, and every `Promise<void>` payload the
+      // promise adapter awaits): JS's void value IS undefined, so the
+      // conversion evaluates the operand for its EFFECTS and produces the
+      // undefined dyn value — the unionWrap void-payload rule, one kind
+      // over (both backends already emit that one). `void` is not a value
+      // TYPE anywhere a dyn can be stored — no record field, array element
+      // or union arm is void — so it stays OUT of canConvertToDyn (whose
+      // answers drive the composite to-dyn walkers) and is spelled here,
+      // at the coercion, where the operand is an expression to evaluate.
+      if (expr.type.kind === "void") {
+        return { kind: "dynFrom", value: expr, type: DYN, loc: expr.loc };
+      }
       if (expr.kind === "unitLit" || this.dynConvertible(expr.type)) {
         return { kind: "dynFrom", value: expr, type: DYN, loc: expr.loc };
       }
@@ -5930,7 +5943,12 @@ export class Lowerer {
       );
     }
     if (src.kind === "jsval") return this.boundaryExitSafe(dst);
-    if (dst.kind === "dyn") return src.kind !== "dyn" && this.dynConvertible(src);
+    // A VOID source: awaiting or calling it yields JS's undefined, which
+    // the dyn holds exactly (coerceToExpected's void arm). cleanFuncAdaptable
+    // already answered yes for the same pair; this is the predicate catching
+    // up, and it is what admits `Promise<void>` into a `Promise<unknown>`
+    // slot through the promise recursion below.
+    if (dst.kind === "dyn") return src.kind !== "dyn" && (src.kind === "void" || this.dynConvertible(src));
     if (src.kind === "dyn") {
       // The checked-dynamic function boundary's OUT direction joins the
       // mechanical set: a dyn result landing in an adaptable func slot
@@ -6187,8 +6205,12 @@ export class Lowerer {
     //   compiles, INVOKING the slot throws the stranded TypeError (a
     //   never-called mismatched callback is exact; divergence 38's stance
     //   extended to calls).
-    // - voidRet "dyn"/"jsval": calling yields JS's undefined — the exact
-    //   undefined dyn/engine value after the call's effects.
+    // - voidRet "jsval": calling yields JS's undefined — the exact
+    //   undefined engine value after the call's effects. (The dyn twin is
+    //   NOT here: a void result entering an 'unknown' slot is an ordinary
+    //   coercibleValue conversion now, so it takes the general result path
+    //   below and lowers to the same dynFrom-of-a-void-operand every other
+    //   void→unknown flow does — one spelling, not two.)
     // - voidRet "strand": a void result where the slot promises a typed
     //   value — the call runs (a `never` thrower never comes back, so the
     //   trap is unreachable there), then the stranded TypeError.
@@ -6196,7 +6218,7 @@ export class Lowerer {
     for (let i = 0; i < Math.min(fromT.params.length, toT.params.length); i++) {
       if (!this.coercibleValue(toT.params[i]!, fromT.params[i]!)) strandParams = true;
     }
-    let voidRet: "dyn" | "jsval" | "strand" | null = null;
+    let voidRet: "jsval" | "strand" | null = null;
     let strandRet = false;
     // A factory returning a CLASS INSTANCE into a slot that spells the
     // instance's shape as a record -- `() => new Store()` passed where the
@@ -6219,7 +6241,7 @@ export class Lowerer {
         // throws the stranded TypeError where its result would convert.
         strandRet = true;
       } else {
-        voidRet = toT.ret.kind === "dyn" ? "dyn" : toT.ret.kind === "jsval" ? "jsval" : "strand";
+        voidRet = toT.ret.kind === "jsval" ? "jsval" : "strand";
       }
     }
     if (toT.ret.kind === "void" && fromT.ret.kind === "jsval") return null;
@@ -6273,11 +6295,6 @@ export class Lowerer {
         body = [
           { kind: "exprStmt", expr: call, loc },
           { kind: "return", value: null, loc },
-        ];
-      } else if (voidRet === "dyn") {
-        body = [
-          { kind: "exprStmt", expr: call, loc },
-          { kind: "return", value: dynUndefinedExpr(loc), loc },
         ];
       } else if (voidRet === "jsval") {
         body = [

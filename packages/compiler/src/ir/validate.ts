@@ -3166,6 +3166,13 @@ function validateFunction(
           break;
         }
         checkExpr(e.value);
+        // A VOID operand is legal (like unitLit, and like unionWrap's
+        // void-payload rule): a void call/await has no value to convert, so
+        // the backends evaluate it for its EFFECTS and produce the undefined
+        // dyn value. Kept out of canConvertToDyn on purpose — that predicate
+        // answers for composite MEMBERS, and no record field, array element
+        // or union arm is ever void.
+        if (e.value.type.kind === "void") break;
         // Domain: JSON-safe, bytes<u8> (the checked-dynamic tree's bytes kind — payload
         // copied), an undefined-armed union of JSON-safe arms (the
         // undefined arm becomes the undefined dyn value), or a BOXABLE
