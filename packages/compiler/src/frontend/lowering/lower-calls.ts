@@ -7730,17 +7730,21 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
           `(only an inline callback whose predicate the checker inferred can re-tag — ${annotateEscape})`,
       );
     }
-    let writtenPredicate = false;
-    if (argNode.type) {
-      // A WRITTEN `x is T` is the program's claim, not the checker's — it
-      // proves nothing at runtime, which is why the re-tag cannot be the
-      // unchecked one an INFERRED predicate earns. It rides the CHECKED
-      // extraction instead: each kept element is verified against the arm,
-      // and a lying predicate throws the catchable TypeError rather than
-      // handing back another arm's payload. Same stance as `x!` and as an
-      // overload whose return the implementation never honoured.
-      writtenPredicate = true;
-    }
+    // Written or INFERRED, the predicate is a claim about the arm and not a
+    // test of it. A written `x is T` is the program's word; an inferred one
+    // is the checker's reading of a body that may itself be nothing but a
+    // call to a lying guard (`xs.filter((v) => isHit(v))`, where `isHit`
+    // returns true for everything) — the runtime bool says the callback
+    // agreed, never which arm the value holds. Both ride the CHECKED
+    // extraction: each kept element is verified against the arm, and a
+    // lying predicate throws the catchable TypeError rather than handing
+    // back another arm's payload. Same stance as `x!`, as the checker's own
+    // narrowings, and as the emit payload array.
+    //
+    // The element union is the worst case for the alternative by
+    // construction: the arm being claimed and the arm the value actually
+    // holds are both arms of that one union, which is the precondition the
+    // emit dispatcher's hazard needed and most unions do not meet.
     // The receiver evaluates FIRST, in the enclosing function, like JS.
     const receiver = L.lowerExpr(access.expression);
     const fnArg = L.lowerExpr(argNode);
@@ -7752,7 +7756,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     ) {
       L.badType(argNode, L.typeOf(argNode));
     }
-    const helper = filterNarrowHelper(L, "callback", elem, outElem!, tag, loc, writtenPredicate);
+    const helper = filterNarrowHelper(L, "callback", elem, outElem!, tag, loc);
     return { kind: "call", callee: helper, args: [receiver, fnArg], type: arrayOf(outElem!), loc };
   }
 
@@ -7765,19 +7769,32 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
    *   return out;
    *
    * <test> is f(v) for the predicate form and ToBoolean(v) for Boolean.
-   * The re-tag is sound exactly because the test just PASSED for v: an
-   * inferred predicate proved the arm dynamically, and a truthy value is
-   * never the undefined/null arm. */
-/** The CHECKED extraction of one union arm — `x!`'s machinery. Used where
-   * the claim that an element belongs to the arm is the PROGRAM's, not the
-   * checker's: a lying claim throws the catchable TypeError instead of
-   * reading another arm's payload. Falls back to the unchecked narrow only
-   * when no helper exists for the pair, which the caller has already ruled
-   * out by finding the arm. */
+   *
+   * For BOOLEAN the re-tag is sound because the test itself decides the
+   * arm: the arms Boolean removes are the unit ones, `undefined` and
+   * `null`, and both are falsy — a value that passed ToBoolean cannot be
+   * one of them, so the single arm left is the one it holds.
+   *
+   * For a PREDICATE it is not. The callback answers a bool, and nothing
+   * ties that bool to the tag: the checker inferred `v is T` from a body
+   * that may be a call to a guard that lies. So the re-tag goes through
+   * the CHECKED extraction — see checkedArmExtract. */
+/** The CHECKED extraction of one union arm — `x!`'s machinery, widened to a
+   * class arm's descendants (a subclass value in a base-class slot is a
+   * plain upcast: prefix layout, the vtable rides with the pointer).
+   *
+   * Used where the claim that an element belongs to the arm is not a fact
+   * the runtime established: a lying claim throws the catchable TypeError
+   * instead of reading another arm's payload. Marked `narrowBridge`, like
+   * the other two bridges, so every read-shape predicate that used to see
+   * the unionNarrow underneath still sees its operand.
+   *
+   * Falls back to the unchecked narrow only when no helper exists for the
+   * pair, which the caller has already ruled out by finding the arm. */
   function checkedArmExtract(L: Lowerer, unionId: string, arm: IrType, value: IrExpr, loc: SrcLoc): IrExpr {
-    const helper = L.narrowedArmHelper(unionId, arm, loc);
+    const helper = L.checkedArmHelper(unionId, arm, loc, "a '.filter' predicate kept an element that holds another arm");
     return helper
-      ? { kind: "call", callee: helper, args: [value], type: arm, loc }
+      ? { kind: "call", callee: helper, args: [value], type: arm, narrowBridge: true, loc }
       : { kind: "unionNarrow", unionId, tag: 0, value, type: arm, loc };
   }
 
@@ -7785,9 +7802,8 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     elem: IrType,
     outElem: IrType,
     tag: number | null,
-    loc: SrcLoc,
-    checked = false,): string {
-    const key = `filterNarrow:${test}:${checked ? "ck:" : ""}${typeKey(elem)}:${typeKey(outElem)}`;
+    loc: SrcLoc,): string {
+    const key = `filterNarrow:${test}:${typeKey(elem)}:${typeKey(outElem)}`;
     const existing = L.arrHofHelpers.get(key);
     if (existing) return existing;
     const name = `%arr.filterNarrow.${L.arrHofHelpers.size}`;
@@ -7817,7 +7833,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         : { kind: "toBool", operand: v, type: BOOL, loc };
     const kept: IrExpr =
       tag !== null && elem.kind === "union"
-        ? (checked
+        ? (test === "callback"
             ? checkedArmExtract(L, elem.unionId, outElem, v, loc)
             : { kind: "unionNarrow", unionId: elem.unionId, tag, value: v, type: outElem, loc })
         : v;
