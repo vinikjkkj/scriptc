@@ -106,6 +106,24 @@ export interface AbsVal {
 
 const normZero = (x: number): number => (Object.is(x, -0) ? 0 : x);
 
+/** The value behind maybeNarrow's checker-driven union arm bridge, or null.
+ *
+ * The bridge is a CALL to an interned narrowedArmHelper rather than a
+ * `unionNarrow` node, but for every question this pass asks it IS the read
+ * underneath: same reference, same number, and a tag check that reads one
+ * word and either throws or falls through. It calls nothing and writes
+ * nothing. So it must be transparent in all five places `unionNarrow` is —
+ * isPure, staticAccessPath, stablePathGuard, evalPure and evalExpr — and
+ * missing any one of them is silent: the guard stops counting as static
+ * data access, or the generic `call` case havocs the environment, and a
+ * range that used to be PROVEd is quietly refused (or, worse, an i64 slot
+ * quietly becomes f64). `optional-record-field-range-with-neq` is the test
+ * that catches it. */
+function narrowBridgeArg(e: IrExpr): IrExpr | null {
+  if (e.kind !== "call" || e.narrowBridge !== true) return null;
+  return e.args[0] ?? null;
+}
+
 export function absVal(lo: number, hi: number, whole: boolean, maybeNaN: boolean, spelling?: string): AbsVal {
   lo = normZero(lo);
   hi = normZero(hi);
@@ -1255,6 +1273,8 @@ class FnAnalyzer {
   /** No side effects anywhere in the tree: safe to (re-)evaluate during
    * refinement. */
   private isPure(e: IrExpr): boolean {
+    const bridged = narrowBridgeArg(e);
+    if (bridged !== null) return this.isPure(bridged);
     switch (e.kind) {
       case "incDec":
       case "assignExpr":
@@ -1303,6 +1323,12 @@ class FnAnalyzer {
 
   /** The abstract value of a PURE f64 expression, no env writes. */
   private evalPure(e: IrExpr, env: Env): AbsVal {
+    const bridged = narrowBridgeArg(e);
+    if (bridged !== null) {
+      return e.type.kind === "f64" && numberCarrierKind(bridged.type, this.mod) === "optional"
+        ? this.evalPure(bridged, env)
+        : { ...TOP };
+    }
     switch (e.kind) {
       case "numLit":
         return constVal(e.value, e.spelling);
@@ -1343,6 +1369,17 @@ class FnAnalyzer {
   private staticAccessPath(
     e: IrExpr,
   ): { rootId: string | null; steps: string[][] } | null {
+    // maybeNarrow's checker-driven union bridge is a CALL to
+    // narrowedArmHelper, not a unionNarrow node — but for every question
+    // this pass asks it IS the read underneath: same reference, same
+    // number, and a tag check whose verdict cannot be changed by anything
+    // the guard could mutate. So it is transparent here, in isPure and in
+    // stablePathGuard, exactly where unionNarrow is. Miss one and a guard
+    // mentioning a narrowed field stops being "static data access", and
+    // its range facts are dropped with no diagnostic — which is what
+    // `optional-record-field-range-with-neq` caught.
+    const bridged = narrowBridgeArg(e);
+    if (bridged !== null) return this.staticAccessPath(bridged);
     switch (e.kind) {
       case "varRef":
         return { rootId: e.localId, steps: [["var", e.localId]] };
@@ -1381,6 +1418,8 @@ class FnAnalyzer {
     if (e.kind === "unionNarrow" && e.type.kind === "f64") {
       return this.refinementKey(e.value, allowPaths);
     }
+    const bridged = narrowBridgeArg(e);
+    if (bridged !== null && e.type.kind === "f64") return this.refinementKey(bridged, allowPaths);
     if (!allowPaths || numberCarrierKind(e.type, this.mod) === null) return null;
     if (e.kind === "recordGet") {
       const slot = this.cfg.records.get(e.shapeId)?.get(e.field);
@@ -1394,6 +1433,8 @@ class FnAnalyzer {
    * subexpression from mutating a field and `refine` subsequently
    * reconstructing a stale fact from the guard syntax. */
   private stablePathGuard(e: IrExpr): boolean {
+    const bridged = narrowBridgeArg(e);
+    if (bridged !== null) return this.stablePathGuard(bridged);
     switch (e.kind) {
       case "numLit":
       case "strLit":
@@ -1466,6 +1507,19 @@ class FnAnalyzer {
    * The returned value is meaningful for f64-typed expressions; anything
    * without a modeled transfer is TOP. */
   private evalExpr(e: IrExpr, env: Env): AbsVal {
+    // The union arm bridge, before the generic `call` case below can
+    // havoc the environment for it: narrowedArmHelper reads a tag and
+    // extracts a payload, so it calls nothing and writes nothing, and the
+    // number it hands back is the number its argument already carried.
+    // Treating it like any other call throws away every path fact the
+    // guard just established.
+    const bridged = narrowBridgeArg(e);
+    if (bridged !== null) {
+      const value = this.evalExpr(bridged, env);
+      return e.type.kind === "f64" && numberCarrierKind(bridged.type, this.mod) === "optional"
+        ? value
+        : { ...TOP };
+    }
     switch (e.kind) {
       case "numLit":
         return constVal(e.value, e.spelling);
