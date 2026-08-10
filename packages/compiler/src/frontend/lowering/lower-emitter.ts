@@ -1803,6 +1803,103 @@ function keyMapArity(L: Lowerer, map: ts.Type, key: string): number | null {
   return fn.parameters.length;
 }
 
+/** The catchable TypeError a payload-array extraction throws when the slot
+ * does not hold what the event's tuple says it holds — divergence 38's
+ * lying-assertion stance, worded like narrowedArmHelper's so the family
+ * reads as one thing. Node has no equivalent: it hands the listener the
+ * wrong object and lets the reads answer undefined. */
+function notInTarget(L: Lowerer, from: IrType, to: IrType, loc: SrcLoc): IrExpr {
+  return {
+    kind: "libCall",
+    fn: "error.new",
+    args: [
+      {
+        kind: "strLit",
+        value:
+          `a '${L.fmt(from)}' payload is not representable as '${L.fmt(to)}' ` +
+          `(an emit named an event whose payload array held a different tuple)`,
+        type: STRING,
+        loc,
+      },
+    ],
+    type: { kind: "object", className: "%TypeError" },
+    loc,
+  };
+}
+
+/** The tags a payload-array slot may LEGALLY carry for one wanted position
+ * type: the arm itself, plus — when the position is a CLASS — every arm
+ * that strictly descends from it.
+ *
+ * A subclass value in a base-class position is what tsc's assignability
+ * admits AND what the runtime layout supports: the payload pointer is
+ * prefix-compatible and carries its own vtable, so the fields read right
+ * and a virtual call still reaches the override (probe e05 —
+ * `emit('alpha', new Dog(…))` against `alpha: (a: Animal) => void` —
+ * agrees with Node byte for byte). A WIDER RECORD in a narrower record's
+ * position is neither: tsc admits it, and the two structs put different
+ * fields at the same offsets, which is exactly the confusion this check
+ * exists to catch (e01 segfaults on it, e03 answers the wrong string).
+ * So the class relation widens the admissible set and the record one
+ * does not. */
+function admissiblePayloadTags(L: Lowerer, from: IrType & { kind: "union" }, want: IrType): number[] {
+  const tag = L.armTag(from.unionId, want);
+  if (tag < 0) return [];
+  if (want.kind !== "object") return [tag];
+  const arms = L.unions.get(from.unionId)?.arms ?? [];
+  const out = [tag];
+  arms.forEach((a, i) => {
+    if (i !== tag && a.kind === "object" && a.className !== want.className && L.isSubclassOf(a.className, want.className)) {
+      out.push(i);
+    }
+  });
+  return out;
+}
+
+/** `u->tag == t0 || u->tag == t1 || …` over an admissible tag set. */
+function anyTagTest(from: IrType & { kind: "union" }, v: () => IrExpr, tags: number[], loc: SrcLoc): IrExpr {
+  const one = (t: number): IrExpr => ({ kind: "unionIsTag", unionId: from.unionId, tag: t, negated: false, value: v(), type: BOOL, loc });
+  return tags.slice(1).reduce<IrExpr>((acc, t) => ({ kind: "logical", op: "||", left: acc, right: one(t), type: BOOL, loc }), one(tags[0]!));
+}
+
+/** The payload-array extraction for one position, CHECKED. One admissible
+ * tag is the ordinary case and reuses narrowedArmHelper — the program-wide
+ * `x!` machinery, interned per (union, arm), so the dispatcher adds no
+ * helper of its own. A class position with descendant arms in the union
+ * needs its own `%emit.arm.<n>`: the same shape with a wider guard.
+ *
+ * Null when the extraction has no checked form (a UNIT arm — no payload to
+ * misread); the caller keeps the bare narrow there. */
+function payloadArmHelper(L: Lowerer, from: IrType & { kind: "union" }, want: IrType, loc: SrcLoc): string | null {
+  const tags = admissiblePayloadTags(L, from, want);
+  if (tags.length === 0) return null;
+  if (tags.length === 1) return L.narrowedArmHelper(from.unionId, want, loc);
+  const key = `emitarm:${typeKey(from)}:${typeKey(want)}`;
+  const existing = L.widthHelpers.get(key);
+  if (existing !== undefined) return existing;
+  const name = `%emit.arm.${L.widthHelpers.size}`;
+  L.widthHelpers.set(key, name);
+  const v = (): IrExpr => ({ kind: "varRef", localId: "u.0", type: from, loc });
+  L.liftedFns.push({
+    name,
+    params: [{ localId: "u.0", name: "u", type: from }],
+    returnType: want,
+    locals: [{ id: "u.0", name: "u", type: from, mutable: true }],
+    body: [
+      {
+        kind: "if",
+        cond: { kind: "unary", op: "!", operand: anyTagTest(from, v, tags, loc), type: BOOL, loc },
+        then: [{ kind: "throw", value: notInTarget(L, from, want, loc), loc }],
+        else_: null,
+        loc,
+      },
+      { kind: "return", value: { kind: "unionNarrow", unionId: from.unionId, tag: tags[0]!, value: v(), type: want, loc }, loc },
+    ],
+    loc,
+  });
+  return name;
+}
+
 /** The NESTED convert a union payload needs: `%emit.regroup.<n>(v: U) → T`.
  *
  * The slot's element union U holds the event union T's ARMS — the mapping
@@ -1812,10 +1909,17 @@ function keyMapArity(L: Lowerer, map: ts.Type, key: string): number | null {
  * the value reachable arm by arm: test U's tag, extract that arm, re-wrap it
  * under T's own tag.
  *
- * The LAST arm is the unconditional tail rather than a tested branch: the
- * caller's own type says the value is a T, so no tag outside T's arms can
- * arrive — the same trust unionNarrow already places in the checker, and it
- * leaves the helper with no unreachable return to invent.
+ * The LAST arm is TAG-TESTED too, and a value carrying none of T's arms
+ * throws the catchable TypeError. It used to be an unconditional tail on
+ * the grounds that "the caller's own type says the value is a T" — but the
+ * value arrives out of the dispatcher's PAYLOAD ARRAY, which the caller
+ * filled, and U carries every armed event's arms (131 of them in zapo)
+ * while T carries two. A tail believes the caller about which of those 131
+ * is in the slot, and a wrong one is peeked through T's last arm: a record
+ * of the wrong shape, returned with no diagnostic. It is also invisible to
+ * a scope-walking analyser, which credits the tail as proven-by-exclusion
+ * because the arms above it return — proof only when U's arms are exactly
+ * T's, which is precisely the case this helper exists BECAUSE it is not.
  *
  * Ownership: unionNarrow hands back a +1 payload and unionWrap MOVES it into
  * the fresh box, so the arm value is never double-owned and the result is
@@ -1858,6 +1962,18 @@ function unionRegroupHelper(
       loc,
     });
   }
+  // The last arm's own test, as a NEGATED guard with a throwing body — the
+  // shape keeps the unconditional `return` below as the function's one exit
+  // (no unreachable value to invent for a throwing tail).
+  const lastArm = toArms[toArms.length - 1]!;
+  const lastTags = admissiblePayloadTags(L, from, lastArm);
+  body.push({
+    kind: "if",
+    cond: { kind: "unary", op: "!", operand: anyTagTest(from, v, lastTags.length > 0 ? lastTags : [tags[toArms.length - 1]!], loc), type: BOOL, loc },
+    then: [{ kind: "throw", value: notInTarget(L, from, to, loc), loc }],
+    else_: null,
+    loc,
+  });
   body.push({ kind: "return", value: regrouped(toArms.length - 1), loc });
   L.liftedFns.push({
     name,
@@ -1910,7 +2026,32 @@ export function boundEmitDispatcher(
   const table = emitterEvents(L);
   const loc = locOf(call);
 
-  /** One position's extraction from the payload array. */
+  /** One position's extraction from the payload array — TAG-CHECKED.
+   *
+   * The array is the CALLER's, not the compiler's: the slot's signature is
+   * `<K extends keyof M>(name: K, ...args: Parameters<M[K]>)`, so the pair
+   * (name, payload) is bound by tsc's generic instantiation and by nothing
+   * the runtime performed. The dispatcher tests the NAME (strEq against
+   * each armed event) and used to take the payload's arm on that test's
+   * word — but `args` is filled by whoever holds the bound function, and
+   * the element union carries every armed event's arms at once. A pair
+   * that does not match (an `any`-typed forwarder, a cast, a plugin edge
+   * that assembles the array itself) then peeks one event's payload
+   * through another's struct: two same-width records answer the wrong
+   * field with no diagnostic, and a narrower one runs off its allocation.
+   *
+   * So the extraction goes through narrowedArmHelper — the same checked
+   * machinery `x!` and the checker-narrowing bridges already use, marked
+   * `narrowBridge` so every predicate that has to see the read underneath
+   * (purity, the two instanceof folds, the volatile env read, integer
+   * refinement's six transparency points) answers exactly as it did for
+   * the unionNarrow. Where the pair is honest the check always passes:
+   * zapo's QR arrives through this path — the dispatcher's `auth_qr` arm —
+   * and the helper it calls walks 130 other arms of a 131-arm element
+   * union before falling through to the one it wanted.
+   *
+   * The bare unionNarrow stays only where the helper declines — a UNIT
+   * arm, which carries no payload to misread. */
   const convert = (want: IrType, i: number): IrExpr | null => {
     const read: IrExpr = {
       kind: "arrayGet",
@@ -1922,7 +2063,13 @@ export function boundEmitDispatcher(
     if (typeEquals(elem, want)) return read;
     if (elem.kind === "union") {
       const tag = L.armTag(elem.unionId, want);
-      if (tag >= 0) return { kind: "unionNarrow", unionId: elem.unionId, tag, value: read, type: want, loc };
+      if (tag >= 0) {
+        const helper = payloadArmHelper(L, elem, want, loc);
+        if (helper !== null) {
+          return { kind: "call", callee: helper, args: [read], type: want, narrowBridge: true, loc };
+        }
+        return { kind: "unionNarrow", unionId: elem.unionId, tag, value: read, type: want, loc };
+      }
       // A tuple type that is itself a UNION is never one of the element
       // union's arms — the mapping flattened it away — so it takes the
       // nested convert instead of a single narrow.
