@@ -3625,6 +3625,102 @@ function tableElemType(L: Lowerer, t: IrType): IrType {
   if (!shape.fields.every((f) => typeEquals(f.type, first))) return t;
   return arrayOf(tableElemType(L, first));
 }
+
+/** `const id = node.attrs.id; if (!id) return false` — the read is
+ * answerable, the LOCAL is not. tsc types an index-signature read by the
+ * signature's VALUE type, so the binding it initializes is spelled
+ * `string`, and no string width can hold the undefined an absent key
+ * answers; the read trapped, one line before the author's own guard.
+ *
+ * The binding takes the read at DYN width instead, and the destination
+ * decides all over again — one level down, at every REFERENCE: tsc
+ * narrows each use to the scalar it believes, and maybeNarrow bridges
+ * that with a VALIDATED extraction. So a use that needs the value throws
+ * the catchable dyn-boundary TypeError where Node would throw its own
+ * (`id.length` on undefined), a use that only asks whether the value is
+ * there answers it (narrowBridgeDyn — truthiness and the unit
+ * comparisons look through the bridge), and a HIT is what it always was.
+ * Nothing becomes silent: the read stops trapping and the readers start
+ * checking, in the same program.
+ *
+ * Two restrictions carry the reasoning:
+ *
+ * - IMMUTABLE PRIMITIVES only. A composite read into a dyn slot is a
+ *   `dynFrom` DEEP COPY (estado-recordkey r07), so widening
+ *   `Record<string, string[]>` would sever aliasing the binding has
+ *   today — a silent wrong answer traded for a loud one. Strings,
+ *   numbers and booleans have no identity to lose.
+ * - The slot must be the READ's OWN width, or that width plus an
+ *   undefined arm. The first is the inferred binding (`const id =
+ *   attrs.id`); the second is the author who wrote `string | undefined`
+ *   and had tsc narrow it away at the declaration, whose readers were
+ *   then compiled as bare arm peeks — the r03 SEGFAULT the union-armed
+ *   version of this rule produced. Both land on dyn, where every reader
+ *   is checked and no peek exists. A DIFFERENT declared type (a wider
+ *   union, a supertype) is a conversion the author asked for and keeps
+ *   its own coercion. */
+function keyedReadLocalAtDynWidth(L: Lowerer, init: IrExpr, slot: IrType): IrExpr | null {
+  if (init.kind !== "recordKeyGet") return null;
+  const k = init.type.kind;
+  if (k !== "string" && k !== "f64" && k !== "bool") return null;
+  const sameWidth =
+    typeEquals(slot, init.type) ||
+    (slot.kind === "union" &&
+      L.armTag(slot.unionId, UNDEFINED_T) >= 0 &&
+      typeEquals(L.stripUndefinedArm(slot), init.type));
+  if (!sameWidth) return null;
+  return L.recordKeyReadAtSlotWidth(init, DYN);
+}
+
+/** The same binding at FILE scope, asked from the syntax. A global's type
+ * is fixed before any body lowers, so the rule below cannot inspect a
+ * lowered read; it asks the checker instead — an index-signature receiver,
+ * a key the signature (not a declared field) answers, a primitive value
+ * type, and a binding spelled at exactly that width. Answering true only
+ * sets the slot to dyn: the declaration then lowers with a DYN
+ * expectation, where coerceToExpected's own recordKeyReadAtSlotWidth does
+ * the widening and declines anything it cannot serve — so a false positive
+ * costs a dyn box and changes no answer. */
+export function keyedReadGlobalIsDyn(L: Lowerer, decl: ts.VariableDeclaration): boolean {
+  if (!ts.isIdentifier(decl.name) || decl.initializer === undefined) return false;
+  let e: ts.Expression = decl.initializer;
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  let recv: ts.Expression;
+  let key: string | null;
+  if (ts.isPropertyAccessExpression(e) && e.questionDotToken === undefined && ts.isIdentifier(e.name)) {
+    recv = e.expression;
+    key = e.name.text;
+  } else if (ts.isElementAccessExpression(e) && e.questionDotToken === undefined) {
+    recv = e.expression;
+    key = ts.isStringLiteralLike(e.argumentExpression) ? e.argumentExpression.text : null;
+  } else {
+    return false;
+  }
+  // The receiver must be a RECORD with an index signature — the same
+  // condition recordKeyReadAtSlotWidth checks on the lowered read, asked
+  // of the type instead of the node. Arrays, tuples and every other
+  // index-like receiver are not this rule's business.
+  const recvT = L.typeOf(recv);
+  const recvIr = L.mapTypeOf(recvT);
+  if (recvIr?.kind !== "record") return false;
+  if (L.shapes.get(recvIr.shapeId)?.indexValue === undefined) return false;
+  // A DECLARED field always answers, so widening it would box a value that
+  // is never absent — and a signature-free shape's keyed read keeps the
+  // stranded stance it has today.
+  if (key !== null && L.checker.getPropertyOfType(recvT, key) !== undefined) return false;
+  const read = L.mapTypeOf(L.typeOf(e));
+  if (read === null) return false;
+  if (read.kind !== "string" && read.kind !== "f64" && read.kind !== "bool") return false;
+  const slot = L.mapTypeOf(L.typeOf(decl.name));
+  if (slot === null) return false;
+  return (
+    typeEquals(slot, read) ||
+    (slot.kind === "union" &&
+      L.armTag(slot.unionId, UNDEFINED_T) >= 0 &&
+      typeEquals(L.stripUndefinedArm(slot), read))
+  );
+}
+
 export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: boolean): IrStmt | null {
     // --provenance-sources: an elided pure-annotated dead const emits
     // nothing (collectGlobals registered no global by the same test —
@@ -4173,6 +4269,13 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       L.tdzPredeclared.delete(declSymbol!);
       init = L.coerceInto(decl.initializer, init, preSelf.type);
       return { kind: "assign", localId: preSelf.id, value: init, loc: locOf(decl) };
+    }
+    // `const id = node.attrs.id` — a local whose WHOLE value is an
+    // index-signature keyed read: it holds the read at dyn width, so an
+    // absent key answers undefined the way JS does instead of trapping.
+    {
+      const atWidth = keyedReadLocalAtDynWidth(L, init, type);
+      if (atWidth) { init = atWidth; type = DYN; }
     }
     // Slot coercion: `const r: A | B = bValue;` wraps implicitly; width
     // subtyping (`const p: {a: number} = wider;`) is rejected, not coerced.

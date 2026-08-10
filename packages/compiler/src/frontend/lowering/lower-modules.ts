@@ -16,7 +16,7 @@ import { BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrLocal, IrRecordS
 import { ENTRY_NAME, PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, newFnCtx, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, isPromisifyCall } from "./lower-builtins.js";
 import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, nullishGenericBindingUnitOf } from "./lower-calls.js";
-import { isVarDeclared, jsEvolvingObjectLiteralInit, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
+import { isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
 import { objectStaticFnValueDeclType, stdlibGlobalAliasDecl } from "./surfaces.js";
 import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-namespaces.js";
@@ -1688,10 +1688,18 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
               ts.isIdentifier(decl.name) && nameNode === decl.name
                 ? castAliasedClassRefOf(L, decl)
                 : null;
+            // `const id = attrs.id` at file scope: the keyed-read binding
+            // rule (keyedReadGlobalIsDyn), the same answer its
+            // function-scope twin gets in lowerVarDecl.
+            const keyedReadT =
+              ts.isIdentifier(decl.name) && nameNode === decl.name && keyedReadGlobalIsDyn(L, decl)
+                ? DYN
+                : null;
             let type =
               handleT ??
               (castClass ? ({ kind: "classval", className: castClass.def.name } as IrType) : null) ??
               objFnValueT ??
+              keyedReadT ??
               L.irTypeOf(nameNode);
             // An evolving-`any` array's DERIVED file-scope binding under
             // --dynamic (`const kept = fns.filter(...)` where `fns`
