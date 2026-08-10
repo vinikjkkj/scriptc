@@ -3125,17 +3125,18 @@ function validateFunction(
           typeEquals(t, e.type) ||
           (e.type.kind === "union" &&
             (unions.get(e.type.unionId)?.arms.some((a) => typeEquals(a, t)) ?? false)) ||
-          e.type.kind === "dyn";
+          (e.type.kind === "dyn" && canConvertToDyn(t, (id) => records.get(id), (id) => unions.get(id)));
         if (e.overflowOnly && !shape.indexValue) {
           err(`recordKeyGet on ${e.shapeId}: overflowOnly read of a shape without an index signature`, e.loc);
         }
         if (!e.overflowOnly && !shape.fields.every((f) => surfaces(f.type))) {
           err(`recordKeyGet on ${e.shapeId}: a declared field cannot surface as the result type`, e.loc);
         }
-        if (e.type.kind === "dyn" && shape.indexValue && shape.indexValue.kind !== "dyn") {
-          err(`recordKeyGet on ${e.shapeId}: dyn result over a non-dyn index value`, e.loc);
-        }
-        if (shape.indexValue && e.type.kind !== "dyn" && !surfaces(shape.indexValue)) {
+        // A dyn RESULT over a non-dyn overflow is legal exactly when the
+        // overflow value converts (the toDyn walker's domain) — the read
+        // AT THE DESTINATION'S WIDTH, which is how an absent key answers
+        // JS's undefined instead of trapping.
+        if (shape.indexValue && !surfaces(shape.indexValue)) {
           err(`recordKeyGet on ${e.shapeId}: the overflow value cannot surface as the result type`, e.loc);
         }
         break;
