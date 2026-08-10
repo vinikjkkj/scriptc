@@ -2530,13 +2530,19 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
 /** Checker-driven union narrowing. tsc's control-flow analysis narrows a
    * union-typed reference at use sites (`if (r.kind === "ok") { ...r... }`
    * types `r` as the ok-arm inside the branch); the IR value is still the
-   * tagged union, so the read is bridged with a `unionNarrow` extracting
-   * the arm's payload. The extraction is tag-UNCHECKED at runtime —
-   * soundness rests entirely on tsc having proven the tag (the project's
-   * trust-the-checker thesis; see docs/ir.md). A checker type that maps to
-   * the same union (unnarrowed use), to a SUB-union (partial narrowing —
-   * unrepresentable without a re-tag), or to nothing (`never` in an
-   * exhaustive default) leaves the expression union-typed. */
+   * tagged union, so the read is bridged with an extraction of the arm's
+   * payload. That extraction is TAG-CHECKED (checkedArmBridge): tsc's
+   * proof decides which arm to ask for, the runtime decides whether the
+   * value really carries it, and a narrowing the runtime cannot confirm
+   * throws the catchable TypeError. Trusting the proof outright is what
+   * this bridge used to do, and it is not merely unsound in theory — the
+   * arms of a union routinely share a runtime layout, so an unchecked
+   * peek serves one arm's slot as another's and the program carries on
+   * with the wrong string (`G:\ur\probe`'s m01) or dereferences a double
+   * as a pointer (p05). A checker type that maps to the same union
+   * (unnarrowed use), to a SUB-union (partial narrowing — unrepresentable
+   * without a re-tag), or to nothing (`never` in an exhaustive default)
+   * leaves the expression union-typed. */
   export function maybeNarrow(L: Lowerer, expr: IrExpr, node: ts.Node): IrExpr {
     // A dyn read tsc narrowed to a SCALAR (a typeof test proved the kind):
     // bridge with a VALIDATED extraction — dynCheck, the checked-cast
@@ -2576,8 +2582,14 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     }
     // instanceof narrowing for classes: tsc types this USE as a subclass of
     // the IR value's class (only a dynamic instanceof test narrows a class
-    // type), so the read bridges with an unchecked static downcast — the
-    // same trust-the-checker contract as the union bridge below.
+    // type), so the read bridges with an unchecked static downcast. This
+    // is now the LAST trust-the-checker bridge in maybeNarrow — the union
+    // bridge below is tag-checked and the dyn bridge above is validated.
+    // It is a smaller bet than the union one was (an instanceof narrowing
+    // rides a real runtime test, and a downcast reads a prefix layout the
+    // subclass shares by construction rather than a sibling's slot), but
+    // it is still a bet, and `x as Sub` after a lying predicate is its
+    // open edge.
     if (expr.type.kind === "object") {
       const narrowed = L.mapTypeOf(L.typeOf(node));
       if (
@@ -2608,7 +2620,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         const arrayTags = def ? def.arms.flatMap((a, i) => (a.kind === "array" ? [i] : [])) : [];
         if (arrayTags.length === 1) {
           const arm = def!.arms[arrayTags[0]!]!;
-          return { kind: "unionNarrow", unionId: expr.type.unionId, tag: arrayTags[0]!, value: expr, type: arm, loc: expr.loc };
+          return checkedArmBridge(L, expr, arm, expr.loc);
         }
       }
     }
@@ -2620,16 +2632,45 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     if (!narrowed || narrowed.kind === "union" || narrowed.kind === "void" || isUnitType(narrowed)) {
       return expr;
     }
-    const tag = L.armTag(expr.type.unionId, narrowed);
-    if (tag < 0) return expr;
-    return {
-      kind: "unionNarrow",
-      unionId: expr.type.unionId,
-      tag,
-      value: expr,
-      type: narrowed,
-      loc: expr.loc,
-    };
+    if (L.armTag(expr.type.unionId, narrowed) < 0) return expr;
+    return checkedArmBridge(L, expr, narrowed, expr.loc);
+  }
+
+/** The checker-driven union bridge's ONE extraction, tag-checked.
+ *
+ * tsc proved the arm; the runtime never did. Where the proof is real the
+ * check is a predictable compare that always passes, and where it is not —
+ * a user type predicate that lied, an `in`/`typeof`/discriminant narrowing
+ * over arms the runtime cannot tell apart — the alternative to checking is
+ * to peek one arm's payload through another arm's struct: `G:\ur\probe`'s
+ * `p05` segfaults on it and `m01` silently answers a `Txt`'s `text` where
+ * the source asked for `Img.media`. So the extraction goes through
+ * narrowedArmHelper, the SAME checked machinery `x!` on a union already
+ * uses (divergence 38: a lying assertion throws the catchable TypeError
+ * instead of smuggling). No new stance, no new IR node, no emitter arm.
+ *
+ * The bare unionNarrow stays everywhere the COMPILER owns the tag — inside
+ * a switch it emitted, or after a unionIsTag it just wrote. This is only
+ * the bridge that trusts tsc's control-flow analysis.
+ *
+ * Falls back to the un-narrowed union when the helper declines (target not
+ * a non-unit arm — already excluded by the callers), which fences loudly
+ * downstream rather than admitting an unchecked read. */
+  function checkedArmBridge(L: Lowerer, value: IrExpr, arm: IrType, loc: SrcLoc): IrExpr {
+    if (value.type.kind !== "union") return value;
+    const helper = L.narrowedArmHelper(value.type.unionId, arm, loc);
+    if (!helper) return value;
+    return { kind: "call", callee: helper, args: [value], type: arm, narrowBridge: true, loc };
+  }
+
+/** The value behind a checker-driven union arm bridge, or null. The bridge
+ * is a CALL now, so every predicate that used to recognise the unionNarrow
+ * node — purity, the instanceof folds, the volatile env read, integer
+ * refinement — asks this instead. The call is over one argument and cannot
+ * be re-associated; only `args[0]` is the pre-narrowing value. */
+  export function narrowBridgeArm(e: IrExpr): IrExpr | null {
+    if (e.kind !== "call" || e.narrowBridge !== true) return null;
+    return e.args[0] ?? null;
   }
 
 /** `v === undefined` / `v !== null` — the narrowing tests for unit-armed
@@ -2753,9 +2794,8 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
    * or null — the volatility escape above (and lowerLooseNullCompare's). */
   function volatileEnvRead(e: IrExpr): IrExpr | null {
     if (e.kind === "libCall" && e.fn === "process.envGet") return e;
-    if (e.kind === "unionNarrow" && e.value.kind === "libCall" && e.value.fn === "process.envGet") {
-      return e.value;
-    }
+    const inner = e.kind === "unionNarrow" ? e.value : narrowBridgeArm(e);
+    if (inner && inner.kind === "libCall" && inner.fn === "process.envGet") return inner;
     return null;
   }
 
@@ -2967,8 +3007,14 @@ export function pureReemittable(e: IrExpr): boolean {
     if (e.kind === "recordGet" || e.kind === "fieldGet") return pureReemittable(e.obj);
     // The trust-the-checker narrowing bridges over a pure read: extraction
     // and downcast are reads too (the +1 on ref payloads is RC bookkeeping,
-    // not an observable effect — each emission owns its own copy).
+    // not an observable effect — each emission owns its own copy). The
+    // union arm bridge is a CALL, and it is the one call that qualifies:
+    // its only effects are that same +1 and a tag check whose verdict is
+    // the same on every emission, so re-emitting it either throws on the
+    // first emission or is as pure as the read underneath.
     if (e.kind === "unionNarrow" || e.kind === "downcast") return pureReemittable(e.value);
+    const arm = narrowBridgeArm(e);
+    if (arm) return pureReemittable(arm);
     return false;
   }
 
@@ -10620,13 +10666,18 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
               `'instanceof ${rSym!.name}' on a union with no ${rSym!.name} arm (the answer is constantly false — drop the test)`,
             );
           }
-          // A NARROWED operand is a unionNarrow wrapping the read, not a
-          // bare varRef -- `data instanceof ArrayBuffer` after the other
-          // arms are ruled out is exactly that. Both are pure reads, so
-          // folding drops no evaluation.
+          // A NARROWED operand is the checker's arm bridge over the read,
+          // not a bare varRef -- `data instanceof ArrayBuffer` after the
+          // other arms are ruled out is exactly that. Both are pure reads,
+          // so folding drops no evaluation. Folding also drops the
+          // bridge's tag CHECK, which is sound here for the same reason
+          // the fold is: the bridge's arm is the one the constant answers
+          // for, so a value that would fail the check is a value whose
+          // enclosing narrowing already misread it.
           const pureRead =
             left.kind === "varRef" ||
-            (left.kind === "unionNarrow" && left.value.kind === "varRef");
+            (left.kind === "unionNarrow" && left.value.kind === "varRef") ||
+            narrowBridgeArm(left)?.kind === "varRef";
           if (left.type.kind === "bytes" && pureRead) {
             return { kind: "boolLit", value: left.type.elem === want, type: BOOL, loc };
           }
@@ -10672,7 +10723,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         const left = L.lowerExpr(expr.left);
         const pureRead =
           left.kind === "varRef" ||
-          (left.kind === "unionNarrow" && left.value.kind === "varRef");
+          (left.kind === "unionNarrow" && left.value.kind === "varRef") ||
+          narrowBridgeArm(left)?.kind === "varRef";
         if (pureRead) return { kind: "boolLit", value: false, type: BOOL, loc };
         L.unsupported(
           "SC1090",
