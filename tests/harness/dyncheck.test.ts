@@ -716,6 +716,128 @@ console.log("recovered");
     expect(r.stdout).toBe("woof DOG\nCCAT\nTypeError true\nTypeError true\nrecovered\n");
   });
 
+  test("a WIDER record in a bound-emit payload slot throws instead of dereferencing the surplus field", async () => {
+    // `emit.bind(x)` into a generic key-map slot lowers to a dispatcher
+    // that tests the event NAME and then pulls the payload's arm out of
+    // the slot's element union — a CONTAINER ELEMENT read of an array the
+    // caller filled. It used to take that arm on the name test's word.
+    //
+    // No cast and no lying predicate is needed to break it, which is what
+    // makes this family different from the narrowing bridges: `Wide` is
+    // ASSIGNABLE to `Base`, so naming 'alpha' with a Wide value is plain
+    // type-safe TypeScript. The value carries Wide's arm; the alpha branch
+    // asked for Base's. `Wide` sorts `extra` (a double) where `Base` puts
+    // `kind` (a string pointer), so the read loaded a double and
+    // dereferenced it: SIGSEGV on BOTH backends, exit 139, no diagnostic.
+    // Node prints the property it does have, so this cannot be
+    // differential; corpus 3331 pins the honest direction.
+    const r = await compileAndRun(
+      "bound-emit-payload-wider-record",
+      `import { EventEmitter } from "node:events";
+interface Base { readonly kind: string }
+interface Wide { readonly extra: number; readonly kind: string }
+interface Ev { alpha: (p: Base) => void; beta: (p: Wide) => void }
+interface Sink { readonly emitEvent: <K extends keyof Ev>(event: K, ...args: Parameters<Ev[K]>) => void }
+class Bus extends EventEmitter { sink(): Sink { return { emitEvent: this.emit.bind(this) }; } }
+const bus = new Bus();
+bus.on("alpha", (p: Base) => { console.log("alpha kind=" + p.kind); });
+bus.on("beta", (p: Wide) => { console.log("beta extra=" + String(p.extra)); });
+const s = bus.sink();
+s.emitEvent("alpha", { kind: "A" });
+s.emitEvent("beta", { extra: 7, kind: "B" });
+const w: Wide = { extra: 99, kind: "LIED" };
+try {
+  s.emitEvent("alpha", w);
+  console.log("unreachable");
+} catch (e) {
+  console.log((e as Error).name, (e as Error).message.includes("is not representable"));
+}
+console.log("recovered");
+`,
+    );
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("alpha kind=A\nbeta extra=7\nTypeError true\nrecovered\n");
+  });
+
+  test("a wider record whose surplus field is a STRING returns the wrong field, so it throws too", async () => {
+    // The quiet flavour of the same read: `aaa` sorts before `kind`, so
+    // the wrong-arm peek does not run off anything — it reads a perfectly
+    // valid ScrStr at the offset `Base.kind` occupies and hands the
+    // listener the WRONG STRING. Exit 0, both backends, no diagnostic and
+    // nothing for a crash reporter. That is the shape a segfault would at
+    // least have announced.
+    const r = await compileAndRun(
+      "bound-emit-payload-wrong-string",
+      `import { EventEmitter } from "node:events";
+interface Base { readonly kind: string }
+interface Wide { readonly aaa: string; readonly kind: string }
+interface Ev { alpha: (p: Base) => void; beta: (p: Wide) => void }
+interface Sink { readonly emitEvent: <K extends keyof Ev>(event: K, ...args: Parameters<Ev[K]>) => void }
+class Bus extends EventEmitter { sink(): Sink { return { emitEvent: this.emit.bind(this) }; } }
+const bus = new Bus();
+bus.on("alpha", (p: Base) => { console.log("alpha kind=" + p.kind); });
+bus.on("beta", (p: Wide) => { console.log("beta aaa=" + p.aaa); });
+const s = bus.sink();
+s.emitEvent("alpha", { kind: "A" });
+const w: Wide = { aaa: "WRONG-FIELD", kind: "RIGHT-FIELD" };
+try {
+  s.emitEvent("alpha", w);
+  console.log("unreachable");
+} catch (e) {
+  console.log((e as Error).name, (e as Error).message.includes("is not representable"));
+}
+console.log("recovered");
+`,
+    );
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("alpha kind=A\nTypeError true\nrecovered\n");
+  });
+
+  test("the nested regroup helper's TAIL is tested too, not assumed", async () => {
+    // An event whose payload is itself a UNION cannot come out of the
+    // element union with one narrow (the mapping flattened its arms in),
+    // so the dispatcher calls a regroup helper: test each of the event
+    // union's arms in turn, extract, re-wrap. The LAST arm used to be an
+    // unconditional tail on the grounds that the caller's type says the
+    // value is one of them — which is the same trust, one level in, and a
+    // scope-walking analyser credits the tail as proven-by-exclusion
+    // because the arms above it return.
+    //
+    // Here the element union carries 4 arms and the event's carries 2, so
+    // a WideP (assignable to P, hence a legal 'gamma') fails the P test
+    // and used to be regrouped as a Q: the listener printed `q=LIED`
+    // where Node prints `p=LIED`. Silent, exit 0, both backends.
+    const r = await compileAndRun(
+      "bound-emit-regroup-tail",
+      `import { EventEmitter } from "node:events";
+interface P { readonly p: string }
+interface Q { readonly q: string }
+interface WideP { readonly zzz: number; readonly p: string }
+interface R { readonly r: string }
+interface Ev { gamma: (v: P | Q) => void; delta: (v: WideP) => void; eps: (v: R) => void }
+interface Sink { readonly emitEvent: <K extends keyof Ev>(event: K, ...args: Parameters<Ev[K]>) => void }
+class Bus extends EventEmitter { sink(): Sink { return { emitEvent: this.emit.bind(this) }; } }
+const bus = new Bus();
+bus.on("gamma", (v: P | Q) => { console.log("gamma " + ("p" in v ? "p=" + v.p : "q=" + v.q)); });
+bus.on("delta", (v: WideP) => { console.log("delta p=" + v.p); });
+bus.on("eps", (v: R) => { console.log("eps r=" + v.r); });
+const s = bus.sink();
+s.emitEvent("gamma", { p: "P" });
+s.emitEvent("gamma", { q: "Q" });
+const w: WideP = { zzz: 5, p: "LIED" };
+try {
+  s.emitEvent("gamma", w);
+  console.log("unreachable");
+} catch (e) {
+  console.log((e as Error).name, (e as Error).message.includes("is not representable"));
+}
+console.log("recovered");
+`,
+    );
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("gamma p=P\ngamma q=Q\nTypeError true\nrecovered\n");
+  });
+
   test("a unit smuggled into a PLAIN non-nullable slot throws the stranded trap catchably", async () => {
     // The stranded-UNIT trap without a union in sight: `null!` / `null as
     // any as T` into a plain typed slot (string, array, class, function).
