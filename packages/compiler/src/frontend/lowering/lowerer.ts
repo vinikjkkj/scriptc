@@ -1206,6 +1206,9 @@ export class Lowerer {
    * declaration: member reads call the getter (lower-exprs). */
   readonly cjsAccessorFns = new Map<ts.Node, { fnName: string; type: IrType & { kind: "func" } }>();
   readonly narrowHelpers = new Map<string, string>();
+  /** Class down-narrow helpers (%class.narrow.N), interned per
+   * (from, to) class-name pair — see narrowedClassHelper. */
+  readonly classNarrowHelpers = new Map<string, string>();
   /** Interned `%iter.drain.<n>` helpers (classIteratorDrainCall): one per
    * receiver class — the eager drain of a class iterable's protocol into
    * a fresh element array, behind array/call spreads. */
@@ -6968,6 +6971,84 @@ export class Lowerer {
       params: [{ localId: "u.0", name: "u", type: fromT }],
       returnType: target,
       locals: [{ id: "u.0", name: "u", type: fromT, mutable: true }],
+      body,
+      loc,
+    });
+    return name;
+  }
+
+  /** Interned `%class.narrow.<n>(o)` — the CHECKED downcast behind a
+   * checker-driven class narrowing. `instanceof` against the target's
+   * preorder interval decides: a match reinterprets the pointer exactly
+   * as the bare downcast did (prefix layout, no RC traffic), anything
+   * else throws the catchable TypeError — divergence 38's stance, the
+   * same one narrowedArmHelper takes for a union arm.
+   *
+   * The bare downcast is sound only when the compiler owns the proof (an
+   * instanceof test it just emitted, or the exactness proof behind a
+   * generic dispatch). Where the proof is tsc's alone, a sibling subclass
+   * shares the base's prefix and puts its OWN field at the same offset,
+   * so an unchecked reinterpret serves one subclass's slot as another's
+   * (`G:\dc\probe`'s d01 answers a Cat's `sound` where the source asked
+   * for `Dog.breed`), and a base instance is simply SHORTER than the
+   * subclass struct, so the read runs off the end of the allocation (d02
+   * segfaults on LLVM).
+   *
+   * Null when either class is outside an extends hierarchy — a standalone
+   * class carries no vtable word, so there is no interval to test; the
+   * caller keeps the un-narrowed value, which fences loudly downstream
+   * rather than admitting an unchecked reinterpret. */
+  narrowedClassHelper(fromClass: string, toClass: string, loc: SrcLoc): string | null {
+    const fromInfo = this.classes.get(fromClass);
+    const toInfo = this.classes.get(toClass);
+    if (!fromInfo || !toInfo) return null;
+    if (!this.inHierarchy(fromInfo) || !this.inHierarchy(toInfo)) return null;
+    // The source-level spelling: IR class names carry a '%' for the
+    // runtime-provided classes and a '%m<n>.' module prefix for the rest
+    // (the same normalisation lower-classes' diagnostics use).
+    const classDisplayName = (n: string): string => n.replace(/^%m\d+\./, "").replace(/^%/, "");
+    const key = `${fromClass}:${toClass}`;
+    const existing = this.classNarrowHelpers.get(key);
+    if (existing) return existing;
+    const name = `%class.narrow.${this.classNarrowHelpers.size}`;
+    this.classNarrowHelpers.set(key, name);
+    const fromT: IrType = { kind: "object", className: fromClass };
+    const toT: IrType = { kind: "object", className: toClass };
+    const o: IrExpr = { kind: "varRef", localId: "o.0", type: fromT, loc };
+    const body: IrStmt[] = [
+      {
+        kind: "if",
+        cond: { kind: "instanceOf", value: o, className: toClass, type: BOOL, loc },
+        then: [{ kind: "return", value: { kind: "downcast", value: o, type: toT, loc }, loc }],
+        else_: null,
+        loc,
+      },
+      {
+        kind: "throw",
+        value: {
+          kind: "libCall",
+          fn: "error.new",
+          args: [
+            {
+              kind: "strLit",
+              value:
+                `a '${classDisplayName(fromClass)}' value is not a '${classDisplayName(toClass)}' ` +
+                `(a value narrowed or asserted past it still held another class)`,
+              type: STRING,
+              loc,
+            },
+          ],
+          type: { kind: "object", className: "%TypeError" },
+          loc,
+        },
+        loc,
+      },
+    ];
+    this.liftedFns.push({
+      name,
+      params: [{ localId: "o.0", name: "o", type: fromT }],
+      returnType: toT,
+      locals: [{ id: "o.0", name: "o", type: fromT, mutable: true }],
       body,
       loc,
     });

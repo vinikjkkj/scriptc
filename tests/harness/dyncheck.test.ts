@@ -615,6 +615,107 @@ console.log("recovered");
     expect(r.stdout).toBe("P\nnone\nTypeError true\nrecovered\n");
   });
 
+  test("a LYING type predicate narrowing to a SIBLING subclass throws instead of serving its slot", async () => {
+    // The checker's CLASS narrowing bridge (maybeNarrow), the same
+    // statement as the two union tests above one layer down. `Dog` and
+    // `Cat` both extend `Animal` and both add one string, so the two
+    // structs have the SAME width and put their own field at the same
+    // offset behind the shared prefix. A bare reinterpret of a Cat as a
+    // Dog therefore answered `Cat.sound` where the source asked for
+    // `Dog.breed` — a plausible string, exit 0, no diagnostic, on both
+    // backends. Node prints undefined for the missing property, so this
+    // cannot be differential; corpus 3321 pins the honest direction.
+    const r = await compileAndRun(
+      "class-narrow-lying-predicate-sibling-field",
+      `class Animal { readonly name: string; constructor(name: string) { this.name = name; } }
+class Dog extends Animal { readonly breed: string; constructor(n: string, b: string) { super(n); this.breed = b; } }
+class Cat extends Animal { readonly sound: string; constructor(n: string, s: string) { super(n); this.sound = s; } }
+function lies(a: Animal): a is Dog { return true; }
+function honest(a: Animal): a is Dog { return a instanceof Dog; }
+function read(a: Animal): string { return lies(a) ? a.breed : "not a dog"; }
+console.log(read(new Dog("rex", "BREED")));
+console.log(honest(new Cat("tom", "MEOW")) ? "?" : "honest says no");
+try {
+  console.log("unreachable", read(new Cat("tom", "MEOW")));
+} catch (e) {
+  console.log((e as Error).name, (e as Error).message.includes("is not a 'Dog'"));
+}
+console.log("recovered");
+`,
+    );
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("BREED\nhonest says no\nTypeError true\nrecovered\n");
+  });
+
+  test("a LYING type predicate narrowing the BASE to a wider subclass throws instead of reading off the end", async () => {
+    // The same bridge, the shape that segfaulted. A `Base` instance is
+    // physically SHORTER than the `Wide` struct, so reinterpreting one as
+    // the other and reading `s` loaded a pointer from past the end of the
+    // allocation and dereferenced it: SIGSEGV under LLVM (exit 139) and a
+    // garbage read under C, with no scriptc diagnostic either way. The
+    // instanceof interval test turns it into the catchable TypeError, and
+    // the honest narrowing beside it is unchanged.
+    const r = await compileAndRun(
+      "class-narrow-lying-predicate-base-is-shorter",
+      `class Base { readonly a: string; constructor(a: string) { this.a = a; } }
+class Wide extends Base { readonly n: number; readonly s: string;
+  constructor(a: string, n: number, s: string) { super(a); this.n = n; this.s = s; } }
+function lies(b: Base): b is Wide { return true; }
+function read(b: Base): string { return lies(b) ? b.s : "narrow"; }
+function readHonest(b: Base): string { return b instanceof Wide ? b.s : "narrow"; }
+console.log(read(new Wide("x", 1, "S")));
+console.log(readHonest(new Base("y")));
+try {
+  console.log("unreachable", read(new Base("y")));
+} catch (e) {
+  console.log((e as Error).name, (e as Error).message.includes("is not a 'Wide'"));
+}
+console.log("recovered");
+`,
+    );
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("S\nnarrow\nTypeError true\nrecovered\n");
+  });
+
+  test("a LYING type predicate narrowing a METHOD receiver throws instead of running the subclass body", async () => {
+    // The bridge does not only feed field reads: the narrowed receiver is
+    // what a method call dispatches on, so believing a lie ran the WRONG
+    // BODY over the wrong layout. Base printed `woof CAT` for `a.bark()`
+    // on a `Cat` (Node: "a.bark is not a function") and `DCAT4` for the
+    // virtual `a.who()` (Node: `CCAT4`, the Cat's own override) — the
+    // second is the alarming one, because the call devirtualized to the
+    // subclass body on the strength of the narrowing alone. Both throw
+    // catchably now; the honest narrowing beside them is unchanged.
+    const r = await compileAndRun(
+      "class-narrow-lying-predicate-method-receiver",
+      `class A { readonly x: string; constructor(x: string) { this.x = x; } who(): string { return "A" + this.x; } }
+class D extends A { readonly y: string; constructor(x: string, y: string) { super(x); this.y = y; }
+  who(): string { return "D" + this.y; } bark(): string { return "woof " + this.y; } }
+class C extends A { readonly z: string; constructor(x: string, z: string) { super(x); this.z = z; }
+  who(): string { return "C" + this.z; } }
+function lies(a: A): a is D { return true; }
+function callIt(a: A): string { return lies(a) ? a.bark() : "no"; }
+function virt(a: A): string { return lies(a) ? a.who() : "no"; }
+function honest(a: A): string { return a instanceof D ? a.who() : a.who(); }
+console.log(callIt(new D("1", "DOG")));
+console.log(honest(new C("2", "CAT")));
+try {
+  console.log("unreachable", callIt(new C("2", "CAT")));
+} catch (e) {
+  console.log((e as Error).name, (e as Error).message.includes("is not a 'D'"));
+}
+try {
+  console.log("unreachable", virt(new C("4", "CAT4")));
+} catch (e) {
+  console.log((e as Error).name, (e as Error).message.includes("is not a 'D'"));
+}
+console.log("recovered");
+`,
+    );
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("woof DOG\nCCAT\nTypeError true\nTypeError true\nrecovered\n");
+  });
+
   test("a unit smuggled into a PLAIN non-nullable slot throws the stranded trap catchably", async () => {
     // The stranded-UNIT trap without a union in sight: `null!` / `null as
     // any as T` into a plain typed slot (string, array, class, function).
