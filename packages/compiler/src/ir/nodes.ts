@@ -4936,8 +4936,20 @@ export type IrExpr =
       type: IrType;
       loc: SrcLoc;
     }
-  /** Call of a user function declared in this module, by name. */
-  | { kind: "call"; callee: string; args: IrExpr[]; type: IrType; loc: SrcLoc }
+  /** Call of a user function declared in this module, by name.
+   *
+   * `narrowBridge` marks the checker-driven UNION bridge maybeNarrow builds
+   * (`%union.narrow.<n>(u)` — narrowedArmHelper): tsc narrowed a
+   * union-typed reference to one arm, and the payload comes out through a
+   * TAG-CHECKED extraction rather than a bare unionNarrow, so a narrowing
+   * the runtime cannot confirm throws the catchable TypeError instead of
+   * serving another arm's slot. The flag says only "this call is that
+   * bridge over `args[0]`, and args[0] is the pre-narrowing value": the
+   * read-shape predicates that used to recognise the unionNarrow node
+   * (purity, the instanceof folds, the volatile env read, int refinement)
+   * look through it with narrowBridgeArm. Nothing else may be read from
+   * the flag, and it never changes how the call is emitted. */
+  | { kind: "call"; callee: string; args: IrExpr[]; type: IrType; narrowBridge?: true; loc: SrcLoc }
   /** Direct call of a manifest-bound native C symbol. Arguments are
    * borrowed (native code may inspect but never retain string/bytes
    * pointers); scalar results return by value. The import's ABI signature
@@ -5427,10 +5439,17 @@ export type IrExpr =
    * never aliasing the payload. Never throws. */
   | { kind: "caughtToDyn"; value: IrExpr; type: IrType; loc: SrcLoc }
   /** Union payload extraction, tag-UNCHECKED: `value` is union-typed,
-   * `type` is arms[tag], and the backend reads the payload assuming the tag
-   * — SOUNDNESS RESTS ON tsc's control-flow narrowing (the frontend emits
-   * this only where the checker has already narrowed the expression to that
-   * arm; see docs/ir.md). Refcounted payloads come out retained (+1). */
+   * `type` is arms[tag], and the backend reads the payload assuming the
+   * tag. Emitted only where the TAG IS ALREADY PROVEN AT RUNTIME: inside a
+   * switch on `->tag` the compiler wrote, after a `unionIsTag` it wrote,
+   * or as the one fall-through arm of an interned narrow/retag/field
+   * helper whose other arms all throw. It is NO LONGER how a
+   * checker-driven narrowing reaches its arm — maybeNarrow's bridge goes
+   * through narrowedArmHelper now, because tsc being right is not the
+   * same proposition as the value carrying the tag, and union arms
+   * routinely share a runtime layout, so the difference is a wrong field
+   * or a wild pointer rather than a diagnostic. Refcounted payloads come
+   * out retained (+1). */
   | { kind: "unionNarrow"; unionId: string; tag: number; value: IrExpr; type: IrType; loc: SrcLoc }
   /** Discriminant read `r.kind` on a union receiver: every arm is a
    * record/class possessing field `field` with the SAME primitive IR type

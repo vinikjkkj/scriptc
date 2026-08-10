@@ -551,6 +551,70 @@ console.log("recovered");
     expect(r.stdout).toBe("ok.png\nTypeError true\nrecovered\n");
   });
 
+  test("a LYING type predicate narrowing to ONE arm throws instead of serving the sibling arm's slot", async () => {
+    // The checker's union NARROWING bridge (maybeNarrow), not the property
+    // read above: a single-arm narrowing types the reference as a record,
+    // so the read never reaches lowerUnionProperty and the bridge extracts
+    // the arm directly. That extraction used to be a bare peek with no tag
+    // test, and this is the shape where that was worse than a crash: `Txt`
+    // and `Img` have the SAME runtime layout (a string discriminant and a
+    // string payload), so peeking a Txt through Img's struct served
+    // `Txt.text` where the source asked for `Img.media` — a silent
+    // type-confused read, exit 0, no diagnostic. Node prints undefined, so
+    // it cannot be differential; corpus 3311 pins the honest direction.
+    const r = await compileAndRun(
+      "union-narrow-lying-predicate-sibling-slot",
+      `interface Txt { readonly kind: "txt"; readonly text: string }
+interface Img { readonly kind: "img"; readonly media: string }
+type M = Txt | Img;
+function lies(m: M): m is Img { return true; }
+function read(m: M): string { return lies(m) ? m.media : "no media"; }
+console.log(read({ kind: "img", media: "MEDIA" }));
+try {
+  console.log("unreachable", read({ kind: "txt", text: "TEXT NOT MEDIA" }));
+} catch (e) {
+  console.log((e as Error).name, (e as Error).message.includes("not representable in the target union"));
+}
+console.log("recovered");
+`,
+    );
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("MEDIA\nTypeError true\nrecovered\n");
+  });
+
+  test("a LYING type predicate over arms of DIFFERENT width throws instead of dereferencing the payload", async () => {
+    // The same bridge, the shape that segfaulted. Two of the three source
+    // arms have identical IR records, so the union carries TWO arms and a
+    // predicate admitting both narrows to a single record type — the
+    // bridge's extraction. Reading `payload` (a string) out of the arm
+    // that actually holds `other` (a number) loaded a double as a string
+    // pointer and dereferenced it: SIGSEGV, on both backends, with no
+    // scriptc diagnostic at all. The tag test turns it into the catchable
+    // TypeError, and the honest predicate beside it is unchanged.
+    const r = await compileAndRun(
+      "union-narrow-lying-predicate-payload-deref",
+      `interface A { readonly type: "a"; readonly payload: string }
+interface B { readonly type: "b"; readonly payload: string }
+interface C { readonly type: "c"; readonly other: number }
+type U = A | B | C;
+function honest(u: U): u is A | B { return u.type !== "c"; }
+function lying(u: U): u is A | B { return true; }
+function readHonest(u: U): string { return honest(u) ? u.payload : "none"; }
+function readLying(u: U): string { return lying(u) ? u.payload : "none"; }
+console.log(readHonest({ type: "a", payload: "P" }));
+console.log(readHonest({ type: "c", other: 1 }));
+try {
+  console.log("unreachable", readLying({ type: "c", other: 1 }));
+} catch (e) {
+  console.log((e as Error).name, (e as Error).message.includes("not representable in the target union"));
+}
+console.log("recovered");
+`,
+    );
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("P\nnone\nTypeError true\nrecovered\n");
+  });
+
   test("a unit smuggled into a PLAIN non-nullable slot throws the stranded trap catchably", async () => {
     // The stranded-UNIT trap without a union in sight: `null!` / `null as
     // any as T` into a plain typed slot (string, array, class, function).
