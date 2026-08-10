@@ -521,6 +521,36 @@ console.log("recovered");
     expect(r.stdout).toBe("TypeError true\nscalar: TypeError\nrecovered\n");
   });
 
+  test("a LYING type predicate on a union property read throws the stranded trap catchably", async () => {
+    // Reading a property the union answers only after NARROWING re-tags
+    // the value into the arms the checker named at the site
+    // (lowerUnionProperty; corpus 3301 covers the sound narrowings
+    // differentially). A user type predicate is the checker's word, not a
+    // proof: when it lies, the arm it admitted is not the arm the value
+    // carries, and the re-tag's stranded case throws the catchable
+    // TypeError instead of peeking a payload that has no such field. Node
+    // reads undefined off the object, so this cannot be differential.
+    const r = await compileAndRun(
+      "union-read-lying-predicate",
+      `interface Img { readonly kind: "img"; readonly media: string; readonly width: number }
+interface Vid { readonly kind: "vid"; readonly media: string; readonly seconds: number }
+interface Txt { readonly kind: "txt"; readonly text: string }
+type Content = Img | Vid | Txt;
+function lies(c: Content): c is Img | Vid { return true; }
+function read(c: Content): string { return lies(c) ? c.media : "none"; }
+console.log(read({ kind: "img", media: "ok.png", width: 1 }));
+try {
+  console.log("unreachable", read({ kind: "txt", text: "no media" }));
+} catch (e) {
+  console.log((e as Error).name, (e as Error).message.includes("not representable in the target union"));
+}
+console.log("recovered");
+`,
+    );
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("ok.png\nTypeError true\nrecovered\n");
+  });
+
   test("a unit smuggled into a PLAIN non-nullable slot throws the stranded trap catchably", async () => {
     // The stranded-UNIT trap without a union in sight: `null!` / `null as
     // any as T` into a plain typed slot (string, array, class, function).
