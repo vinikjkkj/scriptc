@@ -6325,6 +6325,18 @@ class LlEmitter {
           }
           return this.own({ name: t, type: e.type });
         }
+        // A VOID operand: evaluate for EFFECTS, produce the undefined dyn
+        // value (the C emitter's rule — JS's void result IS undefined).
+        if (e.value.type.kind === "void") {
+          this.emitExpr(e.value);
+          this.declare(`declare ptr @scr_dyn_undefined()`);
+          this.declare(`declare ptr @scr_dyn_retain_v(ptr)`);
+          const u = B.tmp();
+          const t = B.tmp();
+          B.line(`${u} = call ptr @scr_dyn_undefined()`);
+          B.line(`${t} = call ptr @scr_dyn_retain_v(ptr ${u})`);
+          return this.own({ name: t, type: e.type });
+        }
         const v = this.emitExpr(e.value);
         if (v.type.kind === "func") {
           // A closure boxes as the checked-dynamic tree's function kind: retained closure +
