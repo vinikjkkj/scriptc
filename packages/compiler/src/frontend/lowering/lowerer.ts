@@ -107,7 +107,7 @@ import { lowerAssertModuleCall, lowerAssertDirectCall } from "./lower-assert.js"
 import { lowerUtilModuleCall } from "./lower-inspect.js";
 import { lowerComptime, comptimeBakeable, rejectComptimeCaptures, comptimeValueToIr } from "./lower-comptime.js";
 import { lowerDeleteValue, lowerStmts, noteBlockedBindings, isBlockedBinding, lowerScopedBlock, predeclareForwardCapture, probeBindWhy, predeclareForwardFnDecl, predeclareForwardVar, rejectJumpCrossingFinally, lowerStmt, lowerVarStatement, lowerDestructuringDecl, lowerDestructuringAssignParts, lowerBindingPattern, lowerJsvalBindingPattern, checkBindingElement, bindPatternTarget, lowerVarDeclList, lowerVarDecl, lowerSwitch, lowerTry, lowerExprStatement, lowerForOf, lowerForStatement } from "./lower-stmts.js";
-import { FieldTarget, lowerDynObjectLiteral, lowerExpr, maybeNarrow, lowerUnitComparison, lowerNullishCoalesce, lowerOptionalChain, finishOptionalChain, lowerCondition, ensureBool, requireTruthyUnion, eqComparableUnion, lowerIntrinsicProperty, lowerArrayLiteral, lowerObjectLiteral, lowerShorthandValue, rejectThisInObjectMethod, lowerElementAccess, lowerElementWrite, lowerRecordKeyRead, ensureString, lowerTemplate, lowerAsExpression, lowerPrefixUnary, lowerBinary, lowerCaughtTypeofTest, caughtRead, caughtLocalOf, caughtToString, lowerInstanceOf, lowerRegexLiteral, lowerFieldRead, lowerUnionProperty, fieldTarget, fieldGetExpr, fieldSetStmt, lowerFieldCompound, uniqueSymbolKeyOf, foldedStringKeyOf } from "./lower-exprs.js";
+import { recordKeyResultOk, FieldTarget, lowerDynObjectLiteral, lowerExpr, maybeNarrow, lowerUnitComparison, lowerNullishCoalesce, lowerOptionalChain, finishOptionalChain, lowerCondition, ensureBool, requireTruthyUnion, eqComparableUnion, lowerIntrinsicProperty, lowerArrayLiteral, lowerObjectLiteral, lowerShorthandValue, rejectThisInObjectMethod, lowerElementAccess, lowerElementWrite, lowerRecordKeyRead, ensureString, lowerTemplate, lowerAsExpression, lowerPrefixUnary, lowerBinary, lowerCaughtTypeofTest, caughtRead, caughtLocalOf, caughtToString, lowerInstanceOf, lowerRegexLiteral, lowerFieldRead, lowerUnionProperty, fieldTarget, fieldGetExpr, fieldSetStmt, lowerFieldCompound, uniqueSymbolKeyOf, foldedStringKeyOf } from "./lower-exprs.js";
 import { assertExpandoAccounting, expandoCounters, type ExpandoBind, type ExpandoMember } from "./lower-expando.js";
 import { lowerRecordFieldCall, lowerObjectMethodCall } from "./lower-calls.js";
 import { fenceCrossBlockNsRef, nsPathPrefix } from "./lower-namespaces.js";
@@ -3629,6 +3629,56 @@ export class Lowerer {
     return def ? def.arms.findIndex((a) => typeEquals(a, arm)) : -1;
   }
 
+  /** An index-signature keyed READ flowing into a slot that can itself say
+   * `undefined` — the read AT THE DESTINATION'S WIDTH. `node.attrs.id` on a
+   * `Readonly<Record<string, string>>` types as `string` (tsc, without
+   * noUncheckedIndexedAccess), and a MISSING key has nowhere to go: the
+   * emitted helper traps, where Node answers undefined. But the value's
+   * destination is frequently a slot that CAN hold undefined — an
+   * `unknown`-valued log context, an undefined-armed union — and the
+   * emitted helper's miss path already answers exactly those two: the dyn
+   * undefined singleton, and the union's undefined arm. Only the frontend
+   * never asked for them, because it types the read from the CHECKER and
+   * then converts one step later.
+   *
+   * So: when the read cannot say undefined and the slot is a DYN one, the
+   * read is re-typed to dyn. A HIT is unchanged — the toDyn conversion
+   * that used to wrap the read moves INSIDE the helper and is the same
+   * call — and a MISS becomes JS's undefined instead of a trap. Reads into
+   * a slot that cannot represent undefined keep the trap: the checker
+   * claimed a type nothing can honour, and a silent wrong answer is worse
+   * than a loud one (SEMANTICS.md, the array-OOB policy).
+   *
+   * Only a DYN slot, never an undefined-armed UNION one, even though the
+   * helper's miss path can answer that arm too (it does, under
+   * noUncheckedIndexedAccess). The difference is what the CHECKER told the
+   * readers. `const s: string | undefined = attrs.id` narrows — tsc types
+   * the initializer `string`, so every later use of `s` was compiled as
+   * "definitely the string arm": `s === undefined` folds to a constant
+   * false and the payload read is a bare union peek. Storing the undefined
+   * arm there is a wrong answer that SEGFAULTS (probe r03). An `unknown`
+   * slot has no such readers — `unknown` is not usable until a runtime
+   * guard narrows it, and every guard reads the dyn's own tag — so the dyn
+   * width is the one the destination truly promises. Under
+   * noUncheckedIndexedAccess the union width is already correct because
+   * the checker typed the READ `T | undefined` too, and the readers with
+   * it; this arm never fires there (the read can already say undefined).
+   *
+   * Only INDEX-SIGNATURE shapes take the arm. A signature-free shape's
+   * keyed read was proven to name a declared field (tsc's keyof check), so
+   * its miss is a smuggled key — the stranded stance, which stays. */
+  private recordKeyReadAtSlotWidth(expr: IrExpr, expected: IrType): IrExpr | null {
+    if (expr.kind !== "recordKeyGet") return null;
+    if (expected.kind !== "dyn" || expr.type.kind === "dyn") return null;
+    // A read that can ALREADY answer a miss keeps its width.
+    if (expr.type.kind === "union" && this.armTag(expr.type.unionId, UNDEFINED_T) >= 0) return null;
+    const shape = this.shapes.get(expr.shapeId);
+    if (!shape?.indexValue) return null;
+    const effective = expr.overflowOnly === true ? { ...shape, fields: [] } : shape;
+    if (!recordKeyResultOk(this, effective, DYN)) return null;
+    return { ...expr, type: DYN };
+  }
+
   /** Implicit union construction. Wherever a value flows into a typed slot
    * (initializer, assignment, call argument, return, field write, record
    * literal field, ternary arm) whose expected type is a union and the
@@ -3637,6 +3687,12 @@ export class Lowerer {
    * else (including a DIFFERENT union) is left for requireExactShape, which
    * rejects union mismatches with SC2003. */
   coerceToExpected(expr: IrExpr, expected: IrType): IrExpr {
+    // An index-signature keyed read into a DYN slot reads at that slot's
+    // width, so an absent key answers undefined the way JS does instead of
+    // trapping (recordKeyReadAtSlotWidth). It runs first because the
+    // conversion it replaces is the dynFrom the arms below would build.
+    const atWidth = this.recordKeyReadAtSlotWidth(expr, expected);
+    if (atWidth) return atWidth;
     // Island boundary, both directions. IN: any static value flowing into
     // an any-typed slot marshals implicitly (tsc allows the assignment;
     // the marshal is where its semantics live). OUT: an 'any' value
@@ -7700,6 +7756,12 @@ export class Lowerer {
   intoIndexValueSlot(value: IrExpr, indexValue: IrType, node: ts.Node): IrExpr {
     if (indexValue.kind !== "dyn") return this.coerceInto(node, value, indexValue);
     if (value.type.kind === "dyn") return value;
+    // An index-signature keyed read stored under an 'unknown' signature
+    // reads at THIS slot's width, so an absent key answers undefined the
+    // way JS does (recordKeyReadAtSlotWidth). This path builds its dynFrom
+    // itself rather than going through coerceToExpected, so it asks here.
+    const atWidth = this.recordKeyReadAtSlotWidth(value, DYN);
+    if (atWidth) return atWidth;
     // Bare `undefined`/`null` literals store the dyn unit values (JS keeps
     // the key; JSON.stringify drops an undefined-valued one, like Node).
     if (value.kind === "unitLit") {

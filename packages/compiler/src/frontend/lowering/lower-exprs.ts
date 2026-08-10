@@ -7289,14 +7289,18 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
    * value, exactly what the missing-key path produces); typed results need
    * each field to be the type itself or one of its arms, and the overflow
    * value to be the type or wrappable into it. */
-  function recordKeyResultOk(L: Lowerer, shape: IrRecordShape, type: IrType): boolean {
+  export function recordKeyResultOk(L: Lowerer, shape: IrRecordShape, type: IrType): boolean {
     const surfaces = (t: IrType): boolean =>
       typeEquals(t, type) ||
       (type.kind === "union" && L.armTag(type.unionId, t) >= 0) ||
       (type.kind === "dyn" && L.dynConvertible(t));
     if (!shape.fields.every((f) => surfaces(f.type))) return false;
     if (shape.indexValue) {
-      if (type.kind === "dyn") return shape.indexValue.kind === "dyn";
+      // A dyn RESULT over a non-dyn overflow: the hit converts through the
+      // same toDyn walker a declared field's hit takes (`surfaces`), so the
+      // rule is the walker's domain, not `indexValue.kind === "dyn"`. It
+      // used to be the narrower spelling because the emitters had no arm
+      // for it; they do now (recordKeyGetHelper's dyn overflow surface).
       if (!surfaces(shape.indexValue)) return false;
     }
     return true;

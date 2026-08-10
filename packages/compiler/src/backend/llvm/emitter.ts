@@ -10147,11 +10147,6 @@ class LlEmitter {
         B.br(join);
         B.startBlock(ln);
       } else if (iv) {
-        if (iv.kind !== "dyn") {
-          // The C helper's emitter-bug arm: a non-dyn REF overflow can
-          // never join at dyn (the frontend fences it).
-          throw new LlvmUnsupportedError(`recordKeyGet:narrow:${iv.kind}`, loc);
-        }
         const ovf = this.recordOvfPtr(objName, shapeId);
         this.declare(`declare ptr @scr_map_get_str_ref(ptr, ptr)`);
         const raw = B.tmp();
@@ -10162,7 +10157,19 @@ class LlEmitter {
         const ln = B.newLabel("rkg.n");
         B.condBr(isnull, ln, lh);
         B.startBlock(lh);
-        B.line(`store ptr ${raw}, ptr ${slot} ; get returned +1`);
+        if (iv.kind === "dyn") {
+          B.line(`store ptr ${raw}, ptr ${slot} ; get returned +1`);
+        } else {
+          // A non-dyn REF overflow joining at dyn (the slot-width read —
+          // the C helper's dyn overflow surface): convert through the same
+          // toDyn walker a declared field's hit takes. It BORROWS, and the
+          // map get returned +1, so the hit's reference is dropped after.
+          const conv = this.dyn.toDynHelper(iv);
+          const r = B.tmp();
+          B.line(`${r} = call ptr @${conv}(ptr ${raw})`);
+          this.releaseValue(raw, iv);
+          B.line(`store ptr ${r}, ptr ${slot}`);
+        }
         B.br(join);
         B.startBlock(ln);
       }
