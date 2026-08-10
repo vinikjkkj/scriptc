@@ -4938,17 +4938,26 @@ export type IrExpr =
     }
   /** Call of a user function declared in this module, by name.
    *
-   * `narrowBridge` marks the checker-driven UNION bridge maybeNarrow builds
-   * (`%union.narrow.<n>(u)` — narrowedArmHelper): tsc narrowed a
-   * union-typed reference to one arm, and the payload comes out through a
-   * TAG-CHECKED extraction rather than a bare unionNarrow, so a narrowing
-   * the runtime cannot confirm throws the catchable TypeError instead of
-   * serving another arm's slot. The flag says only "this call is that
-   * bridge over `args[0]`, and args[0] is the pre-narrowing value": the
-   * read-shape predicates that used to recognise the unionNarrow node
-   * (purity, the instanceof folds, the volatile env read, int refinement)
-   * look through it with narrowBridgeArm. Nothing else may be read from
-   * the flag, and it never changes how the call is emitted. */
+   * `narrowBridge` marks a checker-driven NARROWING bridge maybeNarrow
+   * builds. Two callees carry it, and they are the same statement about
+   * two representations:
+   *
+   *   `%union.narrow.<n>(u)` (narrowedArmHelper) — tsc narrowed a
+   *   union-typed reference to one arm, and the payload comes out through
+   *   a TAG-CHECKED extraction rather than a bare unionNarrow.
+   *
+   *   `%class.narrow.<n>(o)` (narrowedClassHelper) — tsc narrowed a class
+   *   reference to a subclass, and the pointer is reinterpreted through an
+   *   INSTANCEOF-CHECKED downcast rather than a bare one.
+   *
+   * Either way a narrowing the runtime cannot confirm throws the catchable
+   * TypeError instead of serving another arm's slot or another subclass's
+   * field. The flag says only "this call is that bridge over `args[0]`,
+   * and args[0] is the pre-narrowing value": the read-shape predicates
+   * that used to recognise the unionNarrow/downcast node (purity, the
+   * instanceof folds, the volatile env read, int refinement) look through
+   * it with narrowBridgeArm. Nothing else may be read from the flag, and
+   * it never changes how the call is emitted. */
   | { kind: "call"; callee: string; args: IrExpr[]; type: IrType; narrowBridge?: true; loc: SrcLoc }
   /** Direct call of a manifest-bound native C symbol. Arguments are
    * borrowed (native code may inspect but never retain string/bytes
