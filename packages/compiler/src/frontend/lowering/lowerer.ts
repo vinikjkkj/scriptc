@@ -6977,6 +6977,96 @@ export class Lowerer {
     return name;
   }
 
+  /** The tags a union value may LEGALLY carry when a narrowing claims one
+   * arm: the arm itself, plus — when the arm is a CLASS — every arm that
+   * strictly descends from it.
+   *
+   * A subclass value in a base-class position is what tsc's assignability
+   * admits AND what the runtime layout supports: the payload pointer is
+   * prefix-compatible and carries its own vtable, so the fields read right
+   * and a virtual call still reaches the override. A WIDER RECORD in a
+   * narrower record's position is neither — tsc admits it, and the two
+   * structs put different fields at the same offsets, which is exactly the
+   * confusion a checked extraction exists to catch. So the class relation
+   * widens the admissible set and the record one does not. */
+  admissibleArmTags(fromId: string, want: IrType): number[] {
+    const tag = this.armTag(fromId, want);
+    if (tag < 0) return [];
+    if (want.kind !== "object") return [tag];
+    const arms = this.unions.get(fromId)?.arms ?? [];
+    const out = [tag];
+    arms.forEach((a, i) => {
+      if (i !== tag && a.kind === "object" && a.className !== want.className && this.isSubclassOf(a.className, want.className)) {
+        out.push(i);
+      }
+    });
+    return out;
+  }
+
+  /** Interned `%union.arm.<n>(u)` — narrowedArmHelper with a WIDER guard,
+   * for a class arm whose descendants are separate arms of the same union.
+   *
+   * One admissible tag is the ordinary case and reuses narrowedArmHelper —
+   * the program-wide `x!` machinery, interned per (union, arm) — so a
+   * caller only gets a helper of its own where the descendant arms exist.
+   * `note` names the claim that failed, in the caller's own words.
+   *
+   * Null when `want` is not an arm of the union; the caller keeps whatever
+   * unchecked form or fence it had. */
+  checkedArmHelper(fromId: string, want: IrType, loc: SrcLoc, note: string): string | null {
+    const tags = this.admissibleArmTags(fromId, want);
+    if (tags.length === 0) return null;
+    if (tags.length === 1) return this.narrowedArmHelper(fromId, want, loc);
+    const from: IrType = { kind: "union", unionId: fromId };
+    const key = `unionarm:${typeKey(from)}:${typeKey(want)}`;
+    const existing = this.widthHelpers.get(key);
+    if (existing !== undefined) return existing;
+    const name = `%union.arm.${this.widthHelpers.size}`;
+    this.widthHelpers.set(key, name);
+    const v = (): IrExpr => ({ kind: "varRef", localId: "u.0", type: from, loc });
+    const one = (t: number): IrExpr => ({ kind: "unionIsTag", unionId: fromId, tag: t, negated: false, value: v(), type: BOOL, loc });
+    const anyTag = tags
+      .slice(1)
+      .reduce<IrExpr>((acc, t) => ({ kind: "logical", op: "||", left: acc, right: one(t), type: BOOL, loc }), one(tags[0]!));
+    this.liftedFns.push({
+      name,
+      params: [{ localId: "u.0", name: "u", type: from }],
+      returnType: want,
+      locals: [{ id: "u.0", name: "u", type: from, mutable: true }],
+      body: [
+        {
+          kind: "if",
+          cond: { kind: "unary", op: "!", operand: anyTag, type: BOOL, loc },
+          then: [
+            {
+              kind: "throw",
+              value: {
+                kind: "libCall",
+                fn: "error.new",
+                args: [
+                  {
+                    kind: "strLit",
+                    value: `a '${this.fmt(from)}' value is not representable as '${this.fmt(want)}' (${note})`,
+                    type: STRING,
+                    loc,
+                  },
+                ],
+                type: { kind: "object", className: "%TypeError" },
+                loc,
+              },
+              loc,
+            },
+          ],
+          else_: null,
+          loc,
+        },
+        { kind: "return", value: { kind: "unionNarrow", unionId: fromId, tag: tags[0]!, value: v(), type: want, loc }, loc },
+      ],
+      loc,
+    });
+    return name;
+  }
+
   /** Interned `%class.narrow.<n>(o)` — the CHECKED downcast behind a
    * checker-driven class narrowing. `instanceof` against the target's
    * preorder interval decides: a match reinterprets the pointer exactly

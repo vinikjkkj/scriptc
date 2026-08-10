@@ -1330,4 +1330,68 @@ console.log("unreachable", s === null ? "n" : "y");
     expect(r.stdout).toBe("");
     expect(r.stderr).toContain("Uncaught TypeError: expected number | null | object at $, got object");
   });
+
+  test("a '.filter' whose INFERRED predicate delegates to a lying guard throws instead of re-tagging", async () => {
+    // `.filter` over a union-element array re-tags every survivor to the
+    // narrowed arm. For a WRITTEN `v is T` that re-tag was already checked;
+    // for an INFERRED one it was not, on the grounds that "the test just
+    // passed for v". The test passing says the callback returned true, not
+    // which arm the value holds — and the arrow below has no annotation, so
+    // the predicate is the checker's inference over a body that is nothing
+    // but a call to a guard that lies.
+    //
+    // The element union is the worst case for that by construction: the arm
+    // being claimed and the arm the value holds are both arms of the SAME
+    // union, which is the precondition the emit dispatcher's hazard needed.
+    // `Miss` sorts `kind` where `Hit` puts `a`, so the wrong-arm peek read a
+    // perfectly valid ScrStr at another field's offset and printed the WRONG
+    // STRING — exit 0, both backends, no diagnostic. Node hands the callback
+    // the object it was given and answers `undefined`, so this cannot be
+    // differential; corpus 3341 pins the honest direction.
+    const r = await compileAndRun(
+      "filter-inferred-predicate-lies",
+      `interface Hit { readonly a: string; readonly kind: string }
+interface Miss { readonly kind: string; readonly z: string }
+function isHit(v: Hit | Miss): v is Hit { return true; }
+const xs: (Hit | Miss)[] = [{ a: "HIT-A", kind: "hit" }, { kind: "MISS-KIND", z: "MISS-Z" }];
+try {
+  const hits = xs.filter((v) => isHit(v));
+  for (const h of hits) console.log("kept a=" + h.a);
+  console.log("unreachable");
+} catch (e) {
+  console.log((e as Error).name, (e as Error).message.includes("is not representable"));
+}
+console.log("recovered");
+`,
+    );
+    expect(r.exitCode).toBe(0);
+    // `.filter` builds the whole result before the loop over it runs, so the
+    // throw lands inside the filter and the honest first element never prints.
+    expect(r.stdout).toBe("TypeError true\nrecovered\n");
+  });
+
+  test("the same '.filter' re-tag over a NUMBER-carrying arm segfaulted, and now throws", async () => {
+    // The loud flavour of the same read. `Miss` sorts a double where `Hit`
+    // puts a string pointer, so the re-tagged element loaded the double and
+    // dereferenced it: SIGSEGV on BOTH backends, exit 139, from a program
+    // whose only untruth is an ordinary `v is T` guard the checker believed.
+    const r = await compileAndRun(
+      "filter-inferred-predicate-lies-segv",
+      `interface Hit { readonly a: string; readonly kind: string }
+interface Miss { readonly b: number; readonly kind: string }
+function isHit(v: Hit | Miss): v is Hit { return true; }
+const xs: (Hit | Miss)[] = [{ a: "HIT-A", kind: "hit" }, { b: 42, kind: "miss" }];
+try {
+  const hits = xs.filter((v) => isHit(v));
+  for (const h of hits) console.log("kept a=" + h.a);
+  console.log("unreachable");
+} catch (e) {
+  console.log((e as Error).name, (e as Error).message.includes("is not representable"));
+}
+console.log("recovered");
+`,
+    );
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("TypeError true\nrecovered\n");
+  });
 });

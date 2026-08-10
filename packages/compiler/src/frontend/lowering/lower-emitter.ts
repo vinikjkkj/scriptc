@@ -1827,34 +1827,9 @@ function notInTarget(L: Lowerer, from: IrType, to: IrType, loc: SrcLoc): IrExpr 
   };
 }
 
-/** The tags a payload-array slot may LEGALLY carry for one wanted position
- * type: the arm itself, plus — when the position is a CLASS — every arm
- * that strictly descends from it.
- *
- * A subclass value in a base-class position is what tsc's assignability
- * admits AND what the runtime layout supports: the payload pointer is
- * prefix-compatible and carries its own vtable, so the fields read right
- * and a virtual call still reaches the override (probe e05 —
- * `emit('alpha', new Dog(…))` against `alpha: (a: Animal) => void` —
- * agrees with Node byte for byte). A WIDER RECORD in a narrower record's
- * position is neither: tsc admits it, and the two structs put different
- * fields at the same offsets, which is exactly the confusion this check
- * exists to catch (e01 segfaults on it, e03 answers the wrong string).
- * So the class relation widens the admissible set and the record one
- * does not. */
-function admissiblePayloadTags(L: Lowerer, from: IrType & { kind: "union" }, want: IrType): number[] {
-  const tag = L.armTag(from.unionId, want);
-  if (tag < 0) return [];
-  if (want.kind !== "object") return [tag];
-  const arms = L.unions.get(from.unionId)?.arms ?? [];
-  const out = [tag];
-  arms.forEach((a, i) => {
-    if (i !== tag && a.kind === "object" && a.className !== want.className && L.isSubclassOf(a.className, want.className)) {
-      out.push(i);
-    }
-  });
-  return out;
-}
+/** The wording the dispatcher's checked extractions carry — what a failing
+ * payload claim actually was. */
+const EMIT_NOTE = "an emit named an event whose payload array held a different tuple";
 
 /** `u->tag == t0 || u->tag == t1 || …` over an admissible tag set. */
 function anyTagTest(from: IrType & { kind: "union" }, v: () => IrExpr, tags: number[], loc: SrcLoc): IrExpr {
@@ -1862,42 +1837,23 @@ function anyTagTest(from: IrType & { kind: "union" }, v: () => IrExpr, tags: num
   return tags.slice(1).reduce<IrExpr>((acc, t) => ({ kind: "logical", op: "||", left: acc, right: one(t), type: BOOL, loc }), one(tags[0]!));
 }
 
-/** The payload-array extraction for one position, CHECKED. One admissible
- * tag is the ordinary case and reuses narrowedArmHelper — the program-wide
- * `x!` machinery, interned per (union, arm), so the dispatcher adds no
- * helper of its own. A class position with descendant arms in the union
- * needs its own `%emit.arm.<n>`: the same shape with a wider guard.
+/** The payload-array extraction for one position, CHECKED — the general
+ * `checkedArmHelper`, which is narrowedArmHelper for an ordinary arm and a
+ * wider-guarded `%union.arm.<n>` for a class position whose descendants are
+ * separate arms of the element union.
+ *
+ * A subclass value in a base-class position is what the runtime layout
+ * supports as well as what tsc admits (probe e05 — `emit('alpha', new
+ * Dog(…))` against `alpha: (a: Animal) => void` — agrees with Node byte for
+ * byte), while a WIDER RECORD in a narrower record's position is neither
+ * (e01 segfaults on it, e03 answers the wrong string). That asymmetry lives
+ * in admissibleArmTags now, because the filter re-tag needs exactly the
+ * same rule.
  *
  * Null when the extraction has no checked form (a UNIT arm — no payload to
  * misread); the caller keeps the bare narrow there. */
 function payloadArmHelper(L: Lowerer, from: IrType & { kind: "union" }, want: IrType, loc: SrcLoc): string | null {
-  const tags = admissiblePayloadTags(L, from, want);
-  if (tags.length === 0) return null;
-  if (tags.length === 1) return L.narrowedArmHelper(from.unionId, want, loc);
-  const key = `emitarm:${typeKey(from)}:${typeKey(want)}`;
-  const existing = L.widthHelpers.get(key);
-  if (existing !== undefined) return existing;
-  const name = `%emit.arm.${L.widthHelpers.size}`;
-  L.widthHelpers.set(key, name);
-  const v = (): IrExpr => ({ kind: "varRef", localId: "u.0", type: from, loc });
-  L.liftedFns.push({
-    name,
-    params: [{ localId: "u.0", name: "u", type: from }],
-    returnType: want,
-    locals: [{ id: "u.0", name: "u", type: from, mutable: true }],
-    body: [
-      {
-        kind: "if",
-        cond: { kind: "unary", op: "!", operand: anyTagTest(from, v, tags, loc), type: BOOL, loc },
-        then: [{ kind: "throw", value: notInTarget(L, from, want, loc), loc }],
-        else_: null,
-        loc,
-      },
-      { kind: "return", value: { kind: "unionNarrow", unionId: from.unionId, tag: tags[0]!, value: v(), type: want, loc }, loc },
-    ],
-    loc,
-  });
-  return name;
+  return L.checkedArmHelper(from.unionId, want, loc, EMIT_NOTE);
 }
 
 /** The NESTED convert a union payload needs: `%emit.regroup.<n>(v: U) → T`.
@@ -1966,7 +1922,7 @@ function unionRegroupHelper(
   // shape keeps the unconditional `return` below as the function's one exit
   // (no unreachable value to invent for a throwing tail).
   const lastArm = toArms[toArms.length - 1]!;
-  const lastTags = admissiblePayloadTags(L, from, lastArm);
+  const lastTags = L.admissibleArmTags(from.unionId, lastArm);
   body.push({
     kind: "if",
     cond: { kind: "unary", op: "!", operand: anyTagTest(from, v, lastTags.length > 0 ? lastTags : [tags[toArms.length - 1]!], loc), type: BOOL, loc },
