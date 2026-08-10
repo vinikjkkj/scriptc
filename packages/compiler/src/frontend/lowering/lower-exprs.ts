@@ -2645,6 +2645,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     if (other.type.kind === "union") {
       const tag = L.armTag(other.type.unionId, unit.type);
       if (tag < 0) {
+        // An index-signature keyed read: the miss the union cannot spell
+        // is exactly what this test asks about (see unitTestAtDynWidth).
+        const atWidth = unitTestAtDynWidth(L, other, unit.unit, negated, loc);
+        if (atWidth) return atWidth;
         // A union WITHOUT that unit arm: legal TS (`miss === null` on a
         // `number | undefined` — null/undefined guard comparisons are
         // permitted against nullable-adjacent types), and === never
@@ -2690,10 +2694,48 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     // no value (nor a sequence form to keep the call's effects). Fall
     // through to the caller's comparison fence instead of folding a lie.
     if (other.type.kind === "void") return null;
+    // An index-signature keyed read is the one operand whose declared type
+    // is not the whole story: `attrs.offline` types `string` and a MISSING
+    // key still answers undefined at runtime. Test it, do not fold it.
+    {
+      const atWidth = unitTestAtDynWidth(L, other, unit.unit, negated, loc);
+      if (atWidth) return atWidth;
+    }
     // Non-union operand: it can never hold undefined/null at runtime (the
     // checker narrowed it to a concrete arm), so `=== unit` is false and
     // `!== unit` is true.
     return { kind: "boolLit", value: negated, type: BOOL, loc };
+  }
+
+/** The runtime answer for a unit comparison whose operand is an
+   * INDEX-SIGNATURE keyed read — the reads whose declared type the checker
+   * derived from the signature's VALUE type, which says nothing about
+   * whether the key is there. `node.attrs.offline !== undefined` types
+   * `string !== undefined`, so every fold above calls it statically true,
+   * and the read is DELETED with it: no value, no trap, no diagnostic —
+   * zapo counted every incoming stanza as an offline stanza. But a
+   * comparison against `undefined` is itself a destination that can say
+   * undefined, so the read is taken at DYN width
+   * (recordKeyReadAtSlotWidth, the same routing a dyn SLOT gets) and the
+   * kind test that a `Record<string, unknown>` read has always used
+   * answers it: hit → the value's kind, miss → the undefined singleton.
+   * The key expression evaluates, so its effects survive too.
+   *
+   * Null (keep the caller's fold) when the read cannot be widened — no
+   * index signature, a value type outside the toDyn walker's domain, or a
+   * read that can ALREADY say undefined (which the caller answers with a
+   * real tag test anyway). */
+  function unitTestAtDynWidth(L: Lowerer, other: IrExpr, unit: "undefined" | "null" | "nullish", negated: boolean, loc: SrcLoc,): IrExpr | null {
+    const atWidth = L.recordKeyReadAtSlotWidth(other, DYN);
+    if (!atWidth) return null;
+    return {
+      kind: "dynTest",
+      test: unit,
+      ...(negated ? { negated: true as const } : {}),
+      value: atWidth,
+      type: BOOL,
+      loc,
+    };
   }
 
 /** The union-typed process.envGet read inside a checker-narrowed operand,
@@ -2749,7 +2791,11 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (!def) L.badType(otherNode, L.typeOf(otherNode));
       const tags = def.arms.flatMap((a, i) => (isUnitType(a) ? [i] : []));
       if (tags.length === 0) {
-        // No unit arms: never null-ish (defensive — the fold below).
+        // An index-signature keyed read answers a MISS here (see
+        // unitTestAtDynWidth); otherwise never null-ish (defensive — the
+        // fold below).
+        const atWidth = unitTestAtDynWidth(L, other, "nullish", negated, loc);
+        if (atWidth) return atWidth;
         return { kind: "boolLit", value: negated, type: BOOL, loc };
       }
       const isTag = (tag: number): IrExpr => ({
@@ -2790,6 +2836,13 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (tag >= 0) {
         return { kind: "unionIsTag", unionId: envRead.type.unionId, tag, negated, value: envRead, type: BOOL, loc };
       }
+    }
+    // An index-signature keyed read: `!= null` is the idiomatic presence
+    // test for exactly these, and folding it deleted the read (see
+    // unitTestAtDynWidth). One nullish kind test covers both units.
+    {
+      const atWidth = unitTestAtDynWidth(L, other, "nullish", negated, loc);
+      if (atWidth) return atWidth;
     }
     // A non-nullable operand (tsc allows the comparison as a guard):
     // `== null` is statically false, `!= null` statically true.
@@ -3551,6 +3604,17 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     {
       const t = staticTruth(e);
       if (t !== null) return { kind: "boolLit", value: t, type: BOOL, loc: e.loc };
+    }
+    // An index-signature keyed read tested for truthiness (`if (attrs.id)`
+    // — the author's own absent-key branch): JS asks the VALUE, and an
+    // absent key is undefined, which is falsy. The read's declared type
+    // cannot say that, so the miss used to trap on the way to a ToBoolean
+    // that would have answered false. At dyn width the truthy kind test
+    // answers it — the same routing the comparisons take
+    // (unitTestAtDynWidth, and recordKeyReadAtSlotWidth's contract).
+    {
+      const atWidth = L.recordKeyReadAtSlotWidth(e, DYN);
+      if (atWidth) return { kind: "dynTest", test: "truthy", value: atWidth, type: BOOL, loc: e.loc };
     }
     if (e.type.kind === "bool") return e;
     if (e.type.kind === "f64" || e.type.kind === "string") {
@@ -11079,6 +11143,14 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       L.unsupported("SC1090", expr, "statically-decided 'in' on computed receivers (bind the value to a variable first)");
     }
     if (shape.indexValue) {
+      // A LITERAL key over an index-signature shape is the same question
+      // the RUNTIME key already answers — `"k" in m` and `k in m` differ
+      // only in where the string comes from — so it takes the same
+      // interned presence helper (lowerRuntimeKeyIn). It used to fence,
+      // and the hint sent the author to `!== undefined`, which on exactly
+      // these reads was a constant fold: the advice compiled to `true`.
+      const lIn = lowerRuntimeKeyIn(L, expr, loc);
+      if (lIn) return lIn;
       L.unsupported("SC1090", expr, "'in' over index-signature keys (read the key and test '!== undefined' instead)");
     }
     if (recv.kind === "varRef" || recv.kind === "recordGet" || recv.kind === "fieldGet" || pureRecvNode) {

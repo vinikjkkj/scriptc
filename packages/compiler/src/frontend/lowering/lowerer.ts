@@ -3666,8 +3666,18 @@ export class Lowerer {
    *
    * Only INDEX-SIGNATURE shapes take the arm. A signature-free shape's
    * keyed read was proven to name a declared field (tsc's keyof check), so
-   * its miss is a smuggled key — the stranded stance, which stays. */
-  private recordKeyReadAtSlotWidth(expr: IrExpr, expected: IrType): IrExpr | null {
+   * its miss is a smuggled key — the stranded stance, which stays.
+   *
+   * A slot is not the only destination that can say undefined. A
+   * COMPARISON against a unit literal, and a TRUTHINESS test, are both
+   * destinations whose whole point is the answer for an absent key —
+   * `attrs.offline !== undefined`, `if (attrs.id)`. The checker types
+   * those reads `string`, so the comparison folded to a constant and the
+   * truthiness test trapped; at dyn width both take the path a
+   * `Record<string, unknown>` read has always taken (one dynTest on the
+   * node's kind). See unitTestAtDynWidth and ensureBool in
+   * lower-exprs.ts. */
+  recordKeyReadAtSlotWidth(expr: IrExpr, expected: IrType): IrExpr | null {
     if (expr.kind !== "recordKeyGet") return null;
     if (expected.kind !== "dyn" || expr.type.kind === "dyn") return null;
     // A read that can ALREADY answer a miss keeps its width.
