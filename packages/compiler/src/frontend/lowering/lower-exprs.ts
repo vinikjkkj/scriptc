@@ -11899,9 +11899,52 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     if (value.type.kind !== "union") {
       throw new Error("lowerer bug: union-typed receiver lowered to a non-union");
     }
+    const field = expr.name.text;
+    const wide = lowerUnionFieldRead(L, expr, value, field);
+    if (wide) return wide;
+    // The WIDE union cannot answer, but the CHECKER's picture at this site
+    // may be a strict SUB-union that can — `isSendMediaMessage(content)`
+    // leaves `content` a seven-arm media union while the value still
+    // carries the whole `WaSendMessageContent`, string arm included.
+    // Control-flow narrowing erases at lowering, so re-tag the value into
+    // the narrowed union first: narrowedRetagHelper maps the arms the
+    // checker kept and compiles the ones it proved away to catchable
+    // TypeError cases (divergence 38's trust-the-checker stance, already
+    // the rule for a narrowed union flowing into a narrower slot). Probed
+    // against a dummy receiver FIRST so a read that still cannot be served
+    // never orphans an interned re-tag helper.
+    if (value.type.unionId !== receiverIr.unionId) {
+      const probe: IrExpr = { kind: "varRef", localId: "%urprobe", type: receiverIr, loc: locOf(expr) };
+      if (lowerUnionFieldRead(L, expr, probe, field)) {
+        const h = L.narrowedRetagHelper(expr.expression, value.type.unionId, receiverIr.unionId, locOf(expr));
+        if (h) {
+          const recv: IrExpr = { kind: "call", callee: h, args: [value], type: receiverIr, loc: locOf(expr) };
+          const narrowed = lowerUnionFieldRead(L, expr, recv, field);
+          if (narrowed) return narrowed;
+        }
+      }
+    }
+    L.unsupported(
+      "SC1090",
+      expr,
+      `reading '${field}' on a union-typed value (every arm must be an object/record ` +
+        `with a same-typed field '${field}'; ` +
+        `${NARROW_FIRST})`,
+    );
+  }
+
+  /** The three ways a union receiver answers a literal field read, in
+   * order: the shared-type discriminant read (unionDisc), the joined
+   * keyed read (unionKeyGet), and the per-arm CONVERTING read for a join
+   * an arm's declared answer only reaches through the width relation.
+   * Null when none of them can serve the pair — the caller owns the fence
+   * message and the narrowed-receiver retry. `value` is typed by the
+   * union being read, which is NOT always the value the receiver lowered
+   * to (the retry passes a re-tagged one). */
+  function lowerUnionFieldRead(L: Lowerer, expr: ts.PropertyAccessExpression, value: IrExpr, field: string): IrExpr | null {
+    if (value.type.kind !== "union") return null;
     const def = L.unions.get(value.type.unionId);
     if (!def) throw new Error(`lowerer bug: unknown union ${value.type.unionId}`);
-    const field = expr.name.text;
     let common: IrType | null = null;
     for (const arm of def.arms) {
       let ft: IrType | undefined;
@@ -11932,13 +11975,115 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const key: IrExpr = { kind: "strLit", value: field, type: STRING, loc: locOf(expr.name) };
     const keyed = lowerUnionKeyedRead(L, expr, value.type.unionId, value, key, field);
     if (keyed) return keyed;
-    L.unsupported(
-      "SC1090",
-      expr,
-      `reading '${field}' on a union-typed value (every arm must be an object/record ` +
-        `with a same-typed field '${field}'; ` +
-        `${NARROW_FIRST})`,
-    );
+    return lowerUnionFieldJoinRead(L, expr, value, field);
+  }
+
+  /** unionKeyGet's arm answers must SURFACE as the join — each is the join
+   * itself or one of its arms, so the emitted switch case can wrap a bare
+   * payload and be done. An arm whose declared answer is a UNION cannot:
+   * a `null`-typed field is the unit-only `null | undefined` union (a lone
+   * unit arm has no representation), so `{socket: Sock} | {socket: null}`
+   * joins to `Sock | null | undefined` with one arm needing a RE-TAG, not a
+   * wrap. That conversion exists — it is widthLiftPlan's `retag` — but it
+   * is a call, not an expression the tag switch can inline, so this form
+   * lifts the whole read into a function: one tag test per arm, the
+   * narrowed payload's field, and the planned conversion into the join.
+   * Every arm must declare the field and every conversion must plan
+   * (purely, before anything interns); index-signature arms stay with
+   * unionKeyGet, whose helper owns the missing-key policy. */
+  function lowerUnionFieldJoinRead(L: Lowerer, expr: ts.PropertyAccessExpression, value: IrExpr, field: string): IrExpr | null {
+    if (value.type.kind !== "union") return null;
+    const fromId = value.type.unionId;
+    const def = L.unions.get(fromId);
+    if (!def || def.arms.length === 0) return null;
+    const declared: IrType[] = [];
+    for (const arm of def.arms) {
+      if (arm.kind !== "record") return null;
+      const shape = L.shapes.get(arm.shapeId);
+      if (!shape || shape.tuple) return null;
+      const ft = shape.fields.find((f) => f.name === field)?.type;
+      if (!ft || ft.kind === "void" || isUnitType(ft)) return null;
+      declared.push(ft);
+    }
+    // The join is the flattened set of the arms' answers, exactly as
+    // lowerUnionKeyedRead builds it — a union answer contributes its own
+    // arms, so `Sock | (null | undefined)` joins to three arms, not two.
+    const joinArms: IrType[] = [];
+    const seen = new Set<string>();
+    for (const t of declared) {
+      const parts = t.kind === "union" ? L.unions.get(t.unionId)?.arms : [t];
+      if (!parts) return null;
+      for (const a of parts) {
+        const k = typeKey(a);
+        if (!seen.has(k)) {
+          seen.add(k);
+          joinArms.push(a);
+        }
+      }
+    }
+    if (joinArms.length === 0) return null;
+    if (
+      joinArms.length > 1 &&
+      (!unionFuncSetArmsOk(joinArms) ||
+        joinArms.some((a) => a.kind === "map" || a.kind === "dyn" || a.kind === "jsval" || a.kind === "generator" || a.kind === "caught"))
+    ) {
+      return null;
+    }
+    joinArms.sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
+    const join: IrType =
+      joinArms.length === 1 ? joinArms[0]! : { kind: "union", unionId: L.unions.intern(joinArms) };
+    // A single-arm join is unionDisc's job and it already declined (a unit
+    // field, a void field); nothing here improves on that.
+    if (join.kind !== "union") return null;
+    const loc = locOf(expr);
+    // Plan every conversion BEFORE interning, so a later arm that cannot
+    // convert never leaves a half-built helper behind.
+    const plans = declared.map((t) => (typeEquals(t, join) ? { how: "copy" as const } : L.widthLiftPlan(t, join)));
+    if (plans.some((pl) => pl === null)) return null;
+    const key = `ufield:${fromId}:${field}:${typeKey(join)}`;
+    let name = L.widthHelpers.get(key);
+    if (name === undefined) {
+      name = `%union.field.${L.widthHelpers.size}`;
+      L.widthHelpers.set(key, name);
+      const fromT: IrType = { kind: "union", unionId: fromId };
+      const u: IrExpr = { kind: "varRef", localId: "u.0", type: fromT, loc };
+      const body: IrStmt[] = [];
+      def.arms.forEach((arm, i) => {
+        const narrowed: IrExpr = { kind: "unionNarrow", unionId: fromId, tag: i, value: u, type: arm, loc };
+        const read: IrExpr = {
+          kind: "recordGet",
+          obj: narrowed,
+          shapeId: (arm as IrType & { kind: "record" }).shapeId,
+          field,
+          type: declared[i]!,
+          loc,
+        };
+        body.push({
+          kind: "if",
+          cond: { kind: "unionIsTag", unionId: fromId, tag: i, negated: false, value: u, type: BOOL, loc },
+          then: [{ kind: "return", value: L.applyWidthLift(plans[i]!, read, join, loc), loc }],
+          else_: null,
+          loc,
+        });
+      });
+      // Unreachable while the tag is one of the arms' — the same backstop
+      // unionRetagHelper writes, and what keeps a corrupted tag loud
+      // instead of returning an uninitialised slot.
+      body.push({
+        kind: "throw",
+        value: { kind: "strLit", value: "scriptc: internal error: invalid union tag", type: STRING, loc },
+        loc,
+      });
+      L.liftedFns.push({
+        name,
+        params: [{ localId: "u.0", name: "u", type: fromT }],
+        returnType: join,
+        locals: [{ id: "u.0", name: "u", type: fromT, mutable: true }],
+        body,
+        loc,
+      });
+    }
+    return { kind: "call", callee: name, args: [value], type: join, loc };
   }
 
 /** The unionDisc generalization: a keyed read on a union receiver whose
