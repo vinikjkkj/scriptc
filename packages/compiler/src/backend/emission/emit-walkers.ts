@@ -2175,6 +2175,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`    return hit; /* get returned +1 */`);
         } else if (t.kind === "union") {
           d.push(`    return ${surface(iv, "hit", true)};`);
+        } else if (t.kind === "dyn") {
+          // A dyn JOIN over a non-dyn overflow (the slot-width read: the
+          // key's value converts here instead of one step later, so an
+          // ABSENT key can answer undefined below). toDyn BORROWS, and the
+          // map get returned +1 — convert, then drop the hit's reference.
+          d.push(`    ${cDecl(t, "out")} = ${surface(iv, "hit", false)};`);
+          d.push(`    ${releaseCallC(iv, "hit")};`);
+          d.push(`    return out;`);
         } else {
           throw new Error(`emitter bug: keyed read overflow ${typeKey(iv)} as ${typeKey(t)}`);
         }
