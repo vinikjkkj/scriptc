@@ -17,7 +17,7 @@ import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerObjectIterOverIndexShape, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
 import { lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerWatcherMethodCall } from "./lower-builtins.js";
-import { droppableStatic, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, probeLower, templateRawTextOf } from "./lower-exprs.js";
+import { droppableStatic, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, templateRawTextOf } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { EMITTER_API_MEMBERS, definePropSlotSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
@@ -3445,7 +3445,17 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         }
       }
       const args = expr.arguments.map((a) => {
-        const lowered = L.lowerExpr(a);
+        // `console.log(attrs.id)`, and the same read one binding later.
+        // The console formatter is TOTAL over dyn kinds and renders each
+        // one exactly as Node does — strings verbatim, -0 as -0, an absent
+        // key's undefined as `undefined` — so the argument is taken at dyn
+        // width: the keyed read directly (recordKeyReadAtSlotWidth), or
+        // through the checker's scalar bridge over a binding that already
+        // holds one (narrowBridgeDyn), whose validation this consumer does
+        // not need. On a hit, and on a soundly narrowed dyn, the two
+        // renderings are the same bytes.
+        const raw = L.lowerExpr(a);
+        const lowered = L.recordKeyReadAtSlotWidth(raw, DYN) ?? narrowBridgeDyn(raw) ?? raw;
         if (lowered.type.kind === "jsval") {
           // Node prints objects with util.inspect formatting, which
           // String() cannot match — silent divergence is banned. Templates

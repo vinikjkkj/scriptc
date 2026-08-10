@@ -5566,7 +5566,14 @@ export type IrExpr =
    * scriptc-specific behavior — JS `as` never checks (SEMANTICS.md
    * documents it as the headline divergence: a lying cast throws instead of
    * corrupting memory). */
-  | { kind: "dynCheck"; value: IrExpr; type: IrType; loc: SrcLoc }
+  /** `narrowBridge` marks the checker-driven scalar bridge maybeNarrow
+   * builds over a dyn read (tsc narrowed the reference to f64/bool/string).
+   * A TEST of such a value asks the dyn itself instead (narrowBridgeDyn):
+   * where the narrowing is sound the answers are identical, and where the
+   * checker's type is wider than it knows — a keyed read whose local holds
+   * an absent key's undefined — the test is the one reader that must not
+   * throw. Nothing else may be read from the flag. */
+  | { kind: "dynCheck"; value: IrExpr; type: IrType; narrowBridge?: true; loc: SrcLoc }
   /** Static → island marshal (--dynamic builds only). `value`'s type is
    * f64/string/bool (marshaled by value) or a JSON-safe composite
    * (record/array/union — marshaled as a DEEP COPY through the emitted

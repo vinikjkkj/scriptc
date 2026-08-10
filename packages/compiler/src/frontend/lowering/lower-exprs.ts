@@ -2516,6 +2516,17 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       }
   }
 
+/** The dyn behind a checker-driven scalar narrow bridge, or null. Only the
+   * bridge maybeNarrow builds is unwrapped — never a written `as` cast,
+   * whose check is the program's own request. The operand still evaluates,
+   * so nothing effectful is dropped; what is dropped is a validation that
+   * a TEST does not need, because a test has an answer for the kinds the
+   * check would have rejected. */
+  export function narrowBridgeDyn(e: IrExpr): IrExpr | null {
+    if (e.kind !== "dynCheck" || e.narrowBridge !== true) return null;
+    return e.value.type.kind === "dyn" ? e.value : null;
+  }
+
 /** Checker-driven union narrowing. tsc's control-flow analysis narrows a
    * union-typed reference at use sites (`if (r.kind === "ok") { ...r... }`
    * types `r` as the ok-arm inside the branch); the IR value is still the
@@ -2539,7 +2550,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         narrowed &&
         (narrowed.kind === "f64" || narrowed.kind === "bool" || narrowed.kind === "string")
       ) {
-        return { kind: "dynCheck", value: expr, type: narrowed, loc: expr.loc };
+        return { kind: "dynCheck", value: expr, type: narrowed, narrowBridge: true, loc: expr.loc };
       }
       // An `instanceof Uint8Array` narrow: the checked-dynamic tree's bytes kind, extracted
       // with the same validated copy the checked cast uses (a Buffer that
@@ -2726,7 +2737,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
    * read that can ALREADY say undefined (which the caller answers with a
    * real tag test anyway). */
   function unitTestAtDynWidth(L: Lowerer, other: IrExpr, unit: "undefined" | "null" | "nullish", negated: boolean, loc: SrcLoc,): IrExpr | null {
-    const atWidth = L.recordKeyReadAtSlotWidth(other, DYN);
+    const atWidth = L.recordKeyReadAtSlotWidth(other, DYN) ?? narrowBridgeDyn(other);
     if (!atWidth) return null;
     return {
       kind: "dynTest",
@@ -3009,6 +3020,35 @@ export function pureReemittable(e: IrExpr): boolean {
       // marshals in (the emitter's jsval nullish arm).
       const right = L.jsvalIn(L.lowerExpr(expr.right), expr.right);
       return { kind: "nullish", left, right, type: JSVAL, loc };
+    }
+    // `node.attrs.from ?? hostDomain`, and the same read one binding later
+    // (`const from = node.attrs.from; from ?? hostDomain`). The checker
+    // types an index-signature read by the signature's value type, so the
+    // non-nullish fold below would DROP the default the absent key exists
+    // to select — and drop it SILENTLY, which is the one outcome this
+    // rung must not produce. Ask the dyn: a nullish kind takes the right,
+    // anything else validates back to the checker's type, the same
+    // trust-but-verify edge every other reader of a widened read takes.
+    // On a soundly narrowed dyn the test is false by construction and the
+    // check never fires, so the answer is the fold's answer. A default
+    // with no dyn representation falls through to the fold.
+    {
+      const atWidth = L.recordKeyReadAtSlotWidth(left, DYN) ?? narrowBridgeDyn(left);
+      // A SCALAR (or dyn) result only: that is what an index-signature
+      // read's `??` produces, and it keeps the validated exit a plain
+      // extraction. A composite or union result would turn the fold into
+      // a deep arm match, which is a different question than this one.
+      const want = atWidth ? L.irTypeOf(expr) : VOID;
+      if (
+        atWidth &&
+        (want.kind === "dyn" || want.kind === "string" || want.kind === "f64" || want.kind === "bool")
+      ) {
+        const right = L.coerceToExpected(L.lowerExpr(expr.right), DYN);
+        if (right.type.kind === "dyn") {
+          const test: IrExpr = { kind: "nullish", left: atWidth, right, type: DYN, loc };
+          return want.kind === "dyn" ? test : { kind: "dynCheck", value: test, type: want, loc };
+        }
+      }
     }
     if (left.type.kind !== "union") return left;
     const def = L.unions.get(left.type.unionId);
@@ -3612,8 +3652,15 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     // that would have answered false. At dyn width the truthy kind test
     // answers it — the same routing the comparisons take
     // (unitTestAtDynWidth, and recordKeyReadAtSlotWidth's contract).
+    // The same question one binding later: `const id = attrs.id; if (!id)`.
+    // The local holds the read at dyn width, so every REFERENCE to it wears
+    // the checker's scalar bridge (maybeNarrow) — and a bridge is exactly
+    // what a truthiness test must look through: ToBoolean has an answer for
+    // every dyn kind, undefined included, so asking the dyn answers the
+    // author's own absent-key branch instead of throwing on the way to it.
+    // On a soundly narrowed dyn the two agree by construction.
     {
-      const atWidth = L.recordKeyReadAtSlotWidth(e, DYN);
+      const atWidth = L.recordKeyReadAtSlotWidth(e, DYN) ?? narrowBridgeDyn(e);
       if (atWidth) return { kind: "dynTest", test: "truthy", value: atWidth, type: BOOL, loc: e.loc };
     }
     if (e.type.kind === "bool") return e;
@@ -8863,7 +8910,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // an operand value, so both operands must share one IR kind (which is
       // also what tsc's type says, modulo literal-union collapsing that
       // mapType already handles). Mixed kinds (`n && s`) stay rejected.
-      const left = L.lowerExpr(expr.left);
+      let left = L.lowerExpr(expr.left);
       // A left operand that already DECIDED at compile time: JavaScript
       // does not evaluate the right one, so neither does this — the dead
       // operand is not lowered AT ALL, which is the whole point. A
@@ -8885,7 +8932,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           return decided === isAnd ? L.lowerExpr(expr.right) : left;
         }
       }
-      const right = L.lowerExpr(expr.right);
+      let right = L.lowerExpr(expr.right);
       // A LITERAL-unit left operand (a compile-time undefined/null — the
       // capability-probe members: `process.features.inspector ||
       // !flag.startsWith('--inspect')` reads undefined in a compiled
@@ -8898,6 +8945,20 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // path staticTruth declines.)
       if (left.kind === "unitLit") {
         return op === ts.SyntaxKind.BarBarToken ? right : left;
+      }
+      // `attrs.id || "D"`, `id && use(id)` — a widened keyed read (or the
+      // local holding one) as a logical OPERAND. The operator's result IS
+      // an operand value, and the operand JS yields here can be the
+      // absent key's undefined: `||` yields the left only when it is
+      // truthy, `&&` only when it is falsy, so validating the left into
+      // the checker's scalar is a check on the very path JS does not take.
+      // The dyn arm below is JS value semantics exactly (ToBoolean over
+      // the kind, result dyn) — consumers validate where they always did.
+      {
+        const l = L.recordKeyReadAtSlotWidth(left, DYN) ?? narrowBridgeDyn(left);
+        const r = L.recordKeyReadAtSlotWidth(right, DYN) ?? narrowBridgeDyn(right);
+        if (l !== null) left = l;
+        if (r !== null) right = r;
       }
       if (left.type.kind === "dyn" || right.type.kind === "dyn") {
         // A checked-dynamic operand (`fn.name || '<anonymous>'` —
@@ -9119,8 +9180,23 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       if (test) return test;
     }
 
-    const left = L.lowerExpr(expr.left);
-    const right = L.lowerExpr(expr.right);
+    let left = L.lowerExpr(expr.left);
+    let right = L.lowerExpr(expr.right);
+    // A widened keyed read (or the local holding one) in a STRICT
+    // comparison: strict equality never coerces, so every dyn kind has an
+    // answer and an absent key's undefined simply is not the other side —
+    // the same reasoning that already routes `=== undefined` here, one
+    // literal wider. Without this the bridge validates a value the
+    // comparison was about to answer `false` for.
+    if (
+      op === ts.SyntaxKind.EqualsEqualsEqualsToken ||
+      op === ts.SyntaxKind.ExclamationEqualsEqualsToken
+    ) {
+      const l = L.recordKeyReadAtSlotWidth(left, DYN) ?? narrowBridgeDyn(left);
+      const r = L.recordKeyReadAtSlotWidth(right, DYN) ?? narrowBridgeDyn(right);
+      if (l !== null) left = l;
+      if (r !== null) right = r;
+    }
     if (left.type.kind === "dyn" || right.type.kind === "dyn") {
       // The narrowing unit comparisons ARE answerable on unknown: `v ===
       // undefined` / `v !== null` test the dyn node's kind directly, and
