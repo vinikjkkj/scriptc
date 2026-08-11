@@ -4512,6 +4512,18 @@ export type IrLibFn =
   | "fs.openSync"
   | "fs.readSync"
   | "fs.closeSync"
+  /** fs.createReadStream(path) / fs.createWriteStream(path) — a file
+   * source and a file sink UNDER the node:stream machinery: the results
+   * are ordinary `%Readable` / `%Writable` values whose _read/_write/
+   * _destroy the runtime supplies natively, so pipe/pipeline/for-await/
+   * backpressure/event order are the shared implementation. Every
+   * syscall is deferred by one stream tick, so an open(2) failure is an
+   * 'error' EVENT (a pipeline REJECTS; nothing throws at the call) —
+   * these are NOT may-throw. The OPTIONS forms (start/end/encoding/
+   * highWaterMark/flags/fd/autoClose) are not this surface: they keep
+   * the fs.streamOptsChk validation fence. */
+  | "fs.readStream"
+  | "fs.writeStream"
   /** fs.watch(path, listener?) → an FSWatcher handle (scr_watch.c —
    * linked, and scr_watch_install() emitted, only when these appear on
    * the IR; moduleUsesFsWatch is the switch). The path opens NOW —
@@ -6844,6 +6856,10 @@ export function moduleUsesStream(mod: IrModule): boolean {
         node.fn === "stream.prop" || node.fn === "stream.errored" ||
         node.fn === "sp.finished" || node.fn === "sp.pipeline" ||
         node.fn.startsWith("sc.") ||
+        // The fs-backed source and sink live IN scr_stream.c (they are
+        // Readable/Writable values with native option callbacks), so a
+        // program whose only stream is a createReadStream still links it.
+        node.fn === "fs.readStream" || node.fn === "fs.writeStream" ||
         node.fn.startsWith("stream.set"))
     ) {
       found = true;
@@ -8455,6 +8471,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.openSync",
   "fs.readSync",
   "fs.closeSync",
+  "fs.readStream",
+  "fs.writeStream",
   "fs.watch",
   "fs.watchCb",
   "crypto.x509Fingerprint",

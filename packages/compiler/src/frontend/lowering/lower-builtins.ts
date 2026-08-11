@@ -805,6 +805,14 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       }
       case "createReadStream":
       case "createWriteStream": {
+        // The PATH-ONLY call has a real lowering now (the BUILTIN_MODULE_FNS
+        // row): fall through to the table so the JS lane gets the same
+        // fs-backed stream the TS lane does. Every OPTIONS form keeps this
+        // validation ladder — the option surface is not implemented, and
+        // Node's argument errors must still precede the fence.
+        const bare = args.length < 2 ||
+          (args.length === 2 && ts.isIdentifier(args[1]!) && args[1]!.text === "undefined");
+        if (bare) return null;
         const a = dynArgs([args[0], args[1]]);
         return a && chk("fs.streamOptsChk", [...a, ladderFenceExpr(L, `fs.${bi.member}`, expr)], resultT);
       }

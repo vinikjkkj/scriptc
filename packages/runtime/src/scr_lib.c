@@ -1470,18 +1470,12 @@ static const char *scr_fs_err_path(const ScrStr *path, char buf[PATH_MAX]) {
 }
 #endif
 
-/* Exported (scr_runtime.h): scr_bytes.c's fs Buffer forms share it. */
-void scr_fs_throw(int e, const char *op, const ScrStr *path) {
-#ifdef _WIN32
-  /* The CRT lands ERROR_ACCESS_DENIED in errno as EACCES; libuv's
-   * uv_translate_sys_error maps the same Win32 error to EPERM, so that
-   * is the code Node throws (a read-only file's write open, chmod on a
-   * held file). Translate at the throw seam so every fs op agrees with
-   * the Windows oracle. */
-  if (e == EACCES) e = EPERM;
-#endif
-  char namebuf[16];
-  const char *name = scr_errno_name(e, namebuf, sizeof namebuf);
+/* The message + code both fs error surfaces share. Fills `code` with the
+ * errno name (a pointer into `namebuf` or a literal) and answers a malloc'd
+ * message the caller frees. `e` arrives already Windows-translated. */
+static char *scr_fs_err_msg(int e, const char *op, const ScrStr *path,
+                            char *namebuf, size_t namecap, const char **code, int *len_out) {
+  const char *name = scr_errno_name(e, namebuf, namecap);
   const char *text = scr_errno_text(e);
   char pathbuf[PATH_MAX];
   const char *shown = scr_fs_err_path(path, pathbuf);
@@ -1490,7 +1484,49 @@ void scr_fs_throw(int e, const char *op, const ScrStr *path) {
   if (!msg) {
     scr_trap("scriptc: out of memory\n");
   }
-  int len = snprintf(msg, cap, "%s: %s, %s '%s'", name, text, op, shown);
+  *len_out = snprintf(msg, cap, "%s: %s, %s '%s'", name, text, op, shown);
+  *code = name;
+  return msg;
+}
+
+/* The CRT lands ERROR_ACCESS_DENIED in errno as EACCES; libuv's
+ * uv_translate_sys_error maps the same Win32 error to EPERM, so that
+ * is the code Node throws (a read-only file's write open, chmod on a
+ * held file). Translate at the seam so every fs op agrees with the
+ * Windows oracle. */
+static int scr_fs_errno_xlate(int e) {
+#ifdef _WIN32
+  if (e == EACCES) return EPERM;
+#endif
+  return e;
+}
+
+/* The fs error as a VALUE (+1) rather than a throw — the same message and
+ * `code` scr_fs_throw raises. The ASYNCHRONOUS fs surfaces need this:
+ * fs.createReadStream/createWriteStream deliver an open(2) failure as an
+ * 'error' EVENT on a later turn, never as a synchronous throw at the
+ * construction site (Node's contract — pipeline() rejects, it does not
+ * throw past the call). Exported (scr_runtime.h). */
+ScrError *scr_fs_error(int e, const char *op, const ScrStr *path) {
+  char namebuf[16];
+  const char *code;
+  int len;
+  char *msg = scr_fs_err_msg(scr_fs_errno_xlate(e), op, path, namebuf, sizeof namebuf, &code, &len);
+  ScrStr *m = scr_str_new(msg, (size_t)len);
+  ScrError *err = scr_error_new(SCR_ERR_ERROR, m);
+  scr_str_release(m);
+  scr_error_set_code(err, code);
+  free(msg);
+  return err;
+}
+
+/* Exported (scr_runtime.h): scr_bytes.c's fs Buffer forms share it. */
+void scr_fs_throw(int e, const char *op, const ScrStr *path) {
+  e = scr_fs_errno_xlate(e);
+  char namebuf[16];
+  const char *name;
+  int len;
+  char *msg = scr_fs_err_msg(e, op, path, namebuf, sizeof namebuf, &name, &len);
   /* A real Error instance (name "Error", message = Node's text) — what a
    * typed catch's `e instanceof Error` + `e.message` observes in Node —
    * with `code` stamped to the errno name (the exotic-errno fallback

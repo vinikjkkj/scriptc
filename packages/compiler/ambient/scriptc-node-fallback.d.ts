@@ -992,6 +992,26 @@ declare module "node:fs" {
     options: WatchOptions,
     listener?: (eventType: string) => void,
   ): FSWatcher;
+  /* The fs-backed source and sink. Node declares these as subclasses of
+   * the node:stream halves, and the runtime backs them with exactly
+   * those values (native _read/_write/_destroy over the shared stream
+   * machinery), so the mapped type IS the base class: pipe, pipeline,
+   * for-await, backpressure and the whole event order are the node:stream
+   * implementation. The fs-only surface (`path`, `bytesRead`, `close()`,
+   * 'open'/'ready') is deliberately NOT declared — it has no lowering,
+   * and @types/node projects meet the fence at the use site instead.
+   *
+   * The PATH-ONLY signature: the options object (start/end/encoding/
+   * highWaterMark/flags/fd/autoClose) is not implemented, and declaring
+   * it here would compile a call whose options are silently ignored.
+   * Written as ALIASES rather than subclasses: the mapped type is the
+   * base half either way, an alias inherits the whole declared surface
+   * without restating it, and it leaves `new fs.ReadStream(...)` a type
+   * error — there is no lowering for constructing one directly. */
+  export type ReadStream = import("node:stream").Readable;
+  export type WriteStream = import("node:stream").Writable;
+  export function createReadStream(path: string): ReadStream;
+  export function createWriteStream(path: string): WriteStream;
   /* fs.promises IS the fs/promises module (Node's rule) — the namespace-
    * import form `fs.promises.readFile(...)` lowers through the same
    * fs/promises table as `import { readFile } from "node:fs/promises"`. */

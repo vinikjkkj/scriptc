@@ -362,6 +362,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "fs.statSync": "scr_fs_stat",
   "fs.lstatSync": "scr_fs_lstat",
   "fs.openSync": "scr_fs_open",
+  "fs.readStream": "scr_fs_read_stream",
+  "fs.writeStream": "scr_fs_write_stream",
   "fs.readSync": "scr_fs_read_sync",
   "fs.closeSync": "scr_fs_close",
   // string_decoder (scr_bytes.c): stateless helpers over (enc, pending,
