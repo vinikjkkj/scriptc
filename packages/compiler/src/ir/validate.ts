@@ -1178,6 +1178,13 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "process.emitWarning": { argTypes: [DYN], result: VOID },
   "async.awaitDyn": { argTypes: [DYN], result: DYN },
   "async.hop": { argTypes: [], result: VOID },
+  // The payload-conversion memo: argument 0 is the SOURCE promise and the
+  // result is the ADAPTED one, both program-dependent promise types (the
+  // libCall case checks the kinds; typing them here would pin one
+  // conversion). Argument 1 is the lowerer's adapter id.
+  "promise.adaptHas": { argTypes: [null, F64], result: BOOL },
+  "promise.adaptGet": { argTypes: [null, F64], result: VOID },
+  "promise.adaptPut": { argTypes: [null, F64, null], result: VOID },
   "als.new": { argTypes: [], result: F64 },
   "als.get": { argTypes: [F64], result: DYN },
   "als.run": { argTypes: [F64, DYN, DYN, DYN], result: DYN },
@@ -3651,6 +3658,21 @@ function validateFunction(
             t && ((t.kind === "array" && t.elem.kind === "f64") || t.kind === "bytes");
           if (!ok) {
             err(`libCall string.fromCharCode arg 0: expected number[] or bytes, got ${t?.kind}`, e.loc);
+          }
+          break;
+        }
+        if (e.fn === "promise.adaptHas" || e.fn === "promise.adaptGet" || e.fn === "promise.adaptPut") {
+          // Source in, adapted out, both promises. The VOID in the table
+          // is the program-dependent sentinel (process.envGet's
+          // precedent) -- the shapes are pinned here instead.
+          if (e.args[0]?.type.kind !== "promise") {
+            err(`libCall ${e.fn} arg 0: expected a promise, got ${e.args[0]?.type.kind}`, e.loc);
+          }
+          if (e.fn === "promise.adaptPut" && e.args[2]?.type.kind !== "promise") {
+            err(`libCall ${e.fn} arg 2: expected a promise, got ${e.args[2]?.type.kind}`, e.loc);
+          }
+          if (e.fn !== "promise.adaptHas" && e.type.kind !== "promise") {
+            err(`libCall ${e.fn} must return a promise`, e.loc);
           }
           break;
         }

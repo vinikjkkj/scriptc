@@ -1187,6 +1187,11 @@ export class Lowerer {
   /** Union re-tag helpers (%union.retag.N), interned per (from, to)
    * unionId pair — see unionRetagHelper. */
   readonly retagHelpers = new Map<string, string>();
+  /** One id per distinct promise payload CONVERSION (from-type, to-type,
+   * settle-or-value flavour) -- the second half of the runtime memo's
+   * key. Separate from retagHelpers.size so the ids stay a dense little
+   * range whatever else interned a helper in between. */
+  promiseAdaptIds = 0;
   /** Symbols bound by `const x = promisify(execFile)` — the one lowered
    * util.promisify shape. Declarations register here and emit nothing;
    * calls through the binding lower (lowerExecFileAsyncCall) and value
@@ -6201,6 +6206,42 @@ export class Lowerer {
     };
   }
 
+  /** promiseCoerceAdapter's decision, asked without building anything:
+   * does a `Promise<U>` reach a `Promise<T>` slot at all? Callers that
+   * only need to know whether the conversion EXISTS -- the union-equality
+   * path, deciding whether identity survives the slot -- ask here rather
+   * than interning a helper they may not emit. The two must agree, and
+   * the adapter's own post-condition (a probed payload that stops
+   * coercing ICEs) is the guard one level down. */
+  promiseAdaptable(
+    fromT: IrType & { kind: "promise" },
+    toT: IrType & { kind: "promise" },
+  ): boolean {
+    if (this.coercibleValue(fromT.inner, toT.inner)) return true;
+    return (
+      fromT.inner.kind === "union" &&
+      this.settleOrValueAwaitYields(fromT.inner, toT.inner)
+    );
+  }
+
+  /** The one promise ARM of `union` that a promise value converts into,
+   * or null. ONE arm only -- two would make the destination a guess, the
+   * same ambiguity stance coerceToExpected's union path takes; this
+   * predicate exists to answer FOR that path without running it. */
+  promiseArmFor(
+    fromT: IrType,
+    union: IrType & { kind: "union" },
+  ): (IrType & { kind: "promise" }) | null {
+    if (fromT.kind !== "promise") return null;
+    const def = this.unions.get(union.unionId);
+    const promiseArms = (def?.arms ?? []).filter((a) => a.kind === "promise");
+    if (promiseArms.length !== 1) return null;
+    const arm = promiseArms[0];
+    if (arm === undefined || arm.kind !== "promise") return null;
+    if (this.armTag(union.unionId, arm) < 0) return null;
+    return this.promiseAdaptable(fromT, arm) ? arm : null;
+  }
+
   /** `Promise<U>` into a `Promise<T>` slot, when the PAYLOAD converts:
    * an async helper that awaits the source and coerces what comes out
    * (`async (p) => coerce(await p)`), so the slot receives a promise whose
@@ -6231,7 +6272,17 @@ export class Lowerer {
     const existing = this.retagHelpers.get(key);
     if (existing) return existing;
     const name = `%promise.adapt.${this.retagHelpers.size}`;
-    this.retagHelpers.set(key, name);
+    // Call sites are handed the MEMO wrapper, not the adapter. JS's
+    // assignment creates no promise, so `m.set("k", p); m.get("k") === p`
+    // is true in Node; here the destination's payload kind differs, an
+    // adapter has to run, and a SECOND run would answer about a second
+    // object -- which is what made a dedup map never evict. The wrapper
+    // files the first result under (source, adapterId) and answers with
+    // it forever after: same-in/same-out, while a different source keeps
+    // a different entry, so different-in/different-out survives too.
+    const adaptId = this.promiseAdaptIds++;
+    const memoName = `${name}.memo`;
+    this.retagHelpers.set(key, memoName);
     // A real function context: the settle-or-value builder declares a hidden
     // local, and it has to land in THIS helper rather than in whatever
     // function happened to be lowering when the coercion was demanded.
@@ -6259,10 +6310,44 @@ export class Lowerer {
         body: [{ kind: "return", value: result, loc }],
         loc,
       });
-      return name;
     } finally {
       this.fnStack.pop();
     }
+    // The wrapper is NOT async: an async body returns a fresh promise by
+    // construction, so the memo check has to stand outside the adapter,
+    // at the call. One expression -- ask, answer, or make-and-file.
+    const wCtx = newFnCtx(true, null, { kind: "func", params: [fromT], ret: toT }, toT);
+    this.fnStack.push(wCtx);
+    try {
+      const wLocal = this.declareHiddenLocal("p", fromT);
+      const src = (): IrExpr => ({ kind: "varRef", localId: wLocal.id, type: fromT, loc });
+      const idOf = (): IrExpr => ({ kind: "numLit", value: adaptId, type: F64, loc });
+      const memoised: IrExpr = {
+        kind: "ternary",
+        cond: { kind: "libCall", fn: "promise.adaptHas", args: [src(), idOf()], type: BOOL, loc },
+        then: { kind: "libCall", fn: "promise.adaptGet", args: [src(), idOf()], type: toT, loc },
+        else_: {
+          kind: "libCall",
+          fn: "promise.adaptPut",
+          args: [src(), idOf(), { kind: "call", callee: name, args: [src()], type: toT, loc }],
+          type: toT,
+          loc,
+        },
+        type: toT,
+        loc,
+      };
+      this.liftedFns.push({
+        name: memoName,
+        params: [{ localId: wLocal.id, name: wLocal.name, type: fromT }],
+        returnType: toT,
+        locals: this.ctx.locals,
+        body: [{ kind: "return", value: memoised, loc }],
+        loc,
+      });
+    } finally {
+      this.fnStack.pop();
+    }
+    return memoName;
   }
 
   funcCoerceAdapter(fromT: IrType & { kind: "func" }, toT: IrType & { kind: "func" }, loc: SrcLoc): string | null {
