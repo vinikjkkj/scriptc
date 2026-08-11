@@ -1424,7 +1424,13 @@ void scr_net_set_autosel_timeout(double ms) {
  * catch form is bindingless).
  */
 
-static const char *scr_errno_name(int e, char *fallback, size_t cap) {
+/* The three fs-error pieces are EXPORTED (scr_runtime.h) rather than
+ * static: scr_stream.c's fs-backed streams need this exact message and
+ * code as a VALUE (a failure is an 'error' EVENT, never a throw), and a
+ * second copy of these tables is how two spellings of one errno drift
+ * apart. The tables stay here, beside the throw that has always used
+ * them; only the assembly lives in the link-gated unit. */
+const char *scr_errno_name(int e, char *fallback, size_t cap) {
   switch (e) {
   case ENOENT: return "ENOENT";
   case EEXIST: return "EEXIST";
@@ -1440,7 +1446,7 @@ static const char *scr_errno_name(int e, char *fallback, size_t cap) {
   }
 }
 
-static const char *scr_errno_text(int e) {
+const char *scr_errno_text(int e) {
   switch (e) {
   case ENOENT: return "no such file or directory";
   case EEXIST: return "file already exists";
@@ -1460,11 +1466,11 @@ static const char *scr_errno_text(int e) {
  * 'C:\cwd\no.bin'". _fullpath reproduces exactly that resolution. POSIX
  * Node reports the path as given — the passthrough arm. */
 #ifdef _WIN32
-static const char *scr_fs_err_path(const ScrStr *path, char buf[PATH_MAX]) {
+const char *scr_fs_err_path(const ScrStr *path, char buf[PATH_MAX]) {
   return _fullpath(buf, path->data, PATH_MAX) != NULL ? buf : path->data;
 }
 #else
-static const char *scr_fs_err_path(const ScrStr *path, char buf[PATH_MAX]) {
+const char *scr_fs_err_path(const ScrStr *path, char buf[PATH_MAX]) {
   (void)buf;
   return path->data;
 }

@@ -561,6 +561,49 @@ export function runtimeStreamClassOf(
   return declared ? irName : null;
 }
 
+/** The runtime stream class node:fs's OWN two stream classes map to —
+ * `fs.ReadStream` → `%Readable`, `fs.WriteStream` → `%Writable` — null
+ * for everything else.
+ *
+ * A TYPE mapping ONLY, deliberately separate from runtimeStreamClassOf.
+ * Node declares these as `class ReadStream extends stream.Readable` /
+ * `class WriteStream extends stream.Writable`, and the runtime backs
+ * fs.createReadStream/createWriteStream with exactly those values (native
+ * _read/_write/_destroy over the shared machinery — scr_fs_read_stream),
+ * so the honest static type IS the base class: every stream operation a
+ * ReadStream supports is a Readable operation. The fs-only surface
+ * (`path`, `bytesRead`, `close()`, the 'open'/'ready' events) is not
+ * implemented and keeps fencing at its use site.
+ *
+ * It is NOT joined to runtimeStreamClassOf because that function also
+ * drives the VALUE mapping (`new Readable(...)`, `x instanceof
+ * Writable`). Answering there would make `new fs.ReadStream(path)`
+ * compile as the options-object Readable constructor and `x instanceof
+ * ReadStream` answer true for any Readable — a quiet wrong answer in
+ * both directions. Constructing and testing fs.ReadStream keep their
+ * fences.
+ *
+ * The ambient module must be "fs": `tty.ReadStream` (process.stdin) and
+ * `NodeJS.WriteStream` (process.stdout) share the two names and are not
+ * these values. */
+export function fsStreamClassOf(
+  decls: readonly ts.Node[],
+  symbolName: string | undefined,
+  isStdlibFile: (sf: ts.SourceFile) => boolean,
+): string | null {
+  const irName = symbolName === "ReadStream" ? "%Readable"
+    : symbolName === "WriteStream" ? "%Writable"
+    : null;
+  if (irName === null) return null;
+  const declared = decls.some(
+    (d) =>
+      ts.isClassDeclaration(d) &&
+      isStdlibFile(d.getSourceFile()) &&
+      isDeclaredInAmbientModule(d, "fs"),
+  );
+  return declared ? irName : null;
+}
+
 function isDeclaredInAmbientModule(d: ts.Declaration, name: string): boolean {
   let node: ts.Node | undefined = d.parent;
   while (node) {
@@ -2536,7 +2579,10 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // branch — see runtimeStreamClassOf for why the two no longer collide.
   {
     const irName = psym
-      ? runtimeStreamClassOf(checker.declarationsOf(psym), psym.name, ctx.isStdlibFile)
+      ? runtimeStreamClassOf(checker.declarationsOf(psym), psym.name, ctx.isStdlibFile) ??
+        // node:fs's own two — the base class they extend (fsStreamClassOf
+        // explains why this is a type-only claim).
+        fsStreamClassOf(checker.declarationsOf(psym), psym.name, ctx.isStdlibFile)
       : null;
     if (irName) return { kind: "object", className: irName };
   }
