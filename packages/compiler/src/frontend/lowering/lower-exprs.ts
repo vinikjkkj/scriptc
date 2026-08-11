@@ -11577,6 +11577,17 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         const acc = shape.fields.some((x) => x.name === `%get:${key}` || x.name === `%set:${key}`);
         answers.push({ tag, has: f !== undefined || acc, slot: null, unit: null, arm });
       }
+      // SCRIPTC_IN_WHY=1 — the `in` census probe: for every UNION
+      // receiver reaching the decision, the site, the key, whether every
+      // arm answered, and the per-arm verdict. An arm the classifier
+      // could not take at all leaves the list SHORT of `arms.length`,
+      // and the kind that stopped it is the next one in arm order.
+      if (process.env.SCRIPTC_IN_WHY) {
+        const line = ts.getLineAndCharacterOfPosition(expr.getSourceFile(), loc.start).line + 1;
+        const verdicts = answers.map((a) => (a.unit !== null ? `throw:${a.unit}` : a.slot !== null ? "perValue" : a.has ? "yes" : "no"));
+        const stopper = answers.length < arms.length ? arms[answers.length]!.kind : "-";
+        console.error(`INWHY ${loc.file}:${line} key='${key}' arms=${arms.length} taken=${answers.length} stopped-at=${stopper} static=${staticAnswers} armwise=${armWise} recv=${recv.kind} [${verdicts.join(",")}]`);
+      }
       if (staticAnswers) {
         const pureRecv = recv.kind === "varRef" || recv.kind === "recordGet" || recv.kind === "fieldGet" || pureRecvNode;
         const isTag = (tag: number, negated: boolean): IrExpr => ({
