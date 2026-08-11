@@ -9955,7 +9955,24 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           const ut = left.type.kind === "union" ? left.type : (right.type as IrType & { kind: "union" });
           const bothUnion = left.type.kind === "union" && right.type.kind === "union";
           const sameUnion = bothUnion && typeEquals(left.type, right.type);
-          if ((sameUnion || !bothUnion) && L.eqComparableUnion(ut.unionId)) {
+          // "the plain side wraps into the union, which preserves payload
+          // identity" is true exactly while the wrap IS a wrap. The plain
+          // side's type has to be an ARM of the union — then unionWrap is a
+          // tag and the payload pointer travels unchanged. A type that is
+          // merely COERCIBLE into an arm goes through a converting adapter
+          // instead, and for a reference kind that adapter yields a
+          // DIFFERENT object: `promise<string>` into a `promise<dyn> |
+          // undefined` slot builds a fresh promise, so
+          //
+          //     m.set("k", p); m.get("k") === p
+          //
+          // answered FALSE where Node answers true — silently, and it is
+          // what made a dedup map never evict its settled entries. A
+          // comparison that cannot be answered by identity is not answered
+          // at all: this falls through to the narrow-first fence below.
+          const plainSideWraps =
+            bothUnion || L.armTag(ut.unionId, left.type.kind === "union" ? right.type : left.type) >= 0;
+          if ((sameUnion || !bothUnion) && plainSideWraps && L.eqComparableUnion(ut.unionId)) {
             return {
               kind: "unionEq",
               unionId: ut.unionId,
