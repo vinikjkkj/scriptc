@@ -11383,10 +11383,14 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * the slot: present iff the arm is not undefined. That last case is the
    * representation's honest answer — a field explicitly assigned
    * `undefined` reads as absent (`"a" in {a: undefined}` is true in JS,
-   * false here; SEMANTICS.md 55). Union receivers (the `in`-narrowing
-   * idiom over multiple shapes), index-signature keys, class instances,
-   * and dyn/unknown stay fenced. Keys are literal strings — a computed key
-   * over a shape would need the runtime key table. */
+   * false here; SEMANTICS.md 55). UNION receivers (the `in`-narrowing
+   * idiom over multiple shapes) answer the same three ways PER ARM, under
+   * that arm's own tag test, plus a fourth for a unit arm the checker
+   * narrowed away — Node's TypeError. An arm with no per-arm answer at
+   * all (a tuple, an index signature, a primitive, a class instance) keeps
+   * the fence for the whole test, as do dyn/unknown receivers. Keys are
+   * literal strings — a computed key over a shape would need the runtime
+   * key table. */
   export function lowerInExpression(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr {
     // `#name in obj` — the ergonomic brand check (ES2022) — resolves
     // before any string-key machinery: the left operand is a private
