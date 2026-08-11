@@ -363,6 +363,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "fs.lstatSync": "scr_fs_lstat",
   "fs.openSync": "scr_fs_open",
   "fs.readStream": "scr_fs_read_stream",
+  "fs.readStreamOpts": "scr_fs_read_stream_opts",
+  "fs.writeStreamOpts": "scr_fs_write_stream_opts",
   "fs.writeStream": "scr_fs_write_stream",
   "fs.readSync": "scr_fs_read_sync",
   "fs.closeSync": "scr_fs_close",

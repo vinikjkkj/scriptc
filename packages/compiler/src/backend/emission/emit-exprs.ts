@@ -3219,6 +3219,17 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_fs_read_stream(${arg(0)})`);
           case "fs.writeStream":
             return finish(`scr_fs_write_stream(${arg(0)})`);
+          // The options forms DO throw (the start/end/highWaterMark/mode
+          // validation Node runs in the constructor), so unlike the pair
+          // above they carry the may-throw seed.
+          case "fs.readStreamOpts":
+            return finish(
+              `scr_fs_read_stream_opts(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)}, ${arg(6)}, ${arg(7)}, ${arg(8)}, ${arg(9)})`,
+            );
+          case "fs.writeStreamOpts":
+            return finish(
+              `scr_fs_write_stream_opts(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)}, ${arg(6)}, ${arg(7)}, ${arg(8)}, ${arg(9)})`,
+            );
           case "fs.watch":
             // Throws Node-shaped fs errors when the path won't open
             // (may-throw seed set). An open watcher holds the loop:

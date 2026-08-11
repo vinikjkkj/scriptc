@@ -226,6 +226,28 @@ export const FS_WATCH_DOCUMENTED_OPTIONS: ReadonlySet<string> = new Set([
   "persistent", "recursive", "encoding", "signal",
 ]);
 
+/** fs.createReadStream's documented option keys (Node v24). `flags`,
+ * `encoding`, `start`, `end`, `highWaterMark`, `mode`, `autoClose` and
+ * `emitClose` LOWER; `fd`, `signal` and `fs` fence by name here. */
+export const FS_READ_STREAM_DOCUMENTED_OPTIONS: ReadonlySet<string> = new Set([
+  "flags", "encoding", "fd", "mode", "autoClose", "emitClose", "start", "end",
+  "highWaterMark", "signal", "fs",
+]);
+
+/** fs.createWriteStream's documented option keys (Node v24) — the same
+ * list without `end`, which WriteStream's constructor never reads. */
+export const FS_WRITE_STREAM_DOCUMENTED_OPTIONS: ReadonlySet<string> = new Set([
+  "flags", "encoding", "fd", "mode", "autoClose", "emitClose", "start",
+  "highWaterMark", "signal", "fs",
+]);
+
+/** The per-key hints for the fs stream options that do NOT lower. */
+export const FS_STREAM_OPTION_HINTS: Record<string, string | undefined> = {
+  fd: "an existing descriptor makes 'path' undefined and hands the fd's lifetime to the caller — open the path instead, or read it with fs.readSync",
+  signal: "AbortSignal has no lowering yet; destroy() the stream to stop it",
+  fs: "a substitute fs implementation is a dependency-injection seam with no lowering",
+};
+
 /** fs.readdirSync's documented option keys. */
 export const FS_READDIR_DOCUMENTED_OPTIONS: ReadonlySet<string> = new Set([
   "encoding", "withFileTypes", "recursive",
@@ -892,6 +914,13 @@ export const BUILTIN_MODULE_FN_ALIASES: Record<string, Record<string, readonly I
     chmodSync: ["fs.lchmodSyncChk"],
     // The two-argument listener form.
     watch: ["fs.watchCb"],
+    // The options-object forms: the SAME file source and sink with a
+    // byte range, a flag and a mark on them, so the member fence has to
+    // witness them too — fencing createReadStream must fence the option
+    // spelling with it. (The attestation-parity case in
+    // surface-manifest.test.ts is what says so, and it caught these.)
+    createReadStream: ["fs.readStreamOpts"],
+    createWriteStream: ["fs.writeStreamOpts"],
   },
   "fs/promises": {
     // The Buffer form (no encoding).
