@@ -322,10 +322,12 @@ ScrPromise *scr_promise_adapt_get(ScrPromise *src, double id) {
 }
 
 ScrPromise *scr_promise_adapt_put(ScrPromise *src, double id, ScrPromise *made) {
-  /* An immortal source (rc == SIZE_MAX) never runs a teardown path, so
-   * an entry on it would be a genuine leak; answer `made` unmemoised.
-   * Identity through such a promise is the pre-existing story. */
-  if (src && src->rc != SIZE_MAX && !scr_promise_adapt_find(src, id)) {
+  /* Filed unconditionally, including on a hypothetical immortal source
+   * (nothing mints a promise at rc == SIZE_MAX today). Skipping one would
+   * trade a bounded leak for a silent wrong `===`, and the entry count
+   * per promise is bounded by the number of conversions the PROGRAM
+   * contains, so the unguarded failure mode is a loud audit line. */
+  if (src && !scr_promise_adapt_find(src, id)) {
     ScrPromiseAdapt *a = (ScrPromiseAdapt *)malloc(sizeof *a);
     if (!a) scr_oom();
     a->next = src->adapts;
