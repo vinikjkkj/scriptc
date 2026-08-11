@@ -15,6 +15,36 @@ import { wsGlobalCtorFor } from "./emit-ws.js";
 
 
 
+/** SCRIPTC_EMIT_ARM_NOTES=1 — append `/*ARMS=<n>,TAG=<t>*` + `/` to every
+ * tag-UNCHECKED payload extraction (`unionNarrow`) in the generated TU.
+ *
+ * A static soundness census over the emitted C can decide a positive tag
+ * test by reading the C alone, but an extraction reached only by RULING
+ * ARMS OUT ("no other arm can get here") is decidable only against the arm
+ * count of its union — and the emitted C does not carry it. Three separate
+ * blocks have now measured that column by patching this one site,
+ * rebuilding, censusing and reverting; this switch makes the same
+ * measurement a flag.
+ *
+ * Read once at module load. Unset/anything-but-"1" keeps the generated TU
+ * byte-for-byte identical, which is what makes the switch free: the
+ * comment is emitted INSIDE the initializer of the extraction's own temp,
+ * so an annotated build differs from a plain one only in those lines. */
+const ARM_NOTES = process.env["SCRIPTC_EMIT_ARM_NOTES"] === "1";
+
+/** The note for an extraction whose arm is known by TYPE rather than by an
+ * explicit tag: the optional-chain / `||` / `??` sites, which are the
+ * "reached by ruling the unit arms out" shapes and therefore exactly the
+ * ones a census cannot decide without the arm count. "" when the switch is
+ * off, so the generated TU is unchanged. */
+function armNoteC(E: CEmitter, unionId: string, arm: IrType, tag?: number): string {
+  if (!ARM_NOTES) return "";
+  const def = E.unionsById.get(unionId);
+  const n = def?.arms.length ?? -1;
+  const t = tag ?? (def ? def.arms.findIndex((a) => typeEquals(a, arm)) : -1);
+  return ` /*ARMS=${n},TAG=${t}*/`;
+}
+
 export function emitExpr(E: CEmitter, e: IrExpr): Temp {
     switch (e.kind) {
       case "numLit":
@@ -393,11 +423,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         if (isRefCounted(narrowed)) E.currentFrame().push({ name: bind, type: narrowed });
         const test = unitTags.map((t) => `${r.name}->tag == ${t}`).join(" || ");
         const extract =
-          narrowed.kind === "f64"
+          (narrowed.kind === "f64"
             ? `scr_union_get_f64(${r.name})`
             : narrowed.kind === "bool"
               ? `scr_union_get_bool(${r.name})`
-              : retainCallC(narrowed, `(${cType(narrowed).trim()})scr_union_peek(${r.name})`);
+              : retainCallC(narrowed, `(${cType(narrowed).trim()})scr_union_peek(${r.name})`)) +
+          armNoteC(E, e.receiver.type.unionId, narrowed, narrowIdx);
         if (e.type.kind === "void") {
           // Statement form (cb?.()): no result value at all.
           E.line(`if (!(${test})) {`);
@@ -486,11 +517,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         } else {
           const arm = e.type;
           const read =
-            arm.kind === "f64"
+            (arm.kind === "f64"
               ? `scr_union_get_f64(${l.name})`
               : arm.kind === "bool"
                 ? `scr_union_get_bool(${l.name})`
-                : retainCallC(arm, `(${cType(arm).trim()})scr_union_peek(${l.name})`);
+                : retainCallC(arm, `(${cType(arm).trim()})scr_union_peek(${l.name})`)) +
+            armNoteC(E, e.left.type.unionId, arm);
           E.line(`${name} = ${read};`);
           E.releaseValue(l.name, e.left.type);
         }
@@ -575,11 +607,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         } else {
           const arm = e.type;
           const read =
-            arm.kind === "f64"
+            (arm.kind === "f64"
               ? `scr_union_get_f64(${l.name})`
               : arm.kind === "bool"
                 ? `scr_union_get_bool(${l.name})`
-                : retainCallC(arm, `(${cType(arm).trim()})scr_union_peek(${l.name})`);
+                : retainCallC(arm, `(${cType(arm).trim()})scr_union_peek(${l.name})`)) +
+            armNoteC(E, e.left.type.unionId, arm);
           E.line(`${name} = ${read};`);
           E.releaseValue(l.name, e.left.type);
         }
@@ -2087,10 +2120,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const u = E.emitExpr(e.value);
         const arm = e.type;
         if (isUnitType(arm)) throw new Error(`emitter bug: unionNarrow to unit arm ${arm.kind}`);
-        if (arm.kind === "f64") return E.newTemp(arm, `scr_union_get_f64(${u.name})`);
-        if (arm.kind === "bool") return E.newTemp(arm, `scr_union_get_bool(${u.name})`);
+        // The census note (SCRIPTC_EMIT_ARM_NOTES=1); "" by default.
+        const NOTE = ARM_NOTES
+          ? ` /*ARMS=${E.unionsById.get(e.unionId)?.arms.length ?? -1},TAG=${e.tag}*/`
+          : "";
+        if (arm.kind === "f64") return E.newTemp(arm, `scr_union_get_f64(${u.name})${NOTE}`);
+        if (arm.kind === "bool") return E.newTemp(arm, `scr_union_get_bool(${u.name})${NOTE}`);
         const payload = `(${cType(arm).trim()})scr_union_peek(${u.name})`;
-        return E.newTemp(arm, retainCallC(arm, payload));
+        return E.newTemp(arm, retainCallC(arm, payload) + NOTE);
       }
       case "unionDisc": {
         // Shared-field read `r.kind` / `spec.config`: switch on the runtime
