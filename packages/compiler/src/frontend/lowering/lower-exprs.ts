@@ -6,7 +6,7 @@
  * (FieldTarget). */
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
-import type { Lowerer } from "./lowerer.js";
+import type { Lowerer, WidthLift } from "./lowerer.js";
 import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, diffieHellmanFnValueOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
@@ -5245,7 +5245,29 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       if (ts.isMethodDeclaration(prop)) L.rejectThisInObjectMethod(prop.body ?? prop);
     }
 
-    let tsType = L.checker.getContextualType(expr) ?? L.typeOf(expr);
+    const ctxType0 = L.checker.getContextualType(expr);
+    let tsType = ctxType0 ?? L.typeOf(expr);
+    /** The literal is being built at its OWN inferred type rather than at
+     * a shape the program declared. It matters for exactly one rule: the
+     * declared-shape merge DROPS a spread's runtime keys that name no
+     * declared field, which is divergence 68 when a DECLARED type says
+     * those keys do not belong, and a silent wrong answer when the shape
+     * is just what tsc inferred for this literal (tsc drops a spread
+     * source's index signature, so `{ jid, ...groupAttrs }` types as
+     * `{ jid: string }` while the value carries every group attribute). */
+    /** A checker type the PROGRAM DECLARED: it has a symbol, that symbol
+     * has declarations, and none of them is an object literal. An
+     * anonymous type inferred FROM a literal fails it. */
+    const declaredProvenance = (ty: ts.Type): boolean => {
+      const sym = ty.getSymbol();
+      if (!sym) return false;
+      const decls = L.checker.declarationsOf(sym);
+      return decls.length > 0 && !decls.some((d) => ts.isObjectLiteralExpression(d));
+    };
+    /** Whether the target SHAPE came from a type the program declared,
+     * rather than from what tsc inferred for this literal. It decides
+     * exactly one rule — see `dropsAreHonest` below. */
+    let shapeDeclared = ctxType0 !== undefined && declaredProvenance(tsType);
     // `lit satisfies T` is TYPE-LEVEL only: the expression's checker type —
     // and therefore the shape every downstream consumer sees — is the
     // literal's OWN type (T still contextually types members, so inferred
@@ -5290,6 +5312,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       const ctxShape = L.shapes.get(mapped.shapeId);
       if (ctxShape && ctxShape.fields.length === 0 && !ctxShape.indexValue && !ctxShape.tuple) {
         mapped = L.mapTypeOf(L.typeOf(expr)) ?? mapped;
+        shapeDeclared = false;
       }
     }
     // A literal with a property the contextual TYPE ITSELF lacks — only
@@ -5317,7 +5340,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           if (ts.isNumericLiteral(p.name)) return extraOf(String(Number(p.name.text)));
           return false; // computed keys keep their existing paths
         });
-        if (extra) mapped = L.mapTypeOf(L.typeOf(expr)) ?? mapped;
+        if (extra) { mapped = L.mapTypeOf(L.typeOf(expr)) ?? mapped; shapeDeclared = false; }
       }
     }
     // A union-typed slot (`const r: Res = { kind: "ok", ... }`) contextually
@@ -5338,6 +5361,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     if (mapped === null || mapped.kind === "union" || mapped.kind === "dyn" || mapped.kind === "object" || mapped.kind === "jsval") {
       const ctxUnion = mapped?.kind === "union" ? mapped : null;
       mapped = L.mapTypeOf(L.typeOf(expr)) ?? mapped;
+      shapeDeclared = false;
       // A literal whose own shape re-tags into NO arm of the contextual
       // union, where the union has exactly ONE record arm: build AS that
       // arm — there is no ambiguity (tsc already checked the literal
@@ -5361,6 +5385,10 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
             !armShape?.tuple
           ) {
             mapped = recordArms[0]!;
+            // The shape is a DECLARED arm of the slot's union, not the
+            // literal's own inferred type — the proto `IImageMessage |
+            // null | undefined` field shape.
+            shapeDeclared = ctxType0 !== undefined;
           }
         } else if (recordArms.length > 1) {
           const ownShapeId = mapped?.kind === "record" ? mapped.shapeId : null;
@@ -5378,7 +5406,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           // rule above. Ambiguous literals keep the SC2003 fence.
           if (ownShapeId === null || !recordArms.some((a) => a.shapeId === ownShapeId)) {
             const arm = literalUnionArmOf(L, expr, tsType, recordArms);
-            if (arm) mapped = arm;
+            if (arm) { mapped = arm; shapeDeclared = ctxType0 !== undefined; }
           }
         }
       }
@@ -5472,10 +5500,42 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       p.name !== undefined &&
       ts.isComputedPropertyName(p.name) &&
       literalComputedKey(L, p.name) === null;
+    // DECLARED fields ride along too: `{ jid, ...groupAttrs }` typed
+    // `{ [k: string]: string; jid: string }` — the attribute-builder
+    // shape tsc infers for a literal that spreads a `Record<string, T>`.
+    // The keyed-write helper the merge already emits (`sc_rks_*`) is the
+    // one that dispatches a declared name onto its struct slot and
+    // everything else into the overflow, so a mixed target needs no new
+    // runtime and no new write kind — only the merge's own admission and
+    // the `overflowOnly` flag flipping off. `lowerIndexMergeHelper`
+    // re-checks the shape matrix and answers null where it cannot, which
+    // keeps the fence below exactly as it was.
+    // A mixed target enters only where the historic desugar CANNOT go —
+    // it fences every plain spread into an index-signature shape and
+    // every runtime-computed key — so nothing that compiles today is
+    // rerouted. A literal whose only spread is CONDITIONAL and whose name
+    // is a declared field already lowers below, and keeps doing so.
+    const historicFences = (p: ts.ObjectLiteralElementLike): boolean => {
+      if (isRuntimeComputedKey(p)) return true;
+      if (!ts.isSpreadAssignment(p)) return false;
+      const cs = conditionalSpreadOf(p.expression);
+      if (!cs) return true; // a plain spread into an index-signature target always fences below
+      if (cs === "unsupported" || cs.props.length !== 1) return true;
+      // A conditional spread whose key IS a declared field lowers below
+      // today (its ternary fills that slot) — leave it there.
+      return !shape.fields.some((f) => f.name === cs.props[0]!.name.text);
+    };
+    const ixMergeAdmits = (): boolean => {
+      const iv = shape.indexValue;
+      if (!iv) return false;
+      if (shape.fields.length === 0) return true;
+      if (shape.fields.some((f) => f.name.startsWith("%") || !typeEquals(f.type, iv))) return false;
+      return expr.properties.some(historicFences);
+    };
     if (
       shape.indexValue &&
-      shape.fields.length === 0 &&
       !shape.tuple &&
+      ixMergeAdmits() &&
       (expr.properties.some((p) => ts.isSpreadAssignment(p)) || expr.properties.some(isRuntimeComputedKey))
     ) {
       const contributors: IndexMergeContributor[] = [];
@@ -5595,8 +5655,15 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         mergeable = false;
         break;
       }
-      if (mergeable) {
-        const helper = lowerIndexMergeHelper(L, type.shapeId, contributors, loc);
+      const helper0 = mergeable ? lowerIndexMergeHelper(L, type.shapeId, contributors, loc) : null;
+      // A PURE-signature target keeps its own refusal message (nothing
+      // below can lower it either). A MIXED target falls through to the
+      // historic desugar instead, so a shape the merge declines meets
+      // exactly the diagnostic it met before this path admitted it.
+      if (mergeable && helper0 === null && shape.fields.length > 0) {
+        // fall through
+      } else if (mergeable) {
+        const helper = helper0;
         if (helper === null) {
           L.unsupported(
             "SC1090",
@@ -5630,18 +5697,72 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // included, no re-read), contributors apply in order with per-key
     // dispatch onto the declared fields (JS last-write-wins). Divergence 68
     // has the runtime rules (validated collisions, extra keys dropped).
+    // EXPLICIT properties ride along: `{ ...spread(content), ...uploaded,
+    // width: w }` — the media-message builder shape, a runtime-keyed
+    // source completed by named fields. They are contributors like any
+    // other, applied at their literal position (the helper's argument
+    // order IS their evaluation order), so JS's last-write-wins decides a
+    // collision either way round. Only names the target DECLARES qualify
+    // (a declared shape has no slot for anything else — the historic
+    // desugar's shape mismatch keeps that case).
+    const declMergeNamed = (p: ts.ObjectLiteralElementLike): string | null => {
+      if (!ts.isPropertyAssignment(p) && !ts.isShorthandPropertyAssignment(p)) return null;
+      if (!p.name) return null;
+      if (
+        !ts.isIdentifier(p.name) &&
+        !ts.isStringLiteral(p.name) &&
+        !ts.isNumericLiteral(p.name) &&
+        !(ts.isComputedPropertyName(p.name) && literalComputedKey(L, p.name) !== null)
+      ) {
+        return null;
+      }
+      return propNameText(L, p.name);
+    };
+    // The declared-shape merge DROPS a runtime key that names no declared
+    // field — divergence 68, and honest exactly while the target's type
+    // says the value has no other keys. A shape scriptc mapped WITHOUT an
+    // index signature whose CHECKER type has one (the inferred literal
+    // type of `{ jid, ...groupAttrs }` in a position with no contextual
+    // type: tsc writes `{ [x: string]: string; jid: string }`, mapType
+    // keeps only `jid`) says the opposite, and dropping there is a silent
+    // wrong answer, not a divergence. Keep the fence.
+    // The declared-shape merge DROPS a runtime key that names no declared
+    // field. That is divergence 68 — honest — exactly when a type the
+    // PROGRAM DECLARED says those keys do not belong. When the shape was
+    // inferred from an object literal instead (tsc drops a spread source's
+    // index signature, so `{ jid, ...groupAttrs }` types as
+    // `{ jid: string }` while the value carries every group attribute, and
+    // an enclosing literal passes that inferred type down as its own
+    // contextual type), dropping is a silent wrong answer and the fence
+    // has to stand. The test is the shape's PROVENANCE: a named
+    // declaration or a type literal in a declaration, never an object
+    // literal expression.
+    const dropsAreHonest = shapeDeclared;
+    if (process.env.SCRIPTC_SPREADIX_WHY && !shape.tuple) {
+      const l = locOf(expr);
+      console.error(`SPREADIX ${l.file}:${l.start} declared=${shapeDeclared} idx=${shape.indexValue ? L.fmt(shape.indexValue) : "-"} fields=${shape.fields.map((f) => f.name).join(",").slice(0, 80)}`);
+    }
     if (
       !shape.indexValue &&
       !shape.tuple &&
+      dropsAreHonest &&
       shape.fields.length > 0 &&
       expr.properties.length > 0 &&
-      expr.properties.every((p) => ts.isSpreadAssignment(p) && !conditionalSpreadOf(p.expression)) &&
+      expr.properties.every((p) =>
+        ts.isSpreadAssignment(p)
+          ? !conditionalSpreadOf(p.expression)
+          : (() => {
+              const n = declMergeNamed(p);
+              return n !== null && shape.fields.some((f) => f.name === n);
+            })(),
+      ) &&
       expr.properties.some((p) => {
-        const t = L.mapTypeOf(L.typeOf((p as ts.SpreadAssignment).expression));
+        if (!ts.isSpreadAssignment(p)) return false;
+        const t = L.mapTypeOf(L.typeOf(p.expression));
         return t?.kind === "record" && !!L.shapes.get(t.shapeId)?.indexValue;
       })
     ) {
-      return lowerDeclaredSpreadMerge(L, expr, type, shape, loc);
+      return lowerDeclaredSpreadMerge(L, expr, type, shape, loc, declMergeNamed);
     }
 
     const shapeMismatch = (node: ts.Node): never => {
@@ -6466,31 +6587,126 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
   function lowerDeclaredSpreadMerge(L: Lowerer, expr: ts.ObjectLiteralExpression,
     type: IrType & { kind: "record" },
     shape: IrRecordShape,
-    loc: SrcLoc,): IrExpr {
-    interface Src { value: IrExpr; shapeId: string; iv: IrType }
-    const srcs: Src[] = [];
+    loc: SrcLoc,
+    namedOf: (p: ts.ObjectLiteralElementLike) => string | null,): IrExpr {
+    /** Contributors in LITERAL order — the helper's parameter order, which
+     * is also the call's argument-evaluation order, so a computed spread
+     * source and an explicit property value evaluate exactly where they
+     * are written. */
+    type Contrib =
+      | { kind: "spread"; value: IrExpr; shapeId: string; iv: IrType }
+      | { kind: "fixed"; value: IrExpr; shapeId: string; copies: { from: string; to: string; type: IrType; lift: WidthLift | null }[] }
+      | { kind: "field"; name: string; value: IrExpr; fieldType: IrType };
+    const fieldTypes = new Map(shape.fields.map((f) => [f.name, f.type] as const));
+    const contribs: Contrib[] = [];
     for (const prop of expr.properties) {
-      const spread = prop as ts.SpreadAssignment; // caller-checked: all spreads
+      if (!ts.isSpreadAssignment(prop)) {
+        // caller-checked: a literal name that the target DECLARES
+        const name = namedOf(prop)!;
+        const fieldType = shape.fields.find((f) => f.name === name)!.type;
+        const valueNode: ts.Node = ts.isPropertyAssignment(prop) ? prop.initializer : prop;
+        let value = ts.isPropertyAssignment(prop)
+          ? L.lowerExpr(prop.initializer)
+          : L.lowerShorthandValue(prop as ts.ShorthandPropertyAssignment);
+        value = L.coerceInto(valueNode, value, fieldType);
+        if (!typeEquals(value.type, fieldType)) L.badType(valueNode, L.typeOf(valueNode));
+        contribs.push({ kind: "field", name, value, fieldType });
+        continue;
+      }
+      const spread = prop;
       const value = L.lowerExpr(spread.expression);
       const srcShape = value.type.kind === "record" ? L.shapes.get(value.type.shapeId) : undefined;
-      if (value.type.kind !== "record" || !srcShape?.indexValue || srcShape.tuple || srcShape.fields.length > 0) {
+      if (value.type.kind !== "record" || !srcShape || srcShape.tuple) {
         L.unsupported(
           "SC1090",
           prop,
           `object spread of '${L.fmt(value.type)}' into '${L.fmt(type)}' (only PURE index-signature records — Object.fromEntries results, Record<string, T> values — spread into a declared shape)`,
         );
       }
-      srcs.push({ value, shapeId: value.type.shapeId, iv: srcShape.indexValue });
-    }
-    // Every target field must be optional: absent keys leave the undefined
-    // arm, exactly the unset-optional representation.
-    for (const f of shape.fields) {
-      if (f.type.kind !== "union" || L.armTag(f.type.unionId, UNDEFINED_T) < 0) {
+      // A FIXED-shape source alongside a runtime-keyed one — the media
+      // builder's `{ ...spread(content), ...uploadedFields, width: w }`,
+      // where `uploadedFields` is an ordinary object literal. It copies
+      // per DECLARED field at its literal position, exactly as the
+      // historic field-by-field desugar does when no runtime-keyed source
+      // is in the literal: a name the target does not declare DROPS
+      // (divergence 36's width stance), and a name it does declare width-
+      // lifts into the slot or keeps the fence.
+      if (!srcShape.indexValue) {
+        if (srcShape.fields.some((f) => f.name.startsWith("%"))) {
+          L.unsupported(
+            "SC1090",
+            prop,
+            `object spread of '${L.fmt(value.type)}' into '${L.fmt(type)}' (only PURE index-signature records — Object.fromEntries results, Record<string, T> values — spread into a declared shape)`,
+          );
+        }
+        fenceAccessorSpreadSource(L, prop, srcShape);
+        const copies: { from: string; to: string; type: IrType; lift: WidthLift | null }[] = [];
+        for (const ff of srcShape.fields) {
+          const targetType = fieldTypes.get(ff.name);
+          if (!targetType) continue; // no slot: the copy drops
+          const lift = typeEquals(ff.type, targetType) ? null : L.widthLiftPlan(ff.type, targetType);
+          if (!typeEquals(ff.type, targetType) && !lift) {
+            L.pushDiag(
+              recordShapeMismatchDiag(
+                L.fmt(type),
+                L.fmt(value.type),
+                locOf(prop),
+                `spread field '${ff.name}': '${L.fmt(ff.type)}' does not lift into '${L.fmt(targetType)}'`,
+              ),
+            );
+            throw new PoisonError();
+          }
+          copies.push({ from: ff.name, to: ff.name, type: ff.type, lift });
+        }
+        contribs.push({ kind: "fixed", value, shapeId: value.type.shapeId, copies });
+        continue;
+      }
+      if (srcShape.fields.length > 0) {
         L.unsupported(
           "SC1090",
-          expr,
-          `object spread of runtime-keyed sources onto the required field '${f.name}' (the keys decide presence at runtime — declare the field optional or spell it explicitly)`,
+          prop,
+          `object spread of '${L.fmt(value.type)}' into '${L.fmt(type)}' (only PURE index-signature records — Object.fromEntries results, Record<string, T> values — spread into a declared shape)`,
         );
+      }
+      contribs.push({ kind: "spread", value, shapeId: value.type.shapeId, iv: srcShape.indexValue });
+    }
+    // A target field is either OPTIONAL — absent keys leave the undefined
+    // arm, exactly the unset-optional representation — or written
+    // UNCONDITIONALLY by a named property or a fixed-shape source's copy.
+    // Only a required field left to the runtime keys has no answer.
+    // `unconditional` doubles as the seed table: the record literal that
+    // starts the helper needs a value for every declared slot, and a
+    // required one takes the first unconditional writer's.
+    const unconditional = new Map<string, number>();
+    contribs.forEach((c, ci) => {
+      if (c.kind === "field") {
+        if (!unconditional.has(c.name)) unconditional.set(c.name, ci);
+      } else if (c.kind === "fixed") {
+        for (const cp of c.copies) if (!unconditional.has(cp.to)) unconditional.set(cp.to, ci);
+      }
+    });
+    for (const f of shape.fields) {
+      if (f.type.kind === "union" && L.armTag(f.type.unionId, UNDEFINED_T) >= 0) continue;
+      if (unconditional.has(f.name)) continue;
+      L.unsupported(
+        "SC1090",
+        expr,
+        `object spread of runtime-keyed sources onto the required field '${f.name}' (the keys decide presence at runtime — declare the field optional or spell it explicitly)`,
+      );
+    }
+    /** Per contributor: the names a STRICTLY LATER contributor writes
+     * unconditionally. A runtime key naming one of them is dead under
+     * JS's last-write-wins, so the earlier source's dispatch drops it —
+     * the historic field-by-field desugar's `laterNames` rule, which this
+     * path replaces and therefore has to carry. */
+    const laterUnconditional: Set<string>[] = new Array<Set<string>>(contribs.length);
+    {
+      const acc = new Set<string>();
+      for (let i = contribs.length - 1; i >= 0; i--) {
+        laterUnconditional[i] = new Set(acc);
+        const c = contribs[i]!;
+        if (c.kind === "field") acc.add(c.name);
+        else if (c.kind === "fixed") for (const cp of c.copies) acc.add(cp.to);
       }
     }
     // Per (source value slot → field) conversion, checked up front so the
@@ -6543,13 +6759,52 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           };
         }
       }
+      // A union value slot into a NON-union field (`Record<string, boolean
+      // | null | string>` keys landing on a `string` slot): the field type
+      // is one arm of the slot, so the write is that arm's TAG TEST with
+      // the extraction under it — the same shape the arm-by-arm re-tag
+      // above builds, one arm wide. Every other arm throws the catchable
+      // TypeError rather than storing a lie (divergence 34), exactly as
+      // the re-tag's fall-through does.
+      if (iv.kind === "union" && !isUnitType(f.type) && f.type.kind !== "dyn") {
+        const tag = L.unions.get(iv.unionId) ? L.armTag(iv.unionId, f.type) : -1;
+        if (tag >= 0) {
+          return {
+            stmts: (write) => [{
+              kind: "if",
+              cond: { kind: "unionIsTag", unionId: iv.unionId, tag, negated: false, value: v, type: BOOL, loc },
+              then: [write({ kind: "unionNarrow", unionId: iv.unionId, tag, value: v, type: f.type, loc })],
+              else_: [{
+                kind: "throw",
+                value: {
+                  kind: "libCall",
+                  fn: "error.new",
+                  args: [{ kind: "strLit", value: `expected ${L.fmt(f.type)} at $.${f.name}`, type: STRING, loc }],
+                  type: { kind: "object", className: "%TypeError" },
+                  loc,
+                },
+                loc,
+              }],
+              loc,
+            }],
+          };
+        }
+      }
       L.unsupported(
         "SC1090",
         expr,
         `object spread into '${L.fmt(type)}' where the source's '${L.fmt(iv)}' values cannot reach the '${L.fmt(f.type)}' field '${f.name}' (the value slot must be the field type, 'unknown', or a union covering the field's arms)`,
       );
     };
-    const key = `declmerge:${type.shapeId}:${srcs.map((s) => s.shapeId).join(",")}`;
+    // The interning key carries the contributor SEQUENCE, not just the
+    // source shapes: `{ ...a, x: 1 }` and `{ x: 1, ...a }` are different
+    // programs (last-write-wins), and two literals share a helper only
+    // when their contributors line up kind-for-kind and name-for-name.
+    const key =
+      `declmerge:${type.shapeId}:` +
+      contribs
+        .map((c) => (c.kind === "field" ? `f${c.name}` : `${c.kind === "spread" ? "s" : "x"}${c.shapeId}`))
+        .join(",");
     let helper = L.widthHelpers.get(key);
     if (!helper) {
       helper = `%rec.declmerge.${L.widthHelpers.size}`;
@@ -6558,25 +6813,78 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       const outRef = ref("out.0", type);
       const ksT = arrayOf(STRING);
       const locals: IrLocal[] = [{ id: "out.0", name: "out", type, mutable: false }];
-      const params = srcs.map((s, j) => {
-        locals.push({ id: `s${j}.0`, name: `s${j}`, type: s.value.type, mutable: true });
-        return { localId: `s${j}.0`, name: `s${j}`, type: s.value.type };
+      // One parameter per contributor, in literal order. An all-spread
+      // literal keeps the historic `s<n>` names, so the C an existing
+      // program emits is unchanged to the byte.
+      const pnameOf = (ci: number): string =>
+        contribs[ci]!.kind === "field" ? `v${ci}` : `s${ci}`;
+      const pidOf = (ci: number): string => `${pnameOf(ci)}.0`;
+      const params = contribs.map((c, ci) => {
+        const t = c.kind === "field" ? c.fieldType : c.value.type;
+        locals.push({ id: pidOf(ci), name: pnameOf(ci), type: t, mutable: true });
+        return { localId: pidOf(ci), name: pnameOf(ci), type: t };
       });
+      // A REQUIRED field is seeded from its first UNCONDITIONAL writer's
+      // parameter (the optionality pass above proved one exists); that
+      // writer still writes at its own position, so a later spread key can
+      // still overwrite it exactly as JS does.
+      const seed = (f: { name: string; type: IrType }): IrExpr => {
+        const und = L.wrappedUndefined(f.type, loc);
+        if (und) return und;
+        const ci = unconditional.get(f.name)!;
+        const c = contribs[ci]!;
+        if (c.kind === "field") return ref(pidOf(ci), f.type);
+        if (c.kind !== "fixed") throw new Error("lowerer bug: seed from a runtime-keyed contributor");
+        const cp = c.copies.find((x) => x.to === f.name)!;
+        const raw: IrExpr = { kind: "recordGet", obj: ref(pidOf(ci), c.value.type), shapeId: c.shapeId, field: cp.from, type: cp.type, loc };
+        return cp.lift ? L.applyWidthLift(cp.lift, raw, f.type, loc) : raw;
+      };
       const body: IrStmt[] = [
         {
           kind: "varDecl",
           localId: "out.0",
           init: {
             kind: "recordLit",
-            fields: shape.fields.map((f) => ({ name: f.name, value: L.wrappedUndefined(f.type, loc)! })),
+            fields: shape.fields.map((f) => ({ name: f.name, value: seed(f) })),
             type,
             loc,
           },
           loc,
         },
       ];
-      srcs.forEach((s, j) => {
-        const sRef = ref(`s${j}.0`, s.value.type);
+      contribs.forEach((c, ci) => {
+        if (c.kind === "field") {
+          body.push({
+            kind: "recordSet",
+            obj: outRef,
+            shapeId: type.shapeId,
+            field: c.name,
+            value: ref(pidOf(ci), c.fieldType),
+            loc,
+          });
+          return;
+        }
+        if (c.kind === "fixed") {
+          // Declared-field copies, in the source shape's own field order —
+          // the same order and the same width lifts the historic
+          // field-by-field desugar applies.
+          const fRef = ref(pidOf(ci), c.value.type);
+          for (const cp of c.copies) {
+            const raw: IrExpr = { kind: "recordGet", obj: fRef, shapeId: c.shapeId, field: cp.from, type: cp.type, loc };
+            body.push({
+              kind: "recordSet",
+              obj: outRef,
+              shapeId: type.shapeId,
+              field: cp.to,
+              value: cp.lift ? L.applyWidthLift(cp.lift, raw, fieldTypes.get(cp.to)!, loc) : raw,
+              loc,
+            });
+          }
+          return;
+        }
+        const s = c;
+        const j = ci;
+        const sRef = ref(pidOf(ci), s.value.type);
         const kRef = ref(`k${j}.0`, STRING);
         const vRef = ref(`v${j}.0`, s.iv);
         locals.push(
@@ -6586,10 +6894,17 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           { id: `v${j}.0`, name: `v${j}`, type: s.iv, mutable: false },
         );
         // Per-key dispatch: if (k === "a") { write a } else if ... else drop.
-        const dispatch = shape.fields.reduceRight<IrStmt[]>((rest, f) => {
+        // A field a LATER contributor writes unconditionally is DEAD here
+        // — JS's last-write-wins overwrites it, and a spread's read is
+        // pure, so the branch drops exactly as a key the target does not
+        // declare does. This is the historic desugar's `laterNames` rule,
+        // and it is the difference between compiling `{ …, ...indexArgs,
+        // ...base }` and fencing on a `base` field whose type no runtime
+        // key of `indexArgs` could ever have reached.
+        const dispatch = shape.fields.filter((f) => !laterUnconditional[ci]!.has(f.name)).reduceRight<IrStmt[]>((rest, f) => {
           const write = (value: IrExpr): IrStmt => ({ kind: "recordSet", obj: outRef, shapeId: type.shapeId, field: f.name, value, loc });
-          const c = conv(s.iv, f, vRef);
-          const thenBody = "value" in c ? [write(c.value)] : c.stmts(write);
+          const cv = conv(s.iv, f, vRef);
+          const thenBody = "value" in cv ? [write(cv.value)] : cv.stmts(write);
           return [{
             kind: "if",
             cond: { kind: "strEq", negated: false, left: kRef, right: { kind: "strLit", value: f.name, type: STRING, loc }, type: BOOL, loc },
@@ -6627,7 +6942,13 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       // must not leave a phantom helper behind for the next literal.
       L.widthHelpers.set(key, helper);
     }
-    return { kind: "call", callee: helper, args: srcs.map((s) => s.value), type, loc };
+    return {
+      kind: "call",
+      callee: helper,
+      args: contribs.map((c) => c.value),
+      type,
+      loc,
+    };
   }
 
 /** The value of a shorthand property (`{ x }`): the binding `x` refers to.
