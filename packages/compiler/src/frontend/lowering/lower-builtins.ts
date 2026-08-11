@@ -6172,10 +6172,11 @@ let digestInputValueDispatches = 0;
             L.lowerExprExpecting(pathNode, STRING),
             { kind: "strLit", value: "", type: STRING, loc },
             { kind: "strLit", value: canon, type: STRING, loc },
-            { kind: "numLit", value: NaN, type: F64, loc },
-            { kind: "numLit", value: NaN, type: F64, loc },
-            { kind: "numLit", value: NaN, type: F64, loc },
-            { kind: "numLit", value: NaN, type: F64, loc },
+            { kind: "numLit", value: 0, type: F64, loc },
+            { kind: "numLit", value: 0, type: F64, loc },
+            { kind: "numLit", value: 0, type: F64, loc },
+            { kind: "numLit", value: 0, type: F64, loc },
+            { kind: "numLit", value: 0, type: F64, loc }, // present: nothing but the encoding
             { kind: "boolLit", value: true, type: BOOL, loc },
             { kind: "boolLit", value: true, type: BOOL, loc },
           ],
@@ -6192,13 +6193,17 @@ let digestInputValueDispatches = 0;
     const num = (v: number): IrExpr => ({ kind: "numLit", value: v, type: F64, loc });
     const str = (v: string): IrExpr => ({ kind: "strLit", value: v, type: STRING, loc });
     const bool = (v: boolean): IrExpr => ({ kind: "boolLit", value: v, type: BOOL, loc });
-    // NaN and "" are the ABSENT sentinels the runtime reads. NaN is not a
-    // legal value for any of these members (Node's validateInteger rejects
-    // it), so no program can spell the sentinel by accident — which is why
-    // it is NaN and not -1: `{ start: -1 }` must reach Node's
-    // ERR_OUT_OF_RANGE, not be read as "no start".
+    // WHICH members the literal wrote travels as a BITMASK, not as
+    // sentinel VALUES. A sentinel cannot carry it: `{ start: NaN }` and
+    // `{ flags: "" }` are programs a user can write, and Node answers both
+    // by name (ERR_OUT_OF_RANGE "must be an integer. Received NaN";
+    // "The argument 'flags' is invalid. Received ''"). Reading either as
+    // "absent" would be a silent wrong answer — the first draft did
+    // exactly that, and it is the reason this argument exists.
+    const PRESENT = { start: 1, end: 2, highWaterMark: 4, mode: 8, flags: 16 } as const;
+    let present = 0;
     let flags = str(""), enc = str("");
-    let start = num(NaN), end = num(NaN), hwm = num(NaN), mode = num(NaN);
+    let start = num(0), end = num(0), hwm = num(0), mode = num(0);
     let autoClose = bool(true), emitClose = bool(true);
     const seen = new Set<string>();
     for (const p of optsNode.properties) {
@@ -6224,6 +6229,7 @@ let digestInputValueDispatches = 0;
       switch (m.name) {
         case "start":
           start = L.lowerExprExpecting(m.value, F64);
+          present |= PRESENT.start;
           break;
         case "end":
           // Read side only. On a write stream 'end' is undocumented and
@@ -6237,12 +6243,15 @@ let digestInputValueDispatches = 0;
             break;
           }
           end = L.lowerExprExpecting(m.value, F64);
+          present |= PRESENT.end;
           break;
         case "highWaterMark":
           hwm = L.lowerExprExpecting(m.value, F64);
+          present |= PRESENT.highWaterMark;
           break;
         case "mode":
           mode = L.lowerExprExpecting(m.value, F64);
+          present |= PRESENT.mode;
           break;
         case "flags":
           // Left as a runtime string on purpose: Node converts the
@@ -6250,6 +6259,7 @@ let digestInputValueDispatches = 0;
           // asynchronous ERR_INVALID_ARG_VALUE 'error' event, so folding
           // it to a compile fence here would answer a different program.
           flags = L.lowerExprExpecting(m.value, STRING);
+          present |= PRESENT.flags;
           break;
         case "encoding": {
           if (absent) break;
@@ -6297,7 +6307,7 @@ let digestInputValueDispatches = 0;
     return {
       kind: "libCall",
       fn: read ? "fs.readStreamOpts" : "fs.writeStreamOpts",
-      args: [path, flags, enc, start, end, hwm, mode, autoClose, emitClose],
+      args: [path, flags, enc, start, end, hwm, mode, num(present), autoClose, emitClose],
       type: result,
       loc,
     };

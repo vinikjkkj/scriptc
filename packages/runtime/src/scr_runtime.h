@@ -1800,12 +1800,16 @@ void scr_stream_flush_done(ScrStream *s, ScrError *err, ScrBytes *data, ScrStr *
  * passes them. */
 ScrStream *scr_fs_read_stream(ScrStr *path);
 ScrStream *scr_fs_write_stream(ScrStr *path);
+/* `present` is a BITMASK of the members the program wrote (1 start,
+ * 2 end, 4 highWaterMark, 8 mode, 16 flags) — a value sentinel cannot
+ * carry that, because NaN and "" are things a program can legally write
+ * and Node rejects both by name. */
 ScrStream *scr_fs_read_stream_opts(ScrStr *path, ScrStr *flags, ScrStr *enc,
                                    double start, double end, double hwm, double mode,
-                                   bool auto_close, bool emit_close);
+                                   double present, bool auto_close, bool emit_close);
 ScrStream *scr_fs_write_stream_opts(ScrStr *path, ScrStr *flags, ScrStr *enc,
                                     double start, double end, double hwm, double mode,
-                                    bool auto_close, bool emit_close);
+                                    double present, bool auto_close, bool emit_close);
 
 /* RC / trace / install (the emitter-unit shapes). */
 ScrStream *scr_stream_retain(ScrStream *s);

@@ -300,15 +300,17 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "fs.lstatSync": { argTypes: [STRING], result: STATS_T },
   "fs.openSync": { argTypes: [STRING, STRING], result: F64 },
   "fs.readStream": { argTypes: [STRING], result: { kind: "object", className: "%Readable" } },
-  // path, flags, encoding, start, end, highWaterMark, mode, autoClose,
-  // emitClose — one fixed shape, the lowering filling every member the
-  // options literal omitted with its sentinel (NaN / "").
+  // path, flags, encoding, start, end, highWaterMark, mode, PRESENT,
+  // autoClose, emitClose — one fixed shape. `present` is a bitmask of the
+  // members the options literal actually wrote (1 start, 2 end, 4 hwm,
+  // 8 mode, 16 flags): a value sentinel cannot carry that, because NaN
+  // and "" are legal things to write and Node rejects both by name.
   "fs.readStreamOpts": {
-    argTypes: [STRING, STRING, STRING, F64, F64, F64, F64, BOOL, BOOL],
+    argTypes: [STRING, STRING, STRING, F64, F64, F64, F64, F64, BOOL, BOOL],
     result: { kind: "object", className: "%Readable" },
   },
   "fs.writeStreamOpts": {
-    argTypes: [STRING, STRING, STRING, F64, F64, F64, F64, BOOL, BOOL],
+    argTypes: [STRING, STRING, STRING, F64, F64, F64, F64, F64, BOOL, BOOL],
     result: { kind: "object", className: "%Writable" },
   },
   "fs.writeStream": { argTypes: [STRING], result: { kind: "object", className: "%Writable" } },
