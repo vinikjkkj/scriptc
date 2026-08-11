@@ -3366,13 +3366,37 @@ typedef struct ScrFsStreamOpts {
 /* Node validates start/end/highWaterMark/mode SYNCHRONOUSLY in the
  * constructor and throws — unlike flags and the open itself, which are
  * events. These reproduce the exact texts (measured against v25.9.0). */
+/* Node's addNumericSeparator: ERR_OUT_OF_RANGE and friends group an
+ * INTEGER whose magnitude exceeds 2^32 into underscore-separated
+ * thousands, and leave everything else alone — `-4294967296` prints
+ * plain, `-4294967297` prints `-4_294_967_297`, and no non-integer is
+ * ever grouped (all three measured against v25.9.0). Writes at most
+ * SCR_FS_NUMBUF bytes including the NUL. */
+#define SCR_FS_NUMBUF 48
+static void scr_fs_num(double v, char *out) {
+  char raw[40];
+  raw[scr_f64_to_str(v, raw)] = 0;
+  if (!(isfinite(v) && v == floor(v) && (v > 4294967296.0 || v < -4294967296.0))) {
+    memcpy(out, raw, strlen(raw) + 1);
+    return;
+  }
+  size_t i = 0, o = 0;
+  if (raw[0] == '-') out[o++] = raw[i++];
+  size_t digits = strlen(raw) - i;
+  for (size_t k = 0; k < digits; k++) {
+    if (k > 0 && (digits - k) % 3 == 0) out[o++] = '_';
+    out[o++] = raw[i + k];
+  }
+  out[o] = 0;
+}
+
 static bool scr_fs_opt_int_chk(double v, const char *what) {
   if (v != v) return true; /* absent */
-  char numbuf[40];
+  char numbuf[SCR_FS_NUMBUF];
   char msg[160];
   int len;
   if (!isfinite(v) || v != floor(v)) {
-    numbuf[scr_f64_to_str(v, numbuf)] = 0;
+    scr_fs_num(v, numbuf);
     len = snprintf(msg, sizeof msg,
                    "The value of \"%s\" is out of range. It must be an integer. Received %s",
                    what, numbuf);
@@ -3380,7 +3404,7 @@ static bool scr_fs_opt_int_chk(double v, const char *what) {
     return false;
   }
   if (v < 0 || v > 9007199254740991.0) {
-    numbuf[scr_f64_to_str(v, numbuf)] = 0;
+    scr_fs_num(v, numbuf);
     len = snprintf(msg, sizeof msg,
                    "The value of \"%s\" is out of range. It must be >= 0 && <= 9007199254740991. Received %s",
                    what, numbuf);
@@ -3393,8 +3417,8 @@ static bool scr_fs_opt_int_chk(double v, const char *what) {
 static bool scr_fs_opt_prop_chk(double v, const char *what, double hi) {
   if (v != v) return true; /* absent */
   if (isfinite(v) && v == floor(v) && v >= 0 && v <= hi) return true;
-  char numbuf[40];
-  numbuf[scr_f64_to_str(v, numbuf)] = 0;
+  char numbuf[SCR_FS_NUMBUF];
+  scr_fs_num(v, numbuf);
   char msg[160];
   int len = snprintf(msg, sizeof msg, "The property 'options.%s' is invalid. Received %s", what, numbuf);
   scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)(len < 0 ? 0 : len), "ERR_INVALID_ARG_VALUE");
@@ -3405,9 +3429,9 @@ static bool scr_fs_opts_validate(const ScrFsStreamOpts *o) {
   if (!scr_fs_opt_int_chk(o->start, "start")) return false;
   if (!scr_fs_opt_int_chk(o->end, "end")) return false;
   if (o->start == o->start && o->end == o->end && o->start > o->end) {
-    char sb[40], eb[40];
-    sb[scr_f64_to_str(o->start, sb)] = 0;
-    eb[scr_f64_to_str(o->end, eb)] = 0;
+    char sb[SCR_FS_NUMBUF], eb[SCR_FS_NUMBUF];
+    scr_fs_num(o->start, sb);
+    scr_fs_num(o->end, eb);
     char msg[160];
     int len = snprintf(msg, sizeof msg,
                        "The value of \"start\" is out of range. It must be <= \"end\" (here: %s). Received %s",
@@ -3482,8 +3506,13 @@ static ScrStream *scr_fs_stream_new_opts(ScrStr *path, bool writable, const ScrF
   return s;
 }
 
+/* Every numeric member is NaN — the ONE spelling of "absent". It was -1
+ * for the mode member in the first draft, which the new validator (correctly)
+ * rejects as out of range, so the PATH-ONLY createReadStream(path) threw
+ * ERR_INVALID_ARG_VALUE. Corpus 3391/3392/3393 caught it; no census would
+ * have. One sentinel, not two. */
 static const ScrFsStreamOpts scr_fs_stream_defaults = {
-  NULL, NULL, 0.0 / 0.0, 0.0 / 0.0, 0.0 / 0.0, -1, true, true,
+  NULL, NULL, 0.0 / 0.0, 0.0 / 0.0, 0.0 / 0.0, 0.0 / 0.0, true, true,
 };
 
 ScrStream *scr_fs_read_stream(ScrStr *path) {
