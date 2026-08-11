@@ -50,6 +50,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -60,11 +61,31 @@
 #include <unistd.h>
 #endif
 
+/* The `start` option seeks to a byte offset Node validates up to 2^53-1,
+ * so the seek must be 64-bit: mingw's off_t is 32 bits unless
+ * _FILE_OFFSET_BITS is set, and a silent truncation there is exactly the
+ * off-by-a-lot this option must not have. */
+#ifdef _WIN32
+#define SCR_LSEEK(fd, off) _lseeki64((fd), (__int64)(off), SEEK_SET)
+#define SCR_LSEEK_BAD ((__int64)-1)
+#else
+#define SCR_LSEEK(fd, off) lseek((fd), (off_t)(off), SEEK_SET)
+#define SCR_LSEEK_BAD ((off_t)-1)
+#endif
+
 /* O_BINARY: Windows-only (CRT text mode would translate \n on fd writes);
  * zero elsewhere so the POSIX open flags are unchanged — scr_lib.c's
  * spelling, for the fs-backed streams at the end of this file. */
 #ifndef O_BINARY
 #define O_BINARY 0
+#endif
+
+/* The "rs"/"sa" flag spellings: the Windows CRT has no O_SYNC, and
+ * scr_lib.c's openSync degrades it to a non-sync open for exactly the
+ * same reason (the difference is durability, not observable output).
+ * Spelled #ifndef here so a platform that HAS it keeps it. */
+#ifndef O_SYNC
+#define O_SYNC 0
 #endif
 
 /* Node v24's stream default (lib/internal/streams/state.js — 64 KiB
@@ -2976,6 +2997,7 @@ static void scr_stream_emit_readable_now(ScrStream *s) {
 
 typedef struct ScrFsBacking {
   int fd;
+  int oflags;      /* the resolved open(2) flags (the `flags` option) */
   bool writable;   /* a sink (createWriteStream) rather than a source */
   bool open_queued;/* the open(2) immediate is still to run */
   bool opened;     /* fd is valid */
@@ -2983,8 +3005,15 @@ typedef struct ScrFsBacking {
   bool closed;     /* fd already returned to the OS */
   bool auto_close;
   bool want_read;  /* a _read arrived before the open landed */
+  bool flags_bad;  /* the flags string is not one of Node's spellings */
+  bool has_start;  /* the `start` option was given */
+  bool bounded;    /* the `end` option was given (INCLUSIVE, Node's rule) */
+  double start;    /* first byte offset; the open lseek(2)s to it */
+  double remaining;/* bytes the `end` bound still allows (bounded only) */
   ScrBytes *pend;  /* owned: the chunk the deferred write will emit */
   ScrStr *path;    /* owned (error messages) */
+  ScrStr *flags;   /* owned: the flags spelling, for the ERR_INVALID_ARG_VALUE */
+  double mode;     /* creation mode; 0666 unless the `mode` option gave one */
   double bytes;    /* bytesRead / bytesWritten */
 } ScrFsBacking;
 
@@ -3017,11 +3046,57 @@ static ScrError *scr_fs_error(int e, const char *op, const ScrStr *path) {
   return err;
 }
 
+/* Node's string-flag grammar for the `flags` option. This is the SIBLING
+ * of scr_fs_open's ladder in scr_lib.c, and it is a second copy on
+ * purpose: scr_lib.c is the ALWAYS-LINKED unit, and the last time a
+ * shared out-of-line helper was carved out of that file it stopped
+ * inlining into scr_fs_throw and grew EVERY binary in the world by 2 048
+ * bytes (estado-fsstream.md §8.2). One copy here costs a stream-free
+ * program nothing. Corpus 3391 drives every spelling through BOTH entry
+ * points (openSync and createWriteStream) and compares the resulting file
+ * bytes, so the two ladders cannot drift apart unnoticed. */
+static bool scr_fs_stream_flags(const char *f, int *out) {
+  int of;
+  if (strcmp(f, "r") == 0) of = O_RDONLY;
+  else if (strcmp(f, "rs") == 0 || strcmp(f, "sr") == 0) of = O_RDONLY | O_SYNC;
+  else if (strcmp(f, "r+") == 0) of = O_RDWR;
+  else if (strcmp(f, "rs+") == 0 || strcmp(f, "sr+") == 0) of = O_RDWR | O_SYNC;
+  else if (strcmp(f, "w") == 0) of = O_TRUNC | O_CREAT | O_WRONLY;
+  else if (strcmp(f, "wx") == 0 || strcmp(f, "xw") == 0) of = O_TRUNC | O_CREAT | O_WRONLY | O_EXCL;
+  else if (strcmp(f, "w+") == 0) of = O_TRUNC | O_CREAT | O_RDWR;
+  else if (strcmp(f, "wx+") == 0 || strcmp(f, "xw+") == 0) of = O_TRUNC | O_CREAT | O_RDWR | O_EXCL;
+  else if (strcmp(f, "a") == 0) of = O_APPEND | O_CREAT | O_WRONLY;
+  else if (strcmp(f, "ax") == 0 || strcmp(f, "xa") == 0) of = O_APPEND | O_CREAT | O_WRONLY | O_EXCL;
+  else if (strcmp(f, "as") == 0 || strcmp(f, "sa") == 0) of = O_APPEND | O_CREAT | O_WRONLY | O_SYNC;
+  else if (strcmp(f, "a+") == 0) of = O_APPEND | O_CREAT | O_RDWR;
+  else if (strcmp(f, "ax+") == 0 || strcmp(f, "xa+") == 0) of = O_APPEND | O_CREAT | O_RDWR | O_EXCL;
+  else if (strcmp(f, "as+") == 0 || strcmp(f, "sa+") == 0) of = O_APPEND | O_CREAT | O_RDWR | O_SYNC;
+  else return false;
+  *out = of;
+  return true;
+}
+
+/* An unknown `flags` spelling is an ERR_INVALID_ARG_VALUE delivered as an
+ * 'error' EVENT, not a throw at the createWriteStream call — measured
+ * against Node v25.9.0, which only converts the string inside open(). */
+static ScrError *scr_fs_flags_error(const ScrStr *flags) {
+  char msg[192];
+  int len = snprintf(msg, sizeof msg, "The argument 'flags' is invalid. Received '%s'", flags->data);
+  if (len < 0) len = 0;
+  if ((size_t)len >= sizeof msg) len = (int)sizeof msg - 1;
+  ScrStr *m = scr_str_new(msg, (size_t)len);
+  ScrError *err = scr_error_new(SCR_ERR_TYPE, m);
+  scr_str_release(m);
+  scr_error_set_code(err, "ERR_INVALID_ARG_VALUE");
+  return err;
+}
+
 static void scr_fs_backing_drop(ScrFsBacking *fb) {
   if (fb == NULL) return;
   if (fb->opened && !fb->closed) close(fb->fd);
   if (fb->pend) scr_bytes_release(fb->pend);
   if (fb->path) scr_str_release(fb->path);
+  if (fb->flags) scr_str_release(fb->flags);
   free(fb);
 }
 
@@ -3031,13 +3106,30 @@ static void scr_fs_stream_do_read(ScrStream *s) {
   ScrStreamState *st = s->st;
   ScrFsBacking *fb = st->fs;
   if (fb == NULL || !fb->opened || fb->closed || st->destroyed || st->r.ended) return;
-  size_t want = st->r.hwm > 0 ? st->r.hwm : SCR_STREAM_DEFAULT_HWM;
+  /* st->r.hwm is the RESOLVED mark: scr_stream_alloc turned the -1
+   * "unset" sentinel into the platform default already, so an explicit
+   * `highWaterMark: 0` survives as 0 here and must stay 0 — Node answers
+   * such a stream with no 'data' at all (measured), which a >0 guard
+   * would silently turn into "read the whole file". */
+  size_t want = st->r.hwm;
   /* read(2)'s count is an unsigned int on the CRT. hwm is normally 64 KiB,
    * but read(n) GROWS it to the next power of two above n (Node's
    * howMuchToRead), so a read(5e9) could otherwise truncate the cast to
    * zero and report a spurious EOF. Cap the per-turn request instead —
    * a short read is not EOF, so the engine simply asks again. */
   if (want > ((size_t)1 << 26)) want = (size_t)1 << 26;
+  /* `end` is INCLUSIVE and is a BYTE BOUND, not a hint: Node computes
+   * min(end - pos + 1, n) per _read and pushes null the moment that is
+   * <= 0, WITHOUT a further read(2). Getting this off by one is the
+   * quiet wrong answer this option is worth fencing over, so the bound
+   * is spent against bytes actually delivered, never against the request. */
+  if (fb->bounded) {
+    if (fb->remaining <= 0) {
+      scr_stream_push_null(s);
+      return;
+    }
+    if ((double)want > fb->remaining) want = (size_t)fb->remaining;
+  }
   ScrBytes *buf = scr_bytes_new(SCR_BYTES_U8, (double)want);
   if (buf == NULL) return; /* the RangeError rides the cell */
   ptrdiff_t n;
@@ -3057,6 +3149,7 @@ static void scr_fs_stream_do_read(ScrStream *s) {
     return;
   }
   fb->bytes += (double)n;
+  if (fb->bounded) fb->remaining -= (double)n;
   ScrBytes *chunk = (size_t)n == want ? buf : scr_bytes_slice(buf, 0, (double)n);
   scr_stream_push(s, scr_bytes_stamp_buffer(chunk)); /* borrows */
   if (chunk != buf) scr_bytes_release(chunk);
@@ -3153,14 +3246,30 @@ static void scr_fs_stream_imm_open(ScrClosure *c) {
     scr_stream_release(s);
     return;
   }
-  int flags = fb->writable ? (O_WRONLY | O_CREAT | O_TRUNC) : O_RDONLY;
-  int fd;
-  do {
-    fd = open(fb->path->data, flags | O_BINARY, 0666);
-  } while (fd < 0 && errno == EINTR);
+  int fd = -1;
+  /* Node converts the flags string inside open(), so a bad spelling is
+   * an 'error' event on this turn's completion, exactly like an ENOENT. */
+  if (!fb->flags_bad) {
+    do {
+      fd = open(fb->path->data, fb->oflags | O_BINARY, (int)fb->mode);
+    } while (fd < 0 && errno == EINTR);
+  }
+  if (fd >= 0 && fb->has_start) {
+    /* `start` is a SEEK, not a skip: the write side must land its first
+     * byte at that offset (Node pwrite()s there, and with the default
+     * 'w' flags the file is truncated first, so the gap reads as zeros),
+     * and O_APPEND correctly overrides it on the append flags. */
+    if (SCR_LSEEK(fd, fb->start) == SCR_LSEEK_BAD) {
+      int se = errno;
+      close(fd);
+      fd = -1;
+      errno = se;
+    }
+  }
   if (fd < 0) {
     fb->failed = true;
-    ScrError *e = scr_fs_error(errno, "open", fb->path);
+    ScrError *e = fb->flags_bad ? scr_fs_flags_error(fb->flags)
+                                : scr_fs_error(errno, "open", fb->path);
     if (fb->pend != NULL) {
       scr_bytes_release(fb->pend);
       fb->pend = NULL;
@@ -3176,6 +3285,16 @@ static void scr_fs_stream_imm_open(ScrClosure *c) {
   }
   fb->fd = fd;
   fb->opened = true;
+  /* `highWaterMark: 0`: Node answers such a ReadStream with NO 'data' at
+   * all and ends it (measured — howMuchToRead returns 0 forever). The
+   * engine never asks for a _read in that state either, so the EOF has to
+   * be pushed here or the stream would simply never finish. */
+  if (!fb->writable && st->has_r && st->r.hwm == 0) {
+    fb->want_read = false;
+    scr_fs_stream_schedule(s, &scr_fs_stream_imm_read);
+    scr_stream_release(s);
+    return;
+  }
   if (fb->want_read) {
     fb->want_read = false;
     scr_fs_stream_schedule(s, &scr_fs_stream_imm_read);
@@ -3215,7 +3334,12 @@ static void scr_fs_stream_destroy_inv(ScrClosure *cb, ScrStream *s, ScrError *er
       scr_bytes_release(fb->pend);
       fb->pend = NULL;
     }
-    if (fb->opened && !fb->closed && fb->auto_close) {
+    /* autoClose is Node's autoDestroy and NOTHING else: with
+     * `autoClose: false` the stream does not destroy itself after
+     * 'end'/'finish' (so no 'close' and the fd survives), but an
+     * EXPLICIT destroy()/close() still returns the fd — measured against
+     * Node v25.9.0, which closes it in both modes once _destroy runs. */
+    if (fb->opened && !fb->closed) {
       fb->closed = true;
       if (close(fb->fd) != 0 && out == NULL) out = scr_fs_error(errno, "close", fb->path);
     }
@@ -3223,21 +3347,100 @@ static void scr_fs_stream_destroy_inv(ScrClosure *cb, ScrStream *s, ScrError *er
   scr_stream_destroy_done(s, out); /* moves */
 }
 
+/* The option surface. Absent is a SENTINEL per member so the emitted call
+ * is one fixed shape: NaN for start/end, a negative hwm/mode, an empty
+ * flags/encoding string. The compiler only ever fills these from an
+ * options OBJECT LITERAL whose every key it recognised, so "absent" here
+ * really means the program did not write the key. */
+typedef struct ScrFsStreamOpts {
+  ScrStr *flags;   /* borrowed; NULL or empty = the side's default */
+  ScrStr *enc;     /* borrowed; NULL or empty = none */
+  double start;
+  double end;      /* INCLUSIVE */
+  double hwm;
+  double mode;
+  bool auto_close;
+  bool emit_close;
+} ScrFsStreamOpts;
+
+/* Node validates start/end/highWaterMark/mode SYNCHRONOUSLY in the
+ * constructor and throws — unlike flags and the open itself, which are
+ * events. These reproduce the exact texts (measured against v25.9.0). */
+static bool scr_fs_opt_int_chk(double v, const char *what) {
+  if (v != v) return true; /* absent */
+  char numbuf[40];
+  char msg[160];
+  int len;
+  if (!isfinite(v) || v != floor(v)) {
+    numbuf[scr_f64_to_str(v, numbuf)] = 0;
+    len = snprintf(msg, sizeof msg,
+                   "The value of \"%s\" is out of range. It must be an integer. Received %s",
+                   what, numbuf);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)(len < 0 ? 0 : len), "ERR_OUT_OF_RANGE");
+    return false;
+  }
+  if (v < 0 || v > 9007199254740991.0) {
+    numbuf[scr_f64_to_str(v, numbuf)] = 0;
+    len = snprintf(msg, sizeof msg,
+                   "The value of \"%s\" is out of range. It must be >= 0 && <= 9007199254740991. Received %s",
+                   what, numbuf);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)(len < 0 ? 0 : len), "ERR_OUT_OF_RANGE");
+    return false;
+  }
+  return true;
+}
+
+static bool scr_fs_opt_prop_chk(double v, const char *what, double hi) {
+  if (v != v) return true; /* absent */
+  if (isfinite(v) && v == floor(v) && v >= 0 && v <= hi) return true;
+  char numbuf[40];
+  numbuf[scr_f64_to_str(v, numbuf)] = 0;
+  char msg[160];
+  int len = snprintf(msg, sizeof msg, "The property 'options.%s' is invalid. Received %s", what, numbuf);
+  scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)(len < 0 ? 0 : len), "ERR_INVALID_ARG_VALUE");
+  return false;
+}
+
+static bool scr_fs_opts_validate(const ScrFsStreamOpts *o) {
+  if (!scr_fs_opt_int_chk(o->start, "start")) return false;
+  if (!scr_fs_opt_int_chk(o->end, "end")) return false;
+  if (o->start == o->start && o->end == o->end && o->start > o->end) {
+    char sb[40], eb[40];
+    sb[scr_f64_to_str(o->start, sb)] = 0;
+    eb[scr_f64_to_str(o->end, eb)] = 0;
+    char msg[160];
+    int len = snprintf(msg, sizeof msg,
+                       "The value of \"start\" is out of range. It must be <= \"end\" (here: %s). Received %s",
+                       eb, sb);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)(len < 0 ? 0 : len), "ERR_OUT_OF_RANGE");
+    return false;
+  }
+  if (!scr_fs_opt_prop_chk(o->hwm, "highWaterMark", 2147483647.0)) return false;
+  if (!scr_fs_opt_prop_chk(o->mode, "mode", 4294967295.0)) return false;
+  return true;
+}
+
 /* The two constructors. `path` is BORROWED; the result is +1. An open(2)
  * failure answers a live, already-destroying stream whose 'error' rides
  * the tick queue — never a throw at this call. */
-static ScrStream *scr_fs_stream_new(ScrStr *path, bool writable) {
+static ScrStream *scr_fs_stream_new_opts(ScrStr *path, bool writable, const ScrFsStreamOpts *o) {
   /* ReadStream's highWaterMark is 64 KiB on EVERY platform (Node's
    * lib/internal/fs/streams.js sets it explicitly), unlike the shared
    * stream default, which is 16 KiB on win32 — measured against Node
    * v25.9.0 here: getDefaultHighWaterMark(false) 16384, a ReadStream
    * 65536, a WriteStream 16384. The write side takes the shared default
    * (-1), which is exactly that platform value. */
+  if (!scr_fs_opts_validate(o)) return NULL; /* the throw rides the cell */
+  /* autoClose is Node's autoDestroy: false leaves the stream undestroyed
+   * after 'end'/'finish' (no 'close', fd still open) until someone calls
+   * destroy() or close(). */
+  double rhwm = o->hwm == o->hwm ? o->hwm : 65536;
+  double whwm = o->hwm == o->hwm ? o->hwm : -1;
   ScrStream *s = writable
-                     ? scr_stream_new_writable(-1, true, true, scr_fs_stream_marker(),
+                     ? scr_stream_new_writable(whwm, o->auto_close, o->emit_close, scr_fs_stream_marker(),
                                                &scr_fs_stream_write_inv, NULL, NULL,
                                                scr_fs_stream_marker(), &scr_fs_stream_destroy_inv)
-                     : scr_stream_new_readable(65536, true, true, scr_fs_stream_marker(),
+                     : scr_stream_new_readable(rhwm, o->auto_close, o->emit_close, scr_fs_stream_marker(),
                                                &scr_fs_stream_read_inv, scr_fs_stream_marker(),
                                                &scr_fs_stream_destroy_inv);
   s->cls = writable ? "WriteStream" : "ReadStream";
@@ -3245,16 +3448,67 @@ static ScrStream *scr_fs_stream_new(ScrStr *path, bool writable) {
   if (!fb) scr_stream_oom();
   fb->fd = -1;
   fb->writable = writable;
-  fb->auto_close = true;
+  fb->auto_close = o->auto_close;
   fb->open_queued = true;
   fb->path = scr_str_retain(path);
+  fb->mode = o->mode == o->mode && o->mode >= 0 ? o->mode : 0666;
+  if (o->flags != NULL && o->flags->len > 0) {
+    fb->flags = scr_str_retain(o->flags);
+    if (!scr_fs_stream_flags(o->flags->data, &fb->oflags)) fb->flags_bad = true;
+  } else {
+    fb->oflags = writable ? (O_WRONLY | O_CREAT | O_TRUNC) : O_RDONLY;
+  }
+  if (o->start == o->start) {
+    fb->has_start = true;
+    fb->start = o->start;
+  }
+  if (o->end == o->end) {
+    fb->bounded = true;
+    /* `end` is INCLUSIVE and counts from `start` (0 when absent), so the
+     * budget is end - start + 1 — the off-by-one that a census would
+     * never see. Node clamps a negative budget to nothing rather than
+     * reading backwards; start > end already threw above. */
+    fb->remaining = o->end - (fb->has_start ? o->start : 0) + 1;
+    if (fb->remaining < 0) fb->remaining = 0;
+  }
   s->st->fs = fb;
+  if (o->enc != NULL && o->enc->len > 0 && !writable) {
+    /* Node's own ReadStream does exactly this: `if (options.encoding)
+     * this.setEncoding(options.encoding)`. The helper answers the
+     * receiver +1. */
+    scr_stream_release(scr_stream_set_encoding(s, o->enc));
+  }
   scr_fs_stream_schedule(s, &scr_fs_stream_imm_open);
   return s;
 }
 
-ScrStream *scr_fs_read_stream(ScrStr *path) { return scr_fs_stream_new(path, false); }
-ScrStream *scr_fs_write_stream(ScrStr *path) { return scr_fs_stream_new(path, true); }
+static const ScrFsStreamOpts scr_fs_stream_defaults = {
+  NULL, NULL, 0.0 / 0.0, 0.0 / 0.0, 0.0 / 0.0, -1, true, true,
+};
+
+ScrStream *scr_fs_read_stream(ScrStr *path) {
+  return scr_fs_stream_new_opts(path, false, &scr_fs_stream_defaults);
+}
+ScrStream *scr_fs_write_stream(ScrStr *path) {
+  return scr_fs_stream_new_opts(path, true, &scr_fs_stream_defaults);
+}
+
+/* The options forms. Every member arrives already folded by the lowering
+ * (an options OBJECT LITERAL whose keys were all recognised); the
+ * sentinels above spell "the program did not write this key". */
+ScrStream *scr_fs_read_stream_opts(ScrStr *path, ScrStr *flags, ScrStr *enc,
+                                   double start, double end, double hwm, double mode,
+                                   bool auto_close, bool emit_close) {
+  ScrFsStreamOpts o = { flags, enc, start, end, hwm, mode, auto_close, emit_close };
+  return scr_fs_stream_new_opts(path, false, &o);
+}
+
+ScrStream *scr_fs_write_stream_opts(ScrStr *path, ScrStr *flags, ScrStr *enc,
+                                    double start, double end, double hwm, double mode,
+                                    bool auto_close, bool emit_close) {
+  ScrFsStreamOpts o = { flags, enc, start, end, hwm, mode, auto_close, emit_close };
+  return scr_fs_stream_new_opts(path, true, &o);
+}
 
 /* ── tick dispatch ────────────────────────────────────────────────────── */
 

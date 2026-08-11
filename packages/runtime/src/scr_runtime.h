@@ -1800,6 +1800,12 @@ void scr_stream_flush_done(ScrStream *s, ScrError *err, ScrBytes *data, ScrStr *
  * passes them. */
 ScrStream *scr_fs_read_stream(ScrStr *path);
 ScrStream *scr_fs_write_stream(ScrStr *path);
+ScrStream *scr_fs_read_stream_opts(ScrStr *path, ScrStr *flags, ScrStr *enc,
+                                   double start, double end, double hwm, double mode,
+                                   bool auto_close, bool emit_close);
+ScrStream *scr_fs_write_stream_opts(ScrStr *path, ScrStr *flags, ScrStr *enc,
+                                    double start, double end, double hwm, double mode,
+                                    bool auto_close, bool emit_close);
 
 /* RC / trace / install (the emitter-unit shapes). */
 ScrStream *scr_stream_retain(ScrStream *s);
