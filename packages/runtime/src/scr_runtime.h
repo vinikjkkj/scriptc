@@ -1792,9 +1792,9 @@ void scr_stream_flush_done(ScrStream *s, ScrError *err, ScrBytes *data, ScrStr *
  * throw at this call) and the writable side really accumulates past its
  * highWaterMark. autoClose is on: _destroy closes the fd, and so does
  * the state drop if the value is released without ever being destroyed.
- * The OPEN itself is eager (SEMANTICS.md's fs-stream divergence: the file
- * is created/truncated on the calling turn, the failure still lands
- * asynchronously). Path BORROWED; result +1. Options (start/end/encoding/
+ * The open(2) is deferred the same way, so a file is neither created nor
+ * truncated on the calling turn (`createWriteStream(p); existsSync(p)` is
+ * false in Node and false here). Path BORROWED; result +1. Options (start/end/encoding/
  * highWaterMark/flags/fd/autoClose) are NOT part of this surface — the
  * compiler keeps its argument-validation fence for every call that
  * passes them. */

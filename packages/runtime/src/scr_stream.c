@@ -366,8 +366,6 @@ typedef enum {
   SCR_ST_NEXT_EOF,      /* a parked for-await's EOF sentinel, AFTER 'end' */
   SCR_ST_FIN,           /* notify finished()/pipeline watchers (already-
                          * terminal registration) */
-  SCR_ST_FS_READ,       /* an fs-backed readable's deferred read(2) */
-  SCR_ST_FS_WRITE,      /* an fs-backed writable's deferred write(2) */
 } ScrStreamTickOp;
 
 typedef struct ScrStreamTick {
@@ -2958,9 +2956,11 @@ static void scr_stream_emit_readable_now(ScrStream *s) {
  *   - _write completes on a later turn, so the writable side actually
  *     accumulates and write() answers false past the highWaterMark —
  *     backpressure asserts instead of being silently free.
- * The open(2) itself happens eagerly at the constructor (the divergence
- * SEMANTICS.md records: the file is created/truncated on the calling
- * turn rather than the next one — the FAILURE still surfaces asynchronously).
+ * The open(2) is deferred the same way, so a file is neither created nor
+ * truncated on the calling turn: `createWriteStream(p); existsSync(p)`
+ * answers false in Node, and answers false here. A successful open then
+ * queues the first read from INSIDE the check phase, which the phase's
+ * end snapshot defers to the next turn — Node's second round trip.
  *
  * SHORT READS ARE NOT EOF. read(2) returning fewer bytes than asked
  * pushes exactly what arrived; only a 0-byte read is EOF (push(null)).
@@ -2975,12 +2975,16 @@ static void scr_stream_emit_readable_now(ScrStream *s) {
 
 typedef struct ScrFsBacking {
   int fd;
-  bool opened; /* fd is valid */
-  bool closed; /* fd already returned to the OS */
+  bool writable;   /* a sink (createWriteStream) rather than a source */
+  bool open_queued;/* the open(2) immediate is still to run */
+  bool opened;     /* fd is valid */
+  bool failed;     /* the open(2) failed; the stream is already erroring */
+  bool closed;     /* fd already returned to the OS */
   bool auto_close;
-  ScrBytes *pend; /* owned: the chunk the deferred write will emit */
-  ScrStr *path;   /* owned (error messages) */
-  double bytes;   /* bytesRead / bytesWritten */
+  bool want_read;  /* a _read arrived before the open landed */
+  ScrBytes *pend;  /* owned: the chunk the deferred write will emit */
+  ScrStr *path;    /* owned (error messages) */
+  double bytes;    /* bytesRead / bytesWritten */
 } ScrFsBacking;
 
 static void scr_fs_backing_drop(ScrFsBacking *fb) {
@@ -3061,12 +3065,97 @@ static ScrClosure *scr_fs_stream_marker(void) {
   return scr_closure_new((void *)&scr_fs_stream_noop_clo, 0);
 }
 
+/* Scheduling: the CHECK phase (setImmediate's queue), not the tick
+ * queue. Node's fs streams run their syscalls on the threadpool and the
+ * completion is delivered in the poll phase, so a read that a turn's
+ * synchronous body started lands AFTER that turn's due timers and
+ * immediates. An immediate reproduces exactly that placement -- measured
+ * against Node v25.9.0 with a createReadStream, a process.nextTick, a
+ * resolved promise, a setTimeout(0) and a setImmediate all queued in one
+ * body: both give `sync micro tick timeout immediate data end close`.
+ * The tick queue would have delivered `data` before either. It also
+ * keeps the loop alive while a read is outstanding, which is what an
+ * in-flight fs request does in Node. */
+static void scr_fs_stream_imm_read(ScrClosure *c) {
+  ScrStream *s = scr_box_get_ref(c->caps[0]); /* +1 */
+  scr_fs_stream_do_read(s);
+  scr_stream_release(s);
+}
+
+static void scr_fs_stream_imm_write(ScrClosure *c) {
+  ScrStream *s = scr_box_get_ref(c->caps[0]); /* +1 */
+  scr_fs_stream_do_write(s);
+  scr_stream_release(s);
+}
+
+static void scr_fs_stream_schedule(ScrStream *s, void (*fn)(ScrClosure *)) {
+  ScrClosure *c = scr_closure_new((void *)fn, 1);
+  c->caps[0] = scr_box_new_obj(&scr_stream_retain_v, &scr_stream_release_v, &scr_stream_trace);
+  scr_box_set_ref(c->caps[0], scr_stream_retain(s));
+  scr_set_immediate(c); /* ownership moves */
+}
+
+/* The deferred open(2). Node opens on the threadpool too, so nothing
+ * about a file's creation or its failure happens on the calling turn:
+ * `createWriteStream(p); existsSync(p)` answers FALSE in Node, and it
+ * answers false here. A successful open then QUEUES the first read from
+ * inside the check phase, which the phase's end snapshot defers to the
+ * next turn -- Node's second round trip, and what puts a same-body
+ * setTimeout(0) ahead of the first 'data'. */
+static void scr_fs_stream_imm_open(ScrClosure *c) {
+  ScrStream *s = scr_box_get_ref(c->caps[0]); /* +1 */
+  ScrStreamState *st = s->st;
+  ScrFsBacking *fb = st->fs;
+  if (fb == NULL || !fb->open_queued) {
+    scr_stream_release(s);
+    return;
+  }
+  fb->open_queued = false;
+  if (st->destroyed) {
+    scr_stream_release(s);
+    return;
+  }
+  int flags = fb->writable ? (O_WRONLY | O_CREAT | O_TRUNC) : O_RDONLY;
+  int fd;
+  do {
+    fd = open(fb->path->data, flags | O_BINARY, 0666);
+  } while (fd < 0 && errno == EINTR);
+  if (fd < 0) {
+    fb->failed = true;
+    ScrError *e = scr_fs_error(errno, "open", fb->path);
+    if (fb->pend != NULL) {
+      scr_bytes_release(fb->pend);
+      fb->pend = NULL;
+    }
+    if (st->w.writing) {
+      scr_stream_write_done(s, e); /* moves; fails the in-flight write, then errors */
+    } else {
+      scr_stream_error_or_destroy(s, e);
+      scr_error_release(e);
+    }
+    scr_stream_release(s);
+    return;
+  }
+  fb->fd = fd;
+  fb->opened = true;
+  if (fb->want_read) {
+    fb->want_read = false;
+    scr_fs_stream_schedule(s, &scr_fs_stream_imm_read);
+  }
+  if (fb->pend != NULL) scr_fs_stream_schedule(s, &scr_fs_stream_imm_write);
+  scr_stream_release(s);
+}
+
 static void scr_fs_stream_read_inv(ScrClosure *cb, ScrStream *s, double size) {
   (void)cb;
   (void)size;
   ScrFsBacking *fb = s->st->fs;
-  if (fb == NULL || !fb->opened || fb->closed) return; /* open failed: destroy owns it */
-  scr_st_tick(s, SCR_ST_FS_READ, NULL, NULL);
+  if (fb == NULL || fb->closed || fb->failed) return; /* the error path owns it */
+  if (!fb->opened) {
+    fb->want_read = true; /* the open completion kicks the read */
+    return;
+  }
+  scr_fs_stream_schedule(s, &scr_fs_stream_imm_read);
 }
 
 static void scr_fs_stream_write_inv(ScrClosure *cb, ScrStream *s, ScrBytes *chunk) {
@@ -3075,7 +3164,8 @@ static void scr_fs_stream_write_inv(ScrClosure *cb, ScrStream *s, ScrBytes *chun
   if (fb == NULL) return;
   if (fb->pend) scr_bytes_release(fb->pend);
   fb->pend = scr_bytes_retain(chunk); /* the engine's chunk is borrowed here */
-  scr_st_tick(s, SCR_ST_FS_WRITE, NULL, NULL);
+  if (!fb->opened) return; /* the open completion kicks the write */
+  scr_fs_stream_schedule(s, &scr_fs_stream_imm_write);
 }
 
 static void scr_fs_stream_destroy_inv(ScrClosure *cb, ScrStream *s, ScrError *err /*borrowed*/) {
@@ -3116,22 +3206,12 @@ static ScrStream *scr_fs_stream_new(ScrStr *path, bool writable) {
   ScrFsBacking *fb = calloc(1, sizeof *fb);
   if (!fb) scr_stream_oom();
   fb->fd = -1;
+  fb->writable = writable;
   fb->auto_close = true;
+  fb->open_queued = true;
   fb->path = scr_str_retain(path);
   s->st->fs = fb;
-  int flags = writable ? (O_WRONLY | O_CREAT | O_TRUNC) : O_RDONLY;
-  int fd;
-  do {
-    fd = open(path->data, flags | O_BINARY, 0666);
-  } while (fd < 0 && errno == EINTR);
-  if (fd < 0) {
-    ScrError *e = scr_fs_error(errno, "open", path);
-    scr_stream_release(scr_stream_destroy(s, e));
-    scr_error_release(e);
-    return s;
-  }
-  fb->fd = fd;
-  fb->opened = true;
+  scr_fs_stream_schedule(s, &scr_fs_stream_imm_open);
   return s;
 }
 
@@ -3302,12 +3382,6 @@ static void scr_stream_run_tick(ScrStreamTick *t) {
       }
       break;
     }
-    case SCR_ST_FS_READ:
-      scr_fs_stream_do_read(s);
-      break;
-    case SCR_ST_FS_WRITE:
-      scr_fs_stream_do_write(s);
-      break;
   }
 }
 
