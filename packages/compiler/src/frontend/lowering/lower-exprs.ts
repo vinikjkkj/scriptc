@@ -9970,8 +9970,20 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           // what made a dedup map never evict its settled entries. A
           // comparison that cannot be answered by identity is not answered
           // at all: this falls through to the narrow-first fence below.
+          // ...and a PROMISE whose payload converts is identity-preserving
+          // again, because the converting adapter is memoised on the
+          // source: the same source always reaches the slot as the same
+          // object, which is exactly what JS's identity-preserving
+          // assignment means here. The predicate mirrors the one path
+          // coerceToExpected would take (one promise arm, payload
+          // adaptable) rather than guessing -- if it declined, the value
+          // would not reach the union at all and the fence below is still
+          // the right answer.
+          const plainT = left.type.kind === "union" ? right.type : left.type;
           const plainSideWraps =
-            bothUnion || L.armTag(ut.unionId, left.type.kind === "union" ? right.type : left.type) >= 0;
+            bothUnion ||
+            L.armTag(ut.unionId, plainT) >= 0 ||
+            L.promiseArmFor(plainT, ut) !== null;
           if ((sameUnion || !bothUnion) && plainSideWraps && L.eqComparableUnion(ut.unionId)) {
             return {
               kind: "unionEq",
