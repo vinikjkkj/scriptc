@@ -29,11 +29,13 @@ class PromiseDedup {
       .then(() => task())
       .finally(() => {
         // zapo guards this with `if (this.inFlight.get(key) === created)`.
-        // That comparison cannot be written here: the map slot holds the
-        // promise through a PAYLOAD conversion, so the two sides are
-        // different objects and scriptc fences the comparison rather than
-        // answering false. The unguarded delete is the same eviction for a
-        // single writer per key, which is what this file exercises.
+        // That comparison DOES compile now — the payload conversion is
+        // memoised on its source, so both sides are the same object — and
+        // 3402 is the file that pins it, at five instantiations with the
+        // task-call counts. This one deliberately keeps the UNGUARDED
+        // delete: it is the same eviction for a single writer per key, and
+        // leaving it here keeps a second shape of the idiom under the
+        // oracle instead of two copies of one.
         this.inFlight.delete(key);
       });
     this.inFlight.set(key, created);
