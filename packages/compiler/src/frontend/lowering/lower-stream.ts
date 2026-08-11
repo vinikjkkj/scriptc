@@ -39,6 +39,55 @@ import { BOOL, DYN, F64, IrExpr, IrFunction, IrLibFn, IrStmt, IrType, RUNTIME_ST
 
 const BYTES = bytesOf("u8");
 
+/** `x instanceof Writable` — NODE's answer, not the prototype chain's.
+ *
+ * Node installs `Writable[Symbol.hasInstance]`: true for a real Writable
+ * descendant, and ALSO true when the target is `Writable` ITSELF and the
+ * object carries a `_writableState`. That second clause is why
+ * `new PassThrough() instanceof Writable` is `true` even though
+ * `Duplex.prototype`'s chain runs through `Readable.prototype` (measured,
+ * Node v25.9.0 — and `new Readable(...) instanceof Writable` is `false`,
+ * so the clause is not "any stream").
+ *
+ * In this IR the second clause is exactly membership of `%Duplex`'s
+ * preorder interval — the rw-sided subtree, the same set
+ * streamDuplexWidensToWritable admits into a `%Writable` slot. So the test
+ * is the OR of two COMPILE-TIME CONSTANT intervals: no runtime helper, no
+ * new IR node, both backends, and an object off the stream forest (a plain
+ * emitter, a user class) has a preorder outside both and still answers
+ * false. `%Duplex` is guaranteed to be in the emitted class forest here —
+ * the node names it, and moduleArtifacts collects every className it walks.
+ *
+ * Node's own `this !== Writable` guard is why the extra clause is for the
+ * EXACT `%Writable` target only: `duplex instanceof MyWritable` (a user
+ * subclass of Writable) is false in Node, and the plain interval test
+ * already answers false here.
+ *
+ * The receiver is evaluated ONCE: a varRef is read twice directly (no
+ * ownership change — instanceOf borrows), anything else binds a hidden
+ * local first. */
+export function streamInstanceOfExpr(
+  L: Lowerer, value: IrExpr, className: string, loc: SrcLoc,
+): IrExpr {
+  const one = (v: IrExpr, c: string): IrExpr =>
+    ({ kind: "instanceOf", value: v, className: c, type: BOOL, loc });
+  if (className !== "%Writable" || !L.classes.has("%Duplex")) return one(value, className);
+  const both = (v: IrExpr): IrExpr => ({
+    kind: "logical", op: "||",
+    left: one(v, "%Writable"), right: one(v, "%Duplex"),
+    type: BOOL, loc,
+  });
+  if (value.kind === "varRef") return both(value);
+  const tmp = L.declareHiddenLocal("%instof", value.type);
+  return {
+    kind: "seqExpr",
+    stmts: [{ kind: "varDecl", localId: tmp.id, init: value, loc }],
+    result: both({ kind: "varRef", localId: tmp.id, type: value.type, loc }),
+    type: BOOL,
+    loc,
+  };
+}
+
 /** The stream sides of a receiver class: the nearest stream-class
  * ancestor's, or null off the stream hierarchy. */
 export function streamSidesOf(L: Lowerer, info: ClassInfo | undefined | null): "r" | "w" | "rw" | null {

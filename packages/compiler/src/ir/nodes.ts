@@ -1094,6 +1094,37 @@ export const RUNTIME_STREAM_CLASSES: ReadonlyMap<
   ["%PassThrough", { lib: "PassThrough", base: "%Transform", sides: "rw" }],
 ]);
 
+/** The DUPLEX WIDENING: a Duplex-rooted stream value flowing into a
+ * `%Writable` slot. Node models a Duplex as `class Duplex extends Readable
+ * implements Writable` — one prototype chain, TWO interfaces — and the IR
+ * class forest can carry only ONE base, so it carries the prototype
+ * chain's (`%Duplex` extends `%Readable`) and the WRITABLE half of a
+ * Duplex is invisible to the nominal `isSubclassOf` test. This predicate
+ * is that missing half, and it is exactly what @types/node admits: a
+ * `Readable` is NOT assignable to `Writable`, a `Duplex`/`Transform`/
+ * `PassThrough` (and any user subclass of one) is.
+ *
+ * The reinterpret is sound for the same reason every other stream upcast
+ * is: all five runtime stream classes share ONE runtime layout (ScrStream
+ * — the ScrEmitter prefix plus the state pointer), and a user subclass
+ * embeds that whole prefix, so widening is a pointer cast with no field
+ * motion. `isStrictSubclass` is passed IN so the frontend and the IR
+ * validator answer from ONE copy of the rule (two copies of a stream
+ * predicate have drifted apart in this compiler before).
+ *
+ * `%Writable` ONLY: a `%Duplex` destination needs both halves, and the
+ * widening to `%Readable` is a real extends edge isSubclassOf already
+ * answers. The matching RUNTIME question — `x instanceof Writable` — is
+ * streamInstanceOfExpr, which admits the same subtree. */
+export function streamDuplexWidensToWritable(
+  from: string,
+  to: string,
+  isStrictSubclass: (sub: string, sup: string) => boolean,
+): boolean {
+  if (to !== "%Writable" || from === "%Writable") return false;
+  return from === "%Duplex" || isStrictSubclass(from, "%Duplex");
+}
+
 export interface IrRecordShape {
   /** Frontend-assigned shape id (`r0`, `r1`, ...). */
   id: string;
