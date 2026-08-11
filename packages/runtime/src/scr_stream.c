@@ -49,6 +49,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -2986,6 +2987,35 @@ typedef struct ScrFsBacking {
   ScrStr *path;    /* owned (error messages) */
   double bytes;    /* bytesRead / bytesWritten */
 } ScrFsBacking;
+
+/* The fs error as a VALUE (+1) rather than a throw — scr_fs_throw's exact
+ * message and `code`, built from the shared pieces in scr_lib.c. The
+ * asynchronous surface needs it: a failure is an 'error' EVENT on a later
+ * turn, never a throw at the createReadStream call, which is what makes
+ * `pipeline(createReadStream(missing), dst)` REJECT. It lives HERE rather
+ * than beside scr_fs_throw so a stream-free binary does not carry it. */
+static ScrError *scr_fs_error(int e, const char *op, const ScrStr *path) {
+#ifdef _WIN32
+  /* The CRT lands ERROR_ACCESS_DENIED in errno as EACCES; libuv maps the
+   * same Win32 error to EPERM, so that is the code Node reports —
+   * scr_fs_throw's own translation, at the one other seam that needs it. */
+  if (e == EACCES) e = EPERM;
+#endif
+  char namebuf[16];
+  const char *name = scr_errno_name(e, namebuf, sizeof namebuf);
+  const char *text = scr_errno_text(e);
+  char pathbuf[PATH_MAX];
+  const char *shown = scr_fs_err_path(path, pathbuf);
+  char msg[PATH_MAX + 96];
+  int len = snprintf(msg, sizeof msg, "%s: %s, %s '%s'", name, text, op, shown);
+  if (len < 0) len = 0;
+  if ((size_t)len >= sizeof msg) len = (int)sizeof msg - 1;
+  ScrStr *m = scr_str_new(msg, (size_t)len);
+  ScrError *err = scr_error_new(SCR_ERR_ERROR, m);
+  scr_str_release(m);
+  scr_error_set_code(err, name);
+  return err;
+}
 
 static void scr_fs_backing_drop(ScrFsBacking *fb) {
   if (fb == NULL) return;

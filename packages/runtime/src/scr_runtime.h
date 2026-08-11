@@ -2714,11 +2714,18 @@ double scr_fs_open(ScrStr *path, ScrStr *flags);
 double scr_fs_read_sync(double fd, ScrBytes *buf, double offset, double length);
 void scr_fs_close(double fd);
 
-/* The fs error as a VALUE (+1) instead of a throw — scr_fs_throw's exact
- * message and `code`. The ASYNCHRONOUS fs surfaces need it: an fs stream
+/* The fs error SHAPE, shared with the link-gated fs streams. An fs stream
  * delivers an open(2)/read(2)/write(2) failure as an 'error' EVENT on a
- * later turn, never as a throw at the call site. Borrows path. */
-ScrError *scr_fs_error(int e, const char *op, const ScrStr *path);
+ * later turn, never as a throw, so it needs scr_fs_throw's exact message
+ * and `code` as a value — and a second copy of the errno tables is how
+ * two spellings of one errno drift apart. scr_fs_err_msg answers a
+ * malloc'd message the caller frees and points `code` at the errno name
+ * (into `namebuf`, or a literal); `e` must already be translated.
+ * scr_fs_errno_xlate is that translation (Windows maps EACCES to Node's
+ * EPERM). Borrows path. */
+const char *scr_errno_name(int e, char *fallback, size_t cap);
+const char *scr_errno_text(int e);
+const char *scr_fs_err_path(const ScrStr *path, char *buf /* PATH_MAX */);
 
 /* ── WHATWG URL (scr_url.c) ──────────────────────────────────────────
  * An immutable, refcounted URL value, parsed once at construction. The

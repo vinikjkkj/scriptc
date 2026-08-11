@@ -805,14 +805,23 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       }
       case "createReadStream":
       case "createWriteStream": {
-        // The PATH-ONLY call has a real lowering now (the BUILTIN_MODULE_FNS
-        // row): fall through to the table so the JS lane gets the same
-        // fs-backed stream the TS lane does. Every OPTIONS form keeps this
-        // validation ladder — the option surface is not implemented, and
-        // Node's argument errors must still precede the fence.
+        // The path-only call over a STATICALLY STRING path has a real
+        // lowering now (the BUILTIN_MODULE_FNS row): hand it to the table so
+        // the JS lane gets the same fs-backed stream the TS lane does.
+        //
+        // Everything else keeps this ladder, and the type test is what makes
+        // that true rather than nearly true: `createReadStream(46)` in a JS
+        // source must still throw Node's ERR_INVALID_ARG_TYPE ("The \"path\"
+        // argument must be of type string…"), which only the ladder renders
+        // — routing it to the table turned that into an SC1090 compile fence,
+        // which 2595-fs-arg-ladders.cjs caught. The OPTIONS forms keep it
+        // too: that surface is not implemented, and Node's argument errors
+        // must precede the fence.
         const bare = args.length < 2 ||
           (args.length === 2 && ts.isIdentifier(args[1]!) && args[1]!.text === "undefined");
-        if (bare) return null;
+        const strPath = args[0] !== undefined &&
+          L.mapTypeOf(L.typeOf(args[0]))?.kind === "string";
+        if (bare && strPath) return null;
         const a = dynArgs([args[0], args[1]]);
         return a && chk("fs.streamOptsChk", [...a, ladderFenceExpr(L, `fs.${bi.member}`, expr)], resultT);
       }
