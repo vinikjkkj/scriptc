@@ -3002,6 +3002,12 @@ static void scr_fs_stream_do_read(ScrStream *s) {
   ScrFsBacking *fb = st->fs;
   if (fb == NULL || !fb->opened || fb->closed || st->destroyed || st->r.ended) return;
   size_t want = st->r.hwm > 0 ? st->r.hwm : SCR_STREAM_DEFAULT_HWM;
+  /* read(2)'s count is an unsigned int on the CRT. hwm is normally 64 KiB,
+   * but read(n) GROWS it to the next power of two above n (Node's
+   * howMuchToRead), so a read(5e9) could otherwise truncate the cast to
+   * zero and report a spurious EOF. Cap the per-turn request instead —
+   * a short read is not EOF, so the engine simply asks again. */
+  if (want > ((size_t)1 << 26)) want = (size_t)1 << 26;
   ScrBytes *buf = scr_bytes_new(SCR_BYTES_U8, (double)want);
   if (buf == NULL) return; /* the RangeError rides the cell */
   ptrdiff_t n;
@@ -3041,7 +3047,9 @@ static void scr_fs_stream_do_write(ScrStream *s) {
   }
   size_t off = 0;
   while (off < c->len) {
-    ptrdiff_t n = (ptrdiff_t)write(fb->fd, c->data + off, (unsigned)(c->len - off));
+    size_t chunk = c->len - off;
+    if (chunk > ((size_t)1 << 26)) chunk = (size_t)1 << 26; /* the count cast, as above */
+    ptrdiff_t n = (ptrdiff_t)write(fb->fd, c->data + off, (unsigned)chunk);
     if (n < 0) {
       if (errno == EINTR) continue;
       ScrError *e = scr_fs_error(errno, "write", fb->path);
