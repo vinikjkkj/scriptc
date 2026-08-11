@@ -1783,6 +1783,24 @@ void scr_stream_destroy_done(ScrStream *s, ScrError *err);
 void scr_stream_transform_done(ScrStream *s, ScrError *err, ScrBytes *data, ScrStr *data_str);
 void scr_stream_flush_done(ScrStream *s, ScrError *err, ScrBytes *data, ScrStr *data_str);
 
+/* fs.createReadStream(path) / fs.createWriteStream(path) — a file source
+ * and a file sink UNDER the machinery above: ordinary Readable/Writable
+ * values whose _read/_write/_destroy are supplied natively, so pipe,
+ * pipeline, for-await, backpressure, and the whole event order are the
+ * shared implementation. Every syscall is deferred by one tick and runs
+ * on the loop, so an open(2) failure arrives as an 'error' EVENT (never a
+ * throw at this call) and the writable side really accumulates past its
+ * highWaterMark. autoClose is on: _destroy closes the fd, and so does
+ * the state drop if the value is released without ever being destroyed.
+ * The OPEN itself is eager (SEMANTICS.md's fs-stream divergence: the file
+ * is created/truncated on the calling turn, the failure still lands
+ * asynchronously). Path BORROWED; result +1. Options (start/end/encoding/
+ * highWaterMark/flags/fd/autoClose) are NOT part of this surface — the
+ * compiler keeps its argument-validation fence for every call that
+ * passes them. */
+ScrStream *scr_fs_read_stream(ScrStr *path);
+ScrStream *scr_fs_write_stream(ScrStr *path);
+
 /* RC / trace / install (the emitter-unit shapes). */
 ScrStream *scr_stream_retain(ScrStream *s);
 void scr_stream_release(ScrStream *s);
@@ -2695,6 +2713,12 @@ ScrStr *scr_path_win32_to_namespaced_path(ScrStr *path);
 double scr_fs_open(ScrStr *path, ScrStr *flags);
 double scr_fs_read_sync(double fd, ScrBytes *buf, double offset, double length);
 void scr_fs_close(double fd);
+
+/* The fs error as a VALUE (+1) instead of a throw — scr_fs_throw's exact
+ * message and `code`. The ASYNCHRONOUS fs surfaces need it: an fs stream
+ * delivers an open(2)/read(2)/write(2) failure as an 'error' EVENT on a
+ * later turn, never as a throw at the call site. Borrows path. */
+ScrError *scr_fs_error(int e, const char *op, const ScrStr *path);
 
 /* ── WHATWG URL (scr_url.c) ──────────────────────────────────────────
  * An immutable, refcounted URL value, parsed once at construction. The
