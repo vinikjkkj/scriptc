@@ -914,6 +914,13 @@ export const BUILTIN_MODULE_FN_ALIASES: Record<string, Record<string, readonly I
     chmodSync: ["fs.lchmodSyncChk"],
     // The two-argument listener form.
     watch: ["fs.watchCb"],
+    // The options-object forms: the SAME file source and sink with a
+    // byte range, a flag and a mark on them, so the member fence has to
+    // witness them too — fencing createReadStream must fence the option
+    // spelling with it. (The attestation-parity case in
+    // surface-manifest.test.ts is what says so, and it caught these.)
+    createReadStream: ["fs.readStreamOpts"],
+    createWriteStream: ["fs.writeStreamOpts"],
   },
   "fs/promises": {
     // The Buffer form (no encoding).
