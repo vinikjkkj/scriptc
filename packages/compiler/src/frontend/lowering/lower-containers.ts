@@ -7556,8 +7556,33 @@ function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & 
   export function lowerIndexMergeHelper(L: Lowerer, toId: string,
     contributors: IndexMergeContributor[], loc: SrcLoc,): string | null {
     const to = L.shapes.get(toId);
-    if (!to?.indexValue || to.tuple || to.fields.length > 0) return null;
+    if (!to?.indexValue || to.tuple) return null;
     const tIv = to.indexValue;
+    // A target that DECLARES fields beside its signature (`{ [k: string]:
+    // string; jid: string }`) writes through the same `sc_rks_*` keyed
+    // helper, which dispatches a declared name onto its struct slot and
+    // everything else into the overflow — so the writes below only have
+    // to stop saying `overflowOnly`. That helper stores a declared slot
+    // RAW (its own comment: "the frontend fences everything else"), so
+    // every declared field must be typed exactly as the signature's value
+    // slot; anything else keeps the caller's fence. Reserved `%` members
+    // are not spellable keys.
+    const declared = to.fields.length > 0;
+    if (declared && to.fields.some((f) => f.name.startsWith("%") || !typeEquals(f.type, tIv))) {
+      return null;
+    }
+    // The record literal that seeds `out` needs a value for every declared
+    // field. An optional slot takes its undefined arm; a REQUIRED one has
+    // to come from an explicit contributor's parameter (a spread's keys
+    // and a conditional spread's key are both runtime-decided, so neither
+    // can promise the field is written at all).
+    const seedOf = new Map<string, number>();
+    contributors.forEach((c, ci) => {
+      if (c.kind === "field" && !seedOf.has(c.name)) seedOf.set(c.name, ci);
+    });
+    if (declared && to.fields.some((f) => L.wrappedUndefined(f.type, loc) === null && !seedOf.has(f.name))) {
+      return null;
+    }
     // Per-source plan: how each spread's values reach the target slot —
     // identity, a one-arm wrap, or (a SUB-UNION value slot: the
     // `{ ...proxyRes.headers }` spread into OutgoingHttpHeaders, whose
@@ -7627,9 +7652,37 @@ function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & 
     const outRef = ref("out.0", toT);
     const params: IrParam[] = [];
     const locals: IrLocal[] = [{ id: "out.0", name: "out", type: toT, mutable: false }];
+    // Declared slots seed from their undefined arm, or (a required one)
+    // from the parameter of the first explicit contributor that names it —
+    // which still writes at its own position below, so a later spread key
+    // overwrites it exactly as JS's last-write-wins does.
     const body: IrStmt[] = [
-      { kind: "varDecl", localId: "out.0", init: { kind: "recordLit", fields: [], type: toT, loc }, loc },
+      {
+        kind: "varDecl",
+        localId: "out.0",
+        init: {
+          kind: "recordLit",
+          fields: to.fields.map((f) => ({
+            name: f.name,
+            value: L.wrappedUndefined(f.type, loc) ?? ref(`v.${seedOf.get(f.name)!}`, f.type),
+          })),
+          type: toT,
+          loc,
+        },
+        loc,
+      },
     ];
+    // With declared slots in play a keyed write must DISPATCH (the helper
+    // sends a declared name to its struct member and everything else to
+    // the overflow); a pure-signature target keeps the direct map insert.
+    const ovf = !declared;
+    // A source field holding its undefined arm SKIPS, because an absent
+    // overflow key is how this representation spells "unset". A DECLARED
+    // slot has no such choice — the key exists either way — so the copy
+    // writes through, which is also what JS does (`{ a: 1, ...{ a:
+    // undefined } }` is `{ a: undefined }`); skipping would leave an
+    // earlier contributor's value standing, a quiet wrong answer.
+    const declaredNames = new Set(to.fields.map((f) => f.name));
     let spreadNo = 0;
     contributors.forEach((c, ci) => {
       if (c.kind === "keyedField") {
@@ -7646,7 +7699,7 @@ function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & 
           shapeId: toId,
           key: ref(kid, STRING),
           value: ref(pid, tIv),
-          overflowOnly: true,
+          ...(ovf ? { overflowOnly: true as const } : {}),
           loc,
         });
         return;
@@ -7672,7 +7725,7 @@ function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & 
           value: widened
             ? { kind: "unionNarrow", unionId: widened.unionId, tag: L.armTag(widened.unionId, tIv), value: ref(pid, widened), type: tIv, loc }
             : ref(pid, tIv),
-          overflowOnly: true,
+          ...(ovf ? { overflowOnly: true as const } : {}),
           loc,
         };
         if (c.kind === "condField") {
@@ -7724,11 +7777,11 @@ function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & 
             shapeId: toId,
             key: { kind: "strLit", value: ff.name, type: STRING, loc },
             value: lift === "dyn" ? { kind: "dynFrom", value: raw, type: DYN, loc } : L.applyWidthLift(lift, raw, tIv, loc),
-            overflowOnly: true,
+            ...(ovf ? { overflowOnly: true as const } : {}),
             loc,
           };
           body.push(
-            utag >= 0 && ff.type.kind === "union"
+            utag >= 0 && ff.type.kind === "union" && !declaredNames.has(ff.name)
               ? { kind: "if", cond: { kind: "unionIsTag", unionId: ff.type.unionId, tag: utag, negated: true, value: raw, type: BOOL, loc }, then: [write], else_: null, loc }
               : write,
           );
@@ -7752,11 +7805,11 @@ function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & 
           shapeId: toId,
           key: { kind: "strLit", value: ff.name, type: STRING, loc },
           value: intoSlot(raw),
-          overflowOnly: true,
+          ...(ovf ? { overflowOnly: true as const } : {}),
           loc,
         };
         body.push(
-          utag >= 0 && ff.type.kind === "union"
+          utag >= 0 && ff.type.kind === "union" && !declaredNames.has(ff.name)
             ? { kind: "if", cond: { kind: "unionIsTag", unionId: ff.type.unionId, tag: utag, negated: true, value: raw, type: BOOL, loc }, then: [write], else_: null, loc }
             : write,
         );
@@ -7792,7 +7845,7 @@ function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & 
               shapeId: toId,
               key: ref(kv, STRING),
               value: intoSlot({ kind: "recordKeyGet", obj: sRef, shapeId: plan.shapeId, key: ref(kv, STRING), overflowOnly: true, type: fIv, loc }),
-              overflowOnly: true,
+              ...(ovf ? { overflowOnly: true as const } : {}),
               loc,
             },
           ],
