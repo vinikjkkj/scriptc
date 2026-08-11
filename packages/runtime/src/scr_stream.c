@@ -2946,10 +2946,10 @@ static void scr_stream_emit_readable_now(ScrStream *s) {
  * implementation, unchanged.
  *
  * ASYNCHRONY. Node's fs streams run their open/read/write on the
- * threadpool, so nothing lands on the caller's stack. Here every syscall
- * is deferred by one TICK (the queue above — the nextTick stand-in) and
- * runs on the loop, never inside _read/_write. That is what makes the
- * two observable contracts hold:
+ * threadpool and the completions arrive in the poll phase, so nothing
+ * lands on the caller's stack. Here every syscall rides setImmediate's
+ * CHECK-phase queue (scr_fs_stream_schedule) and runs on the loop, never
+ * inside _read/_write. That is what makes the observable contracts hold:
  *   - an open(2) failure is delivered as an 'error' EVENT on a later
  *     turn, never a synchronous throw at the createReadStream call (so
  *     `pipeline(createReadStream(missing), dst)` REJECTS, Node's shape);
