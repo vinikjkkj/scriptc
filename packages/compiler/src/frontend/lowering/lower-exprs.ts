@@ -9956,29 +9956,32 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           const bothUnion = left.type.kind === "union" && right.type.kind === "union";
           const sameUnion = bothUnion && typeEquals(left.type, right.type);
           // "the plain side wraps into the union, which preserves payload
-          // identity" is true exactly while the wrap IS a wrap. The plain
-          // side's type has to be an ARM of the union — then unionWrap is a
-          // tag and the payload pointer travels unchanged. A type that is
-          // merely COERCIBLE into an arm goes through a converting adapter
-          // instead, and for a reference kind that adapter yields a
-          // DIFFERENT object: `promise<string>` into a `promise<dyn> |
-          // undefined` slot builds a fresh promise, so
+          // identity" is true exactly while the wrap IS a wrap, and the
+          // one word that comment got wrong cost a WhatsApp client its
+          // dedup eviction. Two ways the plain side keeps its identity:
+          //
+          //  - it IS an arm of the union. unionWrap is then a tag and the
+          //    payload pointer travels unchanged.
+          //  - it is a PROMISE whose payload converts into the union's one
+          //    promise arm. coerceToExpected inserts a converting adapter
+          //    there, and an adapter returns a fresh promise -- but the
+          //    adapter is MEMOISED on its source, so the same source
+          //    reaches the slot as the same object every time, which is
+          //    what JavaScript's identity-preserving assignment means
+          //    here. promiseArmFor mirrors the one path coerceToExpected
+          //    would take (one promise arm, payload adaptable) rather than
+          //    guessing; if it declines, the value does not reach the
+          //    union at all and the fence below is still the right answer.
+          //
+          // Anything else is a conversion whose result is a DIFFERENT
+          // object, and
           //
           //     m.set("k", p); m.get("k") === p
           //
-          // answered FALSE where Node answers true — silently, and it is
-          // what made a dedup map never evict its settled entries. A
+          // answering FALSE where Node answers true -- silently -- is
+          // exactly what a dedup map that never evicts is made of. A
           // comparison that cannot be answered by identity is not answered
-          // at all: this falls through to the narrow-first fence below.
-          // ...and a PROMISE whose payload converts is identity-preserving
-          // again, because the converting adapter is memoised on the
-          // source: the same source always reaches the slot as the same
-          // object, which is exactly what JS's identity-preserving
-          // assignment means here. The predicate mirrors the one path
-          // coerceToExpected would take (one promise arm, payload
-          // adaptable) rather than guessing -- if it declined, the value
-          // would not reach the union at all and the fence below is still
-          // the right answer.
+          // at all: it falls through to the narrow-first fence below.
           const plainT = left.type.kind === "union" ? right.type : left.type;
           const plainSideWraps =
             bothUnion ||
