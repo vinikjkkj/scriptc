@@ -6151,7 +6151,38 @@ let digestInputValueDispatches = 0;
     // The explicit-undefined spelling IS the path-only call; the table row
     // already lowers it, so hand it back rather than claiming it here.
     if (ts.isIdentifier(optsNode) && optsNode.text === "undefined") return null;
+    // Node's SECOND spelling of the same thing: a bare encoding string is
+    // `{ encoding }` and nothing else (createReadStream(path, "utf8")).
+    // It folds through the same bufEncoding gate, so an unknown spelling
+    // fences by name rather than reaching the runtime.
     if (!ts.isObjectLiteralExpression(optsNode)) {
+      if (L.mapTypeOf(L.typeOf(optsNode))?.kind === "string") {
+        const canon = bufEncoding(L, `${member} encoding`, optsNode);
+        if (!read && canon !== "utf8") {
+          L.noLowering(
+            `createWriteStream with the '${canon}' encoding`,
+            optsNode,
+            "utf8 is the write side's default and the only lowered spelling; encode the bytes yourself and write a Buffer",
+          );
+        }
+        return {
+          kind: "libCall",
+          fn: read ? "fs.readStreamOpts" : "fs.writeStreamOpts",
+          args: [
+            L.lowerExprExpecting(pathNode, STRING),
+            { kind: "strLit", value: "", type: STRING, loc },
+            { kind: "strLit", value: canon, type: STRING, loc },
+            { kind: "numLit", value: NaN, type: F64, loc },
+            { kind: "numLit", value: NaN, type: F64, loc },
+            { kind: "numLit", value: NaN, type: F64, loc },
+            { kind: "numLit", value: NaN, type: F64, loc },
+            { kind: "boolLit", value: true, type: BOOL, loc },
+            { kind: "boolLit", value: true, type: BOOL, loc },
+          ],
+          type: { kind: "object", className: read ? "%Readable" : "%Writable" },
+          loc,
+        };
+      }
       L.noLowering(
         `${member} with a non-literal options argument`,
         optsNode,

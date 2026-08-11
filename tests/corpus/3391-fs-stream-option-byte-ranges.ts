@@ -97,5 +97,14 @@ await new Promise<void>((res) => {
 });
 console.log("encBounded", JSON.stringify(bounded.join("")));
 
+// Node's second spelling of { encoding }: a bare string second argument
+const bare: string[] = [];
+const bs = createReadStream(utf, "utf8");
+await new Promise<void>((res) => {
+  bs.on("data", (c: string) => { bare.push(c); });
+  bs.on("close", () => res());
+});
+console.log("bareEncoding chars=" + bare.join("").length, JSON.stringify(bare.join("").slice(0, 12)));
+
 for (const name of readdirSync(scratch)) rmSync(scratch + "/" + name);
 rmdirSync(scratch);

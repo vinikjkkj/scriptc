@@ -1,0 +1,33 @@
+sc_f_c1_positive	5	peek	UPPER	upper=3		sc_rs_r1 *sc_t2 = sc_rretain_r1((sc_rs_r1 *)scr_union_peek(sc_t0)); /* EXPECT UPPER */	
+sc_f_c2_tail	14	peek	EXCL-ONLY		CONTIGUOUS-0..0(TAIL) excl=0	sc_rs_r1 *sc_t2 = sc_rretain_r1((sc_rs_r1 *)scr_union_peek(sc_t0)); /* EXPECT EXCL-ONLY TAIL */	
+sc_f_c3_fieldreread	21	peek	UPPER	upper=1		sc_rs_r1 *sc_t3 = sc_rretain_r1((sc_rs_r1 *)scr_union_peek(sc_t2)); /* EXPECT UPPER */	
+sc_f_c4_fieldreread_call_between	30	peek	BARE			sc_rs_r1 *sc_t3 = sc_rretain_r1((sc_rs_r1 *)scr_union_peek(sc_t2)); /* EXPECT BARE */	
+sc_f_c5_fieldreread_store_between	39	peek	BARE			sc_rs_r1 *sc_t3 = sc_rretain_r1((sc_rs_r1 *)scr_union_peek(sc_t2)); /* EXPECT BARE */	
+sc_f_c6_tageq	45	get_bool	UPPER	upper=0		case 0: return scr_union_get_bool(a) == scr_union_get_bool(b); /* EXPECT UPPER, UPPER */	
+sc_f_c6_tageq	45	get_bool	UPPER	upper=0		case 0: return scr_union_get_bool(a) == scr_union_get_bool(b); /* EXPECT UPPER, UPPER */	
+sc_f_c7_no_tageq	50	get_bool	UPPER	upper=0		case 0: return scr_union_get_bool(a) == scr_union_get_bool(b); /* EXPECT UPPER, BARE */	
+sc_f_c7_no_tageq	50	get_bool	BARE			case 0: return scr_union_get_bool(a) == scr_union_get_bool(b); /* EXPECT UPPER, BARE */	
+sc_f_c8_bare	55	peek	BARE			sc_rs_r1 *sc_t2 = sc_rretain_r1((sc_rs_r1 *)scr_union_peek(sc_t0)); /* EXPECT BARE */	
+sc_f_t1_then	64	peek	UPPER	upper=1		return (u->tag == 1 ? scr_union_peek(u) : NULL); /* EXPECT UPPER */	
+sc_f_t2_else	67	peek	EXCL-ONLY		GAP{0}/0..1 excl=1	return (u->tag == 1 ? NULL : scr_union_peek(u)); /* EXPECT EXCL-ONLY */	
+sc_f_t3_chain	70	peek	UPPER	upper=2		return (u->tag == 1 ? scr_stream_push_null(s) : u->tag == 2 ? scr_stream_push_str(s, (ScrStr *)scr_union_peek(u)) : scr_stream_pus	
+sc_f_t3_chain	70	peek	EXCL-ONLY		GAP{0}/0..2 excl=1|2	return (u->tag == 1 ? scr_stream_push_null(s) : u->tag == 2 ? scr_stream_push_str(s, (ScrStr *)scr_union_peek(u)) : scr_stream_pus	
+sc_f_t4_other_value	73	peek	BARE			return (v->tag == 1 ? scr_union_peek(u) : NULL); /* EXPECT BARE */	
+sc_f_t5_not_a_tag_test	76	peek	BARE			return (flag ? scr_union_peek(u) : NULL); /* EXPECT BARE */	
+sc_f_t6_negated	79	peek	EXCL-ONLY		GAP{0}/0..1 excl=1	return (u->tag != 1 ? scr_union_peek(u) : NULL); /* EXPECT EXCL-ONLY */	
+sc_f_t7_nested_call_arg	82	peek	UPPER	upper=3		return (u->tag == 3 ? scr_stream_push_str(s, (ScrStr *)scr_union_peek(u)) : false); /* EXPECT UPPER */	
+sc_ut_0	94	peek	UPPER	upper=1		case 1: return ((ScrStr *)scr_union_peek(v))->len != 0; /* EXPECT UPPER */	
+sc_ut_1	101	peek	UPPER	upper=1		case 1: return ((ScrStr *)scr_union_peek(v))->len != 0; /* EXPECT UPPER */	
+sc_ut_1	102	get_f64	UPPER	upper=2		case 2: return scr_union_get_f64(v) != 0; /* EXPECT UPPER */	
+sc_f_e2_tobool	109	peek	UPPER	upper=1		out = scr_str_retain((ScrStr *)scr_union_peek(u)); /* EXPECT UPPER */	
+sc_f_e3_tobool_two_truthy	118	peek	BARE			out = scr_str_retain((ScrStr *)scr_union_peek(u)); /* EXPECT BARE */	
+sc_f_e4_tobool_false_side	129	peek	BARE			out = scr_str_retain((ScrStr *)scr_union_peek(u)); /* EXPECT BARE */	
+sc_f_e1_split_else	143	peek	EXCL-ONLY		GAP{0}/0..1 excl=1	out = scr_str_retain((ScrStr *)scr_union_peek(u)); /* EXPECT EXCL-ONLY */	
+sc_f_e5_alloc_between	159	get_f64	EXCL-ONLY		GAP{0}/0..1 excl=1	out = scr_union_get_f64(b); /* EXPECT EXCL-ONLY */	
+sc_f_e6_call_between	170	get_f64	BARE			out = scr_union_get_f64(b); /* EXPECT BARE */	
+sc_f_e7_two_peeks	182	peek	UPPER	upper=0		sc_rs_r1 *p1 = sc_rretain_r1((sc_rs_r1 *)scr_union_peek(u)); /* EXPECT UPPER */	
+sc_f_e7_two_peeks	186	peek	UPPER	upper=0		sc_rs_r1 *p2 = sc_rretain_r1((sc_rs_r1 *)scr_union_peek(u)); /* EXPECT UPPER */	
+sc_f_e7_two_peeks	188	get_f64	EXCL-ONLY		GAP{0}/0..1 excl=1	out = scr_union_get_f64(f2); /* EXPECT EXCL-ONLY */	
+sc_f_e8_two_peeks_rebound	195	peek	BARE			sc_rs_r1 *p1 = sc_rretain_r1((sc_rs_r1 *)scr_union_peek(u)); /* EXPECT BARE */	
+sc_f_e8_two_peeks_rebound	200	peek	BARE			sc_rs_r1 *p2 = sc_rretain_r1((sc_rs_r1 *)scr_union_peek(u)); /* EXPECT BARE */	
+sc_f_e8_two_peeks_rebound	202	get_f64	BARE			out = scr_union_get_f64(f2); /* EXPECT BARE */	
