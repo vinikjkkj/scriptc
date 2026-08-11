@@ -1001,17 +1001,44 @@ declare module "node:fs" {
    * 'open'/'ready') is deliberately NOT declared — it has no lowering,
    * and @types/node projects meet the fence at the use site instead.
    *
-   * The PATH-ONLY signature: the options object (start/end/encoding/
-   * highWaterMark/flags/fd/autoClose) is not implemented, and declaring
-   * it here would compile a call whose options are silently ignored.
    * Written as ALIASES rather than subclasses: the mapped type is the
    * base half either way, an alias inherits the whole declared surface
    * without restating it, and it leaves `new fs.ReadStream(...)` a type
-   * error — there is no lowering for constructing one directly. */
+   * error — there is no lowering for constructing one directly.
+   *
+   * The OPTIONS forms declare only the members that lower. `fd`, `signal`
+   * and `fs` are left out on purpose: here they are a type error, which
+   * is the stricter of the two answers, where an @types/node project
+   * meets the by-name fence instead. Both are loud; neither compiles a
+   * call whose options are silently ignored, which is the thing that
+   * must never happen — `{ flags: "a" }` dropped on the floor truncates
+   * an append target. */
   export type ReadStream = import("node:stream").Readable;
   export type WriteStream = import("node:stream").Writable;
+  export interface ReadStreamOptions {
+    flags?: string;
+    encoding?: string;
+    start?: number;
+    /** INCLUSIVE, Node's rule: `{ start: 0, end: 9 }` reads ten bytes. */
+    end?: number;
+    highWaterMark?: number;
+    mode?: number;
+    autoClose?: boolean;
+    emitClose?: boolean;
+  }
+  export interface WriteStreamOptions {
+    flags?: string;
+    encoding?: string;
+    start?: number;
+    highWaterMark?: number;
+    mode?: number;
+    autoClose?: boolean;
+    emitClose?: boolean;
+  }
   export function createReadStream(path: string): ReadStream;
+  export function createReadStream(path: string, options: ReadStreamOptions): ReadStream;
   export function createWriteStream(path: string): WriteStream;
+  export function createWriteStream(path: string, options: WriteStreamOptions): WriteStream;
   /* fs.promises IS the fs/promises module (Node's rule) — the namespace-
    * import form `fs.promises.readFile(...)` lowers through the same
    * fs/promises table as `import { readFile } from "node:fs/promises"`. */
