@@ -6019,14 +6019,27 @@ export class Lowerer {
     // slot through the promise recursion below.
     if (dst.kind === "dyn") return src.kind !== "dyn" && (src.kind === "void" || this.dynConvertible(src));
     if (src.kind === "dyn") {
-      // The checked-dynamic function boundary's OUT direction joins the
-      // mechanical set: a dyn result landing in an adaptable func slot
-      // takes dynCheck's per-target shim (coerceToExpected's funcOk rule
-      // — the production/development function-choice ternary shape).
-      return (
-        this.jsonSafe(dst) ||
-        (dst.kind === "func" && canAdaptDynFuncTo(dst, (id) => this.shapes.get(id), (id) => this.unions.get(id)))
-      );
+      // The VALIDATED extraction — dynCheck — is what coerceToExpected
+      // builds for this pair, so the domain is dynCheck's own:
+      // canDynCheckTo. That predicate already folds in the checked-dynamic
+      // function boundary's OUT direction (an adaptable func slot takes
+      // dynCheck's per-target shim — the production/development
+      // function-choice ternary shape), so the func clause that used to
+      // stand beside jsonSafe here is a spelling of a case it contains.
+      //
+      // It used to be `jsonSafe(dst)`, and that had DRIFTED exactly the way
+      // coerceToExpected's own hand-rolled subset once had: JSON-safety
+      // refuses every composite carrying a bytes<u8> LEAF — a record of
+      // Uint8Array fields, `Uint8Array | null` — which canDynCheckTo's
+      // nested walk grants and both emitters already walk field by field.
+      // The consequence was not a lost conversion but a lost ADAPTER:
+      // promiseCoerceAdapter probes this predicate before it commits, so
+      // `Promise<unknown>` into a `Promise<{ keyHash: Uint8Array; … }>`
+      // slot fenced one container out from a conversion coerceToExpected
+      // would have emitted on the bare value. Aligning the two spellings
+      // is what unblocks it, and promiseCoerceAdapter's own
+      // "payload stopped coercing" assertion is the proof they agree.
+      return canDynCheckTo(dst, (id) => this.shapes.get(id), (id) => this.unions.get(id));
     }
     // Promise PAYLOADS convert through promiseCoerceAdapter's async helper
     // (the settle-or-value contract's other half: `Promise<null>` into a

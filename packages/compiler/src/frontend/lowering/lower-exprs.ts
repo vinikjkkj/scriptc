@@ -9955,7 +9955,24 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           const ut = left.type.kind === "union" ? left.type : (right.type as IrType & { kind: "union" });
           const bothUnion = left.type.kind === "union" && right.type.kind === "union";
           const sameUnion = bothUnion && typeEquals(left.type, right.type);
-          if ((sameUnion || !bothUnion) && L.eqComparableUnion(ut.unionId)) {
+          // "the plain side wraps into the union, which preserves payload
+          // identity" is true exactly while the wrap IS a wrap. The plain
+          // side's type has to be an ARM of the union — then unionWrap is a
+          // tag and the payload pointer travels unchanged. A type that is
+          // merely COERCIBLE into an arm goes through a converting adapter
+          // instead, and for a reference kind that adapter yields a
+          // DIFFERENT object: `promise<string>` into a `promise<dyn> |
+          // undefined` slot builds a fresh promise, so
+          //
+          //     m.set("k", p); m.get("k") === p
+          //
+          // answered FALSE where Node answers true — silently, and it is
+          // what made a dedup map never evict its settled entries. A
+          // comparison that cannot be answered by identity is not answered
+          // at all: this falls through to the narrow-first fence below.
+          const plainSideWraps =
+            bothUnion || L.armTag(ut.unionId, left.type.kind === "union" ? right.type : left.type) >= 0;
+          if ((sameUnion || !bothUnion) && plainSideWraps && L.eqComparableUnion(ut.unionId)) {
             return {
               kind: "unionEq",
               unionId: ut.unionId,
@@ -13264,6 +13281,30 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     return { kind: "intrinsic", name: "promise.reject", args: [reason], type: resultType, loc };
   }
 
+/** True when a `Promise.all(voids)` result is consumed as a VALUE rather
+   * than for its settlement alone.
+   *
+   * Two parents mean it is not. Directly under an `await`, the void
+   * collapse's `Promise<void>` yields void and that IS what the site reads
+   * — every spelling the corpus and zapo write (`await Promise.all(ps)` as
+   * a statement, `return await ...` from a void async function). As a bare
+   * expression statement the value is discarded outright. Both keep the
+   * collapse, so no program that compiles today allocates an array it did
+   * not allocate before.
+   *
+   * Anything else is HOLDING the promise, and a `Promise<void>` value fits
+   * nowhere tsc would put a `Promise<void[]>` — which is why every such
+   * site fences today rather than compiling to something else.
+   *
+   * One copy, read by both of the uniform-literal paths (this file's tuple
+   * claim and lower-builtins' static one) and by the array-expression
+   * path. */
+  export function voidAllResultIsAValue(call: ts.CallExpression): boolean {
+    const p = call.parent as ts.Node | undefined;
+    if (p === undefined) return false;
+    return !ts.isAwaitExpression(p) && !ts.isExpressionStatement(p);
+  }
+
 /** `Promise.all([...])` where the literal's every entry is the SAME
    * promise type: the checker's tuple overload types the literal
    * [Promise<T>, Promise<T>] — a tuple RECORD, which the array path
@@ -13296,6 +13337,13 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     }
     const loc = locOf(call);
     const inner = first.inner;
+    // An ALL-VOID literal whose result is HELD rather than awaited for its
+    // effect declines here, so the static path's own uniform-literal
+    // handler builds the array of undefineds Node fulfils with. This claim
+    // and that one carry the SAME void collapse, and only one of them
+    // should own the exception; declining BEFORE the elements are lowered
+    // keeps them lowered exactly once, by whichever path takes the call.
+    if (inner.kind === "void" && voidAllResultIsAValue(call)) return null;
     const entryT: IrType = { kind: "promise", inner };
     const elems = argNode.elements.map((el) => L.lowerExpr(el));
     const entries: IrExpr = { kind: "arrayLit", elems, type: arrayOf(entryT), loc };

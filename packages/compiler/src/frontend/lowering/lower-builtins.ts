@@ -26,7 +26,7 @@ import {
   fenceOrDropOptionKey,
   isChildSurfaceMember,
 } from "./surfaces.js";
-import { conditionalSpreadOf, lowerDynObjectLiteral, probeLower } from "./lower-exprs.js";
+import { conditionalSpreadOf, lowerDynObjectLiteral, probeLower, voidAllResultIsAValue } from "./lower-exprs.js";
 import { HTTP2_CONSTANTS } from "./http2-constants.js";
 import { unitOnlyUnion } from "../types.js";
 
@@ -7832,6 +7832,218 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     }
   }
 
+/** `Promise.all(ps)` over a `Promise<void>[]` whose result is held rather
+   * than awaited for its effect: the array of `undefined`s Node produces.
+   *
+   * No runtime function and no emitter case: `voidEntryAdapter` — written
+   * for a void ENTRY of the heterogeneous tuple — already turns one
+   * `Promise<void>` into a promise of the unit-only union, awaiting first so
+   * the entry's WORK happens and its rejection arrives in the same time
+   * order Node reports. The wrapping loop is the one allSettledOverArray
+   * already writes, and it finishes before the single await for the same
+   * reason: every entry has its handler attached while they are all still in
+   * flight.
+   *
+   *   async (ps) => {
+   *     const wrapped = [];
+   *     let i = 0;
+   *     while (i < ps.length) { wrapped.push(voidAdapt(ps[i])); i = i + 1; }
+   *     return await all(wrapped);
+   *   }
+   *
+   * The result is `promise<array<unit>>` — the checker's own type for the
+   * call — so the site needs no further coercion. Null when the checker says
+   * something else, and the caller keeps its fence. */
+  function voidAllOverArray(
+    L: Lowerer,
+    call: ts.CallExpression,
+    entries: IrExpr,
+    psT: IrType & { kind: "array" },
+    loc: SrcLoc,
+  ): IrExpr | null {
+    const unitT = unitOnlyUnion(L.unions);
+    const outT = arrayOf(unitT);
+    // The checker's own answer, accepted in either of its two spellings.
+    // An array ARGUMENT types the call `Promise<void[]>`; an array LITERAL
+    // selects the tuple overload and types it `Promise<[void, void]>`. The
+    // uniform-literal path one block up already treats those as the same
+    // thing ("the tuple IS an array — destructuring reads it exactly like
+    // the tuple"), and every position here is the identical unit-only
+    // union, so the equivalence holds for the same reason.
+    const declared = L.mapTypeOf(L.typeOf(call));
+    if (process.env["SCRIPTC_PALL_TRACE"]) {
+      process.stderr.write(`ALLVOID ${loc.file}@${loc.start} declared=${declared ? typeKey(declared).slice(0, 90) : "null"} want=${typeKey(outT)}
+`);
+    }
+    if (declared?.kind !== "promise") return null;
+    const asArray = typeEquals(declared.inner, outT);
+    const asTuple = (): boolean => {
+      if (declared.inner.kind !== "record") return false;
+      const shape = L.shapes.get(declared.inner.shapeId);
+      return shape?.tuple === true && shape.fields.length > 0 &&
+        shape.fields.every((f) => typeEquals(f.type, unitT));
+    };
+    if (!asArray && !asTuple()) return null;
+    const adapter = voidEntryAdapter(L, unitT, loc);
+    if (adapter === null) return null;
+
+    const entryT = psT.elem;
+    const wrappedT: IrType = { kind: "promise", inner: unitT };
+    const listT = arrayOf(wrappedT);
+    const retT: IrType = { kind: "promise", inner: outT };
+
+    const key = `allvoid:${typeKey(psT)}`;
+    const existing = L.retagHelpers.get(key);
+    if (existing) return { kind: "call", callee: existing, args: [entries], type: retT, loc };
+    const name = `%promise.allvoid.${L.retagHelpers.size}`;
+    L.retagHelpers.set(key, name);
+
+    const funcType: IrType & { kind: "func" } = { kind: "func", params: [psT], ret: retT };
+    const fnCtx = newFnCtx(true, null, funcType, outT);
+    fnCtx.isAsync = true;
+    L.fnStack.push(fnCtx);
+    try {
+      const psLocal = L.declareHiddenLocal("ps", psT);
+      const listLocal = L.declareHiddenLocal("wrapped", listT);
+      const iLocal = L.declareHiddenLocal("i", F64);
+      iLocal.mutable = true;
+      const psRef: IrExpr = { kind: "varRef", localId: psLocal.id, type: psT, loc };
+      const listRef: IrExpr = { kind: "varRef", localId: listLocal.id, type: listT, loc };
+      const iRef: IrExpr = { kind: "varRef", localId: iLocal.id, type: F64, loc };
+      const wrapCall: IrExpr = {
+        kind: "call",
+        callee: adapter,
+        args: [{ kind: "arrayGet", arr: psRef, index: iRef, type: entryT, loc }],
+        type: wrappedT,
+        loc,
+      };
+      const body: IrStmt[] = [
+        { kind: "varDecl", localId: listLocal.id, init: { kind: "arrayLit", elems: [], type: listT, loc }, loc },
+        { kind: "varDecl", localId: iLocal.id, init: { kind: "numLit", value: 0, type: F64, loc }, loc },
+        {
+          kind: "while",
+          cond: {
+            kind: "bin", op: "<", left: iRef,
+            right: { kind: "arrIntrinsic", method: "length", receiver: psRef, args: [], type: F64, loc },
+            type: BOOL, loc,
+          },
+          body: [
+            {
+              kind: "exprStmt",
+              expr: { kind: "arrIntrinsic", method: "push", receiver: listRef, args: [wrapCall], type: F64, loc },
+              loc,
+            },
+            {
+              kind: "assign",
+              localId: iLocal.id,
+              value: { kind: "bin", op: "+", left: iRef, right: { kind: "numLit", value: 1, type: F64, loc }, type: F64, loc },
+              loc,
+            },
+          ],
+          loc,
+        },
+        {
+          kind: "return",
+          value: {
+            kind: "awaitExpr",
+            value: { kind: "intrinsic", name: "promise.all", args: [listRef], type: { kind: "promise", inner: outT }, loc },
+            type: outT,
+            loc,
+          },
+          loc,
+        },
+      ];
+      const ctx = L.ctx;
+      L.liftedFns.push({
+        name,
+        params: [{ localId: psLocal.id, name: psLocal.name, type: psT }],
+        returnType: outT,
+        locals: ctx.locals,
+        body,
+        loc,
+        async: true,
+      });
+      return { kind: "call", callee: name, args: [entries], type: retT, loc };
+    } finally {
+      L.fnStack.pop();
+    }
+  }
+
+/** The settled-result descriptions behind an allSettled call, ONE PER
+   * POSITION, read off the CHECKER's own result type: `Promise<R[]>` for an
+   * array argument (every position R), or `Promise<[R0, R1, ...]>` for the
+   * tuple overload an array literal selects. Null when the result is not a
+   * promise of an array or of a tuple with exactly `n` positions.
+   *
+   * The per-position list is what a HETEROGENEOUS literal needs:
+   * `Promise.allSettled([upload, process])` types as
+   * `[PromiseSettledResult<Uploaded>, PromiseSettledResult<Processed>]`, and
+   * the two descriptions differ only in their fulfilled arm's `value`. The
+   * uniform reader below is this one plus the question "is every position the
+   * same R". */
+  function allSettledElemTypes(L: Lowerer, call: ts.CallExpression, n: number): IrType[] | null {
+    const t = L.mapTypeOf(L.typeOf(call));
+    if (t?.kind !== "promise") return null;
+    const payload = t.inner;
+    if (payload.kind === "array") return Array.from({ length: n }, () => payload.elem);
+    if (payload.kind !== "record") return null;
+    const shape = L.shapes.get(payload.shapeId);
+    if (!shape?.tuple || shape.fields.length !== n) return null;
+    const out: IrType[] = [];
+    for (let i = 0; i < n; i++) {
+      const f = shape.fields.find((g) => g.name === String(i));
+      if (!f) return null;
+      out.push(f.type);
+    }
+    return out;
+  }
+
+/** `Promise.allSettled([a(), b()])` over promises with DIFFERENT payloads.
+   *
+   * Every piece of this already existed and only the routing did not. Each
+   * entry wraps through its OWN `settledWrapAdapter` — the same helper the
+   * uniform form uses, asked for a different settled description per
+   * position — and the wrapped promises, which cannot reject, are handed to
+   * `heterogeneousAll`. That combinator's contract is exactly what is left
+   * over: promises with differing payloads, a checker tuple result, one
+   * shared union to travel in and a per-position narrow back out.
+   *
+   * Wrapping still happens BEFORE any await, for the reason the uniform form
+   * wraps first: the wrapper attaches its handler immediately, so an entry
+   * rejecting while another is in flight is observed rather than left
+   * unhandled until its turn.
+   *
+   * The narrow back out is a re-tag, not a bare extraction: position i's
+   * description is a two-arm union and the shared union carries the other
+   * positions' fulfilled arms too, so `heterogeneousAll` marks those
+   * trappable and a value carrying one THROWS. Nothing here trusts a
+   * position to hold what the checker said beyond what a tag test can
+   * confirm. Null when any piece declines, and the caller keeps its fence. */
+  function heterogeneousAllSettled(
+    L: Lowerer,
+    call: ts.CallExpression,
+    elems: readonly IrExpr[],
+    loc: SrcLoc,
+  ): IrExpr | null {
+    const no = (why: string): null => {
+      if (process.env["SCRIPTC_PALL_TRACE"]) process.stderr.write(`ALLSETTLED declina: ${why}\n`);
+      return null;
+    };
+    const perPos = allSettledElemTypes(L, call, elems.length);
+    if (!perPos) return no("the result is not a settled tuple with one position per entry");
+    const wrapped: IrExpr[] = [];
+    for (const [i, e] of elems.entries()) {
+      if (e.type.kind !== "promise") return no("an entry is not a promise");
+      const settledT = perPos[i]!;
+      const wrapper = settledWrapAdapter(L, e.type, settledT, loc);
+      if (wrapper === null) return no("an entry's settled description is not the expected value/reason pair");
+      wrapped.push({
+        kind: "call", callee: wrapper, args: [e], type: { kind: "promise", inner: settledT }, loc,
+      });
+    }
+    return heterogeneousAll(L, call, wrapped, loc);
+  }
+
 /** The settled-result element behind an allSettled call, read off the
    * CHECKER's own result type: `Promise<R[]>` for an array argument, or
    * `Promise<[R, R, ...]>` for the tuple overload an array literal selects —
@@ -8069,6 +8281,16 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
           elems.every((e) => e.type.kind === "promise" && typeEquals(e.type, first))
         ) {
           const entriesArr: IrExpr = { kind: "arrayLit", elems, type: arrayOf(first), loc };
+          // An ALL-VOID literal whose result is held rather than awaited for
+          // its effect: the same story as the array-expression form one
+          // block down. The void collapse below answers `await
+          // Promise.all([a(), b()])` with a `Promise<void>` and builds
+          // nothing; a held value needs the array of undefineds Node
+          // fulfils with.
+          if (first.inner.kind === "void" && voidAllResultIsAValue(call)) {
+            const built = voidAllOverArray(L, call, entriesArr, { kind: "array", elem: first }, loc);
+            if (built) return built;
+          }
           const resultT: IrType = {
             kind: "promise",
             inner: first.inner.kind === "void" ? VOID : arrayOf(first.inner),
@@ -8171,6 +8393,18 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
         );
       }
       const inner = entries.type.elem.inner;
+      // `Promise<void>[]` whose combined result is USED as a value —
+      // `const settled = Promise.all(pendingWrites)`, zapo's history-sync
+      // shape. The collapse below answers `await Promise.all(voids)` with a
+      // `Promise<void>` and builds no array at all, which is right exactly
+      // while nothing reads the payload; bound to a name it is not, because
+      // the checker types the call `Promise<void[]>` — spelled
+      // `Promise<(null | undefined)[]>` by the type mapping — and a void
+      // promise does not fit that slot.
+      if (inner.kind === "void" && voidAllResultIsAValue(call)) {
+        const built = voidAllOverArray(L, call, entries, entries.type, loc);
+        if (built) return built;
+      }
       const resultT: IrType | null =
         inner.kind === "void"
           ? { kind: "promise", inner: VOID }
@@ -8204,7 +8438,6 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       const settledElem = allSettledElemType(L, call);
       if (
         argNode &&
-        settledElem &&
         ts.isArrayLiteralExpression(argNode) &&
         !argNode.elements.some(ts.isSpreadElement) &&
         argNode.elements.length > 0
@@ -8212,6 +8445,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
         const elems = argNode.elements.map((el) => L.lowerExpr(el));
         const first = elems[0]!.type;
         if (
+          settledElem &&
           first.kind === "promise" &&
           elems.every((e) => e.type.kind === "promise" && typeEquals(e.type, first))
         ) {
@@ -8226,6 +8460,13 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
             return { kind: "intrinsic", name: "promise.all", args: [entriesArr], type: resultT, loc };
           }
         }
+        // The same literal with DIFFERENT payloads per entry: one settled
+        // wrapper per position, then the heterogeneous tuple combinator
+        // Promise.all has had all along. `settledElem` is null for exactly
+        // this shape — it asks whether every position shares one description
+        // — so the uniform path above cannot have taken it.
+        const hetero = heterogeneousAllSettled(L, call, elems, loc);
+        if (hetero) return hetero;
       }
       // The same over an ARRAY EXPRESSION (`Promise.allSettled(pending)`):
       // one lifted helper wraps every entry FIRST, in a plain loop, and only
