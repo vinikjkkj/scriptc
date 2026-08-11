@@ -4,6 +4,7 @@
 // middle of a read, the failed-open path (no fd to return), and the write
 // path's end().
 import { closeSync, createReadStream, createWriteStream, existsSync, mkdirSync, openSync, readdirSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
+import { pipeline } from "node:stream/promises";
 
 function tail(path: string): string {
   let i = path.length - 1;
@@ -56,6 +57,15 @@ async function wrote(): Promise<void> {
   ws.write(Buffer.from("x"));
   await new Promise<void>((res) => { ws.on("close", () => res()); ws.end(); });
 }
+// The sink OPENS and is then destroyed by the failing source: its fd has
+// to come back through the pipeline's destroyer, not just through end().
+async function failedPipeline(): Promise<void> {
+  try {
+    await pipeline(createReadStream(missing), createWriteStream(out));
+  } catch {
+    /* ENOENT from the source */
+  }
+}
 
 const marks: number[] = [];
 for (let i = 0; i < 120; i = i + 1) await drained();
@@ -67,6 +77,8 @@ marks.push(probe() - base);
 for (let i = 0; i < 120; i = i + 1) await failedOpen();
 marks.push(probe() - base);
 for (let i = 0; i < 120; i = i + 1) await wrote();
+marks.push(probe() - base);
+for (let i = 0; i < 120; i = i + 1) await failedPipeline();
 marks.push(probe() - base);
 console.log("fd drift", marks.join(","));
 
