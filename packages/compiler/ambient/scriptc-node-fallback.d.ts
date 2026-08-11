@@ -1036,8 +1036,10 @@ declare module "node:fs" {
     emitClose?: boolean;
   }
   export function createReadStream(path: string): ReadStream;
+  export function createReadStream(path: string, encoding: string): ReadStream;
   export function createReadStream(path: string, options: ReadStreamOptions): ReadStream;
   export function createWriteStream(path: string): WriteStream;
+  export function createWriteStream(path: string, encoding: string): WriteStream;
   export function createWriteStream(path: string, options: WriteStreamOptions): WriteStream;
   /* fs.promises IS the fs/promises module (Node's rule) — the namespace-
    * import form `fs.promises.readFile(...)` lowers through the same
