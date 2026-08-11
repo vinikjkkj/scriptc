@@ -11519,34 +11519,63 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       return { kind: "dynHasKey", key, value: recv, type: BOOL, loc };
     }
     // `"k" in u` over a UNION whose arms are FIXED record shapes: every
-    // arm answers membership STATICALLY (a declared non-optional field is
-    // always present, an undeclared name never is), so the whole test
-    // collapses to runtime TAG tests — tsc's own narrowing then types the
-    // branches (the discriminating-`in` idiom). Optional (undefined-armed)
-    // fields and tuple/index-signature arms answer per VALUE, not per arm
-    // — those unions keep the fence below.
+    // arm answers membership PER ARM, so the whole test collapses to
+    // runtime TAG tests — tsc's own narrowing then types the branches
+    // (the discriminating-`in` idiom). Three answers exist per arm: a
+    // declared non-optional field (or an accessor slot) is always
+    // present and an undeclared name never is — those decide
+    // STATICALLY; an OPTIONAL (undefined-armed) slot decides per VALUE,
+    // off the tag-checked narrow; and a UNIT arm is not a membership
+    // answer at all — Node throws a TypeError for `in` on
+    // undefined/null. Tuple and index-signature arms have no per-arm
+    // answer and keep the fence below.
     if (recv.type.kind === "union") {
       const unionId = recv.type.unionId;
       const arms = L.unions.get(unionId)?.arms ?? [];
-      const answers: { tag: number; has: boolean }[] = [];
+      /** One arm's answer: `has` decides it statically, `slot` is an
+       * optional field's (undefined-armed) type to read off the narrowed
+       * arm, `unit` is the throwing arm. Exactly one of the three is
+       * live per entry. */
+      type InArmAnswer = { tag: number; has: boolean; slot: IrType | null; unit: "undefined" | "null" | null; arm: IrType };
+      const answers: InArmAnswer[] = [];
+      let armWise = arms.length > 0;
       let staticAnswers = arms.length > 0;
       for (const arm of arms) {
         const tag = L.armTag(unionId, arm);
+        if (tag < 0) {
+          armWise = false;
+          staticAnswers = false;
+          break;
+        }
+        // A UNIT arm: `'k' in undefined` / `'k' in null` throws in Node.
+        // tsc rejects such an operand outright, so a unit arm reaching
+        // here is one the CHECKER narrowed away while the LOWERED union
+        // type still carries it (maybeNarrow only collapses a use the
+        // checker types as a SINGLE arm, never a sub-union). Giving the
+        // arm Node's own TypeError is that arm's honest answer and costs
+        // no trust in the narrowing: the term stands on its own tag test.
+        if (isUnitType(arm)) {
+          answers.push({ tag, has: false, slot: null, unit: arm.kind === "undefinedT" ? "undefined" : "null", arm });
+          staticAnswers = false;
+          continue;
+        }
         const shape = arm.kind === "record" ? L.shapes.get(arm.shapeId) : undefined;
-        if (tag < 0 || !shape || shape.tuple || shape.indexValue) {
+        if (!shape || shape.tuple || shape.indexValue) {
+          armWise = false;
           staticAnswers = false;
           break;
         }
         const f = shape.fields.find((x) => x.name === key);
         if (f && f.type.kind === "union" && L.armTag(f.type.unionId, UNDEFINED_T) >= 0) {
+          answers.push({ tag, has: false, slot: f.type, unit: null, arm });
           staticAnswers = false; // an optional slot: presence is per-value
-          break;
+          continue;
         }
         // Accessor properties are own properties to `in` (Node answers
         // true without invoking the getter) — either slot present makes
         // the name a member.
         const acc = shape.fields.some((x) => x.name === `%get:${key}` || x.name === `%set:${key}`);
-        answers.push({ tag, has: f !== undefined || acc });
+        answers.push({ tag, has: f !== undefined || acc, slot: null, unit: null, arm });
       }
       if (staticAnswers) {
         const pureRecv = recv.kind === "varRef" || recv.kind === "recordGet" || recv.kind === "fieldGet" || pureRecvNode;
@@ -11591,6 +11620,60 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           return out;
         }
         L.unsupported("SC1090", expr, "statically-decided 'in' on computed receivers (bind the value to a variable first)");
+      }
+      // MIXED arms — an optional slot, or a unit arm the checker narrowed
+      // away — answer per arm, so the test becomes one GUARDED TERM per
+      // arm, OR'd together. Each term is `isTag(arm) ? <that arm's
+      // answer> : false`, so no term claims anything about a value
+      // carrying a different tag and the chain assumes no
+      // exhaustiveness: an arm that cannot hold the key contributes
+      // nothing at all, an arm that always holds it contributes its bare
+      // tag test, an optional slot contributes the slot's undefined test
+      // read off the TAG-CHECKED narrow (stance 55 again: a field
+      // explicitly assigned undefined reads as absent), and a unit arm
+      // contributes Node's TypeError. Every term re-reads the receiver,
+      // so only side-effect-free receivers qualify — the OR-chain rule
+      // above. An impure one falls through to the fence it met before.
+      if (armWise) {
+        const pureRecv = recv.kind === "varRef" || recv.kind === "recordGet" || recv.kind === "fieldGet" || pureRecvNode;
+        if (pureRecv) {
+          const isTag = (tag: number): IrExpr => ({ kind: "unionIsTag", unionId, tag, negated: false, value: recv, type: BOOL, loc });
+          const falseLit = (): IrExpr => ({ kind: "boolLit", value: false, type: BOOL, loc });
+          const terms: IrExpr[] = [];
+          for (const a of answers) {
+            if (a.unit !== null) {
+              terms.push({
+                kind: "ternary",
+                cond: isTag(a.tag),
+                then: nodeThrowExpr(1, "", `Cannot use 'in' operator to search for '${key}' in ${a.unit}`, BOOL, loc),
+                else_: falseLit(),
+                type: BOOL,
+                loc,
+              });
+              continue;
+            }
+            if (a.slot !== null) {
+              if (a.arm.kind !== "record" || a.slot.kind !== "union") throw new Error("lowerer bug: 'in' per-value arm is not a record with a union slot");
+              const narrowed: IrExpr = { kind: "unionNarrow", unionId, tag: a.tag, value: recv, type: a.arm, loc };
+              const read: IrExpr = { kind: "recordGet", obj: narrowed, shapeId: a.arm.shapeId, field: key, type: a.slot, loc };
+              terms.push({
+                kind: "ternary",
+                cond: isTag(a.tag),
+                then: { kind: "unionIsTag", unionId: a.slot.unionId, tag: L.armTag(a.slot.unionId, UNDEFINED_T), negated: true, value: read, type: BOOL, loc },
+                else_: falseLit(),
+                type: BOOL,
+                loc,
+              });
+              continue;
+            }
+            if (a.has) terms.push(isTag(a.tag));
+          }
+          let out: IrExpr = terms[0] ?? falseLit();
+          for (const t of terms.slice(1)) {
+            out = { kind: "logical", op: "||", left: out, right: t, type: BOOL, loc };
+          }
+          return out;
+        }
       }
     }
     if (recv.type.kind !== "record") {
