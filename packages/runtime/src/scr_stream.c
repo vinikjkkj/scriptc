@@ -3008,6 +3008,7 @@ typedef struct ScrFsBacking {
   bool flags_bad;  /* the flags string is not one of Node's spellings */
   bool has_start;  /* the `start` option was given */
   bool bounded;    /* the `end` option was given (INCLUSIVE, Node's rule) */
+  bool mode_given; /* the `mode` option was written (validated at OPEN) */
   double start;    /* first byte offset; the open lseek(2)s to it */
   double remaining;/* bytes the `end` bound still allows (bounded only) */
   ScrBytes *pend;  /* owned: the chunk the deferred write will emit */
@@ -3088,6 +3089,56 @@ static ScrError *scr_fs_flags_error(const ScrStr *flags) {
   ScrError *err = scr_error_new(SCR_ERR_TYPE, m);
   scr_str_release(m);
   scr_error_set_code(err, "ERR_INVALID_ARG_VALUE");
+  return err;
+}
+
+/* Node's addNumericSeparator: ERR_OUT_OF_RANGE and friends group an
+ * INTEGER whose magnitude exceeds 2^32 into underscore-separated
+ * thousands, and leave everything else alone — `-4294967296` prints
+ * plain, `-4294967297` prints `-4_294_967_297`, and no non-integer is
+ * ever grouped (all three measured against v25.9.0). Writes at most
+ * SCR_FS_NUMBUF bytes including the NUL. */
+#define SCR_FS_NUMBUF 48
+static void scr_fs_num(double v, char *out) {
+  char raw[40];
+  raw[scr_f64_to_str(v, raw)] = 0;
+  if (!(isfinite(v) && v == floor(v) && (v > 4294967296.0 || v < -4294967296.0))) {
+    memcpy(out, raw, strlen(raw) + 1);
+    return;
+  }
+  size_t i = 0, o = 0;
+  if (raw[0] == '-') out[o++] = raw[i++];
+  size_t digits = strlen(raw) - i;
+  for (size_t k = 0; k < digits; k++) {
+    if (k > 0 && (digits - k) % 3 == 0) out[o++] = '_';
+    out[o++] = raw[i + k];
+  }
+  out[o] = 0;
+}
+
+/* Node validates `mode` inside fs.open — parseFileMode runs on the OPEN,
+ * not in the stream constructor — so a bad mode is an ERR_OUT_OF_RANGE
+ * 'error' EVENT, and it beats a bad `flags` when both are wrong
+ * (measured against v25.9.0: `{ flags: "zz", mode: -1 }` reports the
+ * mode). start/end/highWaterMark are the other way round: those DO throw
+ * at the constructor. Two contracts, not one. */
+static ScrError *scr_fs_mode_error(double v) {
+  char numbuf[SCR_FS_NUMBUF];
+  scr_fs_num(v, numbuf);
+  char msg[192];
+  int len = (isfinite(v) && v == floor(v))
+                ? snprintf(msg, sizeof msg,
+                           "The value of \"mode\" is out of range. It must be >= 0 && <= 4294967295. Received %s",
+                           numbuf)
+                : snprintf(msg, sizeof msg,
+                           "The value of \"mode\" is out of range. It must be an integer. Received %s",
+                           numbuf);
+  if (len < 0) len = 0;
+  if ((size_t)len >= sizeof msg) len = (int)sizeof msg - 1;
+  ScrStr *m = scr_str_new(msg, (size_t)len);
+  ScrError *err = scr_error_new(SCR_ERR_RANGE, m);
+  scr_str_release(m);
+  scr_error_set_code(err, "ERR_OUT_OF_RANGE");
   return err;
 }
 
@@ -3247,9 +3298,12 @@ static void scr_fs_stream_imm_open(ScrClosure *c) {
     return;
   }
   int fd = -1;
-  /* Node converts the flags string inside open(), so a bad spelling is
-   * an 'error' event on this turn's completion, exactly like an ENOENT. */
-  if (!fb->flags_bad) {
+  /* Node's fs.open runs parseFileMode BEFORE stringToFlags, so a bad mode
+   * beats a bad flag; both beat the ENOENT that would follow. */
+  bool mode_bad = fb->mode_given &&
+                  !(isfinite(fb->mode) && fb->mode == floor(fb->mode) &&
+                    fb->mode >= 0 && fb->mode <= 4294967295.0);
+  if (!mode_bad && !fb->flags_bad) {
     do {
       fd = open(fb->path->data, fb->oflags | O_BINARY, (int)fb->mode);
     } while (fd < 0 && errno == EINTR);
@@ -3268,7 +3322,8 @@ static void scr_fs_stream_imm_open(ScrClosure *c) {
   }
   if (fd < 0) {
     fb->failed = true;
-    ScrError *e = fb->flags_bad ? scr_fs_flags_error(fb->flags)
+    ScrError *e = mode_bad      ? scr_fs_mode_error(fb->mode)
+                : fb->flags_bad ? scr_fs_flags_error(fb->flags)
                                 : scr_fs_error(errno, "open", fb->path);
     if (fb->pend != NULL) {
       scr_bytes_release(fb->pend);
@@ -3352,13 +3407,26 @@ static void scr_fs_stream_destroy_inv(ScrClosure *cb, ScrStream *s, ScrError *er
  * flags/encoding string. The compiler only ever fills these from an
  * options OBJECT LITERAL whose every key it recognised, so "absent" here
  * really means the program did not write the key. */
+/* WHICH members the program actually wrote. A value sentinel cannot say
+ * this: NaN is a legal thing to write for start/end/highWaterMark (Node
+ * throws on it) and "" is a legal thing to write for flags (Node reports
+ * `The argument 'flags' is invalid. Received ''`), so treating either as
+ * "absent" answers a different program. The lowering only ever builds
+ * this from an options OBJECT LITERAL, so it knows exactly. */
+#define SCR_FSO_START 1
+#define SCR_FSO_END   2
+#define SCR_FSO_HWM   4
+#define SCR_FSO_MODE  8
+#define SCR_FSO_FLAGS 16
+
 typedef struct ScrFsStreamOpts {
-  ScrStr *flags;   /* borrowed; NULL or empty = the side's default */
-  ScrStr *enc;     /* borrowed; NULL or empty = none */
+  ScrStr *flags;   /* borrowed */
+  ScrStr *enc;     /* borrowed; empty = none (bufEncoding never folds to "") */
   double start;
   double end;      /* INCLUSIVE */
   double hwm;
   double mode;
+  int present;
   bool auto_close;
   bool emit_close;
 } ScrFsStreamOpts;
@@ -3366,32 +3434,12 @@ typedef struct ScrFsStreamOpts {
 /* Node validates start/end/highWaterMark/mode SYNCHRONOUSLY in the
  * constructor and throws — unlike flags and the open itself, which are
  * events. These reproduce the exact texts (measured against v25.9.0). */
-/* Node's addNumericSeparator: ERR_OUT_OF_RANGE and friends group an
- * INTEGER whose magnitude exceeds 2^32 into underscore-separated
- * thousands, and leave everything else alone — `-4294967296` prints
- * plain, `-4294967297` prints `-4_294_967_297`, and no non-integer is
- * ever grouped (all three measured against v25.9.0). Writes at most
- * SCR_FS_NUMBUF bytes including the NUL. */
-#define SCR_FS_NUMBUF 48
-static void scr_fs_num(double v, char *out) {
-  char raw[40];
-  raw[scr_f64_to_str(v, raw)] = 0;
-  if (!(isfinite(v) && v == floor(v) && (v > 4294967296.0 || v < -4294967296.0))) {
-    memcpy(out, raw, strlen(raw) + 1);
-    return;
-  }
-  size_t i = 0, o = 0;
-  if (raw[0] == '-') out[o++] = raw[i++];
-  size_t digits = strlen(raw) - i;
-  for (size_t k = 0; k < digits; k++) {
-    if (k > 0 && (digits - k) % 3 == 0) out[o++] = '_';
-    out[o++] = raw[i + k];
-  }
-  out[o] = 0;
-}
-
+/* NaN reaches these: "absent" is the caller's PRESENCE BITMASK, not a
+ * sentinel value, because `{ start: NaN }` is a program a user can write
+ * and Node answers it with ERR_OUT_OF_RANGE ("must be an integer.
+ * Received NaN"). Reading NaN as "no start" would have been a silent
+ * wrong answer of exactly the kind this surface exists to avoid. */
 static bool scr_fs_opt_int_chk(double v, const char *what) {
-  if (v != v) return true; /* absent */
   char numbuf[SCR_FS_NUMBUF];
   char msg[160];
   int len;
@@ -3415,7 +3463,6 @@ static bool scr_fs_opt_int_chk(double v, const char *what) {
 }
 
 static bool scr_fs_opt_prop_chk(double v, const char *what, double hi) {
-  if (v != v) return true; /* absent */
   if (isfinite(v) && v == floor(v) && v >= 0 && v <= hi) return true;
   char numbuf[SCR_FS_NUMBUF];
   scr_fs_num(v, numbuf);
@@ -3426,9 +3473,9 @@ static bool scr_fs_opt_prop_chk(double v, const char *what, double hi) {
 }
 
 static bool scr_fs_opts_validate(const ScrFsStreamOpts *o) {
-  if (!scr_fs_opt_int_chk(o->start, "start")) return false;
-  if (!scr_fs_opt_int_chk(o->end, "end")) return false;
-  if (o->start == o->start && o->end == o->end && o->start > o->end) {
+  if ((o->present & SCR_FSO_START) && !scr_fs_opt_int_chk(o->start, "start")) return false;
+  if ((o->present & SCR_FSO_END) && !scr_fs_opt_int_chk(o->end, "end")) return false;
+  if ((o->present & SCR_FSO_START) && (o->present & SCR_FSO_END) && o->start > o->end) {
     char sb[SCR_FS_NUMBUF], eb[SCR_FS_NUMBUF];
     scr_fs_num(o->start, sb);
     scr_fs_num(o->end, eb);
@@ -3439,8 +3486,8 @@ static bool scr_fs_opts_validate(const ScrFsStreamOpts *o) {
     scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)(len < 0 ? 0 : len), "ERR_OUT_OF_RANGE");
     return false;
   }
-  if (!scr_fs_opt_prop_chk(o->hwm, "highWaterMark", 2147483647.0)) return false;
-  if (!scr_fs_opt_prop_chk(o->mode, "mode", 4294967295.0)) return false;
+  if ((o->present & SCR_FSO_HWM) && !scr_fs_opt_prop_chk(o->hwm, "highWaterMark", 2147483647.0)) return false;
+  /* `mode` is NOT here: Node checks it inside fs.open, so it is an event. */
   return true;
 }
 
@@ -3458,8 +3505,8 @@ static ScrStream *scr_fs_stream_new_opts(ScrStr *path, bool writable, const ScrF
   /* autoClose is Node's autoDestroy: false leaves the stream undestroyed
    * after 'end'/'finish' (no 'close', fd still open) until someone calls
    * destroy() or close(). */
-  double rhwm = o->hwm == o->hwm ? o->hwm : 65536;
-  double whwm = o->hwm == o->hwm ? o->hwm : -1;
+  double rhwm = (o->present & SCR_FSO_HWM) ? o->hwm : 65536;
+  double whwm = (o->present & SCR_FSO_HWM) ? o->hwm : -1;
   ScrStream *s = writable
                      ? scr_stream_new_writable(whwm, o->auto_close, o->emit_close, scr_fs_stream_marker(),
                                                &scr_fs_stream_write_inv, NULL, NULL,
@@ -3475,24 +3522,29 @@ static ScrStream *scr_fs_stream_new_opts(ScrStr *path, bool writable, const ScrF
   fb->auto_close = o->auto_close;
   fb->open_queued = true;
   fb->path = scr_str_retain(path);
-  fb->mode = o->mode == o->mode && o->mode >= 0 ? o->mode : 0666;
-  if (o->flags != NULL && o->flags->len > 0) {
+  fb->mode_given = (o->present & SCR_FSO_MODE) != 0;
+  fb->mode = fb->mode_given ? o->mode : 0666;
+  if ((o->present & SCR_FSO_FLAGS) && o->flags != NULL) {
     fb->flags = scr_str_retain(o->flags);
-    if (!scr_fs_stream_flags(o->flags->data, &fb->oflags)) fb->flags_bad = true;
+    /* An EMPTY spelling is a written one: Node reports it by name. */
+    if (o->flags->len == 0 || !scr_fs_stream_flags(o->flags->data, &fb->oflags)) {
+      fb->flags_bad = true;
+    }
   } else {
     fb->oflags = writable ? (O_WRONLY | O_CREAT | O_TRUNC) : O_RDONLY;
   }
-  if (o->start == o->start) {
+  if (o->present & SCR_FSO_START) {
     fb->has_start = true;
     fb->start = o->start;
   }
-  if (o->end == o->end) {
+  if (o->present & SCR_FSO_END) {
     fb->bounded = true;
     /* `end` is INCLUSIVE and counts from `start` (0 when absent), so the
      * budget is end - start + 1 — the off-by-one that a census would
      * never see. Node clamps a negative budget to nothing rather than
      * reading backwards; start > end already threw above. */
     fb->remaining = o->end - (fb->has_start ? o->start : 0) + 1;
+    /* start > end already threw; a NaN cannot reach here either. */
     if (fb->remaining < 0) fb->remaining = 0;
   }
   s->st->fs = fb;
@@ -3511,8 +3563,12 @@ static ScrStream *scr_fs_stream_new_opts(ScrStr *path, bool writable, const ScrF
  * rejects as out of range, so the PATH-ONLY createReadStream(path) threw
  * ERR_INVALID_ARG_VALUE. Corpus 3391/3392/3393 caught it; no census would
  * have. One sentinel, not two. */
+/* present = 0: the path-only pair writes no option at all. The numbers
+ * are never read in that state, so they carry no sentinel meaning — the
+ * first draft's `mode: -1` DID, and it made plain
+ * createReadStream(path) throw ERR_INVALID_ARG_VALUE (§5.5). */
 static const ScrFsStreamOpts scr_fs_stream_defaults = {
-  NULL, NULL, 0.0 / 0.0, 0.0 / 0.0, 0.0 / 0.0, 0.0 / 0.0, true, true,
+  NULL, NULL, 0, 0, 0, 0, 0, true, true,
 };
 
 ScrStream *scr_fs_read_stream(ScrStr *path) {
@@ -3527,15 +3583,15 @@ ScrStream *scr_fs_write_stream(ScrStr *path) {
  * sentinels above spell "the program did not write this key". */
 ScrStream *scr_fs_read_stream_opts(ScrStr *path, ScrStr *flags, ScrStr *enc,
                                    double start, double end, double hwm, double mode,
-                                   bool auto_close, bool emit_close) {
-  ScrFsStreamOpts o = { flags, enc, start, end, hwm, mode, auto_close, emit_close };
+                                   double present, bool auto_close, bool emit_close) {
+  ScrFsStreamOpts o = { flags, enc, start, end, hwm, mode, (int)present, auto_close, emit_close };
   return scr_fs_stream_new_opts(path, false, &o);
 }
 
 ScrStream *scr_fs_write_stream_opts(ScrStr *path, ScrStr *flags, ScrStr *enc,
                                     double start, double end, double hwm, double mode,
-                                    bool auto_close, bool emit_close) {
-  ScrFsStreamOpts o = { flags, enc, start, end, hwm, mode, auto_close, emit_close };
+                                    double present, bool auto_close, bool emit_close) {
+  ScrFsStreamOpts o = { flags, enc, start, end, hwm, mode, (int)present, auto_close, emit_close };
   return scr_fs_stream_new_opts(path, true, &o);
 }
 

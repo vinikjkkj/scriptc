@@ -47,6 +47,36 @@ attempt("hwm 0", () => { createReadStream(src, { highWaterMark: 0 }).destroy(); 
 attempt("ws start -3", () => { createWriteStream(scratch + "/never1.bin", { start: -3 }).destroy(); });
 attempt("ws hwm -8", () => { createWriteStream(scratch + "/never2.bin", { highWaterMark: -8 }).destroy(); });
 
+// WRITTEN-BUT-DEGENERATE values. These are the reason "absent" travels as
+// a presence bitmask instead of a sentinel VALUE: NaN and "" are things a
+// program can legally write, and Node rejects both BY NAME. Reading either
+// as "the key was not written" is a silent wrong answer.
+attempt("start NaN", () => { createReadStream(src, { start: NaN }).destroy(); });
+attempt("end NaN", () => { createReadStream(src, { end: NaN }).destroy(); });
+attempt("hwm NaN", () => { createReadStream(src, { highWaterMark: NaN }).destroy(); });
+attempt("start Infinity", () => { createReadStream(src, { start: Infinity }).destroy(); });
+
+// ... and the ones Node reports ASYNCHRONOUSLY, because it checks them
+// inside fs.open rather than in the constructor. mode BEATS flags.
+async function evented(tag: string, mk: () => import("node:stream").Readable): Promise<void> {
+  let ev = "no error";
+  const rs = mk();
+  await new Promise<void>((res) => {
+    rs.on("error", (e: Error) => { ev = e.message; });
+    rs.on("close", () => res());
+    rs.resume();
+  });
+  console.log(tag, "|", ev);
+}
+await evented("flags empty", () => createReadStream(src, { flags: "" }));
+await evented("flags space", () => createReadStream(src, { flags: " " }));
+await evented("mode NaN", () => createReadStream(src, { mode: NaN }));
+await evented("mode -1", () => createReadStream(src, { mode: -1 }));
+await evented("mode 1e10", () => createReadStream(src, { mode: 10000000000 }));
+await evented("mode 0.5", () => createReadStream(src, { mode: 0.5 }));
+await evented("mode beats flags", () => createReadStream(src, { flags: "zz", mode: -1 }));
+await evented("mode 438 ok", () => createReadStream(src, { mode: 438 }));
+
 // a constructor that threw did not touch the filesystem: the open is
 // asynchronous and the throw happens before it is ever scheduled
 console.log("never1 exists?", existsSync(scratch + "/never1.bin"));
