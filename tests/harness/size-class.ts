@@ -110,16 +110,42 @@
  * headroom for a platform nobody measured. The static->regex DISTANCE the
  * pair actually protects is untouched: a 3 KB kind cannot hide a 135 KB
  * library or a 620 KB engine.
+ *
+ * RECALIBRATED 2026-08-11, same toolchain, after the promise
+ * payload-conversion MEMO (one pointer on ScrPromise plus three small
+ * always-linked functions in scr_async.c). It tipped BOTH bounds, and it
+ * is the first change here whose two classes move by the SAME amount:
+ *
+ *   main (e348a0c)   641,536 static   780,800 regex
+ *   this change      642,048 static   781,312 regex
+ *
+ * +512 on each, against 464 bytes of static headroom and 200 of regex
+ * headroom. Two things to carry forward. First, this change costs ONE
+ * EIGHTH of a page and still tipped both ceilings: the calibrations above
+ * left less room than their arithmetic suggests, for the third time
+ * running. Second, the classes moved identically because the cost is
+ * always-linked code in scr_async.c, which both lanes carry unchanged —
+ * the warning above that regex does NOT move by the static delta is about
+ * changes the regex lane duplicates, and this is not one. Measured
+ * separately anyway, as that warning demands, rather than derived: the
+ * static->regex DISTANCE is 139,264 bytes on BOTH sides, byte for byte,
+ * which is the invariant this pair exists to protect.
+ *
+ * win32 gets one honest page over each new measurement: 642,048 + 4,096
+ * -> 646,000 static, 781,312 + 4,096 -> 785,000 regex. linux and darwin
+ * cannot be weighed from this box, so they move by exactly what the
+ * change costs here — +512 each — which preserves whatever headroom each
+ * had rather than inventing new headroom for a platform nobody measured.
  */
 const platform = process.platform;
 
 /** A default-built hello-world: no regex, no engine. */
 export const STATIC_CLASS_MAX =
-  platform === "linux" ? 397_120 : platform === "win32" ? 642_000 : 366_120;
+  platform === "linux" ? 397_632 : platform === "win32" ? 646_000 : 366_632;
 
 /** A program that uses regex: libregexp + libunicode, never the engine. */
 export const REGEX_CLASS_MAX =
-  platform === "linux" ? 552_168 : platform === "win32" ? 781_000 : 519_168;
+  platform === "linux" ? 552_680 : platform === "win32" ? 785_000 : 519_680;
 
 /** An --dynamic build that actually enters an island carries the engine.
  * A floor rather than a ceiling — the assertion is that the engine IS

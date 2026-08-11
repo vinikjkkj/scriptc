@@ -104,6 +104,12 @@ struct ScrPromise {
     size_t all_idx;
   } *cbs;
   size_t ncbs, cbs_cap;
+  /* Payload-conversion memo (scr_runtime.h states the contract): the
+   * adapted promises this one has already been converted into, keyed by
+   * the lowerer's adapter id. NULL for every promise in a program that
+   * never converts a payload -- one pointer, no allocation. Entries are
+   * OWNED (+1) and traced. */
+  struct ScrPromiseAdapt *adapts;
   /* Unhandled-rejection tracking: set when rejected, cleared on await. */
   bool rejection_observed;
   /* Set when the checkpoint report delivered THIS promise to
@@ -111,6 +117,16 @@ struct ScrPromise {
    * Node's 'rejectionHandled' moment (scr_prom_observe below). */
   bool reported_unhandled;
 };
+
+/* One payload-conversion memo entry: see the contract on
+ * scr_promise_adapt_has in scr_runtime.h. */
+typedef struct ScrPromiseAdapt {
+  struct ScrPromiseAdapt *next;
+  double id;
+  ScrPromise *adapted; /* owned +1 */
+} ScrPromiseAdapt;
+
+static void scr_promise_adapts_free(ScrPromise *p, bool release);
 
 #ifdef SCR_RC_AUDIT
 static long scr_live_promises = 0;
@@ -155,6 +171,10 @@ static void scr_promise_trace(void *o, ScrTraceVisit visit, void *ctx) {
     visit(p->payload, ctx);
   }
   for (size_t i = 0; i < p->ncbs; i++) visit(p->cbs[i].dst, ctx);
+  /* Memo entries are strong and cycle-headered, and the pair IS a
+   * cycle while the adapter's fiber still holds the source, so the
+   * collector has to be able to see this edge. */
+  for (ScrPromiseAdapt *a = p->adapts; a; a = a->next) visit(a->adapted, ctx);
 }
 
 /* Teardown for the collector: release the payload only when the trace does
@@ -174,6 +194,9 @@ static void scr_promise_gcfree(void *o) {
   for (size_t i = 0; i < p->ncbs; i++) {
     if (p->cbs[i].all) scr_promise_all_state_release(p->cbs[i].all);
   }
+  /* Memo entries ARE visited by the trace, so only the spine frees
+   * here -- the collector owns the adapted promises' releases. */
+  scr_promise_adapts_free(p, false);
   free(p->waiters);
   free(p->cbs);
 #ifdef SCR_RC_AUDIT
@@ -244,6 +267,7 @@ void scr_promise_release(ScrPromise *p) {
   if (--p->rc == 0) {
     scr_cyc_on_dead(p);
     scr_promise_release_payload(p);
+    scr_promise_adapts_free(p, true);
     free(p->waiters);
     for (size_t i = 0; i < p->ncbs; i++) {
       scr_promise_release(p->cbs[i].dst);
@@ -257,6 +281,61 @@ void scr_promise_release(ScrPromise *p) {
   } else {
     scr_cyc_on_release(p); /* possible cycle root; may collect — p is done */
   }
+}
+
+/* Drop the memo list. `release` distinguishes the two teardown paths:
+ * the refcount path owns the entries' references, the collector path
+ * does not (scr_promise_trace visits them -- the complement rule). */
+static void scr_promise_adapts_free(ScrPromise *p, bool release) {
+  ScrPromiseAdapt *a = p->adapts;
+  p->adapts = NULL;
+  while (a) {
+    ScrPromiseAdapt *next = a->next;
+    if (release) scr_promise_release(a->adapted);
+    free(a);
+    a = next;
+  }
+}
+
+/* The id is the lowerer's per-CONVERSION adapter number, so the key is
+ * the (source, adapter) PAIR: two adapters over one source stay two
+ * distinct promises, which is what their differing payload
+ * representations require. The list is short by construction (one
+ * entry per conversion the program actually performs on this value).
+ * NaN would never match itself, so an id is never NaN -- the lowerer
+ * emits a small non-negative integer. */
+static ScrPromiseAdapt *scr_promise_adapt_find(ScrPromise *src, double id) {
+  if (!src) return NULL;
+  for (ScrPromiseAdapt *a = src->adapts; a; a = a->next) {
+    if (a->id == id) return a;
+  }
+  return NULL;
+}
+
+bool scr_promise_adapt_has(ScrPromise *src, double id) {
+  return scr_promise_adapt_find(src, id) != NULL;
+}
+
+ScrPromise *scr_promise_adapt_get(ScrPromise *src, double id) {
+  ScrPromiseAdapt *a = scr_promise_adapt_find(src, id);
+  return a ? scr_promise_retain(a->adapted) : NULL;
+}
+
+ScrPromise *scr_promise_adapt_put(ScrPromise *src, double id, ScrPromise *made) {
+  /* Filed unconditionally, including on a hypothetical immortal source
+   * (nothing mints a promise at rc == SIZE_MAX today). Skipping one would
+   * trade a bounded leak for a silent wrong `===`, and the entry count
+   * per promise is bounded by the number of conversions the PROGRAM
+   * contains, so the unguarded failure mode is a loud audit line. */
+  if (src && !scr_promise_adapt_find(src, id)) {
+    ScrPromiseAdapt *a = (ScrPromiseAdapt *)malloc(sizeof *a);
+    if (!a) scr_oom();
+    a->next = src->adapts;
+    a->id = id;
+    a->adapted = scr_promise_retain(made);
+    src->adapts = a;
+  }
+  return scr_promise_retain(made);
 }
 
 void *scr_promise_retain_v(void *p) { return scr_promise_retain((ScrPromise *)p); }
