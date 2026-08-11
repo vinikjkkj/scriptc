@@ -1006,13 +1006,19 @@ declare module "node:fs" {
    * without restating it, and it leaves `new fs.ReadStream(...)` a type
    * error — there is no lowering for constructing one directly.
    *
-   * The OPTIONS forms declare only the members that lower. `fd`, `signal`
-   * and `fs` are left out on purpose: here they are a type error, which
-   * is the stricter of the two answers, where an @types/node project
-   * meets the by-name fence instead. Both are loud; neither compiles a
-   * call whose options are silently ignored, which is the thing that
-   * must never happen — `{ flags: "a" }` dropped on the floor truncates
-   * an append target. */
+   * The OPTIONS forms declare every member Node documents, but only the
+   * eight that LOWER are given real types. `fd`, `signal` and `fs` are
+   * declared as `unknown` rather than omitted, and that is load-bearing
+   * rather than lazy: omitting them gave a JS source's
+   * `createReadStream(null, { fd: 'k' })` a contextual type it could not
+   * satisfy, so it met a record-shape fence instead of reaching
+   * fs.streamOptsChk — the only thing that renders Node's own
+   * ERR_INVALID_ARG_TYPE for that misuse (2595-fs-arg-ladders.cjs is the
+   * test that says so). Declared-as-unknown, the JS lane keeps Node's
+   * error and the TypeScript lane still meets the by-name fence in the
+   * lowering. Neither lane ever compiles a call whose options are
+   * silently ignored, which is the thing that must never happen —
+   * `{ flags: "a" }` dropped on the floor truncates an append target. */
   export type ReadStream = import("node:stream").Readable;
   export type WriteStream = import("node:stream").Writable;
   export interface ReadStreamOptions {
@@ -1025,6 +1031,12 @@ declare module "node:fs" {
     mode?: number;
     autoClose?: boolean;
     emitClose?: boolean;
+    /** Documented by Node, NOT lowered: the lowering fences these by name.
+     * Typed `unknown` so a JS-lane misuse still reaches Node's own
+     * argument error rather than a record-shape fence. */
+    fd?: unknown;
+    signal?: unknown;
+    fs?: unknown;
   }
   export interface WriteStreamOptions {
     flags?: string;
@@ -1034,6 +1046,11 @@ declare module "node:fs" {
     mode?: number;
     autoClose?: boolean;
     emitClose?: boolean;
+    /** As above: documented, not lowered, typed `unknown` so the JS lane
+     * keeps Node's argument error. */
+    fd?: unknown;
+    signal?: unknown;
+    fs?: unknown;
   }
   export function createReadStream(path: string): ReadStream;
   export function createReadStream(path: string, encoding: string): ReadStream;
