@@ -17,6 +17,9 @@ import {
   BuiltinModuleFn,
   builtinModuleFnOf,
   FS_READDIR_DOCUMENTED_OPTIONS,
+  FS_READ_STREAM_DOCUMENTED_OPTIONS,
+  FS_STREAM_OPTION_HINTS,
+  FS_WRITE_STREAM_DOCUMENTED_OPTIONS,
   FS_WATCH_DOCUMENTED_OPTIONS,
   FS_WRITE_FILE_DOCUMENTED_OPTIONS,
   QS_PARSE_DOCUMENTED_OPTIONS,
@@ -27,6 +30,7 @@ import {
   isChildSurfaceMember,
 } from "./surfaces.js";
 import { conditionalSpreadOf, lowerDynObjectLiteral, probeLower, voidAllResultIsAValue } from "./lower-exprs.js";
+import { bufEncoding } from "./lower-containers.js";
 import { HTTP2_CONSTANTS } from "./http2-constants.js";
 import { unitOnlyUnion } from "../types.js";
 
@@ -861,6 +865,20 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     // record array (types.ts) — the userInfo verification stance.
     if (bi.module === "fs" && bi.member === "readdirSync" && expr.arguments.length === 2) {
       return lowerFsReaddirTypesCall(L, expr, loc);
+    }
+    // fs.createReadStream/createWriteStream(path, options) — the OPTIONS
+    // form, routed BEFORE the 1-argument table completion would arity-fence
+    // it. TypeScript sources only: JS sources were already served by
+    // lowerFsLadderCall above, which is the only thing that renders Node's
+    // dynamic argument errors, and 2595-fs-arg-ladders.cjs is the test that
+    // proved routing past it is a real loss of fidelity.
+    if (
+      bi.module === "fs" &&
+      (bi.member === "createReadStream" || bi.member === "createWriteStream") &&
+      expr.arguments.length === 2
+    ) {
+      const served = lowerFsCreateStreamOptsCall(L, expr, bi.member, loc);
+      if (served) return served;
     }
     if (bi.module === "os" && bi.member === "userInfo") {
       return lowerOsUserInfoCall(L, expr, loc);
@@ -6097,7 +6115,205 @@ let digestInputValueDispatches = 0;
    * @types/node, a user alias reshaping the result) fences honestly. Key
    * and row order follow getifaddrs enumeration — Node itself guarantees
    * no order (compare structurally). */
-/** `fs.readdirSync(path, { withFileTypes: true })` — Dirent rows: name +
+/** `fs.createReadStream(path, options)` / `createWriteStream(path, options)`
+   * — the option surface, over the same fs-backed Readable/Writable the
+   * path-only pair builds.
+   *
+   * THE OPTIONS MUST BE AN OBJECT LITERAL, and that is the whole safety
+   * argument rather than a convenience: the runtime call has one fixed
+   * shape whose absent members are sentinels, so the compiler has to know
+   * every key the program wrote. Handed an opaque options VALUE it would
+   * have to either ignore the keys it cannot see or invent them, and
+   * `{ flags: "a" }` silently ignored TRUNCATES a file the caller meant to
+   * append to — a wrong answer no trap census can see. A non-literal
+   * fences.
+   *
+   * Each lowered member is checked at its own use site, so a wrong TYPE is
+   * a fence rather than a coercion, and the two byte-range members are
+   * spelled out in the runtime (`end` is INCLUSIVE and is spent against
+   * bytes delivered): an off-by-one there is the same class of invisible
+   * wrong answer as the append case.
+   *
+   * `fd`, `signal` and `fs` are documented keys that do NOT lower and
+   * fence BY NAME. Undocumented keys drop exactly as Node drops them (the
+   * options-record stance) — including `end` on a write stream, which
+   * WriteStream's constructor genuinely never reads.
+   *
+   * Null when this is not the lowerable shape (a non-string path), which
+   * leaves the historical arity fence exactly where it was. */
+  export function lowerFsCreateStreamOptsCall(L: Lowerer, call: ts.CallExpression,
+    member: string, loc: SrcLoc,): IrExpr | null {
+    const read = member === "createReadStream";
+    const pathNode = call.arguments[0]!;
+    if (ts.isSpreadElement(pathNode)) return null;
+    if (L.mapTypeOf(L.typeOf(pathNode))?.kind !== "string") return null;
+    const optsNode = call.arguments[1]!;
+    // The explicit-undefined spelling IS the path-only call; the table row
+    // already lowers it, so hand it back rather than claiming it here.
+    if (ts.isIdentifier(optsNode) && optsNode.text === "undefined") return null;
+    // Node's SECOND spelling of the same thing: a bare encoding string is
+    // `{ encoding }` and nothing else (createReadStream(path, "utf8")).
+    // It folds through the same bufEncoding gate, so an unknown spelling
+    // fences by name rather than reaching the runtime.
+    if (!ts.isObjectLiteralExpression(optsNode)) {
+      if (L.mapTypeOf(L.typeOf(optsNode))?.kind === "string") {
+        const canon = bufEncoding(L, `${member} encoding`, optsNode);
+        if (!read && canon !== "utf8") {
+          L.noLowering(
+            `createWriteStream with the '${canon}' encoding`,
+            optsNode,
+            "utf8 is the write side's default and the only lowered spelling; encode the bytes yourself and write a Buffer",
+          );
+        }
+        return {
+          kind: "libCall",
+          fn: read ? "fs.readStreamOpts" : "fs.writeStreamOpts",
+          args: [
+            L.lowerExprExpecting(pathNode, STRING),
+            { kind: "strLit", value: "", type: STRING, loc },
+            { kind: "strLit", value: canon, type: STRING, loc },
+            { kind: "numLit", value: 0, type: F64, loc },
+            { kind: "numLit", value: 0, type: F64, loc },
+            { kind: "numLit", value: 0, type: F64, loc },
+            { kind: "numLit", value: 0, type: F64, loc },
+            { kind: "numLit", value: 0, type: F64, loc }, // present: nothing but the encoding
+            { kind: "boolLit", value: true, type: BOOL, loc },
+            { kind: "boolLit", value: true, type: BOOL, loc },
+          ],
+          type: { kind: "object", className: read ? "%Readable" : "%Writable" },
+          loc,
+        };
+      }
+      L.noLowering(
+        `${member} with a non-literal options argument`,
+        optsNode,
+        "pass the options inline so each member can be checked: createReadStream(path, { start: 0, end: 9 }) — an opaque options value would hide a 'flags' this compiler must not guess at",
+      );
+    }
+    const num = (v: number): IrExpr => ({ kind: "numLit", value: v, type: F64, loc });
+    const str = (v: string): IrExpr => ({ kind: "strLit", value: v, type: STRING, loc });
+    const bool = (v: boolean): IrExpr => ({ kind: "boolLit", value: v, type: BOOL, loc });
+    // WHICH members the literal wrote travels as a BITMASK, not as
+    // sentinel VALUES. A sentinel cannot carry it: `{ start: NaN }` and
+    // `{ flags: "" }` are programs a user can write, and Node answers both
+    // by name (ERR_OUT_OF_RANGE "must be an integer. Received NaN";
+    // "The argument 'flags' is invalid. Received ''"). Reading either as
+    // "absent" would be a silent wrong answer — the first draft did
+    // exactly that, and it is the reason this argument exists.
+    const PRESENT = { start: 1, end: 2, highWaterMark: 4, mode: 8, flags: 16 } as const;
+    let present = 0;
+    let flags = str(""), enc = str("");
+    let start = num(0), end = num(0), hwm = num(0), mode = num(0);
+    let autoClose = bool(true), emitClose = bool(true);
+    const seen = new Set<string>();
+    for (const p of optsNode.properties) {
+      const m = optionMember(p);
+      if (!m) {
+        L.noLowering(
+          `${member} with this options shape`,
+          p,
+          "spreads and computed keys have no lowering — write each member inline",
+        );
+      }
+      // `{ start: undefined }` is Node's own spelling of "absent" and the
+      // shape an optional field forwards; it leaves the sentinel alone.
+      const absent = ts.isIdentifier(m.value) && m.value.text === "undefined";
+      if (!seen.add(m.name)) {
+        L.noLowering(
+          `${member} with a repeated '${m.name}' option`,
+          p,
+          "the last spelling would win at runtime and the first one's effects would still happen — write the key once",
+        );
+      }
+      if (absent && m.name !== "encoding") continue;
+      switch (m.name) {
+        case "start":
+          start = L.lowerExprExpecting(m.value, F64);
+          present |= PRESENT.start;
+          break;
+        case "end":
+          // Read side only. On a write stream 'end' is undocumented and
+          // drops, which is Node's own behaviour — its WriteStream
+          // constructor never reads the member.
+          if (!read) {
+            fenceOrDropOptionKey(
+              L, p, m.name, member, FS_WRITE_STREAM_DOCUMENTED_OPTIONS,
+              "'end' bounds a READ; a write stream stops where the program stops writing",
+            );
+            break;
+          }
+          end = L.lowerExprExpecting(m.value, F64);
+          present |= PRESENT.end;
+          break;
+        case "highWaterMark":
+          hwm = L.lowerExprExpecting(m.value, F64);
+          present |= PRESENT.highWaterMark;
+          break;
+        case "mode":
+          mode = L.lowerExprExpecting(m.value, F64);
+          present |= PRESENT.mode;
+          break;
+        case "flags":
+          // Left as a runtime string on purpose: Node converts the
+          // spelling inside open() and reports an unknown one as an
+          // asynchronous ERR_INVALID_ARG_VALUE 'error' event, so folding
+          // it to a compile fence here would answer a different program.
+          flags = L.lowerExprExpecting(m.value, STRING);
+          present |= PRESENT.flags;
+          break;
+        case "encoding": {
+          if (absent) break;
+          const canon = bufEncoding(L, `${member} encoding`, m.value);
+          if (!read && canon !== "utf8") {
+            // The setDefaultEncoding stance, verbatim: utf8 IS the write
+            // side's default, and any other encoding would change what
+            // write(string) means — which this sink does not implement.
+            L.noLowering(
+              `createWriteStream with the '${canon}' encoding`,
+              m.value,
+              "utf8 is the write side's default and the only lowered spelling; encode the bytes yourself and write a Buffer",
+            );
+          }
+          enc = str(canon);
+          break;
+        }
+        case "autoClose":
+          autoClose = L.lowerExprExpecting(m.value, BOOL);
+          break;
+        case "emitClose":
+          emitClose = L.lowerExprExpecting(m.value, BOOL);
+          break;
+        default:
+          fenceOrDropOptionKey(
+            L, p, m.name, member,
+            read ? FS_READ_STREAM_DOCUMENTED_OPTIONS : FS_WRITE_STREAM_DOCUMENTED_OPTIONS,
+            "flags, encoding, start, end, highWaterMark, mode, autoClose and emitClose are the lowered options",
+            FS_STREAM_OPTION_HINTS,
+          );
+      }
+    }
+    const result: IrType = { kind: "object", className: read ? "%Readable" : "%Writable" };
+    const mapped = L.mapTypeOf(L.typeOf(call));
+    if (mapped === null || mapped.kind !== "object" || mapped.className !== result.className) {
+      // fs.ReadStream maps to %Readable (fsStreamClassOf); anything else
+      // at this call site is a reshaped alias the value does not have.
+      L.noLowering(
+        `${member} where the result is not the fs stream`,
+        call,
+        "the value is a node:stream Readable/Writable with a file underneath it",
+      );
+    }
+    const path = L.lowerExprExpecting(pathNode, STRING);
+    return {
+      kind: "libCall",
+      fn: read ? "fs.readStreamOpts" : "fs.writeStreamOpts",
+      args: [path, flags, enc, start, end, hwm, mode, num(present), autoClose, emitClose],
+      type: result,
+      loc,
+    };
+  }
+
+  /** `fs.readdirSync(path, { withFileTypes: true })` — Dirent rows: name +
    * parentPath (the path argument as given, Node's own rule) + the hidden
    * %dtype entry kind (libuv's UV_DIRENT encoding; DT_UNKNOWN falls back
    * to lstat, Node's getDirents rule). The options literal is checked

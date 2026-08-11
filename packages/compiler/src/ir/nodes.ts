@@ -4523,6 +4523,8 @@ export type IrLibFn =
    * highWaterMark/flags/fd/autoClose) are not this surface: they keep
    * the fs.streamOptsChk validation fence. */
   | "fs.readStream"
+  | "fs.readStreamOpts"
+  | "fs.writeStreamOpts"
   | "fs.writeStream"
   /** fs.watch(path, listener?) → an FSWatcher handle (scr_watch.c —
    * linked, and scr_watch_install() emitted, only when these appear on
@@ -6860,6 +6862,7 @@ export function moduleUsesStream(mod: IrModule): boolean {
         // Readable/Writable values with native option callbacks), so a
         // program whose only stream is a createReadStream still links it.
         node.fn === "fs.readStream" || node.fn === "fs.writeStream" ||
+        node.fn === "fs.readStreamOpts" || node.fn === "fs.writeStreamOpts" ||
         node.fn.startsWith("stream.set"))
     ) {
       found = true;
@@ -8023,6 +8026,13 @@ export function moduleLibNondeterministicSurface(mod: IrModule): string | null {
  * seed on `dynCheck` and `awaitExpr` nodes, which throw on validation
  * failure / promise rejection). */
 export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
+  // The fs stream OPTIONS forms only: Node validates start/end/
+  // highWaterMark/mode in the constructor and throws there (measured —
+  // `{ start: -1 }` is a synchronous ERR_OUT_OF_RANGE). The path-only
+  // pair stays out: its single failure mode is the asynchronous open,
+  // which is an 'error' EVENT.
+  "fs.readStreamOpts",
+  "fs.writeStreamOpts",
   "num.toFixed",
   "num.toStringRadix",
   "insp.jsonDyn",
@@ -8472,6 +8482,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.readSync",
   "fs.closeSync",
   "fs.readStream",
+  "fs.readStreamOpts",
+  "fs.writeStreamOpts",
   "fs.writeStream",
   "fs.watch",
   "fs.watchCb",

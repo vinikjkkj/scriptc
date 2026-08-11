@@ -1001,17 +1001,63 @@ declare module "node:fs" {
    * 'open'/'ready') is deliberately NOT declared — it has no lowering,
    * and @types/node projects meet the fence at the use site instead.
    *
-   * The PATH-ONLY signature: the options object (start/end/encoding/
-   * highWaterMark/flags/fd/autoClose) is not implemented, and declaring
-   * it here would compile a call whose options are silently ignored.
    * Written as ALIASES rather than subclasses: the mapped type is the
    * base half either way, an alias inherits the whole declared surface
    * without restating it, and it leaves `new fs.ReadStream(...)` a type
-   * error — there is no lowering for constructing one directly. */
+   * error — there is no lowering for constructing one directly.
+   *
+   * The OPTIONS forms declare every member Node documents, but only the
+   * eight that LOWER are given real types. `fd`, `signal` and `fs` are
+   * declared as `unknown` rather than omitted, and that is load-bearing
+   * rather than lazy: omitting them gave a JS source's
+   * `createReadStream(null, { fd: 'k' })` a contextual type it could not
+   * satisfy, so it met a record-shape fence instead of reaching
+   * fs.streamOptsChk — the only thing that renders Node's own
+   * ERR_INVALID_ARG_TYPE for that misuse (2595-fs-arg-ladders.cjs is the
+   * test that says so). Declared-as-unknown, the JS lane keeps Node's
+   * error and the TypeScript lane still meets the by-name fence in the
+   * lowering. Neither lane ever compiles a call whose options are
+   * silently ignored, which is the thing that must never happen —
+   * `{ flags: "a" }` dropped on the floor truncates an append target. */
   export type ReadStream = import("node:stream").Readable;
   export type WriteStream = import("node:stream").Writable;
+  export interface ReadStreamOptions {
+    flags?: string;
+    encoding?: string;
+    start?: number;
+    /** INCLUSIVE, Node's rule: `{ start: 0, end: 9 }` reads ten bytes. */
+    end?: number;
+    highWaterMark?: number;
+    mode?: number;
+    autoClose?: boolean;
+    emitClose?: boolean;
+    /** Documented by Node, NOT lowered: the lowering fences these by name.
+     * Typed `unknown` so a JS-lane misuse still reaches Node's own
+     * argument error rather than a record-shape fence. */
+    fd?: unknown;
+    signal?: unknown;
+    fs?: unknown;
+  }
+  export interface WriteStreamOptions {
+    flags?: string;
+    encoding?: string;
+    start?: number;
+    highWaterMark?: number;
+    mode?: number;
+    autoClose?: boolean;
+    emitClose?: boolean;
+    /** As above: documented, not lowered, typed `unknown` so the JS lane
+     * keeps Node's argument error. */
+    fd?: unknown;
+    signal?: unknown;
+    fs?: unknown;
+  }
   export function createReadStream(path: string): ReadStream;
+  export function createReadStream(path: string, encoding: string): ReadStream;
+  export function createReadStream(path: string, options: ReadStreamOptions): ReadStream;
   export function createWriteStream(path: string): WriteStream;
+  export function createWriteStream(path: string, encoding: string): WriteStream;
+  export function createWriteStream(path: string, options: WriteStreamOptions): WriteStream;
   /* fs.promises IS the fs/promises module (Node's rule) — the namespace-
    * import form `fs.promises.readFile(...)` lowers through the same
    * fs/promises table as `import { readFile } from "node:fs/promises"`. */
