@@ -4682,7 +4682,13 @@ export class Lowerer {
     if (
       dst.kind === "object" &&
       src.kind === "object" &&
-      this.isSubclassOf(src.className, dst.className)
+      (this.isSubclassOf(src.className, dst.className) ||
+        // ...and the DUPLEX WIDENING, which is the same reinterpret
+        // without an extends edge. The top-level rule and this one are
+        // the two copies of "may this instance widen"; they read the
+        // same predicate so `f(pt)` and `f({ sink: pt })` cannot
+        // disagree about a PassThrough in a Writable slot.
+        streamDuplexWidensToWritable(src.className, dst.className, (a, b) => this.isSubclassOf(a, b)))
     ) {
       return { how: "upcast" };
     }
