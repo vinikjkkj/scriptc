@@ -631,6 +631,18 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
     // and options-object forms fence by arity/shape.
     readSync: { fn: "fs.readSync", params: [F64, BYTES_U8, F64, F64], result: F64 },
     closeSync: { fn: "fs.closeSync", params: [F64], result: VOID },
+    // The fs-backed source and sink: a real `%Readable` / `%Writable`
+    // over the node:stream machinery (pipe, pipeline, for-await,
+    // backpressure and the whole event order are that implementation).
+    // The PATH-ONLY form — the options object (start/end/encoding/
+    // highWaterMark/flags/fd/autoClose) fences by arity and keeps the
+    // fs.streamOptsChk validation ladder in the JS lane.
+    createReadStream: {
+      fn: "fs.readStream", params: [STRING], result: { kind: "object", className: "%Readable" },
+    },
+    createWriteStream: {
+      fn: "fs.writeStream", params: [STRING], result: { kind: "object", className: "%Writable" },
+    },
     // Entirely special-cased (lowerFsWatchCall — the callback needs an
     // adapter per listener shape); this entry only routes the dispatch.
     watch: { fn: "fs.watch", params: [], result: VOID },

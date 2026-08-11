@@ -3212,6 +3212,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_fs_read_sync(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "fs.closeSync":
             return finish(`scr_fs_close(${arg(0)})`);
+          // The fs-backed stream pair (scr_stream.c): never throws — an
+          // open(2) failure rides the stream's 'error' event on a later
+          // turn, exactly like Node's asynchronous open.
+          case "fs.readStream":
+            return finish(`scr_fs_read_stream(${arg(0)})`);
+          case "fs.writeStream":
+            return finish(`scr_fs_write_stream(${arg(0)})`);
           case "fs.watch":
             // Throws Node-shaped fs errors when the path won't open
             // (may-throw seed set). An open watcher holds the loop:

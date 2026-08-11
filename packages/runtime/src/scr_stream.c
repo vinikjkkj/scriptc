@@ -47,9 +47,25 @@
  * backpressure. */
 #include "scr_runtime.h"
 
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
+/* O_BINARY: Windows-only (CRT text mode would translate \n on fd writes);
+ * zero elsewhere so the POSIX open flags are unchanged — scr_lib.c's
+ * spelling, for the fs-backed streams at the end of this file. */
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
 
 /* Node v24's stream default (lib/internal/streams/state.js — 64 KiB
  * since nodejs/node#52037, EXCEPT win32, where the very same line keeps
@@ -173,6 +189,11 @@ struct ScrStreamState {
     ScrStream **src;
     size_t n, cap;
   } drain_srcs;
+
+  /* fs.createReadStream/createWriteStream's file backing, or NULL for
+   * every other stream (see the fs-backed section at the end of this
+   * file). Owned; the state drop closes a still-open fd. */
+  struct ScrFsBacking *fs;
 };
 
 /* ── vtables and RC ───────────────────────────────────────────────────── */
@@ -222,6 +243,8 @@ static void scr_stream_entry_release(const ScrStreamState *st, void *e) {
   else scr_bytes_release((ScrBytes *)e);
 }
 
+static void scr_fs_backing_drop(struct ScrFsBacking *fb);
+
 static void scr_stream_state_drop(ScrStreamState *st, bool gc) {
   if (!st) return;
   if (st->errored) scr_error_release(st->errored);
@@ -254,6 +277,7 @@ static void scr_stream_state_drop(ScrStreamState *st, bool gc) {
   free(st->pipes.dst);
   free(st->pipes.end);
   free(st->drain_srcs.src);
+  scr_fs_backing_drop(st->fs); /* closes a still-open fd — no leak on any path */
   free(st);
 }
 
@@ -2911,6 +2935,326 @@ static void scr_stream_emit_readable_now(ScrStream *s) {
     scr_stream_end_readable(s);
   }
 }
+
+/* ── fs-backed streams (fs.createReadStream / fs.createWriteStream) ─────
+ *
+ * A file source and a file sink UNDER the machinery above — not beside
+ * it. Both are ordinary Readable/Writable values built by the same
+ * constructors a `new Readable({ read })` takes, with the option
+ * callbacks supplied natively instead of by emitted code: the buffering,
+ * the highWaterMark accounting, 'data'/'end'/'drain'/'finish'/'close'
+ * ordering, pipe, pipeline, for-await and destroy are all the shared
+ * implementation, unchanged.
+ *
+ * ASYNCHRONY. Node's fs streams run their open/read/write on the
+ * threadpool and the completions arrive in the poll phase, so nothing
+ * lands on the caller's stack. Here every syscall rides setImmediate's
+ * CHECK-phase queue (scr_fs_stream_schedule) and runs on the loop, never
+ * inside _read/_write. That is what makes the observable contracts hold:
+ *   - an open(2) failure is delivered as an 'error' EVENT on a later
+ *     turn, never a synchronous throw at the createReadStream call (so
+ *     `pipeline(createReadStream(missing), dst)` REJECTS, Node's shape);
+ *   - _write completes on a later turn, so the writable side actually
+ *     accumulates and write() answers false past the highWaterMark —
+ *     backpressure asserts instead of being silently free.
+ * The open(2) is deferred the same way, so a file is neither created nor
+ * truncated on the calling turn: `createWriteStream(p); existsSync(p)`
+ * answers false in Node, and answers false here. A successful open then
+ * queues the first read from INSIDE the check phase, which the phase's
+ * end snapshot defers to the next turn — Node's second round trip.
+ *
+ * SHORT READS ARE NOT EOF. read(2) returning fewer bytes than asked
+ * pushes exactly what arrived; only a 0-byte read is EOF (push(null)).
+ * PARTIAL WRITES ARE NOT COMPLETION. _write loops until every byte of
+ * the chunk has landed before answering write_done.
+ *
+ * THE fd NEVER LEAKS. autoClose (Node's default, and the only mode this
+ * surface offers) closes in _destroy — which autoDestroy runs after
+ * 'end'/'finish', after an error, and after an explicit destroy() — and
+ * the state drop closes anything still open if the value is released
+ * without ever being destroyed. */
+
+typedef struct ScrFsBacking {
+  int fd;
+  bool writable;   /* a sink (createWriteStream) rather than a source */
+  bool open_queued;/* the open(2) immediate is still to run */
+  bool opened;     /* fd is valid */
+  bool failed;     /* the open(2) failed; the stream is already erroring */
+  bool closed;     /* fd already returned to the OS */
+  bool auto_close;
+  bool want_read;  /* a _read arrived before the open landed */
+  ScrBytes *pend;  /* owned: the chunk the deferred write will emit */
+  ScrStr *path;    /* owned (error messages) */
+  double bytes;    /* bytesRead / bytesWritten */
+} ScrFsBacking;
+
+/* The fs error as a VALUE (+1) rather than a throw — scr_fs_throw's exact
+ * message and `code`, built from the shared pieces in scr_lib.c. The
+ * asynchronous surface needs it: a failure is an 'error' EVENT on a later
+ * turn, never a throw at the createReadStream call, which is what makes
+ * `pipeline(createReadStream(missing), dst)` REJECT. It lives HERE rather
+ * than beside scr_fs_throw so a stream-free binary does not carry it. */
+static ScrError *scr_fs_error(int e, const char *op, const ScrStr *path) {
+#ifdef _WIN32
+  /* The CRT lands ERROR_ACCESS_DENIED in errno as EACCES; libuv maps the
+   * same Win32 error to EPERM, so that is the code Node reports —
+   * scr_fs_throw's own translation, at the one other seam that needs it. */
+  if (e == EACCES) e = EPERM;
+#endif
+  char namebuf[16];
+  const char *name = scr_errno_name(e, namebuf, sizeof namebuf);
+  const char *text = scr_errno_text(e);
+  char pathbuf[PATH_MAX];
+  const char *shown = scr_fs_err_path(path, pathbuf);
+  char msg[PATH_MAX + 96];
+  int len = snprintf(msg, sizeof msg, "%s: %s, %s '%s'", name, text, op, shown);
+  if (len < 0) len = 0;
+  if ((size_t)len >= sizeof msg) len = (int)sizeof msg - 1;
+  ScrStr *m = scr_str_new(msg, (size_t)len);
+  ScrError *err = scr_error_new(SCR_ERR_ERROR, m);
+  scr_str_release(m);
+  scr_error_set_code(err, name);
+  return err;
+}
+
+static void scr_fs_backing_drop(ScrFsBacking *fb) {
+  if (fb == NULL) return;
+  if (fb->opened && !fb->closed) close(fb->fd);
+  if (fb->pend) scr_bytes_release(fb->pend);
+  if (fb->path) scr_str_release(fb->path);
+  free(fb);
+}
+
+/* The deferred read(2): at most one highWaterMark's worth per tick, the
+ * shared engine deciding when to ask again. */
+static void scr_fs_stream_do_read(ScrStream *s) {
+  ScrStreamState *st = s->st;
+  ScrFsBacking *fb = st->fs;
+  if (fb == NULL || !fb->opened || fb->closed || st->destroyed || st->r.ended) return;
+  size_t want = st->r.hwm > 0 ? st->r.hwm : SCR_STREAM_DEFAULT_HWM;
+  /* read(2)'s count is an unsigned int on the CRT. hwm is normally 64 KiB,
+   * but read(n) GROWS it to the next power of two above n (Node's
+   * howMuchToRead), so a read(5e9) could otherwise truncate the cast to
+   * zero and report a spurious EOF. Cap the per-turn request instead —
+   * a short read is not EOF, so the engine simply asks again. */
+  if (want > ((size_t)1 << 26)) want = (size_t)1 << 26;
+  ScrBytes *buf = scr_bytes_new(SCR_BYTES_U8, (double)want);
+  if (buf == NULL) return; /* the RangeError rides the cell */
+  ptrdiff_t n;
+  do {
+    n = (ptrdiff_t)read(fb->fd, buf->data, (unsigned)want);
+  } while (n < 0 && errno == EINTR);
+  if (n < 0) {
+    ScrError *e = scr_fs_error(errno, "read", fb->path);
+    scr_bytes_release(buf);
+    scr_stream_error_or_destroy(s, e);
+    scr_error_release(e);
+    return;
+  }
+  if (n == 0) {
+    scr_bytes_release(buf);
+    scr_stream_push_null(s); /* EOF — and ONLY a zero-byte read is EOF */
+    return;
+  }
+  fb->bytes += (double)n;
+  ScrBytes *chunk = (size_t)n == want ? buf : scr_bytes_slice(buf, 0, (double)n);
+  scr_stream_push(s, scr_bytes_stamp_buffer(chunk)); /* borrows */
+  if (chunk != buf) scr_bytes_release(chunk);
+  scr_bytes_release(buf);
+}
+
+/* The deferred write(2): every byte of the chunk, or the error. */
+static void scr_fs_stream_do_write(ScrStream *s) {
+  ScrStreamState *st = s->st;
+  ScrFsBacking *fb = st->fs;
+  if (fb == NULL) return;
+  ScrBytes *c = fb->pend;
+  fb->pend = NULL;
+  if (c == NULL) return;
+  if (!fb->opened || fb->closed || st->destroyed) {
+    scr_bytes_release(c);
+    return; /* destroy already owns the outcome */
+  }
+  size_t off = 0;
+  while (off < c->len) {
+    size_t chunk = c->len - off;
+    if (chunk > ((size_t)1 << 26)) chunk = (size_t)1 << 26; /* the count cast, as above */
+    ptrdiff_t n = (ptrdiff_t)write(fb->fd, c->data + off, (unsigned)chunk);
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      ScrError *e = scr_fs_error(errno, "write", fb->path);
+      scr_bytes_release(c);
+      scr_stream_write_done(s, e); /* moves */
+      return;
+    }
+    off += (size_t)n;
+  }
+  fb->bytes += (double)c->len;
+  scr_bytes_release(c);
+  scr_stream_write_done(s, NULL);
+}
+
+/* The three native option callbacks. Their ScrClosure is a bare marker
+ * (no captures — the backing hangs off the state), present only because
+ * the engine reads "a _read/_write/_destroy exists" from the slot. */
+static void scr_fs_stream_noop_clo(ScrClosure *c) { (void)c; }
+
+static ScrClosure *scr_fs_stream_marker(void) {
+  return scr_closure_new((void *)&scr_fs_stream_noop_clo, 0);
+}
+
+/* Scheduling: the CHECK phase (setImmediate's queue), not the tick
+ * queue. Node's fs streams run their syscalls on the threadpool and the
+ * completion is delivered in the poll phase, so a read that a turn's
+ * synchronous body started lands AFTER that turn's due timers and
+ * immediates. An immediate reproduces exactly that placement -- measured
+ * against Node v25.9.0 with a createReadStream, a process.nextTick, a
+ * resolved promise, a setTimeout(0) and a setImmediate all queued in one
+ * body: both give `sync micro tick timeout immediate data end close`.
+ * The tick queue would have delivered `data` before either. It also
+ * keeps the loop alive while a read is outstanding, which is what an
+ * in-flight fs request does in Node. */
+static void scr_fs_stream_imm_read(ScrClosure *c) {
+  ScrStream *s = scr_box_get_ref(c->caps[0]); /* +1 */
+  scr_fs_stream_do_read(s);
+  scr_stream_release(s);
+}
+
+static void scr_fs_stream_imm_write(ScrClosure *c) {
+  ScrStream *s = scr_box_get_ref(c->caps[0]); /* +1 */
+  scr_fs_stream_do_write(s);
+  scr_stream_release(s);
+}
+
+static void scr_fs_stream_schedule(ScrStream *s, void (*fn)(ScrClosure *)) {
+  ScrClosure *c = scr_closure_new((void *)fn, 1);
+  c->caps[0] = scr_box_new_obj(&scr_stream_retain_v, &scr_stream_release_v, &scr_stream_trace);
+  scr_box_set_ref(c->caps[0], scr_stream_retain(s));
+  scr_set_immediate(c); /* ownership moves */
+}
+
+/* The deferred open(2). Node opens on the threadpool too, so nothing
+ * about a file's creation or its failure happens on the calling turn:
+ * `createWriteStream(p); existsSync(p)` answers FALSE in Node, and it
+ * answers false here. A successful open then QUEUES the first read from
+ * inside the check phase, which the phase's end snapshot defers to the
+ * next turn -- Node's second round trip, and what puts a same-body
+ * setTimeout(0) ahead of the first 'data'. */
+static void scr_fs_stream_imm_open(ScrClosure *c) {
+  ScrStream *s = scr_box_get_ref(c->caps[0]); /* +1 */
+  ScrStreamState *st = s->st;
+  ScrFsBacking *fb = st->fs;
+  if (fb == NULL || !fb->open_queued) {
+    scr_stream_release(s);
+    return;
+  }
+  fb->open_queued = false;
+  if (st->destroyed) {
+    scr_stream_release(s);
+    return;
+  }
+  int flags = fb->writable ? (O_WRONLY | O_CREAT | O_TRUNC) : O_RDONLY;
+  int fd;
+  do {
+    fd = open(fb->path->data, flags | O_BINARY, 0666);
+  } while (fd < 0 && errno == EINTR);
+  if (fd < 0) {
+    fb->failed = true;
+    ScrError *e = scr_fs_error(errno, "open", fb->path);
+    if (fb->pend != NULL) {
+      scr_bytes_release(fb->pend);
+      fb->pend = NULL;
+    }
+    if (st->w.writing) {
+      scr_stream_write_done(s, e); /* moves; fails the in-flight write, then errors */
+    } else {
+      scr_stream_error_or_destroy(s, e);
+      scr_error_release(e);
+    }
+    scr_stream_release(s);
+    return;
+  }
+  fb->fd = fd;
+  fb->opened = true;
+  if (fb->want_read) {
+    fb->want_read = false;
+    scr_fs_stream_schedule(s, &scr_fs_stream_imm_read);
+  }
+  if (fb->pend != NULL) scr_fs_stream_schedule(s, &scr_fs_stream_imm_write);
+  scr_stream_release(s);
+}
+
+static void scr_fs_stream_read_inv(ScrClosure *cb, ScrStream *s, double size) {
+  (void)cb;
+  (void)size;
+  ScrFsBacking *fb = s->st->fs;
+  if (fb == NULL || fb->closed || fb->failed) return; /* the error path owns it */
+  if (!fb->opened) {
+    fb->want_read = true; /* the open completion kicks the read */
+    return;
+  }
+  scr_fs_stream_schedule(s, &scr_fs_stream_imm_read);
+}
+
+static void scr_fs_stream_write_inv(ScrClosure *cb, ScrStream *s, ScrBytes *chunk) {
+  (void)cb;
+  ScrFsBacking *fb = s->st->fs;
+  if (fb == NULL) return;
+  if (fb->pend) scr_bytes_release(fb->pend);
+  fb->pend = scr_bytes_retain(chunk); /* the engine's chunk is borrowed here */
+  if (!fb->opened) return; /* the open completion kicks the write */
+  scr_fs_stream_schedule(s, &scr_fs_stream_imm_write);
+}
+
+static void scr_fs_stream_destroy_inv(ScrClosure *cb, ScrStream *s, ScrError *err /*borrowed*/) {
+  (void)cb;
+  ScrFsBacking *fb = s->st->fs;
+  ScrError *out = err != NULL ? scr_error_retain(err) : NULL;
+  if (fb != NULL) {
+    if (fb->pend) {
+      scr_bytes_release(fb->pend);
+      fb->pend = NULL;
+    }
+    if (fb->opened && !fb->closed && fb->auto_close) {
+      fb->closed = true;
+      if (close(fb->fd) != 0 && out == NULL) out = scr_fs_error(errno, "close", fb->path);
+    }
+  }
+  scr_stream_destroy_done(s, out); /* moves */
+}
+
+/* The two constructors. `path` is BORROWED; the result is +1. An open(2)
+ * failure answers a live, already-destroying stream whose 'error' rides
+ * the tick queue — never a throw at this call. */
+static ScrStream *scr_fs_stream_new(ScrStr *path, bool writable) {
+  /* ReadStream's highWaterMark is 64 KiB on EVERY platform (Node's
+   * lib/internal/fs/streams.js sets it explicitly), unlike the shared
+   * stream default, which is 16 KiB on win32 — measured against Node
+   * v25.9.0 here: getDefaultHighWaterMark(false) 16384, a ReadStream
+   * 65536, a WriteStream 16384. The write side takes the shared default
+   * (-1), which is exactly that platform value. */
+  ScrStream *s = writable
+                     ? scr_stream_new_writable(-1, true, true, scr_fs_stream_marker(),
+                                               &scr_fs_stream_write_inv, NULL, NULL,
+                                               scr_fs_stream_marker(), &scr_fs_stream_destroy_inv)
+                     : scr_stream_new_readable(65536, true, true, scr_fs_stream_marker(),
+                                               &scr_fs_stream_read_inv, scr_fs_stream_marker(),
+                                               &scr_fs_stream_destroy_inv);
+  s->cls = writable ? "WriteStream" : "ReadStream";
+  ScrFsBacking *fb = calloc(1, sizeof *fb);
+  if (!fb) scr_stream_oom();
+  fb->fd = -1;
+  fb->writable = writable;
+  fb->auto_close = true;
+  fb->open_queued = true;
+  fb->path = scr_str_retain(path);
+  s->st->fs = fb;
+  scr_fs_stream_schedule(s, &scr_fs_stream_imm_open);
+  return s;
+}
+
+ScrStream *scr_fs_read_stream(ScrStr *path) { return scr_fs_stream_new(path, false); }
+ScrStream *scr_fs_write_stream(ScrStr *path) { return scr_fs_stream_new(path, true); }
 
 /* ── tick dispatch ────────────────────────────────────────────────────── */
 

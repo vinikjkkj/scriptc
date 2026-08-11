@@ -1783,6 +1783,24 @@ void scr_stream_destroy_done(ScrStream *s, ScrError *err);
 void scr_stream_transform_done(ScrStream *s, ScrError *err, ScrBytes *data, ScrStr *data_str);
 void scr_stream_flush_done(ScrStream *s, ScrError *err, ScrBytes *data, ScrStr *data_str);
 
+/* fs.createReadStream(path) / fs.createWriteStream(path) — a file source
+ * and a file sink UNDER the machinery above: ordinary Readable/Writable
+ * values whose _read/_write/_destroy are supplied natively, so pipe,
+ * pipeline, for-await, backpressure, and the whole event order are the
+ * shared implementation. Every syscall is deferred by one tick and runs
+ * on the loop, so an open(2) failure arrives as an 'error' EVENT (never a
+ * throw at this call) and the writable side really accumulates past its
+ * highWaterMark. autoClose is on: _destroy closes the fd, and so does
+ * the state drop if the value is released without ever being destroyed.
+ * The open(2) is deferred the same way, so a file is neither created nor
+ * truncated on the calling turn (`createWriteStream(p); existsSync(p)` is
+ * false in Node and false here). Path BORROWED; result +1. Options (start/end/encoding/
+ * highWaterMark/flags/fd/autoClose) are NOT part of this surface — the
+ * compiler keeps its argument-validation fence for every call that
+ * passes them. */
+ScrStream *scr_fs_read_stream(ScrStr *path);
+ScrStream *scr_fs_write_stream(ScrStr *path);
+
 /* RC / trace / install (the emitter-unit shapes). */
 ScrStream *scr_stream_retain(ScrStream *s);
 void scr_stream_release(ScrStream *s);
@@ -2695,6 +2713,19 @@ ScrStr *scr_path_win32_to_namespaced_path(ScrStr *path);
 double scr_fs_open(ScrStr *path, ScrStr *flags);
 double scr_fs_read_sync(double fd, ScrBytes *buf, double offset, double length);
 void scr_fs_close(double fd);
+
+/* The fs error SHAPE, shared with the link-gated fs streams. An fs stream
+ * delivers an open(2)/read(2)/write(2) failure as an 'error' EVENT on a
+ * later turn, never as a throw, so it needs scr_fs_throw's exact message
+ * and `code` as a value — and a second copy of the errno tables is how
+ * two spellings of one errno drift apart. scr_fs_err_msg answers a
+ * malloc'd message the caller frees and points `code` at the errno name
+ * (into `namebuf`, or a literal); `e` must already be translated.
+ * scr_fs_errno_xlate is that translation (Windows maps EACCES to Node's
+ * EPERM). Borrows path. */
+const char *scr_errno_name(int e, char *fallback, size_t cap);
+const char *scr_errno_text(int e);
+const char *scr_fs_err_path(const ScrStr *path, char *buf /* PATH_MAX */);
 
 /* ── WHATWG URL (scr_url.c) ──────────────────────────────────────────
  * An immutable, refcounted URL value, parsed once at construction. The
