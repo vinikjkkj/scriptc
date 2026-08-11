@@ -4549,6 +4549,37 @@ void scr_promise_release(ScrPromise *p);
 void *scr_promise_retain_v(void *p);
 void scr_promise_release_v(void *p);
 
+/* -- the payload-conversion MEMO -------------------------------------
+ * A promise's payload slot is typed per kind, so a Promise<T> cannot
+ * stand in for a Promise<unknown>: the lowerer bridges the two with an
+ * emitted async adapter (%promise.adapt.N) that awaits the source and
+ * converts what comes out -- a FRESH promise. JavaScript's assignment
+ * creates no promise, so a program that observes identity across such a
+ * slot
+ *
+ *     m.set("k", p); m.get("k") === p        // Node: true
+ *
+ * would be reading about the wrong object. The memo makes the bridge
+ * IDEMPOTENT: the same (source, adapter) pair always answers with the
+ * same promise, so every pointer-identity site -- ===, unionEq's ref
+ * arms, Map/Set keys -- gets Node's answer without knowing it exists.
+ *
+ * The key is the PAIR. One slot per promise would hand the second
+ * adapter's caller the first adapter's object -- a promise whose payload
+ * representation is the wrong one -- so entries are a lazily allocated
+ * list keyed by the lowerer's per-conversion adapter id. Programs that
+ * never convert a promise payload allocate nothing.
+ *
+ * Ownership: the SOURCE owns its adapted promises (+1 per entry) and
+ * scr_promise_trace visits them, because the adapter's fiber holds the
+ * source while it awaits -- pending, the pair is a cycle the collector
+ * has to be able to see. Nothing points back once the adapter settles. */
+bool scr_promise_adapt_has(ScrPromise *src, double id);
+ScrPromise *scr_promise_adapt_get(ScrPromise *src, double id); /* +1 */
+/* Files `made` under (src, id) and answers it +1 -- the caller's own
+ * reference on `made` is untouched. */
+ScrPromise *scr_promise_adapt_put(ScrPromise *src, double id, ScrPromise *made);
+
 typedef struct ScrFiber ScrFiber;
 /* Spawn + run eagerly to the first suspension; returns the promise, +1. */
 ScrPromise *scr_async_spawn(void (*entry)(ScrFiber *, void *), void *argpack);

@@ -5235,6 +5235,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "async.hop":
             E.usesTimers = true;
             return finish(`scr_await_hop()`);
+          case "promise.adaptHas":
+            return finish(`scr_promise_adapt_has(${arg(0)}, ${arg(1)})`);
+          case "promise.adaptGet":
+            return finish(`scr_promise_adapt_get(${arg(0)}, ${arg(1)})`);
+          case "promise.adaptPut":
+            return finish(`scr_promise_adapt_put(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "async.awaitDyn":
             E.usesTimers = true; // the hop rides the loop
             return finish(`scr_await_dyn_value(${arg(0)})`);

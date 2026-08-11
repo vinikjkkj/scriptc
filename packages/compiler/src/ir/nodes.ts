@@ -4336,6 +4336,19 @@ export type IrLibFn =
    * NON-promise value — JS awaits non-thenables through exactly one
    * microtask turn and yields the value itself. Never throws. */
   | "async.hop"
+  /** The promise payload-conversion MEMO (scr_async.c). A promise's
+   * payload slot is typed per kind, so `Promise<T>` entering a
+   * `Promise<unknown>` slot is bridged by an emitted async adapter that
+   * awaits the source and converts what comes out -- a FRESH promise,
+   * where JavaScript's assignment creates none. These three make the
+   * bridge idempotent, keyed by the (source promise, adapter id) PAIR, so
+   * the same source always converts to the same object and every pointer
+   * identity site answers what Node answers. `adaptPut` files its third
+   * argument and passes it through (+1); `adaptGet` answers the filed
+   * promise (+1) and is only ever reached under `adaptHas`. None throws. */
+  | "promise.adaptHas"
+  | "promise.adaptGet"
+  | "promise.adaptPut"
   | "als.new"
   | "als.get"
   | "als.run"

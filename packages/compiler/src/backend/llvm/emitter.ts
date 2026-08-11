@@ -817,6 +817,11 @@ const LIB_FN_SYMS: Record<string, string> = {
   // current fiber — USES_TIMERS_LIB_FNS marks the loop live).
   "async.hop": "scr_await_hop",
   "async.awaitDyn": "scr_await_dyn_value",
+  // The promise payload-conversion memo (scr_async.c): borrowed source,
+  // results +1, never throws.
+  "promise.adaptHas": "scr_promise_adapt_has",
+  "promise.adaptGet": "scr_promise_adapt_get",
+  "promise.adaptPut": "scr_promise_adapt_put",
   // encodeURI never throws; the WHATWG base64 globals throw the
   // catchable DOMException InvalidCharacterError (may-throw), and the
   // zero-argument form always throws ERR_MISSING_ARGS.
