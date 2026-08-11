@@ -83,4 +83,4 @@ async function main(): Promise<void> {
     console.log("both die:", await bothDie());
 }
 
-await main();
+void main();

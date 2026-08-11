@@ -55,4 +55,4 @@ async function main(): Promise<void> {
     console.log("delete:", m.delete("p"), m.get("p") === p);
 }
 
-await main();
+void main();
