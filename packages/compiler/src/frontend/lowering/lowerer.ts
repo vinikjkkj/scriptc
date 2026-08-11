@@ -6206,18 +6206,6 @@ export class Lowerer {
     };
   }
 
-  /** `Promise<U>` into a `Promise<T>` slot, when the PAYLOAD converts:
-   * an async helper that awaits the source and coerces what comes out
-   * (`async (p) => coerce(await p)`), so the slot receives a promise whose
-   * payload slot really is T. A promise's payload slot is typed per kind —
-   * there is no reinterpret that would make one stand in for the other, and
-   * a bridge that pretended otherwise read the wrong slot and returned a
-   * wrong ANSWER rather than failing (the settled_bool-through-the-f64-twin
-   * bug). Null when the payload does not convert: the exactness fences stay.
-   *
-   * Rejection passes through untouched — the helper awaits, so a rejected
-   * source rethrows inside it and rejects the adapted promise with the same
-   * value, which is what Node does. */
   /** promiseCoerceAdapter's decision, asked without building anything:
    * does a `Promise<U>` reach a `Promise<T>` slot at all? Callers that
    * only need to know whether the conversion EXISTS -- the union-equality
@@ -6254,6 +6242,18 @@ export class Lowerer {
     return this.promiseAdaptable(fromT, arm) ? arm : null;
   }
 
+  /** `Promise<U>` into a `Promise<T>` slot, when the PAYLOAD converts:
+   * an async helper that awaits the source and coerces what comes out
+   * (`async (p) => coerce(await p)`), so the slot receives a promise whose
+   * payload slot really is T. A promise's payload slot is typed per kind —
+   * there is no reinterpret that would make one stand in for the other, and
+   * a bridge that pretended otherwise read the wrong slot and returned a
+   * wrong ANSWER rather than failing (the settled_bool-through-the-f64-twin
+   * bug). Null when the payload does not convert: the exactness fences stay.
+   *
+   * Rejection passes through untouched — the helper awaits, so a rejected
+   * source rethrows inside it and rejects the adapted promise with the same
+   * value, which is what Node does. */
   promiseCoerceAdapter(
     fromT: IrType & { kind: "promise" },
     toT: IrType & { kind: "promise" },
