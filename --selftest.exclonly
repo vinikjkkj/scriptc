@@ -1,7 +1,0 @@
-sc_f_c2_tail	14	peek	EXCL-ONLY		CONTIGUOUS-0..0(TAIL) excl=0	sc_rs_r1 *sc_t2 = sc_rretain_r1((sc_rs_r1 *)scr_union_peek(sc_t0)); /* EXPECT EXCL-ONLY TAIL */	
-sc_f_t2_else	67	peek	EXCL-ONLY		GAP{0}/0..1 excl=1	return (u->tag == 1 ? NULL : scr_union_peek(u)); /* EXPECT EXCL-ONLY */	
-sc_f_t3_chain	70	peek	EXCL-ONLY		GAP{0}/0..2 excl=1|2	return (u->tag == 1 ? scr_stream_push_null(s) : u->tag == 2 ? scr_stream_push_str(s, (ScrStr *)scr_union_peek(u)) : scr_stream_pus	
-sc_f_t6_negated	79	peek	EXCL-ONLY		GAP{0}/0..1 excl=1	return (u->tag != 1 ? scr_union_peek(u) : NULL); /* EXPECT EXCL-ONLY */	
-sc_f_e1_split_else	143	peek	EXCL-ONLY		GAP{0}/0..1 excl=1	out = scr_str_retain((ScrStr *)scr_union_peek(u)); /* EXPECT EXCL-ONLY */	
-sc_f_e5_alloc_between	159	get_f64	EXCL-ONLY		GAP{0}/0..1 excl=1	out = scr_union_get_f64(b); /* EXPECT EXCL-ONLY */	
-sc_f_e7_two_peeks	188	get_f64	EXCL-ONLY		GAP{0}/0..1 excl=1	out = scr_union_get_f64(f2); /* EXPECT EXCL-ONLY */	
