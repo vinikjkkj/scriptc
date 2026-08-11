@@ -300,6 +300,17 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "fs.lstatSync": { argTypes: [STRING], result: STATS_T },
   "fs.openSync": { argTypes: [STRING, STRING], result: F64 },
   "fs.readStream": { argTypes: [STRING], result: { kind: "object", className: "%Readable" } },
+  // path, flags, encoding, start, end, highWaterMark, mode, autoClose,
+  // emitClose — one fixed shape, the lowering filling every member the
+  // options literal omitted with its sentinel (NaN / "").
+  "fs.readStreamOpts": {
+    argTypes: [STRING, STRING, STRING, F64, F64, F64, F64, BOOL, BOOL],
+    result: { kind: "object", className: "%Readable" },
+  },
+  "fs.writeStreamOpts": {
+    argTypes: [STRING, STRING, STRING, F64, F64, F64, F64, BOOL, BOOL],
+    result: { kind: "object", className: "%Writable" },
+  },
   "fs.writeStream": { argTypes: [STRING], result: { kind: "object", className: "%Writable" } },
   "fs.readSync": { argTypes: [F64, BYTES_U8, F64, F64], result: F64 },
   // fs.watch's callback func type is program-dependent (zero params, or
