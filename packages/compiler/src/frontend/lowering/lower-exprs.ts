@@ -3906,7 +3906,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         return { kind: "numLit", value: shape.fields.length, type: F64, loc: locOf(expr) };
       }
     }
-    if (kind !== "string" && kind !== "array" && kind !== "map" && kind !== "set" && kind !== "f64" && kind !== "regex" && kind !== "url" && kind !== "searchParams" && kind !== "stats" && kind !== "spawnRes" && kind !== "child" && kind !== "bytes" && kind !== "symbol") {
+    if (kind !== "string" && kind !== "array" && kind !== "map" && kind !== "set" && kind !== "f64" && kind !== "regex" && kind !== "url" && kind !== "searchParams" && kind !== "stats" && kind !== "fileHandle" && kind !== "spawnRes" && kind !== "child" && kind !== "bytes" && kind !== "symbol") {
       return null;
     }
     // child receivers also admit the user's own child-shaped interface
@@ -4001,6 +4001,22 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         `SpawnSyncReturns.${name}`,
         expr,
         "status, stdout, stderr, and error are the supported spawnSync-result members",
+        L.checker.getSymbolAtLocation(expr.name),
+      );
+    }
+    if (kind === "fileHandle") {
+      if (name === "fd") {
+        // Node's filehandle.fd — the owned descriptor, or -1 once closed.
+        const receiver = L.lowerExpr(expr.expression);
+        return { kind: "libCall", fn: "fh.fd", args: [receiver], type: F64, loc: locOf(expr) };
+      }
+      if (name === "read" || name === "close") {
+        L.unsupported("SC1090", expr, `FileHandle methods as values (call '${name}' directly)`);
+      }
+      L.noLowering(
+        `FileHandle.${name}`,
+        expr,
+        "read(buffer, offset, length, position), close(), and fd are the supported FileHandle members",
         L.checker.getSymbolAtLocation(expr.name),
       );
     }
