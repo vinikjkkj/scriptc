@@ -25,7 +25,7 @@ import { bindingNeverReassigned, implicitMonoFile, lowerIntlDefaultLocalePropert
 import { mixinFnOfCallee } from "./lower-mixins.js";
 import { isConstAssertionTypeNode, isGenericCallableMemberType, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
-import { lowerStreamProperty, lowerStreamStateProperty, streamSidesOf } from "./lower-stream.js";
+import { lowerStreamProperty, lowerStreamStateProperty, streamInstanceOfExpr, streamSidesOf } from "./lower-stream.js";
 import { lowerWebSocketGlobal } from "./lower-ws.js";
 import { emitterRooted } from "./lower-emitter.js";
 import { EMITTER_API_MEMBERS } from "./lower-classes.js";
@@ -11229,7 +11229,12 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const lhsInfo = L.classes.get(left.type.className);
     if (!lhsInfo) throw new Error(`lowerer bug: unknown class ${left.type.className}`);
     if (L.inHierarchy(lhsInfo) && L.inHierarchy(target)) {
-      return { kind: "instanceOf", value: left, className: target.def.name, type: BOOL, loc };
+      // The plain interval test everywhere except `instanceof
+      // Writable`, where Node's own Symbol.hasInstance also admits the
+      // Duplex subtree — main answers `false` for `new PassThrough()
+      // instanceof Writable`, which Node calls true. See
+      // streamInstanceOfExpr.
+      return streamInstanceOfExpr(L, left, target.def.name, loc);
     }
     const value =
       left.type.className === target.def.name ||
