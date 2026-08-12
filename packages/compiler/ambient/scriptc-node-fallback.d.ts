@@ -1088,6 +1088,33 @@ declare module "fs/promises" {
   export function unlink(path: string): Promise<void>;
   export function chmod(path: string, mode: number): Promise<void>;
 }
+
+/* The FileHandle surface, declared to exactly what lowers — the fs-stream
+ * block's rule: the fallback is STRICTER than @types/node, so a corpus
+ * program cannot accidentally pin behaviour that does not exist. The
+ * options-object read forms, readFile/write/writeFile/stat/truncate and
+ * the bigint position all fence under @types/node; here they are simply
+ * not declared, which is a type error instead. */
+declare module "fs/promises" {
+  export interface FileReadResult {
+    bytesRead: number;
+    buffer: Uint8Array;
+  }
+  export interface FileHandle {
+    /** The owned descriptor, or -1 once closed. */
+    readonly fd: number;
+    /** position: a number reads from there and leaves the file position
+     * unchanged; null reads from, and advances, the file position. */
+    read(
+      buffer: Uint8Array,
+      offset: number,
+      length: number,
+      position: number | null,
+    ): Promise<FileReadResult>;
+    close(): Promise<void>;
+  }
+  export function open(path: string, flags?: string): Promise<FileHandle>;
+}
 declare module "node:fs/promises" {
   export * from "fs/promises";
 }
