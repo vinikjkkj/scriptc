@@ -1688,7 +1688,10 @@ double scr_fs_open(ScrStr *path, ScrStr *flags) {
   else {
     char msg[128];
     int len = snprintf(msg, sizeof msg, "The argument 'flags' is invalid. Received '%s'", f);
-    scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)len);
+    /* Node stamps ERR_INVALID_ARG_VALUE here; without the code a caller
+     * switching on err.code sees undefined and falls through its own
+     * error handling -- the message alone is not the contract. */
+    scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)len, "ERR_INVALID_ARG_VALUE");
     return 0;
   }
   int fd = open(path->data, of | O_BINARY, 0666);
@@ -1706,15 +1709,27 @@ double scr_fs_open(ScrStr *path, ScrStr *flags) {
  * throws ERR_OUT_OF_RANGE; here the checks clamp to the same contract and
  * throw the RangeError shape. Returns the byte count read(2) reports;
  * errors carry the errno name like the other fd operations. */
-double scr_fs_read_sync(double fd, ScrBytes *buf, double offset, double length) {
+/* Node's validateOffsetLengthRead. Answers false with a PENDING exception
+ * on a bad window; on true *off and *want are both in range. ONE copy of
+ * the rule -- fs.readSync and filehandle.read both come through here, so
+ * the two spellings of Node's texts cannot drift apart. */
+static bool scr_fs_read_bounds(ScrBytes *buf, double offset, double length,
+                               size_t *off, size_t *want) {
   size_t bytelen = buf->len; /* u8 buffers: elem count == byte count */
   char msg[160];
   int mlen;
-  /* Node's exact texts: offset validates against MAX_SAFE_INTEGER's range
-   * form, length against the remaining window (validateOffset vs the
-   * buffer-bounds check in fs.readSync). */
+  /* Node's validateOffsetLengthRead, MEASURED rather than remembered (the
+   * oracle is in the FileHandle block report): the OFFSET is bounded by
+   * MAX_SAFE_INTEGER, NOT by the buffer; the LENGTH is truncated toward
+   * zero, must be >= 0, and is bounded by `bufferLength - offset`, which
+   * for an offset past the end is NEGATIVE and printed as such ("It must
+   * be <= -5"). The previous shape rejected offset > bytelen with the
+   * OFFSET message where Node reports the length one -- a loud but wrong
+   * diagnostic. One copy of the rule, shared by fs.readSync and
+   * filehandle.read. */
   char numbuf[40];
-  if (offset < 0 || offset > (double)bytelen) {
+  char availbuf[40];
+  if (offset < 0 || offset > 9007199254740991.0) {
     numbuf[scr_f64_to_str(offset, numbuf)] = 0;
     mlen = snprintf(msg, sizeof msg,
                     "The value of \"offset\" is out of range. It must be >= 0 && <= 9007199254740991. Received %s",
@@ -1722,16 +1737,36 @@ double scr_fs_read_sync(double fd, ScrBytes *buf, double offset, double length) 
     scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)mlen, "ERR_OUT_OF_RANGE");
     return 0;
   }
-  size_t off = (size_t)offset;
-  if (length < 0 || (double)length > (double)(bytelen - off)) {
+  double len_i = trunc(length); /* Node coerces before the >= 0 test: -0.5 is 0 */
+  if (len_i < 0) {
     numbuf[scr_f64_to_str(length, numbuf)] = 0;
     mlen = snprintf(msg, sizeof msg,
-                    "The value of \"length\" is out of range. It must be <= %zu. Received %s",
-                    bytelen - off, numbuf);
+                    "The value of \"length\" is out of range. It must be >= 0. Received %s",
+                    numbuf);
     scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)mlen, "ERR_OUT_OF_RANGE");
     return 0;
   }
-  size_t want = (size_t)length;
+  double avail = (double)bytelen - offset;
+  if (len_i > avail) {
+    numbuf[scr_f64_to_str(length, numbuf)] = 0;
+    availbuf[scr_f64_to_str(avail, availbuf)] = 0;
+    mlen = snprintf(msg, sizeof msg,
+                    "The value of \"length\" is out of range. It must be <= %s. Received %s",
+                    availbuf, numbuf);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)mlen, "ERR_OUT_OF_RANGE");
+    return 0;
+  }
+  /* Past both checks: 0 <= offset <= bytelen and 0 <= len_i <= bytelen -
+   * offset, so pointer and count are both in range (offset == bytelen
+   * with length 0 is the legal one-past-the-end no-op). */
+  *off = (size_t)offset;
+  *want = (size_t)len_i;
+  return true;
+}
+
+double scr_fs_read_sync(double fd, ScrBytes *buf, double offset, double length) {
+  size_t off, want;
+  if (!scr_fs_read_bounds(buf, offset, length, &off, &want)) return 0;
   ssize_t n = read((int)fd, buf->data + off, want);
   if (n < 0) {
     int e = errno;
@@ -1854,33 +1889,17 @@ double scr_fh_read_into(ScrFileHandle *h, ScrBytes *buf, double offset, double l
   errno = saved_errno;
   return n;
 #else
-  size_t bytelen = buf->len;
-  char msg[160];
-  int mlen;
-  char numbuf[40];
-  if (offset < 0 || offset > (double)bytelen) {
-    numbuf[scr_f64_to_str(offset, numbuf)] = 0;
-    mlen = snprintf(msg, sizeof msg,
-                    "The value of \"offset\" is out of range. It must be >= 0 && <= 9007199254740991. Received %s",
-                    numbuf);
-    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)mlen, "ERR_OUT_OF_RANGE");
-    return 0;
-  }
-  size_t off = (size_t)offset;
-  if (length < 0 || (double)length > (double)(bytelen - off)) {
-    numbuf[scr_f64_to_str(length, numbuf)] = 0;
-    mlen = snprintf(msg, sizeof msg,
-                    "The value of \"length\" is out of range. It must be <= %zu. Received %s",
-                    bytelen - off, numbuf);
-    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)mlen, "ERR_OUT_OF_RANGE");
-    return 0;
-  }
-  ssize_t n = pread(h->fd, buf->data + off, (size_t)length, (off_t)position);
+  size_t off, want;
+  if (!scr_fs_read_bounds(buf, offset, length, &off, &want)) return 0;
+  /* pread(2): reads at an absolute offset and does NOT move the file
+   * position, which is exactly Node's numeric-position contract. */
+  ssize_t n = pread(h->fd, buf->data + off, want, (off_t)position);
   if (n < 0) {
     int e = errno;
     char namebuf[16];
     const char *name = scr_errno_name(e, namebuf, sizeof namebuf);
     const char *text = scr_errno_text(e);
+    char msg[160];
     int len = snprintf(msg, sizeof msg, "%s: %s, read", name, text);
     scr_throw_error_msg_code(SCR_ERR_ERROR, msg, (size_t)len, name);
     return 0;
