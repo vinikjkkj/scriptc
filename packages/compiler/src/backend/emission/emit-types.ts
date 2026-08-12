@@ -54,6 +54,8 @@ export function cType(t: IrType): string {
       return "ScrSym *";
     case "stats":
       return "ScrStats *";
+    case "fileHandle":
+      return "ScrFileHandle *";
     case "spawnRes":
       return "ScrSpawnRes *";
     case "child":
@@ -171,6 +173,8 @@ export function retainCallC(type: IrType, expr: string): string {
       return `scr_sym_retain(${expr})`;
     case "stats":
       return `scr_stats_retain(${expr})`;
+    case "fileHandle":
+      return `scr_fh_retain(${expr})`;
     case "spawnRes":
       return `scr_spawn_res_retain(${expr})`;
     case "child":
@@ -263,6 +267,8 @@ export function releaseCallC(type: IrType, expr: string): string {
       return `scr_sym_release(${expr})`;
     case "stats":
       return `scr_stats_release(${expr})`;
+    case "fileHandle":
+      return `scr_fh_release(${expr})`;
     case "spawnRes":
       return `scr_spawn_res_release(${expr})`;
     case "child":
@@ -351,6 +357,7 @@ export function boxKindC(t: IrType): string {
     case "searchParams":
     case "symbol":
     case "stats":
+    case "fileHandle":
     case "spawnRes":
     case "child":
     case "netServer":
@@ -469,6 +476,8 @@ export function rcAdapters(t: IrType): RcAdapters | null {
       return rt("scr_sym_retain_v", "scr_sym_release_v");
     case "stats":
       return rt("scr_stats_retain_v", "scr_stats_release_v");
+    case "fileHandle":
+      return rt("scr_fh_retain_v", "scr_fh_release_v");
     case "spawnRes":
       return rt("scr_spawn_res_retain_v", "scr_spawn_res_release_v");
     case "child":
@@ -662,6 +671,7 @@ export function elemKindC(elem: IrType): string {
     case "url":
     case "searchParams":
     case "stats":
+    case "fileHandle":
     case "spawnRes":
     case "netSocket":
     case "dgramSocket":

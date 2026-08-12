@@ -684,6 +684,7 @@ function lowerOptionalDefaultArg(
       (fnRet.kind === "url" ||
         fnRet.kind === "searchParams" || fnRet.kind === "generator" || fnRet.kind === "caught" ||
         fnRet.kind === "stats" || fnRet.kind === "spawnRes" || fnRet.kind === "netSocket" ||
+        fnRet.kind === "fileHandle" ||
         fnRet.kind === "dgramSocket" || fnRet.kind === "testCtx" || fnRet.kind === "httpReq" ||
         fnRet.kind === "httpRes" || fnRet.kind === "httpClientReq" || fnRet.kind === "secureCtx" ||
         fnRet.kind === "fsWatcher" || fnRet.kind === "childStream" || fnRet.kind === "procStream" ||

@@ -10235,6 +10235,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       case "nullT":
       case "array": case "map": case "set": case "regex": case "bytes":
       case "url": case "searchParams": case "stats": case "spawnRes": case "child":
+      case "fileHandle":
       case "netServer": case "netSocket": case "httpReq": case "httpRes":
       case "httpClientReq": case "secureCtx": case "fsWatcher":
       case "childStream": case "procStream":

@@ -532,6 +532,11 @@ const LIB_FN_SYMS: Record<string, string> = {
   "fsp.readdir": "scr_fsp_readdir",
   "fsp.rm": "scr_fsp_rm",
   "fsp.stat": "scr_fsp_stat",
+  "fsp.open": "scr_fsp_open",
+  "fh.read": "scr_fh_read_into",
+  "fh.readCur": "scr_fh_read_cur",
+  "fh.close": "scr_fh_close",
+  "fh.fd": "scr_fh_fd",
   "sym.new": "scr_sym_new",
   "sym.for": "scr_sym_for",
   "sym.toString": "scr_sym_to_string",
@@ -2691,6 +2696,7 @@ class LlEmitter {
       case "searchParams":
       case "stats":
       case "spawnRes":
+      case "fileHandle":
       case "child":
       case "childStream":
       case "generator":
@@ -2784,6 +2790,7 @@ class LlEmitter {
             case "searchParams":
             case "stats":
             case "spawnRes":
+            case "fileHandle":
             case "child":
             case "childStream":
             case "generator":
@@ -6264,6 +6271,42 @@ class LlEmitter {
             );
           }
           return out;
+        }
+        if (e.name === "promise.settled") {
+          // promise.resolve's sibling for values produced by a libCall
+          // that reports failure through the pending exception cell: the
+          // settled_* constructors convert that cell into the REJECTION.
+          // See the C emitter's twin for why building the value between
+          // the call and this is safe.
+          if (e.type.kind !== "promise") throw new Error("llvm emitter bug: promise.settled type");
+          const t = e.args[0]!.type;
+          if (t.kind === "void") {
+            this.declare(`declare ptr @scr_promise_settled_void()`);
+            const p = B.tmp();
+            B.line(`${p} = call ptr @scr_promise_settled_void()`);
+            return this.own({ name: p, type: e.type });
+          }
+          const v = this.emitExpr(e.args[0]!);
+          const p = B.tmp();
+          if (t.kind === "f64") {
+            this.declare(`declare ptr @scr_promise_settled_f64(double)`);
+            B.line(`${p} = call ptr @scr_promise_settled_f64(double ${v.name})`);
+          } else if (t.kind === "bool") {
+            this.declare(`declare ptr @scr_promise_settled_bool(i1 zeroext)`);
+            B.line(`${p} = call ptr @scr_promise_settled_bool(i1 ${v.name})`);
+          } else if (t.kind === "string") {
+            this.moveTemp(v);
+            this.declare(`declare ptr @scr_promise_settled_str(ptr)`);
+            B.line(`${p} = call ptr @scr_promise_settled_str(ptr ${v.name})`);
+          } else {
+            const rc = vAdapters(this, t);
+            this.moveTemp(v);
+            this.declare(`declare ptr @scr_promise_settled_ref(ptr, ptr, ptr, ptr)`);
+            B.line(
+              `${p} = call ptr @scr_promise_settled_ref(ptr ${v.name}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${traceArg(this, t)})`,
+            );
+          }
+          return this.own({ name: p, type: e.type });
         }
         if (e.name === "promise.race") {
           // A fresh result promise + one race_add per entry: settled
