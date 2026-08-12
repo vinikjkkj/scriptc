@@ -7390,6 +7390,40 @@ export function moduleUsesFsWatch(mod: IrModule): boolean {
   return found;
 }
 
+/** The program touches fs/promises.open (moduleUsesFileHandle on the IR):
+ * compiles scr_filehandle.c in. It is a LINK GATE, not a fence — a wrong
+ * `false` is a loud unresolved-symbol link error, never a wrong answer.
+ * It is a separate unit purely for SIZE: scr_lib.c and scr_async.c are
+ * unconditionally linked and the win32/linux links carry no
+ * --gc-sections, so a FileHandle section living there costs every binary
+ * in the world 2 048 bytes (measured, and reverted). */
+export function moduleUsesFileHandle(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && typeof node.fn === "string" &&
+        (node.fn === "fsp.open" || node.fn.startsWith("fh."))) {
+      found = true;
+      return;
+    }
+    // A handle TYPE left behind by a fenced statement still emits
+    // scr_fh_release — the unit must link. (The fsWatcher precedent
+    // directly above; it is why that probe exists.)
+    if (node.kind === "fileHandle") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 /** True when the module contains any test.* libCall or a testCtx handle
  * type — the link switch that pulls scr_test.c into the binary and has
  * the emitted main return scr_test_exit_code() after the loop drains

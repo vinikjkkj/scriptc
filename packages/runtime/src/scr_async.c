@@ -1582,23 +1582,6 @@ ScrPromise *scr_fsp_stat(ScrStr *path) {
   return scr_promise_settled_ref(st, &scr_stats_retain_v, &scr_stats_release_v, NULL);
 }
 
-/* fs/promises.open — the handle, not the fd (scr_lib.c's ScrFileHandle
- * comment says why the difference is a correctness one). A failed open
- * left a pending exception, which settled_ref moves in as the rejection.
- * filehandle.read() has NO wrapper here: its result is a RECORD, whose
- * layout only the backend knows, so the lowering builds the record and
- * hands it to the same scr_promise_settled_ref through the
- * `promise.settled` intrinsic. */
-ScrPromise *scr_fsp_open(ScrStr *path, ScrStr *flags) {
-  ScrFileHandle *h = scr_fh_open_raw(path, flags);
-  return scr_promise_settled_ref(h, &scr_fh_retain_v, &scr_fh_release_v, NULL);
-}
-
-ScrPromise *scr_fh_close(ScrFileHandle *h) {
-  scr_fh_close_raw(h); /* idempotent: Node's second close() resolves */
-  return scr_promise_settled_void();
-}
-
 /* ── node:timers/promises ────────────────────────────────────────────
  * The promisified pair: a PENDING void promise a one-shot heap timer
  * (setTimeout) or the immediate queue (setImmediate) fulfills — the
