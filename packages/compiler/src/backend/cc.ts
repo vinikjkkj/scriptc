@@ -286,6 +286,10 @@ export interface CcOptions {
    * scr_watch.c into the binary — the net gating precedent, so watch-free
    * binaries keep their exact link line. */
   watch?: boolean;
+  /** The program opens an fs/promises FileHandle (moduleUsesFileHandle on
+   * the IR): compiles scr_filehandle.c in. Gated for SIZE — the always-
+   * linked units have no dead stripping on these targets. */
+  fileHandle?: boolean;
   /** The program uses node:test (moduleUsesNodeTest on the IR): compiles
    * scr_test.c into the binary — the net gating precedent, so test-free
    * binaries keep their exact link line. */
@@ -1390,6 +1394,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
       : []),
     ...(opts.dgram ? [rt(join(rtDir, "scr_dgram.c"))] : []),
     ...(opts.watch ? [rt(join(rtDir, "scr_watch.c"))] : []),
+    ...(opts.fileHandle ? [rt(join(rtDir, "scr_filehandle.c"))] : []),
     ...(opts.nodeTest ? [rt(join(rtDir, "scr_test.c"))] : []),
     // The CA-store unit rides its own gate OR the tls one: scr_tls.c
     // references its default-set override unconditionally.
