@@ -51,7 +51,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { arrayOf, BOOL, canAdaptDynFuncTo, canDynCheckTo, funcOf, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, RUNTIME_ERROR_CLASSES, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { arrayOf, BOOL, canAdaptDynFuncTo, canDynCheckTo, funcOf, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -96,7 +96,7 @@ import { ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorCla
 import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } from "./lower-mixins.js";
 import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bindingNeverReassigned, bodyReadsArguments, isThisParameter, paramShape, paramShapes, checkDefaultParamBodyType, completeArgs, wrappedUndefined, undefinedArgFor, requireExactArityValue, bodyReturnType, declaredReturnType, collectSignature, collectSignatureInner, collectGenericSignature, genericFnOf, lowerGenericCall, lowerGenericFnValue, inferTypeParamBindings, lowerGenericInstance, lowerCall, lowerFfiCall, lowerTimersMemberCall, lowerPromiseMethodCall, lowerFilterNarrowCall, isTopLevelFnSymbol, lowerNestedFunctionDecl, lambdaSignature, lowerLambda, lowerFunction, validateFfiImports } from "./lower-calls.js";
 import { lowerArrayMethodCall, lowerBufferStaticCall, lowerBytesMethodCall, lowerBytesNew, lowerMapMethodCall, lowerMapForEachCall, buildMapForEachFn, lowerRecordOvfCaptureHelper, ovfCapturePlannable, lowerEnvToPairsHelper, lowerSetMethodCall, lowerSetForEachCall, buildSetForEachFn, lowerRegexMethodCall, lowerStringMethodCall } from "./lower-containers.js";
-import { lowerStreamModuleCall } from "./lower-stream.js";
+import { lowerStreamModuleCall, streamInstanceOfExpr } from "./lower-stream.js";
 import { lowerEmitOverrideSpec, type EmitSpecCtx, type EmitSpecRequest } from "./lower-emitter.js";
 import { builtinImportOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, stripTypeCasts, lowerBuiltinModuleCall, lowerFsToUnixTimestampCall, lowerFsLadderCall, lowerChildArgsArg, lowerSpawnSyncCall, lowerSpawnCall, lowerExecSyncCall, recordToEnvPairs, lowerJsonMethodCall, fencedBuiltinImportOf, lowerCryptoComposedCall, lowerUrlMethodCall, lowerSearchParamsMethodCall, lowerStatsMethodCall, lowerChildMethodCall, lowerAtomicsCall, lowerBuiltinExtraProperty, promisifiedExecFileDecl, lowerPromisifiedSettledCall, type PromisifiedTarget, lowerExecFileAsyncCall, execFileAsyncHelper, lowerStringDecoderMethodCall, strdecHelper, lowerReadlineMethodCall, lowerDcChannelMethodCall, lowerDcChannelProperty, lowerAlsMethodCall, lowerDcTracingChannelMethodCall, lowerDcTracingChannelProperty, lowerJsonProperty, lowerErrorCodeProperty, lowerErrorPrototypeProperty, lowerUint8ArrayPrototypeProperty, lowerUint8ArrayStaticProperty, lowerProcessProperty, processVersionsMember, isProcessEnv, envValueType, lowerProcessEnvGet, lowerProcessMethodCall, lowerProcessOptionalMethodCall, lowerTimeoutMethodCall, envSnapshotHelper, isConsoleLog, consoleCallMember, lowerNumberStaticCall, lowerNumberStaticProperty, lowerDateCall, lowerTextCodecCall, lowerCryptoModuleCall, lowerFsConstantsProperty, lowerBuiltinConstantsProperty, builtinConstantBindingOf, builtinConstantsDestructureDecl, lowerProcessStreamProperty, lowerStringStaticCall, lowerStringLastIndexOfCall, lowerPromiseStaticCall } from "./lower-builtins.js";
 import { isIslandExpr, islandFuncValueFence, islandRegexpOf, jsvalIn, requireDynamicApi, islandGlobalFnOf, lowerDynamicImportCall, lowerFetchCall, lowerIslandMethodCall, lowerMathProperty, npmPackageOf, npmMemberFence, npmPackageOfSymbol } from "./lower-island.js";
@@ -3963,6 +3963,17 @@ export class Lowerer {
     ) {
       return { kind: "upcast", value: expr, type: expected, loc: expr.loc };
     }
+    // The DUPLEX WIDENING — the second, non-prototype half of Node's
+    // stream hierarchy (streamDuplexWidensToWritable says why it is not an
+    // isSubclassOf edge). Same node, same pointer reinterpret; the IR
+    // validator admits the pair through the SAME predicate.
+    if (
+      expected.kind === "object" &&
+      expr.type.kind === "object" &&
+      streamDuplexWidensToWritable(expr.type.className, expected.className, (a, b) => this.isSubclassOf(a, b))
+    ) {
+      return { kind: "upcast", value: expr, type: expected, loc: expr.loc };
+    }
     // CLASS-VALUE widening (classval:D into a classval:C slot): the same
     // pointer with only the static type changing — legal exactly when D
     // strictly descends from C AND the two completed constructor ABIs
@@ -4671,7 +4682,13 @@ export class Lowerer {
     if (
       dst.kind === "object" &&
       src.kind === "object" &&
-      this.isSubclassOf(src.className, dst.className)
+      (this.isSubclassOf(src.className, dst.className) ||
+        // ...and the DUPLEX WIDENING, which is the same reinterpret
+        // without an extends edge. The top-level rule and this one are
+        // the two copies of "may this instance widen"; they read the
+        // same predicate so `f(pt)` and `f({ sink: pt })` cannot
+        // disagree about a PassThrough in a Writable slot.
+        streamDuplexWidensToWritable(src.className, dst.className, (a, b) => this.isSubclassOf(a, b)))
     ) {
       return { how: "upcast" };
     }
@@ -7191,6 +7208,12 @@ export class Lowerer {
     const toInfo = this.classes.get(toClass);
     if (!fromInfo || !toInfo) return null;
     if (!this.inHierarchy(fromInfo) || !this.inHierarchy(toInfo)) return null;
+    // The DUPLEX WIDENING is not a narrowing: a Duplex-rooted value
+    // reaching a `%Writable` slot is coerceToExpected's upcast, and
+    // building the checked bridge here would emit a `downcast` the
+    // validator rejects. Declining leaves the value un-narrowed, which
+    // is exactly what the caller wants — the upcast runs instead.
+    if (streamDuplexWidensToWritable(fromClass, toClass, (a, b) => this.isSubclassOf(a, b))) return null;
     // The source-level spelling: IR class names carry a '%' for the
     // runtime-provided classes and a '%m<n>.' module prefix for the rest
     // (the same normalisation lower-classes' diagnostics use).
@@ -7206,7 +7229,11 @@ export class Lowerer {
     const body: IrStmt[] = [
       {
         kind: "if",
-        cond: { kind: "instanceOf", value: o, className: toClass, type: BOOL, loc },
+        // The SAME answer the source-level `instanceof` gives (Node's
+        // Writable[Symbol.hasInstance] admits the Duplex subtree): a
+        // guard that says yes and a bridge that throws would be worse
+        // than either alone.
+        cond: streamInstanceOfExpr(this, o, toClass, loc),
         then: [{ kind: "return", value: { kind: "downcast", value: o, type: toT, loc }, loc }],
         else_: null,
         loc,
