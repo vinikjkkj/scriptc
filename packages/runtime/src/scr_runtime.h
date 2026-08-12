@@ -2180,6 +2180,39 @@ bool scr_stats_is_symlink(ScrStats *s); /* lstat snapshots only */
 double scr_stats_size(ScrStats *s);
 double scr_stats_mtime_ms(ScrStats *s); /* ms with the ns fraction */
 
+/* FileHandle (fs/promises.open): an OWNED, refcounted descriptor — NOT
+ * the raw fd. The distinction is load-bearing rather than cosmetic: the
+ * OS recycles descriptor numbers, so a bare fd that has been closed and
+ * reopened elsewhere reads the OTHER file's bytes with no error at all.
+ * The handle remembers that it was closed and answers Node's rejection
+ * (code EBADF, message "file closed") instead. Closing is idempotent
+ * (Node's second close() resolves), and a handle released while still
+ * open closes its fd rather than leaking it.
+ *
+ * scr_fh_open_raw / scr_fh_read_into / scr_fh_close_raw leave a PENDING
+ * exception on failure and return a dummy; they are deliberately OUTSIDE
+ * MAY_THROW_LIB_FNS, so the emitted code runs no pending check and the
+ * settled-promise constructor converts the pending cell into the
+ * rejection — the scr_fsp_* invariant, one statement wider. */
+typedef struct ScrFileHandle ScrFileHandle;
+
+ScrFileHandle *scr_fh_open_raw(ScrStr *path, ScrStr *flags); /* +1, or NULL + pending */
+ScrFileHandle *scr_fh_retain(ScrFileHandle *h);
+void scr_fh_release(ScrFileHandle *h);
+void *scr_fh_retain_v(void *p);
+void scr_fh_release_v(void *p);
+/* The fd the handle owns, or -1 once closed (Node's filehandle.fd). */
+double scr_fh_fd(ScrFileHandle *h);
+/* read(buffer, offset, length, position) — the POSITIONED form: the file
+ * position is left unchanged (Node/pread). Returns bytesRead. */
+double scr_fh_read_into(ScrFileHandle *h, ScrBytes *buf, double offset, double length, double position);
+/* The position:null form — reads from, and advances, the file position. */
+double scr_fh_read_cur(ScrFileHandle *h, ScrBytes *buf, double offset, double length);
+void scr_fh_close_raw(ScrFileHandle *h);
+/* The promise forms (scr_async.c, beside the other fsp wrappers). */
+ScrPromise *scr_fsp_open(ScrStr *path, ScrStr *flags);
+ScrPromise *scr_fh_close(ScrFileHandle *h);
+
 /* fs/promises: the SAME sync operations, minting an already-settled
  * promise — success fulfills, failure REJECTS with the would-be thrown
  * error (catchable at the await, like Node). The syscall blocks the loop:

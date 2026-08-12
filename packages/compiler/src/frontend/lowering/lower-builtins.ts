@@ -5054,6 +5054,133 @@ let digestInputValueDispatches = 0;
     );
   }
 
+/** Method calls on FileHandle-typed receivers (fs/promises.open's
+   * result). Three members lower: `read` in Node's four-argument buffer
+   * form, `close`, and the `fd` read (handled as a property elsewhere).
+   * Everything else @types/node declares — readFile, write, writeFile,
+   * stat, truncate, createReadStream, the options-object read forms —
+   * fences member-qualified. Null for non-FileHandle receivers.
+   *
+   * `read` is the interesting one. Node resolves it with
+   * `{ bytesRead, buffer }` where `buffer` is THE SAME object that went
+   * in (measured: `res.buffer === buf` is true), so the record's buffer
+   * field is the receiver-side value re-read from a hidden local, never a
+   * copy — identity survives. The syscall itself is a libCall that is
+   * deliberately NOT in MAY_THROW_LIB_FNS: it leaves a failure in the
+   * pending exception cell, and the `promise.settled` wrapped around the
+   * record turns that cell into the REJECTION Node produces. Doing it the
+   * obvious way instead — a may-throw call plus promise.resolve — would
+   * make an un-awaited `fh.read(...)` throw synchronously where Node
+   * hands back a rejected promise. */
+  export function lowerFileHandleMethodCall(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,): IrExpr | null {
+    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "fileHandle") return null;
+    if (!L.isStdlibMember(access)) return null;
+    const name = access.name.text;
+    const loc = locOf(call);
+
+    if (name === "close" && call.arguments.length === 0) {
+      const receiver = L.lowerExpr(access.expression);
+      return {
+        kind: "libCall", fn: "fh.close", args: [receiver],
+        type: { kind: "promise", inner: VOID }, loc,
+      };
+    }
+
+    if (name === "read" && call.arguments.length === 4) {
+      // The result record comes from the CHECKER (FileReadResult<T>), so
+      // its shape id, field order and field types are the ones every
+      // other site in the program already agrees on — nothing is interned
+      // by hand here.
+      const resultT = L.mapTypeOf(L.typeOf(call));
+      const bufT = L.mapTypeOf(L.typeOf(call.arguments[0]!));
+      const offT = L.mapTypeOf(L.typeOf(call.arguments[1]!));
+      const lenT = L.mapTypeOf(L.typeOf(call.arguments[2]!));
+      const posArg = call.arguments[3]!;
+      const posT = L.mapTypeOf(L.typeOf(posArg));
+      // Node's `position` is `number | null`: a number reads from there
+      // and LEAVES THE FILE POSITION ALONE, null reads from and advances
+      // it. They are two different syscalls, so they are two different
+      // libCalls — the alternative is a number that means "not a number",
+      // which is the sentinel the fs-options block got wrong twice. A
+      // position whose type is neither (a `number | null` variable) is
+      // not resolvable here and falls through to the fence.
+      // The null/undefined spelling is recognised SYNTACTICALLY: the
+      // contextual type of a bare `null` argument is the parameter's own
+      // `ReadPosition | null`, which maps to a union rather than to nullT,
+      // so asking mapType alone answers "neither" for the commonest call
+      // in the surface.
+      const posIsNullish =
+        posArg.kind === ts.SyntaxKind.NullKeyword ||
+        (ts.isIdentifier(posArg) && posArg.text === "undefined") ||
+        posT?.kind === "nullT" || posT?.kind === "undefinedT";
+      const positioned = posIsNullish ? false : posT?.kind === "f64" ? true : null;
+      if (
+        resultT?.kind === "promise" && resultT.inner.kind === "record" &&
+        bufT !== null && typeEquals(bufT, BYTES_U8) &&
+        offT?.kind === "f64" && lenT?.kind === "f64" && positioned !== null
+      ) {
+        const shape = L.shapes.get(resultT.inner.shapeId);
+        const fields = shape?.fields ?? [];
+        // Only the exact two-field Node shape; anything else (a widened
+        // or renamed FileReadResult) falls through to the fence rather
+        // than being filled in positionally.
+        if (
+          fields.length === 2 &&
+          fields.some((f) => f.name === "bytesRead" && f.type.kind === "f64") &&
+          fields.some((f) => f.name === "buffer" && typeEquals(f.type, BYTES_U8))
+        ) {
+          const receiver = L.lowerExpr(access.expression);
+          const buffer = L.lowerExpr(call.arguments[0]!);
+          const offset = L.lowerExpr(call.arguments[1]!);
+          const length = L.lowerExpr(call.arguments[2]!);
+          // The buffer is used TWICE — as the read destination and as the
+          // resolved record's `buffer` field — so it binds to a hidden
+          // local and is read from there both times. Evaluating the
+          // argument expression twice would run its side effects twice
+          // and, for a fresh `new Uint8Array(n)`, hand back a DIFFERENT
+          // object than the one that was filled.
+          const bufLocal = L.declareHiddenLocal("%fhbuf", BYTES_U8);
+          const bufRef = (): IrExpr =>
+            ({ kind: "varRef", localId: bufLocal.id, type: BYTES_U8, loc });
+          const args: IrExpr[] = positioned
+            ? [receiver, bufRef(), offset, length, L.lowerExpr(posArg)]
+            : [receiver, bufRef(), offset, length];
+          const nLocal = L.declareHiddenLocal("%fhread", F64);
+          const readCall: IrExpr = {
+            kind: "libCall", fn: positioned ? "fh.read" : "fh.readCur",
+            args, type: F64, loc,
+          };
+          const rec: IrExpr = {
+            kind: "recordLit",
+            fields: [
+              { name: "bytesRead", value: { kind: "varRef", localId: nLocal.id, type: F64, loc } },
+              { name: "buffer", value: bufRef() },
+            ],
+            type: resultT.inner, loc,
+          };
+          return {
+            kind: "seqExpr",
+            stmts: [
+              { kind: "varDecl", localId: bufLocal.id, init: buffer, loc },
+              { kind: "varDecl", localId: nLocal.id, init: readCall, loc },
+            ],
+            result: { kind: "intrinsic", name: "promise.settled", args: [rec], type: resultT, loc },
+            type: resultT, loc,
+          };
+        }
+      }
+    }
+
+    L.noLowering(
+      `FileHandle.${name}`,
+      call,
+      "read(buffer, offset, length, position) and close() are the supported FileHandle members",
+      L.checker.getSymbolAtLocation(access.name),
+    );
+  }
+
 /** `Atomics.wait(int32Array, idx, expected, timeoutMs)` — the
    * synchronous-sleep idiom (RouteStore's
    * `Atomics.wait(sleepBuffer, 0, 0, ms)`): scriptc has no threads, so

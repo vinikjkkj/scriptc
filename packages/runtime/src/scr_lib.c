@@ -1758,6 +1758,158 @@ void scr_fs_close(double fd) {
   }
 }
 
+/* ── FileHandle values (fs/promises.open) ────────────────────────────
+ * An OWNED descriptor with a closed flag, not a bare fd. The flag is the
+ * whole point: close(2) returns the number to the OS free list, so a
+ * later open(2) hands the SAME number to a different file, and a stale
+ * bare fd then reads that file's bytes and reports success. Node answers
+ * `EBADF: file closed` from state held on the handle object; so does
+ * this. (Measured both ways in the block report's oracle.)
+ *
+ * Failures leave a pending exception and return a dummy — the caller is
+ * always a settled-promise constructor, which turns the pending cell
+ * into the rejection. */
+
+struct ScrFileHandle {
+  size_t rc;
+  int fd;       /* -1 once closed */
+  bool closed;  /* distinct from fd < 0 so a failed open never looks closed */
+};
+
+ScrFileHandle *scr_fh_retain(ScrFileHandle *h) {
+  if (h && h->rc != SIZE_MAX) h->rc++;
+  return h;
+}
+
+void scr_fh_release(ScrFileHandle *h) {
+  if (!h || h->rc == SIZE_MAX) return;
+  if (--h->rc == 0) {
+    /* An un-closed handle whose last reference dropped: close the fd
+     * rather than leak it. Node holds it until GC and warns; closing
+     * early is the divergence that does not exhaust the table. */
+    if (!h->closed && h->fd >= 0) close(h->fd);
+    free(h);
+  }
+}
+
+void *scr_fh_retain_v(void *p) { return scr_fh_retain(p); }
+void scr_fh_release_v(void *p) { scr_fh_release(p); }
+
+double scr_fh_fd(ScrFileHandle *h) { return h->closed ? -1.0 : (double)h->fd; }
+
+ScrFileHandle *scr_fh_open_raw(ScrStr *path, ScrStr *flags) {
+  double fd = scr_fs_open(path, flags); /* Node's flag grammar + fs error */
+  if (scr_exc_pending()) return NULL;
+  ScrFileHandle *h = malloc(sizeof(ScrFileHandle));
+  if (!h) {
+    scr_trap("scriptc: out of memory\n");
+  }
+  h->rc = 1;
+  h->fd = (int)fd;
+  h->closed = false;
+  return h;
+}
+
+/* Node's post-close rejection: code EBADF, message exactly "file closed"
+ * — NOT the usual "EBADF: bad file descriptor, read" errno shape. */
+static bool scr_fh_closed_throw(ScrFileHandle *h) {
+  if (!h->closed) return false;
+  scr_throw_error_msg_code(SCR_ERR_ERROR, "file closed", 11, "EBADF");
+  return true;
+}
+
+double scr_fh_read_into(ScrFileHandle *h, ScrBytes *buf, double offset, double length,
+                        double position) {
+  if (scr_fh_closed_throw(h)) return 0;
+  /* Node's numeric `position` leaves the file position unchanged — pread
+   * where it exists, save/seek/read/restore on the CRT that lacks it. */
+#if defined(_WIN32)
+  long long saved = _lseeki64(h->fd, 0, SEEK_CUR);
+  if (saved < 0) {
+    int e = errno;
+    char namebuf[16];
+    const char *name = scr_errno_name(e, namebuf, sizeof namebuf);
+    const char *text = scr_errno_text(e);
+    char msg[160];
+    int len = snprintf(msg, sizeof msg, "%s: %s, read", name, text);
+    scr_throw_error_msg_code(SCR_ERR_ERROR, msg, (size_t)len, name);
+    return 0;
+  }
+  if (_lseeki64(h->fd, (long long)position, SEEK_SET) < 0) {
+    int e = errno;
+    char namebuf[16];
+    const char *name = scr_errno_name(e, namebuf, sizeof namebuf);
+    const char *text = scr_errno_text(e);
+    char msg[160];
+    int len = snprintf(msg, sizeof msg, "%s: %s, read", name, text);
+    scr_throw_error_msg_code(SCR_ERR_ERROR, msg, (size_t)len, name);
+    return 0;
+  }
+  /* The offset/length validation and the read itself are the SAME code
+   * the fs.readSync surface runs — one copy of Node's ERR_OUT_OF_RANGE
+   * texts, one copy of the errno shape. */
+  double n = scr_fs_read_sync((double)h->fd, buf, offset, length);
+  int saved_errno = errno;
+  _lseeki64(h->fd, saved, SEEK_SET); /* restore even on the throw path */
+  errno = saved_errno;
+  return n;
+#else
+  size_t bytelen = buf->len;
+  char msg[160];
+  int mlen;
+  char numbuf[40];
+  if (offset < 0 || offset > (double)bytelen) {
+    numbuf[scr_f64_to_str(offset, numbuf)] = 0;
+    mlen = snprintf(msg, sizeof msg,
+                    "The value of \"offset\" is out of range. It must be >= 0 && <= 9007199254740991. Received %s",
+                    numbuf);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)mlen, "ERR_OUT_OF_RANGE");
+    return 0;
+  }
+  size_t off = (size_t)offset;
+  if (length < 0 || (double)length > (double)(bytelen - off)) {
+    numbuf[scr_f64_to_str(length, numbuf)] = 0;
+    mlen = snprintf(msg, sizeof msg,
+                    "The value of \"length\" is out of range. It must be <= %zu. Received %s",
+                    bytelen - off, numbuf);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)mlen, "ERR_OUT_OF_RANGE");
+    return 0;
+  }
+  ssize_t n = pread(h->fd, buf->data + off, (size_t)length, (off_t)position);
+  if (n < 0) {
+    int e = errno;
+    char namebuf[16];
+    const char *name = scr_errno_name(e, namebuf, sizeof namebuf);
+    const char *text = scr_errno_text(e);
+    int len = snprintf(msg, sizeof msg, "%s: %s, read", name, text);
+    scr_throw_error_msg_code(SCR_ERR_ERROR, msg, (size_t)len, name);
+    return 0;
+  }
+  return (double)n;
+#endif
+}
+
+double scr_fh_read_cur(ScrFileHandle *h, ScrBytes *buf, double offset, double length) {
+  if (scr_fh_closed_throw(h)) return 0;
+  return scr_fs_read_sync((double)h->fd, buf, offset, length);
+}
+
+void scr_fh_close_raw(ScrFileHandle *h) {
+  if (h->closed) return; /* Node's second close() resolves */
+  int fd = h->fd;
+  h->closed = true;
+  h->fd = -1;
+  if (close(fd) != 0) {
+    int e = errno;
+    char namebuf[16];
+    const char *name = scr_errno_name(e, namebuf, sizeof namebuf);
+    const char *text = scr_errno_text(e);
+    char msg[160];
+    int len = snprintf(msg, sizeof msg, "%s: %s, close", name, text);
+    scr_throw_error_msg_code(SCR_ERR_ERROR, msg, (size_t)len, name);
+  }
+}
+
 /* The two-path fs error shape — Node's copyfile errors quote both ends:
  * "ENOENT: no such file or directory, copyfile 'src' -> 'dest'". */
 static void scr_fs_throw2(int e, const char *op, const ScrStr *src, const ScrStr *dest) {
