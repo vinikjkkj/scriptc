@@ -3492,6 +3492,91 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         if (unions.recursivePending(widened)) return null;
         return arms[0]!;
       }
+      // ALL-PROMISE UNIONS COLLAPSE INTO ONE PROMISE. A ternary whose two
+      // arms are promises types as `Promise<A> | Promise<B>` — the shape
+      // `cond ? Promise.resolve(null) : requirePreKey(...)` takes, and one
+      // of the commonest ways to spell an optional async lookup. The
+      // union-home rules below refuse a second promise arm, and rightly:
+      // two promises are both `typeof "object"`, so no runtime test could
+      // tell the arms apart.
+      //
+      // But nothing ever has to tell them apart. `Promise<A> | Promise<B>`
+      // and `Promise<A | B>` have the SAME inhabitants — a promise that
+      // settles to an A or to a B — and the same consumers: a promise is
+      // write-only from the producer and read-only through `await`/`then`,
+      // so no operation can observe WHICH arm a value came from, only what
+      // it settles to. Collapsing to one promise over the union of the
+      // payloads is therefore not a widening; it is the same type spelled
+      // so the IR can hold it.
+      //
+      // The payload union comes from the checker (`getAwaitedType`
+      // distributes over the union), NOT from stitching the mapped arms
+      // together: that way the payload takes the ORDINARY union mapping
+      // with every one of its home rules intact, so a payload union that
+      // genuinely has no representation (`Promise<Map<K,V>> |
+      // Promise<string>`) still fences instead of being smuggled in
+      // through the promise.
+      //
+      // Gated on every arm being a promise over a NON-promise payload:
+      // getAwaitedType unwraps recursively, so a nested promise arm would
+      // have its payload flattened past a level the IR does keep.
+      if (
+        arms.length >= 2 &&
+        arms.every((a) => a.kind === "promise" && a.inner.kind !== "promise") &&
+        !unions.recursivePending(widened)
+      ) {
+        // The payload arms, deduped by key exactly as the outer union
+        // deduped its own. (`getAwaitedType` cannot answer here: the ts7
+        // facade cannot BUILD a union type, so a union whose arms unwrap
+        // to more than one distinct type returns undefined by design. The
+        // arms are already mapped, so the payload set is in hand.)
+        const payloadByKey = new Map<string, IrType>();
+        let payloadSpliceable = true;
+        for (const a of arms) {
+          if (a.kind !== "promise") continue;
+          // Mirror the outer branch's nested-union SPLICE. A payload is
+          // often ALREADY a union — `Promise<null>`'s payload is the
+          // unit-only union standalone `null` maps to, and `Promise<A | B>`
+          // beside `Promise<C>` is a three-arm payload. `(A | B) | C` IS
+          // `A | B | C`, and the flat set is exactly what a runtime tag
+          // has to tell apart. A PENDING placeholder cannot be spliced
+          // (the frame filling its arms is still running), so it keeps the
+          // fence rather than contributing an empty arm set.
+          if (a.inner.kind === "union") {
+            const inner = unions.get(a.inner.unionId);
+            if (inner === undefined || unions.isPending(a.inner.unionId) || inner.arms.length === 0) {
+              payloadSpliceable = false;
+              break;
+            }
+            for (const innerArm of inner.arms) payloadByKey.set(typeKey(innerArm), innerArm);
+            continue;
+          }
+          payloadByKey.set(typeKey(a.inner), a.inner);
+        }
+        if (!payloadSpliceable) return null;
+        const payloadArms = [...payloadByKey.values()];
+        let payload: IrType | null = null;
+        if (payloadArms.length === 1) {
+          // Distinct promise types over the SAME payload: `Promise<T>` in
+          // two spellings. One promise, no union needed.
+          payload = payloadArms[0]!;
+        } else if (unionArmsHaveHomes(payloadArms, unions)) {
+          // The payload earns its union home under the SAME rules a union
+          // spelled directly must satisfy — arriving inside a promise
+          // grants nothing.
+          const sorted = [...payloadArms].sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
+          payload = { kind: "union", unionId: unions.intern(sorted) };
+        }
+        if (process.env["SCRIPTC_PROMUNION_WHY"] !== undefined) {
+          console.error(
+            `PROMUNION ${checker.typeToString(widened).slice(0, 70)} arms=${arms.length}` +
+              ` -> ${payload === null ? "<refused>" : `promise<${typeKey(payload).slice(0, 60)}>`}`,
+          );
+        }
+        if (payload === null) return null;
+        mapTrace(`PROMISEUNION ${checker.typeToString(widened).slice(0, 70)} -> promise<${typeKey(payload).slice(0, 50)}>`);
+        return { kind: "promise", inner: payload };
+      }
       // The `string | object`-family COLLAPSE (world unification lane 3):
       // a union with an 'object'/'unknown'/`{}`-flavored arm (dyn) beside
       // arms the checked-dynamic representation FAITHFULLY holds maps to
@@ -3519,56 +3604,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       ) {
         return DYN;
       }
-      if (
-        arms.some(
-          (a) =>
-            a.kind === "void" || a.kind === "union" ||
-            // Map/Set arms have no narrowing test against DATA siblings
-            // (no discriminant fields, and typeof answers "object" like
-            // the rest) — but against units there is nothing to narrow:
-            // the unit TAG test is the whole story, which is the
-            // container-or-absent shape a Map lookup returns
-            // (`Map<string, Set<T>>.get(k)`). Beside any data sibling they
-            // stay out. REGEX arms map anywhere: `x instanceof RegExp` is
-            // their narrowing test (the skip-utility `string | RegExp`
-            // shape), and the arm rides the ref machinery like array regex
-            // elements.
-            ((a.kind === "map" || a.kind === "set") &&
-              !arms.every((c) => c === a || isUnitType(c))) ||
-            a.kind === "dyn" ||
-            // Generator arms follow the map/set rule: no narrowing test.
-            a.kind === "generator" ||
-            // Func arms map beside ANY sibling: `typeof x === "function"`
-            // is the narrowing against data arms (typeofAnswer knows every
-            // arm kind), unit TAG tests cover the nullable-callback shape
-            // (cb !== null, cb ?? f, cb?.()), and against FUNC siblings
-            // (`StringConstructor | NumberConstructor` — the option-table
-            // field) closures compare by pointer identity per tag
-            // (unionEq), so `x === String` narrows. No restriction left.
-            // Promise arms follow the func rule (typeof gives no test
-            // against sibling data arms): only the promise-or-absent shape
-            // maps — `Promise<T> | undefined`, and `Promise<T> | void`
-            // return types whose void part became the undefined arm above.
-            // Promise arms need a narrowing test against every sibling DATA
-            // arm. `typeof` supplies one whenever the sibling answers
-            // something other than "object" — `typeof v === "string"` splits
-            // `string | Promise<string>` exactly, which is the shape a
-            // resolver option takes (`T | (() => T | Promise<T>)`).
-            //
-            // Against another "object" answer `typeof` gives nothing, and
-            // exactly one shape survives that: the SETTLE-OR-VALUE contract
-            // `T | Promise<T>`, whose sole consumer is `await` — which needs
-            // no test, because the union's own TAG picks the branch
-            // (lower-exprs' await lowering). Any other object-flavored
-            // sibling, and a second promise arm, stay refused: there the
-            // value would have to be told apart to be used at all.
-            (a.kind === "promise" &&
-              !arms.every(
-                (c) => c === a || isUnitType(c) || typeofSplitsFromObject(c),
-              ) &&
-              !settleOrValueArms(a, arms, unions)),
-        )
-      ) {
+      if (!unionArmsHaveHomes(arms, unions)) {
         return null;
       }
       arms.sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
@@ -4792,6 +4828,89 @@ function mapTrace(message: string): void {
  * Gated on the object being symbolic (no properties, no index infos, no
  * signatures): a RESOLVED `Record<"a", V>` still walks its real members, so
  * this never displaces an answer the checker was able to give. */
+/** The index signature tsc ERASED when it inferred an object literal's
+ * type, or undefined when nothing was erased (the ordinary path).
+ *
+ * `{ jid, ...groupAttrs }` over `Record<string, string>` infers as
+ * `{ jid: string }`: tsc keeps the named members and drops the source's
+ * signature. The compiled record then has no overflow store, so a merge
+ * into it can only DROP the source's runtime keys — the silent wrong
+ * answer the spread desugar fences on today. Reading the signature back
+ * off the literal's own spread sources restores the store, and with it
+ * the ability to compile the right answer.
+ *
+ * ONLY for types inferred from object literals. A declared type means what
+ * it says: the drop is divergence 68 there, the shape's identity is
+ * published, and widening it would invent a store the author never wrote.
+ *
+ * Answers undefined — leaving today's mapping byte-for-byte unchanged —
+ * whenever any condition fails, so this can never take away an answer. */
+function spreadErasedIndexValue(
+  widened: ts.Type,
+  ctx: TypeMapperCtx,
+): IrType | undefined {
+  const { checker } = ctx;
+  const sym = widened.getSymbol();
+  if (!sym) return undefined;
+  const decls = checker.declarationsOf(sym);
+  // Every declaration an object literal: this is a type tsc INFERRED from
+  // literal syntax, never one the program declared under a name.
+  if (decls.length === 0 || !decls.every((d) => ts.isObjectLiteralExpression(d))) return undefined;
+  let value: IrType | null = null;
+  let sawSpread = false;
+  for (const decl of decls as ts.ObjectLiteralExpression[]) {
+    // KEY ORDER decides whether the recovered store can answer at all.
+    // A hybrid record enumerates DECLARED fields (in declared order) and
+    // THEN its overflow — the documented canonical-then-overflow order.
+    // JS enumerates by INSERTION, so the two agree exactly while every
+    // spread sits AFTER every named property: `{ jid, ...attrs }` is
+    // jid-then-attrs both ways. `{ ...attrs, jid }` is not — JS says
+    // `zeta,alpha,jid` and the struct can only say `jid,zeta,alpha`.
+    // Recovering there would trade a LOUD fence for a silently reordered
+    // object (measured: s5 in the block's lab), so the shape keeps its
+    // fence and this answers undefined.
+    const firstSpread = decl.properties.findIndex((p) => ts.isSpreadAssignment(p));
+    if (firstSpread >= 0 && !decl.properties.slice(firstSpread).every((p) => ts.isSpreadAssignment(p))) {
+      return undefined;
+    }
+    for (const prop of decl.properties) {
+      if (!ts.isSpreadAssignment(prop)) continue;
+      sawSpread = true;
+      // A spread source with NO signature erased nothing, but it also
+      // contributes keys this shape would now claim to store uniformly —
+      // and its own fields may not fit the slot. Refuse the whole
+      // recovery rather than claim a store one source cannot fill.
+      const srcInfos = checker.getIndexInfosOfType(checker.getTypeAtLocation(prop.expression));
+      if (srcInfos.length === 0) return undefined;
+      for (const info of srcInfos) {
+        if (
+          !(info.keyType.flags & ts.TypeFlags.String) &&
+          !(info.keyType.flags & ts.TypeFlags.Number)
+        ) {
+          return undefined;
+        }
+        const iv = mapType(info.valueType, ctx);
+        if (!iv || !isSupportedIndexValue(iv)) return undefined;
+        if (value !== null && !typeEquals(value, iv)) return undefined;
+        value = iv;
+      }
+    }
+  }
+  if (!sawSpread || value === null) return undefined;
+  // Every DECLARED member must fit the recovered slot. A member the
+  // overflow could not hold would make the shape claim a uniform value
+  // type it does not have — and every undeclared key read would answer at
+  // a type the struct cannot produce.
+  for (const p of checker.getPropertiesOfType(widened)) {
+    const pt = mapType(checker.getTypeOfSymbol(p), ctx);
+    if (!pt || !typeEquals(pt, value)) return undefined;
+  }
+  if (process.env["SCRIPTC_SPREADIX_WHY"] !== undefined) {
+    console.error(`SPREADIX-RECOVER ${checker.typeToString(widened)} idx=${typeKey(value)}`);
+  }
+  return value;
+}
+
 function mapSymbolicMappedAlias(
   widened: ts.Type,
   ctx: TypeMapperCtx,
@@ -4978,6 +5097,41 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       v = iv;
     }
     indexValue = v!;
+  }
+  // THE SPREAD-ERASED INDEX SIGNATURE, RECOVERED. tsc DISCARDS a spread
+  // source's index signature when it infers an object literal's type:
+  // `{ jid, ...groupAttrs }` over a `Record<string, string>` source types
+  // as `{ jid: string }`, even though the VALUE carries every key the
+  // source had. The literal's own inferred type is then what an enclosing
+  // literal passes down as contextual type, so the shape the merge builds
+  // at has no overflow store — and a merge into it must DROP the runtime
+  // keys. Dropping is divergence 68 (honest) when a DECLARED type says
+  // those keys do not belong; here the type is only what tsc inferred for
+  // this literal, so dropping is a silent wrong answer and the desugar
+  // rightly fenced (`dropsAreHonest`). Recovering the signature is what
+  // lets the RIGHT answer compile: the shape keeps the overflow map the
+  // emitter already builds for every index-signature record, the runtime
+  // keys land in it, and enumeration/serialization see them.
+  //
+  // Deliberately narrow — each condition is what keeps it sound:
+  //  - the type must be ANONYMOUS-FROM-A-LITERAL (its symbol's only
+  //    declarations are object literal expressions). A type the program
+  //    DECLARED means what it says; widening it would invent a store the
+  //    author did not ask for and change a declared shape's identity.
+  //  - the literal must actually SPREAD something (no spread, nothing was
+  //    erased), and EVERY spread source must publish a string/number index
+  //    signature. A fixed-shape source erases nothing, and mixing one in
+  //    would claim an overflow wider than any source can fill.
+  //  - all sources must agree on the value type, and it must be a
+  //    supported overflow value — the same domain the declared path takes.
+  //
+  // A source whose signature does not qualify answers `undefined` and the
+  // type maps EXACTLY as it does today (a plain record; the desugar fences
+  // at the spread). Recovery only ever ADDS a store when every condition
+  // holds — it can never turn a type that maps today into one that does
+  // not.
+  if (indexValue === undefined) {
+    indexValue = spreadErasedIndexValue(widened, ctx);
   }
   // The HEADER-FAMILY canonicalization: an index-signature shape whose
   // slot carries a `string[]` arm (alongside string/number/undefined —
@@ -5377,6 +5531,60 @@ function typeofSplitsFromObject(arm: IrType): boolean {
     default:
       return false;
   }
+}
+
+/** Whether every arm of a candidate compiled union has a runtime home —
+ * mapTypeInner's union rule, lifted so the PAYLOAD of an all-promise union
+ * can be judged by exactly the same rules as a union spelled directly.
+ * Sharing the predicate is the point: a payload that has no representation
+ * on its own must not acquire one by arriving inside a promise. */
+function unionArmsHaveHomes(arms: IrType[], unions: UnionRegistry): boolean {
+  return !arms.some(
+    (a) =>
+      a.kind === "void" || a.kind === "union" ||
+      // Map/Set arms have no narrowing test against DATA siblings
+      // (no discriminant fields, and typeof answers "object" like
+      // the rest) — but against units there is nothing to narrow:
+      // the unit TAG test is the whole story, which is the
+      // container-or-absent shape a Map lookup returns
+      // (`Map<string, Set<T>>.get(k)`). Beside any data sibling they
+      // stay out. REGEX arms map anywhere: `x instanceof RegExp` is
+      // their narrowing test (the skip-utility `string | RegExp`
+      // shape), and the arm rides the ref machinery like array regex
+      // elements.
+      ((a.kind === "map" || a.kind === "set") &&
+        !arms.every((c) => c === a || isUnitType(c))) ||
+      a.kind === "dyn" ||
+      // Generator arms follow the map/set rule: no narrowing test.
+      a.kind === "generator" ||
+      // Func arms map beside ANY sibling: `typeof x === "function"`
+      // is the narrowing against data arms (typeofAnswer knows every
+      // arm kind), unit TAG tests cover the nullable-callback shape
+      // (cb !== null, cb ?? f, cb?.()), and against FUNC siblings
+      // (`StringConstructor | NumberConstructor` — the option-table
+      // field) closures compare by pointer identity per tag
+      // (unionEq), so `x === String` narrows. No restriction left.
+      // Promise arms follow the func rule (typeof gives no test
+      // against sibling data arms): only the promise-or-absent shape
+      // maps — `Promise<T> | undefined`, and `Promise<T> | void`
+      // return types whose void part became the undefined arm above.
+      // Promise arms need a narrowing test against every sibling DATA
+      // arm. `typeof` supplies one whenever the sibling answers
+      // something other than "object" — `typeof v === "string"` splits
+      // `string | Promise<string>` exactly, which is the shape a
+      // resolver option takes (`T | (() => T | Promise<T>)`).
+      //
+      // Against another "object" answer `typeof` gives nothing, and
+      // exactly one shape survives that: the SETTLE-OR-VALUE contract
+      // `T | Promise<T>`, whose sole consumer is `await` — which needs
+      // no test, because the union's own TAG picks the branch
+      // (lower-exprs' await lowering). Any other object-flavored
+      // sibling, and a second promise arm, stay refused: there the
+      // value would have to be told apart to be used at all.
+      (a.kind === "promise" &&
+        !arms.every((c) => c === a || isUnitType(c) || typeofSplitsFromObject(c)) &&
+        !settleOrValueArms(a, arms, unions)),
+  );
 }
 
 /** Arm kinds with no home in a compiled union (mapTypeInner's union rule):
