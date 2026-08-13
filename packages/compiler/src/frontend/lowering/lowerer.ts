@@ -1114,6 +1114,10 @@ export class Lowerer {
    * the body needs — indexed accesses (`T[K]` needs K's literal key) and
    * keyed record reads (`o[k]` where k's type is a literal-bound K). */
   typeParamTsBindings: Map<ts.Symbol, ts.Type> | null = null;
+  /** The current instantiation's symbolic→resolved side table, installed
+   * only while that instance's body lowers (lowerGenericInstance). Null
+   * everywhere else, which makes symbolicTsResolver inert. */
+  symbolicResolved: Map<ts.Type, ts.Type> | null = null;
   /** Non-null while an IMPLICIT-ANY instance body lowers (npm-static JS —
    * lower-calls' implicit-monomorphization section): bound param symbol →
    * the call site's checker type, consulted by typeOf for identifier
@@ -1570,6 +1574,7 @@ export class Lowerer {
       classNamer: this.classNamer,
       resolveTypeParam: this.typeParamResolver,
       resolveTypeParamTs: this.typeParamTsResolver,
+      resolveSymbolic: this.symbolicTsResolver,
       genericClassInstance: (decl, ref) => this.genericClassInstanceType(decl, ref),
       mixinClassInstance: (decl) =>
         this.mixinTypeContext && this.mixinTypeContext.classNode === decl
@@ -3355,6 +3360,14 @@ export class Lowerer {
     if (!this.typeParamTsBindings || !(t.flags & ts.TypeFlags.TypeParameter)) return null;
     const sym: ts.Symbol | undefined = t.getSymbol();
     return (sym && this.typeParamTsBindings.get(sym)) ?? null;
+  };
+
+  /** The instantiation's symbolic→resolved side table, as mapType sees it:
+   * a symbolic type the CALL SITE already resolved answers with that
+   * resolution, everything else with null. Inert outside a call-keyed
+   * generic instance body (symbolicResolved is null there). */
+  readonly symbolicTsResolver = (t: ts.Type): ts.Type | null => {
+    return this.symbolicResolved?.get(t) ?? null;
   };
 
   irTypeOf(node: ts.Node): IrType {

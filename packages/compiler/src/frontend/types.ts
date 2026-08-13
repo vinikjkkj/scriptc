@@ -701,6 +701,13 @@ export type TypeParamResolver = (t: ts.Type) => IrType | null;
  * IrType binding can carry. */
 export type TypeParamTsResolver = (t: ts.Type) => ts.Type | null;
 
+/** Resolves a SYMBOLIC checker type — one written in terms of a generic's
+ * own type parameters, which the checker leaves unresolved inside the body
+ * — to the RESOLVED checker type the current instantiation's call site
+ * already computed for it. See collectSymbolicResolutions (lower-calls.ts)
+ * for how the pairing is built and why it cannot mis-pair. */
+export type SymbolicResolver = (t: ts.Type) => ts.Type | null;
+
 /** Everything mapType needs besides the type itself: the checker, the two
  * interners (owned by the Lowerer), and the Lowerer-injected hooks. Built
  * once per Lowerer and threaded through the recursion — adding a hook means
@@ -715,6 +722,13 @@ export interface TypeMapperCtx {
    * only where literal identity matters — indexed accesses (`T[K]`) inside
    * generic bodies whose K is bound to a literal key. */
   resolveTypeParamTs?: TypeParamTsResolver;
+  /** The instantiation's symbolic→resolved side table (SymbolicResolver):
+   * a type the checker keeps SYMBOLIC inside a generic body, answered with
+   * the resolved type the CALL SITE already holds for it. Consulted only
+   * for types the symbolic-candidate gate admits, and only ever populated
+   * with pairs whose symbolic side does not map on its own — so a refusal
+   * is exactly today's answer. Inert outside call-keyed instantiation. */
+  resolveSymbolic?: SymbolicResolver;
   /** Constraint-erased VALUE mapping: an indexed access whose index is a
    * UNION of literal keys answers the UNION of those property types. Set
    * only by constraintErasedCtx — a monomorphized body keeps the stricter
@@ -1173,6 +1187,18 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     if (viaParamsAlias !== null) {
       contextResolutions++;
       return viaParamsAlias;
+    }
+  }
+  // The instantiation's symbolic→resolved side table. LAST of the
+  // context-sensitive hooks on purpose: it only ever holds pairs whose
+  // symbolic side mapped to null at collection time, so every rule above
+  // that could answer already has, and a refusal here leaves today's
+  // diagnostic exactly where it was.
+  {
+    const viaSideTable = mapResolvedSymbolic(type, ctx);
+    if (viaSideTable !== null) {
+      contextResolutions++;
+      return viaSideTable;
     }
   }
   const widened = checker.getBaseTypeOfLiteralType(type);
@@ -3681,6 +3707,84 @@ export function settleOrValueArms(
     others.length === payloadArms.length &&
     others.every((c) => payloadArms.some((q) => typeEquals(q, c)))
   );
+}
+
+/** How deep the symbolic-candidate gate looks through type arguments. A
+ * type parameter buried deeper than this reads as "not symbolic" — the
+ * conservative direction: the gate declining costs today's diagnostic. */
+const SYMBOLIC_GATE_DEPTH = 3;
+
+/** Is this a type that could need the instantiation side table — i.e. a
+ * type written in terms of a generic's own type parameters, which the
+ * checker therefore keeps symbolic inside the body?
+ *
+ * Deliberately SYNTACTIC and cheap: alias and reference type ARGUMENTS
+ * only, no property walks, no signature queries. Two reasons.
+ *
+ *  - It runs on every type mapped inside an instantiated body, and the
+ *    memo exists because checker round trips are the compiler's dominant
+ *    cost (see mapTypeMemo). A gate that queried properties would pay that
+ *    cost back at every site.
+ *  - Admitting a type here BUMPS memoSensitivity, which costs a cache
+ *    entry. Narrow is cheap; wide is a global slowdown.
+ *
+ * Bare type PARAMETERS are excluded: mapTypeInner's own first branch owns
+ * them and has already answered by the time this runs. */
+function symbolicCandidate(type: ts.Type, checker: TypeMapperCtx["checker"], depth = 0): boolean {
+  if (type.flags & ts.TypeFlags.TypeParameter) return depth > 0;
+  if (depth > SYMBOLIC_GATE_DEPTH) return false;
+  const aliasArgs = type.getAliasTypeArguments() ?? [];
+  for (const a of aliasArgs) if (symbolicCandidate(a, checker, depth + 1)) return true;
+  if (type.isTypeReference()) {
+    for (const a of checker.getTypeArguments(type)) {
+      if (symbolicCandidate(a, checker, depth + 1)) return true;
+    }
+  }
+  return false;
+}
+
+/** The gate, for the collector that BUILDS the table (lower-calls.ts). Both
+ * sides must agree on what a candidate is: a pair the collector records but
+ * the gate would never admit is dead weight in the instance key, and a type
+ * the gate admits but the collector never records is a wasted lookup. */
+export function isSymbolicCandidateType(type: ts.Type, checker: TypeMapperCtx["checker"]): boolean {
+  return symbolicCandidate(type, checker);
+}
+
+/** A type the checker keeps SYMBOLIC inside a generic body, answered with
+ * the RESOLVED type the instantiation's call site already computed.
+ *
+ * `IndexArgsForSchema<S>` — a key-remapped mapped type over
+ * `S['indexParts'][number]` — is the shape this exists for. Asked directly,
+ * the checker hands it nothing: no properties, no index signature, no
+ * constraint, an apparent type equal to itself. There is no layout to read
+ * and inventing one would be the plausible-shape-wrong-field failure, so
+ * refusing is correct. But the SAME type resolves perfectly three frames up,
+ * at the call site that created the instantiation — `IndexArgsForSchema<{
+ * concrete }>` with its properties present — and that answer is what this
+ * carries down.
+ *
+ * Two things keep a resolved layout from reaching the wrong instantiation:
+ *
+ *  - the table lives on the GenericInstance and is installed only while
+ *    that instance's body lowers, exactly the discipline tsBindings uses;
+ *  - every resolution it holds is folded into the instance KEY
+ *    (symbolicResolutionKey), so two call sites that resolve the same
+ *    symbolic type differently can never share one instance — which is the
+ *    only way one could answer for the other.
+ *
+ * The memo bump comes BEFORE the refusal, not inside the hit: consulting an
+ * instantiation is context-dependent whether or not the table has an entry,
+ * and caching the "no entry yet" answer as if it were context-free is the
+ * leak memoSensitivity was introduced for (corpus 907's `Partial<T>`). */
+function mapResolvedSymbolic(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
+  const { resolveSymbolic, checker } = ctx;
+  if (!resolveSymbolic) return null;
+  if (!symbolicCandidate(type, checker)) return null;
+  memoSensitivity++;
+  const resolved = resolveSymbolic(type);
+  if (!resolved || resolved === type) return null;
+  return mapType(resolved, ctx);
 }
 
 function mapNarrowedTypeParam(type: ts.Type, ctx: TypeMapperCtx): IrType | null | undefined {
