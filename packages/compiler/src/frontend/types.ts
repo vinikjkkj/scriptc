@@ -3743,12 +3743,32 @@ function symbolicCandidate(type: ts.Type, checker: TypeMapperCtx["checker"], dep
   return false;
 }
 
-/** The gate, for the collector that BUILDS the table (lower-calls.ts). Both
- * sides must agree on what a candidate is: a pair the collector records but
- * the gate would never admit is dead weight in the instance key, and a type
- * the gate admits but the collector never records is a wasted lookup. */
+/** The STRICT gate, for the collector that BUILDS the table
+ * (lower-calls.ts). The cheap gate above is deliberately a SUPERSET of this
+ * one — it runs on every type mapped inside an instantiated body, so it has
+ * to stay syntactic, and a lookup it admits that the table never held
+ * simply misses. Admission to the TABLE is the expensive, exact question,
+ * asked once per instantiation.
+ *
+ * What it asks is the finding itself: does the checker hand mapType
+ * literally NOTHING for this type? No properties, no index signature, no
+ * call or construct signatures. That is true of `IndexArgsForSchema<S>` and
+ * false of everything that already has machinery — `T[]` has the array
+ * members, `Promise<T>` has then/catch/finally, `Partial<T>` over a
+ * constrained parameter has the constraint's members. Those forms resolve
+ * inside the body through resolveTypeParam and its siblings, and recording
+ * them would be worse than useless: their resolutions would enter the
+ * instance KEY and split instances that a call and a pinned value are
+ * supposed to share (`const f: (xs: number[]) => number = len`), which is
+ * exactly what a looser gate was measured doing to corpus 2020. */
 export function isSymbolicCandidateType(type: ts.Type, checker: TypeMapperCtx["checker"]): boolean {
-  return symbolicCandidate(type, checker);
+  if (!symbolicCandidate(type, checker)) return false;
+  return (
+    checker.getPropertiesOfType(type).length === 0 &&
+    checker.getIndexInfosOfType(type).length === 0 &&
+    checker.getCallSignatures(type).length === 0 &&
+    checker.getConstructSignatures(type).length === 0
+  );
 }
 
 /** A type the checker keeps SYMBOLIC inside a generic body, answered with
