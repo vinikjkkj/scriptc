@@ -1428,6 +1428,15 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
  * a deeply generic signature cannot turn instantiation into a graph walk. */
 const SYMBOLIC_PAIR_DEPTH = 4;
 
+/** Total member pairs one instantiation's walk may visit. The walk runs at
+ * EVERY generic instantiation in the program and each step is a checker
+ * round trip, so it gets an absolute budget rather than only a depth bound:
+ * a signature whose parameters differ structurally in a large library type
+ * would otherwise enumerate that type's whole member graph for nothing.
+ * Exhausting the budget stops collection, which leaves today's diagnostic —
+ * the same direction every other refusal here takes. */
+const SYMBOLIC_PAIR_BUDGET = 256;
+
 /** The symbolic→resolved side table for ONE instantiation.
  *
  * The checker gives us both halves already computed and asks nothing new of
@@ -1468,9 +1477,14 @@ const SYMBOLIC_PAIR_DEPTH = 4;
   ): Map<ts.Type, ts.Type> | null {
     const out = new Map<ts.Type, ts.Type>();
     const seen = new Set<ts.Type>();
+    let budget = SYMBOLIC_PAIR_BUDGET;
     const pair = (declared: ts.Type, resolved: ts.Type, depth: number): void => {
+      // Identical type objects are the common case and the cheapest prune:
+      // a parameter the instantiation did not touch (`timestamp: number`)
+      // hands back the SAME ts.Type on both sides, so every non-generic
+      // parameter costs one reference comparison and stops here.
       if (declared === resolved || depth > SYMBOLIC_PAIR_DEPTH) return;
-      if (seen.has(declared)) return;
+      if (budget-- <= 0 || seen.has(declared)) return;
       seen.add(declared);
       if (isSymbolicCandidateType(declared, L.checker)) {
         // The symbolic side must be the one with no answer, and the
