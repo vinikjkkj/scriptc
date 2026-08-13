@@ -66,6 +66,7 @@ void scr_fh_release(ScrFileHandle *h) {
      * scr_stream_state_drop makes for an undestroyed fs stream. */
     if (!h->closed && h->fd >= 0) close(h->fd);
     free(h);
+    scr_obj_free_note();
   }
 }
 
@@ -84,6 +85,12 @@ ScrFileHandle *scr_fh_open_raw(ScrStr *path, ScrStr *flags) {
   h->rc = 1;
   h->fd = (int)fd;
   h->closed = false;
+  /* Make a LEAKED handle visible to the RC audit. scr_rc_audit_at_exit
+   * counts fifteen kinds and a bare malloc is none of them, so without
+   * this a retained ScrFileHandle is invisible to the detector and the
+   * arming proof for this family could not fire at all. scr_stream_alloc
+   * notes for the same reason; off the audit lane both notes are empty. */
+  scr_obj_alloc_note();
   return h;
 }
 
