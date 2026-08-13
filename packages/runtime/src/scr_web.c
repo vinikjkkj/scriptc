@@ -1025,6 +1025,16 @@ static const char web_prelude[] =
     "    throwIfAborted() { if (this._aborted) throw this._reason; }\n"
     "    addEventListener(type, fn, options) {\n"
     "      if (String(type) !== 'abort' || typeof fn !== 'function') return;\n"
+    /* EventTarget's listener set is keyed on (type, callback, capture), so
+     * re-adding the SAME function is not a second registration: the repeat
+     * is ignored outright. Two consequences the suite pins, both wrong
+     * before this line existed — the listener fires ONCE rather than once
+     * per add, and it keeps the FIRST add's position in the order, so a
+     * later re-add cannot move it down the list. The repeat's `once` is
+     * discarded with the rest of it: add(f) then add(f,{once:true}) leaves
+     * a non-once entry, and one removeEventListener still clears it
+     * because only one entry was ever stored. */
+    "      if (this._listeners.some((l) => l.fn === fn)) return;\n"
     "      const once = options !== undefined && options !== null && !!options.once;\n"
     "      this._listeners.push({ fn, once });\n"
     "    }\n"
