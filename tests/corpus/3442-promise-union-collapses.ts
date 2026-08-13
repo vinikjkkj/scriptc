@@ -52,7 +52,17 @@ async function counted(id: number | null): Promise<string> {
   return (v === null ? "n" : v.label) + " calls=" + String(calls);
 }
 
+// The ordinary spelling: an ANNOTATED nullable-payload promise assigned
+// from a ternary. tsc types the initializer `Promise<null> | Promise<T>`
+// regardless of the annotation, so this shape needed the collapse too —
+// and `.then` lowers normally once it has it.
+async function annotated(k: boolean): Promise<string> {
+  const p: Promise<PreKeyRecord | null> = k ? requirePreKey(2) : Promise.resolve(null);
+  return await p.then((v) => (v === null ? "T-null" : "T-" + v.label));
+}
+
 console.log(await optional(null), await optional(3));
+console.log(await annotated(true), await annotated(false));
 console.log(await three(0), await three(1), await three(2));
 console.log(await samePayload(true), await samePayload(false));
 console.log(await passed(Promise.resolve(null)));
