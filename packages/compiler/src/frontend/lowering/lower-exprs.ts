@@ -3198,7 +3198,7 @@ export function pureReemittable(e: IrExpr): boolean {
       // it here would retire an SC1090 from the census and hand the same
       // program a runtime throw with no diagnostic code — the census would
       // read better and the binary would not. The fence stays until the
-      // promise arm is representable; §the report names the defect.
+      // promise arm is representable; estado-sweep.md §4.3 names the defect.
       const resArms = L.unions.get(type.unionId)?.arms ?? [];
       const carriable = resArms.length > 0 && resArms.every((a) => a.kind !== "promise");
       if (armPairs.every((p) => p.src >= 0 && p.dst >= 0) && carriable) {
