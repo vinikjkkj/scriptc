@@ -3158,7 +3158,19 @@ function nullishTestedByParent(expr: ts.Expression): boolean {
         const right = L.coerceToExpected(L.lowerExpr(expr.right), DYN);
         if (right.type.kind === "dyn") {
           const test: IrExpr = { kind: "nullish", left: atWidth, right, type: DYN, loc };
-          return want.kind === "dyn" ? test : { kind: "dynCheck", value: test, type: want, loc };
+          // `attrs.a ?? attrs.b ?? "tail"` — BOTH keys absent. The
+          // validated exit back to `want` is the right edge for every
+          // consumer but one: an enclosing `??` is about to test this
+          // value for nullish, and undefined is the answer it is asking
+          // for. Checking it back to a width that cannot say undefined
+          // threw an uncoded "expected string at $, got undefined" where
+          // Node prints the tail default — pre-existing, identical on
+          // `main` (repro-pt/lab/n1.ts). Hand it over at dyn width
+          // instead; the enclosing `??` has a total dyn arm, and the
+          // predicate guarantees that arm is the consumer.
+          return want.kind === "dyn" || nullishTestedByParent(expr)
+            ? test
+            : { kind: "dynCheck", value: test, type: want, loc };
         }
       }
     }
