@@ -7426,6 +7426,36 @@ export function moduleUsesFileHandle(mod: IrModule): boolean {
   return found;
 }
 
+/** The program pipes a Readable INTO a ClientRequest (the
+ * `http.clientPipeFrom` libCall): compiles scr_http_pipe.c in. A LINK
+ * GATE, not a fence — a wrong `false` is a loud unresolved symbol, never
+ * a wrong answer.
+ *
+ * Unlike moduleUsesFileHandle there is no TYPE to probe beside the
+ * libCall, and there does not need to be: the adapter is a runtime-only
+ * value that never appears in the IR, so nothing but this call can
+ * reference the unit. It is gated for the reason a plain `http.request`
+ * probe demonstrated — with the adapter inside scr_http.c, every http
+ * program owed the linker scr_stream_pipe and five of its neighbours. */
+export function moduleUsesHttpPipe(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && node.fn === "http.clientPipeFrom") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 /** True when the module contains any test.* libCall or a testCtx handle
  * type — the link switch that pulls scr_test.c into the binary and has
  * the emitted main return scr_test_exit_code() after the loop drains

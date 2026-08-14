@@ -6295,6 +6295,11 @@ void scr_net_sock_write_native(ScrNetSocket *s, const char *buf, size_t n);
  * liveness test, `sweep` runs at every net sweep top. */
 void scr_net_set_proto_sweep(bool (*pending)(void), void (*sweep)(void));
 void scr_net_fire_err(ScrNetLs *l, ScrStr *msg); /* unhandled => exit(1) */
+/* The same fan-out carrying an EXPLICIT error object: the listeners get
+ * THAT object rather than one rebuilt from the message (see the
+ * scr_err_obj_push note). err borrowed; its message travels the shared
+ * (cb, ScrStr *) ABI so the no-listener path still prints the right text. */
+void scr_net_fire_err_obj(ScrNetLs *l, ScrError *err /*borrowed*/);
 
 ScrNetServer *scr_net_server_retain(ScrNetServer *s);
 void scr_net_server_release(ScrNetServer *s);
