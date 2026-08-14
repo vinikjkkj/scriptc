@@ -8522,7 +8522,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
    * Null when the callee isn't a NumberFormat-construction .format. */
   function lowerIntlNumberFormatCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (access.name.text !== "format") return null;
     let recv: ts.Expression = access.expression;
     while (ts.isParenthesizedExpression(recv)) recv = recv.expression;

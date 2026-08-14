@@ -503,7 +503,7 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
    * value. Other members on the performance object fence by name; null
    * for non-perf_hooks callees (the call chain keeps trying). */
   export function lowerPerfHooksCall(L: Lowerer, expr: ts.CallExpression, access: ts.PropertyAccessExpression): IrExpr | null {
-    if (access.questionDotToken) return null;
+    if (L.chainBlocked(access)) return null;
     const loc = locOf(expr);
     if (access.name.text === "now" && isPerfHooksPerformanceExpr(L, access.expression)) {
       if (expr.arguments.length !== 0) {
@@ -5854,7 +5854,7 @@ let digestInputValueDispatches = 0;
    *
    * Null for every other receiver, so the property chain keeps trying. */
   export function lowerErrorPrototypeProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-    if (expr.questionDotToken) return null;
+    if (L.chainBlocked(expr)) return null;
     if (L.dynamic) return null;
     if (L.stdlibGlobalMember(expr, "Error") !== "prototype") return null;
     return { kind: "libCall", fn: "dyn.errorProto", args: [], type: DYN, loc: locOf(expr) };
@@ -5879,7 +5879,7 @@ let digestInputValueDispatches = 0;
    *
    * Null for every other receiver, so the property chain keeps trying. */
   export function lowerUint8ArrayPrototypeProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-    if (expr.questionDotToken) return null;
+    if (L.chainBlocked(expr)) return null;
     if (L.dynamic) return null;
     if (L.stdlibGlobalMember(expr, "Uint8Array") !== "prototype") return null;
     return { kind: "libCall", fn: "dyn.u8Proto", args: [], type: DYN, loc: locOf(expr) };
@@ -9499,7 +9499,7 @@ export function isConsoleLog(L: Lowerer, call: ts.CallExpression): boolean {
   ): "log" | "info" | "debug" | "error" | "warn" | null {
     if (!ts.isPropertyAccessExpression(call.expression)) return null;
     const access = call.expression;
-    if (access.questionDotToken || call.questionDotToken) return null;
+    if (L.chainBlocked(access, call)) return null;
     const name = access.name.text;
     if (name !== "log" && name !== "info" && name !== "debug" && name !== "error" && name !== "warn") return null;
     return L.isStdlibGlobal(access.expression, "console") ? name : null;
