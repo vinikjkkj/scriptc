@@ -671,6 +671,9 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "http.clientWriteDyn": { argTypes: [HTTPCLIENTREQ_T, DYN], result: VOID },
   "http.clientEndDyn": { argTypes: [HTTPCLIENTREQ_T, DYN], result: VOID },
   "http.clientDestroy": { argTypes: [HTTPCLIENTREQ_T], result: VOID },
+  // arg 1 is an %Error-rooted instance; the lowerer proves the root and
+  // upcasts, so the slot is unchecked here exactly as stream.destroyErr's is.
+  "http.clientDestroyErr": { argTypes: [HTTPCLIENTREQ_T, null], result: VOID },
   "http.clientDestroyed": { argTypes: [HTTPCLIENTREQ_T], result: BOOL },
   "http.clientOnResponse": { argTypes: [HTTPCLIENTREQ_T, null, BOOL], result: VOID },
   "http.clientOnError": { argTypes: [HTTPCLIENTREQ_T, null, BOOL], result: VOID },

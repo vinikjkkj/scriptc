@@ -88,6 +88,22 @@ export function streamInstanceOfExpr(
   };
 }
 
+/** Does this IR type root at `%Error`?
+ *
+ * The admissibility rule for every `destroy(err)` surface: only an
+ * %Error-hierarchy instance has the layout (name / message / code prefix)
+ * the runtime's error slot reads, so anything else must fence rather than
+ * be coerced. ONE copy on purpose — `stream.destroy(err)` and
+ * `request.destroy(err)` are different lowerers in different files, and
+ * the brief's own history is two copies of a predicate drifting apart. */
+export function errorRootedType(L: Lowerer, t: IrType): boolean {
+  if (t.kind !== "object") return false;
+  for (let c: ClassInfo | null = L.classes.get(t.className) ?? null; c; c = c.base) {
+    if (c.def.name === "%Error") return true;
+  }
+  return false;
+}
+
 /** The stream sides of a receiver class: the nearest stream-class
  * ancestor's, or null off the stream hierarchy. */
 export function streamSidesOf(L: Lowerer, info: ClassInfo | undefined | null): "r" | "w" | "rw" | null {
@@ -1746,14 +1762,7 @@ export function lowerStreamMethodCall(L: Lowerer, call: ts.CallExpression,
     const receiver = L.lowerExpr(access.expression);
     if (args[0] !== undefined) {
       const err = L.lowerExpr(args[0]);
-      const rootsAtError = (t: IrType): boolean => {
-        if (t.kind !== "object") return false;
-        for (let c: ClassInfo | null = L.classes.get(t.className) ?? null; c; c = c.base) {
-          if (c.def.name === "%Error") return true;
-        }
-        return false;
-      };
-      if (!rootsAtError(err.type)) {
+      if (!errorRootedType(L, err.type)) {
         L.noLowering(`destroy with a '${L.fmt(err.type)}' argument`, args[0], "the supported argument is an Error-hierarchy instance");
       }
       return { kind: "libCall", fn: "stream.destroyErr", args: [receiver, L.upcastTo(err, "%Error")], type: receiver.type, loc };

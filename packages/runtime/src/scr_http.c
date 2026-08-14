@@ -2244,6 +2244,12 @@ struct ScrHttpClientReq {
   bool had_error;
   bool close_queued;
   bool close_emitted; /* settled: listeners dropped, off the registry */
+  /* request.destroy(err)'s error (+1, NULL = none): the premature-teardown
+   * pass fires THIS object instead of synthesising 'socket hang up', which
+   * is both what Node emits and why the emission stays DEFERRED — measured:
+   * destroy(err) returns before its 'error' runs, so firing it inline here
+   * would reorder the program. Set once; a second destroy is a no-op. */
+  ScrError *destroy_err;
   ScrHttpReq *res; /* +1 once the head parses */
   ScrNetLs resp_ls, err_ls, timeout_ls, close_ls, upgrade_ls;
   /* the owning Agent (+1; the agent's entry holds this client +1 too —
@@ -2279,6 +2285,7 @@ void scr_http_client_release(ScrHttpClientReq *c) {
     free(c->hvalues);
     if (c->res) scr_http_req_release(c->res);
     if (c->sock) scr_net_sock_release(c->sock);
+    if (c->destroy_err) scr_error_release(c->destroy_err);
 #ifdef SCR_RC_AUDIT
     scr_http_live--;
 #endif
@@ -2486,6 +2493,16 @@ void scr_http_client_set_timeout(ScrHttpClientReq *c, double ms) {
 void scr_http_client_destroy(ScrHttpClientReq *c) {
   if (c->destroyed) return;
   c->destroyed = true;
+  if (c->sock) scr_net_sock_destroy(c->sock);
+}
+
+void scr_http_client_destroy_err(ScrHttpClientReq *c, ScrError *err /*borrowed*/) {
+  /* Node: the FIRST destroy wins — a second destroy(other) emits nothing
+   * (oracle-pinned). Checking `destroyed` before stashing the error keeps
+   * that true for destroy() followed by destroy(err) as well. */
+  if (c->destroyed) return;
+  c->destroyed = true;
+  if (err != NULL && c->destroy_err == NULL) c->destroy_err = scr_error_retain(err);
   if (c->sock) scr_net_sock_destroy(c->sock);
 }
 
@@ -2745,9 +2762,21 @@ static void scr_http_client_premature(ScrHttpConn *conn) {
   c->response_done = true; /* the exchange is over, one way or another */
   if (!c->response_started) {
     if (!c->had_error) {
-      ScrStr *msg = scr_str_new("socket hang up", 14);
-      scr_http_client_error(c, msg);
-      scr_str_release(msg);
+      if (c->destroy_err != NULL) {
+        /* destroy(err): the user's OWN object goes to the listeners —
+         * identity, name, code and own properties intact — and it
+         * REPLACES 'socket hang up' rather than preceding it, which is
+         * Node's answer (measured: exactly one 'error', then 'close').
+         * The message still travels the shared (cb, ScrStr *) ABI so the
+         * no-listener path prints the right text before exiting 1. */
+        ScrError *prev = scr_err_obj_push(c->destroy_err);
+        scr_http_client_error(c, c->destroy_err->message);
+        scr_err_obj_pop(prev);
+      } else {
+        ScrStr *msg = scr_str_new("socket hang up", 14);
+        scr_http_client_error(c, msg);
+        scr_str_release(msg);
+      }
       if (scr_exc_pending()) return;
     }
     scr_http_client_queue_close(c);
