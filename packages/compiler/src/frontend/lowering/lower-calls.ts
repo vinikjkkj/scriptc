@@ -5674,6 +5674,14 @@ const DYN_STRING_ONLY_METHODS = new Set([
     if (L.stdlibGlobalMember(access, "ArrayBuffer") !== "isView") return null;
     if (call.arguments.length !== 1) return null; // the stdlib chokepoint fences
     const argNode = call.arguments[0]!;
+    // The type is probed BEFORE anything is lowered, and the two shapes
+    // this answers for are the only ones that get lowered at all. Every
+    // other operand leaves this function having built nothing, so the
+    // fence path below re-lowers nothing either — the `??` chain's
+    // convention is to tolerate a second lowering after a null, and there
+    // is no reason to spend one here.
+    const argT = L.mapTypeOf(L.typeOf(argNode));
+    if (argT?.kind !== "dyn" && argT?.kind !== "bytes") return null;
     const arg = L.lowerExpr(argNode);
     const loc = locOf(call);
     if (arg.type.kind === "dyn") {
@@ -5685,7 +5693,12 @@ const DYN_STRING_ONLY_METHODS = new Set([
     ) {
       return { kind: "boolLit", value: arg.type.elem !== "buf", type: BOOL, loc };
     }
-    return null;
+    // Probed as one of the two and lowered to neither — a computed
+    // `bytes` operand (folding it would DROP the call, the fold
+    // discipline's whole point) or a bridge out of dyn. Committed now, so
+    // say so here rather than returning null and lowering twice; the
+    // wording is the member fence's own.
+    L.noLowering("ArrayBuffer.isView", call);
   }
 
 /** Predicate declarations currently being inlined — re-entrancy guard
