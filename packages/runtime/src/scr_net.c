@@ -351,6 +351,30 @@ void scr_net_fire0_this(ScrNetLs *l, void *self, ScrDynHandleTag tag) {
 
 void scr_net_fire0(ScrNetLs *l) { scr_net_fire0_this(l, NULL, 0); }
 
+/* A SOCKET's 'close' list: the same zero-payload pass, except that a
+ * listener which asked for `hadError` gets it. WHICH listeners those are
+ * is recorded in the entry's adapter slot at registration (NULL = the
+ * zero-argument shape, which is every listener this list held before and
+ * every checked-dynamic one still), so the split costs one pointer test
+ * per listener and nothing at all to a program that never spells the
+ * parameter. It is the pointer dispatch scr_net_fire_err_impl already
+ * uses, for the same reason it does: the (ScrClosure *) call convention
+ * eight other handle families share stays unwidened. */
+static void scr_net_fire_close(ScrNetLs *l, void *self, ScrDynHandleTag tag, bool had_error) {
+  ScrNetL *snap;
+  size_t n = scr_net_ls_snapshot(l, &snap);
+  scr_dyn_this_push(self, tag);
+  for (size_t i = 0; i < n; i++) {
+    if (!scr_exc_pending()) {
+      if (snap[i].fn != NULL) ((ScrNetCloseFn)snap[i].fn)(snap[i].cb, had_error);
+      else ((void (*)(ScrClosure *))snap[i].cb->fn)(snap[i].cb);
+    }
+    scr_closure_release(snap[i].cb);
+  }
+  scr_dyn_this_pop();
+  free(snap);
+}
+
 /* Fire an error list through the ScrChildErrFn adapters (msg borrowed),
  * the emitting handle bound as the ambient receiver. An 'error' with NO
  * listener is fatal, like Node's unhandled 'error' EventEmitter throw:
@@ -2287,12 +2311,19 @@ void scr_net_sock_on_end(ScrNetSocket *s, ScrClosure *cb /*moves*/, bool once) {
   scr_net_ls_add(&s->end_ls, cb, NULL, once);
 }
 
-void scr_net_sock_on_close(ScrNetSocket *s, ScrClosure *cb /*moves*/, bool once) {
+void scr_net_sock_on_close(ScrNetSocket *s, ScrClosure *cb /*moves*/, ScrNetCloseFn fn,
+                            bool once) {
   if (s->close_emitted) {
     scr_closure_release(cb);
     return;
   }
-  scr_net_ls_add(&s->close_ls, cb, NULL, once);
+  scr_net_ls_add(&s->close_ls, cb, (void *)fn, once);
+}
+
+/* The `hadError` adapter. The listener owns a plain bool -- nothing to
+ * retain, so the thunk is the one cast (the data/conn thunk pattern). */
+void scr_net_close_thunk_bool(ScrClosure *cb, bool had_error) {
+  ((void (*)(ScrClosure *, bool))cb->fn)(cb, had_error);
 }
 
 void scr_net_sock_on_error(ScrNetSocket *s, ScrClosure *cb /*moves*/, ScrChildErrFn fn,
@@ -2669,7 +2700,7 @@ static void scr_net_sweep(void) {
           return;
         }
       }
-      scr_net_fire0_this(&sock->close_ls, sock, SCR_DYNH_NET_SOCKET);
+      scr_net_fire_close(&sock->close_ls, sock, SCR_DYNH_NET_SOCKET, sock->had_error);
       /* settle: listeners drop (cycle story) */
       scr_net_ls_drop(&sock->data_ls);
       scr_net_ls_drop(&sock->end_ls);
@@ -2935,7 +2966,7 @@ static ScrDyn *scr_net_dynh_sock_invoke(void *h, ScrDyn *self, const char *metho
     } else if (scr_net_dynh_name_is(name, "end")) {
       scr_net_sock_on_end(s, scr_dyn_listener_closure0(cb), once);
     } else if (scr_net_dynh_name_is(name, "close")) {
-      scr_net_sock_on_close(s, scr_dyn_listener_closure0(cb), once);
+      scr_net_sock_on_close(s, scr_dyn_listener_closure0(cb), NULL, once);
     } else if (scr_net_dynh_name_is(name, "error")) {
       scr_net_sock_on_error(s, scr_dyn_listener_closure_err(cb), (ScrChildErrFn)&scr_dyn_listener_fire_err, once);
     } else if (scr_net_dynh_name_is(name, "connect")) {
