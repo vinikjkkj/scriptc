@@ -714,6 +714,35 @@ export function typeKey(t: IrType): string {
   }
 }
 
+/** The tag of the PROMISE arm when `u` is exactly the settle-or-value union
+ * over `inner` — `Promise<T> | T`, and the union-payload form
+ * `Promise<T | null> | T | null` — and -1 for anything else.
+ *
+ * The frontend's own recognizer is types.ts's settleOrValueArms, which
+ * answers about a union it already holds the definition of. This one takes
+ * the arm lookup as a callback so the IR validator and both emitters can ask
+ * the same question of their own union tables: a `new Promise` executor
+ * whose resolve parameter was widened for ADOPTION carries exactly this
+ * union, and every consumer has to agree on which arm is the promise. */
+export function settleOrValuePromiseTag(
+  u: IrType,
+  inner: IrType,
+  armsOf: (unionId: string) => readonly IrType[] | undefined,
+): number {
+  if (u.kind !== "union") return -1;
+  const arms = armsOf(u.unionId);
+  if (arms === undefined) return -1;
+  const tag = arms.findIndex((a) => a.kind === "promise" && typeEquals(a.inner, inner));
+  if (tag < 0) return -1;
+  const payload = inner.kind === "union" ? armsOf(inner.unionId) : [inner];
+  if (payload === undefined) return -1;
+  const others = arms.filter((_, i) => i !== tag);
+  return others.length === payload.length &&
+    others.every((o) => payload.some((q) => typeEquals(q, o)))
+    ? tag
+    : -1;
+}
+
 export function typeEquals(a: IrType, b: IrType): boolean {
   if (a.kind === "array") return b.kind === "array" && typeEquals(a.elem, b.elem);
   if (a.kind === "bytes") return b.kind === "bytes" && a.elem === b.elem;
