@@ -4525,6 +4525,19 @@ long scr_hmac_live_count(void);
 void scr_cipher_alloc_note(void);
 void scr_cipher_free_note(void);
 long scr_cipher_live_count(void);
+/* The abort pair. Same reason as the five above for living in
+ * scr_object.c: scr_abort.c is an OPTIONAL link unit (moduleUsesAbortSignal)
+ * and the audit reads every counter unconditionally, so a counter defined
+ * there would be an undefined symbol in every signal-free binary. These
+ * two matter more than most -- a leaked listener shows up as a leaked
+ * CLOSURE, one indirection away from its cause, and until now a leaked
+ * signal did not show up at all. */
+void scr_abortsig_alloc_note(void);
+void scr_abortsig_free_note(void);
+long scr_abortsig_live_count(void);
+void scr_abortctl_alloc_note(void);
+void scr_abortctl_free_note(void);
+long scr_abortctl_live_count(void);
 #else
 #define scr_bigint_alloc_note() ((void)0)
 #define scr_bigint_free_note() ((void)0)
@@ -4536,6 +4549,10 @@ long scr_cipher_live_count(void);
 #define scr_hmac_free_note() ((void)0)
 #define scr_cipher_alloc_note() ((void)0)
 #define scr_cipher_free_note() ((void)0)
+#define scr_abortsig_alloc_note() ((void)0)
+#define scr_abortsig_free_note() ((void)0)
+#define scr_abortctl_alloc_note() ((void)0)
+#define scr_abortctl_free_note() ((void)0)
 #endif
 
 /* ── async: promises, fibers, event loop ────────────────────────────
@@ -6540,11 +6557,51 @@ void scr_tls_ca_certs_chk(const ScrDyn *type, const ScrStr *fence);
  * members and AbortController all fence in the frontend -- so nothing
  * constructs one and these entry points exist for the ownership
  * bookkeeping a record field needs, nothing more. */
+/* AbortController / AbortSignal (scr_abort.c — LINK-GATED on
+ * moduleUsesAbortSignal: the unit is not in RUNTIME_SOURCES, so a binary
+ * with no abortSignal/abortController-typed slot never carries it).
+ *
+ * BOTH handles are collector-headered, which is why they have real trace
+ * entry points where the other opaque handles have none: a listener
+ * closure that captures its own signal (or the controller owning it) is a
+ * cycle ordinary code writes on purpose --
+ *
+ *     const onAbort = () => c.abort(signal.reason)
+ *     signal.addEventListener('abort', onAbort, { once: true })
+ *
+ * -- and a refcount alone would leak it. The abort REASON is not traced:
+ * no ScrDyn tracing exists anywhere in this runtime. */
 typedef struct ScrAbortSignal ScrAbortSignal;
+typedef struct ScrAbortController ScrAbortController;
+ScrAbortSignal *scr_abort_signal_new(void);
 ScrAbortSignal *scr_abort_signal_retain(ScrAbortSignal *s);
 void scr_abort_signal_release(ScrAbortSignal *s);
 void *scr_abort_signal_retain_v(void *p);
 void scr_abort_signal_release_v(void *p);
+void scr_abort_signal_trace_v(void *p, ScrTraceVisit visit, void *ctx);
+bool scr_abort_signal_aborted(const ScrAbortSignal *s);
+ScrDyn *scr_abort_signal_reason(const ScrAbortSignal *s); /* +1 */
+/* cb MOVES IN. A repeat of the same callback pointer is NOT a second
+ * listener (EventTarget keys on (type, callback, capture)) and releases
+ * it right back; so does an add after the abort already fired. */
+void scr_abort_signal_add(ScrAbortSignal *s, ScrClosure *cb, bool once);
+/* By callback IDENTITY, and it RELEASES the vector's reference — a remove
+ * that only forgot the entry would keep the closure, and everything it
+ * captured, alive forever. */
+void scr_abort_signal_off(ScrAbortSignal *s, ScrClosure *cb);
+/* reason BORROWED; NULL or the dyn undefined mints the AbortError
+ * DOMException (WebIDL legacy code 20). The FIRST abort wins: a second is
+ * a no-op that does not change the reason. Fires listeners synchronously,
+ * so it can leave an exception pending. */
+void scr_abort_signal_abort(ScrAbortSignal *s, ScrDyn *reason);
+ScrAbortController *scr_abort_controller_new(void);
+ScrAbortController *scr_abort_controller_retain(ScrAbortController *c);
+void scr_abort_controller_release(ScrAbortController *c);
+void *scr_abort_controller_retain_v(void *p);
+void scr_abort_controller_release_v(void *p);
+void scr_abort_controller_trace_v(void *p, ScrTraceVisit visit, void *ctx);
+ScrAbortSignal *scr_abort_controller_signal(ScrAbortController *c); /* +1, stable identity */
+void scr_abort_controller_abort(ScrAbortController *c, ScrDyn *reason);
 ScrSecureCtx *scr_secure_ctx_retain(ScrSecureCtx *c);
 void scr_secure_ctx_release(ScrSecureCtx *c);
 void *scr_secure_ctx_retain_v(void *p);

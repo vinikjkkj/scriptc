@@ -80,6 +80,8 @@ export function cType(t: IrType): string {
       return "ScrSecureCtx *";
     case "abortSignal":
       return "ScrAbortSignal *";
+    case "abortController":
+      return "ScrAbortController *";
     case "fsWatcher":
       return "ScrWatcher *";
     case "childStream":
@@ -122,8 +124,6 @@ export function cType(t: IrType): string {
       return "ScrGen *";
     case "void":
       return "void";
-    case "abortSignal":
-      return "ScrAbortSignal *";
     case "undefinedT":
     case "nullT":
       // Unit kinds have no C value form: they exist only as union arms
@@ -197,6 +197,8 @@ export function retainCallC(type: IrType, expr: string): string {
       return `scr_secure_ctx_retain(${expr})`;
     case "abortSignal":
       return `scr_abort_signal_retain(${expr})`;
+    case "abortController":
+      return `scr_abort_controller_retain(${expr})`;
     case "fsWatcher":
       return `scr_watcher_retain(${expr})`;
     case "childStream":
@@ -289,6 +291,8 @@ export function releaseCallC(type: IrType, expr: string): string {
       return `scr_secure_ctx_release(${expr})`;
     case "abortSignal":
       return `scr_abort_signal_release(${expr})`;
+    case "abortController":
+      return `scr_abort_controller_release(${expr})`;
     case "fsWatcher":
       return `scr_watcher_release(${expr})`;
     case "childStream":
@@ -365,6 +369,8 @@ export function boxKindC(t: IrType): string {
     case "secureCtx":
     case "fsWatcher":
     case "childStream":
+    case "abortSignal":
+    case "abortController":
     case "bytes":
       throw new Error(`emitter bug: ${t.kind} boxes go through boxNewC, not boxKindC`);
     case "procStream":
@@ -385,9 +391,6 @@ export function boxKindC(t: IrType): string {
     case "undefinedT":
     case "nullT":
     case "caught":
-    // A signal is fenced out of union arms in the frontend, like the
-    // other opaque handles.
-    case "abortSignal":
       // unit kinds never stand alone (and catch bindings never box), so
       // nothing to box
       throw new Error(`emitter bug: box of ${t.kind}`);
@@ -495,6 +498,8 @@ export function rcAdapters(t: IrType): RcAdapters | null {
       return rt("scr_secure_ctx_retain_v", "scr_secure_ctx_release_v");
     case "abortSignal":
       return rt("scr_abort_signal_retain_v", "scr_abort_signal_release_v");
+    case "abortController":
+      return rt("scr_abort_controller_retain_v", "scr_abort_controller_release_v");
     case "fsWatcher":
       return rt("scr_watcher_retain_v", "scr_watcher_release_v");
     case "childStream":
@@ -656,8 +661,11 @@ export function elemKindC(elem: IrType): string {
     // there rather than through the array.
     case "http2Session":
     case "http2Stream":
-    // AbortSignal handles: refcounted, immutable from the array's side.
+    // The abort pair: refcounted, and CYCLE-CAPABLE — an element's
+    // listener closure can capture the array holding it — so such arrays
+    // construct through scr_arr_new_ref with a real trace.
     case "abortSignal":
+    case "abortController":
       return "SCR_ELEM_REF";
     case "url":
     case "searchParams":

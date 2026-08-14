@@ -61,19 +61,27 @@ static void scr_rc_audit_at_exit(void) {
   long hashes = scr_hash_live_count();
   long hmacs = scr_hmac_live_count();
   long ciphers = scr_cipher_live_count();
+  /* The abort pair. AbortSignal was invisible to this audit until it had
+   * values to leak: a signal that outlives its program held a listener
+   * vector, and that showed up -- if at all -- as a nonzero CLOSURE count
+   * one indirection from its cause. */
+  long abortsigs = scr_abortsig_live_count();
+  long abortctls = scr_abortctl_live_count();
   if (strings != 0 || arrays != 0 || maps != 0 || boxes != 0 || closures != 0 ||
       objects != 0 || unions != 0 || dyns != 0 || bytes != 0 || jsvals != 0 ||
       bigints != 0 || keyobjs != 0 || hashes != 0 || hmacs != 0 ||
-      ciphers != 0) {
+      ciphers != 0 || abortsigs != 0 || abortctls != 0) {
     fflush(stdout);
     fprintf(stderr,
             "scriptc RC AUDIT FAILED: %ld heap string(s), %ld array(s), "
             "%ld map(s), %ld box(es), %ld closure(s), %ld object(s), "
             "%ld union(s), %ld dyn value(s), %ld bytes value(s), "
             "%ld island value(s), %ld bigint(s), %ld key object(s), "
-            "%ld hash(es), %ld hmac(s), %ld cipher(s) live at exit\n",
+            "%ld hash(es), %ld hmac(s), %ld cipher(s), %ld abort signal(s), "
+            "%ld abort controller(s) live at exit\n",
             strings, arrays, maps, boxes, closures, objects, unions, dyns,
-            bytes, jsvals, bigints, keyobjs, hashes, hmacs, ciphers);
+            bytes, jsvals, bigints, keyobjs, hashes, hmacs, ciphers,
+            abortsigs, abortctls);
     _Exit(99);
   }
 }

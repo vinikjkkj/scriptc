@@ -203,15 +203,31 @@ export type IrType =
    * as a Map VALUE (the per-hostname context cache) like child; fenced out
    * of array elements and JSON like the other opaque handles. */
   | { kind: "secureCtx" }
-  /** AbortSignal — the fetch-cancellation slice. A refcounted handle like
-   * secureCtx: immutable identity, no cycles reachable from it (the
-   * abort reason is the only payload). It exists as a TYPE first: a
-   * signal is overwhelmingly an optional field on an options record that
-   * the program never reads, and mapping it is what lets those records
-   * compile. Every value operation (the statics, the instance members,
-   * AbortController) fences until the runtime lands, so no signal value
-   * can be built or observed while only the type is here. */
+  /** AbortSignal — the fetch-cancellation slice. A refcounted handle
+   * that IS cycle-capable, and not accidentally: the canonical program
+   *
+   *     const onAbort = () => c.abort(signal.reason)
+   *     signal.addEventListener('abort', onAbort, { once: true })
+   *
+   * writes signal -> closure -> signal on purpose. So the handle carries
+   * a collector header and its listener vector is a TRACED edge (the
+   * abort reason is not traced: no ScrDyn tracing exists anywhere in the
+   * runtime, so a cycle through a reason payload is merely never
+   * collected). It exists as a TYPE first: a signal is overwhelmingly an
+   * optional field on an options record that the program never reads,
+   * and mapping it is what lets those records compile. Values arrive
+   * with the seven operations in lower-abort.ts; the statics
+   * (abort/timeout/any), onabort and throwIfAborted still fence. */
   | { kind: "abortSignal" }
+  /** AbortController — the signal's one writer. A refcounted handle
+   * holding exactly one signal, minted with it and answered by .signal
+   * with stable identity on every read. Cycle-capable through that edge:
+   * a listener closure capturing the CONTROLLER closes the same loop one
+   * hop longer, so the signal edge is traced too. Kept a DISTINCT kind
+   * rather than folded onto the signal it owns: the two are different
+   * objects in Node, and making controller.signal answer the controller
+   * would be a silently wrong object rather than a refusal. */
+  | { kind: "abortController" }
   /** Heap, refcounted closure. `rest` marks a VARIADIC JS function (a
    * `...args` rest parameter, or a zero-param function body reading
    * `arguments` — test/common's mustCall wrapper): the lifted function
@@ -356,7 +372,7 @@ export const REF_TRUTHY_KINDS: ReadonlySet<string> = new Set([
   "symbol",
   "array", "map", "set", "regex", "url", "searchParams", "stats", "spawnRes", "child",
   "netServer", "netSocket", "http2Session", "http2Stream", "dgramSocket", "testCtx", "httpReq", "httpRes", "httpClientReq",
-  "secureCtx", "abortSignal", "fsWatcher", "childStream", "procStream", "bytes", "func", "object", "record", "promise",
+  "secureCtx", "abortSignal", "abortController", "fsWatcher", "childStream", "procStream", "bytes", "func", "object", "record", "promise",
   // A generator object is a JS object: always truthy.
   "generator",
   // A class object is a JS object (constructors are functions): always truthy.
@@ -391,6 +407,7 @@ export const HTTPRES_T: IrType = { kind: "httpRes" };
 export const HTTPCLIENTREQ_T: IrType = { kind: "httpClientReq" };
 export const SECURECTX_T: IrType = { kind: "secureCtx" };
 export const ABORTSIGNAL_T: IrType = { kind: "abortSignal" };
+export const ABORTCONTROLLER_T: IrType = { kind: "abortController" };
 export const FSWATCHER_T: IrType = { kind: "fsWatcher" };
 export const CHILDSTREAM_T: IrType = { kind: "childStream" };
 export const PROCSTREAM_T: IrType = { kind: "procStream" };
@@ -671,6 +688,8 @@ export function typeKey(t: IrType): string {
       return `generator<${typeKey(t.yieldT)},${typeKey(t.retT)},${typeKey(t.nextT)}>`;
     case "abortSignal":
       return "abortSignal";
+    case "abortController":
+      return "abortController";
     default: {
       const _exhaustive: never = t;
       void _exhaustive;
@@ -769,7 +788,14 @@ export function isRefCounted(t: IrType): boolean {
     // SecureContext handles are refcounted like url/stats (immutable, no
     // cycles — parsed cert/key material inside only).
     t.kind === "secureCtx" ||
+    // The abort pair is refcounted like the rest of this list, but UNLIKE
+    // the rest it carries a collector header: a listener closure that
+    // captures its own signal (or the controller that owns it) is a cycle
+    // ordinary code writes on purpose. traceAdapterC answers a real trace
+    // for both, so any record or object holding one is cycle-capable
+    // through it.
     t.kind === "abortSignal" ||
+    t.kind === "abortController" ||
     // bigint and the four crypto handles. Ordinary refcounted heap values
     // with NULL-tolerant, immortal-tolerant releases and — decisively —
     // NO collector header and no edge that could point back at anything
@@ -4583,6 +4609,28 @@ export type IrLibFn =
   | "fs.watch"
   | "fs.watchCb"
   | "watcher.close"
+  /** The AbortController / AbortSignal value surface (scr_abort.c —
+   * link-gated by moduleUsesAbortSignal). newController mints the
+   * controller AND its one signal; `signal` answers that same object on
+   * every read. `abort` with no reason mints the AbortError DOMException
+   * (WebIDL legacy code 20) in the runtime; `abortReason` stores the dyn
+   * it is given BY REFERENCE — Node leaves signal.reason === err with
+   * .code intact, and rebuilding the error from its message would
+   * silently drop .code. The FIRST abort wins: a second is a no-op that
+   * does not change the reason, which is what makes abort()-after-the-
+   * operation-completed quiet rather than a late rejection. `on` MOVES the
+   * listener closure in and ignores a repeat of the same callback
+   * (EventTarget keys its set on (type, callback, capture)); `off` removes
+   * by identity and RELEASES, which is the difference between a remove
+   * and a leak. */
+  | "abort.newController"
+  | "abort.signal"
+  | "abort.abort"
+  | "abort.abortReason"
+  | "abort.aborted"
+  | "abort.reason"
+  | "abort.on"
+  | "abort.off"
   /** The composed `new crypto.X509Certificate(data).fingerprint` read
    * (scr_lib.c — no certificate handle exists): the SHA-1 of the DER,
    * uppercase colon-separated, over PEM or raw-DER Buffer input; other
@@ -6008,8 +6056,10 @@ function isJsonSafeAt(
     case "cipher":
     case "decipher":
     // An AbortSignal is an object with no own enumerable properties, so
-    // Node stringifies it to {} — no honest JSON surface either.
+    // Node stringifies it to {} — no honest JSON surface either, and an
+    // AbortController (one internal signal slot) is the same answer.
     case "abortSignal":
+    case "abortController":
       return false;
     default: {
       const _exhaustive: never = t;
@@ -6715,7 +6765,8 @@ export function moduleUsesAbortSignal(mod: IrModule): boolean {
       for (const item of v) visit(item);
       return;
     }
-    if ((v as { kind?: unknown }).kind === "abortSignal") {
+    const k = (v as { kind?: unknown }).kind;
+    if (k === "abortSignal" || k === "abortController") {
       found = true;
       return;
     }
@@ -7936,6 +7987,7 @@ const LIB_MODE_REFUSED_KINDS: ReadonlyMap<string, string> = new Map([
   ["httpClientReq", "the node:http surface"],
   ["secureCtx", "the node:tls surface"],
   ["abortSignal", "the AbortSignal surface"],
+  ["abortController", "the AbortSignal surface"],
   ["dynInvoke", "checked-dynamic prototype dispatch"],
 ]);
 
@@ -8560,6 +8612,10 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.writeStream",
   "fs.watch",
   "fs.watchCb",
+  // controller.abort() dispatches the 'abort' event synchronously: every
+  // listener runs, and the FIRST error is re-raised at the end.
+  "abort.abort",
+  "abort.abortReason",
   "crypto.x509Fingerprint",
   "crypto.x509FingerprintStr",
   "crypto.x509ValidFrom",

@@ -3263,6 +3263,34 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_crypto_x509_valid_to(${arg(0)})`);
           case "crypto.x509ValidToStr":
             return finish(`scr_crypto_x509_valid_to_str(${arg(0)})`);
+          case "abort.newController":
+            return finish(`scr_abort_controller_new()`);
+          case "abort.signal":
+            return finish(`scr_abort_controller_signal(${arg(0)})`);
+          case "abort.abort":
+            return finish(`scr_abort_controller_abort(${arg(0)}, NULL)`);
+          // The reason is BORROWED: the runtime retains it into the
+          // signal's slot, which is what keeps signal.reason === the very
+          // object the caller passed, and .code with it.
+          case "abort.abortReason":
+            return finish(`scr_abort_controller_abort(${arg(0)}, ${arg(1)})`);
+          case "abort.aborted":
+            return finish(`scr_abort_signal_aborted(${arg(0)})`);
+          case "abort.reason":
+            return finish(`scr_abort_signal_reason(${arg(0)})`);
+          // The listener closure MOVES into the signal's vector (the
+          // scr_net_ls_add contract), so the temp is not released here.
+          // A repeat of the same callback releases it right back — the
+          // runtime owns that decision, not the emitter.
+          case "abort.on": {
+            const cb = args[1]!;
+            E.moveTemp(cb);
+            return finish(`scr_abort_signal_add(${arg(0)}, ${cb.name}, ${arg(2)})`);
+          }
+          // removeEventListener BORROWS: it finds the entry by pointer
+          // identity and releases the vector's OWN reference.
+          case "abort.off":
+            return finish(`scr_abort_signal_off(${arg(0)}, ${arg(1)})`);
           case "watcher.close":
             E.line(`scr_watcher_close(${arg(0)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
