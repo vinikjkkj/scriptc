@@ -4829,6 +4829,9 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         // by the receiver's own element.
         L.lowerFilterNarrowCall(expr, expr.expression) ??
         lowerArrayIsArrayCall(L, expr, expr.expression) ??
+        // The sibling runtime kind test: `ArrayBuffer.isView(u)`, the third
+        // line of the same payload-normalising dispatch isArray heads.
+        lowerArrayBufferIsViewCall(L, expr, expr.expression) ??
         lowerSymbolStaticCall(L, expr, expr.expression) ??
         lowerSymbolMethodCall(L, expr, expr.expression) ??
         lowerRegExpStaticCall(L, expr, expr.expression) ??
@@ -5637,6 +5640,52 @@ const DYN_STRING_ONLY_METHODS = new Set([
       call,
       "statically-decided Array.isArray on computed arguments (bind the value to a variable first)",
     );
+  }
+
+/** `ArrayBuffer.isView(v)` — the THIRD line of the payload-normalising
+ * idiom whose first two lines already lower (`u instanceof Uint8Array`
+ * and `u instanceof ArrayBuffer` over an `unknown`, lowerInstanceOf's dyn
+ * arms). It answers the same way, off the same runtime tag, and needs no
+ * new IR node, runtime helper or emitter arm: `dynTest test:"bytes"` is
+ * the existing SCR_DYN_BYTES kind compare.
+ *
+ * The answer is EXACT rather than approximate, and only because the dyn
+ * tree carries exactly two byte flavors (DYN_BYTES_KINDS: u8 →
+ * SCR_DYN_BYTES, buf → SCR_DYN_ARRBUF) and isDynBytes is the one gate a
+ * bytes value crosses on. So a dyn value is a VIEW iff its kind is
+ * SCR_DYN_BYTES — Node-exact, Buffer included (a Buffer is a Uint8Array
+ * there and rides the same kind here), and false for the ArrayBuffer
+ * flavor exactly as `ArrayBuffer.isView(new ArrayBuffer(8))` is false.
+ *
+ * Statically-typed operands fold, and the fold is exact for the same
+ * reason from the other end: every typed array AND DataView maps to
+ * `bytes` (types.ts maps DataView to bytesOf("u8") — one view
+ * representation), and `bytes<buf>` is the sole non-view member of the
+ * family. Folded only over side-effect-free reads, the `in`-operator /
+ * isArray discipline.
+ *
+ * Everything else — unions with bytes arms, jsval, caught, computed
+ * operands — is left to the standing SC2020 member fence deliberately:
+ * a loud refusal beats a guessed answer, and no shape here needs one.
+ * Null when the callee isn't THE stdlib ArrayBuffer.isView. */
+  function lowerArrayBufferIsViewCall(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,): IrExpr | null {
+    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.stdlibGlobalMember(access, "ArrayBuffer") !== "isView") return null;
+    if (call.arguments.length !== 1) return null; // the stdlib chokepoint fences
+    const argNode = call.arguments[0]!;
+    const arg = L.lowerExpr(argNode);
+    const loc = locOf(call);
+    if (arg.type.kind === "dyn") {
+      return { kind: "dynTest", test: "bytes", value: arg, type: BOOL, loc };
+    }
+    if (
+      arg.type.kind === "bytes" &&
+      (arg.kind === "varRef" || arg.kind === "recordGet" || arg.kind === "fieldGet")
+    ) {
+      return { kind: "boolLit", value: arg.type.elem !== "buf", type: BOOL, loc };
+    }
+    return null;
   }
 
 /** Predicate declarations currently being inlined — re-entrancy guard
