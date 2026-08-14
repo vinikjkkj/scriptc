@@ -76,6 +76,17 @@ class Live extends EventEmitter {
     }
 }
 
+//
+// What this does NOT assert, deliberately: the projected DATA field. A data
+// field rides the width-lift COPY (SEMANTICS.md 35 — "later mutations of the
+// source field don't alias"), so after `live.bump()` the record's `s` still
+// reads "hi" here while Node reads "hi!". That divergence is `main`'s, not
+// this change's: the identical class with `extends EventEmitter` removed
+// prints the identical "hi" on `main` (repro `c7.ts`, measured on the base
+// twin). This change makes an emitter subclass behave like every other class,
+// including there — it does not introduce the copy. `lp.n` is read only
+// BEFORE the mutation for that reason, and `m` is the field that proves the
+// closure holds the instance rather than a copy.
 const live = new Live();
 const lp = live as unknown as { m: (x: string) => string; n: number };
 console.log("before", lp.m("A"), lp.n);
