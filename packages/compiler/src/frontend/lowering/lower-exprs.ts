@@ -6011,7 +6011,10 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           if (e.kind === "unionWrap") return orderIndependent(e.value);
           if (e.kind !== "varRef") return false;
           const local = L.ctx.locals.find((l) => l.id === e.localId);
-          return local !== undefined && !local.mutable;
+          // A TDZ const is excluded: reading it before its initializer
+          // THROWS, and hoisting would run the source call ahead of that
+          // throw — an effect JS never reaches.
+          return local !== undefined && !local.mutable && local.tdz !== true;
         };
         const earlierStable = fields.every((f) => f.value === undefined || orderIndependent(f.value));
         if (srcLowered && !pureReemittable(srcLowered) && (!afterExplicit || earlierStable)) {
