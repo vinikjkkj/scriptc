@@ -602,18 +602,58 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         E.indent--;
         E.line(`} else {`);
         E.indent++;
+        const leftUnionId = e.left.type.unionId;
+        const extractC = (arm: IrType): string =>
+          (arm.kind === "f64"
+            ? `scr_union_get_f64(${l.name})`
+            : arm.kind === "bool"
+              ? `scr_union_get_bool(${l.name})`
+              : retainCallC(arm, `(${cType(arm).trim()})scr_union_peek(${l.name})`)) +
+          armNoteC(E, leftUnionId, arm);
         if (typeEquals(e.type, e.left.type)) {
           E.line(`${name} = ${l.name};`);
+        } else if (e.type.kind === "union") {
+          // The RETAGGED shape (lowerNullishCoalesce): the default widened
+          // the result union, so the surviving payload moves into the
+          // result's matching arm. The extraction is the narrowed shape's
+          // (+1 on ref arms) and the wrap is unionWrap's, composed — the
+          // +1 is exactly the ownership the new box takes. Unit tags cannot
+          // reach here (the test above owns them), so the LAST non-unit arm
+          // is the chain's fallthrough and no invalid-tag case exists.
+          const resDef = E.unionsById.get(e.type.unionId);
+          if (!resDef) throw new Error(`emitter bug: nullish retag into unknown union ${e.type.unionId}`);
+          const wrapC = (arm: IrType): string => {
+            const dst = resDef.arms.findIndex((b) => typeEquals(b, arm));
+            if (dst < 0) throw new Error(`emitter bug: nullish retag arm ${arm.kind} outside the result union`);
+            if (arm.kind === "f64") return `scr_union_new_f64(${dst}, ${extractC(arm)})`;
+            if (arm.kind === "bool") return `scr_union_new_bool(${dst}, ${extractC(arm)})`;
+            const rc = vAdapters(arm);
+            return `scr_union_new_ref(${dst}, ${extractC(arm)}, &${rc.retain}, &${rc.release}, ${E.traceArgC(arm)})`;
+          };
+          const nonUnit = def.arms.flatMap((a, t) => (isUnitType(a) ? [] : [[a, t] as const]));
+          if (nonUnit.length === 0) throw new Error("emitter bug: nullish retag over an all-unit union");
+          nonUnit.forEach(([arm, tag], i) => {
+            const last = i === nonUnit.length - 1;
+            if (last) {
+              if (i > 0) {
+                E.line(`} else {`);
+                E.indent++;
+              }
+              E.line(`${name} = ${wrapC(arm)};`);
+              if (i > 0) {
+                E.indent--;
+                E.line(`}`);
+              }
+              return;
+            }
+            E.line(i === 0 ? `if (${l.name}->tag == ${tag}) {` : `} else if (${l.name}->tag == ${tag}) {`);
+            E.indent++;
+            E.line(`${name} = ${wrapC(arm)};`);
+            E.indent--;
+          });
+          E.releaseValue(l.name, e.left.type);
         } else {
-          const arm = e.type;
-          const read =
-            (arm.kind === "f64"
-              ? `scr_union_get_f64(${l.name})`
-              : arm.kind === "bool"
-                ? `scr_union_get_bool(${l.name})`
-                : retainCallC(arm, `(${cType(arm).trim()})scr_union_peek(${l.name})`)) +
-            armNoteC(E, e.left.type.unionId, arm);
-          E.line(`${name} = ${read};`);
+          E.line(`${name} = ${extractC(e.type)};`);
           E.releaseValue(l.name, e.left.type);
         }
         E.indent--;
