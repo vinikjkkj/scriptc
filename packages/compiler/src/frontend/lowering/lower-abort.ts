@@ -184,7 +184,7 @@ export function lowerAbortMethodCall(
   call: ts.CallExpression,
   access: ts.PropertyAccessExpression,
 ): IrExpr | null {
-  if (call.questionDotToken || access.questionDotToken) return null;
+  if (L.chainBlocked(call, access)) return null;
   const kind = L.mapTypeOf(L.typeOf(access.expression))?.kind;
   if (kind !== "abortSignal" && kind !== "abortController") return null;
   if (!L.isStdlibMember(access)) return null;
