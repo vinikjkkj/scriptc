@@ -5107,7 +5107,7 @@ function literalUnionArmOf(
   /** litT fits ftT: unions per arm; literal-vs-literal by value; unit
    * types only into their own unit; otherwise the widened IR pair must be
    * equal or width-liftable. */
-  const fits = (litT: ts.Type, ftT: ts.Type): boolean => {
+  const fitsOne = (litT: ts.Type, ftT: ts.Type): boolean => {
     if (ftT.isUnionType()) return ftT.getTypes().some((a) => fits(litT, a));
     if (ftT.isStringLiteralType()) return litT.isStringLiteralType() && litT.value === ftT.value;
     if (ftT.isNumberLiteralType()) return litT.isNumberLiteralType() && litT.value === ftT.value;
@@ -5122,6 +5122,34 @@ function literalUnionArmOf(
     if (!li || !fi) return false;
     return typeEquals(li, fi) || L.widthLiftPlan(li, fi) !== null;
   };
+  /** The same test, plus the SOURCE-union decomposition. A property whose
+   * CHECKER type is a union fits a field when EVERY arm of it fits — the
+   * value is one of those arms at runtime and each has a home, which is
+   * the same "widens into any union that contains it" relation the whole
+   * probe rests on, read from the source side.
+   *
+   * `fitsOne` alone answers false for a source union against a NON-union
+   * field, because its last step compares the whole union's IR type
+   * against the field's. That is the shape an object literal has inside an
+   * INSTANTIATED generic body: the checker still reports the SYMBOLIC type
+   * for a nested literal — `{ ...v, timestamp: t }` where `v: F<S>` is a
+   * conditional over the type parameter distributes into one arm per
+   * branch — while the lowering builds the nested literal at the
+   * RESOLVED shape. The arm probe was asking the checker's symbolic
+   * spelling to equal the resolved one, so a discriminant that names
+   * exactly one arm ('operation: "set"') could not select it, the literal
+   * fell back to its own inferred type, and the nested literal's resolved
+   * record then mismatched that type's symbolic field (SC2003).
+   *
+   * `every`, not `some`: a source arm with no home would be a value the
+   * chosen arm cannot hold. And this only ever ADDS candidates — two
+   * fitting arms are still ambiguous and still decline, and every property
+   * of the arm this selects is coerced and re-checked exactly as before. */
+  function fits(litT: ts.Type, ftT: ts.Type): boolean {
+    if (fitsOne(litT, ftT)) return true;
+    if (!litT.isUnionType()) return false;
+    return litT.getTypes().every((a) => fitsOne(a, ftT));
+  }
   const armShapeIds = new Set(recordArms.map((a) => a.shapeId));
   const candidates = new Set<string>();
   for (const member of tsType.getTypes()) {
@@ -5951,8 +5979,34 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         // answer, not a missing feature. An earlier explicit PROPERTY
         // withholds it too: its read is pure, but a hoisted call could
         // write what that read observes, and the two would swap.
-        if (srcLowered && !pureReemittable(srcLowered) && !afterExplicit) {
-          if (fields.every((f) => pureReemittable(f.value))) {
+        //
+        // "Ahead of earlier contributors" is only a hazard for a
+        // contributor whose VALUE the call could change. A read of an
+        // IMMUTABLE local — `{ filePath, ...meter.finalize() }`, zapo's
+        // media prepare — cannot be one: nothing a callee does can
+        // reassign a `const` binding of the caller, and the read yields
+        // the same value on either side of the call. Literals likewise.
+        // So the ban is on contributors that are order-DEPENDENT (a field
+        // read the call could write, an element read, another call), not
+        // on the mere presence of an earlier property.
+        const orderIndependent = (e: IrExpr): boolean => {
+          if (e.kind === "numLit" || e.kind === "strLit" || e.kind === "boolLit" || e.kind === "bigLit") return true;
+          if (e.kind === "unitLit") return true;
+          if (e.kind === "unionWrap") return orderIndependent(e.value);
+          if (e.kind !== "varRef") return false;
+          const local = L.ctx.locals.find((l) => l.id === e.localId);
+          // A TDZ const is excluded: reading it before its initializer
+          // THROWS, and hoisting would run the source call ahead of that
+          // throw — an effect JS never reaches.
+          return local !== undefined && !local.mutable && local.tdz !== true;
+        };
+        const earlierStable = fields.every((f) => f.value === undefined || orderIndependent(f.value));
+        if (srcLowered && !pureReemittable(srcLowered) && (!afterExplicit || earlierStable)) {
+          // `pureReemittable` is about re-READING a value cheaply and so
+          // starts at `varRef`; a LITERAL is not one of its kinds even
+          // though nothing is purer. `orderIndependent` covers exactly
+          // those, so the two together are the honest test here.
+          if (fields.every((f) => pureReemittable(f.value) || orderIndependent(f.value))) {
             const slot = L.declareHiddenLocal("%spread", srcLowered.type);
             prelude.push({ kind: "varDecl", localId: slot.id, init: srcLowered, loc: locOf(srcNode) });
             srcLowered = { kind: "varRef", localId: slot.id, type: srcLowered.type, loc: locOf(srcNode) };
