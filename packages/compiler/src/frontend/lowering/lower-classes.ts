@@ -5185,18 +5185,11 @@ function executorResolveAdoptionUnion(
   }
   const resolveSym = L.checker.getSymbolAtLocation(p0.name);
   if (resolveSym === undefined) return null;
-  // The settle-or-value union over T: the promise arm beside exactly T's own
-  // arms. Interned SORTED — mapType sorts before interning and UnionRegistry
-  // keys on the arm list as given, so an unsorted intern would mint a SECOND
-  // id for a union that already exists and typeEquals (which compares ids)
-  // would then reject it everywhere.
   const promiseArm: IrType = { kind: "promise", inner };
   const payloadArms =
     inner.kind === "union" ? (L.unions.get(inner.unionId)?.arms ?? []) : [inner];
   if (payloadArms.length === 0) return null;
   if (payloadArms.some((a) => a.kind === "promise")) return null;
-  const arms = [promiseArm, ...payloadArms].sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
-  const sov: IrType & { kind: "union" } = { kind: "union", unionId: L.unions.intern(arms) };
   // Does any call of the resolve parameter pass a value that CARRIES a
   // promise? The mapped argument type answers it: a bare promise (the plain
   // `resolve(p)` the override's comment says must fail lowering) or a union
@@ -5219,7 +5212,21 @@ function executorResolveAdoptionUnion(
     ts.forEachChild(n, walk);
   };
   walk(fn.body);
+  // INTERNING IS THE LAST STEP, on purpose. UnionRegistry.intern MINTS an id
+  // for an arm list it has not seen, and union ids are emitted in creation
+  // order — interning speculatively, before the scan has said the union is
+  // wanted, renumbers every union declared after it in every program that
+  // merely CONSTRUCTS a promise. (Measured: zapo's emitted C moved by
+  // nothing but `u1186` -> `u1188`.) Deciding first keeps the promise this
+  // block makes — a program that does not resolve with a promise emits the
+  // same bytes it did before.
   if (!wanted) return null;
+  // Sorted before interning: mapType sorts and UnionRegistry keys on the arm
+  // list AS GIVEN, so an unsorted intern would mint a SECOND id for a union
+  // that already exists and typeEquals (which compares ids) would then
+  // reject it everywhere.
+  const arms = [promiseArm, ...payloadArms].sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
+  const sov: IrType & { kind: "union" } = { kind: "union", unionId: L.unions.intern(arms) };
   // The parameter IS the resolve closure, so the override is its SIGNATURE
   // with the widened value type — `(Promise<T> | T) => void`.
   L.paramIrOverrides.set(p0, { kind: "func", params: [sov], ret: VOID });
