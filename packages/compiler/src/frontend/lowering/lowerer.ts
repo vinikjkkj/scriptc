@@ -4497,7 +4497,19 @@ export class Lowerer {
       // The Error and stream chains keep declining unchanged: %Error DOES
       // publish `name`/`message`/`toString` as runtime layout, and a
       // stream node is reached before this skip can apply.
-      if (c !== info && c.builtinEmitter === true) continue;
+      // Checked, not assumed: if %EventEmitter ever grows a field or a
+      // method the guard reverts to declining rather than projecting a lie.
+      if (
+        c !== info &&
+        c.builtinEmitter === true &&
+        c.fields.size === 0 &&
+        c.methods.size === 0 &&
+        (c.genericMethods?.size ?? 0) === 0 &&
+        (c.symbolFields?.size ?? 0) === 0 &&
+        c.def.fields.length === 0
+      ) {
+        continue;
+      }
       if (c.builtinError || c.builtinEmitter || c.builtinStream !== undefined || c.def.runtime) return null;
     }
     const key = `ctorwitness:${className}:${target.shapeId}`;
