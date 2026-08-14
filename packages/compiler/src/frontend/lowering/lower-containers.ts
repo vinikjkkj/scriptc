@@ -7060,6 +7060,125 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     return { kind: "call", callee: helper, args: [receiver], type: resultT, loc };
   }
 
+/** The MAP source of an `Object.fromEntries` argument: `m.entries()` (the
+   * spelling every caller writes) or the bare `m`. Returns the node that
+   * evaluates to the map and its lowered type, or null. Only STRING keys —
+   * a number-keyed map would need ToPropertyKey per entry, which is a
+   * different rule and a different order story (canonical array indices
+   * enumerate first), and the tuple path fences the same way. */
+  function fromEntriesMapSource(L: Lowerer, argNode: ts.Expression,
+  ): { node: ts.Expression; type: IrType & { kind: "map" } } | null {
+    let node = argNode;
+    if (
+      ts.isCallExpression(node) && node.arguments.length === 0 &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === "entries" &&
+      !node.questionDotToken && !node.expression.questionDotToken &&
+      L.isStdlibMember(node.expression)
+    ) {
+      node = node.expression.expression;
+    }
+    const t = L.mapTypeOf(L.typeOf(node));
+    if (t?.kind !== "map" || t.key.kind !== "string") return null;
+    return { node, type: t };
+  }
+
+/** `Object.fromEntries(m.entries())` — the map half. An interned helper
+   * walks the source's own iteration primitives (the Map.forEach contract:
+   * iterCount fresh, iterLive for tombstones, iterEnter/iterExit inside a
+   * finally) and keyed-writes each pair into a fresh index-signature
+   * record, exactly as the tuple-array half does with an index loop.
+   *
+   * Order is JS's: entries are visited in the map's insertion order and
+   * each write appends to the record's overflow, so the object's own-key
+   * order is the record's documented one (canonical array indices
+   * ascending, then insertion) — the same answer `Object.fromEntries` over
+   * the equivalent pair ARRAY already gives.
+   *
+   * zapo's spelling is `store/memory/appstate.store.ts:87`, serialising a
+   * `Map<string, Uint8Array>` index into the exported store snapshot. */
+  function lowerFromEntriesMap(L: Lowerer, call: ts.CallExpression,
+    srcNode: ts.Expression,
+    mapT: IrType & { kind: "map" },): IrExpr | null {
+    const valT = mapT.value;
+    if (!isSupportedIndexValue(valT)) return null;
+    const resultT: IrType & { kind: "record" } = {
+      kind: "record",
+      shapeId: L.shapes.intern([], false, valT, []),
+    };
+    const loc = locOf(call);
+    const receiver = L.lowerExpr(srcNode);
+    if (receiver.type.kind !== "map") return null;
+    const key = `obj.fromEntries.map:${typeKey(valT)}:${resultT.shapeId}`;
+    let helper = L.arrHofHelpers.get(key);
+    if (!helper) {
+      helper = `%obj.fromEntries.${L.arrHofHelpers.size}`;
+      L.arrHofHelpers.set(key, helper);
+      const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
+      const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+      const iter = (
+        method: "iterCount" | "iterLive" | "iterKey" | "iterValue" | "iterEnter" | "iterExit",
+        args: IrExpr[],
+        type: IrType,
+      ): IrExpr => ({ kind: "mapIntrinsic", method, receiver: ref("s.0", mapT), args, type, loc });
+      const loop: IrStmt = {
+        kind: "for",
+        init: { kind: "varDecl", localId: "i.0", init: num(0), loc },
+        cond: { kind: "bin", op: "<", left: ref("i.0", F64), right: iter("iterCount", [], F64), type: BOOL, loc },
+        update: {
+          kind: "assign",
+          localId: "i.0",
+          value: { kind: "bin", op: "+", left: ref("i.0", F64), right: num(1), type: F64, loc },
+          loc,
+        },
+        body: [
+          {
+            kind: "if",
+            cond: iter("iterLive", [ref("i.0", F64)], BOOL),
+            then: [
+              {
+                kind: "recordKeySet",
+                obj: ref("out.0", resultT),
+                shapeId: resultT.shapeId,
+                key: iter("iterKey", [ref("i.0", F64)], STRING),
+                value: iter("iterValue", [ref("i.0", F64)], valT),
+                loc,
+              },
+            ],
+            else_: null,
+            loc,
+          },
+        ],
+        loc,
+      };
+      L.liftedFns.push({
+        name: helper,
+        params: [{ localId: "s.0", name: "s", type: mapT }],
+        returnType: resultT,
+        locals: [
+          { id: "s.0", name: "s", type: mapT, mutable: true },
+          { id: "out.0", name: "out", type: resultT, mutable: false },
+          { id: "i.0", name: "i", type: F64, mutable: true },
+        ],
+        body: [
+          { kind: "varDecl", localId: "out.0", init: { kind: "recordLit", fields: [], type: resultT, loc }, loc },
+          { kind: "exprStmt", expr: iter("iterEnter", [], VOID), loc },
+          {
+            kind: "tryCatch",
+            tryBody: [loop],
+            catchBody: null,
+            catchLocalId: null,
+            finallyBody: [{ kind: "exprStmt", expr: iter("iterExit", [], VOID), loc }],
+            loc,
+          },
+          { kind: "return", value: ref("out.0", resultT), loc },
+        ],
+        loc,
+      });
+    }
+    return { kind: "call", callee: helper, args: [receiver], type: resultT, loc };
+  }
+
 /** `Object.fromEntries(pairs)` over a `[string, V][]` VALUE into the
    * checker's own index-signature result shape (`{ [k: string]: V }` —
    * always declared-field-free from the lib signature): an interned helper
@@ -7079,6 +7198,12 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     if (call.arguments.length !== 1 || ts.isSpreadElement(call.arguments[0]!)) return null;
     const argNode = call.arguments[0]!;
     const argIr = L.mapTypeOf(L.typeOf(argNode));
+    // `Object.fromEntries(m.entries())` and `Object.fromEntries(m)` over a
+    // string-keyed MAP: the same helper one iterator over. The lib types
+    // the argument `Iterable<readonly [PropertyKey, T]>` and a map IS one,
+    // so this is the source shape the fence was actually refusing.
+    const mapped = fromEntriesMapSource(L, argNode);
+    if (mapped) return lowerFromEntriesMap(L, call, mapped.node, mapped.type);
     if (argIr?.kind !== "array") return null;
     // `Object.fromEntries(rows)` over a `string[][]` VALUE — the env-line
     // idiom (`envArray.map((env) => env.split('='))`). The checker has no
