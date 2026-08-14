@@ -7967,15 +7967,155 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     };
   }
 
+/** `String.fromCodePoint(cp)`, interned once per program:
+   *
+   *   %str.codePoint(cp) {
+   *     if (!(cp >= 0) || !(cp <= 0x10FFFF) || cp % 1 !== 0)
+   *       throw RangeError(`Invalid code point ${cp}`);
+   *     return cp < 0x10000
+   *       ? String.fromCharCode(cp)
+   *       : String.fromCharCode(0xD800 + (v - v % 1024) / 1024, 0xDC00 + v % 1024)
+   *         where v = cp - 0x10000;
+   *   }
+   *
+   * No new runtime unit: `scr_str_from_units` — the one `fromCharCode`
+   * already calls — recombines an adjacent surrogate pair into the code
+   * point and UTF-8 encodes it, which is precisely the second branch's
+   * job. So this rule is the SPEC's validation and its UTF16Encode, in IR,
+   * over the encoder that was already there.
+   *
+   * The three refusals in the guard are the spec's, and each is spelled so
+   * that the exceptional Numbers fall on the right side: NaN fails
+   * `cp >= 0`, Infinity fails `cp <= 0x10FFFF`, and `cp % 1 !== 0` catches
+   * fractions while leaving -0 alone (`-0 % 1` is `-0`, and `-0 !== 0` is
+   * false — Node's `String.fromCodePoint(-0)` is U+0000, not a throw).
+   * The message carries the RAW argument through the static ToString, the
+   * budget checker's convention. */
+  function internCodePointEncoder(L: Lowerer, loc: SrcLoc): string {
+    const key = "str:fromCodePoint";
+    const found = L.arrHofHelpers.get(key);
+    if (found !== undefined) return found;
+    const name = "%str.codePoint";
+    L.arrHofHelpers.set(key, name);
+    const cp = (): IrExpr => ({ kind: "varRef", localId: "cp.0", type: F64, loc });
+    const v = (): IrExpr => ({ kind: "varRef", localId: "v.0", type: F64, loc });
+    const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+    const bin = (op: "+" | "-" | "*" | "/" | "%", left: IrExpr, right: IrExpr): IrExpr =>
+      ({ kind: "bin", op, left, right, type: F64, loc });
+    const test = (op: "<" | ">" | "!==", left: IrExpr, right: IrExpr): IrExpr =>
+      ({ kind: "bin", op, left, right, type: BOOL, loc });
+    const or = (left: IrExpr, right: IrExpr): IrExpr =>
+      ({ kind: "logical", op: "||", left, right, type: BOOL, loc });
+    const units = (elems: IrExpr[]): IrExpr => ({
+      kind: "libCall",
+      fn: "string.fromCharCode",
+      args: [{ kind: "arrayLit", elems, type: arrayOf(F64), loc }],
+      type: STRING,
+      loc,
+    });
+    // `!(cp >= 0)` and `!(cp <= max)` spelled as the strict complements, so
+    // NaN — which compares false either way — lands in the throw.
+    const bad = or(
+      or(test("<", cp(), num(0)), test(">", cp(), num(0x10ffff))),
+      or(
+        test("!==", cp(), cp()), // NaN
+        test("!==", bin("%", cp(), num(1)), num(0)),
+      ),
+    );
+    const body: IrStmt[] = [
+      {
+        kind: "if",
+        cond: bad,
+        then: [
+          {
+            kind: "throw",
+            value: {
+              kind: "libCall",
+              fn: "error.new",
+              args: [
+                {
+                  kind: "strConcat",
+                  left: { kind: "strLit", value: "Invalid code point ", type: STRING, loc },
+                  right: { kind: "toString", operand: cp(), type: STRING, loc },
+                  type: STRING,
+                  loc,
+                },
+              ],
+              type: { kind: "object", className: "%RangeError" },
+              loc,
+            },
+            loc,
+          },
+        ],
+        else_: null,
+        loc,
+      },
+      {
+        kind: "if",
+        cond: test("<", cp(), num(0x10000)),
+        then: [{ kind: "return", value: units([cp()]), loc }],
+        else_: null,
+        loc,
+      },
+      { kind: "varDecl", localId: "v.0", init: bin("-", cp(), num(0x10000)), loc },
+      {
+        kind: "return",
+        value: units([
+          bin("+", num(0xd800), bin("/", bin("-", v(), bin("%", v(), num(1024))), num(1024))),
+          bin("+", num(0xdc00), bin("%", v(), num(1024))),
+        ]),
+        loc,
+      },
+    ];
+    L.liftedFns.push({
+      name,
+      params: [{ localId: "cp.0", name: "cp", type: F64 }],
+      returnType: STRING,
+      locals: [
+        { id: "cp.0", name: "cp", type: F64, mutable: true },
+        { id: "v.0", name: "v", type: F64, mutable: false },
+      ],
+      body,
+      loc,
+    });
+    return name;
+  }
+
 /** `String.fromCharCode(...codes)` on THE String global: every argument
    * lowers as a number and packs into ONE f64[] array-literal argument
    * (the path.join convention) — or ONE whole-array spread forwards the
-   * array itself. Other String statics (fromCodePoint, raw) fall through
-   * to the member fence. Null for non-String receivers. */
+   * array itself. `String.fromCodePoint(...)` rides the encoder above, one
+   * interned helper call per argument, concatenated left to right (the
+   * spec's own loop order — `String.fromCodePoint(65, -1)` throws AFTER
+   * the 'A' would have been appended, and nothing observes the partial
+   * string). The SPREAD form of fromCodePoint keeps its fence: it needs a
+   * runtime loop, not a fixed concat. `String.raw` is handled below. Null
+   * for non-String receivers. */
   export function lowerStringStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken) return null;
     const member = L.stdlibGlobalMember(access, "String");
+    if (member === "fromCodePoint") {
+      const loc0 = locOf(call);
+      if (call.arguments.some(ts.isSpreadElement)) {
+        L.noLowering(
+          "String.fromCodePoint with a spread argument",
+          call,
+          "the fixed-argument form lowers (String.fromCodePoint(cp) / (a, b, ...)); " +
+            "a spread needs a runtime loop — build the string with a for-of and += instead",
+        );
+      }
+      if (call.arguments.length === 0) return { kind: "strLit", value: "", type: STRING, loc: loc0 };
+      const helper = internCodePointEncoder(L, loc0);
+      const pieces = call.arguments.map((a): IrExpr => ({
+        kind: "call",
+        callee: helper,
+        args: [L.lowerExprExpecting(a, F64)],
+        type: STRING,
+        loc: locOf(a),
+      }));
+      return pieces.reduce((left, right) => ({ kind: "strConcat", left, right, type: STRING, loc: loc0 }));
+    }
     if (member !== "fromCharCode" && member !== "raw") return null;
     const loc = locOf(call);
     // String.raw(template, ...substitutions): the template's `raw` member
