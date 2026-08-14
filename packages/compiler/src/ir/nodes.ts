@@ -6696,6 +6696,35 @@ export function moduleUsesChildStream(mod: IrModule): boolean {
   return found;
 }
 
+/** True when the module contains an `abortSignal`-typed slot anywhere —
+ * the LINK gate for scr_abort.c (cc.ts). The unit used to be
+ * unconditional, which was affordable only while it was forty lines of
+ * pure refcount: the link line has no --gc-sections, so every line added
+ * to it is paid by every binary in the project (a measured 512 bytes per
+ * ten lines on a stream-free hello-world). Nothing outside scr_abort.c
+ * names its symbols, so the emitted program TU is its only caller, and
+ * the TU names them exactly when an abortSignal-typed slot exists —
+ * which is what makes a TYPE walk the precise gate here. Same generic
+ * JSON walk as moduleUsesChildStream: `kind` discriminants live only on
+ * IR objects, so user string VALUES can never false-positive. */
+export function moduleUsesAbortSignal(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    if ((v as { kind?: unknown }).kind === "abortSignal") {
+      found = true;
+      return;
+    }
+    for (const x of Object.values(v as Record<string, unknown>)) visit(x);
+  };
+  visit(mod);
+  return found;
+}
+
 /** True when the module contains any regex construct — a regexLit /
  * regexIntrinsic node or a regex-typed slot anywhere. This is the link
  * switch that pulls scr_regex.c + the vendored libregexp into the binary
