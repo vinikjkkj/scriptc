@@ -14,6 +14,86 @@ import { OVERFLOW_MEMBER } from "./emit-shapes.js";
 
 
 
+/** Counts every `localId` mentioned anywhere inside an IR node.
+ *
+ * Structural rather than kind-directed, deliberately. The IR is plain
+ * JSON-safe data by construction (ir/serialize.ts states it and enforces
+ * it), so this terminates; and a node kind added tomorrow that carries a
+ * localId is counted the day it is added, where a hand-written per-kind
+ * walk would silently stop counting it. A MISSED reference here would be
+ * a use-after-free, not a size regression, so the walk that cannot miss
+ * one is the right one even though it is slower. Nodes are never shared
+ * (the IR serializes as a tree), so a count is an occurrence count. */
+  function countLocalIds(node: unknown, into: Map<string, number>): void {
+    if (node === null || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const item of node) countLocalIds(item, into);
+      return;
+    }
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      if (k === "localId" && typeof v === "string") into.set(v, (into.get(v) ?? 0) + 1);
+      else countLocalIds(v, into);
+    }
+  }
+
+/** The hidden locals whose ENTIRE live range is one seqExpr.
+ *
+ * A seqExpr is straight-line — the validator restricts its statements to
+ * writes, so no jump leaves the region — and the lowerings that build one
+ * mint their scratch locals with declareHiddenLocal, which binds them to
+ * NO ts.Symbol: nothing in the source can name them. Such a local is dead
+ * the moment the seqExpr's value has been produced. It nevertheless lives
+ * in the enclosing BLOCK scope, so every unwind between the seqExpr and
+ * that block's end names it — and N property writes in one function cost
+ * 1.5N² release lines instead of a constant per write.
+ *
+ * Two conditions, both CHECKED rather than assumed, because thirty-odd
+ * lowerings build seqExprs and this rule must be right for all of them
+ * and for the ones written after it:
+ *
+ *   - the local is HIDDEN (`%`-prefixed — declareHiddenLocal's own
+ *     naming), so no source-visible binding is ever rescoped;
+ *   - it is mentioned exactly as many times inside the seqExpr as in the
+ *     whole function body, i.e. there is NO reference outside the region.
+ *     A builder that keeps a local alive past its seqExpr simply does not
+ *     get the scope, and keeps today's emission exactly.
+ *
+ * Boxed locals are excluded outright: a box is shared with a closure, so
+ * its lifetime is not the region's to end. Params and captures likewise —
+ * the function scope owns those. */
+  export function seqScopedLocals(fn: IrFunction): Set<string> {
+    const out = new Set<string>();
+    const byId = new Map(fn.locals.map((l) => [l.id, l]));
+    const paramIds = new Set(fn.params.map((p) => p.localId));
+    const capIds = new Set((fn.captures ?? []).map((c) => c.localId));
+    const whole = new Map<string, number>();
+    countLocalIds(fn.body, whole);
+    const visit = (node: unknown): void => {
+      if (node === null || typeof node !== "object") return;
+      if (Array.isArray(node)) {
+        for (const item of node) visit(item);
+        return;
+      }
+      const n = node as { kind?: unknown; stmts?: unknown };
+      if (n.kind === "seqExpr" && Array.isArray(n.stmts)) {
+        const inside = new Map<string, number>();
+        countLocalIds(node, inside);
+        for (const s of n.stmts as IrStmt[]) {
+          if (s.kind !== "varDecl") continue;
+          const local = byId.get(s.localId);
+          if (!local || local.boxed === true) continue;
+          if (!local.name.startsWith("%")) continue;
+          if (paramIds.has(s.localId) || capIds.has(s.localId)) continue;
+          if ((inside.get(s.localId) ?? 0) !== (whole.get(s.localId) ?? 0)) continue;
+          out.add(s.localId);
+        }
+      }
+      for (const v of Object.values(node as Record<string, unknown>)) visit(v);
+    };
+    visit(fn.body);
+    return out;
+  }
+
 export function emitFunction(E: CEmitter, fn: IrFunction): void {
     E.tempCounter = 0;
     E.frames = [];
@@ -26,6 +106,8 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
     E.labelCounter = 0;
     E.currentLocals = new Map(fn.locals.map((l) => [l.id, l]));
     E.captureIds = new Set((fn.captures ?? []).map((c) => c.localId));
+    E.seqScoped = seqScopedLocals(fn);
+    E.seqScopeAt.clear();
 
     E.line(`${E.signature(fn)} {${E.srcComment(fn.loc)}`);
     E.indent++;
@@ -185,10 +267,10 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
                 ? "scr_box_new(SCR_BOX_ARR)"
                 : E.boxNewC(local.type);
             E.line(`${target} = ${boxNew};${E.srcComment(s.loc)} /* let ${local.name}; */`);
-            E.scopes[E.scopes.length - 1]!.push({ name: target, type: local.type, boxed: true });
+            E.declScope(s.localId).push({ name: target, type: local.type, boxed: true });
           } else if (isRefCounted(local.type)) {
             E.line(`${target} = NULL;${E.srcComment(s.loc)} /* let ${local.name}; */`);
-            E.scopes[E.scopes.length - 1]!.push({ name: target, type: local.type });
+            E.declScope(s.localId).push({ name: target, type: local.type });
           }
           // Scalars need nothing: the C local exists from the prologue and
           // no read happens before an assign writes it.
@@ -198,7 +280,7 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
           // Box FIRST, then evaluate the initializer: a named function
           // expression's closure captures this box during init evaluation.
           E.line(`${target} = ${E.boxNewC(local.type)};${E.srcComment(s.loc)}`);
-          E.scopes[E.scopes.length - 1]!.push({ name: target, type: local.type, boxed: true });
+          E.declScope(s.localId).push({ name: target, type: local.type, boxed: true });
           const v = E.emitExpr(s.init);
           if (isRefCounted(v.type)) E.moveTemp(v); // the box takes ownership
           E.line(`scr_box_set_${boxAccess(local.type)}(${target}, ${v.name});`);
@@ -208,7 +290,7 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         E.moveTemp(v);
         E.line(`${target} = ${v.name};${E.srcComment(s.loc)}`);
         if (isRefCounted(v.type)) {
-          E.scopes[E.scopes.length - 1]!.push({ name: target, type: v.type });
+          E.declScope(s.localId).push({ name: target, type: v.type });
         }
         break;
       }

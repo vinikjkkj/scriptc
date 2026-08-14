@@ -134,6 +134,16 @@ export class CEmitter {
    * borrowed — never declared, never released here). */
   currentLocals = new Map<string, IrLocal>();
   captureIds = new Set<string>();
+  /** Hidden locals whose ENTIRE live range is one seqExpr: released when
+   * that seqExpr's value has been produced, not at block exit. See
+   * seqScopedLocals — the emitter computes this once per function and the
+   * seqExpr case consults it. */
+  seqScoped = new Set<string>();
+  /** Indices into `scopes` that are seqExpr REGIONS. A region scope owns
+   * only the locals seqScoped picked out; anything else declared inside
+   * one belongs to the nearest enclosing ordinary scope, exactly where it
+   * went before regions existed. */
+  readonly seqScopeAt = new Set<number>();
   /** Declared functions referenced as values: each needs an env-signature
    * wrapper + an interned immortal closure (so `f === f` holds). */
   readonly fnValues = new Set<string>();
@@ -1403,6 +1413,25 @@ export class CEmitter {
   /** The release call for one owned refcounted value. */
   releaseValue(name: string, type: IrType): void {
     this.line(`${releaseCallC(type, name)};`);
+  }
+
+  /** The scope a `varDecl`'s local belongs to.
+   *
+   * Without seqExpr regions this was always the innermost scope, and for
+   * every local that is not seq-scoped it still is: a region is skipped
+   * over, so the local lands in the same scope it landed in before. A
+   * seq-scoped local belongs to the region it was declared in, which is
+   * the innermost scope at the moment its varDecl emits (its own
+   * seqExpr pushed it; nothing else pushes a scope in between). The
+   * `seqScopeAt.has` test on the top is a belt-and-braces check: if the
+   * innermost scope is somehow NOT a region, the local takes the old
+   * path rather than a region that is not its own. */
+  declScope(localId: string): ScopeEntry[] {
+    const top = this.scopes.length - 1;
+    if (this.seqScoped.has(localId) && this.seqScopeAt.has(top)) return this.scopes[top]!;
+    let i = top;
+    while (i > 0 && this.seqScopeAt.has(i)) i--;
+    return this.scopes[i]!;
   }
 
   releaseFrame(frame: ScopeEntry[]): void {
