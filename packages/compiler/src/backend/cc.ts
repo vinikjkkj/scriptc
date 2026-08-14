@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-const RUNTIME_SOURCES = ["scr_number.c", "scr_string.c", "scr_array.c", "scr_bytes.c", "scr_bytes_io.c", "scr_abort.c", "scr_map.c", "scr_closure.c", "scr_object.c", "scr_union.c", "scr_exception.c", "scr_error.c", "scr_console.c", "scr_lib.c", "scr_path.c", "scr_url.c", "scr_json.c", "scr_async.c", "scr_child.c", "scr_cycle.c", "scr_random_fill.c"];
+const RUNTIME_SOURCES = ["scr_number.c", "scr_string.c", "scr_array.c", "scr_bytes.c", "scr_bytes_io.c", "scr_map.c", "scr_closure.c", "scr_object.c", "scr_union.c", "scr_exception.c", "scr_error.c", "scr_console.c", "scr_lib.c", "scr_path.c", "scr_url.c", "scr_json.c", "scr_async.c", "scr_child.c", "scr_cycle.c", "scr_random_fill.c"];
 
 /* ---------------------- the runtime link-closure check ---------------------
  * The selection above and the gated arms in compileC/compileLibArchive are a
@@ -315,6 +315,20 @@ export interface CcOptions {
    * `tls` does — scr_tls.c consults its default-set override for the
    * client trust anchors. */
   tlsCa?: boolean;
+  /** The program has an abortSignal-typed slot anywhere
+   * (moduleUsesAbortSignal on the IR): compiles scr_abort.c into the
+   * binary. The unit was UNCONDITIONAL while it was forty lines of pure
+   * refcount, and that was affordable only while it stayed forty lines:
+   * the link line carries no -ffunction-sections and no --gc-sections, so
+   * a measured ten lines added to it grew a stream-free hello-world from
+   * 642 048 to 642 560 bytes -- 512 bytes on EVERY binary in the project,
+   * including ones that have never heard of a signal. The value surface
+   * that follows is several hundred lines, so the unit moves behind a gate
+   * FIRST and the behaviour lands after, free. Signal-free binaries keep
+   * their exact size class; nothing outside scr_abort.c references its
+   * symbols, so the emitted TU is the only caller and it names them
+   * exactly when an abortSignal-typed slot exists. */
+  abortSignal?: boolean;
 }
 
 /** Structured compiler-driver failure. Most callers still let this surface
@@ -911,6 +925,7 @@ export interface LibArchiveOptions {
   asym?: boolean;
   cipher?: boolean;
   copying?: boolean;
+  abortSignal?: boolean;
 }
 
 export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> {
@@ -944,6 +959,7 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     // The two-gate keyobj ↔ cipher bridge — see compileC's arm.
     ...(opts.asym && opts.cipher ? ["scr_cipher_key.c"] : []),
     ...(opts.copying ? ["scr_copying.c"] : []),
+    ...(opts.abortSignal ? ["scr_abort.c"] : []),
   ];
   assertRuntimeUnitsClosed(sources, false, "the library archive");
   const cflags = [
@@ -1361,6 +1377,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opts.symbol ? [rt(join(rtDir, "scr_symbol.c"))] : []),
     ...(opts.searchParams ? [rt(join(rtDir, "scr_url_params.c"))] : []),
     ...(opts.qs ? [rt(join(rtDir, "scr_qs.c"))] : []),
+    ...(opts.abortSignal ? [rt(join(rtDir, "scr_abort.c"))] : []),
     ...(opts.stream ? [rt(join(rtDir, "scr_stream.c"))] : []),
     // The readiness-poller backends (scr_platform.h): kqueue on macOS/BSD,
     // epoll on Linux, WSAPoll on Windows — each TU is empty off its
