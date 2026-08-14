@@ -149,6 +149,19 @@ struct ScrStreamState {
      * toward length/hwm and delivers undivided — Node's objectMode
      * accounting for the from() surface; hwm is 1). */
     bool object_entries;
+    /* Readable.from's UNDELIVERED source. Node's from() wraps the
+     * iterable in an async generator and pulls ONE value per _read, so a
+     * freshly constructed stream has NOTHING buffered and has NOT ended;
+     * seeding the whole array at construction answered `_readableState
+     * .ended` true and `.length` <n> where Node answers false and 0.
+     * The entries are retained at construction exactly as before (the
+     * source array is borrowed, and stays borrowed) — they are parked
+     * here instead of in r.buf, and r.buf gets one at a time. from_open
+     * is the "EOF not pushed yet" bit, which an EMPTY source needs to
+     * tell itself from a stream that has already ended. */
+    void **pend;
+    size_t pend_n, pend_i;
+    bool from_open;
     /* The parked for-await next() promise (at most one — the loop awaits
      * each chunk before asking again). next_dyn picks the resolution
      * shape: a dyn boxed by tag (the JS lane), or bytes. */
@@ -271,6 +284,10 @@ static void scr_stream_state_drop(ScrStreamState *st, bool gc) {
   if (st->errored) scr_error_release(st->errored);
   for (size_t i = 0; i < st->r.n; i++) scr_stream_entry_release(st, st->r.buf[i]);
   free(st->r.buf);
+  /* Readable.from's undelivered tail: retained at construction, same as
+   * the buffered entries above and released the same way. */
+  for (size_t i = st->r.pend_i; i < st->r.pend_n; i++) scr_stream_entry_release(st, st->r.pend[i]);
+  free(st->r.pend);
   if (st->r.enc) scr_str_release(st->r.enc);
   if (st->r.push_enc) scr_str_release(st->r.push_enc);
   if (!gc && st->r.next_waiter) scr_promise_release(st->r.next_waiter);
@@ -643,7 +660,25 @@ static void scr_stream_end_readable(ScrStream *s) {
 static void scr_stream_call_read(ScrStream *s) {
   ScrStreamState *st = s->st;
   if (st->r.read_cb == NULL && st->r.object_entries) {
-    /* Readable.from: fully seeded at construction — _read is a no-op */
+    /* Readable.from: the parked source IS the generator — one entry per
+     * _read, then EOF, which is what Node's from() wrapper does. The
+     * push side is add_chunk's tail minus the decode (these entries are
+     * already in their final form) and minus the direct-emit fast path
+     * (a _read push is never the async case that one is for). */
+    if (!st->r.from_open) {
+      st->r.in_read_sync = false;
+      return;
+    }
+    st->r.in_read_sync = true;
+    if (st->r.pend_i < st->r.pend_n) {
+      scr_stream_rbuf_push(st, st->r.pend[st->r.pend_i++], false);
+      if (st->r.need_readable) scr_stream_emit_readable_nt(s);
+      scr_stream_maybe_read_more(s);
+      if (!scr_exc_pending()) scr_stream_settle_next(s);
+    } else {
+      st->r.from_open = false;
+      scr_stream_push_null(s);
+    }
     st->r.in_read_sync = false;
     return;
   }
@@ -1085,10 +1120,17 @@ ScrStream *scr_stream_from_arr(ScrArr *arr, bool strings) {
   st->r.object_entries = true;
   st->r.encoded = strings;
   if (strings) st->r.enc = scr_str_new("utf8", 4);
-  for (size_t i = 0; i < arr->len; i++) {
-    scr_stream_rbuf_push(st, scr_arr_get_ref(arr, (double)i), false);
+  /* Park the whole source; _read hands over one entry at a time. Same
+   * retains as the eager form took, one array over. */
+  if (arr->len > 0) {
+    st->r.pend = malloc(arr->len * sizeof *st->r.pend);
+    if (!st->r.pend) scr_stream_oom();
+    for (size_t i = 0; i < arr->len; i++) {
+      st->r.pend[i] = scr_arr_get_ref(arr, (double)i);
+    }
+    st->r.pend_n = arr->len;
   }
-  scr_stream_push_null(s);
+  st->r.from_open = true;
   return s;
 }
 
