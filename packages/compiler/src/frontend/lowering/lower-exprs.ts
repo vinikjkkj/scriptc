@@ -5995,7 +5995,26 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         // answer, not a missing feature. An earlier explicit PROPERTY
         // withholds it too: its read is pure, but a hoisted call could
         // write what that read observes, and the two would swap.
-        if (srcLowered && !pureReemittable(srcLowered) && !afterExplicit) {
+        //
+        // "Ahead of earlier contributors" is only a hazard for a
+        // contributor whose VALUE the call could change. A read of an
+        // IMMUTABLE local — `{ filePath, ...meter.finalize() }`, zapo's
+        // media prepare — cannot be one: nothing a callee does can
+        // reassign a `const` binding of the caller, and the read yields
+        // the same value on either side of the call. Literals likewise.
+        // So the ban is on contributors that are order-DEPENDENT (a field
+        // read the call could write, an element read, another call), not
+        // on the mere presence of an earlier property.
+        const orderIndependent = (e: IrExpr): boolean => {
+          if (e.kind === "numLit" || e.kind === "strLit" || e.kind === "boolLit" || e.kind === "bigLit") return true;
+          if (e.kind === "unitLit") return true;
+          if (e.kind === "unionWrap") return orderIndependent(e.value);
+          if (e.kind !== "varRef") return false;
+          const local = L.ctx.locals.find((l) => l.id === e.localId);
+          return local !== undefined && !local.mutable;
+        };
+        const earlierStable = fields.every((f) => f.value === undefined || orderIndependent(f.value));
+        if (srcLowered && !pureReemittable(srcLowered) && (!afterExplicit || earlierStable)) {
           if (fields.every((f) => pureReemittable(f.value))) {
             const slot = L.declareHiddenLocal("%spread", srcLowered.type);
             prelude.push({ kind: "varDecl", localId: slot.id, init: srcLowered, loc: locOf(srcNode) });
