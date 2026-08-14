@@ -5123,7 +5123,7 @@ function literalUnionArmOf(
   /** litT fits ftT: unions per arm; literal-vs-literal by value; unit
    * types only into their own unit; otherwise the widened IR pair must be
    * equal or width-liftable. */
-  const fits = (litT: ts.Type, ftT: ts.Type): boolean => {
+  const fitsOne = (litT: ts.Type, ftT: ts.Type): boolean => {
     if (ftT.isUnionType()) return ftT.getTypes().some((a) => fits(litT, a));
     if (ftT.isStringLiteralType()) return litT.isStringLiteralType() && litT.value === ftT.value;
     if (ftT.isNumberLiteralType()) return litT.isNumberLiteralType() && litT.value === ftT.value;
@@ -5138,6 +5138,34 @@ function literalUnionArmOf(
     if (!li || !fi) return false;
     return typeEquals(li, fi) || L.widthLiftPlan(li, fi) !== null;
   };
+  /** The same test, plus the SOURCE-union decomposition. A property whose
+   * CHECKER type is a union fits a field when EVERY arm of it fits — the
+   * value is one of those arms at runtime and each has a home, which is
+   * the same "widens into any union that contains it" relation the whole
+   * probe rests on, read from the source side.
+   *
+   * `fitsOne` alone answers false for a source union against a NON-union
+   * field, because its last step compares the whole union's IR type
+   * against the field's. That is the shape an object literal has inside an
+   * INSTANTIATED generic body: the checker still reports the SYMBOLIC type
+   * for a nested literal — `{ ...v, timestamp: t }` where `v: F<S>` is a
+   * conditional over the type parameter distributes into one arm per
+   * branch — while the lowering builds the nested literal at the
+   * RESOLVED shape. The arm probe was asking the checker's symbolic
+   * spelling to equal the resolved one, so a discriminant that names
+   * exactly one arm ('operation: "set"') could not select it, the literal
+   * fell back to its own inferred type, and the nested literal's resolved
+   * record then mismatched that type's symbolic field (SC2003).
+   *
+   * `every`, not `some`: a source arm with no home would be a value the
+   * chosen arm cannot hold. And this only ever ADDS candidates — two
+   * fitting arms are still ambiguous and still decline, and every property
+   * of the arm this selects is coerced and re-checked exactly as before. */
+  function fits(litT: ts.Type, ftT: ts.Type): boolean {
+    if (fitsOne(litT, ftT)) return true;
+    if (!litT.isUnionType()) return false;
+    return litT.getTypes().every((a) => fitsOne(a, ftT));
+  }
   const armShapeIds = new Set(recordArms.map((a) => a.shapeId));
   const candidates = new Set<string>();
   for (const member of tsType.getTypes()) {
