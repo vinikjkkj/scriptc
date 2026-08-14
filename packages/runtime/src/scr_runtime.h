@@ -6837,6 +6837,11 @@ void scr_http_client_write_dynv(ScrHttpClientReq *c, const ScrDyn *d /*borrowed*
 void scr_http_client_end_dynv(ScrHttpClientReq *c, const ScrDyn *d /*borrowed*/);
 void scr_http_client_set_timeout(ScrHttpClientReq *c, double ms);
 void scr_http_client_destroy(ScrHttpClientReq *c);
+/* readable.pipe(request): wraps the request in a native Writable adapter
+ * and pipes into THAT, so the pipe's backpressure / end-propagation /
+ * error semantics are the stream ones rather than a second copy. Answers
+ * the request, which is what Node's pipe() returns. src/c borrowed. */
+ScrHttpClientReq *scr_http_client_pipe_from(ScrStream *src, ScrHttpClientReq *c, bool end);
 /* request.destroy(err): Node emits the GIVEN error object on the request
  * (identity, name, code and own properties intact), then 'close', and
  * suppresses the 'socket hang up' the bare destroy() would have raised.

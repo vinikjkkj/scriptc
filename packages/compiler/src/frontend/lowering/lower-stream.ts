@@ -1718,11 +1718,19 @@ export function lowerStreamMethodCall(L: Lowerer, call: ts.CallExpression,
     const dst = L.lowerExpr(args[0]!);
     const dstInfo = dst.type.kind === "object" ? L.classes.get(dst.type.className) : undefined;
     const dstSides = streamSidesOf(L, dstInfo);
-    if (dstSides !== "w" && dstSides !== "rw") {
+    // A ClientRequest is NOT an ScrStream — it is its own handle with its
+    // own listener lists — so it can never satisfy the stream-sides test
+    // above. The runtime wraps it in a native Writable adapter and pipes
+    // into that, which keeps pipe's backpressure, end-propagation and
+    // error semantics as the stream ones instead of a second copy. That
+    // is why this is a destination TYPE test sitting beside, not inside,
+    // the sides test.
+    const pipeToClient = dst.type.kind === "httpClientReq";
+    if (!pipeToClient && dstSides !== "w" && dstSides !== "rw") {
       L.noLowering(
         `pipe into a '${L.fmt(dst.type)}'`,
         args[0]!,
-        "the destination must be a stream Writable/Duplex (process streams and sockets are not pipe destinations yet)",
+        "the destination must be a stream Writable/Duplex, or a ClientRequest (process streams and sockets are not pipe destinations yet)",
       );
     }
     let end: IrExpr = boolLit(true, loc);
@@ -1738,6 +1746,9 @@ export function lowerStreamMethodCall(L: Lowerer, call: ts.CallExpression,
       }
     }
     const receiver = L.lowerExpr(access.expression);
+    if (pipeToClient) {
+      return { kind: "libCall", fn: "http.clientPipeFrom", args: [receiver, dst, end], type: dst.type, loc };
+    }
     return { kind: "libCall", fn: "readable.pipe", args: [receiver, dst, end], type: dst.type, loc };
   }
 
