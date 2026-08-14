@@ -504,6 +504,12 @@ export class CEmitter {
       switch (t.kind) {
         case "func":
         case "promise":
+        // The abort pair carries a collector header of its own: a listener
+        // closure stored on a signal can capture the record or object
+        // holding that signal, so the containing shape is cycle-capable
+        // through the handle.
+        case "abortSignal":
+        case "abortController":
           return true;
         case "object":
           return this.tracedShapes.has(`object:${t.className}`);
@@ -1700,6 +1706,7 @@ export class CEmitter {
       case "httpRes":
       case "httpClientReq":
       case "secureCtx":
+      case "abortController":
       case "fsWatcher":
       case "childStream":
       case "bytes":

@@ -18,7 +18,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "./nodes.js";
-import { arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, F64, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
+import { arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is how many may be omitted
@@ -320,6 +320,16 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "fs.watch": { argTypes: [STRING], result: FSWATCHER_T },
   "fs.watchCb": { argTypes: [STRING, null], result: FSWATCHER_T },
   "watcher.close": { argTypes: [FSWATCHER_T], result: VOID },
+  "abort.newController": { argTypes: [], result: ABORTCONTROLLER_T },
+  "abort.signal": { argTypes: [ABORTCONTROLLER_T], result: ABORTSIGNAL_T },
+  "abort.abort": { argTypes: [ABORTCONTROLLER_T], result: VOID },
+  "abort.abortReason": { argTypes: [ABORTCONTROLLER_T, DYN], result: VOID },
+  "abort.aborted": { argTypes: [ABORTSIGNAL_T], result: BOOL },
+  "abort.reason": { argTypes: [ABORTSIGNAL_T], result: DYN },
+  // The listener slot is the program's own () => void closure type;
+  // null leaves it unchecked, exactly like fs.watchCb's callback.
+  "abort.on": { argTypes: [ABORTSIGNAL_T, null, BOOL], result: VOID },
+  "abort.off": { argTypes: [ABORTSIGNAL_T, null], result: VOID },
   "crypto.x509Fingerprint": { argTypes: [BYTES_U8], result: STRING },
   "crypto.x509FingerprintStr": { argTypes: [STRING], result: STRING },
   "crypto.x509ValidFrom": { argTypes: [BYTES_U8], result: STRING },

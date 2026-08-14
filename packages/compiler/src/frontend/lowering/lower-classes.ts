@@ -6,6 +6,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { BOOL, DYN, F64, bytesOf, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { lowerAbortControllerNew } from "./lower-abort.js";
 import { MAX_GENERIC_INSTANCES, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
 import { isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
@@ -5402,6 +5403,12 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         const pattern = strArg(args[0], "pattern");
         const flags = strArg(args[1], "flags argument");
         return { kind: "libCall", fn: "regex.new", args: [pattern, flags], type: { kind: "regex" }, loc };
+      }
+      // new AbortController() — the controller mints its one signal
+      // (lower-abort.ts). Ahead of the stdlib-constructor chokepoint
+      // below, which is where this used to report SC2020.
+      if (symbol && symbol.name === "AbortController" && L.isStdlibSymbol(symbol)) {
+        return lowerAbortControllerNew(L, expr, loc);
       }
       if (symbol && symbol.name === "URL" && L.isStdlibSymbol(symbol)) {
         const args = expr.arguments ?? [];

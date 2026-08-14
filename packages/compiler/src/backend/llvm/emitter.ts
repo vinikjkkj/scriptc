@@ -453,6 +453,12 @@ const LIB_FN_SYMS: Record<string, string> = {
   // WHATWG URL + URLSearchParams (scr_url.c / scr_url_params.c):
   // constructions +1; url.new, the fileURLToPath pair, the win32
   // pathToFileURL flavor, and sp.fromPairs throw catchably (may-throw).
+  "abort.newController": "scr_abort_controller_new",
+  "abort.signal": "scr_abort_controller_signal",
+  "abort.abortReason": "scr_abort_controller_abort",
+  "abort.aborted": "scr_abort_signal_aborted",
+  "abort.reason": "scr_abort_signal_reason",
+  "abort.off": "scr_abort_signal_off",
   "url.new": "scr_url_new",
   "url.protocol": "scr_url_protocol",
   "url.host": "scr_url_host",
@@ -2795,6 +2801,8 @@ class LlEmitter {
             case "childStream":
             case "generator":
             case "fsWatcher":
+            case "abortSignal":
+            case "abortController":
               B.line(`store i1 true, ptr ${slot} ; ${arm.kind}: objects are truthy`);
               break;
             default:
@@ -10707,6 +10715,28 @@ class LlEmitter {
       const out = this.own({ name: t, type: e.type });
       this.emitPendingCheck();
       return out;
+    }
+    if (e.fn === "abort.abort") {
+      // The no-reason form: the runtime mints the AbortError DOMException
+      // itself, so the second C parameter is a literal null and the call
+      // cannot ride the arity-matched generic path. Fires listeners, so
+      // the pending check is not optional.
+      const c = this.emitExpr(e.args[0]!);
+      this.declare(`declare void @scr_abort_controller_abort(ptr, ptr)`);
+      B.line(`call void @scr_abort_controller_abort(ptr ${c.name}, ptr null)`);
+      return { name: "", type: e.type };
+    }
+    if (e.fn === "abort.on") {
+      // The listener closure MOVES into the signal's vector (the
+      // scr_net_ls_add contract), which the generic path would get wrong
+      // by releasing the temp afterwards.
+      const s = this.emitExpr(e.args[0]!);
+      const cb = this.emitExpr(e.args[1]!);
+      const once = this.emitExpr(e.args[2]!);
+      this.moveTemp(cb);
+      this.declare(`declare void @scr_abort_signal_add(ptr, ptr, i1 zeroext)`);
+      B.line(`call void @scr_abort_signal_add(ptr ${s.name}, ptr ${cb.name}, i1 ${once.name})`);
+      return { name: "", type: e.type };
     }
     if (e.fn === "fs.watchCb") {
       // The callback MOVES into the watcher's registry; the adapter is
