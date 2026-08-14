@@ -1333,6 +1333,16 @@ export class Lowerer {
    * engine handle (a dynamic import's namespace object) — paramShape's
    * early-out. */
   readonly jsvalParamOverrides = new Set<ts.ParameterDeclaration>();
+  /** Parameters bound at an IR type the CHECKER did not spell — paramShape's
+   * second early-out, the jsvalParamOverrides pattern with a type instead of
+   * a fixed kind. One producer today: a `new Promise` executor's resolve
+   * parameter, widened to the SETTLE-OR-VALUE union `Promise<T> | T` when the
+   * executor actually resolves with a promise (lower-classes.ts,
+   * executorResolveAdoptionUnion). The lib signature says
+   * `(value: T | PromiseLike<T>) => void` and mapType collapses that to `T`,
+   * which is what erases the promise possibility; the override puts it back
+   * exactly where the value can still be told apart — the union's tag. */
+  readonly paramIrOverrides = new Map<ts.ParameterDeclaration, IrType>();
   /** File → qualifier prefix: "" for the entry, "%mI." otherwise. */
   readonly fileTag = new Map<ts.SourceFile, string>();
   /** Namespace ModuleBlocks this program lowers, filled by splitFiles:

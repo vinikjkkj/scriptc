@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleUsesChildStream, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { settleOrValuePromiseTag, canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleUsesChildStream, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
@@ -6141,6 +6141,46 @@ class LlEmitter {
           B.line(`call void @scr_promise_run_executor0(ptr ${p}, ptr ${exec0.name})`);
           return out;
         }
+        // The ADOPTING form (lower-classes.ts, executorResolveAdoptionUnion):
+        // the executor is handed a SECOND promise whose payload is the
+        // settle-or-value union — the spec's resolving-function capability,
+        // whose settled state is the spec's `alreadyResolved` flag — and this
+        // promise then follows it through the adopt adapter. See the C
+        // emitter's newPromise for the full contract.
+        const execT = e.executor.type.kind === "func" ? e.executor.type : undefined;
+        const resolveT = execT?.params[0];
+        const adoptTag =
+          resolveT !== undefined && resolveT.kind === "func" && resolveT.params.length === 1
+            ? settleOrValuePromiseTag(resolveT.params[0]!, inner, (id) => this.unionsById.get(id)?.arms)
+            : -1;
+        if (adoptTag >= 0 && resolveT?.kind === "func" && execT !== undefined) {
+          const sov = resolveT.params[0]!;
+          const adapter = this.promiseAdoptAdapterFor(sov, inner);
+          this.declare(`declare ptr @scr_make_resolve_fn(ptr, ptr)`);
+          this.declare(`declare void @scr_promise_race_add(ptr, ptr, ptr)`);
+          const q = B.tmp();
+          B.line(`${q} = call ptr @scr_promise_new()`);
+          const qOwned = this.own({ name: q, type: { kind: "promise", inner: sov } });
+          const resolveA = B.tmp();
+          B.line(`${resolveA} = call ptr @scr_make_resolve_fn(ptr ${q}, ptr @${this.resolveThunkFor(sov)})`);
+          let rejectA: string | undefined;
+          if (execT.params.length === 2) {
+            this.declare(`declare ptr @scr_make_reject(ptr)`);
+            rejectA = B.tmp();
+            B.line(`${rejectA} = call ptr @scr_make_reject(ptr ${q})`);
+          }
+          const execA = this.emitExpr(e.executor);
+          if (rejectA !== undefined) {
+            this.declare(`declare void @scr_promise_run_executor2(ptr, ptr, ptr, ptr)`);
+            B.line(`call void @scr_promise_run_executor2(ptr ${q}, ptr ${execA.name}, ptr ${resolveA}, ptr ${rejectA})`);
+          } else {
+            this.declare(`declare void @scr_promise_run_executor(ptr, ptr, ptr)`);
+            B.line(`call void @scr_promise_run_executor(ptr ${q}, ptr ${execA.name}, ptr ${resolveA})`);
+          }
+          B.line(`call void @scr_promise_race_add(ptr ${p}, ptr ${q}, ptr @${adapter})`);
+          void qOwned;
+          return out;
+        }
         let resolve: string;
         const kindNums: Partial<Record<IrType["kind"], number>> = { f64: 0, bool: 1, string: 2, void: 3 };
         const kindNum = kindNums[inner.kind];
@@ -7921,6 +7961,138 @@ class LlEmitter {
       `  call void @scr_union_release(ptr %u0)`,
       `  %v = load ptr, ptr %slot`,
       `  ${fulfill("%v")}`,
+      `  ret void`,
+      `}`,
+      ``,
+    );
+    this.resolveThunkDefs.push(...d);
+    return sym;
+  }
+
+  /** The ADOPTING `new Promise` adapter — emit-async.ts's
+   * promiseAdoptAdapterFor: `void (ScrPromise *dst, ScrPromise *src)`, run by
+   * scr_promise_race_add when the executor's settle capability `src` fulfills
+   * with a settle-or-value union. The promise arm makes `dst` FOLLOW that
+   * promise (another race_add — the runtime's own adoption); the data arms
+   * fulfill `dst` with the payload, re-tagged into the promised type when
+   * that type is itself a union. `src` rejecting never reaches here. */
+  private promiseAdoptAdapterFor(sov: IrType, inner: IrType): string {
+    const key = `adopt:${typeKey(sov)}=>${typeKey(inner)}`;
+    let sym = this.resolveThunks.get(key);
+    if (sym) return sym;
+    sym = `sc_race_${this.resolveThunks.size}`;
+    this.resolveThunks.set(key, sym);
+    if (sov.kind !== "union") throw new Error("llvm emitter bug: adopt adapter over a non-union");
+    const def = this.unionsById.get(sov.unionId);
+    if (!def) throw new Error("llvm emitter bug: adopt adapter over an unknown union");
+    const promiseTag = def.arms.findIndex((a) => a.kind === "promise");
+    if (promiseTag < 0) throw new Error("llvm emitter bug: adopt adapter with no promise arm");
+    const innerDef = inner.kind === "union" ? this.unionsById.get(inner.unionId) : undefined;
+    if (inner.kind === "union" && !innerDef) {
+      throw new Error("llvm emitter bug: adopt adapter payload union unknown");
+    }
+    this.declare(`declare ptr @scr_promise_payload_ref(ptr)`);
+    this.declare(`declare void @scr_union_release(ptr)`);
+    this.declare(`declare void @scr_promise_race_add(ptr, ptr, ptr)`);
+    this.declare(`declare void @scr_promise_adapt_copy(ptr, ptr)`);
+    // scr_union_peek is a static inline in the header, so the IR reads the
+    // payload field directly — the race adapter's own technique.
+    const peek = (i: number): string[] => [
+      `  %pp${i} = getelementptr inbounds %ScrUnion, ptr %u0, i64 0, i32 5`,
+      `  %p${i} = load ptr, ptr %pp${i}`,
+    ];
+    const d: string[] = [
+      `define internal void @${sym}(ptr %dst, ptr %src) ${FN_ATTRS} { ; ${key}`,
+      `entry:`,
+      `  %u0 = call ptr @scr_promise_payload_ref(ptr %src)`,
+      `  %tagp = getelementptr inbounds %ScrUnion, ptr %u0, i64 0, i32 1`,
+      `  %tag = load i32, ptr %tagp`,
+      `  switch i32 %tag, label %done [ ${def.arms.map((_, i) => `i32 ${i}, label %a${i}`).join(" ")} ]`,
+    ];
+    def.arms.forEach((arm, i) => {
+      d.push(`a${i}:`);
+      if (i === promiseTag) {
+        d.push(
+          ...peek(i),
+          `  call void @scr_promise_race_add(ptr %dst, ptr %p${i}, ptr @scr_promise_adapt_copy)`,
+          `  br label %done`,
+        );
+        return;
+      }
+      // The payload the promised type actually holds: the arm itself, or the
+      // arm re-tagged into the promised union.
+      if (inner.kind === "union" && innerDef) {
+        const innerTag = innerDef.arms.findIndex((a) => typeEquals(a, arm));
+        if (innerTag < 0) throw new Error("llvm emitter bug: adopt adapter arm not in the payload union");
+        const iv = vAdapters(this, inner);
+        this.declare(`declare void @scr_promise_fulfill_ref(ptr, ptr, ptr, ptr, ptr)`);
+        if (isUnitType(arm)) {
+          d.push(`  %v${i} = bitcast ptr ${this.unitInstanceRef(inner.unionId, innerTag)} to ptr`);
+        } else if (arm.kind === "f64") {
+          this.declare(`declare double @scr_union_get_f64(ptr)`);
+          this.declare(`declare ptr @scr_union_new_f64(i32, double)`);
+          d.push(
+            `  %x${i} = call double @scr_union_get_f64(ptr %u0)`,
+            `  %v${i} = call ptr @scr_union_new_f64(i32 ${innerTag}, double %x${i})`,
+          );
+        } else if (arm.kind === "bool") {
+          this.declare(`declare zeroext i1 @scr_union_get_bool(ptr)`);
+          this.declare(`declare ptr @scr_union_new_bool(i32, i1 zeroext)`);
+          d.push(
+            `  %x${i} = call zeroext i1 @scr_union_get_bool(ptr %u0)`,
+            `  %v${i} = call ptr @scr_union_new_bool(i32 ${innerTag}, i1 %x${i})`,
+          );
+        } else {
+          const av = vAdapters(this, arm);
+          this.declare(`declare ptr @scr_union_new_ref(i32, ptr, ptr, ptr, ptr)`);
+          d.push(
+            ...peek(i),
+            `  %r${i} = call ptr ${av.retain}(ptr %p${i})`,
+            `  %v${i} = call ptr @scr_union_new_ref(i32 ${innerTag}, ptr %r${i}, ptr ${av.retain}, ptr ${av.release}, ptr ${traceArg(this, arm)})`,
+          );
+        }
+        d.push(
+          `  call void @scr_promise_fulfill_ref(ptr %dst, ptr %v${i}, ptr ${iv.retain}, ptr ${iv.release}, ptr ${traceArg(this, inner)})`,
+          `  br label %done`,
+        );
+        return;
+      }
+      if (arm.kind === "f64") {
+        this.declare(`declare double @scr_union_get_f64(ptr)`);
+        this.declare(`declare void @scr_promise_fulfill_f64(ptr, double)`);
+        d.push(
+          `  %x${i} = call double @scr_union_get_f64(ptr %u0)`,
+          `  call void @scr_promise_fulfill_f64(ptr %dst, double %x${i})`,
+        );
+      } else if (arm.kind === "bool") {
+        this.declare(`declare zeroext i1 @scr_union_get_bool(ptr)`);
+        this.declare(`declare void @scr_promise_fulfill_bool(ptr, i1 zeroext)`);
+        d.push(
+          `  %x${i} = call zeroext i1 @scr_union_get_bool(ptr %u0)`,
+          `  call void @scr_promise_fulfill_bool(ptr %dst, i1 %x${i})`,
+        );
+      } else if (arm.kind === "string") {
+        this.declare(`declare ptr @scr_str_retain_v(ptr)`);
+        this.declare(`declare void @scr_promise_fulfill_str(ptr, ptr)`);
+        d.push(
+          ...peek(i),
+          `  %r${i} = call ptr @scr_str_retain_v(ptr %p${i})`,
+          `  call void @scr_promise_fulfill_str(ptr %dst, ptr %r${i})`,
+        );
+      } else {
+        const av = vAdapters(this, arm);
+        this.declare(`declare void @scr_promise_fulfill_ref(ptr, ptr, ptr, ptr, ptr)`);
+        d.push(
+          ...peek(i),
+          `  %r${i} = call ptr ${av.retain}(ptr %p${i})`,
+          `  call void @scr_promise_fulfill_ref(ptr %dst, ptr %r${i}, ptr ${av.retain}, ptr ${av.release}, ptr ${traceArg(this, arm)})`,
+        );
+      }
+      d.push(`  br label %done`);
+    });
+    d.push(
+      `done:`,
+      `  call void @scr_union_release(ptr %u0)`,
       `  ret void`,
       `}`,
       ``,

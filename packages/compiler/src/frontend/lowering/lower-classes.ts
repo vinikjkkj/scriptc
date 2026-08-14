@@ -5137,6 +5137,95 @@ function boundFnOriginOf(
   return null;
 }
 
+/** A `new Promise<T>(executor)` whose executor RESOLVES WITH A PROMISE:
+ * re-bind its resolve parameter to the SETTLE-OR-VALUE union `Promise<T> | T`
+ * (paramIrOverrides) and answer that union, or null to leave the executor
+ * exactly as it lowers today.
+ *
+ * WHY the parameter and not the argument. The lib's
+ * `resolve: (value: T | PromiseLike<T>) => void` maps to `T` — the
+ * PromiseLike arm has no home of its own, so the union collapses — and the
+ * promise possibility is gone before the call is lowered. Nothing at the
+ * call site can put it back: the resolve closure is the only thing that
+ * holds the promise being settled, so adoption has to live in the closure's
+ * own type. The settle-or-value union is the one shape a runtime tag can
+ * tell apart (types.ts, settleOrValueArms), and `await` already consumes it.
+ *
+ * WHY only executors that need it. Re-binding every resolve would put a
+ * union wrap in front of every `resolve(value)` in every program. The scan
+ * below asks whether some call of the resolve parameter passes a value whose
+ * IR type actually carries a promise; nothing else is touched, so a program
+ * that resolves with plain values emits the same bytes it did before.
+ *
+ * The scan is deliberately narrow: an INLINE arrow/function executor whose
+ * first parameter is a plain unannotated identifier. A resolve that escapes
+ * as a value (`arr.push(resolve)`) or an executor written as a named
+ * function VALUE keeps today's behaviour — including today's fences. */
+function executorResolveAdoptionUnion(
+  L: Lowerer,
+  execNode: ts.Expression,
+  inner: IrType,
+): (IrType & { kind: "union" }) | null {
+  // Promise<void> resolve takes no argument, and a promise PAYLOAD that is
+  // itself a promise has no tag that separates the two.
+  if (inner.kind === "void" || inner.kind === "promise") return null;
+  let fn: ts.Expression = execNode;
+  while (ts.isParenthesizedExpression(fn)) fn = fn.expression;
+  if (!ts.isArrowFunction(fn) && !ts.isFunctionExpression(fn)) return null;
+  const p0 = fn.parameters[0];
+  if (
+    p0 === undefined ||
+    !ts.isIdentifier(p0.name) ||
+    p0.type !== undefined ||
+    p0.questionToken !== undefined ||
+    p0.dotDotDotToken !== undefined ||
+    p0.initializer !== undefined
+  ) {
+    return null;
+  }
+  const resolveSym = L.checker.getSymbolAtLocation(p0.name);
+  if (resolveSym === undefined) return null;
+  // The settle-or-value union over T: the promise arm beside exactly T's own
+  // arms. Interned SORTED — mapType sorts before interning and UnionRegistry
+  // keys on the arm list as given, so an unsorted intern would mint a SECOND
+  // id for a union that already exists and typeEquals (which compares ids)
+  // would then reject it everywhere.
+  const promiseArm: IrType = { kind: "promise", inner };
+  const payloadArms =
+    inner.kind === "union" ? (L.unions.get(inner.unionId)?.arms ?? []) : [inner];
+  if (payloadArms.length === 0) return null;
+  if (payloadArms.some((a) => a.kind === "promise")) return null;
+  const arms = [promiseArm, ...payloadArms].sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
+  const sov: IrType & { kind: "union" } = { kind: "union", unionId: L.unions.intern(arms) };
+  // Does any call of the resolve parameter pass a value that CARRIES a
+  // promise? The mapped argument type answers it: a bare promise (the plain
+  // `resolve(p)` the override's comment says must fail lowering) or a union
+  // with a promise arm (the settle-or-value value that silently threw).
+  let wanted = false;
+  const walk = (n: ts.Node): void => {
+    if (wanted) return;
+    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.arguments.length === 1) {
+      if (L.checker.getSymbolAtLocation(n.expression) === resolveSym) {
+        const at = L.mapTypeOf(L.typeOf(n.arguments[0]!));
+        if (at !== null && at !== undefined) {
+          if (at.kind === "promise") wanted = true;
+          else if (at.kind === "union") {
+            const def = L.unions.get(at.unionId);
+            if (def?.arms.some((a) => a.kind === "promise") === true) wanted = true;
+          }
+        }
+      }
+    }
+    ts.forEachChild(n, walk);
+  };
+  walk(fn.body);
+  if (!wanted) return null;
+  // The parameter IS the resolve closure, so the override is its SIGNATURE
+  // with the widened value type — `(Promise<T> | T) => void`.
+  L.paramIrOverrides.set(p0, { kind: "func", params: [sov], ret: VOID });
+  return sov;
+}
+
 export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
     const loc = locOf(expr);
     // `new X(...)` where X is a package-declared class, in a static build:
@@ -5936,6 +6025,21 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             }
           }
         }
+        // An executor that RESOLVES WITH A PROMISE. The lib signature spells
+        // resolve `(value: T | PromiseLike<T>) => void`; mapType collapses
+        // that union to `T`, so the promise possibility is erased from the
+        // parameter and the argument coercion then reaches for the checked
+        // single-arm extraction — an UNCODED TypeError at run time for a
+        // settle-or-value union, and an SC1090 for a plain promise. Both are
+        // gaps against the ambient override's own written contract.
+        //
+        // The parameter is re-bound to the SETTLE-OR-VALUE union instead, the
+        // one shape whose arms a runtime tag can tell apart, and the
+        // emitters adopt off that tag (emit-exprs.ts's newPromise). Only
+        // executors that actually pass a promise-carrying value are
+        // re-bound, so every program that resolves with a plain value keeps
+        // its emitted code to the byte.
+        executorResolveAdoptionUnion(L, args[0]!, type.inner);
         // Executors bind resolve alone or (resolve, reject): reject is a
         // real closure rejecting the promise with an Error reason (the
         // ambient override pins `reason: Error` — rejection payloads share

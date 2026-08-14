@@ -2,7 +2,7 @@
  * expression lands in a fresh C temp, with RC ownership tracked on the
  * emitter's frames (see the discipline comment in emitter core). */
 import type { CEmitter, Temp } from "./emitter.js";
-import { arrayOf, BOOL, BYTES_U8, bytesOf, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, STRING, typeEquals } from "../../ir/nodes.js";
+import { arrayOf, BOOL, BYTES_U8, bytesOf, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals } from "../../ir/nodes.js";
 import { boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct } from "../mangle.js";
 import { OVERFLOW_MEMBER } from "./emit-shapes.js";
@@ -7020,6 +7020,53 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           const exec0 = E.emitExpr(e.executor);
           E.line(
             `scr_promise_run_executor0(${p.name}, ${exec0.name});${E.srcComment(e.loc)}`,
+          );
+          return p;
+        }
+        // The ADOPTING form (lower-classes.ts, executorResolveAdoptionUnion):
+        // the resolve parameter is the settle-or-value union, so the executor
+        // may resolve with a promise and this promise has to FOLLOW it.
+        //
+        // The executor is handed a second promise `sc_q` instead — the spec's
+        // resolving-function capability — whose payload is that union. Its
+        // own settled state IS the spec's `alreadyResolved` flag, and that is
+        // the whole reason for the indirection: resolve-with-a-pending-promise
+        // must LOCK the outcome, so a later resolve(), a later reject() and a
+        // throw escaping the executor are all no-ops exactly as in JS. Then
+        // this promise follows `sc_q` through the adopt adapter: a data arm
+        // fulfills it now (same turn as today's direct fulfill), a promise arm
+        // makes it follow that promise, and a rejection copies straight
+        // across.
+        const execT = e.executor.type.kind === "func" ? e.executor.type : undefined;
+        const resolveT = execT?.params[0];
+        const adoptTag =
+          resolveT !== undefined && resolveT.kind === "func" && resolveT.params.length === 1
+            ? settleOrValuePromiseTag(resolveT.params[0]!, inner, (id) => E.unionsById.get(id)?.arms)
+            : -1;
+        if (adoptTag >= 0 && resolveT?.kind === "func") {
+          const sov = resolveT.params[0]!;
+          const q = E.newTemp({ kind: "promise", inner: sov }, `scr_promise_new()`);
+          const resolveA = E.newTemp(
+            { kind: "func", params: [sov], ret: { kind: "void" } },
+            `scr_make_resolve_fn(${q.name}, (void *)&${E.resolveThunkFor(sov)})`,
+          );
+          const twoArg = execT !== undefined && execT.params.length === 2;
+          const rejectA = twoArg
+            ? E.newTemp(
+                { kind: "func", params: [{ kind: "object", className: "%Error" }], ret: { kind: "void" } },
+                `scr_make_reject(${q.name})`,
+              )
+            : undefined;
+          const execA = E.emitExpr(e.executor);
+          E.moveTemp(resolveA);
+          if (rejectA) E.moveTemp(rejectA);
+          E.line(
+            rejectA
+              ? `scr_promise_run_executor2(${q.name}, ${execA.name}, ${resolveA.name}, ${rejectA.name});${E.srcComment(e.loc)}`
+              : `scr_promise_run_executor(${q.name}, ${execA.name}, ${resolveA.name});${E.srcComment(e.loc)}`,
+          );
+          E.line(
+            `scr_promise_race_add(${p.name}, ${q.name}, &${E.promiseAdoptAdapterFor(sov, inner)});`,
           );
           return p;
         }
