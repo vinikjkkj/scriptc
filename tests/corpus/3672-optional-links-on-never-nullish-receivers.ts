@@ -23,6 +23,8 @@
 // none of them is nullable — is pinned separately at the bottom.
 
 import * as path from "node:path";
+import { constants as h2 } from "node:http2";
+import { constants as fsc } from "node:fs";
 
 // ── globals whose members lower, through the optional link ────────────
 console.log("floor:", Math?.floor(3.7), "agrees:", Math?.floor(3.7) === Math.floor(3.7));
@@ -63,6 +65,15 @@ console.log("nf:", new Intl.NumberFormat("en-US")?.format(1234.5));
 console.log("join:", path?.join("a", "b") === path.join("a", "b"));
 console.log("basename:", path?.basename("/x/y/z.txt"));
 console.log("extname:", path?.extname("z.txt"));
+
+// ── a builtin CONSTANTS table as the receiver ─────────────────────────
+// These two needed their own guard converted as well as the re-dispatch:
+// the re-dispatch alone left them fencing on 'http2.constants', and only
+// converting the guard behind it made the read lower.
+console.log("cancel:", h2?.NGHTTP2_CANCEL, "agrees:", h2?.NGHTTP2_CANCEL === h2.NGHTTP2_CANCEL);
+console.log("internal:", h2?.NGHTTP2_INTERNAL_ERROR);
+console.log("access bits:", fsc?.F_OK, fsc?.R_OK, fsc?.W_OK, fsc?.X_OK);
+console.log("fs agrees:", fsc?.F_OK === fsc.F_OK);
 
 // ── `process` and `performance`, the two runtime globals ──────────────
 console.log("platform is non-empty:", process?.platform.length > 0);
