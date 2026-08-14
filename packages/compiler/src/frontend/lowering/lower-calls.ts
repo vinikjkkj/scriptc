@@ -8357,7 +8357,68 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     }
     if (probed?.type.kind !== "record") return null;
     const shape = L.shapes.get(probed.type.shapeId);
-    if (!shape || shape.tuple || shape.indexValue || shapeHasAccessorSlots(shape)) return null;
+    if (!shape || shape.tuple || shapeHasAccessorSlots(shape)) return null;
+    // A PURE index-signature shape (`Record<string, string>` — no
+    // declared fields at all) is the one record whose own-key set is an
+    // exact runtime fact: every key it has lives in the overflow map, so
+    // membership IS the map's, with no explicit-undefined-is-absent
+    // divergence to inherit — that divergence belongs to the DECLARED
+    // half, and this shape has no declared half.
+    //
+    // The read that answers it already exists: a keyed get at the slot
+    // width (`V | undefined`) returns the undefined arm exactly when the
+    // map missed. So the fence lifts by asking a question the emitter
+    // has answered since the index-signature read was written; no new
+    // IR node, no new runtime entry.
+    //
+    // A value type that can ITSELF be undefined (`Record<string, V |
+    // undefined>`, and `unknown`-valued signatures, whose dyn miss and
+    // dyn undefined are the same value) keeps the fence: there the two
+    // answers are genuinely indistinguishable at this width, and JS
+    // says `true` for a key explicitly holding undefined.
+    //
+    // So does an ALREADY-UNION value (`Record<string, string | number>`).
+    // The widened read has to surface the overflow value as one ARM of
+    // its result, and a union widened by an undefined arm FLATTENS —
+    // `string | number` is not an arm of `string | number | undefined`,
+    // its two members are. The emitter says exactly that (`the overflow
+    // value cannot surface as the result type`) and the ordinary keyed
+    // read of such a shape sidesteps it by reading at `dyn`, which is no
+    // use here because a dyn miss and a dyn undefined are the same value.
+    // The gate below is therefore the emitter's own requirement spelled
+    // as a question — `iv` must BE an arm of the widened union — rather
+    // than a guess about which shapes are safe.
+    if (shape.indexValue) {
+      if (shape.fields.length > 0) return null;
+      const iv = shape.indexValue;
+      if (iv.kind === "dyn" || isUnitType(iv)) return null;
+      const atWidth = L.withUndefinedArmOf(iv);
+      if (atWidth === null || atWidth.kind !== "union") return null;
+      const utag = L.armTag(atWidth.unionId, UNDEFINED_T);
+      if (utag < 0) return null;
+      if (L.armTag(atWidth.unionId, iv) < 0) return null;
+      const receiver = L.lowerExpr(recvNode);
+      if (receiver.type.kind !== "record") return null; // probe/lower drift
+      const key = keyOf();
+      if (key === null) return null;
+      return {
+        kind: "unionIsTag",
+        unionId: atWidth.unionId,
+        tag: utag,
+        negated: true,
+        value: {
+          kind: "recordKeyGet",
+          obj: receiver,
+          shapeId: receiver.type.shapeId,
+          key,
+          overflowOnly: true,
+          type: atWidth,
+          loc,
+        },
+        type: BOOL,
+        loc,
+      };
+    }
     const receiver = L.lowerExpr(recvNode);
     if (receiver.type.kind !== "record") return null; // probe/lower drift: keep the fence
     const key = keyOf();
@@ -9359,10 +9420,11 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     // fields answer by their runtime tag — the explicit-undefined-is-absent
     // stance: an omitted optional field holds the undefined arm and reads
     // as NOT own, exactly Node's absent key (an EXPLICIT `k: undefined`
-    // diverges — documented next to the child-env/JSON rule). Tuple,
-    // index-signature (overflow membership lives in the runtime map), and
-    // accessor-carrying shapes keep the SC2020 fence; non-record receivers
-    // do too.
+    // diverges — documented next to the child-env/JSON rule). A PURE
+    // index-signature shape has no declared half to carry that
+    // divergence and answers from the overflow map exactly. Tuple,
+    // accessor-carrying and mixed declared/index shapes keep the SC2020
+    // fence; non-record receivers do too.
     if (member === "hasOwn" && call.arguments.length === 2 && !call.arguments.some((a) => ts.isSpreadElement(a))) {
       return lowerHasOwnOver(L, call, call.arguments[0]!, call.arguments[1]!);
     }
@@ -10693,13 +10755,33 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
         call.arguments.length === 2 &&
         !call.arguments.some((a) => ts.isSpreadElement(a))
       ) {
-        // The CHECKED-DYNAMIC receiver only, and the restriction is not
-        // caution: the RECORD arm of Object.hasOwn carries the documented
-        // explicit-undefined-is-absent divergence (an own key holding
-        // `undefined` reads as absent), and a protobuf writer testing a
-        // field it set to undefined is exactly where that would become a
-        // new silent wrong answer. A record receiver keeps the loud fence.
-        if (probeLower(L, call.arguments[0]!)?.type.kind === "dyn") {
+        // The CHECKED-DYNAMIC receiver, and the restriction is not
+        // caution: the DECLARED-FIELD arm of Object.hasOwn carries the
+        // documented explicit-undefined-is-absent divergence (an own key
+        // holding `undefined` reads as absent), and a protobuf writer
+        // testing a field it set to undefined is exactly where that
+        // would become a new silent wrong answer. A record receiver with
+        // declared fields keeps the loud fence.
+        //
+        // A PURE index-signature receiver has no declared field to carry
+        // that divergence — its own-key set is the overflow map, exactly
+        // — so it joins the dyn arm here. The test is spelled out rather
+        // than delegated to lowerHasOwnOver's gate on purpose: that
+        // function also admits SIGNATURE-FREE records (Object.hasOwn's
+        // own spelling has taken them, divergence and all, for as long as
+        // the compare chain has existed), and this call site is precisely
+        // where the divergence was judged unacceptable. Widening the two
+        // spellings to agree is a separate decision from lifting this
+        // fence, and it is not this one. (zapo's WebSocket header probe
+        // is `for (const key in headers)` + this call over a
+        // `Readonly<Record<string, string>>`; the enumeration lowered and
+        // only the membership test did not.)
+        const recvProbe = probeLower(L, call.arguments[0]!)?.type;
+        const recvShape = recvProbe?.kind === "record" ? L.shapes.get(recvProbe.shapeId) : undefined;
+        if (
+          recvProbe?.kind === "dyn" ||
+          (recvShape !== undefined && recvShape.fields.length === 0 && !!recvShape.indexValue)
+        ) {
           const own = lowerHasOwnOver(L, call, call.arguments[0]!, call.arguments[1]!);
           if (own) return own;
         }
