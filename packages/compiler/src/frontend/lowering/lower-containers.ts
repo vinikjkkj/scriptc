@@ -6661,6 +6661,50 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     return null; // of, copyBytesFrom, ... → the SC2020 member fence
   }
 
+/** `Uint8Array.from(x)` (and the other typed-array constructors' `from`)
+   * over the two sources whose answer is already built: a SAME-KIND typed
+   * array/Buffer, and a `number[]`. Both mean exactly what
+   * `new Uint8Array(x)` means — an independent copy, element by element,
+   * taking the constructor's own flavor (a plain Uint8Array, never a
+   * Buffer) — so this routes to the SAME `bytesNew` node rather than
+   * inventing a second construction path.
+   *
+   * The lengths of the fence are deliberate:
+   *   - `Uint8Array.from(x, mapFn)` keeps its fence. The mapped form is a
+   *     per-element callback, and it is the HOF contract, not a copy.
+   *   - a NUMBER argument keeps its fence, which is where this rule
+   *     DIVERGES from `new Uint8Array(n)`: `new Uint8Array(3)` is three
+   *     zeroes, `Uint8Array.from(3)` is EMPTY (3 is not array-like, so
+   *     ToLength(undefined) is 0). Routing the number through bytesNew
+   *     would produce the constructor's answer for the static's spelling
+   *     — a silent wrong value, the one thing this must not do.
+   *   - cross-kind sources (`Uint8Array.from(u32)`) keep the fence
+   *     `new Uint8Array(u32)` already gives them, and for the same reason.
+   *   - a string keeps its fence: `Uint8Array.from('12')` is [1, 2] in
+   *     Node (per-CHARACTER ToNumber), not a UTF-8 encode.
+   *
+   * Null for every other receiver/member, so the property chain keeps
+   * trying. */
+  export function lowerBytesStaticFromCall(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,): IrExpr | null {
+    if (L.chainBlocked(access, call)) return null;
+    if (access.name.text !== "from") return null;
+    if (!ts.isIdentifier(access.expression)) return null;
+    const name = access.expression.text;
+    const elem = own(BYTES_CTORS, name);
+    if (!elem || !L.isStdlibGlobal(access.expression, name)) return null;
+    const args = call.arguments;
+    if (args.length !== 1 || ts.isSpreadElement(args[0]!)) return null; // mapFn / spread → the fence
+    const argNode = args[0]!;
+    const type = bytesOf(elem);
+    const loc = locOf(call);
+    const src = L.lowerExpr(argNode);
+    if (typeEquals(src.type, type) || (src.type.kind === "array" && src.type.elem.kind === "f64")) {
+      return markFlavor({ kind: "bytesNew", source: src, type, loc }, "plain", loc);
+    }
+    return null; // every other source keeps the SC2020 member fence
+  }
+
 /** `Object.keys/values/entries` over an INDEX-SIGNATURE (overflow-carrying)
    * record shape: declared fields answer first from the compile-time field
    * list (declaration order, undefined-valued fields skipped — exactly the
