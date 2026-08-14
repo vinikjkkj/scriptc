@@ -1306,6 +1306,13 @@ declare module "node:url" {
  * there); every other use gets an ordinary Buffer value. */
 declare module "crypto" {
   export function randomUUID(): string;
+  /* timingSafeEqual: constant-time equality. @types/node declares the
+   * arguments as the wide NodeJS.ArrayBufferView (and, since v20, allows
+   * ArrayBuffer); the fallback declares the typed-array form, which is
+   * the one that lowers. Its length-mismatch RangeError is a real
+   * behaviour of the call, not a refusal — callers that want a boolean
+   * for differing lengths must compare the lengths themselves first. */
+  export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean;
   export function randomBytes(size: number): Buffer;
   /* randomFill: the same draw over a buffer the caller owns, answered
    * through a callback Node invokes ASYNCHRONOUSLY. Node passes
