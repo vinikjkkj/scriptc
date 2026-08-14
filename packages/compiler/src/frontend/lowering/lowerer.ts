@@ -8157,11 +8157,57 @@ export class Lowerer {
     }
     const e = this.lowerExpr(node);
     if (expected.kind === "void" && e.kind === "unitLit") return null;
-    if (this.ctx.isAsync && e.type.kind === "promise" && expected.kind !== "promise") {
-      const awaited: IrExpr = { kind: "awaitExpr", value: e, type: e.type.inner, loc: e.loc };
-      return this.coerceInto(node, awaited, expected);
+    return this.coerceInto(node, this.asyncReturnFlatten(e, expected, this.ctx.isAsync), expected);
+  }
+
+  /** JS's RETURN-SIDE flattening in an async function, as one rule with two
+   * callers: the `return <expr>` statement above, and the async CONCISE
+   * ARROW body (`async () => x`), whose implicit return is the same
+   * completion. Answers `value` unchanged when nothing flattens.
+   *
+   * A returned thenable is adopted by the function's own promise, which is
+   * `return await p` — this compiler's long-standing spelling for it, and
+   * the reason the plain-promise arm below has been here as long as async
+   * has. The tick it costs is the genuine `return p` / `return await p`
+   * difference and is already visible on main for the plain case.
+   *
+   * The SETTLE-OR-VALUE union `T | Promise<T>` is the arm the rule was
+   * missing, and missing it was a SILENT WRONG ANSWER rather than a fence.
+   * The test was `kind === "promise"`, so a union merely CARRYING a promise
+   * arm fell through to the ordinary coercion — which has no
+   * union-to-payload conversion and reached for the checked single-arm
+   * extraction (narrowedArmHelper), compiling the promise arm to a throw.
+   * Both spellings of
+   *
+   *     async f(x: string | Promise<string>): Promise<string> { return x }
+   *
+   * therefore printed the string for `f('a')` and rejected `f(g())` with an
+   * UNCODED "a 'Promise<string>' value is not representable in the target
+   * union" TypeError. No diagnostic code and no census trap; the `??` block
+   * found it while deciding not to lift a fence in front of it, and it is
+   * why that fence was right to stay. estado-promiseunion.md §3.
+   *
+   * settleOrValueAwait is the builder — the same one `await u` reaches from
+   * the expression lowering and promiseCoerceAdapter reaches for a nested
+   * payload — so neither emitter learns anything new.
+   *
+   * The union guard is written to be as WIDE as it can honestly be and no
+   * wider. It stands aside when the destination is the SAME union (the
+   * coercion is already identity) and when the destination genuinely
+   * CARRIES the promise arm, where the arm-wise re-tag is the right answer
+   * and awaiting would change the value. Everywhere else the path it
+   * replaces was a throw or a fence, so nothing that compiled can move. */
+  asyncReturnFlatten(value: IrExpr, expected: IrType, isAsync: boolean | undefined): IrExpr {
+    if (!isAsync || expected.kind === "promise") return value;
+    if (value.type.kind === "promise") {
+      return { kind: "awaitExpr", value, type: value.type.inner, loc: value.loc };
     }
-    return this.coerceInto(node, e, expected);
+    if (value.type.kind !== "union" || typeEquals(value.type, expected)) return value;
+    const def = this.unions.get(value.type.unionId);
+    const promiseArm = def?.arms.find((a) => a.kind === "promise");
+    if (promiseArm === undefined) return value;
+    if (expected.kind === "union" && this.armTag(expected.unionId, promiseArm) >= 0) return value;
+    return this.settleOrValueAwait(value, value.loc) ?? value;
   }
 
   /** `return <expr>` lowered as a STATEMENT against the declared return.
@@ -8173,10 +8219,14 @@ export class Lowerer {
   lowerReturnStmt(node: ts.Expression, loc: SrcLoc): IrStmt {
     const expected = this.ctx.returnType;
     if (expected.kind === "void") {
-      let e = this.lowerExpr(node);
-      if (this.ctx.isAsync && e.type.kind === "promise") {
-        e = { kind: "awaitExpr", value: e, type: e.type.inner, loc: e.loc };
-      }
+      // The THIRD spelling of the flattening rule, shared rather than
+      // copied — copying it is how the settle-or-value union came to be
+      // handled in one place and not the others. A contextually
+      // void-typed async function still ADOPTS a returned thenable: the
+      // value is dropped, but settlement waits for it and a REJECTION on
+      // the promise arm has to reach the caller rather than surfacing as
+      // an unhandled rejection.
+      const e = this.asyncReturnFlatten(this.lowerExpr(node), expected, this.ctx.isAsync);
       if (e.kind === "unitLit") return { kind: "return", value: null, loc };
       if (e.type.kind === "void") return { kind: "return", value: e, loc };
       return {
