@@ -8,7 +8,7 @@ import { lowerGenMethodCall } from "./lower-generators.js";
 import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, locOf } from "../program.js";
-import { isGenericCallableMemberType, typeKey} from "../types.js";
+import { isGenericCallableMemberType, isSymbolicCandidateType, typeKey} from "../types.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
@@ -144,6 +144,13 @@ export interface GenericInstance {
    * binding has already lost what the body needs — `T[K]` and `o[k]` reads
    * whose K is bound to one literal key (typeParamTsBindings). */
   tsBindings?: Map<ts.Symbol, ts.Type>;
+  /** Call-keyed instances: a SYMBOLIC member type the checker leaves
+   * unresolved inside the body → the RESOLVED type this call site already
+   * holds for it (collectSymbolicResolutions). Consulted by mapType through
+   * resolveSymbolic while the body lowers, and folded into the instance KEY
+   * so two call sites resolving one symbolic type differently can never
+   * share an instance. */
+  symResolved?: Map<ts.Type, ts.Type>;
   /** Rendered type arguments ("<number, string>") for diagnostics. */
   typeArgsText: string;
   /** Implicit instances only: param symbol → the call site's (widened)
@@ -1378,9 +1385,17 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
     // widened discipline.
     // Overload-selected: the bindings ARE the constraints, already used to
     // map the params above. Nothing to infer, and no literal to key on.
+    // The symbolic→resolved pairing, built from the same rsig the params
+    // came from. Collected BEFORE interning: its resolutions are part of
+    // the instance key (symbolicResolutionKey), so an instance can never be
+    // shared across two call sites that resolve a symbolic type differently.
+    const symResolved = collectSymbolicResolutions(L, info, rsig);
+    const symKey = symbolicResolutionKey(L, symResolved);
     if (overloadBindings) {
       return internGenericInstance(L, expr, info, params, returnType, () => overloadBindings, {
         tsBindings: overloadTsBindings,
+        extraKey: symKey,
+        symResolved,
       });
     }
     const keyofTps = keyofConstrainedTypeParams(info);
@@ -1397,13 +1412,141 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
         })
         .join(",");
       return internGenericInstance(L, expr, info, params, returnType, () => bindings, {
-        extraKey: `@${litKey}`,
+        extraKey: `@${litKey}${symKey}`,
         tsBindings,
+        symResolved,
       });
     }
     return internGenericInstance(L, expr, info, params, returnType, (tsBindings) =>
       L.inferTypeParamBindings(expr, info, rsig, tsBindings),
+      { extraKey: symKey, symResolved },
     );
+  }
+
+/** How deep the pairing walk descends through members. The zapo shape needs
+ * one level (a symbolic member of an object parameter); the budget exists so
+ * a deeply generic signature cannot turn instantiation into a graph walk. */
+const SYMBOLIC_PAIR_DEPTH = 4;
+
+/** Total member pairs one instantiation's walk may visit. The walk runs at
+ * EVERY generic instantiation in the program and each step is a checker
+ * round trip, so it gets an absolute budget rather than only a depth bound:
+ * a signature whose parameters differ structurally in a large library type
+ * would otherwise enumerate that type's whole member graph for nothing.
+ * Exhausting the budget stops collection, which leaves today's diagnostic —
+ * the same direction every other refusal here takes. */
+const SYMBOLIC_PAIR_BUDGET = 256;
+
+/** The symbolic→resolved side table for ONE instantiation.
+ *
+ * The checker gives us both halves already computed and asks nothing new of
+ * it: the DECLARED parameter type comes off the declaration's own type node
+ * (still written in the generic's type parameters), the RESOLVED one off
+ * `rsig`'s parameter symbol (substituted at this call site). Walking the two
+ * in parallel by property NAME pairs them structurally.
+ *
+ *   buildSetMutationFromSchema<S>(input: {
+ *     readonly schema: S
+ *     readonly indexArgs: IndexArgsForSchema<S>   <-- symbolic; no layout
+ *     ...
+ *   })
+ *
+ * At `{ schema: MUTE, indexArgs: { jid } }` the resolved twin of
+ * `.indexArgs` is `IndexArgsForSchema<Schema<MuteParts>>`, which has the
+ * property `jid`. That pair is the whole content of the table, and the same
+ * symbolic ts.Type is what the body's inner call
+ * (`buildMutationIndexFromSchema(input.schema, input.indexArgs)`) asks
+ * mapType about — measured identical, which is why an identity-keyed map is
+ * enough and no instantiation-on-demand is needed (the ts7 facade exposes
+ * none).
+ *
+ * Only pairs whose SYMBOLIC side maps to null are recorded. That is the
+ * conservative direction and it is what bounds the blast radius: where the
+ * symbolic type already maps, nothing changes; where it does not, the
+ * alternative is the SC2001 trap this exists to remove. An empty table means
+ * an empty key contribution, so every program that does not hit this shape
+ * emits byte-identically.
+ *
+ * `mapTypeOf` here is a pure query — it returns null rather than
+ * diagnosing — and the resolved side it interns is already interned by the
+ * enclosing parameter's own shape, so collection mints nothing new. */
+  export function collectSymbolicResolutions(
+    L: Lowerer,
+    info: GenericFnInfo,
+    rsig: ts.Signature,
+  ): Map<ts.Type, ts.Type> | null {
+    const out = new Map<ts.Type, ts.Type>();
+    const seen = new Set<ts.Type>();
+    let budget = SYMBOLIC_PAIR_BUDGET;
+    const pair = (declared: ts.Type, resolved: ts.Type, depth: number): void => {
+      // Identical type objects are the common case and the cheapest prune:
+      // a parameter the instantiation did not touch (`timestamp: number`)
+      // hands back the SAME ts.Type on both sides, so every non-generic
+      // parameter costs one reference comparison and stops here.
+      if (declared === resolved || depth > SYMBOLIC_PAIR_DEPTH) return;
+      if (budget-- <= 0 || seen.has(declared)) return;
+      seen.add(declared);
+      if (isSymbolicCandidateType(declared, L.checker)) {
+        // The symbolic side must be the one with no answer, and the
+        // resolved side must have one — anything else is not this problem.
+        if (L.mapTypeOf(declared) === null) {
+          if (L.mapTypeOf(resolved) !== null) out.set(declared, resolved);
+          return;
+        }
+      }
+      // Structural descent, by property NAME. A member the resolved side
+      // does not carry is skipped rather than guessed at.
+      for (const dprop of L.checker.getPropertiesOfType(declared)) {
+        const rprop = L.checker.getPropertyOfType(resolved, dprop.name);
+        if (!rprop) continue;
+        pair(L.checker.getTypeOfSymbol(dprop), L.checker.getTypeOfSymbol(rprop), depth + 1);
+      }
+    };
+    rsig.getParameters().forEach((p, i) => {
+      const declParam = info.decl.parameters[i];
+      if (!declParam?.type) return;
+      pair(L.checker.getTypeFromTypeNode(declParam.type), L.checker.getTypeOfSymbol(p), 0);
+    });
+    const declRet = info.decl.type;
+    if (declRet) {
+      pair(L.checker.getTypeFromTypeNode(declRet), L.checker.getReturnTypeOfSignature(rsig), 0);
+    }
+    if (out.size > 0 && process.env["SCRIPTC_INST_WHY"] !== undefined) {
+      for (const [d, r] of out) {
+        const ir = L.mapTypeOf(r);
+        console.error(
+          `[instwhy] ${info.baseName}: ${L.checker.typeToString(d)} -> ` +
+            `${L.checker.typeToString(r)} = ${ir ? L.fmt(ir) : "<null>"}`,
+        );
+      }
+    }
+    return out.size > 0 ? out : null;
+  }
+
+/** The instance-key contribution of a side table: the IR spelling of every
+ * resolution, in collection order.
+ *
+ * This is the half that makes the table safe rather than merely useful. A
+ * resolved layout carried to the wrong instantiation is a wrong field read
+ * at speed, and the only way one instantiation can answer for another is by
+ * sharing its instance — so every resolution the body may consult is folded
+ * into the key that decides sharing. Same resolutions ⇒ same key ⇒ one
+ * instance (correctly shared: the answers are identical). Any differing
+ * resolution ⇒ different key ⇒ separate instances, each with its own table.
+ *
+ * The parameter typeKeys alone are NOT enough. They discriminate a symbolic
+ * type that appears in the signature, but two instantiations can agree on
+ * every parameter's IR type and still resolve a symbolic type differently —
+ * a mapped type keyed on a literal member widens out of the parameter's
+ * layout while still naming different fields. */
+  export function symbolicResolutionKey(L: Lowerer, table: Map<ts.Type, ts.Type> | null): string {
+    if (table === null || table.size === 0) return "";
+    const parts: string[] = [];
+    for (const resolved of table.values()) {
+      const ir = L.mapTypeOf(resolved);
+      parts.push(ir ? typeKey(ir) : "<null>");
+    }
+    return `#${parts.join("#")}`;
   }
 
 /** The one instance table both instantiation routes share: key identity IS
@@ -1416,7 +1559,11 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
     params: ParamShape[],
     returnType: IrType,
     makeBindings: (tsBindings: Map<ts.Symbol, ts.Type>) => Map<ts.Symbol, IrType>,
-    opts?: { extraKey?: string; tsBindings?: Map<ts.Symbol, ts.Type> },): GenericInstance {
+    opts?: {
+      extraKey?: string;
+      tsBindings?: Map<ts.Symbol, ts.Type>;
+      symResolved?: Map<ts.Type, ts.Type> | null;
+    },): GenericInstance {
     // keyof-constrained instantiations append their literal keys
     // (extraKey): the IR signature alone under-discriminates there — two
     // literals can map to one IR signature while their bodies read
@@ -1455,6 +1602,7 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
         returnType,
         bindings,
         tsBindings,
+        ...(opts?.symResolved ? { symResolved: opts.symResolved } : {}),
         typeArgsText,
       };
       info.instances.set(key, inst);
@@ -1703,6 +1851,13 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
     // so only the method instantiation's own map installs.
     const prevTsBindings = L.typeParamTsBindings;
     L.typeParamTsBindings = inst.tsBindings ?? null;
+    // The symbolic→resolved side table rides the same scope, for the same
+    // reason: the SAME symbolic ts.Type resolves differently under each
+    // instantiation, so an answer installed past this body's end would be
+    // one instantiation answering for another. The instance key already
+    // guarantees no two differing resolutions share this frame.
+    const prevSymResolved = L.symbolicResolved;
+    L.symbolicResolved = inst.symResolved ?? null;
     // The rest-tuple rule is scoped to THIS body (see erasedRest).
     const prevRestErasure = L.typeCtx.restTupleFromErasure;
     L.typeCtx.restTupleFromErasure = inst.erasedRest === true ? true : undefined;
@@ -1840,6 +1995,7 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
       L.currentClass = prevClass;
       L.typeParamBindings = prevBindings;
       L.typeParamTsBindings = prevTsBindings;
+      L.symbolicResolved = prevSymResolved;
       // Scoped to THIS body: left set, the rest-tuple rule would apply to
       // everything lowered afterwards — which is exactly the over-broad
       // behaviour that changed 30 corpus programs.
