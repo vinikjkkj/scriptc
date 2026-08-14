@@ -8007,22 +8007,39 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     };
   }
 
-/** `String.fromCodePoint(cp)`, interned once per program:
+/** `String.fromCodePoint(...points)`, interned once per program. Takes
+   * the WHOLE argument list as one f64[] and answers one string:
    *
-   *   %str.codePoint(cp) {
-   *     if (!(cp >= 0) || !(cp <= 0x10FFFF) || cp % 1 !== 0)
-   *       throw RangeError(`Invalid code point ${cp}`);
-   *     return cp < 0x10000
-   *       ? String.fromCharCode(cp)
-   *       : String.fromCharCode(0xD800 + (v - v % 1024) / 1024, 0xDC00 + v % 1024)
-   *         where v = cp - 0x10000;
+   *   %str.codePoints(points) {
+   *     units = [];
+   *     for (i = 0; i < points.length; i++) {
+   *       cp = points[i];
+   *       if (!(cp >= 0) || !(cp <= 0x10FFFF) || cp !== cp || cp % 1 !== 0)
+   *         throw RangeError(`Invalid code point ${cp}`);
+   *       if (cp < 0x10000) units.push(cp);
+   *       else { v = cp - 0x10000;
+   *              units.push(0xD800 + (v - v % 1024) / 1024);
+   *              units.push(0xDC00 + v % 1024); }
+   *     }
+   *     return String.fromCharCode(units);   // ONE call, all the units
    *   }
    *
    * No new runtime unit: `scr_str_from_units` — the one `fromCharCode`
    * already calls — recombines an adjacent surrogate pair into the code
-   * point and UTF-8 encodes it, which is precisely the second branch's
-   * job. So this rule is the SPEC's validation and its UTF16Encode, in IR,
-   * over the encoder that was already there.
+   * point and UTF-8 encodes it.
+   *
+   * ONE call over the whole unit list is the load-bearing part, and it is
+   * what a per-argument encoder cannot do. fromCodePoint appends UTF-16
+   * CODE UNITS, so two adjacent lone-surrogate ARGUMENTS form a real pair:
+   * Node's `String.fromCodePoint(0xD83D, 0xDE00)` is U+1F600. Encoding each
+   * argument on its own and concatenating hands `scr_str_from_units` a
+   * one-unit array per argument, where the pairing lookahead has nothing to
+   * look ahead at, so each lone surrogate meets divergence 1's storage
+   * policy separately and the answer is two U+FFFD. Measured against Node
+   * on both backends before and after; fixture 3554 pins it.
+   *
+   * Collecting the units first also makes the SPREAD form fall out: a
+   * spread is already an f64[] of code points, so it is the same call.
    *
    * The three refusals in the guard are the spec's, and each is spelled so
    * that the exceptional Numbers fall on the right side: NaN fails
@@ -8035,8 +8052,12 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     const key = "str:fromCodePoint";
     const found = L.arrHofHelpers.get(key);
     if (found !== undefined) return found;
-    const name = "%str.codePoint";
+    const name = "%str.codePoints";
     L.arrHofHelpers.set(key, name);
+    const listT = arrayOf(F64);
+    const points = (): IrExpr => ({ kind: "varRef", localId: "ps.0", type: listT, loc });
+    const out = (): IrExpr => ({ kind: "varRef", localId: "u.0", type: listT, loc });
+    const i = (): IrExpr => ({ kind: "varRef", localId: "i.0", type: F64, loc });
     const cp = (): IrExpr => ({ kind: "varRef", localId: "cp.0", type: F64, loc });
     const v = (): IrExpr => ({ kind: "varRef", localId: "v.0", type: F64, loc });
     const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
@@ -8046,11 +8067,9 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       ({ kind: "bin", op, left, right, type: BOOL, loc });
     const or = (left: IrExpr, right: IrExpr): IrExpr =>
       ({ kind: "logical", op: "||", left, right, type: BOOL, loc });
-    const units = (elems: IrExpr[]): IrExpr => ({
-      kind: "libCall",
-      fn: "string.fromCharCode",
-      args: [{ kind: "arrayLit", elems, type: arrayOf(F64), loc }],
-      type: STRING,
+    const push = (value: IrExpr): IrStmt => ({
+      kind: "exprStmt",
+      expr: { kind: "arrIntrinsic", method: "push", receiver: out(), args: [value], type: F64, loc },
       loc,
     });
     // `!(cp >= 0)` and `!(cp <= max)` spelled as the strict complements, so
@@ -8062,8 +8081,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
         test("!==", bin("%", cp(), num(1)), num(0)),
       ),
     );
-    const body: IrStmt[] = [
-      {
+    const throwBad: IrStmt = {
         kind: "if",
         cond: bad,
         then: [
@@ -8089,31 +8107,56 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
         ],
         else_: null,
         loc,
-      },
+      };
+    // UTF16EncodeCodePoint, appending UNITS to the shared list rather than
+    // producing a string per argument.
+    const encodeOne: IrStmt = {
+      kind: "if",
+      cond: test("<", cp(), num(0x10000)),
+      then: [push(cp())],
+      else_: [
+        { kind: "assign", localId: "v.0", value: bin("-", cp(), num(0x10000)), loc },
+        push(bin("+", num(0xd800), bin("/", bin("-", v(), bin("%", v(), num(1024))), num(1024)))),
+        push(bin("+", num(0xdc00), bin("%", v(), num(1024)))),
+      ],
+      loc,
+    };
+    const body: IrStmt[] = [
+      { kind: "varDecl", localId: "u.0", init: { kind: "arrayLit", elems: [], type: listT, loc }, loc },
+      { kind: "varDecl", localId: "i.0", init: num(0), loc },
       {
-        kind: "if",
-        cond: test("<", cp(), num(0x10000)),
-        then: [{ kind: "return", value: units([cp()]), loc }],
-        else_: null,
+        kind: "while",
+        cond: {
+          kind: "bin", op: "<", left: i(),
+          right: { kind: "arrIntrinsic", method: "length", receiver: points(), args: [], type: F64, loc },
+          type: BOOL, loc,
+        },
+        body: [
+          { kind: "varDecl", localId: "cp.0", init: { kind: "arrayGet", arr: points(), index: i(), type: F64, loc }, loc },
+          throwBad,
+          encodeOne,
+          { kind: "assign", localId: "i.0", value: bin("+", i(), num(1)), loc },
+        ],
         loc,
       },
-      { kind: "varDecl", localId: "v.0", init: bin("-", cp(), num(0x10000)), loc },
+      // ONE fromCharCode over every unit: this is where an adjacent
+      // surrogate pair contributed by two separate ARGUMENTS recombines.
       {
         kind: "return",
-        value: units([
-          bin("+", num(0xd800), bin("/", bin("-", v(), bin("%", v(), num(1024))), num(1024))),
-          bin("+", num(0xdc00), bin("%", v(), num(1024))),
-        ]),
+        value: { kind: "libCall", fn: "string.fromCharCode", args: [out()], type: STRING, loc },
         loc,
       },
     ];
     L.liftedFns.push({
       name,
-      params: [{ localId: "cp.0", name: "cp", type: F64 }],
+      params: [{ localId: "ps.0", name: "ps", type: listT }],
       returnType: STRING,
       locals: [
+        { id: "ps.0", name: "ps", type: listT, mutable: true },
+        { id: "u.0", name: "u", type: listT, mutable: false },
+        { id: "i.0", name: "i", type: F64, mutable: true },
         { id: "cp.0", name: "cp", type: F64, mutable: true },
-        { id: "v.0", name: "v", type: F64, mutable: false },
+        { id: "v.0", name: "v", type: F64, mutable: true },
       ],
       body,
       loc,
@@ -8124,37 +8167,46 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
 /** `String.fromCharCode(...codes)` on THE String global: every argument
    * lowers as a number and packs into ONE f64[] array-literal argument
    * (the path.join convention) — or ONE whole-array spread forwards the
-   * array itself. `String.fromCodePoint(...)` rides the encoder above, one
-   * interned helper call per argument, concatenated left to right (the
-   * spec's own loop order — `String.fromCodePoint(65, -1)` throws AFTER
-   * the 'A' would have been appended, and nothing observes the partial
-   * string). The SPREAD form of fromCodePoint keeps its fence: it needs a
-   * runtime loop, not a fixed concat. `String.raw` is handled below. Null
-   * for non-String receivers. */
+   * array itself. `String.fromCodePoint(...)` rides the encoder above with
+   * ONE call over the whole argument list, packed the same way — the
+   * spec's loop order is preserved inside the helper (it validates and
+   * encodes left to right, so `String.fromCodePoint(65, -1)` still throws
+   * naming -1, and nothing observes the partial result), and because every
+   * unit reaches `scr_str_from_units` in one array, two adjacent
+   * lone-surrogate arguments recombine the way Node's do. The SPREAD form
+   * lowers too: a spread is already the f64[] the helper wants.
+   * `String.raw` is handled below. Null for non-String receivers. */
   export function lowerStringStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken) return null;
     const member = L.stdlibGlobalMember(access, "String");
     if (member === "fromCodePoint") {
       const loc0 = locOf(call);
-      if (call.arguments.some(ts.isSpreadElement)) {
-        L.noLowering(
-          "String.fromCodePoint with a spread argument",
-          call,
-          "the fixed-argument form lowers (String.fromCodePoint(cp) / (a, b, ...)); " +
-            "a spread needs a runtime loop — build the string with a for-of and += instead",
-        );
-      }
       if (call.arguments.length === 0) return { kind: "strLit", value: "", type: STRING, loc: loc0 };
+      const cpSpread = call.arguments.find(ts.isSpreadElement);
+      let packed: IrExpr;
+      if (cpSpread) {
+        // A whole-array spread forwards the array itself, the
+        // fromCharCode convention. Mixing a spread with plain arguments
+        // would need a runtime concat of the two, which nothing spells.
+        if (call.arguments.length !== 1) {
+          L.noLowering(
+            "String.fromCodePoint with a mixed spread call",
+            call,
+            "spread a whole array (String.fromCodePoint(...points)) or pass plain arguments",
+          );
+        }
+        packed = L.lowerExprExpecting(cpSpread.expression, arrayOf(F64));
+      } else {
+        packed = {
+          kind: "arrayLit",
+          elems: call.arguments.map((a) => L.lowerExprExpecting(a, F64)),
+          type: arrayOf(F64),
+          loc: loc0,
+        };
+      }
       const helper = internCodePointEncoder(L, loc0);
-      const pieces = call.arguments.map((a): IrExpr => ({
-        kind: "call",
-        callee: helper,
-        args: [L.lowerExprExpecting(a, F64)],
-        type: STRING,
-        loc: locOf(a),
-      }));
-      return pieces.reduce((left, right) => ({ kind: "strConcat", left, right, type: STRING, loc: loc0 }));
+      return { kind: "call", callee: helper, args: [packed], type: STRING, loc: loc0 };
     }
     if (member !== "fromCharCode" && member !== "raw") return null;
     const loc = locOf(call);
