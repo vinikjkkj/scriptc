@@ -196,6 +196,17 @@ export interface GenericInstance {
     if (ts.isIdentifier(param.name) && L.jsvalParamOverrides.has(param)) {
       return { type: JSVAL, mode: param.questionToken ? "omittable" : "required" };
     }
+    // A parameter bound at an IR type the checker did not spell — today only
+    // a `new Promise` executor's resolve parameter widened to the
+    // settle-or-value union (lowerer.ts, paramIrOverrides). Same early-out
+    // shape as the island-handle rule above; the producer establishes the
+    // binding is sound before it registers one.
+    {
+      const forced = ts.isIdentifier(param.name) ? L.paramIrOverrides.get(param) : undefined;
+      if (forced !== undefined) {
+        return { type: forced, mode: param.questionToken ? "omittable" : "required" };
+      }
+    }
     if (!ts.isIdentifier(param.name)) {
       // A destructuring pattern parameter — `([label, value]) => ...`,
       // `({ x }) => ...`. The ABI slot carries the SOURCE value (the
