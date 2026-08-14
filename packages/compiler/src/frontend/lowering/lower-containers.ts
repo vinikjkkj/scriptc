@@ -5100,6 +5100,120 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     };
   }
 
+/** `new Map(other)` where `other` is itself a MAP value — the copy
+   * constructor, `ReadonlyMap` sources included. JS drains the source's
+   * entries iterator and `set()`s each pair into a fresh map, so this is
+   * the seed-array desugar with the iterator swapped for the source's own
+   * iteration primitives. Both maps must agree on key AND value type: a
+   * copy that converted would be a different value, not a copy.
+   *
+   * Nothing user-written runs mid-walk (keys and values are plain slot
+   * reads and the destination is a fresh map nobody else holds), so the
+   * walk cannot observe a concurrent mutation of the source and there is
+   * no live-iteration question to get wrong — the iterEnter/iterExit
+   * bracket is here because the RUNTIME's compaction is what it guards,
+   * and `iterLive` is what skips tombstones a prior `delete` left.
+   *
+   * Null when the argument isn't a matching map (the caller keeps its
+   * fence). */
+  export function lowerMapCloneNew(L: Lowerer, argNode: ts.Expression,
+    mapT: IrType & { kind: "map" },): IrExpr | null {
+    if (ts.isSpreadElement(argNode)) return null;
+    const src = L.lowerExpr(argNode);
+    if (src.type.kind !== "map") return null;
+    if (!typeEquals(src.type.key, mapT.key) || !typeEquals(src.type.value, mapT.value)) return null;
+    const loc = locOf(argNode);
+    const key = `clone:${typeKey(mapT.key)}:${typeKey(mapT.value)}`;
+    let helper = L.mapHofHelpers.get(key);
+    if (!helper) {
+      helper = `%map.clone.${L.mapHofHelpers.size}`;
+      L.mapHofHelpers.set(key, helper);
+      L.liftedFns.push(buildMapCloneFn(mapT, helper, loc));
+    }
+    return { kind: "call", callee: helper, args: [src], type: mapT, loc };
+  }
+
+/** The clone loop, from existing IR nodes:
+   *
+   *   out = new Map(); s.iterEnter();
+   *   try {
+   *     for (i = 0; i < s.iterCount; i++)
+   *       if (s.iterLive(i)) out.set(s.iterKey(i), s.iterValue(i));
+   *   } finally { s.iterExit(); }
+   *   return out;
+   */
+  function buildMapCloneFn(mapT: IrType & { kind: "map" }, name: string, loc: SrcLoc): IrFunction {
+    const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
+    const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+    const iter = (
+      method: "iterCount" | "iterLive" | "iterKey" | "iterValue" | "iterEnter" | "iterExit",
+      args: IrExpr[],
+      type: IrType,
+    ): IrExpr => ({ kind: "mapIntrinsic", method, receiver: ref("s.0", mapT), args, type, loc });
+    const loop: IrStmt = {
+      kind: "for",
+      init: { kind: "varDecl", localId: "i.0", init: num(0), loc },
+      cond: { kind: "bin", op: "<", left: ref("i.0", F64), right: iter("iterCount", [], F64), type: BOOL, loc },
+      update: {
+        kind: "assign",
+        localId: "i.0",
+        value: { kind: "bin", op: "+", left: ref("i.0", F64), right: num(1), type: F64, loc },
+        loc,
+      },
+      body: [
+        {
+          kind: "if",
+          cond: iter("iterLive", [ref("i.0", F64)], BOOL),
+          then: [
+            {
+              kind: "exprStmt",
+              expr: {
+                kind: "mapIntrinsic",
+                method: "set",
+                receiver: ref("m.0", mapT),
+                args: [
+                  iter("iterKey", [ref("i.0", F64)], mapT.key),
+                  iter("iterValue", [ref("i.0", F64)], mapT.value),
+                ],
+                type: VOID,
+                loc,
+              },
+              loc,
+            },
+          ],
+          else_: null,
+          loc,
+        },
+      ],
+      loc,
+    };
+    const body: IrStmt[] = [
+      { kind: "varDecl", localId: "m.0", init: { kind: "mapNew", type: mapT, loc }, loc },
+      { kind: "exprStmt", expr: iter("iterEnter", [], VOID), loc },
+      {
+        kind: "tryCatch",
+        tryBody: [loop],
+        catchBody: null,
+        catchLocalId: null,
+        finallyBody: [{ kind: "exprStmt", expr: iter("iterExit", [], VOID), loc }],
+        loc,
+      },
+      { kind: "return", value: ref("m.0", mapT), loc },
+    ];
+    return {
+      name,
+      params: [{ localId: "s.0", name: "s", type: mapT }],
+      returnType: mapT,
+      locals: [
+        { id: "s.0", name: "s", type: mapT, mutable: true },
+        { id: "m.0", name: "m", type: mapT, mutable: false },
+        { id: "i.0", name: "i", type: F64, mutable: true },
+      ],
+      body,
+      loc,
+    };
+  }
+
 /** Regex method calls, both directions: `re.test(s)` on a regex receiver,
    * and `s.replace(re, tpl)` / `s.replaceAll(re, tpl)` / `s.split(re)` on a
    * string receiver whose FIRST ARGUMENT is a regex (the string-pattern
