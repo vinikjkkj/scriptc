@@ -8161,6 +8161,33 @@ export class Lowerer {
       const awaited: IrExpr = { kind: "awaitExpr", value: e, type: e.type.inner, loc: e.loc };
       return this.coerceInto(node, awaited, expected);
     }
+    // The SETTLE-OR-VALUE union — `T | Promise<T>` — returned from an ASYNC
+    // function. JS flattens a returned thenable into the function's own
+    // promise, and the arm that is not a thenable resolves as itself: that
+    // IS settleOrValueAwait, the same builder `await u` reaches from the
+    // expression lowering. The rule above only saw a value whose whole type
+    // was `promise`, so the union fell through to the ordinary coercion —
+    // which has no union-to-payload conversion and reached for the CHECKED
+    // single-arm extraction (narrowedArmHelper), compiling the promise arm
+    // to a throw. `f(g())` on `async f(x: string | Promise<string>):
+    // Promise<string> { return x }` therefore rejected with an UNCODED
+    // TypeError where Node prints the string (estado-promiseunion.md §3).
+    //
+    // Declining leaves that behavior, so the guard is written to be as WIDE
+    // as it can honestly be and no wider: it stands aside only when the
+    // destination is the SAME union (the coercion is already identity) or
+    // when the destination genuinely carries the promise arm, where the
+    // plain re-tag is the right answer and awaiting would change the value.
+    if (this.ctx.isAsync && e.type.kind === "union" && expected.kind !== "promise" && !typeEquals(e.type, expected)) {
+      const def = this.unions.get(e.type.unionId);
+      const promiseArm = def?.arms.find((a) => a.kind === "promise");
+      const carried = promiseArm !== undefined && expected.kind === "union" &&
+        this.armTag(expected.unionId, promiseArm) >= 0;
+      if (!carried) {
+        const settled = this.settleOrValueAwait(e, e.loc);
+        if (settled) return this.coerceInto(node, settled, expected);
+      }
+    }
     return this.coerceInto(node, e, expected);
   }
 
