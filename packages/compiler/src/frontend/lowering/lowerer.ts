@@ -7100,13 +7100,24 @@ export class Lowerer {
     const key = `${fromId}:${tag}`;
     const existing = this.narrowHelpers.get(key);
     if (existing) return existing;
+    // A DESCENDANT arm satisfies the claim too. admissibleArmTags is
+    // this compiler's own rule for which tags a narrowing may legally
+    // find (the arm itself, plus every arm that strictly descends from
+    // it when the target is a CLASS) and the extraction below is a
+    // tag-independent payload peek, so a subclass payload reads right
+    // and a virtual call still reaches the override. Without this the
+    // helper throws on `const p: P = arrOfPorQ[0]!` -- sound TypeScript,
+    // which Node runs and this threw an uncoded TypeError for. Records
+    // are deliberately NOT widened: two record shapes put different
+    // fields at the same offsets, which is what the check exists for.
+    const admissible = new Set(this.admissibleArmTags(fromId, target));
     const name = `%union.narrow.${this.narrowHelpers.size}`;
     this.narrowHelpers.set(key, name);
     const fromT: IrType = { kind: "union", unionId: fromId };
     const u: IrExpr = { kind: "varRef", localId: "u.0", type: fromT, loc };
     const body: IrStmt[] = [];
     from.arms.forEach((arm, i) => {
-      if (i === tag) return; // the fall-through extraction below
+      if (admissible.has(i)) return; // the fall-through extraction below
       const what = isUnitType(arm)
         ? (arm.kind === "undefinedT" ? "undefined" : "null")
         : `a '${this.fmt(arm)}' value`;
