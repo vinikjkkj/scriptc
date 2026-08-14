@@ -1,0 +1,13 @@
+nullish-retag-fences.ts:11:12 - error SC1090: '??' where the default changes the result type (left is 'string | undefined' but the whole expression is 'Promise<string> | string' — give both sides one type) is not supported yet
+
+  10 | async function resolveStanzaId(provided: string | undefined, gen: () => Promise<string>): Promise<string> {
+  11 |     return provided ?? gen();
+     |            ^~~~~~~~~~~~~~~~~
+  12 | }
+
+nullish-retag-fences.ts:26:17 - error SC1090: '??' on 'string[] | { from: string | undefined; tag: string | undefined } | undefined' (the non-nullish result is a sub-union; check a discriminant field first) is not supported yet
+
+  25 | function forward(t: string[] | Opts | undefined): string {
+  26 |     return take((t as Opts | undefined) ?? {});
+     |                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  27 | }
