@@ -914,21 +914,49 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const acc = elemAccess(elem);
         const spreadSet = new Set(e.spreads ?? []);
         e.elems.forEach((el, i) => {
-          const v = E.emitExpr(el);
-          if (spreadSet.has(i)) {
-            const n = `sc_i${E.tempCounter++}`;
-            E.line(`for (size_t ${n} = 0, ${n}_len = (size_t)scr_arr_len(${v.name}); ${n} < ${n}_len; ${n}++) {`);
-            E.indent++;
-            // A COPY: an ABSENT slot copies through as absent (JS spreads
-            // holes too), which is what scr_arr_copy_ref does and what
-            // scr_arr_get_ref refuses.
-            E.line(`scr_arr_push_${acc}(${arr.name}, ${acc === "ref" ? "scr_arr_copy_ref" : `scr_arr_get_${acc}`}(${v.name}, (double)${n}));`);
-            E.indent--;
-            E.line(`}`);
-            return;
+          // Each element expression gets its OWN release scope, exactly as a
+          // record literal's field initializers do. The element VALUE still
+          // moves into the array (moveTemp reaches through every frame);
+          // what dies here is the expression's leftover intermediates — the
+          // retained receiver, the object it was read out of, the read that
+          // fed the push — which are dead the moment the element is pushed
+          // and which the statement frame would otherwise carry to the end
+          // of the literal. A SPREAD's source array is borrowed for the copy
+          // loop and dies with the same scope, one element later than the
+          // loop that reads it.
+          //
+          // That accumulation is what made the emission QUADRATIC: every
+          // may-throw element emits an `if (scr_exc_pending())` whose unwind
+          // releases the whole live frame, so element k's cleanup listed
+          // every temp of elements 0..k. With a per-element scope the live
+          // frame between two elements is the array and nothing else, so
+          // every cleanup block is the same constant size and the emission
+          // is linear in the element count.
+          //
+          // The RELEASES THEMSELVES ARE UNCHANGED in count, in order and in
+          // type — they move earlier within the same literal, to the point
+          // after which nothing can read them. An unwind still releases
+          // everything live: releaseForJump walks all frames.
+          E.frames.push([]);
+          try {
+            const v = E.emitExpr(el);
+            if (spreadSet.has(i)) {
+              const n = `sc_i${E.tempCounter++}`;
+              E.line(`for (size_t ${n} = 0, ${n}_len = (size_t)scr_arr_len(${v.name}); ${n} < ${n}_len; ${n}++) {`);
+              E.indent++;
+              // A COPY: an ABSENT slot copies through as absent (JS spreads
+              // holes too), which is what scr_arr_copy_ref does and what
+              // scr_arr_get_ref refuses.
+              E.line(`scr_arr_push_${acc}(${arr.name}, ${acc === "ref" ? "scr_arr_copy_ref" : `scr_arr_get_${acc}`}(${v.name}, (double)${n}));`);
+              E.indent--;
+              E.line(`}`);
+              return;
+            }
+            if (acc === "ref") E.moveTemp(v);
+            E.line(`scr_arr_push_${acc}(${arr.name}, ${v.name});`);
+          } finally {
+            E.releaseFrame(E.frames.pop()!);
           }
-          if (acc === "ref") E.moveTemp(v);
-          E.line(`scr_arr_push_${acc}(${arr.name}, ${v.name});`);
         });
         return arr;
       }
