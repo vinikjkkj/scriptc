@@ -1688,6 +1688,7 @@ export class CEmitter {
       case "symbol":
       case "stats":
       case "spawnRes":
+      case "fileHandle":
       case "child":
       case "netServer":
       case "netSocket":

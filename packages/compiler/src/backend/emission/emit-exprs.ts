@@ -2556,6 +2556,38 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           }
           return p;
         }
+        if (e.name === "promise.settled") {
+          // The scr_fsp_* shape, one statement wider: the value was
+          // produced by a libCall that leaves failures in the PENDING
+          // EXCEPTION CELL (deliberately outside MAY_THROW_LIB_FNS, so no
+          // pending check ran and nothing unwound), and
+          // scr_promise_settled_* is what converts that cell into the
+          // rejection. Building the value in between is safe because the
+          // only work there is allocation, and settled_ref RELEASES the
+          // value it was handed when it rejects.
+          if (e.type.kind !== "promise") throw new Error("emitter bug: promise.settled type");
+          const v = E.emitExpr(e.args[0]!);
+          const t = e.args[0]!.type;
+          switch (t.kind) {
+            case "void":
+              return E.newTemp(e.type, `scr_promise_settled_void()`);
+            case "f64":
+              return E.newTemp(e.type, `scr_promise_settled_f64(${v.name})`);
+            case "bool":
+              return E.newTemp(e.type, `scr_promise_settled_bool(${v.name})`);
+            case "string":
+              E.moveTemp(v);
+              return E.newTemp(e.type, `scr_promise_settled_str(${v.name})`);
+            default: {
+              const rc = vAdapters(t);
+              E.moveTemp(v);
+              return E.newTemp(
+                e.type,
+                `scr_promise_settled_ref(${v.name}, ${rc.retain}, ${rc.release}, ${E.traceArgC(t)})`,
+              );
+            }
+          }
+        }
         if (e.name === "promise.race") {
           // A fresh result promise + one race_add per entry: settled
           // entries settle it immediately (first add wins), pending ones
@@ -5307,6 +5339,16 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_fsp_rm(${arg(0)})`);
           case "fsp.stat":
             return finish(`scr_fsp_stat(${arg(0)})`);
+          case "fsp.open":
+            return finish(`scr_fsp_open(${arg(0)}, ${arg(1)})`);
+          case "fh.read":
+            return finish(`scr_fh_read_into(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)})`);
+          case "fh.readCur":
+            return finish(`scr_fh_read_cur(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
+          case "fh.close":
+            return finish(`scr_fh_close(${arg(0)})`);
+          case "fh.fd":
+            return finish(`scr_fh_fd(${arg(0)})`);
           case "process.argv":
             return finish(`scr_process_argv()`);
           case "process.platform":
