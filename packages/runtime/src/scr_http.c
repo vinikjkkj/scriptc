@@ -2556,7 +2556,13 @@ static void scr_hcw_destroy_inv(ScrClosure *cb, ScrStream *s, ScrError *err /*bo
     if (err != NULL) scr_http_client_destroy_err(c, err);
     scr_http_client_release(c);
   }
-  scr_stream_destroy_done(s, err != NULL ? scr_error_retain(err) : NULL);
+  /* The error is forwarded to the REQUEST above and NOT re-emitted here.
+   * An 'error' with no listener is fatal (scr_emitter_emit_error is
+   * Node's throwing EventEmitter path), and the adapter is invisible —
+   * the user has no way to attach a handler to it, so emitting on it
+   * could only ever crash a program that was handling the error properly
+   * on the surface Node actually gives it. */
+  scr_stream_destroy_done(s, NULL);
 }
 
 ScrHttpClientReq *scr_http_client_pipe_from(ScrStream *src, ScrHttpClientReq *c, bool end) {
