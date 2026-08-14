@@ -12335,6 +12335,170 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     return groups;
   }
 
+/** Which capture groups PARTICIPATE in every successful match of a
+   * pattern — the question a function replacement value has to answer
+   * before a group's value can be typed `string`.
+   *
+   * Node hands a replacer `undefined` for a group that did not
+   * participate, and `""` for one that participated on an empty span:
+   * two distinguishable states. Divergence 51 collapses them for
+   * `match`/`matchAll`/`exec` and for `$1` template substitution, where
+   * the value's type is the compiler's to choose. A replacer's parameter
+   * type is the AUTHOR's, so the honest answer is to admit the `string`
+   * spelling only where the group provably always participates — and
+   * fence otherwise, rather than inherit the divergence into a fifth
+   * surface (see lowerRegexReplaceFnCall).
+   *
+   * The scan is the same skeleton namedCaptureGroupsOfPattern uses
+   * (escapes, character classes, `(` kinds) with a level stack on top.
+   * A group is skipped by a successful match only if some construct
+   * ENCLOSING it could be skipped, so group k participates always iff
+   *   - its own level is not quantified with a zero minimum, and
+   *   - no STRICT ANCESTOR level carries an alternation (a sibling
+   *     branch would route around it) or a zero-minimum quantifier, and
+   *   - no enclosing level is a lookaround (a negative one never
+   *     participates; a positive one is refused conservatively).
+   * An alternation inside the group's OWN level is harmless — some
+   * branch of it matched, so the group did.
+   *
+   * Null when the scan cannot answer confidently (an unterminated
+   * construct, a `\u`-escaped group name, or a `{`-quantifier this scan
+   * declines to parse) — callers fence rather than guess. */
+  export function captureParticipationOfPattern(
+    pattern: string,
+  ): { captureCount: number; always: Map<number, boolean> } | null {
+    type Level = { look: boolean; hasAlt: boolean; minZero: boolean; parent: number };
+    const levels: Level[] = [{ look: false, hasAlt: false, minZero: false, parent: -1 }];
+    const stack: number[] = [0];
+    const groupLevel = new Map<number, number>();
+    let captureIndex = 0;
+    let inClass = false;
+    let i = 0;
+    const openLevel = (look: boolean): void => {
+      levels.push({ look, hasAlt: false, minZero: false, parent: stack[stack.length - 1]! });
+      stack.push(levels.length - 1);
+    };
+    while (i < pattern.length) {
+      const c = pattern[i]!;
+      if (c === "\\") {
+        i += 2;
+        continue;
+      }
+      if (inClass) {
+        if (c === "]") inClass = false;
+        i++;
+        continue;
+      }
+      if (c === "[") {
+        inClass = true;
+        i++;
+        continue;
+      }
+      if (c === "|") {
+        levels[stack[stack.length - 1]!]!.hasAlt = true;
+        i++;
+        continue;
+      }
+      if (c === ")") {
+        if (stack.length === 1) return null; // unbalanced; tsc syntax-checked the literal
+        const id = stack.pop()!;
+        const q = pattern[i + 1];
+        if (q === "{") return null; // a `{n,m}` form this scan will not parse
+        if (q === "?" || q === "*") {
+          levels[id]!.minZero = true;
+          i += 2;
+        } else if (q === "+") {
+          i += 2;
+        } else {
+          i += 1;
+        }
+        continue;
+      }
+      if (c !== "(") {
+        i++;
+        continue;
+      }
+      if (pattern[i + 1] !== "?") {
+        captureIndex++;
+        openLevel(false);
+        groupLevel.set(captureIndex, stack[stack.length - 1]!);
+        i++;
+        continue;
+      }
+      // (?<name> captures; (?= (?! (?<= (?<! are lookarounds; every other
+      // (?… form — (?:, modifier groups (?i: — is a plain non-capturing level.
+      const c2 = pattern[i + 2];
+      const c3 = pattern[i + 3];
+      if (c2 === "<" && c3 !== "=" && c3 !== "!") {
+        const gt = pattern.indexOf(">", i + 3);
+        if (gt < 0) return null;
+        if (pattern.slice(i + 3, gt).includes("\\")) return null; // \u-escaped name
+        captureIndex++;
+        openLevel(false);
+        groupLevel.set(captureIndex, stack[stack.length - 1]!);
+        i = gt + 1;
+        continue;
+      }
+      openLevel(c2 === "=" || c2 === "!" || (c2 === "<" && (c3 === "=" || c3 === "!")));
+      i += 2;
+    }
+    if (stack.length !== 1) return null;
+    const always = new Map<number, boolean>();
+    for (const [gi, lid] of groupLevel) {
+      let ok = !levels[lid]!.minZero && !levels[lid]!.look;
+      for (let p = levels[lid]!.parent; p >= 0 && ok; p = levels[p]!.parent) {
+        const lv = levels[p]!;
+        if (lv.hasAlt || lv.minZero || lv.look) ok = false;
+      }
+      always.set(gi, ok);
+    }
+    return { captureCount: captureIndex, always };
+  }
+
+/** The statically-known regex literal TEXT — pattern AND flags — behind
+   * an expression: a regex literal, a const local initialized with one,
+   * or `new RegExp("...", "gi")` over string literals. Flags matter to
+   * the function-replacer desugar (a non-global `.replace` stops after
+   * one match), so this is staticRegexPatternOf's stricter sibling: it
+   * declines the `new RegExp(pattern)` spellings whose flags argument is
+   * not a literal, where the pattern alone would have been enough. */
+  export function staticRegexTextOf(L: Lowerer, e: ts.Expression): { pattern: string; flags: string } | null {
+    let expr = e;
+    for (;;) {
+      if (ts.isParenthesizedExpression(expr) || ts.isNonNullExpression(expr)) {
+        expr = expr.expression;
+        continue;
+      }
+      break;
+    }
+    if (ts.isRegularExpressionLiteral(expr)) {
+      const text = expr.text;
+      const lastSlash = text.lastIndexOf("/");
+      return { pattern: text.slice(1, lastSlash), flags: text.slice(lastSlash + 1) };
+    }
+    if (
+      ts.isNewExpression(expr) &&
+      ts.isIdentifier(expr.expression) &&
+      expr.expression.text === "RegExp" &&
+      L.isStdlibGlobal(expr.expression, "RegExp") &&
+      expr.arguments !== undefined &&
+      expr.arguments.length >= 1 &&
+      expr.arguments.length <= 2 &&
+      (ts.isStringLiteral(expr.arguments[0]!) || ts.isNoSubstitutionTemplateLiteral(expr.arguments[0]!))
+    ) {
+      const pattern = (expr.arguments[0] as ts.StringLiteral | ts.NoSubstitutionTemplateLiteral).text;
+      const fa = expr.arguments[1];
+      if (fa === undefined) return { pattern, flags: "" };
+      if (!ts.isStringLiteral(fa) && !ts.isNoSubstitutionTemplateLiteral(fa)) return null;
+      return { pattern, flags: (fa as ts.StringLiteral | ts.NoSubstitutionTemplateLiteral).text };
+    }
+    if (ts.isIdentifier(expr)) {
+      const init = constInitializerOf(L, expr);
+      if (init !== null) return staticRegexTextOf(L, init);
+    }
+    return null;
+  }
+
 /** The statically-known regex PATTERN behind an expression: a regex
    * literal, a const local initialized with one (the crypto.js
    * `const regexp = /(?<m>\d+)/` shape), or `new RegExp("...")` over a

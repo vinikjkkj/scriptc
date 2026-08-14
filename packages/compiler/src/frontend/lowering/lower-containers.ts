@@ -4,9 +4,9 @@
  * method surfaces. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, BYTES_U8, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { BOOL, BYTES_U8, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
-import { checkedJsNumber, droppableStatic, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable } from "./lower-exprs.js";
+import { captureParticipationOfPattern, checkedJsNumber, droppableStatic, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexTextOf } from "./lower-exprs.js";
 import { forOfVarTarget, lowerDestructuringAssign } from "./lower-stmts.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { DYN_DISPATCH_METHODS, islandPrimitiveExit } from "./lower-calls.js";
@@ -5489,6 +5489,10 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       }
       const receiver = lowerReceiver();
       const args = call.arguments.map((a) => L.lowerExpr(a));
+      if (name !== "split" && args[1]?.type.kind === "func") {
+        const fn = lowerRegexReplaceFnCall(L, call, name, receiver, arg0, args[0]!, args[1]!, loc);
+        if (fn !== null) return fn;
+      }
       if (name !== "split" && args[1]?.type.kind !== "string") {
         L.unsupported(
           "SC1120",
@@ -5506,6 +5510,300 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       };
     }
     return null;
+  }
+
+/** `s.replace(re, fn)` / `s.replaceAll(re, fn)` with a FUNCTION
+   * replacement value — the last regex-surface form the lib declares and
+   * the compiler fenced.
+   *
+   * # The non-participating capture group, decided before the code
+   *
+   * Node calls the replacer with `(match, p1…pN, offset, subject)` and
+   * hands a group that did not participate `undefined` — distinguishable
+   * from a group that participated on an EMPTY span, which is `""`
+   * (measured on v25.9.0: `"a".replace(/(a)(z)?/, …)` passes undefined,
+   * `"ab".replace(/(a)(b*?)/, …)` passes ""). Divergence 51 collapses the
+   * two for `match`/`matchAll`/`exec` and for `$1` template substitution,
+   * because there the value's TYPE is the compiler's to choose and `""`
+   * keeps the slice a plain `string[]`.
+   *
+   * A replacer's parameter type is the AUTHOR's, not the compiler's, so
+   * that trade is not available here and inheriting the divergence into a
+   * fifth surface would be a quiet wrong answer: a replacer typed
+   * `(_, n: string) => f(Number(n))` would silently see `Number("")` — 0 —
+   * where Node computes `Number(undefined)` — NaN. The decision is
+   * therefore:
+   *
+   *   a capture parameter is admitted at type `string` only where the
+   *   pattern PROVES the group participates in every successful match
+   *   (captureParticipationOfPattern); every other group keeps the
+   *   compile-time fence, which names the group.
+   *
+   * That is Node-exact wherever it compiles and loud everywhere else. The
+   * honest type of an unprovable group is `string | undefined`, and
+   * admitting THAT spelling is the remaining half of this surface: the
+   * desugar below reads the group out of matchAll's slice, where a
+   * nonparticipating group is already `""`, so it would need the drain to
+   * distinguish the two states first (a companion participation mask, the
+   * shape matchAllInto's index array already has). Not built here.
+   *
+   * # The desugar
+   *
+   * No new IR kinds, no backend or runtime involvement — the array-HOF
+   * stance. `s.replace(re, f)` becomes a call of an interned synthetic
+   * function whose body is matchAll's companion-index drain plus a plain
+   * loop of slice/concat/callValue. That the drain is EAGER is not an
+   * approximation: RegExp.prototype[@@replace] collects every match FIRST
+   * and only then calls the replacer, so the interleaving is the spec's.
+   *
+   * The internal regex always carries `g` (a non-global `.replace`
+   * replaces the first match only, which the helper spells by capping the
+   * row count at 1 — `y` still anchors at 0 either way). `.replaceAll`
+   * over a non-global regex must throw Node's TypeError and keeps the
+   * fence rather than have the desugar swallow it.
+   *
+   * Null only when the argument shapes never applied; every refusal
+   * inside is a named SC1120 fence. */
+  function lowerRegexReplaceFnCall(L: Lowerer, call: ts.CallExpression,
+    method: "replace" | "replaceAll",
+    receiver: IrExpr,
+    reNode: ts.Expression,
+    reIr: IrExpr,
+    fnIr: IrExpr,
+    loc: SrcLoc,): IrExpr | null {
+    const fnT = fnIr.type;
+    if (fnT.kind !== "func") return null;
+    const at = call.arguments[1] ?? call;
+    const fence = (why: string): never => L.unsupported("SC1120", at, why);
+    const lit = staticRegexTextOf(L, reNode);
+    if (lit === null) {
+      fence(
+        "a function replacement value over a regex the compiler cannot read statically (the group-participation proof needs the pattern — write the literal at the call, or bind it to a const)",
+      );
+    }
+    const part = captureParticipationOfPattern(lit!.pattern);
+    if (part === null) {
+      fence(
+        "a function replacement value over a pattern this compiler cannot scan for capture-group participation (a '{n,m}' quantifier on a group, or an escaped group name)",
+      );
+    }
+    if (method === "replaceAll" && !lit!.flags.includes("g")) {
+      fence(
+        "'.replaceAll()' with a function replacement value and a non-global regex (Node throws a TypeError here; add the 'g' flag)",
+      );
+    }
+    if (fnT.rest === true) {
+      fence("a function replacement value with a rest parameter (declare the capture groups it reads)");
+    }
+    if (fnT.ret.kind !== "string") {
+      fence(
+        `a function replacement value returning '${L.fmt(fnT.ret)}' (Node applies ToString to the result — declare the replacer '=> string')`,
+      );
+    }
+    const arity = fnT.params.length;
+    if (arity > 1 + part!.captureCount) {
+      fence(
+        `a function replacement value declaring ${arity} parameters over a pattern with ${part!.captureCount} capture group(s) (the trailing offset/subject/groups parameters have no lowering — declare only the match and its groups)`,
+      );
+    }
+    for (let i = 0; i < arity; i++) {
+      if (fnT.params[i]!.kind !== "string") {
+        fence(
+          `a function replacement value whose parameter ${i + 1} is '${L.fmt(fnT.params[i]!)}' (the match and its capture groups are strings — annotate them 'string')`,
+        );
+      }
+      if (i >= 1 && part!.always.get(i) !== true) {
+        fence(
+          `a function replacement value reading capture group ${i}, which this pattern does not always fill (Node passes 'undefined' for a group that did not participate, and this compiler will not quietly answer '' for it)`,
+        );
+      }
+    }
+    // The internal regex is the source one with 'g' guaranteed. When the
+    // author already wrote it, the ALREADY-LOWERED operand rides through
+    // (a const binding stays evaluated, exactly as JS evaluates it).
+    const re: IrExpr = lit!.flags.includes("g")
+      ? reIr
+      : { kind: "regexLit", pattern: lit!.pattern, flags: lit!.flags + "g", type: REGEX, loc };
+    const once = !lit!.flags.includes("g");
+    const helper = strReplaceFnHelper(L, arity, once, loc);
+    return { kind: "call", callee: helper, args: [receiver, re, fnIr], type: STRING, loc };
+  }
+
+/** Interned synthetic loop function for one (arity, once) combo. Named
+   * `%str.repl.<n>`, sharing the array-HOF helper table (one namespace of
+   * '%'-prefixed lifted helpers). */
+  function strReplaceFnHelper(L: Lowerer, arity: number, once: boolean, loc: SrcLoc): string {
+    const key = `strRepl:${arity}:${once}`;
+    const existing = L.arrHofHelpers.get(key);
+    if (existing) return existing;
+    const name = `%str.repl.${L.arrHofHelpers.size}`;
+    L.arrHofHelpers.set(key, name);
+    L.liftedFns.push(buildStrReplaceFn(L, name, arity, once, loc));
+    return name;
+  }
+
+/** The body of `%str.repl.<n>`:
+   *
+   *     const ix: number[] = [];
+   *     const rows = matchAllInto(s, re, ix);   // [whole, ...captures] per match
+   *     let out = ""; let nx = 0;
+   *     let n = rows.length; if (once && n > 1) n = 1;
+   *     for (let i = 0; i < n; i++) {
+   *       const row = rows[i], st = ix[i], w = row[0];
+   *       out = out + s.slice(nx, st);
+   *       out = out + f(w, row[1], …);
+   *       nx = st + w.length;
+   *     }
+   *     return out + s.slice(nx, s.length);
+   *
+   * Every index is UTF-16 — matchAllInto's start index, slice's bounds and
+   * `.length` all are, which is what makes the astral cases come out
+   * Node-exact. */
+  function buildStrReplaceFn(L: Lowerer, name: string, arity: number, once: boolean, loc: SrcLoc): IrFunction {
+    void L;
+    const rowT = arrayOf(STRING);
+    const rowsT = arrayOf(rowT);
+    const ixT = arrayOf(F64);
+    const fnT = funcOf(new Array<IrType>(arity).fill(STRING), STRING);
+    const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
+    const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+    const locals: IrLocal[] = [
+      { id: "s.0", name: "s", type: STRING, mutable: true },
+      { id: "re.0", name: "re", type: REGEX, mutable: true },
+      { id: "f.0", name: "f", type: fnT, mutable: true },
+      { id: "ix.0", name: "ix", type: ixT, mutable: false },
+      { id: "rows.0", name: "rows", type: rowsT, mutable: false },
+      { id: "out.0", name: "out", type: STRING, mutable: true },
+      { id: "nx.0", name: "nx", type: F64, mutable: true },
+      { id: "n.0", name: "n", type: F64, mutable: true },
+      { id: "i.0", name: "i", type: F64, mutable: true },
+      { id: "row.0", name: "row", type: rowT, mutable: false },
+      { id: "st.0", name: "st", type: F64, mutable: false },
+      { id: "w.0", name: "w", type: STRING, mutable: false },
+    ];
+    const params: IrParam[] = [
+      { localId: "s.0", name: "s", type: STRING },
+      { localId: "re.0", name: "re", type: REGEX },
+      { localId: "f.0", name: "f", type: fnT },
+    ];
+    const sliceOf = (from: IrExpr, to: IrExpr): IrExpr => ({
+      kind: "strIntrinsic",
+      method: "slice",
+      receiver: ref("s.0", STRING),
+      args: [from, to],
+      type: STRING,
+      loc,
+    });
+    const appendOut = (value: IrExpr): IrStmt => ({
+      kind: "assign",
+      localId: "out.0",
+      value: { kind: "strConcat", left: ref("out.0", STRING), right: value, type: STRING, loc },
+      loc,
+    });
+    // The replacer receives the whole match and then row[1..] — exactly
+    // the prefix it declares, the HOF-callback rule.
+    const callArgs: IrExpr[] = [];
+    for (let i = 0; i < arity; i++) {
+      callArgs.push(
+        i === 0
+          ? ref("w.0", STRING)
+          : { kind: "arrayGet", arr: ref("row.0", rowT), index: num(i), type: STRING, loc },
+      );
+    }
+    const body: IrStmt[] = [
+      { kind: "varDecl", localId: "ix.0", init: { kind: "arrayLit", elems: [], type: ixT, loc }, loc },
+      {
+        kind: "varDecl",
+        localId: "rows.0",
+        init: {
+          kind: "regexIntrinsic",
+          method: "matchAllInto",
+          receiver: ref("s.0", STRING),
+          args: [ref("re.0", REGEX), ref("ix.0", ixT)],
+          type: rowsT,
+          loc,
+        },
+        loc,
+      },
+      { kind: "varDecl", localId: "out.0", init: { kind: "strLit", value: "", type: STRING, loc }, loc },
+      { kind: "varDecl", localId: "nx.0", init: num(0), loc },
+      {
+        kind: "varDecl",
+        localId: "n.0",
+        init: { kind: "arrIntrinsic", method: "length", receiver: ref("rows.0", rowsT), args: [], type: F64, loc },
+        loc,
+      },
+    ];
+    if (once) {
+      // A non-global `.replace` replaces the FIRST match only.
+      body.push({
+        kind: "if",
+        cond: { kind: "bin", op: ">", left: ref("n.0", F64), right: num(1), type: BOOL, loc },
+        then: [{ kind: "assign", localId: "n.0", value: num(1), loc }],
+        else_: null,
+        loc,
+      });
+    }
+    body.push({
+      kind: "for",
+      init: { kind: "varDecl", localId: "i.0", init: num(0), loc },
+      cond: { kind: "bin", op: "<", left: ref("i.0", F64), right: ref("n.0", F64), type: BOOL, loc },
+      update: {
+        kind: "assign",
+        localId: "i.0",
+        value: { kind: "bin", op: "+", left: ref("i.0", F64), right: num(1), type: F64, loc },
+        loc,
+      },
+      body: [
+        {
+          kind: "varDecl",
+          localId: "row.0",
+          init: { kind: "arrayGet", arr: ref("rows.0", rowsT), index: ref("i.0", F64), type: rowT, loc },
+          loc,
+        },
+        {
+          kind: "varDecl",
+          localId: "st.0",
+          init: { kind: "arrayGet", arr: ref("ix.0", ixT), index: ref("i.0", F64), type: F64, loc },
+          loc,
+        },
+        {
+          kind: "varDecl",
+          localId: "w.0",
+          init: { kind: "arrayGet", arr: ref("row.0", rowT), index: num(0), type: STRING, loc },
+          loc,
+        },
+        appendOut(sliceOf(ref("nx.0", F64), ref("st.0", F64))),
+        appendOut({ kind: "callValue", callee: ref("f.0", fnT), args: callArgs, type: STRING, loc }),
+        {
+          kind: "assign",
+          localId: "nx.0",
+          value: {
+            kind: "bin",
+            op: "+",
+            left: ref("st.0", F64),
+            right: {
+              kind: "strIntrinsic",
+              method: "length",
+              receiver: ref("w.0", STRING),
+              args: [],
+              type: F64,
+              loc,
+            },
+            type: F64,
+            loc,
+          },
+          loc,
+        },
+      ],
+      loc,
+    });
+    body.push(appendOut(sliceOf(
+      ref("nx.0", F64),
+      { kind: "strIntrinsic", method: "length", receiver: ref("s.0", STRING), args: [], type: F64, loc },
+    )));
+    body.push({ kind: "return", value: ref("out.0", STRING), loc });
+    return { name, params, returnType: STRING, locals, body, loc };
   }
 
 /** `s.slice(1, 4)` and friends → strIntrinsic. Null when this isn't an
