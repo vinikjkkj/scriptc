@@ -5561,6 +5561,13 @@ ScrStr *scr_str_from_char_code(ScrArr *codes);
 /* The spread-typed-array form (String.fromCharCode(...bytes) — the
  * magic-number ASCII probe); same semantics per element. */
 ScrStr *scr_str_from_char_code_bytes(ScrBytes *codes);
+/* crypto.timingSafeEqual(a, b) (scr_bytes_io.c): constant-time equality
+ * over BYTE length (widths folded, so a Uint32Array and a Uint8Array of
+ * the same byte count compare). A length MISMATCH throws Node's
+ * ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH RangeError — it is not answered
+ * `false`, which would reintroduce the data-dependent branch the whole
+ * member exists to avoid. The compare never short-circuits. */
+bool scr_crypto_timing_safe_equal(const ScrBytes *a, const ScrBytes *b);
 double scr_str_last_index_of(ScrStr *s, ScrStr *needle);
 
 /* ── Number statics (scr_lib.c) ───────────────────────────────────────

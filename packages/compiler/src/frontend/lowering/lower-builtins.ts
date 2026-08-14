@@ -4408,6 +4408,46 @@ let digestInputValueDispatches = 0;
           "secret-key surface, which has no lowering)",
       );
     }
+    // `timingSafeEqual(a, b)` — the constant-time compare. Both
+    // arguments must be typed-array/Buffer values; @types/node declares
+    // them as the wide NodeJS.ArrayBufferView, so the check is on the
+    // MAPPED type and any element width is admitted (Node's contract is
+    // byte length, and the runtime folds the widths). An ArrayBuffer
+    // argument keeps its fence: it has no representation here.
+    //
+    // Nothing about the length is decided at this level. The
+    // length-mismatch RangeError is a SPECIFIED behaviour of the call,
+    // so it belongs where the lengths are — lowering it into a
+    // compile-time refusal, or into a `false`, would turn a contract
+    // into a wrong answer.
+    if (bi.member === "timingSafeEqual") {
+      if (expr.arguments.length !== 2 || expr.arguments.some(ts.isSpreadElement)) {
+        L.noLowering(
+          `timingSafeEqual with ${expr.arguments.length} arguments`,
+          expr,
+          "pass exactly two Buffer/typed-array values",
+        );
+      }
+      const [aNode, bNode] = [expr.arguments[0]!, expr.arguments[1]!];
+      const aT = L.mapTypeOf(L.typeOf(aNode));
+      const bT = L.mapTypeOf(L.typeOf(bNode));
+      if (aT?.kind !== "bytes" || bT?.kind !== "bytes") {
+        const bad = aT?.kind !== "bytes" ? aNode : bNode;
+        const badT = aT?.kind !== "bytes" ? aT : bT;
+        L.noLowering(
+          `timingSafeEqual over '${badT ? L.fmt(badT) : L.checker.typeToString(L.typeOf(bad))}' values`,
+          bad,
+          "Buffer/Uint8Array (and the other typed-array widths) are the lowered forms",
+        );
+      }
+      return {
+        kind: "libCall",
+        fn: "crypto.timingSafeEqual",
+        args: [L.lowerExpr(aNode), L.lowerExpr(bNode)],
+        type: BOOL,
+        loc,
+      };
+    }
     // `pbkdf2Sync(password, salt, iterations, keylen, digest)` — the
     // SHA-256 derivation. The digest name must be a literal and must
     // spell sha256: deriving with a different PRF silently produces a
