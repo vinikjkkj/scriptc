@@ -31,7 +31,14 @@
 // 5. A BARE EventEmitter. The skip applies only to the builtin as a STRICT
 //    ancestor (`c !== info`); the runtime class itself is still refused, and
 //    the whole emitter surface with it.
+//
+// 6. A node:stream value. The stream ClassInfos root at %EventEmitter through
+//    their base chain, so the skip could in principle be reached from one --
+//    it is not, because the walk meets the stream node (`builtinStream`)
+//    first and declines there. Pinned so a future "skip every builtin"
+//    simplification cannot quietly project a runtime stream layout.
 import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 
 class MyErr extends Error {
     readonly code2: number = 3;
@@ -70,3 +77,6 @@ console.log(w.m("a"));
 
 const bare = new EventEmitter() as unknown as { setMaxListeners: (n: number) => unknown };
 console.log(typeof bare.setMaxListeners);
+
+const stream = new PassThrough() as unknown as { write: (c: string) => boolean };
+console.log(typeof stream.write);
