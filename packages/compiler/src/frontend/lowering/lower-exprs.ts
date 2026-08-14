@@ -3136,6 +3136,36 @@ export function pureReemittable(e: IrExpr): boolean {
     return pureReemittable(e);
   }
 
+/** A plain keyed ACCESS — `o.k` / `o["k"]`, no optional chain — or a bare
+ * IDENTIFIER. The syntaxes an index-signature read can wear directly or
+ * one binding later, and the ones for which lowerExprExpecting is exactly
+ * lowerExpr followed by the coercion (its own rules are for
+ * `Object.freeze`, array literals and object literals — none of these). */
+function keyedAccessSyntax(n: ts.Expression): boolean {
+  if (ts.isIdentifier(n)) return true;
+  return (
+    (ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n)) &&
+    n.questionDotToken === undefined
+  );
+}
+
+/** Is this expression's value tested for nullish by the operator that
+ * consumes it — i.e. is it the LEFT operand of an enclosing `??`
+ * (parentheses tolerated)? Deliberately syntactic and deliberately
+ * narrow: it is the one destination where an `undefined` this node
+ * produces is not merely representable but the answer the consumer is
+ * asking for. */
+function nullishTestedByParent(expr: ts.Expression): boolean {
+  let n: ts.Node = expr;
+  while (n.parent && ts.isParenthesizedExpression(n.parent)) n = n.parent;
+  const p = n.parent;
+  return (
+    p !== undefined && ts.isBinaryExpression(p) &&
+    p.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken &&
+    p.left === n
+  );
+}
+
 /** `a ?? b` — JS-exact nullish coalescing: ONLY null/undefined take the
    * default (0, "", and false do not), and the right side evaluates lazily.
    * On a unit-armed union left this is the `nullish` node (a runtime tag
@@ -3194,7 +3224,19 @@ export function pureReemittable(e: IrExpr): boolean {
         const right = L.coerceToExpected(L.lowerExpr(expr.right), DYN);
         if (right.type.kind === "dyn") {
           const test: IrExpr = { kind: "nullish", left: atWidth, right, type: DYN, loc };
-          return want.kind === "dyn" ? test : { kind: "dynCheck", value: test, type: want, loc };
+          // `attrs.a ?? attrs.b ?? "tail"` — BOTH keys absent. The
+          // validated exit back to `want` is the right edge for every
+          // consumer but one: an enclosing `??` is about to test this
+          // value for nullish, and undefined is the answer it is asking
+          // for. Checking it back to a width that cannot say undefined
+          // threw an uncoded "expected string at $, got undefined" where
+          // Node prints the tail default — pre-existing, identical on
+          // `main` (repro-pt/lab/n1.ts). Hand it over at dyn width
+          // instead; the enclosing `??` has a total dyn arm, and the
+          // predicate guarantees that arm is the consumer.
+          return want.kind === "dyn" || nullishTestedByParent(expr)
+            ? test
+            : { kind: "dynCheck", value: test, type: want, loc };
         }
       }
     }
@@ -3205,6 +3247,56 @@ export function pureReemittable(e: IrExpr): boolean {
     const type = L.irTypeOf(expr);
     const rest = def.arms.filter((a) => !isUnitType(a));
     if (typeEquals(type, left.type) || (rest.length === 1 && typeEquals(type, rest[0]!))) {
+      // `event.key.participant ?? event.rawNode.attrs.participant ??
+      // event.key.remoteJid` (zapo mailbox.ts:99). The MIDDLE operand is
+      // this `??`'s default, and its value is handed straight to the
+      // ENCLOSING `??`, whose entire job is to test it for nullish. So
+      // the destination can say undefined and must: JS evaluates the
+      // chain left to right and takes the first non-nullish, which for an
+      // absent key is `remoteJid`. tsc types the middle read `string`,
+      // the fold above then demanded a string, and the miss aborted the
+      // process one operand short of the answer.
+      //
+      // The enclosing test is asked of the SYNTAX (a `??` whose left this
+      // node is, parentheses tolerated) because that is the fact being
+      // relied on, and it is the only destination this rung claims: a
+      // chain of two takes the plain fold and keeps its trap. The right
+      // operand is restricted to a plain keyed ACCESS so that lowering it
+      // here is exactly what lowerExprExpecting would have done with it
+      // (that function's own rules are for `Object.freeze`, array and
+      // object literals — none of them this syntax).
+      if (keyedAccessSyntax(expr.right) && nullishTestedByParent(expr)) {
+        const raw = L.lowerExpr(expr.right);
+        // The middle operand is the read itself, or a REFERENCE to the
+        // local that holds it at dyn width (zapo persistContacts:
+        // `const rawParticipant = event.rawNode.attrs.participant` on the
+        // line above, then `event.key.participant ?? rawParticipant ??
+        // event.key.remoteJid`). tsc narrows each such reference back to
+        // the scalar it believes and maybeNarrow bridges it with a
+        // VALIDATED extraction — right for a use that needs the value,
+        // wrong for THIS one, which is asking whether there is a value at
+        // all: it threw "expected string at $, got undefined" where Node
+        // takes the tail. Pre-existing and identical on `main`
+        // (repro-pt/lab/q1.ts). narrowBridgeDyn drops the validation and
+        // keeps the operand; the dyn then converts into the armed union
+        // through the ordinary boundary, whose walker builds the undefined
+        // arm from a dyn undefined and validates every other kind.
+        //
+        // The armed union is interned only once a candidate is in hand: a
+        // union the rung then declines would still be a new entry in the
+        // program-wide table, and renumbering the unions of a program that
+        // does not use this rule is churn with no answer behind it.
+        const bridged = raw.kind === "recordKeyGet" ? null : narrowBridgeDyn(raw);
+        const armedT = raw.kind === "recordKeyGet" || bridged ? L.withUndefinedArmOf(type) : null;
+        if (armedT !== null) {
+          const armed = L.recordKeyReadAtUndefinedArm(raw, armedT);
+          if (armed) return { kind: "nullish", left, right: armed, type: armedT, loc };
+          if (bridged) {
+            return { kind: "nullish", left, right: L.coerceInto(expr.right, bridged, armedT), type: armedT, loc };
+          }
+        }
+        return { kind: "nullish", left, right: L.coerceInto(expr.right, raw, type), type, loc };
+      }
       const right = L.lowerExprExpecting(expr.right, type);
       return { kind: "nullish", left, right, type, loc };
     }
@@ -6649,6 +6741,20 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         fields.push({ name, value: slotted, overflow: true, expl: true });
         continue;
       }
+      // `participantJid: event.rawNode.attrs.participant` into a
+      // `participantJid?: string` slot (zapo mailbox.ts:100). The checker
+      // types an index-signature read by the signature's VALUE type, so
+      // the read is spelled `string` and its miss had nowhere to go — an
+      // ABORT, on every ordinary incoming 1:1 message, past the caller's
+      // own try/catch. The FIELD can say undefined and keeps saying it:
+      // tsc does not narrow an optional property from the literal that
+      // initialised it (measured — repro-pt/lab/narrowq2.ts (4)), so the
+      // readers were compiled against `string | undefined` and every one
+      // of them discriminates. That is the difference from the
+      // declaration/assignment/property-write destinations, which tsc
+      // DOES narrow and which recordKeyReadAtUndefinedArm is therefore
+      // never offered.
+      value = L.recordKeyReadAtUndefinedArm(value, fieldType) ?? value;
       value = L.coerceInto(valueNode, value, fieldType); // union-typed fields wrap arm values
       if (!typeEquals(value.type, fieldType)) L.badType(valueNode, L.typeOf(valueNode));
       // An explicit property overrides a spread-copied field: JS
