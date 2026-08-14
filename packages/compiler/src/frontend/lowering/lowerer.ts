@@ -4520,10 +4520,21 @@ export class Lowerer {
    * inexact method signature, a builtin runtime layout, or a field that
    * doesn't lift. */
   ctorWitnessProjection(className: string, target: IrType & { kind: "record" }, loc: SrcLoc): string | null {
+    // SCRIPTC_PROJ_WHY: name the declining clause. The projection is
+    // per-REQUESTED-FIELD and its declines are numerous; three separate
+    // reports guessed the wrong clause before this probe existed.
+    const why = (m: string): null => {
+      if (process.env["SCRIPTC_PROJ_WHY"] !== undefined) {
+        console.error(`[projwhy] ${className} -> shape ${target.shapeId}: ${m}`);
+      }
+      return null;
+    };
     const shape = this.shapes.get(target.shapeId);
     const info = this.classes.get(className);
-    if (!shape || !info || shape.tuple || shape.indexValue !== undefined || shape.fields.length === 0) return null;
-    if (shape.fields.some((f) => f.name.startsWith("%"))) return null;
+    if (!shape || !info || shape.tuple || shape.indexValue !== undefined || shape.fields.length === 0) {
+      return why(`shape/class prelude (shape=${shape !== undefined} class=${info !== undefined} tuple=${shape?.tuple === true} indexValue=${shape?.indexValue !== undefined} fields=${shape?.fields.length ?? -1})`);
+    }
+    if (shape.fields.some((f) => f.name.startsWith("%"))) return why("a reserved '%' field (accessor slot) in the target shape");
     for (let c: ClassInfo | null = info; c; c = c.base) {
       // A user class that merely EXTENDS node:events EventEmitter IS
       // projectable. registerBuiltinEmitterClass gives %EventEmitter an
@@ -4551,7 +4562,9 @@ export class Lowerer {
       ) {
         continue;
       }
-      if (c.builtinError || c.builtinEmitter || c.builtinStream !== undefined || c.def.runtime) return null;
+      if (c.builtinError || c.builtinEmitter || c.builtinStream !== undefined || c.def.runtime) {
+        return why(`base chain reached builtin '${c.def.name}' (error=${c.builtinError === true} emitter=${c.builtinEmitter === true} stream=${c.builtinStream !== undefined} runtime=${c.def.runtime === true})`);
+      }
     }
     const key = `ctorwitness:${className}:${target.shapeId}`;
     const existing = this.retagHelpers.get(key);
@@ -4582,14 +4595,14 @@ export class Lowerer {
             armIdx < 0 ||
             !udef.arms.some((a) => a.kind === "undefinedT")
           ) {
-            return null;
+            return why(`field '${f.name}': a union-typed method field that is not exactly (signature | undefined)`);
           }
           fnT = udef.arms[armIdx]!;
           wrap = { unionId: f.type.unionId, tag: armIdx };
         }
-        if (fnT.kind !== "func" || fnT.rest === true) return null;
-        if (found.sig.abstract === true || found.sig.gen !== undefined) return null;
-        if (found.sig.params.some((p) => p.mode === "rest")) return null;
+        if (fnT.kind !== "func" || fnT.rest === true) return why(`field '${f.name}': target member is not a plain (rest-free) function type`);
+        if (found.sig.abstract === true || found.sig.gen !== undefined) return why(`field '${f.name}': the class method is abstract or generic`);
+        if (found.sig.params.some((p) => p.mode === "rest")) return why(`field '${f.name}': the class method takes a rest parameter`);
         const methodParamTypes = found.sig.params.map((p) => p.type);
         const methodT = funcOf(methodParamTypes, found.sig.ret);
         // The class method may carry EXTRA TRAILING OPTIONAL parameters
@@ -4608,7 +4621,9 @@ export class Lowerer {
             typeEquals(found.sig.ret, fnT.ret) &&
             fnT.params.every((fp, i) => typeEquals(fp, methodParamTypes[i]!)) &&
             methodParamTypes.slice(fnT.params.length).every(optionalParam);
-          if (!compatible) return null;
+          if (!compatible) {
+            return why(`field '${f.name}': signature mismatch — method ${typeKey(methodT).slice(0, 110)} vs target ${typeKey(fnT).slice(0, 110)}`);
+          }
           extraParams = methodParamTypes.slice(fnT.params.length);
         }
         plan.push({
@@ -4624,18 +4639,22 @@ export class Lowerer {
         });
         continue;
       }
-      if (findMethodOn(this, info, `get:${f.name}`) || findGenericMethodOn(this, info, f.name)) return null;
+      if (findMethodOn(this, info, `get:${f.name}`) || findGenericMethodOn(this, info, f.name)) {
+        return why(`field '${f.name}': satisfied by an ACCESSOR or a generic method`);
+      }
       const ft = info.fields.get(f.name);
       if (ft === undefined) {
-        if (f.type.kind !== "union") return null;
+        if (f.type.kind !== "union") return why(`field '${f.name}': the class has no such member and the target slot is not undefined-armed`);
         const def = this.unions.get(f.type.unionId);
         const utag = def ? def.arms.findIndex((a) => a.kind === "undefinedT") : -1;
-        if (utag < 0) return null;
+        if (utag < 0) return why(`field '${f.name}': the class has no such member and the target union has no undefined arm`);
         plan.push({ how: "absent", name: f.name, utag, fieldT: f.type });
         continue;
       }
       const lift = this.widthLiftPlan(ft, f.type);
-      if (!lift) return null;
+      if (!lift) {
+        return why(`field '${f.name}': the class field does not width-lift — ${typeKey(ft).slice(0, 110)} into ${typeKey(f.type).slice(0, 110)}`);
+      }
       plan.push({ how: "lift", name: f.name, src: ft, lift, fieldT: f.type });
     }
     const builder = `%ctorwitness.${this.retagHelpers.size}`;
