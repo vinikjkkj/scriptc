@@ -134,9 +134,12 @@ function onceArg(L: Lowerer, call: ts.CallExpression, loc: SrcLoc): IrExpr {
  * EventTarget ignores every other type silently; ignoring silently is the
  * one answer worse than refusing, so a different literal refuses and a
  * computed name refuses too. */
-function requireAbortType(L: Lowerer, a: ts.Expression | undefined, what: string): void {
+function requireAbortType(L: Lowerer, call: ts.CallExpression, a: ts.Expression | undefined, what: string): void {
   if (a === undefined || !ts.isStringLiteral(a)) {
-    L.noLowering(`${what} with a computed event name`, a ?? undefined!,
+    // `a` is absent only from a JS caller (the .d.ts makes `type`
+    // required), so the refusal anchors at the CALL when there is no
+    // argument node to point at.
+    L.noLowering(`${what} with a computed event name`, a ?? call,
       "'abort' is the only event an AbortSignal has — pass the literal");
   }
   if (a.text !== "abort") {
@@ -203,7 +206,7 @@ export function lowerAbortMethodCall(
     L.noLowering(`AbortController.${name}`, call, CONTROLLER_HINT, L.checker.getSymbolAtLocation(access.name));
   }
   if (name === "addEventListener") {
-    requireAbortType(L, call.arguments[0], "AbortSignal.addEventListener");
+    requireAbortType(L, call, call.arguments[0], "AbortSignal.addEventListener");
     if (call.arguments.length < 2) {
       L.noLowering("AbortSignal.addEventListener with one argument", call, "addEventListener('abort', fn) is the shape");
     }
@@ -213,7 +216,7 @@ export function lowerAbortMethodCall(
     return { kind: "libCall", fn: "abort.on", args: [receiver, fn, once], type: VOID, loc };
   }
   if (name === "removeEventListener") {
-    requireAbortType(L, call.arguments[0], "AbortSignal.removeEventListener");
+    requireAbortType(L, call, call.arguments[0], "AbortSignal.removeEventListener");
     if (call.arguments.length < 2 || call.arguments.length > 2) {
       L.noLowering(
         `AbortSignal.removeEventListener with ${call.arguments.length} argument${call.arguments.length === 1 ? "" : "s"}`,
