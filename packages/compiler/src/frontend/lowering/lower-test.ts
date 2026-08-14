@@ -454,7 +454,7 @@ export function lowerTestMethodCall(
  * for other receivers/members (the chain keeps trying); unlowered
  * TestContext members fence member-qualified. */
 export function lowerTestCtxProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-  if (expr.questionDotToken) return null;
+  if (L.chainBlocked(expr)) return null;
   if (L.mapTypeOf(L.typeOf(expr.expression))?.kind !== "testCtx") return null;
   if (!L.isStdlibMember(expr)) return null;
   const loc = locOf(expr);

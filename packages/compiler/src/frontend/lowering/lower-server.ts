@@ -1967,7 +1967,7 @@ function lowerH2StreamMethodCall(L: Lowerer, call: ts.CallExpression,
  * the two reads never materializes; the runtime answers the bound port
  * directly. Null for every other property shape. */
 export function lowerServerProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-  if (expr.questionDotToken) return null;
+  if (L.chainBlocked(expr)) return null;
   const loc = locOf(expr);
   // req.url / req.method — always-present strings on server requests;
   // req.headers.NAME — the `string | undefined` union (envGet's type).
