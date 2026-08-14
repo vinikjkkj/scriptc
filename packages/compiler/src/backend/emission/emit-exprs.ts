@@ -255,8 +255,33 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // position) and the result is an ordinary temp of the current
         // frame. The validator restricted stmts to straight-line writes —
         // no jump can leave the region.
-        for (const s of e.stmts) E.emitStmt(s);
-        return E.emitExpr(e.result);
+        //
+        // The region owns the hidden locals whose whole live range it is
+        // (seqScopedLocals): they are released HERE rather than at block
+        // exit. Leaving them in the block scope is what makes every later
+        // unwind in that block name them — N property writes in one
+        // function costing 1.5N² release lines instead of a constant
+        // apiece. It is a SCOPE, not a frame, so an unwind from inside
+        // the region still releases the region first and everything
+        // outside it after (releaseForJump walks every scope, innermost
+        // out). No C braces are introduced: the locals are still declared
+        // once at the top of the function, and nothing is rescoped in the
+        // emitted C.
+        E.scopes.push([]);
+        E.seqScopeAt.add(E.scopes.length - 1);
+        let out: Temp;
+        try {
+          for (const s of e.stmts) E.emitStmt(s);
+          // The value is produced BEFORE the region is released: a varRef
+          // to a refcounted local comes out +1 into the enclosing
+          // statement frame, so releasing the region cannot take the
+          // expression's value with it.
+          out = E.emitExpr(e.result);
+        } finally {
+          E.seqScopeAt.delete(E.scopes.length - 1);
+          E.releaseFrame(E.scopes.pop()!);
+        }
+        return out;
       }
       case "dynDestrCheck": {
         // RequireObjectCoercible with V8's destructuring TypeError. dyn
