@@ -7801,7 +7801,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
    * Null when this is neither form. */
   export function lowerDateCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     const loc = locOf(call);
     if (L.stdlibGlobalMember(access, "Date") === "now") {
       if (call.arguments.length !== 0) {

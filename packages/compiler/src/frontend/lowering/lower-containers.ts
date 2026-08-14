@@ -2665,7 +2665,7 @@ function lowerOptionalDefaultArg(
    * Array-static access. */
   export function lowerArrayFromCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (!L.isStdlibGlobal(access.expression, "Array")) return null;
     if (access.name.text !== "from") return null;
     const loc = locOf(call);
@@ -3544,7 +3544,7 @@ const MAP_ITER_METHODS = new Set(["keys", "values", "entries"]);
    * isn't the stdlib Object/Map groupBy. */
   export function lowerGroupByStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (access.name.text !== "groupBy") return null;
     const isMap = L.isStdlibGlobal(access.expression, "Map");
     const isObject = !isMap && L.isStdlibGlobal(access.expression, "Object");
@@ -6651,7 +6651,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
    * the callee isn't a Buffer-static access. */
   export function lowerBufferStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (!L.isStdlibGlobal(access.expression, "Buffer")) return null;
     const member = access.name.text;
     const loc = locOf(call);
