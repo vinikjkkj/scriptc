@@ -35,6 +35,13 @@ const server = http.createServer((req, res) => {
     console.log("absent is undefined:", pick(false)?.url === undefined);
     console.log("receiver evals:", recvEvals);
 
+    // `headers` as a VALUE is a snapshot RECORD, so the chained read is
+    // the one member whose result type the lowering reads back off the
+    // checker — under a chain that type carries the guard's undefined arm,
+    // and the read has to answer the record anyway.
+    const hs = maybe?.headers;
+    console.log("probe header:", hs === undefined ? "none" : hs["x-probe-3604"]);
+
     res.statusCode = 204;
     res.end();
 });
@@ -42,7 +49,12 @@ const server = http.createServer((req, res) => {
 server.listen(0, () => {
     const addr = server.address();
     const port = addr !== null && typeof addr !== "string" ? addr.port : 0;
-    const req = http.get({ host: "127.0.0.1", port: port, path: "/probe?q=1" }, (res) => {
+    const req = http.get({
+        host: "127.0.0.1",
+        port: port,
+        path: "/probe?q=1",
+        headers: { "x-probe-3604": "round-tripped" },
+    }, (res) => {
         // The RESPONSE side: statusCode is the `number | undefined` union,
         // and the chained read must produce the same arm as the plain one.
         const maybe: typeof res | undefined = res;
