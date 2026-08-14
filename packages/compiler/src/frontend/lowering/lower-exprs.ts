@@ -6015,7 +6015,11 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         };
         const earlierStable = fields.every((f) => f.value === undefined || orderIndependent(f.value));
         if (srcLowered && !pureReemittable(srcLowered) && (!afterExplicit || earlierStable)) {
-          if (fields.every((f) => pureReemittable(f.value))) {
+          // `pureReemittable` is about re-READING a value cheaply and so
+          // starts at `varRef`; a LITERAL is not one of its kinds even
+          // though nothing is purer. `orderIndependent` covers exactly
+          // those, so the two together are the honest test here.
+          if (fields.every((f) => pureReemittable(f.value) || orderIndependent(f.value))) {
             const slot = L.declareHiddenLocal("%spread", srcLowered.type);
             prelude.push({ kind: "varDecl", localId: slot.id, init: srcLowered, loc: locOf(srcNode) });
             srcLowered = { kind: "varRef", localId: slot.id, type: srcLowered.type, loc: locOf(srcNode) };
