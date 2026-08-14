@@ -3579,7 +3579,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
    * site downstream). */
   export function lowerStaticMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (access.questionDotToken) return null;
+    if (L.chainBlocked(access)) return null;
     // `module.exports.describe()` in a module whose whole export IS a
     // class expression: the receiver is exactly that class (the kept
     // export assignment pins it) — the direct-name rules apply.
