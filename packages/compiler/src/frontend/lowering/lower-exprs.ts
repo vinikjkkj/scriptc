@@ -317,6 +317,65 @@ export function ctorObjectGlobalValue(L: Lowerer, canonical: string, loc: SrcLoc
   return { kind: "libCall", fn: "dyn.u8Ctor", args: [], type: DYN, loc };
 }
 
+/** Node's `typeof` answer for a stdlib global taken as a VALUE, read off
+ * the CHECKER's declared type — or null where the shape says nothing.
+ *
+ * `typeof` is the one consumer of a stdlib global that never needs the
+ * value: the answer is a property of the global's KIND, and the standard
+ * library declares the kind. Every other consumer keeps the value it had
+ * (the identity token in a JavaScript source, the SC2020 fence in a
+ * TypeScript one) — this asks a different question of the same symbol,
+ * it does not hand the token a kind. That distinction is why this is not
+ * the token generalisation the sibling measurement refuted: nothing here
+ * makes an uncallable global claim it can be called; it reports what the
+ * declaration already says.
+ *
+ * A global whose declared type says NOTHING keeps its old answer: the
+ * capability-gated pair (`crypto`, `localStorage`, ... — `declare var
+ * crypto: unknown`) is deliberately typed for a runtime that does not
+ * have them, so there is no fact here to report and the fold declines.
+ *
+ * A constructor this compiler does not let a program CONSTRUCT is written
+ * as a statics-only interface, which is structurally the same thing as
+ * `Math` — and Node still answers "function" for it, because the value is
+ * a function object. Two of the three such globals say so in the
+ * declaration: `readonly prototype: X` is what a library writes to mean
+ * "this value is the constructor", and it is the JS marker of a function
+ * object (`MessagePort` and `AbortSignal` here — measured, not assumed).
+ * `Buffer` is the third and declares no prototype either, so it is a
+ * NAMED exception. The whole 93-global census — every name the ambient
+ * files and the ES lib declare — agrees with Node on every other entry,
+ * which is what makes one name a named exception rather than a shape rule
+ * guessing for a family. */
+const FUNCTION_VALUED_GLOBALS: ReadonlySet<string> = new Set([
+  // `new Buffer()` was removed from Node's API, so the BufferConstructor
+  // this compiler declares carries only the statics (from/alloc/concat/
+  // ...) and no prototype. `typeof Buffer` is "function" in Node 25.
+  "Buffer",
+]);
+
+export function stdlibGlobalTypeOfAnswer(L: Lowerer, canonical: string, t: ts.Type): string | null {
+  if (
+    FUNCTION_VALUED_GLOBALS.has(canonical) ||
+    L.checker.getCallSignatures(t).length > 0 ||
+    L.checker.getConstructSignatures(t).length > 0
+  ) {
+    return "function";
+  }
+  const f = t.flags;
+  if (f & ts.TypeFlags.NumberLike) return "number";
+  if (f & ts.TypeFlags.StringLike) return "string";
+  if (f & ts.TypeFlags.BooleanLike) return "boolean";
+  if (f & ts.TypeFlags.BigIntLike) return "bigint";
+  if (f & ts.TypeFlags.ESSymbolLike) return "symbol";
+  if (f & (ts.TypeFlags.Undefined | ts.TypeFlags.Void)) return "undefined";
+  if (f & ts.TypeFlags.Null) return "object";
+  if (f & ts.TypeFlags.Object) {
+    return L.checker.getPropertyOfType(t, "prototype") !== undefined ? "function" : "object";
+  }
+  return null;
+}
+
 function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     const loc = locOf(expr);
 
@@ -789,26 +848,30 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       return { kind: "jsOp", op: "arrLit", args, type: JSVAL, loc };
     }
     if (ts.isTypeOfExpression(expr)) {
-      // `typeof queueMicrotask` / `typeof DOMException` on a STDLIB global
-      // whose declared type is callable or constructable: folds to
-      // "function" BEFORE the operand lowers — the identity-token story
-      // (JS files) deliberately represents these values as strings, and
-      // the TS-file fence would name a value the program never needs; an
-      // identifier read has no side effects to preserve. Node's answer for
-      // every function and constructor global is "function" (the harness's
-      // `typeof queueMicrotask === 'function'` probes). Shadowing locals
-      // have non-stdlib symbols and keep the ordinary path.
+      // `typeof queueMicrotask` / `typeof Math` on a STDLIB global: folds
+      // to Node's answer BEFORE the operand lowers — read off the declared
+      // type, because `typeof` is the one consumer that never needs the
+      // value. A JavaScript source represents these values as the identity
+      // TOKEN (an interned string), so lowering the operand answered
+      // "string" for every global that is not callable — `Math`, `JSON`,
+      // `globalThis`, `process`, `console`, `Reflect`, `Intl`,
+      // `performance` and `Buffer` all lied, silently, in the one shape
+      // vendored bundles sniff their environment with; a TypeScript source
+      // fenced SC2020 instead, naming a value the program never asked for.
+      // An identifier read has no side effects to preserve, and the gate is
+      // exactly the one that mints the token (stdlibGlobalNameOf's surface:
+      // the bare name, `globalThis.<name>`, and the casts over it), so the
+      // two stay in step. Shadowing locals have non-stdlib symbols and keep
+      // the ordinary path.
+      {
+        const g = stdlibGlobalNameOf(L, expr.expression);
+        if (g !== null) {
+          const answer = stdlibGlobalTypeOfAnswer(L, g, L.typeOf(expr.expression));
+          if (answer !== null) return { kind: "strLit", value: answer, type: STRING, loc };
+        }
+      }
       if (ts.isIdentifier(expr.expression)) {
         const sym = L.checker.getSymbolAtLocation(expr.expression);
-        if (L.isStdlibSymbol(sym)) {
-          const t = L.typeOf(expr.expression);
-          if (
-            L.checker.getCallSignatures(t).length > 0 ||
-            L.checker.getConstructSignatures(t).length > 0
-          ) {
-            return { kind: "strLit", value: "function", type: STRING, loc };
-          }
-        }
         // `typeof window` / `typeof define` — a name NOTHING in the program
         // binds. This is the one read of an undeclared name JavaScript does
         // not throw on, and its answer is fixed: "undefined". The operand
