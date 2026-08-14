@@ -4484,6 +4484,20 @@ export class Lowerer {
     if (!shape || !info || shape.tuple || shape.indexValue !== undefined || shape.fields.length === 0) return null;
     if (shape.fields.some((f) => f.name.startsWith("%"))) return null;
     for (let c: ClassInfo | null = info; c; c = c.base) {
+      // A user class that merely EXTENDS node:events EventEmitter IS
+      // projectable. registerBuiltinEmitterClass gives %EventEmitter an
+      // EMPTY fields map and an EMPTY methods map -- the ScrEmitter
+      // registry/name prefix is laid out by the BACKEND, not by IR fields
+      // -- so nothing a plan can name ever resolves ONTO it: the emitter
+      // surface (`on`, `emit`, ...) lowers through lower-emitter.ts and
+      // findMethodOn cannot see it, so a target naming one of those still
+      // declines below (no method, no field, no undefined arm). Every
+      // member the plan CAN reach is the user class own, and fieldGet /
+      // `%Decl.m` on it are exactly what an ordinary method body emits.
+      // The Error and stream chains keep declining unchanged: %Error DOES
+      // publish `name`/`message`/`toString` as runtime layout, and a
+      // stream node is reached before this skip can apply.
+      if (c !== info && c.builtinEmitter === true) continue;
       if (c.builtinError || c.builtinEmitter || c.builtinStream !== undefined || c.def.runtime) return null;
     }
     const key = `ctorwitness:${className}:${target.shapeId}`;
