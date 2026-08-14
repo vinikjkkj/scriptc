@@ -9230,7 +9230,52 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
           }
         }
       }
-      const resultT = L.mapTypeOf(L.typeOf(call));
+      // tsc types `Promise.resolve([])` as `Promise<never[]>`: the empty
+      // literal has no element of its own, and `resolve<T>(value: T):
+      // Promise<Awaited<T>>` puts a conditional type between the slot's
+      // contextual type and T, so the inference that supplies an element
+      // in every ordinary slot never runs here. `never[]` then maps to
+      // the f64 array — the uninhabited's representation, not the slot's
+      // element — and the coercion at the return fences on a
+      // 'Promise<number[]>' the source never wrote.
+      //
+      // Two places already state this rule for a bare `[]`
+      // (lowerExprExpecting's array slot and lowerReturnValue's return
+      // slot, both for the same reason); this is the same rule one
+      // wrapper out. It is sound for the same reason those are: the
+      // literal is EMPTY, so the element type it is BUILT at is
+      // unobservable — no element exists to read, and the array's own
+      // element vtable only ever runs over elements. Only the slot has
+      // an opinion, so ask the slot. A NON-EMPTY literal keeps the
+      // checker's answer: there the payload has an identity a caller can
+      // observe (`Promise.resolve(arr)` then `(await p) === arr`), and
+      // rebuilding it at a different width would be a COPY.
+      //
+      // An ASYNC return slot contributes the awaited-or-thenable union
+      // (`readonly Row[] | PromiseLike<readonly Row[]>`) rather than a
+      // promise, which is exactly the shape lowerReturnValue's own note
+      // says defeated the bare-`[]` rule until it asked ctx.returnType
+      // instead. Both constituents name the same array here, so the
+      // constituents are mapped and the answer taken only when they
+      // AGREE on one — two different array payloads, or none, decline.
+      let resultT = L.mapTypeOf(L.typeOf(call));
+      if (argNode !== undefined && resultT?.kind === "promise" && resultT.inner.kind === "array") {
+        let bare: ts.Expression = argNode;
+        while (ts.isParenthesizedExpression(bare)) bare = bare.expression;
+        if (ts.isArrayLiteralExpression(bare) && bare.elements.length === 0) {
+          const ctx = L.checker.getContextualType(call);
+          const parts: readonly ts.Type[] =
+            ctx === undefined ? [] : ctx.isUnionType() ? ctx.getTypes() : [ctx];
+          const payloads = new Map<string, IrType>();
+          for (const part of parts) {
+            const m = L.mapTypeOf(part);
+            const arr = m?.kind === "promise" ? m.inner : m;
+            if (arr?.kind === "array") payloads.set(typeKey(arr), arr);
+          }
+          const only = payloads.size === 1 ? [...payloads.values()][0]! : null;
+          if (only !== null) resultT = { kind: "promise", inner: only };
+        }
+      }
       if (resultT?.kind !== "promise") {
         L.noLowering(
           "Promise.resolve at this type",
