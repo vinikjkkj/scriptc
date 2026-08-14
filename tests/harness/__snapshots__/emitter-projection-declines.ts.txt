@@ -1,44 +1,53 @@
-emitter-projection-declines.ts:42:11 - error SC2002: record shapes must match exactly or width-coerce: expected '{ code2: number; m: (string) => string }', got 'MyErr'
+emitter-projection-declines.ts:49:11 - error SC2002: record shapes must match exactly or width-coerce: expected '{ code2: number; m: (string) => string }', got 'MyErr'
 
-  41 | }
-  42 | const e = new MyErr("boom") as unknown as { m: (x: string) => string; code2: number };
+  48 | }
+  49 | const e = new MyErr("boom") as unknown as { m: (x: string) => string; code2: number };
      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  43 | console.log(e.m("a"), e.code2);
+  50 | console.log(e.m("a"), e.code2);
 
   hint: width subtyping compiles as a copy (each expected field copied off the source; extra fields drop) — this pair is outside the copy's rules; build a literal with exactly the expected fields instead
 
-emitter-projection-declines.ts:51:11 - error SC2002: record shapes must match exactly or width-coerce: expected '{ on: (string, () => void) => unknown }', got 'Surface'
+emitter-projection-declines.ts:58:11 - error SC2002: record shapes must match exactly or width-coerce: expected '{ on: (string, () => void) => unknown }', got 'Surface'
 
-  50 | }
-  51 | const s = new Surface() as unknown as { on: (ev: string, f: () => void) => unknown };
+  57 | }
+  58 | const s = new Surface() as unknown as { on: (ev: string, f: () => void) => unknown };
      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  52 | console.log(typeof s.on);
+  59 | console.log(typeof s.on);
 
   hint: width subtyping compiles as a copy (each expected field copied off the source; extra fields drop) — this pair is outside the copy's rules; build a literal with exactly the expected fields instead
 
-emitter-projection-declines.ts:60:11 - error SC2002: record shapes must match exactly or width-coerce: expected '{ val: number }', got 'Getter'
+emitter-projection-declines.ts:67:11 - error SC2002: record shapes must match exactly or width-coerce: expected '{ val: number }', got 'Getter'
 
-  59 | }
-  60 | const g = new Getter() as unknown as { val: number };
+  66 | }
+  67 | const g = new Getter() as unknown as { val: number };
      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  61 | console.log(g.val);
+  68 | console.log(g.val);
 
   hint: width subtyping compiles as a copy (each expected field copied off the source; extra fields drop) — this pair is outside the copy's rules; build a literal with exactly the expected fields instead
 
-emitter-projection-declines.ts:68:11 - error SC2002: record shapes must match exactly or width-coerce: expected '{ m: (unknown) => string }', got 'Sig'
+emitter-projection-declines.ts:75:11 - error SC2002: record shapes must match exactly or width-coerce: expected '{ m: (unknown) => string }', got 'Sig'
 
-  67 | }
-  68 | const w = new Sig() as unknown as { m: (x: unknown) => string };
+  74 | }
+  75 | const w = new Sig() as unknown as { m: (x: unknown) => string };
      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  69 | console.log(w.m("a"));
+  76 | console.log(w.m("a"));
 
   hint: width subtyping compiles as a copy (each expected field copied off the source; extra fields drop) — this pair is outside the copy's rules; build a literal with exactly the expected fields instead
 
-emitter-projection-declines.ts:71:14 - error SC2002: record shapes must match exactly or width-coerce: expected '{ setMaxListeners: (number) => unknown }', got 'EventEmitter'
+emitter-projection-declines.ts:78:14 - error SC2002: record shapes must match exactly or width-coerce: expected '{ setMaxListeners: (number) => unknown }', got 'EventEmitter'
 
-  70 | 
-  71 | const bare = new EventEmitter() as unknown as { setMaxListeners: (n: number) => unknown };
+  77 | 
+  78 | const bare = new EventEmitter() as unknown as { setMaxListeners: (n: number) => unknown };
      |              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  72 | console.log(typeof bare.setMaxListeners);
+  79 | console.log(typeof bare.setMaxListeners);
+
+  hint: width subtyping compiles as a copy (each expected field copied off the source; extra fields drop) — this pair is outside the copy's rules; build a literal with exactly the expected fields instead
+
+emitter-projection-declines.ts:81:16 - error SC2002: record shapes must match exactly or width-coerce: expected '{ write: (string) => boolean }', got 'PassThrough'
+
+  80 | 
+  81 | const stream = new PassThrough() as unknown as { write: (c: string) => boolean };
+     |                ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  82 | console.log(typeof stream.write);
 
   hint: width subtyping compiles as a copy (each expected field copied off the source; extra fields drop) — this pair is outside the copy's rules; build a literal with exactly the expected fields instead
