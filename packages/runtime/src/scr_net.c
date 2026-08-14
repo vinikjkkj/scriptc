@@ -357,7 +357,8 @@ void scr_net_fire0(ScrNetLs *l) { scr_net_fire0_this(l, NULL, 0); }
  * print and die 1 (_Exit skips atexit on purpose — the loop dies
  * mid-turn with registries live, like process.exit). Exported:
  * scr_http.c's req/res/client fire their 'error' the same way. */
-void scr_net_fire_err_this(ScrNetLs *l, ScrStr *msg, void *self, ScrDynHandleTag tag) {
+static void scr_net_fire_err_impl(ScrNetLs *l, ScrStr *msg, ScrError *obj,
+                                  void *self, ScrDynHandleTag tag) {
   if (l->n == 0) {
     fflush(stdout);
     fprintf(stderr, "Unhandled 'error' event: Error: %s\n", msg->data);
@@ -366,15 +367,31 @@ void scr_net_fire_err_this(ScrNetLs *l, ScrStr *msg, void *self, ScrDynHandleTag
   ScrNetL *snap;
   size_t n = scr_net_ls_snapshot(l, &snap);
   scr_dyn_this_push(self, tag);
+  /* The explicit-error-object slot belongs to EXACTLY this fan-out. A
+   * message-only fan-out sets it to NULL rather than leaving it alone,
+   * which is the whole point of setting it here instead of at the call
+   * site: an 'error' raised from inside one of these listeners would
+   * otherwise inherit an outer destroy(err)'s object and hand the wrong
+   * error to the wrong handle — a wrong answer no census could see. */
+  ScrError *prev = scr_err_obj_push(obj);
   for (size_t i = 0; i < n; i++) {
     if (!scr_exc_pending()) ((ScrChildErrFn)snap[i].fn)(snap[i].cb, msg);
     scr_closure_release(snap[i].cb);
   }
+  scr_err_obj_pop(prev);
   scr_dyn_this_pop();
   free(snap);
 }
 
-void scr_net_fire_err(ScrNetLs *l, ScrStr *msg) { scr_net_fire_err_this(l, msg, NULL, 0); }
+void scr_net_fire_err_this(ScrNetLs *l, ScrStr *msg, void *self, ScrDynHandleTag tag) {
+  scr_net_fire_err_impl(l, msg, NULL, self, tag);
+}
+
+void scr_net_fire_err(ScrNetLs *l, ScrStr *msg) { scr_net_fire_err_impl(l, msg, NULL, NULL, 0); }
+
+void scr_net_fire_err_obj(ScrNetLs *l, ScrError *err /*borrowed*/) {
+  scr_net_fire_err_impl(l, err->message, err, NULL, 0);
+}
 
 /* ── the handles ─────────────────────────────────────────────────────── */
 

@@ -42,6 +42,10 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   "scr_dyn_invoke.c": ["scr_async_dyn.c"],
   "scr_events_emitter.c": ["scr_dyn_handle.c"],
   "scr_http.c": ["scr_dyn_handle.c", "scr_net.c"],
+  // The pipe-into-a-ClientRequest adapter: a Writable over a request, so
+  // it needs BOTH sides. Split out of scr_http.c precisely so that plain
+  // http programs do not owe the linker the stream unit.
+  "scr_http_pipe.c": ["scr_dyn_handle.c", "scr_http.c", "scr_net.c", "scr_stream.c"],
   "scr_http2.c": ["scr_dyn_handle.c", "scr_http.c", "scr_net.c", "scr_tls.c"],
   "scr_net.c": ["scr_dyn_handle.c", "scr_loop_kqueue.c", "scr_loop_epoll.c", "scr_loop_wsapoll.c"],
   "scr_readline.c": ["scr_events.c"],
@@ -290,6 +294,11 @@ export interface CcOptions {
    * the IR): compiles scr_filehandle.c in. Gated for SIZE — the always-
    * linked units have no dead stripping on these targets. */
   fileHandle?: boolean;
+  /** The program pipes a Readable INTO a ClientRequest
+   * (moduleUsesHttpPipe on the IR): compiles scr_http_pipe.c in. Gated so
+   * that a plain http program does not have to link scr_stream.c — the
+   * adapter references both sides, and there is no dead stripping here. */
+  httpPipe?: boolean;
   /** The program uses node:test (moduleUsesNodeTest on the IR): compiles
    * scr_test.c into the binary — the net gating precedent, so test-free
    * binaries keep their exact link line. */
@@ -1395,6 +1404,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opts.dgram ? [rt(join(rtDir, "scr_dgram.c"))] : []),
     ...(opts.watch ? [rt(join(rtDir, "scr_watch.c"))] : []),
     ...(opts.fileHandle ? [rt(join(rtDir, "scr_filehandle.c"))] : []),
+    ...(opts.httpPipe ? [rt(join(rtDir, "scr_http_pipe.c"))] : []),
     ...(opts.nodeTest ? [rt(join(rtDir, "scr_test.c"))] : []),
     // The CA-store unit rides its own gate OR the tls one: scr_tls.c
     // references its default-set override unconditionally.
