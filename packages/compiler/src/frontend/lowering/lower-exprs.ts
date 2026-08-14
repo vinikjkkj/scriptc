@@ -3146,21 +3146,62 @@ export function pureReemittable(e: IrExpr): boolean {
       return { kind: "nullish", left, right, type, loc };
     }
     // The RETAGGED shape — the default changes the result union (`s ??
-    // null` over `string | undefined` answers `null | string`): every
-    // non-unit arm of the left has a home in the result, so an interned
-    // helper tests the unit tags and re-wraps the payload per arm. The
-    // helper call evaluates the default EAGERLY where JS is lazy, so only
-    // effect-free defaults (the literal null/0/"" spellings) qualify —
-    // anything effectful keeps the fence.
+    // null` over `string | undefined` answers `null | string`, `p ?? gen()`
+    // over `string | undefined` answers `Promise<string> | string`): every
+    // non-unit arm of the left has a home in the result, so the non-nullish
+    // path re-wraps the payload arm-wise into the result union.
+    //
+    // This is the SAME nullish node as the two shapes above, and that is the
+    // point. The interned helper this replaced took the default as an
+    // ARGUMENT, so the default was evaluated EAGERLY where JS evaluates it
+    // lazily — which restricted the shape to effect-free defaults (the
+    // literal null/0/"" spellings) and fenced everything else. The three
+    // defaults zapo actually writes here are a clock call, an optional-chain
+    // index read and an `await`, and pre-evaluating that last one would have
+    // awaited on the path that must not await. The re-tag belongs in the
+    // emitters' non-nullish BRANCH, where the default is not evaluated at
+    // all; the arm map is derivable from the two union types, so the node
+    // carries no extra field (validate.ts pins the shape; both emitters
+    // answer for it).
     if (type.kind === "union") {
       const leftT = left.type;
       const armPairs = rest.map((a) => ({ arm: a, src: L.armTag(leftT.unionId, a), dst: L.armTag(type.unionId, a) }));
-      if (armPairs.every((p) => p.src >= 0 && p.dst >= 0)) {
+      // The DEFAULT needs a home in the result union too, and this is not
+      // pedantry: lowerExprExpecting answers a throwing `%union.strand`
+      // helper for a value the union cannot hold, and that throw carries no
+      // diagnostic code. `p ?? gen()` over `string | undefined` types
+      // `Promise<string> | string`, whose promise arm has no
+      // representation — admitting it retired an SC1090 from the census and
+      // left an uncaught TypeError in its place at run time, which is
+      // strictly worse than the fence. The eager-default restriction used
+      // to exclude that by accident (a strand is a call, so it was never
+      // droppable); this states the exclusion instead of inheriting it.
+      // Spelled as "not a STRAND" rather than as a type test on purpose. A
+      // type test ("the default's own type is an identical arm") would have
+      // refused a record literal that width-lifts into an arm — a shape the
+      // eager form ACCEPTED, since a literal is droppable. Every strand is
+      // a call and no call is droppable, so this predicate is strictly
+      // wider than the one it replaces and nothing that compiled can move.
+      const strandFn = (e: IrExpr): boolean =>
+        e.kind === "call" &&
+        typeof e.callee === "string" &&
+        (e.callee.startsWith("%union.strand.") || e.callee.startsWith("%unit.strand."));
+      // A PROMISE arm in the result is refused, and the reason is measured
+      // rather than assumed: `T | Promise<T>` does not survive a union
+      // re-tag anywhere in this compiler today. Four lines with no `??` in
+      // them (repro-sw/lab/n3.ts) throw an UNCODED
+      // "a 'Promise<string>' value is not representable in the target
+      // union" TypeError on main. `provided ?? deps.generateStanzaId()`
+      // inside an `async` function types exactly that union, so admitting
+      // it here would retire an SC1090 from the census and hand the same
+      // program a runtime throw with no diagnostic code — the census would
+      // read better and the binary would not. The fence stays until the
+      // promise arm is representable; estado-sweep.md §4.3 names the defect.
+      const resArms = L.unions.get(type.unionId)?.arms ?? [];
+      const carriable = resArms.length > 0 && resArms.every((a) => a.kind !== "promise");
+      if (armPairs.every((p) => p.src >= 0 && p.dst >= 0) && carriable) {
         const right = L.lowerExprExpecting(expr.right, type);
-        if (droppableStatic(right)) {
-          const helper = nullishRetagHelper(L, leftT, type, loc);
-          return { kind: "call", callee: helper, args: [left, right], type, loc };
-        }
+        if (!strandFn(right)) return { kind: "nullish", left, right, type, loc };
       }
     }
     // The default is a WIDTH-SUBSET of the left's single non-unit arm. The
@@ -3215,63 +3256,6 @@ export function pureReemittable(e: IrExpr): boolean {
     if (!s || !d || s.tuple || d.tuple || s.indexValue !== undefined) return false;
     if (s.fields.some((f) => !d.fields.some((g) => g.name === f.name))) return false;
     return L.widthLiftPlan(src, dst) !== null;
-  }
-
-/** Interned `%nullish.retag.<n>(l, r)` — the retagged `??` (see
-   * lowerNullishCoalesce): unit-armed left answers the pre-evaluated
-   * default; every other arm narrows out of the left union and wraps into
-   * the result union's matching arm. */
-  function nullishRetagHelper(L: Lowerer, leftT: IrType & { kind: "union" }, resT: IrType & { kind: "union" }, loc: SrcLoc): string {
-    const key = `nullish:${leftT.unionId}:${typeKey(resT)}`;
-    const existing = L.widthHelpers.get(key);
-    if (existing) return existing;
-    const name = `%nullish.retag.${L.widthHelpers.size}`;
-    L.widthHelpers.set(key, name);
-    const def = L.unions.get(leftT.unionId)!;
-    const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
-    const l = ref("l.0", leftT);
-    const r = ref("r.0", resT);
-    const body: IrStmt[] = [];
-    def.arms.forEach((arm, tag) => {
-      if (isUnitType(arm)) return;
-      const dst = L.armTag(resT.unionId, arm);
-      body.push({
-        kind: "if",
-        cond: { kind: "unionIsTag", unionId: leftT.unionId, tag, negated: false, value: l, type: BOOL, loc },
-        then: [
-          {
-            kind: "return",
-            value: {
-              kind: "unionWrap",
-              unionId: resT.unionId,
-              tag: dst,
-              value: { kind: "unionNarrow", unionId: leftT.unionId, tag, value: l, type: arm, loc },
-              type: resT,
-              loc,
-            },
-            loc,
-          },
-        ],
-        else_: null,
-        loc,
-      });
-    });
-    body.push({ kind: "return", value: r, loc });
-    L.liftedFns.push({
-      name,
-      params: [
-        { localId: "l.0", name: "l", type: leftT },
-        { localId: "r.0", name: "r", type: resT },
-      ],
-      returnType: resT,
-      locals: [
-        { id: "l.0", name: "l", type: leftT, mutable: true },
-        { id: "r.0", name: "r", type: resT, mutable: true },
-      ],
-      body,
-      loc,
-    });
-    return name;
   }
 
 /** One optional-chain STEP: `a?.b`, `a?.m(...)`, `a?.[i]` (the token on

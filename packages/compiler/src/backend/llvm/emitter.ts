@@ -5034,11 +5034,46 @@ class LlEmitter {
         B.startBlock(lv);
         if (typeEquals(e.type, e.left.type)) {
           B.line(`store ${ty} ${l.name}, ptr ${slot}`);
+          B.br(lj);
+        } else if (e.type.kind === "union") {
+          // The RETAGGED shape (lowerNullishCoalesce, and the C emitter's
+          // third nullish arm): the surviving payload extracts (+1) and
+          // moves into the result union's matching arm. Unit tags cannot
+          // reach this block, so the LAST non-unit arm is the fallthrough
+          // and the chain needs no invalid-tag case. The box releases on
+          // every path before the join.
+          const resDef = this.unionsById.get(e.type.unionId);
+          if (!resDef) throw new Error(`llvm emitter bug: nullish retag into unknown union ${e.type.unionId}`);
+          const nonUnit = def.arms.flatMap((a, t) => (isUnitType(a) ? [] : [[a, t] as const]));
+          if (nonUnit.length === 0) throw new Error("llvm emitter bug: nullish retag over an all-unit union");
+          const storeArm = (arm: IrType): void => {
+            const dst = resDef.arms.findIndex((b) => typeEquals(b, arm));
+            if (dst < 0) throw new Error(`llvm emitter bug: nullish retag arm ${arm.kind} outside the result union`);
+            const v = this.unionExtract(l.name, arm);
+            const box = this.unionNewOwned(dst, { name: v, type: arm });
+            B.line(`store ${ty} ${box}, ptr ${slot}`);
+            this.releaseValue(l.name, e.left.type);
+            B.br(lj);
+          };
+          nonUnit.forEach(([arm, tag], i) => {
+            if (i === nonUnit.length - 1) {
+              storeArm(arm);
+              return;
+            }
+            const hit = B.newLabel("nulr.h");
+            const nxt = B.newLabel("nulr.n");
+            const c = B.tmp();
+            B.line(`${c} = icmp eq i32 ${this.unionTag(l.name)}, ${tag}`);
+            B.condBr(c, hit, nxt);
+            B.startBlock(hit);
+            storeArm(arm);
+            B.startBlock(nxt);
+          });
         } else {
           B.line(`store ${ty} ${this.unionExtract(l.name, e.type)}, ptr ${slot}`);
           this.releaseValue(l.name, e.left.type);
+          B.br(lj);
         }
-        B.br(lj);
         B.startBlock(lj);
         const t = B.tmp();
         B.line(`${t} = load ${ty}, ptr ${slot}`);

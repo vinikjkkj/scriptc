@@ -2153,12 +2153,24 @@ function validateFunction(
         if (!def.arms.some(isUnitType)) {
           err("nullish left union has no unit arm (frontend must fence)", e.loc);
         }
-        // Two shapes: pass-through (type === left's union) or narrowed
-        // (type === the union's SINGLE non-unit arm).
+        // Three shapes: pass-through (type === left's union), narrowed
+        // (type === the union's SINGLE non-unit arm) and RETAGGED — the
+        // default widened the result, so the non-nullish path re-wraps the
+        // left's payload arm-wise. The retagged shape is admissible exactly
+        // when every non-unit arm of the left has an IDENTICAL arm in the
+        // result union: that map is what both emitters derive, and a left
+        // arm with no home would have no tag to wrap into.
         if (!typeEquals(e.type, e.left.type)) {
           const rest = def.arms.filter((a) => !isUnitType(a));
-          if (rest.length !== 1 || !typeEquals(e.type, rest[0]!)) {
-            err("nullish type must be the left union or its single non-unit arm", e.loc);
+          const narrowed = rest.length === 1 && typeEquals(e.type, rest[0]!);
+          const resDef = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
+          const retagged =
+            resDef !== undefined && rest.every((a) => resDef.arms.some((b) => typeEquals(a, b)));
+          if (!narrowed && !retagged) {
+            err(
+              "nullish type must be the left union, its single non-unit arm, or a union carrying every non-unit arm",
+              e.loc,
+            );
           }
         }
         break;
