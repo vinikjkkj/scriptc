@@ -2496,6 +2496,81 @@ void scr_http_client_destroy(ScrHttpClientReq *c) {
   if (c->sock) scr_net_sock_destroy(c->sock);
 }
 
+/* ── readable.pipe(req): a native Writable over a ClientRequest ────────
+ * scr_stream_pipe needs TWO ScrStreams and a ClientRequest is not one —
+ * it is an ScrHttpClientReq with its own listener lists. A native
+ * Writable whose _write forwards the bytes, whose _final ends the
+ * request and whose _destroy destroys it makes the request a legal pipe
+ * destination and inherits pipe's backpressure, end-propagation and
+ * error semantics unchanged, instead of restating them here.
+ *
+ * The adapter OWNS the request (+1) and the request holds nothing back,
+ * so the pair cannot cycle. It is deliberately NOT cached on the
+ * request: a cache needs a back-pointer the request cannot clear when
+ * the adapter outlives it (the pipe holds the adapter too), and it buys
+ * nothing — every write funnels into scr_http_client_write_bytes in call
+ * order, so a direct req.write() and a pipe cannot disagree about
+ * ordering however many adapters exist.
+ *
+ * The adapter never reaches the IR: scr_http_client_pipe_from below is
+ * the whole surface, so there is no stream-typed value for a lowering to
+ * get wrong and no new handle kind to wire through eighteen switches. */
+static ScrClosure *scr_hcw_closure(ScrHttpClientReq *c, void *fn) {
+  ScrClosure *cb = scr_closure_new(fn, 1);
+  ScrBox *box = scr_box_new_obj(&scr_http_client_retain_v, &scr_http_client_release_v, NULL);
+  scr_box_set_ref(box, scr_http_client_retain(c));
+  cb->caps[0] = box;
+  return cb;
+}
+
+static void scr_hcw_write_inv(ScrClosure *cb, ScrStream *s, ScrBytes *chunk /*borrowed*/) {
+  ScrHttpClientReq *c = (ScrHttpClientReq *)scr_box_get_ref(cb->caps[0]); /* +1 */
+  if (c != NULL) {
+    scr_http_client_write_bytes(c, chunk);
+    scr_http_client_release(c);
+  }
+  /* the forward is synchronous, so the write completes in place — the
+   * request's own socket buffering is what actually paces the wire */
+  scr_stream_write_done(s, NULL);
+}
+
+static void scr_hcw_final_inv(ScrClosure *cb, ScrStream *s) {
+  ScrHttpClientReq *c = (ScrHttpClientReq *)scr_box_get_ref(cb->caps[0]);
+  if (c != NULL) {
+    scr_http_client_end(c); /* pipe's end:true default lands here */
+    scr_http_client_release(c);
+  }
+  scr_stream_final_done(s, NULL);
+}
+
+/* Teardown of the ADAPTER is not teardown of the request. A clean finish
+ * reaches here too — autoDestroy destroys a Writable once it has
+ * finished — and destroying the request there would kill the exchange
+ * the instant the body was fully sent, before its response could arrive
+ * ('socket hang up', measured the hard way). Node's `end` of a piped
+ * upload leaves the request open and waiting, so only a destroy carrying
+ * an ERROR is forwarded. */
+static void scr_hcw_destroy_inv(ScrClosure *cb, ScrStream *s, ScrError *err /*borrowed*/) {
+  ScrHttpClientReq *c = (ScrHttpClientReq *)scr_box_get_ref(cb->caps[0]);
+  if (c != NULL) {
+    if (err != NULL) scr_http_client_destroy_err(c, err);
+    scr_http_client_release(c);
+  }
+  scr_stream_destroy_done(s, err != NULL ? scr_error_retain(err) : NULL);
+}
+
+ScrHttpClientReq *scr_http_client_pipe_from(ScrStream *src, ScrHttpClientReq *c, bool end) {
+  ScrStream *w = scr_stream_new_writable(
+      -1 /* the byte default */, true /* autoDestroy */, true /* emitClose */,
+      scr_hcw_closure(c, (void *)&scr_hcw_write_inv), &scr_hcw_write_inv,
+      scr_hcw_closure(c, (void *)&scr_hcw_final_inv), &scr_hcw_final_inv,
+      scr_hcw_closure(c, (void *)&scr_hcw_destroy_inv), &scr_hcw_destroy_inv);
+  ScrStream *d = scr_stream_pipe(src, w, end); /* d is w, +1 */
+  if (d != NULL) scr_stream_release(d);
+  scr_stream_release(w);
+  return c; /* Node's pipe answers the DESTINATION — the request itself */
+}
+
 void scr_http_client_destroy_err(ScrHttpClientReq *c, ScrError *err /*borrowed*/) {
   /* Node: the FIRST destroy wins — a second destroy(other) emits nothing
    * (oracle-pinned). Checking `destroyed` before stashing the error keeps

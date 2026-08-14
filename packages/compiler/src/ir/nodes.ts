@@ -3093,6 +3093,7 @@ export type IrLibFn =
   | "http.requestUrlCb"
   | "http.clientDestroy"
   | "http.clientDestroyErr"
+  | "http.clientPipeFrom"
   | "http.clientDestroyed"
   | "http.clientOnResponse"
   | "http.clientOnError"
