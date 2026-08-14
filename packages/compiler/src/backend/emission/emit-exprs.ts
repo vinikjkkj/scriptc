@@ -3269,6 +3269,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_abort_controller_signal(${arg(0)})`);
           case "abort.abort":
             return finish(`scr_abort_controller_abort(${arg(0)}, NULL)`);
+          // Cannot leave an exception pending: a throwing listener is
+          // reported as uncaught inside the runtime, not propagated.
           // The reason is BORROWED: the runtime retains it into the
           // signal's slot, which is what keeps signal.reason === the very
           // object the caller passed, and .code with it.
