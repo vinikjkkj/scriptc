@@ -23,7 +23,7 @@ regex.ts:9:17 - error SC1120: the regex 'd' flag (match indices) is not supporte
      |                 ^~~~~~
   10 | const sets = /[\p{L}]/v;
 
-  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates
+  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
 
 regex.ts:10:14 - error SC1120: the regex 'v' flag (unicode sets) is not supported yet
 
@@ -32,7 +32,7 @@ regex.ts:10:14 - error SC1120: the regex 'v' flag (unicode sets) is not supporte
      |              ^~~~~~~~~~
   11 | const asValue = /x/.test;
 
-  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates
+  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
 
 regex.ts:11:17 - error SC1090: regex methods as values (call 'test' directly) are not supported yet
 
