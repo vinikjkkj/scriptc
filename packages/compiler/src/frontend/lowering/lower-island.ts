@@ -248,7 +248,7 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
   export function lowerFetchCall(L: Lowerer, call: ts.CallExpression): IrExpr | null {
     const callee = call.expression;
     if (!ts.isIdentifier(callee) || callee.text !== "fetch") return null;
-    if (call.questionDotToken) return null;
+    if (L.chainBlocked(call)) return null;
     const symbol = L.resolveValueSymbol(callee);
     if (!symbol || !L.isStdlibSymbol(symbol)) return null;
     if (call.arguments.length < 1 || call.arguments.length > 2) return null;

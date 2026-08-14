@@ -5726,7 +5726,7 @@ const inliningPredicates = new Set<ts.Symbol>();
  * caught-argument fences — apply). */
   function lowerCaughtPredicateCall(L: Lowerer, call: ts.CallExpression,
     caughtLocal: IrLocal,): IrExpr | null {
-    if (call.questionDotToken) return null;
+    if (L.chainBlocked(call)) return null;
     const callee = call.expression;
     if (!ts.isIdentifier(callee)) return null;
     const symbol = L.resolveValueSymbol(callee);
@@ -5959,7 +5959,7 @@ const inliningPredicates = new Set<ts.Symbol>();
    * Null elsewhere: non-literal keys, other members, other receivers. */
   export function lowerPrimitiveProtoCall(L: Lowerer, call: ts.CallExpression,
     recv: ts.Expression, name: string, memberSym: ts.Symbol | undefined,): IrExpr | null {
-    if (call.questionDotToken) return null;
+    if (L.chainBlocked(call)) return null;
     if (!L.isStdlibSymbol(memberSym)) return null;
     const recvKind = L.mapTypeOf(L.typeOf(recv))?.kind;
     if (recvKind !== "f64" && recvKind !== "bool" && recvKind !== "string") return null;
