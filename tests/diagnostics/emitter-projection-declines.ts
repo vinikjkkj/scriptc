@@ -27,6 +27,10 @@
 //    cannot take. Unrelated to the emitter chain, and included because it is
 //    the OTHER half of what closed estado-pairlid's last route — its harness
 //    typed the event parameter `unknown`.
+//
+// 5. A BARE EventEmitter. The skip applies only to the builtin as a STRICT
+//    ancestor (`c !== info`); the runtime class itself is still refused, and
+//    the whole emitter surface with it.
 import { EventEmitter } from "node:events";
 
 class MyErr extends Error {
@@ -63,3 +67,6 @@ class Sig extends EventEmitter {
 }
 const w = new Sig() as unknown as { m: (x: unknown) => string };
 console.log(w.m("a"));
+
+const bare = new EventEmitter() as unknown as { setMaxListeners: (n: number) => unknown };
+console.log(typeof bare.setMaxListeners);
