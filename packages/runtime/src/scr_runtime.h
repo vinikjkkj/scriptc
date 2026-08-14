@@ -2440,24 +2440,6 @@ void scr_child_exit_thunk0(ScrClosure *cb, bool has_code, double code,
                             const char *signal_name);
 void scr_child_err_thunk0(ScrClosure *cb, ScrStr *msg);
 void scr_child_err_thunk_error(ScrClosure *cb, ScrStr *msg);
-/* [the EXPLICIT error object of an 'error' fan-out]
- * The 'error' listener ABI is (ScrClosure *, ScrStr *msg) — nine handle
- * families share it (net server/socket, http req/client, http2
- * session/stream, dgram, stdin, child), and its thunk RECONSTRUCTS an
- * Error from the message text, recovering `code` by parsing the errno
- * name back out (scr_err_msg_code). That is exact for the runtime's OWN
- * errnoException-shaped messages and lossy for anything else.
- * `destroy(err)` hands over a USER error whose identity, `name`, `code`
- * and own properties must all survive; rebuilding it from `.message`
- * would silently drop every one of them. Rather than widen the shared
- * ABI at nine call sites, the emitting side publishes the object here
- * for the duration of its fan-out and scr_child_err_thunk_error prefers
- * it — the same shape as scr_child_err_code, one level up from a string.
- * push() returns the previous value; the caller MUST restore it (an
- * error listener may itself destroy another handle). Borrowed: the
- * pusher owns the reference across the fan-out. */
-ScrError *scr_err_obj_push(ScrError *e /*borrowed*/);
-void scr_err_obj_pop(ScrError *prev);
 /* The stream surface: child.stdout/stderr answer +1 handles (NULL when
  * the slot was not piped — Node's null); listeners MOVE in and release
  * at EOF/exit-cleanup (post-'end' registrations release immediately and
@@ -6295,10 +6277,13 @@ void scr_net_sock_write_native(ScrNetSocket *s, const char *buf, size_t n);
  * liveness test, `sweep` runs at every net sweep top. */
 void scr_net_set_proto_sweep(bool (*pending)(void), void (*sweep)(void));
 void scr_net_fire_err(ScrNetLs *l, ScrStr *msg); /* unhandled => exit(1) */
-/* The same fan-out carrying an EXPLICIT error object: the listeners get
- * THAT object rather than one rebuilt from the message (see the
- * scr_err_obj_push note). err borrowed; its message travels the shared
- * (cb, ScrStr *) ABI so the no-listener path still prints the right text. */
+/* The same fan-out carrying an EXPLICIT error object: an `(err) => …`
+ * listener gets THAT object — identity, name, code and own properties
+ * intact — instead of one rebuilt from the message text. Recognised by
+ * the adapter pointer, so the shared (cb, ScrStr *) ABI is unchanged and
+ * the always-linked units are untouched; see scr_net_fire_err_impl.
+ * err borrowed; its message still travels the ABI, so a zero-parameter
+ * listener and the no-listener exit path both read the right text. */
 void scr_net_fire_err_obj(ScrNetLs *l, ScrError *err /*borrowed*/);
 
 ScrNetServer *scr_net_server_retain(ScrNetServer *s);
