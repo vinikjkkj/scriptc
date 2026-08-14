@@ -750,6 +750,9 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "spawnRes.stdout": { argTypes: [SPAWNRES_T], result: STRING },
   "spawnRes.stderr": { argTypes: [SPAWNRES_T], result: STRING },
   "crypto.randomUUID": { argTypes: [], result: STRING },
+  // Any two bytes values (the widths fold at runtime); byte-length
+  // mismatch throws rather than answering.
+  "crypto.timingSafeEqual": { argTypes: [null, null], result: BOOL },
   "crypto.randomBytesToString": { argTypes: [F64, STRING], result: STRING },
   "crypto.randomBytes": { argTypes: [F64], result: BYTES_U8 },
   "crypto.randomFillDeferred": {
@@ -3713,6 +3716,15 @@ function validateFunction(
           const want = sig.argTypes[i];
           if (want) expectType(a, want, `libCall ${e.fn} arg ${i}`);
         });
+        if (e.fn === "crypto.timingSafeEqual") {
+          // Two bytes values of any element width (the table says null so
+          // the widths are free; the KIND is pinned here).
+          const [ta, tb] = [e.args[0]?.type, e.args[1]?.type];
+          if (ta?.kind !== "bytes" || tb?.kind !== "bytes") {
+            err(`libCall crypto.timingSafeEqual: expected two bytes values, got ${ta?.kind} and ${tb?.kind}`, e.loc);
+          }
+          break;
+        }
         if (e.fn === "string.fromCharCode") {
           // One packed f64[] or one bytes value (the spread form).
           const t = e.args[0]?.type;

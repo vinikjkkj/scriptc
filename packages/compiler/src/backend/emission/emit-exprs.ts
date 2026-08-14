@@ -5077,6 +5077,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // pending check here; the await re-throws catchably. args[1] of
           // readFile is the (always-"utf8") encoding, evaluated for
           // JS-exact side-effect order and ignored by the runtime.
+          case "crypto.timingSafeEqual":
+            // Constant-time over the two values' bytes; throws the
+            // length-mismatch RangeError, hence the pending check the
+            // MAY_THROW_LIB_FNS membership emits.
+            return finish(`scr_crypto_timing_safe_equal(${arg(0)}, ${arg(1)})`);
           case "crypto.randomUUID":
             return finish(`scr_crypto_random_uuid()`);
           case "crypto.randomBytesToString":

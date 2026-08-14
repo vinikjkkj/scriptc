@@ -897,6 +897,43 @@ ScrBytes *scr_crypto_hkdf_sha256(const ScrBytes *ikm, const ScrBytes *salt,
   return out;
 }
 
+/* crypto.timingSafeEqual(a, b) — constant-time byte equality. Two of its
+ * properties are CONTRACTS rather than conveniences, and both are the
+ * reason the function exists at all:
+ *
+ *  - A LENGTH MISMATCH THROWS. Node raises
+ *    `RangeError [ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH]: Input buffers
+ *    must have the same byte length`. Answering `false` instead would be
+ *    the very leak this function is meant to prevent — a caller could
+ *    learn a secret's length by timing or by result — so the mismatch is
+ *    an error and not a data-dependent branch. Callers that want a
+ *    boolean (zapo's uint8TimingSafeEqual) compare lengths themselves
+ *    BEFORE calling, precisely because this one throws.
+ *  - THE COMPARE DOES NOT SHORT-CIRCUIT. The accumulator visits every
+ *    byte whatever it finds; `diff` is volatile so the loop cannot be
+ *    recognised and turned back into an early-exit memcmp.
+ *
+ * Node compares BYTE length rather than element count (a Uint32Array of
+ * 2 and a Uint8Array of 8 are comparable, and answer over the same
+ * bytes), so the widths are folded here through scr_bytes_elem_size
+ * instead of being restricted at the call site. Borrowed args; plain
+ * bool; throws only for the mismatch. */
+bool scr_crypto_timing_safe_equal(const ScrBytes *a, const ScrBytes *b) {
+  size_t alen = a->len * scr_bytes_elem_size(a->elem);
+  size_t blen = b->len * scr_bytes_elem_size(b->elem);
+  if (alen != blen) {
+    static const char msg[] = "Input buffers must have the same byte length";
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, sizeof msg - 1,
+                             "ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH");
+    return false;
+  }
+  volatile unsigned char diff = 0;
+  for (size_t i = 0; i < alen; i++) {
+    diff = (unsigned char)(diff | (unsigned char)(a->data[i] ^ b->data[i]));
+  }
+  return diff == 0;
+}
+
 /* util.promisify(pbkdf2): the derivation behind an already-settled
  * promise (the fs/promises stance). A range error rejects. */
 ScrPromise *scr_crypto_pbkdf2_sha256_async(const ScrBytes *password, const ScrBytes *salt,

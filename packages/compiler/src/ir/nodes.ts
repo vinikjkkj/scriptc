@@ -3166,6 +3166,13 @@ export type IrLibFn =
    * randomBytesToString THROWS Node's RangeError on out-of-range sizes. */
   | "crypto.randomUUID"
   | "crypto.randomBytesToString"
+  /** crypto.timingSafeEqual(a, b): constant-time equality over the two
+   * values' BYTES (element widths folded — Node's contract is byte
+   * length). THROWS the ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH RangeError
+   * when the byte lengths differ; that is a specified behaviour of the
+   * call and NOT a refusal, so the member is in the may-throw seed and
+   * answers a plain bool otherwise. Borrowed args. */
+  | "crypto.timingSafeEqual"
   /** crypto.randomFill(buf, offset, size, cb) — the fill, plus a DEFERRED
    * call. args are (bytes, offset, size, sizeGiven, thunk). The thunk is a
    * ZERO-argument closure that already captured the callback and the
@@ -8681,6 +8688,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "zlib.unzipSync",
   "zlib.inflateRawSync",
   "date.toISOString",
+  // The length-mismatch RangeError, which is a contract of the call.
+  "crypto.timingSafeEqual",
   "fs.mkdirRecursiveSync",
   "fs.rmOptsSync",
   "fs.rmRetrySync",
