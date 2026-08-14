@@ -3073,18 +3073,6 @@ export function pureReemittable(e: IrExpr): boolean {
     return pureReemittable(e);
   }
 
-/** `a ?? b` — JS-exact nullish coalescing: ONLY null/undefined take the
-   * default (0, "", and false do not), and the right side evaluates lazily.
-   * On a unit-armed union left this is the `nullish` node (a runtime tag
-   * test against the unit arms, docs/ir.md); the two lowered shapes follow
-   * the checker's result type — pass-through (`(s: string | undefined) ??
-   * t` with t also `string | undefined`) and narrowed (`s ?? "d"` → plain
-   * string, the single non-unit arm). A left the checker types non-nullish
-   * never takes the right side, so the whole expression folds to the left
-   * value — dropping only the never-evaluated default, the same
-   * trust-the-checker bet as lowerUnitComparison's static fold. Sub-union
-   * results (several non-unit arms) and defaults that change the result
-   * type are fenced with narrow-first hints. */
 /** A plain keyed ACCESS — `o.k` / `o["k"]`, no optional chain. The
  * syntaxes an index-signature read can wear, and the ones for which
  * lowerExprExpecting is exactly lowerExpr followed by the coercion. */
@@ -3112,6 +3100,18 @@ function nullishTestedByParent(expr: ts.Expression): boolean {
   );
 }
 
+/** `a ?? b` — JS-exact nullish coalescing: ONLY null/undefined take the
+   * default (0, "", and false do not), and the right side evaluates lazily.
+   * On a unit-armed union left this is the `nullish` node (a runtime tag
+   * test against the unit arms, docs/ir.md); the two lowered shapes follow
+   * the checker's result type — pass-through (`(s: string | undefined) ??
+   * t` with t also `string | undefined`) and narrowed (`s ?? "d"` → plain
+   * string, the single non-unit arm). A left the checker types non-nullish
+   * never takes the right side, so the whole expression folds to the left
+   * value — dropping only the never-evaluated default, the same
+   * trust-the-checker bet as lowerUnitComparison's static fold. Sub-union
+   * results (several non-unit arms) and defaults that change the result
+   * type are fenced with narrow-first hints. */
   export function lowerNullishCoalesce(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr {
     const left = L.lowerExpr(expr.left);
     if (left.type.kind === "dyn") {
