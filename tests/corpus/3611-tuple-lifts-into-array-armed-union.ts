@@ -9,14 +9,15 @@
 // arms, and fell through to `strandedCoercionTrap` — a helper with NO tag
 // test, whose entire body is `throw`. Reaching the call site was throwing.
 //
-// `pairLidPn` below is zapo's, copied verbatim from its source, and it is as
-// ordinary as code gets. It sits on the incoming-message path
+// `pairLidPn` below is zapo's own function — its source text, restyled only
+// for this repo's semicolons and braces — and it is as ordinary as code
+// gets. It sits on the incoming-message path
 // (handleIncomingMessageEvent -> persistIncomingMailboxEntities ->
 // persistContacts -> canonicalContact -> pairLidPn), so every contact
 // persisted for an incoming message reached it — and its caller wraps the
 // whole body in a try/catch that turns the throw into a logged warning, so
-// the failure was SILENT: contacts simply stopped being written. Nothing on
-// the QR path calls it, which is why every QR sweep stayed green.
+// the failure was SILENT: contacts simply stopped being written. The QR flow
+// never reaches an incoming message, which is why every QR sweep stayed green.
 //
 // The `readonly` is what makes the two sides disagree, and it is not a typo:
 // a UNIFORM readonly tuple rides the ARRAY representation (the `as const`
@@ -47,7 +48,7 @@ function isUserJid(jid: string): boolean {
     return jid.endsWith("@s.whatsapp.net");
 }
 
-// zapo's function, verbatim.
+// zapo's function.
 function pairLidPn(a: string | undefined, b: string | undefined): readonly [string, string] | null {
     if (!a || !b) return null;
     if (isLidJid(a) && isUserJid(b)) return [a, b];
@@ -55,7 +56,7 @@ function pairLidPn(a: string | undefined, b: string | undefined): readonly [stri
     return null;
 }
 
-// ...and its caller, also verbatim, which is what makes the pair observable.
+// ...and its caller, which is what makes the pair observable.
 function canonicalContact(
     primary: string,
     alt: string | undefined,
