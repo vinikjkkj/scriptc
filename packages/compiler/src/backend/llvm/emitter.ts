@@ -748,6 +748,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "http.clientWriteDyn": "scr_http_client_write_dynv",
   "http.clientEndDyn": "scr_http_client_end_dynv",
   "http.clientDestroy": "scr_http_client_destroy",
+  "http.clientDestroyErr": "scr_http_client_destroy_err",
   "http.clientDestroyed": "scr_http_client_destroyed",
   "http2.streamUndefCall": "scr_http2_stream_undef_call",
   "http.agentNew": "scr_http_agent_new",

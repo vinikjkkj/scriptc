@@ -2440,6 +2440,24 @@ void scr_child_exit_thunk0(ScrClosure *cb, bool has_code, double code,
                             const char *signal_name);
 void scr_child_err_thunk0(ScrClosure *cb, ScrStr *msg);
 void scr_child_err_thunk_error(ScrClosure *cb, ScrStr *msg);
+/* [the EXPLICIT error object of an 'error' fan-out]
+ * The 'error' listener ABI is (ScrClosure *, ScrStr *msg) — nine handle
+ * families share it (net server/socket, http req/client, http2
+ * session/stream, dgram, stdin, child), and its thunk RECONSTRUCTS an
+ * Error from the message text, recovering `code` by parsing the errno
+ * name back out (scr_err_msg_code). That is exact for the runtime's OWN
+ * errnoException-shaped messages and lossy for anything else.
+ * `destroy(err)` hands over a USER error whose identity, `name`, `code`
+ * and own properties must all survive; rebuilding it from `.message`
+ * would silently drop every one of them. Rather than widen the shared
+ * ABI at nine call sites, the emitting side publishes the object here
+ * for the duration of its fan-out and scr_child_err_thunk_error prefers
+ * it — the same shape as scr_child_err_code, one level up from a string.
+ * push() returns the previous value; the caller MUST restore it (an
+ * error listener may itself destroy another handle). Borrowed: the
+ * pusher owns the reference across the fan-out. */
+ScrError *scr_err_obj_push(ScrError *e /*borrowed*/);
+void scr_err_obj_pop(ScrError *prev);
 /* The stream surface: child.stdout/stderr answer +1 handles (NULL when
  * the slot was not piped — Node's null); listeners MOVE in and release
  * at EOF/exit-cleanup (post-'end' registrations release immediately and
@@ -6819,6 +6837,11 @@ void scr_http_client_write_dynv(ScrHttpClientReq *c, const ScrDyn *d /*borrowed*
 void scr_http_client_end_dynv(ScrHttpClientReq *c, const ScrDyn *d /*borrowed*/);
 void scr_http_client_set_timeout(ScrHttpClientReq *c, double ms);
 void scr_http_client_destroy(ScrHttpClientReq *c);
+/* request.destroy(err): Node emits the GIVEN error object on the request
+ * (identity, name, code and own properties intact), then 'close', and
+ * suppresses the 'socket hang up' the bare destroy() would have raised.
+ * A second destroy is a no-op — the first error wins. err borrowed. */
+void scr_http_client_destroy_err(ScrHttpClientReq *c, ScrError *err /*borrowed*/);
 bool scr_http_client_destroyed(ScrHttpClientReq *c);
 void scr_http_client_on_response(ScrHttpClientReq *c, ScrClosure *cb /*moves*/, ScrHttpRespFn fn, bool once);
 void scr_http_client_on_error(ScrHttpClientReq *c, ScrClosure *cb /*moves*/, ScrChildErrFn fn, bool once);
