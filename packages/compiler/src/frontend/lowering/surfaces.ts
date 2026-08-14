@@ -2262,7 +2262,7 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     L: Lowerer,
     access: ts.PropertyAccessExpression,
   ): { method: IrStrIntrinsicMethod; params: IrType[]; ret: IrType } | null {
-    if (access.questionDotToken) return null;
+    if (L.chainBlocked(access)) return null;
     // STATIC builds only. Under --dynamic a JS value is an island HANDLE
     // and the engine keeps its own `this`; the ambient-receiver window
     // this body reads is the static world's, so it would answer a receiver

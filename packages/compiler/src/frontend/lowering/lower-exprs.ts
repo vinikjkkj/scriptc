@@ -3387,6 +3387,21 @@ export function pureReemittable(e: IrExpr): boolean {
     }
   }
 
+  /** True when the checker proves this expression is neither null nor
+   * undefined — so an optional link over it cannot short-circuit and `?.`
+   * IS `.`. `any` and `unknown` answer FALSE deliberately: their values do
+   * exist as island handles and dyn nodes, and their own arms of
+   * lowerOptionalChain answer the guard over them. Reads through L.typeOf,
+   * so an enclosing chain's narrow counts. */
+  function calleeNeverNullish(L: Lowerer, node: ts.Expression): boolean {
+    const t = L.typeOf(node);
+    const bad = ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.Null |
+      ts.TypeFlags.Undefined | ts.TypeFlags.Void | ts.TypeFlags.Never;
+    if ((t.flags & bad) !== 0) return false;
+    const parts = t.isUnionType() ? t.getTypes() : [t];
+    return !parts.some((p) => (p.flags & bad) !== 0);
+  }
+
 export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.PropertyAccessExpression | ts.ElementAccessExpression,): IrExpr {
     const loc = locOf(expr);
     // The node CARRYING the ?. token and the receiver expression it guards.
@@ -3426,6 +3441,26 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       }
       dotNode = tail;
       recvNode = tail.expression;
+    }
+    // `f?.()` where the CALLEE cannot be nullish: the guard cannot
+    // short-circuit, so the value IS the plain call's — but the gate below
+    // opens by lowering the callee as a STANDALONE function value, and most
+    // call-position lowerings deliberately materialize none (`JSON.stringify`
+    // as a value, `Promise.all` as a value, `n.toString` as a value are each
+    // their own fence). Demanding one would refuse a result already known —
+    // exactly the stance isRequireMainFilename and processVersionsMember take
+    // one construct up, for the same reason. Re-dispatch the plain call with
+    // the token marked handled; the arguments evaluate exactly as the
+    // unguarded spelling's do, which is what JS does when the callee is not
+    // nullish. 'any'/'unknown' callees stay out — the island and dyn worlds
+    // answer their own optional calls below, over values that DO exist.
+    if (dotNode === expr && ts.isCallExpression(expr) && calleeNeverNullish(L, recvNode)) {
+      L.chainHandled.add(dotNode);
+      try {
+        return L.lowerExpr(expr);
+      } finally {
+        L.chainHandled.delete(dotNode);
+      }
     }
     const receiver = L.lowerExpr(recvNode);
     if (receiver.type.kind === "dyn") {
@@ -13362,7 +13397,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * fence says so. Null for other members and non-Promise receivers. */
   export function lowerPromiseRejectCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken) return null;
+    if (L.chainBlocked(call)) return null;
     if (L.stdlibGlobalMember(access, "Promise") !== "reject") return null;
     const loc = locOf(call);
     if (call.arguments.length !== 1) {
@@ -13451,7 +13486,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * and non-literal arguments keep the array path and its fences. */
   export function lowerPromiseAllTupleCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken) return null;
+    if (L.chainBlocked(call)) return null;
     if (L.stdlibGlobalMember(access, "Promise") !== "all") return null;
     const argNode = call.arguments.length === 1 ? call.arguments[0]! : null;
     if (
