@@ -464,7 +464,7 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
    * Null when the receiver is not a baked constants object (the property
    * chain keeps trying). */
   export function lowerBuiltinConstantsProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-    if (expr.questionDotToken) return null;
+    if (L.chainBlocked(expr)) return null;
     const module = builtinConstantsModuleOf(L, expr.expression);
     if (module === null) return null;
     const entry = BUILTIN_CONSTANTS_TABLES[module]!;
@@ -503,7 +503,7 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
    * value. Other members on the performance object fence by name; null
    * for non-perf_hooks callees (the call chain keeps trying). */
   export function lowerPerfHooksCall(L: Lowerer, expr: ts.CallExpression, access: ts.PropertyAccessExpression): IrExpr | null {
-    if (access.questionDotToken) return null;
+    if (L.chainBlocked(access)) return null;
     const loc = locOf(expr);
     if (access.name.text === "now" && isPerfHooksPerformanceExpr(L, access.expression)) {
       if (expr.arguments.length !== 0) {
@@ -5854,7 +5854,7 @@ let digestInputValueDispatches = 0;
    *
    * Null for every other receiver, so the property chain keeps trying. */
   export function lowerErrorPrototypeProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-    if (expr.questionDotToken) return null;
+    if (L.chainBlocked(expr)) return null;
     if (L.dynamic) return null;
     if (L.stdlibGlobalMember(expr, "Error") !== "prototype") return null;
     return { kind: "libCall", fn: "dyn.errorProto", args: [], type: DYN, loc: locOf(expr) };
@@ -5879,7 +5879,7 @@ let digestInputValueDispatches = 0;
    *
    * Null for every other receiver, so the property chain keeps trying. */
   export function lowerUint8ArrayPrototypeProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-    if (expr.questionDotToken) return null;
+    if (L.chainBlocked(expr)) return null;
     if (L.dynamic) return null;
     if (L.stdlibGlobalMember(expr, "Uint8Array") !== "prototype") return null;
     return { kind: "libCall", fn: "dyn.u8Proto", args: [], type: DYN, loc: locOf(expr) };
@@ -5938,7 +5938,7 @@ let digestInputValueDispatches = 0;
    * supported hosts). Other fs.constants members (COPYFILE_*, O_*) fence
    * by name. Null for non-fs-constants receivers. */
   export function lowerFsConstantsProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-    if (expr.questionDotToken) return null;
+    if (L.chainBlocked(expr)) return null;
     if (!ts.isIdentifier(expr.expression)) return null;
     const bi = L.builtinImportOf(expr.expression);
     if (!bi || bi.module !== "fs" || bi.member !== "constants") return null;
@@ -7801,7 +7801,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
    * Null when this is neither form. */
   export function lowerDateCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     const loc = locOf(call);
     if (L.stdlibGlobalMember(access, "Date") === "now") {
       if (call.arguments.length !== 0) {
@@ -9499,7 +9499,7 @@ export function isConsoleLog(L: Lowerer, call: ts.CallExpression): boolean {
   ): "log" | "info" | "debug" | "error" | "warn" | null {
     if (!ts.isPropertyAccessExpression(call.expression)) return null;
     const access = call.expression;
-    if (access.questionDotToken || call.questionDotToken) return null;
+    if (L.chainBlocked(access, call)) return null;
     const name = access.name.text;
     if (name !== "log" && name !== "info" && name !== "debug" && name !== "error" && name !== "warn") return null;
     return L.isStdlibGlobal(access.expression, "console") ? name : null;

@@ -3392,8 +3392,11 @@ export function pureReemittable(e: IrExpr): boolean {
    * IS `.`. `any` and `unknown` answer FALSE deliberately: their values do
    * exist as island handles and dyn nodes, and their own arms of
    * lowerOptionalChain answer the guard over them. Reads through L.typeOf,
-   * so an enclosing chain's narrow counts. */
-  function calleeNeverNullish(L: Lowerer, node: ts.Expression): boolean {
+   * so an enclosing chain's narrow counts. A PROOF, in the direction where
+   * a wrong `true` would stop declining and start evaluating what `?.`
+   * skips — so every nullish constituent, and `void`/`never` besides,
+   * answers `false`, and `false` is the pre-existing behaviour exactly. */
+  function recvNeverNullish(L: Lowerer, node: ts.Expression): boolean {
     const t = L.typeOf(node);
     const bad = ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.Null |
       ts.TypeFlags.Undefined | ts.TypeFlags.Void | ts.TypeFlags.Never;
@@ -3442,19 +3445,32 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       dotNode = tail;
       recvNode = tail.expression;
     }
-    // `f?.()` where the CALLEE cannot be nullish: the guard cannot
-    // short-circuit, so the value IS the plain call's — but the gate below
-    // opens by lowering the callee as a STANDALONE function value, and most
-    // call-position lowerings deliberately materialize none (`JSON.stringify`
-    // as a value, `Promise.all` as a value, `n.toString` as a value are each
-    // their own fence). Demanding one would refuse a result already known —
-    // exactly the stance isRequireMainFilename and processVersionsMember take
-    // one construct up, for the same reason. Re-dispatch the plain call with
-    // the token marked handled; the arguments evaluate exactly as the
-    // unguarded spelling's do, which is what JS does when the callee is not
-    // nullish. 'any'/'unknown' callees stay out — the island and dyn worlds
-    // answer their own optional calls below, over values that DO exist.
-    if (dotNode === expr && ts.isCallExpression(expr) && calleeNeverNullish(L, recvNode)) {
+    // A receiver the checker proves NEITHER null NOR undefined: `?.` IS `.`
+    // — no short-circuit can happen, so the chain's value is the plain
+    // form's. The gate below opens by lowering that receiver as a
+    // STANDALONE value, and a great many receivers deliberately have none:
+    // `JSON.stringify` as a function value, `process.versions`, a `new
+    // Intl.NumberFormat(...)` instance, and — in a JavaScript source — the
+    // `[builtin Object]` identity token that stands in for a stdlib global.
+    // Demanding a value there refuses a result that is already known, and
+    // the receiver subtree is DISCARDED a few lines below anyway (the
+    // never-nullish arm re-lowers `expr` from scratch), so building it buys
+    // nothing and costs whatever the lowering interned on the way past — a
+    // dead class layout, a dead record shape, a dead %env.snapshot helper.
+    // Re-dispatch the plain lowering with the token marked handled: the
+    // receiver and the arguments evaluate exactly as the unguarded
+    // spelling's do, which is what JS does when the receiver is not
+    // nullish. This is the stance isRequireMainFilename and
+    // processVersionsMember take one construct up, generalized instead of
+    // special-cased a third time. 'any'/'unknown' receivers stay out — the
+    // island and dyn worlds answer their own optional links below, over
+    // values that DO exist — and a checker-nullish receiver keeps the old
+    // path entirely, so nothing that already worked is re-routed. No narrow
+    // is written: the gate IS "the checker says non-nullish", so
+    // getNonNullableType would be the identity, and a TAIL's intermediate
+    // steps carry their plain types for the same reason (TypeScript adds
+    // the `| undefined` only where the chain CAN short-circuit).
+    if (recvNeverNullish(L, recvNode)) {
       L.chainHandled.add(dotNode);
       try {
         return L.lowerExpr(expr);
