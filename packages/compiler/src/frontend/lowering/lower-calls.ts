@@ -7160,7 +7160,18 @@ const inliningPredicates = new Set<ts.Symbol>();
 
 export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    // chainBlocked, not a raw token test. A raw test declines the
+    // RE-DISPATCH lowerOptionalChain performs with the receiver already
+    // bound to a chainRecv — the chain has proved the receiver non-nullish
+    // and asked for the plain lowering, and a raw `questionDotToken` check
+    // reads the token that is still on the node and says no. That turned
+    // `p?.then(...)` / `p?.catch(...)` / `p?.finally(...)` into an SC2020
+    // naming the member, when the only unsupported thing about the site
+    // was the `?.` — zapo's `pendingMutations.get(jid)?.catch(...)` is a
+    // Map holding in-flight writes, the everyday spelling of "await it if
+    // one is running". The chain machinery then wraps the promise result
+    // into the checker's undefined-armed union like any other chain value.
+    if (L.chainBlocked(call, access)) return null;
     const member = access.name.text;
     if (member !== "then" && member !== "catch" && member !== "finally") return null;
     let recvT = L.mapTypeOf(L.typeOf(access.expression));
@@ -7174,6 +7185,17 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     if (recvT?.kind !== "promise") return null;
     if (!L.isStdlibMember(access)) return null;
     const loc = locOf(call);
+    // The COMBINED result type, as this call alone produces it. Under an
+    // optional-chain re-dispatch the checker's type for the call node is
+    // the whole CHAIN's — `Promise<T> | undefined`, the undefined coming
+    // from the guard rather than from this call — and the chain wraps the
+    // body into exactly that union itself (finishOptionalChain). So strip
+    // the guard's arm here and hand the chain the promise it expects; the
+    // wrapping is not skipped, it moves to the one place that owns it.
+    const chained = L.chainHandled.has(access);
+    const callTs = chained
+      ? L.checker.getNonNullableType(L.typeOf(call))
+      : L.typeOf(call);
     // Handler-less spellings — `p.then()`, `p.catch()`, `p.finally()`,
     // and the explicit `undefined`/`null` handler: the spec substitutes
     // identity/thrower/no-op, so each is the PASSTHROUGH promise — a
@@ -7400,7 +7422,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
           `then handlers whose parameter is not the settled value's type (expected '${L.fmt(inner)}', got '${L.fmt(param)}')`,
         );
       }
-      const resultT = L.mapTypeOf(L.typeOf(call));
+      const resultT = L.mapTypeOf(callTs);
       if (resultT?.kind !== "promise") {
         L.noLowering(
           "then with this handler's result type",
@@ -7680,7 +7702,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
           "value — take `(e)` or `(e: unknown)` and narrow with instanceof)",
       );
     }
-    const resultT = L.mapTypeOf(L.typeOf(call));
+    const resultT = L.mapTypeOf(callTs);
     if (resultT?.kind !== "promise") {
       L.noLowering(
         "catch with this handler's result type",
