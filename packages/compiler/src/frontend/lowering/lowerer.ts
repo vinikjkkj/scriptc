@@ -3759,6 +3759,46 @@ export class Lowerer {
     return { ...expr, type: DYN };
   }
 
+  /** The same read at an UNDEFINED-ARMED UNION destination. The helper's
+   * miss path already answers a union's undefined arm — it does, under
+   * noUncheckedIndexedAccess, and both emitters carry the arm-surfacing
+   * chain for it (recordKeyGetHelper's union branch; the LLVM
+   * keyedRecordRead's "the result union's undefined arm"). Only the
+   * frontend never asked for it away from that flag.
+   *
+   * recordKeyReadAtSlotWidth refuses this width, and says why: a DECLARED
+   * `const s: string | undefined = attrs.id` is narrowed by tsc to
+   * `string` at the declaration, so every later use of `s` was compiled
+   * as "definitely the string arm" — a bare arm peek over a stored
+   * undefined, the r03 SEGFAULT. That is a fact about the DESTINATION,
+   * not about the width, and it is not true of every destination.
+   * Measured on tsc 5.9.3 (repro-pt/lab/narrowq2.ts), `string |
+   * undefined` survives to the readers at a RECORD-LITERAL FIELD and is
+   * narrowed away at a declaration, at an assignment and at a property
+   * write. So this rung is offered to the callers whose readers keep the
+   * declared union, never through coerceToExpected — a slot that narrows
+   * keeps the dyn widening (where every reader is checked) or the trap.
+   *
+   * The width must be EXACTLY the read's own plus the undefined arm.
+   * Anything wider is a conversion the author asked for and keeps its own
+   * coercion, the same line keyedReadLocalAtDynWidth draws. Unlike the dyn
+   * widening this is not a dynFrom, so no deep copy severs aliasing and
+   * the immutable-primitive restriction that rule carries is not needed
+   * here: a union wrap retains the very value the map holds. */
+  recordKeyReadAtUndefinedArm(expr: IrExpr, expected: IrType): IrExpr | null {
+    if (expr.kind !== "recordKeyGet") return null;
+    if (expected.kind !== "union") return null;
+    if (this.armTag(expected.unionId, UNDEFINED_T) < 0) return null;
+    // A read that can ALREADY answer a miss keeps its width.
+    if (expr.type.kind === "union" && this.armTag(expr.type.unionId, UNDEFINED_T) >= 0) return null;
+    if (!typeEquals(this.stripUndefinedArm(expected), expr.type)) return null;
+    const shape = this.shapes.get(expr.shapeId);
+    if (!shape?.indexValue) return null;
+    const effective = expr.overflowOnly === true ? { ...shape, fields: [] } : shape;
+    if (!recordKeyResultOk(this, effective, expected)) return null;
+    return { ...expr, type: expected };
+  }
+
   /** Implicit union construction. Wherever a value flows into a typed slot
    * (initializer, assignment, call argument, return, field write, record
    * literal field, ternary arm) whose expected type is a union and the
