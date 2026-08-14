@@ -3199,7 +3199,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * string) and `.hasSubscribers` (the publish guard). Null for
    * non-Channel receivers and other members (the method fence owns them). */
   export function lowerDcChannelProperty(L: Lowerer, access: ts.PropertyAccessExpression): IrExpr | null {
-    if (access.questionDotToken) return null;
+    if (L.chainBlocked(access)) return null;
     const name = access.name.text;
     if (name !== "name" && name !== "hasSubscribers") return null;
     if (!isDcChannelTyped(L, access.expression)) return null;
@@ -3355,7 +3355,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * take over) and `.hasSubscribers` (the five-channel disjunction). Null
    * for other members and non-TracingChannel receivers. */
   export function lowerDcTracingChannelProperty(L: Lowerer, access: ts.PropertyAccessExpression): IrExpr | null {
-    if (access.questionDotToken) return null;
+    if (L.chainBlocked(access)) return null;
     const name = access.name.text;
     const idx = (DC_TRACE_EVENTS as readonly string[]).indexOf(name);
     if (idx < 0 && name !== "hasSubscribers") return null;
