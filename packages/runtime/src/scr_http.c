@@ -2567,8 +2567,14 @@ ScrHttpClientReq *scr_http_client_pipe_from(ScrStream *src, ScrHttpClientReq *c,
       scr_hcw_closure(c, (void *)&scr_hcw_destroy_inv), &scr_hcw_destroy_inv);
   ScrStream *d = scr_stream_pipe(src, w, end); /* d is w, +1 */
   if (d != NULL) scr_stream_release(d);
-  scr_stream_release(w);
-  return c; /* Node's pipe answers the DESTINATION — the request itself */
+  scr_stream_release(w); /* the pipe edge holds the adapter now */
+  /* Node's pipe answers the DESTINATION — the request itself — and a
+   * libCall result is OWNED (+1) by the caller, which the emitter proves
+   * by releasing it: `call void @scr_http_client_release_v(ptr %t84)`.
+   * Returning it borrowed was an over-release that no test could see,
+   * because the registry and the caller's own local keep the count
+   * positive and scr_rc_audit_at_exit does not count http clients. */
+  return scr_http_client_retain(c);
 }
 
 void scr_http_client_destroy_err(ScrHttpClientReq *c, ScrError *err /*borrowed*/) {
