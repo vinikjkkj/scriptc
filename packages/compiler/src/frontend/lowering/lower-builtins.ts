@@ -7988,7 +7988,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
    * that the exceptional Numbers fall on the right side: NaN fails
    * `cp >= 0`, Infinity fails `cp <= 0x10FFFF`, and `cp % 1 !== 0` catches
    * fractions while leaving -0 alone (`-0 % 1` is `-0`, and `-0 !== 0` is
-   * false — Node's `String.fromCodePoint(-0)` is " ", not a throw).
+   * false — Node's `String.fromCodePoint(-0)` is U+0000, not a throw).
    * The message carries the RAW argument through the static ToString, the
    * budget checker's convention. */
   function internCodePointEncoder(L: Lowerer, loc: SrcLoc): string {
