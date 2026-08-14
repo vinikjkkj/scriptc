@@ -3199,7 +3199,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * string) and `.hasSubscribers` (the publish guard). Null for
    * non-Channel receivers and other members (the method fence owns them). */
   export function lowerDcChannelProperty(L: Lowerer, access: ts.PropertyAccessExpression): IrExpr | null {
-    if (access.questionDotToken) return null;
+    if (L.chainBlocked(access)) return null;
     const name = access.name.text;
     if (name !== "name" && name !== "hasSubscribers") return null;
     if (!isDcChannelTyped(L, access.expression)) return null;
@@ -3355,7 +3355,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * take over) and `.hasSubscribers` (the five-channel disjunction). Null
    * for other members and non-TracingChannel receivers. */
   export function lowerDcTracingChannelProperty(L: Lowerer, access: ts.PropertyAccessExpression): IrExpr | null {
-    if (access.questionDotToken) return null;
+    if (L.chainBlocked(access)) return null;
     const name = access.name.text;
     const idx = (DC_TRACE_EVENTS as readonly string[]).indexOf(name);
     if (idx < 0 && name !== "hasSubscribers") return null;
@@ -5929,7 +5929,7 @@ let digestInputValueDispatches = 0;
    * fix instead of lowering to a lie. Null for anything else, so the
    * property chain keeps trying. */
   export function lowerProcessStreamProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-    if (expr.questionDotToken) return null;
+    if (L.chainBlocked(expr)) return null;
     const member = expr.name.text;
     if (member !== "isTTY" && member !== "columns") return null;
     let recv: ts.Expression = expr.expression;
@@ -6882,7 +6882,7 @@ let digestInputValueDispatches = 0;
    * present wraps the string arm, absent yields the interned
    * undefined-arm instance. Null for non-env receivers. */
   export function lowerProcessEnvGet(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-    if (expr.questionDotToken) return null;
+    if (L.chainBlocked(expr)) return null;
     if (!L.isProcessEnv(expr.expression)) return null;
     const loc = locOf(expr);
     const key: IrExpr = { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr.name) };
@@ -7575,7 +7575,7 @@ const NUMBER_PREDICATE_FN_T: IrType = funcOf([DYN], BOOL);
     expr: ts.PropertyAccessExpression,
     member: string,
   ): IrExpr | null {
-    if (expr.questionDotToken) return null;
+    if (L.chainBlocked(expr)) return null;
     if (L.dynamic) return null;
     // The CALL form is lowerNumberStaticCall's — including the arities and
     // the island/nullish argument arms it handles, which must keep their

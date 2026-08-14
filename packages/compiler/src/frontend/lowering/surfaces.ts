@@ -1709,7 +1709,7 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
    * anything else, so property-lowering chains keep trying other
    * receivers. */
   export function stdlibGlobalMember(L: Lowerer, access: ts.PropertyAccessExpression, name: string): string | null {
-    if (access.questionDotToken) return null;
+    if (L.chainBlocked(access)) return null;
     return L.isStdlibGlobal(access.expression, name) ? access.name.text : null;
   }
 

@@ -12435,7 +12435,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
   export function lowerFieldRead(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     const target = L.fieldTarget(expr);
     if (target) return L.fieldGetExpr(target, locOf(expr), expr);
-    if (expr.questionDotToken) return null;
+    if (L.chainBlocked(expr)) return null;
     const receiverIr = L.mapTypeOf(L.typeOf(expr.expression));
     if (
       receiverIr?.kind === "object" &&
@@ -12518,7 +12518,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * and `switch (r.kind)` work without dedicated test nodes. Anything else
    * on a union receiver is rejected specifically (narrow first). */
   export function lowerUnionProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-    if (expr.questionDotToken) return null;
+    if (L.chainBlocked(expr)) return null;
     const receiverIr = L.mapTypeOf(L.typeOf(expr.expression));
     if (receiverIr?.kind !== "union") return null;
     // Lower the receiver FIRST and read its actual IR union: a partially
