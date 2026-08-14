@@ -636,16 +636,62 @@ function lowerOptionalDefaultArg(
       for (const n of overridden) L.chainNarrowedType.delete(n);
     }
     const full = [...lead, F64, arrT];
-    if (
-      fnArg.type.kind !== "func" ||
-      fnArg.type.params.length > full.length ||
-      !fnArg.type.params.every((p, i) => typeEquals(p, full[i]!))
-    ) {
+    if (fnArg.type.kind !== "func" || fnArg.type.params.length > full.length) {
       L.badType(argNode, L.typeOf(argNode));
+    }
+    // A callback declaring a WIDER parameter than the element — `(e: Env |
+    // null | undefined) => R` over an `Env[]`, the shape a named parser
+    // reused for a nullable single value takes when it is handed to
+    // `.map` by reference. tsc admits it (parameter contravariance), and
+    // the desugared loop is the only caller, so the element it passes is
+    // exactly what the callback must receive: the ordinary argument
+    // conversion, applied once at the callback value instead of at every
+    // call. coerceToExpected's funcCoerceAdapter already builds precisely
+    // that closure; only the routing to it was missing, and the helper
+    // interning downstream keys on the CANONICAL signature, which the
+    // adapter restores.
+    //
+    // Restricted to ARM WRAPS (and exact matches) rather than everything
+    // coerceToExpected can do. Two of its dispositions would be wrong
+    // here even though they compile: a static→dyn conversion DEEP-COPIES,
+    // so a callback typed `unknown` would stop seeing the array's own
+    // element (identity and mutation both diverge from Node); and a
+    // parameter that cannot convert at all strands a TypeError with no
+    // code inside the adapter, which is strictly worse than the fence it
+    // would replace. An arm wrap boxes the same pointer under a tag and
+    // is exactly what a direct call of the same function performs.
+    //
+    // A UNION element re-wraps arm by arm on the same terms, and only on
+    // them: unionRetagHelper's own account is that a plain re-wrap is
+    // identity-preserving while a width-LIFTED arm is a copy, and an arm
+    // with no destination throws the uncoded TypeError this rule exists to
+    // avoid. So every arm of the element must have an IDENTICAL arm in the
+    // parameter — total, no lift, no strand. `(Env | null)[]` handed to
+    // `(e: Env | null | undefined) => R` is zapo's other two spellings.
+    const rewrapOnly = (w: IrType, p: IrType): boolean => {
+      if (typeEquals(w, p)) return true;
+      if (p.kind !== "union") return false;
+      if (L.armTag(p.unionId, w) >= 0) return true;
+      if (w.kind !== "union") return false;
+      const arms = L.unions.get(w.unionId)?.arms;
+      if (arms === undefined || arms.length === 0) return false;
+      return arms.every((a) => L.armTag(p.unionId, a) >= 0);
+    };
+    const want = full.slice(0, fnArg.type.params.length);
+    if (!fnArg.type.params.every((p, i) => typeEquals(p, want[i]!))) {
+      const wrapOnly =
+        fnArg.type.rest !== true &&
+        want.every((w, i) => rewrapOnly(w, (fnArg.type as IrType & { kind: "func" }).params[i]!));
+      const slot = funcOf(want, (fnArg.type as IrType & { kind: "func" }).ret);
+      const adapted = wrapOnly ? L.coerceToExpected(fnArg, slot) : null;
+      if (adapted === null || !typeEquals(adapted.type, slot)) {
+        L.badType(argNode, L.typeOf(argNode));
+      }
+      fnArg = adapted;
     }
     return {
       fnArg: fnArg as IrExpr & { type: IrType & { kind: "func" } },
-      arity: fnArg.type.params.length,
+      arity: (fnArg.type as IrType & { kind: "func" }).params.length,
     };
   }
 
