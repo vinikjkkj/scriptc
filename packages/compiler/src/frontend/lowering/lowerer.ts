@@ -133,6 +133,7 @@ export type WidthLift =
   | { how: "clsWidth" }
   | { how: "narrow" }
   | { how: "dynIn" }
+  | { how: "dynOut" }
   | { how: "upcast" }
   | { how: "funcAdapt" };
 
@@ -4900,6 +4901,10 @@ export class Lowerer {
         if (dst.kind !== "dyn") throw new Error("lowerer bug: dynIn lift against a non-dyn slot");
         return { kind: "dynFrom", value, type: DYN, loc };
       }
+      case "dynOut": {
+        if (value.type.kind !== "dyn" || dst.kind === "dyn") throw new Error("lowerer bug: dynOut lift shape");
+        return { kind: "dynCheck", value, type: dst, loc };
+      }
       case "upcast": {
         if (dst.kind !== "object" || value.type.kind !== "object") throw new Error("lowerer bug: upcast lift shape");
         return this.upcastTo(value, dst.className);
@@ -5003,7 +5008,23 @@ export class Lowerer {
               tf.type.kind === "dyn" ||
               (tf.type.kind === "union" && this.armTag(tf.type.unionId, UNDEFINED_T) >= 0);
             const readT = this.indexReadType(from.indexValue);
-            const lift = optionalFlavored ? this.widthLiftPlan(readT, tf.type) : null;
+            // The read's own type is what lifts into the field — unless the
+            // signature's value type is 'unknown'. Then the read is a DYN,
+            // and the conversion that puts a dyn into a typed slot is not a
+            // width lift at all: it is the VALIDATED extraction (dynCheck)
+            // that coerceToExpected already applies to a dyn flowing into
+            // any canDynCheckTo slot, and that coercibleValue already
+            // answers yes for. The width family simply never offered it,
+            // so `Record<string, unknown>` — the ordinary accumulator
+            // spelling, and the ONLY shape tsc lets satisfy an all-optional
+            // target through the index-signature hole — had no reshape at
+            // all and stranded. Scoped to this arm on purpose: the keyed
+            // read is the position with no other bridge, and widening the
+            // whole relation would turn ordinary `unknown`-field fences
+            // into copies nobody asked for.
+            const lift = optionalFlavored
+              ? (this.widthLiftPlan(readT, tf.type) ?? this.dynOutPlan(readT, tf.type))
+              : null;
             if (process.env.SCRIPTC_KEYREAD_WHY) {
               console.error(
                 `KEYREAD plan ${fromId}->${toId} field=${tf.name} read=${this.fmt(readT)} want=${this.fmt(tf.type)} opt=${optionalFlavored} lift=${lift?.how ?? "NONE"}`,
@@ -5032,6 +5053,21 @@ export class Lowerer {
     } finally {
       this.widthPlanning.delete(key);
     }
+  }
+
+  /** The VALIDATED extraction as a width-plan step: a DYN source into a
+   * slot dynCheck can check. Exactly coerceToExpected's own dyn rule and
+   * exactly coercibleValue's `src.kind === "dyn"` answer — the same
+   * canDynCheckTo domain the `as T` cast path and the IR validator apply —
+   * so a position taking this plan agrees with the top-level conversion
+   * instead of stranding. It can THROW (a value that does not match the
+   * slot gets the catchable TypeError, divergence 38's stance), which is
+   * why it is not folded into widthLiftPlan for every caller: `narrow` is
+   * the precedent for a checked lift, and like `narrow` it is offered only
+   * where the alternative is worse. Null for anything else. */
+  dynOutPlan(src: IrType, dst: IrType): WidthLift | null {
+    if (src.kind !== "dyn" || dst.kind === "dyn") return null;
+    return canDynCheckTo(dst, (id) => this.shapes.get(id), (id) => this.unions.get(id)) ? { how: "dynOut" } : null;
   }
 
   /** The type a KEYED read of an index-signature shape has, for a key that
