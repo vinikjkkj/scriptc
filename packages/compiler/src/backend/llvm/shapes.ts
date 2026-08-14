@@ -277,6 +277,14 @@ export function traceAdapter(host: ShapeHost, t: IrType): string | null {
     case "func":
       host.declare(`declare void @scr_closure_trace_v(ptr, ptr, ptr)`);
       return "@scr_closure_trace_v";
+    // Unconditionally cycle-capable: a listener closure stored on a signal
+    // can capture that signal, or the controller that owns it.
+    case "abortSignal":
+      host.declare(`declare void @scr_abort_signal_trace_v(ptr, ptr, ptr)`);
+      return "@scr_abort_signal_trace_v";
+    case "abortController":
+      host.declare(`declare void @scr_abort_controller_trace_v(ptr, ptr, ptr)`);
+      return "@scr_abort_controller_trace_v";
     case "promise":
       // Promises are unconditionally cycle-capable (a rejection payload
       // is an arbitrary thrown value) — emit-shapes.ts's row.

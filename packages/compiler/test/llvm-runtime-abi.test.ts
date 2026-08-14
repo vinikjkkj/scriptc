@@ -358,6 +358,7 @@ describe("LLVM backend declares match scr_runtime.h prototypes", () => {
     httpClientReq: { kind: "httpClientReq" },
     secureCtx: { kind: "secureCtx" },
     abortSignal: { kind: "abortSignal" },
+    abortController: { kind: "abortController" },
     fsWatcher: { kind: "fsWatcher" },
     childStream: { kind: "childStream" },
     func: { kind: "func", params: [], ret: { kind: "void" } },

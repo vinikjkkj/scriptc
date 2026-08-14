@@ -7,13 +7,6 @@ fenced.ts:5:13 - error SC2020: 'process.memoryUsage' is typed by @types/node but
 
   hint: the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)
 
-fenced.ts:6:7 - error SC2001: values of type 'bigint' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
-
-  5 | console.log(process.memoryUsage()); // uptime/cpuUsage/resourceUsage lower now; the V8-heap report does not
-  6 | const buf = Buffer.from("bytes").readBigUInt64BE(0); // from, fill, and the numeric families lower; the bigint reads fence
-    |       ^~~
-  7 | console.log(Buffer.poolSize);
-
 fenced.ts:6:13 - error SC2020: 'Buffer<ArrayBuffer>.readBigUInt64BE' is typed by @types/node but has no scriptc lowering yet
 
   5 | console.log(process.memoryUsage()); // uptime/cpuUsage/resourceUsage lower now; the V8-heap report does not
@@ -41,33 +34,6 @@ fenced.ts:17:1 - error SC2020: 'Timeout.close' is typed by @types/node but has n
 
   hint: unref(), ref(), hasRef(), and refresh() are the supported Timeout methods
 
-fenced.ts:20:7 - error SC2020: 'AbortController' is typed by @types/node but has no scriptc lowering yet
-
-  19 |  * (no "Cannot find name") and their uses fence cleanly. */
-  20 | const controller = new AbortController();
-     |       ^~~~~~~~~~
-  21 | controller.abort();
-
-  hint: the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)
-
-fenced.ts:20:20 - error SC2020: 'new AbortController' is typed by @types/node but has no scriptc lowering yet
-
-  19 |  * (no "Cannot find name") and their uses fence cleanly. */
-  20 | const controller = new AbortController();
-     |                    ^~~~~~~~~~~~~~~~~~~~~
-  21 | controller.abort();
-
-  hint: the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)
-
-fenced.ts:21:1 - error SC2020: 'AbortController.abort' is typed by @types/node but has no scriptc lowering yet
-
-  20 | const controller = new AbortController();
-  21 | controller.abort();
-     | ^~~~~~~~~~~~~~~~
-  22 | fetch("https://example.invalid/");
-
-  hint: the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)
-
 fenced.ts:22:1 - error SC2012: 'fetch' runs in the embedded dynamic engine, which this build does not include
 
   21 | controller.abort();
@@ -86,14 +52,14 @@ fenced.ts:29:1 - error SC2020: 'fs.watchFile' is typed by @types/node but has no
 
   hint: the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)
 
-fenced.ts:30:13 - error SC2020: 'CpuInfo[].length' is part of the standard library types but has no scriptc lowering yet
+fenced.ts:30:13 - error SC2020: 'os.cpus' is typed by @types/node but has no scriptc lowering yet
 
   29 | watchFile("x", () => {});
   30 | console.log(cpus().length);
-     |             ^~~~~~~~~~~~~
+     |             ^~~~~~
   31 | console.log(win32.sep);
 
-  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+  hint: the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)
 
 fenced.ts:31:13 - error SC2020: 'PlatformPath.sep' is typed by @types/node but has no scriptc lowering yet
 
@@ -122,14 +88,14 @@ fenced.ts:44:13 - error SC2020: 'deflateSync of 'string' data' is part of the st
 
   hint: zlib works on Buffers: deflateSync(Buffer.from(s, "utf8"))
 
-fenced.ts:45:1 - error SC2020: 'zlib.gzipSync' is typed by @types/node but has no scriptc lowering yet
+fenced.ts:45:10 - error SC2020: 'gzipSync of 'string' data' is part of the standard library types but has no scriptc lowering yet
 
   44 | deflateSync("data");
   45 | gzipSync("data");
-     | ^~~~~~~~~~~~~~~~
+     |          ^~~~~~
   46 | /* The http2 compatibility slice's @types/node-world fences (divergence
 
-  hint: deflateSync and inflateSync are the lowered zlib surface
+  hint: zlib works on Buffers: gzipSync(Buffer.from(s, "utf8"))
 
 fenced.ts:54:71 - error SC2020: 'a createSecureServer SNICallback of 'undefined' values' is part of the standard library types but has no scriptc lowering yet
 
@@ -167,23 +133,23 @@ fenced.ts:68:1 - error SC2020: 'crypto.generateKeyPair' is typed by @types/node 
 
   hint: asymmetric-key operations need a public-key stack (bignum, RSA/EC/EdDSA math) and a KeyObject value model — neither exists in the static runtime, so no faithful lowering can be small; the lowered crypto surface is hashing, randomness, and the introspection statics
 
-fenced.ts:69:1 - error SC2020: 'crypto.createCipheriv' is typed by @types/node but has no scriptc lowering yet
+fenced.ts:69:1 - error SC2020: 'createCipheriv with this algorithm' is part of the standard library types but has no scriptc lowering yet
 
   68 | generateKeyPair("rsa", { modulusLength: 2048 }, () => {});
   69 | createCipheriv("aes-128-cbc", Buffer.alloc(16), Buffer.alloc(16));
      | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   70 | pbkdf2Sync("pw", "salt", 100000, 64, "sha512");
 
-  hint: symmetric ciphers need a cipher stack the static runtime does not vendor — the lowered crypto surface is hashing, randomness, and the introspection statics
+  hint: aes-256-gcm, aes-256-cbc and aes-256-ctr are the lowered ciphers (the options argument has no lowering either)
 
-fenced.ts:70:1 - error SC2020: 'crypto.pbkdf2Sync' is typed by @types/node but has no scriptc lowering yet
+fenced.ts:70:38 - error SC2020: 'crypto.pbkdf2Sync with this digest' is part of the standard library types but has no scriptc lowering yet
 
   69 | createCipheriv("aes-128-cbc", Buffer.alloc(16), Buffer.alloc(16));
   70 | pbkdf2Sync("pw", "salt", 100000, 64, "sha512");
-     | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     |                                      ^~~~~~~~
   71 | setFips(false);
 
-  hint: key-derivation functions have no lowering yet — the lowered crypto surface is hashing, randomness, and the introspection statics
+  hint: sha256 is the derived PRF — pass it as a literal (another digest would derive a different key)
 
 fenced.ts:71:1 - error SC2020: 'crypto.setFips' is typed by @types/node but has no scriptc lowering yet
 

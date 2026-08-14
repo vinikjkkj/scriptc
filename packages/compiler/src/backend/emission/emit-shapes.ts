@@ -679,6 +679,13 @@ export interface ClassMeta {
     switch (t.kind) {
       case "func":
         return "scr_closure_trace_v";
+      // The signal's listener vector, and the controller's edge to the
+      // signal it owns. Unconditional, unlike the record/object/map/array
+      // rules below: a signal can always be given a listener.
+      case "abortSignal":
+        return "scr_abort_signal_trace_v";
+      case "abortController":
+        return "scr_abort_controller_trace_v";
       case "union":
         return E.tracedUnions.has(t.unionId) ? "scr_union_trace_v" : null;
       case "promise":
