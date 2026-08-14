@@ -5581,6 +5581,18 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
         "a function replacement value over a regex the compiler cannot read statically (the group-participation proof needs the pattern — write the literal at the call, or bind it to a const)",
       );
     }
+    // The flag ALPHABET, checked here and not only in lowerRegexLiteral.
+    // A regex literal's flags are fenced when the literal lowers, but a
+    // `new RegExp(p, "d")` reaches this point with flags the backends
+    // cannot represent — and the desugar may synthesize a regexLit out of
+    // them (the 'g' completion below), which turned an ordinary SC1120
+    // into an SC9001 ICE ("regexLit flags \"dg\" outside the supported
+    // alphabet"). Found by a deliberate flag sweep, not by a fixture.
+    if ([...lit!.flags].some((f) => !"gimsuy".includes(f))) {
+      fence(
+        `a function replacement value over a regex with the '${[...lit!.flags].filter((f) => !"gimsuy".includes(f)).join("")}' flag (the lowered alphabet is g/i/m/s/u/y)`,
+      );
+    }
     const part = captureParticipationOfPattern(lit!.pattern);
     if (part === null) {
       fence(
