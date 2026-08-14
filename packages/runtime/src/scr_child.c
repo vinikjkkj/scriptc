@@ -19,26 +19,6 @@
  */
 #include "scr_runtime.h"
 
-/* ── the explicit error object of an 'error' fan-out ──────────────────
- * ONE definition for BOTH platform arms below. The arms each carry their
- * own copy of scr_child_err_code and scr_err_msg_code and the copies have
- * to be kept in step by hand; this one is deliberately not duplicated,
- * because a drift here is a silently WRONG error object rather than a
- * missing one. See the scr_runtime.h note for what it is for: destroy(err)
- * publishes the user's own Error so the (cb, ScrStr *msg) thunk can hand
- * it over unchanged, instead of rebuilding a lookalike that answers
- * `false` to `e === sent`, `"Error"` to `e.name` and `undefined` to
- * `e.code` for every code that is not an errno name. */
-static ScrError *scr_err_obj = NULL;
-
-ScrError *scr_err_obj_push(ScrError *e /*borrowed*/) {
-  ScrError *prev = scr_err_obj;
-  scr_err_obj = e;
-  return prev;
-}
-
-void scr_err_obj_pop(ScrError *prev) { scr_err_obj = prev; }
-
 #ifdef _WIN32
 /* ── Windows arm: real children via CreateProcessW ────────────────────
  * The POSIX arm below is untouched; this arm reimplements the exported
@@ -1620,11 +1600,6 @@ static const char *scr_err_msg_code(const ScrStr *msg) {
 }
 
 void scr_child_err_thunk_error(ScrClosure *cb, ScrStr *msg) {
-  /* the explicit-object arm — the POSIX twin's comment has the story */
-  if (scr_err_obj != NULL) {
-    ((void (*)(ScrClosure *, ScrError *))cb->fn)(cb, scr_error_retain(scr_err_obj));
-    return;
-  }
   ScrError *e = scr_error_new(0 /* Error */, msg);
   if (scr_child_err_code != NULL) {
     scr_error_set_code(e, scr_child_err_code);
@@ -3466,20 +3441,12 @@ static const char *scr_err_msg_code(const ScrStr *msg) {
   return buf;
 }
 
-/* An (err: Error) listener: hands over the explicit error object when the
- * emitter published one, else constructs the %Error instance from the
+/* An (err: Error) listener: constructs the %Error instance from the
  * message (borrowed; scr_error_new retains its copy) — the listener owns
  * the +1 error param per the universal convention. `code` stamps from the
  * settle context (spawn failures) or the message's own embedded errno name
  * (net/http/dgram 'error' events — see scr_err_msg_code). */
 void scr_child_err_thunk_error(ScrClosure *cb, ScrStr *msg) {
-  if (scr_err_obj != NULL) {
-    /* Identity is the point: the SAME object Node would have passed, so
-     * `e === sent`, `e.name`, `e.code` and own properties all hold. The
-     * listener owns a +1 per the universal convention. */
-    ((void (*)(ScrClosure *, ScrError *))cb->fn)(cb, scr_error_retain(scr_err_obj));
-    return;
-  }
   ScrError *e = scr_error_new(0 /* Error */, msg);
   if (scr_child_err_code != NULL) {
     scr_error_set_code(e, scr_child_err_code);
