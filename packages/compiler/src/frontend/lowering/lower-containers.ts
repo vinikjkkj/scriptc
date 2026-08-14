@@ -3669,7 +3669,7 @@ const MAP_ITER_METHODS = new Set(["keys", "values", "entries"]);
    * Null when the callee isn't a terminal over such a chain. */
   export function lowerIteratorHelperCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     const terminal = access.name.text;
     if (!ITER_TERMINALS.has(terminal)) return null;
     // Walk receiver: stage* ← values()/entries() ← array-typed source
@@ -3681,7 +3681,7 @@ const MAP_ITER_METHODS = new Set(["keys", "values", "entries"]);
     let srcProj: "values" | "entries" = "values";
     for (;;) {
       if (!ts.isCallExpression(cur) || !ts.isPropertyAccessExpression(cur.expression)) return null;
-      if (cur.questionDotToken || cur.expression.questionDotToken) return null;
+      if (L.chainBlocked(cur, cur.expression)) return null;
       const name = cur.expression.name.text;
       if ((name === "values" || name === "entries") && cur.arguments.length === 0) {
         const recvIr = L.mapTypeOf(L.typeOf(cur.expression.expression));
@@ -3802,8 +3802,19 @@ const MAP_ITER_METHODS = new Set(["keys", "values", "entries"]);
       resultT = accT;
     }
     // The checker's own result type must agree (annotation drift fences).
+    // Under an optional chain the checker folds the GUARD's undefined into
+    // this node's type, so the stripped reading is the one the operation
+    // produces — except for `find`, whose own result is undefined-armed
+    // already: there the two arms are the same arm, the union absorbs the
+    // guard's, and the unstripped reading is the right one. The two are
+    // indistinguishable in the checker's type, so both are accepted; outside
+    // a chain they are the same type and nothing widens.
     const checkerT = L.mapTypeOf(L.typeOf(call));
-    if (terminal !== "forEach" && (checkerT === null || !typeEquals(checkerT, resultT))) {
+    const chainT = L.mapTypeOf(L.chainResultType(call));
+    const agrees =
+      (checkerT !== null && typeEquals(checkerT, resultT)) ||
+      (chainT !== null && typeEquals(chainT, resultT));
+    if (terminal !== "forEach" && !agrees) {
       L.noLowering(
         `.${terminal} at this result type`,
         call,

@@ -5802,7 +5802,7 @@ const inliningPredicates = new Set<ts.Symbol>();
    * other receivers/arms (the narrow-first fences stay). */
   export function lowerUnionToStringCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (access.name.text !== "toString" || call.arguments.length !== 0) return null;
     const recvT = L.mapTypeOf(L.typeOf(access.expression));
     if (recvT?.kind !== "union") return null;
@@ -5830,7 +5830,7 @@ const inliningPredicates = new Set<ts.Symbol>();
    * helper so the receiver's effects keep their place. */
   export function lowerDefaultToStringCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (access.name.text !== "toString" || call.arguments.length !== 0) return null;
     if (!L.isStdlibMember(access)) return null;
     const recvT = L.mapTypeOf(L.typeOf(access.expression));
@@ -5893,7 +5893,7 @@ const inliningPredicates = new Set<ts.Symbol>();
    * non-literal keys keep the fence. */
   function lowerClassHasOwnPropertyCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (access.name.text !== "hasOwnProperty" || call.arguments.length !== 1) return null;
     if (!ts.isIdentifier(access.expression)) return null;
     const argNode = call.arguments[0]!;
@@ -7920,7 +7920,6 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
    * escape). Null hands non-narrowing filters to the generic HOF path. */
   export function lowerFilterNarrowCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
     if (access.name.text !== "filter") return null;
     if (L.chainBlocked(access, call)) return null;
     const receiverIr = L.mapTypeOf(L.typeOf(access.expression));

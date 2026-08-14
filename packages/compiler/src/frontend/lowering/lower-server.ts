@@ -817,7 +817,7 @@ function lowerNetConnectOptions(L: Lowerer, expr: ts.CallExpression, member: str
  * name `.bind` otherwise). */
 function lowerServerCloseBind(L: Lowerer, call: ts.CallExpression,
   access: ts.PropertyAccessExpression,): IrExpr | null {
-  if (call.questionDotToken || access.questionDotToken) return null;
+  if (L.chainBlocked(call, access)) return null;
   if (access.name.text !== "bind") return null;
   const closeAccess = access.expression;
   if (!ts.isPropertyAccessExpression(closeAccess) || closeAccess.name.text !== "close") return null;
@@ -1619,7 +1619,7 @@ function lowerNetSocketMethodCall(L: Lowerer, call: ts.CallExpression,
  * slot). Null when the receiver is neither. */
 export function lowerServerMethodCall(L: Lowerer, call: ts.CallExpression,
   access: ts.PropertyAccessExpression,): IrExpr | null {
-  if (call.questionDotToken || access.questionDotToken) return null;
+  if (L.chainBlocked(call, access)) return null;
   return (
     lowerServerCloseBind(L, call, access) ??
     lowerNetServerMethodCall(L, call, access) ??
