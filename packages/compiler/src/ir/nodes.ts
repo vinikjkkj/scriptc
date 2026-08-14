@@ -8612,10 +8612,6 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.writeStream",
   "fs.watch",
   "fs.watchCb",
-  // controller.abort() dispatches the 'abort' event synchronously: every
-  // listener runs, and the FIRST error is re-raised at the end.
-  "abort.abort",
-  "abort.abortReason",
   "crypto.x509Fingerprint",
   "crypto.x509FingerprintStr",
   "crypto.x509ValidFrom",

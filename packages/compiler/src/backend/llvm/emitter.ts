@@ -10681,7 +10681,6 @@ class LlEmitter {
       const c = this.emitExpr(e.args[0]!);
       this.declare(`declare void @scr_abort_controller_abort(ptr, ptr)`);
       B.line(`call void @scr_abort_controller_abort(ptr ${c.name}, ptr null)`);
-      this.emitPendingCheck();
       return { name: "", type: e.type };
     }
     if (e.fn === "abort.on") {

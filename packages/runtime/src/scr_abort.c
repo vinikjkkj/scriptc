@@ -32,11 +32,12 @@
  * limitation the dyn->closure edge already has.
  *
  * The listener vector is the ScrNetLs SHAPE, not the ScrNetLs unit: a
- * flat array of {closure, once} with snapshot firing. What it adds is the
- * identity-keyed remove that family lacks, because removeEventListener is
- * one of the seven and EventTarget keys its listener set on
- * (type, callback, capture) — which is also why a repeat add of the same
- * callback is not a second listener. */
+ * flat array of {closure, once} entries. It adds two things that family
+ * does not have — the identity-keyed remove removeEventListener needs
+ * (EventTarget keys its set on (type, callback, capture), which is also
+ * why a repeat add of the same callback is not a second listener), and a
+ * dispatch that survives being mutated by its own listeners in the four
+ * ways Node allows. See scr_abort_fire. */
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,6 +47,12 @@
 typedef struct ScrAbortL {
   ScrClosure *cb; /* owned; TRACED (the capture cycle above) */
   bool once;
+  /* Registration order, monotonic and never reused. The dispatch walks by
+   * this rather than by array index, because the array is allowed to move
+   * under it: a listener may add or remove listeners while the pass is
+   * running, and Node's answers to those cases are what the sequence
+   * numbers reproduce. See scr_abort_fire. */
+  uint64_t seq;
 } ScrAbortL;
 
 struct ScrAbortSignal {
@@ -62,6 +69,7 @@ struct ScrAbortSignal {
   ScrDyn *reason;
   ScrAbortL *ls;
   size_t n, cap;
+  uint64_t next_seq;
 };
 
 struct ScrAbortController {
@@ -143,14 +151,14 @@ ScrDyn *scr_abort_signal_reason(const ScrAbortSignal *s) {
  * repeat's `once` is discarded with the rest of it, so add(f) then
  * add(f,{once:true}) leaves a non-once entry that ONE remove clears.
  *
- * A listener added AFTER the abort never fires, and is not stored: the
- * event it would answer has already been dispatched. `cb` MOVES IN. */
+ * A listener added AFTER the abort is STORED and never fires — there is
+ * no second dispatch, because the first abort wins. Storing it is not
+ * bookkeeping for its own sake: an add made DURING the dispatch has to
+ * land in the list, or Node's "a non-last listener's append still fires"
+ * case cannot happen (measured; scr_abort_fire's walk is what reaches
+ * it). `cb` MOVES IN. */
 void scr_abort_signal_add(ScrAbortSignal *s, ScrClosure *cb, bool once) {
   if (!cb) return;
-  if (s->aborted) {
-    scr_closure_release(cb);
-    return;
-  }
   for (size_t i = 0; i < s->n; i++) {
     if (s->ls[i].cb == cb) {
       scr_closure_release(cb);
@@ -164,6 +172,7 @@ void scr_abort_signal_add(ScrAbortSignal *s, ScrClosure *cb, bool once) {
   }
   s->ls[s->n].cb = cb; /* ownership moves in */
   s->ls[s->n].once = once;
+  s->ls[s->n].seq = s->next_seq++;
   s->n++;
   /* Nothing is buffered here on purpose. Storing an edge never makes an
    * object a candidate root — the cycle it closes becomes visible when
@@ -178,6 +187,10 @@ void scr_abort_signal_add(ScrAbortSignal *s, ScrClosure *cb, bool once) {
  * which on the capture cycle above means the signal too. */
 void scr_abort_signal_off(ScrAbortSignal *s, ScrClosure *cb) {
   if (!cb) return;
+  /* A remove that lands DURING a dispatch takes effect immediately: the
+   * walk finds entries by sequence number in the LIVE array, so a removed
+   * listener is simply not there when its turn comes (Node skips a
+   * listener another listener removed — measured).  */
   for (size_t i = 0; i < s->n; i++) {
     if (s->ls[i].cb != cb) continue;
     scr_closure_release(s->ls[i].cb);
@@ -202,47 +215,96 @@ static ScrDyn *scr_abort_default_reason(void) {
   return r;
 }
 
-/* Fires the 'abort' event: registration order, each `once` entry removed
- * from the LIVE list BEFORE its callback runs (EventTarget's order), a
- * throwing listener does not stop the others, and the FIRST error is
- * re-raised at the end. `s` is borrowed and kept alive by the caller. */
-static void scr_abort_fire(ScrAbortSignal *s) {
-  size_t n = s->n;
-  if (n == 0) return;
-  ScrAbortL *snap = malloc(n * sizeof *snap);
-  if (!snap) scr_abort_oom();
-  for (size_t i = 0; i < n; i++) {
-    snap[i] = s->ls[i];
-    scr_closure_retain(snap[i].cb);
-  }
-  size_t w = 0;
+/* Fires the 'abort' event.
+ *
+ * The dispatch walks the LIVE listener list, and that is measured against
+ * Node v25.9.0 rather than taken from the spec. WHATWG says to dispatch
+ * over a COPY of the listener list; Node walks its linked list and reads
+ * each node's `next` BEFORE invoking that node. The two disagree exactly
+ * when a listener mutates the list, and all four cases are observable:
+ *
+ *   add from a NON-last listener   -> the new listener DOES fire (Node)
+ *   add from the LAST listener     -> it does NOT (next was already null)
+ *   remove another listener        -> the removed one does NOT fire
+ *   a `once` in the MIDDLE          -> the ones after it still fire
+ *
+ * A copy gets the first wrong; a naive live index walk gets the second
+ * wrong. So entries carry a monotonic SEQUENCE number and the walk reads
+ * its "next" seq before each call: everything present at that moment with
+ * a higher seq is still ahead, anything removed since is simply not found
+ * when its turn comes, and anything appended after the captured next ends
+ * the walk exactly as Node's null `next` does.
+ *
+ * `once` entries leave the list BEFORE their own callback runs, like
+ * EventTarget.
+ *
+ * A THROWING listener does not stop the others. What happens to the error
+ * afterwards is a MEASURED DIVERGENCE, recorded here rather than left to
+ * be discovered: Node reports it through
+ * `process.nextTick(() => { throw err; })`, so abort() returns normally,
+ * the rest of the current tick runs, and the process dies with that error
+ * at the next checkpoint. Here the FIRST error is reported as UNCAUGHT
+ * the moment the pass ends -- stdout flushed, the error on stderr, exit 1.
+ * Same ultimate outcome and the same exit code; what is lost is whatever
+ * the current tick would have printed after abort() returned. The
+ * alternative considered and rejected was rethrowing SYNCHRONOUSLY, which
+ * IS catchable: a program wrapping abort() in try/catch would then
+ * continue and exit 0 where Node exits 1 -- a quiet wrong answer instead
+ * of a loud partial one. Matching Node exactly wants a deferred report
+ * carrying a payload, which the raw next-tick primitive cannot do today
+ * (it takes no context pointer) and which would drag the event loop into
+ * otherwise loop-free programs.
+ *
+ * `s` is borrowed and kept alive by the caller. */
+static const uint64_t SCR_ABORT_SEQ_END = (uint64_t)-1;
+
+/* The smallest sequence number present that is >= `from`, or the END
+ * sentinel. Linear over a list that is a handful of entries in every
+ * program anyone writes. */
+static uint64_t scr_abort_seq_at_or_after(const ScrAbortSignal *s, uint64_t from) {
+  uint64_t best = SCR_ABORT_SEQ_END;
   for (size_t i = 0; i < s->n; i++) {
-    if (s->ls[i].once) {
-      scr_closure_release(s->ls[i].cb);
-    } else {
-      s->ls[w++] = s->ls[i];
-    }
+    if (s->ls[i].seq >= from && s->ls[i].seq < best) best = s->ls[i].seq;
   }
-  s->n = w;
+  return best;
+}
+
+static void scr_abort_fire(ScrAbortSignal *s) {
   ScrCaught *first = NULL;
-  for (size_t i = 0; i < n; i++) {
-    ((void (*)(ScrClosure *))snap[i].cb->fn)(snap[i].cb);
-    if (scr_exc_pending()) {
-      /* The others still run; only the first error survives to be
-       * re-raised, exactly like EventTarget's dispatch. */
-      ScrCaught *c = scr_exc_take();
-      if (first == NULL) {
-        first = c;
-      } else {
-        scr_caught_release(c);
-      }
+  uint64_t cur = 0;
+  for (;;) {
+    uint64_t seq = scr_abort_seq_at_or_after(s, cur);
+    if (seq == SCR_ABORT_SEQ_END) break;
+    size_t idx = 0;
+    while (idx < s->n && s->ls[idx].seq != seq) idx++;
+    if (idx == s->n) break; /* unreachable; keeps the index honest */
+    ScrClosure *cb = scr_closure_retain(s->ls[idx].cb);
+    if (s->ls[idx].once) {
+      /* Out of the live list BEFORE the call, EventTarget's order. */
+      scr_closure_release(s->ls[idx].cb);
+      for (size_t j = idx + 1; j < s->n; j++) s->ls[j - 1] = s->ls[j];
+      s->n--;
     }
-    scr_closure_release(snap[i].cb);
+    /* Node reads `next` before invoking: an append made by THIS callback
+     * lands after the captured position and is therefore not visited when
+     * this was the last entry. */
+    uint64_t next = seq == SCR_ABORT_SEQ_END ? SCR_ABORT_SEQ_END
+                                             : scr_abort_seq_at_or_after(s, seq + 1);
+    ((void (*)(ScrClosure *))cb->fn)(cb);
+    if (scr_exc_pending()) {
+      ScrCaught *c = scr_exc_take();
+      if (first == NULL) first = c;
+      else scr_caught_release(c);
+    }
+    scr_closure_release(cb);
+    if (next == SCR_ABORT_SEQ_END) break;
+    cur = next;
   }
-  free(snap);
   if (first != NULL) {
     scr_rethrow(first);
     scr_caught_release(first);
+    scr_exc_print_uncaught();
+    _Exit(1);
   }
 }
 
