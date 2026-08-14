@@ -1112,25 +1112,40 @@ function lowerOptionalDefaultArg(
     // find: the result is the checker's `T | undefined` union. When the
     // element type IS that union already (it carries an undefined arm), the
     // found element passes through untouched; otherwise it wraps into its
-    // arm. A union element whose result union differs would need the
-    // union-into-union re-tag that doesn't exist — fenced.
+    // arm.
+    //
+    // A UNION element is neither: `IndexPart | undefined` over a
+    // three-armed `IndexPart` is not one arm of the result, it is every
+    // arm of it plus undefined — an ARM-WISE re-tag, which is exactly what
+    // unionRetagHelper does and what the spread's sub-union value slot
+    // already uses. `schema.indexParts.find(p => p.type === 'boolString')`
+    // is zapo's spelling; the fence's own advice ("loop and test instead")
+    // was the only way to write it. Anything unmappable keeps the fence.
     const resultT = L.irTypeOf(call);
     if (resultT.kind !== "union") L.badType(call, L.typeOf(call)); // defensive: T | undefined always maps to a union
     const undefTag = L.armTag(resultT.unionId, UNDEFINED_T);
     if (undefTag < 0) L.badType(call, L.typeOf(call));
     let foundTag: number | null = null;
+    let retag: string | null = null;
     if (!typeEquals(resultT, elem)) {
       foundTag = L.armTag(resultT.unionId, elem);
       if (foundTag < 0) {
-        L.unsupported(
-          "SC1090",
-          call,
-          `'.${method}' on '${L.fmt(elem)}'-element arrays (the found element would need a union ` +
-            "re-tag that is not supported yet — loop and test instead)",
-        );
+        if (elem.kind === "union" && L.unionRetagMappable(elem.unionId, resultT.unionId)) {
+          retag = L.unionRetagHelper(elem.unionId, resultT.unionId, loc);
+        } else if (elem.kind === "union") {
+          retag = predicateNarrowedRetag(L, argNode, elem.unionId, resultT.unionId, loc);
+        }
+        if (retag === null) {
+          L.unsupported(
+            "SC1090",
+            call,
+            `'.${method}' on '${L.fmt(elem)}'-element arrays (the found element would need a union ` +
+              "re-tag that is not supported yet — loop and test instead)",
+          );
+        }
       }
     }
-    const helper = findHelper(L, elem, resultT, foundTag, undefTag, fnRet, arity, last, loc);
+    const helper = findHelper(L, elem, resultT, foundTag, retag, undefTag, fnRet, arity, last, loc);
     return { kind: "call", callee: helper, args: [receiver, fnArg], type: resultT, loc };
   }
 
@@ -1148,9 +1163,38 @@ function lowerOptionalDefaultArg(
    *   for (i = 0; i < n; i++) { v = a[i]; if (f(v)) return <v as result arm>; }
    *   return <undefined arm>;
    */
+/** The re-tag for a `.find` whose CALLBACK is a type guard. TypeScript
+ * infers a predicate for a single-expression discriminant test (5.5's
+ * inferred type predicates) as well as for a written `p is X`, and then
+ * types the call `X | undefined` — NARROWER than the element union. The
+ * arms X excludes have no home in that result, so a plain arm-wise re-tag
+ * declines; but the loop's own runtime test IS the predicate, so those
+ * arms are provably never the value returned. They compile to the
+ * stranded-arm trap (the same catchable TypeError unionRetagHelper writes
+ * for a checker-narrowed union elsewhere): a sound guard never reaches
+ * them, a lying one throws instead of smuggling the wrong arm out.
+ *
+ * Only a REAL predicate qualifies. A callback that merely happens to
+ * return a boolean leaves the result union wide, and a result narrowed by
+ * anything other than the guard keeps the fence. */
+  function predicateNarrowedRetag(L: Lowerer, argNode: ts.Expression, fromId: string, toId: string, loc: SrcLoc): string | null {
+    const sigs = L.checker.getCallSignatures(L.typeOf(argNode));
+    const pred = sigs.length === 1 ? L.checker.getTypePredicateOfSignature(sigs[0]!) : undefined;
+    if (!pred?.type) return null;
+    const from = L.unions.get(fromId);
+    if (!from || !L.unions.get(toId)) return null;
+    const trappable = new Set<number>();
+    from.arms.forEach((arm, i) => {
+      if (L.armTag(toId, arm) < 0) trappable.add(i);
+    });
+    if (trappable.size === 0 || trappable.size === from.arms.length) return null;
+    return L.unionRetagHelper(fromId, toId, loc, trappable);
+  }
+
   function findHelper(L: Lowerer, elem: IrType,
     resultT: IrType & { kind: "union" },
     foundTag: number | null,
+    retag: string | null,
     undefTag: number,
     fnRet: IrType,
     arity: number,
@@ -1167,9 +1211,11 @@ function lowerOptionalDefaultArg(
     const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
     const v = ref("v.0", elem);
     const found: IrExpr =
-      foundTag === null
-        ? v
-        : { kind: "unionWrap", unionId: resultT.unionId, tag: foundTag, value: v, type: resultT, loc };
+      retag !== null
+        ? { kind: "call", callee: retag, args: [v], type: resultT, loc }
+        : foundTag === null
+          ? v
+          : { kind: "unionWrap", unionId: resultT.unionId, tag: foundTag, value: v, type: resultT, loc };
     const miss: IrExpr = {
       kind: "unionWrap",
       unionId: resultT.unionId,
