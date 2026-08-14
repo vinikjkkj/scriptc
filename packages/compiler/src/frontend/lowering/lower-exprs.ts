@@ -3178,9 +3178,16 @@ export function pureReemittable(e: IrExpr): boolean {
       // strictly worse than the fence. The eager-default restriction used
       // to exclude that by accident (a strand is a call, so it was never
       // droppable); this states the exclusion instead of inheriting it.
-      const rightT = L.mapTypeOf(L.typeOf(expr.right));
-      const rightAtHome =
-        rightT !== null && (typeEquals(rightT, type) || L.armTag(type.unionId, rightT) >= 0);
+      // Spelled as "not a STRAND" rather than as a type test on purpose. A
+      // type test ("the default's own type is an identical arm") would have
+      // refused a record literal that width-lifts into an arm — a shape the
+      // eager form ACCEPTED, since a literal is droppable. Every strand is
+      // a call and no call is droppable, so this predicate is strictly
+      // wider than the one it replaces and nothing that compiled can move.
+      const strandFn = (e: IrExpr): boolean =>
+        e.kind === "call" &&
+        typeof e.callee === "string" &&
+        (e.callee.startsWith("%union.strand.") || e.callee.startsWith("%unit.strand."));
       // A PROMISE arm in the result is refused, and the reason is measured
       // rather than assumed: `T | Promise<T>` does not survive a union
       // re-tag anywhere in this compiler today. Four lines with no `??` in
@@ -3194,9 +3201,9 @@ export function pureReemittable(e: IrExpr): boolean {
       // promise arm is representable; §the report names the defect.
       const resArms = L.unions.get(type.unionId)?.arms ?? [];
       const carriable = resArms.length > 0 && resArms.every((a) => a.kind !== "promise");
-      if (armPairs.every((p) => p.src >= 0 && p.dst >= 0) && rightAtHome && carriable) {
+      if (armPairs.every((p) => p.src >= 0 && p.dst >= 0) && carriable) {
         const right = L.lowerExprExpecting(expr.right, type);
-        return { kind: "nullish", left, right, type, loc };
+        if (!strandFn(right)) return { kind: "nullish", left, right, type, loc };
       }
     }
     // The default is a WIDTH-SUBSET of the left's single non-unit arm. The
