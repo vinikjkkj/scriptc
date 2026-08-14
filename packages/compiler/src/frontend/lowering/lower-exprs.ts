@@ -3186,19 +3186,27 @@ export function pureReemittable(e: IrExpr): boolean {
         e.kind === "call" &&
         typeof e.callee === "string" &&
         (e.callee.startsWith("%union.strand.") || e.callee.startsWith("%unit.strand."));
-      // A PROMISE arm in the result is refused, and the reason is measured
-      // rather than assumed: `T | Promise<T>` does not survive a union
-      // re-tag anywhere in this compiler today. Four lines with no `??` in
-      // them (repro-sw/lab/n3.ts) throw an UNCODED
-      // "a 'Promise<string>' value is not representable in the target
-      // union" TypeError on main. `provided ?? deps.generateStanzaId()`
-      // inside an `async` function types exactly that union, so admitting
-      // it here would retire an SC1090 from the census and hand the same
-      // program a runtime throw with no diagnostic code — the census would
-      // read better and the binary would not. The fence stays until the
-      // promise arm is representable; estado-sweep.md §4.3 names the defect.
+      // A PROMISE arm in the result was refused here, because
+      // `T | Promise<T>` did not survive the trip to its consumer: four
+      // lines with no `??` in them threw an UNCODED "a 'Promise<string>'
+      // value is not representable in the target union" TypeError
+      // (repro-pu/lab/n3.ts). That was never a fact about `??` — the
+      // ASYNC RETURN rule tested for a value whose whole type was
+      // `promise` and let a union CARRYING a promise arm fall through to
+      // the ordinary coercion, which reached for the checked single-arm
+      // extraction. lowerReturnValue routes it to settleOrValueAwait now,
+      // so the shape `provided ?? deps.generateStanzaId()` produces has a
+      // consumer that reads it correctly, and the fence is retired:
+      // measured, not assumed — repro-pu/lab/s1.ts is that exact site in
+      // seven lines, byte-identical to Node on both backends, and
+      // estado-promiseunion.md §4 has the before/after.
+      //
+      // The retag itself needed nothing: both arms of the settle-or-value
+      // union exist in the destination, so the arm-wise wrap was always
+      // right. What remains of the guard is only the non-empty test — a
+      // union with no arms has nothing to map.
       const resArms = L.unions.get(type.unionId)?.arms ?? [];
-      const carriable = resArms.length > 0 && resArms.every((a) => a.kind !== "promise");
+      const carriable = resArms.length > 0;
       if (armPairs.every((p) => p.src >= 0 && p.dst >= 0) && carriable) {
         const right = L.lowerExprExpecting(expr.right, type);
         if (!strandFn(right)) return { kind: "nullish", left, right, type, loc };

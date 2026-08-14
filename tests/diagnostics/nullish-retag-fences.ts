@@ -1,20 +1,21 @@
-// The two fences the retagged `??` keeps, stated so the next block finds
-// them written down rather than rediscovers them.
+// The fence the retagged `??` keeps, stated so the next block finds it
+// written down rather than rediscovers it.
+//
+// This file used to pin a SECOND one: a PROMISE arm in the result union,
+// which `provided ?? gen()` inside an async function produces. That fence
+// is RETIRED — it was never a fact about `??`. The union mapped; what
+// mishandled it was the async RETURN, which tested for a value whose whole
+// type was `promise` and let a union carrying a promise arm fall through
+// to a checked single-arm extraction that throws. Routing the return
+// through settleOrValueAwait fixed the consumer, and the shape now
+// compiles and answers correctly on both backends —
+// `tests/corpus/3522-a-nullish-default-may-settle.ts` is that exact site,
+// byte-identical to Node.
 
-// 1. A PROMISE arm in the result union. `provided ?? gen()` inside an
-//    async function types `Promise<string> | string`, and `T | Promise<T>`
-//    does not survive a union re-tag anywhere in this compiler: four lines
-//    with no `??` in them throw an UNCODED "not representable in the
-//    target union" TypeError. Admitting it here would retire this SC1090
-//    and hand the same program a runtime throw with no diagnostic code.
-async function resolveStanzaId(provided: string | undefined, gen: () => Promise<string>): Promise<string> {
-    return provided ?? gen();
-}
-
-// 2. The result type is a single RECORD, not a union — a contextually
-//    typed `{}` default at a call argument, over a left with TWO non-unit
-//    arms. There is no arm to re-tag INTO; this wants a union-to-arm
-//    narrowing, which is a different question from widening.
+// The result type is a single RECORD, not a union — a contextually typed
+// `{}` default at a call argument, over a left with TWO non-unit arms.
+// There is no arm to re-tag INTO; this wants a union-to-arm narrowing,
+// which is a different question from widening.
 interface Opts {
     readonly tag?: string;
     readonly from?: string;
@@ -27,4 +28,3 @@ function forward(t: string[] | Opts | undefined): string {
 }
 
 console.log(forward(undefined));
-void resolveStanzaId;
