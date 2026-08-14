@@ -3151,7 +3151,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
    * fall through to the ordinary chain so the static fence or the
    * generic member rejection names the site. */
   export function lowerStaticFieldRead(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-    if (expr.questionDotToken) return null;
+    if (L.chainBlocked(expr)) return null;
     if (!ts.isIdentifier(expr.expression)) return null;
     const symbol = L.resolveValueSymbol(expr.expression);
     const info =
@@ -3709,7 +3709,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
    * class object's stored name. Null when the receiver isn't a class
    * value or the member doesn't resolve. */
   export function lowerClassValueProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-    if (expr.questionDotToken) return null;
+    if (L.chainBlocked(expr)) return null;
     const recvT = L.mapTypeOf(L.typeOf(expr.expression));
     if (recvT?.kind !== "classval") return null;
     const loc = locOf(expr);

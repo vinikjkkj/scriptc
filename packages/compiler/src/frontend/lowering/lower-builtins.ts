@@ -5929,7 +5929,7 @@ let digestInputValueDispatches = 0;
    * fix instead of lowering to a lie. Null for anything else, so the
    * property chain keeps trying. */
   export function lowerProcessStreamProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-    if (expr.questionDotToken) return null;
+    if (L.chainBlocked(expr)) return null;
     const member = expr.name.text;
     if (member !== "isTTY" && member !== "columns") return null;
     let recv: ts.Expression = expr.expression;
@@ -6882,7 +6882,7 @@ let digestInputValueDispatches = 0;
    * present wraps the string arm, absent yields the interned
    * undefined-arm instance. Null for non-env receivers. */
   export function lowerProcessEnvGet(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-    if (expr.questionDotToken) return null;
+    if (L.chainBlocked(expr)) return null;
     if (!L.isProcessEnv(expr.expression)) return null;
     const loc = locOf(expr);
     const key: IrExpr = { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr.name) };
@@ -7575,7 +7575,7 @@ const NUMBER_PREDICATE_FN_T: IrType = funcOf([DYN], BOOL);
     expr: ts.PropertyAccessExpression,
     member: string,
   ): IrExpr | null {
-    if (expr.questionDotToken) return null;
+    if (L.chainBlocked(expr)) return null;
     if (L.dynamic) return null;
     // The CALL form is lowerNumberStaticCall's — including the arities and
     // the island/nullish argument arms it handles, which must keep their
