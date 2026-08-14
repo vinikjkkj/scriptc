@@ -1914,27 +1914,53 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         if (e.type.kind !== "record") throw new Error("emitter bug: recordLit of non-record type");
         const rec = E.newTemp(e.type, `${mangleRecordNew(e.type.shapeId)}()`);
         for (const f of e.fields) {
-          if (f.drop) {
-            // A mapping-dropped field (the PromiseSettledResult subset):
-            // the initializer runs in its source-order slot — effects and
-            // throws included — and the result (if any) releases with the
-            // statement frame instead of storing.
-            E.emitExpr(f.value);
-            continue;
+          // Each field initializer gets its OWN release scope. The value
+          // itself still moves into the struct (moveTemp reaches through
+          // every frame); what dies here is the initializer's leftover
+          // intermediates — the retained receiver, the retained key
+          // literal, the read they fed — which are dead the moment the
+          // field is written and which the statement frame would
+          // otherwise carry to the end of the literal.
+          //
+          // That accumulation is what made the emission QUADRATIC: every
+          // may-throw field emits an `if (scr_exc_pending())` whose
+          // unwind releases the whole live frame, so field k's cleanup
+          // listed every temp of fields 0..k. A ~200-field protobuf
+          // reshape emitted one 335 881-byte helper. With a per-field
+          // scope the live frame between two fields is the record and
+          // nothing else, so every cleanup block is the same constant
+          // size and the helper is linear in the field count.
+          //
+          // The RELEASES THEMSELVES ARE UNCHANGED in count, in order and
+          // in type — they move earlier within the same literal, to the
+          // point after which nothing can read them. An unwind still
+          // releases everything live: releaseForJump walks all frames.
+          E.frames.push([]);
+          try {
+            if (f.drop) {
+              // A mapping-dropped field (the PromiseSettledResult subset):
+              // the initializer runs in its source-order slot — effects and
+              // throws included — and the result (if any) releases with the
+              // field's scope instead of storing.
+              E.emitExpr(f.value);
+              continue;
+            }
+            const v = E.emitExpr(f.value);
+            if (f.overflow) {
+              const lit = E.internLiteral(f.name);
+              const acc =
+                v.type.kind === "f64" ? "f64" : v.type.kind === "bool" ? "bool" : "ref";
+              if (acc === "ref") E.moveTemp(v);
+              E.line(
+                `scr_map_set_str_${acc}(${rec.name}->${OVERFLOW_MEMBER}, (ScrStr *)&${lit}, ${v.name});`,
+              );
+              continue;
+            }
+            if (isRefCounted(v.type)) E.moveTemp(v);
+            E.line(`${rec.name}->${mangleField(f.name)} = ${v.name};`);
+          } finally {
+            E.releaseFrame(E.frames.pop()!);
           }
-          const v = E.emitExpr(f.value);
-          if (f.overflow) {
-            const lit = E.internLiteral(f.name);
-            const acc =
-              v.type.kind === "f64" ? "f64" : v.type.kind === "bool" ? "bool" : "ref";
-            if (acc === "ref") E.moveTemp(v);
-            E.line(
-              `scr_map_set_str_${acc}(${rec.name}->${OVERFLOW_MEMBER}, (ScrStr *)&${lit}, ${v.name});`,
-            );
-            continue;
-          }
-          if (isRefCounted(v.type)) E.moveTemp(v);
-          E.line(`${rec.name}->${mangleField(f.name)} = ${v.name};`);
         }
         return rec;
       }
