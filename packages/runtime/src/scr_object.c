@@ -53,6 +53,8 @@ SCR_HANDLE_COUNTER(keyobj)
 SCR_HANDLE_COUNTER(hash)
 SCR_HANDLE_COUNTER(hmac)
 SCR_HANDLE_COUNTER(cipher)
+SCR_HANDLE_COUNTER(abortsig)
+SCR_HANDLE_COUNTER(abortctl)
 #undef SCR_HANDLE_COUNTER
 #else
 void scr_obj_alloc_note(void) {}
