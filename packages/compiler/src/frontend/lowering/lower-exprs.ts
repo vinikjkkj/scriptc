@@ -3115,15 +3115,13 @@ export function pureReemittable(e: IrExpr): boolean {
     // with no dyn representation falls through to the fold.
     {
       const atWidth = L.recordKeyReadAtSlotWidth(left, DYN) ?? narrowBridgeDyn(left);
-      // A SCALAR (or dyn) result only: that is what an index-signature
-      // read's `??` produces, and it keeps the validated exit a plain
-      // extraction. A composite or union result would turn the fold into
-      // a deep arm match, which is a different question than this one.
+      // A result with NO IDENTITY only — a scalar, a union of scalars, or
+      // dyn: that is what an index-signature read's `??` produces, and it
+      // keeps the validated exit a plain extraction. A COMPOSITE result
+      // would turn the fold into a deep arm match, which is a different
+      // question than this one.
       const want = atWidth ? L.irTypeOf(expr) : VOID;
-      if (
-        atWidth &&
-        (want.kind === "dyn" || want.kind === "string" || want.kind === "f64" || want.kind === "bool")
-      ) {
+      if (atWidth && (want.kind === "dyn" || isImmutablePrimitiveWidth(L, want))) {
         const right = L.coerceToExpected(L.lowerExpr(expr.right), DYN);
         if (right.type.kind === "dyn") {
           const test: IrExpr = { kind: "nullish", left: atWidth, right, type: DYN, loc };
@@ -8262,10 +8260,58 @@ export function ensureStringForPlus(L: Lowerer, e: IrExpr, node: ts.Node): IrExp
   if (e.type.kind === "dyn") {
     return { kind: "toString", operand: e, hint: "default", type: STRING, loc: e.loc };
   }
+  // `attrs.id + '!'` — the concat's ToPrimitive is TOTAL over dyn kinds
+  // (undefined included: JS says "undefined"), so it is a destination that
+  // can say what an absent index-signature key answers. Same routing as
+  // ensureBool's truthiness test; the DEFAULT hint is the concat's own.
+  {
+    const atWidth = stringConvAtDynWidth(L, e);
+    if (atWidth) return { kind: "toString", operand: atWidth, hint: "default", type: STRING, loc: e.loc };
+  }
   return ensureString(L, e, node);
 }
 
+/** A width with NO IDENTITY: an immutable scalar, or a union whose every
+ * arm is one. It is what lets a keyed read widen into a dyn destination
+ * without a `dynFrom` DEEP COPY severing aliasing the program has today
+ * (estado-recordkey r07) — strings, numbers and booleans have nothing to
+ * sever, and neither does a union of them. `Record<string, string |
+ * boolean>` is the shape zapo's app-state index args actually have.
+ *
+ * Unit arms are NOT admitted. A union that can already say undefined
+ * answers an absent key itself (recordKeyReadAtSlotWidth declines it one
+ * level up), and a `null` arm would leave the widening's own answer
+ * ambiguous against a stored null. */
+export function isImmutablePrimitiveWidth(L: Lowerer, t: IrType): boolean {
+  if (t.kind === "string" || t.kind === "f64" || t.kind === "bool") return true;
+  if (t.kind !== "union") return false;
+  const def = L.unions.get(t.unionId);
+  return (
+    def !== undefined &&
+    def.arms.length > 0 &&
+    def.arms.every((a) => a.kind === "string" || a.kind === "f64" || a.kind === "bool")
+  );
+}
+
+/** The dyn behind a string conversion's operand when the conversion is the
+ * destination that can say undefined: an index-signature keyed read whose
+ * declared width cannot (recordKeyReadAtSlotWidth), or a reference to a
+ * local that already holds such a read at dyn width (narrowBridgeDyn).
+ *
+ * ToString is TOTAL over the dyn kinds — the runtime dispatch is Node's
+ * String() exactly, undefined included — so a conversion never has to
+ * refuse the way a typed slot does. `String(args[k])` and `` `${args[k]}` ``
+ * printed `undefined` in Node and TRAPPED here, on the union-valued
+ * signatures where the binding rule could not reach them either. */
+function stringConvAtDynWidth(L: Lowerer, e: IrExpr): IrExpr | null {
+  return L.recordKeyReadAtSlotWidth(e, DYN) ?? narrowBridgeDyn(e);
+}
+
 export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
+    {
+      const atWidth = stringConvAtDynWidth(L, e);
+      if (atWidth) return { kind: "toString", operand: atWidth, type: STRING, loc: e.loc };
+    }
     if (e.type.kind === "string") return e;
     if (e.type.kind === "dyn") {
       // String(u) / `${u}`: a runtime dispatch over the dyn kind — Node's
