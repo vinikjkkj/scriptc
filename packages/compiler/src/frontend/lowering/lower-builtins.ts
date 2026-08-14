@@ -464,7 +464,7 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
    * Null when the receiver is not a baked constants object (the property
    * chain keeps trying). */
   export function lowerBuiltinConstantsProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-    if (expr.questionDotToken) return null;
+    if (L.chainBlocked(expr)) return null;
     const module = builtinConstantsModuleOf(L, expr.expression);
     if (module === null) return null;
     const entry = BUILTIN_CONSTANTS_TABLES[module]!;
@@ -5938,7 +5938,7 @@ let digestInputValueDispatches = 0;
    * supported hosts). Other fs.constants members (COPYFILE_*, O_*) fence
    * by name. Null for non-fs-constants receivers. */
   export function lowerFsConstantsProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-    if (expr.questionDotToken) return null;
+    if (L.chainBlocked(expr)) return null;
     if (!ts.isIdentifier(expr.expression)) return null;
     const bi = L.builtinImportOf(expr.expression);
     if (!bi || bi.module !== "fs" || bi.member !== "constants") return null;
