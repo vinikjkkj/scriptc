@@ -12169,9 +12169,23 @@ class LlEmitter {
       B.line(`call void @${entry}(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr @${adapter}, i1 ${args[2]!.name})`);
       return { name: "", type: e.type };
     }
+    if (e.fn === "net.sockOnClose") {
+      // The socket 'close' payload: the adapter pointer says whether
+      // this listener wants `hadError`, and NULL keeps the
+      // zero-argument call the pre-existing shape had.
+      const cbT = e.args[1]!.type;
+      if (cbT.kind !== "func") throw new Error("llvm emitter bug: net.sockOnClose callback not a func");
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.moveTemp(args[1]!);
+      const adapter = cbT.params.length === 0 ? null : "scr_net_close_thunk_bool";
+      if (adapter !== null) this.declare(`declare void @${adapter}(ptr, i1 zeroext)`);
+      this.declare("declare void @scr_net_sock_on_close(ptr, ptr, ptr, i1 zeroext)");
+      B.line(`call void @scr_net_sock_on_close(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ptr ${adapter === null ? "null" : "@" + adapter}, i1 ${args[2]!.name})`);
+      return { name: "", type: e.type };
+    }
     if (
       e.fn === "net.serverOnClose" || e.fn === "net.serverOnListening" ||
-      e.fn === "net.sockOnEnd" || e.fn === "net.sockOnClose" || e.fn === "net.sockOnConnect" ||
+      e.fn === "net.sockOnEnd" || e.fn === "net.sockOnConnect" ||
       e.fn === "net.sockOnTimeout" || e.fn === "net.sockOnReadable" ||
       e.fn === "http.reqOnEnd" || e.fn === "http.reqOnClose" || e.fn === "http.resOnClose" ||
       e.fn === "http.clientOnTimeout" || e.fn === "http.clientOnClose"
@@ -12181,7 +12195,6 @@ class LlEmitter {
         "net.serverOnClose": "scr_net_server_on_close",
         "net.serverOnListening": "scr_net_server_on_listening",
         "net.sockOnEnd": "scr_net_sock_on_end",
-        "net.sockOnClose": "scr_net_sock_on_close",
         "net.sockOnConnect": "scr_net_sock_on_connect",
         "net.sockOnTimeout": "scr_net_sock_on_timeout",
         "net.sockOnReadable": "scr_net_sock_on_readable",

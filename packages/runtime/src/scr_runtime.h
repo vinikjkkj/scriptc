@@ -6231,6 +6231,9 @@ typedef struct ScrNetServer ScrNetServer;
 typedef struct ScrNetSocket ScrNetSocket;
 typedef void (*ScrNetConnFn)(ScrClosure *cb, ScrNetSocket *sock); /* sock +1 */
 typedef void (*ScrNetDataFn)(ScrClosure *cb, ScrBytes *chunk);    /* borrowed */
+/* A socket 'close' listener that asked for Node's `hadError` payload.
+ * NULL in the adapter slot is the zero-argument shape. */
+typedef void (*ScrNetCloseFn)(ScrClosure *cb, bool had_error);
 
 /* The listener-list family (snapshot firing, once-before-run): owned by
  * scr_net.c, reused by scr_http.c for the request-body event lists. */
@@ -6405,7 +6408,8 @@ bool scr_net_sock_encrypted(ScrNetSocket *s); /* true = TLS transport (false map
 void scr_net_sock_pipe(ScrNetSocket *src, ScrNetSocket *dst);
 void scr_net_sock_on_data(ScrNetSocket *s, ScrClosure *cb /*moves*/, ScrNetDataFn fn, bool once);
 void scr_net_sock_on_end(ScrNetSocket *s, ScrClosure *cb /*moves*/, bool once);
-void scr_net_sock_on_close(ScrNetSocket *s, ScrClosure *cb /*moves*/, bool once);
+void scr_net_sock_on_close(ScrNetSocket *s, ScrClosure *cb /*moves*/, ScrNetCloseFn fn,
+                            bool once);
 void scr_net_sock_on_error(ScrNetSocket *s, ScrClosure *cb /*moves*/, ScrChildErrFn fn, bool once);
 void scr_net_sock_on_connect(ScrNetSocket *s, ScrClosure *cb /*moves*/, bool once);
 /* The paused-mode surface (the demux path: once('readable') + read(1) +
@@ -6428,6 +6432,7 @@ void scr_net_data_thunk_str(ScrClosure *cb, ScrBytes *chunk);
 /* The dynCheck-adapted listener's flavor: boxes the chunk as a
  * Buffer-flavored dyn (toString decodes utf8, Node's 'data' payload). */
 void scr_net_data_thunk_dyn(ScrClosure *cb, ScrBytes *chunk);
+void scr_net_close_thunk_bool(ScrClosure *cb, bool had_error);
 void scr_net_conn_thunk0(ScrClosure *cb, ScrNetSocket *sock);
 void scr_net_conn_thunk_sock(ScrClosure *cb, ScrNetSocket *sock);
 void scr_net_install(void);

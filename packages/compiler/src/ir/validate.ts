@@ -405,7 +405,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "net.sockPipeRes": { argTypes: [NETSOCKET_T, HTTPRES_T], result: VOID },
   "net.sockOnData": { argTypes: [NETSOCKET_T, null, BOOL], result: VOID },
   "net.sockOnEnd": { argTypes: [NETSOCKET_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
-  "net.sockOnClose": { argTypes: [NETSOCKET_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
+  "net.sockOnClose": { argTypes: [NETSOCKET_T, null, BOOL], result: VOID },
   "net.sockOnError": { argTypes: [NETSOCKET_T, null, BOOL], result: VOID },
   "net.sockOnConnect": { argTypes: [NETSOCKET_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
   // node:dgram + node:dns (scr_dgram.c). The message/error listeners and
@@ -4030,11 +4030,12 @@ function validateFunction(
         if (e.fn === "net.createServerCb" || e.fn === "net.serverOnConnection" ||
             e.fn === "net.serverOnSecureConnection" ||
             e.fn === "net.sockOnData" || e.fn === "net.serverOnError" ||
-            e.fn === "net.sockOnError") {
+            e.fn === "net.sockOnError" || e.fn === "net.sockOnClose") {
           // The program-dependent listener shapes: a void closure with no
           // params, or exactly the one supported parameter per event
-          // (socket handle / data chunk bytes / error %Error). The
-          // callback slot is arg 0 for createServerCb, arg 1 otherwise.
+          // (socket handle / data chunk bytes / error %Error / the socket
+          // 'close' hadError flag). The callback slot is arg 0 for
+          // createServerCb, arg 1 otherwise.
           const cbT = e.args[e.fn === "net.createServerCb" ? 0 : 1]?.type;
           let ok = cbT?.kind === "func" && cbT.ret.kind === "void" && cbT.params.length <= 1;
           if (ok && cbT?.kind === "func" && cbT.params.length === 1) {
@@ -4042,7 +4043,8 @@ function validateFunction(
             if (e.fn === "net.sockOnData") ok = (p.kind === "bytes" && p.elem === "u8") || p.kind === "dyn";
             else if (e.fn === "net.serverOnError" || e.fn === "net.sockOnError") {
               ok = p.kind === "object" && p.className === "%Error";
-            } else ok = p.kind === "netSocket";
+            } else if (e.fn === "net.sockOnClose") ok = p.kind === "bool";
+            else ok = p.kind === "netSocket";
           }
           if (!ok) {
             err(`libCall ${e.fn} callback shape (frontend must fence)`, e.loc);
