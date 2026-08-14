@@ -76,8 +76,8 @@ function tagOr<T>(x: T | string): T {
 console.log(tagOr(5));
 
 // `??` on a multi-arm union lowers now: every non-unit arm re-wraps into
-// the result union through the interned %nullish.retag helper (the
-// effect-free literal default pre-evaluates).
+// the result union in the emitters' non-nullish BRANCH, which is what
+// keeps an EFFECTFUL default lazy (the helper that took both is gone).
 function subUnionDefault(x: number | string | undefined): number | string {
   return x ?? 0;
 }
