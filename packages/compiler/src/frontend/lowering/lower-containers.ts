@@ -1130,9 +1130,22 @@ function lowerOptionalDefaultArg(
     if (!typeEquals(resultT, elem)) {
       foundTag = L.armTag(resultT.unionId, elem);
       if (foundTag < 0) {
-        if (elem.kind === "union" && L.unionRetagMappable(elem.unionId, resultT.unionId)) {
+        // The re-tag routes need the checker's element type to BE the
+        // receiver's. Inside an INSTANTIATED generic body it need not be:
+        // zapo's `schema.indexParts` is the symbolic part UNION to the
+        // checker, while instance %0's argument lowers `array<record>`
+        // and instance %1's a different union. Every helper below takes
+        // the receiver as `array<elem>`, so re-tagging on the checker's
+        // word would hand the validator an ill-typed argument (SC9001) —
+        // and the found element's RESULT union is the checker's too, so a
+        // resolved element would need a resolved result beside it, which
+        // is the instantiation table's business and not this call's. A
+        // disagreement keeps the fence it has today, unchanged.
+        const elemIsTheValue = elem.kind === "union" && receiver.type.kind === "array" &&
+          typeEquals(receiver.type.elem, elem);
+        if (elemIsTheValue && elem.kind === "union" && L.unionRetagMappable(elem.unionId, resultT.unionId)) {
           retag = L.unionRetagHelper(elem.unionId, resultT.unionId, loc);
-        } else if (elem.kind === "union") {
+        } else if (elemIsTheValue && elem.kind === "union") {
           retag = predicateNarrowedRetag(L, argNode, elem.unionId, resultT.unionId, loc);
         }
         if (retag === null) {
