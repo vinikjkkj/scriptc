@@ -313,7 +313,7 @@ function lowerDnsModuleCall(L: Lowerer, expr: ts.CallExpression,
  * receivers. */
 export function lowerDgramMethodCall(L: Lowerer, call: ts.CallExpression,
   access: ts.PropertyAccessExpression,): IrExpr | null {
-  if (call.questionDotToken || access.questionDotToken) return null;
+  if (L.chainBlocked(call, access)) return null;
   if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "dgramSocket") return null;
   if (!L.isStdlibMember(access)) return null;
   const name = access.name.text;
