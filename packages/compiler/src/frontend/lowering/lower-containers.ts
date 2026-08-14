@@ -660,16 +660,30 @@ function lowerOptionalDefaultArg(
     // code inside the adapter, which is strictly worse than the fence it
     // would replace. An arm wrap boxes the same pointer under a tag and
     // is exactly what a direct call of the same function performs.
+    //
+    // A UNION element re-wraps arm by arm on the same terms, and only on
+    // them: unionRetagHelper's own account is that a plain re-wrap is
+    // identity-preserving while a width-LIFTED arm is a copy, and an arm
+    // with no destination throws the uncoded TypeError this rule exists to
+    // avoid. So every arm of the element must have an IDENTICAL arm in the
+    // parameter — total, no lift, no strand. `(Env | null)[]` handed to
+    // `(e: Env | null | undefined) => R` is zapo's other two spellings.
+    const rewrapOnly = (w: IrType, p: IrType): boolean => {
+      if (typeEquals(w, p)) return true;
+      if (p.kind !== "union") return false;
+      if (L.armTag(p.unionId, w) >= 0) return true;
+      if (w.kind !== "union") return false;
+      const arms = L.unions.get(w.unionId)?.arms;
+      if (arms === undefined || arms.length === 0) return false;
+      return arms.every((a) => L.armTag(p.unionId, a) >= 0);
+    };
     const want = full.slice(0, fnArg.type.params.length);
     if (!fnArg.type.params.every((p, i) => typeEquals(p, want[i]!))) {
-      const armWrapOnly =
+      const wrapOnly =
         fnArg.type.rest !== true &&
-        want.every((w, i) => {
-          const p = fnArg.type.kind === "func" ? fnArg.type.params[i]! : w;
-          return typeEquals(w, p) || (p.kind === "union" && L.armTag(p.unionId, w) >= 0);
-        });
+        want.every((w, i) => rewrapOnly(w, (fnArg.type as IrType & { kind: "func" }).params[i]!));
       const slot = funcOf(want, (fnArg.type as IrType & { kind: "func" }).ret);
-      const adapted = armWrapOnly ? L.coerceToExpected(fnArg, slot) : null;
+      const adapted = wrapOnly ? L.coerceToExpected(fnArg, slot) : null;
       if (adapted === null || !typeEquals(adapted.type, slot)) {
         L.badType(argNode, L.typeOf(argNode));
       }

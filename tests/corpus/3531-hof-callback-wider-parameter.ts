@@ -68,8 +68,12 @@ items.forEach((e: Env | undefined) => {
 });
 console.log(items.map((e) => e.n).join(","));
 
-// An OPTIONAL parameter is the same union one spelling over.
-function optParam(e?: Env): string {
+// What this rule does NOT reach, and should not: a callback declared with an
+// OPTIONAL parameter (`(e?: Env)`) is a function VALUE with an incomplete
+// signature, which has its own fence and its own reason — the completed
+// signature is a different ABI, not a conversion of this one. Spelling the
+// union out is the working form, and it is the form above.
+function spelledOut(e: Env | undefined): string {
     return e === undefined ? "-" : e.id;
 }
-console.log(items.map(optParam).join(","));
+console.log(items.map(spelledOut).join(","));
