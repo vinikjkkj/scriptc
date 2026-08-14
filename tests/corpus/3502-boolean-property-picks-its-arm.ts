@@ -107,14 +107,31 @@ for (const c of codes) {
 const maybe: number | string | boolean = flag ? true : 500;
 console.log(build({ kind: "message", node, id: "m5", to: "e@s", error: typeof maybe === "boolean" ? String(maybe) : maybe }));
 
-// Own-key order of a literal built AS the selected arm: the arm declares
-// kind, node, retryType, includeParticipant, includeRecipient and the
-// literal writes a prefix of that order, so the compiled record and JS
-// agree.
-function receiptKeys(retry: boolean, ip: boolean): string {
-    const flat = { kind: "receipt", retryType: retry, includeParticipant: ip };
-    return Object.keys(flat).join(",");
+// Own-key order and PRESENCE of a literal built AS the selected arm. The
+// arm carries optional fields this literal never writes; building at the
+// arm must not invent them. (A record shape is interned per field-name
+// set with the order it was first seen in, so a literal that writes the
+// arm's names in any order shares one shape with it — the selection can
+// only ever add UNWRITTEN optional fields, and those must stay absent.)
+interface ReceiptArm {
+    readonly kind: "receipt";
+    readonly node: Node2;
+    readonly retryType?: boolean;
+    readonly includeParticipant?: boolean;
+    readonly includeRecipient?: boolean;
 }
-console.log("keys", receiptKeys(true, false));
+function inspect(r: ReceiptArm): string {
+    return [
+        Object.keys(r).join(","),
+        `retryType-in=${String("retryType" in r)}`,
+        `includeRecipient-in=${String("includeRecipient" in r)}`,
+        JSON.stringify({ kind: r.kind, retryType: r.retryType, includeParticipant: r.includeParticipant }),
+    ].join(" ");
+}
+function pick(ip: boolean): AckInput {
+    return { kind: "receipt", node, includeParticipant: ip };
+}
+const picked = pick(receiptType !== "server-error");
+if (picked.kind === "receipt") console.log("arm", inspect(picked));
 
 console.log("done");
