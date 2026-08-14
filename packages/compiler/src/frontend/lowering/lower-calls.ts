@@ -5605,7 +5605,7 @@ const DYN_STRING_ONLY_METHODS = new Set([
  * stdlib Array.isArray, so the chain keeps trying. */
   function lowerArrayIsArrayCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (L.stdlibGlobalMember(access, "Array") !== "isArray") return null;
     if (call.arguments.length !== 1) return null; // the stdlib chokepoint fences
     const argNode = call.arguments[0]!;
@@ -5684,7 +5684,7 @@ const DYN_STRING_ONLY_METHODS = new Set([
  * Null when the callee isn't THE stdlib ArrayBuffer.isView. */
   function lowerArrayBufferIsViewCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (L.stdlibGlobalMember(access, "ArrayBuffer") !== "isView") return null;
     if (call.arguments.length !== 1) return null; // the stdlib chokepoint fences
     const argNode = call.arguments[0]!;
@@ -8181,7 +8181,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
    * SymbolConstructor type fence. */
   function lowerSymbolStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (!L.isStdlibGlobal(access.expression, "Symbol")) return null;
     const member = access.name.text;
     const loc = locOf(call);
@@ -8496,7 +8496,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
    * (the stdlib member fence names them). */
   function lowerRegExpStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (!L.isStdlibGlobal(access.expression, "RegExp")) return null;
     if (access.name.text !== "escape") return null;
     if (!L.isStdlibMember(access)) return null;
@@ -8824,7 +8824,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
 
   function lowerObjectStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (!L.isStdlibGlobal(access.expression, "Object")) return null;
     const member = access.name.text;
     if (member === "defineProperty") {
