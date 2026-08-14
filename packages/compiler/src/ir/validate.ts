@@ -18,7 +18,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "./nodes.js";
-import { arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, F64, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
+import { arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, F64, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is how many may be omitted
@@ -842,6 +842,11 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "fsp.readdir": { argTypes: [STRING], result: { kind: "promise", inner: arrayOf(STRING) } },
   "fsp.rm": { argTypes: [STRING], result: { kind: "promise", inner: VOID } },
   "fsp.stat": { argTypes: [STRING], result: { kind: "promise", inner: STATS_T } },
+  "fsp.open": { argTypes: [STRING, STRING], result: { kind: "promise", inner: FILEHANDLE_T } },
+  "fh.read": { argTypes: [FILEHANDLE_T, BYTES_U8, F64, F64, F64], result: F64 },
+  "fh.readCur": { argTypes: [FILEHANDLE_T, BYTES_U8, F64, F64], result: F64 },
+  "fh.close": { argTypes: [FILEHANDLE_T], result: { kind: "promise", inner: VOID } },
+  "fh.fd": { argTypes: [FILEHANDLE_T], result: F64 },
   "process.argv": { argTypes: [], result: arrayOf(STRING) },
   "process.platform": { argTypes: [], result: STRING },
   // The one libCall whose result type is program-dependent (union ids are
@@ -3592,6 +3597,26 @@ function validateFunction(
             err("zero-argument promise.resolve must be promise<void>", e.loc);
           } else if (e.args.length === 1 && !typeEquals(e.args[0]!.type, e.type.inner)) {
             err("promise.resolve argument must be the result's inner type", e.loc);
+          }
+          break;
+        }
+        if (e.name === "promise.settled") {
+          // promise.resolve's sibling for a value computed by a libCall
+          // that reports failure through the PENDING EXCEPTION CELL
+          // instead of throwing (the scr_fsp_* convention). Same shape
+          // rules; the difference is entirely in emission, which uses
+          // scr_promise_settled_* so a pending cell becomes the
+          // REJECTION rather than being carried past.
+          if (e.args.length !== 1) err("promise.settled takes exactly one argument", e.loc);
+          for (const a of e.args) {
+            checkExpr(a);
+            if (a.type.kind === "promise") {
+              err("promise argument to promise.settled", a.loc);
+            }
+          }
+          if (e.type.kind !== "promise") err("promise.settled must be promise-typed", e.loc);
+          else if (e.args.length === 1 && !typeEquals(e.args[0]!.type, e.type.inner)) {
+            err("promise.settled argument must be the result's inner type", e.loc);
           }
           break;
         }

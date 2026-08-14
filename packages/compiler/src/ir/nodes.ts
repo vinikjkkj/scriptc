@@ -116,6 +116,19 @@ export type IrType =
    * never part of a cycle, no trace. Same container rules as url: union
    * arms fine, arrays/maps/JSON fenced. */
   | { kind: "stats" }
+  /** An fs/promises FileHandle (scr_lib.c's ScrFileHandle): heap,
+   * refcounted, an OWNED descriptor plus the closed flag. It is a handle
+   * kind rather than the raw fd for a correctness reason, not a cosmetic
+   * one: close(2) returns the number to the OS free list, so a bare fd
+   * that has been closed and reopened elsewhere reads the OTHER file's
+   * bytes and reports success — a silent wrong answer with no diagnostic
+   * anywhere. The handle remembers it was closed and answers Node's
+   * `EBADF: file closed` rejection instead. Being a handle kind also
+   * keeps it OUT of DYN_HANDLE_KINDS, so crossing the checked-dynamic
+   * boundary, JSON, or an island is REFUSED loudly rather than silently
+   * becoming a number. Holds no references — never part of a cycle, no
+   * trace. Same container rules as stats. */
+  | { kind: "fileHandle" }
   /** A child_process.spawnSync result (scr_child.c): heap, refcounted,
    * IMMUTABLE — the reaped child's status plus its captured utf8 stdout/
    * stderr. Holds only strings — never part of a cycle, no trace. Same
@@ -355,6 +368,7 @@ export const REF_TRUTHY_KINDS: ReadonlySet<string> = new Set([
   // constant-true answer.
   "symbol",
   "array", "map", "set", "regex", "url", "searchParams", "stats", "spawnRes", "child",
+  "fileHandle",
   "netServer", "netSocket", "http2Session", "http2Stream", "dgramSocket", "testCtx", "httpReq", "httpRes", "httpClientReq",
   "secureCtx", "abortSignal", "fsWatcher", "childStream", "procStream", "bytes", "func", "object", "record", "promise",
   // A generator object is a JS object: always truthy.
@@ -378,6 +392,7 @@ export const URL_T: IrType = { kind: "url" };
 export const SEARCH_PARAMS_T: IrType = { kind: "searchParams" };
 export const SYMBOL_T: IrType = { kind: "symbol" };
 export const STATS_T: IrType = { kind: "stats" };
+export const FILEHANDLE_T: IrType = { kind: "fileHandle" };
 export const SPAWNRES_T: IrType = { kind: "spawnRes" };
 export const CHILD_T: IrType = { kind: "child" };
 export const NETSERVER_T: IrType = { kind: "netServer" };
@@ -612,6 +627,7 @@ export function typeKey(t: IrType): string {
     case "symbol":
     case "stats":
     case "spawnRes":
+    case "fileHandle":
     case "child":
     case "netServer":
     case "netSocket":
@@ -749,6 +765,7 @@ export function isRefCounted(t: IrType): boolean {
     // most two strings.
     t.kind === "symbol" ||
     t.kind === "stats" ||
+    t.kind === "fileHandle" ||
     t.kind === "spawnRes" ||
     t.kind === "child" ||
     // net handles are refcounted like child (listeners drop at settle,
@@ -3337,6 +3354,22 @@ export type IrLibFn =
   | "fsp.readdir"
   | "fsp.rm"
   | "fsp.stat"
+  /** fs/promises FileHandle. `fsp.open` mints the OWNED handle (never the
+   * raw fd — see the fileHandle IrType comment) behind a settled promise.
+   * The read pair is deliberately SPLIT rather than carrying an "absent
+   * position" sentinel in one entry: `fh.read` is Node's numeric-position
+   * form (the file position is left unchanged, pread) and `fh.readCur` is
+   * the position:null form (reads from, and advances, the position). A
+   * sentinel would have to be a number that means "no number", which is
+   * how the fs-options block shipped -1 and then NaN and got the same bug
+   * twice. Neither read is in MAY_THROW_LIB_FNS: both leave the failure
+   * in the pending cell for the `promise.settled` that immediately
+   * follows, exactly as scr_fsp_stat does one call further in. */
+  | "fsp.open"
+  | "fh.read"
+  | "fh.readCur"
+  | "fh.close"
+  | "fh.fd"
   | "process.argv"
   | "process.platform"
   /** getenv(3): one string key arg → the interned `string | undefined`
@@ -5607,7 +5640,7 @@ export type IrExpr =
    * frontend returns them as-is, the spec's native-promise identity;
    * thenables and promise-armed unions fence); the backend mints a fresh
    * promise and fulfills it immediately per the inner kind. */
-  | { kind: "intrinsic"; name: "console.log" | "console.error" | "promise.race" | "promise.all" | "promise.reject" | "promise.resolve" | "module.await"; args: IrExpr[]; type: IrType; loc: SrcLoc }
+  | { kind: "intrinsic"; name: "console.log" | "console.error" | "promise.race" | "promise.all" | "promise.reject" | "promise.resolve" | "promise.settled" | "module.await"; args: IrExpr[]; type: IrType; loc: SrcLoc }
   /** Standard-library call (`process` members, node:fs functions). `fn` is a
    * closed union; arg/result types are fixed per member (validated against
    * LIB_FN_SIGS). Property READS (`process.argv`, `process.platform`) are
@@ -5963,6 +5996,7 @@ function isJsonSafeAt(
     case "bytes":
     case "stats":
     case "spawnRes":
+    case "fileHandle":
     case "child":
     case "netServer":
     case "netSocket":
@@ -7347,6 +7381,40 @@ export function moduleUsesFsWatch(mod: IrModule): boolean {
     // A watcher HANDLE TYPE left behind by a fenced statement still emits
     // scr_watcher_release — the unit must link.
     if (node.kind === "fsWatcher") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
+/** The program touches fs/promises.open (moduleUsesFileHandle on the IR):
+ * compiles scr_filehandle.c in. It is a LINK GATE, not a fence — a wrong
+ * `false` is a loud unresolved-symbol link error, never a wrong answer.
+ * It is a separate unit purely for SIZE: scr_lib.c and scr_async.c are
+ * unconditionally linked and the win32/linux links carry no
+ * --gc-sections, so a FileHandle section living there costs every binary
+ * in the world 2 048 bytes (measured, and reverted). */
+export function moduleUsesFileHandle(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && typeof node.fn === "string" &&
+        (node.fn === "fsp.open" || node.fn.startsWith("fh."))) {
+      found = true;
+      return;
+    }
+    // A handle TYPE left behind by a fenced statement still emits
+    // scr_fh_release — the unit must link. (The fsWatcher precedent
+    // directly above; it is why that probe exists.)
+    if (node.kind === "fileHandle") {
       found = true;
       return;
     }

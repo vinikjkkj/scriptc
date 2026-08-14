@@ -4594,6 +4594,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         L.lowerUrlMethodCall(expr, expr.expression) ??
         L.lowerSearchParamsMethodCall(expr, expr.expression) ??
         L.lowerStatsMethodCall(expr, expr.expression) ??
+        L.lowerFileHandleMethodCall(expr, expr.expression) ??
         L.lowerChildMethodCall(expr, expr.expression) ??
         // Piped child-output stream receivers — on/once("data" | "end").
         lowerChildStreamMethodCall(L, expr, expr.expression) ??

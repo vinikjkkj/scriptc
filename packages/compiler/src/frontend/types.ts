@@ -443,6 +443,8 @@ function formatIrTypeInner(t: IrType, shapes: ShapeRegistry, unions: UnionRegist
       return "symbol";
     case "stats":
       return "Stats";
+    case "fileHandle":
+      return "FileHandle";
     case "spawnRes":
       return "SpawnSyncReturns";
     case "child":
@@ -1447,6 +1449,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       elem.kind === "url" ||
       elem.kind === "searchParams" ||
       elem.kind === "stats" ||
+      elem.kind === "fileHandle" ||
       elem.kind === "spawnRes" ||
       elem.kind === "netSocket" ||
       elem.kind === "dgramSocket" ||
@@ -2537,6 +2540,26 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     )
   ) {
     return { kind: "fsWatcher" };
+  }
+  // fs/promises FileHandle: the handle fsPromises.open() resolves to.
+  // Module-checked like FSWatcher — @types/node declares
+  // `interface FileHandle` inside `declare module "fs/promises"`, and the
+  // name is common enough (any library may export its own FileHandle)
+  // that the enclosing-module check is what keeps this from capturing
+  // one. Deliberately NOT mapped to the raw fd: see the IrType comment —
+  // a closed-then-reopened descriptor number reads the wrong file with
+  // no error, and only an owned handle can answer Node's
+  // `EBADF: file closed`.
+  if (
+    psym?.name === "FileHandle" &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+        ctx.isStdlibFile(d.getSourceFile()) &&
+        isDeclaredInAmbientModule(d, "fs/promises"),
+    )
+  ) {
+    return { kind: "fileHandle" };
   }
   // The piped child-output stream, under BOTH spellings @types/node uses
   // for it: stream.Readable (ChildProcess.stdout's declared type — the

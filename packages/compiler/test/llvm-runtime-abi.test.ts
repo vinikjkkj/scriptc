@@ -344,6 +344,7 @@ describe("LLVM backend declares match scr_runtime.h prototypes", () => {
     searchParams: { kind: "searchParams" },
     symbol: { kind: "symbol" },
     stats: { kind: "stats" },
+    fileHandle: { kind: "fileHandle" },
     spawnRes: { kind: "spawnRes" },
     child: { kind: "child" },
     netServer: { kind: "netServer" },
