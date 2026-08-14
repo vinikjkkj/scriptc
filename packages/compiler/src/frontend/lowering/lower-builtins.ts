@@ -2970,7 +2970,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * is too generic). The interface maps to an f64 handle, so the IR type
    * cannot discriminate it from a plain number. */
   function isReadlineTyped(L: Lowerer, node: ts.Expression): boolean {
-    const t = L.checker.getTypeAtLocation(node);
+    const t = L.typeOf(node);
     const sym = t.getAliasSymbol() ?? t.getSymbol();
     if (sym?.name !== "Interface") return false;
     return L.checker.declarationsOf(sym).some((d) => {
@@ -3060,7 +3060,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * (stdlib provenance plus the ambient module, the readline.Interface
    * technique — the value itself is an f64 handle, types.ts). */
   function isDcChannelTyped(L: Lowerer, node: ts.Expression): boolean {
-    const t = L.checker.getTypeAtLocation(node);
+    const t = L.typeOf(node);
     const sym = t.getAliasSymbol() ?? t.getSymbol();
     if (sym?.name !== "Channel") return false;
     return L.checker.declarationsOf(sym).some(
@@ -3076,7 +3076,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * runStores) fences member-qualified. Null for non-Channel receivers. */
   export function lowerDcChannelMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (!isDcChannelTyped(L, access.expression)) return null;
     if (!L.isStdlibMember(access)) return null;
     const name = access.name.text;
@@ -3140,7 +3140,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * (the Channel detection's shape — the value is an f64 store handle,
    * types.ts). */
   function isAlsTyped(L: Lowerer, node: ts.Expression): boolean {
-    const t = L.checker.getTypeAtLocation(node);
+    const t = L.typeOf(node);
     const sym = t.getAliasSymbol() ?? t.getSymbol();
     if (sym?.name !== "AsyncLocalStorage") return false;
     return L.checker.declarationsOf(sym).some(
@@ -3156,7 +3156,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * for non-ALS receivers. */
   export function lowerAlsMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (!isAlsTyped(L, access.expression)) return null;
     if (!L.isStdlibMember(access)) return null;
     const name = access.name.text;
@@ -3215,7 +3215,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * TracingChannel (the Channel detection's shape — the value is an f64
    * handle into the tracing registry, types.ts). */
   function isDcTracingChannelTyped(L: Lowerer, node: ts.Expression): boolean {
-    const t = L.checker.getTypeAtLocation(node);
+    const t = L.typeOf(node);
     const sym = t.getAliasSymbol() ?? t.getSymbol();
     if (sym?.name !== "TracingChannel") return false;
     return L.checker.declarationsOf(sym).some(
@@ -3287,7 +3287,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * Null for non-TracingChannel receivers. */
   export function lowerDcTracingChannelMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (!isDcTracingChannelTyped(L, access.expression)) return null;
     if (!L.isStdlibMember(access)) return null;
     const name = access.name.text;
@@ -3376,7 +3376,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
 
   export function lowerReadlineMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (!isReadlineTyped(L, access.expression)) return null;
     if (!L.isStdlibMember(access)) return null;
     const name = access.name.text;
@@ -3447,7 +3447,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * decoder maps to its one-field pending record, so the IR type alone
    * cannot discriminate it from a user record. */
   function isStringDecoderTyped(L: Lowerer, node: ts.Expression): boolean {
-    const t = L.checker.getTypeAtLocation(node);
+    const t = L.typeOf(node);
     const sym = t.getAliasSymbol() ?? t.getSymbol();
     if (sym?.name !== "StringDecoder") return false;
     return L.checker.declarationsOf(sym).some(
@@ -3466,7 +3466,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * non-decoder receivers. */
   export function lowerStringDecoderMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (!isStringDecoderTyped(L, access.expression)) return null;
     if (!L.isStdlibMember(access)) return null;
     const name = access.name.text;
@@ -3781,7 +3781,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * isn't a toString on a crypto.randomBytes call. */
   export function lowerCryptoComposedCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     // The FUSED chain gets first refusal; only what it does not recognize
     // as a chain falls through to the materialized handle. That ordering
     // is what keeps the fast path exactly as it was.
@@ -4656,7 +4656,7 @@ let digestInputValueDispatches = 0;
    * declares fences member-qualified. Null for non-URL receivers. */
   export function lowerUrlMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "url") return null;
     if (!L.isStdlibMember(access)) return null;
     const name = access.name.text;
@@ -4752,7 +4752,7 @@ let digestInputValueDispatches = 0;
    * drain fence. Null for non-searchParams receivers. */
   export function lowerSearchParamsMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "searchParams") return null;
     if (!L.isStdlibMember(access)) return null;
     const name = access.name.text;
@@ -5031,7 +5031,7 @@ let digestInputValueDispatches = 0;
    * receivers. */
   export function lowerStatsMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "stats") return null;
     if (!L.isStdlibMember(access)) return null;
     const name = access.name.text;
@@ -5074,7 +5074,7 @@ let digestInputValueDispatches = 0;
    * hands back a rejected promise. */
   export function lowerFileHandleMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "fileHandle") return null;
     if (!L.isStdlibMember(access)) return null;
     const name = access.name.text;
@@ -5316,7 +5316,7 @@ let digestInputValueDispatches = 0;
    * non-child receivers. */
   export function lowerChildMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "child") return null;
     if (!isChildSurfaceMember(L, access)) return null;
     const name = access.name.text;
@@ -5719,7 +5719,7 @@ let digestInputValueDispatches = 0;
    * qualified. Null for non-watcher receivers. */
   export function lowerWatcherMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "fsWatcher") return null;
     if (!L.isStdlibMember(access)) return null;
     const name = access.name.text;
@@ -6530,7 +6530,7 @@ let digestInputValueDispatches = 0;
    * type probes (isBlockDevice, ...) fence with the supported list. */
   export function lowerDirentMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (!L.isStdlibMember(access)) return null;
     const recvSym = L.typeOf(access.expression).getSymbol();
     if (recvSym?.name !== "Dirent") return null;
@@ -7870,7 +7870,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
    * matches (isTimerHandleTyped's technique, for a stored instance whose
    * IR type alone cannot discriminate it). */
   function isStdlibInstanceOf(L: Lowerer, node: ts.Expression, name: string): boolean {
-    const t = L.checker.getTypeAtLocation(node);
+    const t = L.typeOf(node);
     const sym = t.getAliasSymbol() ?? t.getSymbol();
     if (sym?.name !== name) return false;
     return L.checker.declarationsOf(sym).some(
@@ -7880,7 +7880,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
 
   export function lowerTextCodecCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     const member = access.name.text;
     if (member !== "decode" && member !== "encode") return null;
     const recv = access.expression;
@@ -8199,7 +8199,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
    * fences per site. Null for non-string receivers / other members. */
   export function lowerStringLastIndexOfCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken || access.questionDotToken) return null;
+    if (L.chainBlocked(call, access)) return null;
     if (access.name.text !== "lastIndexOf") return null;
     if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "string") return null;
     if (!L.isStdlibMember(access)) return null;
@@ -9187,7 +9187,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
    * f64, so the method calls below can't tell it from a plain number by IR
    * type alone; this is the discriminator. */
   function isTimerHandleTyped(L: Lowerer, node: ts.Expression, name: "Timeout" | "Immediate"): boolean {
-    const t = L.checker.getTypeAtLocation(node);
+    const t = L.typeOf(node);
     const sym = t.getAliasSymbol() ?? t.getSymbol();
     if (sym?.name !== name) return false;
     return L.checker.declarationsOf(sym).some(
@@ -9209,7 +9209,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     // is the plain call: the method always exists on a Timeout handle. A
     // `t?.unref()` receiver guard is real narrowing and stays with the
     // chain machinery.
-    if (access.questionDotToken) return null;
+    if (L.chainBlocked(access)) return null;
     const isTimeout = isTimeoutTyped(L, access.expression);
     const isImmediate = !isTimeout && isTimerHandleTyped(L, access.expression, "Immediate");
     if (!isTimeout && !isImmediate) return null;

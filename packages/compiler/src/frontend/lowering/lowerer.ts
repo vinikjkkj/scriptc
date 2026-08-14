@@ -3280,6 +3280,44 @@ export class Lowerer {
     return nodes.some((n) => n.questionDotToken !== undefined && !this.chainHandled.has(n));
   }
 
+  /** True when `node` is lowering INSIDE the body of an optional chain
+   * its OWN receiver spine entered — either because it carries the
+   * chain's `?.` itself (the `a?.m()` re-dispatch) or because the token
+   * sits deeper in the spine and the chain claimed the whole tail
+   * (`a?.b().c()`). Spine-only: an argument's own nested chain is not
+   * this node's. */
+  inChainBody(node: ts.Expression): boolean {
+    let cur: ts.Expression = node;
+    for (;;) {
+      // The chain's bound receiver read is a LEAF — its token was
+      // consumed by the chain that bound it.
+      if (this.chainRecvByNode.has(cur)) return false;
+      if (this.chainHandled.has(cur)) return true;
+      if (
+        ts.isCallExpression(cur) ||
+        ts.isPropertyAccessExpression(cur) ||
+        ts.isElementAccessExpression(cur) ||
+        ts.isParenthesizedExpression(cur) ||
+        ts.isNonNullExpression(cur)
+      ) {
+        cur = cur.expression;
+        continue;
+      }
+      return false;
+    }
+  }
+
+  /** The checker type of `node` as THIS node alone produces it. Inside a
+   * chain body the checker folds the guard's undefined into every step's
+   * type — that arm is the GUARD's, and finishOptionalChain adds it back
+   * around the whole body — so a lowering reading its own result type off
+   * the checker must strip it here or it asks for a union the operation
+   * never produces. Outside a chain this is typeOf unchanged. */
+  chainResultType(node: ts.Expression): ts.Type {
+    const t = this.typeOf(node);
+    return this.inChainBody(node) ? this.checker.getNonNullableType(t) : t;
+  }
+
   /** formatIrType with this Lowerer's registries (records and unions expand
    * to their structure in diagnostics). */
   fmt(t: IrType): string {

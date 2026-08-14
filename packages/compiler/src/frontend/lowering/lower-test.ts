@@ -365,7 +365,7 @@ export function lowerTestMethodCall(
   call: ts.CallExpression,
   access: ts.PropertyAccessExpression,
 ): IrExpr | null {
-  if (call.questionDotToken || access.questionDotToken) return null;
+  if (L.chainBlocked(call, access)) return null;
   const loc = locOf(call);
   const member = access.name.text;
   // test.skip / it.only / describe.todo on a NAMED import binding: the
