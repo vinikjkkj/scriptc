@@ -11,7 +11,7 @@ import { MAX_GENERIC_INSTANCES, bindingNeverReassigned, genericCallInstance, imp
 import { isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
-import { bufEncoding, lowerMapSeedArrayNew } from "./lower-containers.js";
+import { bufEncoding, lowerMapCloneNew, lowerMapSeedArrayNew } from "./lower-containers.js";
 import { fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
 import { lowerSearchParamsNew } from "./lower-builtins.js";
 import { requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
@@ -5691,6 +5691,10 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         if (seedArg && !entriesLit && mapped?.kind === "map") {
           const seeded = lowerMapSeedArrayNew(L, seedArg, mapped);
           if (seeded) return seeded;
+          // `new Map(other)` — the COPY constructor, over a map value of
+          // exactly this key/value type (ReadonlyMap sources included).
+          const cloned = lowerMapCloneNew(L, seedArg, mapped);
+          if (cloned) return cloned;
         }
         if ((expr.arguments?.length ?? 0) > 0 && !entriesLit) {
           L.noLowering(
