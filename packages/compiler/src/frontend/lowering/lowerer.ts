@@ -4709,22 +4709,46 @@ export class Lowerer {
       const def = this.unions.get(dst.unionId);
       if (!def) return null;
       const candidates: { tag: number; arm: IrType }[] = [];
-      def.arms.forEach((arm, i) => {
-        if (isUnitType(arm)) return;
-        const sameFamily =
-          (src.kind === "record" && arm.kind === "record") ||
-          (src.kind === "array" && arm.kind === "array") ||
-          (src.kind === "object" && arm.kind === "record") ||
-          (src.kind === "record" && arm.kind === "object") ||
-          // A FUNCTION arm: `socket.onopen = () => {…}` against
-          // `((e: Event) => void) | null`, where JS simply does not pass
-          // the argument the callback ignores. The adapter that makes the
-          // signatures meet already exists (funcAdapt); it just had no
-          // family here, so an EXACT-signature callback reached the arm
-          // and an arity-adapted one did not.
-          (src.kind === "func" && arm.kind === "func")
-        if (sameFamily && this.widthLiftPlan(src, arm) !== null) candidates.push({ tag: i, arm });
-      });
+      // TWO PASSES. The first considers only the SAME-FAMILY arms above,
+      // exactly as before. The second adds the TUPLE-into-ARRAY arm — a
+      // change of REPRESENTATION rather than a width refinement — and runs
+      // only when the first found nothing, so a union that already had a
+      // candidate can never be made AMBIGUOUS by the new family: no pair
+      // that lifts today changes its answer, and the trap population is the
+      // only thing that shrinks.
+      const collect = (tupleIntoArray: boolean): void => {
+        def.arms.forEach((arm, i) => {
+          if (isUnitType(arm)) return;
+          const sameFamily =
+            (src.kind === "record" && arm.kind === "record") ||
+            (src.kind === "array" && arm.kind === "array") ||
+            (src.kind === "object" && arm.kind === "record") ||
+            (src.kind === "record" && arm.kind === "object") ||
+            // A FUNCTION arm: `socket.onopen = () => {…}` against
+            // `((e: Event) => void) | null`, where JS simply does not pass
+            // the argument the callback ignores. The adapter that makes the
+            // signatures meet already exists (funcAdapt); it just had no
+            // family here, so an EXACT-signature callback reached the arm
+            // and an arity-adapted one did not.
+            (src.kind === "func" && arm.kind === "func")
+          // A TUPLE against an ARRAY arm — `return [a, b]` out of a function
+          // whose return type is `string[] | null`. tsc assigns
+          // `[string, string]` to `string[]` for free, but a monomorphic
+          // tuple is a positional RECORD, so the two never met here and a
+          // SOUND assignment was read as a lying assertion: the flow became
+          // an UNCONDITIONAL runtime throw (strandedCoercionTrap has no tag
+          // test — reaching the call site IS throwing). The bridge is the
+          // fresh-array rebuild widthCoerce already performs for the same
+          // value in a plain `string[]` slot (tupleArrayWidthHelper, the
+          // const-table rule), copy stance and all (SEMANTICS.md 35) — so
+          // this makes the union-arm position AGREE with the plain slot
+          // one arm over, rather than taking a new stance.
+          const tupleArm = tupleIntoArray && src.kind === "record" && arm.kind === "array";
+          if ((sameFamily || tupleArm) && this.widthLiftPlan(src, arm) !== null) candidates.push({ tag: i, arm });
+        });
+      };
+      collect(false);
+      if (candidates.length === 0) collect(true);
       if (candidates.length !== 1) return null;
       return { how: "liftWrap", tag: candidates[0]!.tag, arm: candidates[0]!.arm };
     }
