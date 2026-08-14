@@ -404,6 +404,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "crypto.hkdfSha256": "scr_crypto_hkdf_sha256",
   "crypto.randomBytesToString": "scr_crypto_random_string",
   "crypto.randomUUID": "scr_crypto_random_uuid",
+  "crypto.timingSafeEqual": "scr_crypto_timing_safe_equal",
   "crypto.hashDigestStr": "scr_crypto_hash_digest_str",
   "crypto.hashDigestBytes": "scr_crypto_hash_digest_bytes",
   "crypto.hashDigestStrRaw": "scr_crypto_hash_digest_str_raw",

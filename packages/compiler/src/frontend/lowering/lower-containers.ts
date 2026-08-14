@@ -2024,27 +2024,52 @@ function lowerOptionalDefaultArg(
  * the same stable insertion walk as Array.toSorted. Uint8Array's default
  * comparator is numeric ascending, so its comparator-less form needs no
  * string-conversion machinery. */
+  /** `.sort(cmp?)` and `.toSorted(cmp?)` on a typed array. One body: they
+   * differ only in which value comes back (the receiver vs a copy), and
+   * that difference is the `inPlace` flag the helper carries.
+   *
+   * The COMPARATOR form works at every element width — the comparator
+   * decides the order and the elements are only ever read as f64. The
+   * DEFAULT form subtracts, which is the exact numeric ascending order
+   * the spec asks for on the integer widths and is NOT correct on the
+   * float ones: `a - b` is NaN when either is, so NaN would keep its
+   * position instead of sorting last, and `-0 - +0` is -0, so the two
+   * zeroes would compare equal instead of -0 sorting first. Float
+   * receivers therefore keep their fence for the default form only. */
   function lowerBytesToSortedCall(
     L: Lowerer,
     call: ts.CallExpression,
     access: ts.PropertyAccessExpression,
     bytesT: IrType & { kind: "bytes" },
+    method: "sort" | "toSorted",
   ): IrExpr {
     const loc = locOf(call);
+    const inPlace = method === "sort";
+    const recvName = bytesT.elem === "u8" ? "Uint8Array" : `${L.fmt(bytesT)}`;
     if (call.arguments.length > 1 || call.arguments.some(ts.isSpreadElement)) {
-      L.noLowering(`.toSorted with ${call.arguments.length} arguments on Uint8Array`, call);
+      L.noLowering(`.${method} with ${call.arguments.length} arguments on ${recvName}`, call);
     }
     const receiver = L.lowerExpr(access.expression);
     const undefinedArg = call.arguments[0]
       ? lowerStaticallyUndefinedArg(L, call.arguments[0])
       : null;
     if (call.arguments.length === 0 || undefinedArg) {
-      const key = "bytes.toSorted:u8:default";
+      // The default order is a subtraction, exact only where there are no
+      // NaNs and no signed zero to distinguish.
+      if (bytesT.elem === "f32" || bytesT.elem === "f64") {
+        L.noLowering(
+          `.${method} with no comparator on ${recvName}`,
+          call,
+          "pass a comparator: the default order has to place NaN last and -0 before +0, " +
+            "which a subtraction cannot express",
+        );
+      }
+      const key = `bytes.${method}:${bytesT.elem}:default`;
       let helper = L.arrHofHelpers.get(key);
       if (!helper) {
-        helper = `%bytes.toSorted.${L.arrHofHelpers.size}`;
+        helper = `%bytes.${method}.${L.arrHofHelpers.size}`;
         L.arrHofHelpers.set(key, helper);
-        L.liftedFns.push(buildBytesSortFn(helper, 0, false, loc));
+        L.liftedFns.push(buildBytesSortFn(helper, 0, false, bytesT, inPlace, loc));
       }
       if (!undefinedArg || droppableStatic(undefinedArg)) {
         return { kind: "call", callee: helper, args: [receiver], type: bytesT, loc };
@@ -2087,12 +2112,12 @@ function lowerOptionalDefaultArg(
       L.badType(argNode, L.typeOf(argNode));
     }
     const arity = fnArg.type.params.length;
-    const key = `bytes.toSorted:u8:${arity}`;
+    const key = `bytes.${method}:${bytesT.elem}:${arity}`;
     let helper = L.arrHofHelpers.get(key);
     if (!helper) {
-      helper = `%bytes.toSorted.${L.arrHofHelpers.size}`;
+      helper = `%bytes.${method}.${L.arrHofHelpers.size}`;
       L.arrHofHelpers.set(key, helper);
-      L.liftedFns.push(buildBytesSortFn(helper, arity, true, loc));
+      L.liftedFns.push(buildBytesSortFn(helper, arity, true, bytesT, inPlace, loc));
     }
     return {
       kind: "call",
@@ -2103,13 +2128,29 @@ function lowerOptionalDefaultArg(
     };
   }
 
+  /** The insertion sort behind BOTH typed-array orderings. It is stable,
+   * which ES2019 requires of both, and it is parameterised two ways:
+   *
+   *   - `bytesT` is the receiver's element width. The body only ever
+   *     touches elements through bytesIntrinsic get / bytesSet, which
+   *     already read and write every width, so nothing about the sort
+   *     itself is u8-specific.
+   *   - `inPlace` picks `sort` over `toSorted`. `sort` still sorts a
+   *     COPY and blits the result back, which is not an optimisation
+   *     detail but the spec's semantics: SortIndexedProperties reads the
+   *     elements into a List, sorts the LIST, and writes back at the end,
+   *     so a comparator that reads the array being sorted sees the
+   *     ORIGINAL contents throughout. An in-place shuffle would show it
+   *     intermediate states. `sort` then answers the receiver itself,
+   *     `toSorted` the copy. */
   function buildBytesSortFn(
     name: string,
     arity: number,
     hasComparator: boolean,
+    bytesT: IrType & { kind: "bytes" },
+    inPlace: boolean,
     loc: SrcLoc,
   ): IrFunction {
-    const bytesT = BYTES_U8;
     const fnT = funcOf([F64, F64].slice(0, arity), F64);
     const ref = (localId: string, type: IrType): IrExpr => ({
       kind: "varRef",
@@ -2220,8 +2261,22 @@ function lowerOptionalDefaultArg(
       { id: "i.0", name: "i", type: F64, mutable: true },
       { id: "v.0", name: "v", type: F64, mutable: false },
       { id: "j.0", name: "j", type: F64, mutable: true },
+      // `sort` keeps the receiver (o) beside the working copy (a): the
+      // sorted values are blitted back into o at the end and o is the
+      // answer, so the call yields the SAME typed array the caller
+      // passed — including when it is a subarray view, whose writes go
+      // through to the buffer it aliases.
+      ...(inPlace
+        ? [
+            { id: "o.0", name: "o", type: bytesT, mutable: false },
+            { id: "k.0", name: "k", type: F64, mutable: true },
+          ]
+        : []),
     ];
     const body: IrStmt[] = [
+      ...(inPlace
+        ? [{ kind: "varDecl" as const, localId: "o.0", init: ref("a.0", bytesT), loc }]
+        : []),
       {
         kind: "assign",
         localId: "a.0",
@@ -2308,7 +2363,56 @@ function lowerOptionalDefaultArg(
         ],
         loc,
       },
-      { kind: "return", value: ref("a.0", bytesT), loc },
+      // The write-back: `sort` mutates the receiver, so the sorted copy
+      // is copied into it element by element (a bytesSet per index, which
+      // is what makes a subarray receiver write through to its backing).
+      ...(inPlace
+        ? [
+            {
+              kind: "for" as const,
+              init: { kind: "varDecl" as const, localId: "k.0", init: num(0), loc },
+              cond: {
+                kind: "bin" as const,
+                op: "<" as const,
+                left: ref("k.0", F64),
+                right: ref("n.0", F64),
+                type: BOOL,
+                loc,
+              },
+              update: {
+                kind: "assign" as const,
+                localId: "k.0",
+                value: {
+                  kind: "bin" as const,
+                  op: "+" as const,
+                  left: ref("k.0", F64),
+                  right: num(1),
+                  type: F64,
+                  loc,
+                },
+                loc,
+              },
+              body: [
+                {
+                  kind: "bytesSet" as const,
+                  arr: ref("o.0", bytesT),
+                  index: ref("k.0", F64),
+                  value: {
+                    kind: "bytesIntrinsic" as const,
+                    method: "get" as const,
+                    receiver: ref("a.0", bytesT),
+                    args: [ref("k.0", F64)],
+                    type: F64,
+                    loc,
+                  },
+                  loc,
+                },
+              ],
+              loc,
+            },
+          ]
+        : []),
+      { kind: "return", value: ref(inPlace ? "o.0" : "a.0", bytesT), loc },
     ];
     return {
       name,
@@ -5952,7 +6056,15 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
     const loc = locOf(call);
     const nArgs = call.arguments.length;
     if (receiverIr.elem === "u8" && name === "toSorted") {
-      return lowerBytesToSortedCall(L, call, access, receiverIr);
+      return lowerBytesToSortedCall(L, call, access, receiverIr, "toSorted");
+    }
+    // `.sort(cmp?)` at EVERY typed-array width — the SC2020 group-A
+    // member behind zapo's phash (`ORDER.subarray(0, n).sort(cmp)` on a
+    // Uint32Array). `toSorted` stays u8-only: nothing asks for the copying
+    // form at another width, and widening it is a separate claim. `buf`
+    // is excluded because an ArrayBuffer has no elements to order.
+    if (name === "sort" && receiverIr.elem !== "buf") {
+      return lowerBytesToSortedCall(L, call, access, receiverIr, "sort");
     }
     if (receiverIr.elem === "u8" && name === "toReversed") {
       if (nArgs !== 0) {
