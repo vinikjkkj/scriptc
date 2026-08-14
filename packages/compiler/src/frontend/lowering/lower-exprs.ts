@@ -7,7 +7,7 @@
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
-import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
+import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, diffieHellmanFnValueOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
@@ -8582,6 +8582,45 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
           const helper = L.narrowedArmHelper(inner.type.unionId, target, locOf(expr));
           if (helper) {
             return { kind: "call", callee: helper, args: [inner], type: target, loc: locOf(expr) };
+          }
+        }
+      }
+      // `o as Derived` on a class INSTANCE is the union case one block up,
+      // one layer down: the CHECKED downcast — checkedDowncastBridge, the
+      // very same instanceof-gated %class.narrow helper maybeNarrow builds
+      // for a narrowing tsc proved — the asserted class comes out, any
+      // other class throws the catchable TypeError.
+      //
+      // Erasure could not stand here. The cast kept the BASE type, so a
+      // consumer that coerces fenced with SC1090 (`const r = q as R`) while
+      // a consumer that does NOT — a member-access RECEIVER, `(q as R).r`,
+      // which resolves the field against the checker's type — handed the
+      // emitter a base-typed pointer for a derived field offset, and the IR
+      // validator reported that as SC9001 'fieldGet receiver: expected
+      // object:R, got object:Q'. One spelling of one cast, an ICE on one
+      // side of it and a fence on the other; the bridge is what both
+      // positions were missing, and it is the same reinterpret the base
+      // instance cannot survive unchecked (a base struct is SHORTER than
+      // the subclass's, so the read leaves the allocation).
+      // The WIDENING spelling of the same cast (`(r as Q).q`, r: R) is the
+      // implicit upcast coerceToExpected performs for the same pair — the
+      // prefix-layout pointer reinterpret, no copy and no check, because
+      // an R IS a Q. It ICEd identically and for the identical reason:
+      // erasure left an R-typed receiver where the field resolved against
+      // Q. Read through the same subclass predicate coerceToExpected reads,
+      // duplex widening included, so `(pt as Writable)` and a Writable slot
+      // cannot disagree about a PassThrough.
+      if (inner.type.kind === "object") {
+        const target = L.mapTypeOf(targetTs0);
+        if (target !== null && target.kind === "object" && target.className !== inner.type.className) {
+          if (L.isSubclassOf(target.className, inner.type.className)) {
+            const bridged = checkedDowncastBridge(L, inner, target, locOf(expr));
+            if (bridged !== inner) return bridged;
+          } else if (
+            L.isSubclassOf(inner.type.className, target.className) ||
+            streamDuplexWidensToWritable(inner.type.className, target.className, (a, b) => L.isSubclassOf(a, b))
+          ) {
+            return L.upcastTo(inner, target.className);
           }
         }
       }
