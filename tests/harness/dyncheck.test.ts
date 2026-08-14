@@ -1394,4 +1394,93 @@ console.log("recovered");
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toBe("TypeError true\nrecovered\n");
   });
+
+  // `Record<string, unknown>` flowing into a declared all-optional record.
+  // tsc admits the assignment through the index-signature hole WITHOUT
+  // checking any value type, so the map may genuinely hold anything; the
+  // keyed read that reshapes it is a VALIDATED extraction, and the two
+  // shapes that fail it print the value under Node. The agreeing half is
+  // corpus 3621.
+  test("Record<string, unknown> keyed read: a wrong-typed value throws with the arms named", async () => {
+    const r = await compileAndRun(
+      "keyread-unknown-wrong-type",
+      `type U = { readonly name?: string };
+const m: Record<string, unknown> = {};
+m.name = 42;
+console.log("before");
+console.log(JSON.stringify({ updates: m } as { updates?: U }));
+`,
+    );
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toBe("before\n");
+    expect(r.stderr).toContain("Uncaught TypeError: expected string | undefined at $, got number");
+  });
+
+  test("Record<string, unknown> keyed read: a NULL value is not the undefined arm", async () => {
+    // zapo's own `updates.picture = input.picture === null ? null : ...`
+    // reaches this: the spec type says `picture?: string`, and null is not
+    // one of its arms. Node hands the null straight through; the extraction
+    // refuses it, which is the loud half of divergence 38 and strictly
+    // better than main's unconditional throw at the same site.
+    const r = await compileAndRun(
+      "keyread-unknown-null",
+      `type U = { readonly picture?: string };
+const m: Record<string, unknown> = {};
+m.picture = null;
+console.log("before");
+console.log(JSON.stringify({ updates: m } as { updates?: U }));
+`,
+    );
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toBe("before\n");
+    expect(r.stderr).toContain("Uncaught TypeError: expected string | undefined at $, got null");
+  });
+
+  // `o as Derived` on a class instance. Node never checks an `as`, so a
+  // base instance simply reads `undefined` off the missing field; scriptc
+  // takes the instanceof-gated bridge, exactly as it does for `u as Arm`
+  // on a union. The agreeing half is corpus 3622. Before this bridge
+  // existed the RECEIVER spelling did not throw at all — it raised SC9001,
+  // an internal compiler error.
+  test("class `as` downcast: a BASE instance throws instead of reading off the end", async () => {
+    const r = await compileAndRun(
+      "class-as-lying-base",
+      `class P { p: string = "p" }
+class Q extends P { q: string = "q" }
+class R extends Q { r: string = "r" }
+const q: Q = new Q();
+console.log("before");
+console.log((q as R).r);
+`,
+    );
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toBe("before\n");
+    expect(r.stderr).toContain(
+      "Uncaught TypeError: a 'Q' value is not a 'R' (a value narrowed or asserted past it still held another class)",
+    );
+  });
+
+  test("class `as` downcast: a SIBLING subclass throws rather than answering its own field", async () => {
+    // The dangerous one. S and R have the same width and put their own
+    // field at the same offset, so an unchecked reinterpret would print
+    // "SIBLING-SECRET" as `R.r` and nothing would crash.
+    const r = await compileAndRun(
+      "class-as-lying-sibling",
+      `class P { p: string = "p" }
+class Q extends P { q: string = "q" }
+class R extends Q { r: string = "r" }
+class S extends Q { s: string = "SIBLING-SECRET" }
+const q: Q = new S();
+try {
+  console.log((q as R).r);
+  console.log("unreachable");
+} catch (e) {
+  console.log((e as Error).name, (e as Error).message.includes("is not a 'R'"));
+}
+console.log("recovered");
+`,
+    );
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("TypeError true\nrecovered\n");
+  });
 });
