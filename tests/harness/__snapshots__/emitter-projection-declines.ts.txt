@@ -1,0 +1,35 @@
+emitter-projection-declines.ts:38:11 - error SC2002: record shapes must match exactly or width-coerce: expected '{ code2: number; m: (string) => string }', got 'MyErr'
+
+  37 | }
+  38 | const e = new MyErr("boom") as unknown as { m: (x: string) => string; code2: number };
+     |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  39 | console.log(e.m("a"), e.code2);
+
+  hint: width subtyping compiles as a copy (each expected field copied off the source; extra fields drop) — this pair is outside the copy's rules; build a literal with exactly the expected fields instead
+
+emitter-projection-declines.ts:47:11 - error SC2002: record shapes must match exactly or width-coerce: expected '{ on: (string, () => void) => unknown }', got 'Surface'
+
+  46 | }
+  47 | const s = new Surface() as unknown as { on: (ev: string, f: () => void) => unknown };
+     |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  48 | console.log(typeof s.on);
+
+  hint: width subtyping compiles as a copy (each expected field copied off the source; extra fields drop) — this pair is outside the copy's rules; build a literal with exactly the expected fields instead
+
+emitter-projection-declines.ts:56:11 - error SC2002: record shapes must match exactly or width-coerce: expected '{ val: number }', got 'Getter'
+
+  55 | }
+  56 | const g = new Getter() as unknown as { val: number };
+     |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  57 | console.log(g.val);
+
+  hint: width subtyping compiles as a copy (each expected field copied off the source; extra fields drop) — this pair is outside the copy's rules; build a literal with exactly the expected fields instead
+
+emitter-projection-declines.ts:64:11 - error SC2002: record shapes must match exactly or width-coerce: expected '{ m: (unknown) => string }', got 'Sig'
+
+  63 | }
+  64 | const w = new Sig() as unknown as { m: (x: unknown) => string };
+     |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  65 | console.log(w.m("a"));
+
+  hint: width subtyping compiles as a copy (each expected field copied off the source; extra fields drop) — this pair is outside the copy's rules; build a literal with exactly the expected fields instead
