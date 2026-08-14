@@ -2299,6 +2299,48 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           );
         }
       }
+      // The ADOPTED-INSTANCE read. A binding whose VALUE is a class
+      // instance keeps the INSTANCE type even where the checker spells a
+      // record — lowerVarDecl adopts the initializer's type for a const
+      // whose declared type maps to a record ("the interface is erasure
+      // over a nominal value"), and `c as unknown as { f: ... }` erases to
+      // that same instance. The adoption's own promise is that members
+      // then read as the CLASS's own; the METHOD side keeps that promise
+      // (lowerObjectMethodCall's exactInstanceClassOf rescue) and the DATA
+      // side never did, so `x.v` fenced on the very shape the rule was
+      // written for. The read is the same fieldGet a method body's
+      // `this.v` emits, over the flattened instance-field map.
+      //
+      // Placed ONE LINE before the last-resort fence, so no read that
+      // lowers today changes: this can only turn a fence into an answer.
+      // An ACCESSOR-satisfied name declines — a getter has no data slot
+      // and a raw fieldGet would read past the dispatch (the exact-shape
+      // stance ctorWitnessProjection already draws for the same pair).
+      if (recvLowered.type.kind === "object") {
+        const adoptedInfo = L.classes.get(recvLowered.type.className);
+        const adoptedFieldT = adoptedInfo?.fields.get(expr.name.text);
+        if (
+          adoptedInfo !== undefined &&
+          adoptedFieldT !== undefined &&
+          L.findMethodOn(adoptedInfo, `get:${expr.name.text}`) === null &&
+          L.findMethodOn(adoptedInfo, expr.name.text) === null
+        ) {
+          return {
+            kind: "fieldGet",
+            obj: recvLowered,
+            className: recvLowered.type.className,
+            field: expr.name.text,
+            type: adoptedFieldT,
+            loc,
+          };
+        }
+      }
+      if (process.env["SCRIPTC_READ_WHY"] !== undefined) {
+        console.error(
+          `[readwhy] .${expr.name.text} lowered-recv=${typeKey(recvLowered.type).slice(0, 90)}` +
+            ` checker=${L.checker.typeToString(L.typeOf(expr.expression)).slice(0, 90)}`,
+        );
+      }
       L.unsupported(
         "SC1090",
         expr,
