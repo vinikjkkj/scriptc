@@ -22,7 +22,7 @@ import { lowerStreamUnderscoreAssign, streamClassAliasDecl, streamSidesOf } from
 import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment } from "./lower-server.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
-import { ctorObjectGlobalValue } from "./lower-exprs.js";
+import { ctorObjectGlobalValue, isImmutablePrimitiveWidth } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
@@ -3649,7 +3649,11 @@ function tableElemType(L: Lowerer, t: IrType): IrType {
  *   `dynFrom` DEEP COPY (estado-recordkey r07), so widening
  *   `Record<string, string[]>` would sever aliasing the binding has
  *   today — a silent wrong answer traded for a loud one. Strings,
- *   numbers and booleans have no identity to lose.
+ *   numbers and booleans have no identity to lose — and neither does a
+ *   UNION of them (isImmutablePrimitiveWidth): `Record<string, string |
+ *   boolean>` is the shape zapo's app-state index args have, where
+ *   `const arg = args[part.name]` trapped one line before the author's
+ *   own `arg === undefined` guard.
  * - The slot must be the READ's OWN width, or that width plus an
  *   undefined arm. The first is the inferred binding (`const id =
  *   attrs.id`); the second is the author who wrote `string | undefined`
@@ -3661,8 +3665,7 @@ function tableElemType(L: Lowerer, t: IrType): IrType {
  *   its own coercion. */
 function keyedReadLocalAtDynWidth(L: Lowerer, init: IrExpr, slot: IrType): IrExpr | null {
   if (init.kind !== "recordKeyGet") return null;
-  const k = init.type.kind;
-  if (k !== "string" && k !== "f64" && k !== "bool") return null;
+  if (!isImmutablePrimitiveWidth(L, init.type)) return null;
   const sameWidth =
     typeEquals(slot, init.type) ||
     (slot.kind === "union" &&
@@ -3710,7 +3713,7 @@ export function keyedReadGlobalIsDyn(L: Lowerer, decl: ts.VariableDeclaration): 
   if (key !== null && L.checker.getPropertyOfType(recvT, key) !== undefined) return false;
   const read = L.mapTypeOf(L.typeOf(e));
   if (read === null) return false;
-  if (read.kind !== "string" && read.kind !== "f64" && read.kind !== "bool") return false;
+  if (!isImmutablePrimitiveWidth(L, read)) return false;
   const slot = L.mapTypeOf(L.typeOf(decl.name));
   if (slot === null) return false;
   return (
