@@ -6294,6 +6294,14 @@ void scr_net_sock_write_native(ScrNetSocket *s, const char *buf, size_t n);
  * liveness test, `sweep` runs at every net sweep top. */
 void scr_net_set_proto_sweep(bool (*pending)(void), void (*sweep)(void));
 void scr_net_fire_err(ScrNetLs *l, ScrStr *msg); /* unhandled => exit(1) */
+/* The same fan-out carrying an EXPLICIT error object: an `(err) => …`
+ * listener gets THAT object — identity, name, code and own properties
+ * intact — instead of one rebuilt from the message text. Recognised by
+ * the adapter pointer, so the shared (cb, ScrStr *) ABI is unchanged and
+ * the always-linked units are untouched; see scr_net_fire_err_impl.
+ * err borrowed; its message still travels the ABI, so a zero-parameter
+ * listener and the no-listener exit path both read the right text. */
+void scr_net_fire_err_obj(ScrNetLs *l, ScrError *err /*borrowed*/);
 
 ScrNetServer *scr_net_server_retain(ScrNetServer *s);
 void scr_net_server_release(ScrNetServer *s);
@@ -6876,6 +6884,16 @@ void scr_http_client_write_dynv(ScrHttpClientReq *c, const ScrDyn *d /*borrowed*
 void scr_http_client_end_dynv(ScrHttpClientReq *c, const ScrDyn *d /*borrowed*/);
 void scr_http_client_set_timeout(ScrHttpClientReq *c, double ms);
 void scr_http_client_destroy(ScrHttpClientReq *c);
+/* readable.pipe(request): wraps the request in a native Writable adapter
+ * and pipes into THAT, so the pipe's backpressure / end-propagation /
+ * error semantics are the stream ones rather than a second copy. Answers
+ * the request, which is what Node's pipe() returns. src/c borrowed. */
+ScrHttpClientReq *scr_http_client_pipe_from(ScrStream *src, ScrHttpClientReq *c, bool end);
+/* request.destroy(err): Node emits the GIVEN error object on the request
+ * (identity, name, code and own properties intact), then 'close', and
+ * suppresses the 'socket hang up' the bare destroy() would have raised.
+ * A second destroy is a no-op — the first error wins. err borrowed. */
+void scr_http_client_destroy_err(ScrHttpClientReq *c, ScrError *err /*borrowed*/);
 bool scr_http_client_destroyed(ScrHttpClientReq *c);
 void scr_http_client_on_response(ScrHttpClientReq *c, ScrClosure *cb /*moves*/, ScrHttpRespFn fn, bool once);
 void scr_http_client_on_error(ScrHttpClientReq *c, ScrClosure *cb /*moves*/, ScrChildErrFn fn, bool once);

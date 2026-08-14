@@ -4984,6 +4984,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "http.clientDestroy":
             E.line(`scr_http_client_destroy(${arg(0)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
+          case "http.clientDestroyErr":
+            E.line(`scr_http_client_destroy_err(${arg(0)}, (ScrError *)${arg(1)});${E.srcComment(e.loc)}`);
+            return { name: "", type: e.type };
+          case "http.clientPipeFrom":
+            E.usesTimers = true;
+            return finish(`scr_http_client_pipe_from((ScrStream *)${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "http.clientDestroyed":
             return finish(`scr_http_client_destroyed(${arg(0)})`);
           case "http.clientOnResponse": {

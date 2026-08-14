@@ -26,6 +26,7 @@ import {
   TLS_SERVER_DOCUMENTED_OPTIONS,
 } from "./surfaces.js";
 import { conditionalSpreadOf } from "./lower-exprs.js";
+import { errorRootedType } from "./lower-stream.js";
 
 /** The lowered value members of the net module — the surfaces.ts table's
  * spoke-side twin (the call SHAPES are all special-cased here, so the
@@ -4029,10 +4030,30 @@ function lowerHttpClientMethodCall(L: Lowerer, call: ts.CallExpression,
   }
   if (name === "destroy") {
     requireStatementPosition(L, call, "request.destroy()");
-    if (args.length !== 0) {
-      L.noLowering(`destroy with ${args.length} arguments`, call, "destroy() takes no arguments here");
+    if (args.length > 1) {
+      L.noLowering(`destroy with ${args.length} arguments`, call, "the supported forms are destroy() and destroy(error)");
     }
     const receiver = L.lowerExpr(access.expression);
+    if (args.length === 1) {
+      // destroy(err) emits the GIVEN object on the request — Node keeps its
+      // identity, name, code and own properties, so the error travels as an
+      // object and not as a message string (rebuilding it from `.message`
+      // would drop `code`, which is the whole reason this stayed fenced).
+      // The root check is the stream lane's, verbatim: only an
+      // %Error-hierarchy instance has the layout the runtime slot expects.
+      const err = L.lowerExpr(args[0]!);
+      if (!errorRootedType(L, err.type)) {
+        L.noLowering(
+          `destroy with a '${L.fmt(err.type)}' argument`,
+          args[0]!,
+          "the supported argument is an Error-hierarchy instance",
+        );
+      }
+      return {
+        kind: "libCall", fn: "http.clientDestroyErr",
+        args: [receiver, L.upcastTo(err, "%Error")], type: VOID, loc,
+      };
+    }
     return { kind: "libCall", fn: "http.clientDestroy", args: [receiver], type: VOID, loc };
   }
   if ((name === "on" || name === "once" || name === "addListener") && args.length === 2) {

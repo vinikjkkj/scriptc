@@ -357,7 +357,31 @@ void scr_net_fire0(ScrNetLs *l) { scr_net_fire0_this(l, NULL, 0); }
  * print and die 1 (_Exit skips atexit on purpose — the loop dies
  * mid-turn with registries live, like process.exit). Exported:
  * scr_http.c's req/res/client fire their 'error' the same way. */
-void scr_net_fire_err_this(ScrNetLs *l, ScrStr *msg, void *self, ScrDynHandleTag tag) {
+/* `obj` NULL = the ordinary message-only fan-out. Non-NULL = the caller
+ * has the actual Error OBJECT (request.destroy(err)) and the listeners
+ * must receive THAT, with its identity, name, code and own properties
+ * intact — rebuilding a lookalike from the message would answer `false`
+ * to `e === sent`, `"Error"` to the name of every subclass, and
+ * `undefined` to every code that is not an errno name.
+ *
+ * How the object reaches a listener without widening the shared
+ * (ScrClosure *, ScrStr *msg) ABI that nine handle families use: the
+ * adapter POINTER says what the listener wants. The compiler emits
+ * exactly two of them — scr_child_err_thunk_error for `(err) => …` and
+ * scr_child_err_thunk0 for `() => …` — so recognising the first one is
+ * enough to call the user's closure directly with the real error.
+ *
+ * The earlier version of this was an ambient "current error object"
+ * global read by the thunk. It worked, and it cost a stream-free
+ * hello-world 512 BYTES, because the thunk lives in scr_child.c, which
+ * is unconditionally linked and has no dead stripping — the brief's
+ * named hazard, measured. Dispatching on the pointer here instead keeps
+ * every byte of this inside scr_net.c, which is gated, and removes the
+ * global's nesting hazard (an 'error' raised from inside a destroy(err)
+ * listener could have inherited the outer object) by having no global
+ * at all. */
+static void scr_net_fire_err_impl(ScrNetLs *l, ScrStr *msg, ScrError *obj,
+                                  void *self, ScrDynHandleTag tag) {
   if (l->n == 0) {
     fflush(stdout);
     fprintf(stderr, "Unhandled 'error' event: Error: %s\n", msg->data);
@@ -367,14 +391,30 @@ void scr_net_fire_err_this(ScrNetLs *l, ScrStr *msg, void *self, ScrDynHandleTag
   size_t n = scr_net_ls_snapshot(l, &snap);
   scr_dyn_this_push(self, tag);
   for (size_t i = 0; i < n; i++) {
-    if (!scr_exc_pending()) ((ScrChildErrFn)snap[i].fn)(snap[i].cb, msg);
+    if (!scr_exc_pending()) {
+      if (obj != NULL && snap[i].fn == (void *)&scr_child_err_thunk_error) {
+        /* the listener owns a +1 error param, the universal convention */
+        ((void (*)(ScrClosure *, ScrError *))snap[i].cb->fn)(
+            snap[i].cb, scr_error_retain(obj));
+      } else {
+        ((ScrChildErrFn)snap[i].fn)(snap[i].cb, msg);
+      }
+    }
     scr_closure_release(snap[i].cb);
   }
   scr_dyn_this_pop();
   free(snap);
 }
 
-void scr_net_fire_err(ScrNetLs *l, ScrStr *msg) { scr_net_fire_err_this(l, msg, NULL, 0); }
+void scr_net_fire_err_this(ScrNetLs *l, ScrStr *msg, void *self, ScrDynHandleTag tag) {
+  scr_net_fire_err_impl(l, msg, NULL, self, tag);
+}
+
+void scr_net_fire_err(ScrNetLs *l, ScrStr *msg) { scr_net_fire_err_impl(l, msg, NULL, NULL, 0); }
+
+void scr_net_fire_err_obj(ScrNetLs *l, ScrError *err /*borrowed*/) {
+  scr_net_fire_err_impl(l, err->message, err, NULL, 0);
+}
 
 /* ── the handles ─────────────────────────────────────────────────────── */
 

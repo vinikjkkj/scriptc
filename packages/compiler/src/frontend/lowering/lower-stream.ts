@@ -88,6 +88,22 @@ export function streamInstanceOfExpr(
   };
 }
 
+/** Does this IR type root at `%Error`?
+ *
+ * The admissibility rule for every `destroy(err)` surface: only an
+ * %Error-hierarchy instance has the layout (name / message / code prefix)
+ * the runtime's error slot reads, so anything else must fence rather than
+ * be coerced. ONE copy on purpose — `stream.destroy(err)` and
+ * `request.destroy(err)` are different lowerers in different files, and
+ * the brief's own history is two copies of a predicate drifting apart. */
+export function errorRootedType(L: Lowerer, t: IrType): boolean {
+  if (t.kind !== "object") return false;
+  for (let c: ClassInfo | null = L.classes.get(t.className) ?? null; c; c = c.base) {
+    if (c.def.name === "%Error") return true;
+  }
+  return false;
+}
+
 /** The stream sides of a receiver class: the nearest stream-class
  * ancestor's, or null off the stream hierarchy. */
 export function streamSidesOf(L: Lowerer, info: ClassInfo | undefined | null): "r" | "w" | "rw" | null {
@@ -1702,11 +1718,19 @@ export function lowerStreamMethodCall(L: Lowerer, call: ts.CallExpression,
     const dst = L.lowerExpr(args[0]!);
     const dstInfo = dst.type.kind === "object" ? L.classes.get(dst.type.className) : undefined;
     const dstSides = streamSidesOf(L, dstInfo);
-    if (dstSides !== "w" && dstSides !== "rw") {
+    // A ClientRequest is NOT an ScrStream — it is its own handle with its
+    // own listener lists — so it can never satisfy the stream-sides test
+    // above. The runtime wraps it in a native Writable adapter and pipes
+    // into that, which keeps pipe's backpressure, end-propagation and
+    // error semantics as the stream ones instead of a second copy. That
+    // is why this is a destination TYPE test sitting beside, not inside,
+    // the sides test.
+    const pipeToClient = dst.type.kind === "httpClientReq";
+    if (!pipeToClient && dstSides !== "w" && dstSides !== "rw") {
       L.noLowering(
         `pipe into a '${L.fmt(dst.type)}'`,
         args[0]!,
-        "the destination must be a stream Writable/Duplex (process streams and sockets are not pipe destinations yet)",
+        "the destination must be a stream Writable/Duplex, or a ClientRequest (process streams and sockets are not pipe destinations yet)",
       );
     }
     let end: IrExpr = boolLit(true, loc);
@@ -1722,6 +1746,9 @@ export function lowerStreamMethodCall(L: Lowerer, call: ts.CallExpression,
       }
     }
     const receiver = L.lowerExpr(access.expression);
+    if (pipeToClient) {
+      return { kind: "libCall", fn: "http.clientPipeFrom", args: [receiver, dst, end], type: dst.type, loc };
+    }
     return { kind: "libCall", fn: "readable.pipe", args: [receiver, dst, end], type: dst.type, loc };
   }
 
@@ -1746,14 +1773,7 @@ export function lowerStreamMethodCall(L: Lowerer, call: ts.CallExpression,
     const receiver = L.lowerExpr(access.expression);
     if (args[0] !== undefined) {
       const err = L.lowerExpr(args[0]);
-      const rootsAtError = (t: IrType): boolean => {
-        if (t.kind !== "object") return false;
-        for (let c: ClassInfo | null = L.classes.get(t.className) ?? null; c; c = c.base) {
-          if (c.def.name === "%Error") return true;
-        }
-        return false;
-      };
-      if (!rootsAtError(err.type)) {
+      if (!errorRootedType(L, err.type)) {
         L.noLowering(`destroy with a '${L.fmt(err.type)}' argument`, args[0], "the supported argument is an Error-hierarchy instance");
       }
       return { kind: "libCall", fn: "stream.destroyErr", args: [receiver, L.upcastTo(err, "%Error")], type: receiver.type, loc };

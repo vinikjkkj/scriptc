@@ -2298,7 +2298,10 @@ declare module "http" {
     readonly destroyed: boolean;
     write(data: string | Uint8Array): void;
     end(data?: string | Uint8Array): void;
-    destroy(): void;
+    /* destroy(error) emits THAT object on the request — identity, name,
+     * code and own properties intact — in place of the 'socket hang up'
+     * the bare form raises, then 'close'. The first destroy wins. */
+    destroy(error?: Error): void;
     on(event: "response", listener: (res: IncomingMessage) => void): void;
     on(event: "upgrade", listener: (res: IncomingMessage, socket: Socket, head: Buffer) => void): void;
     on(event: "timeout" | "close", listener: () => void): void;
@@ -3318,6 +3321,16 @@ declare module "stream" {
     isPaused(): boolean;
     setEncoding(encoding: string): this;
     pipe<T extends Writable>(destination: T, options?: { end?: boolean }): T;
+    /* A ClientRequest is a Writable in @types/node (it descends from
+     * OutgoingMessage) but a bare interface here, so the upload idiom
+     * `body.pipe(req)` needs its own overload to typecheck against the
+     * fallback. The runtime wraps the request in a native Writable
+     * adapter either way — see scr_http_client_pipe_from.
+     * SECOND on purpose: overload resolution takes the first match, so
+     * the generic Writable form must keep answering exactly what it
+     * answered before this line existed, and only a destination it
+     * REJECTS may fall through to here. */
+    pipe(destination: import("http").ClientRequest, options?: { end?: boolean }): import("http").ClientRequest;
     unpipe(destination?: Writable): this;
     destroy(error?: Error): this;
     readonly readable: boolean;

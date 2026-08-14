@@ -681,6 +681,12 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "http.clientWriteDyn": { argTypes: [HTTPCLIENTREQ_T, DYN], result: VOID },
   "http.clientEndDyn": { argTypes: [HTTPCLIENTREQ_T, DYN], result: VOID },
   "http.clientDestroy": { argTypes: [HTTPCLIENTREQ_T], result: VOID },
+  // arg 1 is an %Error-rooted instance; the lowerer proves the root and
+  // upcasts, so the slot is unchecked here exactly as stream.destroyErr's is.
+  "http.clientDestroyErr": { argTypes: [HTTPCLIENTREQ_T, null], result: VOID },
+  // arg 0 is the source stream (an object type, like readable.pipe's);
+  // the result is the DESTINATION, which is what Node's pipe() answers.
+  "http.clientPipeFrom": { argTypes: [null, HTTPCLIENTREQ_T, BOOL], result: HTTPCLIENTREQ_T },
   "http.clientDestroyed": { argTypes: [HTTPCLIENTREQ_T], result: BOOL },
   "http.clientOnResponse": { argTypes: [HTTPCLIENTREQ_T, null, BOOL], result: VOID },
   "http.clientOnError": { argTypes: [HTTPCLIENTREQ_T, null, BOOL], result: VOID },
