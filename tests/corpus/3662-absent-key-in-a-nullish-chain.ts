@@ -19,6 +19,10 @@
 // the SYNTAX (a `??` whose left this node is, parentheses tolerated), because
 // that is exactly the fact being relied on.
 //
+// The middle operand is also reached one BINDING later — a reference to the
+// local that holds the read at dyn width — which is the form zapo's
+// persistContacts writes; section 3.
+//
 // A chain of TWO (`a ?? attrs.k`, nothing after it) has no such consumer: its
 // result flows into whatever slot the author wrote, and a slot that cannot
 // say undefined keeps the loud trap. That case is not below, for the same
@@ -87,7 +91,39 @@ console.log("r13", oneToOne.attrs.participant ?? "left-dflt", oneToOne.attrs.id 
 console.log("r14", oneToOne.attrs.nope ?? oneToOne.attrs.participant ?? "tail");
 console.log("r15", oneToOne.attrs.nope ?? oneToOne.attrs.id ?? "tail");
 
-// ------------------------------------------------ 3. widths and non-strings
+// ------------------------------- 3. the middle operand one binding later
+// zapo's `persistContacts` writes the read into a local first and then puts
+// the LOCAL in the middle of the chain:
+//
+//   const rawParticipant = event.rawNode.attrs.participant;
+//   const participantJid = rawParticipant ? toUserJid(rawParticipant) : undefined;
+//   const senderPrimary  = event.key.participant ?? rawParticipant ?? event.key.remoteJid;
+//
+// The local holds the read at dyn width (0b6bdfb), and tsc narrows each
+// REFERENCE back to the `string` it believes, so the reference carries a
+// validated extraction. That is right for a use that needs the value and
+// wrong for this one, which is asking whether there is a value at all: it
+// threw "expected string at $, got undefined" where Node takes the tail.
+function contactSender(k: Key, n: Node2): string {
+  const rawParticipant = n.attrs.participant;
+  return k.participant ?? rawParticipant ?? k.remoteJid;
+}
+console.log("r14a", contactSender(keyDirect, oneToOne));
+console.log("r14b", contactSender(keyDirect, group));
+console.log("r14c", contactSender(keyGroup, oneToOne));
+
+// The use that DOES need the value still validates, in the same function --
+// nothing became silent.
+function contactPair(n: Node2, lead: string | undefined): string {
+  const raw = n.attrs.participant;
+  const upper = raw ? raw.toUpperCase() : "-";
+  const primary = lead ?? raw ?? "fallback";
+  return upper + " / " + primary;
+}
+console.log("r14d", contactPair(oneToOne, undefined));
+console.log("r14e", contactPair(group, undefined));
+
+// ------------------------------------------------ 4. widths and non-strings
 const counts = { a: 1 } as unknown as Readonly<Record<string, number>>;
 const n1: number | undefined = undefined;
 console.log("r16", n1 ?? counts["nope"] ?? -1);
@@ -99,7 +135,7 @@ console.log("r18", n1 ?? zeros["z"] ?? -1);
 const empties = { e: "" } as unknown as Readonly<Record<string, string>>;
 console.log("r19", "[" + (keyDirect.participant ?? empties["e"] ?? "tail") + "]");
 
-// ------------------------------------------------------ 4. what does NOT move
+// ------------------------------------------------------ 5. what does NOT move
 // A DECLARED field always answers, so nothing widens.
 const declared: { readonly kind: string; readonly [k: string]: string } = { kind: "k", extra: "e" };
 console.log("r20", keyDirect.participant ?? declared.kind ?? "tail");
@@ -113,7 +149,7 @@ console.log("r23", raw ?? "bound-dflt");
 const rawHit = oneToOne.attrs.id;
 console.log("r24", rawHit ?? "bound-dflt");
 
-// ------------------------------------------------- 5. the loop zapo runs it in
+// ------------------------------------------------- 6. the loop zapo runs it in
 const stanzas: readonly Node2[] = [oneToOne, group, oneToOne];
 const keys: readonly Key[] = [keyDirect, keyDirect, keyGroup];
 for (let i = 0; i < stanzas.length; i += 1) {

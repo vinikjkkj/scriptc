@@ -3073,10 +3073,13 @@ export function pureReemittable(e: IrExpr): boolean {
     return pureReemittable(e);
   }
 
-/** A plain keyed ACCESS — `o.k` / `o["k"]`, no optional chain. The
- * syntaxes an index-signature read can wear, and the ones for which
- * lowerExprExpecting is exactly lowerExpr followed by the coercion. */
+/** A plain keyed ACCESS — `o.k` / `o["k"]`, no optional chain — or a bare
+ * IDENTIFIER. The syntaxes an index-signature read can wear directly or
+ * one binding later, and the ones for which lowerExprExpecting is exactly
+ * lowerExpr followed by the coercion (its own rules are for
+ * `Object.freeze`, array literals and object literals — none of these). */
 function keyedAccessSyntax(n: ts.Expression): boolean {
+  if (ts.isIdentifier(n)) return true;
   return (
     (ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n)) &&
     n.questionDotToken === undefined
@@ -3199,13 +3202,36 @@ function nullishTestedByParent(expr: ts.Expression): boolean {
       // here is exactly what lowerExprExpecting would have done with it
       // (that function's own rules are for `Object.freeze`, array and
       // object literals — none of them this syntax).
-      const armedT = keyedAccessSyntax(expr.right) && nullishTestedByParent(expr)
-        ? L.withUndefinedArmOf(type)
-        : null;
-      if (armedT !== null) {
+      if (keyedAccessSyntax(expr.right) && nullishTestedByParent(expr)) {
         const raw = L.lowerExpr(expr.right);
-        const armed = L.recordKeyReadAtUndefinedArm(raw, armedT);
-        if (armed) return { kind: "nullish", left, right: armed, type: armedT, loc };
+        // The middle operand is the read itself, or a REFERENCE to the
+        // local that holds it at dyn width (zapo persistContacts:
+        // `const rawParticipant = event.rawNode.attrs.participant` on the
+        // line above, then `event.key.participant ?? rawParticipant ??
+        // event.key.remoteJid`). tsc narrows each such reference back to
+        // the scalar it believes and maybeNarrow bridges it with a
+        // VALIDATED extraction — right for a use that needs the value,
+        // wrong for THIS one, which is asking whether there is a value at
+        // all: it threw "expected string at $, got undefined" where Node
+        // takes the tail. Pre-existing and identical on `main`
+        // (repro-pt/lab/q1.ts). narrowBridgeDyn drops the validation and
+        // keeps the operand; the dyn then converts into the armed union
+        // through the ordinary boundary, whose walker builds the undefined
+        // arm from a dyn undefined and validates every other kind.
+        //
+        // The armed union is interned only once a candidate is in hand: a
+        // union the rung then declines would still be a new entry in the
+        // program-wide table, and renumbering the unions of a program that
+        // does not use this rule is churn with no answer behind it.
+        const bridged = raw.kind === "recordKeyGet" ? null : narrowBridgeDyn(raw);
+        const armedT = raw.kind === "recordKeyGet" || bridged ? L.withUndefinedArmOf(type) : null;
+        if (armedT !== null) {
+          const armed = L.recordKeyReadAtUndefinedArm(raw, armedT);
+          if (armed) return { kind: "nullish", left, right: armed, type: armedT, loc };
+          if (bridged) {
+            return { kind: "nullish", left, right: L.coerceInto(expr.right, bridged, armedT), type: armedT, loc };
+          }
+        }
         return { kind: "nullish", left, right: L.coerceInto(expr.right, raw, type), type, loc };
       }
       const right = L.lowerExprExpecting(expr.right, type);
