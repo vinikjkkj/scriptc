@@ -5191,22 +5191,31 @@ function executorResolveAdoptionUnion(
   if (payloadArms.length === 0) return null;
   if (payloadArms.some((a) => a.kind === "promise")) return null;
   // Does any call of the resolve parameter pass a value that CARRIES a
-  // promise? The mapped argument type answers it: a bare promise (the plain
-  // `resolve(p)` the override's comment says must fail lowering) or a union
-  // with a promise arm (the settle-or-value value that silently threw).
+  // promise? The question is asked of the CHECKER type, never of the mapped
+  // one. mapType INTERNS — record shapes and unions are minted on first
+  // sight and emitted in creation order — so mapping an argument here, ahead
+  // of the ordinary lowering, renumbers shapes in every program that merely
+  // CONSTRUCTS a promise. (Measured twice: `u1186` -> `u1188` from a
+  // speculative union intern, then `r2301` -> `r2302` from a speculative
+  // mapType. zapo's whole emitted C moved, semantically unchanged both
+  // times.) A Promise/PromiseLike reference, alone or as a union arm, is the
+  // only thing this needs to know, and the checker answers it for free.
+  const isPromiseRef = (t: ts.Type): boolean => {
+    if (!t.isTypeReference()) return false;
+    const n = t.getTarget().getSymbol()?.name;
+    return n === "Promise" || n === "PromiseLike";
+  };
+  const carriesPromise = (t: ts.Type): boolean =>
+    isPromiseRef(t) || (t.isUnionType() && t.getTypes().some(isPromiseRef));
   let wanted = false;
   const walk = (n: ts.Node): void => {
     if (wanted) return;
     if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.arguments.length === 1) {
-      if (L.checker.getSymbolAtLocation(n.expression) === resolveSym) {
-        const at = L.mapTypeOf(L.typeOf(n.arguments[0]!));
-        if (at !== null && at !== undefined) {
-          if (at.kind === "promise") wanted = true;
-          else if (at.kind === "union") {
-            const def = L.unions.get(at.unionId);
-            if (def?.arms.some((a) => a.kind === "promise") === true) wanted = true;
-          }
-        }
+      if (
+        L.checker.getSymbolAtLocation(n.expression) === resolveSym &&
+        carriesPromise(L.typeOf(n.arguments[0]!))
+      ) {
+        wanted = true;
       }
     }
     ts.forEachChild(n, walk);
