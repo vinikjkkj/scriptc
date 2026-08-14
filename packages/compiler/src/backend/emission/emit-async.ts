@@ -835,6 +835,92 @@ import { IrType, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/
     return sym;
   }
 
+/** The ADOPTING `new Promise` adapter: `void (ScrPromise *dst, ScrPromise
+ * *src)`, run by scr_promise_race_add when the executor's settle capability
+ * `src` FULFILLS with a settle-or-value union.
+ *
+ * The union's tag is the whole decision. The promise arm makes `dst` FOLLOW
+ * that promise — another race_add, the runtime's own adoption: an
+ * already-settled inner copies through now, a pending one parks a callback,
+ * a rejected one rejects `dst` and counts as handled on the inner (Node's
+ * subscribe-to-it behavior), and an inner that never settles leaves `dst`
+ * pending forever, which is JS-exact. The data arms fulfill `dst` with the
+ * payload, re-tagged into the promised type when that type is itself a union.
+ *
+ * `src` REJECTING never reaches here — race_add copies a rejection straight
+ * across, which is exactly the executor's reject() and its escaping throw.
+ *
+ * Interned per (union, promised type) pair. */
+export function promiseAdoptAdapterFor(E: CEmitter, sov: IrType, inner: IrType): string {
+  const key = `adopt:${typeKey(sov)}=>${typeKey(inner)}`;
+  let sym = E.raceThunks.get(key);
+  if (sym) return sym;
+  sym = mangleRaceThunk(E.raceThunks.size);
+  E.raceThunks.set(key, sym);
+  if (sov.kind !== "union") throw new Error("emitter bug: adopt adapter over a non-union");
+  const def = E.unionsById.get(sov.unionId);
+  if (!def) throw new Error("emitter bug: adopt adapter over an unknown union");
+  const promiseTag = def.arms.findIndex((a) => a.kind === "promise");
+  if (promiseTag < 0) throw new Error("emitter bug: adopt adapter with no promise arm");
+  // Fulfilling dst from one data arm of the union. When the promised type is
+  // itself a union the arm is re-tagged into it first — the settle-or-value
+  // contract guarantees the arm IS one of that union's arms.
+  const fulfillFrom = (arm: IrType, tag: number): string => {
+    if (inner.kind === "union") {
+      const innerDef = E.unionsById.get(inner.unionId);
+      const innerTag = innerDef ? innerDef.arms.findIndex((a) => typeEquals(a, arm)) : -1;
+      if (innerTag < 0) throw new Error("emitter bug: adopt adapter arm not in the payload union");
+      let build: string;
+      if (isUnitType(arm)) {
+        build = E.unitInstanceRef(inner.unionId, innerTag);
+      } else if (arm.kind === "f64") {
+        build = `scr_union_new_f64(${innerTag}, scr_union_get_f64(sc_u))`;
+      } else if (arm.kind === "bool") {
+        build = `scr_union_new_bool(${innerTag}, scr_union_get_bool(sc_u))`;
+      } else {
+        const av = vAdapters(arm);
+        build = `scr_union_new_ref(${innerTag}, ${av.retain}(scr_union_peek(sc_u)), ${av.retain}, ${av.release}, ${E.traceArgC(arm)})`;
+      }
+      const iv = vAdapters(inner);
+      return `scr_promise_fulfill_ref(sc_dst, ${build}, ${iv.retain}, ${iv.release}, ${E.traceArgC(inner)});`;
+    }
+    void tag;
+    switch (arm.kind) {
+      case "f64":
+        return `scr_promise_fulfill_f64(sc_dst, scr_union_get_f64(sc_u));`;
+      case "bool":
+        return `scr_promise_fulfill_bool(sc_dst, scr_union_get_bool(sc_u));`;
+      case "string":
+        return `scr_promise_fulfill_str(sc_dst, scr_str_retain((ScrStr *)scr_union_peek(sc_u)));`;
+      default: {
+        const av = vAdapters(arm);
+        return `scr_promise_fulfill_ref(sc_dst, ${av.retain}(scr_union_peek(sc_u)), ${av.retain}, ${av.release}, ${E.traceArgC(arm)});`;
+      }
+    }
+  };
+  const lines: string[] = [
+    `static void ${sym}(ScrPromise *sc_dst, ScrPromise *sc_src) {`,
+    `  ScrUnion *sc_u = (ScrUnion *)scr_promise_payload_ref(sc_src);`,
+    `  switch (sc_u->tag) {`,
+    `  case ${promiseTag}:`,
+    `    scr_promise_race_add(sc_dst, (ScrPromise *)scr_union_peek(sc_u), scr_promise_adapt_copy);`,
+    `    break;`,
+  ];
+  def.arms.forEach((arm, tag) => {
+    if (tag === promiseTag) return;
+    lines.push(`  case ${tag}:`, `    ${fulfillFrom(arm, tag)}`, `    break;`);
+  });
+  lines.push(
+    `  default: break;`,
+    `  }`,
+    `  scr_union_release(sc_u);`,
+    `}`,
+  );
+  E.walkerProtos.push(`static void ${sym}(ScrPromise *sc_dst, ScrPromise *sc_src);`);
+  E.walkerDefs.push(...lines, ``);
+  return sym;
+}
+
 /** Interned per inner-type resolve thunk for ref-kind new Promise. */
   export function resolveThunkFor(E: CEmitter, inner: IrType): string {
     const key = typeKey(inner);
