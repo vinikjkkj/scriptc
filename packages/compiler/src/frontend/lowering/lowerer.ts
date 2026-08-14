@@ -10387,7 +10387,7 @@ export class Lowerer {
    * { module, member } shape builtinImportOf gives named imports, so both
    * import forms key the same lowering tables. Null for everything else. */
   builtinMemberOf(access: ts.PropertyAccessExpression): { module: string; member: string } | null {
-    if (access.questionDotToken) return null;
+    if (this.chainBlocked(access)) return null;
     const module = this.builtinNamespaceModuleOf(access.expression);
     if (module !== null) return { module, member: access.name.text };
     // The RE-EXPORT FACADE's namespace spelling: `import * as assert from

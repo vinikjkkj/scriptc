@@ -1172,7 +1172,7 @@ export function lowerStreamUnderscoreAssign(L: Lowerer, expr: ts.BinaryExpressio
  * chain once the receiver resolved to a stream class value. */
 export function lowerStreamStaticCall(L: Lowerer, call: ts.CallExpression,
   access: ts.PropertyAccessExpression): IrExpr | null {
-  if (call.questionDotToken || access.questionDotToken) return null;
+  if (L.chainBlocked(call, access)) return null;
   let symbol: ts.Symbol | null | undefined = null;
   if (ts.isIdentifier(access.expression)) {
     symbol = L.resolveValueSymbol(access.expression);

@@ -1072,7 +1072,7 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
     expr: ts.PropertyAccessExpression,
     member: string,
   ): IrExpr | null {
-    if (expr.questionDotToken) return null;
+    if (L.chainBlocked(expr)) return null;
     if (L.dynamic) return null;
     // The CALL form is lowerMathCall's — including the arities and the
     // n-ary min/max fold it handles, which must keep their own paths.
