@@ -276,7 +276,7 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
     L: Lowerer,
     call: ts.CallExpression,
   ): { spec: string | null; baseFile: ts.SourceFile } | null {
-    if (call.questionDotToken) return null;
+    if (L.chainBlocked(call)) return null;
     const baseFile = createRequireCalleeFileOf(L, call.expression);
     if (baseFile === null) return null;
     if (call.arguments.length !== 1) return { spec: null, baseFile };
@@ -1483,7 +1483,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * fence. Null when this isn't a Reflect.apply call. */
   export function lowerReflectApplyCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken) return null;
+    if (L.chainBlocked(call)) return null;
     if (L.stdlibGlobalMember(access, "Reflect") !== "apply") return null;
     const loc = locOf(call);
     const fenceHint =
@@ -3604,7 +3604,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * Null when this isn't a JSON member call. */
   export function lowerJsonMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken) return null;
+    if (L.chainBlocked(call)) return null;
     const member = L.stdlibGlobalMember(access, "JSON");
     if (member === null) return null;
     const loc = locOf(call);
@@ -6937,7 +6937,7 @@ let digestInputValueDispatches = 0;
    * always holds in a compiled program). */
   export function lowerProcessMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken) return null;
+    if (L.chainBlocked(call)) return null;
     // process.stdout.write(s) / process.stderr.write(s): the raw byte
     // write — no newline, no formatting. stdout shares console.log's
     // promptly-submitted stream, preserving source order. Node's boolean
@@ -7688,7 +7688,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
    * for non-Number receivers. */
   export function lowerNumberStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken) return null;
+    if (L.chainBlocked(call)) return null;
     const member = L.stdlibGlobalMember(access, "Number");
     if (member === null) return null;
     const loc = locOf(call);
@@ -8178,7 +8178,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
    * `String.raw` is handled below. Null for non-String receivers. */
   export function lowerStringStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken) return null;
+    if (L.chainBlocked(call)) return null;
     const member = L.stdlibGlobalMember(access, "String");
     if (member === "fromCodePoint") {
       const loc0 = locOf(call);
@@ -8774,7 +8774,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
 
   export function lowerPromiseStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (call.questionDotToken) return null;
+    if (L.chainBlocked(call)) return null;
     const member = L.stdlibGlobalMember(access, "Promise");
     if (member === null) return null;
     const loc = locOf(call);
