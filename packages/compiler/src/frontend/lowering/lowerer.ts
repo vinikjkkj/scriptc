@@ -8219,10 +8219,14 @@ export class Lowerer {
   lowerReturnStmt(node: ts.Expression, loc: SrcLoc): IrStmt {
     const expected = this.ctx.returnType;
     if (expected.kind === "void") {
-      let e = this.lowerExpr(node);
-      if (this.ctx.isAsync && e.type.kind === "promise") {
-        e = { kind: "awaitExpr", value: e, type: e.type.inner, loc: e.loc };
-      }
+      // The THIRD spelling of the flattening rule, shared rather than
+      // copied — copying it is how the settle-or-value union came to be
+      // handled in one place and not the others. A contextually
+      // void-typed async function still ADOPTS a returned thenable: the
+      // value is dropped, but settlement waits for it and a REJECTION on
+      // the promise arm has to reach the caller rather than surfacing as
+      // an unhandled rejection.
+      const e = this.asyncReturnFlatten(this.lowerExpr(node), expected, this.ctx.isAsync);
       if (e.kind === "unitLit") return { kind: "return", value: null, loc };
       if (e.type.kind === "void") return { kind: "return", value: e, loc };
       return {
