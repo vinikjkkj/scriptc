@@ -2059,16 +2059,28 @@ declare module "net" {
      * registration never fires — Node's exact split. 'session' fires
      * once with the serialized session (the received-ticket event). */
     on(event: "data", listener: (chunk: Buffer) => void): void;
-    on(event: "end" | "close" | "connect" | "timeout" | "readable" | "finish" | "secureConnect", listener: () => void): void;
+    /* Node's socket 'close' carries hadError — true when the socket
+     * was destroyed by a transmission error. A zero-parameter
+     * listener is assignable to it, so both spellings typecheck. */
+    on(event: "close", listener: (hadError: boolean) => void): void;
+    on(event: "end" | "connect" | "timeout" | "readable" | "finish" | "secureConnect", listener: () => void): void;
     on(event: "error", listener: (err: Error) => void): void;
     on(event: "session", listener: (session: Buffer) => void): void;
     /* addListener IS on (Node aliases them) — the suite spells both. */
     addListener(event: "data", listener: (chunk: Buffer) => void): void;
-    addListener(event: "end" | "close" | "connect" | "timeout" | "readable" | "finish" | "secureConnect", listener: () => void): void;
+    /* Node's socket 'close' carries hadError — true when the socket
+     * was destroyed by a transmission error. A zero-parameter
+     * listener is assignable to it, so both spellings typecheck. */
+    addListener(event: "close", listener: (hadError: boolean) => void): void;
+    addListener(event: "end" | "connect" | "timeout" | "readable" | "finish" | "secureConnect", listener: () => void): void;
     addListener(event: "error", listener: (err: Error) => void): void;
     addListener(event: "session", listener: (session: Buffer) => void): void;
     once(event: "data", listener: (chunk: Buffer) => void): void;
-    once(event: "end" | "close" | "connect" | "timeout" | "readable" | "finish" | "secureConnect", listener: () => void): void;
+    /* Node's socket 'close' carries hadError — true when the socket
+     * was destroyed by a transmission error. A zero-parameter
+     * listener is assignable to it, so both spellings typecheck. */
+    once(event: "close", listener: (hadError: boolean) => void): void;
+    once(event: "end" | "connect" | "timeout" | "readable" | "finish" | "secureConnect", listener: () => void): void;
     once(event: "error", listener: (err: Error) => void): void;
     once(event: "session", listener: (session: Buffer) => void): void;
   }

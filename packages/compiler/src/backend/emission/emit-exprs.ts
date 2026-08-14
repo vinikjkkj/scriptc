@@ -3906,14 +3906,26 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             E.line(`scr_net_sock_on_data(${arg(0)}, ${cb.name}, &${adapter}, ${arg(2)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
           }
+          case "net.sockOnClose": {
+            // The adapter pointer says whether this listener WANTS the
+            // `hadError` flag, exactly as the data and error lists say
+            // what their listener wants. A zero-parameter listener (and
+            // every checked-dynamic one, which adapts through the
+            // zero-argument boundary) stores NULL and is called with no
+            // arguments — the pre-existing shape, byte for byte.
+            const cbT = e.args[1]!.type;
+            if (cbT.kind !== "func") throw new Error("emitter bug: net.sockOnClose callback not a func");
+            const cb = args[1]!;
+            E.moveTemp(cb);
+            const adapter = cbT.params.length === 0 ? "NULL" : "&scr_net_close_thunk_bool";
+            E.line(`scr_net_sock_on_close(${arg(0)}, ${cb.name}, ${adapter}, ${arg(2)});${E.srcComment(e.loc)}`);
+            return { name: "", type: e.type };
+          }
           case "net.sockOnEnd":
-          case "net.sockOnClose":
           case "net.sockOnConnect": {
             const cb = args[1]!;
             E.moveTemp(cb);
-            const fn = e.fn === "net.sockOnEnd" ? "scr_net_sock_on_end"
-              : e.fn === "net.sockOnClose" ? "scr_net_sock_on_close"
-              : "scr_net_sock_on_connect";
+            const fn = e.fn === "net.sockOnEnd" ? "scr_net_sock_on_end" : "scr_net_sock_on_connect";
             E.line(`${fn}(${arg(0)}, ${cb.name}, ${arg(2)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
           }

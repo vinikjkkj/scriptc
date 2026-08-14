@@ -1564,12 +1564,37 @@ function lowerNetSocketMethodCall(L: Lowerer, call: ts.CallExpression,
       );
       return { kind: "libCall", fn: "net.sockOnError", args: [receiver, cb, once], type: VOID, loc };
     }
-    if (event === "end" || event === "close" || event === "connect" || event === "timeout" ||
+    if (event === "close") {
+      // A SOCKET's 'close' carries `hadError` — Node's one payload here,
+      // and the one fact a close listener has no other way to read: the
+      // 'error' event fires on a DIFFERENT list, so a program that
+      // registers only 'close' (the shape zapo's mobile TCP transport
+      // uses) can otherwise never tell a clean FIN from a reset.
+      //
+      // The runtime has tracked the flag since the transport-error path
+      // was written (`ScrNetSocket.had_error`, set at every place a
+      // socket dies from an error); only the DELIVERY was missing. So
+      // this hands the listener a fact the socket already holds rather
+      // than computing a new one, and the arity is the whole change.
+      //
+      // The dyn tuple stays EMPTY on purpose: a checked-dynamic listener
+      // (a JS-source `function(){}` with dyn params) keeps adapting
+      // through the zero-argument boundary exactly as before, and the
+      // runtime decides per listener from the adapter pointer the
+      // emitter stores — the split scr_net_fire_err_impl already uses.
+      const { cb } = lowerCallbackArg(
+        L, args[1]!, "close listeners", 1,
+        (p) => p.kind === "bool",
+        "use (hadError: boolean) or ()",
+        [],
+      );
+      return { kind: "libCall", fn: "net.sockOnClose", args: [receiver, cb, once], type: VOID, loc };
+    }
+    if (event === "end" || event === "connect" || event === "timeout" ||
         event === "readable") {
       const { cb } = lowerCallbackArg(L, args[1]!, `${event} listeners`, 0, () => false, "use ()", []);
       const fn: IrLibFn =
         event === "end" ? "net.sockOnEnd"
-        : event === "close" ? "net.sockOnClose"
         : event === "timeout" ? "net.sockOnTimeout"
         : event === "readable" ? "net.sockOnReadable"
         : "net.sockOnConnect";
