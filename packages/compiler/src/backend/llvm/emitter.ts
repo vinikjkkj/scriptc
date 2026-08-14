@@ -2794,6 +2794,8 @@ class LlEmitter {
             case "childStream":
             case "generator":
             case "fsWatcher":
+            case "abortSignal":
+            case "abortController":
               B.line(`store i1 true, ptr ${slot} ; ${arm.kind}: objects are truthy`);
               break;
             default:
