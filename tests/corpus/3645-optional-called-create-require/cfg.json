@@ -1,0 +1,7 @@
+{
+  "name": "guarded-cli",
+  "version": "1.4.2",
+  "port": 9090,
+  "tags": ["guarded", "static"],
+  "nested": { "deep": true }
+}
