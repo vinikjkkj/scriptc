@@ -71,7 +71,24 @@ async function fabsent(x: Promise<string> | undefined): Promise<string> {
     return x;
 }
 
-// ---------------------------------- 6. a REJECTION on the promise arm has
+// -------------- 6. the ASYNC CONCISE ARROW body, which is the very same
+//                    completion and had the very same gap. It is a
+//                    SEPARATE site in the compiler, and fixing the
+//                    statement form alone left this one throwing — the two
+//                    share one rule now (asyncReturnFlatten) rather than
+//                    spelling it twice.
+
+// What is NOT here, on purpose: `async (x, empty) => empty ? null : x`.
+// The ternary merges both branches BEFORE the return, so the returned type
+// is `string | Promise<string> | null` — a promise arm with a unit sibling
+// that is not part of its payload, which is not the settle-or-value
+// contract and has no await lowering. That keeps a LOUD SC2003 on main and
+// on this branch alike (repro-pu/lab/t1.ts is the statement spelling of
+// it, identical on both sides). A fence is not a bug; a silent throw was.
+
+const arrow = async (x: string | Promise<string>): Promise<string> => x;
+
+// ---------------------------------- 7. a REJECTION on the promise arm has
 //                                       to reach the caller as a rejection
 
 async function boom(): Promise<string> {
@@ -95,6 +112,9 @@ async function main(): Promise<void> {
 
     console.log("absent", await fabsent(undefined));
     console.log("present", await fabsent(gen("four")));
+
+    console.log("arrow-lit", await arrow("arrowed"));
+    console.log("arrow-prom", await arrow(gen("five")));
 
     try {
         await f(boom());

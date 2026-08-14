@@ -6858,13 +6858,17 @@ const inliningPredicates = new Set<ts.Symbol>();
           }
         } else {
           let value = L.lowerExpr(bodyExpr);
-          // An async concise body whose value is itself a promise
-          // (`async () => p`): the async machinery RESOLVES the returned
-          // thenable into the function's own promise — lowerReturnValue's
-          // await-through, applied to the implicit return.
-          if (isAsync && value.type.kind === "promise" && bodyReturn.kind !== "promise") {
-            value = { kind: "awaitExpr", value, type: value.type.inner, loc: value.loc };
-          }
+          // An async concise body: the async machinery RESOLVES a returned
+          // thenable into the function's own promise. That is exactly the
+          // `return <expr>` statement's completion, so it is exactly the
+          // same rule — asyncReturnFlatten, shared with lowerReturnValue
+          // rather than spelled twice. Spelling it twice is how the
+          // SETTLE-OR-VALUE union came to be handled in the statement form
+          // and not here: `async (x: string | Promise<string>) => x` kept
+          // throwing the uncoded "not representable in the target union"
+          // TypeError after the statement form was fixed
+          // (estado-promiseunion.md §5).
+          value = L.asyncReturnFlatten(value, bodyReturn, isAsync);
           body =
             value.type.kind === "void" && L.wrappedUndefined(bodyReturn, locOf(node.body!))
               ? [{ kind: "exprStmt", expr: value, loc: locOf(node.body!) }]

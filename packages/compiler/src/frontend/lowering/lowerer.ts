@@ -8157,38 +8157,57 @@ export class Lowerer {
     }
     const e = this.lowerExpr(node);
     if (expected.kind === "void" && e.kind === "unitLit") return null;
-    if (this.ctx.isAsync && e.type.kind === "promise" && expected.kind !== "promise") {
-      const awaited: IrExpr = { kind: "awaitExpr", value: e, type: e.type.inner, loc: e.loc };
-      return this.coerceInto(node, awaited, expected);
+    return this.coerceInto(node, this.asyncReturnFlatten(e, expected, this.ctx.isAsync), expected);
+  }
+
+  /** JS's RETURN-SIDE flattening in an async function, as one rule with two
+   * callers: the `return <expr>` statement above, and the async CONCISE
+   * ARROW body (`async () => x`), whose implicit return is the same
+   * completion. Answers `value` unchanged when nothing flattens.
+   *
+   * A returned thenable is adopted by the function's own promise, which is
+   * `return await p` — this compiler's long-standing spelling for it, and
+   * the reason the plain-promise arm below has been here as long as async
+   * has. The tick it costs is the genuine `return p` / `return await p`
+   * difference and is already visible on main for the plain case.
+   *
+   * The SETTLE-OR-VALUE union `T | Promise<T>` is the arm the rule was
+   * missing, and missing it was a SILENT WRONG ANSWER rather than a fence.
+   * The test was `kind === "promise"`, so a union merely CARRYING a promise
+   * arm fell through to the ordinary coercion — which has no
+   * union-to-payload conversion and reached for the checked single-arm
+   * extraction (narrowedArmHelper), compiling the promise arm to a throw.
+   * Both spellings of
+   *
+   *     async f(x: string | Promise<string>): Promise<string> { return x }
+   *
+   * therefore printed the string for `f('a')` and rejected `f(g())` with an
+   * UNCODED "a 'Promise<string>' value is not representable in the target
+   * union" TypeError. No diagnostic code and no census trap; the `??` block
+   * found it while deciding not to lift a fence in front of it, and it is
+   * why that fence was right to stay. estado-promiseunion.md §3.
+   *
+   * settleOrValueAwait is the builder — the same one `await u` reaches from
+   * the expression lowering and promiseCoerceAdapter reaches for a nested
+   * payload — so neither emitter learns anything new.
+   *
+   * The union guard is written to be as WIDE as it can honestly be and no
+   * wider. It stands aside when the destination is the SAME union (the
+   * coercion is already identity) and when the destination genuinely
+   * CARRIES the promise arm, where the arm-wise re-tag is the right answer
+   * and awaiting would change the value. Everywhere else the path it
+   * replaces was a throw or a fence, so nothing that compiled can move. */
+  asyncReturnFlatten(value: IrExpr, expected: IrType, isAsync: boolean | undefined): IrExpr {
+    if (!isAsync || expected.kind === "promise") return value;
+    if (value.type.kind === "promise") {
+      return { kind: "awaitExpr", value, type: value.type.inner, loc: value.loc };
     }
-    // The SETTLE-OR-VALUE union — `T | Promise<T>` — returned from an ASYNC
-    // function. JS flattens a returned thenable into the function's own
-    // promise, and the arm that is not a thenable resolves as itself: that
-    // IS settleOrValueAwait, the same builder `await u` reaches from the
-    // expression lowering. The rule above only saw a value whose whole type
-    // was `promise`, so the union fell through to the ordinary coercion —
-    // which has no union-to-payload conversion and reached for the CHECKED
-    // single-arm extraction (narrowedArmHelper), compiling the promise arm
-    // to a throw. `f(g())` on `async f(x: string | Promise<string>):
-    // Promise<string> { return x }` therefore rejected with an UNCODED
-    // TypeError where Node prints the string (estado-promiseunion.md §3).
-    //
-    // Declining leaves that behavior, so the guard is written to be as WIDE
-    // as it can honestly be and no wider: it stands aside only when the
-    // destination is the SAME union (the coercion is already identity) or
-    // when the destination genuinely carries the promise arm, where the
-    // plain re-tag is the right answer and awaiting would change the value.
-    if (this.ctx.isAsync && e.type.kind === "union" && expected.kind !== "promise" && !typeEquals(e.type, expected)) {
-      const def = this.unions.get(e.type.unionId);
-      const promiseArm = def?.arms.find((a) => a.kind === "promise");
-      const carried = promiseArm !== undefined && expected.kind === "union" &&
-        this.armTag(expected.unionId, promiseArm) >= 0;
-      if (!carried) {
-        const settled = this.settleOrValueAwait(e, e.loc);
-        if (settled) return this.coerceInto(node, settled, expected);
-      }
-    }
-    return this.coerceInto(node, e, expected);
+    if (value.type.kind !== "union" || typeEquals(value.type, expected)) return value;
+    const def = this.unions.get(value.type.unionId);
+    const promiseArm = def?.arms.find((a) => a.kind === "promise");
+    if (promiseArm === undefined) return value;
+    if (expected.kind === "union" && this.armTag(expected.unionId, promiseArm) >= 0) return value;
+    return this.settleOrValueAwait(value, value.loc) ?? value;
   }
 
   /** `return <expr>` lowered as a STATEMENT against the declared return.
