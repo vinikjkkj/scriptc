@@ -205,18 +205,27 @@ function loopFill(n: number): any {
 const filled: any = loopFill(5)
 console.log("loop      :", String(filled["i0"]), String(filled["i4"]))
 
-// And in a while loop whose CONDITION contains the region — the one place the
-// enclosing block scope was outside the loop, so the region's locals were
-// overwritten once per pass and released once in total.
-function loopCond(): string {
+// A region in a while CONDITION is deliberately NOT here. It is the one
+// place the enclosing block scope sits OUTSIDE the loop, so the region's
+// locals are overwritten once per pass and released once in total — a real
+// pre-existing LEAK, present on both backends before this change and fixed
+// by it on the C backend only. A corpus program that leaks would move the
+// documented corpus leak baseline of three, so the reproducer lives outside
+// the corpus (repro-fn/leak/a.ts) and the defect is written down instead.
+// What is exercised here is the same re-entry through a loop BODY, which
+// leaks on neither side.
+function loopBody(n: number): string {
     const acc: any = dynObj()
+    let seenKeys = ""
     let i = 0
-    while (String(acc["c" + String(i)] = "c" + String(i)) !== "c3") {
+    while (i < n) {
+        const v: any = (acc["c" + String(i)] = "c" + String(i))
+        seenKeys = seenKeys + String(v)
         i = i + 1
     }
-    return String(acc["c0"]) + "," + String(acc["c3"]) + "," + String(i)
+    return seenKeys + "|" + String(acc["c0"]) + "," + String(acc["c3"])
 }
-console.log("while     :", loopCond())
+console.log("while     :", loopBody(4))
 
 /* ── 9. THE RECORD / CLASS RECEIVER ARM ───────────────────────────────── */
 
