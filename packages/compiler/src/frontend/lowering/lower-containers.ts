@@ -5100,6 +5100,120 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     };
   }
 
+/** `new Map(other)` where `other` is itself a MAP value — the copy
+   * constructor, `ReadonlyMap` sources included. JS drains the source's
+   * entries iterator and `set()`s each pair into a fresh map, so this is
+   * the seed-array desugar with the iterator swapped for the source's own
+   * iteration primitives. Both maps must agree on key AND value type: a
+   * copy that converted would be a different value, not a copy.
+   *
+   * Nothing user-written runs mid-walk (keys and values are plain slot
+   * reads and the destination is a fresh map nobody else holds), so the
+   * walk cannot observe a concurrent mutation of the source and there is
+   * no live-iteration question to get wrong — the iterEnter/iterExit
+   * bracket is here because the RUNTIME's compaction is what it guards,
+   * and `iterLive` is what skips tombstones a prior `delete` left.
+   *
+   * Null when the argument isn't a matching map (the caller keeps its
+   * fence). */
+  export function lowerMapCloneNew(L: Lowerer, argNode: ts.Expression,
+    mapT: IrType & { kind: "map" },): IrExpr | null {
+    if (ts.isSpreadElement(argNode)) return null;
+    const src = L.lowerExpr(argNode);
+    if (src.type.kind !== "map") return null;
+    if (!typeEquals(src.type.key, mapT.key) || !typeEquals(src.type.value, mapT.value)) return null;
+    const loc = locOf(argNode);
+    const key = `clone:${typeKey(mapT.key)}:${typeKey(mapT.value)}`;
+    let helper = L.mapHofHelpers.get(key);
+    if (!helper) {
+      helper = `%map.clone.${L.mapHofHelpers.size}`;
+      L.mapHofHelpers.set(key, helper);
+      L.liftedFns.push(buildMapCloneFn(mapT, helper, loc));
+    }
+    return { kind: "call", callee: helper, args: [src], type: mapT, loc };
+  }
+
+/** The clone loop, from existing IR nodes:
+   *
+   *   out = new Map(); s.iterEnter();
+   *   try {
+   *     for (i = 0; i < s.iterCount; i++)
+   *       if (s.iterLive(i)) out.set(s.iterKey(i), s.iterValue(i));
+   *   } finally { s.iterExit(); }
+   *   return out;
+   */
+  function buildMapCloneFn(mapT: IrType & { kind: "map" }, name: string, loc: SrcLoc): IrFunction {
+    const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
+    const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+    const iter = (
+      method: "iterCount" | "iterLive" | "iterKey" | "iterValue" | "iterEnter" | "iterExit",
+      args: IrExpr[],
+      type: IrType,
+    ): IrExpr => ({ kind: "mapIntrinsic", method, receiver: ref("s.0", mapT), args, type, loc });
+    const loop: IrStmt = {
+      kind: "for",
+      init: { kind: "varDecl", localId: "i.0", init: num(0), loc },
+      cond: { kind: "bin", op: "<", left: ref("i.0", F64), right: iter("iterCount", [], F64), type: BOOL, loc },
+      update: {
+        kind: "assign",
+        localId: "i.0",
+        value: { kind: "bin", op: "+", left: ref("i.0", F64), right: num(1), type: F64, loc },
+        loc,
+      },
+      body: [
+        {
+          kind: "if",
+          cond: iter("iterLive", [ref("i.0", F64)], BOOL),
+          then: [
+            {
+              kind: "exprStmt",
+              expr: {
+                kind: "mapIntrinsic",
+                method: "set",
+                receiver: ref("m.0", mapT),
+                args: [
+                  iter("iterKey", [ref("i.0", F64)], mapT.key),
+                  iter("iterValue", [ref("i.0", F64)], mapT.value),
+                ],
+                type: VOID,
+                loc,
+              },
+              loc,
+            },
+          ],
+          else_: null,
+          loc,
+        },
+      ],
+      loc,
+    };
+    const body: IrStmt[] = [
+      { kind: "varDecl", localId: "m.0", init: { kind: "mapNew", type: mapT, loc }, loc },
+      { kind: "exprStmt", expr: iter("iterEnter", [], VOID), loc },
+      {
+        kind: "tryCatch",
+        tryBody: [loop],
+        catchBody: null,
+        catchLocalId: null,
+        finallyBody: [{ kind: "exprStmt", expr: iter("iterExit", [], VOID), loc }],
+        loc,
+      },
+      { kind: "return", value: ref("m.0", mapT), loc },
+    ];
+    return {
+      name,
+      params: [{ localId: "s.0", name: "s", type: mapT }],
+      returnType: mapT,
+      locals: [
+        { id: "s.0", name: "s", type: mapT, mutable: true },
+        { id: "m.0", name: "m", type: mapT, mutable: false },
+        { id: "i.0", name: "i", type: F64, mutable: true },
+      ],
+      body,
+      loc,
+    };
+  }
+
 /** Regex method calls, both directions: `re.test(s)` on a regex receiver,
    * and `s.replace(re, tpl)` / `s.replaceAll(re, tpl)` / `s.split(re)` on a
    * string receiver whose FIRST ARGUMENT is a regex (the string-pattern
@@ -6661,6 +6775,50 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     return null; // of, copyBytesFrom, ... → the SC2020 member fence
   }
 
+/** `Uint8Array.from(x)` (and the other typed-array constructors' `from`)
+   * over the two sources whose answer is already built: a SAME-KIND typed
+   * array/Buffer, and a `number[]`. Both mean exactly what
+   * `new Uint8Array(x)` means — an independent copy, element by element,
+   * taking the constructor's own flavor (a plain Uint8Array, never a
+   * Buffer) — so this routes to the SAME `bytesNew` node rather than
+   * inventing a second construction path.
+   *
+   * The lengths of the fence are deliberate:
+   *   - `Uint8Array.from(x, mapFn)` keeps its fence. The mapped form is a
+   *     per-element callback, and it is the HOF contract, not a copy.
+   *   - a NUMBER argument keeps its fence, which is where this rule
+   *     DIVERGES from `new Uint8Array(n)`: `new Uint8Array(3)` is three
+   *     zeroes, `Uint8Array.from(3)` is EMPTY (3 is not array-like, so
+   *     ToLength(undefined) is 0). Routing the number through bytesNew
+   *     would produce the constructor's answer for the static's spelling
+   *     — a silent wrong value, the one thing this must not do.
+   *   - cross-kind sources (`Uint8Array.from(u32)`) keep the fence
+   *     `new Uint8Array(u32)` already gives them, and for the same reason.
+   *   - a string keeps its fence: `Uint8Array.from('12')` is [1, 2] in
+   *     Node (per-CHARACTER ToNumber), not a UTF-8 encode.
+   *
+   * Null for every other receiver/member, so the property chain keeps
+   * trying. */
+  export function lowerBytesStaticFromCall(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,): IrExpr | null {
+    if (L.chainBlocked(access, call)) return null;
+    if (access.name.text !== "from") return null;
+    if (!ts.isIdentifier(access.expression)) return null;
+    const name = access.expression.text;
+    const elem = own(BYTES_CTORS, name);
+    if (!elem || !L.isStdlibGlobal(access.expression, name)) return null;
+    const args = call.arguments;
+    if (args.length !== 1 || ts.isSpreadElement(args[0]!)) return null; // mapFn / spread → the fence
+    const argNode = args[0]!;
+    const type = bytesOf(elem);
+    const loc = locOf(call);
+    const src = L.lowerExpr(argNode);
+    if (typeEquals(src.type, type) || (src.type.kind === "array" && src.type.elem.kind === "f64")) {
+      return markFlavor({ kind: "bytesNew", source: src, type, loc }, "plain", loc);
+    }
+    return null; // every other source keeps the SC2020 member fence
+  }
+
 /** `Object.keys/values/entries` over an INDEX-SIGNATURE (overflow-carrying)
    * record shape: declared fields answer first from the compile-time field
    * list (declaration order, undefined-valued fields skipped — exactly the
@@ -6902,6 +7060,125 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     return { kind: "call", callee: helper, args: [receiver], type: resultT, loc };
   }
 
+/** The MAP source of an `Object.fromEntries` argument: `m.entries()` (the
+   * spelling every caller writes) or the bare `m`. Returns the node that
+   * evaluates to the map and its lowered type, or null. Only STRING keys —
+   * a number-keyed map would need ToPropertyKey per entry, which is a
+   * different rule and a different order story (canonical array indices
+   * enumerate first), and the tuple path fences the same way. */
+  function fromEntriesMapSource(L: Lowerer, argNode: ts.Expression,
+  ): { node: ts.Expression; type: IrType & { kind: "map" } } | null {
+    let node = argNode;
+    if (
+      ts.isCallExpression(node) && node.arguments.length === 0 &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === "entries" &&
+      !node.questionDotToken && !node.expression.questionDotToken &&
+      L.isStdlibMember(node.expression)
+    ) {
+      node = node.expression.expression;
+    }
+    const t = L.mapTypeOf(L.typeOf(node));
+    if (t?.kind !== "map" || t.key.kind !== "string") return null;
+    return { node, type: t };
+  }
+
+/** `Object.fromEntries(m.entries())` — the map half. An interned helper
+   * walks the source's own iteration primitives (the Map.forEach contract:
+   * iterCount fresh, iterLive for tombstones, iterEnter/iterExit inside a
+   * finally) and keyed-writes each pair into a fresh index-signature
+   * record, exactly as the tuple-array half does with an index loop.
+   *
+   * Order is JS's: entries are visited in the map's insertion order and
+   * each write appends to the record's overflow, so the object's own-key
+   * order is the record's documented one (canonical array indices
+   * ascending, then insertion) — the same answer `Object.fromEntries` over
+   * the equivalent pair ARRAY already gives.
+   *
+   * zapo's spelling is `store/memory/appstate.store.ts:87`, serialising a
+   * `Map<string, Uint8Array>` index into the exported store snapshot. */
+  function lowerFromEntriesMap(L: Lowerer, call: ts.CallExpression,
+    srcNode: ts.Expression,
+    mapT: IrType & { kind: "map" },): IrExpr | null {
+    const valT = mapT.value;
+    if (!isSupportedIndexValue(valT)) return null;
+    const resultT: IrType & { kind: "record" } = {
+      kind: "record",
+      shapeId: L.shapes.intern([], false, valT, []),
+    };
+    const loc = locOf(call);
+    const receiver = L.lowerExpr(srcNode);
+    if (receiver.type.kind !== "map") return null;
+    const key = `obj.fromEntries.map:${typeKey(valT)}:${resultT.shapeId}`;
+    let helper = L.arrHofHelpers.get(key);
+    if (!helper) {
+      helper = `%obj.fromEntries.${L.arrHofHelpers.size}`;
+      L.arrHofHelpers.set(key, helper);
+      const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
+      const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+      const iter = (
+        method: "iterCount" | "iterLive" | "iterKey" | "iterValue" | "iterEnter" | "iterExit",
+        args: IrExpr[],
+        type: IrType,
+      ): IrExpr => ({ kind: "mapIntrinsic", method, receiver: ref("s.0", mapT), args, type, loc });
+      const loop: IrStmt = {
+        kind: "for",
+        init: { kind: "varDecl", localId: "i.0", init: num(0), loc },
+        cond: { kind: "bin", op: "<", left: ref("i.0", F64), right: iter("iterCount", [], F64), type: BOOL, loc },
+        update: {
+          kind: "assign",
+          localId: "i.0",
+          value: { kind: "bin", op: "+", left: ref("i.0", F64), right: num(1), type: F64, loc },
+          loc,
+        },
+        body: [
+          {
+            kind: "if",
+            cond: iter("iterLive", [ref("i.0", F64)], BOOL),
+            then: [
+              {
+                kind: "recordKeySet",
+                obj: ref("out.0", resultT),
+                shapeId: resultT.shapeId,
+                key: iter("iterKey", [ref("i.0", F64)], STRING),
+                value: iter("iterValue", [ref("i.0", F64)], valT),
+                loc,
+              },
+            ],
+            else_: null,
+            loc,
+          },
+        ],
+        loc,
+      };
+      L.liftedFns.push({
+        name: helper,
+        params: [{ localId: "s.0", name: "s", type: mapT }],
+        returnType: resultT,
+        locals: [
+          { id: "s.0", name: "s", type: mapT, mutable: true },
+          { id: "out.0", name: "out", type: resultT, mutable: false },
+          { id: "i.0", name: "i", type: F64, mutable: true },
+        ],
+        body: [
+          { kind: "varDecl", localId: "out.0", init: { kind: "recordLit", fields: [], type: resultT, loc }, loc },
+          { kind: "exprStmt", expr: iter("iterEnter", [], VOID), loc },
+          {
+            kind: "tryCatch",
+            tryBody: [loop],
+            catchBody: null,
+            catchLocalId: null,
+            finallyBody: [{ kind: "exprStmt", expr: iter("iterExit", [], VOID), loc }],
+            loc,
+          },
+          { kind: "return", value: ref("out.0", resultT), loc },
+        ],
+        loc,
+      });
+    }
+    return { kind: "call", callee: helper, args: [receiver], type: resultT, loc };
+  }
+
 /** `Object.fromEntries(pairs)` over a `[string, V][]` VALUE into the
    * checker's own index-signature result shape (`{ [k: string]: V }` —
    * always declared-field-free from the lib signature): an interned helper
@@ -6921,6 +7198,12 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     if (call.arguments.length !== 1 || ts.isSpreadElement(call.arguments[0]!)) return null;
     const argNode = call.arguments[0]!;
     const argIr = L.mapTypeOf(L.typeOf(argNode));
+    // `Object.fromEntries(m.entries())` and `Object.fromEntries(m)` over a
+    // string-keyed MAP: the same helper one iterator over. The lib types
+    // the argument `Iterable<readonly [PropertyKey, T]>` and a map IS one,
+    // so this is the source shape the fence was actually refusing.
+    const mapped = fromEntriesMapSource(L, argNode);
+    if (mapped) return lowerFromEntriesMap(L, call, mapped.node, mapped.type);
     if (argIr?.kind !== "array") return null;
     // `Object.fromEntries(rows)` over a `string[][]` VALUE — the env-line
     // idiom (`envArray.map((env) => env.split('='))`). The checker has no
