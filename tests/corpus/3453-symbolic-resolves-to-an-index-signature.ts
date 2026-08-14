@@ -130,15 +130,18 @@ console.log(JSON.stringify(setMutation("pin", { fromMe: false, target: "c@s" }, 
 console.log(JSON.stringify(removeMutation("mute", { jid: "d@s" })));
 console.log(JSON.stringify(removeMutation("pin", { fromMe: true, target: "e@s" })));
 
-// NOT exercised here: a key the args bag does not carry. `Record<string,
-// string | boolean>` has no undefined arm, so a MISSING-key read throws
-// `record has no key` where Node yields undefined — and that is a
-// pre-existing property of index-signature reads, not of this table. Five
-// lines with no generic in them reproduce it identically on main:
+// NOT exercised here: a key the args bag does not carry. That divergence
+// was real and is FIXED — see 3481, which pins it. Two corrections to the
+// note this comment used to carry, both worth keeping:
 //
-//     const bag = {} as unknown as Readonly<Record<string, string>>
-//     console.log(String(bag['nope']))    // Node: "undefined"; scriptc: throws
-//
-// It belongs to whoever widens runtime-keyed reads to `V | undefined`. It
-// is named here because this fixture is what makes the surrounding code
-// compile, so it is the change that puts that read within reach.
+//   - the five-line repro spelled here was wrong. `Record<string, string>`
+//     already answered `undefined` on main (0b6bdfb / 90faac7 / 421c1d6).
+//     The spelling that threw needs the value type to be a UNION —
+//     `Record<string, string | boolean>`, which is exactly the shape these
+//     index args have — because the widening's admission test spelled
+//     "immutable primitive" as a list of three kinds.
+//   - it did not need "runtime-keyed reads widened to `V | undefined`".
+//     The read widens to DYN at the destinations that can say undefined,
+//     which is what the three earlier merges already did; only the
+//     admission test and two destinations (a string conversion, and `??`
+//     with a union result) were missing.
