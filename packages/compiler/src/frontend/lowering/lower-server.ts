@@ -3961,7 +3961,21 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
           signal = v;
           break;
         }
-        if (v.type.kind === "undefinedT" || v.type.kind === "nullT") break;
+        if (v.type.kind === "undefinedT" || v.type.kind === "nullT") {
+          // Dropping the option DROPS THE VALUE, so the value has to be
+          // one whose evaluation nobody can observe. `signal: undefined`
+          // and a shorthand are; `signal: makeNothing()` is not, and Node
+          // WOULD have called it. The agent option's null/undefined arms
+          // dodge this by matching the syntax before lowering; this one
+          // needs the type, so it asks the same audited predicate the
+          // TLS-option drop asks.
+          if (initializer === null || sideEffectFreeOptionValue(initializer)) break;
+          L.noLowering(
+            `a ${member} 'signal' option whose absent value is effectful`,
+            prop,
+            "the option means no signal, so the value is dropped — hoist it (const s = ...) or drop the entry",
+          );
+        }
         if (optionalSignalArm(L, v.type) !== null) {
           signal = v;
           break;
