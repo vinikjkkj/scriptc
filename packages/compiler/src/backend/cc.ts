@@ -513,13 +513,37 @@ function rcAuditRequested(): boolean {
   return v !== undefined && v !== "" && v !== "0";
 }
 
+/** SCRIPTC_TRAP_TRACE=1 at BUILD time: which lowering traps a run
+ * actually EXECUTES. A `runtimeFence` (the deferred compile fence
+ * --best-effort emits for a statement whose construct has no static
+ * lowering) never blocks the build, so a trap census counts constructs
+ * the compiler DECLINED and says nothing about how many the program
+ * REACHES. The define turns on scr_error.c's SCTRAP marker, which prints
+ * the fence's code and message to stderr at the throw, BEFORE the
+ * unwind, so a fence the program catches and swallows is still observed.
+ *
+ * Exactly the SCRIPTC_RC_AUDIT contract, for the same reasons:
+ * unset/empty/"0" keeps the historical command line byte for byte (and
+ * the instrument is `#ifdef SCR_TRAP_TRACE` in the runtime, so the
+ * binary is byte-identical too, not merely the emitted C), and when it
+ * IS set the extra define lands in the build-cache key and in the
+ * runtime object set key like any other flag, so traced and untraced
+ * binaries never share an entry. */
+function trapTraceRequested(): boolean {
+  const v = process.env.SCRIPTC_TRAP_TRACE;
+  return v !== undefined && v !== "" && v !== "0";
+}
+
 /** The optimization + audit flags every compile shares: the sanitized lane
  * unchanged, plain builds at -O2 plus the audit define only when asked.
  * compileC's two option sets and compileLibArchive must stay in lockstep —
  * see buildArgs' -fno-strict-aliasing note. */
 function optAuditArgs(sanitize: boolean): string[] {
-  if (sanitize) return ["-O1", "-fsanitize=address", "-DSCR_RC_AUDIT"];
-  return rcAuditRequested() ? ["-O2", "-DSCR_RC_AUDIT"] : ["-O2"];
+  // Appended last and only when asked, so an untraced build's argv is
+  // the historical one, element for element.
+  const trap = trapTraceRequested() ? ["-DSCR_TRAP_TRACE"] : [];
+  if (sanitize) return ["-O1", "-fsanitize=address", "-DSCR_RC_AUDIT", ...trap];
+  return rcAuditRequested() ? ["-O2", "-DSCR_RC_AUDIT", ...trap] : ["-O2", ...trap];
 }
 
 /** The engine archive for one flavor, built lazily on the first --dynamic
