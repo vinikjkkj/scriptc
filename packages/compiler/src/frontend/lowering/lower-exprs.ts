@@ -8991,7 +8991,7 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
         const target = L.mapTypeOf(targetTs0);
         if (target !== null && httpReqIsReadableIn(inner.type, target)) return L.httpBodyStream(inner);
       }
-      // `b as (T & { readonly destroy?: () => Promise<void> })`  the CAST
+      // `b as (T & { readonly destroy?: () => Promise<void> })` — the CAST
       // spelling of the slot, and the fifth member of this function's
       // family. mapTypeOf maps the intersection to a record with the MERGED
       // fields, and every OTHER position that meets that record already
@@ -9002,22 +9002,22 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
       // alone had no conversion, so erasure left the OPERAND's record where
       // the read resolved against the ASSERTED one and the last-resort fence
       // answered "reading 'destroy' from a value of type
-      // 'WithDestroyLifecycle<WaIdentityStore>'"  a refusal standing beside
+      // 'WithDestroyLifecycle<WaIdentityStore>'" — a refusal standing beside
       // two spellings of the same conversion that answer.
       //
       // WIDENING ONLY, and deliberately. Every field of the operand's shape
       // must exist on the asserted one and the asserted one must add at
       // least one: precisely the pair erasure cannot serve. A NARROWING cast
-      // (`wide as Narrow`) keeps erasure  a copy there would DROP fields and
+      // (`wide as Narrow`) keeps erasure — a copy there would DROP fields and
       // change what a mutation through the result reaches, and nothing about
       // it fences today. Index-signature shapes on either side keep erasure
       // too: the overflow CAPTURE is widthCoerce's other arm, with its own
       // runtime validation, and this position is not asking for it. Tuples
       // never widen (TS permits no other tuple width).
       //
-      // A pair widthCoerce DECLINES keeps the existing fence exactly  an
+      // A pair widthCoerce DECLINES keeps the existing fence exactly — an
       // added field with no undefined arm is a required member the operand
-      // cannot supply  so this can only turn a refusal into the answer the
+      // cannot supply — so this can only turn a refusal into the answer the
       // slot already gives.
       if (inner.type.kind === "record") {
         const target = L.mapTypeOf(targetTs0);
