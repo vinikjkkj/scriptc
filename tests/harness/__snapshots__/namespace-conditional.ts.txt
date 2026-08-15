@@ -1,0 +1,80 @@
+namespace-conditional.ts:21:11 - error SC2020: 'a module-namespace conditional outside a const declaration' is part of the standard library types but has no scriptc lowering yet
+
+  20 | function reassignable(): void {
+  21 |   let t = flag ? https : http;
+     |           ^~~~~~~~~~~~~~~~~~~
+  22 |   t.request("https://127.0.0.1:9/", { method: "GET" }, cb);
+
+  hint: bind it first — `const t = cond ? a : b` — and use `t.member(...)`; the binding holds the CHOICE, not a module object
+
+namespace-conditional.ts:22:3 - error SC2020: 'typeof import("node:http") | typeof import("node:https").request' is part of the standard library types but has no scriptc lowering yet
+
+  21 |   let t = flag ? https : http;
+  22 |   t.request("https://127.0.0.1:9/", { method: "GET" }, cb);
+     |   ^~~~~~~~~
+  23 | }
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+namespace-conditional.ts:29:23 - error SC2020: 'a module-namespace conditional outside a const declaration' is part of the standard library types but has no scriptc lowering yet
+
+  28 | function noSlot(): void {
+  29 |   console.log(typeof (flag ? https : http));
+     |                       ^~~~~~~~~~~~~~~~~~~
+  30 | }
+
+  hint: bind it first — `const t = cond ? a : b` — and use `t.member(...)`; the binding holds the CHOICE, not a module object
+
+namespace-conditional.ts:36:15 - error SC2020: ''t' as a value (it names one of two module namespaces, chosen at runtime)' is part of the standard library types but has no scriptc lowering yet
+
+  35 |   const t = flag ? https : http;
+  36 |   console.log(t);
+     |               ^
+  37 | }
+
+  hint: call a member on it — `t.member(...)` lowers to one call per arm; the binding itself holds only the choice between 'https' and 'http'
+
+namespace-conditional.ts:42:17 - error SC2020: ''t' as a value (it names one of two module namespaces, chosen at runtime)' is part of the standard library types but has no scriptc lowering yet
+
+  41 |   const t = flag ? https : http;
+  42 |   const other = t;
+     |                 ^
+  43 |   console.log(typeof other);
+
+  hint: call a member on it — `t.member(...)` lowers to one call per arm; the binding itself holds only the choice between 'https' and 'http'
+
+namespace-conditional.ts:43:22 - error SC2004: uses of 'other' inherit the blocker on its declaration
+
+  42 |   const other = t;
+  43 |   console.log(typeof other);
+     |                      ^~~~~
+  44 | }
+
+  hint: the declaration of 'other' did not compile — fix the diagnostic reported there and these sites clear with it
+
+namespace-conditional.ts:49:13 - error SC2020: 'typeof import("node:http") | typeof import("node:https").request' is part of the standard library types but has no scriptc lowering yet
+
+  48 |   const t = flag ? https : http;
+  49 |   const f = t.request;
+     |             ^~~~~~~~~
+  50 |   console.log(typeof f);
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+namespace-conditional.ts:50:22 - error SC2004: uses of 'f' inherit the blocker on its declaration
+
+  49 |   const f = t.request;
+  50 |   console.log(typeof f);
+     |                      ^
+  51 | }
+
+  hint: the declaration of 'f' did not compile — fix the diagnostic reported there and these sites clear with it
+
+namespace-conditional.ts:59:22 - error SC2020: ''t' as a value (it names one of two module namespaces, chosen at runtime)' is part of the standard library types but has no scriptc lowering yet
+
+  58 |   const t = flag ? fs : fsp;
+  59 |   console.log(typeof t);
+     |                      ^
+  60 | }
+
+  hint: call a member on it — `t.member(...)` lowers to one call per arm; the binding itself holds only the choice between 'fs' and 'fs/promises'
