@@ -80,3 +80,14 @@ catch (e) { console.log("r16", (e as Error).name, (e as Error).message); }
 // reserved punctuator. The engine reports it, and the error is catchable.
 try { new RegExp("[a(b]", "v"); console.log("r17 NOT REJECTED"); }
 catch (e) { console.log("r17", (e as Error).name); }
+
+// ------------------------------- 7. the FUNCTION-REPLACER path, un-fenced
+// lowerStringReplaceWithFn fences a function replacement value over a regex
+// carrying a flag outside the lowered alphabet -- and 'v' was outside it, so
+// widening the alphabet un-fences this path too. That is a behaviour change
+// this file has to own rather than leave to the diagnostics snapshot that
+// used to pin it (tests/diagnostics/regex-replacer.ts).
+console.log("r18", "abc".replace(new RegExp("(a)", "v"), (m: string, g: string): string => g + g));
+console.log("r19", "abcabc".replace(new RegExp("(b)", "gv"), (m: string, g: string): string => "[" + g + "]"));
+console.log("r20", "xayb".replace(/([[a-z]--[aeiou]])/gv, (m: string, g: string): string => g.toUpperCase()));
+console.log("r21", "aaa".replaceAll(/(a)/gv, (m: string, g: string): string => g + "!"));

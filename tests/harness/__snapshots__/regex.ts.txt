@@ -1,51 +1,42 @@
-regex.ts:7:11 - error SC1121: '.test()' on a regex with the 'g' or 'y' flag is not supported yet
+regex.ts:9:11 - error SC1121: '.test()' on a regex with the 'g' or 'y' flag is not supported yet
 
-  6 | // compile — corpus 2448).
-  7 | const g = /ab/g.test("abab");
-    |           ^~~~~~~~~~~~~~~~~~
-  8 | const y = /ab/y.test("abab");
-
-  hint: g/y regexes carry mutable lastIndex state between calls, which is not modeled; drop the flag for a plain match test, or use replace/replaceAll/split (their iteration is internal)
-
-regex.ts:8:11 - error SC1121: '.test()' on a regex with the 'g' or 'y' flag is not supported yet
-
-  7 | const g = /ab/g.test("abab");
-  8 | const y = /ab/y.test("abab");
-    |           ^~~~~~~~~~~~~~~~~~
-  9 | const indices = /cat/d;
+   8 | // compile — corpus 2448).
+   9 | const g = /ab/g.test("abab");
+     |           ^~~~~~~~~~~~~~~~~~
+  10 | const y = /ab/y.test("abab");
 
   hint: g/y regexes carry mutable lastIndex state between calls, which is not modeled; drop the flag for a plain match test, or use replace/replaceAll/split (their iteration is internal)
 
-regex.ts:9:17 - error SC1120: the regex 'd' flag (match indices) is not supported yet
+regex.ts:10:11 - error SC1121: '.test()' on a regex with the 'g' or 'y' flag is not supported yet
 
-   8 | const y = /ab/y.test("abab");
-   9 | const indices = /cat/d;
+   9 | const g = /ab/g.test("abab");
+  10 | const y = /ab/y.test("abab");
+     |           ^~~~~~~~~~~~~~~~~~
+  11 | const indices = /cat/d;
+
+  hint: g/y regexes carry mutable lastIndex state between calls, which is not modeled; drop the flag for a plain match test, or use replace/replaceAll/split (their iteration is internal)
+
+regex.ts:11:17 - error SC1120: the regex 'd' flag (match indices) is not supported yet
+
+  10 | const y = /ab/y.test("abab");
+  11 | const indices = /cat/d;
      |                 ^~~~~~
-  10 | const sets = /[\p{L}]/v;
+  12 | const sets = /[\p{L}]/v;
 
-  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
+  hint: supported: literal regexes with the g/i/m/s/u/v/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
 
-regex.ts:10:14 - error SC1120: the regex 'v' flag (unicode sets) is not supported yet
+regex.ts:13:17 - error SC1090: regex methods as values (call 'test' directly) are not supported yet
 
-   9 | const indices = /cat/d;
-  10 | const sets = /[\p{L}]/v;
-     |              ^~~~~~~~~~
-  11 | const asValue = /x/.test;
-
-  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
-
-regex.ts:11:17 - error SC1090: regex methods as values (call 'test' directly) are not supported yet
-
-  10 | const sets = /[\p{L}]/v;
-  11 | const asValue = /x/.test;
+  12 | const sets = /[\p{L}]/v;
+  13 | const asValue = /x/.test;
      |                 ^~~~~~~~
-  12 | const maybe: RegExp | undefined = /a/;
+  14 | const maybe: RegExp | undefined = /a/;
 
-regex.ts:15:22 - error SC2020: 'RegExpExecArray.groups' is part of the standard library types but has no scriptc lowering yet
+regex.ts:17:22 - error SC2020: 'RegExpExecArray.groups' is part of the standard library types but has no scriptc lowering yet
 
-  14 |   const m = re.exec("2024-07");
-  15 |   if (m) console.log(m.groups);
+  16 |   const m = re.exec("2024-07");
+  17 |   if (m) console.log(m.groups);
      |                      ^~~~~~~~
-  16 | }
+  18 | }
 
   hint: '.groups' lowers when the match's regex is STATICALLY known — a regex literal, or a const initialized with one (the group-name table is built at compile time) — and the read is not an optional-chain step: narrow the match instead (if (m) { m.groups } or m!.groups)

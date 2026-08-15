@@ -40,6 +40,11 @@ console.log("a".replace(new RegExp("(a)", flags), (m: string, g: string) => g));
 // lowers, but `new RegExp(p, "d")` arrives here with flags the backends
 // cannot represent — and the desugar completes them with 'g', which used
 // to hand the emitter an unrepresentable regexLit (an SC9001 ICE).
+//
+// 'v' USED to be one of those flags and is not any more: widening the
+// alphabet un-fenced this path, and the line below now compiles and
+// answers what Node answers (corpus 3811 r18-r21). It stays here,
+// producing no diagnostic, so that a future regression puts one back.
 console.log("a".replace(new RegExp("(a)", "d"), (m: string, g: string) => g));
 console.log("a".replace(new RegExp("(a)", "v"), (m: string, g: string) => g));
 
