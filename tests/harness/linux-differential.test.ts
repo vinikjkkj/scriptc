@@ -235,8 +235,17 @@ async function runLinuxNode(file: string): Promise<RunResult> {
   ]);
 }
 
+/** Entry file plus siblings for directory tests. SEPARATOR-AGNOSTIC: the
+ * host that cross-compiles for this lane may be Windows, where globSync
+ * answers BACKSLASH paths and a forward-slash-only test matched NONE of
+ * the 95 directory tests — silently degenerating this to [file] and
+ * leaving 175 sibling files / 47 665 bytes out of the compile cache key
+ * (measured on this repo). The local lane's copy of this function carries
+ * the full story. On a POSIX host the two spellings are the same
+ * predicate: no corpus path segment contains a backslash, so `[\\/]` and
+ * `/` match at exactly the same positions — verified over all 95. */
 function programInputs(file: string): string[] {
-  if (!/\/main\.(ts|js|mjs|cjs)$/.test(file)) return [file];
+  if (!/[\\/]main\.(ts|js|mjs|cjs)$/.test(file)) return [file];
   return [
     ...ENTRY_EXTS.flatMap((ext) => globSync(join(file, `../**/*.${ext}`))),
     ...globSync(join(file, "../**/tsconfig.json")),

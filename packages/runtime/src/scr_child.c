@@ -1433,11 +1433,29 @@ ScrChild *scr_spawn_opts(ScrStr *cmd, ScrArr *args, double in_mode,
     c->proc = sp.proc;
     c->pid = sp.pid;
   }
-  /* The registry's reference: dropped when the child settles. */
+  /* The registry's reference: dropped when the child settles. The
+   * registry is APPENDED to, not pushed onto: scr_children_poll walks
+   * it head-first and settles every spawn FAILURE on its first pass,
+   * so the list order IS the order those 'error' events fire. Node
+   * queues them with process.nextTick, which is FIFO, so two failing
+   * spawns report in spawn order there; they used to report in
+   * REVERSE here. With no handler on the second one that is not a
+   * cosmetic difference: the unhandled 'error' killed the program
+   * before the first child's handler ever ran, so a line Node prints
+   * never printed at all (tests/corpus/1466, tests/corpus/3872).
+   * Real exits tie-break by this order too, and spawn order is the
+   * only defensible tie-break -- which of two same-instant children
+   * Node reaps first is genuinely unspecified, and the corpus already
+   * sorts before printing wherever it depends on that. The walk is
+   * O(unsettled children), a number this registry keeps in single
+   * digits; a tail pointer would have to be kept correct by the
+   * unlink in scr_children_poll as well. */
   c->reffed = true;
   scr_children_reffed_n++;
-  c->next = scr_children;
-  scr_children = scr_child_retain(c);
+  c->next = NULL;
+  ScrChild **tail = &scr_children;
+  while (*tail != NULL) tail = &(*tail)->next;
+  *tail = scr_child_retain(c);
   return c;
 }
 
@@ -3238,11 +3256,29 @@ ScrChild *scr_spawn_opts(ScrStr *cmd, ScrArr *args, double in_mode,
 #endif
     if (c->unwatched) scr_children_unwatched++;
   }
-  /* The registry's reference: dropped when the child settles. */
+  /* The registry's reference: dropped when the child settles. The
+   * registry is APPENDED to, not pushed onto: scr_children_poll walks
+   * it head-first and settles every spawn FAILURE on its first pass,
+   * so the list order IS the order those 'error' events fire. Node
+   * queues them with process.nextTick, which is FIFO, so two failing
+   * spawns report in spawn order there; they used to report in
+   * REVERSE here. With no handler on the second one that is not a
+   * cosmetic difference: the unhandled 'error' killed the program
+   * before the first child's handler ever ran, so a line Node prints
+   * never printed at all (tests/corpus/1466, tests/corpus/3872).
+   * Real exits tie-break by this order too, and spawn order is the
+   * only defensible tie-break -- which of two same-instant children
+   * Node reaps first is genuinely unspecified, and the corpus already
+   * sorts before printing wherever it depends on that. The walk is
+   * O(unsettled children), a number this registry keeps in single
+   * digits; a tail pointer would have to be kept correct by the
+   * unlink in scr_children_poll as well. */
   c->reffed = true;
   scr_children_reffed_n++;
-  c->next = scr_children;
-  scr_children = scr_child_retain(c);
+  c->next = NULL;
+  ScrChild **tail = &scr_children;
+  while (*tail != NULL) tail = &(*tail)->next;
+  *tail = scr_child_retain(c);
   return c;
 }
 
