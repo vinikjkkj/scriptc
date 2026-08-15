@@ -6498,6 +6498,96 @@ export class Lowerer {
     };
   }
 
+  /** `Promise.resolve(u)` over the SAME settle-or-value union — the mirror
+   * of settleOrValueAwait, and the only other question a `Promise<T> | T`
+   * can be asked. The union's own TAG picks the branch, exactly as it does
+   * there: the promise arm is RETURNED AS IT IS (the spec's native-promise
+   * identity — `Promise.resolve(p) === p`, which every scriptc promise
+   * already satisfies and an `async` wrapper would break by minting a
+   * second promise), and the data arms wrap into a freshly fulfilled one.
+   *
+   * Nothing new is invented: this is settleOrValueAwait's arm walk with
+   * `promise.resolve` where the await was, so both backends see only nodes
+   * they already emit (seqExpr / unionIsTag / unionNarrow / unionWrap /
+   * ternary / the promise.resolve intrinsic). There is no microtask hop on
+   * the data side because `Promise.resolve(v)` does not await — the promise
+   * is fulfilled at creation, which is why the await twin needs `async.hop`
+   * and this one must not have it.
+   *
+   * Ownership follows the pieces: unionNarrow hands back a +1 payload, the
+   * promise.resolve intrinsic MOVES its argument into the fulfilled
+   * promise, and the identity branch's +1 promise is the expression's own
+   * answer. Null when the union is not the settle-or-value shape, so the
+   * caller's fence stands for everything else. */
+  settleOrValueResolve(value: IrExpr, loc: SrcLoc): IrExpr | null {
+    if (value.type.kind !== "union") return null;
+    const unionId = value.type.unionId;
+    const def = this.unions.get(unionId);
+    if (!def) return null;
+    const promiseTag = def.arms.findIndex((a) => a.kind === "promise");
+    const promiseArm = promiseTag >= 0 ? def.arms[promiseTag] : undefined;
+    if (!promiseArm || promiseArm.kind !== "promise") return null;
+    if (!settleOrValueArms(promiseArm, def.arms, this.unions)) return null;
+    const inner = promiseArm.inner;
+    const dataTags = def.arms.map((_, i) => i).filter((i) => i !== promiseTag);
+    if (dataTags.length === 0) return null;
+    // A void or unit payload has no fulfill adapter (the same two corners
+    // Promise.resolve's own lowering fences on); leave them to it.
+    if (inner.kind === "void" || isUnitType(inner)) return null;
+
+    // SCRIPTC_PRESOLVE_WHY: name every Promise.resolve this walk answers.
+    if (process.env["SCRIPTC_PRESOLVE_WHY"]) {
+      process.stderr.write(`[presolve] ${loc.file}:${loc.start} arms=${def.arms.length} payload=${inner.kind}\n`);
+    }
+    const vLocal = this.declareHiddenLocal("%presolve", value.type);
+    const uRef: IrExpr = { kind: "varRef", localId: vLocal.id, type: value.type, loc };
+    const extract = (tag: number): IrExpr => {
+      const arm = def.arms[tag]!;
+      if (isUnitType(arm)) {
+        const lit: IrExpr = {
+          kind: "unitLit",
+          unit: arm.kind === "undefinedT" ? "undefined" : "null",
+          type: arm,
+          loc,
+        };
+        return this.coerceToExpected(lit, inner);
+      }
+      const got: IrExpr = { kind: "unionNarrow", unionId, tag, value: uRef, type: arm, loc };
+      if (inner.kind !== "union") return got;
+      const innerDef = this.unions.get(inner.unionId);
+      const innerTag = innerDef ? innerDef.arms.findIndex((a) => typeEquals(a, arm)) : -1;
+      if (innerTag < 0) return got;
+      return { kind: "unionWrap", unionId: inner.unionId, tag: innerTag, value: got, type: inner, loc };
+    };
+    const wrap = (v: IrExpr): IrExpr =>
+      ({ kind: "intrinsic", name: "promise.resolve", args: [v], type: promiseArm, loc });
+    let dataBranch = wrap(extract(dataTags[dataTags.length - 1]!));
+    for (let k = dataTags.length - 2; k >= 0; k--) {
+      dataBranch = {
+        kind: "ternary",
+        cond: { kind: "unionIsTag", unionId, tag: dataTags[k]!, negated: false, value: uRef, type: BOOL, loc },
+        then: wrap(extract(dataTags[k]!)),
+        else_: dataBranch,
+        type: promiseArm,
+        loc,
+      };
+    }
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "varDecl", localId: vLocal.id, init: value, loc }],
+      result: {
+        kind: "ternary",
+        cond: { kind: "unionIsTag", unionId, tag: promiseTag, negated: false, value: uRef, type: BOOL, loc },
+        then: { kind: "unionNarrow", unionId, tag: promiseTag, value: uRef, type: promiseArm, loc },
+        else_: dataBranch,
+        type: promiseArm,
+        loc,
+      },
+      type: promiseArm,
+      loc,
+    };
+  }
+
   /** promiseCoerceAdapter's decision, asked without building anything:
    * does a `Promise<U>` reach a `Promise<T>` slot at all? Callers that
    * only need to know whether the conversion EXISTS -- the union-equality

@@ -2768,12 +2768,33 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     // never fires; a read smuggled past it throws a catchable TypeError
     // instead of misreading the payload (the dyn boundary's usual stance).
     // Object/array narrowings stay dyn-typed and keep their fences.
+    //
+    // BIGINT is a scalar of this family and was missing from the list.
+    // The premise that kept it out went stale the same way the folded
+    // `typeof v === "bigint"` test's did: SCR_DYN_BIG exists, the dyn
+    // tree really can carry a bigint, the test beside this one is a REAL
+    // runtime test, and `v as bigint` already extracts one through this
+    // very dynCheck. So the guard proved the kind, the extraction was
+    // built, and only the bridge between them was missing — which reads
+    // at the use site as `Number(v)` refusing an 'unknown' the program
+    // had just narrowed. Identity, not a list: what belongs here is
+    // "a scalar the checked cast extracts", and bigint is one.
     if (expr.type.kind === "dyn") {
       const narrowed = L.mapTypeOf(L.typeOf(node));
       if (
         narrowed &&
-        (narrowed.kind === "f64" || narrowed.kind === "bool" || narrowed.kind === "string")
+        (narrowed.kind === "f64" ||
+          narrowed.kind === "bool" ||
+          narrowed.kind === "string" ||
+          narrowed.kind === "bigint")
       ) {
+        // SCRIPTC_BIGNARROW_WHY: name the reads this bridge answers with a
+        // bigint, so "the rule fires nowhere" and "nothing changed" are
+        // different observations in the same run.
+        if (narrowed.kind === "bigint" && process.env["SCRIPTC_BIGNARROW_WHY"]) {
+          const p = ts.getLineAndCharacterOfPosition(node.getSourceFile(), locOf(node).start);
+          process.stderr.write(`[bignarrow] ${locOf(node).file}:${p.line + 1} ${node.getText().slice(0, 40)}\n`);
+        }
         return { kind: "dynCheck", value: expr, type: narrowed, narrowBridge: true, loc: expr.loc };
       }
       // An `instanceof Uint8Array` narrow: the checked-dynamic tree's bytes kind, extracted
