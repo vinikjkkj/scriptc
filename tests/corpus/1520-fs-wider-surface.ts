@@ -32,9 +32,10 @@ try {
 // That is a POSIX truth: Windows Node DOES re-apply the readonly bit, so
 // this probe is GUARDED and reports its verdict. Unguarded it threw an
 // uncaught EPERM whose message carries the full scratch path — including
-// mkdtemp's random suffix — so the program's own output could never agree
-// with itself across two runs (scr-fsw-2w0sd8 against scr-fsw-6z14ek), on
-// any platform where the probe throws. Nothing here prints the path.
+// mkdtemp's random suffix (scr-fsw-PBWyQr on the run that reproduced it)
+// — so the program's own output could never agree with itself across two
+// runs, on any platform where the probe throws. Nothing here prints the
+// path.
 writeFileSync(join(dir, "a.txt"), "beta", { mode: 0o400 });
 let existingWritable = true;
 try {
