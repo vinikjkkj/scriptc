@@ -3463,6 +3463,48 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     );
   }
 
+  /** The class INSTANCE a file-scope CONST binding's initializer names
+   * through ERASURE — the file-scope face of lowerVarDecl's adoption arm
+   * (`!isLet && init.type.kind === "object"` over a record-mapping
+   * declared type). collectGlobals runs BEFORE any body lowers, so it
+   * cannot ask the lowering what the initializer produced; this mirrors
+   * the two spellings whose lowered value provably IS the identifier's own
+   * instance:
+   *
+   *   const v: Iface = live;                       // no cast at all
+   *   const v = live as unknown as { … };          // an erasing cast chain
+   *
+   * A cast is peeled only where lowerAsExpression would ERASE it. Two
+   * targets do not erase and are refused rather than predicted: a target
+   * that maps to an OBJECT builds the checked-downcast or upcast bridge
+   * (so the lowered value's class is the TARGET's, not this identifier's),
+   * and `as any` under --dynamic is the island entrance (jsvalIn), whose
+   * value is a handle. Everything past an identifier — a call, an element
+   * read, a property read — is out: only a plain identifier's flow type is
+   * the value the initializer yields with no lowering of its own. */
+  export function adoptedInstanceClassOf(L: Lowerer, decl: ts.VariableDeclaration): string | null {
+    if (decl.initializer === undefined) return null;
+    if ((ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) === 0) return null;
+    let init: ts.Expression = decl.initializer;
+    for (;;) {
+      if (ts.isParenthesizedExpression(init) || ts.isSatisfiesExpression(init)) {
+        init = init.expression;
+        continue;
+      }
+      if (ts.isAsExpression(init) || ts.isTypeAssertion(init)) {
+        const targetTs = L.checker.getTypeFromTypeNode(init.type);
+        if (L.mapTypeOf(targetTs)?.kind === "object") return null;
+        if ((targetTs.flags & ts.TypeFlags.Any) !== 0 && L.dynamic) return null;
+        init = init.expression;
+        continue;
+      }
+      break;
+    }
+    if (!ts.isIdentifier(init)) return null;
+    const t = L.mapTypeOf(L.typeOf(init));
+    return t !== null && t.kind === "object" ? t.className : null;
+  }
+
   /** The class a CONST binding's initializer names directly, with the
    * type-level wrappers peeled — the declaration-site face of
    * castAliasedClassInfoOf, for callers that hold the declaration rather
