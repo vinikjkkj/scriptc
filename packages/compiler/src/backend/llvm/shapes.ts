@@ -22,7 +22,7 @@ import {
   mangleRecordStruct,
   mangleRecordTrace,
 } from "../mangle.js";
-import { arrayElemIsRef, rcAdapters } from "../emission/emit-types.js";
+import { arrayElemIsRef, mapKeyAccess as mapKeyAccessC, rcAdapters } from "../emission/emit-types.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 
 /** What the tables need from the emitter: the extern-declaration ledger
@@ -436,19 +436,30 @@ export function llFieldType(t: IrType): "double" | "i8" | "ptr" {
 
 /* ── maps and sets ────────────────────────────────────────────────────── */
 
-/** Runtime suffix for a map's KEY kind (mapKeyAccess's table): f64 with
- * SameValueZero, string content, or handle-identity REF (symbols). */
+/** Runtime suffix for a map's KEY kind: f64 with SameValueZero, string
+ * content, or identity REF.
+ *
+ * IMPORTED, not copied — emit-types.ts's mapKeyAccess is the one table,
+ * exactly as vAdapters imports rcAdapters above. The hand-written copy
+ * this replaces admitted four kinds where its C twin admits seven, and
+ * said so: "adding the suffix alone makes them compile and then
+ * SEGFAULT — this side needs more than the accessor name". That was
+ * true and is no longer: what the ref path needed was the ref-KEY
+ * CONSTRUCTOR (scr_map_new_ref / scr_set_new_ref_traced), so the map
+ * retains and releases its own keys, and emitMapNew/emitSetNew now call
+ * it. Every other ref-key entry point — set/get/has/delete/iter_key/
+ * to_arr — was already reachable through this same suffix.
+ *
+ * A kind the shared table calls a ref key but this tier cannot retain
+ * still refuses cleanly: vAdapters raises `rc:<kind>` from rcAdapters.
+ * And a kind NEITHER tier knows is an emitter bug there and a refusal
+ * here, which is this tier's contract. */
 export function mapKeyAccess(key: IrType): "f64" | "str" | "ref" {
-  if (key.kind === "f64") return "f64";
-  if (key.kind === "string") return "str";
-  if (key.kind === "symbol") return "ref";
-  if (key.kind === "netServer") return "ref"; // handle identity (Set<Server>)
-  // Reference-identity keys (class instances, records) are NOT here on
-  // purpose. Adding the suffix alone makes them compile and then
-  // SEGFAULT -- this side needs more than the accessor name, and a
-  // clean tier refusal (the default build falls back to C) beats a
-  // binary that crashes.
-  throw new LlvmUnsupportedError(`mapKey:${key.kind}`);
+  try {
+    return mapKeyAccessC(key);
+  } catch {
+    throw new LlvmUnsupportedError(`mapKey:${key.kind}`);
+  }
 }
 
 /** The ScrMapKeyKind / ScrMapValKind constants for scr_map_new. */

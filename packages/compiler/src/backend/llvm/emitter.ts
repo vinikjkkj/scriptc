@@ -9819,11 +9819,25 @@ class LlEmitter {
     const B = this.B;
     const value = e.type.value;
     const rc = isRefCounted(value) ? vAdapters(this, value) : { retain: "null", release: "null" };
-    this.declare(`declare ptr @scr_map_new(i32, i32, ptr, ptr, ptr)`);
+    const valTrace = isRefCounted(value) ? traceArg(this, value) : "null";
+    // Object KEYS carry their own RC adapters at construction — the map
+    // retains each key — so they take the ref-key constructor, exactly
+    // as emit-exprs.ts's mapNew does. Without it the keys are stored
+    // borrowed and the first collection of one is a use-after-free;
+    // that is what the old mapKey refusal was standing in for.
+    const kRc = mapKeyAccess(e.type.key) === "ref" ? vAdapters(this, e.type.key) : null;
     const m = B.tmp();
-    B.line(
-      `${m} = call ptr @scr_map_new(i32 ${mapKeyKindNum(e.type.key)}, i32 ${mapValKindNum(value)}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${isRefCounted(value) ? traceArg(this, value) : "null"})`,
-    );
+    if (kRc !== null) {
+      this.declare(`declare ptr @scr_map_new_ref(i32, ptr, ptr, ptr, ptr, ptr)`);
+      B.line(
+        `${m} = call ptr @scr_map_new_ref(i32 ${mapValKindNum(value)}, ptr ${kRc.retain}, ptr ${kRc.release}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${valTrace})`,
+      );
+    } else {
+      this.declare(`declare ptr @scr_map_new(i32, i32, ptr, ptr, ptr)`);
+      B.line(
+        `${m} = call ptr @scr_map_new(i32 ${mapKeyKindNum(e.type.key)}, i32 ${mapValKindNum(value)}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${valTrace})`,
+      );
+    }
     const out = this.own({ name: m, type: e.type });
     // Seeded construction: set() each pair in source order — a repeated
     // key overwrites (the runtime releases the old value).
@@ -10006,8 +10020,19 @@ class LlEmitter {
     const s = B.tmp();
     if (kAcc === "ref") {
       const rc = vAdapters(this, e.type.elem);
-      this.declare(`declare ptr @scr_set_new_ref(ptr, ptr)`);
-      B.line(`${s} = call ptr @scr_set_new_ref(ptr ${rc.retain}, ptr ${rc.release})`);
+      // A cycle-capable ELEMENT can hold the set right back, so the set
+      // needs the collector header and a trace that visits the KEY side
+      // — emit-exprs.ts's setNew makes the same split. Without it a
+      // Set<Promise> or Set<Record> is uncollectable, which is the other
+      // half of what the mapKey refusal was standing in for.
+      const trace = traceAdapter(this, e.type.elem);
+      if (trace !== null) {
+        this.declare(`declare ptr @scr_set_new_ref_traced(ptr, ptr, ptr)`);
+        B.line(`${s} = call ptr @scr_set_new_ref_traced(ptr ${rc.retain}, ptr ${rc.release}, ptr ${trace})`);
+      } else {
+        this.declare(`declare ptr @scr_set_new_ref(ptr, ptr)`);
+        B.line(`${s} = call ptr @scr_set_new_ref(ptr ${rc.retain}, ptr ${rc.release})`);
+      }
     } else {
       this.declare(`declare ptr @scr_map_new(i32, i32, ptr, ptr, ptr)`);
       B.line(`${s} = call ptr @scr_map_new(i32 ${mapKeyKindNum(e.type.elem)}, i32 0, ptr null, ptr null, ptr null)`);
