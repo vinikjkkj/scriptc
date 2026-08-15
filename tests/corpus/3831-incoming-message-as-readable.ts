@@ -170,24 +170,12 @@ server.listen(0, () => {
                                 console.log("G err=" + (err ? err.message : "none") +
                                   " out=" + out.join("|"));
 
-                                // H. the SERVER side: a request body in a
-                                //    Readable slot inside the handler
-                                const port = (server.address() as { port: number }).port;
-                                const reqH = http.request(
-                                  "http://127.0.0.1:" + String(port) + "/echo",
-                                  { method: "POST", agent: false },
-                                  (resH) => {
-                                    const bh = resH;
-                                    const acc: string[] = [];
-                                    bh.on("data", (c: Uint8Array) => { acc.push(Buffer.from(c).toString()); });
-                                    bh.on("end", () => {
-                                      console.log("H " + acc.join(""));
-                                      server.close();
-                                      console.log("done");
-                                    });
-                                  },
-                                );
-                                reqH.end("0123456789");
+                                // I. `res.pipe(writable)` DIRECTLY -- the
+                                //    conversion happens under the pipe, so
+                                //    the general stream machinery owns the
+                                //    backpressure and the end propagation
+                                //    instead of a fourth hand-written leg.
+                                iCase();
                               });
                             });
                           });
@@ -204,3 +192,60 @@ server.listen(0, () => {
       });
     }).end();
 });
+
+function iCase(): void {
+  const port = (server.address() as { port: number }).port;
+  http.request("http://127.0.0.1:" + String(port) + "/chunks", { method: "GET", agent: false }, (res) => {
+    const out: string[] = [];
+    const w = new Writable({
+      write(chunk: Buffer, _e: string, cbw: (e?: Error | null) => void) {
+        out.push(chunk.toString());
+        cbw();
+      },
+    });
+    w.on("close", () => {
+      console.log("I res.pipe=" + out.join("|"));
+      jCase();
+    });
+    res.pipe(w);
+  }).end();
+}
+
+function jCase(): void {
+  const port = (server.address() as { port: number }).port;
+  http.request("http://127.0.0.1:" + String(port) + "/chunks", { method: "GET", agent: false }, (res) => {
+    // J. the CAST spelling of the slot: erasure would leave an
+    //    IncomingMessage where pipeline resolves a Readable.
+    const out: string[] = [];
+    const w = new Writable({
+      write(chunk: Buffer, _e: string, cbw: (e?: Error | null) => void) {
+        out.push(chunk.toString());
+        cbw();
+      },
+    });
+    pipeline(res as Readable, w, (err: Error | null) => {
+      console.log("J cast err=" + (err ? err.message : "none") + " out=" + out.join("|"));
+      hCase();
+    });
+  }).end();
+}
+
+function hCase(): void {
+  // H. the SERVER side: a request body in a Readable slot in the handler
+  const port = (server.address() as { port: number }).port;
+  const reqH = http.request(
+    "http://127.0.0.1:" + String(port) + "/echo",
+    { method: "POST", agent: false },
+    (resH) => {
+      const bh = resH;
+      const acc: string[] = [];
+      bh.on("data", (c: Uint8Array) => { acc.push(Buffer.from(c).toString()); });
+      bh.on("end", () => {
+        console.log("H " + acc.join(""));
+        server.close();
+        console.log("done");
+      });
+    },
+  );
+  reqH.end("0123456789");
+}
