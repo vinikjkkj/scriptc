@@ -1364,7 +1364,9 @@ class LlEmitter {
       });
     }
     if (mod.embedded !== undefined && mod.embedded.modules.length > 0) {
-      throw new LlvmUnsupportedError("npmEmbedding");
+      const err = new LlvmUnsupportedError("npmEmbedding");
+      if (this.census === null) throw err;
+      this.census.record(err, "<module>");
     }
   }
 
