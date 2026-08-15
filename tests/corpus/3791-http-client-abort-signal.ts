@@ -148,19 +148,20 @@ server.listen(0, () => {
                 console.log("G response (unexpected)");
               });
               let nG = 0;
-              // NAME and MESSAGE only. The bare destroy()'s 'socket hang up'
-              // reaches the listener through the runtime's MESSAGE adapter,
-              // which recovers `code` by reading an errno name back out of
-              // the text — and "socket hang up" contains none, so this one
-              // error answers `undefined` where Node answers ECONNRESET.
-              // That is a pre-existing gap in the teardown path (a plain
-              // destroy(), no signal involved), measured and reported
-              // rather than papered over: the fix is for the premature
-              // pass to fire an ScrError stamped ECONNRESET through
-              // scr_net_fire_err_obj, the way destroy(err) already does.
+              // `code` is read here again. It was NAME and MESSAGE only
+              // when this fixture landed: the bare destroy()'s 'socket
+              // hang up' reached the listener through the runtime's
+              // MESSAGE adapter, which recovers `code` by reading an
+              // errno name back out of the text, and "socket hang up"
+              // contains none — so it answered `undefined` where Node
+              // answers ECONNRESET. The premature pass now mints the
+              // ScrError with the code stamped and fires the OBJECT
+              // (scr_http_client_hangup), which is the fix this comment
+              // used to name, so the narrowing is gone and the whole
+              // error is pinned.
               reqG.on("error", (e) => {
                 nG++;
-                console.log("G#" + String(nG) + " error name=" + e.name + " message=" + e.message);
+                describe("G#" + String(nG), e);
               });
               reqG.on("close", () => {
                 console.log("G close errors=" + String(nG));
