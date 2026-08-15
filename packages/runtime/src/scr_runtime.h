@@ -6391,8 +6391,9 @@ void scr_net_connect_opts_chk(const ScrDyn *opts, const ScrStr *fence);
  * then delivers Node's exact getaddrinfo ENOTFOUND cause). */
 ScrStr *scr_net_blocking_lookup(ScrStr *host /*borrowed*/);
 /* connect(port, HOSTNAME) with Node's autoSelectFamily: getaddrinfo's
- * whole answer, dialed on Node's staggered attempt schedule (500 ms per
- * non-final candidate, families alternating). The protocol clients that
+ * whole answer, dialed on Node's staggered attempt schedule (the
+ * process-wide autoSelectFamilyAttemptTimeout per non-final candidate,
+ * families alternating). The protocol clients that
  * dial by name use this instead of resolving first-answer themselves. */
 ScrNetSocket *scr_net_connect_host(double port, ScrStr *host /*borrowed, nullable*/,
                                     ScrClosure *cb /*moves, nullable*/);
