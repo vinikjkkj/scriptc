@@ -12334,15 +12334,13 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const pattern = text.slice(1, lastSlash);
     const flags = text.slice(lastSlash + 1);
     for (const f of flags) {
-      if (!"gimsuy".includes(f)) {
+      if (!"gimsuvy".includes(f)) {
         L.unsupported(
           "SC1120",
           expr,
           f === "d"
             ? "the regex 'd' flag (match indices)"
-            : f === "v"
-              ? "the regex 'v' flag (unicode sets)"
-              : `the regex '${f}' flag`,
+            : `the regex '${f}' flag`,
         );
       }
     }

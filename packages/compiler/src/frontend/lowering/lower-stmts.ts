@@ -17,7 +17,7 @@ import { ForOfIterProjection, lowerForOfArrayIter, lowerForOfMap, lowerForOfSear
 import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall } from "./lower-calls.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import type { ClassInfo, ClassIteratorInfo } from "./lower-classes.js";
-import { genericIfaceBindingKeepsClass } from "./lower-classes.js";
+import { bindingHoldsItsInitializer, genericIfaceBindingKeepsClass } from "./lower-classes.js";
 import { lowerStreamUnderscoreAssign, streamClassAliasDecl, streamSidesOf } from "./lower-stream.js";
 import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment } from "./lower-server.js";
 import { namespaceConditionalOf } from "./lower-nsvalue.js";
@@ -4028,6 +4028,18 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // is inference residue, not element information — unmappable, so the
     // dyn initializer keeps the binding checked-dynamic.
     const bindingTainted = neverTaintedJsType(L, decl.name, L.typeOf(decl.name));
+    // SCRIPTC_ADOPT_LET_OFF declines the LET half AFTER its probe has
+    // printed, so a census run with it set lists exactly the declarations
+    // this change moves while the compiler still behaves like main. That is
+    // the positive control the census rests on.
+    const adoptLetOff = process.env["SCRIPTC_ADOPT_LET_OFF"] !== undefined;
+    // SCRIPTC_ADOPT_WHY names every binding the arm adopts, tagging the LET
+    // ones — the half this change adds.
+    const adoptWhy = (Lx: Lowerer, d: ts.VariableDeclaration, t: IrType): void => {
+      if (process.env["SCRIPTC_ADOPT_WHY"] === undefined) return;
+      const l = locOf(d.name);
+      console.error(`[adoptwhy${isLet ? "-let" : ""}] ${l.file}:${l.start} ${d.name.getText()}: record -> ${t.kind === "object" ? `object:${t.className}` : t.kind}`);
+    };
     let type =
       (L.dynamic &&
       (init.type.kind === "jsval" ||
@@ -4056,9 +4068,19 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       // so the interface is erasure over a nominal value: keeping the
       // instance type reads members as the class's own methods instead
       // of demanding a record shape the value never had.
-      (!isLet && init.type.kind === "object" && !bindingTainted
+      //
+      // `let` qualifies on the SAME proof, not on a weaker one: the arm
+      // refuses a reassignable binding because a later assignment could
+      // name an unrelated class, and bindingHoldsItsInitializer is the
+      // proof that no later assignment exists. A `let` the file never
+      // writes is a const the author did not spell, and leaving it on the
+      // record route made it a SILENT WRONG ANSWER rather than a fence:
+      // the copy loses a mutation made through the class and drops a write
+      // made through the binding, on a program that compiles and exits 0.
+      ((!isLet || bindingHoldsItsInitializer(L, decl)) &&
+      init.type.kind === "object" && !bindingTainted
         ? (L.mapTypeOf(L.typeOf(decl.name))?.kind === "record"
-            ? init.type
+            ? (adoptWhy(L, decl, init.type), isLet && adoptLetOff ? null : init.type)
             : null)
         : null) ??
       // A binding whose INITIALIZER is an ARRAY while the checker spells a

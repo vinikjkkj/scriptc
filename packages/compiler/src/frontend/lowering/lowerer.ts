@@ -4332,6 +4332,13 @@ export class Lowerer {
     if (expected.kind === "record" && expr.type.kind === "object") {
       const proj = this.ctorWitnessProjection(expr.type.className, expected, expr.loc);
       if (proj !== null) {
+        // SCRIPTC_PROJ_USE: one line per COERCION SITE (a helper is interned
+        // once but coerced at many). Diagnostic only.
+        if (process.env["SCRIPTC_PROJ_USE"] !== undefined) {
+          const sh = this.shapes.get(expected.shapeId);
+          const dataF = (sh?.fields ?? []).filter((f) => !f.name.startsWith("%") && f.type.kind !== "func").map((f) => f.name);
+          console.error(`[projuse] ${expr.loc.file}@${expr.loc.start} ${expr.type.className} -> ${expected.shapeId} data=${dataF.length}${dataF.length > 0 ? ` [${dataF.join(",")}]` : ""}`);
+        }
         return { kind: "call", callee: proj, args: [expr], type: expected, loc: expr.loc };
       }
     }
@@ -4686,6 +4693,15 @@ export class Lowerer {
         return why(`field '${f.name}': the class field does not width-lift — ${typeKey(ft).slice(0, 110)} into ${typeKey(f.type).slice(0, 110)}`);
       }
       plan.push({ how: "lift", name: f.name, src: ft, lift, fieldT: f.type });
+    }
+    // SCRIPTC_PROJ_CENSUS: one line per INTERNED projection, naming how many
+    // target fields ride the method closure (which aliases the instance) and
+    // how many ride the width-lift COPY (which does not). Diagnostic only.
+    if (process.env["SCRIPTC_PROJ_CENSUS"] !== undefined) {
+      const lifted = plan.filter((p) => p.how === "lift").map((p) => p.name);
+      const meth = plan.filter((p) => p.how === "method").length;
+      const abs = plan.filter((p) => p.how === "absent").length;
+      console.error(`[projcensus] ${className} -> ${target.shapeId} methods=${meth} absent=${abs} lift=${lifted.length}${lifted.length > 0 ? ` [${lifted.join(",")}]` : ""}`);
     }
     const builder = `%ctorwitness.${this.retagHelpers.size}`;
     this.retagHelpers.set(key, builder);
