@@ -4495,6 +4495,33 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               `${entry}(${arg(0)}, ${arg(1)}, ${arg(2)}, ${cbExpr}, ${adapter})`,
             );
           }
+          // request(url, options[, cb]) — the URL row carrying the middle
+          // argument's option slots. The https twin's CA is the
+          // https.request expansion: data + len off a ScrStr or ScrBytes.
+          case "http.requestUrlOpts":
+          case "http.requestUrlOptsCb":
+          case "https.requestUrlOpts":
+          case "https.requestUrlOptsCb": {
+            E.usesTimers = true; // an in-flight request holds the loop open
+            const tls = e.fn.startsWith("https.");
+            const cbIdx = tls ? 7 : 5;
+            let cbExpr = "NULL";
+            let adapter = "NULL";
+            if (e.fn.endsWith("Cb")) {
+              const cbT = e.args[cbIdx]!.type;
+              if (cbT.kind !== "func") throw new Error(`emitter bug: ${e.fn} callback not a func`);
+              const cb = args[cbIdx]!;
+              E.moveTemp(cb);
+              cbExpr = cb.name;
+              adapter = cbT.params.length === 0 ? "&scr_http_resp_thunk0" : "&scr_http_resp_thunk_res";
+            }
+            const head = `${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}`;
+            return finish(
+              tls
+                ? `scr_https_request_url_opts(${head}, ${arg(5)}, (const char *)${arg(6)}->data, ${arg(6)}->len, ${cbExpr}, ${adapter})`
+                : `scr_http_request_url_opts(${head}, ${cbExpr}, ${adapter})`,
+            );
+          }
           case "http.requestConn":
           case "http.requestConnCb": {
             E.usesTimers = true;
