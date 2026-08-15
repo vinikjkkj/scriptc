@@ -185,6 +185,7 @@ struct ScrHttpReq {
    * over. NULL until the first conversion; the slot is also the MEMO,
    * so a second conversion answers the same stream. */
   void *body_view;
+  void (*body_view_settle)(void *);
   void (*body_view_free)(void *);
 };
 
@@ -269,8 +270,10 @@ void scr_http_req_release(ScrHttpReq *r) {
 
 /* The Readable-view slot (scr_http_body.c owns what goes in it). */
 void *scr_http_req_body_view(ScrHttpReq *r) { return r->body_view; }
-void scr_http_req_attach_body_view(ScrHttpReq *r, void *view, void (*freefn)(void *)) {
+void scr_http_req_attach_body_view(ScrHttpReq *r, void *view, void (*settle)(void *),
+                                    void (*freefn)(void *)) {
   r->body_view = view;
+  r->body_view_settle = settle;
   r->body_view_free = freefn;
 }
 
@@ -1288,6 +1291,24 @@ static void scr_http_proto_sweep(void) {
         scr_net_ls_drop(&req->err_ls);
         scr_net_ls_drop(&req->close_ls);
         scr_net_ls_drop(&req->aborted_ls);
+        /* ...and the Readable view's stream goes with them. The listener
+         * drop here is the settle-releases-listeners story, and the view
+         * is the same kind of edge: the USER's listeners live on the
+         * stream's own emitter, one of them captures the response, and
+         * the response reaches this request through the connection --
+         * so a request that kept owning its view after the exchange was
+         * over would close a cycle no listener drop could break, and the
+         * whole ring would still be live at exit. Measured: a server
+         * handler that reads its request body through the view leaked 16
+         * strings, 2 boxes, 2 closures and an object with the release at
+         * free instead of here.
+         *
+         * The view itself stays ATTACHED so the free path can still clear
+         * its borrowed back-pointer, and a conversion after this point
+         * refills the same view with a fresh (immediately ended) stream. */
+        if (req->body_view != NULL && req->body_view_settle != NULL) {
+          req->body_view_settle(req->body_view);
+        }
       }
       break;
     }

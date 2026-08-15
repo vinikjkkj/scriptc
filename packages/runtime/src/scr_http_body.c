@@ -96,10 +96,38 @@ static void scr_http_body_release(void *p) {
   if (--v->rc == 0) free(v);
 }
 
+/* The SETTLE: the request's 'close' has fired and every listener list it
+ * owns has dropped. The view's stream goes with them, and for the same
+ * reason -- the ring
+ *
+ *   request -> view -> stream -> the USER's 'end' listener -> the
+ *   response it captured -> the socket -> the connection -> the request
+ *
+ * closes through the user's own handler, and no listener drop inside
+ * scr_http.c can break it, because that listener lives on the STREAM's
+ * emitter and not on any list the request owns. Measured: a server
+ * handler reading its request body through the view leaked 16 strings, 2
+ * boxes, 2 closures and an object while this ran at free instead of
+ * here. Everything the view can still be asked to do is over by now: a
+ * natural end has pushed NULL and an aborted one has destroyed with its
+ * error, both strictly before the 'close' that brings us here.
+ *
+ * The view stays ATTACHED (the free path must still clear its borrowed
+ * back-pointer) and a later conversion refills it. */
+static void scr_http_body_settle(void *p) {
+  ScrHttpBodyView *v = (ScrHttpBodyView *)p;
+  if (v == NULL || v->s == NULL) return;
+  ScrStream *s = v->s;
+  v->s = NULL;
+  scr_stream_release(s);
+}
+
 /* The request's free path calls this through the function pointer it was
  * handed, so scr_http.c never names scr_stream_release. Clear the
  * back-pointer FIRST: releasing the stream can run its destroy path, and
- * that path must see a source that is already gone. */
+ * that path must see a source that is already gone. A request that never
+ * settled -- one still live at exit -- arrives here still holding its
+ * stream, so the release stays. */
 static void scr_http_body_detach(void *p) {
   ScrHttpBodyView *v = (ScrHttpBodyView *)p;
   if (v == NULL) return;
@@ -226,26 +254,34 @@ static ScrClosure *scr_http_body_closure(ScrHttpBodyView *v, void *fn) {
 /* res AS a Readable (+1). Memoized on the request, so the conversion is
  * idempotent and `body === body` the way Node's one object is. */
 ScrStream *scr_http_req_body_stream(ScrHttpReq *r) {
-  ScrHttpBodyView *old = (ScrHttpBodyView *)scr_http_req_body_view(r);
-  if (old != NULL && old->s != NULL) return scr_stream_retain(old->s);
+  ScrHttpBodyView *have = (ScrHttpBodyView *)scr_http_req_body_view(r);
+  if (have != NULL && have->s != NULL) return scr_stream_retain(have->s);
 
-  ScrHttpBodyView *v = (ScrHttpBodyView *)calloc(1, sizeof *v);
-  if (v == NULL) scr_http_body_oom();
-  v->rc = 1; /* the request's attachment, taken below */
-  v->r = r;
+  /* A view whose stream the settle already took is REFILLED rather than
+   * replaced: its borrowed back-pointer is still this request's, and the
+   * free path is the only thing allowed to clear that. */
+  ScrHttpBodyView *v = have;
+  if (v == NULL) {
+    v = (ScrHttpBodyView *)calloc(1, sizeof *v);
+    if (v == NULL) scr_http_body_oom();
+    v->rc = 1; /* the request's attachment, taken below */
+    v->r = r;
+  }
   /* A borrowed payload: identity in, nothing out. The box carries no
    * cycle header (obj_trace NULL) because the view is not a traced
    * object — the collector never needs to walk this edge, which is the
    * whole point of keeping it borrowed. */
-  v->box = scr_box_new_obj(&scr_http_body_retain, &scr_http_body_release, NULL);
-  scr_box_set_ref(v->box, scr_http_body_retain(v));
+  if (have == NULL) {
+    v->box = scr_box_new_obj(&scr_http_body_retain, &scr_http_body_release, NULL);
+    scr_box_set_ref(v->box, scr_http_body_retain(v));
+  }
 
   ScrStream *s = scr_stream_new_readable(
       (double)SCR_HTTP_BODY_HWM, true /* autoDestroy */, true /* emitClose */,
       scr_http_body_closure(v, (void *)&scr_http_body_read), &scr_http_body_read,
       scr_http_body_closure(v, (void *)&scr_http_body_destroy), &scr_http_body_destroy);
-  v->s = s; /* the request's +1 lives here */
-  scr_http_req_attach_body_view(r, v, &scr_http_body_detach);
+  v->s = s; /* the request's +1 lives here, until the settle takes it */
+  scr_http_req_attach_body_view(r, v, &scr_http_body_settle, &scr_http_body_detach);
 
   /* The listeners go on AFTER the stream exists so a synchronous 'end'
    * (a body that already completed) has somewhere to land. A response
@@ -266,6 +302,6 @@ ScrStream *scr_http_req_body_stream(ScrHttpReq *r) {
    * makes the view's own last reference the BOX's, so the ring
    * view→stream→closures→box→view unwinds the moment detach drops the
    * view's hold on the stream. */
-  scr_box_release(v->box);
+  if (have == NULL) scr_box_release(v->box);
   return scr_stream_retain(s);
 }
