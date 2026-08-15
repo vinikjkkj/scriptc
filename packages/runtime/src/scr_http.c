@@ -60,6 +60,22 @@ static void scr_http_oom(void) {
   abort();
 }
 
+/* Node's `aborted` on a request/response whose body was cut short. It is
+ * a connReset exception there, so it carries `code: 'ECONNRESET'`
+ * (measured, v25.9.0 — repro-inc/m5.mjs), and the MESSAGE fan-out cannot
+ * deliver that: the shared adapter recovers a code by reading an errno
+ * NAME back out of the text, and "aborted" contains none, so every
+ * listener that asked for the object got `code: undefined`. Firing the
+ * OBJECT — the destroy(err) route, one event over — carries it. */
+static void scr_http_fire_aborted(ScrNetLs *ls, ScrHttpReq *req) {
+  ScrStr *msg = scr_str_new("aborted", 7);
+  ScrError *e = scr_error_new(0 /* Error */, msg);
+  scr_error_set_code(e, "ECONNRESET");
+  scr_net_fire_err_obj_this(ls, e, req, SCR_DYNH_HTTP_REQ);
+  scr_error_release(e);
+  scr_str_release(msg);
+}
+
 /* Node's STATUS_CODES reason phrases (the slice's subset; everything the
  * fixtures and portless's handlers send, plus the common neighbors). */
 static const char *scr_http_reason(int code) {
@@ -1298,9 +1314,7 @@ static void scr_http_proto_sweep(void) {
     case SCR_HTTP_EMIT_REQ_ABORTED: {
       ScrHttpReq *req = (ScrHttpReq *)e.h;
       if (!req->close_emitted) {
-        ScrStr *msg = scr_str_new("aborted", 7);
-        scr_net_fire_err_this(&req->err_ls, msg, req, SCR_DYNH_HTTP_REQ);
-        scr_str_release(msg);
+        scr_http_fire_aborted(&req->err_ls, req);
       }
       break;
     }
@@ -1984,9 +1998,7 @@ static bool scr_http_conn_err(void *ctx, ScrStr *msg) {
   ScrHttpConn *conn = (ScrHttpConn *)ctx;
   if (conn->client_mode) return scr_http_client_sock_err(conn, msg);
   if (conn->req && conn->req->err_ls.n > 0) {
-    ScrStr *aborted = scr_str_new("aborted", 7);
-    scr_net_fire_err_this(&conn->req->err_ls, aborted, conn->req, SCR_DYNH_HTTP_REQ);
-    scr_str_release(aborted);
+    scr_http_fire_aborted(&conn->req->err_ls, conn->req);
   }
   scr_http_conn_drop_request(conn, false);
   return true;
