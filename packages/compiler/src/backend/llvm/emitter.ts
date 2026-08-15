@@ -791,6 +791,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "http.reqResume": "scr_http_req_resume",
   "http.reqDestroy": "scr_http_req_destroy",
   "http.reqSetEncoding": "scr_http_req_set_encoding",
+  "http.reqAborted": "scr_http_req_aborted_flag",
+  "http.reqComplete": "scr_http_req_complete",
   "http.resSetHeader": "scr_http_res_set_header",
   "http.resWriteHead": "scr_http_res_write_head",
   "http.resWriteHeadN": "scr_http_res_write_head_n",
@@ -12708,6 +12710,7 @@ class LlEmitter {
       e.fn === "net.sockOnEnd" || e.fn === "net.sockOnConnect" ||
       e.fn === "net.sockOnTimeout" || e.fn === "net.sockOnReadable" ||
       e.fn === "http.reqOnEnd" || e.fn === "http.reqOnClose" || e.fn === "http.resOnClose" ||
+      e.fn === "http.reqOnAborted" ||
       e.fn === "http.clientOnTimeout" || e.fn === "http.clientOnClose"
     ) {
       // Adapter-free registrations: (recv, cb /moves/, once).
@@ -12720,6 +12723,7 @@ class LlEmitter {
         "net.sockOnReadable": "scr_net_sock_on_readable",
         "http.reqOnEnd": "scr_http_req_on_end",
         "http.reqOnClose": "scr_http_req_on_close",
+        "http.reqOnAborted": "scr_http_req_on_aborted",
         "http.resOnClose": "scr_http_res_on_close",
         "http.clientOnTimeout": "scr_http_client_on_timeout",
         "http.clientOnClose": "scr_http_client_on_close",
