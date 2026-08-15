@@ -29,10 +29,12 @@ https.get("https://127.0.0.1:9/", { path: "/x" }, cb);
 http.request({ hostname: "127.0.0.1", port: 9, path: "/" }, { method: "GET" }, cb);
 http.request({ path: "/" }, { method: "GET" });
 
-// The Agent rows are keyed on an explicit host/port/path (getName's
-// shape) — the URL row derives them at runtime.
+// An Agent VALUE alongside a URL now LOWERS (the requestUrlAgent rows —
+// tests/corpus/3792-http-client-optional-options.ts). What still fences
+// is an agent the dial cannot be handed to: the caller's own dialer owns
+// the socket, and a request-function binding picks its module at runtime.
 const agent = new http.Agent({});
-http.request(url, { agent }, cb);
+http.request(url, { agent, createConnection: () => connect(9) }, cb);
 
 // The caller's own dialer owns the socket; a URL to dial contradicts it.
 const dialer = () => connect(9);
