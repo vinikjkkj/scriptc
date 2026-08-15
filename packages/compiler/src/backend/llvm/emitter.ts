@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { settleOrValuePromiseTag, canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleUsesChildStream, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { settleOrValuePromiseTag, canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleUsesChildStream, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals } from "../emission/emit-stmts.js";
 import { mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
@@ -91,6 +91,7 @@ import { DK, LlDyn } from "./dyn.js";
 import { rcAdapters } from "../emission/emit-types.js";
 import { LlvmCensus, llvmCensusEnabled, LlvmUnsupportedError } from "./unsupported.js";
 import { LlWalkers } from "./walkers.js";
+import { wsGlobalCtorFor } from "./ws.js";
 import {
   arrNewCall,
   boxAccess,
@@ -1405,7 +1406,16 @@ class LlEmitter {
     // handle-dispatch ops for the checked-dynamic boundary); http-surface
     // programs additionally stamp the httpReq/httpRes ops — the C main's
     // install lines, gated on the same predicates cc.ts links by.
-    const usesNet = moduleUsesNet(this.mod);
+    // globalThis.WebSocket rides the SAME hooks: scr_ws_client.c dials
+    // through scr_net_connect and reads through the poller, so without
+    // scr_net_install the loop never polls and the process exits between
+    // the constructor and the handshake. That is not a guess — it is what
+    // this tier did the first time a WebSocket program reached it, and
+    // the disjunct is the C main's (emission/emitter.ts). It was
+    // unreachable while `wsCtor` refused, which is exactly how it got
+    // here; llvm-main-installs.test.ts now compares the two tables rather
+    // than this one line.
+    const usesNet = moduleUsesNet(this.mod) || moduleUsesWsGlobal(this.mod);
     const usesHttp = moduleUsesHttpServer(this.mod);
     // Fetch-referencing programs register the native fetch bridge before
     // any island entry (the engine's lazy boot consults it) — cc.ts
@@ -2601,6 +2611,33 @@ class LlEmitter {
 
   needOom(): void {
     this.needsOom = true;
+  }
+
+  /* ── the WsHost surface (backend/llvm/ws.ts) ───────────────────────
+   * globalThis.WebSocket's five synthesized functions are built in their
+   * own file, exactly as the C tier builds them in emit-ws.ts. These are
+   * the five things that file needs from the emitter and could not
+   * otherwise reach: the private type mapping, the two "emit this shared
+   * helper" switches, and the thunk pool everything else here writes
+   * into. Nothing new is DECIDED here. */
+
+  /** typeKey(construct signature) → the interned immortal closure. */
+  readonly wsCtors = new Map<string, string>();
+
+  llTypeOf(t: IrType): string {
+    return this.llType(t);
+  }
+
+  needRetainBox(): void {
+    this.needsRetainBox = true;
+  }
+
+  markUsesTimers(): void {
+    this.usesTimers = true;
+  }
+
+  pushThunkDefs(lines: readonly string[]): void {
+    this.resolveThunkDefs.push(...lines);
   }
 
   private currentFrame(): LlValue[] {
@@ -7186,12 +7223,17 @@ class LlEmitter {
         B.line(`${t} = call ptr @scr_big_parse(ptr ${this.cstr(e.text)}, i64 ${len})`);
         return this.own({ name: t, type: e.type });
       }
-      // globalThis.WebSocket builds its API record out of five
-      // synthesized C functions (emit-ws.ts) over per-program record
-      // shapes; the LLVM tier has no port of that scaffolding yet, so it
-      // refuses loudly rather than emitting a half-built object.
+      // globalThis.WebSocket: the address of ONE immortal closure per
+      // construct signature — never an allocation, because the global has
+      // identity (`globalThis.WebSocket === globalThis.WebSocket`). The
+      // five synthesized functions behind it are ws.ts, the .ll mirror of
+      // emit-ws.ts. Retained like every other interned function value: a
+      // no-op at rc == SIZE_MAX, and the frame's release is one too.
       case "wsCtor":
-        throw new LlvmUnsupportedError("globalThis.WebSocket");
+        return this.own({
+          name: this.retainValue(wsGlobalCtorFor(this, e.type), e.type),
+          type: e.type,
+        });
       case "promiseVoidWiden": {
         // One ScrPromise* either way — ownership transfers, type-only
         // (the C emitter's rule).
