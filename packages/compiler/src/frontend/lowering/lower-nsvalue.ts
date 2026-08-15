@@ -48,7 +48,6 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import type { IrExpr } from "../../ir/nodes.js";
-import { BOOL } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 
 /** The two modules a registered selector picks between. */
@@ -224,5 +223,3 @@ export function lowerNamespaceConditionalCall(
   }
   return { kind: "ternary", cond: sel, then, else_, type: then.type, loc };
 }
-
-export { BOOL as NSVALUE_SELECTOR_TYPE };
