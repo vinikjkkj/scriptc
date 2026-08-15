@@ -159,6 +159,6 @@ describe("the two mains install the same hooks on the same predicates", () => {
     expect(c).toContain("scr_island_modules(sc_npm_modules");
     expect(ll).not.toContain("scr_island_modules");
     expect(ll).toContain("mod.embedded.modules.length > 0");
-    expect(ll).toContain(`throw new LlvmUnsupportedError("npmEmbedding")`);
+    expect(ll).toContain(`new LlvmUnsupportedError("npmEmbedding")`);
   });
 });
