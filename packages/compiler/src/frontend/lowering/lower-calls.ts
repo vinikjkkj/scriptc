@@ -4987,6 +4987,28 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           );
         }
       }
+      // The ADOPTED-INSTANCE call — the method twin of the field-read
+      // rescue in lower-exprs. exactInstanceClassOf proves the receiver's
+      // class off the SYNTAX (a const initialized by a direct `new`), so
+      // a cast-initialized binding (`const wb = client as unknown as
+      // { ... }`) and a field read off one are invisible to it — even
+      // though the binding's IR type already IS the instance. Ask the
+      // lowered VALUE instead, through probeLower (a declined probe's
+      // diagnostics vanish), and restrict the probe to a PLAIN READ CHAIN
+      // so re-lowering the receiver cannot duplicate a side effect.
+      //
+      // One line before the last-resort fence: no call that lowers today
+      // changes.
+      {
+        const recvNode = expr.expression.expression;
+        if (plainReadChain(recvNode)) {
+          const probe = probeLower(L, recvNode);
+          if (probe !== null && probe.type.kind === "object") {
+            const adopted = lowerObjectMethodCall(L, expr, expr.expression, probe.type.className);
+            if (adopted) return adopted;
+          }
+        }
+      }
       {
         const recvNode = expr.expression.expression;
         mcallWhy("fence", expr.expression, expr.expression.name.text,
@@ -5473,6 +5495,21 @@ function mcallWhy(arm: string, node: ts.Node, key: string, extra?: () => string)
   process.stderr.write(
     `MCALL ${arm} ${key} ${sf.fileName}:${lc.line + 1}:${lc.character + 1}${tail} :: ${node.getText().slice(0, 60).replace(/\s+/g, " ")}\n`,
   );
+}
+
+/** A PLAIN READ CHAIN — an identifier, or a dotted chain of names rooted
+ * at one (`wb`, `wb.writeBehind`). Re-lowering one of these is free of
+ * side effects, which is what licenses the adopted-instance probe to
+ * lower the receiver a second time. Optional chaining stays out: its
+ * guard belongs to the chain lowering, not to a probe. */
+function plainReadChain(recv: ts.Expression): boolean {
+  let n: ts.Expression = recv;
+  while (ts.isParenthesizedExpression(n)) n = n.expression;
+  while (ts.isPropertyAccessExpression(n) && n.questionDotToken === undefined) {
+    n = n.expression;
+    while (ts.isParenthesizedExpression(n)) n = n.expression;
+  }
+  return ts.isIdentifier(n);
 }
 
 /** The Annex B B.2.2 "HTML wrapper" half of String.prototype — thirteen
@@ -10918,9 +10955,13 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
    * receivers — stays a direct `call` of the nearest declaration, exactly
    * as before inheritance existed. */
   export function lowerObjectMethodCall(L: Lowerer, call: ts.CallExpression,
-    access: ts.PropertyAccessExpression,): IrExpr | null {
+    access: ts.PropertyAccessExpression, adoptedClass?: string,): IrExpr | null {
     if (L.chainBlocked(access, call)) return null;
     let receiverIr = L.mapTypeOf(L.typeOf(access.expression));
+    // The receiver's LOWERED value is a class instance (adoptedClass —
+    // see the adopted-instance rescue at the method fence). Only that
+    // call site passes it, and it passes the type it just lowered.
+    if (adoptedClass !== undefined) receiverIr = { kind: "object", className: adoptedClass };
     // An INTERFACE-typed receiver whose binding KEPT the class (`const c =
     // new WaClient(...)` through a construct-signature alias, or an
     // explicit `const x: Iface = new Impl()`): the checker spells the
