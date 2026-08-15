@@ -2439,7 +2439,96 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           }
         }
       }
+      // The TRUE-arm twin of the rule above, and the other half of the same
+      // tsc quirk. `Array.isArray(x)` is declared `arg is any[]`; a
+      // `readonly T[]` arm is NOT assignable to `any[]`, so the arm never
+      // survives the narrowing and tsc falls back to the predicate's own
+      // type — the TRUE arm's reads of x come out bare `any[]`, with T
+      // gone. maybeNarrow's isArray bridge already proves the union's ONE
+      // array arm with a runtime tag test, and lowerArrayMethodCall rides
+      // that bridge to lower the VALUE correctly — but the CHECKER type
+      // stays `any[]` and poisons everything derived from it in turn: a HOF
+      // callback's parameter, the call's own result, the const that binds
+      // it, and every read off that const, each fencing on an `any` the
+      // value never had. One `.find` cost four fences in a row that way.
+      //
+      // Answer those reads with the union's array constituent at the one
+      // place every consumer asks (typeOf). Deliberately narrow:
+      //   * exactly ONE array constituent, so the arm the runtime test
+      //     selects is never ambiguous (the same count the false arm needs);
+      //   * only nodes tsc ITSELF narrowed to `any[]` are overridden — the
+      //     checker already decided the narrowing holds at that read, so
+      //     this only changes WHICH type it narrowed to, never whether;
+      //   * nested functions stay out (they run later, when the proof is
+      //     stale — tsc's own invalidation rule, and the false arm's).
+      // A reference is an identifier or a chain of property reads off one,
+      // which is what the guard argument is at every zapo site
+      // (`node.content`, `check?.suggestions`).
+      const trueArmNarrows: ts.Expression[] = [];
+      let trueArmNarrowType: ts.Type | null = null;
+      {
+        let c: ts.Expression = expr.condition;
+        while (ts.isParenthesizedExpression(c)) c = c.expression;
+        if (
+          ts.isCallExpression(c) &&
+          ts.isPropertyAccessExpression(c.expression) &&
+          c.arguments.length === 1 &&
+          L.stdlibGlobalMember(c.expression, "Array") === "isArray"
+        ) {
+          const argExpr = c.arguments[0]!;
+          const t = L.checker.getTypeAtLocation(argExpr);
+          const constituents = t.isUnionType() ? t.getTypes() : [];
+          const arrays = constituents.filter(
+            (a) => L.checker.isArrayType(a) || L.checker.isTupleType(a),
+          );
+          const sameRef = (a: ts.Expression, b: ts.Expression): boolean => {
+            let x = a;
+            let y = b;
+            while (ts.isParenthesizedExpression(x) || ts.isNonNullExpression(x)) x = x.expression;
+            while (ts.isParenthesizedExpression(y) || ts.isNonNullExpression(y)) y = y.expression;
+            if (ts.isIdentifier(x) && ts.isIdentifier(y)) {
+              // resolveValueSymbol answers NULL when it cannot resolve, so a
+              // truthiness test is required: `sx === sy` alone would make two
+              // UNRESOLVABLE identifiers compare equal and narrow a read that
+              // has nothing to do with the guard.
+              const sx = L.resolveValueSymbol(x);
+              return sx !== null && sx === L.resolveValueSymbol(y);
+            }
+            if (ts.isPropertyAccessExpression(x) && ts.isPropertyAccessExpression(y)) {
+              return x.name.text === y.name.text && sameRef(x.expression, y.expression);
+            }
+            return false;
+          };
+          if (arrays.length === 1 && L.mapTypeOf(arrays[0]!) !== null) {
+            const collect = (n: ts.Node): void => {
+              if (ts.isFunctionLike(n)) return;
+              if (
+                (ts.isIdentifier(n) || ts.isPropertyAccessExpression(n)) &&
+                !L.chainNarrowedType.has(n) &&
+                sameRef(n, argExpr) &&
+                L.checkerAnyArray(n)
+              ) {
+                trueArmNarrows.push(n);
+                return;
+              }
+              n.forEachChild(collect);
+            };
+            collect(expr.whenTrue);
+            if (trueArmNarrows.length > 0) trueArmNarrowType = arrays[0]!;
+          }
+        }
+      }
+      if (process.env["SCRIPTC_ISARR_WHY"] !== undefined && trueArmNarrowType !== null) {
+        console.error(
+          `[isarrwhy] true-arm ${trueArmNarrows.length} read(s) -> ` +
+            `${L.checker.typeToString(trueArmNarrowType)} at ` +
+            `${expr.getSourceFile().fileName}:${
+              expr.getSourceFile().getLineAndCharacterOfPosition(expr.pos).line + 1
+            }`,
+        );
+      }
       for (const n of falseArmNarrows) L.chainNarrowedType.set(n, falseArmNarrowType!);
+      for (const n of trueArmNarrows) L.chainNarrowedType.set(n, trueArmNarrowType!);
       try {
       const cond = L.lowerCondition(expr.condition);
       // A condition the LOWERING proved constant (typeof-dyn against a
@@ -2641,6 +2730,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       return { kind: "ternary", cond, then, else_, type, loc };
       } finally {
         for (const n of falseArmNarrows) L.chainNarrowedType.delete(n);
+        for (const n of trueArmNarrows) L.chainNarrowedType.delete(n);
       }
   }
 
