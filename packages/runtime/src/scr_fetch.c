@@ -40,13 +40,13 @@
  *   "gzip, deflate", and content-encoding: gzip/x-gzip/deflate inflates
  *   through zlib's 15+32 auto-detect — raw-deflate servers and br/zstd
  *   are out of the slice, honestly: br/zstd are never offered).
- * - DNS: scr_net dials IP literals only (Node's shape for its slice), so
- *   this unit resolves hostnames with getaddrinfo AT HOP START — the
- *   dns.lookup precedent (scr_dgram.c): synchronous resolution, first
- *   answer wins; failures ride the socket's deferred
- *   "getaddrinfo ENOTFOUND host" error so the rejection's cause is
- *   Node's exact shape. TLS handshakes verify/SNI against the URL
- *   HOSTNAME while the socket dials the resolved IP.
+ * - DNS: the hop hands the http client the HOSTNAME and the client
+ *   resolves it at its dial (scr_net_connect_host) with getaddrinfo,
+ *   synchronously — the dns.lookup precedent (scr_dgram.c) — keeping the
+ *   whole answer and dialing it on Node's autoSelectFamily schedule;
+ *   failures ride the socket's deferred "getaddrinfo ENOTFOUND host"
+ *   error so the rejection's cause is Node's exact shape. TLS handshakes
+ *   verify/SNI against the URL HOSTNAME while the socket dials an IP.
  * - Proxies, matched to Node: undici's global fetch IGNORES http_proxy/
  *   https_proxy unless NODE_USE_ENV_PROXY=1 opts in (Node 24's
  *   EnvHttpProxyAgent). Opted in, http:// targets relay through the
@@ -461,17 +461,14 @@ static ScrUrl *fx_proxy_for(const ScrUrl *target, bool https, int target_port) {
 
 /* ── DNS (the dns.lookup precedent: getaddrinfo at hop start) ────────── */
 
-/* The address to DIAL for `host` (+1): brackets strip, then the shared
- * blocking lookup (scr_net.c) — IP literals and localhost pass through,
- * hostnames resolve first-answer, and resolution failure answers the
- * HOSTNAME unchanged so the dial's deferred "getaddrinfo ENOTFOUND host"
- * error is Node's exact cause. */
-static ScrStr *fx_dial_host(const ScrStr *host) {
-  ScrStr *bare = fx_bare_host(host);
-  ScrStr *out = scr_net_blocking_lookup(bare);
-  scr_str_release(bare);
-  return out;
-}
+/* The host to DIAL (+1): brackets strip, and that is all — the http
+ * client resolves it (scr_net_connect_host, Node's autoSelectFamily
+ * schedule), which is where resolution belonged all along. This unit
+ * pre-resolved to a first answer and handed the http client an IP; that
+ * cost the whole connect budget on a host whose preferred family has no
+ * egress, and the Host header already comes from the name (fx_pairs_push
+ * of the authority), so the name reaches the client with nothing lost. */
+static ScrStr *fx_dial_host(const ScrStr *host) { return fx_bare_host(host); }
 
 /* ── the hop ─────────────────────────────────────────────────────────── */
 
