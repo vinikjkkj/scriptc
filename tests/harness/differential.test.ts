@@ -222,7 +222,16 @@ const islandShim = pathToFileURL(join(import.meta.dirname, "island-shim.mjs")).h
  * plus the configs that steer both sides (tsconfig.json adoption,
  * package.json module-format detection). */
 function programInputs(file: string): string[] {
-  if (!/\/main\.(ts|js|mjs|cjs)$/.test(file)) return [file];
+  // SEPARATOR-AGNOSTIC on purpose. globSync returns BACKSLASH paths on
+  // Windows, so a forward-slash-only test never matched and this
+  // degenerated to [file] for all 99 directory tests — silently. It cost
+  // 1890-ns-imports its oracle: wantsTransformTypes could not see the
+  // `enum` in a SIBLING module, so Node ran without
+  // --experimental-transform-types, died in strip-only mode, and the
+  // program read as a stdout divergence. It also cost BOTH cache keys
+  // their sibling bytes, so editing a nested module did not invalidate
+  // the remembered verdict — the comment above promises otherwise.
+  if (!/[\\/]main\.(ts|js|mjs|cjs)$/.test(file)) return [file];
   return [
     ...ENTRY_EXTS.flatMap((ext) => globSync(join(file, `../**/*.${ext}`))),
     ...globSync(join(file, "../**/tsconfig.json")),
