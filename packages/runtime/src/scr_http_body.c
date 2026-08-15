@@ -155,15 +155,35 @@ static void scr_http_body_err(ScrClosure *cb, ScrError *err /*+1*/) {
   scr_http_body_release(v);
 }
 
-/* The body stopped without ending: the connection died under it. Node
- * destroys the response; the readable's own 'close' follows. An 'end'
- * that already ran leaves nothing to do — autoDestroy closes the view. */
+/* The body stopped without ending: the connection died under it. An 'end'
+ * that already ran leaves nothing to do — autoDestroy closes the view.
+ *
+ * A view that closed SILENTLY here would hand `for await` a short body
+ * and no error, which is how a truncated download becomes a successful
+ * one. Node does not: a response whose body was cut short emits
+ * `Error: aborted` with `code: 'ECONNRESET'` and THEN 'close' (measured
+ * against v25.9.0 — repro-inc/m5.mjs; the same run shows Node's own
+ * 'aborted' event and the request's close arriving first).
+ *
+ * The error is minted HERE, on the view, and the request's own 'error'
+ * list is deliberately left alone: the premature pass not firing a
+ * request 'error' at all is a separate, pre-existing divergence with its
+ * own teardown-ordering neighbours, and widening this seam into that one
+ * would put a shared path at risk for a case the view can answer by
+ * itself. The stream's readable-ended flag — not the request's `ended`,
+ * which the aborted finish also sets — is what says the body was cut. */
 static void scr_http_body_close(ScrClosure *cb) {
   ScrHttpBodyView *v = scr_http_body_of(cb);
   if (scr_http_body_live(v) && scr_stream_prop(v->s, "rs:ended") == 0) {
+    static const char aborted[] = "aborted";
+    ScrStr *msg = scr_str_new(aborted, sizeof aborted - 1);
+    ScrError *e = scr_error_new(0 /* Error */, msg);
+    scr_error_set_code(e, "ECONNRESET");
     v->tearing = true;
-    scr_stream_release(scr_stream_destroy(v->s, NULL));
+    scr_stream_release(scr_stream_destroy(v->s, e));
     v->tearing = false;
+    scr_error_release(e);
+    scr_str_release(msg);
   }
   scr_http_body_release(v);
 }
@@ -179,7 +199,6 @@ static void scr_http_body_read(ScrClosure *cb, ScrStream *s, double size) {
 }
 
 static void scr_http_body_destroy(ScrClosure *cb, ScrStream *s, ScrError *err /*borrowed*/) {
-  (void)err;
   ScrHttpBodyView *v = scr_http_body_of(cb);
   if (v->r != NULL && !v->tearing) {
     /* body.destroy() IS res.destroy(): Node's response destroy tears the
@@ -190,7 +209,12 @@ static void scr_http_body_destroy(ScrClosure *cb, ScrStream *s, ScrError *err /*
     v->tearing = false;
   }
   scr_http_body_release(v);
-  scr_stream_destroy_done(s, NULL);
+  /* FORWARD the error. scr_stream_destroy_done is Node's `_destroy`
+   * callback: `cb()` with nothing SWALLOWS the error the destroy carried
+   * (errored stays set, no 'error' emission) and `cb(err)` re-raises it,
+   * which is what Node's DEFAULT _destroy does. Swallowing here turned a
+   * body cut short into a silent short read — measured, then fixed. */
+  scr_stream_destroy_done(s, err == NULL ? NULL : scr_error_retain(err));
 }
 
 static ScrClosure *scr_http_body_closure(ScrHttpBodyView *v, void *fn) {
