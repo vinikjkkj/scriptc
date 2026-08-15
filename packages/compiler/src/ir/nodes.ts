@@ -2993,6 +2993,11 @@ export type IrLibFn =
    * anchors), and a non-https scheme is ERR_INVALID_PROTOCOL. */
   | "https.requestUrl"
   | "https.requestUrlCb"
+  /** The three-argument form over TLS: http.requestUrlOpts plus the
+   * https extras the options record can carry (rejectUnauthorized, ca).
+   * Args are (url, method, timeoutMs, headers, autoEnd, reject, ca). */
+  | "https.requestUrlOpts"
+  | "https.requestUrlOptsCb"
   /** A call through a `const requestFn = tls ? https.request :
    * http.request` binding — the module-function-as-value ternary between
    * the two known clients: the https.request row with a leading `secure`
@@ -3146,6 +3151,16 @@ export type IrLibFn =
    * non-http scheme. */
   | "http.requestUrl"
   | "http.requestUrlCb"
+  /** Node's THREE-argument `request(url, options, callback)` (and its
+   * two-argument `request(url, options)` sibling): the URL supplies
+   * host/port/path exactly as http.requestUrl does, and the options
+   * record supplies method/timeout/headers — Node merges the options
+   * OVER the URL's parts, and the keys that would OVERRIDE a URL part
+   * (host/hostname/port/path) fence at the call rather than lower to a
+   * silent half-merge. Args are (url, method, timeoutMs, headers,
+   * autoEnd[, cb]). MAY THROW, exactly http.requestUrl's parse. */
+  | "http.requestUrlOpts"
+  | "http.requestUrlOptsCb"
   | "http.clientDestroy"
   | "http.clientDestroyErr"
   | "http.clientPipeFrom"
@@ -8376,6 +8391,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // ("Invalid URL") or a non-http scheme (ERR_INVALID_PROTOCOL).
   "http.requestUrl",
   "http.requestUrlCb",
+  "http.requestUrlOpts",
+  "http.requestUrlOptsCb",
   // The h2 client's throwing entries: connect on a bad/non-http
   // authority (ERR_INVALID_URL / ERR_INVALID_PROTOCOL), request on a
   // closed/destroyed session (ERR_HTTP2_INVALID_SESSION), setEncoding on
@@ -8492,6 +8509,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // unparsable input, or a scheme that is not https).
   "https.requestUrl",
   "https.requestUrlCb",
+  "https.requestUrlOpts",
+  "https.requestUrlOptsCb",
   "https.requestFn",
   "https.requestFnCb",
   "rl.question",

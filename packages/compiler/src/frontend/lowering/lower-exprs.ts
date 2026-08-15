@@ -21,6 +21,7 @@ import { fenceEnumObjectValue, lowerEnumAccess } from "./lower-enums.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, lowerNsIdentifierValue, nsMemberIdentOf, nsUndefRead, nsWritableTarget } from "./lower-namespaces.js";
 import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
 import { lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
+import { fenceNamespaceConditionalValue, lowerNamespaceConditionalDecl } from "./lower-nsvalue.js";
 import { findGenericMethodOn, lowerStaticFieldRead } from "./lower-classes.js";
 import { bindingNeverReassigned, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js";
@@ -980,6 +981,14 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             `a promisified execFile as a value (call '${expr.text}' directly)`,
           );
         }
+      }
+      // The same story for a runtime-chosen module namespace: the slot
+      // holds the SELECTOR, so every use that is not a member call on it
+      // fences by name rather than reading a bool where Node reads a
+      // module object.
+      {
+        const sym = L.checker.getSymbolAtLocation(expr);
+        if (sym) fenceNamespaceConditionalValue(L, expr, sym);
       }
       // Union-typed bindings read through tsc's control-flow narrowing:
       // when the checker types this USE as a single arm, maybeNarrow
@@ -2378,6 +2387,14 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
   export function lowerTernary(L: Lowerer, expr: ts.ConditionalExpression,
     expected?: IrType & { kind: "array" },): IrExpr {
     const loc = locOf(expr);
+      // `const t = cond ? https : http` — a module NAMESPACE chosen at
+      // runtime. There is no module object in a compiled binary, so the
+      // declaration lowers to its CONDITION and the binding's slot becomes
+      // the selector each use branches on (lower-nsvalue.ts).
+      {
+        const sel = lowerNamespaceConditionalDecl(L, expr);
+        if (sel) return sel;
+      }
       // `Array.isArray(x) ? x : [x]` over a `T | readonly T[]` union: tsc
       // narrows the TRUE branch to `any[]` (maybeNarrow's isArray bridge
       // rides that) but leaves the FALSE branch wide — a readonly array

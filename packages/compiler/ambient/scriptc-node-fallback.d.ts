@@ -2354,13 +2354,21 @@ declare module "http" {
    * `target` is a URL string or URL object (the spelling a from-scratch
    * client reaches for first — dialed directly, with a non-http scheme
    * an ERR_INVALID_PROTOCOL at runtime rather than a type error), or
-   * the options record. */
+   * the options record.
+   *
+   * The SECOND parameter is Node's `request(url[, options][, callback])`
+   * middle slot, and it stays a UNION for the same reason the first one
+   * does: an overload SET here would put the request-fn ternary back
+   * where it started. `request(url, options, cb)` merges the options
+   * OVER the URL's own parts, exactly Node's ObjectAssign order. */
   export function request(
     target: RequestOptions | string | URL,
+    optionsOrCallback?: RequestOptions | ((res: IncomingMessage) => void),
     callback?: (res: IncomingMessage) => void,
   ): ClientRequest;
   export function get(
     target: RequestOptions | string | URL,
+    optionsOrCallback?: RequestOptions | ((res: IncomingMessage) => void),
     callback?: (res: IncomingMessage) => void,
   ): ClientRequest;
 }
@@ -2476,15 +2484,18 @@ declare module "https" {
     requestListener: (req: IncomingMessage, res: ServerResponse) => void,
   ): Server;
   /* One signature with a union first parameter, for the request-fn
-   * ternary's sake (see the http block). A URL target takes no options,
-   * which means Node's defaults — the certificate is verified against
-   * the default trust anchors. */
+   * ternary's sake (see the http block). A URL target with no options
+   * means Node's defaults — the certificate is verified against the
+   * default trust anchors; the three-argument form merges the options
+   * over the URL's parts. */
   export function request(
     target: RequestOptions | string | URL,
+    optionsOrCallback?: RequestOptions | ((res: IncomingMessage) => void),
     callback?: (res: IncomingMessage) => void,
   ): ClientRequest;
   export function get(
     target: RequestOptions | string | URL,
+    optionsOrCallback?: RequestOptions | ((res: IncomingMessage) => void),
     callback?: (res: IncomingMessage) => void,
   ): ClientRequest;
 }
