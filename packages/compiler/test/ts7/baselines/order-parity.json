@@ -7535,6 +7535,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3891-union-spread-narrowed-first.ts": {
+   "order": [
+    "<repo>/tests/corpus/3891-union-spread-narrowed-first.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3921-http-client-teardown-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/3921-http-client-teardown-errors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3931-net-autosel-default-budget.ts": {
+   "order": [
+    "<repo>/tests/corpus/3931-net-autosel-default-budget.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3941-agent-queue-dials-by-name.ts": {
+   "order": [
+    "<repo>/tests/corpus/3941-agent-queue-dials-by-name.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/400-fib.ts": {
    "order": [
     "<repo>/tests/corpus/400-fib.ts"
@@ -8794,6 +8818,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/fetch-typed-option-member.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/fetch-typed-option-member.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/filter-narrow.ts": {
    "order": [
     "<repo>/tests/diagnostics/filter-narrow.ts"
@@ -9541,6 +9571,12 @@
   "<repo>/tests/diagnostics/unassigned-fields.ts": {
    "order": [
     "<repo>/tests/diagnostics/unassigned-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/union-spread-into-union-slot.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/union-spread-into-union-slot.ts"
    ],
    "diags": []
   },
