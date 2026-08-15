@@ -7553,6 +7553,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3941-agent-queue-dials-by-name.ts": {
+   "order": [
+    "<repo>/tests/corpus/3941-agent-queue-dials-by-name.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/400-fib.ts": {
    "order": [
     "<repo>/tests/corpus/400-fib.ts"
