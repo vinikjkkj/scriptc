@@ -429,6 +429,28 @@ const LIB_FN_SYMS: Record<string, string> = {
   "tlsca.root": "scr_tls_ca_root",
   "tlsca.get": "scr_tls_ca_get",
   "tlsca.set": "scr_tls_ca_set_default",
+  // ── node:tls's runtime-options slice and node:dgram: the rows that
+  // were the whole of this tier's enumerated refusal list except the two
+  // PEM-pair servers below and the deliberate npmEmbedding fence. Every
+  // one rides the GENERIC path unchanged, because the C tier spells each
+  // as ONE runtime call whose arguments are 1:1 with the IR's — what kept
+  // them out was a missing row, plus (for three) a trailing NULL the IR
+  // does not carry, which is LIB_FN_TAIL's existing seat, and (for one) a
+  // callback that MOVES, which is LIB_FN_MOVE_ARGS' new one. All are
+  // MAY_THROW_LIB_FNS members: the generic path runs the pending check
+  // after each, exactly as emit-exprs.ts's finish() does.
+  //
+  // tls.caCertsChk is deliberately NOT here — it is the one row of this
+  // family the generic path cannot carry, and it is special-cased below
+  // with the reason. llvm-runtime-abi.test.ts fences the class.
+  "tls.pemDyn": "scr_tls_pem_from_dyn",
+  "tls.createServerDyn": "scr_tls_create_server_dyn",
+  "tls.createSecureContextDyn": "scr_tls_create_secure_context_dyn",
+  "tls.connect": "scr_tls_connect_dyn",
+  "dgram.createSocket": "scr_dgram_create",
+  "dgram.connectCb": "scr_dgram_connect",
+  "dgram.sendChk": "scr_dgram_send_chk",
+  "dgram.close": "scr_dgram_close",
   "crypto.randomBytes": "scr_crypto_random_bytes",
   "crypto.randomInt": "scr_crypto_random_int",
   "crypto.randomIntAsync": "scr_crypto_random_int_async",
@@ -466,6 +488,9 @@ const LIB_FN_SYMS: Record<string, string> = {
   "process.stdoutWriteBytes": "scr_process_stdout_write_bytes",
   "process.stderrWriteBytes": "scr_process_stderr_write_bytes",
   "insp.buffer": "scr_insp_buffer",
+  // JSON.stringify over a checked-dynamic value: one borrowed argument, a
+  // +1 string, and it throws on a cycle (the generic pending check).
+  "insp.jsonDyn": "scr_dyn_format_j",
   // util.inspect (scr_inspect.c): all args borrowed; string results +1;
   // the begin/entry/key/moreItems/end accumulator drives the emitted
   // container walks. None of these throw.
@@ -959,6 +984,38 @@ const LIB_FN_TAIL: Record<string, readonly { readonly decl: string; readonly arg
   "decipher.newBytes": [{ decl: "i1 zeroext", arg: "i1 true" }],
   "cipher.newKey": [{ decl: "i1 zeroext", arg: "i1 false" }],
   "decipher.newKey": [{ decl: "i1 zeroext", arg: "i1 true" }],
+  // The nullable trailing CALLBACK (and, for createServerDyn, the adapter
+  // that goes with it): the no-handler flavor of a runtime entry whose Cb
+  // sibling carries one. The C tier spells the identical NULLs inline.
+  "tls.createServerDyn": [{ decl: "ptr", arg: "ptr null" }, { decl: "ptr", arg: "ptr null" }],
+  "tls.connect": [{ decl: "ptr", arg: "ptr null" }],
+  "dgram.close": [{ decl: "ptr", arg: "ptr null" }],
+};
+
+/** The rows whose runtime entry TAKES OWNERSHIP of an argument — the
+ * closure a registration keeps. The C tier calls E.moveTemp on that
+ * argument before the call so the frame stops owning it; a generic row
+ * that forgot to would emit a release the runtime also performs, which
+ * is a double free, or (if the runtime never released) a leak. Neither
+ * is a wrong DIGIT, so neither shows up in a differential — it shows up
+ * under SCRIPTC_RC_AUDIT, which is why the seat is a table and not a
+ * per-call habit. Index is into the IR's argument list. */
+const LIB_FN_MOVE_ARGS: Record<string, readonly number[]> = {
+  // scr_dgram_connect's `ScrClosure *cb /*moves, nullable*/`.
+  "dgram.connectCb": [3],
+};
+
+/** The rows where a STRING argument is handed to the runtime as its raw
+ * `const char *` — the inline bytes at offset 24 — rather than as the
+ * ScrStr handle. The C tier writes `arg->data` and clang checks it; in
+ * LLVM both spellings are `ptr`, which is exactly why this has to be a
+ * table and cannot be derived: passing the handle type-checks, links,
+ * and hands the runtime a 24-byte header to read as text. Index is into
+ * the IR's argument list. */
+const LIB_FN_ARG_STRDATA: Record<string, readonly number[]> = {
+  // scr_tls_pem_from_dyn(v, const char *what) — `what` names the option
+  // ("cert", "key", ...) in the fence's message.
+  "tls.pemDyn": [1],
 };
 
 /** The canonical option-callback order per stream base — emit-exprs.ts's
@@ -996,6 +1053,12 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
   "sc.text", "sc.json", "sc.buffer",
   "net.listen", "net.listenCb", "net.listenOpts", "net.listenOptsCb",
   "net.connect", "net.connectCb", "net.connectLookup", "net.connectAttempt",
+  // node:tls / node:https servers and the TLS client socket, and the
+  // dgram calls that implicit-bind — emit-exprs.ts marks E.usesTimers on
+  // exactly these, and a server whose loop never runs accepts nothing.
+  "tls.createServer", "tls.createServerCb", "tls.createServerDyn", "tls.connect",
+  "https.createServer",
+  "dgram.connectCb", "dgram.sendChk",
   "fs.existsChk",
   "http.createServer", "http.createServerEmpty",
   "http.request", "http.requestCb", "http.requestUrl", "http.requestUrlCb",
@@ -2710,6 +2773,47 @@ class LlEmitter {
    * results: optional chains, branch joins that park ownership). */
   private ownSlot(slot: string, type: IrType): void {
     if (isRefCounted(type)) this.currentFrame().push({ name: slot, type, slot: true });
+  }
+
+  /** A PEM argument — cert / key / CA — expanded to the raw pointer and
+   * byte length the runtime entry takes. At the IR it is an ScrStr OR an
+   * ScrBytes, which is why ONE C emission shape serves both (`->data` and
+   * `->len` name a member on each); here the two layouts differ — a
+   * string's bytes are INLINE at offset 24, a Buffer's are behind a
+   * pointer at 24 — so the read is per kind and the wrong one silently
+   * hands the runtime a header to parse as PEM. Factored out of the
+   * https.request CA slot, which was the only caller, so the servers
+   * below and it cannot drift. */
+  private pemDataLen(fn: string, v: LlValue): { data: string; len: string } {
+    const B = this.B;
+    const lenPtr = B.tmp();
+    const len = B.tmp();
+    if (v.type.kind === "string") {
+      const data = B.tmp();
+      B.line(`${lenPtr} = getelementptr inbounds %ScrStr, ptr ${v.name}, i64 0, i32 1`);
+      B.line(`${len} = load i64, ptr ${lenPtr}`);
+      B.line(`${data} = getelementptr inbounds i8, ptr ${v.name}, i64 24`);
+      return { data, len };
+    }
+    if (v.type.kind === "bytes" && v.type.elem === "u8") {
+      const dataPtr = B.tmp();
+      const data = B.tmp();
+      B.line(`${lenPtr} = getelementptr inbounds i8, ptr ${v.name}, i64 8`);
+      B.line(`${len} = load i64, ptr ${lenPtr}`);
+      B.line(`${dataPtr} = getelementptr inbounds i8, ptr ${v.name}, i64 24`);
+      B.line(`${data} = load ptr, ptr ${dataPtr}`);
+      return { data, len };
+    }
+    throw new Error(`llvm emitter bug: ${fn} PEM argument is not a string or Buffer`);
+  }
+
+  /** A string argument's raw `const char *`: the inline bytes at offset
+   * 24, not the ScrStr handle (LIB_FN_ARG_STRDATA). */
+  private strDataPtr(fn: string, v: LlValue): string {
+    if (v.type.kind !== "string") throw new Error(`llvm emitter bug: ${fn} char* argument is not a string`);
+    const t = this.B.tmp();
+    this.B.line(`${t} = getelementptr inbounds i8, ptr ${v.name}, i64 24`);
+    return t;
   }
 
   /** Strike a refcounted temp from its frame: ownership is being moved. */
@@ -12679,6 +12783,44 @@ class LlEmitter {
       B.line(`${t} = call ptr @scr_http_create_server(ptr ${cb}, ptr ${adapter})`);
       return this.own({ name: t, type: e.type });
     }
+    if (e.fn === "tls.createServer" || e.fn === "tls.createServerCb" || e.fn === "https.createServer") {
+      // The node:tls and node:https servers — the two rows in this tier's
+      // refusal list that the generic path genuinely cannot take, because
+      // cert and key are ONE IR argument each and TWO runtime arguments
+      // each (pemDataLen). Everything else is the net/http createServer
+      // shape directly above: the handler MOVES into the handle's registry
+      // with a runtime adapter picked by the callback's arity. Neither
+      // entry is a MAY_THROW_LIB_FNS member — bad PEM is the
+      // construction-time print-and-die trap, not a catchable throw — so
+      // there is no pending check here, exactly like the C tier's.
+      const isHttps = e.fn === "https.createServer";
+      const args = e.args.map((a) => this.emitExpr(a));
+      const cert = this.pemDataLen(e.fn, args[0]!);
+      const key = this.pemDataLen(e.fn, args[1]!);
+      let cb = "null";
+      let adapter = "null";
+      if (isHttps || e.fn === "tls.createServerCb") {
+        const cbT = e.args[2]!.type;
+        if (cbT.kind !== "func") throw new Error(`llvm emitter bug: ${e.fn} handler not a func`);
+        this.moveTemp(args[2]!);
+        cb = args[2]!.name;
+        const sym = isHttps
+          ? cbT.params.length === 2 ? "scr_http_handler_thunk2"
+            : cbT.params.length === 1 ? "scr_http_handler_thunk1"
+            : "scr_http_handler_thunk0"
+          : cbT.params.length === 0 ? "scr_net_conn_thunk0"
+            : "scr_net_conn_thunk_sock";
+        this.declare(isHttps ? `declare void @${sym}(ptr, ptr, ptr)` : `declare void @${sym}(ptr, ptr)`);
+        adapter = `@${sym}`;
+      }
+      const entry = isHttps ? "scr_https_create_server" : "scr_tls_create_server";
+      this.declare(`declare ptr @${entry}(ptr, i64, ptr, i64, ptr, ptr)`);
+      const t = B.tmp();
+      B.line(
+        `${t} = call ptr @${entry}(ptr ${cert.data}, i64 ${cert.len}, ptr ${key.data}, i64 ${key.len}, ptr ${cb}, ptr ${adapter})`,
+      );
+      return this.own({ name: t, type: e.type });
+    }
     if (e.fn === "http.serverOnRequest") {
       const cbT = e.args[1]!.type;
       if (cbT.kind !== "func") throw new Error("llvm emitter bug: http.serverOnRequest handler not a func");
@@ -12756,25 +12898,11 @@ class LlEmitter {
         : isAgent ? "scr_http_request_agent" : "scr_http_request";
       let callArgs = head.map((a) => `${this.llType(a.type)} ${a.name}`);
       if (caIdx >= 0) {
-        const ca = args[caIdx]!;
-        const caLenPtr = B.tmp();
-        const caLen = B.tmp();
-        let caData: string;
-        if (ca.type.kind === "string") {
-          caData = B.tmp();
-          B.line(`${caLenPtr} = getelementptr inbounds %ScrStr, ptr ${ca.name}, i64 0, i32 1`);
-          B.line(`${caLen} = load i64, ptr ${caLenPtr}`);
-          B.line(`${caData} = getelementptr inbounds i8, ptr ${ca.name}, i64 24`);
-        } else if (ca.type.kind === "bytes" && ca.type.elem === "u8") {
-          const caDataPtr = B.tmp();
-          caData = B.tmp();
-          B.line(`${caLenPtr} = getelementptr inbounds i8, ptr ${ca.name}, i64 8`);
-          B.line(`${caLen} = load i64, ptr ${caLenPtr}`);
-          B.line(`${caDataPtr} = getelementptr inbounds i8, ptr ${ca.name}, i64 24`);
-          B.line(`${caData} = load ptr, ptr ${caDataPtr}`);
-        } else {
-          throw new Error(`llvm emitter bug: ${e.fn} CA is not a string or Buffer`);
-        }
+        // The extraction is pemDataLen's: the same two layout reads in
+        // the same temp ORDER, now shared with the tls/https servers
+        // below so the three PEM call sites cannot drift. The `${fn}`
+        // in its emitter-bug message names which one raised it.
+        const { data: caData, len: caLen } = this.pemDataLen(e.fn, args[caIdx]!);
         // The CA slot expands to (ptr, i64) IN PLACE — everything after it
         // stays. The previous spelling truncated the tail and hardcoded the
         // two declares, which was invisible while the CA was always last
@@ -12843,6 +12971,31 @@ class LlEmitter {
       this.declare(`declare void @scr_jsval_cast_fail(ptr, ptr)`);
       B.line(`call void @scr_jsval_cast_fail(ptr ${args[0]!.name}, ptr ${args[1]!.name})`);
       const out = this.own({ name: "null", type: e.type });
+      this.emitPendingCheck();
+      return out;
+    }
+    if (e.fn === "tls.caCertsChk") {
+      // ALWAYS throws (Node's getCACertificates type/value ladder, then
+      // the trailing fence), so the IR gives this call THE TYPE OF THE
+      // EXPRESSION IT REPLACED — validate.ts's global.undefRead pattern —
+      // while the runtime entry is `void`. The generic path cannot carry
+      // that pair: it derives the `declare` from the IR result type, so
+      // it would declare a value return over a void callee, read rax as
+      // a result the callee never set, and hand the frame a garbage
+      // pointer to release on the unwind. That is not theory — it is what
+      // this row did on its first run: 2598's five typed TypeErrors came
+      // back as five throws with no name, no code and no message, which
+      // is the differential doing its job on a silently wrong ABI. The C
+      // tier spells the same thing as `(call(...), (T)NULL)`. Like
+      // island.castFail: call, park a typed dummy the pending check
+      // abandons, unwind.
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.declare(`declare void @scr_tls_ca_certs_chk(ptr, ptr)`);
+      B.line(`call void @scr_tls_ca_certs_chk(ptr ${args[0]!.name}, ptr ${args[1]!.name})`);
+      const ty = this.llType(e.type);
+      const out = ty === "void"
+        ? { name: "", type: e.type }
+        : this.own({ name: ty === "double" ? f64Lit(0) : ty === "i1" ? "false" : "null", type: e.type });
       this.emitPendingCheck();
       return out;
     }
@@ -12997,6 +13150,9 @@ class LlEmitter {
     if (sym === undefined) throw new LlvmUnsupportedError(`libCall:${e.fn}`, e.loc);
     const tail = LIB_FN_TAIL[e.fn] ?? [];
     const args = e.args.map((a) => this.emitExpr(a));
+    // The frame stops owning an argument the runtime keeps (see
+    // LIB_FN_MOVE_ARGS) — before the call, like the C tier's E.moveTemp.
+    for (const i of LIB_FN_MOVE_ARGS[e.fn] ?? []) this.moveTemp(args[i]!);
     const argDecls = [
       ...args.map((a) => {
         const ty = this.llType(a.type);
@@ -13011,8 +13167,9 @@ class LlEmitter {
     const retTy = this.llType(e.type);
     const retDecl = cRet ?? (retTy === "i1" ? "zeroext i1" : retTy);
     this.declare(`declare ${retDecl} @${sym}(${argDecls.join(", ")})`);
+    const strData = LIB_FN_ARG_STRDATA[e.fn] ?? [];
     const argList = [
-      ...args.map((a) => `${this.llType(a.type)} ${a.name}`),
+      ...args.map((a, i) => `${this.llType(a.type)} ${strData.includes(i) ? this.strDataPtr(e.fn, a) : a.name}`),
       ...tail.map((t) => t.arg),
     ].join(", ");
     if (cRet !== undefined) {
