@@ -6910,7 +6910,14 @@ void scr_http_res_write_head_pairs(ScrHttpRes *r, double status, ScrArr *pairs /
  * scr_http_pipe.c gate, mirrored). */
 ScrStream *scr_http_req_body_stream(ScrHttpReq *r); /* +1 */
 void *scr_http_req_body_view(ScrHttpReq *r);        /* borrowed; NULL until the first conversion */
-void scr_http_req_attach_body_view(ScrHttpReq *r, void *view, void (*freefn)(void *));
+/* attach installs BOTH callbacks: `settle` is called when the request
+ * settles (the 'close' emit, where every listener list drops) and makes
+ * the view give up its STREAM, which is what keeps the ring
+ * request -> view -> stream -> user listener -> response -> connection
+ * -> request from surviving the exchange; `freefn` runs at the
+ * request's own free and clears the view's borrowed back-pointer. */
+void scr_http_req_attach_body_view(ScrHttpReq *r, void *view, void (*settle)(void *),
+                                    void (*freefn)(void *));
 
 /* node:http, the CLIENT slice (http.request/http.get over the net client
  * machinery — one dialed connection per request, no agent pooling; the
