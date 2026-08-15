@@ -138,6 +138,26 @@ export function emitLlvmModule(mod: IrModule): string {
   return new LlEmitter(mod).emit();
 }
 
+/** `out.push(...arr)` spreads the array into ARGUMENTS, and V8 caps a call
+ * at roughly 125 000 of them. Every module-assembly append in this file was
+ * written that way, and on a program the size of zapo -- 63 826 static
+ * definitions, whose emitted shape/class/thunk bodies run to several hundred
+ * thousand lines -- the assembly died with
+ *
+ *     RangeError: Maximum call stack size exceeded
+ *       at LlEmitter.emit (emitter.js:1528)   // out.push(...shapes.defs)
+ *
+ * a message that names the STACK and means the ARGUMENT LIST. Nothing was
+ * wrong with the module: emission had already finished, every function body
+ * was in hand, and the emit had raised no tier refusal anywhere in it. The
+ * emitter simply could not put the pieces into one array.
+ *
+ * Appending in place has no such limit, and that is the only thing this does
+ * -- same order, same strings, the same result for every program small
+ * enough that the spread happened to work. */
+function appendAll(out: string[], src: readonly string[]): void {
+  for (const s of src) out.push(s);
+}
 /** Exact double literal: LLVM's 16-digit hex form round-trips every f64
  * bit pattern (−0 and the full denormal range included). */
 function f64Lit(n: number): string {
@@ -1594,8 +1614,8 @@ class LlEmitter {
       // builders stack-allocate one per recursion level (dyn.ts).
       `%ScrDynPath = type { ptr, ptr, i64 }`,
     ];
-    out.push(...shapes.typeDefs);
-    out.push(...classShapes.typeDefs);
+    appendAll(out, shapes.typeDefs);
+    appendAll(out, classShapes.typeDefs);
     out.push(
       ``,
       `@scr_error_vts = external global [5 x %ScrVt]`,
@@ -1662,15 +1682,15 @@ class LlEmitter {
       out.push(`@${mangleGlobal(g.id)} = internal global ${ty} ${zero} ; ${g.name}`);
     }
     if (globals.length > 0) out.push(``);
-    out.push(...helpers);
-    out.push(...shapes.defs);
-    out.push(...classShapes.defs);
-    out.push(...classObjDefs);
-    out.push(...this.walkers.defs);
-    out.push(...this.dyn.defs);
-    out.push(...wrappers);
-    out.push(...asyncDefs);
-    out.push(...this.resolveThunkDefs);
+    appendAll(out, helpers);
+    appendAll(out, shapes.defs);
+    appendAll(out, classShapes.defs);
+    appendAll(out, classObjDefs);
+    appendAll(out, this.walkers.defs);
+    appendAll(out, this.dyn.defs);
+    appendAll(out, wrappers);
+    appendAll(out, asyncDefs);
+    appendAll(out, this.resolveThunkDefs);
     out.push(fnDefs.join("\n\n"), ``);
 
     // main(): scr_init, the program-dependent error-vt interval stamps,
@@ -1726,7 +1746,7 @@ class LlEmitter {
     if (this.mod.lib !== undefined) {
       // LIBRARY mode: no @main — the profile-declared external
       // symbols instead, from the same IR facts the C emission consumes.
-      out.push(...this.emitLibDefs(globals, globalReleaseLines, stamps));
+      appendAll(out, this.emitLibDefs(globals, globalReleaseLines, stamps));
       out.push(`attributes #0 = { sanitize_address }`, ``);
       return out.join("\n");
     }
@@ -2287,7 +2307,7 @@ class LlEmitter {
         tr.push(`  call void ${releaseSym(this, ret)}(ptr %r)`);
       }
       tr.push(`  ret void`, `}`, ``);
-      out.push(...tr);
+      appendAll(out, tr);
 
       // Spawn wrapper: pack the args (+1 moves in), spawn the fiber.
       const params = fieldTys.map((ty, i) => `${ty} %a${i}`);
@@ -2374,9 +2394,9 @@ class LlEmitter {
         `}`,
         ``,
       );
-      out.push(...sp);
+      appendAll(out, sp);
     }
-    out.push(...this.emitGenScaffolding());
+    appendAll(out, this.emitGenScaffolding());
     return out;
   }
 
@@ -2469,7 +2489,7 @@ class LlEmitter {
         tr.push(`  call void ${releaseSym(this, ret)}(ptr %r) ; unwound: the never-read dummy`);
       }
       tr.push(`  br label %done`, `done:`, `  ret void`, `}`, ``);
-      out.push(...tr);
+      appendAll(out, tr);
 
       // The never-started teardown: drop the packed (+1) arguments.
       const dr: string[] = [
@@ -2492,7 +2512,7 @@ class LlEmitter {
         }
       });
       dr.push(`  call void @free(ptr %ap)`, `  ret void`, `}`, ``);
-      out.push(...dr);
+      appendAll(out, dr);
 
       // Spawn wrapper: pack the args (+1 moves in), allocate the
       // SUSPENDED fiber — nothing runs until the first .next().
@@ -2525,7 +2545,7 @@ class LlEmitter {
         `}`,
         ``,
       );
-      out.push(...sp);
+      appendAll(out, sp);
     }
     return out;
   }
