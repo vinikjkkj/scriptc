@@ -2886,6 +2886,19 @@ double scr_os_totalmem(void); /* total physical memory, bytes */
 /* os.userInfo()'s field trio (pw_name / pw_shell / pw_dir — the passwd
  * home, not the $HOME cascade). +1 fresh; abort on lookup failure. */
 ScrStr *scr_os_user_name(void);
+/* os.userInfo()'s uid/gid. NOT process.getuid/getgid: those two are
+ * ABSENT from Node's process object on Windows, so calling them is a
+ * TypeError there — while os.userInfo() answers -1 for both and returns
+ * a complete record. Sharing one entry point made every os.userInfo()
+ * call on Windows throw. POSIX answers getuid(2)/getgid(2), which is
+ * what the shared entry point already answered. */
+double scr_os_user_uid(void);
+double scr_os_user_gid(void);
+/* True where Node's os.userInfo().shell is null rather than a string:
+ * uv_os_get_passwd leaves pw_shell unset on Windows. The HOST decides,
+ * not the build — the compiler cross-compiles, so the record's shell arm
+ * is selected by a branch on this and not by a build-time constant. */
+bool scr_os_user_shell_null(void);
 ScrStr *scr_os_user_shell(void);
 ScrStr *scr_os_user_homedir(void);
 

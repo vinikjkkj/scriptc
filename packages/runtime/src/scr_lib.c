@@ -636,15 +636,28 @@ ScrStr *scr_os_user_name(void) {
 }
 
 ScrStr *scr_os_user_shell(void) {
-  /* Node's userInfo().shell is null on Windows; the scriptc surface types
-   * it string, so the closest honest spelling is "" (divergence noted in
-   * the windows report). */
+  /* Unreachable on this host: the record takes the NULL arm through
+   * scr_os_user_shell_null below, which is Node's actual Windows answer.
+   * Kept as the well-defined value for a `shell: string` mapping, which
+   * has no null arm to take. */
   return scr_str_new("", 0);
 }
+
+bool scr_os_user_shell_null(void) { return true; }
 
 ScrStr *scr_os_user_homedir(void) {
   return scr_os_homedir(); /* uv_os_get_passwd reuses uv_os_homedir on win */
 }
+
+/* uv_os_get_passwd fills uid/gid with -1 on Windows and Node hands that
+ * straight through: `os.userInfo().uid === -1`. This is NOT the same
+ * answer as process.getuid(), which does not EXIST on Windows and whose
+ * call is a TypeError (scr_process_getuid, above, is right to throw) —
+ * and userInfo used to be assembled from that one, so reading any field
+ * of the record threw instead of answering. */
+double scr_os_user_uid(void) { return -1; }
+
+double scr_os_user_gid(void) { return -1; }
 
 ScrStr *scr_os_release(void) {
   /* uv_os_uname on Windows: RtlGetVersion (the un-lied-to GetVersionEx),
@@ -770,6 +783,14 @@ ScrStr *scr_os_user_name(void) {
   return scr_str_new(r->pw_name, strlen(r->pw_name));
 }
 
+/* The passwd entry's ids. getuid(2)/getgid(2) rather than pw_uid/
+ * pw_gid: it is the answer the shared process.getuid/getgid entry points
+ * gave before userInfo stopped sharing them, so this split changes
+ * nothing off Windows. */
+double scr_os_user_uid(void) { return (double)getuid(); }
+
+double scr_os_user_gid(void) { return (double)getgid(); }
+
 ScrStr *scr_os_user_shell(void) {
   struct passwd pw;
   char buf[8192];
@@ -777,6 +798,9 @@ ScrStr *scr_os_user_shell(void) {
   const char *sh = r->pw_shell ? r->pw_shell : "";
   return scr_str_new(sh, strlen(sh));
 }
+
+/* POSIX always answers the string arm — uv_os_get_passwd fills pw_shell. */
+bool scr_os_user_shell_null(void) { return false; }
 
 ScrStr *scr_os_user_homedir(void) {
   /* The PASSWD home (pw_dir) — Node's userInfo().homedir, distinct from
