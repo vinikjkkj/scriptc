@@ -5,7 +5,7 @@ regex-replacer.ts:14:37 - error SC1120: a function replacement value reading cap
      |                                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   15 | console.log("a".replace(/x(a)*/g, (m: string, g1: string) => g1));
 
-  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
+  hint: supported: literal regexes with the g/i/m/s/u/v/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
 
 regex-replacer.ts:15:35 - error SC1120: a function replacement value reading capture group 1, which this pattern does not always fill (Node passes 'undefined' for a group that did not participate, and this compiler will not quietly answer '' for it) is not supported yet
 
@@ -14,7 +14,7 @@ regex-replacer.ts:15:35 - error SC1120: a function replacement value reading cap
      |                                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   16 | 
 
-  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
+  hint: supported: literal regexes with the g/i/m/s/u/v/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
 
 regex-replacer.ts:18:37 - error SC1120: a function replacement value reading capture group 1, which this pattern does not always fill (Node passes 'undefined' for a group that did not participate, and this compiler will not quietly answer '' for it) is not supported yet
 
@@ -23,7 +23,7 @@ regex-replacer.ts:18:37 - error SC1120: a function replacement value reading cap
      |                                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   19 | console.log("a".replace(/((a)|b)c/g, (m: string, g1: string, g2: string) => g2));
 
-  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
+  hint: supported: literal regexes with the g/i/m/s/u/v/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
 
 regex-replacer.ts:19:38 - error SC1120: a function replacement value reading capture group 2, which this pattern does not always fill (Node passes 'undefined' for a group that did not participate, and this compiler will not quietly answer '' for it) is not supported yet
 
@@ -32,7 +32,7 @@ regex-replacer.ts:19:38 - error SC1120: a function replacement value reading cap
      |                                      ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   20 | 
 
-  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
+  hint: supported: literal regexes with the g/i/m/s/u/v/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
 
 regex-replacer.ts:23:39 - error SC1120: a function replacement value reading capture group 1, which this pattern does not always fill (Node passes 'undefined' for a group that did not participate, and this compiler will not quietly answer '' for it) is not supported yet
 
@@ -41,7 +41,7 @@ regex-replacer.ts:23:39 - error SC1120: a function replacement value reading cap
      |                                       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   24 | console.log("a".replace(/(?=(a))a/g, (m: string, g1: string) => g1));
 
-  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
+  hint: supported: literal regexes with the g/i/m/s/u/v/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
 
 regex-replacer.ts:24:38 - error SC1120: a function replacement value reading capture group 1, which this pattern does not always fill (Node passes 'undefined' for a group that did not participate, and this compiler will not quietly answer '' for it) is not supported yet
 
@@ -50,7 +50,7 @@ regex-replacer.ts:24:38 - error SC1120: a function replacement value reading cap
      |                                      ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   25 | 
 
-  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
+  hint: supported: literal regexes with the g/i/m/s/u/v/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
 
 regex-replacer.ts:27:37 - error SC1120: a function replacement value over a pattern this compiler cannot scan for capture-group participation (a '{n,m}' quantifier on a group, or an escaped group name) is not supported yet
 
@@ -59,7 +59,7 @@ regex-replacer.ts:27:37 - error SC1120: a function replacement value over a patt
      |                                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   28 | 
 
-  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
+  hint: supported: literal regexes with the g/i/m/s/u/v/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
 
 regex-replacer.ts:30:34 - error SC1120: a function replacement value declaring 3 parameters over a pattern with 1 capture group(s) (the trailing offset/subject/groups parameters have no lowering — declare only the match and its groups) is not supported yet
 
@@ -68,7 +68,7 @@ regex-replacer.ts:30:34 - error SC1120: a function replacement value declaring 3
      |                                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   31 | console.log("ab".replace(/a/g, (m: string, x: string) => m + x));
 
-  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
+  hint: supported: literal regexes with the g/i/m/s/u/v/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
 
 regex-replacer.ts:31:32 - error SC1120: a function replacement value declaring 2 parameters over a pattern with 0 capture group(s) (the trailing offset/subject/groups parameters have no lowering — declare only the match and its groups) is not supported yet
 
@@ -77,7 +77,7 @@ regex-replacer.ts:31:32 - error SC1120: a function replacement value declaring 2
      |                                ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   32 | 
 
-  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
+  hint: supported: literal regexes with the g/i/m/s/u/v/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
 
 regex-replacer.ts:35:29 - error SC1120: a function replacement value over a regex the compiler cannot read statically (the group-participation proof needs the pattern — write the literal at the call, or bind it to a const) is not supported yet
 
@@ -86,7 +86,7 @@ regex-replacer.ts:35:29 - error SC1120: a function replacement value over a rege
      |                             ^~~~~~~~~~~~~~~~~~~~~~~~~~~
   36 | const flags = "g";
 
-  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
+  hint: supported: literal regexes with the g/i/m/s/u/v/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
 
 regex-replacer.ts:37:51 - error SC1120: a function replacement value over a regex the compiler cannot read statically (the group-participation proof needs the pattern — write the literal at the call, or bind it to a const) is not supported yet
 
@@ -95,31 +95,22 @@ regex-replacer.ts:37:51 - error SC1120: a function replacement value over a rege
      |                                                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~
   38 | 
 
-  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
+  hint: supported: literal regexes with the g/i/m/s/u/v/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
 
-regex-replacer.ts:43:49 - error SC1120: a function replacement value over a regex with the 'd' flag (the lowered alphabet is g/i/m/s/u/y) is not supported yet
+regex-replacer.ts:48:49 - error SC1120: a function replacement value over a regex with the 'd' flag (the lowered alphabet is g/i/m/s/u/v/y) is not supported yet
 
-  42 | // to hand the emitter an unrepresentable regexLit (an SC9001 ICE).
-  43 | console.log("a".replace(new RegExp("(a)", "d"), (m: string, g: string) => g));
+  47 | // producing no diagnostic, so that a future regression puts one back.
+  48 | console.log("a".replace(new RegExp("(a)", "d"), (m: string, g: string) => g));
      |                                                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~
-  44 | console.log("a".replace(new RegExp("(a)", "v"), (m: string, g: string) => g));
+  49 | console.log("a".replace(new RegExp("(a)", "v"), (m: string, g: string) => g));
 
-  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
+  hint: supported: literal regexes with the g/i/m/s/u/v/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
 
-regex-replacer.ts:44:49 - error SC1120: a function replacement value over a regex with the 'v' flag (the lowered alphabet is g/i/m/s/u/y) is not supported yet
+regex-replacer.ts:53:35 - error SC1120: '.replaceAll()' with a function replacement value and a non-global regex (Node throws a TypeError here; add the 'g' flag) is not supported yet
 
-  43 | console.log("a".replace(new RegExp("(a)", "d"), (m: string, g: string) => g));
-  44 | console.log("a".replace(new RegExp("(a)", "v"), (m: string, g: string) => g));
-     |                                                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~
-  45 | 
-
-  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
-
-regex-replacer.ts:48:35 - error SC1120: '.replaceAll()' with a function replacement value and a non-global regex (Node throws a TypeError here; add the 'g' flag) is not supported yet
-
-  47 | // desugar would swallow it, so the fence stays.
-  48 | console.log("a".replaceAll(/(a)/, (m: string, g: string) => g));
+  52 | // desugar would swallow it, so the fence stays.
+  53 | console.log("a".replaceAll(/(a)/, (m: string, g: string) => g));
      |                                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~
-  49 | 
+  54 | 
 
-  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
+  hint: supported: literal regexes with the g/i/m/s/u/v/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
