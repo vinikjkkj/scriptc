@@ -158,6 +158,16 @@ struct ScrHttpReq {
   struct ScrHttpClientReq *pipe_client;
   ScrNetSocket *pipe_sock;
   bool ended; /* body complete (or connection dead): data/end drop */
+  /* `ended` is "this message is done, one way or another" — it is the
+   * guard on data/end delivery, and a body CUT SHORT sets it too. Node's
+   * `complete` / `readableEnded` mean something narrower: the body
+   * arrived in full and 'end' was emitted. Measured (v25.9.0,
+   * repro-ef/n7.mjs): through a mid-body teardown both read FALSE at the
+   * 'aborted' event and still false at 'close'; through a natural end
+   * both read true. Reading `ended` for them answered true on the
+   * aborted path — silently, since a cut-short body reaches 'close'
+   * either way. */
+  bool completed;
   bool enc_utf8; /* setEncoding('utf8'): 'data' delivers strings */
   bool http10;   /* the parsed request/status line's version (httpVersion) */
   bool http2;    /* an h2 compat request (httpVersion "2.0") */
@@ -562,6 +572,7 @@ static void scr_http_req_finish(ScrHttpReq *r, bool fire) {
     return;
   }
   r->ended = true;
+  if (fire) r->completed = true; /* `fire` IS "the body arrived in full" */
   if (fire) scr_net_fire0_this(&r->end_ls, r, SCR_DYNH_HTTP_REQ);
   scr_net_ls_drop(&r->data_ls);
   scr_net_ls_drop(&r->end_ls);
@@ -2170,7 +2181,7 @@ ScrStr *scr_http_req_http_version(ScrHttpReq *r) {
 double scr_http_req_http_version_major(ScrHttpReq *r) { return r->http2 ? 2 : 1; }
 double scr_http_req_http_version_minor(ScrHttpReq *r) { return r->http2 || r->http10 ? 0 : 1; }
 bool scr_http_req_aborted_flag(ScrHttpReq *r) { return r->aborted; }
-bool scr_http_req_complete(ScrHttpReq *r) { return r->ended; }
+bool scr_http_req_complete(ScrHttpReq *r) { return r->completed; }
 
 /* The stream died with the response side open: 'aborted' fires NOW (the
  * teardown macrotask, Node's position), then the close rides the sweep. */
@@ -3779,10 +3790,10 @@ static ScrDyn *scr_http_dynh_req_get(void *h, const char *key, size_t key_len) {
     return d;
   }
   if (strcmp(key, "aborted") == 0) return scr_dyn_new_bool(r->aborted);
-  if (strcmp(key, "complete") == 0) return scr_dyn_new_bool(r->ended);
+  if (strcmp(key, "complete") == 0) return scr_dyn_new_bool(r->completed);
   if (strcmp(key, "destroyed") == 0) return scr_dyn_new_bool(scr_http_req_destroyed_flag(r));
   if (strcmp(key, "readable") == 0) return scr_dyn_new_bool(scr_http_req_readable(r));
-  if (strcmp(key, "readableEnded") == 0) return scr_dyn_new_bool(r->ended);
+  if (strcmp(key, "readableEnded") == 0) return scr_dyn_new_bool(r->completed);
   if (strcmp(key, "closed") == 0) return scr_dyn_new_bool(r->close_emitted);
   {
     /* Real instance properties without a modeled read: loud, never a
