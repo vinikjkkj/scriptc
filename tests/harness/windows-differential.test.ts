@@ -246,8 +246,12 @@ function expectedExitCode(file: string): number {
 /** The program's lane name: the corpus file's own name, or the directory's
  * for main.ts programs — unique within the corpus, and the .exe's name. */
 function laneName(file: string): string {
+  // SEPARATOR-AGNOSTIC (see programInputs below): on a Windows HOST `rel`
+  // is `1890-ns-imports\main.ts`, so the forward-slash test missed and the
+  // whole `<dir>\main.ts` became the lane name — which is the .exe's name
+  // and an scp destination.
   const rel = file.slice(corpusDir.length + 1);
-  return /\/main\.(ts|js|mjs|cjs)$/.test(rel) ? rel.slice(0, rel.indexOf("/")) : rel;
+  return /[\\/]main\.(ts|js|mjs|cjs)$/.test(rel) ? rel.slice(0, rel.search(/[\\/]/)) : rel;
 }
 
 /** Runs one command ON THE BOX via ssh (remote shell is cmd.exe), stdin
@@ -344,7 +348,7 @@ async function crossCompile(file: string): Promise<string> {
  * sources. */
 async function shipProgram(file: string): Promise<void> {
   const binary = await crossCompile(file);
-  const programRoot = /\/main\.(ts|js|mjs|cjs)$/.test(file) ? join(file, "..") : file;
+  const programRoot = /[\\/]main\.(ts|js|mjs|cjs)$/.test(file) ? join(file, "..") : file;
   // Decorator programs additionally ship the tsc downlevel the oracle
   // executes (the compiler still eats the real source above).
   const oracleExtra = wantsTscDecorators(file) ? [decOraclePath(file)] : [];
@@ -375,7 +379,7 @@ function fixtureCases(root: string): { name: string; entry: string; driver: stri
     .sort()
     .filter((f) => filter === undefined || new RegExp(filter).test(f))
     .map((entry) => ({
-      name: entry.split("/").at(-2)!,
+      name: entry.split(/[\\/]/).at(-2)!,
       entry,
       driver: existsSync(join(entry, "../driver.mjs")) ? join(entry, "../driver.mjs") : null,
     }));
