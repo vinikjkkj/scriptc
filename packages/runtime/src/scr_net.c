@@ -447,7 +447,20 @@ void scr_net_fire_err_obj_this(ScrNetLs *l, ScrError *err /*borrowed*/, void *se
 
 /* ── the handles ─────────────────────────────────────────────────────── */
 
-enum { SCR_NET_K_SERVER = 1, SCR_NET_K_SOCKET = 2 };
+enum { SCR_NET_K_SERVER = 1, SCR_NET_K_SOCKET = 2, SCR_NET_K_DIAL = 3 };
+
+/* Per family, the most candidate addresses a dial chain will hold. Node
+ * has no cap; a chain longer than this stops growing (documented). */
+#define SCR_NET_HE_MAX 16
+
+/* The attempt timer's poller identity. The idle timer is keyed by the
+ * SOCKET pointer, so this one needs a key of its own — a sub-struct
+ * whose address is unique and whose FIRST int routes the drain, exactly
+ * like the server and socket handles. */
+typedef struct ScrNetDialTimer {
+  int kind; /* FIRST: poller udata routes on it */
+  struct ScrNetSocket *sock;
+} ScrNetDialTimer;
 
 struct ScrNetServer {
   int kind; /* FIRST: poller udata routes on it */
@@ -542,6 +555,18 @@ struct ScrNetSocket {
   /* the in-flight dial chain's LAST failure — surfaced (moved into
    * pending_err) only when the list exhausts; a later success drops it */
   ScrStr *dial_err;
+  /* Node's autoSelectFamily attempt schedule. A dial that still has a
+   * candidate BEHIND it gets an attempt budget; when it elapses the
+   * attempt is abandoned — its fd CLOSED (Node's handle.close(), so
+   * exactly one socket is ever in flight) — and the chain moves on to
+   * the next family. The FINAL candidate carries NO budget: it runs to
+   * the OS's own connect timeout, measured as Node's rule too
+   * (`current < context.addresses.length - 1`). dial_attempt_ms == 0
+   * turns the schedule off, which is what a caller-supplied lookup's
+   * chain keeps (its documented behaviour is dial-in-order). */
+  ScrNetDialTimer dial_timer;
+  bool dial_timer_armed;
+  double dial_attempt_ms;
   ScrNetLs data_ls, end_ls, close_ls, err_ls, conn_ls, timeout_ls, readable_ls;
   /* Flow control (pause()/resume()): user_paused holds reads OFF even
    * with consumers (kernel/TCP backpressure is the buffer); flowing
@@ -662,6 +687,11 @@ void scr_net_sock_release(ScrNetSocket *s) {
     for (size_t i = 0; i < s->dial_n; i++) scr_str_release(s->dial_ips[i]);
     free(s->dial_ips);
     scr_str_release(s->dial_err);
+    /* the attempt key must leave the poller table before this struct
+     * does — the table holds &s->dial_timer, which is inside it */
+    if (s->dial_timer_armed && scr_net_poller != NULL) {
+      scrp_timer_cancel(scr_net_poller, &s->dial_timer);
+    }
     free(s->wbuf);
     free(s->rbuf);
     if (s->pipe_dst) scr_net_sock_release(s->pipe_dst);
@@ -755,6 +785,23 @@ static void scr_net_sock_timer_cancel(ScrNetSocket *s) {
   scrp_timer_cancel(scr_net_poller, s); /* may already have fired */
 }
 
+/* The attempt timer rides the SAME poller, keyed by &s->dial_timer so it
+ * is a different key from the idle timer's (which is `s`): a socket can
+ * legitimately hold both at once — setTimeout() before connect() arms
+ * the idle clock while the dial chain is still choosing a family. */
+static void scr_net_sock_attempt_arm(ScrNetSocket *s) {
+  if (scr_net_poller == NULL || s->fd < 0 || s->dial_attempt_ms <= 0) return;
+  (void)scrp_timer_arm(scr_net_poller, &s->dial_timer, s->dial_attempt_ms, &s->dial_timer);
+  s->dial_timer_armed = true;
+}
+
+static void scr_net_sock_attempt_cancel(ScrNetSocket *s) {
+  if (!s->dial_timer_armed) return;
+  s->dial_timer_armed = false;
+  if (scr_net_poller == NULL) return;
+  scrp_timer_cancel(scr_net_poller, &s->dial_timer); /* may already have fired */
+}
+
 /* Activity: every read/write/connect resets the idle clock (re-arming an
  * existing timer replaces its deadline). */
 static void scr_net_sock_touch(ScrNetSocket *s) {
@@ -835,6 +882,14 @@ static ScrNetSocket *scr_net_sock_new(void) {
   s->kind = SCR_NET_K_SOCKET;
   s->rc = 1;
   s->fd = -1;
+  s->dial_timer.kind = SCR_NET_K_DIAL;
+  s->dial_timer.sock = s;
+  /* the PROCESS-WIDE budget, read here — a socket is minted at its
+   * connect, which is where Node reads
+   * autoSelectFamilyAttemptTimeoutDefault too, so a
+   * setDefaultAutoSelectFamilyAttemptTimeout before the dial takes
+   * effect and one after it does not */
+  s->dial_attempt_ms = scr_net_get_autosel_timeout();
 #ifdef SCR_RC_AUDIT
   scr_net_live++;
 #endif
@@ -882,6 +937,7 @@ static void scr_net_sock_update_write(ScrNetSocket *s) {
  * flag the 'close' sweep. */
 static void scr_net_sock_close_fd(ScrNetSocket *s) {
   scr_net_sock_timer_cancel(s);
+  scr_net_sock_attempt_cancel(s);
   if (s->fd >= 0) {
     scr_net_close_fd_raw(s->fd);
     s->fd = -1;
@@ -1143,6 +1199,9 @@ static void scr_net_sock_connect_done(ScrNetSocket *s) {
   socklen_t len = sizeof err;
   if (getsockopt(s->fd, SOL_SOCKET, SO_ERROR, &err, &len) != 0) err = errno;
   s->connecting = false;
+  /* this attempt has ANSWERED (either way): its budget is spent, and a
+   * stale timer must not fire into the next attempt's fd */
+  scr_net_sock_attempt_cancel(s);
   if (err != 0 && s->dial_i < s->dial_n) {
     /* a caller-lookup dial with addresses left: record the failure
      * (last-wins, surfaced only on exhaustion) and retry QUIETLY — no
@@ -1604,40 +1663,91 @@ static void scr_net_server_accept(ScrNetServer *srv) {
  * 127.0.0.1 — the documented divergence from Node's family autoselect).
  * The connect callback registers as once('connect'). Never throws: every
  * failure is the async 'error' event, like Node. */
-/* Blocking first-answer hostname resolution for the CLIENT bridges (the
- * native fetch, the island's http/https client) — the dns.lookup
- * precedent (scr_dgram.c): getaddrinfo runs AT CALL TIME, first answer
- * wins. Returns +1: the resolved IP string, or a RETAIN of `host` when it
- * is already an IP literal or localhost (scr_net_connect's own arms) or
- * unresolvable — the dial's deferred "getaddrinfo ENOTFOUND host" error
- * is then Node's exact cause shape. node:net's own connect surface stays
+/* Blocking hostname resolution for the CLIENT bridges — the dns.lookup
+ * precedent (scr_dgram.c): getaddrinfo runs AT CALL TIME. The dial keeps
+ * the WHOLE answer (scr_net_lookup_candidates below); a caller that only
+ * wants one address still gets the first, through
+ * scr_net_blocking_lookup. node:net's own connect surface stays
  * resolver-less on purpose (Node's async lookup semantics are not this). */
-ScrStr *scr_net_blocking_lookup(ScrStr *host /*borrowed*/) {
-  if (host->len == 9 && memcmp(host->data, "localhost", 9) == 0) return scr_str_retain(host);
+/* getaddrinfo's WHOLE answer for `host`, in Node's autoSelectFamily
+ * order. Read off net.js (lookupAndConnectMultiple) and then MEASURED on
+ * v25.9.0 with a synthetic lookup: the answers split into two family
+ * groups, group 0 being the family of the FIRST answer; each group
+ * dedupes by address text; the chain is then the two groups
+ * INTERLEAVED — g0[0], g1[0], g0[1], g1[1], … — so a preference for a
+ * family that cannot egress still costs only one attempt budget.
+ *
+ * Answers 0 for the cases scr_net_blocking_lookup always passed through
+ * unchanged: "localhost", an IP literal, and a resolution failure (whose
+ * dial must keep delivering Node's deferred "getaddrinfo ENOTFOUND
+ * host"). *out is malloc'd with +1 on every entry; the caller owns both. */
+static size_t scr_net_lookup_candidates(ScrStr *host /*borrowed*/, ScrStr ***out) {
+  *out = NULL;
+  if (host == NULL || host->len == 0) return 0;
+  if (host->len == 9 && memcmp(host->data, "localhost", 9) == 0) return 0;
   struct in_addr a4;
   struct in6_addr a6;
   if (inet_pton(AF_INET, host->data, &a4) == 1 || inet_pton(AF_INET6, host->data, &a6) == 1) {
-    return scr_str_retain(host);
+    return 0;
   }
-  if (!scr_net_poller_init()) return scr_str_retain(host); /* WSAStartup on win32 */
+  if (!scr_net_poller_init()) return 0; /* WSAStartup on win32 */
   struct addrinfo hints;
   memset(&hints, 0, sizeof hints);
   hints.ai_socktype = SOCK_STREAM;
   struct addrinfo *res = NULL;
   if (getaddrinfo(host->data, NULL, &hints, &res) != 0 || res == NULL) {
     if (res) freeaddrinfo(res);
-    return scr_str_retain(host);
+    return 0;
   }
-  char ip[INET6_ADDRSTRLEN] = "";
-  const char *out = NULL;
-  if (res->ai_family == AF_INET) {
-    out = inet_ntop(AF_INET, &((struct sockaddr_in *)res->ai_addr)->sin_addr, ip, sizeof ip);
-  } else if (res->ai_family == AF_INET6) {
-    out = inet_ntop(AF_INET6, &((struct sockaddr_in6 *)res->ai_addr)->sin6_addr, ip, sizeof ip);
+  ScrStr *g[2][SCR_NET_HE_MAX];
+  size_t gn[2] = {0, 0};
+  int lead = 0; /* the first answer's ai_family; 0 = none seen yet */
+  for (struct addrinfo *ai = res; ai != NULL; ai = ai->ai_next) {
+    char ip[INET6_ADDRSTRLEN] = "";
+    const char *o = NULL;
+    if (ai->ai_family == AF_INET) {
+      o = inet_ntop(AF_INET, &((struct sockaddr_in *)ai->ai_addr)->sin_addr, ip, sizeof ip);
+    } else if (ai->ai_family == AF_INET6) {
+      o = inet_ntop(AF_INET6, &((struct sockaddr_in6 *)ai->ai_addr)->sin6_addr, ip, sizeof ip);
+    }
+    if (o == NULL) continue; /* neither family, or unprintable: not a candidate */
+    if (lead == 0) lead = ai->ai_family;
+    size_t d = ai->ai_family == lead ? 0 : 1;
+    if (gn[d] >= SCR_NET_HE_MAX) continue;
+    size_t iplen = strlen(ip);
+    bool dup = false;
+    for (size_t i = 0; i < gn[d]; i++) {
+      if (g[d][i]->len == iplen && memcmp(g[d][i]->data, ip, iplen) == 0) {
+        dup = true;
+        break;
+      }
+    }
+    if (dup) continue; /* Node keeps each address once, within its group */
+    g[d][gn[d]++] = scr_str_new(ip, iplen);
   }
   freeaddrinfo(res);
-  if (!out) return scr_str_retain(host);
-  return scr_str_new(ip, strlen(ip));
+  size_t n = gn[0] + gn[1];
+  if (n == 0) return 0;
+  ScrStr **list = malloc(n * sizeof *list);
+  if (!list) scr_net_oom();
+  size_t k = 0;
+  size_t m = gn[0] > gn[1] ? gn[0] : gn[1];
+  for (size_t i = 0; i < m; i++) {
+    if (i < gn[0]) list[k++] = g[0][i];
+    if (i < gn[1]) list[k++] = g[1][i];
+  }
+  *out = list;
+  return n;
+}
+
+ScrStr *scr_net_blocking_lookup(ScrStr *host /*borrowed*/) {
+  ScrStr **ips = NULL;
+  size_t n = scr_net_lookup_candidates(host, &ips);
+  if (n == 0) return scr_str_retain(host);
+  ScrStr *first = ips[0];
+  for (size_t i = 1; i < n; i++) scr_str_release(ips[i]);
+  free(ips);
+  return first; /* the preferred family's first address: the old answer */
 }
 
 /* The dial itself (peer_ip/peer_port already set): the sockaddr arms,
@@ -1717,6 +1827,44 @@ ScrNetSocket *scr_net_connect(double port, ScrStr *host /*borrowed, nullable*/,
     abort();
   }
   scr_net_sock_dial_peer(s);
+  scr_net_sock_register(s);
+  return s;
+}
+
+/* connect(port, HOSTNAME) with Node's autoSelectFamily — the entry every
+ * protocol client that dials by name uses (the ws client, the http and
+ * http2 clients, tls.connect). It resolves ONCE here, keeps the whole
+ * answer, and dials it on the staggered schedule; a single candidate (or
+ * a literal, or localhost, or a name that will not resolve) collapses to
+ * scr_net_connect and is byte-for-byte the previous behaviour, including
+ * Node's rule that a lone address gets no attempt budget.
+ *
+ * Only the DIAL takes the address: the caller keeps the name for the
+ * Host header, SNI, and certificate verification, exactly as it did when
+ * it called scr_net_blocking_lookup itself. */
+ScrNetSocket *scr_net_connect_host(double port, ScrStr *host /*borrowed, nullable*/,
+                                    ScrClosure *cb /*moves, nullable*/) {
+  ScrStr **ips = NULL;
+  size_t n = host != NULL ? scr_net_lookup_candidates(host, &ips) : 0;
+  if (n <= 1) {
+    ScrStr *one = n == 1 ? ips[0] : NULL;
+    free(ips);
+    ScrNetSocket *s = scr_net_connect(port, one != NULL ? one : host, cb);
+    if (one != NULL) scr_str_release(one);
+    return s;
+  }
+  ScrNetSocket *s = scr_net_sock_new();
+  if (cb) scr_net_ls_add(&s->conn_ls, cb, NULL, true);
+  s->peer_port = (int)port;
+  if (!scr_net_poller_init()) {
+    fputs("scriptc: event poller init failed\n", stderr);
+    abort();
+  }
+  s->dial_ips = ips; /* the +1s move onto the socket */
+  s->dial_n = n;
+  s->dial_i = 0;
+  s->connecting = true;
+  scr_net_sock_dial_next(s); /* sets peer_ip; exhaustion defers the error */
   scr_net_sock_register(s);
   return s;
 }
@@ -1854,7 +2002,32 @@ ScrNetSocket *scr_net_connect_deferred(double port, ScrStr *host /*borrowed, nul
 void scr_net_sock_dial_start(ScrNetSocket *s) {
   if (!s->dial_deferred || s->close_emitted || s->emit_close || s->fd >= 0) return;
   s->dial_deferred = false;
-  scr_net_sock_dial_peer(s);
+  /* peer_ip holds whatever the caller QUEUED, and the http agent queues
+   * the request's host — which is a NAME. scr_net_sock_dial_peer only
+   * knows literals, so a queued request to a hostname used to answer
+   * "getaddrinfo ENOTFOUND <name>" while the very same request answered
+   * 200 when a slot happened to be free. It resolves HERE, at the moment
+   * the slot frees, which is where Node creates the socket and looks the
+   * host up too, and it takes the same staggered chain as any other
+   * dial-by-name. */
+  ScrStr *queued = scr_str_new(s->peer_ip, strlen(s->peer_ip));
+  ScrStr **ips = NULL;
+  size_t n = scr_net_lookup_candidates(queued, &ips);
+  scr_str_release(queued);
+  if (n <= 1) {
+    if (n == 1) {
+      snprintf(s->peer_ip, sizeof s->peer_ip, "%.*s", (int)(ips[0]->len < 63 ? ips[0]->len : 63),
+               ips[0]->data);
+      scr_str_release(ips[0]);
+    }
+    free(ips);
+    scr_net_sock_dial_peer(s);
+    return;
+  }
+  s->dial_ips = ips; /* the +1s move onto the socket */
+  s->dial_n = n;
+  s->dial_i = 0;
+  scr_net_sock_dial_next(s);
 }
 
 /* ── the caller-lookup dial (net.connect with a lookup option) ─────────
@@ -1926,11 +2099,20 @@ static bool scr_net_sock_dial_ip(ScrNetSocket *s, const ScrStr *ip) {
 }
 
 /* Dials the next answered addresses until one starts; exhaustion flags
- * the deferred 'error' + 'close' (the last dial's message stands). */
+ * the deferred 'error' + 'close' (the last dial's message stands).
+ *
+ * A started attempt with a candidate STILL BEHIND it gets the attempt
+ * budget (Node: `if (current < context.addresses.length - 1)`); the last
+ * one does not, so a chain whose tail is black-holed ends at the OS's
+ * connect timeout rather than early. dial_i has already advanced past
+ * the address just dialled, so `dial_i < dial_n` IS "one behind it". */
 static void scr_net_sock_dial_next(ScrNetSocket *s) {
   while (s->dial_i < s->dial_n) {
     const ScrStr *ip = s->dial_ips[s->dial_i++];
-    if (scr_net_sock_dial_ip(s, ip)) return;
+    if (scr_net_sock_dial_ip(s, ip)) {
+      if (s->dial_i < s->dial_n) scr_net_sock_attempt_arm(s);
+      return;
+    }
   }
   /* exhausted: the last failure surfaces now */
   if (s->dial_err != NULL && s->pending_err == NULL) {
@@ -1940,6 +2122,31 @@ static void scr_net_sock_dial_next(ScrNetSocket *s) {
   s->connecting = false;
   s->had_error = true;
   s->emit_close = true;
+}
+
+/* The attempt budget elapsed with the connect still unanswered — the
+ * black-holed family, which is the whole reason this exists: a refusal
+ * comes back as an error in milliseconds and never reaches here.
+ *
+ * Node abandons the attempt: `req.oncomplete = undefined`, an ETIMEDOUT
+ * pushed onto the error list, and `handle.close()`. We do the same three
+ * things — the fd is CLOSED before the next family starts, so at no
+ * moment are two of this socket's sockets in flight, and a completion
+ * that lands on the abandoned fd cannot surface (it is gone from the
+ * poller and the fd is closed). The recorded failure is last-wins like
+ * every other link in the chain: it surfaces only if the chain
+ * EXHAUSTS, so a family that fails while the other succeeds is silent. */
+static void scr_net_sock_attempt_timeout(ScrNetSocket *s) {
+  s->dial_timer_armed = false;
+  if (!s->connecting || s->fd < 0 || s->dial_i >= s->dial_n) return;
+  char msg[128];
+  snprintf(msg, sizeof msg, "connect ETIMEDOUT %s:%d", s->peer_ip, s->peer_port);
+  scr_str_release(s->dial_err);
+  s->dial_err = scr_str_new(msg, strlen(msg));
+  scr_net_close_fd_raw(s->fd); /* registrations dropped, then the fd */
+  s->fd = -1;
+  s->read_armed = s->write_armed = false;
+  scr_net_sock_dial_next(s);
 }
 
 ScrNetSocket *scr_net_connect_lookup(double port, ScrStr *host /*borrowed*/,
@@ -2817,6 +3024,9 @@ static void scr_net_dispatch(void) {
       int kind = *(int *)udata;
       if (kind == SCR_NET_K_SERVER) {
         scr_net_server_accept((ScrNetServer *)udata);
+      } else if (kind == SCR_NET_K_DIAL) {
+        /* the attempt budget: only ever a timer, never fd readiness */
+        scr_net_sock_attempt_timeout(((ScrNetDialTimer *)udata)->sock);
       } else if (kind == SCR_NET_K_SOCKET) {
         ScrNetSocket *s = (ScrNetSocket *)udata;
         /* A callback earlier in this batch may have closed this fd
