@@ -7589,6 +7589,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3951-typeof-over-an-effectful-operand.ts": {
+   "order": [
+    "<repo>/tests/corpus/3951-typeof-over-an-effectful-operand.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3952-typeof-a-keyed-read-asks-whether-the-key-is-there.ts": {
+   "order": [
+    "<repo>/tests/corpus/3952-typeof-a-keyed-read-asks-whether-the-key-is-there.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/400-fib.ts": {
    "order": [
     "<repo>/tests/corpus/400-fib.ts"
