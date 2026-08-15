@@ -12334,7 +12334,19 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         );
       }
     }
-    return { kind: "regexLit", pattern, flags, type: REGEX, loc: locOf(expr) };
+    // The flag string is OBSERVABLE — `re.flags`, `console.log(re)`, the
+    // dynamic `String(re)`, and the engine's invalid-pattern SyntaxError
+    // all quote it — and JS reports it in GETTER order (dgimsuvy), never
+    // the order it was written: node answers `/x/ysmig`.flags with
+    // "gimsy" and inspects the literal as /x/gimsy. Normalising HERE is
+    // what makes lower-assert's regexFlagsGetterOrder comment true, fixes
+    // every consumer at once without any of them knowing, and interns
+    // /a/gy and /a/yg to the one static they always were. The filter runs
+    // over the FULL getter alphabet, not the supported one, so a flag the
+    // fence above rejected still reaches the IR validator instead of
+    // being silently dropped out of an already-erroring program.
+    const ordered = [..."dgimsuvy"].filter((f) => flags.includes(f)).join("");
+    return { kind: "regexLit", pattern, flags: ordered, type: REGEX, loc: locOf(expr) };
   }
 
 /** The pattern's named capture groups, in source order: each `(?<name>`
