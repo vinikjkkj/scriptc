@@ -9819,7 +9819,6 @@ class LlEmitter {
     const B = this.B;
     const value = e.type.value;
     const rc = isRefCounted(value) ? vAdapters(this, value) : { retain: "null", release: "null" };
-    const valTrace = isRefCounted(value) ? traceArg(this, value) : "null";
     // Object KEYS carry their own RC adapters at construction — the map
     // retains each key — so they take the ref-key constructor, exactly
     // as emit-exprs.ts's mapNew does. Without it the keys are stored
@@ -9830,12 +9829,12 @@ class LlEmitter {
     if (kRc !== null) {
       this.declare(`declare ptr @scr_map_new_ref(i32, ptr, ptr, ptr, ptr, ptr)`);
       B.line(
-        `${m} = call ptr @scr_map_new_ref(i32 ${mapValKindNum(value)}, ptr ${kRc.retain}, ptr ${kRc.release}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${valTrace})`,
+        `${m} = call ptr @scr_map_new_ref(i32 ${mapValKindNum(value)}, ptr ${kRc.retain}, ptr ${kRc.release}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${isRefCounted(value) ? traceArg(this, value) : "null"})`,
       );
     } else {
       this.declare(`declare ptr @scr_map_new(i32, i32, ptr, ptr, ptr)`);
       B.line(
-        `${m} = call ptr @scr_map_new(i32 ${mapKeyKindNum(e.type.key)}, i32 ${mapValKindNum(value)}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${valTrace})`,
+        `${m} = call ptr @scr_map_new(i32 ${mapKeyKindNum(e.type.key)}, i32 ${mapValKindNum(value)}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${isRefCounted(value) ? traceArg(this, value) : "null"})`,
       );
     }
     const out = this.own({ name: m, type: e.type });
