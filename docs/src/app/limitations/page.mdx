@@ -60,7 +60,19 @@ const who = process.argv.length > 2 ? process.argv[2] : "world";
 
 **A lying cast on dynamic data throws instead of corrupting memory** — the headline divergence, and the point. `JSON.parse(s) as Config` with mismatched data throws a catchable error naming the offending path (`expected number at $.port, got string`) where JS would silently hand you garbage.
 
-**Structural width subtyping copies.** A record flowing into a strict field-subset shape is copied, not aliased: mutations through the narrower reference are invisible to the original. Same stance at the dynamic boundary: values cross by copy, never by reference.
+**Structural width subtyping copies.** A record flowing into a strict field-subset shape is copied, not aliased: mutations through the narrower reference are invisible to the original. Same stance at the dynamic boundary: values cross by copy, never by reference. The copy also *ends* the properties outside the narrower shape — a record's type is its runtime shape here, so a value that reaches a narrower declared type (a `const` annotation, a parameter, a declared return type) no longer carries the fields that type does not name, and a later cast back to a wider shape completes them as `undefined` rather than finding the originals. JS keeps them:
+
+```ts
+type Narrow = { get(): number };
+type Wide = { get(): number; extra?(): number };
+function mk(): Narrow {
+  const rich = { get: () => 7, extra: () => 1 };
+  return rich;            // the copy into Narrow drops `extra` here
+}
+(mk() as Wide).extra;     // scriptc: undefined      Node: the function
+```
+
+Only *optional* members complete this way — a required one has no `undefined` to complete to, and the cast is refused at compile time instead.
 
 **`Object.keys`/`values`/`entries` and `JSON.stringify` report a record's declaration order**, not per-object insertion order. Identical to Node whenever objects are built in declaration order (the overwhelmingly common case).
 

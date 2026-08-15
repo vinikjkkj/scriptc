@@ -212,9 +212,10 @@ ScrWsClient *scr_ws_client_connect(ScrStr *url, ScrStr *protocols,
     return NULL;
   }
 
-  ScrStr *dial = scr_net_blocking_lookup(u->host);
-  c->sock = scr_net_connect(port, dial, NULL);
-  scr_str_release(dial);
+  /* The dial resolves inside scr_net_connect_host and races the families
+   * on Node's autoSelectFamily schedule; u->host, the NAME, is what the
+   * Host header and the TLS wrap below still see. */
+  c->sock = scr_net_connect_host(port, u->host, NULL);
 
   scr_net_sock_set_native_reader(c->sock, &wsc_data, &wsc_eof, &wsc_eof, c, NULL);
   scr_net_sock_set_native_events(c->sock, NULL, &wsc_err);
