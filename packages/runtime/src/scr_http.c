@@ -60,6 +60,22 @@ static void scr_http_oom(void) {
   abort();
 }
 
+/* Node's `aborted` on a request/response whose body was cut short. It is
+ * a connReset exception there, so it carries `code: 'ECONNRESET'`
+ * (measured, v25.9.0 — repro-inc/m5.mjs), and the MESSAGE fan-out cannot
+ * deliver that: the shared adapter recovers a code by reading an errno
+ * NAME back out of the text, and "aborted" contains none, so every
+ * listener that asked for the object got `code: undefined`. Firing the
+ * OBJECT — the destroy(err) route, one event over — carries it. */
+static void scr_http_fire_aborted(ScrNetLs *ls, ScrHttpReq *req) {
+  ScrStr *msg = scr_str_new("aborted", 7);
+  ScrError *e = scr_error_new(0 /* Error */, msg);
+  scr_error_set_code(e, "ECONNRESET");
+  scr_net_fire_err_obj_this(ls, e, req, SCR_DYNH_HTTP_REQ);
+  scr_error_release(e);
+  scr_str_release(msg);
+}
+
 /* Node's STATUS_CODES reason phrases (the slice's subset; everything the
  * fixtures and portless's handlers send, plus the common neighbors). */
 static const char *scr_http_reason(int code) {
@@ -160,6 +176,17 @@ struct ScrHttpReq {
   size_t pend_len, pend_cap;
   bool destroyed; /* req.destroy()/the teardown ran — req.destroyed */
   ScrNetLs aborted_ls; /* req.on('aborted') — the h2 compat event */
+  /* The Readable VIEW of this body (scr_http_body.c), OPAQUE here: the
+   * request owns exactly one reference to it and gives that reference
+   * up through the callback the view installed. Keeping it opaque is
+   * what lets scr_http.c stay free of every scr_stream_* symbol, so an
+   * http program that never puts a response in a Readable slot links
+   * without the stream unit — the scr_http_pipe.c gate, one direction
+   * over. NULL until the first conversion; the slot is also the MEMO,
+   * so a second conversion answers the same stream. */
+  void *body_view;
+  void (*body_view_settle)(void *);
+  void (*body_view_free)(void *);
 };
 
 #ifdef SCR_RC_AUDIT
@@ -225,11 +252,29 @@ void scr_http_req_release(ScrHttpReq *r) {
     free(r->pend);
     if (r->sock) scr_net_sock_release(r->sock);
     if (r->h2_stream) scr_http_h2_ops->release(r->h2_stream);
+    /* AFTER the listener lists have dropped: the view's four listeners
+     * hold it, and its free callback releases the stream, whose own
+     * teardown must not find a listener list mid-free. */
+    if (r->body_view != NULL) {
+      void *v = r->body_view;
+      void (*freefn)(void *) = r->body_view_free;
+      r->body_view = NULL;
+      freefn(v);
+    }
 #ifdef SCR_RC_AUDIT
     scr_http_live--;
 #endif
     free(r);
   }
+}
+
+/* The Readable-view slot (scr_http_body.c owns what goes in it). */
+void *scr_http_req_body_view(ScrHttpReq *r) { return r->body_view; }
+void scr_http_req_attach_body_view(ScrHttpReq *r, void *view, void (*settle)(void *),
+                                    void (*freefn)(void *)) {
+  r->body_view = view;
+  r->body_view_settle = settle;
+  r->body_view_free = freefn;
 }
 
 void *scr_http_req_retain_v(void *p) { return scr_http_req_retain((ScrHttpReq *)p); }
@@ -1246,6 +1291,24 @@ static void scr_http_proto_sweep(void) {
         scr_net_ls_drop(&req->err_ls);
         scr_net_ls_drop(&req->close_ls);
         scr_net_ls_drop(&req->aborted_ls);
+        /* ...and the Readable view's stream goes with them. The listener
+         * drop here is the settle-releases-listeners story, and the view
+         * is the same kind of edge: the USER's listeners live on the
+         * stream's own emitter, one of them captures the response, and
+         * the response reaches this request through the connection --
+         * so a request that kept owning its view after the exchange was
+         * over would close a cycle no listener drop could break, and the
+         * whole ring would still be live at exit. Measured: a server
+         * handler that reads its request body through the view leaked 16
+         * strings, 2 boxes, 2 closures and an object with the release at
+         * free instead of here.
+         *
+         * The view itself stays ATTACHED so the free path can still clear
+         * its borrowed back-pointer, and a conversion after this point
+         * refills the same view with a fresh (immediately ended) stream. */
+        if (req->body_view != NULL && req->body_view_settle != NULL) {
+          req->body_view_settle(req->body_view);
+        }
       }
       break;
     }
@@ -1272,9 +1335,7 @@ static void scr_http_proto_sweep(void) {
     case SCR_HTTP_EMIT_REQ_ABORTED: {
       ScrHttpReq *req = (ScrHttpReq *)e.h;
       if (!req->close_emitted) {
-        ScrStr *msg = scr_str_new("aborted", 7);
-        scr_net_fire_err_this(&req->err_ls, msg, req, SCR_DYNH_HTTP_REQ);
-        scr_str_release(msg);
+        scr_http_fire_aborted(&req->err_ls, req);
       }
       break;
     }
@@ -1958,9 +2019,7 @@ static bool scr_http_conn_err(void *ctx, ScrStr *msg) {
   ScrHttpConn *conn = (ScrHttpConn *)ctx;
   if (conn->client_mode) return scr_http_client_sock_err(conn, msg);
   if (conn->req && conn->req->err_ls.n > 0) {
-    ScrStr *aborted = scr_str_new("aborted", 7);
-    scr_net_fire_err_this(&conn->req->err_ls, aborted, conn->req, SCR_DYNH_HTTP_REQ);
-    scr_str_release(aborted);
+    scr_http_fire_aborted(&conn->req->err_ls, conn->req);
   }
   scr_http_conn_drop_request(conn, false);
   return true;

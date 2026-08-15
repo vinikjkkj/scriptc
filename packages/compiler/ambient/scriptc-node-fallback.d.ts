@@ -2173,6 +2173,9 @@ declare module "node:net" {
  * connection per call (no agent pooling) with Node's exact wire head. */
 declare module "http" {
   import { Server as NetServer, Socket } from "net";
+  /* IncomingMessage IS a Readable (see the interface below); the pipe
+   * overload it inherits is typed in Writable. */
+  import { Readable, Writable } from "stream";
   export type Server = NetServer;
   /* The Server VALUE — Node's constructor works with and without `new`
    * (test/parallel's http.Server(fn) spelling); both route to the
@@ -2199,7 +2202,27 @@ declare module "http" {
    * merges into outgoing literals as a copy; the fallback keeps reads
    * simple and spreads target the same string | undefined slot). */
   export type OutgoingHttpHeaders = { [name: string]: number | string | string[] | undefined };
-  export interface IncomingMessage {
+  /* `class IncomingMessage extends stream.Readable` is what @types/node
+   * declares and what Node does — one object, both surfaces — and until
+   * this line the fallback said otherwise, so `body: res` into a
+   * `Readable | null` slot was a tsc error (SC0001) before the compiler
+   * ever got a look at it. The runtime is NOT one object (an ScrHttpReq
+   * is not an ScrStream), so the conversion is an adapter rather than an
+   * upcast — see httpReqIsReadableIn and scr_http_body.c — but that is
+   * the lowering's business, not the type's.
+   *
+   * Inheriting brings the whole Readable surface with it. The members
+   * this slice actually implements are re-declared below; everything
+   * else (push/read/unshift/isPaused/the readable* flags) now TYPECHECKS
+   * and fences at its use site with the IncomingMessage member fence's
+   * own words, which is the loud answer, not a quiet one.
+   *
+   * Every re-declaration must stay ASSIGNABLE to the inherited member,
+   * so the `void` returns this interface used to carry are now Node's
+   * own `this`/`T` returns. Discarded at every existing call site; a
+   * chained one (`res.on(...).on(...)`) used to be a tsc error and is
+   * now a scriptc fence. */
+  export interface IncomingMessage extends Readable {
     readonly url: string;
     readonly method: string;
     readonly statusCode: number | undefined;
@@ -2207,24 +2230,29 @@ declare module "http" {
     readonly socket: Socket;
     readonly headers: { [name: string]: string | undefined };
     readonly rawHeaders: string[];
-    resume(): void;
-    destroy(): void;
+    resume(): this;
+    destroy(error?: Error): this;
     /* setEncoding('utf8'): 'data' delivers strings (other real encodings
      * fence loudly at runtime; unknown names throw ERR_UNKNOWN_ENCODING). */
-    setEncoding(encoding: string): void;
+    setEncoding(encoding: string): this;
     /* The proxy legs: the body streams into a ServerResponse, a
-     * ClientRequest, or a raw Socket; natural end ends the destination. */
+     * ClientRequest, or a raw Socket; natural end ends the destination.
+     * The inherited Writable-destination overload comes FIRST so it keeps
+     * answering exactly what it answered before this interface extended
+     * anything, and only a destination it REJECTS falls through to the
+     * http legs — the Readable.pipe(ClientRequest) precedent. */
+    pipe<T extends Writable>(destination: T, options?: { end?: boolean }): T;
     pipe(destination: ServerResponse | ClientRequest | Socket): void;
-    on(event: "data", listener: (chunk: any) => void): void;
-    on(event: "end" | "close", listener: () => void): void;
-    on(event: "error", listener: (err: Error) => void): void;
+    on(event: "data", listener: (chunk: any) => void): this;
+    on(event: "end" | "close", listener: () => void): this;
+    on(event: "error", listener: (err: Error) => void): this;
     /* addListener IS on (Node aliases them) — the suite spells both. */
-    addListener(event: "data", listener: (chunk: any) => void): void;
-    addListener(event: "end" | "close", listener: () => void): void;
-    addListener(event: "error", listener: (err: Error) => void): void;
-    once(event: "data", listener: (chunk: any) => void): void;
-    once(event: "end" | "close", listener: () => void): void;
-    once(event: "error", listener: (err: Error) => void): void;
+    addListener(event: "data", listener: (chunk: any) => void): this;
+    addListener(event: "end" | "close", listener: () => void): this;
+    addListener(event: "error", listener: (err: Error) => void): this;
+    once(event: "data", listener: (chunk: any) => void): this;
+    once(event: "end" | "close", listener: () => void): this;
+    once(event: "error", listener: (err: Error) => void): this;
   }
   export interface ServerResponse {
     readonly headersSent: boolean;
