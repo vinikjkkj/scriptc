@@ -4581,3 +4581,26 @@ ScrHttpClientReq *scr_http_request_url(ScrStr *url /*borrowed*/, ScrStr *method 
   scr_str_release(path);
   return c;
 }
+
+/* http.request(url, options[, cb]) — Node's three-argument form. The URL
+ * still supplies host/port/path (same parse, same scheme check); the
+ * options record supplies method, timeout and headers. Node merges the
+ * options OVER the URL's parts, so the keys that would REPLACE a URL
+ * part fence at the call rather than half-merge here. */
+ScrHttpClientReq *scr_http_request_url_opts(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*/,
+                                            double timeout_ms, ScrArr *header_pairs /*borrowed*/,
+                                            bool auto_end, ScrClosure *cb /*moves, nullable*/,
+                                            ScrHttpRespFn fn) {
+  ScrStr *host;
+  ScrStr *path;
+  double port;
+  if (!scr_http_url_parts(url, false, &host, &port, &path)) {
+    if (cb) scr_closure_release(cb);
+    return NULL; /* Invalid URL / ERR_INVALID_PROTOCOL pending */
+  }
+  ScrHttpClientReq *c = scr_http_request_ex(host, port, path, method, timeout_ms, header_pairs,
+                                             auto_end, cb, fn, 80, NULL, NULL);
+  scr_str_release(host);
+  scr_str_release(path);
+  return c;
+}

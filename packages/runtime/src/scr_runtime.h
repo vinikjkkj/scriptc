@@ -6934,6 +6934,14 @@ ScrHttpClientReq *scr_http_request_ex(ScrStr *host /*borrowed*/, double port,
 ScrHttpClientReq *scr_http_request_url(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*/,
                                         bool auto_end, ScrClosure *cb /*moves, nullable*/,
                                         ScrHttpRespFn fn); /* +1 */
+/* Node's three-argument request(url, options[, cb]): the same parse and
+ * the same scheme check, plus the option slots the middle argument
+ * fills (method, timeout, headers). The options that would REPLACE a
+ * URL part (host/hostname/port/path) fence at the call. */
+ScrHttpClientReq *scr_http_request_url_opts(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*/,
+                                            double timeout_ms, ScrArr *header_pairs /*borrowed*/,
+                                            bool auto_end, ScrClosure *cb /*moves, nullable*/,
+                                            ScrHttpRespFn fn); /* +1 */
 /* Its parse half, shared with scr_tls.c's https spelling: the scheme is
  * checked against `secure` (the calling module), so a mismatch is Node's
  * ERR_INVALID_PROTOCOL rather than a silent upgrade. false = the
@@ -7134,6 +7142,14 @@ ScrHttpClientReq *scr_https_request(ScrStr *host /*borrowed*/, double port,
 ScrHttpClientReq *scr_https_request_url(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*/,
                                          bool auto_end, ScrClosure *cb /*moves, nullable*/,
                                          ScrHttpRespFn fn); /* +1 */
+/* The three-argument twin over TLS (scr_http_request_url_opts plus the
+ * https extras the options record carries). */
+ScrHttpClientReq *scr_https_request_url_opts(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*/,
+                                             double timeout_ms, ScrArr *header_pairs /*borrowed*/,
+                                             bool auto_end, bool reject_unauthorized,
+                                             const char *ca /*borrowed, len 0 = none*/,
+                                             size_t ca_len, ScrClosure *cb /*moves, nullable*/,
+                                             ScrHttpRespFn fn); /* +1 */
 /* The agent-threaded twin (the scr_http_request_agent story over TLS). */
 ScrHttpClientReq *scr_https_request_agent(ScrStr *host /*borrowed*/, double port,
                                            ScrStr *path /*borrowed*/, ScrStr *method /*borrowed*/,

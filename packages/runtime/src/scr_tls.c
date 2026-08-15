@@ -1046,6 +1046,30 @@ ScrHttpClientReq *scr_https_request_url(ScrStr *url /*borrowed*/, ScrStr *method
   return c;
 }
 
+/* https.request(url, options[, cb]) — scr_http_request_url_opts over the
+ * same per-request TLS client config the options form dials with (the
+ * scheme check rejects a non-https URL here, Node's
+ * ERR_INVALID_PROTOCOL). */
+ScrHttpClientReq *scr_https_request_url_opts(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*/,
+                                             double timeout_ms, ScrArr *header_pairs /*borrowed*/,
+                                             bool auto_end, bool reject_unauthorized,
+                                             const char *ca /*borrowed, len 0 = none*/,
+                                             size_t ca_len, ScrClosure *cb /*moves, nullable*/,
+                                             ScrHttpRespFn fn) {
+  ScrStr *host;
+  ScrStr *path;
+  double port;
+  if (!scr_http_url_parts(url, true, &host, &port, &path)) {
+    if (cb) scr_closure_release(cb);
+    return NULL; /* Invalid URL / ERR_INVALID_PROTOCOL pending */
+  }
+  ScrHttpClientReq *c = scr_https_request(host, port, path, method, timeout_ms, header_pairs,
+                                           auto_end, reject_unauthorized, ca, ca_len, cb, fn);
+  scr_str_release(host);
+  scr_str_release(path);
+  return c;
+}
+
 ScrHttpClientReq *scr_https_request_agent(ScrStr *host /*borrowed*/, double port,
                                            ScrStr *path /*borrowed*/, ScrStr *method /*borrowed*/,
                                            double timeout_ms, ScrArr *header_pairs /*borrowed*/,
