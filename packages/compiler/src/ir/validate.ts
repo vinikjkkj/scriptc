@@ -497,6 +497,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "http.serverOnConnect": { argTypes: [NETSERVER_T, null, BOOL], result: VOID },
   "http.clientOnUpgrade": { argTypes: [HTTPCLIENTREQ_T, null, BOOL], result: VOID },
   "http.reqSocket": { argTypes: [HTTPREQ_T], result: NETSOCKET_T },
+  "http.reqBodyStream": { argTypes: [HTTPREQ_T], result: { kind: "object", className: "%Readable" } },
   "http.reqPipeRes": { argTypes: [HTTPREQ_T, HTTPRES_T], result: VOID },
   "http.reqPipeClient": { argTypes: [HTTPREQ_T, HTTPCLIENTREQ_T], result: VOID },
   "http.reqPipeSock": { argTypes: [HTTPREQ_T, NETSOCKET_T], result: VOID },

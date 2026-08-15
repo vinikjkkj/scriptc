@@ -6888,6 +6888,23 @@ void scr_http_res_destroy(ScrHttpRes *r);
 void scr_http_res_on_close(ScrHttpRes *r, ScrClosure *cb /*moves*/, bool once);
 void scr_http_res_write_head_pairs(ScrHttpRes *r, double status, ScrArr *pairs /*borrowed*/);
 
+/* ── an IncomingMessage IN a Readable slot (scr_http_body.c) ───────────
+ * Node's `class IncomingMessage extends stream.Readable` is ONE object;
+ * here the two are different structs (ScrHttpReq vs ScrStream), so the
+ * conversion is an ADAPTER, not the pointer reinterpret the Duplex
+ * widening is. scr_http_req_body_stream answers a native Readable whose
+ * source is the request's body — memoized on the request, so a second
+ * conversion answers the first stream.
+ *
+ * The two slot accessors below are all scr_http.c knows about it: the
+ * view is OPAQUE and frees itself through the callback it installed, so
+ * scr_http.o references no scr_stream_* symbol and an http program that
+ * never spells the conversion links without scr_stream.c (the
+ * scr_http_pipe.c gate, mirrored). */
+ScrStream *scr_http_req_body_stream(ScrHttpReq *r); /* +1 */
+void *scr_http_req_body_view(ScrHttpReq *r);        /* borrowed; NULL until the first conversion */
+void scr_http_req_attach_body_view(ScrHttpReq *r, void *view, void (*freefn)(void *));
+
 /* node:http, the CLIENT slice (http.request/http.get over the net client
  * machinery — one dialed connection per request, no agent pooling; the
  * wire head is Node's exactly). The response arrives as a ScrHttpReq. */
