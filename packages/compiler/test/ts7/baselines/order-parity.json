@@ -7589,6 +7589,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3981-execsync-platform-shell.ts": {
+   "order": [
+    "<repo>/tests/corpus/3981-execsync-platform-shell.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3982-rmsync-force-readonly.ts": {
+   "order": [
+    "<repo>/tests/corpus/3982-rmsync-force-readonly.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3983-resourceusage-memory-rows.ts": {
+   "order": [
+    "<repo>/tests/corpus/3983-resourceusage-memory-rows.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3984-spawnsync-capture-stays-string-on-purpose.ts": {
+   "order": [
+    "<repo>/tests/corpus/3984-spawnsync-capture-stays-string-on-purpose.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/400-fib.ts": {
    "order": [
     "<repo>/tests/corpus/400-fib.ts"
