@@ -31,6 +31,27 @@
 // that the failure is old, bounded, and known, not that it is invisible.
 // The same stance 3921 took for the read this block has now closed.
 //
+// The SECOND shape that keeps its own slot is `code?: string`, and it is a
+// nearer miss: it IS a string, but its type is the `string | undefined`
+// union, and the routing rule tests for plain STRING. Routing it is not the
+// same size of change. The inherited slot holds a bare `ScrStr *` with NULL
+// meaning absent, so an optional field would have to read back OUT of a
+// possibly-NULL slot into an undefined-armed union — which is exactly what
+// the `error.code` libCall already does for the base view, but the subclass
+// side would then need its reads redirected onto that libCall and its writes
+// given a union-into-nullable-slot store form that does not exist. A new
+// write form plus a read redirect plus the validator is a block, not a
+// footnote, and nothing in the wild that motivated this work spells it that
+// way (zapo's two code-bearing subclasses are `readonly code = "LITERAL"`
+// and `code: string`). Measured, so the next reader does not have to:
+//
+//     class OptSet extends Error { code?: string; ctor: this.code = "E_OPT" }
+//     o.code                          Node E_OPT    here E_OPT
+//     (o as ErrnoException).code      Node E_OPT    here undefined
+//
+// Section 4 below pins the half that agrees, and deliberately not the half
+// that does not.
+//
 // If a later block gives ScrError a wider code slot, or gives the base
 // view a dynamic read, delete this file's third section and print the
 // base-view read here.
@@ -91,3 +112,29 @@ class DeeperNumbered extends Numbered {
 }
 const d = new DeeperNumbered("deep");
 console.log("D d.code=" + d.code + " name=" + d.name + " str=" + String(d));
+
+// 4. `code?: string` — the near miss. Its own slot, correct through the
+//    subclass type. The base-view read is NOT printed, for the reason in
+//    the header: the union does not fit the inherited string slot without
+//    a store form that does not exist yet.
+class OptSet extends Error {
+  code?: string;
+  constructor(msg: string) {
+    super(msg);
+    this.name = "OptSet";
+    this.code = "E_OPT";
+  }
+}
+class OptUnset extends Error {
+  code?: string;
+  constructor(msg: string) {
+    super(msg);
+    this.name = "OptUnset";
+  }
+}
+const os1 = new OptSet("set");
+const os2 = new OptUnset("unset");
+console.log("E set.code=" + os1.code + " str=" + String(os1));
+console.log("E unset.code=" + os2.code + " str=" + String(os2));
+viaError("E set", os1);
+viaError("E unset", os2);
