@@ -88,6 +88,7 @@ import {
   type LlClassMeta,
 } from "./classes.js";
 import { DK, LlDyn } from "./dyn.js";
+import { emitNpmEmbeddingLl } from "./island.js";
 import { rcAdapters } from "../emission/emit-types.js";
 import { LlvmCensus, llvmCensusEnabled, LlvmUnsupportedError } from "./unsupported.js";
 import { LlWalkers } from "./walkers.js";
@@ -259,7 +260,10 @@ const LIB_FN_SYMS: Record<string, string> = {
   "os.totalmem": "scr_os_totalmem",
   "os.release": "scr_os_release",
   "os.userName": "scr_os_user_name",
+  "os.userUid": "scr_os_user_uid",
+  "os.userGid": "scr_os_user_gid",
   "os.userShell": "scr_os_user_shell",
+  "os.userShellNull": "scr_os_user_shell_null",
   "os.userHomedir": "scr_os_user_homedir",
   "os.tmpdir": "scr_os_tmpdir",
   "process.argv": "scr_process_argv",
@@ -431,7 +435,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "tlsca.set": "scr_tls_ca_set_default",
   // ── node:tls's runtime-options slice and node:dgram: the rows that
   // were the whole of this tier's enumerated refusal list except the two
-  // PEM-pair servers below and the deliberate npmEmbedding fence. Every
+  // PEM-pair servers below and the embedded npm graph (island.ts, the
+  // last of the seven to close). Every
   // one rides the GENERIC path unchanged, because the C tier spells each
   // as ONE runtime call whose arguments are 1:1 with the IR's — what kept
   // them out was a missing row, plus (for three) a trailing NULL the IR
@@ -1363,9 +1368,6 @@ class LlEmitter {
         lib: rec.lib,
       });
     }
-    if (mod.embedded !== undefined && mod.embedded.modules.length > 0) {
-      throw new LlvmUnsupportedError("npmEmbedding");
-    }
   }
 
   // ── types ───────────────────────────────────────────────────────────────
@@ -1535,6 +1537,22 @@ class LlEmitter {
     // row for row and fails on drift in either direction.
     const usesHttp2 = moduleUsesHttp2(this.mod);
     const usesDgram = moduleUsesDgram(this.mod);
+    // The embedded npm graph (--dynamic): every reached module's source
+    // and the resolution edges, as two static tables the island's loader
+    // and its require shim resolve from — binaries never read
+    // node_modules at runtime. island.ts is emit-island.ts's
+    // emitNpmEmbedding in IR: same compression contract, same rows, so
+    // the two backends embed identical bytes. A program without a graph
+    // gets null and every line below is gated on it, which is why its
+    // emitted module is unchanged to the byte.
+    const npm = emitNpmEmbeddingLl(this, this.mod);
+    // Embedded npm code can leave island promise chains pending when
+    // %main returns (a package function's async work) — the loop's io
+    // hook drains the engine's job queue at quiescence, so npm-importing
+    // programs always run the loop, like Node always runs its own. And
+    // they exit with process.exitCode when the graph set it (Node's
+    // implicit exit status). Both are the C main's usesIsland.
+    const usesIsland = npm !== null;
     const embedsZlib = moduleEmbedsBuiltin(this.mod, "node:zlib");
     const embedsHttpClient =
       moduleEmbedsBuiltin(this.mod, "node:http") || moduleEmbedsBuiltin(this.mod, "node:https");
@@ -1578,12 +1596,53 @@ class LlEmitter {
     // async loop-exhaustion story.
     const runsLoop =
       this.usesTimers ||
-      this.mod.functions.some((f) => f.async === true || f.generator !== undefined);
+      this.mod.functions.some((f) => f.async === true || f.generator !== undefined) ||
+      usesIsland;
     const uncaughtReleases = entryMayThrow && !asyncEntry ? globalReleaseLines("gu") : [];
     const loopReleasesU = runsLoop ? globalReleaseLines("gl") : [];
     const loopReleasesR = runsLoop ? globalReleaseLines("gr") : [];
     const topRejectReleases = asyncEntry ? globalReleaseLines("gt") : [];
     const topPendingReleases = asyncEntry ? globalReleaseLines("gp") : [];
+    // The pending-module-root exit (status 13): an island program's
+    // process.exitCode outranks it — the C main's programExitCode in that
+    // block. Exit listeners run there too and can SET it, so the code is
+    // read again afterwards and replaces the verdict only when the
+    // island's version counter moved (the C main's exit-code-version
+    // dance, which is also why the note is emitted BEFORE the listeners).
+    const islandStuck: { pre: string[]; post: string[]; status: string } =
+      !usesIsland || !asyncEntry
+        ? { pre: [], post: [], status: "13" }
+        : !usesEvents || !hasRefGlobals
+          ? {
+              pre: [
+                `  %islp = call i32 @scr_island_exit_code()`,
+                `  %islpz = icmp eq i32 %islp, 0`,
+                `  %islps = select i1 %islpz, i32 13, i32 %islp`,
+              ],
+              post: [],
+              status: "%islps",
+            }
+          : {
+              pre: [
+                `  %islp = call i32 @scr_island_exit_code()`,
+                `  %islpz = icmp eq i32 %islp, 0`,
+                `  %islps = select i1 %islpz, i32 13, i32 %islp`,
+                `  %islpv = call i64 @scr_island_exit_code_version()`,
+                `  call void @scr_exit_code_note(i32 %islps)`,
+              ],
+              post: [
+                `  %islpv2 = call i64 @scr_island_exit_code_version()`,
+                `  %islpvc = icmp ne i64 %islpv, %islpv2`,
+                `  br i1 %islpvc, label %islp_moved, label %islp_join`,
+                `islp_moved:`,
+                `  %islpm = call i32 @scr_island_exit_code()`,
+                `  call void @scr_exit_code_note(i32 %islpm)`,
+                `  br label %islp_join`,
+                `islp_join:`,
+                `  %islpf = phi i32 [ %islps, %tla_stuck ], [ %islpm, %islp_moved ]`,
+              ],
+              status: "%islpf",
+            };
     const loopReportedReleases = runsLoop ? globalReleaseLines("gq") : [];
     // main's epilogues read the flag / the loop entry points — declared
     // HERE, before the extern block flushes (a pending check usually
@@ -1593,6 +1652,26 @@ class LlEmitter {
       this.declare(`declare zeroext i1 @scr_loop_run(ptr)`);
       this.declare(`declare zeroext i1 @scr_report_unhandled_rejections()`);
       this.declare(`declare void @scr_discard_unhandled_rejections()`);
+    }
+    // The island's registration and its exit code. The C main reads
+    // process.exitCode from the embedded graph at BOTH exits — the
+    // ordinary one and the pending-module-root one (status 13, which an
+    // island verdict outranks).
+    if (npm !== null) {
+      this.declare(`declare void @scr_island_modules(ptr, i64, ptr, i64)`);
+      this.declare(`declare i32 @scr_island_exit_code()`);
+      // Compressed module text needs the inflater installed before the
+      // first load — scr_zlib.c joins the link on the same
+      // moduleEmbedsCompressedNpm predicate (index.ts's zlib switch), so
+      // a compression-free dynamic build keeps its exact link line.
+      if (npm.compressed) {
+        this.declare(`declare void @scr_island_set_inflate(ptr)`);
+        this.declare(`declare zeroext i1 @scr_zlib_inflate_exact(ptr, i64, ptr, i64)`);
+      }
+      if (asyncEntry && usesEvents && hasRefGlobals) {
+        this.declare(`declare void @scr_exit_code_note(i32)`);
+        this.declare(`declare i64 @scr_island_exit_code_version()`);
+      }
     }
     if (asyncEntry) {
       this.declare(`declare i32 @scr_promise_finish_top_level(ptr)`);
@@ -1686,6 +1765,7 @@ class LlEmitter {
       // The dynCheck error-path spine { parent, key, index } — the emitted
       // builders stack-allocate one per recursion level (dyn.ts).
       `%ScrDynPath = type { ptr, ptr, i64 }`,
+      ...(npm !== null ? npm.typeDefs : []),
     ];
     appendAll(out, shapes.typeDefs);
     appendAll(out, classShapes.typeDefs);
@@ -1745,6 +1825,10 @@ class LlEmitter {
       );
     }
     if (this.cstrs.size > 0) out.push(``);
+    if (npm !== null) {
+      appendAll(out, npm.defs);
+      out.push(``);
+    }
     for (const [className, d] of this.dynClassDescSyms) {
       out.push(`@${d.sym} = internal constant ${d.body} ; dyn box: class ${className}`);
     }
@@ -1846,6 +1930,18 @@ class LlEmitter {
       ...(embedsZlib ? [`  call void @scr_zlib_island_install()`] : []),
       ...(embedsHttpClient ? [`  call void @scr_net_island_install()`] : []),
       `  call void @scr_lib_init(i32 %argc, ptr %argv)`,
+      // The embedded npm tables must be registered before %main: the
+      // %init functions it calls import from them. Static data only —
+      // the engine still boots lazily, on the first island entry.
+      ...(npm !== null
+        ? [
+            ...(npm.compressed
+              ? [`  call void @scr_island_set_inflate(ptr @scr_zlib_inflate_exact)`]
+              : []),
+            `  call void @scr_island_modules(ptr @sc_npm_modules, i64 ${npm.nmods}, ` +
+              `ptr ${npm.nedges > 0 ? "@sc_npm_edges" : "null"}, i64 ${npm.nedges})`,
+          ]
+        : []),
       ...(asyncEntry
         ? [`  %top = call ptr @${mangleAsyncSpawn(this.mod.entry)}()`]
         : [`  call void @${mangleFunction(this.mod.entry)}()`]),
@@ -1917,9 +2013,11 @@ class LlEmitter {
                   `  %tla_pending = icmp eq i32 %tla_status, 13`,
                   `  br i1 %tla_pending, label %tla_stuck, label %tla_ok`,
                   `tla_stuck:`,
+                  ...islandStuck.pre,
                   ...exitListenerLines("xp"),
+                  ...islandStuck.post,
                   ...topPendingReleases,
-                  `  ret i32 13`,
+                  `  ret i32 ${islandStuck.status}`,
                   `tla_ok:`,
                 ]
               : []),
@@ -1927,7 +2025,12 @@ class LlEmitter {
         : []),
       ...exitListenerLines("xn"),
       ...globalReleases,
-      `  ret i32 0`,
+      // Node's implicit exit status: an island program returns whatever
+      // the embedded graph left in process.exitCode (0 when never set).
+      // Read AFTER the exit listeners and the releases, like the C main's
+      // `return scr_island_exit_code();`.
+      ...(usesIsland ? [`  %islex = call i32 @scr_island_exit_code()`] : []),
+      `  ret i32 ${usesIsland ? "%islex" : "0"}`,
       `}`,
       ``,
       // sanitize_address is inert under the plain pipeline; the sanitized

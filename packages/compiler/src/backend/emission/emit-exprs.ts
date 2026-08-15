@@ -2991,8 +2991,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_os_release()`);
           case "os.userName":
             return finish(`scr_os_user_name()`);
+          case "os.userUid":
+            return finish(`scr_os_user_uid()`);
+          case "os.userGid":
+            return finish(`scr_os_user_gid()`);
           case "os.userShell":
             return finish(`scr_os_user_shell()`);
+          case "os.userShellNull":
+            return finish(`scr_os_user_shell_null()`);
           case "os.userHomedir":
             return finish(`scr_os_user_homedir()`);
           case "os.tmpdir":

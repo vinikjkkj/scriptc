@@ -945,7 +945,9 @@ export const BUILTIN_MODULE_FN_ALIASES: Record<string, Record<string, readonly I
   },
   os: {
     // lowerOsUserInfoCall assembles the record from scalar libCalls.
-    userInfo: ["os.userHomedir", "os.userShell"],
+    userInfo: [
+      "os.userHomedir", "os.userShell", "os.userShellNull", "os.userUid", "os.userGid",
+    ],
   },
 };
 
