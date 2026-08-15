@@ -1663,13 +1663,11 @@ static void scr_net_server_accept(ScrNetServer *srv) {
  * 127.0.0.1 — the documented divergence from Node's family autoselect).
  * The connect callback registers as once('connect'). Never throws: every
  * failure is the async 'error' event, like Node. */
-/* Blocking first-answer hostname resolution for the CLIENT bridges (the
- * native fetch, the island's http/https client) — the dns.lookup
- * precedent (scr_dgram.c): getaddrinfo runs AT CALL TIME, first answer
- * wins. Returns +1: the resolved IP string, or a RETAIN of `host` when it
- * is already an IP literal or localhost (scr_net_connect's own arms) or
- * unresolvable — the dial's deferred "getaddrinfo ENOTFOUND host" error
- * is then Node's exact cause shape. node:net's own connect surface stays
+/* Blocking hostname resolution for the CLIENT bridges — the dns.lookup
+ * precedent (scr_dgram.c): getaddrinfo runs AT CALL TIME. The dial keeps
+ * the WHOLE answer (scr_net_lookup_candidates below); a caller that only
+ * wants one address still gets the first, through
+ * scr_net_blocking_lookup. node:net's own connect surface stays
  * resolver-less on purpose (Node's async lookup semantics are not this). */
 /* getaddrinfo's WHOLE answer for `host`, in Node's autoSelectFamily
  * order. Read off net.js (lookupAndConnectMultiple) and then MEASURED on
@@ -2004,7 +2002,32 @@ ScrNetSocket *scr_net_connect_deferred(double port, ScrStr *host /*borrowed, nul
 void scr_net_sock_dial_start(ScrNetSocket *s) {
   if (!s->dial_deferred || s->close_emitted || s->emit_close || s->fd >= 0) return;
   s->dial_deferred = false;
-  scr_net_sock_dial_peer(s);
+  /* peer_ip holds whatever the caller QUEUED, and the http agent queues
+   * the request's host — which is a NAME. scr_net_sock_dial_peer only
+   * knows literals, so a queued request to a hostname used to answer
+   * "getaddrinfo ENOTFOUND <name>" while the very same request answered
+   * 200 when a slot happened to be free. It resolves HERE, at the moment
+   * the slot frees, which is where Node creates the socket and looks the
+   * host up too, and it takes the same staggered chain as any other
+   * dial-by-name. */
+  ScrStr *queued = scr_str_new(s->peer_ip, strlen(s->peer_ip));
+  ScrStr **ips = NULL;
+  size_t n = scr_net_lookup_candidates(queued, &ips);
+  scr_str_release(queued);
+  if (n <= 1) {
+    if (n == 1) {
+      snprintf(s->peer_ip, sizeof s->peer_ip, "%.*s", (int)(ips[0]->len < 63 ? ips[0]->len : 63),
+               ips[0]->data);
+      scr_str_release(ips[0]);
+    }
+    free(ips);
+    scr_net_sock_dial_peer(s);
+    return;
+  }
+  s->dial_ips = ips; /* the +1s move onto the socket */
+  s->dial_n = n;
+  s->dial_i = 0;
+  scr_net_sock_dial_next(s);
 }
 
 /* ── the caller-lookup dial (net.connect with a lookup option) ─────────
