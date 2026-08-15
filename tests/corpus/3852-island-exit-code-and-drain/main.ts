@@ -1,4 +1,5 @@
 // @dynamic
+// @exit: 3
 // Node's implicit exit status and the island's own job queue — the two
 // main-time rows an embedded graph adds beyond the tables themselves.
 //
