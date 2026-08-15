@@ -123,6 +123,26 @@ console.log(typeof withFields.a, typeof withFields.b, typeof withFields.c);
 const withOpt: { c?: string } = {};
 console.log(typeof withOpt.c, typeof withOpt.c === "undefined");
 
+// A HYBRID shape -- declared fields AND an index signature. The declared
+// field is always present and answers its own type; the index keys are the
+// presence test. Both spellings in one object, so a rung that confused the
+// two would print the wrong answer on one of these three.
+console.log("-- hybrid: declared field plus index signature --");
+const hybrid: { id: string; [k: string]: string } = { id: "x", extra: "y" };
+console.log(typeof hybrid.id, typeof hybrid.extra, typeof hybrid.nope);
+
+// UNAFFECTED NEIGHBOURS, here so the block's reach is bounded by a test and
+// not only by an argument. A `Record<string, unknown>` read already
+// answered a miss (it reads at dyn width and asks the dyn kind table); a
+// `Map.get` already answered one (the lib types it `V | undefined`).
+// Neither goes through the new rung and both must keep their answers.
+console.log("-- neighbours that already answered --");
+const unknowns: { [k: string]: unknown } = { a: 1, b: "s", c: null, d: [1] };
+console.log(typeof unknowns.a, typeof unknowns.b, typeof unknowns.c, typeof unknowns.d, typeof unknowns.missing);
+const sizes = new Map<string, number>();
+sizes.set("k", 1);
+console.log(typeof sizes.get("k"), typeof sizes.get("z"));
+
 // A nested keyed read: the RECEIVER is itself a keyed read into a record
 // of records.
 console.log("-- nested --");
