@@ -924,6 +924,35 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (folded && droppableStatic(operand)) {
         return { kind: "strLit", value: folded, type: STRING, loc };
       }
+      // The ANSWER is static but the OPERAND is not droppable: `typeof
+      // decodeLength(buf)`, `typeof makeTag()`. JS evaluates a typeof
+      // operand exactly like any other expression and only then reports its
+      // type, so the answer is the same interned string the fold above
+      // returns -- all the effectful case needs is somewhere to put the
+      // evaluation, and `seqExpr` is that place. It is the shape the COMMA
+      // operator already builds for this exact job ("left runs for effect,
+      // right is the value" -- lowerBinary's CommaToken arm), and the one
+      // value-position `void e` was fenced for want of: "the effect would
+      // need to sequence before it, which no expression shape carries".
+      // It does carry it, 9 700 lines further down the same file.
+      //
+      // The statement is an `exprStmt` over the ALREADY-LOWERED operand --
+      // re-lowering the syntax would run every lowering side effect twice,
+      // and `exprStmt` is in seqExprSafeStmt's straight-line set, so no
+      // seqExpr region rule is bent. Purely additive: this arm only runs
+      // where `droppableStatic` said no and the code below therefore
+      // called `unsupported`. Operands whose TYPE has no static answer
+      // (jsval, dyn, union) never reach here -- they are answered above,
+      // and their own fences are untouched.
+      if (folded) {
+        return {
+          kind: "seqExpr",
+          stmts: [{ kind: "exprStmt", expr: operand, loc }],
+          result: { kind: "strLit", value: folded, type: STRING, loc },
+          type: STRING,
+          loc,
+        };
+      }
       // A union operand: every arm's typeof answer is static, so the value
       // form is a ternary chain over runtime TAG tests (arms grouped by
       // answer; the last group needs no test). The operand rides several
