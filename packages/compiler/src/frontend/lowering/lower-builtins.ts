@@ -9265,8 +9265,17 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
           // promise arms are exactly the promise's payload — crosses; a
           // union hiding a DIFFERENT payload keeps the fence below,
           // because there the answer really would depend on which arm.
-          const bridged = L.settleOrValueResolve(L.lowerExpr(argNode), locOf(argNode));
-          if (bridged !== null) return bridged;
+          // The shape is decided BEFORE the argument is lowered. Lowering
+          // first and asking afterwards would run the operand's lowering on
+          // the way to a fence, and a fence is not where a second, unrelated
+          // diagnostic should come from: every union this rule declines must
+          // keep reporting exactly the SC2020 it reported before.
+          const uArms = L.unions.get(argIr.unionId)?.arms ?? [];
+          const pArm = uArms.find((a) => a.kind === "promise");
+          if (pArm?.kind === "promise" && L.settleOrValueAwaitYields(argIr, pArm.inner)) {
+            const bridged = L.settleOrValueResolve(L.lowerExpr(argNode), locOf(argNode));
+            if (bridged !== null) return bridged;
+          }
           L.noLowering(
             "Promise.resolve over a value that may already be a promise",
             argNode,
