@@ -33,6 +33,12 @@ const RUNTIME_SOURCES = ["scr_number.c", "scr_string.c", "scr_array.c", "scr_byt
  * REAL argv of every build (compileC hands it the source list it is about to
  * put on the command line, so the two cannot drift). */
 const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
+  // The `signal` option's seam: an AbortSignal torn into an in-flight
+  // ClientRequest. scr_abort.c and scr_http.c are gated independently (an
+  // http program need not have a signal; an AbortController program need
+  // not have http), so neither may name the other — this TU names both and
+  // is gated on the two together, the scr_cipher_key.c pattern.
+  "scr_abort_http.c": ["scr_abort.c", "scr_http.c"],
   "scr_cipher_key.c": ["scr_asym.c", "scr_cipher_value.c"],
   "scr_cipher_value.c": ["scr_cipher.c"],
   "scr_dc.c": ["scr_async_dyn.c"],
@@ -299,6 +305,13 @@ export interface CcOptions {
    * that a plain http program does not have to link scr_stream.c — the
    * adapter references both sides, and there is no dead stripping here. */
   httpPipe?: boolean;
+  /** The program passes an AbortSignal to http.request (the
+   * `http.clientSignal` libCall on the IR): compiles scr_abort_http.c in,
+   * and IMPLIES both halves it wires (scr_abort.c, scr_http.c) so the link
+   * set stays closed. The seam is a separate TU for the httpPipe reason —
+   * an abort-free http program and an http-free AbortController program
+   * must each link without the other unit. */
+  abortHttp?: boolean;
   /** The program uses node:test (moduleUsesNodeTest on the IR): compiles
    * scr_test.c into the binary — the net gating precedent, so test-free
    * binaries keep their exact link line. */
@@ -1240,7 +1253,11 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // http2.* libCall beside it) from becoming an lld-link error.
   const http2 = opts.http2 ?? false;
   const tls = (opts.tls ?? false) || http2 || nativeFetch || netIsland || wsGlobal;
-  const http = (opts.http ?? false) || tls || http2 || nativeFetch || netIsland || wsGlobal;
+  const abortHttp = opts.abortHttp ?? false;
+  /* The seam implies its two halves: a wrong `false` here would be an
+   * undefined symbol at the very end of the build naming no gate. */
+  const abortSignal = (opts.abortSignal ?? false) || abortHttp;
+  const http = (opts.http ?? false) || tls || http2 || nativeFetch || netIsland || wsGlobal || abortHttp;
   const net = (opts.net ?? false) || http || tls || http2 || nativeFetch || netIsland || wsGlobal;
   const driver = resolveCc();
   if (driver.target !== null) {
@@ -1390,7 +1407,8 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opts.symbol ? [rt(join(rtDir, "scr_symbol.c"))] : []),
     ...(opts.searchParams ? [rt(join(rtDir, "scr_url_params.c"))] : []),
     ...(opts.qs ? [rt(join(rtDir, "scr_qs.c"))] : []),
-    ...(opts.abortSignal ? [rt(join(rtDir, "scr_abort.c"))] : []),
+    ...(abortSignal ? [rt(join(rtDir, "scr_abort.c"))] : []),
+    ...(abortHttp ? [rt(join(rtDir, "scr_abort_http.c"))] : []),
     ...(opts.stream ? [rt(join(rtDir, "scr_stream.c"))] : []),
     // The readiness-poller backends (scr_platform.h): kqueue on macOS/BSD,
     // epoll on Linux, WSAPoll on Windows — each TU is empty off its

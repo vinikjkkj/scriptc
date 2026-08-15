@@ -1,0 +1,35 @@
+http-client-signal.ts:19:21 - error SC2020: 'a request 'signal' option of 'number' values' is part of the standard library types but has no scriptc lowering yet
+
+  18 | // Not a signal: the option's own type fence, naming what it saw.
+  19 | http.request(url, { signal: 5 as unknown as AbortSignal }, cb);
+     |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  20 | http.request(url, { signal: "later" as unknown as AbortSignal }, cb);
+
+  hint: the signal is an AbortSignal, or an AbortSignal | undefined (Node ignores an absent one)
+
+http-client-signal.ts:20:21 - error SC2020: 'a request 'signal' option of 'string' values' is part of the standard library types but has no scriptc lowering yet
+
+  19 | http.request(url, { signal: 5 as unknown as AbortSignal }, cb);
+  20 | http.request(url, { signal: "later" as unknown as AbortSignal }, cb);
+     |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  21 | 
+
+  hint: the signal is an AbortSignal, or an AbortSignal | undefined (Node ignores an absent one)
+
+http-client-signal.ts:34:30 - error SC2020: 'request headers of '{ [key: string]: boolean } | undefined' values' is part of the standard library types but has no scriptc lowering yet
+
+  33 | const bad: Bad = {};
+  34 | http.request(url, { headers: bad.headers as unknown as Record<string, string> }, cb);
+     |                              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  35 | 
+
+  hint: pass an object literal or a Record<string, string> (an optional one may be undefined — Node reads no headers then)
+
+http-client-signal.ts:41:44 - error SC2020: 'request with agent: false and a non-literal headers record' is part of the standard library types but has no scriptc lowering yet
+
+  40 | const init: Init = {};
+  41 | http.request(url, { headers: init.headers, agent: false }, cb);
+     |                                            ^~~~~~~~~~~~
+  42 | 
+
+  hint: agent: false lowers by injecting Connection: close into a LITERAL headers object — add connection: "close" to the record instead, or write the headers inline

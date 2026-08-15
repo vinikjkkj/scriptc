@@ -6642,6 +6642,25 @@ void scr_abort_signal_add(ScrAbortSignal *s, ScrClosure *cb, bool once);
  * that only forgot the entry would keep the closure, and everything it
  * captured, alive forever. */
 void scr_abort_signal_off(ScrAbortSignal *s, ScrClosure *cb);
+/* A NATIVE 'abort' listener: a C function plus a borrowed context, kept in
+ * the SAME vector as the JS listeners and carrying a sequence number off
+ * the same counter, so it fires in true REGISTRATION order among them.
+ * That ordering is observable and was measured against Node v25.9.0: a
+ * user listener added BEFORE an http request reads req.destroyed === false
+ * inside its own body, one added AFTER reads true, because Node's
+ * ClientRequest registers its listener at construction. A hook fired
+ * always-first or always-last gets one of those two cases wrong.
+ *
+ * ctx is BORROWED: the owner (scr_abort_http.c's client) holds the signal
+ * +1 and removes its entry before it can die. Registration is keyed on
+ * (fn, ctx) — a repeat is not a second listener, the JS rule. An add after
+ * the abort has already fired is stored and never runs, exactly as the
+ * closure form is; scr_abort_http.c never makes that call (it checks
+ * `aborted` first, because Node destroys the request synchronously there).
+ */
+typedef void (*ScrAbortNativeFn)(void *ctx);
+void scr_abort_signal_add_native(ScrAbortSignal *s, ScrAbortNativeFn fn, void *ctx);
+void scr_abort_signal_off_native(ScrAbortSignal *s, ScrAbortNativeFn fn, void *ctx);
 /* reason BORROWED; NULL or the dyn undefined mints the AbortError
  * DOMException (WebIDL legacy code 20). The FIRST abort wins: a second is
  * a no-op that does not change the reason. Fires listeners synchronously,
@@ -6907,6 +6926,24 @@ ScrHttpClientReq *scr_http_client_pipe_from(ScrStream *src, ScrHttpClientReq *c,
  * A second destroy is a no-op — the first error wins. err borrowed. */
 void scr_http_client_destroy_err(ScrHttpClientReq *c, ScrError *err /*borrowed*/);
 bool scr_http_client_destroyed(ScrHttpClientReq *c);
+/* The ABORT SEAM. scr_http.c must not name an scr_abort.c symbol and
+ * scr_abort.c must not name an scr_http.c one: the two units are
+ * independently link-gated (abortSignal / http), and an abort-free http
+ * program and an http-free abort program both have to link. So the
+ * wiring lives in a THIRD unit, scr_abort_http.c (gated on the two
+ * together, exactly as scr_cipher_key.c is gated on asym && cipher), and
+ * the only thing the client holds is an opaque signal pointer plus the
+ * detach it must run when it settles. `sig` moves in (+1, released by the
+ * detach); `detach` runs at most once, at 'close' or at the handle's own
+ * free, whichever comes first. */
+typedef void (*ScrHttpAbortDetach)(void *sig, void *client);
+void scr_http_client_set_abort(ScrHttpClientReq *c, void *sig /*moves*/, ScrHttpAbortDetach detach);
+/* http.request's `signal` option (scr_abort_http.c): wires an AbortSignal
+ * into an in-flight request and answers the SAME handle, +1 — a pass
+ * through, so it composes with every request row rather than doubling
+ * them. An already-aborted signal tears the request down now (the error
+ * still arrives through the queue, which is Node's order). */
+ScrHttpClientReq *scr_http_client_signal(ScrAbortSignal *s, ScrHttpClientReq *c);
 void scr_http_client_on_response(ScrHttpClientReq *c, ScrClosure *cb /*moves*/, ScrHttpRespFn fn, bool once);
 void scr_http_client_on_error(ScrHttpClientReq *c, ScrClosure *cb /*moves*/, ScrChildErrFn fn, bool once);
 void scr_http_client_on_timeout(ScrHttpClientReq *c, ScrClosure *cb /*moves*/, bool once);
@@ -6947,7 +6984,16 @@ ScrHttpClientReq *scr_http_request_url_opts(ScrStr *url /*borrowed*/, ScrStr *me
  * ERR_INVALID_PROTOCOL rather than a silent upgrade. false = the
  * exception is pending and no out-parameter was written. */
 bool scr_http_url_parts(ScrStr *url /*borrowed*/, bool secure, ScrStr **host_out /*+1*/,
-                         double *port_out, ScrStr **path_out /*+1*/);
+                         double *port_out, ScrStr **path_out /*+1*/,
+                         bool *explicit_port_out /*nullable*/);
+/* request(url, { agent, ... }[, cb]): the URL row threading an Agent. The
+ * port is the URL's when the authority wrote one and the -1 sentinel
+ * otherwise — Node's merge consults agent.defaultPort exactly then. */
+ScrHttpClientReq *scr_http_request_url_agent(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*/,
+                                             double timeout_ms, ScrArr *header_pairs /*borrowed*/,
+                                             bool auto_end, const struct ScrDyn *agent /*borrowed*/,
+                                             ScrClosure *cb /*moves, nullable*/,
+                                             ScrHttpRespFn fn); /* +1 */
 /* ── the http Agent (new http.Agent(opts) — option surface, getName, and
  * the maxSockets queue over one-dial-per-request connections; keep-alive
  * POOLING is not modeled: keepAlive: true fences at construction).
@@ -7150,6 +7196,14 @@ ScrHttpClientReq *scr_https_request_url_opts(ScrStr *url /*borrowed*/, ScrStr *m
                                              const char *ca /*borrowed, len 0 = none*/,
                                              size_t ca_len, ScrClosure *cb /*moves, nullable*/,
                                              ScrHttpRespFn fn); /* +1 */
+/* The URL row threading an Agent over TLS (scr_http_request_url_agent). */
+ScrHttpClientReq *scr_https_request_url_agent(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*/,
+                                              double timeout_ms, ScrArr *header_pairs /*borrowed*/,
+                                              bool auto_end, bool reject_unauthorized,
+                                              const char *ca /*borrowed, len 0 = none*/,
+                                              size_t ca_len, const struct ScrDyn *agent /*borrowed*/,
+                                              ScrClosure *cb /*moves, nullable*/,
+                                              ScrHttpRespFn fn); /* +1 */
 /* The agent-threaded twin (the scr_http_request_agent story over TLS). */
 ScrHttpClientReq *scr_https_request_agent(ScrStr *host /*borrowed*/, double port,
                                            ScrStr *path /*borrowed*/, ScrStr *method /*borrowed*/,

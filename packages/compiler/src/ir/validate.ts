@@ -532,7 +532,15 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // request(url, options[, cb]) — the URL row plus the option slots the
   // middle argument fills (timeout, headers).
   "http.requestUrlOpts": { argTypes: [STRING, STRING, F64, arrayOf(STRING), BOOL], result: HTTPCLIENTREQ_T },
+  "http.requestUrlAgent": { argTypes: [STRING, STRING, F64, arrayOf(STRING), BOOL, DYN], result: HTTPCLIENTREQ_T },
+  "http.requestUrlAgentCb": { argTypes: [STRING, STRING, F64, arrayOf(STRING), BOOL, DYN, null], result: HTTPCLIENTREQ_T },
   "http.requestUrlOptsCb": { argTypes: [STRING, STRING, F64, arrayOf(STRING), BOOL, null], result: HTTPCLIENTREQ_T },
+  // The `signal` option. Signal FIRST: the emitters evaluate a libCall's
+  // arguments left to right, so putting it there keeps every option value
+  // evaluating before the request row it wraps actually dials — the order
+  // Node's caller has, since the options record is built first. The result
+  // is the request argument itself, +1.
+  "http.clientSignal": { argTypes: [ABORTSIGNAL_T, HTTPCLIENTREQ_T], result: HTTPCLIENTREQ_T },
   "net.sockOnReadable": { argTypes: [NETSOCKET_T, null, BOOL], result: VOID },
   // sockRead's result is the interned `Buffer | null` union — checked
   // specially below (the reqHeader/envGet pattern; VOID here is a
@@ -674,6 +682,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // The TLS twin: the ca slot is a PEM string OR a Buffer, so it stays
   // unchecked here exactly like https.request's.
   "https.requestUrlOpts": { argTypes: [STRING, STRING, F64, arrayOf(STRING), BOOL, BOOL, null], result: HTTPCLIENTREQ_T },
+  "https.requestUrlAgent": { argTypes: [STRING, STRING, F64, arrayOf(STRING), BOOL, BOOL, null, DYN], result: HTTPCLIENTREQ_T },
+  "https.requestUrlAgentCb": { argTypes: [STRING, STRING, F64, arrayOf(STRING), BOOL, BOOL, null, DYN, null], result: HTTPCLIENTREQ_T },
   "https.requestUrlOptsCb": { argTypes: [STRING, STRING, F64, arrayOf(STRING), BOOL, BOOL, null, null], result: HTTPCLIENTREQ_T },
   "https.requestAgent": { argTypes: [STRING, F64, STRING, STRING, F64, arrayOf(STRING), BOOL, BOOL, null, DYN], result: HTTPCLIENTREQ_T },
   "https.requestAgentCb": { argTypes: [STRING, F64, STRING, STRING, F64, arrayOf(STRING), BOOL, BOOL, null, DYN, null], result: HTTPCLIENTREQ_T },
@@ -3891,7 +3901,8 @@ function validateFunction(
             e.fn === "http.requestUrlCb" || e.fn === "http.clientOnResponse" ||
             e.fn === "http.requestAgentCb" || e.fn === "https.requestAgentCb" ||
             e.fn === "https.requestUrlCb" ||
-            e.fn === "http.requestUrlOptsCb" || e.fn === "https.requestUrlOptsCb") {
+            e.fn === "http.requestUrlOptsCb" || e.fn === "https.requestUrlOptsCb" ||
+            e.fn === "http.requestUrlAgentCb" || e.fn === "https.requestUrlAgentCb") {
           // The response listener: void, no params or exactly (res: httpReq).
           const cbT = e.args[
             e.fn === "http.requestCb" ? 7
@@ -3899,6 +3910,8 @@ function validateFunction(
             : e.fn === "http.requestUrlCb" || e.fn === "https.requestUrlCb" ? 3
             : e.fn === "http.requestUrlOptsCb" ? 5
             : e.fn === "https.requestUrlOptsCb" ? 7
+            : e.fn === "http.requestUrlAgentCb" ? 6
+            : e.fn === "https.requestUrlAgentCb" ? 8
             : e.fn === "http.requestAgentCb" ? 8
             : e.fn === "https.requestAgentCb" ? 10
             : 1]?.type;

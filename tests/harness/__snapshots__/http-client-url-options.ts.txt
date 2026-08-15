@@ -61,29 +61,29 @@ http-client-url-options.ts:30:29 - error SC2020: 'request with an options record
 
   hint: the three-argument form is request(url, options[, callback]) — the first argument is the URL
 
-http-client-url-options.ts:35:19 - error SC2020: 'request with a URL first argument and an agent value' is part of the standard library types but has no scriptc lowering yet
+http-client-url-options.ts:37:19 - error SC2020: 'request mixing an agent value with createConnection' is part of the standard library types but has no scriptc lowering yet
 
-  34 | const agent = new http.Agent({});
-  35 | http.request(url, { agent }, cb);
-     |                   ^~~~~~~~~
-  36 | 
+  36 | const agent = new http.Agent({});
+  37 | http.request(url, { agent, createConnection: () => connect(9) }, cb);
+     |                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  38 | 
 
-  hint: pass the whole request as an options record when threading an Agent
+  hint: both own the dial — pass one or the other
 
-http-client-url-options.ts:39:19 - error SC2020: 'request with a URL first argument and a createConnection option' is part of the standard library types but has no scriptc lowering yet
+http-client-url-options.ts:41:19 - error SC2020: 'request with a URL first argument and a createConnection option' is part of the standard library types but has no scriptc lowering yet
 
-  38 | const dialer = () => connect(9);
-  39 | http.request(url, { createConnection: dialer }, cb);
+  40 | const dialer = () => connect(9);
+  41 | http.request(url, { createConnection: dialer }, cb);
      |                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  40 | 
+  42 | 
 
   hint: the dialer supplies the socket — pass the whole request as an options record
 
-http-client-url-options.ts:46:13 - error SC2020: 'a URL first argument through a request-function binding' is part of the standard library types but has no scriptc lowering yet
+http-client-url-options.ts:48:13 - error SC2020: 'a URL first argument through a request-function binding' is part of the standard library types but has no scriptc lowering yet
 
-  45 |   const requestFn = tls ? https.request : http.request;
-  46 |   requestFn(url, { method: "HEAD" }, cb);
+  47 |   const requestFn = tls ? https.request : http.request;
+  48 |   requestFn(url, { method: "HEAD" }, cb);
      |             ^~~
-  47 | }
+  49 | }
 
   hint: call http.request / https.request directly for the URL form, or pass the options as an object literal
