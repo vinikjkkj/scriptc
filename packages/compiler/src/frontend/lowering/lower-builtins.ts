@@ -9239,6 +9239,18 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
         }
         if (argIr?.kind === "union" &&
             (L.unions.get(argIr.unionId)?.arms ?? []).some((a) => a.kind === "promise")) {
+          // "wrap-or-identity depends on the runtime arm" is a REASON TO
+          // TEST THE ARM, not a reason to refuse — and for the SETTLE-OR-
+          // VALUE shape (`Promise<T> | T`) the compiler already tests it:
+          // `await` on this exact union walks the tag and picks the branch
+          // (settleOrValueAwait). Promise.resolve is the same union asked
+          // the other question, so it takes the same walk with the wrap
+          // where the await was. Only that shape — a union whose non-
+          // promise arms are exactly the promise's payload — crosses; a
+          // union hiding a DIFFERENT payload keeps the fence below,
+          // because there the answer really would depend on which arm.
+          const bridged = L.settleOrValueResolve(L.lowerExpr(argNode), locOf(argNode));
+          if (bridged !== null) return bridged;
           L.noLowering(
             "Promise.resolve over a value that may already be a promise",
             argNode,
