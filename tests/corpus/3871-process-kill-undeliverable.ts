@@ -43,9 +43,12 @@ attempt("signo -1", () => process.kill(pid, -1));
 
 // A pid above every host's pid_max but inside int32: the process is
 // resolved BEFORE the signal is looked at, so an undeliverable signal
-// to a dead pid answers for the pid, not for the signal.
+// to a dead pid answers for the pid, not for the signal. The last one
+// is where the two orders visibly disagree: Windows answers for the pid
+// (ESRCH) and Linux's kill(2) validates the signal first (EINVAL).
 attempt("esrch probe", () => process.kill(99999999, 0));
 attempt("esrch winch", () => process.kill(99999999, 28));
+attempt("esrch out of range", () => process.kill(99999999, 9999));
 
 // Unknown NAMES are a TypeError before any kill(2) happens.
 attempt("bad name", () => process.kill(pid, "SIGNOPE"));
