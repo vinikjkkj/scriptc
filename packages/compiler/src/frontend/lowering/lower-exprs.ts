@@ -2788,6 +2788,13 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           narrowed.kind === "string" ||
           narrowed.kind === "bigint")
       ) {
+        // SCRIPTC_BIGNARROW_WHY: name the reads this bridge answers with a
+        // bigint, so "the rule fires nowhere" and "nothing changed" are
+        // different observations in the same run.
+        if (narrowed.kind === "bigint" && process.env["SCRIPTC_BIGNARROW_WHY"]) {
+          const p = ts.getLineAndCharacterOfPosition(node.getSourceFile(), locOf(node).start);
+          process.stderr.write(`[bignarrow] ${locOf(node).file}:${p.line + 1} ${node.getText().slice(0, 40)}\n`);
+        }
         return { kind: "dynCheck", value: expr, type: narrowed, narrowBridge: true, loc: expr.loc };
       }
       // An `instanceof Uint8Array` narrow: the checked-dynamic tree's bytes kind, extracted
