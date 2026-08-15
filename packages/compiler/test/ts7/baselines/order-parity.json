@@ -7517,6 +7517,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3871-process-kill-undeliverable.ts": {
+   "order": [
+    "<repo>/tests/corpus/3871-process-kill-undeliverable.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3872-spawn-failure-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/3872-spawn-failure-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3873-spawn-failure-order-unhandled.ts": {
+   "order": [
+    "<repo>/tests/corpus/3873-spawn-failure-order-unhandled.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/400-fib.ts": {
    "order": [
     "<repo>/tests/corpus/400-fib.ts"
