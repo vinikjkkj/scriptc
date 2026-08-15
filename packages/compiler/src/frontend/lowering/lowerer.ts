@@ -101,6 +101,7 @@ import { lowerEmitOverrideSpec, type EmitSpecCtx, type EmitSpecRequest } from ".
 import { builtinImportOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, stripTypeCasts, lowerBuiltinModuleCall, lowerFsToUnixTimestampCall, lowerFsLadderCall, lowerChildArgsArg, lowerSpawnSyncCall, lowerSpawnCall, lowerExecSyncCall, recordToEnvPairs, lowerJsonMethodCall, fencedBuiltinImportOf, lowerCryptoComposedCall, lowerUrlMethodCall, lowerSearchParamsMethodCall, lowerStatsMethodCall, lowerFileHandleMethodCall, lowerChildMethodCall, lowerAtomicsCall, lowerBuiltinExtraProperty, promisifiedExecFileDecl, lowerPromisifiedSettledCall, type PromisifiedTarget, lowerExecFileAsyncCall, execFileAsyncHelper, lowerStringDecoderMethodCall, strdecHelper, lowerReadlineMethodCall, lowerDcChannelMethodCall, lowerDcChannelProperty, lowerAlsMethodCall, lowerDcTracingChannelMethodCall, lowerDcTracingChannelProperty, lowerJsonProperty, lowerErrorCodeProperty, lowerErrorPrototypeProperty, lowerUint8ArrayPrototypeProperty, lowerUint8ArrayStaticProperty, lowerProcessProperty, processVersionsMember, isProcessEnv, envValueType, lowerProcessEnvGet, lowerProcessMethodCall, lowerProcessOptionalMethodCall, lowerTimeoutMethodCall, envSnapshotHelper, isConsoleLog, consoleCallMember, lowerNumberStaticCall, lowerNumberStaticProperty, lowerDateCall, lowerTextCodecCall, lowerCryptoModuleCall, lowerFsConstantsProperty, lowerBuiltinConstantsProperty, builtinConstantBindingOf, builtinConstantsDestructureDecl, lowerProcessStreamProperty, lowerStringStaticCall, lowerStringLastIndexOfCall, lowerPromiseStaticCall } from "./lower-builtins.js";
 import { isIslandExpr, islandFuncValueFence, islandRegexpOf, jsvalIn, requireDynamicApi, islandGlobalFnOf, lowerDynamicImportCall, lowerFetchCall, lowerIslandMethodCall, lowerMathProperty, npmPackageOf, npmMemberFence, npmPackageOfSymbol } from "./lower-island.js";
 import { lowerHttpHeadersElement, lowerNetModuleCall, lowerServerMethodCall, lowerServerProperty, lowerTlsRootCertificates } from "./lower-server.js";
+import { lowerNamespaceConditionalCall, namespaceOverrideOf } from "./lower-nsvalue.js";
 import { lowerDgramDnsModuleCall, lowerDgramMethodCall } from "./lower-dgram.js";
 import { lowerNodeTestModuleCall, lowerTestDirectCall, lowerTestMethodCall, lowerTestCtxProperty } from "./lower-test.js";
 import { lowerAssertModuleCall, lowerAssertDirectCall } from "./lower-assert.js";
@@ -10338,6 +10339,17 @@ export class Lowerer {
    * same object as node:fs/promises, Node's rule). Null otherwise. */
   builtinNamespaceModuleOf(expr: ts.Expression): string | null {
     if (ts.isIdentifier(expr)) {
+      // A runtime-chosen namespace (`const t = c ? https : http`) inside
+      // ONE arm of its own use: the override pins which module this arm
+      // is being lowered for, so every table below reads it as a plain
+      // namespace binding. Outside an arm there is no override and the
+      // identifier keeps whatever the ordinary rules say (which for a
+      // registered selector is nothing — the value fence owns it).
+      {
+        const sym = this.checker.getSymbolAtLocation(expr);
+        const pinned = sym ? namespaceOverrideOf(this, sym) : undefined;
+        if (pinned !== undefined) return pinned;
+      }
       const symbol = this.checker.getSymbolAtLocation(expr);
       const decl = symbol ? this.checker.declarationsOf(symbol)[0] : undefined;
       if (!decl) return null;
@@ -10444,6 +10456,12 @@ export class Lowerer {
    * qualified per-member fence for the rest. Null for non-namespace
    * callees (the call chain keeps trying). */
   lowerNamespaceBuiltinCall(call: ts.CallExpression, access: ts.PropertyAccessExpression): IrExpr | null {
+    // A member call through a RUNTIME-chosen namespace lowers once per
+    // arm under a module override and answers the ternary (lower-nsvalue.ts).
+    {
+      const cond = lowerNamespaceConditionalCall(this, call, access);
+      if (cond) return cond;
+    }
     const bi = this.builtinMemberOf(access);
     if (!bi) return null;
     // The timers spoke: `timers.setTimeout(...)` through a namespace or

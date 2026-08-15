@@ -20,6 +20,7 @@ import type { ClassInfo, ClassIteratorInfo } from "./lower-classes.js";
 import { genericIfaceBindingKeepsClass } from "./lower-classes.js";
 import { lowerStreamUnderscoreAssign, streamClassAliasDecl, streamSidesOf } from "./lower-stream.js";
 import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment } from "./lower-server.js";
+import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
 import { ctorObjectGlobalValue, isImmutablePrimitiveWidth } from "./lower-exprs.js";
@@ -4173,6 +4174,12 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     ) {
       type = init.type;
     }
+    // `const t = cond ? https : http` — a module NAMESPACE chosen at
+    // runtime: the initializer lowered to the CONDITION and this binding
+    // is the SELECTOR its member calls branch on (lower-nsvalue.ts). The
+    // checker spells the unmappable union of two module types; the slot
+    // holds a bool, and every use that is not a member call fences.
+    if (declSymbol && namespaceConditionalOf(L, declSymbol)) type = init.type;
     if (!type) {
       // The JS declaration fallback (irTypeOf's story): the binding holds
       // the checked-dynamic kind when even the initializer's type has no
