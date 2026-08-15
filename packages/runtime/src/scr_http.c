@@ -160,6 +160,16 @@ struct ScrHttpReq {
   size_t pend_len, pend_cap;
   bool destroyed; /* req.destroy()/the teardown ran — req.destroyed */
   ScrNetLs aborted_ls; /* req.on('aborted') — the h2 compat event */
+  /* The Readable VIEW of this body (scr_http_body.c), OPAQUE here: the
+   * request owns exactly one reference to it and gives that reference
+   * up through the callback the view installed. Keeping it opaque is
+   * what lets scr_http.c stay free of every scr_stream_* symbol, so an
+   * http program that never puts a response in a Readable slot links
+   * without the stream unit — the scr_http_pipe.c gate, one direction
+   * over. NULL until the first conversion; the slot is also the MEMO,
+   * so a second conversion answers the same stream. */
+  void *body_view;
+  void (*body_view_free)(void *);
 };
 
 #ifdef SCR_RC_AUDIT
@@ -225,11 +235,27 @@ void scr_http_req_release(ScrHttpReq *r) {
     free(r->pend);
     if (r->sock) scr_net_sock_release(r->sock);
     if (r->h2_stream) scr_http_h2_ops->release(r->h2_stream);
+    /* AFTER the listener lists have dropped: the view's four listeners
+     * hold it, and its free callback releases the stream, whose own
+     * teardown must not find a listener list mid-free. */
+    if (r->body_view != NULL) {
+      void *v = r->body_view;
+      void (*freefn)(void *) = r->body_view_free;
+      r->body_view = NULL;
+      freefn(v);
+    }
 #ifdef SCR_RC_AUDIT
     scr_http_live--;
 #endif
     free(r);
   }
+}
+
+/* The Readable-view slot (scr_http_body.c owns what goes in it). */
+void *scr_http_req_body_view(ScrHttpReq *r) { return r->body_view; }
+void scr_http_req_attach_body_view(ScrHttpReq *r, void *view, void (*freefn)(void *)) {
+  r->body_view = view;
+  r->body_view_free = freefn;
 }
 
 void *scr_http_req_retain_v(void *p) { return scr_http_req_retain((ScrHttpReq *)p); }
