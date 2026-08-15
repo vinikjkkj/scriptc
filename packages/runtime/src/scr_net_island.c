@@ -325,17 +325,20 @@ static JSValue ni_host_start(JSContext *ctx, JSValueConst this_val, int argc,
   t->cbs = JS_DupValue(ctx, argv[7]);
   t->cbs_live = true;
 
-  ScrStr *dial = scr_net_blocking_lookup(hostname);
+  /* The NAME goes to the http client, which resolves at its own dial
+   * (scr_net_connect_host, Node's autoSelectFamily schedule). This unit
+   * used to pre-resolve to a first answer and pass the IP — the Host
+   * header is built from `authority` above either way, and the TLS ctx
+   * from `hostname`, so nothing here depended on the pre-resolution. */
   ScrHttpClientReq *c;
   if (secure) {
     void *cli = scr_tls_fetch_client_ctx(hostname, true);
-    c = scr_http_request_ex(dial, (double)port, pathstr, methodstr, timeout_ms, pairs, false,
+    c = scr_http_request_ex(hostname, (double)port, pathstr, methodstr, timeout_ms, pairs, false,
                              NULL, NULL, 443, &scr_tls_fetch_client_wrap, cli);
   } else {
-    c = scr_http_request_ex(dial, (double)port, pathstr, methodstr, timeout_ms, pairs, false,
+    c = scr_http_request_ex(hostname, (double)port, pathstr, methodstr, timeout_ms, pairs, false,
                              NULL, NULL, 80, NULL, NULL);
   }
-  scr_str_release(dial);
   scr_str_release(hostname);
   scr_str_release(pathstr);
   scr_str_release(methodstr);

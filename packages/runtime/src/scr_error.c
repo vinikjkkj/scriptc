@@ -155,6 +155,20 @@ ScrError *scr_error_new(int kind, ScrStr *message) {
   return e;
 }
 
+/* Was this error MINTED BY THE RUNTIME, or is it an instance of a user
+ * class that extends Error? Runtime-minted errors carry one of the five
+ * builtin vtables by address (scr_error_alloc: `e->vt = &scr_error_vts[kind]`);
+ * an emitted subclass carries its own static vtable, whose pre/post nest
+ * INSIDE Error's interval — which is what makes instanceof work and is
+ * exactly why the interval test cannot answer this question. Pointer
+ * identity can. */
+static bool scr_error_runtime_minted(const ScrError *e) {
+  for (int i = 0; i < 5; i++) {
+    if (e->vt == &scr_error_vts[i]) return true;
+  }
+  return false;
+}
+
 ScrStr *scr_error_to_string(ScrError *e) {
   /* ECMA-262 Error.prototype.toString over the two fields (no prototype
    * chain exists: constructors always initialize both) — except Node's
@@ -162,13 +176,22 @@ ScrStr *scr_error_to_string(ScrError *e) {
    * family's construction-time name both render "name [code]: message".
    * Every ERR_*-coded error this runtime mints IS one of those classes
    * (fs/exec errno codes like ENOENT keep the plain form, like Node), so
-   * the code-prefix test is exact for runtime-thrown errors; a user
-   * assigning an ERR_* code onto a plain Error would bracket here where
-   * Node would not (documented — user code owns that spelling). */
+   * the code-prefix test is exact for runtime-thrown errors.
+   *
+   * A USER subclass never brackets in Node — `class Coded extends Error`
+   * with `this.code = "ERR_X"` stringifies as "Coded: boom", measured on
+   * v25.9.0 — and now that a subclass's own `code` declaration ROUTES
+   * into this very slot (one property, one slot, so the `Error` view can
+   * answer it), user-assigned ERR_* codes reach here for the first time.
+   * The provenance test above is what keeps that from bracketing: it was
+   * a documented-unreachable divergence while nothing could write the
+   * slot from user code, and closing the read is what made it reachable,
+   * so the two land together. */
   ScrStr *name = e->name;
   ScrStr *message = e->message;
   bool assertion = name && e->code && e->code->len >= 4 &&
-                   memcmp(e->code->data, "ERR_", 4) == 0;
+                   memcmp(e->code->data, "ERR_", 4) == 0 &&
+                   scr_error_runtime_minted(e);
   if (!name || name->len == 0) {
     return message ? scr_str_retain(message) : scr_str_new("", 0);
   }

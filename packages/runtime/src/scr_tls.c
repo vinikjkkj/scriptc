@@ -1610,9 +1610,8 @@ ScrNetSocket *scr_tls_connect_dyn(double port, ScrStr *host /*borrowed, nullable
   /* Resolve for the dial only (the http client's rule): verify_host above
    * already holds the NAME, which is what SNI and certificate verification
    * must see. A null dial_host stays null — scr_net_connect's own arm. */
-  ScrStr *dial_addr = dial_host != NULL ? scr_net_blocking_lookup(dial_host) : NULL;
-  ScrNetSocket *s = scr_net_connect(port, dial_addr, cb); /* cb fires post-handshake — secureConnect */
-  if (dial_addr) scr_str_release(dial_addr);
+  ScrNetSocket *s =
+      scr_net_connect_host(port, dial_host, cb); /* cb fires post-handshake — secureConnect */
   ScrTlsCli *cli = scr_tls_cli_new2(verify_host, reject,
                                      ca != NULL ? (const char *)ca->data : NULL,
                                      ca != NULL ? ca->len : 0, !reject);
