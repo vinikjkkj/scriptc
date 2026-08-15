@@ -1,0 +1,56 @@
+incoming-message-readable.ts:30:16 - error SC1090: 'IncomingMessage' values where 'Writable' is expected is not supported yet
+
+  29 | http.request(url, {}, (res) => {
+  30 |   intoWritable(res as unknown as Writable);
+     |                ^~~~~~~~~~~~~~~~~~~~~~~~~~
+  31 |   intoDuplex(res as unknown as Duplex);
+
+incoming-message-readable.ts:31:14 - error SC1090: 'IncomingMessage' values where 'Duplex' is expected is not supported yet
+
+  30 |   intoWritable(res as unknown as Writable);
+  31 |   intoDuplex(res as unknown as Duplex);
+     |              ^~~~~~~~~~~~~~~~~~~~~~~~
+  32 |   intoSubclass(res as unknown as MyReadable);
+
+incoming-message-readable.ts:32:16 - error SC1090: 'IncomingMessage' values where 'MyReadable' is expected is not supported yet
+
+  31 |   intoDuplex(res as unknown as Duplex);
+  32 |   intoSubclass(res as unknown as MyReadable);
+     |                ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  33 |   // The Readable members the view does not implement: they TYPECHECK now
+
+incoming-message-readable.ts:35:3 - error SC2020: 'IncomingMessage.push' is part of the standard library types but has no scriptc lowering yet
+
+  34 |   // (the interface inherits them) and must fence at the use site.
+  35 |   res.push(Buffer.from("x"));
+     |   ^~~~~~~~~~~~~~~~~~~~~~~~~~
+  36 |   console.log(res.read(1));
+
+  hint: url, method, statusCode, statusMessage, socket, headers/rawHeaders reads, resume, destroy, pipe, and on/once of data/end/error/close are the supported IncomingMessage members
+
+incoming-message-readable.ts:36:15 - error SC2020: 'IncomingMessage.read' is part of the standard library types but has no scriptc lowering yet
+
+  35 |   res.push(Buffer.from("x"));
+  36 |   console.log(res.read(1));
+     |               ^~~~~~~~~~~
+  37 |   res.unshift(Buffer.from("y"));
+
+  hint: url, method, statusCode, statusMessage, socket, headers/rawHeaders reads, resume, destroy, pipe, and on/once of data/end/error/close are the supported IncomingMessage members
+
+incoming-message-readable.ts:37:3 - error SC2020: 'IncomingMessage.unshift' is part of the standard library types but has no scriptc lowering yet
+
+  36 |   console.log(res.read(1));
+  37 |   res.unshift(Buffer.from("y"));
+     |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  38 |   console.log(res.isPaused());
+
+  hint: url, method, statusCode, statusMessage, socket, headers/rawHeaders reads, resume, destroy, pipe, and on/once of data/end/error/close are the supported IncomingMessage members
+
+incoming-message-readable.ts:38:15 - error SC2020: 'IncomingMessage.isPaused' is part of the standard library types but has no scriptc lowering yet
+
+  37 |   res.unshift(Buffer.from("y"));
+  38 |   console.log(res.isPaused());
+     |               ^~~~~~~~~~~~~~
+  39 | });
+
+  hint: url, method, statusCode, statusMessage, socket, headers/rawHeaders reads, resume, destroy, pipe, and on/once of data/end/error/close are the supported IncomingMessage members

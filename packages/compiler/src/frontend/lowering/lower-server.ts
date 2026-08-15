@@ -12,7 +12,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { ladderFenceExpr, nodeThrowExpr } from "./lowerer.js";
 import { isJsSourceFile, locOf } from "../program.js";
-import { ABORTSIGNAL_T, arrayOf, BOOL, BYTES_U8, canBoxFuncIntoDyn, canConvertToDyn, DYN, DYN_HANDLE_KINDS, F64, funcOf, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, IrExpr, IrLibFn, IrParam, IrStmt, IrType, NETSERVER_T, NETSOCKET_T, NULL_T, SECURECTX_T, STRING, UNDEFINED_T, SrcLoc, typeKey, VOID } from "../../ir/nodes.js";
+import { ABORTSIGNAL_T, arrayOf, BOOL, BYTES_U8, canBoxFuncIntoDyn, canConvertToDyn, DYN, DYN_HANDLE_KINDS, F64, funcOf, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, IrExpr, IrLibFn, IrParam, IrStmt, IrType, NETSERVER_T, NETSOCKET_T, NULL_T, RUNTIME_STREAM_CLASSES, SECURECTX_T, STRING, UNDEFINED_T, SrcLoc, typeKey, VOID } from "../../ir/nodes.js";
 import {
   AGENT_DOCUMENTED_OPTIONS,
   builtinFenceHintOf,
@@ -4637,6 +4637,16 @@ function lowerHttpReqMethodCall(L: Lowerer, call: ts.CallExpression,
     }
     const receiver = handleReceiver(L, access.expression, HTTPREQ_T);
     const dst = L.lowerExpr(args[0]!);
+    // A STREAM destination is the general case and it belongs to the
+    // general machinery: convert the body to its Readable view and let
+    // readable.pipe own the backpressure, the end propagation and the
+    // error story, rather than adding a fourth hand-written leg. The
+    // three handle legs above stay because their destinations are not
+    // streams at all.
+    if (dst.type.kind === "object" && RUNTIME_STREAM_CLASSES.has(dst.type.className)) {
+      const body = L.httpBodyStream(receiver);
+      return { kind: "libCall", fn: "readable.pipe", args: [body, dst, boolLit(true, loc)], type: dst.type, loc };
+    }
     const fn: IrLibFn | null =
       dst.type.kind === "httpRes" ? "http.reqPipeRes"
       : dst.type.kind === "httpClientReq" ? "http.reqPipeClient"
@@ -4646,7 +4656,7 @@ function lowerHttpReqMethodCall(L: Lowerer, call: ts.CallExpression,
       L.noLowering(
         `pipe into '${L.fmt(dst.type)}' destinations`,
         args[0]!,
-        "an IncomingMessage pipes into a ServerResponse, a ClientRequest, or a Socket",
+        "an IncomingMessage pipes into a Writable stream, a ServerResponse, a ClientRequest, or a Socket",
       );
     }
     return { kind: "libCall", fn, args: [receiver, dst], type: VOID, loc };

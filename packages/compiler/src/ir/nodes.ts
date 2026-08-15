@@ -418,6 +418,8 @@ export const HTTP2STREAM_T: IrType = { kind: "http2Stream" };
 export const DGRAMSOCK_T: IrType = { kind: "dgramSocket" };
 export const TESTCTX_T: IrType = { kind: "testCtx" };
 export const HTTPREQ_T: IrType = { kind: "httpReq" };
+/** The stream class an IncomingMessage converts INTO (httpReqIsReadableIn). */
+export const READABLE_T: IrType = { kind: "object", className: "%Readable" };
 export const HTTPRES_T: IrType = { kind: "httpRes" };
 export const HTTPCLIENTREQ_T: IrType = { kind: "httpClientReq" };
 export const SECURECTX_T: IrType = { kind: "secureCtx" };
@@ -1195,6 +1197,32 @@ export function streamDuplexWidensToWritable(
 ): boolean {
   if (to !== "%Writable" || from === "%Writable") return false;
   return from === "%Duplex" || isStrictSubclass(from, "%Duplex");
+}
+
+/** An INCOMING MESSAGE flowing into a `Readable` slot (`body: res`,
+ * `readAllBytes(res)`, `res` piped through `pipeline`). Node's
+ * `class IncomingMessage extends stream.Readable` makes this a plain
+ * upcast there; here it is neither an upcast nor a widening, because the
+ * two are different REPRESENTATIONS — an httpReq is an ScrHttpReq (a
+ * parsed head plus four listener lists) and a %Readable is an ScrStream
+ * (the ScrEmitter prefix plus a readable state block). There is no shared
+ * prefix to reinterpret, so unlike streamDuplexWidensToWritable directly
+ * above, admitting this pair costs a runtime ADAPTER
+ * (`http.reqBodyStream` — scr_http_body.c), not a pointer cast.
+ *
+ * It lives here for the reason that one does: the top-level coercion and
+ * the width-lift PLAN each need the answer, and two copies of a stream
+ * predicate have drifted apart in this compiler before.
+ *
+ * `%Readable` exactly. A `%Duplex`/`%Writable` destination wants a
+ * writable half a response body does not have, and a user subclass of
+ * Readable wants fields the adapter never allocates — both keep their
+ * fences.
+ *
+ * NOT the reverse: nothing converts a Readable into an IncomingMessage,
+ * and no slot asks. */
+export function httpReqIsReadableIn(from: IrType, to: IrType): boolean {
+  return from.kind === "httpReq" && to.kind === "object" && to.className === "%Readable";
 }
 
 export interface IrRecordShape {
@@ -2813,6 +2841,16 @@ export type IrLibFn =
    * request-body forward), or a raw socket (the upgrade-rejection leg);
    * chunk-for-chunk, natural end ends the destination (Node's pipe
    * default; no backpressure — divergence 54's stream model). */
+  /** An IncomingMessage IN a `Readable` slot (`body: res`) — the value,
+  * not a pipe. Node's IncomingMessage IS a Readable (one class, one
+  * object); here httpReq and %Readable are different runtime structs, so
+  * this is a CONVERSION and not the pointer reinterpret
+  * streamDuplexWidensToWritable admits. The result is a native Readable
+  * whose source is the body (scr_http_body.c), MEMOIZED on the request:
+  * converting the same response twice answers the same stream, which is
+  * the closest this representation gets to Node's one object. Never
+  * throws; the result is +1. */
+  | "http.reqBodyStream"
   | "http.reqPipeRes"
   | "http.reqPipeClient"
   | "http.reqPipeSock"
@@ -7610,6 +7648,42 @@ export function moduleUsesHttpPipe(mod: IrModule): boolean {
     }
     const node = v as { kind?: unknown; fn?: unknown };
     if (node.kind === "libCall" && node.fn === "http.clientPipeFrom") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
+/** The program converts an IncomingMessage INTO a Readable (the
+ * `http.reqBodyStream` libCall): compiles scr_http_body.c in. A LINK
+ * GATE, not a fence — a wrong `false` is a loud unresolved symbol, never
+ * a wrong answer.
+ *
+ * The moduleUsesHttpPipe shape, mirrored: the adapter is a runtime-only
+ * object with no IR presence of its own (the libCall answers a plain
+ * %Readable), so nothing but this call can reference the unit. It is
+ * gated for the reason that probe measured one direction over — with the
+ * adapter inside scr_http.c, every http program would owe the linker
+ * scr_stream_new_readable and five of its neighbours.
+ *
+ * cc.ts ORs it into the stream gate as well: a program can reach this
+ * call without ever writing `new Readable`, so moduleUsesStream may
+ * legitimately answer false while scr_http_body.o needs the unit's
+ * symbols. The RUNTIME_UNIT_DEPS edge turns a wrong gate into a named
+ * selection error instead of an lld-link undefined symbol. */
+export function moduleUsesHttpBody(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && node.fn === "http.reqBodyStream") {
       found = true;
       return;
     }

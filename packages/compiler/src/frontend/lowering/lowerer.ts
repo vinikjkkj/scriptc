@@ -51,7 +51,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { arrayOf, BOOL, canAdaptDynFuncTo, canDynCheckTo, funcOf, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { arrayOf, BOOL, canAdaptDynFuncTo, canDynCheckTo, funcOf, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -136,6 +136,7 @@ export type WidthLift =
   | { how: "dynIn" }
   | { how: "dynOut" }
   | { how: "upcast" }
+  | { how: "httpBody" }
   | { how: "funcAdapt" };
 
 /** A class METHOD projected into a func-typed record slot: the field
@@ -4077,6 +4078,15 @@ export class Lowerer {
     ) {
       return { kind: "upcast", value: expr, type: expected, loc: expr.loc };
     }
+    // An INCOMING MESSAGE into a `Readable` slot. Node's IncomingMessage
+    // IS a Readable, but the two are DIFFERENT runtime representations
+    // here (an ScrHttpReq against an ScrStream), so unlike the widening
+    // directly above this one is not a pointer reinterpret — it is a
+    // conversion, and httpReqIsReadableIn names it so the plan copy below
+    // and this one cannot disagree. Idempotent at runtime: the view is
+    // memoized on the request, so two conversions of one response answer
+    // one stream.
+    if (httpReqIsReadableIn(expr.type, expected)) return this.httpBodyStream(expr);
     // CLASS-VALUE widening (classval:D into a classval:C slot): the same
     // pointer with only the static type changing — legal exactly when D
     // strictly descends from C AND the two completed constructor ABIs
@@ -4157,6 +4167,25 @@ export class Lowerer {
     }
     const tag = this.armTag(expected.unionId, expr.type);
     if (tag < 0) {
+      // An INCOMING MESSAGE against a union carrying a `Readable` arm —
+      // zapo's `body: res` into `Readable | null`, and the shape every
+      // "the body may be absent" response record has. Convert first, then
+      // wrap like any arm value: the conversion is the very one the bare
+      // `Readable` slot takes above, so a union slot and a plain slot
+      // cannot disagree about the same response.
+      if (expr.type.kind === "httpReq") {
+        const readableTag = this.armTag(expected.unionId, READABLE_T);
+        if (readableTag >= 0) {
+          return {
+            kind: "unionWrap",
+            unionId: expected.unionId,
+            tag: readableTag,
+            value: this.httpBodyStream(expr),
+            type: expected,
+            loc: expr.loc,
+          };
+        }
+      }
       // A derived class flowing into a union with a base-class arm widens
       // first (nearest ancestor arm wins), then wraps like any arm value.
       if (expr.type.kind === "object") {
@@ -4864,6 +4893,11 @@ export class Lowerer {
     ) {
       return { how: "upcast" };
     }
+    // An IncomingMessage into a `Readable` FIELD (`{ body: res }` copying
+    // into a `{ body: Readable }` slot). The second copy of "may this
+    // response widen", the duplex lesson applied before it could bite:
+    // one predicate, so `f(res)` and `f({ body: res })` answer the same.
+    if (httpReqIsReadableIn(src, dst)) return { how: "httpBody" };
     // A FUNCTION into a slot whose signature differs only by CLEAN
     // mechanical conversions (fewer params — JS ignores extras — and
     // coercibleValue pieces): the general function-value adapter, plan-
@@ -5018,6 +5052,10 @@ export class Lowerer {
       case "upcast": {
         if (dst.kind !== "object" || value.type.kind !== "object") throw new Error("lowerer bug: upcast lift shape");
         return this.upcastTo(value, dst.className);
+      }
+      case "httpBody": {
+        if (!httpReqIsReadableIn(value.type, dst)) throw new Error("lowerer bug: httpBody lift shape");
+        return this.httpBodyStream(value);
       }
       case "funcAdapt": {
         if (dst.kind !== "func" || value.type.kind !== "func") throw new Error("lowerer bug: funcAdapt lift shape");
@@ -8705,6 +8743,21 @@ export class Lowerer {
 
   upcastTo(expr: IrExpr, className: string): IrExpr {
     return upcastTo(this, expr, className);
+  }
+
+  /** `res` AS a Readable: the native view over an IncomingMessage's body
+   * (scr_http_body.c). The ONE builder for both the top-level coercion
+   * and the width-lift plan, so the two spellings emit the same call.
+   *
+   * There is no interned helper and no temp: the libCall takes the
+   * request BORROWED and answers the stream +1, so the argument
+   * evaluates exactly once wherever the coercion runs. The runtime
+   * memoizes the view on the request, which is what keeps a second
+   * conversion of the same response from building a second stream over
+   * one body — Node has one object and this is as close as two
+   * representations get. */
+  httpBodyStream(expr: IrExpr): IrExpr {
+    return { kind: "libCall", fn: "http.reqBodyStream", args: [expr], type: READABLE_T, loc: expr.loc };
   }
 
   /** True when `className` is the %Error root or any class inside its

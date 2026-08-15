@@ -4279,6 +4279,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "net.sockPipeRes":
             E.line(`scr_http_sock_pipe_res(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
+          case "http.reqBodyStream":
+            // The view's 'end'/'close' ride the stream tick queue, which
+            // only drains inside the loop: usesTimers, like every other
+            // flowing-stream entry.
+            E.usesTimers = true;
+            return finish(`(${cType(e.type).trim()})scr_http_req_body_stream(${arg(0)})`);
           case "http.reqPipeRes":
             E.line(`scr_http_req_pipe_res(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };

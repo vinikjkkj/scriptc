@@ -52,6 +52,9 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   // it needs BOTH sides. Split out of scr_http.c precisely so that plain
   // http programs do not owe the linker the stream unit.
   "scr_http_pipe.c": ["scr_dyn_handle.c", "scr_http.c", "scr_net.c", "scr_stream.c"],
+  // The IncomingMessage-as-Readable adapter: the same two sides, the other
+  // direction. Split out of scr_http.c for the scr_http_pipe.c reason.
+  "scr_http_body.c": ["scr_dyn_handle.c", "scr_http.c", "scr_net.c", "scr_stream.c"],
   "scr_http2.c": ["scr_dyn_handle.c", "scr_http.c", "scr_net.c", "scr_tls.c"],
   "scr_net.c": ["scr_dyn_handle.c", "scr_loop_kqueue.c", "scr_loop_epoll.c", "scr_loop_wsapoll.c"],
   "scr_readline.c": ["scr_events.c"],
@@ -305,6 +308,14 @@ export interface CcOptions {
    * that a plain http program does not have to link scr_stream.c — the
    * adapter references both sides, and there is no dead stripping here. */
   httpPipe?: boolean;
+  /** The program puts an IncomingMessage in a `Readable` slot (the
+   * `http.reqBodyStream` libCall on the IR): compiles scr_http_body.c in,
+   * and IMPLIES both halves it bridges (scr_http.c, scr_stream.c). Gated
+   * for the httpPipe reason, plus one this direction adds: the program can
+   * reach the conversion without ever spelling `new Readable`, so
+   * moduleUsesStream may legitimately answer false while this unit needs
+   * scr_stream.o. */
+  httpBody?: boolean;
   /** The program passes an AbortSignal to http.request (the
    * `http.clientSignal` libCall on the IR): compiles scr_abort_http.c in,
    * and IMPLIES both halves it wires (scr_abort.c, scr_http.c) so the link
@@ -1254,10 +1265,15 @@ export async function compileC(opts: CcOptions): Promise<void> {
   const http2 = opts.http2 ?? false;
   const tls = (opts.tls ?? false) || http2 || nativeFetch || netIsland || wsGlobal;
   const abortHttp = opts.abortHttp ?? false;
+  /* The body view implies BOTH halves it bridges, for the abortHttp
+   * reason: the two detectors answer independently and one of them can be
+   * false at a site that needs the unit. */
+  const httpBody = opts.httpBody ?? false;
+  const stream = (opts.stream ?? false) || httpBody;
   /* The seam implies its two halves: a wrong `false` here would be an
    * undefined symbol at the very end of the build naming no gate. */
   const abortSignal = (opts.abortSignal ?? false) || abortHttp;
-  const http = (opts.http ?? false) || tls || http2 || nativeFetch || netIsland || wsGlobal || abortHttp;
+  const http = (opts.http ?? false) || tls || http2 || nativeFetch || netIsland || wsGlobal || abortHttp || httpBody;
   const net = (opts.net ?? false) || http || tls || http2 || nativeFetch || netIsland || wsGlobal;
   const driver = resolveCc();
   if (driver.target !== null) {
@@ -1396,12 +1412,12 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // drags %EventEmitter in through its base chain, so moduleUsesEmitter
     // answers true whenever moduleUsesStream does) and no binary changes;
     // the implication belongs where the link line is decided too.
-    ...(opts.emitter || opts.stream ? [rt(join(rtDir, "scr_events_emitter.c"))] : []),
+    ...(opts.emitter || stream ? [rt(join(rtDir, "scr_events_emitter.c"))] : []),
     // The checked-dynamic HANDLE support unit (listener gate + runtime
     // adapter closures): every referencing unit is one of the emitter or
     // net families (http implies net), so handle-free binaries keep
     // their exact size class.
-    ...(opts.emitter || opts.stream || net || opts.childStream
+    ...(opts.emitter || stream || net || opts.childStream
       ? [rt(join(rtDir, "scr_dyn_handle.c"))]
       : []),
     ...(opts.symbol ? [rt(join(rtDir, "scr_symbol.c"))] : []),
@@ -1409,7 +1425,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opts.qs ? [rt(join(rtDir, "scr_qs.c"))] : []),
     ...(abortSignal ? [rt(join(rtDir, "scr_abort.c"))] : []),
     ...(abortHttp ? [rt(join(rtDir, "scr_abort_http.c"))] : []),
-    ...(opts.stream ? [rt(join(rtDir, "scr_stream.c"))] : []),
+    ...(stream ? [rt(join(rtDir, "scr_stream.c"))] : []),
     // The readiness-poller backends (scr_platform.h): kqueue on macOS/BSD,
     // epoll on Linux, WSAPoll on Windows — each TU is empty off its
     // platform, so all three link whenever a poller-using unit does and
@@ -1440,6 +1456,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opts.watch ? [rt(join(rtDir, "scr_watch.c"))] : []),
     ...(opts.fileHandle ? [rt(join(rtDir, "scr_filehandle.c"))] : []),
     ...(opts.httpPipe ? [rt(join(rtDir, "scr_http_pipe.c"))] : []),
+    ...(httpBody ? [rt(join(rtDir, "scr_http_body.c"))] : []),
     ...(opts.nodeTest ? [rt(join(rtDir, "scr_test.c"))] : []),
     // The CA-store unit rides its own gate OR the tls one: scr_tls.c
     // references its default-set override unconditionally.

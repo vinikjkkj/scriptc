@@ -440,6 +440,11 @@ void scr_net_fire_err_obj(ScrNetLs *l, ScrError *err /*borrowed*/) {
   scr_net_fire_err_impl(l, err->message, err, NULL, 0);
 }
 
+void scr_net_fire_err_obj_this(ScrNetLs *l, ScrError *err /*borrowed*/, void *self,
+                               ScrDynHandleTag tag) {
+  scr_net_fire_err_impl(l, err->message, err, self, tag);
+}
+
 /* ── the handles ─────────────────────────────────────────────────────── */
 
 enum { SCR_NET_K_SERVER = 1, SCR_NET_K_SOCKET = 2 };

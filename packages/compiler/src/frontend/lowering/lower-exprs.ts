@@ -7,7 +7,7 @@
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
-import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
+import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, diffieHellmanFnValueOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
@@ -8889,6 +8889,18 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
       // Q. Read through the same subclass predicate coerceToExpected reads,
       // duplex widening included, so `(pt as Writable)` and a Writable slot
       // cannot disagree about a PassThrough.
+      // `res as Readable` — the CAST spelling of the slot. Erasure leaves
+      // an httpReq where every consumer downstream resolves against
+      // %Readable, so the cast has to perform the same conversion the slot
+      // performs (httpReqIsReadableIn, one predicate). The sweep found
+      // this: `pipeline(res as Readable, dst, cb)` fenced while
+      // `const b: Readable = res; pipeline(b, dst, cb)` compiled, which is
+      // the duplex block's "two positions, one rule" lesson in the one
+      // position that block did not have to touch.
+      if (inner.type.kind === "httpReq") {
+        const target = L.mapTypeOf(targetTs0);
+        if (target !== null && httpReqIsReadableIn(inner.type, target)) return L.httpBodyStream(inner);
+      }
       if (inner.type.kind === "object") {
         const target = L.mapTypeOf(targetTs0);
         if (target !== null && target.kind === "object" && target.className !== inner.type.className) {

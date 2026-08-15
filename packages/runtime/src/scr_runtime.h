@@ -6312,6 +6312,13 @@ void scr_net_fire_err(ScrNetLs *l, ScrStr *msg); /* unhandled => exit(1) */
  * err borrowed; its message still travels the ABI, so a zero-parameter
  * listener and the no-listener exit path both read the right text. */
 void scr_net_fire_err_obj(ScrNetLs *l, ScrError *err /*borrowed*/);
+/* ...with the emitting handle bound as the ambient receiver, the
+ * scr_net_fire_err_this shape. The teardown errors http owns are the
+ * callers: they carry an errno code the MESSAGE adapter cannot recover
+ * from their text ("aborted" contains no errno name), and a listener
+ * that asked for the object must still see `this`. */
+void scr_net_fire_err_obj_this(ScrNetLs *l, ScrError *err /*borrowed*/, void *self,
+                                ScrDynHandleTag tag);
 
 ScrNetServer *scr_net_server_retain(ScrNetServer *s);
 void scr_net_server_release(ScrNetServer *s);
@@ -6887,6 +6894,30 @@ void scr_http_req_on_close(ScrHttpReq *r, ScrClosure *cb /*moves*/, bool once);
 void scr_http_res_destroy(ScrHttpRes *r);
 void scr_http_res_on_close(ScrHttpRes *r, ScrClosure *cb /*moves*/, bool once);
 void scr_http_res_write_head_pairs(ScrHttpRes *r, double status, ScrArr *pairs /*borrowed*/);
+
+/* ── an IncomingMessage IN a Readable slot (scr_http_body.c) ───────────
+ * Node's `class IncomingMessage extends stream.Readable` is ONE object;
+ * here the two are different structs (ScrHttpReq vs ScrStream), so the
+ * conversion is an ADAPTER, not the pointer reinterpret the Duplex
+ * widening is. scr_http_req_body_stream answers a native Readable whose
+ * source is the request's body — memoized on the request, so a second
+ * conversion answers the first stream.
+ *
+ * The two slot accessors below are all scr_http.c knows about it: the
+ * view is OPAQUE and frees itself through the callback it installed, so
+ * scr_http.o references no scr_stream_* symbol and an http program that
+ * never spells the conversion links without scr_stream.c (the
+ * scr_http_pipe.c gate, mirrored). */
+ScrStream *scr_http_req_body_stream(ScrHttpReq *r); /* +1 */
+void *scr_http_req_body_view(ScrHttpReq *r);        /* borrowed; NULL until the first conversion */
+/* attach installs BOTH callbacks: `settle` is called when the request
+ * settles (the 'close' emit, where every listener list drops) and makes
+ * the view give up its STREAM, which is what keeps the ring
+ * request -> view -> stream -> user listener -> response -> connection
+ * -> request from surviving the exchange; `freefn` runs at the
+ * request's own free and clears the view's borrowed back-pointer. */
+void scr_http_req_attach_body_view(ScrHttpReq *r, void *view, void (*settle)(void *),
+                                    void (*freefn)(void *));
 
 /* node:http, the CLIENT slice (http.request/http.get over the net client
  * machinery — one dialed connection per request, no agent pooling; the
