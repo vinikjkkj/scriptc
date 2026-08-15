@@ -2912,25 +2912,40 @@ static void scr_http_client_premature(ScrHttpConn *conn) {
      * A bare destroy() emits NO request 'error' in this window — the
      * response's ECONNRESET is the only error — which is why the object
      * fires only when destroy(err) stashed one. */
+    /* Both emits below run USER code, and a listener can reach the
+     * response — so this pass may not cache conn->req across them on the
+     * connection's reference alone. It takes its OWN (the pattern the
+     * queue entries use), and re-checks that the connection still names
+     * the same handle before breaking the conn edge. */
     ScrHttpReq *res = conn->req;
+    if (res != NULL) scr_http_req_retain(res);
     if (c->destroy_err != NULL && !c->had_error && !c->close_emitted) {
       c->had_error = true;
       scr_net_fire_err_obj(&c->err_ls, c->destroy_err);
-      if (scr_exc_pending()) return;
+      if (scr_exc_pending()) {
+        if (res != NULL) scr_http_req_release(res);
+        return;
+      }
     }
     if (res != NULL) {
       /* the response's 'aborted' — same handle, same list the h2 lane
        * fires; the http/1 parser lane simply never reached it before */
       scr_http_h2_req_aborted(res);
-      if (scr_exc_pending()) return;
+      if (scr_exc_pending()) {
+        scr_http_req_release(res);
+        return;
+      }
     }
     scr_http_client_queue_close(c);
     if (res != NULL) {
       scr_http_queue_req_aborted(res);
       scr_http_queue_req_close(res);
       scr_http_req_finish(res, false); /* body never completes */
-      conn->req = NULL; /* break the res→sock→ctx→res cycle */
-      scr_http_req_release(res);
+      if (conn->req == res) {
+        conn->req = NULL; /* break the res→sock→ctx→res cycle */
+        scr_http_req_release(res); /* the connection's edge */
+      }
+      scr_http_req_release(res); /* this pass's own */
     }
   }
 }
