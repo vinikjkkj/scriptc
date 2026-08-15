@@ -2998,6 +2998,9 @@ export type IrLibFn =
    * Args are (url, method, timeoutMs, headers, autoEnd, reject, ca). */
   | "https.requestUrlOpts"
   | "https.requestUrlOptsCb"
+  /** The agent-threaded URL form over TLS (http.requestUrlAgent's twin). */
+  | "https.requestUrlAgent"
+  | "https.requestUrlAgentCb"
   /** A call through a `const requestFn = tls ? https.request :
    * http.request` binding — the module-function-as-value ternary between
    * the two known clients: the https.request row with a leading `secure`
@@ -3161,6 +3164,15 @@ export type IrLibFn =
    * autoEnd[, cb]). MAY THROW, exactly http.requestUrl's parse. */
   | "http.requestUrlOpts"
   | "http.requestUrlOptsCb"
+  /** The three-argument form threading an AGENT: requestUrlOpts plus
+   * the agent dyn, which is where the getName-keyed maxSockets
+   * accounting lives. The URL row and the agent rows disagreed about
+   * one thing only — where host/port/path come from — so this is that
+   * parse feeding request_agent_ex. A PORTLESS url passes the -1
+   * sentinel on, because Node's merge lets agent.defaultPort decide
+   * exactly when the authority wrote no port. MAY THROW (the parse). */
+  | "http.requestUrlAgent"
+  | "http.requestUrlAgentCb"
   /** The `signal` option: an AbortSignal wired into a request that has
    * just been constructed, answering that SAME handle (+1). A pass
    * through rather than a wider row on each of the nine request rows —
@@ -8433,6 +8445,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "http.requestUrlCb",
   "http.requestUrlOpts",
   "http.requestUrlOptsCb",
+  "http.requestUrlAgent",
+  "http.requestUrlAgentCb",
   // The h2 client's throwing entries: connect on a bad/non-http
   // authority (ERR_INVALID_URL / ERR_INVALID_PROTOCOL), request on a
   // closed/destroyed session (ERR_HTTP2_INVALID_SESSION), setEncoding on
@@ -8551,6 +8565,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "https.requestUrlCb",
   "https.requestUrlOpts",
   "https.requestUrlOptsCb",
+  "https.requestUrlAgent",
+  "https.requestUrlAgentCb",
   "https.requestFn",
   "https.requestFnCb",
   "rl.question",

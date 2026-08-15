@@ -4558,7 +4558,8 @@ void scr_http_client_end_dynv(ScrHttpClientReq *c, const ScrDyn *d) {
 #include "scr_url_internal.h"
 
 bool scr_http_url_parts(ScrStr *url /*borrowed*/, bool secure, ScrStr **host_out /*+1*/,
-                         double *port_out, ScrStr **path_out /*+1*/) {
+                         double *port_out, ScrStr **path_out /*+1*/,
+                         bool *explicit_port_out /*nullable*/) {
   ScrUrl *u = scr_url_new(url);
   if (!u) return false; /* Invalid URL pending */
   /* The scheme is checked against the MODULE the call came from, not read
@@ -4575,6 +4576,11 @@ bool scr_http_url_parts(ScrStr *url /*borrowed*/, bool secure, ScrStr **host_out
     return false;
   }
   double port = secure ? 443 : 80;
+  /* Whether the AUTHORITY wrote a port at all. It is not the same question
+   * as "is the port the default": Node's urlToHttpOptions hands the merge
+   * an empty string for a portless URL, so an Agent's defaultPort wins
+   * there and does NOT win over an explicit ":80". */
+  if (explicit_port_out) *explicit_port_out = u->port->len > 0;
   if (u->port->len > 0) {
     port = 0;
     for (size_t i = 0; i < u->port->len; i++) port = port * 10 + (u->port->data[i] - '0');
@@ -4602,7 +4608,7 @@ ScrHttpClientReq *scr_http_request_url(ScrStr *url /*borrowed*/, ScrStr *method 
   ScrStr *host;
   ScrStr *path;
   double port;
-  if (!scr_http_url_parts(url, false, &host, &port, &path)) {
+  if (!scr_http_url_parts(url, false, &host, &port, &path, NULL)) {
     if (cb) scr_closure_release(cb);
     return NULL; /* Invalid URL / ERR_INVALID_PROTOCOL pending */
   }
@@ -4627,12 +4633,38 @@ ScrHttpClientReq *scr_http_request_url_opts(ScrStr *url /*borrowed*/, ScrStr *me
   ScrStr *host;
   ScrStr *path;
   double port;
-  if (!scr_http_url_parts(url, false, &host, &port, &path)) {
+  if (!scr_http_url_parts(url, false, &host, &port, &path, NULL)) {
     if (cb) scr_closure_release(cb);
     return NULL; /* Invalid URL / ERR_INVALID_PROTOCOL pending */
   }
   ScrHttpClientReq *c = scr_http_request_ex(host, port, path, method, timeout_ms, header_pairs,
                                              auto_end, cb, fn, 80, NULL, NULL);
+  scr_str_release(host);
+  scr_str_release(path);
+  return c;
+}
+
+/* http.request(url, { agent, ... }[, cb]) — the URL row threading an Agent
+ * handle. Same parse and same scheme check; the agent's getName-keyed
+ * accounting then owns the dial. The port is the URL's when the authority
+ * wrote one and the SENTINEL otherwise, because that is exactly when
+ * Node's merge lets agent.defaultPort decide. */
+ScrHttpClientReq *scr_http_request_url_agent(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*/,
+                                             double timeout_ms, ScrArr *header_pairs /*borrowed*/,
+                                             bool auto_end, const ScrDyn *agent /*borrowed*/,
+                                             ScrClosure *cb /*moves, nullable*/,
+                                             ScrHttpRespFn fn) {
+  ScrStr *host;
+  ScrStr *path;
+  double port;
+  bool explicit_port = false;
+  if (!scr_http_url_parts(url, false, &host, &port, &path, &explicit_port)) {
+    if (cb) scr_closure_release(cb);
+    return NULL; /* Invalid URL / ERR_INVALID_PROTOCOL pending */
+  }
+  ScrHttpClientReq *c = scr_http_request_agent_ex(host, explicit_port ? port : -1, path, method,
+                                                   timeout_ms, header_pairs, auto_end, agent,
+                                                   cb, fn, 80, NULL, NULL);
   scr_str_release(host);
   scr_str_release(path);
   return c;

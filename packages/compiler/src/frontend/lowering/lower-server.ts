@@ -4033,16 +4033,6 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
       "call http.request/https.request directly when passing an Agent",
     );
   }
-  if (agentVal !== null && urlNode !== null) {
-    // The agent rows are keyed on an explicit host/port/path (getName's
-    // shape); the URL row derives them at runtime. agent: false / null /
-    // undefined are unaffected — they change no row.
-    L.noLowering(
-      `${member} with a URL first argument and an agent value`,
-      optsNode,
-      "pass the whole request as an options record when threading an Agent",
-    );
-  }
   if (connCb !== null && urlNode !== null) {
     L.noLowering(
       `${member} with a URL first argument and a createConnection option`,
@@ -4099,8 +4089,17 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
       ca ??= strLit(""); /* none: the default trust anchors */
       urlBase.push(reject, ca);
     }
+    // An Agent VALUE alongside the URL: the agent rows used to demand an
+    // explicit host/port/path (getName's shape) while this row derives
+    // them from the parse, which is the whole of what kept them apart.
+    // The runtime entry does the parse and hands request_agent_ex the
+    // parts, passing the -1 port sentinel for a PORTLESS url so that
+    // agent.defaultPort decides exactly when Node's merge lets it.
+    if (agentVal !== null) urlBase.push(agentVal);
     if (args.length === 2) {
-      const fn: IrLibFn = secure === true ? "https.requestUrlOpts" : "http.requestUrlOpts";
+      const fn: IrLibFn = secure === true
+        ? (agentVal !== null ? "https.requestUrlAgent" : "https.requestUrlOpts")
+        : (agentVal !== null ? "http.requestUrlAgent" : "http.requestUrlOpts");
       return withSignal({ kind: "libCall", fn, args: urlBase, type: HTTPCLIENTREQ_T, loc });
     }
     const { cb } = lowerCallbackArg(
@@ -4109,7 +4108,9 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
       "use (res) or ()",
       [HTTPREQ_T],
     );
-    const fn: IrLibFn = secure === true ? "https.requestUrlOptsCb" : "http.requestUrlOptsCb";
+    const fn: IrLibFn = secure === true
+      ? (agentVal !== null ? "https.requestUrlAgentCb" : "https.requestUrlOptsCb")
+      : (agentVal !== null ? "http.requestUrlAgentCb" : "http.requestUrlOptsCb");
     return withSignal({ kind: "libCall", fn, args: [...urlBase, cb], type: HTTPCLIENTREQ_T, loc });
   }
   if (connCb !== null) {
@@ -4149,6 +4150,67 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
     : secure === true ? (agentVal !== null ? "https.requestAgentCb" : "https.requestCb")
     : agentVal !== null ? "http.requestAgentCb" : "http.requestCb";
   return withSignal({ kind: "libCall", fn, args: [...base, cb], type: HTTPCLIENTREQ_T, loc });
+}
+
+/** The interned `(h: Record | undefined) => string[]` behind an optional
+ * headers option: the record arm flattens through the SAME env.pairs
+ * helper an unconditional record would use, and the absent arm answers the
+ * empty pairs array — Node's no-headers, byte for byte.
+ *
+ * Null (the caller fences) when the union is not exactly one record plus
+ * units, or when that record's own value slots are not the env.pairs
+ * matrix — the pre-existing fence, reached through one more layer. */
+function optionalHeadersHelper(L: Lowerer, unionId: string, loc: SrcLoc): string | null {
+  const def = L.unions.get(unionId);
+  if (def === undefined) return null;
+  if (!def.arms.every((a) => a.kind === "record" || a.kind === "undefinedT" || a.kind === "nullT")) {
+    return null;
+  }
+  const tag = def.arms.findIndex((a) => a.kind === "record");
+  if (tag < 0) return null;
+  const recT = def.arms[tag]!;
+  if (recT.kind !== "record") return null;
+  const inner = L.envToPairsHelper(recT.shapeId, loc);
+  if (inner === null) return null;
+  const key = `http.headers:${unionId}`;
+  const existing = L.widthHelpers.get(key);
+  if (existing !== undefined) return existing;
+  const name = `%http.headers.${L.widthHelpers.size}`;
+  L.widthHelpers.set(key, name);
+  const unionT: IrType = { kind: "union", unionId };
+  const arrT = arrayOf(STRING);
+  const hRef: IrExpr = { kind: "varRef", localId: "h.0", type: unionT, loc };
+  const body: IrStmt[] = [
+    {
+      kind: "if",
+      cond: { kind: "unionIsTag", unionId, tag, negated: false, value: hRef, type: BOOL, loc },
+      then: [
+        {
+          kind: "return",
+          value: {
+            kind: "call",
+            callee: inner,
+            args: [{ kind: "unionNarrow", unionId, tag, value: hRef, type: recT, loc }],
+            type: arrT,
+            loc,
+          },
+          loc,
+        },
+      ],
+      else_: null,
+      loc,
+    },
+    { kind: "return", value: { kind: "arrayLit", elems: [], type: arrT, loc }, loc },
+  ];
+  L.liftedFns.push({
+    name,
+    params: [{ localId: "h.0", name: "h", type: unionT }],
+    returnType: arrT,
+    locals: [{ id: "h.0", name: "h", type: unionT, mutable: false }],
+    body,
+    loc,
+  });
+  return name;
 }
 
 /** `AbortSignal | undefined` (or `| null`) — the signal arm's tag, or null
@@ -4233,7 +4295,14 @@ function optionalSignalHelper(L: Lowerer, unionId: string, tag: number, loc: Src
  * keys and string values packs into the flat [k0, v0, k1, v1, ...] pairs
  * array directly; any other expression must be a Record whose values are
  * strings (or `string | undefined` — absent entries drop, the env-option
- * rule), flattened by the interned env.pairs helper. */
+ * rule), flattened by the interned env.pairs helper.
+ *
+ * A `Record | undefined` VALUE (zapo's `headers: init.headers` off an
+ * optional field) is Node's "no headers at all" when it is absent —
+ * measured, not assumed: Node's ClientRequest only iterates the record
+ * when one was given. It goes through a second interned helper rather
+ * than a ternary for the reason the signal option does: a ternary would
+ * evaluate the option expression TWICE, and this one can be a call. */
 function lowerClientHeadersOption(L: Lowerer, node: ts.Expression): IrExpr {
   const loc = locOf(node);
   if (ts.isObjectLiteralExpression(node)) {
@@ -4265,11 +4334,18 @@ function lowerClientHeadersOption(L: Lowerer, node: ts.Expression): IrExpr {
     return { kind: "arrayLit", elems, type: arrayOf(STRING), loc };
   }
   const v = L.lowerExpr(node);
+  if (v.type.kind === "union") {
+    const helper = optionalHeadersHelper(L, v.type.unionId, loc);
+    if (helper !== null) {
+      return { kind: "call", callee: helper, args: [v], type: arrayOf(STRING), loc };
+    }
+  }
   if (v.type.kind !== "record") {
     L.noLowering(
       `request headers of '${L.fmt(v.type)}' values`,
       node,
-      "pass an object literal or a Record<string, string>",
+      "pass an object literal or a Record<string, string>" +
+        (v.type.kind === "union" ? " (an optional one may be undefined — Node reads no headers then)" : ""),
     );
   }
   const helper = L.envToPairsHelper(v.type.shapeId, loc);
