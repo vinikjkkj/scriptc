@@ -18,6 +18,7 @@ import { describe, expect, test } from "vitest";
 import ts5 from "typescript";
 import { compile } from "@scriptc/compiler";
 import { shardSelect, shardSuffix } from "./shard.js";
+import { oracleCrashed, reduceNativeReport, reduceNodeReport } from "./uncaught-report.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -437,15 +438,40 @@ describe(`differential corpus (${files.length} programs${sanitize ? ", sanitized
       // warn, process.stderr.write); nonzero-exit programs keep stdout-only
       // — their stderr carries the uncaught report, whose format is a
       // documented divergence.
-      if (expectedExit === 0) {
+      // The oracle itself DIED on this host: an exit-0 corpus program
+      // whose Node run ends in a V8 crash report. The report FORMAT is
+      // the documented divergence this suite already exempts for
+      // `// @exit:` programs, and the exemption was keyed on the
+      // DECLARED exit code, so these landed inside the byte comparison
+      // and compared a stack trace against one line. Key it on the
+      // OBSERVED report instead and compare the REDUCTION: the program's
+      // own stderr before the report, byte-for-byte, and the error's
+      // `Name: message`, byte-for-byte. A binary that reports a
+      // different error, a different message, or none at all still
+      // fails.
+      const hostCrash = oracleCrashed(nodeRes.exitCode, expectedExit, nodeRes.stderr);
+      if (hostCrash) {
+        const want = reduceNodeReport(nodeRes.stderr)!;
+        const got = reduceNativeReport(comparableStderr(nativeRes.stderr));
+        expect(got?.pre ?? comparableStderr(nativeRes.stderr).toString("utf8")).toBe(want.pre);
+        expect(got?.line ?? "<no uncaught report>").toBe(want.line);
+      } else if (expectedExit === 0) {
         const nativeErr = comparableStderr(nativeRes.stderr);
         if (!nodeRes.stderr.equals(nativeErr)) {
           expect(nativeErr.toString("utf8")).toBe(nodeRes.stderr.toString("utf8"));
           expect.unreachable("stderr differed at byte level but not after utf8 decode");
         }
       }
-      expect(nodeRes.exitCode).toBe(expectedExit);
-      expect(nativeRes.exitCode).toBe(expectedExit);
+      // The declared code keeps `// @exit:` directives honest — except
+      // where the oracle crashed on this host, which says nothing about
+      // the directive. There the contract that still means something is
+      // that the compiled binary agrees with the oracle.
+      if (hostCrash) {
+        expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+      } else {
+        expect(nodeRes.exitCode).toBe(expectedExit);
+        expect(nativeRes.exitCode).toBe(expectedExit);
+      }
     },
   );
 });
