@@ -137,13 +137,18 @@ const WINDOWS_SKIPS: Record<string, string> = {
   // The errno-spelling gap 1520 used to name is FIXED (scr_fs_throw
   // translates the CRT's EACCES to EPERM on win32 — libuv's
   // ERROR_ACCESS_DENIED map; the program's caught branches print
-  // matching codes on both sides now), but the program itself is
-  // posix-shaped: its "mode does NOT re-apply to an existing file" line
-  // is a POSIX truth — Windows Node re-applies the readonly bit and its
-  // next unguarded accessSync(W_OK) crashes BOTH sides identically at
-  // the same line, rendered differently (stack vs one line), where
-  // @exit says 0.
-  "1520-fs-wider-surface.ts": "posix-shaped: writeFileSync {mode} re-applies readonly on Windows (Node too) — the unguarded accessSync crashes both sides, rendered differently",
+  // matching codes on both sides now). The unguarded accessSync(W_OK)
+  // that used to crash BOTH sides is fixed too — the probe is guarded and
+  // prints its verdict, so Node on Windows now runs the program to
+  // completion. What is left is a REAL runtime divergence, measured on a
+  // Windows host through the local differential lane: the program's
+  // closing rmSync(dir, {recursive,force}) has to remove the 0o400
+  // `ro.txt`, and Node clears the readonly attribute before unlinking
+  // while the runtime does not — the binary dies "EPERM: operation not
+  // permitted, unlink …\ro.txt" and never prints its last line. Minimal
+  // repro: writeFileSync(f,{mode:0o400}) then rmSync(dir,{recursive:true,
+  // force:true}). Unskip when the runtime's recursive remove clears it.
+  "1520-fs-wider-surface.ts": "runtime rmSync(recursive,force) will not remove a 0o400 file on Windows (Node clears the readonly bit first); the binary dies EPERM before the program's last line",
   // (1480 left this list: GetAdaptersAddresses walks libuv's exact rows.)
   // os.userInfo: shell is null on Windows Node; the scriptc surface types
   // it string ("" here) — and username/homedir differ per box anyway.
