@@ -273,6 +273,51 @@ describe("LLVM backend declares match scr_runtime.h prototypes", () => {
     expect(failures).toEqual([]);
   });
 
+  /* The fourth direction, and the one a differential found the hard way.
+   * The generic LIB_FN_SYMS path derives its `declare` return type from
+   * the IR CALL SITE's result type. That is right for every ordinary row,
+   * because the IR result and the C return agree by construction. It is
+   * wrong for one family: validate.ts gives an "always throws" libCall the
+   * type of the expression it REPLACED (the global.undefRead pattern), so
+   * the IR says `string[]` while the runtime entry says `void`. The
+   * emitter then declares a value return over a void callee and reads a
+   * result register the callee never set — no crash, no warning, and on
+   * the first row that did it (tls.caCertsChk) five typed TypeErrors came
+   * back as five throws with no name, no code and no message.
+   *
+   * This is LIB_FN_RET_SEXT's lesson in a second coat, and it is checkable
+   * from the two tables alone: an always-throws member must not be a
+   * generic row when its C entry returns void. It must be special-cased,
+   * which is exactly what island.castFail and the fs `Chk` ladders are. */
+  test("no always-throws libCall rides the generic path over a void runtime entry", async () => {
+    const { protos } = await parseHeader();
+    const emitterSrc = await readFile(join(llvmSrcDir, "emitter.ts"), "utf8");
+    const table = /const LIB_FN_SYMS: Record<string, string> = \{([\s\S]*?)\n\};/.exec(emitterSrc);
+    expect(table).not.toBeNull();
+    const rows = [...table![1]!.matchAll(/^\s*"([^"]+)":\s*"(scr_[a-z0-9_]+)",/gm)].map(
+      (m) => [m[1]!, m[2]!] as const,
+    );
+    // Extractor guards: the table is hundreds of rows and the list below
+    // is a dozen names — finding few of either means a scan rotted.
+    expect(rows.length).toBeGreaterThan(400);
+    const validateSrc = await readFile(join(repoRoot, "packages/compiler/src/ir/validate.ts"), "utf8");
+    const marker = validateSrc.indexOf("Always throws — the result type is the replaced expression's");
+    expect(marker).toBeGreaterThan(0);
+    const head = validateSrc.slice(Math.max(0, marker - 900), marker);
+    const alwaysThrows = new Set([...head.matchAll(/e\.fn === "([^"]+)"/g)].map((m) => m[1]!));
+    alwaysThrows.add("global.undefRead");
+    expect(alwaysThrows.size).toBeGreaterThan(5);
+    const failures = rows
+      .filter(([fn, sym]) => alwaysThrows.has(fn) && protos.get(sym)?.ret === "void")
+      .map(
+        ([fn, sym]) =>
+          `${fn} → ${sym}: an always-throws libCall (its IR result type is the replaced ` +
+          `expression's, not void) is a GENERIC LIB_FN_SYMS row over a void runtime entry — ` +
+          `the emitted declare would read a result the callee never set. Special-case it.`,
+      );
+    expect(failures).toEqual([]);
+  });
+
   test("every declare emitted for the fs/path corpus slice", async () => {
     const { protos } = await parseHeader();
     const failures: string[] = [];
