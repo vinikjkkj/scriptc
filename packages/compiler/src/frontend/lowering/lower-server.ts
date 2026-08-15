@@ -2833,9 +2833,23 @@ function lowerTlsModuleCall(L: Lowerer, expr: ts.CallExpression,
   if (bi.member === "getCACertificates" && args.length === 1 && !args.some(ts.isSpreadElement) &&
       isJsSourceFile(expr.getSourceFile())) {
     // The type-argument ladder (validateString + the documented name
-    // set); the real CA list has no lowering, so a valid name meets the
-    // compiler-rendered fence after the validation.
+    // set) for the arguments a JS source can pass and a TS one cannot.
     const raw = L.lowerExpr(args[0]!);
+    // A STRING argument is not a ladder case. tlsca.get answers the real
+    // per-type array for a known name AND throws Node's exact
+    // ERR_INVALID_ARG_VALUE ("The argument 'type' is invalid. Received
+    // '...'", scr_tls_ca.c) for an unknown one — both of the ladder's
+    // rungs that a string can reach, plus the answer the ladder cannot
+    // give at all. Sending it down the ladder instead meant the trailing
+    // fence: `tls.getCACertificates('bundled')` in a .js or .cjs source
+    // threw SC2020 "has no compiled implementation" AT RUNTIME, on both
+    // backends, while the identical call in a .ts source returned the
+    // certificates. The comment this replaces said the real CA list has
+    // no lowering; the tlsca.get branch thirty lines below is that
+    // lowering, and it had been there the whole time.
+    if (raw.type.kind === "string") {
+      return { kind: "libCall", fn: "tlsca.get", args: [raw], type: arrayOf(STRING), loc };
+    }
     if (raw.type.kind === "dyn" || raw.kind === "unitLit" || L.dynConvertible(raw.type)) {
       const t: IrExpr = raw.type.kind === "dyn" ? raw : { kind: "dynFrom", value: raw, type: DYN, loc };
       return {
