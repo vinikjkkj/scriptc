@@ -207,7 +207,10 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "net.setAutoSelTimeout": { argTypes: [F64], result: VOID },
   "fs.realpathSync": { argTypes: [STRING], result: STRING },
   "os.userName": { argTypes: [], result: STRING },
+  "os.userUid": { argTypes: [], result: F64 },
+  "os.userGid": { argTypes: [], result: F64 },
   "os.userShell": { argTypes: [], result: STRING },
+  "os.userShellNull": { argTypes: [], result: BOOL },
   "os.userHomedir": { argTypes: [], result: STRING },
   "os.tmpdir": { argTypes: [], result: STRING },
   // Result is the call site's Dict<NetworkInterfaceInfo[]> record (VOID is

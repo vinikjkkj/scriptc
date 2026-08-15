@@ -2191,7 +2191,19 @@ export type IrLibFn =
    * lookup failure aborts (Node throws a system error there — no
    * compiled program path reaches it for the running uid). */
   | "os.userName"
+  /** os.userInfo()'s uid/gid, which are NOT process.getuid/getgid: on
+   * Windows those two do not exist on Node's process object and calling
+   * them is a TypeError, while userInfo answers -1 for both. Assembling
+   * the record from the process pair made every os.userInfo() call on
+   * that host throw. Never throws. */
+  | "os.userUid"
+  | "os.userGid"
   | "os.userShell"
+  /** True where userInfo().shell is null rather than a string (Windows).
+   * The record's `string | null` arm branches on this at RUNTIME: the
+   * compiler cross-compiles, so the host is not known at lowering. Never
+   * throws. */
+  | "os.userShellNull"
   | "os.userHomedir"
   | "os.tmpdir"
   /** os.networkInterfaces(): getifaddrs(3) → the Dict<NetworkInterfaceInfo[]>

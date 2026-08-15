@@ -6611,9 +6611,12 @@ let digestInputValueDispatches = 0;
 
 /** `os.userInfo()` — the passwd-entry snapshot, Node's uv_os_get_passwd
    * behind the call site's own mapped record shape: username = pw_name,
-   * uid/gid = getuid/getgid, shell = pw_shell (as the `string | null`
+   * uid/gid = os.userUid/os.userGid — NOT process.getuid/getgid, which
+   * do not exist on Windows Node and whose call is a TypeError there
+   * while userInfo answers -1, shell = pw_shell (as the `string | null`
    * union @types/node declares — POSIX always answers the string arm;
-   * null is Node's Windows answer), homedir = pw_dir (the PASSWD home,
+   * null is Node's Windows answer, selected at runtime through
+   * os.userShellNull), homedir = pw_dir (the PASSWD home,
    * NOT os.homedir's $HOME-first cascade — Node's own split). The record
    * assembles field-by-field from scalar libCalls in the shape's
    * declaration order; unknown fields and the options argument fence. */
@@ -6640,9 +6643,9 @@ let digestInputValueDispatches = 0;
       if (f.name === "username" && f.type.kind === "string") {
         fields.push({ name: f.name, value: { kind: "libCall", fn: "os.userName", args: [], type: STRING, loc } });
       } else if (f.name === "uid" && f.type.kind === "f64") {
-        fields.push({ name: f.name, value: { kind: "libCall", fn: "process.getuid", args: [], type: F64, loc } });
+        fields.push({ name: f.name, value: { kind: "libCall", fn: "os.userUid", args: [], type: F64, loc } });
       } else if (f.name === "gid" && f.type.kind === "f64") {
-        fields.push({ name: f.name, value: { kind: "libCall", fn: "process.getgid", args: [], type: F64, loc } });
+        fields.push({ name: f.name, value: { kind: "libCall", fn: "os.userGid", args: [], type: F64, loc } });
       } else if (f.name === "homedir" && f.type.kind === "string") {
         fields.push({ name: f.name, value: { kind: "libCall", fn: "os.userHomedir", args: [], type: STRING, loc } });
       } else if (f.name === "shell") {
@@ -6654,9 +6657,32 @@ let digestInputValueDispatches = 0;
         } else if (f.type.kind === "union") {
           const tag = L.armTag(f.type.unionId, STRING);
           if (tag < 0) fence();
+          const strArm: IrExpr = {
+            kind: "unionWrap", unionId: f.type.unionId, tag, value: raw, type: f.type, loc,
+          };
+          // Node's Windows answer is null, not "": uv_os_get_passwd leaves
+          // pw_shell unset there. Which arm that is depends on the HOST and
+          // this compiler cross-compiles, so it is a runtime branch on
+          // os.userShellNull rather than a build-time constant. A mapping
+          // with no null arm (plain `shell: string`) keeps the string one.
+          const nullTag = L.armTag(f.type.unionId, NULL_T);
           fields.push({
             name: f.name,
-            value: { kind: "unionWrap", unionId: f.type.unionId, tag, value: raw, type: f.type, loc },
+            value:
+              nullTag < 0
+                ? strArm
+                : {
+                    kind: "ternary",
+                    cond: { kind: "libCall", fn: "os.userShellNull", args: [], type: BOOL, loc },
+                    then: {
+                      kind: "unionWrap", unionId: f.type.unionId, tag: nullTag,
+                      value: { kind: "unitLit", unit: "null", type: NULL_T, loc },
+                      type: f.type, loc,
+                    },
+                    else_: strArm,
+                    type: f.type,
+                    loc,
+                  },
           });
         } else {
           fence();

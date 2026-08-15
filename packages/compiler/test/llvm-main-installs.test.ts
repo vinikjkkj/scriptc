@@ -147,18 +147,38 @@ describe("the two mains install the same hooks on the same predicates", () => {
     }
   });
 
-  test("the npm-table registration, which is not _install-shaped, stays refused here", async () => {
+  test("the npm-table registration, which is not _install-shaped, is on BOTH sides", async () => {
     // The one main-time registration that does not end in _install is the
     // embedded npm module table (scr_island_modules / scr_island_set_inflate),
     // gated on `embedded && embedded.modules.length > 0`. The LLVM emitter
-    // refuses exactly that during its module scan, so the row cannot be
-    // reached rather than being merely absent. If the refusal ever goes,
-    // this test fails and the table above has to gain the row.
+    // used to refuse exactly that during its module scan — the tier`s last
+    // refusal, and the reason this row could not be reached rather than
+    // being merely absent. It now emits the two tables (llvm/island.ts is
+    // emission/emit-island.ts in IR) and registers them in the same
+    // position the C main does: last before the entry call.
+    //
+    // installTable above cannot compare this row, because neither gate is
+    // a moduleX predicate — C tests `embedded.modules.length > 0` and LLVM
+    // the null-ness of that same computation. So it is checked by name.
     const ll = await readFile(llvmEmitter, "utf8");
     const c = await readFile(cEmitter, "utf8");
+    const island = await readFile(join(import.meta.dirname, "../src/backend/llvm/island.ts"), "utf8");
     expect(c).toContain("scr_island_modules(sc_npm_modules");
-    expect(ll).not.toContain("scr_island_modules");
-    expect(ll).toContain("mod.embedded.modules.length > 0");
-    expect(ll).toContain(`throw new LlvmUnsupportedError("npmEmbedding")`);
+    expect(ll).toContain("@scr_island_modules(ptr @sc_npm_modules");
+    // The refusal is gone from the source, not merely unreachable.
+    expect(ll).not.toContain("npmEmbedding");
+    // The inflater rides the SAME predicate on both sides: main installs
+    // it exactly when some module stored compressed, which is also the
+    // predicate index.ts links scr_zlib.c by (moduleEmbedsCompressedNpm).
+    expect(c).toContain("scr_island_set_inflate(scr_zlib_inflate_exact)");
+    expect(ll).toContain("@scr_island_set_inflate(ptr @scr_zlib_inflate_exact)");
+    // …and both decide "compressed" with the same store() rule, so the
+    // two backends embed identical bytes rather than merely equivalent
+    // ones. A divergence here is a binary that inflates garbage.
+    for (const src of [await readFile(join(import.meta.dirname, "../src/backend/emission/emit-island.ts"), "utf8"), island]) {
+      expect(src).toContain("NPM_COMPRESS_MIN");
+      expect(src).toContain("deflateRawSync(plain, { level: 9 })");
+      expect(src).toContain("deflated.length < plain.length");
+    }
   });
 });
