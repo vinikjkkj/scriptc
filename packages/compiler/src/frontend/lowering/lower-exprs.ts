@@ -13360,7 +13360,42 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         // A checker-record receiver whose VALUE stayed dyn (the erased
         // all-unknown-fields cast — `(err as { code?: unknown }).code`):
         // decline, and the dyn keyed-read fallback answers.
-        if (obj.type.kind !== "record") return null;
+        if (obj.type.kind !== "record") {
+          // The ADOPTED-INSTANCE write. The checker says record (the
+          // binding's declared interface) while the VALUE is the class
+          // instance lowerVarDecl's adoption arm kept, so the record
+          // branch above resolved the member against a shape the value
+          // never had. The adoption rule promises members "read as the
+          // class's own"; its READ half is rescued at lowerFieldRead's
+          // last-resort fence and its CALL half at lowerObjectMethodCall's,
+          // but the WRITE half never was — `x.v = 1` through an adopted
+          // binding fell all the way to "assignment to non-variables",
+          // which is a FENCE, so nothing that compiles today reaches here.
+          // Same authority as the read's: the flattened instance-field map
+          // (inherited members included). An accessor-satisfied name has no
+          // data slot and a method name is a bound reference, so both keep
+          // the older fences, exactly the line the read rescue draws.
+          if (obj.type.kind === "object") {
+            const adoptedInfo = L.classes.get(obj.type.className);
+            const adoptedFieldT = adoptedInfo?.fields.get(access.name.text);
+            if (
+              adoptedInfo !== undefined &&
+              adoptedFieldT !== undefined &&
+              L.findMethodOn(adoptedInfo, `get:${access.name.text}`) === null &&
+              L.findMethodOn(adoptedInfo, `set:${access.name.text}`) === null &&
+              L.findMethodOn(adoptedInfo, access.name.text) === null
+            ) {
+              return {
+                container: "class",
+                obj,
+                className: obj.type.className,
+                field: access.name.text,
+                fieldType: adoptedFieldT,
+              };
+            }
+          }
+          return null;
+        }
         // A user type-guard narrowing to `T & { f: … }` refines the
         // receiver's CHECKER shape to a SIBLING record (same fields, a
         // tighter member type — `exposeAs?: string` → `exposeAs: string`)
