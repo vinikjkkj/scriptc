@@ -29,6 +29,65 @@ import { declSymbolOf } from "./lower-modules.js";
 import { expandoMemberRead } from "./lower-expando.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 
+/** Does this parameter take paramShape's ISLAND-REST form? A JS
+ * `(...args)` has no static element type — tsc's `any[]` is inference
+ * residue, not element information — so under --dynamic the binding is
+ * the ENGINE's own arguments array: ONE jsval, never a static array.
+ * The predicate lives here, beside the shape it decides, because the
+ * function value's own signature differs from the checker's spelling of
+ * it and the declaration rule that reconciles the two (lowerVarDecl and
+ * collectGlobals) must not drift from this ABI. */
+export function isIslandRestParam(L: Lowerer, param: ts.ParameterDeclaration): boolean {
+  if (param.dotDotDotToken === undefined || !L.dynamic) return false;
+  if (!isJsSourceFile(param.getSourceFile())) return false;
+  const mapped = L.mapTypeOf(L.typeOf(param.name));
+  return mapped?.kind === "array" && mapped.elem.kind === "jsval";
+}
+
+/** A function LITERAL initializer at least one of whose parameters takes
+ * the island-rest form — the declaration-site face of
+ * isIslandRestParam. Parentheses are transparent; anything that is not
+ * a literal (a call result, a reference) answers false, because only a
+ * literal's signature is decided by paramShape right here. */
+export function islandRestFunctionLiteral(L: Lowerer, init: ts.Expression): boolean {
+  let e: ts.Expression = init;
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (!ts.isArrowFunction(e) && !ts.isFunctionExpression(e)) return false;
+  return e.parameters.some((p) => isIslandRestParam(L, p));
+}
+
+/** The SLOT type for a declaration whose initializer is an island-rest
+ * function literal, derived from the checker's mapped signature by
+ * rewriting each island-rest parameter's `any[]` inference residue to the
+ * one jsval the ABI passes (lambdaSignature builds the same shape from
+ * the other side, and `rest`/`restAbi` mark it the REST host-call form).
+ * collectGlobals runs BEFORE any body lowers, so it cannot ask the
+ * lowering what the initializer produced; this answers from the same rule
+ * without lowering anything. Returns null whenever the two sides do not
+ * line up one-to-one — a dynRest sibling, an `arguments` read, an
+ * unmappable signature — and the declaration keeps the checker's
+ * spelling. */
+export function islandRestSlotType(
+  L: Lowerer,
+  init: ts.Expression,
+  mapped: IrType | null,
+): (IrType & { kind: "func" }) | null {
+  if (mapped === null || mapped.kind !== "func" || mapped.rest === true) return null;
+  let e: ts.Expression = init;
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (!ts.isArrowFunction(e) && !ts.isFunctionExpression(e)) return null;
+  if (mapped.params.length !== e.parameters.length) return null;
+  let island = false;
+  const params = mapped.params.map((p, i) => {
+    const decl = e.parameters[i];
+    if (decl === undefined || !isIslandRestParam(L, decl)) return p;
+    island = true;
+    return JSVAL;
+  });
+  if (!island) return null;
+  return { kind: "func", params, ret: mapped.ret, rest: true, restAbi: "jsval" };
+}
+
 /** How a parameter participates in CALL-SITE COMPLETION (the frontend
  * completes every call to the one full signature, so the IR and backends
  * stay count-exact — see docs/ir.md). `required` params must be passed;
@@ -274,7 +333,7 @@ export interface GenericInstance {
         // value crosses as a REST host function (the withPlugins
         // `async (...args) =>` shape). Static builds keep the variadic
         // dyn form for every unmappable JS rest.
-        if (restMapped?.kind === "array" && restMapped.elem.kind === "jsval" && L.dynamic) {
+        if (isIslandRestParam(L, param)) {
           return { type: JSVAL, mode: "islandRest" };
         }
         if (restMapped?.kind !== "array") {
