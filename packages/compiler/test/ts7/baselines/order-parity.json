@@ -7535,6 +7535,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3891-union-spread-narrowed-first.ts": {
+   "order": [
+    "<repo>/tests/corpus/3891-union-spread-narrowed-first.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3901-typeof-bigint-narrows-like-a-scalar.ts": {
+   "order": [
+    "<repo>/tests/corpus/3901-typeof-bigint-narrows-like-a-scalar.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3902-promise-resolve-over-a-settle-or-value-union.ts": {
+   "order": [
+    "<repo>/tests/corpus/3902-promise-resolve-over-a-settle-or-value-union.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3921-http-client-teardown-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/3921-http-client-teardown-errors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3931-error-subclass-code-through-the-error-view.ts": {
+   "order": [
+    "<repo>/tests/corpus/3931-error-subclass-code-through-the-error-view.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3932-error-subclass-nonstring-code-keeps-its-own-slot-on-purpose.ts": {
+   "order": [
+    "<repo>/tests/corpus/3932-error-subclass-nonstring-code-keeps-its-own-slot-on-purpose.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/400-fib.ts": {
    "order": [
     "<repo>/tests/corpus/400-fib.ts"
@@ -8794,6 +8830,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/fetch-typed-option-member.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/fetch-typed-option-member.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/filter-narrow.ts": {
    "order": [
     "<repo>/tests/diagnostics/filter-narrow.ts"
@@ -9541,6 +9583,12 @@
   "<repo>/tests/diagnostics/unassigned-fields.ts": {
    "order": [
     "<repo>/tests/diagnostics/unassigned-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/union-spread-into-union-slot.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/union-spread-into-union-slot.ts"
    ],
    "diags": []
   },
