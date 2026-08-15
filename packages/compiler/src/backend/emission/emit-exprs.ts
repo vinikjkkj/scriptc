@@ -4501,10 +4501,18 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "http.requestUrlOpts":
           case "http.requestUrlOptsCb":
           case "https.requestUrlOpts":
-          case "https.requestUrlOptsCb": {
+          case "https.requestUrlOptsCb":
+          // The agent-threaded twins: the same row with the agent dyn
+          // appended, so the whole case differs by one argument and the
+          // entry-point name.
+          case "http.requestUrlAgent":
+          case "http.requestUrlAgentCb":
+          case "https.requestUrlAgent":
+          case "https.requestUrlAgentCb": {
             E.usesTimers = true; // an in-flight request holds the loop open
             const tls = e.fn.startsWith("https.");
-            const cbIdx = tls ? 7 : 5;
+            const agented = e.fn.includes("requestUrlAgent");
+            const cbIdx = (tls ? 7 : 5) + (agented ? 1 : 0);
             let cbExpr = "NULL";
             let adapter = "NULL";
             if (e.fn.endsWith("Cb")) {
@@ -4516,12 +4524,19 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               adapter = cbT.params.length === 0 ? "&scr_http_resp_thunk0" : "&scr_http_resp_thunk_res";
             }
             const head = `${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}`;
+            const tail = agented ? `, ${arg(tls ? 7 : 5)}` : "";
             return finish(
               tls
-                ? `scr_https_request_url_opts(${head}, ${arg(5)}, (const char *)${arg(6)}->data, ${arg(6)}->len, ${cbExpr}, ${adapter})`
-                : `scr_http_request_url_opts(${head}, ${cbExpr}, ${adapter})`,
+                ? `scr_https_request_url_${agented ? "agent" : "opts"}(${head}, ${arg(5)}, (const char *)${arg(6)}->data, ${arg(6)}->len${tail}, ${cbExpr}, ${adapter})`
+                : `scr_http_request_url_${agented ? "agent" : "opts"}(${head}${tail}, ${cbExpr}, ${adapter})`,
             );
           }
+          // The `signal` option: wire the signal into the request the inner
+          // row just built and answer that same handle (+1). One entry
+          // point for every request row, because Node applies the signal
+          // to the ClientRequest rather than to the wire.
+          case "http.clientSignal":
+            return finish(`scr_http_client_signal(${arg(0)}, ${arg(1)})`);
           case "http.requestConn":
           case "http.requestConnCb": {
             E.usesTimers = true;

@@ -12,7 +12,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { ladderFenceExpr, nodeThrowExpr } from "./lowerer.js";
 import { isJsSourceFile, locOf } from "../program.js";
-import { arrayOf, BOOL, BYTES_U8, canBoxFuncIntoDyn, canConvertToDyn, DYN, DYN_HANDLE_KINDS, F64, funcOf, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, IrExpr, IrLibFn, IrStmt, IrType, NETSERVER_T, NETSOCKET_T, NULL_T, SECURECTX_T, STRING, UNDEFINED_T, SrcLoc, typeKey, VOID } from "../../ir/nodes.js";
+import { ABORTSIGNAL_T, arrayOf, BOOL, BYTES_U8, canBoxFuncIntoDyn, canConvertToDyn, DYN, DYN_HANDLE_KINDS, F64, funcOf, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, IrExpr, IrLibFn, IrParam, IrStmt, IrType, NETSERVER_T, NETSOCKET_T, NULL_T, SECURECTX_T, STRING, UNDEFINED_T, SrcLoc, typeKey, VOID } from "../../ir/nodes.js";
 import {
   AGENT_DOCUMENTED_OPTIONS,
   builtinFenceHintOf,
@@ -3593,17 +3593,19 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
    *     Node treats `headers: undefined` as no headers. A
    *     lowerClientHeadersOption widening plus an "absent -> empty
    *     pairs" arm. Smallest of the three.
-   *   signal: <AbortSignal>  DOCUMENTED and unlowered (it fences by name
-   *     through fenceOrDropOptionKey). Nothing in scr_http.c wires abort
-   *     into an in-flight client request today; this is real runtime
-   *     work, and it is the one that keeps that call site trapping.
+   *   signal: <AbortSignal>  LOWERED (http.clientSignal, below) — including
+   *     the `AbortSignal | undefined` spelling, through an interned
+   *     helper, since a ternary would have to duplicate the request and
+   *     therefore DIAL TWICE.
    *   agent: <Agent value>  the agent rows are keyed on an explicit
    *     host/port/path (getName's shape) while this row derives them at
    *     runtime, so it needs a requestUrlAgent quartet of exactly the
    *     shape requestUrlOpts added. Mechanical.
    *
-   * The first and third are worth nothing without the second: they sit
-   * on the same options record, so whichever remains keeps the trap. */
+   * With signal lowered, the two that remain are on the same options
+   * record and CLOSE THE SITE ONLY TOGETHER: zapo's httpRequest spells
+   * headers, signal and agent in one literal, so either one left behind
+   * keeps the whole call fenced. */
   const urlKindOf = (n: ts.Expression): "string" | "url" | null => {
     if (ts.isObjectLiteralExpression(n)) return null;
     const t = L.mapTypeOf(L.typeOf(n));
@@ -3703,6 +3705,9 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
   let agentClose: ts.Node | null = null;
   /** agent: <Agent value> — the requestAgent rows thread the handle. */
   let agentVal: IrExpr | null = null;
+  /** signal: <AbortSignal | undefined> — wired into the handle AFTER the
+   * row builds it (http.clientSignal), which is where Node applies it too. */
+  let signal: IrExpr | null = null;
   for (const prop of optsNode.properties) {
     // Shorthand entries ({ port } for { port: port }) are the natural
     // spelling at these call sites — the shorthand's VALUE lowering
@@ -3937,6 +3942,50 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
         agentVal = v;
         break;
       }
+      case "signal": {
+        // Node's AbortSignal on a ClientRequest. It configures the HANDLE,
+        // not the wire, so it does not widen any request row: the row
+        // builds the request and http.clientSignal wires the signal into
+        // it (scr_abort_http.c), which is the same order Node has —
+        // ClientRequest exists, then addAbortSignal runs against it.
+        //
+        // Three admitted shapes, and nothing else:
+        //   AbortSignal                      the row's argument directly
+        //   AbortSignal | undefined (| null) an interned helper narrows it
+        //   the undefined/null literal       no signal at all (Node ignores
+        //                                    `signal: undefined`, measured)
+        const v = initializer !== null
+          ? L.lowerExpr(initializer)
+          : L.lowerShorthandValue(prop as ts.ShorthandPropertyAssignment);
+        if (v.type.kind === "abortSignal") {
+          signal = v;
+          break;
+        }
+        if (v.type.kind === "undefinedT" || v.type.kind === "nullT") {
+          // Dropping the option DROPS THE VALUE, so the value has to be
+          // one whose evaluation nobody can observe. `signal: undefined`
+          // and a shorthand are; `signal: makeNothing()` is not, and Node
+          // WOULD have called it. The agent option's null/undefined arms
+          // dodge this by matching the syntax before lowering; this one
+          // needs the type, so it asks the same audited predicate the
+          // TLS-option drop asks.
+          if (initializer === null || sideEffectFreeOptionValue(initializer)) break;
+          L.noLowering(
+            `a ${member} 'signal' option whose absent value is effectful`,
+            prop,
+            "the option means no signal, so the value is dropped — hoist it (const s = ...) or drop the entry",
+          );
+        }
+        if (optionalSignalArm(L, v.type) !== null) {
+          signal = v;
+          break;
+        }
+        L.noLowering(
+          `a ${member} 'signal' option of '${L.fmt(v.type)}' values`,
+          prop,
+          "the signal is an AbortSignal, or an AbortSignal | undefined (Node ignores an absent one)",
+        );
+      }
       default:
         fenceOrDropOptionKey(
           L, prop, key, member,
@@ -3998,16 +4047,6 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
       "call http.request/https.request directly when passing an Agent",
     );
   }
-  if (agentVal !== null && urlNode !== null) {
-    // The agent rows are keyed on an explicit host/port/path (getName's
-    // shape); the URL row derives them at runtime. agent: false / null /
-    // undefined are unaffected — they change no row.
-    L.noLowering(
-      `${member} with a URL first argument and an agent value`,
-      optsNode,
-      "pass the whole request as an options record when threading an Agent",
-    );
-  }
   if (connCb !== null && urlNode !== null) {
     L.noLowering(
       `${member} with a URL first argument and a createConnection option`,
@@ -4015,6 +4054,30 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
       "the dialer supplies the socket — pass the whole request as an options record",
     );
   }
+  /** The `signal` option, applied to whichever row built the request.
+   *
+   * The signal is argument ZERO of the wrapper, so it evaluates BEFORE the
+   * row it wraps: the emitters lower a libCall's arguments left to right,
+   * and Node's caller has the whole options record in hand before the
+   * request is made. (Option values still evaluate in ROW order rather
+   * than source order — that is this lowering's pre-existing latitude,
+   * unchanged here.)
+   *
+   * The `AbortSignal | undefined` spelling cannot be a ternary: both arms
+   * would need the request expression, and duplicating it would build and
+   * DIAL two requests. So it goes through an interned two-parameter
+   * helper, where the narrow is proven by the `if` the compiler itself
+   * writes rather than by tsc having been right. */
+  const withSignal = (req: IrExpr): IrExpr => {
+    if (signal === null) return req;
+    if (signal.type.kind === "abortSignal") {
+      return { kind: "libCall", fn: "http.clientSignal", args: [signal, req], type: HTTPCLIENTREQ_T, loc };
+    }
+    const tag = optionalSignalArm(L, signal.type);
+    if (tag === null || signal.type.kind !== "union") throw new Error("lowerer bug: signal option arm");
+    const helper = optionalSignalHelper(L, signal.type.unionId, tag, loc);
+    return { kind: "call", callee: helper, args: [signal, req], type: HTTPCLIENTREQ_T, loc };
+  };
   host ??= strLit("localhost");
   // The binding mode's default port follows the runtime dial: 443 on the
   // TLS arm, 80 on the plain one — exactly each client's own default.
@@ -4040,9 +4103,18 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
       ca ??= strLit(""); /* none: the default trust anchors */
       urlBase.push(reject, ca);
     }
+    // An Agent VALUE alongside the URL: the agent rows used to demand an
+    // explicit host/port/path (getName's shape) while this row derives
+    // them from the parse, which is the whole of what kept them apart.
+    // The runtime entry does the parse and hands request_agent_ex the
+    // parts, passing the -1 port sentinel for a PORTLESS url so that
+    // agent.defaultPort decides exactly when Node's merge lets it.
+    if (agentVal !== null) urlBase.push(agentVal);
     if (args.length === 2) {
-      const fn: IrLibFn = secure === true ? "https.requestUrlOpts" : "http.requestUrlOpts";
-      return { kind: "libCall", fn, args: urlBase, type: HTTPCLIENTREQ_T, loc };
+      const fn: IrLibFn = secure === true
+        ? (agentVal !== null ? "https.requestUrlAgent" : "https.requestUrlOpts")
+        : (agentVal !== null ? "http.requestUrlAgent" : "http.requestUrlOpts");
+      return withSignal({ kind: "libCall", fn, args: urlBase, type: HTTPCLIENTREQ_T, loc });
     }
     const { cb } = lowerCallbackArg(
       L, args[2]!, "response callbacks", 1,
@@ -4050,13 +4122,15 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
       "use (res) or ()",
       [HTTPREQ_T],
     );
-    const fn: IrLibFn = secure === true ? "https.requestUrlOptsCb" : "http.requestUrlOptsCb";
-    return { kind: "libCall", fn, args: [...urlBase, cb], type: HTTPCLIENTREQ_T, loc };
+    const fn: IrLibFn = secure === true
+      ? (agentVal !== null ? "https.requestUrlAgentCb" : "https.requestUrlOptsCb")
+      : (agentVal !== null ? "http.requestUrlAgentCb" : "http.requestUrlOptsCb");
+    return withSignal({ kind: "libCall", fn, args: [...urlBase, cb], type: HTTPCLIENTREQ_T, loc });
   }
   if (connCb !== null) {
     const base = [connCb, path, method, timeout, headers, autoEnd];
     if (args.length === 1) {
-      return { kind: "libCall", fn: "http.requestConn", args: base, type: HTTPCLIENTREQ_T, loc };
+      return withSignal({ kind: "libCall", fn: "http.requestConn", args: base, type: HTTPCLIENTREQ_T, loc });
     }
     const { cb } = lowerCallbackArg(
       L, args[1]!, "response callbacks", 1,
@@ -4064,7 +4138,7 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
       "use (res) or ()",
       [HTTPREQ_T],
     );
-    return { kind: "libCall", fn: "http.requestConnCb", args: [...base, cb], type: HTTPCLIENTREQ_T, loc };
+    return withSignal({ kind: "libCall", fn: "http.requestConnCb", args: [...base, cb], type: HTTPCLIENTREQ_T, loc });
   }
   const base = [host, port, path, method, timeout, headers, autoEnd];
   if (secureish) {
@@ -4078,7 +4152,7 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
     const fn: IrLibFn = binding !== null ? "https.requestFn"
       : secure === true ? (agentVal !== null ? "https.requestAgent" : "https.request")
       : agentVal !== null ? "http.requestAgent" : "http.request";
-    return { kind: "libCall", fn, args: base, type: HTTPCLIENTREQ_T, loc };
+    return withSignal({ kind: "libCall", fn, args: base, type: HTTPCLIENTREQ_T, loc });
   }
   const { cb } = lowerCallbackArg(
     L, args[1]!, "response callbacks", 1,
@@ -4089,14 +4163,160 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
   const fn: IrLibFn = binding !== null ? "https.requestFnCb"
     : secure === true ? (agentVal !== null ? "https.requestAgentCb" : "https.requestCb")
     : agentVal !== null ? "http.requestAgentCb" : "http.requestCb";
-  return { kind: "libCall", fn, args: [...base, cb], type: HTTPCLIENTREQ_T, loc };
+  return withSignal({ kind: "libCall", fn, args: [...base, cb], type: HTTPCLIENTREQ_T, loc });
+}
+
+/** The interned `(h: Record | undefined) => string[]` behind an optional
+ * headers option: the record arm flattens through the SAME env.pairs
+ * helper an unconditional record would use, and the absent arm answers the
+ * empty pairs array — Node's no-headers, byte for byte.
+ *
+ * Null (the caller fences) when the union is not exactly one record plus
+ * units, or when that record's own value slots are not the env.pairs
+ * matrix — the pre-existing fence, reached through one more layer. */
+function optionalHeadersHelper(L: Lowerer, unionId: string, loc: SrcLoc): string | null {
+  const def = L.unions.get(unionId);
+  if (def === undefined) return null;
+  if (!def.arms.every((a) => a.kind === "record" || a.kind === "undefinedT" || a.kind === "nullT")) {
+    return null;
+  }
+  const tag = def.arms.findIndex((a) => a.kind === "record");
+  if (tag < 0) return null;
+  const recT = def.arms[tag]!;
+  if (recT.kind !== "record") return null;
+  const inner = L.envToPairsHelper(recT.shapeId, loc);
+  if (inner === null) return null;
+  const key = `http.headers:${unionId}`;
+  const existing = L.widthHelpers.get(key);
+  if (existing !== undefined) return existing;
+  const name = `%http.headers.${L.widthHelpers.size}`;
+  L.widthHelpers.set(key, name);
+  const unionT: IrType = { kind: "union", unionId };
+  const arrT = arrayOf(STRING);
+  const hRef: IrExpr = { kind: "varRef", localId: "h.0", type: unionT, loc };
+  const body: IrStmt[] = [
+    {
+      kind: "if",
+      cond: { kind: "unionIsTag", unionId, tag, negated: false, value: hRef, type: BOOL, loc },
+      then: [
+        {
+          kind: "return",
+          value: {
+            kind: "call",
+            callee: inner,
+            args: [{ kind: "unionNarrow", unionId, tag, value: hRef, type: recT, loc }],
+            type: arrT,
+            loc,
+          },
+          loc,
+        },
+      ],
+      else_: null,
+      loc,
+    },
+    { kind: "return", value: { kind: "arrayLit", elems: [], type: arrT, loc }, loc },
+  ];
+  L.liftedFns.push({
+    name,
+    params: [{ localId: "h.0", name: "h", type: unionT }],
+    returnType: arrT,
+    locals: [{ id: "h.0", name: "h", type: unionT, mutable: false }],
+    body,
+    loc,
+  });
+  return name;
+}
+
+/** `AbortSignal | undefined` (or `| null`) — the signal arm's tag, or null
+   * for anything else. A ROUTING predicate: a null answer sends the option
+   * to its fence, never to a wrong row. */
+function optionalSignalArm(L: Lowerer, t: IrType): number | null {
+  if (t.kind !== "union") return null;
+  const def = L.unions.get(t.unionId);
+  if (def === undefined) return null;
+  if (!def.arms.every((a) => a.kind === "abortSignal" || a.kind === "undefinedT" || a.kind === "nullT")) {
+    return null;
+  }
+  const tag = def.arms.findIndex((a) => a.kind === "abortSignal");
+  return tag < 0 ? null : tag;
+}
+
+/** The interned `(signal: AbortSignal | undefined, req) => req` that wires
+   * the option when the union carries a signal and answers the request
+   * untouched when it does not.
+   *
+   * Why a function and not an expression: the request must be evaluated
+   * EXACTLY ONCE (it dials), which rules out the ternary a narrow would
+   * otherwise want, and unionNarrow is tag-UNCHECKED — legal only where the
+   * compiler itself wrote the test. Both fall out of a two-parameter helper
+   * whose body is an `if` over the unionIsTag. Interned per union id, so a
+   * program with many such calls emits one. */
+function optionalSignalHelper(L: Lowerer, unionId: string, tag: number, loc: SrcLoc): string {
+  const key = `http.signal:${unionId}`;
+  const existing = L.widthHelpers.get(key);
+  if (existing !== undefined) return existing;
+  const name = `%http.signal.${L.widthHelpers.size}`;
+  L.widthHelpers.set(key, name);
+  const unionT: IrType = { kind: "union", unionId };
+  const params: IrParam[] = [
+    { localId: "s.0", name: "s", type: unionT },
+    { localId: "r.0", name: "r", type: HTTPCLIENTREQ_T },
+  ];
+  const sigRef: IrExpr = { kind: "varRef", localId: "s.0", type: unionT, loc };
+  const reqRef: IrExpr = { kind: "varRef", localId: "r.0", type: HTTPCLIENTREQ_T, loc };
+  const body: IrStmt[] = [
+    {
+      kind: "if",
+      cond: { kind: "unionIsTag", unionId, tag, negated: false, value: sigRef, type: BOOL, loc },
+      then: [
+        {
+          kind: "exprStmt",
+          expr: {
+            kind: "libCall",
+            fn: "http.clientSignal",
+            args: [
+              { kind: "unionNarrow", unionId, tag, value: sigRef, type: ABORTSIGNAL_T, loc },
+              reqRef,
+            ],
+            type: HTTPCLIENTREQ_T,
+            loc,
+          },
+          loc,
+        },
+      ],
+      else_: null,
+      loc,
+    },
+    { kind: "return", value: reqRef, loc },
+  ];
+  // A param needs a LOCAL entry beside its param entry (the validator
+  // checks both, and caught this as an SC9001 rather than a wrong answer).
+  L.liftedFns.push({
+    name,
+    params,
+    returnType: HTTPCLIENTREQ_T,
+    locals: [
+      { id: "s.0", name: "s", type: unionT, mutable: false },
+      { id: "r.0", name: "r", type: HTTPCLIENTREQ_T, mutable: false },
+    ],
+    body,
+    loc,
+  });
+  return name;
 }
 
 /** The headers option of http.request: an object literal with literal
  * keys and string values packs into the flat [k0, v0, k1, v1, ...] pairs
  * array directly; any other expression must be a Record whose values are
  * strings (or `string | undefined` — absent entries drop, the env-option
- * rule), flattened by the interned env.pairs helper. */
+ * rule), flattened by the interned env.pairs helper.
+ *
+ * A `Record | undefined` VALUE (zapo's `headers: init.headers` off an
+ * optional field) is Node's "no headers at all" when it is absent —
+ * measured, not assumed: Node's ClientRequest only iterates the record
+ * when one was given. It goes through a second interned helper rather
+ * than a ternary for the reason the signal option does: a ternary would
+ * evaluate the option expression TWICE, and this one can be a call. */
 function lowerClientHeadersOption(L: Lowerer, node: ts.Expression): IrExpr {
   const loc = locOf(node);
   if (ts.isObjectLiteralExpression(node)) {
@@ -4128,11 +4348,18 @@ function lowerClientHeadersOption(L: Lowerer, node: ts.Expression): IrExpr {
     return { kind: "arrayLit", elems, type: arrayOf(STRING), loc };
   }
   const v = L.lowerExpr(node);
+  if (v.type.kind === "union") {
+    const helper = optionalHeadersHelper(L, v.type.unionId, loc);
+    if (helper !== null) {
+      return { kind: "call", callee: helper, args: [v], type: arrayOf(STRING), loc };
+    }
+  }
   if (v.type.kind !== "record") {
     L.noLowering(
       `request headers of '${L.fmt(v.type)}' values`,
       node,
-      "pass an object literal or a Record<string, string>",
+      "pass an object literal or a Record<string, string>" +
+        (v.type.kind === "union" ? " (an optional one may be undefined — Node reads no headers then)" : ""),
     );
   }
   const helper = L.envToPairsHelper(v.type.shapeId, loc);

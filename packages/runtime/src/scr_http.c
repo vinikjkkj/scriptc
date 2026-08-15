@@ -2250,6 +2250,16 @@ struct ScrHttpClientReq {
    * destroy(err) returns before its 'error' runs, so firing it inline here
    * would reorder the program. Set once; a second destroy is a no-op. */
   ScrError *destroy_err;
+  /* The `signal` option's seam (scr_abort_http.c). `abort_sig` is an
+   * ScrAbortSignal * held +1 and OPAQUE here — this unit names no
+   * scr_abort.c symbol, because the two units are independently
+   * link-gated and either one has to be able to link without the other.
+   * `abort_detach` removes the native listener and drops that reference;
+   * it runs at 'close' (before the listeners, so a 'close' handler sees
+   * the signal already clean — Node's listener count is 0 there) or at
+   * this handle's own free, whichever comes first, and at most once. */
+  void *abort_sig;
+  ScrHttpAbortDetach abort_detach;
   ScrHttpReq *res; /* +1 once the head parses */
   ScrNetLs resp_ls, err_ls, timeout_ls, close_ls, upgrade_ls;
   /* the owning Agent (+1; the agent's entry holds this client +1 too —
@@ -2266,9 +2276,28 @@ ScrHttpClientReq *scr_http_client_retain(ScrHttpClientReq *c) {
   return c;
 }
 
+/* Runs the abort seam's detach exactly once: the native listener leaves
+ * the signal's vector and the signal's reference drops. Idempotent, and
+ * safe to call from the free path — the client pointer the listener
+ * borrows stops being reachable in the same statement. */
+static void scr_http_client_abort_detach(ScrHttpClientReq *c) {
+  ScrHttpAbortDetach d = c->abort_detach;
+  void *sig = c->abort_sig;
+  if (d == NULL) return;
+  c->abort_detach = NULL;
+  c->abort_sig = NULL;
+  d(sig, c);
+}
+
+void scr_http_client_set_abort(ScrHttpClientReq *c, void *sig /*moves*/, ScrHttpAbortDetach detach) {
+  c->abort_sig = sig;
+  c->abort_detach = detach;
+}
+
 void scr_http_client_release(ScrHttpClientReq *c) {
   if (!c || c->rc == SIZE_MAX) return;
   if (--c->rc == 0) {
+    scr_http_client_abort_detach(c);
     scr_net_ls_drop(&c->resp_ls);
     scr_net_ls_drop(&c->err_ls);
     scr_net_ls_drop(&c->timeout_ls);
@@ -2334,6 +2363,10 @@ static void scr_http_client_settle(struct ScrHttpClientReq *c) {
   c->close_emitted = true;
   c->destroyed = true;
   scr_http_client_agent_detach(c); /* usually already detached at socket close */
+  /* Before the 'close' listeners: Node's request removes its own abort
+   * listener as it closes, and getEventListeners(signal, 'abort') already
+   * answers 0 inside a 'close' handler (measured). */
+  scr_http_client_abort_detach(c);
   scr_net_fire0(&c->close_ls);
   scr_net_ls_drop(&c->resp_ls);
   scr_net_ls_drop(&c->err_ls);
@@ -4525,7 +4558,8 @@ void scr_http_client_end_dynv(ScrHttpClientReq *c, const ScrDyn *d) {
 #include "scr_url_internal.h"
 
 bool scr_http_url_parts(ScrStr *url /*borrowed*/, bool secure, ScrStr **host_out /*+1*/,
-                         double *port_out, ScrStr **path_out /*+1*/) {
+                         double *port_out, ScrStr **path_out /*+1*/,
+                         bool *explicit_port_out /*nullable*/) {
   ScrUrl *u = scr_url_new(url);
   if (!u) return false; /* Invalid URL pending */
   /* The scheme is checked against the MODULE the call came from, not read
@@ -4542,6 +4576,11 @@ bool scr_http_url_parts(ScrStr *url /*borrowed*/, bool secure, ScrStr **host_out
     return false;
   }
   double port = secure ? 443 : 80;
+  /* Whether the AUTHORITY wrote a port at all. It is not the same question
+   * as "is the port the default": Node's urlToHttpOptions hands the merge
+   * an empty string for a portless URL, so an Agent's defaultPort wins
+   * there and does NOT win over an explicit ":80". */
+  if (explicit_port_out) *explicit_port_out = u->port->len > 0;
   if (u->port->len > 0) {
     port = 0;
     for (size_t i = 0; i < u->port->len; i++) port = port * 10 + (u->port->data[i] - '0');
@@ -4569,7 +4608,7 @@ ScrHttpClientReq *scr_http_request_url(ScrStr *url /*borrowed*/, ScrStr *method 
   ScrStr *host;
   ScrStr *path;
   double port;
-  if (!scr_http_url_parts(url, false, &host, &port, &path)) {
+  if (!scr_http_url_parts(url, false, &host, &port, &path, NULL)) {
     if (cb) scr_closure_release(cb);
     return NULL; /* Invalid URL / ERR_INVALID_PROTOCOL pending */
   }
@@ -4594,12 +4633,38 @@ ScrHttpClientReq *scr_http_request_url_opts(ScrStr *url /*borrowed*/, ScrStr *me
   ScrStr *host;
   ScrStr *path;
   double port;
-  if (!scr_http_url_parts(url, false, &host, &port, &path)) {
+  if (!scr_http_url_parts(url, false, &host, &port, &path, NULL)) {
     if (cb) scr_closure_release(cb);
     return NULL; /* Invalid URL / ERR_INVALID_PROTOCOL pending */
   }
   ScrHttpClientReq *c = scr_http_request_ex(host, port, path, method, timeout_ms, header_pairs,
                                              auto_end, cb, fn, 80, NULL, NULL);
+  scr_str_release(host);
+  scr_str_release(path);
+  return c;
+}
+
+/* http.request(url, { agent, ... }[, cb]) — the URL row threading an Agent
+ * handle. Same parse and same scheme check; the agent's getName-keyed
+ * accounting then owns the dial. The port is the URL's when the authority
+ * wrote one and the SENTINEL otherwise, because that is exactly when
+ * Node's merge lets agent.defaultPort decide. */
+ScrHttpClientReq *scr_http_request_url_agent(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*/,
+                                             double timeout_ms, ScrArr *header_pairs /*borrowed*/,
+                                             bool auto_end, const ScrDyn *agent /*borrowed*/,
+                                             ScrClosure *cb /*moves, nullable*/,
+                                             ScrHttpRespFn fn) {
+  ScrStr *host;
+  ScrStr *path;
+  double port;
+  bool explicit_port = false;
+  if (!scr_http_url_parts(url, false, &host, &port, &path, &explicit_port)) {
+    if (cb) scr_closure_release(cb);
+    return NULL; /* Invalid URL / ERR_INVALID_PROTOCOL pending */
+  }
+  ScrHttpClientReq *c = scr_http_request_agent_ex(host, explicit_port ? port : -1, path, method,
+                                                   timeout_ms, header_pairs, auto_end, agent,
+                                                   cb, fn, 80, NULL, NULL);
   scr_str_release(host);
   scr_str_release(path);
   return c;
