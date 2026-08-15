@@ -590,6 +590,20 @@ function lowerOptionalDefaultArg(
     return lowerArrayReduceCall(L, call, access, name as "reduce" | "reduceRight", elem);
   }
 
+/** The CHECKER's element type for a HOF receiver, when it has a usable one.
+   * Under the `Array.isArray` readonly-array quirk it does not — the receiver
+   * is bare `any[]` — and the isArray true-arm rule may already have answered
+   * the receiver's reads with the union's array constituent, which is exactly
+   * the case this recovers. `undefined` means "the checker has nothing to
+   * add", and every caller then keeps its own behaviour. */
+  function hofElemTs(L: Lowerer, access: ts.PropertyAccessExpression): ts.Type | undefined {
+    const recvTs = L.typeOf(access.expression);
+    if (!L.checker.isArrayType(recvTs)) return undefined;
+    const elemTs = L.checker.getTypeArguments(recvTs as ts.TypeReference)[0];
+    if (elemTs === undefined) return undefined;
+    return (elemTs.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0 ? undefined : elemTs;
+  }
+
 /** Lowers and validates a HOF callback argument. The lib declares optional
    * trailing (index, array) parameters after `lead` (the element for the
    * map family, accumulator + element for reduce); a callback may declare
@@ -597,7 +611,8 @@ function lowerOptionalDefaultArg(
    * loop passes exactly what it declares (JS passes everything; a callback
    * only sees the parameters it names). Returns the lowered callback and
    * its declared arity. */
-  function hofCallbackArg(L: Lowerer, argNode: ts.Expression, lead: IrType[], arrT: IrType):
+  function hofCallbackArg(L: Lowerer, argNode: ts.Expression, lead: IrType[], arrT: IrType,
+    leadTs?: readonly (ts.Type | undefined)[]):
     { fnArg: IrExpr & { type: IrType & { kind: "func" } }; arity: number } {
     // A DYN-receiver HOF's callback (`parsed.flatMap((value) => ...)`):
     // the contextual signature types the unannotated param `any` (the
@@ -647,16 +662,70 @@ function lowerOptionalDefaultArg(
     // destructuring parameters are left alone — an annotation is the
     // author's own answer, and only an `any` the checker inferred is
     // overridden.
+    //
+    // The parameter's CHECKER type is answered too whenever the caller can
+    // supply one, and that is the half that matters for the BODY: a bound
+    // parameter whose reads still resolve against `any` fences on the first
+    // `c.tag.length` it meets. typeOf is the one place every consumer asks,
+    // so answering there fixes the binding and its reads together.
     const irOverridden: ts.ParameterDeclaration[] = [];
+    const tsOverridden: ts.Node[] = [];
     if (ts.isArrowFunction(argNode) || ts.isFunctionExpression(argNode)) {
       argNode.parameters.forEach((p, i) => {
         if (i >= lead.length) return;
         const want = lead[i]!;
         if (want.kind === "dyn" || want.kind === "jsval") return;
         if (!ts.isIdentifier(p.name) || p.type || p.initializer || p.dotDotDotToken) return;
-        if (L.paramIrOverrides.has(p)) return;
+        if (L.paramIrOverrides.has(p) || L.chainNarrowedType.has(p.name)) return;
         const t = L.checker.getTypeAtLocation(p.name);
         if ((t.flags & ts.TypeFlags.Any) === 0) return;
+        const elemTs = leadTs?.[i];
+        const pname = p.name;
+        if (elemTs !== undefined) {
+          // The declaration node alone binds the parameter; the BODY's reads
+          // are separate nodes and ask typeOf separately, so they are
+          // answered too — otherwise `c` is the element while `c.tag` is
+          // still `any` and the first member read off a member fences. A
+          // parameter the body WRITES keeps the checker's own answer: the
+          // override describes what the loop passes IN, and nothing here
+          // knows what a later assignment put there.
+          const psym = L.resolveValueSymbol(pname);
+          const refs: ts.Identifier[] = [];
+          let written = false;
+          if (psym !== undefined) {
+            const collectRefs = (n: ts.Node): void => {
+              if (written) return;
+              if (ts.isIdentifier(n) && L.resolveValueSymbol(n) === psym) {
+                const par = n.parent;
+                if (
+                  (ts.isBinaryExpression(par) && par.left === n &&
+                    par.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+                    par.operatorToken.kind <= ts.SyntaxKind.LastAssignment) ||
+                  ((ts.isPostfixUnaryExpression(par) || ts.isPrefixUnaryExpression(par)) &&
+                    (par.operator === ts.SyntaxKind.PlusPlusToken ||
+                      par.operator === ts.SyntaxKind.MinusMinusToken))
+                ) {
+                  written = true;
+                  return;
+                }
+                if (!L.chainNarrowedType.has(n)) refs.push(n);
+                return;
+              }
+              n.forEachChild(collectRefs);
+            };
+            collectRefs(argNode);
+          }
+          if (!written) {
+            for (const r of refs) {
+              L.chainNarrowedType.set(r, elemTs);
+              tsOverridden.push(r);
+            }
+            if (!L.chainNarrowedType.has(pname)) {
+              L.chainNarrowedType.set(pname, elemTs);
+              tsOverridden.push(pname);
+            }
+          }
+        }
         L.paramIrOverrides.set(p, want);
         irOverridden.push(p);
       });
@@ -674,6 +743,7 @@ function lowerOptionalDefaultArg(
       fnArg = L.lowerExpr(argNode);
     } finally {
       for (const n of overridden) L.chainNarrowedType.delete(n);
+      for (const n of tsOverridden) L.chainNarrowedType.delete(n);
       for (const p of irOverridden) L.paramIrOverrides.delete(p);
     }
     const full = [...lead, F64, arrT];
@@ -754,7 +824,7 @@ function lowerOptionalDefaultArg(
     const receiver = L.lowerExpr(access.expression);
     const argNode = call.arguments[0];
     if (!argNode) L.unsupported("SC1090", call, "this call form"); // tsc-guarded
-    const { fnArg, arity } = hofCallbackArg(L, argNode, [elem], arrayOf(elem));
+    const { fnArg, arity } = hofCallbackArg(L, argNode, [elem], arrayOf(elem), [hofElemTs(L, access)]);
     const fnRet = fnArg.type.ret;
     if (method === "map" && (fnRet.kind === "void" || fnRet.kind === "func")) {
       // The result array U[] is unrepresentable here (no void elements;
@@ -1170,7 +1240,7 @@ function lowerOptionalDefaultArg(
     const arrT = arrayOf(elem);
     const argNode = call.arguments[0];
     if (!argNode) L.unsupported("SC1090", call, "this call form"); // tsc-guarded
-    const { fnArg, arity } = hofCallbackArg(L, argNode, [elem], arrT);
+    const { fnArg, arity } = hofCallbackArg(L, argNode, [elem], arrT, [hofElemTs(L, access)]);
     // JS takes the ToBoolean of the predicate's result — allowed wherever
     // that ToBoolean has a static answer (bool passes through; f64/string
     // by value; a truthy-answerable union by its arm — the
