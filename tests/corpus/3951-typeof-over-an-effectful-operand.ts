@@ -151,4 +151,54 @@ console.log("one group:");
 console.log(typeof twoObjects(0));
 console.log(typeof twoObjects(1));
 
+// SHORT-CIRCUIT AND CONTROL-FLOW POSITIONS. This is the section that
+// would catch the dangerous version of this change. A seqExpr carries
+// STATEMENTS into the middle of an expression, and if the emitter
+// hoisted them to the enclosing statement point the operand would run
+// even where JS never evaluates it -- the right side of a false "&&",
+// the untaken ternary arm, the right side of a "??" whose left is
+// present. Every row prints the tick count immediately after, so an
+// eagerly hoisted effect shows up as a NUMBER and not merely as a
+// missing line.
+console.log("A: && short-circuits, right must NOT run");
+console.log(false && typeof num() === "number");
+console.log("ticks", ticks);
+console.log("B: || short-circuits, right must NOT run");
+console.log(true || typeof num() === "number");
+console.log("ticks", ticks);
+console.log("C: && where the right side MUST run");
+console.log(true && typeof num() === "number");
+console.log("ticks", ticks);
+console.log("D: the untaken ternary arm");
+console.log(false ? typeof str() : "skipped");
+console.log("ticks", ticks);
+console.log("E: ?? whose left is present");
+const present: string | undefined = "here";
+console.log(present ?? typeof str());
+console.log("ticks", ticks);
+console.log("F: an if condition");
+if (typeof num() === "number") { console.log("  taken"); }
+console.log("ticks", ticks);
+console.log("G: a while condition, one pass");
+let passes = 0;
+while (passes < 1 && typeof num() === "number") { passes += 1; }
+console.log("ticks", ticks, "passes", passes);
+console.log("H: a switch discriminant");
+switch (typeof num()) {
+    case "number": console.log("  number"); break;
+    default: console.log("  other"); break;
+}
+console.log("ticks", ticks);
+console.log("I: an awaited operand");
+async function later(): Promise<string> {
+    ticks += 1;
+    console.log("  eval later", ticks);
+    return "p";
+}
+console.log(typeof (await later()));
+console.log("ticks", ticks);
+
 console.log("total ticks:", ticks);
+
+// Top-level await needs the file to be a module.
+export {};
