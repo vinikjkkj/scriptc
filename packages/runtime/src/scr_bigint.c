@@ -731,7 +731,22 @@ ScrStr *scr_big_to_str(const ScrBigInt *a, double radix) {
   uint32_t base = (uint32_t)radix;
   if (base < 2 || base > 36) base = 10;
   if (a->sign == 0) return scr_str_new("0", 1);
-  size_t cap = a->n * 11 + 2;
+  /* Digits per 32-bit limb is 32/log2(base): ten and a bit for decimal,
+   * but THIRTY-TWO for radix 2. The bound here used to be 11 — the
+   * decimal one — so every radix below 8 wrote past the end of this heap
+   * block once the value was wide enough to outrun the +2 slack. Measured
+   * from inside this function (written bytes vs the old cap):
+   *
+   *     limbs   r=2    r=3   r=4   r=5   r=6   r=7  | r=8   r=10
+   *        5   +74    +26    +9     .     .     .   |   .      .
+   *        6  +124    +54   +29   +16    +7    +2   |   .      .
+   *       16  +334   +146   +78   +43   +21    +5   |   .      .
+   *
+   * Radix 8 and up are safe at every width (11 covers 32/3), which is why
+   * decimal never showed it. The worst case over the legal range 2..36 is
+   * radix 2's 32 digits per limb, so bound it there once and every radix
+   * is covered: 32*n digits, plus the sign, plus one spare. */
+  size_t cap = a->n * 32 + 2;
   char *buf = malloc(cap);
   if (!buf) scr_big_oom();
   uint32_t *work = malloc(a->n * sizeof(uint32_t));
