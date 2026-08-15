@@ -689,10 +689,12 @@ function lowerOptionalDefaultArg(
           // parameter the body WRITES keeps the checker's own answer: the
           // override describes what the loop passes IN, and nothing here
           // knows what a later assignment put there.
+          // NULL, not undefined, is resolveValueSymbol's "cannot resolve";
+          // comparing against it would match every other unresolvable name.
           const psym = L.resolveValueSymbol(pname);
           const refs: ts.Identifier[] = [];
           let written = false;
-          if (psym !== undefined) {
+          if (psym !== null) {
             const collectRefs = (n: ts.Node): void => {
               if (written) return;
               if (ts.isIdentifier(n) && L.resolveValueSymbol(n) === psym) {

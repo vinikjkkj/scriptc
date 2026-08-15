@@ -2487,8 +2487,12 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             while (ts.isParenthesizedExpression(x) || ts.isNonNullExpression(x)) x = x.expression;
             while (ts.isParenthesizedExpression(y) || ts.isNonNullExpression(y)) y = y.expression;
             if (ts.isIdentifier(x) && ts.isIdentifier(y)) {
+              // resolveValueSymbol answers NULL when it cannot resolve, so a
+              // truthiness test is required: `sx === sy` alone would make two
+              // UNRESOLVABLE identifiers compare equal and narrow a read that
+              // has nothing to do with the guard.
               const sx = L.resolveValueSymbol(x);
-              return sx !== undefined && sx === L.resolveValueSymbol(y);
+              return sx !== null && sx === L.resolveValueSymbol(y);
             }
             if (ts.isPropertyAccessExpression(x) && ts.isPropertyAccessExpression(y)) {
               return x.name.text === y.name.text && sameRef(x.expression, y.expression);
