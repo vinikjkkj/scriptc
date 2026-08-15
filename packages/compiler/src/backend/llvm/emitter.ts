@@ -336,6 +336,18 @@ const LIB_FN_SYMS: Record<string, string> = {
   "buffer.concatLen": "scr_bytes_concat_len",
   "buffer.byteLenStr": "scr_bytes_byte_length_str",
   "buffer.isEncoding": "scr_bytes_is_encoding",
+  // The Cipher/Decipher constructors. Both entry points are the ones the
+  // C tier calls, and the trailing `bool decrypt` rides LIB_FN_TAIL — a
+  // Buffer key and a secret KeyObject need different runtime entries
+  // because @types/node's `BinaryLike | KeyObject` is a union, exactly as
+  // nodes.ts describes. update/final/setAAD/getAuthTag/setAuthTag were
+  // already here: their arguments are 1:1, so only the constructors were
+  // out of tier, and cipher.newKey is the construct that kept zapo off
+  // this backend entirely.
+  "cipher.newBytes": "scr_cipher_new_bytes",
+  "decipher.newBytes": "scr_cipher_new_bytes",
+  "cipher.newKey": "scr_cipher_new_key",
+  "decipher.newKey": "scr_cipher_new_key",
   // The checked-dynamic compare/equals validators (scr_bytes_io.c):
   // Node's argument ladders throw catchably (MAY_THROW_LIB_FNS).
   "dyn.toStringCoerce": "scr_dyn_string_coerce_js",
@@ -882,6 +894,47 @@ const LIB_FN_SYMS: Record<string, string> = {
   "timers.immediatePromise": "scr_immediate_promise",
 };
 
+/** The rows whose runtime entry takes a trailing CONSTANT the IR does not
+ * carry as an argument. The C tier spells it inline
+ * (`scr_cipher_new_key(a, b, c, false)`), which is the whole reason those
+ * four rows could not ride the generic path: LIB_FN_SYMS derives every
+ * argument from the call site's IR types, and there was no seat for an
+ * argument that has no IR expression. One seat is all they needed.
+ *
+ * Each entry is the LLVM parameter DECLARATION and the argument text; the
+ * generic path appends them to both the `declare` and the `call`. */
+/** The rows whose runtime entry returns a C scalar that is NOT the IR
+ * result type's LLVM spelling. C hides these: `double d =
+ * scr_big_cmp(a, b);` converts at the assignment, so the reference
+ * backend is right by construction. LLVM has no such step — a
+ * `declare double` over a function that returns `int` reads xmm0 while
+ * the value is in eax, and the caller gets whatever was there. It does
+ * not crash and it does not warn; it silently answers the wrong value,
+ * which is why nothing caught it: a bigint could not reach this tier at
+ * all until bigint literals did, and the FIRST program that got here
+ * printed `-9223372036854775808n < 0n` as false.
+ *
+ * The table is the audit's output, not a guess. Every one of the 595
+ * LIB_FN_SYMS rows was checked against its prototype in scr_runtime.h
+ * (repro-lt/abi-audit.mjs, and packages/compiler/test/llvm-libcall-abi
+ * keeps it checked): 595 matched, and this is the only row where the C
+ * return type is neither `double`, nor `bool`, nor a pointer. */
+const LIB_FN_RET_SEXT: Record<string, string> = {
+  // int scr_big_cmp(const ScrBigInt *a, const ScrBigInt *b) — the sign of
+  // the comparison, widened to the f64 the IR gives the call.
+  "big.cmp": "i32",
+};
+
+const LIB_FN_TAIL: Record<string, readonly { readonly decl: string; readonly arg: string }[]> = {
+  // scr_cipher_new_bytes / scr_cipher_new_key take `bool decrypt` last —
+  // one runtime entry per key shape, the direction as a constant. The C
+  // tier's four cases in emit-exprs.ts are these four rows.
+  "cipher.newBytes": [{ decl: "i1 zeroext", arg: "i1 false" }],
+  "decipher.newBytes": [{ decl: "i1 zeroext", arg: "i1 true" }],
+  "cipher.newKey": [{ decl: "i1 zeroext", arg: "i1 false" }],
+  "decipher.newKey": [{ decl: "i1 zeroext", arg: "i1 true" }],
+};
+
 /** The canonical option-callback order per stream base — emit-exprs.ts's
  * table: the flags literal names which are PRESENT (bit i = canonical[i]);
  * absent ones pass NULL pairs. */
@@ -1140,9 +1193,9 @@ class LlEmitter {
   private logArgSlots = 0;
   /** SCRIPTC_LLVM_CENSUS=1: collect refusals instead of stopping at the
    * first one. Null (the default) is the product behaviour, byte for
-   * byte  every census branch below tests this field first. */
+   * byte — every census branch below tests this field first. */
   private readonly census: LlvmCensus | null = llvmCensusEnabled() ? new LlvmCensus() : null;
-  /** IR name of the function being emitted  census attribution only. */
+  /** IR name of the function being emitted — census attribution only. */
   private currentFnName = "";
 
   constructor(private readonly mod: IrModule) {
@@ -7119,10 +7172,20 @@ class LlEmitter {
         this.emitPendingCheck();
         return out;
       }
-      // bigint is C-backend only for now: the LLVM tier has no ScrBigInt
-      // ABI yet, so it refuses loudly (SC3001) instead of miscompiling.
-      case "bigLit":
-        throw new LlvmUnsupportedError("bigint literals");
+      // A bigint literal is its SPELLING, parsed by the runtime — the C
+      // tier's whole bigLit case (emit-exprs.ts) is one scr_big_parse
+      // call, and this is that call. There was never a ScrBigInt ABI to
+      // port: `bigint` is one `ptr` here like every other refcounted kind
+      // (llType's rcAdapters rule), its RC/trace/field adapters already
+      // exist, and all NINETEEN big.* operations were already in
+      // LIB_FN_SYMS. Only the literal had no route.
+      case "bigLit": {
+        const len = Buffer.byteLength(e.text, "utf8");
+        this.declare(`declare ptr @scr_big_parse(ptr, i64)`);
+        const t = B.tmp();
+        B.line(`${t} = call ptr @scr_big_parse(ptr ${this.cstr(e.text)}, i64 ${len})`);
+        return this.own({ name: t, type: e.type });
+      }
       // globalThis.WebSocket builds its API record out of five
       // synthesized C functions (emit-ws.ts) over per-program record
       // shapes; the LLVM tier has no port of that scaffolding yet, so it
@@ -12785,15 +12848,36 @@ class LlEmitter {
     }
     const sym = LIB_FN_SYMS[e.fn];
     if (sym === undefined) throw new LlvmUnsupportedError(`libCall:${e.fn}`, e.loc);
+    const tail = LIB_FN_TAIL[e.fn] ?? [];
     const args = e.args.map((a) => this.emitExpr(a));
-    const argDecls = args.map((a) => {
-      const ty = this.llType(a.type);
-      return ty === "i1" ? "i1 zeroext" : ty;
-    });
+    const argDecls = [
+      ...args.map((a) => {
+        const ty = this.llType(a.type);
+        return ty === "i1" ? "i1 zeroext" : ty;
+      }),
+      ...tail.map((t) => t.decl),
+    ];
+    // The C return type wins over the IR's when they disagree (see
+    // LIB_FN_RET_SEXT): call at the ABI's width, then widen to the type
+    // the rest of the emission expects.
+    const cRet = LIB_FN_RET_SEXT[e.fn];
     const retTy = this.llType(e.type);
-    const retDecl = retTy === "i1" ? "zeroext i1" : retTy;
+    const retDecl = cRet ?? (retTy === "i1" ? "zeroext i1" : retTy);
     this.declare(`declare ${retDecl} @${sym}(${argDecls.join(", ")})`);
-    const argList = args.map((a) => `${this.llType(a.type)} ${a.name}`).join(", ");
+    const argList = [
+      ...args.map((a) => `${this.llType(a.type)} ${a.name}`),
+      ...tail.map((t) => t.arg),
+    ].join(", ");
+    if (cRet !== undefined) {
+      if (retTy !== "double") throw new Error(`llvm emitter bug: ${e.fn} widens ${cRet} into ${retTy}`);
+      const raw = B.tmp();
+      const wide = B.tmp();
+      B.line(`${raw} = call ${cRet} @${sym}(${argList})`);
+      B.line(`${wide} = sitofp ${cRet} ${raw} to double`);
+      const widened = this.own({ name: wide, type: e.type });
+      if (MAY_THROW_LIB_FNS.has(e.fn)) this.emitPendingCheck();
+      return widened;
+    }
     if (retTy === "void") {
       B.line(`call void @${sym}(${argList})`);
       if (MAY_THROW_LIB_FNS.has(e.fn)) this.emitPendingCheck();
