@@ -6520,6 +6520,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3131-instanceof-a-boxed-wrapper-constructor.js": {
+   "order": [
+    "<repo>/tests/corpus/3131-instanceof-a-boxed-wrapper-constructor.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3132-typed-array-set-on-a-dynamic-value.js": {
+   "order": [
+    "<repo>/tests/corpus/3132-typed-array-set-on-a-dynamic-value.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/3141-expando-statics-through-a-dynamic-reference/main.js": {
    "order": [
     "<repo>/tests/corpus/3141-expando-statics-through-a-dynamic-reference/codec.cjs",
@@ -6551,6 +6563,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3181-stream-done-callback-tuples.ts": {
+   "order": [
+    "<repo>/tests/corpus/3181-stream-done-callback-tuples.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/3191-arraybuffer-into-unknown-round-trip.ts": {
    "order": [
     "<repo>/tests/corpus/3191-arraybuffer-into-unknown-round-trip.ts"
@@ -6572,6 +6590,930 @@
   "<repo>/tests/corpus/3194-asserted-index-signature-dot-read-on-a-union.ts": {
    "order": [
     "<repo>/tests/corpus/3194-asserted-index-signature-dot-read-on-a-union.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3201-promise-all-void-entry-short-pattern.ts": {
+   "order": [
+    "<repo>/tests/corpus/3201-promise-all-void-entry-short-pattern.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3202-promise-all-void-entry-hole-in-pattern.ts": {
+   "order": [
+    "<repo>/tests/corpus/3202-promise-all-void-entry-hole-in-pattern.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3203-promise-all-conditional-entry-or-null.ts": {
+   "order": [
+    "<repo>/tests/corpus/3203-promise-all-conditional-entry-or-null.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3204-promise-all-heterogeneous-not-destructured.ts": {
+   "order": [
+    "<repo>/tests/corpus/3204-promise-all-heterogeneous-not-destructured.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3211-prototype-method-named-after-a-string-wrapper.js": {
+   "order": [
+    "<repo>/tests/corpus/3211-prototype-method-named-after-a-string-wrapper.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3212-math-statics-bound-as-values.js": {
+   "order": [
+    "<repo>/tests/corpus/3212-math-statics-bound-as-values.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3213-bigint-as-intn-as-uintn.ts": {
+   "order": [
+    "<repo>/tests/corpus/3213-bigint-as-intn-as-uintn.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3214-dataview-set-big-composed.ts": {
+   "order": [
+    "<repo>/tests/corpus/3214-dataview-set-big-composed.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3215-dataview-set-big-edges.ts": {
+   "order": [
+    "<repo>/tests/corpus/3215-dataview-set-big-edges.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3221-bigint-into-unknown-round-trip.ts": {
+   "order": [
+    "<repo>/tests/corpus/3221-bigint-into-unknown-round-trip.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3222-bigint-through-an-untyped-prototype.js": {
+   "order": [
+    "<repo>/tests/corpus/3222-bigint-through-an-untyped-prototype.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3231-splice-through-an-untyped-receiver.js": {
+   "order": [
+    "<repo>/tests/corpus/3231-splice-through-an-untyped-receiver.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3232-hasownproperty-through-an-untyped-receiver.js": {
+   "order": [
+    "<repo>/tests/corpus/3232-hasownproperty-through-an-untyped-receiver.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3233-tostring-range-through-an-untyped-receiver.js": {
+   "order": [
+    "<repo>/tests/corpus/3233-tostring-range-through-an-untyped-receiver.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3234-buffer-flavor-across-the-dyn-boundary.js": {
+   "order": [
+    "<repo>/tests/corpus/3234-buffer-flavor-across-the-dyn-boundary.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3241-instanceof-arraybuffer-on-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/3241-instanceof-arraybuffer-on-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3251-array-slot-tombstone.ts": {
+   "order": [
+    "<repo>/tests/corpus/3251-array-slot-tombstone.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3261-promise-void-widen.ts": {
+   "order": [
+    "<repo>/tests/corpus/3261-promise-void-widen.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3271-record-absent-key-into-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/3271-record-absent-key-into-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3281-absent-key-compared-with-undefined.ts": {
+   "order": [
+    "<repo>/tests/corpus/3281-absent-key-compared-with-undefined.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3282-literal-key-in-over-index-signature.ts": {
+   "order": [
+    "<repo>/tests/corpus/3282-literal-key-in-over-index-signature.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3291-absent-key-in-a-local.ts": {
+   "order": [
+    "<repo>/tests/corpus/3291-absent-key-in-a-local.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3301-union-property-the-checker-narrowed.ts": {
+   "order": [
+    "<repo>/tests/corpus/3301-union-property-the-checker-narrowed.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3302-union-property-with-a-null-arm.ts": {
+   "order": [
+    "<repo>/tests/corpus/3302-union-property-with-a-null-arm.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3311-narrowed-union-arm-is-tag-checked.ts": {
+   "order": [
+    "<repo>/tests/corpus/3311-narrowed-union-arm-is-tag-checked.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3321-narrowed-class-downcast-is-instanceof-checked.ts": {
+   "order": [
+    "<repo>/tests/corpus/3321-narrowed-class-downcast-is-instanceof-checked.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3331-bound-emit-payload-array-is-tag-checked.ts": {
+   "order": [
+    "<repo>/tests/corpus/3331-bound-emit-payload-array-is-tag-checked.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3341-filter-predicate-retag-is-tag-checked.ts": {
+   "order": [
+    "<repo>/tests/corpus/3341-filter-predicate-retag-is-tag-checked.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3351-index-spread-with-named-fields.ts": {
+   "order": [
+    "<repo>/tests/corpus/3351-index-spread-with-named-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3352-spread-into-index-shape-with-fields.ts": {
+   "order": [
+    "<repo>/tests/corpus/3352-spread-into-index-shape-with-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3361-in-over-mixed-union-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/3361-in-over-mixed-union-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3362-in-over-a-narrowed-unit-arm.ts": {
+   "order": [
+    "<repo>/tests/corpus/3362-in-over-a-narrowed-unit-arm.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3371-promise-allsettled-heterogeneous-tuple.ts": {
+   "order": [
+    "<repo>/tests/corpus/3371-promise-allsettled-heterogeneous-tuple.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3372-promise-unknown-payload-into-a-typed-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/3372-promise-unknown-payload-into-a-typed-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3373-promise-all-void-array-held-as-a-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/3373-promise-all-void-array-held-as-a-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3381-fs-read-stream-basics.ts": {
+   "order": [
+    "<repo>/tests/corpus/3381-fs-read-stream-basics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3382-fs-write-stream-backpressure.ts": {
+   "order": [
+    "<repo>/tests/corpus/3382-fs-write-stream-backpressure.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3383-fs-stream-pipeline-and-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/3383-fs-stream-pipeline-and-errors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3384-fs-stream-fd-lifecycle.ts": {
+   "order": [
+    "<repo>/tests/corpus/3384-fs-stream-fd-lifecycle.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3385-fs-stream-event-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/3385-fs-stream-event-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3391-fs-stream-option-byte-ranges.ts": {
+   "order": [
+    "<repo>/tests/corpus/3391-fs-stream-option-byte-ranges.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3392-fs-stream-option-flags.ts": {
+   "order": [
+    "<repo>/tests/corpus/3392-fs-stream-option-flags.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3393-fs-stream-option-validation.ts": {
+   "order": [
+    "<repo>/tests/corpus/3393-fs-stream-option-validation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3394-fs-stream-option-lifecycle.ts": {
+   "order": [
+    "<repo>/tests/corpus/3394-fs-stream-option-lifecycle.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3401-promise-identity-through-payload-conversion.ts": {
+   "order": [
+    "<repo>/tests/corpus/3401-promise-identity-through-payload-conversion.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3402-promise-dedup-eviction.ts": {
+   "order": [
+    "<repo>/tests/corpus/3402-promise-dedup-eviction.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3403-promise-adapter-memo-lifetime.ts": {
+   "order": [
+    "<repo>/tests/corpus/3403-promise-adapter-memo-lifetime.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3411-duplex-widens-to-writable.ts": {
+   "order": [
+    "<repo>/tests/corpus/3411-duplex-widens-to-writable.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3412-writable-narrowing-bridge.ts": {
+   "order": [
+    "<repo>/tests/corpus/3412-writable-narrowing-bridge.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3421-filehandle-basics.ts": {
+   "order": [
+    "<repo>/tests/corpus/3421-filehandle-basics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3422-filehandle-closed-state.ts": {
+   "order": [
+    "<repo>/tests/corpus/3422-filehandle-closed-state.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3423-filehandle-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/3423-filehandle-errors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3424-filehandle-fd-lifecycle.ts": {
+   "order": [
+    "<repo>/tests/corpus/3424-filehandle-fd-lifecycle.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3441-spread-erased-index-signature.ts": {
+   "order": [
+    "<repo>/tests/corpus/3441-spread-erased-index-signature.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3442-promise-union-collapses.ts": {
+   "order": [
+    "<repo>/tests/corpus/3442-promise-union-collapses.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3451-symbolic-resolved-instantiation-table.ts": {
+   "order": [
+    "<repo>/tests/corpus/3451-symbolic-resolved-instantiation-table.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3452-instantiation-table-does-not-leak.ts": {
+   "order": [
+    "<repo>/tests/corpus/3452-instantiation-table-does-not-leak.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3453-symbolic-resolves-to-an-index-signature.ts": {
+   "order": [
+    "<repo>/tests/corpus/3453-symbolic-resolves-to-an-index-signature.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3454-symbolic-table-through-a-pinned-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/3454-symbolic-table-through-a-pinned-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3461-abort-signal-surface.ts": {
+   "order": [
+    "<repo>/tests/corpus/3461-abort-signal-surface.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3462-abort-context-cleanup.ts": {
+   "order": [
+    "<repo>/tests/corpus/3462-abort-context-cleanup.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3463-abort-listener-cycle.ts": {
+   "order": [
+    "<repo>/tests/corpus/3463-abort-listener-cycle.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3464-abort-dispatch-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/3464-abort-dispatch-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3471-http-client-destroy-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/3471-http-client-destroy-error.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3472-http-client-pipe-upload.ts": {
+   "order": [
+    "<repo>/tests/corpus/3472-http-client-pipe-upload.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3481-absent-key-at-a-union-of-scalars.ts": {
+   "order": [
+    "<repo>/tests/corpus/3481-absent-key-at-a-union-of-scalars.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3482-find-over-a-union-element-array.ts": {
+   "order": [
+    "<repo>/tests/corpus/3482-find-over-a-union-element-array.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3491-nullish-retag-effectful-default.ts": {
+   "order": [
+    "<repo>/tests/corpus/3491-nullish-retag-effectful-default.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3492-nullish-retag-await-default.ts": {
+   "order": [
+    "<repo>/tests/corpus/3492-nullish-retag-await-default.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3493-nullish-retag-three-arm-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/3493-nullish-retag-three-arm-chain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3501-union-arm-through-a-symbolic-generic.ts": {
+   "order": [
+    "<repo>/tests/corpus/3501-union-arm-through-a-symbolic-generic.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3502-boolean-property-picks-its-arm.ts": {
+   "order": [
+    "<repo>/tests/corpus/3502-boolean-property-picks-its-arm.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3503-computed-spread-source-hoists.ts": {
+   "order": [
+    "<repo>/tests/corpus/3503-computed-spread-source-hoists.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3511-nullish-retag-keeps-the-left-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/3511-nullish-retag-keeps-the-left-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3521-async-return-of-a-settle-or-value-union.ts": {
+   "order": [
+    "<repo>/tests/corpus/3521-async-return-of-a-settle-or-value-union.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3522-a-nullish-default-may-settle.ts": {
+   "order": [
+    "<repo>/tests/corpus/3522-a-nullish-default-may-settle.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3531-hof-callback-wider-parameter.ts": {
+   "order": [
+    "<repo>/tests/corpus/3531-hof-callback-wider-parameter.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3532-hof-wider-parameter-every-method.ts": {
+   "order": [
+    "<repo>/tests/corpus/3532-hof-wider-parameter-every-method.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3533-hof-wider-parameter-nested-and-refcount.ts": {
+   "order": [
+    "<repo>/tests/corpus/3533-hof-wider-parameter-nested-and-refcount.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3534-hof-wider-parameter-union-element.ts": {
+   "order": [
+    "<repo>/tests/corpus/3534-hof-wider-parameter-union-element.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3541-arraybuffer-isview-over-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/3541-arraybuffer-isview-over-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3542-typeof-bigint-stays-dyn-on-purpose.ts": {
+   "order": [
+    "<repo>/tests/corpus/3542-typeof-bigint-stays-dyn-on-purpose.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3551-uint8array-from-copy.ts": {
+   "order": [
+    "<repo>/tests/corpus/3551-uint8array-from-copy.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3552-new-map-copy-constructor.ts": {
+   "order": [
+    "<repo>/tests/corpus/3552-new-map-copy-constructor.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3553-optional-chained-promise-method.ts": {
+   "order": [
+    "<repo>/tests/corpus/3553-optional-chained-promise-method.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3554-string-fromcodepoint.ts": {
+   "order": [
+    "<repo>/tests/corpus/3554-string-fromcodepoint.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3555-object-fromentries-over-a-map.ts": {
+   "order": [
+    "<repo>/tests/corpus/3555-object-fromentries-over-a-map.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3561-promise-executor-resolves-with-a-promise.ts": {
+   "order": [
+    "<repo>/tests/corpus/3561-promise-executor-resolves-with-a-promise.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3562-promise-executor-adoption-payload-kinds.ts": {
+   "order": [
+    "<repo>/tests/corpus/3562-promise-executor-adoption-payload-kinds.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3563-promise-executor-adoption-refcount.ts": {
+   "order": [
+    "<repo>/tests/corpus/3563-promise-executor-adoption-refcount.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3572-crypto-timing-safe-equal.ts": {
+   "order": [
+    "<repo>/tests/corpus/3572-crypto-timing-safe-equal.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3573-typed-array-sort.ts": {
+   "order": [
+    "<repo>/tests/corpus/3573-typed-array-sort.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3581-optional-chained-whatwg-receivers.ts": {
+   "order": [
+    "<repo>/tests/corpus/3581-optional-chained-whatwg-receivers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3582-optional-chained-string-and-object-members.ts": {
+   "order": [
+    "<repo>/tests/corpus/3582-optional-chained-string-and-object-members.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3583-optional-chained-provenance-typed-receivers.ts": {
+   "order": [
+    "<repo>/tests/corpus/3583-optional-chained-provenance-typed-receivers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3584-optional-chained-iterator-helper-tail.ts": {
+   "order": [
+    "<repo>/tests/corpus/3584-optional-chained-iterator-helper-tail.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3585-optional-chained-fs-and-timer-handles.ts": {
+   "order": [
+    "<repo>/tests/corpus/3585-optional-chained-fs-and-timer-handles.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3591-union-narrow-admits-descendant-arm.ts": {
+   "order": [
+    "<repo>/tests/corpus/3591-union-narrow-admits-descendant-arm.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3601-optional-chained-class-statics.ts": {
+   "order": [
+    "<repo>/tests/corpus/3601-optional-chained-class-statics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3602-optional-chained-union-and-tuple-reads.ts": {
+   "order": [
+    "<repo>/tests/corpus/3602-optional-chained-union-and-tuple-reads.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3603-optional-chained-process-and-number-statics.ts": {
+   "order": [
+    "<repo>/tests/corpus/3603-optional-chained-process-and-number-statics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3604-optional-chained-http-request-members.ts": {
+   "order": [
+    "<repo>/tests/corpus/3604-optional-chained-http-request-members.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3605-optional-chained-diagnostics-channels.ts": {
+   "order": [
+    "<repo>/tests/corpus/3605-optional-chained-diagnostics-channels.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3611-tuple-lifts-into-array-armed-union.ts": {
+   "order": [
+    "<repo>/tests/corpus/3611-tuple-lifts-into-array-armed-union.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3621-record-unknown-keyed-read-into-declared-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/3621-record-unknown-keyed-read-into-declared-shape.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3622-class-as-cast-both-directions.ts": {
+   "order": [
+    "<repo>/tests/corpus/3622-class-as-cast-both-directions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3631-emitter-subclass-projects-onto-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/3631-emitter-subclass-projects-onto-record.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3641-optional-called-stdlib-statics.ts": {
+   "order": [
+    "<repo>/tests/corpus/3641-optional-called-stdlib-statics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3642-optional-chained-static-method-calls.ts": {
+   "order": [
+    "<repo>/tests/corpus/3642-optional-chained-static-method-calls.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3643-optional-called-primitives-and-caught-guards.ts": {
+   "order": [
+    "<repo>/tests/corpus/3643-optional-called-primitives-and-caught-guards.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3644-optional-links-on-javascript-value-surfaces.cjs": {
+   "order": [
+    "<repo>/tests/corpus/3644-optional-links-on-javascript-value-surfaces.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3645-optional-called-create-require/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/3645-optional-called-create-require/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3651-record-literal-field-release-scope.ts": {
+   "order": [
+    "<repo>/tests/corpus/3651-record-literal-field-release-scope.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3661-absent-key-into-an-optional-record-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/3661-absent-key-into-an-optional-record-field.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3662-absent-key-in-a-nullish-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/3662-absent-key-in-a-nullish-chain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3671-optional-links-on-javascript-stdlib-statics.cjs": {
+   "order": [
+    "<repo>/tests/corpus/3671-optional-links-on-javascript-stdlib-statics.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3672-optional-links-on-never-nullish-receivers.ts": {
+   "order": [
+    "<repo>/tests/corpus/3672-optional-links-on-never-nullish-receivers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3673-optional-link-short-circuit-is-unmoved.ts": {
+   "order": [
+    "<repo>/tests/corpus/3673-optional-link-short-circuit-is-unmoved.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3681-seq-expr-region-release-scope.ts": {
+   "order": [
+    "<repo>/tests/corpus/3681-seq-expr-region-release-scope.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3691-typeof-stdlib-globals-javascript.cjs": {
+   "order": [
+    "<repo>/tests/corpus/3691-typeof-stdlib-globals-javascript.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3692-typeof-stdlib-globals-typescript.ts": {
+   "order": [
+    "<repo>/tests/corpus/3692-typeof-stdlib-globals-typescript.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3693-readable-from-pulls-lazily.cjs": {
+   "order": [
+    "<repo>/tests/corpus/3693-readable-from-pulls-lazily.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3694-readable-from-public-surface-typescript.ts": {
+   "order": [
+    "<repo>/tests/corpus/3694-readable-from-public-surface-typescript.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3701-array-literal-element-release-scope.ts": {
+   "order": [
+    "<repo>/tests/corpus/3701-array-literal-element-release-scope.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3711-promise-resolve-empty-array-payload.ts": {
+   "order": [
+    "<repo>/tests/corpus/3711-promise-resolve-empty-array-payload.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3712-net-socket-close-haderror.ts": {
+   "order": [
+    "<repo>/tests/corpus/3712-net-socket-close-haderror.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3713-hasown-over-an-index-signature-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/3713-hasown-over-an-index-signature-record.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3721-llvm-release-scopes-record-array-and-region.ts": {
+   "order": [
+    "<repo>/tests/corpus/3721-llvm-release-scopes-record-array-and-region.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3731-adopted-instance-field-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/3731-adopted-instance-field-read.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3732-adopted-instance-method-call.ts": {
+   "order": [
+    "<repo>/tests/corpus/3732-adopted-instance-method-call.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3741-regex-replace-function-replacer.ts": {
+   "order": [
+    "<repo>/tests/corpus/3741-regex-replace-function-replacer.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3742-regex-replacer-group-participation.ts": {
+   "order": [
+    "<repo>/tests/corpus/3742-regex-replacer-group-participation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3751-cipher-constructors-and-bigint-literals.ts": {
+   "order": [
+    "<repo>/tests/corpus/3751-cipher-constructors-and-bigint-literals.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3752-reference-identity-map-and-set-keys.ts": {
+   "order": [
+    "<repo>/tests/corpus/3752-reference-identity-map-and-set-keys.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3761-http-client-url-with-options.ts": {
+   "order": [
+    "<repo>/tests/corpus/3761-http-client-url-with-options.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3762-namespace-conditional-transport.ts": {
+   "order": [
+    "<repo>/tests/corpus/3762-namespace-conditional-transport.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3771-file-scope-adopted-instance.ts": {
+   "order": [
+    "<repo>/tests/corpus/3771-file-scope-adopted-instance.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3772-adopted-instance-field-write.ts": {
+   "order": [
+    "<repo>/tests/corpus/3772-adopted-instance-field-write.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3781-bigint-tostring-every-radix.ts": {
+   "order": [
+    "<repo>/tests/corpus/3781-bigint-tostring-every-radix.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3791-http-client-abort-signal.ts": {
+   "order": [
+    "<repo>/tests/corpus/3791-http-client-abort-signal.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3792-http-client-optional-options.ts": {
+   "order": [
+    "<repo>/tests/corpus/3792-http-client-optional-options.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3801-regexp-runtime-flags.ts": {
+   "order": [
+    "<repo>/tests/corpus/3801-regexp-runtime-flags.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3811-regexp-unicode-sets-flag.ts": {
+   "order": [
+    "<repo>/tests/corpus/3811-regexp-unicode-sets-flag.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3813-adopted-instance-in-a-never-written-let.ts": {
+   "order": [
+    "<repo>/tests/corpus/3813-adopted-instance-in-a-never-written-let.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3821-tls-ca-certificates-ladder.cjs": {
+   "order": [
+    "<repo>/tests/corpus/3821-tls-ca-certificates-ladder.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3831-incoming-message-as-readable.ts": {
+   "order": [
+    "<repo>/tests/corpus/3831-incoming-message-as-readable.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3832-incoming-message-readable-teardown.ts": {
+   "order": [
+    "<repo>/tests/corpus/3832-incoming-message-readable-teardown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3841-classval-widening-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/3841-classval-widening-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3842-dynamic-rest-binding-slot.js": {
+   "order": [
+    "<repo>/tests/corpus/3842-dynamic-rest-binding-slot.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3851-island-npm-graph-shapes/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/3851-island-npm-graph-shapes/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3852-island-exit-code-and-drain/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/3852-island-exit-code-and-drain/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3853-userinfo-is-not-getuid.js": {
+   "order": [
+    "<repo>/tests/corpus/3853-userinfo-is-not-getuid.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3854-tls-https-server-handler-arities.ts": {
+   "order": [
+    "<repo>/tests/corpus/3854-tls-https-server-handler-arities.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3861-isarray-true-arm-keeps-the-array-arm.ts": {
+   "order": [
+    "<repo>/tests/corpus/3861-isarray-true-arm-keeps-the-array-arm.ts"
    ],
    "diags": []
   },
@@ -7798,6 +8740,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/emitter-projection-declines.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/emitter-projection-declines.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/enums.ts": {
    "order": [
     "<repo>/tests/diagnostics/enums.ts"
@@ -7867,6 +8815,18 @@
   "<repo>/tests/diagnostics/generics.ts": {
    "order": [
     "<repo>/tests/diagnostics/generics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/http-client-signal.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/http-client-signal.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/http-client-url-options.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/http-client-url-options.ts"
    ],
    "diags": []
   },
@@ -8046,6 +9006,12 @@
      "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
     }
    ]
+  },
+  "<repo>/tests/diagnostics/incoming-message-readable.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/incoming-message-readable.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/diagnostics/index-signature-values.ts": {
    "order": [
@@ -8332,6 +9298,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/namespace-conditional.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/namespace-conditional.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/namespaces.ts": {
    "order": [
     "<repo>/tests/diagnostics/namespaces.ts"
@@ -8360,6 +9332,12 @@
    "order": [
     "<repo>/tests/diagnostics/ns-import-object/lib.ts",
     "<repo>/tests/diagnostics/ns-import-object/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/nullish-retag-fences.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/nullish-retag-fences.ts"
    ],
    "diags": []
   },
@@ -8476,9 +9454,9 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/regex-checker.ts": {
+  "<repo>/tests/diagnostics/regex-replacer.ts": {
    "order": [
-    "<repo>/tests/diagnostics/regex-checker.ts"
+    "<repo>/tests/diagnostics/regex-replacer.ts"
    ],
    "diags": []
   },
@@ -9045,6 +10023,12 @@
   "<repo>/tests/fixtures/node-types/stream-capture.ts": {
    "order": [
     "<repo>/tests/fixtures/node-types/stream-capture.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/streams.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/streams.ts"
    ],
    "diags": []
   }
