@@ -76,6 +76,7 @@ import type {
 } from "../../ir/nodes.js";
 import { settleOrValuePromiseTag, canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleUsesChildStream, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { computeMayThrow } from "../emission/may-throw.js";
+import { seqScopedLocals } from "../emission/emit-stmts.js";
 import { mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
 import {
@@ -1101,6 +1102,16 @@ class LlEmitter {
   }[] = [];
   private currentLocals = new Map<string, IrLocal>();
   private captureIds = new Set<string>();
+  /** Hidden locals whose ENTIRE live range is one seqExpr: released when
+   * that seqExpr's value has been produced, not at block exit. The C
+   * emitter's seqScopedLocals decides it — ONE predicate, shared, so the
+   * two tiers cannot drift. */
+  private seqScoped = new Set<string>();
+  /** Indices into `scopes` that are seqExpr REGIONS. A region scope owns
+   * only the locals seqScoped picked out; anything else declared inside
+   * one belongs to the nearest enclosing ordinary scope, exactly where it
+   * went before regions existed. */
+  private readonly seqScopeAt = new Set<number>();
   /** Enclosing try-with-FINALLY regions, innermost last: a `return`
    * inside one runs every crossed finally (innermost first) before the
    * actual ret — the C emitter's pending-return path, with the finally
@@ -2569,6 +2580,25 @@ class LlEmitter {
     }
   }
 
+  /** The scope a `varDecl`'s local belongs to. CEmitter.declScope.
+   *
+   * Without seqExpr regions this was always the innermost scope, and for
+   * every local that is not seq-scoped it still is: a region is skipped
+   * over, so the local lands in the same scope it landed in before. A
+   * seq-scoped local belongs to the region it was declared in, which is
+   * the innermost scope at the moment its varDecl emits (its own seqExpr
+   * pushed it; nothing else pushes a scope in between). The
+   * `seqScopeAt.has` test on the top is a belt-and-braces check: if the
+   * innermost scope is somehow NOT a region, the local takes the old path
+   * rather than a region that is not its own. */
+  private declScope(localId: string): LlScopeEntry[] {
+    const top = this.scopes.length - 1;
+    if (this.seqScoped.has(localId) && this.seqScopeAt.has(top)) return this.scopes[top]!;
+    let i = top;
+    while (i > 0 && this.seqScopeAt.has(i)) i--;
+    return this.scopes[i]!;
+  }
+
   private releaseScope(scope: LlScopeEntry[]): void {
     for (const e of scope) {
       const t = this.B.tmp();
@@ -3184,6 +3214,8 @@ class LlEmitter {
     this.jumpTargets = [];
     this.currentLocals = new Map(fn.locals.map((l) => [l.id, l]));
     this.captureIds = new Set((fn.captures ?? []).map((c) => c.localId));
+    this.seqScoped = seqScopedLocals(fn);
+    this.seqScopeAt.clear();
     this.chainSlots.clear();
     this.finallyStack = [];
     this.tryStack = [];
@@ -3306,7 +3338,7 @@ class LlEmitter {
           const box = B.tmp();
           B.line(`${box} = ${boxNew} ; let ${b.local!.name} (boxed)`);
           B.line(`store ptr ${box}, ptr ${b.slot}`);
-          this.scopes[this.scopes.length - 1]!.push({ slot: b.slot, type: b.type, boxed: true });
+          this.declScope(s.localId).push({ slot: b.slot, type: b.type, boxed: true });
           if (s.init === null) break;
           const v = this.emitExpr(s.init);
           if (isRefCounted(v.type)) this.moveTemp(v); // the box takes ownership
@@ -3323,7 +3355,7 @@ class LlEmitter {
           // old value and left a stale pointer (NULL-tolerant releases).
           if (isRefCounted(b.type)) {
             B.line(`store ptr null, ptr ${b.slot}`);
-            this.scopes[this.scopes.length - 1]!.push({ slot: b.slot, type: b.type });
+            this.declScope(s.localId).push({ slot: b.slot, type: b.type });
           }
           break;
         }
@@ -3331,7 +3363,7 @@ class LlEmitter {
         this.moveTemp(v);
         B.line(`store ${this.llType(b.type)} ${v.name}, ptr ${b.slot}`);
         if (isRefCounted(b.type)) {
-          this.scopes[this.scopes.length - 1]!.push({ slot: b.slot, type: b.type });
+          this.declScope(s.localId).push({ slot: b.slot, type: b.type });
         }
         break;
       }
@@ -4493,13 +4525,30 @@ class LlEmitter {
         const acc = elemAccess(elem);
         const spreadSet = new Set(e.spreads ?? []);
         e.elems.forEach((el, i) => {
-          const v = this.emitExpr(el);
-          if (spreadSet.has(i)) {
-            this.emitArrayCopyLoop(arr, v.name, acc);
-            return;
+          // Each element gets its OWN release scope: the intermediates it
+          // leaves behind are dead the moment its value has moved into the
+          // array, so they release here instead of riding the statement
+          // frame to the end of the literal. Without it every may-throw
+          // point in element k unwinds the leftovers of elements 0..k and
+          // the emission is quadratic in the element count. The value still
+          // moves in (moveTemp searches every frame innermost outward), an
+          // unwind still releases everything (releaseForJump walks every
+          // frame from the top down), and a try inside an element still
+          // resumes (tryStack records the depth INCLUDING this frame).
+          // A SPREAD's source array is borrowed and read only by its own
+          // copy loop, emitted inside this same scope.
+          this.frames.push([]);
+          try {
+            const v = this.emitExpr(el);
+            if (spreadSet.has(i)) {
+              this.emitArrayCopyLoop(arr, v.name, acc);
+              return;
+            }
+            if (acc === "ref") this.moveTemp(v);
+            this.arrPush(arr, acc, v.name);
+          } finally {
+            this.releaseFrame(this.frames.pop()!);
           }
-          if (acc === "ref") this.moveTemp(v);
-          this.arrPush(arr, acc, v.name);
         });
         return out;
       }
@@ -4611,29 +4660,39 @@ class LlEmitter {
         B.line(`${rec} = call ptr @${mangleRecordNew(shapeId)}()`);
         const out = this.own({ name: rec, type: e.type });
         for (const f of e.fields) {
-          if (f.drop) {
-            // A mapping-dropped field: the initializer runs in its source-
-            // order slot — effects included — and the result (if any)
-            // releases with the statement frame instead of storing.
-            this.emitExpr(f.value);
-            continue;
+          // Each field initializer gets its OWN release scope — the
+          // arrayLit case's reasoning one node over, and the C tier's
+          // fix verbatim. A field's dead intermediates release the moment
+          // its value has moved into the struct instead of accumulating
+          // in the statement frame for every later unwind to name.
+          this.frames.push([]);
+          try {
+            if (f.drop) {
+              // A mapping-dropped field: the initializer runs in its source-
+              // order slot — effects included — and the result (if any)
+              // releases with this field's frame instead of storing.
+              this.emitExpr(f.value);
+              continue;
+            }
+            const v = this.emitExpr(f.value);
+            if (f.overflow) {
+              const lit = this.internLiteral(f.name);
+              const acc = v.type.kind === "f64" ? "f64" : v.type.kind === "bool" ? "bool" : "ref";
+              if (acc === "ref") this.moveTemp(v);
+              const ovf = this.recordOvfPtr(rec, shapeId);
+              const argTy = acc === "f64" ? "double" : acc === "bool" ? "i1 zeroext" : "ptr";
+              this.declare(`declare void @scr_map_set_str_${acc}(ptr, ptr, ${argTy})`);
+              B.line(
+                `call void @scr_map_set_str_${acc}(ptr ${ovf}, ptr ${lit}, ${argTy === "i1 zeroext" ? "i1" : argTy} ${v.name})`,
+              );
+              continue;
+            }
+            if (isRefCounted(v.type)) this.moveTemp(v);
+            const { ptr, type } = this.recordFieldPtr(rec, shapeId, f.name);
+            this.storeField(ptr, type, v.name);
+          } finally {
+            this.releaseFrame(this.frames.pop()!);
           }
-          const v = this.emitExpr(f.value);
-          if (f.overflow) {
-            const lit = this.internLiteral(f.name);
-            const acc = v.type.kind === "f64" ? "f64" : v.type.kind === "bool" ? "bool" : "ref";
-            if (acc === "ref") this.moveTemp(v);
-            const ovf = this.recordOvfPtr(rec, shapeId);
-            const argTy = acc === "f64" ? "double" : acc === "bool" ? "i1 zeroext" : "ptr";
-            this.declare(`declare void @scr_map_set_str_${acc}(ptr, ptr, ${argTy})`);
-            B.line(
-              `call void @scr_map_set_str_${acc}(ptr ${ovf}, ptr ${lit}, ${argTy === "i1 zeroext" ? "i1" : argTy} ${v.name})`,
-            );
-            continue;
-          }
-          if (isRefCounted(v.type)) this.moveTemp(v);
-          const { ptr, type } = this.recordFieldPtr(rec, shapeId, f.name);
-          this.storeField(ptr, type, v.name);
         }
         return out;
       }
@@ -5756,8 +5815,31 @@ class LlEmitter {
         // exactly statement position); the result is an ordinary temp of
         // the current frame. The validator restricted stmts to straight-
         // line writes — no jump can leave the region.
-        for (const s of e.stmts) this.emitStmt(s);
-        return this.emitExpr(e.result);
+        //
+        // The region owns the hidden locals whose whole live range it is
+        // (seqScopedLocals): they are released HERE rather than at block
+        // exit. Leaving them in the block scope is what makes every later
+        // unwind in that block name them — and what LEAKS when the region
+        // sits in a loop CONDITION, whose owning block scope is outside
+        // the loop (estado-fnscope §5: repro-fn/leak/a.ts, fixed on the C
+        // tier and until now still live here). It is a SCOPE, not a frame,
+        // so an unwind from inside still releases the region first and
+        // everything outside it after. No slot is rescoped: the allocas
+        // stay in the entry block exactly as they were.
+        this.scopes.push([]);
+        this.seqScopeAt.add(this.scopes.length - 1);
+        let out: LlValue;
+        try {
+          for (const s of e.stmts) this.emitStmt(s);
+          // The value is produced BEFORE the region is released: a varRef
+          // to a refcounted local comes out +1 into the enclosing statement
+          // frame, so releasing the region cannot take it with it.
+          out = this.emitExpr(e.result);
+        } finally {
+          this.seqScopeAt.delete(this.scopes.length - 1);
+          this.releaseScope(this.scopes.pop()!);
+        }
+        return out;
       }
       case "jsonStringify": {
         // Type-directed serialization: the STATIC type picks an emitted
