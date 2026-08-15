@@ -4988,7 +4988,7 @@ export type IrExpr =
    * (dgimsuvy), not source order — lowerRegexLiteral normalises them there,
    * because the string is observable through `re.flags`, inspect and the
    * engine's SyntaxError text, and node answers /x/ysmig.flags with
-   * "gimsy" (alphabet fenced to gimsuy by the frontend). Backends intern ONE immortal static per (pattern, flags)
+   * "gimsy" (alphabet fenced to gimsuvy by the frontend). Backends intern ONE immortal static per (pattern, flags)
    * pair — like string literals, so repeated evaluation is free and
    * `re === re` would hold — and compile the pattern lazily at first use
    * (a pattern the engine rejects aborts with a clear message; Node throws
