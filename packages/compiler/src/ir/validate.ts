@@ -1425,6 +1425,17 @@ export function validateModule(mod: IrModule): IrValidationError[] {
   // Hierarchy invariants: bases exist, the graph is acyclic, and every
   // derived class's field list starts with its base's EXACTLY (the prefix
   // layout that makes upcasts pointer reinterprets).
+  //
+  // "Exactly" is POSITION and TYPE. Exactly ONE name difference is
+  // admitted, and it is the one thing the check was never protecting: a
+  // class that routed its own `code` declaration onto ScrError's inherited
+  // slot (lower-classes.ts) names that slot `code` rather than `%code` in
+  // its own layout. Same index, same string type, same memory — the
+  // reinterpret is untouched, because a reinterpret is positional and no
+  // upcast has ever consulted a field NAME. The rename is what lets one JS
+  // property answer through both the subclass's field paths and the
+  // `%Error` view's error.code libCall, instead of the two naming
+  // different slots and the view answering undefined.
   for (const cls of mod.classes ?? []) {
     if (cls.base === undefined) continue;
     const base = classesByName.get(cls.base);
@@ -1443,7 +1454,9 @@ export function validateModule(mod: IrModule): IrValidationError[] {
     if (
       cls.fields.length < base.fields.length ||
       base.fields.some(
-        (f, i) => cls.fields[i]!.name !== f.name || !typeEquals(cls.fields[i]!.type, f.type),
+        (f, i) =>
+          !(cls.fields[i]!.name === f.name || (f.name === "%code" && cls.fields[i]!.name === "code")) ||
+          !typeEquals(cls.fields[i]!.type, f.type),
       )
     ) {
       errors.push({

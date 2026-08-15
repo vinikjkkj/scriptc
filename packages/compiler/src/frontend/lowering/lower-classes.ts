@@ -1258,6 +1258,17 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       const symbolFields = new Map<ts.Symbol, string>(base?.symbolFields ?? []);
       const hiddenSymbolFields = new Set<string>(base?.hiddenSymbolFields ?? []);
       const fieldOrder: ClassInfo["fieldOrder"] = [];
+      // Set when this class routes its own `code` declaration onto
+      // ScrError's inherited code slot (the Error-rooted branch in the
+      // member loop below): the layout prefix then names that slot
+      // `code`, so ONE JS property answers through both the subclass's
+      // field paths and the `%Error` view's error.code libCall.
+      let routesErrorCode = false;
+      const errorRootedBase = ((): boolean => {
+        let r: ClassInfo | null = base;
+        while (r && r.base) r = r.base;
+        return r !== null && r.def.name === "%Error";
+      })();
       const methods = new Map<string, { params: ParamShape[]; ret: IrType; abstract?: true; async?: true; gen?: { yieldT: IrType; nextT: IrType } }>();
       // Own accessor declarations ("get:x"/"set:x" → node), for the
       // partial-override analysis below (diagnostics need the node).
@@ -1665,6 +1676,66 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           // array elements still reject dyn — those are anonymous positions
           // mapType cannot slot — so a dyn-field class projected to a record
           // still fences at the projection, as it should.
+          // `code` on an ERROR-ROOTED class IS ScrError's inherited slot,
+          // not a new field. The runtime lays Error out as [name, message,
+          // code], and the `%Error` view answers `.code` by reading that
+          // third slot through the error.code libCall. A subclass that
+          // declared its own `code` used to get a SECOND slot laid out
+          // after it, so the value answered through the subclass type and
+          // `undefined` through every `Error`/ErrnoException view — Node
+          // has ONE property and answers it either way (measured: `e.code`
+          // and `(e as Error).code` both give the subclass's string).
+          // Routing the declaration onto the inherited slot makes the two
+          // views the same memory, which is the whole fix; the layout
+          // rename at the def below is its other half.
+          //
+          // STRING only. The slot is a plain string, so a `code: number`
+          // subclass keeps its own separate slot and its own (pre-existing,
+          // unchanged) view divergence rather than taking a new fence —
+          // turning a wrong answer into a refusal is not a fix, and
+          // 1301-errors-subclass.ts is exactly that shape.
+          //
+          // Runs BEFORE the redeclare check because `%code` is deliberately
+          // absent from the base's fields map: `fields.has("code")` is
+          // false at the first routing class, and TRUE at any subclass of
+          // one — which is why that case falls through to the ordinary
+          // redeclare path (slot-exact, initializer required) unchanged.
+          if (
+            member.name.text === "code" &&
+            errorRootedBase &&
+            !fields.has("code") &&
+            typeEquals(type, STRING)
+          ) {
+            routesErrorCode = true;
+            fields.set("code", STRING);
+            if (member.initializer) {
+              fieldOrder.push({ name: "code", type, initializer: member.initializer, redeclared: true });
+            } else {
+              // No initializer: the inherited slot is already NULL, and
+              // NULL is exactly what the `Error` view reports as absent —
+              // Node's own answer for a bare redeclare — so construction
+              // needs no write. A read before the constructor assigns it
+              // would still hand NULL to a string slot, so it takes the
+              // same definite-assignment guarantee every other field whose
+              // type cannot hold undefined takes.
+              const codeOpts = L.program.getCompilerOptions();
+              const codeSpi = codeOpts.strictPropertyInitialization ?? codeOpts.strict ?? false;
+              if (member.postfixToken?.kind === ts.SyntaxKind.ExclamationToken) {
+                unguardedFields.push({
+                  node: member.name,
+                  name: "code",
+                  why: "definite assignment assertions on fields not assigned at the constructor's top level ('code!' defers the first assignment past construction — the field would hold garbage, not undefined, until it runs; assign it in the constructor or include undefined in its type)",
+                });
+              } else if (!codeSpi) {
+                unguardedFields.push({
+                  node: member.name,
+                  name: "code",
+                  why: "initializer-less fields not assigned at the constructor's top level when strictPropertyInitialization is off (nothing guarantees 'code' is assigned before a read — enable the option, assign it unconditionally at the top of the constructor, or include undefined in its type)",
+                });
+              }
+            }
+            continue;
+          }
           if (fields.has(member.name.text)) {
             // REDECLARING an inherited field: Node [[Define]]s the OWN
             // property again when THIS class's field initializers run
@@ -2093,8 +2164,24 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       // No definite-assignment analysis applies: the constructor assigns
       // them unconditionally (paramPropInitStmts).
       if (paramProps.length > 0) {
+        // `code` routes onto ScrError's inherited slot from a PARAMETER
+        // property too, by the same rule and into the same slot — the two
+        // spellings of "an Error subclass carrying a code" must not
+        // disagree about which memory holds it. Same shape as the declared
+        // field: no own slot, and paramPropInitStmts' unconditional
+        // assignment writes the prefix slot (which is also why this needs
+        // no definite-assignment note — the constructor always assigns).
+        const ppRoutesCode = (pp: { name: string; type: IrType }): boolean =>
+          errorRootedBase && pp.name === "code" && !fields.has("code") && typeEquals(pp.type, STRING);
+        for (const pp of paramProps) {
+          if (ppRoutesCode(pp)) routesErrorCode = true;
+        }
+        const ppRouted = routesErrorCode ? paramProps.some((pp) => pp.name === "code") : false;
         for (const pp of paramProps) fields.set(pp.name, pp.type);
-        fieldOrder.unshift(...paramProps.map((pp) => ({ name: pp.name, type: pp.type, initializer: undefined })));
+        fieldOrder.unshift(...paramProps.map((pp) =>
+          ppRouted && pp.name === "code"
+            ? { name: pp.name, type: pp.type, initializer: undefined, redeclared: true as const }
+            : { name: pp.name, type: pp.type, initializer: undefined }));
       }
 
       // The deferred definite-assignment check: a field on the unguarded
@@ -2477,7 +2564,15 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           // Redeclared INHERITED fields contribute no slot (their
           // initializers assign the prefix slot).
           fields: [
-            ...(base?.def.fields ?? []),
+            // A class that routed its own `code` onto ScrError's inherited
+            // slot names that slot `code` in ITS OWN layout: same index,
+            // same type, same memory. Upcasts stay reinterprets (they are
+            // positional, never by name), and the struct member the
+            // subclass's field paths spell is now the very prefix slot the
+            // `Error` view's error.code reads through `(ScrError *)`. This
+            // is what keeps the whole change inside the frontend: no
+            // backend, validator, IR or runtime layout knows about it.
+            ...(base?.def.fields ?? []).map((f) => (routesErrorCode && f.name === "%code" ? { ...f, name: "code" } : f)),
             ...fieldOrder.filter((f) => f.redeclared !== true).map((f) => ({ name: f.name, type: f.type })),
           ],
           ...(methods.size > 0 ? { methods: [...methods.keys()] } : {}),
