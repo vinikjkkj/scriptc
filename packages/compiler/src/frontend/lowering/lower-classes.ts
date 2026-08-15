@@ -3482,9 +3482,33 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
    * value is a handle. Everything past an identifier — a call, an element
    * read, a property read — is out: only a plain identifier's flow type is
    * the value the initializer yields with no lowering of its own. */
+  /** True when a binding provably HOLDS its initializer for its whole life:
+   * a `const`, or a `let`/`var` that nothing in its declaring file ever
+   * writes. Both adoption arms rest on that and only on that — the reason
+   * they refuse a reassignable binding is that a later assignment could
+   * name an unrelated class, and bindingNeverReassigned is exactly the
+   * proof that no later assignment exists. Its file walk is the whole story
+   * for a module-scope binding (ESM import bindings are read-only, so no
+   * other file can write one) and strictly conservative for a block-scoped
+   * one, whose writers are a SUBSET of its declaring file.
+   *
+   * Merged `var` redeclarations are one symbol with several initializers —
+   * writes the assignment scan never sees — and are refused, the same fence
+   * bindingGenericFnInfoOf draws for the same reason. */
+  export function bindingHoldsItsInitializer(L: Lowerer, decl: ts.VariableDeclaration): boolean {
+    if ((ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) !== 0) return true;
+    if (!ts.isIdentifier(decl.name)) return false;
+    const sym = L.checker.getSymbolAtLocation(decl.name);
+    if (!sym) return false;
+    if (L.checker.declarationsOf(sym).some((d) => d !== decl && ts.isVariableDeclaration(d) && d.initializer !== undefined)) {
+      return false;
+    }
+    return bindingNeverReassigned(L, sym, decl);
+  }
+
   export function adoptedInstanceClassOf(L: Lowerer, decl: ts.VariableDeclaration): string | null {
     if (decl.initializer === undefined) return null;
-    if ((ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) === 0) return null;
+    if (!bindingHoldsItsInitializer(L, decl)) return null;
     let init: ts.Expression = decl.initializer;
     for (;;) {
       if (ts.isParenthesizedExpression(init) || ts.isSatisfiesExpression(init)) {
