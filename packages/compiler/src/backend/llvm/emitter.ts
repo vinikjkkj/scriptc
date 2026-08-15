@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { settleOrValuePromiseTag, canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleUsesChildStream, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { settleOrValuePromiseTag, canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals } from "../emission/emit-stmts.js";
 import { mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
@@ -1428,6 +1428,23 @@ class LlEmitter {
     // `child.stdout` can cross into the checked-dynamic tree by reference.
     // scr_child.c is always linked, so this gates only the install call.
     const usesChildStream = moduleUsesChildStream(this.mod);
+    // The four rows below were missing from this main entirely, and the
+    // reason each was invisible is the same one that hid the WebSocket
+    // disjunct: no program that turns the gate on had ever reached this
+    // tier. "Had ever reached" is not "can never reach" — moduleUsesDgram
+    // and moduleUsesHttp2 are true of a HANDLE TYPE as well as of a call
+    // (their own comments say so), and dgramSocket/http2Session are types
+    // this tier can hold since rcAdapters became the one kind table. So
+    // the table is completed rather than excused: every install the C
+    // main emits, on the identical predicate, which is also the predicate
+    // cc.ts links the unit by — the call and the symbol appear together
+    // or not at all. llvm-main-installs.test.ts compares the two tables
+    // row for row and fails on drift in either direction.
+    const usesHttp2 = moduleUsesHttp2(this.mod);
+    const usesDgram = moduleUsesDgram(this.mod);
+    const embedsZlib = moduleEmbedsBuiltin(this.mod, "node:zlib");
+    const embedsHttpClient =
+      moduleEmbedsBuiltin(this.mod, "node:http") || moduleEmbedsBuiltin(this.mod, "node:https");
     const hasRefGlobals = globals.some((g) => isRefCounted(g.type)) || fnValueProps.length > 0;
     // Declared NOW — the extern block flushes before main assembles.
     if (usesEvents) this.declare(`declare void @scr_events_install()`);
@@ -1438,6 +1455,10 @@ class LlEmitter {
       this.declare(`declare void @scr_net_dyn_install()`);
     }
     if (usesHttp) this.declare(`declare void @scr_http_dyn_install()`);
+    if (usesHttp2) this.declare(`declare void @scr_http2_dyn_install()`);
+    if (usesDgram) this.declare(`declare void @scr_dgram_install()`);
+    if (embedsZlib) this.declare(`declare void @scr_zlib_island_install()`);
+    if (embedsHttpClient) this.declare(`declare void @scr_net_island_install()`);
     if (usesRegex) this.declare(`declare void @scr_regex_dyn_install()`);
     if (usesChildStream) this.declare(`declare void @scr_child_stream_dyn_install()`);
     if (usesFetch) this.declare(`declare void @scr_fetch_install()`);
@@ -1727,6 +1748,10 @@ class LlEmitter {
       ...(usesRegex ? [`  call void @scr_regex_dyn_install()`] : []),
       ...(usesChildStream ? [`  call void @scr_child_stream_dyn_install()`] : []),
       ...(usesStream ? [`  call void @scr_stream_install()`] : []),
+      ...(usesHttp2 ? [`  call void @scr_http2_dyn_install()`] : []),
+      ...(usesDgram ? [`  call void @scr_dgram_install()`] : []),
+      ...(embedsZlib ? [`  call void @scr_zlib_island_install()`] : []),
+      ...(embedsHttpClient ? [`  call void @scr_net_island_install()`] : []),
       `  call void @scr_lib_init(i32 %argc, ptr %argv)`,
       ...(asyncEntry
         ? [`  %top = call ptr @${mangleAsyncSpawn(this.mod.entry)}()`]
