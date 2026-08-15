@@ -12688,14 +12688,23 @@ class LlEmitter {
         } else {
           throw new Error(`llvm emitter bug: ${e.fn} CA is not a string or Buffer`);
         }
-        callArgs = [...callArgs.slice(0, caIdx), `ptr ${caData}`, `i64 ${caLen}`];
-        this.declare(
-          isTlsOptions
-            ? `declare ptr @scr_https_request(ptr, double, ptr, ptr, double, ptr, i1 zeroext, i1 zeroext, ptr, i64, ptr, ptr)`
-            : `declare ptr @scr_https_request_url_opts(ptr, ptr, double, ptr, i1 zeroext, i1 zeroext, ptr, i64, ptr, ptr)`,
-        );
-      } else {
-        const decls = head.map((a) => (this.llType(a.type) === "i1" ? "i1 zeroext" : this.llType(a.type)));
+        // The CA slot expands to (ptr, i64) IN PLACE — everything after it
+        // stays. The previous spelling truncated the tail and hardcoded the
+        // two declares, which was invisible while the CA was always last
+        // and became `use of undefined value @scr_https_request_url_agent`
+        // the moment a row put the agent dyn behind it (found by the
+        // sweep, not by a test).
+        callArgs = [...callArgs.slice(0, caIdx), `ptr ${caData}`, `i64 ${caLen}`, ...callArgs.slice(caIdx + 1)];
+      }
+      {
+        // One derivation for both shapes: the argument types as declared,
+        // with the CA slot spelled (ptr, i64). For the two pre-existing
+        // TLS rows this reproduces their hand-written declares exactly.
+        const decls: string[] = [];
+        head.forEach((a, i) => {
+          if (i === caIdx) { decls.push("ptr", "i64"); return; }
+          decls.push(this.llType(a.type) === "i1" ? "i1 zeroext" : this.llType(a.type));
+        });
         this.declare(`declare ptr @${entry}(${[...decls, "ptr", "ptr"].join(", ")})`);
       }
       const t = B.tmp();
