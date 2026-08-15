@@ -89,7 +89,7 @@ import {
 } from "./classes.js";
 import { DK, LlDyn } from "./dyn.js";
 import { rcAdapters } from "../emission/emit-types.js";
-import { LlvmUnsupportedError } from "./unsupported.js";
+import { LlvmCensus, llvmCensusEnabled, LlvmUnsupportedError } from "./unsupported.js";
 import { LlWalkers } from "./walkers.js";
 import {
   arrNewCall,
@@ -110,7 +110,7 @@ import {
   vAdapters,
 } from "./shapes.js";
 
-export { LlvmUnsupportedError } from "./unsupported.js";
+export { LlvmCensus, llvmCensusEnabled, LlvmUnsupportedError } from "./unsupported.js";
 
 /** An emitted value: an LLVM value string (SSA name or immediate) plus its
  * IR type — frames track these so releases stay type-directed, exactly the
@@ -336,6 +336,18 @@ const LIB_FN_SYMS: Record<string, string> = {
   "buffer.concatLen": "scr_bytes_concat_len",
   "buffer.byteLenStr": "scr_bytes_byte_length_str",
   "buffer.isEncoding": "scr_bytes_is_encoding",
+  // The Cipher/Decipher constructors. Both entry points are the ones the
+  // C tier calls, and the trailing `bool decrypt` rides LIB_FN_TAIL — a
+  // Buffer key and a secret KeyObject need different runtime entries
+  // because @types/node's `BinaryLike | KeyObject` is a union, exactly as
+  // nodes.ts describes. update/final/setAAD/getAuthTag/setAuthTag were
+  // already here: their arguments are 1:1, so only the constructors were
+  // out of tier, and cipher.newKey is the construct that kept zapo off
+  // this backend entirely.
+  "cipher.newBytes": "scr_cipher_new_bytes",
+  "decipher.newBytes": "scr_cipher_new_bytes",
+  "cipher.newKey": "scr_cipher_new_key",
+  "decipher.newKey": "scr_cipher_new_key",
   // The checked-dynamic compare/equals validators (scr_bytes_io.c):
   // Node's argument ladders throw catchably (MAY_THROW_LIB_FNS).
   "dyn.toStringCoerce": "scr_dyn_string_coerce_js",
@@ -882,6 +894,47 @@ const LIB_FN_SYMS: Record<string, string> = {
   "timers.immediatePromise": "scr_immediate_promise",
 };
 
+/** The rows whose runtime entry takes a trailing CONSTANT the IR does not
+ * carry as an argument. The C tier spells it inline
+ * (`scr_cipher_new_key(a, b, c, false)`), which is the whole reason those
+ * four rows could not ride the generic path: LIB_FN_SYMS derives every
+ * argument from the call site's IR types, and there was no seat for an
+ * argument that has no IR expression. One seat is all they needed.
+ *
+ * Each entry is the LLVM parameter DECLARATION and the argument text; the
+ * generic path appends them to both the `declare` and the `call`. */
+/** The rows whose runtime entry returns a C scalar that is NOT the IR
+ * result type's LLVM spelling. C hides these: `double d =
+ * scr_big_cmp(a, b);` converts at the assignment, so the reference
+ * backend is right by construction. LLVM has no such step — a
+ * `declare double` over a function that returns `int` reads xmm0 while
+ * the value is in eax, and the caller gets whatever was there. It does
+ * not crash and it does not warn; it silently answers the wrong value,
+ * which is why nothing caught it: a bigint could not reach this tier at
+ * all until bigint literals did, and the FIRST program that got here
+ * printed `-9223372036854775808n < 0n` as false.
+ *
+ * The table is the audit's output, not a guess. Every one of the 595
+ * LIB_FN_SYMS rows was checked against its prototype in scr_runtime.h
+ * (repro-lt/abi-audit.mjs, and packages/compiler/test/llvm-libcall-abi
+ * keeps it checked): 595 matched, and this is the only row where the C
+ * return type is neither `double`, nor `bool`, nor a pointer. */
+const LIB_FN_RET_SEXT: Record<string, string> = {
+  // int scr_big_cmp(const ScrBigInt *a, const ScrBigInt *b) — the sign of
+  // the comparison, widened to the f64 the IR gives the call.
+  "big.cmp": "i32",
+};
+
+const LIB_FN_TAIL: Record<string, readonly { readonly decl: string; readonly arg: string }[]> = {
+  // scr_cipher_new_bytes / scr_cipher_new_key take `bool decrypt` last —
+  // one runtime entry per key shape, the direction as a constant. The C
+  // tier's four cases in emit-exprs.ts are these four rows.
+  "cipher.newBytes": [{ decl: "i1 zeroext", arg: "i1 false" }],
+  "decipher.newBytes": [{ decl: "i1 zeroext", arg: "i1 true" }],
+  "cipher.newKey": [{ decl: "i1 zeroext", arg: "i1 false" }],
+  "decipher.newKey": [{ decl: "i1 zeroext", arg: "i1 true" }],
+};
+
 /** The canonical option-callback order per stream base — emit-exprs.ts's
  * table: the flags literal names which are PRESENT (bit i = canonical[i]);
  * absent ones pass NULL pairs. */
@@ -1138,6 +1191,12 @@ class LlEmitter {
   /** Active optional-chain bind slots, by chain id (chainRecv reads). */
   private readonly chainSlots = new Map<string, LlValue>();
   private logArgSlots = 0;
+  /** SCRIPTC_LLVM_CENSUS=1: collect refusals instead of stopping at the
+   * first one. Null (the default) is the product behaviour, byte for
+   * byte — every census branch below tests this field first. */
+  private readonly census: LlvmCensus | null = llvmCensusEnabled() ? new LlvmCensus() : null;
+  /** IR name of the function being emitted — census attribution only. */
+  private currentFnName = "";
 
   constructor(private readonly mod: IrModule) {
     for (const fn of mod.functions) this.fnByName.set(fn.name, fn);
@@ -1183,7 +1242,9 @@ class LlEmitter {
         cls.name !== RUNTIME_EMITTER_CLASS &&
         !RUNTIME_STREAM_CLASSES.has(cls.name)
       ) {
-        throw new LlvmUnsupportedError(`classDef:${cls.name}`, cls.loc);
+        const err = new LlvmUnsupportedError(`classDef:${cls.name}`, cls.loc);
+        if (this.census === null) throw err;
+        this.census.record(err, `%${cls.name}`, cls.loc);
       }
     }
     // The class graph: base/children links, hierarchy membership, the
@@ -1252,7 +1313,26 @@ class LlEmitter {
     // Function bodies first (the literal/unit/fn-value tables fill as they
     // emit), then the file assembles around them — the C emitter's order.
     const fnDefs: string[] = [];
-    for (const fn of this.mod.functions) fnDefs.push(this.emitFunction(fn));
+    for (const fn of this.mod.functions) {
+      if (this.census === null) {
+        fnDefs.push(this.emitFunction(fn));
+        continue;
+      }
+      // A refusal that escapes a whole function (a signature type, a
+      // module-assembly walk) still leaves the remaining functions to
+      // census; the abandoned body emits nothing at all.
+      try {
+        fnDefs.push(this.emitFunction(fn));
+      } catch (err) {
+        this.census.record(err, fn.name, fn.loc);
+      }
+    }
+    if (this.census !== null && this.census.size > 0) {
+      process.stderr.write(this.census.report() + "\n");
+      // The recovered module is missing statements: it must never be
+      // written, linked or cached. Fail exactly as the build would have.
+      throw this.census.firstRefusal ?? new LlvmUnsupportedError("censusDownstreamOnly");
+    }
     const shapes = emitRecordShapes(this, this.mod);
     const classShapes = emitClassShapes(this, this.mod, this.classMeta);
     const classObjDefs = emitClassObjDefs(this, this.classMeta, this.classObjs, this.fnByName, (t) => this.llType(t));
@@ -3207,6 +3287,7 @@ class LlEmitter {
   }
 
   private emitFunction(fn: IrFunction): string {
+    this.currentFnName = fn.name;
     const B = new BlockBuilder();
     this.B = B;
     this.frames = [];
@@ -3319,6 +3400,25 @@ class LlEmitter {
   }
 
   private emitStmt(s: IrStmt): void {
+    if (this.census === null) {
+      this.emitStmtInner(s);
+      return;
+    }
+    // Census mode: a refused statement is recorded and skipped, and the
+    // frame/scope stacks are rewound to the depths it entered at so the
+    // NEXT statement still emits against a consistent emitter.
+    const frameDepth = this.frames.length;
+    const scopeDepth = this.scopes.length;
+    try {
+      this.emitStmtInner(s);
+    } catch (err) {
+      this.census.record(err, this.currentFnName, s.loc);
+      this.frames.length = frameDepth;
+      this.scopes.length = scopeDepth;
+    }
+  }
+
+  private emitStmtInner(s: IrStmt): void {
     const B = this.B;
     this.frames.push([]);
     switch (s.kind) {
@@ -7072,10 +7172,20 @@ class LlEmitter {
         this.emitPendingCheck();
         return out;
       }
-      // bigint is C-backend only for now: the LLVM tier has no ScrBigInt
-      // ABI yet, so it refuses loudly (SC3001) instead of miscompiling.
-      case "bigLit":
-        throw new LlvmUnsupportedError("bigint literals");
+      // A bigint literal is its SPELLING, parsed by the runtime — the C
+      // tier's whole bigLit case (emit-exprs.ts) is one scr_big_parse
+      // call, and this is that call. There was never a ScrBigInt ABI to
+      // port: `bigint` is one `ptr` here like every other refcounted kind
+      // (llType's rcAdapters rule), its RC/trace/field adapters already
+      // exist, and all NINETEEN big.* operations were already in
+      // LIB_FN_SYMS. Only the literal had no route.
+      case "bigLit": {
+        const len = Buffer.byteLength(e.text, "utf8");
+        this.declare(`declare ptr @scr_big_parse(ptr, i64)`);
+        const t = B.tmp();
+        B.line(`${t} = call ptr @scr_big_parse(ptr ${this.cstr(e.text)}, i64 ${len})`);
+        return this.own({ name: t, type: e.type });
+      }
       // globalThis.WebSocket builds its API record out of five
       // synthesized C functions (emit-ws.ts) over per-program record
       // shapes; the LLVM tier has no port of that scaffolding yet, so it
@@ -9709,11 +9819,24 @@ class LlEmitter {
     const B = this.B;
     const value = e.type.value;
     const rc = isRefCounted(value) ? vAdapters(this, value) : { retain: "null", release: "null" };
-    this.declare(`declare ptr @scr_map_new(i32, i32, ptr, ptr, ptr)`);
+    // Object KEYS carry their own RC adapters at construction — the map
+    // retains each key — so they take the ref-key constructor, exactly
+    // as emit-exprs.ts's mapNew does. Without it the keys are stored
+    // borrowed and the first collection of one is a use-after-free;
+    // that is what the old mapKey refusal was standing in for.
+    const kRc = mapKeyAccess(e.type.key) === "ref" ? vAdapters(this, e.type.key) : null;
     const m = B.tmp();
-    B.line(
-      `${m} = call ptr @scr_map_new(i32 ${mapKeyKindNum(e.type.key)}, i32 ${mapValKindNum(value)}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${isRefCounted(value) ? traceArg(this, value) : "null"})`,
-    );
+    if (kRc !== null) {
+      this.declare(`declare ptr @scr_map_new_ref(i32, ptr, ptr, ptr, ptr, ptr)`);
+      B.line(
+        `${m} = call ptr @scr_map_new_ref(i32 ${mapValKindNum(value)}, ptr ${kRc.retain}, ptr ${kRc.release}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${isRefCounted(value) ? traceArg(this, value) : "null"})`,
+      );
+    } else {
+      this.declare(`declare ptr @scr_map_new(i32, i32, ptr, ptr, ptr)`);
+      B.line(
+        `${m} = call ptr @scr_map_new(i32 ${mapKeyKindNum(e.type.key)}, i32 ${mapValKindNum(value)}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${isRefCounted(value) ? traceArg(this, value) : "null"})`,
+      );
+    }
     const out = this.own({ name: m, type: e.type });
     // Seeded construction: set() each pair in source order — a repeated
     // key overwrites (the runtime releases the old value).
@@ -9896,8 +10019,19 @@ class LlEmitter {
     const s = B.tmp();
     if (kAcc === "ref") {
       const rc = vAdapters(this, e.type.elem);
-      this.declare(`declare ptr @scr_set_new_ref(ptr, ptr)`);
-      B.line(`${s} = call ptr @scr_set_new_ref(ptr ${rc.retain}, ptr ${rc.release})`);
+      // A cycle-capable ELEMENT can hold the set right back, so the set
+      // needs the collector header and a trace that visits the KEY side
+      // — emit-exprs.ts's setNew makes the same split. Without it a
+      // Set<Promise> or Set<Record> is uncollectable, which is the other
+      // half of what the mapKey refusal was standing in for.
+      const trace = traceAdapter(this, e.type.elem);
+      if (trace !== null) {
+        this.declare(`declare ptr @scr_set_new_ref_traced(ptr, ptr, ptr)`);
+        B.line(`${s} = call ptr @scr_set_new_ref_traced(ptr ${rc.retain}, ptr ${rc.release}, ptr ${trace})`);
+      } else {
+        this.declare(`declare ptr @scr_set_new_ref(ptr, ptr)`);
+        B.line(`${s} = call ptr @scr_set_new_ref(ptr ${rc.retain}, ptr ${rc.release})`);
+      }
     } else {
       this.declare(`declare ptr @scr_map_new(i32, i32, ptr, ptr, ptr)`);
       B.line(`${s} = call ptr @scr_map_new(i32 ${mapKeyKindNum(e.type.elem)}, i32 0, ptr null, ptr null, ptr null)`);
@@ -12738,15 +12872,36 @@ class LlEmitter {
     }
     const sym = LIB_FN_SYMS[e.fn];
     if (sym === undefined) throw new LlvmUnsupportedError(`libCall:${e.fn}`, e.loc);
+    const tail = LIB_FN_TAIL[e.fn] ?? [];
     const args = e.args.map((a) => this.emitExpr(a));
-    const argDecls = args.map((a) => {
-      const ty = this.llType(a.type);
-      return ty === "i1" ? "i1 zeroext" : ty;
-    });
+    const argDecls = [
+      ...args.map((a) => {
+        const ty = this.llType(a.type);
+        return ty === "i1" ? "i1 zeroext" : ty;
+      }),
+      ...tail.map((t) => t.decl),
+    ];
+    // The C return type wins over the IR's when they disagree (see
+    // LIB_FN_RET_SEXT): call at the ABI's width, then widen to the type
+    // the rest of the emission expects.
+    const cRet = LIB_FN_RET_SEXT[e.fn];
     const retTy = this.llType(e.type);
-    const retDecl = retTy === "i1" ? "zeroext i1" : retTy;
+    const retDecl = cRet ?? (retTy === "i1" ? "zeroext i1" : retTy);
     this.declare(`declare ${retDecl} @${sym}(${argDecls.join(", ")})`);
-    const argList = args.map((a) => `${this.llType(a.type)} ${a.name}`).join(", ");
+    const argList = [
+      ...args.map((a) => `${this.llType(a.type)} ${a.name}`),
+      ...tail.map((t) => t.arg),
+    ].join(", ");
+    if (cRet !== undefined) {
+      if (retTy !== "double") throw new Error(`llvm emitter bug: ${e.fn} widens ${cRet} into ${retTy}`);
+      const raw = B.tmp();
+      const wide = B.tmp();
+      B.line(`${raw} = call ${cRet} @${sym}(${argList})`);
+      B.line(`${wide} = sitofp ${cRet} ${raw} to double`);
+      const widened = this.own({ name: wide, type: e.type });
+      if (MAY_THROW_LIB_FNS.has(e.fn)) this.emitPendingCheck();
+      return widened;
+    }
     if (retTy === "void") {
       B.line(`call void @${sym}(${argList})`);
       if (MAY_THROW_LIB_FNS.has(e.fn)) this.emitPendingCheck();
