@@ -23,7 +23,7 @@ import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-name
 import { collectExpandoMembers, expandoBindStmts } from "./lower-expando.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import type { ClassInfo } from "./lower-classes.js";
-import { decoratorNodesOf, genericIfaceBindingKeepsClass, guaranteedDecorationThrow, castAliasedClassRefOf, constructedClassInfoOf} from "./lower-classes.js";
+import { decoratorNodesOf, genericIfaceBindingKeepsClass, guaranteedDecorationThrow, castAliasedClassRefOf, constructedClassInfoOf, adoptedInstanceClassOf} from "./lower-classes.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 
 /** One file's declarations, split for collection and init-body lowering. */
@@ -1745,6 +1745,27 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             ) {
               const built = constructedClassInfoOf(L, decl.initializer);
               if (built) type = { kind: "object", className: built.def.name };
+              else {
+                // The same rule for the two spellings whose value is an
+                // EXISTING instance rather than a fresh one: `const v:
+                // Iface = live` and `const v = live as unknown as { … }`.
+                // A block-scoped const already keeps the instance for both
+                // (lowerVarDecl's adoption arm reads the LOWERED
+                // initializer, and both spellings lower to the object), so
+                // without this the same declaration means two different
+                // things at the two scopes — and the file-scope answer is
+                // the wrong one: the record slot COPIES at the assignment,
+                // so a mutation made through the class after the binding
+                // exists is invisible through it, and a write through the
+                // binding never reaches the object. Node has one object.
+                const adopted = adoptedInstanceClassOf(L, decl);
+                if (adopted !== null) {
+                  if (process.env["SCRIPTC_ADOPT_WHY"] !== undefined) {
+                    console.error(`[adoptwhy] ${locOf(nameNode).file}:${locOf(nameNode).start} ${nameNode.text}: record -> object:${adopted}`);
+                  }
+                  type = { kind: "object", className: adopted };
+                }
+              }
             }
             // A file-scope PATTERN over an ISLAND-bound source (`export
             // let { toString } = 1;` — the engine reads the wrapper's
