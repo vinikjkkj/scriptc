@@ -2964,6 +2964,20 @@ export class Lowerer {
     if (
       !this.dynamic &&
       !(widened.flags & ts.TypeFlags.Any) &&
+      // BOTH halves of the message are claims, so BOTH are measured. The
+      // dynamic probe alone only proves the second ("runs in the engine");
+      // the first ("has no static representation") is about THIS build,
+      // and badType is reached by callers that refused for reasons of
+      // their own — a construct the lowering cannot build out of a type
+      // that maps perfectly well. Without this probe such a site reports
+      // a type fence twice over false: the static mapping ANSWERS (an
+      // object literal against a union-typed slot maps to that union),
+      // and --dynamic does not run it either (the same refusal reports
+      // SC2001 there), so the hint sends the user to a build that fails
+      // the same way. Measured on zapo: three sites, all object literals
+      // whose contextual union maps, all reported as dynamic-capable in
+      // the coverage report and none of them dynamic-capable in fact.
+      mapType(widened, this.typeCtx) === null &&
       mapType(widened, { ...this.typeCtx, dynamic: true }) !== null
     ) {
       this.dynWhy(node, type, widened);

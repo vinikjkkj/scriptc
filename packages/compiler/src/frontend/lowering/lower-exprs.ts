@@ -5698,6 +5698,12 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       tsType = L.checker.getAwaitedType(tsType) ?? tsType;
     }
     let mapped = L.mapTypeOf(tsType);
+    /** The CONTEXTUAL union, when the slot's type mapped to one and the
+     * literal therefore had to pick an arm to build as. Kept out here so
+     * the refusal below can tell "the slot is a union and no arm fit"
+     * apart from "the type has no mapping at all" — two stories the type
+     * fence used to tell in one voice. */
+    let ctxUnion: (IrType & { kind: "union" }) | null = null;
     // An EMPTY-record context under a NON-empty literal (`Object.keys({
     // ...process.env })` — the lib's `{}`-typed parameters admit every
     // object): `{}` carries no shape information, so the literal builds as
@@ -5754,7 +5760,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // island through checker-`any` field residue): the literal builds at
     // its own type like every unmappable context.
     if (mapped === null || mapped.kind === "union" || mapped.kind === "dyn" || mapped.kind === "object" || mapped.kind === "jsval") {
-      const ctxUnion = mapped?.kind === "union" ? mapped : null;
+      ctxUnion = mapped?.kind === "union" ? mapped : null;
       mapped = L.mapTypeOf(L.typeOf(expr)) ?? mapped;
       shapeDeclared = false;
       // A literal whose own shape re-tags into NO arm of the contextual
@@ -5849,6 +5855,46 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // consumers ride the keyed-dyn paths. TypeScript keeps the fence.
     if ((!mapped || mapped.kind === "dyn") && isJsSourceFile(expr.getSourceFile())) {
       return lowerDynObjectLiteral(L, expr);
+    }
+    // The slot IS a union, its arms map, and no single arm fit — so the
+    // literal has a static home and the type fence's "no static
+    // representation" would be false about it. What actually blocks the
+    // build is the SPREAD: a source union with several record arms leaves
+    // the result's arm undecided until run time, and an object literal
+    // builds one shape. Name that, in the union-source spread's own voice
+    // one level up (the per-field merge below already refuses the same
+    // source when the TARGET shape is known); badType keeps every other
+    // literal unchanged.
+    if ((!mapped || mapped.kind !== "record") && ctxUnion) {
+      for (const prop of expr.properties) {
+        if (!ts.isSpreadAssignment(prop)) continue;
+        if (conditionalSpreadOf(prop.expression)) continue;
+        const st = L.mapTypeOf(L.typeOf(prop.expression));
+        if (st?.kind !== "union") continue;
+        const sdef = L.unions.get(st.unionId);
+        const srecs = sdef?.arms.filter((a) => a.kind === "record") ?? [];
+        if (srecs.length < 2) continue;
+        // The CHECKER's spelling, not the IR's, and capped. Both unions
+        // here are whole event families (nine arms of ten fields at
+        // zapo's widest), and `fmt` expands every arm structurally: the
+        // message would run past the emitter's ~4012-character truncation
+        // and land in the census's "suspiciously long prose" bucket,
+        // which is the population this project keeps at zero. The
+        // declared name is also the more useful half — a reader can look
+        // 'WaMexNotificationEvent' up; a 4 000-character structural
+        // recitation of it tells them nothing they can act on.
+        const name = (t: ts.Type): string => {
+          const s = L.checker.typeToString(t);
+          return s.length <= 80 ? s : `${s.slice(0, 77)}...`;
+        };
+        L.unsupported(
+          "SC1090",
+          prop,
+          `object spread of '${name(L.typeOf(prop.expression))}' into the union-typed slot ` +
+            `'${name(tsType)}' (the source's arm decides which arm the literal builds, ` +
+            `and a literal builds one shape — ${NARROW_FIRST})`,
+        );
+      }
     }
     if (!mapped || mapped.kind !== "record") L.badType(expr, tsType);
     let type = mapped;

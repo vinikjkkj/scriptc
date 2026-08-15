@@ -1,0 +1,20 @@
+union-spread-into-union-slot.ts:72:31 - error SC1090: object spread of 'Parsed' into the union-typed slot 'Ev' (the source's arm decides which arm the literal builds, and a literal builds one shape — narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) is not supported yet
+
+  71 | if (p !== null) {
+  72 |   console.log(emit({ ...base, ...p }));
+     |                               ^~~~
+  73 | }
+
+union-spread-into-union-slot.ts:79:22 - error SC1090: object spread of 'Parsed' into the union-typed slot 'Ev' (the source's arm decides which arm the literal builds, and a literal builds one shape — narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) is not supported yet
+
+  78 | if (q !== null) {
+  79 |   console.log(emit({ ...q, rawId: "R2" }));
+     |                      ^~~~
+  80 | }
+
+union-spread-into-union-slot.ts:87:41 - error SC1090: object spread of 'Parsed' into the union-typed slot 'Ev | null' (the source's arm decides which arm the literal builds, and a literal builds one shape — narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) is not supported yet
+
+  86 |   const r = parse(n);
+  87 |   return r === null ? null : { ...base, ...r };
+     |                                         ^~~~
+  88 | }
