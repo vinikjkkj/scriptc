@@ -89,7 +89,7 @@ import {
 } from "./classes.js";
 import { DK, LlDyn } from "./dyn.js";
 import { rcAdapters } from "../emission/emit-types.js";
-import { LlvmUnsupportedError } from "./unsupported.js";
+import { LlvmCensus, llvmCensusEnabled, LlvmUnsupportedError } from "./unsupported.js";
 import { LlWalkers } from "./walkers.js";
 import {
   arrNewCall,
@@ -110,7 +110,7 @@ import {
   vAdapters,
 } from "./shapes.js";
 
-export { LlvmUnsupportedError } from "./unsupported.js";
+export { LlvmCensus, llvmCensusEnabled, LlvmUnsupportedError } from "./unsupported.js";
 
 /** An emitted value: an LLVM value string (SSA name or immediate) plus its
  * IR type — frames track these so releases stay type-directed, exactly the
@@ -1138,6 +1138,12 @@ class LlEmitter {
   /** Active optional-chain bind slots, by chain id (chainRecv reads). */
   private readonly chainSlots = new Map<string, LlValue>();
   private logArgSlots = 0;
+  /** SCRIPTC_LLVM_CENSUS=1: collect refusals instead of stopping at the
+   * first one. Null (the default) is the product behaviour, byte for
+   * byte  every census branch below tests this field first. */
+  private readonly census: LlvmCensus | null = llvmCensusEnabled() ? new LlvmCensus() : null;
+  /** IR name of the function being emitted  census attribution only. */
+  private currentFnName = "";
 
   constructor(private readonly mod: IrModule) {
     for (const fn of mod.functions) this.fnByName.set(fn.name, fn);
@@ -1183,7 +1189,9 @@ class LlEmitter {
         cls.name !== RUNTIME_EMITTER_CLASS &&
         !RUNTIME_STREAM_CLASSES.has(cls.name)
       ) {
-        throw new LlvmUnsupportedError(`classDef:${cls.name}`, cls.loc);
+        const err = new LlvmUnsupportedError(`classDef:${cls.name}`, cls.loc);
+        if (this.census === null) throw err;
+        this.census.record(err, `%${cls.name}`, cls.loc);
       }
     }
     // The class graph: base/children links, hierarchy membership, the
@@ -1252,7 +1260,26 @@ class LlEmitter {
     // Function bodies first (the literal/unit/fn-value tables fill as they
     // emit), then the file assembles around them — the C emitter's order.
     const fnDefs: string[] = [];
-    for (const fn of this.mod.functions) fnDefs.push(this.emitFunction(fn));
+    for (const fn of this.mod.functions) {
+      if (this.census === null) {
+        fnDefs.push(this.emitFunction(fn));
+        continue;
+      }
+      // A refusal that escapes a whole function (a signature type, a
+      // module-assembly walk) still leaves the remaining functions to
+      // census; the abandoned body emits nothing at all.
+      try {
+        fnDefs.push(this.emitFunction(fn));
+      } catch (err) {
+        this.census.record(err, fn.name, fn.loc);
+      }
+    }
+    if (this.census !== null && this.census.size > 0) {
+      process.stderr.write(this.census.report() + "\n");
+      // The recovered module is missing statements: it must never be
+      // written, linked or cached. Fail exactly as the build would have.
+      throw this.census.firstRefusal ?? new LlvmUnsupportedError("censusDownstreamOnly");
+    }
     const shapes = emitRecordShapes(this, this.mod);
     const classShapes = emitClassShapes(this, this.mod, this.classMeta);
     const classObjDefs = emitClassObjDefs(this, this.classMeta, this.classObjs, this.fnByName, (t) => this.llType(t));
@@ -3207,6 +3234,7 @@ class LlEmitter {
   }
 
   private emitFunction(fn: IrFunction): string {
+    this.currentFnName = fn.name;
     const B = new BlockBuilder();
     this.B = B;
     this.frames = [];
@@ -3319,6 +3347,25 @@ class LlEmitter {
   }
 
   private emitStmt(s: IrStmt): void {
+    if (this.census === null) {
+      this.emitStmtInner(s);
+      return;
+    }
+    // Census mode: a refused statement is recorded and skipped, and the
+    // frame/scope stacks are rewound to the depths it entered at so the
+    // NEXT statement still emits against a consistent emitter.
+    const frameDepth = this.frames.length;
+    const scopeDepth = this.scopes.length;
+    try {
+      this.emitStmtInner(s);
+    } catch (err) {
+      this.census.record(err, this.currentFnName, s.loc);
+      this.frames.length = frameDepth;
+      this.scopes.length = scopeDepth;
+    }
+  }
+
+  private emitStmtInner(s: IrStmt): void {
     const B = this.B;
     this.frames.push([]);
     switch (s.kind) {
