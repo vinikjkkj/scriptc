@@ -158,6 +158,16 @@ struct ScrHttpReq {
   struct ScrHttpClientReq *pipe_client;
   ScrNetSocket *pipe_sock;
   bool ended; /* body complete (or connection dead): data/end drop */
+  /* `ended` is "this message is done, one way or another" — it is the
+   * guard on data/end delivery, and a body CUT SHORT sets it too. Node's
+   * `complete` / `readableEnded` mean something narrower: the body
+   * arrived in full and 'end' was emitted. Measured (v25.9.0,
+   * repro-ef/n7.mjs): through a mid-body teardown both read FALSE at the
+   * 'aborted' event and still false at 'close'; through a natural end
+   * both read true. Reading `ended` for them answered true on the
+   * aborted path — silently, since a cut-short body reaches 'close'
+   * either way. */
+  bool completed;
   bool enc_utf8; /* setEncoding('utf8'): 'data' delivers strings */
   bool http10;   /* the parsed request/status line's version (httpVersion) */
   bool http2;    /* an h2 compat request (httpVersion "2.0") */
@@ -562,6 +572,7 @@ static void scr_http_req_finish(ScrHttpReq *r, bool fire) {
     return;
   }
   r->ended = true;
+  if (fire) r->completed = true; /* `fire` IS "the body arrived in full" */
   if (fire) scr_net_fire0_this(&r->end_ls, r, SCR_DYNH_HTTP_REQ);
   scr_net_ls_drop(&r->data_ls);
   scr_net_ls_drop(&r->end_ls);
@@ -2170,7 +2181,7 @@ ScrStr *scr_http_req_http_version(ScrHttpReq *r) {
 double scr_http_req_http_version_major(ScrHttpReq *r) { return r->http2 ? 2 : 1; }
 double scr_http_req_http_version_minor(ScrHttpReq *r) { return r->http2 || r->http10 ? 0 : 1; }
 bool scr_http_req_aborted_flag(ScrHttpReq *r) { return r->aborted; }
-bool scr_http_req_complete(ScrHttpReq *r) { return r->ended; }
+bool scr_http_req_complete(ScrHttpReq *r) { return r->completed; }
 
 /* The stream died with the response side open: 'aborted' fires NOW (the
  * teardown macrotask, Node's position), then the close rides the sweep. */
@@ -2447,6 +2458,25 @@ static void scr_http_client_error(ScrHttpClientReq *c, ScrStr *msg /*borrowed*/)
   if (c->close_emitted) return;
   c->had_error = true;
   scr_net_fire_err(&c->err_ls, msg);
+}
+
+/* A hang-up before any response head. Node's error is a plain Error
+ * "socket hang up" carrying `code: 'ECONNRESET'` (measured, v25.9.0 —
+ * repro-ef/n1.mjs; own properties are exactly code/message/stack), and
+ * the MESSAGE fan-out above cannot deliver that code: the shared adapter
+ * recovers one by reading an errno NAME back out of the text, and
+ * "socket hang up" contains none, so every listener that asked for the
+ * object got `code: undefined`. Firing the OBJECT — scr_http_fire_aborted's
+ * route, one event over — carries it. */
+static void scr_http_client_hangup(ScrHttpClientReq *c) {
+  if (c->close_emitted) return;
+  ScrStr *msg = scr_str_new("socket hang up", 14);
+  ScrError *e = scr_error_new(0 /* Error */, msg);
+  scr_error_set_code(e, "ECONNRESET");
+  c->had_error = true;
+  scr_net_fire_err_obj(&c->err_ls, e);
+  scr_error_release(e);
+  scr_str_release(msg);
 }
 
 /* ── the wire: Node's exact request head ─────────────────────────────── */
@@ -2864,24 +2894,58 @@ static void scr_http_client_premature(ScrHttpConn *conn) {
           scr_net_fire_err_obj(&c->err_ls, c->destroy_err);
         }
       } else {
-        ScrStr *msg = scr_str_new("socket hang up", 14);
-        scr_http_client_error(c, msg);
-        scr_str_release(msg);
+        scr_http_client_hangup(c);
       }
       if (scr_exc_pending()) return;
     }
     scr_http_client_queue_close(c);
   } else {
-    /* mid-head-to-body death: req close, then 'aborted' on the res, then
-     * res close (the queue preserves push order) */
+    /* Mid-head-to-body death. Node's order, measured against v25.9.0
+     * (repro-ef/n3.mjs, and n2.mjs for the bare twin):
+     *
+     *   destroy(err)   req 'error' (the user's OWN object) ─┐ synchronous
+     *   both           res 'aborted' (res.aborted = true)  ─┘
+     *   both           req 'close'                         ─┐
+     *   both           res 'error'  Error: aborted/ECONNRESET │ queued,
+     *   both           res 'close'                           ─┘ in order
+     *
+     * A bare destroy() emits NO request 'error' in this window — the
+     * response's ECONNRESET is the only error — which is why the object
+     * fires only when destroy(err) stashed one. */
+    /* Both emits below run USER code, and a listener can reach the
+     * response — so this pass may not cache conn->req across them on the
+     * connection's reference alone. It takes its OWN (the pattern the
+     * queue entries use), and re-checks that the connection still names
+     * the same handle before breaking the conn edge. */
+    ScrHttpReq *res = conn->req;
+    if (res != NULL) scr_http_req_retain(res);
+    if (c->destroy_err != NULL && !c->had_error && !c->close_emitted) {
+      c->had_error = true;
+      scr_net_fire_err_obj(&c->err_ls, c->destroy_err);
+      if (scr_exc_pending()) {
+        if (res != NULL) scr_http_req_release(res);
+        return;
+      }
+    }
+    if (res != NULL) {
+      /* the response's 'aborted' — same handle, same list the h2 lane
+       * fires; the http/1 parser lane simply never reached it before */
+      scr_http_h2_req_aborted(res);
+      if (scr_exc_pending()) {
+        scr_http_req_release(res);
+        return;
+      }
+    }
     scr_http_client_queue_close(c);
-    if (conn->req) {
-      ScrHttpReq *res = conn->req;
+    if (res != NULL) {
       scr_http_queue_req_aborted(res);
       scr_http_queue_req_close(res);
       scr_http_req_finish(res, false); /* body never completes */
-      conn->req = NULL; /* break the res→sock→ctx→res cycle */
-      scr_http_req_release(res);
+      if (conn->req == res) {
+        conn->req = NULL; /* break the res→sock→ctx→res cycle */
+        scr_http_req_release(res); /* the connection's edge */
+      }
+      scr_http_req_release(res); /* this pass's own */
     }
   }
 }
@@ -3741,10 +3805,10 @@ static ScrDyn *scr_http_dynh_req_get(void *h, const char *key, size_t key_len) {
     return d;
   }
   if (strcmp(key, "aborted") == 0) return scr_dyn_new_bool(r->aborted);
-  if (strcmp(key, "complete") == 0) return scr_dyn_new_bool(r->ended);
+  if (strcmp(key, "complete") == 0) return scr_dyn_new_bool(r->completed);
   if (strcmp(key, "destroyed") == 0) return scr_dyn_new_bool(scr_http_req_destroyed_flag(r));
   if (strcmp(key, "readable") == 0) return scr_dyn_new_bool(scr_http_req_readable(r));
-  if (strcmp(key, "readableEnded") == 0) return scr_dyn_new_bool(r->ended);
+  if (strcmp(key, "readableEnded") == 0) return scr_dyn_new_bool(r->completed);
   if (strcmp(key, "closed") == 0) return scr_dyn_new_bool(r->close_emitted);
   {
     /* Real instance properties without a modeled read: loud, never a

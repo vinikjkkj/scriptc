@@ -2243,15 +2243,26 @@ declare module "http" {
      * http legs — the Readable.pipe(ClientRequest) precedent. */
     pipe<T extends Writable>(destination: T, options?: { end?: boolean }): T;
     pipe(destination: ServerResponse | ClientRequest | Socket): void;
+    /* A body cut short. Node fires 'aborted' on the message BEFORE the
+     * request's own 'close' and flips `aborted` to true with `complete`
+     * still false (measured, v25.9.0 — repro-ef/n3.mjs, n4.mjs). The
+     * event and both flags already had lowerings (http.reqOnAborted,
+     * http.reqAborted, http.reqComplete); only this surface was missing,
+     * so the corpus could not spell what the runtime answers. */
+    readonly aborted: boolean;
+    readonly complete: boolean;
     on(event: "data", listener: (chunk: any) => void): this;
     on(event: "end" | "close", listener: () => void): this;
+    on(event: "aborted", listener: () => void): this;
     on(event: "error", listener: (err: Error) => void): this;
     /* addListener IS on (Node aliases them) — the suite spells both. */
     addListener(event: "data", listener: (chunk: any) => void): this;
     addListener(event: "end" | "close", listener: () => void): this;
+    addListener(event: "aborted", listener: () => void): this;
     addListener(event: "error", listener: (err: Error) => void): this;
     once(event: "data", listener: (chunk: any) => void): this;
     once(event: "end" | "close", listener: () => void): this;
+    once(event: "aborted", listener: () => void): this;
     once(event: "error", listener: (err: Error) => void): this;
   }
   export interface ServerResponse {
