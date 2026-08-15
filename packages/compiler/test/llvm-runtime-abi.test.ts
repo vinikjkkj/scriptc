@@ -305,7 +305,79 @@ describe("LLVM backend declares match scr_runtime.h prototypes", () => {
     expect(failures).toEqual([]);
   });
 
-  /* Direction 4: the RC adapter TABLE.
+  /* Direction 4: the libCall TABLE's RETURN types.
+   *
+   * The generic LIB_FN_SYMS path spells its declare from the CALL SITE's
+   * IR types, so a row's signature exists only where a program calls it —
+   * which is why the three scans above can all pass over a wrong one. The
+   * source scan sees no literal (the declare is interpolated). The
+   * emitted scan sees only the rows the fs/path slice happens to reach.
+   * And the name scan checks that the SYMBOL exists, not what it returns.
+   *
+   * That is not hypothetical. `int scr_big_cmp(const ScrBigInt *, const
+   * ScrBigInt *)` sat in the table under an IR result type of f64, so the
+   * emitter wrote `declare double @scr_big_cmp(ptr, ptr)` — reading xmm0
+   * for a value that is returned in eax. It never linked wrong, never
+   * warned, and never ran, because no bigint could reach this tier at all
+   * until bigint literals joined it; the first program that got here
+   * printed `-9223372036854775808n < 0n` as false.
+   *
+   * So this scan checks the TABLE rather than any emission: for every
+   * LIB_FN_SYMS row, the C return type in the header must be one the
+   * generic path can spell from an IR type (a pointer, double, bool or
+   * void) — or else the row must be listed in LIB_FN_RET_SEXT with the
+   * exact width the header gives it, which is the conversion path. It
+   * covers every row, including the ones no fixture calls. */
+  test("every LIB_FN_SYMS row returns a C type the generic path can spell", async () => {
+    const { protos } = await parseHeader();
+    const emitterSrc = await readFile(join(llvmSrcDir, "emitter.ts"), "utf8");
+    const table = (name: string): string => {
+      const at = emitterSrc.indexOf(`const ${name}`);
+      expect(at, `${name} not found in emitter.ts`).toBeGreaterThan(0);
+      return emitterSrc.slice(at, emitterSrc.indexOf("\n};", at));
+    };
+    const rows = [...table("LIB_FN_SYMS").matchAll(/^\s*"([a-zA-Z0-9_.]+)":\s*"(scr_[a-z0-9_]+)"/gm)]
+      .map((m) => ({ fn: m[1]!, sym: m[2]! }));
+    const widened = new Map(
+      [...table("LIB_FN_RET_SEXT").matchAll(/^\s*"([a-zA-Z0-9_.]+)":\s*"(i[0-9]+)"/gm)]
+        .map((m) => [m[1]!, m[2]!] as const),
+    );
+    // A return type the generic path derives from the IR result type. Any
+    // other C return is a width the IR cannot know about.
+    const SPELLABLE = new Set(["ptr", "double", "i1", "void"]);
+    const failures: string[] = [];
+    for (const { fn, sym } of rows) {
+      const proto = protos.get(sym);
+      if (proto === undefined) {
+        failures.push(`${fn} -> ${sym}: no prototype in scr_runtime.h`);
+        continue;
+      }
+      const declared = widened.get(fn);
+      if (declared !== undefined) {
+        if (declared !== proto.ret) {
+          failures.push(`${fn} -> ${sym}: LIB_FN_RET_SEXT says ${declared}, C returns ${proto.ret}`);
+        }
+        continue;
+      }
+      if (!SPELLABLE.has(proto.ret)) {
+        failures.push(
+          `${fn} -> ${sym}: C returns ${proto.ret}, which the generic path cannot derive from an IR type — ` +
+            `add a LIB_FN_RET_SEXT row so the call is made at the ABI's width and widened`,
+        );
+      }
+    }
+    // Every widened row must still BE a row: a stale entry would silently
+    // stop applying if its symbol were renamed out of the table.
+    const known = new Set(rows.map((r) => r.fn));
+    for (const fn of widened.keys()) {
+      if (!known.has(fn)) failures.push(`LIB_FN_RET_SEXT names ${fn}, which LIB_FN_SYMS does not`);
+    }
+    // Extractor guard: the table carries hundreds of rows.
+    expect(rows.length).toBeGreaterThan(400);
+    expect(failures).toEqual([]);
+  });
+
+  /* Direction 5: the RC adapter TABLE.
    *
    * emit-types.ts's `rcAdapters` is the one place both backends learn a
    * kind's retain/release symbols, and the LLVM tier turns each entry into
