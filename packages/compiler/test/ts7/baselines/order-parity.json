@@ -7535,6 +7535,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3881-as-cast-widens-into-the-intersection-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/3881-as-cast-widens-into-the-intersection-record.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/3891-union-spread-narrowed-first.ts": {
    "order": [
     "<repo>/tests/corpus/3891-union-spread-narrowed-first.ts"
@@ -7565,9 +7571,21 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3931-net-autosel-default-budget.ts": {
+   "order": [
+    "<repo>/tests/corpus/3931-net-autosel-default-budget.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/3932-error-subclass-nonstring-code-keeps-its-own-slot-on-purpose.ts": {
    "order": [
     "<repo>/tests/corpus/3932-error-subclass-nonstring-code-keeps-its-own-slot-on-purpose.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3941-agent-queue-dials-by-name.ts": {
+   "order": [
+    "<repo>/tests/corpus/3941-agent-queue-dials-by-name.ts"
    ],
    "diags": []
   },
