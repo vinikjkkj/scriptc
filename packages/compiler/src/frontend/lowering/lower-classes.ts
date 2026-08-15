@@ -3440,7 +3440,8 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     }
     if (!ts.isIdentifier(init)) return null;
     const classSym = L.resolveValueSymbol(init);
-    return (classSym ? L.classBySymbol.get(classSym) : undefined) ?? null;
+    const info = (classSym ? L.classBySymbol.get(classSym) : undefined) ?? null;
+    return annotationNamesAnotherClass(L, decl, info) ? null : info;
   }
 
   /** The class a `new` expression CONSTRUCTS, resolved through the callee
@@ -3529,6 +3530,30 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     return t !== null && t.kind === "object" ? t.className : null;
   }
 
+  /** Does this declaration's own type ANNOTATION name a different class
+   * than the one its initializer references? `const s: typeof Animal =
+   * Spider` is a WIDENING class-value slot, not the erasure alias the
+   * cast-alias rule models: tsc types every use of the binding against
+   * the annotation (`new s(2)` answers Animal, `s.name` reads Animal's
+   * static side), so pinning the initializer's class here makes the
+   * lowering and the checker disagree about one expression — which the
+   * IR validator can only report as SC9001, never as a diagnostic.
+   *
+   * Only an annotation that maps to a class value of its own can
+   * disagree. The published-class shape the rule exists for (`export
+   * const C = Impl as unknown as CCtor`) annotates a CONSTRUCT-SIGNATURE
+   * interface, which maps to no classval at all, so it keeps the alias.
+   * An UNANNOTATED binding keeps it too. */
+  function annotationNamesAnotherClass(
+    L: Lowerer,
+    decl: ts.VariableDeclaration,
+    info: ClassInfo | null,
+  ): boolean {
+    if (info === null || decl.type === undefined) return false;
+    const declared = L.mapTypeOf(L.checker.getTypeFromTypeNode(decl.type));
+    return declared?.kind === "classval" && declared.className !== info.def.name;
+  }
+
   /** The class a CONST binding's initializer names directly, with the
    * type-level wrappers peeled — the declaration-site face of
    * castAliasedClassInfoOf, for callers that hold the declaration rather
@@ -3547,7 +3572,8 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     }
     if (!ts.isIdentifier(init)) return null;
     const sym = L.resolveValueSymbol(init);
-    return (sym ? L.classBySymbol.get(sym) : undefined) ?? null;
+    const info = (sym ? L.classBySymbol.get(sym) : undefined) ?? null;
+    return annotationNamesAnotherClass(L, decl, info) ? null : info;
   }
 
   export function propertyAssignedClassInfoOf(

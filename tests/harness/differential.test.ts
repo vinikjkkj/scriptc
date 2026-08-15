@@ -18,6 +18,8 @@ import { describe, expect, test } from "vitest";
 import ts5 from "typescript";
 import { compile } from "@scriptc/compiler";
 import { shardSelect, shardSuffix } from "./shard.js";
+import { oracleCrashed, reduceNativeReport, reduceNodeReport } from "./uncaught-report.js";
+import { oracleIsTrustworthy as oracleTrustworthy } from "./oracle-trust.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -220,7 +222,16 @@ const islandShim = pathToFileURL(join(import.meta.dirname, "island-shim.mjs")).h
  * plus the configs that steer both sides (tsconfig.json adoption,
  * package.json module-format detection). */
 function programInputs(file: string): string[] {
-  if (!/\/main\.(ts|js|mjs|cjs)$/.test(file)) return [file];
+  // SEPARATOR-AGNOSTIC on purpose. globSync returns BACKSLASH paths on
+  // Windows, so a forward-slash-only test never matched and this
+  // degenerated to [file] for all 99 directory tests — silently. It cost
+  // 1890-ns-imports its oracle: wantsTransformTypes could not see the
+  // `enum` in a SIBLING module, so Node ran without
+  // --experimental-transform-types, died in strip-only mode, and the
+  // program read as a stdout divergence. It also cost BOTH cache keys
+  // their sibling bytes, so editing a nested module did not invalidate
+  // the remembered verdict — the comment above promises otherwise.
+  if (!/[\\/]main\.(ts|js|mjs|cjs)$/.test(file)) return [file];
   return [
     ...ENTRY_EXTS.flatMap((ext) => globSync(join(file, `../**/*.${ext}`))),
     ...globSync(join(file, "../**/tsconfig.json")),
@@ -280,39 +291,13 @@ function usesRealTime(inputs: string[]): boolean {
   );
 }
 
-/* Is this Node run something we are willing to remember as THE answer?
- *
- * The oracle cache stored whatever `runBinary("node", …)` returned, with
- * no guard on the exit code, and under memory pressure this box produced
- *
- *     {"v":2,"exitCode":3221225794,"stdout":"","stderr":""}
- *
- * 3221225794 is 0xC0000142, STATUS_DLL_INIT_FAILED — Windows refusing to
- * START the process. Node never ran. Every later run in that cache
- * directory then compared the compiled binary's real output against an
- * empty oracle and reported the BINARY as wrong; it cost the previous
- * block three reproductions to rule out a compiler regression.
- *
- * Two rules, both about a run that produced NO EVIDENCE:
- *  - an exit code in the NTSTATUS failure range (>= 0xC0000000) is the OS
- *    reporting that it could not run the program, never a JS exit code;
- *  - a non-zero exit with BOTH streams empty is not an answer either —
- *    Node prints a stack for an uncaught throw and the harness compares
- *    stderr, so a silent non-zero exit is a run that did not happen,
- *    UNLESS the program declares its code with `// @exit:` (those are
- *    deliberate, and 0 is deliberate too).
- *
- * The guard is applied on the WRITE (nothing poisoned is stored) and on
- * the READ (a directory poisoned by an older harness heals itself instead
- * of failing until someone deletes the file by hand). The failure mode is
- * symmetric — the same record manufactures a phantom PASS for any program
- * whose compiled output is also empty — which is why this refuses rather
- * than repairing. */
+/** The oracle-cache trust guard (oracle-trust.ts), bound to this suite's
+ * `// @exit:` reader. It moved out of this file so it could be pinned by a
+ * test: it is the only thing standing between the cache and a record that
+ * describes a run Node never really finished, and a wrong TRUE there reads
+ * as a compiler regression for every later run in the directory. */
 function oracleIsTrustworthy(res: { exitCode: number; stdout: Buffer; stderr: Buffer }, file: string): boolean {
-  if (res.exitCode >= 0xc0000000) return false;
-  if (res.exitCode === 0) return true;
-  if (res.stdout.length > 0 || res.stderr.length > 0) return true;
-  return expectedExitCode(file) === res.exitCode;
+  return oracleTrustworthy(res, expectedExitCode(file));
 }
 
 async function runNode(file: string): Promise<RunResult> {
@@ -437,15 +422,40 @@ describe(`differential corpus (${files.length} programs${sanitize ? ", sanitized
       // warn, process.stderr.write); nonzero-exit programs keep stdout-only
       // — their stderr carries the uncaught report, whose format is a
       // documented divergence.
-      if (expectedExit === 0) {
+      // The oracle itself DIED on this host: an exit-0 corpus program
+      // whose Node run ends in a V8 crash report. The report FORMAT is
+      // the documented divergence this suite already exempts for
+      // `// @exit:` programs, and the exemption was keyed on the
+      // DECLARED exit code, so these landed inside the byte comparison
+      // and compared a stack trace against one line. Key it on the
+      // OBSERVED report instead and compare the REDUCTION: the program's
+      // own stderr before the report, byte-for-byte, and the error's
+      // `Name: message`, byte-for-byte. A binary that reports a
+      // different error, a different message, or none at all still
+      // fails.
+      const hostCrash = oracleCrashed(nodeRes.exitCode, expectedExit, nodeRes.stderr);
+      if (hostCrash) {
+        const want = reduceNodeReport(nodeRes.stderr)!;
+        const got = reduceNativeReport(comparableStderr(nativeRes.stderr));
+        expect(got?.pre ?? comparableStderr(nativeRes.stderr).toString("utf8")).toBe(want.pre);
+        expect(got?.line ?? "<no uncaught report>").toBe(want.line);
+      } else if (expectedExit === 0) {
         const nativeErr = comparableStderr(nativeRes.stderr);
         if (!nodeRes.stderr.equals(nativeErr)) {
           expect(nativeErr.toString("utf8")).toBe(nodeRes.stderr.toString("utf8"));
           expect.unreachable("stderr differed at byte level but not after utf8 decode");
         }
       }
-      expect(nodeRes.exitCode).toBe(expectedExit);
-      expect(nativeRes.exitCode).toBe(expectedExit);
+      // The declared code keeps `// @exit:` directives honest — except
+      // where the oracle crashed on this host, which says nothing about
+      // the directive. There the contract that still means something is
+      // that the compiled binary agrees with the oracle.
+      if (hostCrash) {
+        expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+      } else {
+        expect(nodeRes.exitCode).toBe(expectedExit);
+        expect(nativeRes.exitCode).toBe(expectedExit);
+      }
     },
   );
 });
