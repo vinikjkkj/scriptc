@@ -6521,6 +6521,10 @@ export class Lowerer {
     // Promise.resolve's own lowering fences on); leave them to it.
     if (inner.kind === "void" || isUnitType(inner)) return null;
 
+    // SCRIPTC_PRESOLVE_WHY: name every Promise.resolve this walk answers.
+    if (process.env["SCRIPTC_PRESOLVE_WHY"]) {
+      process.stderr.write(`[presolve] ${loc.file}:${loc.start} arms=${def.arms.length} payload=${inner.kind}\n`);
+    }
     const vLocal = this.declareHiddenLocal("%presolve", value.type);
     const uRef: IrExpr = { kind: "varRef", localId: vLocal.id, type: value.type, loc };
     const extract = (tag: number): IrExpr => {
