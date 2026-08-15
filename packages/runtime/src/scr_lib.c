@@ -1332,13 +1332,105 @@ double scr_thread_cpu_system_diff(double prev) { return scr_thread_cpu_system() 
  * order, and units (CPU times in µs; maxRSS in kilobytes — uv divides
  * Darwin's bytes by 1024; the rest are getrusage's own counters, zero
  * where the platform never fills them). */
+#ifdef _WIN32
+/* PROCESS_MEMORY_COUNTERS / IO_COUNTERS, declared locally with private
+ * names so this needs neither <psapi.h> nor a new -l on the link line the
+ * C backend emits: both producers are kernel32.dll exports
+ * (K32GetProcessMemoryInfo since Windows 7, GetProcessIoCounters since
+ * XP) resolved through GetProcAddress. A resolution failure answers 0,
+ * which is exactly what this code did for every one of these fields
+ * before, so the worst case is the old behaviour rather than a crash.
+ * Both layouts are the documented, stable ones. */
+typedef struct {
+  DWORD cb;
+  DWORD PageFaultCount;
+  SIZE_T PeakWorkingSetSize;
+  SIZE_T WorkingSetSize;
+  SIZE_T QuotaPeakPagedPoolUsage;
+  SIZE_T QuotaPagedPoolUsage;
+  SIZE_T QuotaPeakNonPagedPoolUsage;
+  SIZE_T QuotaNonPagedPoolUsage;
+  SIZE_T PagefileUsage;
+  SIZE_T PeakPagefileUsage;
+} ScrWinProcMem;
+
+typedef struct {
+  ULONGLONG ReadOperationCount;
+  ULONGLONG WriteOperationCount;
+  ULONGLONG OtherOperationCount;
+  ULONGLONG ReadTransferCount;
+  ULONGLONG WriteTransferCount;
+  ULONGLONG OtherTransferCount;
+} ScrWinIoCounters;
+
+typedef BOOL(WINAPI *ScrGetProcMemFn)(HANDLE, ScrWinProcMem *, DWORD);
+typedef BOOL(WINAPI *ScrGetProcIoFn)(HANDLE, ScrWinIoCounters *);
+
+static bool scr_win_proc_mem(ScrWinProcMem *out) {
+  static ScrGetProcMemFn fn = NULL;
+  static bool tried = false;
+  if (!tried) {
+    tried = true;
+    HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
+    if (k32 != NULL) {
+      fn = (ScrGetProcMemFn)(void *)GetProcAddress(k32, "K32GetProcessMemoryInfo");
+    }
+  }
+  if (fn == NULL) return false;
+  memset(out, 0, sizeof *out);
+  out->cb = (DWORD)sizeof *out;
+  return fn(GetCurrentProcess(), out, (DWORD)sizeof *out) != 0;
+}
+
+static bool scr_win_proc_io(ScrWinIoCounters *out) {
+  static ScrGetProcIoFn fn = NULL;
+  static bool tried = false;
+  if (!tried) {
+    tried = true;
+    HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
+    if (k32 != NULL) {
+      fn = (ScrGetProcIoFn)(void *)GetProcAddress(k32, "GetProcessIoCounters");
+    }
+  }
+  if (fn == NULL) return false;
+  memset(out, 0, sizeof *out);
+  return fn(GetCurrentProcess(), out) != 0;
+}
+#endif
+
 double scr_process_rusage(double idx) {
 #ifdef _WIN32
-  /* uv fills only the CPU times and page-fault/maxRSS slice on Windows;
-   * everything else answers 0 — Node's own shape there. */
+  /* uv_getrusage's Windows arm fills five rows besides the CPU times —
+   * maxRSS from PeakWorkingSetSize (kilobytes, uv's own division),
+   * majorPageFault from PageFaultCount, and fsRead/fsWrite from the IO
+   * counters. Everything else is genuinely 0 there, Node's own shape.
+   *
+   * These rows used to answer 0 unconditionally, which made
+   * `process.resourceUsage().maxRSS > 0` — true under Node on this very
+   * box — read false. */
   switch ((int)idx) {
     case 0: return scr_cpu_user();
     case 1: return scr_cpu_system();
+    case 2: { /* maxRSS (kilobytes) */
+      ScrWinProcMem m;
+      if (!scr_win_proc_mem(&m)) return 0;
+      return (double)((unsigned long long)m.PeakWorkingSetSize / 1024ULL);
+    }
+    case 7: { /* majorPageFault */
+      ScrWinProcMem m;
+      if (!scr_win_proc_mem(&m)) return 0;
+      return (double)m.PageFaultCount;
+    }
+    case 9: { /* fsRead */
+      ScrWinIoCounters io;
+      if (!scr_win_proc_io(&io)) return 0;
+      return (double)io.ReadOperationCount;
+    }
+    case 10: { /* fsWrite */
+      ScrWinIoCounters io;
+      if (!scr_win_proc_io(&io)) return 0;
+      return (double)io.WriteOperationCount;
+    }
     default: return 0;
   }
 #else
@@ -2083,16 +2175,50 @@ static void scr_rm_fail_set(ScrRmFail *f, int err, const char *op, const char *p
   f->path = scr_str_new(path, len);
 }
 
+/* One unlink for rmSync, with `force`'s Windows read-only clause.
+ *
+ * Windows refuses to delete a file carrying FILE_ATTRIBUTE_READONLY — the
+ * bit `writeFileSync(p, s, { mode: 0o400 })` and `chmodSync(p, 0o444)`
+ * set — and reports it as EPERM. Node does not stop there: rimraf's
+ * fixWinEPERMSync chmods the path back to 0o666 and retries the unlink,
+ * which is what makes `force: true` mean "remove it anyway" on Windows.
+ * Without this, a tree holding one read-only file survives an
+ * `rmSync(dir, { recursive: true, force: true })` that Node completes.
+ *
+ * If the retry still fails the ORIGINAL errno is what throws — the chmod
+ * is a repair attempt, never a new failure site, so a genuinely locked
+ * file keeps reporting the error the user's operation actually hit.
+ *
+ * POSIX needs none of it (the DIRECTORY's write bit governs unlink there,
+ * not the file's own mode) so the clause is inside the _WIN32 arm and the
+ * POSIX arm keeps calling unlink exactly as before.
+ *
+ * Returns 0, or the errno to report. */
+static int scr_rm_unlink_e(const char *path, bool force) {
+  if (unlink(path) == 0) return 0;
+#ifdef _WIN32
+  int first = errno;
+  if (!force || (first != EPERM && first != EACCES)) return first;
+  if (chmod(path, 0666) != 0) return first;
+  if (unlink(path) == 0) return 0;
+  return first;
+#else
+  (void)force;
+  return errno;
+#endif
+}
+
 /* Post-order tree removal for rmSync's recursive form. Stops at (and
  * records) the first failure, with the failing path and syscall name. */
-static void scr_rm_tree_e(const char *path, size_t len, ScrRmFail *f) {
+static void scr_rm_tree_e(const char *path, size_t len, bool force, ScrRmFail *f) {
   struct stat st;
   if (lstat(path, &st) != 0) {
     scr_rm_fail_set(f, errno, "lstat", path, len);
     return;
   }
   if (!S_ISDIR(st.st_mode)) {
-    if (unlink(path) != 0) scr_rm_fail_set(f, errno, "unlink", path, len);
+    int e = scr_rm_unlink_e(path, force);
+    if (e != 0) scr_rm_fail_set(f, e, "unlink", path, len);
     return;
   }
   DIR *d = opendir(path);
@@ -2111,7 +2237,7 @@ static void scr_rm_tree_e(const char *path, size_t len, ScrRmFail *f) {
     memcpy(child, path, len);
     child[len] = '/';
     memcpy(child + len + 1, ent->d_name, namelen + 1);
-    scr_rm_tree_e(child, len + 1 + namelen, f);
+    scr_rm_tree_e(child, len + 1 + namelen, force, f);
     free(child);
     if (f->err != 0) {
       closedir(d);
@@ -2139,10 +2265,11 @@ static void scr_fs_rm_attempt(ScrStr *path, bool recursive, bool force, ScrRmFai
       scr_rm_fail_set(f, EISDIR, "rm", path->data, path->len);
       return;
     }
-    scr_rm_tree_e(path->data, path->len, f);
+    scr_rm_tree_e(path->data, path->len, force, f);
     return;
   }
-  if (unlink(path->data) != 0) scr_rm_fail_set(f, errno, "unlink", path->data, path->len);
+  int e = scr_rm_unlink_e(path->data, force);
+  if (e != 0) scr_rm_fail_set(f, e, "unlink", path->data, path->len);
 }
 
 void scr_fs_rm_opts(ScrStr *path, bool recursive, bool force) {
