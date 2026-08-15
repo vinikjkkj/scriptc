@@ -501,7 +501,11 @@ type ThrowsExpected =
 const SHAPE_KEY_IDS: Record<string, number | undefined> = { code: 0, message: 1, name: 2 };
 
 /** inspect renders regex flags in GETTER order (dgimsuvy), not source
- * order — the same reordering scr_regex.c applies at runtime. */
+ * order. Both constructors now store them that way already — literals at
+ * lowerRegexLiteral, runtime ones in scr_regex_new — so this is a
+ * defensive re-sort of an already-sorted string rather than the only
+ * place the rule is applied, which is what the comment used to claim it
+ * was and what scr_regex.c did NOT in fact do. */
 function regexFlagsGetterOrder(flags: string): string {
   return [..."dgimsuvy"].filter((f) => flags.includes(f)).join("");
 }
