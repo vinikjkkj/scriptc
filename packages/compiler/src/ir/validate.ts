@@ -533,6 +533,12 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // middle argument fills (timeout, headers).
   "http.requestUrlOpts": { argTypes: [STRING, STRING, F64, arrayOf(STRING), BOOL], result: HTTPCLIENTREQ_T },
   "http.requestUrlOptsCb": { argTypes: [STRING, STRING, F64, arrayOf(STRING), BOOL, null], result: HTTPCLIENTREQ_T },
+  // The `signal` option. Signal FIRST: the emitters evaluate a libCall's
+  // arguments left to right, so putting it there keeps every option value
+  // evaluating before the request row it wraps actually dials — the order
+  // Node's caller has, since the options record is built first. The result
+  // is the request argument itself, +1.
+  "http.clientSignal": { argTypes: [ABORTSIGNAL_T, HTTPCLIENTREQ_T], result: HTTPCLIENTREQ_T },
   "net.sockOnReadable": { argTypes: [NETSOCKET_T, null, BOOL], result: VOID },
   // sockRead's result is the interned `Buffer | null` union — checked
   // specially below (the reqHeader/envGet pattern; VOID here is a

@@ -4522,6 +4522,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
                 : `scr_http_request_url_opts(${head}, ${cbExpr}, ${adapter})`,
             );
           }
+          // The `signal` option: wire the signal into the request the inner
+          // row just built and answer that same handle (+1). One entry
+          // point for every request row, because Node applies the signal
+          // to the ClientRequest rather than to the wire.
+          case "http.clientSignal":
+            return finish(`scr_http_client_signal(${arg(0)}, ${arg(1)})`);
           case "http.requestConn":
           case "http.requestConnCb": {
             E.usesTimers = true;

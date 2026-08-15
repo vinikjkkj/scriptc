@@ -770,6 +770,11 @@ const LIB_FN_SYMS: Record<string, string> = {
   "http.clientDestroy": "scr_http_client_destroy",
   "http.clientDestroyErr": "scr_http_client_destroy_err",
   "http.clientPipeFrom": "scr_http_client_pipe_from",
+  // The `signal` option: (ScrAbortSignal *, ScrHttpClientReq *) ->
+  // ScrHttpClientReq * (+1, the same handle). The generic path maps the
+  // two pointers positionally, which is exactly why the C entry takes the
+  // signal FIRST — the IR row's order is the evaluation order it needs.
+  "http.clientSignal": "scr_http_client_signal",
   "http.clientDestroyed": "scr_http_client_destroyed",
   "http2.streamUndefCall": "scr_http2_stream_undef_call",
   "http.agentNew": "scr_http_agent_new",
