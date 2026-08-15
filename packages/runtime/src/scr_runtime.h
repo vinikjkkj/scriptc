@@ -6390,6 +6390,12 @@ void scr_net_connect_opts_chk(const ScrDyn *opts, const ScrStr *fence);
  * of `host` (already an IP literal / localhost / unresolvable — the dial
  * then delivers Node's exact getaddrinfo ENOTFOUND cause). */
 ScrStr *scr_net_blocking_lookup(ScrStr *host /*borrowed*/);
+/* connect(port, HOSTNAME) with Node's autoSelectFamily: getaddrinfo's
+ * whole answer, dialed on Node's staggered attempt schedule (500 ms per
+ * non-final candidate, families alternating). The protocol clients that
+ * dial by name use this instead of resolving first-answer themselves. */
+ScrNetSocket *scr_net_connect_host(double port, ScrStr *host /*borrowed, nullable*/,
+                                    ScrClosure *cb /*moves, nullable*/);
 ScrNetSocket *scr_net_connect_lookup(double port, ScrStr *host /*borrowed*/,
                                       ScrClosure *lookup /*moves*/, void *answer_fn); /* +1 */
 void scr_net_lookup_answer(ScrClosure *self, bool has_err, ScrStr *msg /*borrowed, nullable*/,

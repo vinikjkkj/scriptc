@@ -3104,13 +3104,12 @@ static ScrHttpClientReq *scr_http_request_impl(ScrStr *host /*borrowed*/, double
    * dial takes the address — c->host keeps the ORIGINAL name, which is
    * what the Host header carries and what the caller built the TLS
    * client's SNI from. An unresolvable name comes back unchanged and the
-   * dial delivers Node's deferred ENOTFOUND. */
+   * dial delivers Node's deferred ENOTFOUND. scr_net_connect_host holds
+   * the whole answer and dials it on Node's autoSelectFamily schedule. */
   if (presock != NULL) {
     c->sock = presock;
   } else {
-    ScrStr *dial = scr_net_blocking_lookup(host);
-    c->sock = scr_net_connect(port, dial, NULL);
-    scr_str_release(dial);
+    c->sock = scr_net_connect_host(port, host, NULL);
   }
   ScrHttpConn *conn = calloc(1, sizeof *conn);
   if (!conn) scr_http_oom();
