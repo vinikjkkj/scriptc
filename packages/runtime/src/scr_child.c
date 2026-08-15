@@ -196,8 +196,15 @@ static WCHAR *scr_quote_cmd_arg(const WCHAR *source, WCHAR *target) {
 
 /* cmd + args → the full malloc'd command line (argv[0] is the command AS
  * TYPED — CreateProcessW's lpApplicationName carries the resolved path,
- * so the child's argv[0] stays the caller's spelling, like Node). */
-static WCHAR *scr_child_cmdline(ScrStr *cmd, ScrArr *args) {
+ * so the child's argv[0] stays the caller's spelling, like Node).
+ *
+ * `verbatim` is libuv's UV_PROCESS_WINDOWS_VERBATIM_ARGUMENTS: the args
+ * are joined with single spaces and NOT quoted, the caller having already
+ * written the exact command line it wants. Node sets it for exactly one
+ * caller — the Windows shell form, whose `"<command>"` wrapper cmd.exe
+ * strips itself under /s and which quote_cmd_arg would otherwise escape
+ * into `\"<command>\"`. */
+static WCHAR *scr_child_cmdline(ScrStr *cmd, ScrArr *args, bool verbatim) {
   size_t n = (size_t)scr_arr_len(args);
   size_t argc = n + 1;
   WCHAR **wargs = malloc(argc * sizeof(WCHAR *));
@@ -214,7 +221,13 @@ static WCHAR *scr_child_cmdline(ScrStr *cmd, ScrArr *args) {
   if (!dst) scr_child_oom();
   WCHAR *pos = dst;
   for (size_t i = 0; i < argc; i++) {
-    pos = scr_quote_cmd_arg(wargs[i], pos);
+    if (verbatim) {
+      size_t len = wcslen(wargs[i]);
+      memcpy(pos, wargs[i], len * sizeof(WCHAR));
+      pos += len;
+    } else {
+      pos = scr_quote_cmd_arg(wargs[i], pos);
+    }
     *pos++ = i + 1 < argc ? L' ' : L'\0';
     free(wargs[i]);
   }
@@ -474,6 +487,7 @@ typedef struct {
   const ScrStr *cwd; /* NULL: inherit */
   ScrArr *env_pairs; /* NULL: inherit */
   bool detached;
+  bool verbatim; /* libuv's WINDOWS_VERBATIM_ARGUMENTS (the shell form) */
   /* out */
   HANDLE proc;
   DWORD pid;
@@ -507,7 +521,7 @@ static void scr_win_create_process(ScrStr *cmd, ScrArr *args, ScrWinSpawn *sp) {
     free(cwd_w);
     return;
   }
-  WCHAR *cmdline = scr_child_cmdline(cmd, args);
+  WCHAR *cmdline = scr_child_cmdline(cmd, args, sp->verbatim);
 
   STARTUPINFOW si;
   memset(&si, 0, sizeof si);
@@ -627,7 +641,8 @@ typedef struct {
 static void scr_win_run_sync(ScrStr *cmd, ScrArr *args, const ScrStr *input,
                              int in_mode, int out_mode, int err_mode,
                              const ScrStr *cwd, ScrArr *env_pairs,
-                             double timeout_ms, ScrWinSyncRes *res) {
+                             double timeout_ms, bool verbatim,
+                             ScrWinSyncRes *res) {
   res->spawn_errname = NULL;
   res->timed_out = false;
   res->exit_code = 0;
@@ -681,6 +696,7 @@ static void scr_win_run_sync(ScrStr *cmd, ScrArr *args, const ScrStr *input,
       .cwd = cwd,
       .env_pairs = env_pairs,
       .detached = false,
+      .verbatim = verbatim,
   };
   scr_win_create_process(cmd, args, &sp);
   if (in_child != NULL) CloseHandle(in_child);
@@ -839,7 +855,7 @@ static ScrSpawnRes *scr_spawn_sync_core(ScrStr *cmd, ScrArr *args, double timeou
                                         int err_mode) {
   ScrWinSyncRes w;
   scr_win_run_sync(cmd, args, NULL, in_mode, out_mode, err_mode, NULL, NULL,
-                   timeout_ms, &w);
+                   timeout_ms, false, &w);
   if (w.spawn_errname != NULL) {
     free(w.out.data);
     free(w.err.data);
@@ -956,6 +972,78 @@ static void scr_exec_throw_spawn(ScrStr *cmd, const char *errname, bool async_sh
   free(msg);
 }
 
+/* execSync's shell, the Windows spelling.
+ *
+ * The frontend lowers `execSync(command)` to the POSIX shell form —
+ * cmd = "/bin/sh", args = ["-c", command] — because that is what the
+ * shell means on the platform the lowering was written for. Windows has
+ * no /bin/sh, so this arm used to resolve ENOENT and throw where Node
+ * runs the command perfectly well. Node's own child_process does the
+ * platform switch at spawn time, and so does this:
+ *
+ *   file = %ComSpec% (or "cmd.exe"), args = /d /s /c "<command>",
+ *   windowsVerbatimArguments = true
+ *
+ * /d skips AutoRun, /s makes cmd strip exactly the outer quote pair and
+ * take the rest of the line verbatim (which is why the command is
+ * wrapped and why the args must not be re-quoted), /c runs and exits.
+ *
+ * Node picks the /d /s /c spelling only when the shell LOOKS like cmd —
+ * `(?:.*\)?cmd(?:\.exe)?` case-insensitively — and falls back to
+ * `-c <command>` otherwise, so a ComSpec pointing at a POSIX shell keeps
+ * working. That test is ported here rather than assumed.
+ *
+ * The rewrite is local to the spawn: the ORIGINAL cmd/args still feed
+ * scr_exec_display, so "Command failed: <command>" keeps naming what the
+ * user wrote instead of the cmd.exe line. Nothing outside this arm
+ * changes, and the POSIX arm below still spawns /bin/sh directly. */
+static bool scr_win_shell_is_cmd(const char *file, size_t len) {
+  /* the basename, after the last \ or / */
+  size_t start = 0;
+  for (size_t i = 0; i < len; i++) {
+    if (file[i] == '\\' || file[i] == '/') start = i + 1;
+  }
+  size_t n = len - start;
+  const char *b = file + start;
+  if (n == 3) return _strnicmp(b, "cmd", 3) == 0;
+  if (n == 7) return _strnicmp(b, "cmd.exe", 7) == 0;
+  return false;
+}
+
+/* Builds the shell invocation. Returns the file to spawn (caller
+ * releases) and fills *out_args (caller releases) and *out_verbatim. */
+static ScrStr *scr_win_shell_argv(const ScrStr *command, ScrArr **out_args,
+                                  bool *out_verbatim) {
+  const char *comspec = getenv("ComSpec");
+  if (comspec == NULL || comspec[0] == '\0') comspec = getenv("COMSPEC");
+  if (comspec == NULL || comspec[0] == '\0') comspec = "cmd.exe";
+  size_t flen = strlen(comspec);
+  ScrStr *file = scr_str_new(comspec, flen);
+  ScrArr *a = scr_arr_new(SCR_ELEM_STR, 4);
+  if (scr_win_shell_is_cmd(comspec, flen)) {
+    /* /d /s /c "<command>" — verbatim, cmd strips the wrapper itself. */
+    size_t qlen = command->len + 2;
+    char *q = malloc(qlen + 1);
+    if (!q) scr_child_oom();
+    q[0] = '"';
+    memcpy(q + 1, command->data, command->len);
+    q[qlen - 1] = '"';
+    q[qlen] = '\0';
+    scr_arr_push_ref(a, scr_str_new("/d", 2));
+    scr_arr_push_ref(a, scr_str_new("/s", 2));
+    scr_arr_push_ref(a, scr_str_new("/c", 2));
+    scr_arr_push_ref(a, scr_str_new(q, qlen));
+    free(q);
+    *out_verbatim = true;
+  } else {
+    scr_arr_push_ref(a, scr_str_new("-c", 2));
+    scr_arr_push_ref(a, scr_str_new(command->data, command->len));
+    *out_verbatim = false;
+  }
+  *out_args = a;
+  return file;
+}
+
 /* The shared exec body (sync + promisified shapes — the POSIX arm's
  * scr_exec_sync_core semantics over the win run core). */
 static ScrStr *scr_exec_run(ScrStr *cmd, ScrArr *args, bool shell,
@@ -969,10 +1057,26 @@ static ScrStr *scr_exec_run(ScrStr *cmd, ScrArr *args, bool shell,
   bool cap_out = stdout_mode == 1;
   bool cap_err = stderr_mode == 0 || stderr_mode == 1;
   ScrWinSyncRes w;
-  scr_win_run_sync(cmd, args, input, stdin_inherit ? 2 : 0,
+  /* The shell form spawns cmd.exe, not the lowering's /bin/sh; the
+   * originals stay bound for scr_exec_display below. */
+  ScrStr *spawn_cmd = cmd;
+  ScrArr *spawn_args = args;
+  bool verbatim = false;
+  ScrStr *shell_file = NULL;
+  ScrArr *shell_args = NULL;
+  if (shell) {
+    ScrStr *command = (ScrStr *)scr_arr_get_ref(args, 1); /* ["-c", cmd] */
+    shell_file = scr_win_shell_argv(command, &shell_args, &verbatim);
+    scr_str_release(command);
+    spawn_cmd = shell_file;
+    spawn_args = shell_args;
+  }
+  scr_win_run_sync(spawn_cmd, spawn_args, input, stdin_inherit ? 2 : 0,
                    cap_out ? 0 : (stdout_mode == 2 ? 2 : 1),
                    cap_err ? 0 : (stderr_mode == 3 ? 2 : 1), cwd,
-                   env_pairs, timeout_ms, &w);
+                   env_pairs, timeout_ms, verbatim, &w);
+  if (shell_file != NULL) scr_str_release(shell_file);
+  if (shell_args != NULL) scr_arr_release(shell_args);
   if (w.spawn_errname != NULL) {
     free(w.out.data);
     free(w.err.data);
