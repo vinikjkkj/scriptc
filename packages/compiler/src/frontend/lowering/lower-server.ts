@@ -26,6 +26,7 @@ import {
   TLS_SERVER_DOCUMENTED_OPTIONS,
 } from "./surfaces.js";
 import { conditionalSpreadOf } from "./lower-exprs.js";
+import { inNamespaceConditionalArm } from "./lower-nsvalue.js";
 import { errorRootedType } from "./lower-stream.js";
 
 /** The lowered value members of the net module — the surfaces.ts table's
@@ -3824,6 +3825,16 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
       }
       case "rejectUnauthorized": {
         if (!secureish) {
+          // The PLAIN arm of a namespace conditional: one options record
+          // serves both modules, and Node's http.request ignores TLS
+          // options rather than refusing them (the requestFn binding's
+          // rule, with the arms spelled out). Side-effect-free values
+          // only — the arms duplicate the record, so a dropped expression
+          // would never evaluate on this arm.
+          if (initializer !== null && inNamespaceConditionalArm(L) &&
+              sideEffectFreeOptionValue(initializer)) {
+            break;
+          }
           L.noLowering(
             `${member} option 'rejectUnauthorized'`,
             prop,
@@ -3845,6 +3856,13 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
       }
       case "ca": {
         if (!secureish) {
+          // The plain arm of a namespace conditional — see
+          // 'rejectUnauthorized' just above. A SHORTHAND entry is a bare
+          // identifier read, which is side-effect-free by construction.
+          if (inNamespaceConditionalArm(L) &&
+              (initializer === null || sideEffectFreeOptionValue(initializer))) {
+            break;
+          }
           L.noLowering(
             `${member} option 'ca'`,
             prop,
