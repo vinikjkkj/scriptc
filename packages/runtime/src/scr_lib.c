@@ -510,27 +510,77 @@ static bool scr_kill_pid_check(double pid) {
 }
 
 /* The shared kill(2) tail: signal 0 probes; failure throws Node's terse
- * `kill ESRCH` / `kill EPERM` Error. Returns Node's constant true.
- * Windows: uv_kill's behavior — signal 0 opens the process to probe
- * liveness, anything else is TerminateProcess (no signal exists to
- * deliver; the target dies with exit code 1, exactly Node-on-Windows's
- * process.kill). ESRCH/EPERM map from the open failure. */
+ * `kill ESRCH` / `kill EPERM` / `kill EINVAL` / `kill ENOSYS` Error.
+ * Returns Node's constant true.
+ *
+ * Windows has no signals, so process.kill there is not a kill(2) at all
+ * but libuv's uv_kill emulation, and the order of its three decisions is
+ * observable. Measured against Node v25.9.0 on this host over the whole
+ * range (pid: self, 0, -1, 4, 99999999; signal: every name Node's table
+ * carries plus -1, 0, 1..32, 63, 64, 65, 100, 1000):
+ *
+ *   pid 0                  the CURRENT process (not a process group)
+ *   the open fails         ESRCH, or EPERM on ERROR_ACCESS_DENIED — and
+ *                          that answer wins over any signal complaint:
+ *                          pid 99999999 answers ESRCH for signal -1 and
+ *                          for signal 30 alike
+ *   signal < 0 or > 28     EINVAL (uv/win.h redefines NSIG as
+ *                          SIGWINCH + 1 for exactly this test: 28 is in
+ *                          range, 29 is not)
+ *   signal 0               liveness probe; an already-exited process is
+ *                          ESRCH
+ *   SIGINT SIGQUIT SIGKILL SIGTERM
+ *                          TerminateProcess(h, 1) — killed processes
+ *                          exit 1
+ *   anything else in range ENOSYS
+ *
+ * That last row is why this function exists in this shape. It used to
+ * TerminateProcess for it, and the comment here claimed that was
+ * "exactly Node-on-Windows's process.kill" — it is the opposite of it.
+ * Node throws a CATCHABLE `Error: kill ENOSYS` and the target keeps
+ * running; the compiled binary killed the caller instead, so
+ * `process.kill(process.pid, "SIGWINCH")` printed one line and died with
+ * exit 1 and an empty stderr where Node prints, catches and carries on
+ * (tests/corpus/3871, and 1461's `winch self:` line). A silent death
+ * where the oracle throws something the program can handle is the worst
+ * shape a divergence can take: nothing in the program, and nothing in
+ * the harness, can see it happen. */
 #ifdef _WIN32
 static int scr_win_kill(int pid, int sig) {
-  HANDLE h = OpenProcess(
-      sig == 0 ? PROCESS_QUERY_LIMITED_INFORMATION : PROCESS_TERMINATE,
-      FALSE, (DWORD)pid);
+  /* uv_kill's own two rights, requested for EVERY signal: a probe of a
+   * process this one may query but not terminate is EPERM under Node. */
+  HANDLE h = pid == 0
+                 ? GetCurrentProcess()
+                 : OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION,
+                               FALSE, (DWORD)pid);
   if (h == NULL) {
     errno = GetLastError() == ERROR_ACCESS_DENIED ? EPERM : ESRCH;
     return -1;
   }
-  BOOL ok = sig == 0 ? TRUE : TerminateProcess(h, 1);
-  CloseHandle(h);
-  if (!ok) {
-    errno = EPERM;
-    return -1;
+  int rc = 0;
+  if (sig < 0 || sig > SIGWINCH) {
+    errno = EINVAL; /* uv__kill's `signum < 0 || signum >= NSIG` */
+    rc = -1;
+  } else if (sig == 0) {
+    DWORD status;
+    if (!GetExitCodeProcess(h, &status)) {
+      errno = EPERM;
+      rc = -1;
+    } else if (status != STILL_ACTIVE) {
+      errno = ESRCH; /* opened, but already dead */
+      rc = -1;
+    }
+  } else if (sig == SIGINT || sig == SIGQUIT || sig == SIGKILL || sig == SIGTERM) {
+    if (!TerminateProcess(h, 1)) {
+      errno = EPERM;
+      rc = -1;
+    }
+  } else {
+    errno = ENOSYS; /* in range, and Windows cannot deliver it */
+    rc = -1;
   }
-  return 0;
+  if (pid != 0) CloseHandle(h); /* GetCurrentProcess is a pseudo-handle */
+  return rc;
 }
 #define scr_sys_kill(pid, sig) scr_win_kill((int)(pid), (sig))
 #else
@@ -539,9 +589,12 @@ static int scr_win_kill(int pid, int sig) {
 
 static bool scr_kill_send(int pid, int sig) {
   if (scr_sys_kill(pid, sig) == 0) return true;
-  const char *name = errno == ESRCH   ? "ESRCH"
-                     : errno == EPERM ? "EPERM"
+  const char *name = errno == ESRCH    ? "ESRCH"
+                     : errno == EPERM  ? "EPERM"
                      : errno == EINVAL ? "EINVAL"
+                     /* Windows answers ENOSYS for every signal it cannot
+                      * deliver — the common case there, not an edge. */
+                     : errno == ENOSYS ? "ENOSYS"
                                        : NULL;
   char msg[32];
   int len;
