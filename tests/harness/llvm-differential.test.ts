@@ -33,6 +33,7 @@ import { afterAll, describe, expect, test } from "vitest";
 import ts5 from "typescript";
 import { compile } from "@scriptc/compiler";
 import { shardSelect, shardSuffix } from "./shard.js";
+import { oracleCrashed, reduceNativeReport, reduceNodeReport } from "./uncaught-report.js";
 import { EXE_SUFFIX } from "./exe.js";
 
 const execFileAsync = promisify(execFile);
@@ -323,9 +324,31 @@ describe(`llvm differential corpus (${files.length} programs${sanitize ? ", sani
       }
       // stderr: the exit-0 contract of the main differential suite.
       const expectedExit = expectedExitCode(file);
-      if (expectedExit === 0) {
-        const llvmErr = comparableStderr(llvm.stderr);
-        const cErr = comparableStderr(c.stderr);
+      const llvmErr = comparableStderr(llvm.stderr);
+      const cErr = comparableStderr(c.stderr);
+      // The oracle itself DIED on this host: an exit-0 corpus program
+      // whose Node run ends in a V8 crash report. The report FORMAT is
+      // the documented divergence this suite already exempts for
+      // `// @exit:` programs, and the exemption was keyed on the
+      // DECLARED exit code, so these landed inside the byte comparison
+      // and compared a stack trace against one line. Key it on the
+      // OBSERVED report instead and compare the REDUCTION: the program's
+      // own stderr before the report, byte-for-byte, and the error's
+      // `Name: message`, byte-for-byte. A binary that reports a
+      // different error, a different message, or none at all still
+      // fails.
+      const hostCrash = oracleCrashed(node.exitCode, expectedExit, node.stderr);
+      if (hostCrash) {
+        const want = reduceNodeReport(node.stderr)!;
+        // The two TIERS still compare byte-for-byte: nothing about the
+        // oracle's host licenses a difference between them.
+        if (!llvmErr.equals(cErr)) {
+          expect(llvmErr.toString("utf8")).toBe(cErr.toString("utf8"));
+        }
+        const got = reduceNativeReport(llvmErr);
+        expect(got?.pre ?? llvmErr.toString("utf8")).toBe(want.pre);
+        expect(got?.line ?? "<no uncaught report>").toBe(want.line);
+      } else if (expectedExit === 0) {
         if (!llvmErr.equals(cErr)) {
           expect(llvmErr.toString("utf8")).toBe(cErr.toString("utf8"));
         }
@@ -333,9 +356,14 @@ describe(`llvm differential corpus (${files.length} programs${sanitize ? ", sani
           expect(llvmErr.toString("utf8")).toBe(node.stderr.toString("utf8"));
         }
       }
-      expect(llvm.exitCode).toBe(expectedExit);
-      expect(c.exitCode).toBe(expectedExit);
-      expect(node.exitCode).toBe(expectedExit);
+      if (hostCrash) {
+        expect(llvm.exitCode).toBe(node.exitCode);
+        expect(c.exitCode).toBe(node.exitCode);
+      } else {
+        expect(llvm.exitCode).toBe(expectedExit);
+        expect(c.exitCode).toBe(expectedExit);
+        expect(node.exitCode).toBe(expectedExit);
+      }
     },
   );
 
