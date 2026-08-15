@@ -14,7 +14,7 @@ import { isProvenanceSourceFile } from "../provenance-registry.js";
 import { ambientUndefVarRootOf, lowerImportEquals, nsUndefRead, nsWritableTarget, trapDeclRootOf } from "./lower-namespaces.js";
 import { expandoWritableTarget, lowerExpandoAssignStmt } from "./lower-expando.js";
 import { ForOfIterProjection, lowerForOfArrayIter, lowerForOfMap, lowerForOfSearchParams, lowerForOfSet, objectIterOverIndexShape, strCharsCall } from "./lower-containers.js";
-import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall } from "./lower-calls.js";
+import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestFunctionLiteral, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall } from "./lower-calls.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import type { ClassInfo, ClassIteratorInfo } from "./lower-classes.js";
 import { bindingHoldsItsInitializer, genericIfaceBindingKeepsClass } from "./lower-classes.js";
@@ -4161,6 +4161,21 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       type !== null && init.type.kind === "union" && isJsSourceFile(decl.getSourceFile()) &&
       L.armTag(init.type.unionId, UNDEFINED_T) >= 0 &&
       typeEquals(L.stripUndefinedArm(init.type), type)
+    ) {
+      type = init.type;
+    }
+    // A JS function LITERAL whose rest parameter binds the ENGINE's own
+    // arguments array (paramShape's islandRest, --dynamic only): the value
+    // takes ONE island argument while tsc spells the rest `any[]`, which
+    // maps to an `(any[]) => any` slot. No conversion between the two
+    // exists — the slot would demand a static array the engine value never
+    // receives — and the VALUE is the truth, exactly like the
+    // checked-dynamic rules above. Without this the `(...args) =>
+    // f(...args)` forwarding idiom fenced at its own declaration, and JS
+    // sources defer fences, so it shipped as a runtime SC1090 throw.
+    if (
+      type?.kind === "func" && init.type.kind === "func" &&
+      islandRestFunctionLiteral(L, decl.initializer)
     ) {
       type = init.type;
     }

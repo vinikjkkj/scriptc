@@ -15,7 +15,7 @@ import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } 
 import { BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrLocal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/nodes.js";
 import { ENTRY_NAME, PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, newFnCtx, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, isPromisifyCall } from "./lower-builtins.js";
-import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, nullishGenericBindingUnitOf } from "./lower-calls.js";
+import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestSlotType, nullishGenericBindingUnitOf } from "./lower-calls.js";
 import { isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
 import { objectStaticFnValueDeclType, stdlibGlobalAliasDecl } from "./surfaces.js";
@@ -1695,11 +1695,26 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
               ts.isIdentifier(decl.name) && nameNode === decl.name && keyedReadGlobalIsDyn(L, decl)
                 ? DYN
                 : null;
+            // A JS function LITERAL whose rest parameter binds the ENGINE's
+            // own arguments array (paramShape's islandRest, --dynamic only):
+            // the value takes ONE island argument while tsc spells the rest
+            // `any[]`, which maps to an `(any[]) => any` slot. No conversion
+            // between the two exists — the slot would demand a static array
+            // the engine value never receives — and the VALUE is the truth,
+            // the file-scope face of lowerVarDecl's rule. Without it the
+            // `(...args) => f(...args)` forwarding idiom fenced at its own
+            // declaration; JS sources defer fences, so a program that built
+            // clean threw SC1090 at run time instead.
+            const islandRestT =
+              ts.isIdentifier(decl.name) && nameNode === decl.name && decl.initializer !== undefined
+                ? islandRestSlotType(L, decl.initializer, L.mapTypeOf(L.typeOf(nameNode)))
+                : null;
             let type =
               handleT ??
               (castClass ? ({ kind: "classval", className: castClass.def.name } as IrType) : null) ??
               objFnValueT ??
               keyedReadT ??
+              islandRestT ??
               L.irTypeOf(nameNode);
             // An evolving-`any` array's DERIVED file-scope binding under
             // --dynamic (`const kept = fns.filter(...)` where `fns`
