@@ -35,6 +35,18 @@
 // "this consumer is a test / a walker, give me the dyn underneath". These
 // rows go red the moment the bridge widens without that work.
 //
+// UPDATE (block r17): the list WAS widened, and the price above was paid
+// exactly as written. `json threw` did go red the moment the bridge
+// widened, and the audit found ONE consumer — this one. JSON.stringify now
+// asks for the dyn underneath through `narrowBridgeDyn`, gated on
+// `jsonSafe` so it can only turn a refusal back into the dyn path and never
+// moves a value the per-type serializer already handled. Every other row
+// here (log / String / inspect / arr / rec / cast) kept compiling and kept
+// its answer: those consumers have bigint arms of their own and print
+// Node's spelling. This file is byte-identical to Node on both tiers with
+// the widened bridge; corpus 3901 restates the property at its own shapes
+// so the audit has a fixture on the widening side too.
+//
 // NO BIGINT LITERALS: they are outside the LLVM tier (SC3001), and one
 // here would move the whole program to the C lane and leave the property
 // unpinned in the other. 3221's rule, same reason.

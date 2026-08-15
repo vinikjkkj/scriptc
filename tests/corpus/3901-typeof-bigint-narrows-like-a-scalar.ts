@@ -16,10 +16,27 @@
 // through this very dynCheck — r09/r10 are that route, and they compiled on
 // main. Only the bridge between the guard and the extraction was absent.
 //
+// Widening that list is NOT free, and corpus 3542 is the fixture that says
+// so: it was written by the block that tried this, measured the loss and
+// declined. A dyn argument is strictly more capable than a static one for at
+// least one consumer — JSON.stringify, whose runtime walker reaches the
+// BigInt case and throws V8's own "Do not know how to serialize a BigInt"
+// (Node's answer) while the static bigint arm is a compile-time refusal of a
+// program that ran. 3542 prices the widening at "an audit of every consumer
+// that special-cases kind === 'dyn' and has no bigint arm, routed back
+// through narrowBridgeDyn".
+//
+// That audit is r15-r17 here, and the corpus is the instrument: of 54
+// bigint- or Promise.resolve-bearing corpus programs the widened rule fires
+// in four, and exactly ONE consumer regressed — JSON.stringify. It now asks
+// for the dyn underneath, gated on jsonSafe so it can only turn a refusal
+// into the dyn path. 3542 is byte-identical to Node again, on both tiers.
+//
 // r01-r08 are the rows that fail to build on main. r09-r14 are controls:
 // the explicit-cast route that already worked (r09/r10), the scalars that
 // were already in the list (r11/r12/r13), and the guard actually guarding —
-// a non-bigint argument must still take the fall-through arm (r14).
+// a non-bigint argument must still take the fall-through arm (r14). r15-r17
+// are 3542's property, restated at this file's own shapes.
 
 // r01 — the zapo spelling: Number() of a typeof-narrowed unknown.
 function asNumber(value: unknown, field: string): number {
@@ -146,3 +163,42 @@ console.log("r13 " + asBool(true) + " " + asBool(0))
 // r14 — CONTROL: the guard still guards. Every non-bigint argument must take
 // the fall-through arm, and a bigint-looking NUMBER is not a bigint.
 console.log("r14 " + asText(7) + " " + asText("7") + " " + asText(null) + " " + asText(undefined))
+
+// r15 — THE AUDIT ROW. JSON.stringify of the narrowed value must still reach
+// the runtime's dyn walker and throw V8's own message, not refuse at compile
+// time. This is the row 3542 predicted would go red, and the one the
+// jsonSafe-gated narrowBridgeDyn in the JSON lowering exists for.
+function jsonOf(value: unknown): string {
+    if (typeof value === "bigint") {
+        try {
+            return "ok:" + JSON.stringify(value)
+        } catch (e) {
+            return "threw:" + String(e instanceof TypeError) + ":" + (e as Error).message
+        }
+    }
+    return "not-bigint"
+}
+console.log("r15 " + jsonOf(5n))
+
+// r16 — the other consumers 3542 lists, at this file's own shapes: each has
+// a bigint arm of its own and must keep printing Node's spelling (`9n`, not
+// `9`), which is the check that the extraction did not quietly change what
+// gets printed.
+function shows(value: unknown): void {
+    if (typeof value === "bigint") {
+        console.log("r16", value, [value], { v: value })
+        return
+    }
+    console.log("r16 -")
+}
+shows(9n)
+
+// r17 — the same JSON row with NO guard at all, so the property is pinned
+// independently of the bridge: a bigint that reached `unknown` unguarded
+// takes the walker too.
+const unguarded: unknown = BigInt(4)
+try {
+    console.log("r17 ok:" + JSON.stringify(unguarded))
+} catch (e) {
+    console.log("r17 threw:" + String(e instanceof TypeError))
+}

@@ -29,7 +29,7 @@ import {
   fenceOrDropOptionKey,
   isChildSurfaceMember,
 } from "./surfaces.js";
-import { conditionalSpreadOf, lowerDynObjectLiteral, probeLower, voidAllResultIsAValue } from "./lower-exprs.js";
+import { conditionalSpreadOf, lowerDynObjectLiteral, narrowBridgeDyn, probeLower, voidAllResultIsAValue } from "./lower-exprs.js";
 import { bufEncoding } from "./lower-containers.js";
 import { HTTP2_CONSTANTS } from "./http2-constants.js";
 import { unitOnlyUnion } from "../types.js";
@@ -3622,7 +3622,23 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     if (member === "stringify") {
       const indent = stringifySpaceIndent(L, call);
       const argNode = call.arguments[0]!;
-      const value = L.lowerExpr(argNode);
+      let value = L.lowerExpr(argNode);
+      // A read maybeNarrow bridged out of a dyn with a VALIDATED extraction
+      // is asked for the dyn UNDERNEATH here, and only when the extracted
+      // type is one the type-directed serializer would refuse. The walker
+      // is strictly more capable than the serializer for at least one kind:
+      // a bigint reaches its BigInt case and throws V8's own "Do not know
+      // how to serialize a BigInt", which is Node's answer byte for byte,
+      // while the static bigint arm is a COMPILE-TIME refusal of a program
+      // that ran correctly. Corpus 3542 is the fixture that records this,
+      // and it is the audit that file demands of anyone widening the
+      // bridge. Gated on jsonSafe so it can only turn a refusal into the
+      // dyn path: a bridged f64/bool/string is already serializable and
+      // keeps the per-type serializer it has always had.
+      if (!L.jsonSafe(value.type)) {
+        const under = narrowBridgeDyn(value);
+        if (under !== null) value = under;
+      }
       // An ISLAND value (`JSON.stringify(err)` on a package handle — the
       // island error-inspection idiom): the ENGINE's own JSON.stringify
       // runs, so key order, nesting, toJSON, and getters match Node by
