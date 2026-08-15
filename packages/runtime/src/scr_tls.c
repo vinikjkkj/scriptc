@@ -1033,7 +1033,7 @@ ScrHttpClientReq *scr_https_request_url(ScrStr *url /*borrowed*/, ScrStr *method
   ScrStr *host;
   ScrStr *path;
   double port;
-  if (!scr_http_url_parts(url, true, &host, &port, &path)) {
+  if (!scr_http_url_parts(url, true, &host, &port, &path, NULL)) {
     if (cb) scr_closure_release(cb);
     return NULL; /* Invalid URL / ERR_INVALID_PROTOCOL pending */
   }
@@ -1059,12 +1059,39 @@ ScrHttpClientReq *scr_https_request_url_opts(ScrStr *url /*borrowed*/, ScrStr *m
   ScrStr *host;
   ScrStr *path;
   double port;
-  if (!scr_http_url_parts(url, true, &host, &port, &path)) {
+  if (!scr_http_url_parts(url, true, &host, &port, &path, NULL)) {
     if (cb) scr_closure_release(cb);
     return NULL; /* Invalid URL / ERR_INVALID_PROTOCOL pending */
   }
   ScrHttpClientReq *c = scr_https_request(host, port, path, method, timeout_ms, header_pairs,
                                            auto_end, reject_unauthorized, ca, ca_len, cb, fn);
+  scr_str_release(host);
+  scr_str_release(path);
+  return c;
+}
+
+/* https.request(url, { agent, ... }[, cb]) — scr_http_request_url_agent's
+ * twin with the TLS dial and the two https-only option slots. The portless
+ * sentinel is the same rule (Node's merge lets agent.defaultPort decide
+ * exactly when the authority wrote no port). */
+ScrHttpClientReq *scr_https_request_url_agent(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*/,
+                                              double timeout_ms, ScrArr *header_pairs /*borrowed*/,
+                                              bool auto_end, bool reject_unauthorized,
+                                              const char *ca /*borrowed, len 0 = none*/,
+                                              size_t ca_len, const ScrDyn *agent /*borrowed*/,
+                                              ScrClosure *cb /*moves, nullable*/,
+                                              ScrHttpRespFn fn) {
+  ScrStr *host;
+  ScrStr *path;
+  double port;
+  bool explicit_port = false;
+  if (!scr_http_url_parts(url, true, &host, &port, &path, &explicit_port)) {
+    if (cb) scr_closure_release(cb);
+    return NULL; /* Invalid URL / ERR_INVALID_PROTOCOL pending */
+  }
+  ScrHttpClientReq *c = scr_https_request_agent(host, explicit_port ? port : -1, path, method,
+                                                 timeout_ms, header_pairs, auto_end,
+                                                 reject_unauthorized, ca, ca_len, agent, cb, fn);
   scr_str_release(host);
   scr_str_release(path);
   return c;

@@ -981,6 +981,8 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
   "https.request", "https.requestCb", "https.requestUrl", "https.requestUrlCb",
   "http.requestUrlOpts", "http.requestUrlOptsCb",
   "https.requestUrlOpts", "https.requestUrlOptsCb",
+  "http.requestUrlAgent", "http.requestUrlAgentCb",
+  "https.requestUrlAgent", "https.requestUrlAgentCb",
   "http.requestConn", "http.requestConnCb",
   "http.agentNew", "http.requestAgent", "http.requestAgentCb",
   // The dyn-async slice (emit-exprs.ts's markings): fiber parks, the
@@ -12625,7 +12627,9 @@ class LlEmitter {
         e.fn === "https.request" || e.fn === "https.requestCb" ||
         e.fn === "https.requestUrl" || e.fn === "https.requestUrlCb" ||
         e.fn === "http.requestUrlOpts" || e.fn === "http.requestUrlOptsCb" ||
-        e.fn === "https.requestUrlOpts" || e.fn === "https.requestUrlOptsCb") {
+        e.fn === "https.requestUrlOpts" || e.fn === "https.requestUrlOptsCb" ||
+        e.fn === "http.requestUrlAgent" || e.fn === "http.requestUrlAgentCb" ||
+        e.fn === "https.requestUrlAgent" || e.fn === "https.requestUrlAgentCb") {
       // The https URL row is the http one with the TLS entry point — same
       // three arguments, same response-callback adapter. The https options
       // row is wider: rejectUnauthorized stays an i1, while its ScrStr or
@@ -12633,11 +12637,14 @@ class LlEmitter {
       // request(url, options[, cb]) is the URL row plus timeout/headers,
       // and over TLS it carries the same CA expansion one slot earlier.
       const isTls = e.fn.startsWith("https.");
-      const isUrlOpts = e.fn.includes("requestUrlOpts");
+      // The URL+agent rows ARE the URL+options rows plus the agent dyn:
+      // same parse, same slots, one more argument and another entry name.
+      const isUrlAgent = e.fn.includes("requestUrlAgent");
+      const isUrlOpts = e.fn.includes("requestUrlOpts") || isUrlAgent;
       const isUrl = e.fn.includes("requestUrl") && !isUrlOpts;
       const isTlsOptions = isTls && !isUrl && !isUrlOpts;
       const isAgent = e.fn.startsWith("http.requestAgent");
-      const cbIdx = isUrl ? 3 : isUrlOpts ? (isTls ? 7 : 5) : isTlsOptions ? 9 : isAgent ? 8 : 7;
+      const cbIdx = isUrl ? 3 : isUrlOpts ? (isTls ? 7 : 5) + (isUrlAgent ? 1 : 0) : isTlsOptions ? 9 : isAgent ? 8 : 7;
       /** The ScrStr/ScrBytes CA slot, expanded to pointer + length. */
       const caIdx = isTlsOptions ? 8 : isTls && isUrlOpts ? 6 : -1;
       const hasCb = e.fn.endsWith("Cb");
@@ -12655,6 +12662,7 @@ class LlEmitter {
       }
       const head = args.slice(0, cbIdx);
       const entry = isTlsOptions ? "scr_https_request"
+        : isUrlAgent ? (isTls ? "scr_https_request_url_agent" : "scr_http_request_url_agent")
         : isUrlOpts ? (isTls ? "scr_https_request_url_opts" : "scr_http_request_url_opts")
         : isTls ? "scr_https_request_url"
         : isUrl ? "scr_http_request_url"

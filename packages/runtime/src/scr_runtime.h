@@ -6984,7 +6984,16 @@ ScrHttpClientReq *scr_http_request_url_opts(ScrStr *url /*borrowed*/, ScrStr *me
  * ERR_INVALID_PROTOCOL rather than a silent upgrade. false = the
  * exception is pending and no out-parameter was written. */
 bool scr_http_url_parts(ScrStr *url /*borrowed*/, bool secure, ScrStr **host_out /*+1*/,
-                         double *port_out, ScrStr **path_out /*+1*/);
+                         double *port_out, ScrStr **path_out /*+1*/,
+                         bool *explicit_port_out /*nullable*/);
+/* request(url, { agent, ... }[, cb]): the URL row threading an Agent. The
+ * port is the URL's when the authority wrote one and the -1 sentinel
+ * otherwise — Node's merge consults agent.defaultPort exactly then. */
+ScrHttpClientReq *scr_http_request_url_agent(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*/,
+                                             double timeout_ms, ScrArr *header_pairs /*borrowed*/,
+                                             bool auto_end, const struct ScrDyn *agent /*borrowed*/,
+                                             ScrClosure *cb /*moves, nullable*/,
+                                             ScrHttpRespFn fn); /* +1 */
 /* ── the http Agent (new http.Agent(opts) — option surface, getName, and
  * the maxSockets queue over one-dial-per-request connections; keep-alive
  * POOLING is not modeled: keepAlive: true fences at construction).
@@ -7187,6 +7196,14 @@ ScrHttpClientReq *scr_https_request_url_opts(ScrStr *url /*borrowed*/, ScrStr *m
                                              const char *ca /*borrowed, len 0 = none*/,
                                              size_t ca_len, ScrClosure *cb /*moves, nullable*/,
                                              ScrHttpRespFn fn); /* +1 */
+/* The URL row threading an Agent over TLS (scr_http_request_url_agent). */
+ScrHttpClientReq *scr_https_request_url_agent(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*/,
+                                              double timeout_ms, ScrArr *header_pairs /*borrowed*/,
+                                              bool auto_end, bool reject_unauthorized,
+                                              const char *ca /*borrowed, len 0 = none*/,
+                                              size_t ca_len, const struct ScrDyn *agent /*borrowed*/,
+                                              ScrClosure *cb /*moves, nullable*/,
+                                              ScrHttpRespFn fn); /* +1 */
 /* The agent-threaded twin (the scr_http_request_agent story over TLS). */
 ScrHttpClientReq *scr_https_request_agent(ScrStr *host /*borrowed*/, double port,
                                            ScrStr *path /*borrowed*/, ScrStr *method /*borrowed*/,
