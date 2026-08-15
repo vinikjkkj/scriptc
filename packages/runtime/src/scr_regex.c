@@ -106,10 +106,11 @@ static void scr_note_compiled(ScrRegex *re) {
 }
 
 /* Flags string → LRE_FLAG_* mask. The frontend fences the LITERAL flag
- * alphabet to g/i/m/s/u/y (a /v/ literal is refused at lowering, not
- * here); scr_regex_new validates the RUNTIME string, which may also carry
- * 'v', before anything reaches this function. Anything else here is a
- * compiler bug. */
+ * alphabet to g/i/m/s/u/v/y and scr_regex_new validates the RUNTIME string
+ * against the same alphabet, so the two agree and 'v' arrives here from
+ * either. ('d' reaches neither: lowerRegexLiteral refuses the literal and
+ * scr_regex_new refuses the string.) Anything else here is a compiler
+ * bug. */
 static int scr_lre_flags(const ScrStr *flags) {
   int mask = 0;
   for (size_t i = 0; i < flags->len; i++) {
