@@ -6312,6 +6312,13 @@ void scr_net_fire_err(ScrNetLs *l, ScrStr *msg); /* unhandled => exit(1) */
  * err borrowed; its message still travels the ABI, so a zero-parameter
  * listener and the no-listener exit path both read the right text. */
 void scr_net_fire_err_obj(ScrNetLs *l, ScrError *err /*borrowed*/);
+/* ...with the emitting handle bound as the ambient receiver, the
+ * scr_net_fire_err_this shape. The teardown errors http owns are the
+ * callers: they carry an errno code the MESSAGE adapter cannot recover
+ * from their text ("aborted" contains no errno name), and a listener
+ * that asked for the object must still see `this`. */
+void scr_net_fire_err_obj_this(ScrNetLs *l, ScrError *err /*borrowed*/, void *self,
+                                ScrDynHandleTag tag);
 
 ScrNetServer *scr_net_server_retain(ScrNetServer *s);
 void scr_net_server_release(ScrNetServer *s);
