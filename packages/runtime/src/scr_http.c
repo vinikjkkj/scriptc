@@ -2449,6 +2449,25 @@ static void scr_http_client_error(ScrHttpClientReq *c, ScrStr *msg /*borrowed*/)
   scr_net_fire_err(&c->err_ls, msg);
 }
 
+/* A hang-up before any response head. Node's error is a plain Error
+ * "socket hang up" carrying `code: 'ECONNRESET'` (measured, v25.9.0 —
+ * repro-ef/n1.mjs; own properties are exactly code/message/stack), and
+ * the MESSAGE fan-out above cannot deliver that code: the shared adapter
+ * recovers one by reading an errno NAME back out of the text, and
+ * "socket hang up" contains none, so every listener that asked for the
+ * object got `code: undefined`. Firing the OBJECT — scr_http_fire_aborted's
+ * route, one event over — carries it. */
+static void scr_http_client_hangup(ScrHttpClientReq *c) {
+  if (c->close_emitted) return;
+  ScrStr *msg = scr_str_new("socket hang up", 14);
+  ScrError *e = scr_error_new(0 /* Error */, msg);
+  scr_error_set_code(e, "ECONNRESET");
+  c->had_error = true;
+  scr_net_fire_err_obj(&c->err_ls, e);
+  scr_error_release(e);
+  scr_str_release(msg);
+}
+
 /* ── the wire: Node's exact request head ─────────────────────────────── */
 
 static bool scr_http_client_has_header(ScrHttpClientReq *c, const char *name) {
@@ -2864,19 +2883,38 @@ static void scr_http_client_premature(ScrHttpConn *conn) {
           scr_net_fire_err_obj(&c->err_ls, c->destroy_err);
         }
       } else {
-        ScrStr *msg = scr_str_new("socket hang up", 14);
-        scr_http_client_error(c, msg);
-        scr_str_release(msg);
+        scr_http_client_hangup(c);
       }
       if (scr_exc_pending()) return;
     }
     scr_http_client_queue_close(c);
   } else {
-    /* mid-head-to-body death: req close, then 'aborted' on the res, then
-     * res close (the queue preserves push order) */
+    /* Mid-head-to-body death. Node's order, measured against v25.9.0
+     * (repro-ef/n3.mjs, and n2.mjs for the bare twin):
+     *
+     *   destroy(err)   req 'error' (the user's OWN object) ─┐ synchronous
+     *   both           res 'aborted' (res.aborted = true)  ─┘
+     *   both           req 'close'                         ─┐
+     *   both           res 'error'  Error: aborted/ECONNRESET │ queued,
+     *   both           res 'close'                           ─┘ in order
+     *
+     * A bare destroy() emits NO request 'error' in this window — the
+     * response's ECONNRESET is the only error — which is why the object
+     * fires only when destroy(err) stashed one. */
+    ScrHttpReq *res = conn->req;
+    if (c->destroy_err != NULL && !c->had_error && !c->close_emitted) {
+      c->had_error = true;
+      scr_net_fire_err_obj(&c->err_ls, c->destroy_err);
+      if (scr_exc_pending()) return;
+    }
+    if (res != NULL) {
+      /* the response's 'aborted' — same handle, same list the h2 lane
+       * fires; the http/1 parser lane simply never reached it before */
+      scr_http_h2_req_aborted(res);
+      if (scr_exc_pending()) return;
+    }
     scr_http_client_queue_close(c);
-    if (conn->req) {
-      ScrHttpReq *res = conn->req;
+    if (res != NULL) {
       scr_http_queue_req_aborted(res);
       scr_http_queue_req_close(res);
       scr_http_req_finish(res, false); /* body never completes */
