@@ -105,8 +105,11 @@ static void scr_note_compiled(ScrRegex *re) {
   scr_compiled[scr_compiled_len++] = re;
 }
 
-/* Flags string → LRE_FLAG_* mask. The frontend fences the flag alphabet to
- * g/i/m/s/u/y, so anything else here is a compiler bug. */
+/* Flags string → LRE_FLAG_* mask. The frontend fences the LITERAL flag
+ * alphabet to g/i/m/s/u/y (a /v/ literal is refused at lowering, not
+ * here); scr_regex_new validates the RUNTIME string, which may also carry
+ * 'v', before anything reaches this function. Anything else here is a
+ * compiler bug. */
 static int scr_lre_flags(const ScrStr *flags) {
   int mask = 0;
   for (size_t i = 0; i < flags->len; i++) {
@@ -116,6 +119,7 @@ static int scr_lre_flags(const ScrStr *flags) {
       case 'm': mask |= LRE_FLAG_MULTILINE; break;
       case 's': mask |= LRE_FLAG_DOTALL; break;
       case 'u': mask |= LRE_FLAG_UNICODE; break;
+      case 'v': mask |= LRE_FLAG_UNICODE_SETS; break;
       case 'y': mask |= LRE_FLAG_STICKY; break;
       default:
         scr_trap_fmt("scriptc: internal error: unexpected regex flag '%c'\n",
@@ -125,8 +129,11 @@ static int scr_lre_flags(const ScrStr *flags) {
   return mask;
 }
 
-/* Without /u, JS treats the pattern itself as UTF-16 code units: an astral
- * character in the pattern SOURCE is two separate surrogate units.
+/* Without /u OR /v, JS treats the pattern itself as UTF-16 code units: an
+ * astral character in the pattern SOURCE is two separate surrogate units.
+ * /v is a unicode-mode grammar exactly as /u is, so BOTH callers gate this
+ * re-encoding on the pair — running it under /v would corrupt an astral
+ * pattern into two lone surrogates.
  * libregexp expects that spelled as CESU-8 (quickjs feeds it
  * JS_ToCStringLen2(cesu8=true) for non-unicode patterns), so a non-/u
  * pattern containing a 4-byte UTF-8 sequence is re-encoded: each astral
@@ -180,7 +187,7 @@ static uint8_t *scr_regex_bc(ScrRegex *re) {
   const char *pat = re->source->data;
   size_t pat_len = re->source->len;
   char *cesu = NULL;
-  if (!(flags & LRE_FLAG_UNICODE)) {
+  if (!(flags & (LRE_FLAG_UNICODE | LRE_FLAG_UNICODE_SETS))) {
     cesu = scr_pattern_cesu8(re->source, &pat_len);
     if (cesu) pat = cesu;
   }
@@ -929,22 +936,74 @@ void scr_assert_shape_re(int key, ScrRegex *re) {
  * pattern compiles EAGERLY so an invalid pattern throws Node's catchable
  * SyntaxError at construction (Node: "Invalid regular expression:
  * /pat/: detail" — the detail text is libregexp's, approximate fidelity
- * by design; e.name is exact). Unknown flag letters throw Node's
- * "Invalid flags supplied to RegExp constructor 'x'". An empty pattern
- * stores the spec's "(?:)" source, like Node. Borrows both; +1. */
+ * by design; e.name is exact). A bad flag string throws Node's
+ * "Invalid flags supplied to RegExp constructor '<flags>'". An empty
+ * pattern stores the spec's "(?:)" source, like Node. Borrows both; +1.
+ *
+ * The flag string is validated WHOLE before the pattern is looked at,
+ * because Node does: three separate things are the same SyntaxError, and
+ * measuring them against node v25.9.0 rather than reading one of them out
+ * of the old code is what found the second and third.
+ *
+ *   an unknown letter   new RegExp("a", "x")   -> SyntaxError
+ *   a REPEATED letter   new RegExp("a", "gg")  -> SyntaxError
+ *   'u' AND 'v'         new RegExp("a", "uv")  -> SyntaxError
+ *
+ * and the message quotes the flags in full — node prints all forty of a
+ * forty-character string, where this used to print twenty.
+ *
+ * 'v' (unicodeSets) IS accepted: it is LRE_FLAG_UNICODE_SETS, which the
+ * vendored libregexp implements and which three sites in this file
+ * already read beside LRE_FLAG_UNICODE.
+ *
+ * 'd' (hasIndices) is deliberately NOT accepted, and this is the one
+ * letter where the SyntaxError above is not Node's answer — node builds
+ * the regex. There is no LRE flag for it and a match result here carries
+ * no `indices`, so admitting the letter would answer the question wrongly
+ * instead of refusing it. Taking 'd' means taking the whole `indices`
+ * surface. */
 ScrRegex *scr_regex_new(ScrStr *pattern, ScrStr *flags) {
+  static const char kFlagAlphabet[] = "gimsuvy";
+  static const char kFlagAlphabetOrder[] = "dgimsuvy"; /* the GETTER order */
+  unsigned seen = 0;
+  bool bad_flags = false;
   for (size_t i = 0; i < flags->len; i++) {
-    switch (flags->data[i]) {
-    case 'g': case 'i': case 'm': case 's': case 'u': case 'y':
-      break;
-    default: {
-      char msg[80];
-      int n = snprintf(msg, sizeof msg,
-                       "Invalid flags supplied to RegExp constructor '%.20s'",
-                       flags->data);
-      scr_throw_error_msg(SCR_ERR_SYNTAX, msg, (size_t)n);
-      return NULL;
-    }
+    const char c = flags->data[i];
+    const char *at = c ? strchr(kFlagAlphabet, c) : NULL;
+    if (!at) { bad_flags = true; break; }
+    const unsigned bit = 1u << (unsigned)(at - kFlagAlphabet);
+    if (seen & bit) { bad_flags = true; break; } /* a repeat is an error */
+    seen |= bit;
+  }
+  /* /u and /v are two different pattern grammars, not two switches. */
+  if ((seen & (1u << 4)) && (seen & (1u << 5))) bad_flags = true;
+  if (bad_flags) {
+    const size_t cap = flags->len + 64; /* the fixed text is 47 bytes */
+    char *msg = malloc(cap);
+    if (!msg) scr_trap("scriptc: out of memory\n");
+    int n = snprintf(msg, cap,
+                     "Invalid flags supplied to RegExp constructor '%.*s'",
+                     (int)flags->len, flags->data);
+    if (n < 0) n = 0;
+    if ((size_t)n >= cap) n = (int)(cap - 1);
+    scr_throw_error_msg(SCR_ERR_SYNTAX, msg, (size_t)n);
+    free(msg);
+    return NULL;
+  }
+  /* The flag string is OBSERVABLE — re.flags, String(re), inspect and the
+   * invalid-pattern SyntaxError all quote it — and JS reports it in GETTER
+   * order (dgimsuvy), never the order it was passed: node answers
+   * new RegExp("a","yg").flags with "gy". Store it normalised ONCE here, so
+   * every reader downstream is right without knowing about it. (Literals
+   * are normalised in the frontend, at lowerRegexLiteral — the two
+   * constructors are the only two places a flag string is born.) The
+   * VALIDATION above deliberately ran on the string as passed, because the
+   * error message quotes what the caller wrote. */
+  char ordered[8];
+  size_t olen = 0;
+  for (const char *f = kFlagAlphabetOrder; *f; f++) {
+    for (size_t i = 0; i < flags->len; i++) {
+      if (flags->data[i] == *f) { ordered[olen++] = *f; break; }
     }
   }
   ScrRegex *re = calloc(1, sizeof *re);
@@ -953,14 +1012,14 @@ ScrRegex *scr_regex_new(ScrStr *pattern, ScrStr *flags) {
   }
   re->rc = 1;
   re->source = pattern->len > 0 ? scr_str_retain(pattern) : scr_str_new("(?:)", 4);
-  re->flags = scr_str_retain(flags);
+  re->flags = scr_str_new(ordered, olen);
   /* Eager compile — the literal path stays lazy (its failure is an
    * abort; tsc already parsed those patterns). */
   int lre_flags = scr_lre_flags(re->flags);
   const char *pat = re->source->data;
   size_t pat_len = re->source->len;
   char *cesu = NULL;
-  if (!(lre_flags & LRE_FLAG_UNICODE)) {
+  if (!(lre_flags & (LRE_FLAG_UNICODE | LRE_FLAG_UNICODE_SETS))) {
     cesu = scr_pattern_cesu8(re->source, &pat_len);
     if (cesu) pat = cesu;
   }

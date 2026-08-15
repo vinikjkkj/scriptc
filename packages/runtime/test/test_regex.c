@@ -100,7 +100,12 @@ static void test_test(void) {
 static void test_source_flags(void) {
   expect_str(scr_regex_source(&re_abc_i), "ab+c", "source readback");
   expect_str(scr_regex_flags(&re_abc_i), "i", "flags readback");
-  expect_str(scr_regex_flags(&re_empty_gu), "gu", "flags keep source order");
+  /* scr_regex_flags hands back the STORED string verbatim. That is the
+   * right answer now because both constructors store the flags in getter
+   * order (dgimsuvy) — this fixture builds its ScrRegex by hand and so
+   * spells them that way itself. The label used to say "source order",
+   * which was the bug: node reports new RegExp("a","yg").flags as "gy". */
+  expect_str(scr_regex_flags(&re_empty_gu), "gu", "flags readback, getter order");
 }
 
 static void test_replace(void) {
