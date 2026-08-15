@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { settleOrValuePromiseTag, canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleUsesChildStream, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { settleOrValuePromiseTag, canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals } from "../emission/emit-stmts.js";
 import { mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
@@ -91,6 +91,7 @@ import { DK, LlDyn } from "./dyn.js";
 import { rcAdapters } from "../emission/emit-types.js";
 import { LlvmCensus, llvmCensusEnabled, LlvmUnsupportedError } from "./unsupported.js";
 import { LlWalkers } from "./walkers.js";
+import { wsGlobalCtorFor } from "./ws.js";
 import {
   arrNewCall,
   boxAccess,
@@ -137,6 +138,26 @@ export function emitLlvmModule(mod: IrModule): string {
   return new LlEmitter(mod).emit();
 }
 
+/** `out.push(...arr)` spreads the array into ARGUMENTS, and V8 caps a call
+ * at roughly 125 000 of them. Every module-assembly append in this file was
+ * written that way, and on a program the size of zapo -- 63 826 static
+ * definitions, whose emitted shape/class/thunk bodies run to several hundred
+ * thousand lines -- the assembly died with
+ *
+ *     RangeError: Maximum call stack size exceeded
+ *       at LlEmitter.emit (emitter.js:1528)   // out.push(...shapes.defs)
+ *
+ * a message that names the STACK and means the ARGUMENT LIST. Nothing was
+ * wrong with the module: emission had already finished, every function body
+ * was in hand, and the emit had raised no tier refusal anywhere in it. The
+ * emitter simply could not put the pieces into one array.
+ *
+ * Appending in place has no such limit, and that is the only thing this does
+ * -- same order, same strings, the same result for every program small
+ * enough that the spread happened to work. */
+function appendAll(out: string[], src: readonly string[]): void {
+  for (const s of src) out.push(s);
+}
 /** Exact double literal: LLVM's 16-digit hex form round-trips every f64
  * bit pattern (−0 and the full denormal range included). */
 function f64Lit(n: number): string {
@@ -1407,7 +1428,16 @@ class LlEmitter {
     // handle-dispatch ops for the checked-dynamic boundary); http-surface
     // programs additionally stamp the httpReq/httpRes ops — the C main's
     // install lines, gated on the same predicates cc.ts links by.
-    const usesNet = moduleUsesNet(this.mod);
+    // globalThis.WebSocket rides the SAME hooks: scr_ws_client.c dials
+    // through scr_net_connect and reads through the poller, so without
+    // scr_net_install the loop never polls and the process exits between
+    // the constructor and the handshake. That is not a guess — it is what
+    // this tier did the first time a WebSocket program reached it, and
+    // the disjunct is the C main's (emission/emitter.ts). It was
+    // unreachable while `wsCtor` refused, which is exactly how it got
+    // here; llvm-main-installs.test.ts now compares the two tables rather
+    // than this one line.
+    const usesNet = moduleUsesNet(this.mod) || moduleUsesWsGlobal(this.mod);
     const usesHttp = moduleUsesHttpServer(this.mod);
     // Fetch-referencing programs register the native fetch bridge before
     // any island entry (the engine's lazy boot consults it) — cc.ts
@@ -1420,6 +1450,23 @@ class LlEmitter {
     // `child.stdout` can cross into the checked-dynamic tree by reference.
     // scr_child.c is always linked, so this gates only the install call.
     const usesChildStream = moduleUsesChildStream(this.mod);
+    // The four rows below were missing from this main entirely, and the
+    // reason each was invisible is the same one that hid the WebSocket
+    // disjunct: no program that turns the gate on had ever reached this
+    // tier. "Had ever reached" is not "can never reach" — moduleUsesDgram
+    // and moduleUsesHttp2 are true of a HANDLE TYPE as well as of a call
+    // (their own comments say so), and dgramSocket/http2Session are types
+    // this tier can hold since rcAdapters became the one kind table. So
+    // the table is completed rather than excused: every install the C
+    // main emits, on the identical predicate, which is also the predicate
+    // cc.ts links the unit by — the call and the symbol appear together
+    // or not at all. llvm-main-installs.test.ts compares the two tables
+    // row for row and fails on drift in either direction.
+    const usesHttp2 = moduleUsesHttp2(this.mod);
+    const usesDgram = moduleUsesDgram(this.mod);
+    const embedsZlib = moduleEmbedsBuiltin(this.mod, "node:zlib");
+    const embedsHttpClient =
+      moduleEmbedsBuiltin(this.mod, "node:http") || moduleEmbedsBuiltin(this.mod, "node:https");
     const hasRefGlobals = globals.some((g) => isRefCounted(g.type)) || fnValueProps.length > 0;
     // Declared NOW — the extern block flushes before main assembles.
     if (usesEvents) this.declare(`declare void @scr_events_install()`);
@@ -1430,6 +1477,10 @@ class LlEmitter {
       this.declare(`declare void @scr_net_dyn_install()`);
     }
     if (usesHttp) this.declare(`declare void @scr_http_dyn_install()`);
+    if (usesHttp2) this.declare(`declare void @scr_http2_dyn_install()`);
+    if (usesDgram) this.declare(`declare void @scr_dgram_install()`);
+    if (embedsZlib) this.declare(`declare void @scr_zlib_island_install()`);
+    if (embedsHttpClient) this.declare(`declare void @scr_net_island_install()`);
     if (usesRegex) this.declare(`declare void @scr_regex_dyn_install()`);
     if (usesChildStream) this.declare(`declare void @scr_child_stream_dyn_install()`);
     if (usesFetch) this.declare(`declare void @scr_fetch_install()`);
@@ -1565,8 +1616,8 @@ class LlEmitter {
       // builders stack-allocate one per recursion level (dyn.ts).
       `%ScrDynPath = type { ptr, ptr, i64 }`,
     ];
-    out.push(...shapes.typeDefs);
-    out.push(...classShapes.typeDefs);
+    appendAll(out, shapes.typeDefs);
+    appendAll(out, classShapes.typeDefs);
     out.push(
       ``,
       `@scr_error_vts = external global [5 x %ScrVt]`,
@@ -1633,15 +1684,15 @@ class LlEmitter {
       out.push(`@${mangleGlobal(g.id)} = internal global ${ty} ${zero} ; ${g.name}`);
     }
     if (globals.length > 0) out.push(``);
-    out.push(...helpers);
-    out.push(...shapes.defs);
-    out.push(...classShapes.defs);
-    out.push(...classObjDefs);
-    out.push(...this.walkers.defs);
-    out.push(...this.dyn.defs);
-    out.push(...wrappers);
-    out.push(...asyncDefs);
-    out.push(...this.resolveThunkDefs);
+    appendAll(out, helpers);
+    appendAll(out, shapes.defs);
+    appendAll(out, classShapes.defs);
+    appendAll(out, classObjDefs);
+    appendAll(out, this.walkers.defs);
+    appendAll(out, this.dyn.defs);
+    appendAll(out, wrappers);
+    appendAll(out, asyncDefs);
+    appendAll(out, this.resolveThunkDefs);
     out.push(fnDefs.join("\n\n"), ``);
 
     // main(): scr_init, the program-dependent error-vt interval stamps,
@@ -1697,7 +1748,7 @@ class LlEmitter {
     if (this.mod.lib !== undefined) {
       // LIBRARY mode: no @main — the profile-declared external
       // symbols instead, from the same IR facts the C emission consumes.
-      out.push(...this.emitLibDefs(globals, globalReleaseLines, stamps));
+      appendAll(out, this.emitLibDefs(globals, globalReleaseLines, stamps));
       out.push(`attributes #0 = { sanitize_address }`, ``);
       return out.join("\n");
     }
@@ -1719,6 +1770,10 @@ class LlEmitter {
       ...(usesRegex ? [`  call void @scr_regex_dyn_install()`] : []),
       ...(usesChildStream ? [`  call void @scr_child_stream_dyn_install()`] : []),
       ...(usesStream ? [`  call void @scr_stream_install()`] : []),
+      ...(usesHttp2 ? [`  call void @scr_http2_dyn_install()`] : []),
+      ...(usesDgram ? [`  call void @scr_dgram_install()`] : []),
+      ...(embedsZlib ? [`  call void @scr_zlib_island_install()`] : []),
+      ...(embedsHttpClient ? [`  call void @scr_net_island_install()`] : []),
       `  call void @scr_lib_init(i32 %argc, ptr %argv)`,
       ...(asyncEntry
         ? [`  %top = call ptr @${mangleAsyncSpawn(this.mod.entry)}()`]
@@ -2254,7 +2309,7 @@ class LlEmitter {
         tr.push(`  call void ${releaseSym(this, ret)}(ptr %r)`);
       }
       tr.push(`  ret void`, `}`, ``);
-      out.push(...tr);
+      appendAll(out, tr);
 
       // Spawn wrapper: pack the args (+1 moves in), spawn the fiber.
       const params = fieldTys.map((ty, i) => `${ty} %a${i}`);
@@ -2341,9 +2396,9 @@ class LlEmitter {
         `}`,
         ``,
       );
-      out.push(...sp);
+      appendAll(out, sp);
     }
-    out.push(...this.emitGenScaffolding());
+    appendAll(out, this.emitGenScaffolding());
     return out;
   }
 
@@ -2436,7 +2491,7 @@ class LlEmitter {
         tr.push(`  call void ${releaseSym(this, ret)}(ptr %r) ; unwound: the never-read dummy`);
       }
       tr.push(`  br label %done`, `done:`, `  ret void`, `}`, ``);
-      out.push(...tr);
+      appendAll(out, tr);
 
       // The never-started teardown: drop the packed (+1) arguments.
       const dr: string[] = [
@@ -2459,7 +2514,7 @@ class LlEmitter {
         }
       });
       dr.push(`  call void @free(ptr %ap)`, `  ret void`, `}`, ``);
-      out.push(...dr);
+      appendAll(out, dr);
 
       // Spawn wrapper: pack the args (+1 moves in), allocate the
       // SUSPENDED fiber — nothing runs until the first .next().
@@ -2492,7 +2547,7 @@ class LlEmitter {
         `}`,
         ``,
       );
-      out.push(...sp);
+      appendAll(out, sp);
     }
     return out;
   }
@@ -2603,6 +2658,33 @@ class LlEmitter {
 
   needOom(): void {
     this.needsOom = true;
+  }
+
+  /* ── the WsHost surface (backend/llvm/ws.ts) ───────────────────────
+   * globalThis.WebSocket's five synthesized functions are built in their
+   * own file, exactly as the C tier builds them in emit-ws.ts. These are
+   * the five things that file needs from the emitter and could not
+   * otherwise reach: the private type mapping, the two "emit this shared
+   * helper" switches, and the thunk pool everything else here writes
+   * into. Nothing new is DECIDED here. */
+
+  /** typeKey(construct signature) → the interned immortal closure. */
+  readonly wsCtors = new Map<string, string>();
+
+  llTypeOf(t: IrType): string {
+    return this.llType(t);
+  }
+
+  needRetainBox(): void {
+    this.needsRetainBox = true;
+  }
+
+  markUsesTimers(): void {
+    this.usesTimers = true;
+  }
+
+  pushThunkDefs(lines: readonly string[]): void {
+    this.resolveThunkDefs.push(...lines);
   }
 
   private currentFrame(): LlValue[] {
@@ -7188,12 +7270,17 @@ class LlEmitter {
         B.line(`${t} = call ptr @scr_big_parse(ptr ${this.cstr(e.text)}, i64 ${len})`);
         return this.own({ name: t, type: e.type });
       }
-      // globalThis.WebSocket builds its API record out of five
-      // synthesized C functions (emit-ws.ts) over per-program record
-      // shapes; the LLVM tier has no port of that scaffolding yet, so it
-      // refuses loudly rather than emitting a half-built object.
+      // globalThis.WebSocket: the address of ONE immortal closure per
+      // construct signature — never an allocation, because the global has
+      // identity (`globalThis.WebSocket === globalThis.WebSocket`). The
+      // five synthesized functions behind it are ws.ts, the .ll mirror of
+      // emit-ws.ts. Retained like every other interned function value: a
+      // no-op at rc == SIZE_MAX, and the frame's release is one too.
       case "wsCtor":
-        throw new LlvmUnsupportedError("globalThis.WebSocket");
+        return this.own({
+          name: this.retainValue(wsGlobalCtorFor(this, e.type), e.type),
+          type: e.type,
+        });
       case "promiseVoidWiden": {
         // One ScrPromise* either way — ownership transfers, type-only
         // (the C emitter's rule).
