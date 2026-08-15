@@ -449,10 +449,6 @@ void scr_net_fire_err_obj_this(ScrNetLs *l, ScrError *err /*borrowed*/, void *se
 
 enum { SCR_NET_K_SERVER = 1, SCR_NET_K_SOCKET = 2, SCR_NET_K_DIAL = 3 };
 
-/* Node's autoSelectFamily attempt budget, in ms. MEASURED on v25.9.0:
- * net.getDefaultAutoSelectFamilyAttemptTimeout() === 500 (the 250 the
- * flag shipped with in v20 was raised; do not assume the old number). */
-#define SCR_NET_HE_ATTEMPT_MS 500.0
 /* Per family, the most candidate addresses a dial chain will hold. Node
  * has no cap; a chain longer than this stops growing (documented). */
 #define SCR_NET_HE_MAX 16
@@ -888,7 +884,12 @@ static ScrNetSocket *scr_net_sock_new(void) {
   s->fd = -1;
   s->dial_timer.kind = SCR_NET_K_DIAL;
   s->dial_timer.sock = s;
-  s->dial_attempt_ms = SCR_NET_HE_ATTEMPT_MS;
+  /* the PROCESS-WIDE budget, read here — a socket is minted at its
+   * connect, which is where Node reads
+   * autoSelectFamilyAttemptTimeoutDefault too, so a
+   * setDefaultAutoSelectFamilyAttemptTimeout before the dial takes
+   * effect and one after it does not */
+  s->dial_attempt_ms = scr_net_get_autosel_timeout();
 #ifdef SCR_RC_AUDIT
   scr_net_live++;
 #endif
