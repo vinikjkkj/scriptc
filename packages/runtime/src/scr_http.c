@@ -2250,6 +2250,16 @@ struct ScrHttpClientReq {
    * destroy(err) returns before its 'error' runs, so firing it inline here
    * would reorder the program. Set once; a second destroy is a no-op. */
   ScrError *destroy_err;
+  /* The `signal` option's seam (scr_abort_http.c). `abort_sig` is an
+   * ScrAbortSignal * held +1 and OPAQUE here — this unit names no
+   * scr_abort.c symbol, because the two units are independently
+   * link-gated and either one has to be able to link without the other.
+   * `abort_detach` removes the native listener and drops that reference;
+   * it runs at 'close' (before the listeners, so a 'close' handler sees
+   * the signal already clean — Node's listener count is 0 there) or at
+   * this handle's own free, whichever comes first, and at most once. */
+  void *abort_sig;
+  ScrHttpAbortDetach abort_detach;
   ScrHttpReq *res; /* +1 once the head parses */
   ScrNetLs resp_ls, err_ls, timeout_ls, close_ls, upgrade_ls;
   /* the owning Agent (+1; the agent's entry holds this client +1 too —
@@ -2266,9 +2276,28 @@ ScrHttpClientReq *scr_http_client_retain(ScrHttpClientReq *c) {
   return c;
 }
 
+/* Runs the abort seam's detach exactly once: the native listener leaves
+ * the signal's vector and the signal's reference drops. Idempotent, and
+ * safe to call from the free path — the client pointer the listener
+ * borrows stops being reachable in the same statement. */
+static void scr_http_client_abort_detach(ScrHttpClientReq *c) {
+  ScrHttpAbortDetach d = c->abort_detach;
+  void *sig = c->abort_sig;
+  if (d == NULL) return;
+  c->abort_detach = NULL;
+  c->abort_sig = NULL;
+  d(sig, c);
+}
+
+void scr_http_client_set_abort(ScrHttpClientReq *c, void *sig /*moves*/, ScrHttpAbortDetach detach) {
+  c->abort_sig = sig;
+  c->abort_detach = detach;
+}
+
 void scr_http_client_release(ScrHttpClientReq *c) {
   if (!c || c->rc == SIZE_MAX) return;
   if (--c->rc == 0) {
+    scr_http_client_abort_detach(c);
     scr_net_ls_drop(&c->resp_ls);
     scr_net_ls_drop(&c->err_ls);
     scr_net_ls_drop(&c->timeout_ls);
@@ -2334,6 +2363,10 @@ static void scr_http_client_settle(struct ScrHttpClientReq *c) {
   c->close_emitted = true;
   c->destroyed = true;
   scr_http_client_agent_detach(c); /* usually already detached at socket close */
+  /* Before the 'close' listeners: Node's request removes its own abort
+   * listener as it closes, and getEventListeners(signal, 'abort') already
+   * answers 0 inside a 'close' handler (measured). */
+  scr_http_client_abort_detach(c);
   scr_net_fire0(&c->close_ls);
   scr_net_ls_drop(&c->resp_ls);
   scr_net_ls_drop(&c->err_ls);

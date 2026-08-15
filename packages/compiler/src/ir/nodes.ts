@@ -3161,6 +3161,18 @@ export type IrLibFn =
    * autoEnd[, cb]). MAY THROW, exactly http.requestUrl's parse. */
   | "http.requestUrlOpts"
   | "http.requestUrlOptsCb"
+  /** The `signal` option: an AbortSignal wired into a request that has
+   * just been constructed, answering that SAME handle (+1). A pass
+   * through rather than a wider row on each of the nine request rows —
+   * options / URL / URL+options / agent / createConnection / the requestFn
+   * binding, each with and without a callback — because the signal is the
+   * one option that configures the handle rather than the wire, and Node
+   * itself applies it after the ClientRequest exists. The signal argument
+   * evaluates FIRST (arg 0), which keeps the whole options record
+   * evaluating before the request is made, exactly as Node's caller does.
+   * Never throws: an already-aborted signal tears the request down, and
+   * that error is delivered through the queue like every other one. */
+  | "http.clientSignal"
   | "http.clientDestroy"
   | "http.clientDestroyErr"
   | "http.clientPipeFrom"
@@ -7583,6 +7595,34 @@ export function moduleUsesHttpPipe(mod: IrModule): boolean {
     }
     const node = v as { kind?: unknown; fn?: unknown };
     if (node.kind === "libCall" && node.fn === "http.clientPipeFrom") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
+/** The program wires an AbortSignal into an http client request (the
+ * `http.clientSignal` libCall): compiles scr_abort_http.c in, and in
+ * cc.ts implies BOTH units it bridges. A LINK GATE, not a fence — a wrong
+ * `false` is a loud unresolved symbol, never a wrong answer.
+ *
+ * Keyed on the libCall alone, the moduleUsesHttpPipe shape: there is no
+ * type to probe beside it, because the seam owns no value — the signal is
+ * an abortSignal (moduleUsesAbortSignal's business) and the request is an
+ * httpClientReq (moduleUsesHttpServer's). */
+export function moduleUsesAbortHttp(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && node.fn === "http.clientSignal") {
       found = true;
       return;
     }

@@ -45,7 +45,15 @@
 #include "scr_runtime.h"
 
 typedef struct ScrAbortL {
-  ScrClosure *cb; /* owned; TRACED (the capture cycle above) */
+  ScrClosure *cb; /* owned; TRACED (the capture cycle above). NULL = NATIVE */
+  /* A NATIVE entry: a runtime unit's own C listener (scr_abort_http.c wires
+   * an in-flight http request here). It lives in THIS vector rather than a
+   * second one so it fires in registration order among the JS listeners —
+   * measured against Node, where the ClientRequest's own listener is
+   * registered at construction and a user listener added before it runs
+   * first. `ctx` is borrowed; the owner removes the entry before it dies. */
+  ScrAbortNativeFn native;
+  void *ctx;
   bool once;
   /* Registration order, monotonic and never reused. The dispatch walks by
    * this rather than by array index, because the array is allowed to move
@@ -83,7 +91,12 @@ static void scr_abort_oom(void) { scr_trap("scriptc: out of memory\n"); }
 
 static void scr_abort_signal_trace(void *obj, ScrTraceVisit visit, void *ctx) {
   ScrAbortSignal *s = obj;
-  for (size_t i = 0; i < s->n; i++) visit(s->ls[i].cb, ctx);
+  /* NATIVE entries own nothing the collector can see: their context is a
+   * borrowed runtime handle that is not a traced object, and the edge that
+   * matters (client -> signal) is a plain refcount broken at settle. */
+  for (size_t i = 0; i < s->n; i++) {
+    if (s->ls[i].cb != NULL) visit(s->ls[i].cb, ctx);
+  }
 }
 
 /* Collector teardown: the complement of the trace — frees the vector but
@@ -171,6 +184,8 @@ void scr_abort_signal_add(ScrAbortSignal *s, ScrClosure *cb, bool once) {
     if (!s->ls) scr_abort_oom();
   }
   s->ls[s->n].cb = cb; /* ownership moves in */
+  s->ls[s->n].native = NULL;
+  s->ls[s->n].ctx = NULL;
   s->ls[s->n].once = once;
   s->ls[s->n].seq = s->next_seq++;
   s->n++;
@@ -194,6 +209,44 @@ void scr_abort_signal_off(ScrAbortSignal *s, ScrClosure *cb) {
   for (size_t i = 0; i < s->n; i++) {
     if (s->ls[i].cb != cb) continue;
     scr_closure_release(s->ls[i].cb);
+    for (size_t j = i + 1; j < s->n; j++) s->ls[j - 1] = s->ls[j];
+    s->n--;
+    return;
+  }
+}
+
+/* A NATIVE listener, keyed on (fn, ctx) — the closure form's identity rule
+ * with the pair standing in for the callback. It takes a slot in the SAME
+ * vector and the SAME sequence counter, so scr_abort_fire visits it in
+ * registration order among the JS listeners; that order is observable
+ * (a user listener added before an http request sees req.destroyed false,
+ * one added after sees true — measured against Node v25.9.0) and a hook
+ * fired always-first or always-last gets one of the two cases wrong. */
+void scr_abort_signal_add_native(ScrAbortSignal *s, ScrAbortNativeFn fn, void *ctx) {
+  if (!fn) return;
+  for (size_t i = 0; i < s->n; i++) {
+    if (s->ls[i].cb == NULL && s->ls[i].native == fn && s->ls[i].ctx == ctx) return;
+  }
+  if (s->n == s->cap) {
+    s->cap = s->cap ? s->cap * 2 : 2;
+    s->ls = realloc(s->ls, s->cap * sizeof *s->ls);
+    if (!s->ls) scr_abort_oom();
+  }
+  s->ls[s->n].cb = NULL;
+  s->ls[s->n].native = fn;
+  s->ls[s->n].ctx = ctx;
+  s->ls[s->n].once = false;
+  s->ls[s->n].seq = s->next_seq++;
+  s->n++;
+}
+
+/* The native twin of scr_abort_signal_off: nothing to release (the context
+ * is borrowed), and a remove landing DURING a dispatch takes effect the
+ * same way — the walk finds entries by sequence number in the LIVE array. */
+void scr_abort_signal_off_native(ScrAbortSignal *s, ScrAbortNativeFn fn, void *ctx) {
+  if (!fn) return;
+  for (size_t i = 0; i < s->n; i++) {
+    if (s->ls[i].cb != NULL || s->ls[i].native != fn || s->ls[i].ctx != ctx) continue;
     for (size_t j = i + 1; j < s->n; j++) s->ls[j - 1] = s->ls[j];
     s->n--;
     return;
@@ -278,7 +331,12 @@ static void scr_abort_fire(ScrAbortSignal *s) {
     size_t idx = 0;
     while (idx < s->n && s->ls[idx].seq != seq) idx++;
     if (idx == s->n) break; /* unreachable; keeps the index honest */
-    ScrClosure *cb = scr_closure_retain(s->ls[idx].cb);
+    /* A NATIVE entry has no closure to retain: its context is borrowed and
+     * kept alive by the owner that registered it (which removes the entry
+     * before it can die). Everything else about the walk is identical. */
+    ScrAbortNativeFn nat = s->ls[idx].native;
+    void *natctx = s->ls[idx].ctx;
+    ScrClosure *cb = nat != NULL ? NULL : scr_closure_retain(s->ls[idx].cb);
     if (s->ls[idx].once) {
       /* Out of the live list BEFORE the call, EventTarget's order. */
       scr_closure_release(s->ls[idx].cb);
@@ -290,13 +348,17 @@ static void scr_abort_fire(ScrAbortSignal *s) {
      * this was the last entry. */
     uint64_t next = seq == SCR_ABORT_SEQ_END ? SCR_ABORT_SEQ_END
                                              : scr_abort_seq_at_or_after(s, seq + 1);
-    ((void (*)(ScrClosure *))cb->fn)(cb);
+    if (nat != NULL) {
+      nat(natctx);
+    } else {
+      ((void (*)(ScrClosure *))cb->fn)(cb);
+    }
     if (scr_exc_pending()) {
       ScrCaught *c = scr_exc_take();
       if (first == NULL) first = c;
       else scr_caught_release(c);
     }
-    scr_closure_release(cb);
+    if (cb != NULL) scr_closure_release(cb);
     if (next == SCR_ABORT_SEQ_END) break;
     cur = next;
   }
