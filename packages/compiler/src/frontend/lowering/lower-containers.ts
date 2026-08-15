@@ -5588,9 +5588,9 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     // them (the 'g' completion below), which turned an ordinary SC1120
     // into an SC9001 ICE ("regexLit flags \"dg\" outside the supported
     // alphabet"). Found by a deliberate flag sweep, not by a fixture.
-    if ([...lit!.flags].some((f) => !"gimsuy".includes(f))) {
+    if ([...lit!.flags].some((f) => !"gimsuvy".includes(f))) {
       fence(
-        `a function replacement value over a regex with the '${[...lit!.flags].filter((f) => !"gimsuy".includes(f)).join("")}' flag (the lowered alphabet is g/i/m/s/u/y)`,
+        `a function replacement value over a regex with the '${[...lit!.flags].filter((f) => !"gimsuvy".includes(f)).join("")}' flag (the lowered alphabet is g/i/m/s/u/v/y)`,
       );
     }
     const part = captureParticipationOfPattern(lit!.pattern);

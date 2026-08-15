@@ -23,7 +23,7 @@ import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-name
 import { collectExpandoMembers, expandoBindStmts } from "./lower-expando.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import type { ClassInfo } from "./lower-classes.js";
-import { decoratorNodesOf, genericIfaceBindingKeepsClass, guaranteedDecorationThrow, castAliasedClassRefOf, constructedClassInfoOf, adoptedInstanceClassOf} from "./lower-classes.js";
+import { decoratorNodesOf, genericIfaceBindingKeepsClass, guaranteedDecorationThrow, bindingHoldsItsInitializer, castAliasedClassRefOf, constructedClassInfoOf, adoptedInstanceClassOf} from "./lower-classes.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 
 /** One file's declarations, split for collection and init-body lowering. */
@@ -1739,12 +1739,26 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // simply IS the instance. tsc proved the instance satisfies
             // the annotation, so the slot keeps the class and member reads
             // resolve as the class's own.
+            //
+            // A `let` the declaring file never writes rests on the SAME
+            // proof and takes the same route: the only reason to refuse a
+            // reassignable binding is that a later assignment could name an
+            // unrelated class, and bindingHoldsItsInitializer is the proof
+            // that no later assignment exists. Splitting the two spellings
+            // here would rebuild the very asymmetry this arm removed.
             if (
               type.kind === "record" && ts.isIdentifier(decl.name) && nameNode === decl.name &&
-              (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) !== 0
+              decl.initializer !== undefined && bindingHoldsItsInitializer(L, decl)
             ) {
+              const isLetDecl0 = (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) === 0;
+              const letOff = isLetDecl0 && process.env["SCRIPTC_ADOPT_LET_OFF"] !== undefined;
               const built = constructedClassInfoOf(L, decl.initializer);
-              if (built) type = { kind: "object", className: built.def.name };
+              if (built) {
+                if (process.env["SCRIPTC_ADOPT_WHY"] !== undefined && isLetDecl0) {
+                  console.error(`[adoptwhy-let] ${locOf(nameNode).file}:${locOf(nameNode).start} ${nameNode.text}: record -> object:${built.def.name}`);
+                }
+                if (!letOff) type = { kind: "object", className: built.def.name };
+              }
               else {
                 // The same rule for the two spellings whose value is an
                 // EXISTING instance rather than a fresh one: `const v:
@@ -1761,9 +1775,9 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
                 const adopted = adoptedInstanceClassOf(L, decl);
                 if (adopted !== null) {
                   if (process.env["SCRIPTC_ADOPT_WHY"] !== undefined) {
-                    console.error(`[adoptwhy] ${locOf(nameNode).file}:${locOf(nameNode).start} ${nameNode.text}: record -> object:${adopted}`);
+                    console.error(`[adoptwhy${isLetDecl0 ? "-let" : ""}] ${locOf(nameNode).file}:${locOf(nameNode).start} ${nameNode.text}: record -> object:${adopted}`);
                   }
-                  type = { kind: "object", className: adopted };
+                  if (!letOff) type = { kind: "object", className: adopted };
                 }
               }
             }
