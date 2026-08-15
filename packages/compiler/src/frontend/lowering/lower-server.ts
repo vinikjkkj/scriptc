@@ -3583,7 +3583,27 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
    * the record supplies method/timeout/headers. Recognized only with a
    * URL first argument — `request(opts, opts2, cb)` is not a Node form
    * (there the second argument becomes the callback and lands on
-   * once('response') as a non-function). */
+   * once('response') as a non-function).
+   *
+   * THE OPTION KEYS THIS FORM STILL REFUSES, and what each would cost —
+   * measured against zapo's WaMediaTransferClient.httpRequest, which
+   * spells all three and is the only caller that needs them:
+   *
+   *   headers: <Record | undefined>  the option walk demands a record;
+   *     Node treats `headers: undefined` as no headers. A
+   *     lowerClientHeadersOption widening plus an "absent -> empty
+   *     pairs" arm. Smallest of the three.
+   *   signal: <AbortSignal>  DOCUMENTED and unlowered (it fences by name
+   *     through fenceOrDropOptionKey). Nothing in scr_http.c wires abort
+   *     into an in-flight client request today; this is real runtime
+   *     work, and it is the one that keeps that call site trapping.
+   *   agent: <Agent value>  the agent rows are keyed on an explicit
+   *     host/port/path (getName's shape) while this row derives them at
+   *     runtime, so it needs a requestUrlAgent quartet of exactly the
+   *     shape requestUrlOpts added. Mechanical.
+   *
+   * The first and third are worth nothing without the second: they sit
+   * on the same options record, so whichever remains keeps the trap. */
   const urlKindOf = (n: ts.Expression): "string" | "url" | null => {
     if (ts.isObjectLiteralExpression(n)) return null;
     const t = L.mapTypeOf(L.typeOf(n));

@@ -28,11 +28,22 @@
  *     it, passing it, `typeof`-ing it would all read the selector and
  *     silently answer something Node never says.
  *
- * WHAT IS NOT BUILT: only the member-CALL use lowers. A member READ
- * through the binding (`transport.globalAgent`) has the same shape and
- * the same soundness story — two arms over one selector — but a value
- * position needs the two arms' IR types to agree, which the call path
- * checks and no read path exists yet to check. It fences by name.
+ * WHAT IS NOT BUILT, so the next reader need not re-derive it:
+ *
+ *   - only the member-CALL use lowers. A member READ through the binding
+ *     (`transport.globalAgent`) has the same shape and the same soundness
+ *     story — two arms over one selector — but a value position needs the
+ *     two arms' IR types to agree, which the call path checks and no read
+ *     path exists yet to check. It fences by name.
+ *
+ *   - a FILE-SCOPE selector still fences (SC2009 on the binding's own
+ *     type). collectGlobals decides a module global's IR type from the
+ *     DECLARED type before any initializer lowers, so there is no point
+ *     at which lowerNamespaceConditionalDecl could hand it the bool the
+ *     way lowerVarDecl's block-scoped path takes it. Closing it means
+ *     teaching collectGlobals the same rule — the registration would have
+ *     to move to collection time, where the promisify binding's already
+ *     is (lower-modules.ts's `isPromisifyCall` arm).
  */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
