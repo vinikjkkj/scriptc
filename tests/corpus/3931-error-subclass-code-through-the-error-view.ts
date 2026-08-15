@@ -110,8 +110,10 @@ console.log("C tos prefixed=" + prefixed.toString());
 
 // Presence tests answer off the same slot.
 console.log("D typeof coded=" + typeof coded.code);
-console.log("D typeof plain=" + typeof (plain as NodeJS.ErrnoException).code);
+console.log("D coded is string=" + (typeof (coded as NodeJS.ErrnoException).code === "string"));
+console.log("D plain is undefined=" + (typeof (plain as NodeJS.ErrnoException).code === "undefined"));
 console.log("D in coded=" + ("code" in coded));
+console.log("D in plain=" + ("code" in plain));
 
 // A catch binding narrowed by instanceof is the base view again.
 try {
