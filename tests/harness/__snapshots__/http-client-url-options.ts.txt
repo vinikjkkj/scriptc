@@ -1,0 +1,89 @@
+http-client-url-options.ts:20:21 - error SC2020: 'a 'host' option alongside a URL first argument' is part of the standard library types but has no scriptc lowering yet
+
+  19 | // The four keys Node merges OVER the URL's own parts.
+  20 | http.request(url, { host: "elsewhere" }, cb);
+     |                     ^~~~~~~~~~~~~~~~~
+  21 | http.request(url, { hostname: "elsewhere" }, cb);
+
+  hint: Node merges it OVER the URL's own host — pass the whole request as request(options[, callback]) instead
+
+http-client-url-options.ts:21:21 - error SC2020: 'a 'hostname' option alongside a URL first argument' is part of the standard library types but has no scriptc lowering yet
+
+  20 | http.request(url, { host: "elsewhere" }, cb);
+  21 | http.request(url, { hostname: "elsewhere" }, cb);
+     |                     ^~~~~~~~~~~~~~~~~~~~~
+  22 | http.request(url, { port: 1234 }, cb);
+
+  hint: Node merges it OVER the URL's own hostname — pass the whole request as request(options[, callback]) instead
+
+http-client-url-options.ts:22:21 - error SC2020: 'a 'port' option alongside a URL first argument' is part of the standard library types but has no scriptc lowering yet
+
+  21 | http.request(url, { hostname: "elsewhere" }, cb);
+  22 | http.request(url, { port: 1234 }, cb);
+     |                     ^~~~~~~~~~
+  23 | http.request(url, { path: "/somewhere-else" }, cb);
+
+  hint: Node merges it OVER the URL's own port — pass the whole request as request(options[, callback]) instead
+
+http-client-url-options.ts:23:21 - error SC2020: 'a 'path' option alongside a URL first argument' is part of the standard library types but has no scriptc lowering yet
+
+  22 | http.request(url, { port: 1234 }, cb);
+  23 | http.request(url, { path: "/somewhere-else" }, cb);
+     |                     ^~~~~~~~~~~~~~~~~~~~~~~
+  24 | https.get("https://127.0.0.1:9/", { path: "/x" }, cb);
+
+  hint: Node merges it OVER the URL's own path — pass the whole request as request(options[, callback]) instead
+
+http-client-url-options.ts:24:37 - error SC2020: 'a 'path' option alongside a URL first argument' is part of the standard library types but has no scriptc lowering yet
+
+  23 | http.request(url, { path: "/somewhere-else" }, cb);
+  24 | https.get("https://127.0.0.1:9/", { path: "/x" }, cb);
+     |                                     ^~~~~~~~~~
+  25 | 
+
+  hint: Node merges it OVER the URL's own path — pass the whole request as get(options[, callback]) instead
+
+http-client-url-options.ts:29:61 - error SC2020: 'request with an options record as its second argument' is part of the standard library types but has no scriptc lowering yet
+
+  28 | // and the third is dropped.
+  29 | http.request({ hostname: "127.0.0.1", port: 9, path: "/" }, { method: "GET" }, cb);
+     |                                                             ^~~~~~~~~~~~~~~~~
+  30 | http.request({ path: "/" }, { method: "GET" });
+
+  hint: the three-argument form is request(url, options[, callback]) — the first argument is the URL
+
+http-client-url-options.ts:30:29 - error SC2020: 'request with an options record as its second argument' is part of the standard library types but has no scriptc lowering yet
+
+  29 | http.request({ hostname: "127.0.0.1", port: 9, path: "/" }, { method: "GET" }, cb);
+  30 | http.request({ path: "/" }, { method: "GET" });
+     |                             ^~~~~~~~~~~~~~~~~
+  31 | 
+
+  hint: the three-argument form is request(url, options[, callback]) — the first argument is the URL
+
+http-client-url-options.ts:35:19 - error SC2020: 'request with a URL first argument and an agent value' is part of the standard library types but has no scriptc lowering yet
+
+  34 | const agent = new http.Agent({});
+  35 | http.request(url, { agent }, cb);
+     |                   ^~~~~~~~~
+  36 | 
+
+  hint: pass the whole request as an options record when threading an Agent
+
+http-client-url-options.ts:39:19 - error SC2020: 'request with a URL first argument and a createConnection option' is part of the standard library types but has no scriptc lowering yet
+
+  38 | const dialer = () => connect(9);
+  39 | http.request(url, { createConnection: dialer }, cb);
+     |                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  40 | 
+
+  hint: the dialer supplies the socket — pass the whole request as an options record
+
+http-client-url-options.ts:46:13 - error SC2020: 'a URL first argument through a request-function binding' is part of the standard library types but has no scriptc lowering yet
+
+  45 |   const requestFn = tls ? https.request : http.request;
+  46 |   requestFn(url, { method: "HEAD" }, cb);
+     |             ^~~
+  47 | }
+
+  hint: call http.request / https.request directly for the URL form, or pass the options as an object literal
