@@ -529,6 +529,10 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "http.requestAgentCb": { argTypes: [STRING, F64, STRING, STRING, F64, arrayOf(STRING), BOOL, DYN, null], result: HTTPCLIENTREQ_T },
   "http.requestUrl": { argTypes: [STRING, STRING, BOOL], result: HTTPCLIENTREQ_T },
   "http.requestUrlCb": { argTypes: [STRING, STRING, BOOL, null], result: HTTPCLIENTREQ_T },
+  // request(url, options[, cb]) — the URL row plus the option slots the
+  // middle argument fills (timeout, headers).
+  "http.requestUrlOpts": { argTypes: [STRING, STRING, F64, arrayOf(STRING), BOOL], result: HTTPCLIENTREQ_T },
+  "http.requestUrlOptsCb": { argTypes: [STRING, STRING, F64, arrayOf(STRING), BOOL, null], result: HTTPCLIENTREQ_T },
   "net.sockOnReadable": { argTypes: [NETSOCKET_T, null, BOOL], result: VOID },
   // sockRead's result is the interned `Buffer | null` union — checked
   // specially below (the reqHeader/envGet pattern; VOID here is a
@@ -667,6 +671,10 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "https.requestCb": { argTypes: [STRING, F64, STRING, STRING, F64, arrayOf(STRING), BOOL, BOOL, null, null], result: HTTPCLIENTREQ_T },
   "https.requestUrl": { argTypes: [STRING, STRING, BOOL], result: HTTPCLIENTREQ_T },
   "https.requestUrlCb": { argTypes: [STRING, STRING, BOOL, null], result: HTTPCLIENTREQ_T },
+  // The TLS twin: the ca slot is a PEM string OR a Buffer, so it stays
+  // unchecked here exactly like https.request's.
+  "https.requestUrlOpts": { argTypes: [STRING, STRING, F64, arrayOf(STRING), BOOL, BOOL, null], result: HTTPCLIENTREQ_T },
+  "https.requestUrlOptsCb": { argTypes: [STRING, STRING, F64, arrayOf(STRING), BOOL, BOOL, null, null], result: HTTPCLIENTREQ_T },
   "https.requestAgent": { argTypes: [STRING, F64, STRING, STRING, F64, arrayOf(STRING), BOOL, BOOL, null, DYN], result: HTTPCLIENTREQ_T },
   "https.requestAgentCb": { argTypes: [STRING, F64, STRING, STRING, F64, arrayOf(STRING), BOOL, BOOL, null, DYN, null], result: HTTPCLIENTREQ_T },
   // The requestFn binding's runtime-secure rows: https.request's shape
@@ -3882,12 +3890,15 @@ function validateFunction(
         if (e.fn === "http.requestCb" || e.fn === "https.requestCb" ||
             e.fn === "http.requestUrlCb" || e.fn === "http.clientOnResponse" ||
             e.fn === "http.requestAgentCb" || e.fn === "https.requestAgentCb" ||
-            e.fn === "https.requestUrlCb") {
+            e.fn === "https.requestUrlCb" ||
+            e.fn === "http.requestUrlOptsCb" || e.fn === "https.requestUrlOptsCb") {
           // The response listener: void, no params or exactly (res: httpReq).
           const cbT = e.args[
             e.fn === "http.requestCb" ? 7
             : e.fn === "https.requestCb" ? 9
             : e.fn === "http.requestUrlCb" || e.fn === "https.requestUrlCb" ? 3
+            : e.fn === "http.requestUrlOptsCb" ? 5
+            : e.fn === "https.requestUrlOptsCb" ? 7
             : e.fn === "http.requestAgentCb" ? 8
             : e.fn === "https.requestAgentCb" ? 10
             : 1]?.type;

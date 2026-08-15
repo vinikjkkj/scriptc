@@ -3576,14 +3576,55 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
       : { kind: "unary", op: "!", operand: c, type: BOOL, loc };
   };
   const args = expr.arguments;
-  if (args.length < 1 || args.length > 2) {
+  /* Node's `request(url[, options][, callback])`: the MIDDLE slot is an
+   * options record that merges OVER the URL's own parts (Node's
+   * ObjectAssign order), so the URL still supplies host/port/path and
+   * the record supplies method/timeout/headers. Recognized only with a
+   * URL first argument — `request(opts, opts2, cb)` is not a Node form
+   * (there the second argument becomes the callback and lands on
+   * once('response') as a non-function). */
+  const urlKindOf = (n: ts.Expression): "string" | "url" | null => {
+    if (ts.isObjectLiteralExpression(n)) return null;
+    const t = L.mapTypeOf(L.typeOf(n));
+    return t?.kind === "string" ? "string" : t?.kind === "url" ? "url" : null;
+  };
+  let urlNode: ts.Expression | null = null;
+  let urlKind: "string" | "url" | null = null;
+  if (args.length >= 2 && ts.isObjectLiteralExpression(args[1]!)) {
+    urlKind = urlKindOf(args[0]!);
+    if (urlKind === null) {
+      L.noLowering(
+        `${member} with an options record as its second argument`,
+        args[1]!,
+        `the three-argument form is ${member}(url, options[, callback]) — the first argument is the URL`,
+      );
+    }
+    urlNode = args[0]!;
+  }
+  if (args.length < 1 || args.length > (urlNode !== null ? 3 : 2)) {
     L.noLowering(
       `${member} with ${args.length} arguments`,
       expr,
-      `the supported form is ${member}(options[, callback])`,
+      `the supported forms are ${member}(options[, callback]) and ${member}(url, options[, callback])`,
     );
   }
-  const optsNode = args[0]!;
+  if (urlNode !== null && binding !== null) {
+    // The binding's dial is chosen at RUNTIME, and the two schemes reject
+    // each other's URLs — the same reason the URL row has no binding mode.
+    L.noLowering(
+      "a URL first argument through a request-function binding",
+      urlNode,
+      "call http.request / https.request directly for the URL form, or pass the options as an object literal",
+    );
+  }
+  /* Source order: the URL argument evaluates before the options record,
+   * so it lowers before the option walk does. */
+  const urlExpr: IrExpr | null = urlNode === null
+    ? null
+    : urlKind === "url"
+      ? { kind: "libCall", fn: "url.href", args: [L.lowerExpr(urlNode)], type: STRING, loc }
+      : L.lowerExprExpecting(urlNode, STRING);
+  const optsNode = urlNode !== null ? args[1]! : args[0]!;
   if (!ts.isObjectLiteralExpression(optsNode)) {
     const t = L.mapTypeOf(L.typeOf(optsNode));
     if ((t?.kind === "string" || t?.kind === "url") && binding === null) {
@@ -3719,6 +3760,19 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
       }
       return v;
     };
+    if (urlNode !== null &&
+        (key === "hostname" || key === "host" || key === "port" || key === "path")) {
+      // Node MERGES these over the URL's own parts (ObjectAssign order):
+      // request('http://a/x', { path: '/y' }) dials /y. The URL row
+      // derives host/port/path from the URL itself, so honouring the
+      // override would need a second source of truth — the half that is
+      // not built. Loud, and the two-argument options form spells it.
+      L.noLowering(
+        `a '${key}' option alongside a URL first argument`,
+        prop,
+        `Node merges it OVER the URL's own ${key} — pass the whole request as ${member}(options[, callback]) instead`,
+      );
+    }
     switch (key) {
       case "hostname":
       case "host":
@@ -3906,6 +3960,23 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
       "call http.request/https.request directly when passing an Agent",
     );
   }
+  if (agentVal !== null && urlNode !== null) {
+    // The agent rows are keyed on an explicit host/port/path (getName's
+    // shape); the URL row derives them at runtime. agent: false / null /
+    // undefined are unaffected — they change no row.
+    L.noLowering(
+      `${member} with a URL first argument and an agent value`,
+      optsNode,
+      "pass the whole request as an options record when threading an Agent",
+    );
+  }
+  if (connCb !== null && urlNode !== null) {
+    L.noLowering(
+      `${member} with a URL first argument and a createConnection option`,
+      optsNode,
+      "the dialer supplies the socket — pass the whole request as an options record",
+    );
+  }
   host ??= strLit("localhost");
   // The binding mode's default port follows the runtime dial: 443 on the
   // TLS arm, 80 on the plain one — exactly each client's own default.
@@ -3920,6 +3991,30 @@ function lowerHttpClientCall(L: Lowerer, expr: ts.CallExpression, member: "reque
   timeout ??= numLit(0);
   headers ??= { kind: "arrayLit", elems: [], type: arrayOf(STRING), loc };
   const autoEnd = boolLit(member === "get", loc);
+  if (urlExpr !== null) {
+    // request(url, options[, cb]): the URL row carrying the option slots
+    // the middle argument filled. host/port/path come off the parse (and
+    // the scheme is checked against the calling module, exactly the
+    // two-argument URL form's ERR_INVALID_PROTOCOL).
+    const urlBase: IrExpr[] = [urlExpr, method, timeout, headers, autoEnd];
+    if (secure === true) {
+      reject ??= boolLit(true, loc); /* Node's default: verify */
+      ca ??= strLit(""); /* none: the default trust anchors */
+      urlBase.push(reject, ca);
+    }
+    if (args.length === 2) {
+      const fn: IrLibFn = secure === true ? "https.requestUrlOpts" : "http.requestUrlOpts";
+      return { kind: "libCall", fn, args: urlBase, type: HTTPCLIENTREQ_T, loc };
+    }
+    const { cb } = lowerCallbackArg(
+      L, args[2]!, "response callbacks", 1,
+      (p) => p.kind === "httpReq",
+      "use (res) or ()",
+      [HTTPREQ_T],
+    );
+    const fn: IrLibFn = secure === true ? "https.requestUrlOptsCb" : "http.requestUrlOptsCb";
+    return { kind: "libCall", fn, args: [...urlBase, cb], type: HTTPCLIENTREQ_T, loc };
+  }
   if (connCb !== null) {
     const base = [connCb, path, method, timeout, headers, autoEnd];
     if (args.length === 1) {

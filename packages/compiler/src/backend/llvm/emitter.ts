@@ -921,6 +921,8 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
   "http.createServer", "http.createServerEmpty",
   "http.request", "http.requestCb", "http.requestUrl", "http.requestUrlCb",
   "https.request", "https.requestCb", "https.requestUrl", "https.requestUrlCb",
+  "http.requestUrlOpts", "http.requestUrlOptsCb",
+  "https.requestUrlOpts", "https.requestUrlOptsCb",
   "http.requestConn", "http.requestConnCb",
   "http.agentNew", "http.requestAgent", "http.requestAgentCb",
   // The dyn-async slice (emit-exprs.ts's markings): fiber parks, the
@@ -12482,16 +12484,23 @@ class LlEmitter {
     if (e.fn === "http.request" || e.fn === "http.requestCb" || e.fn === "http.requestUrl" || e.fn === "http.requestUrlCb" ||
         e.fn === "http.requestAgent" || e.fn === "http.requestAgentCb" ||
         e.fn === "https.request" || e.fn === "https.requestCb" ||
-        e.fn === "https.requestUrl" || e.fn === "https.requestUrlCb") {
+        e.fn === "https.requestUrl" || e.fn === "https.requestUrlCb" ||
+        e.fn === "http.requestUrlOpts" || e.fn === "http.requestUrlOptsCb" ||
+        e.fn === "https.requestUrlOpts" || e.fn === "https.requestUrlOptsCb") {
       // The https URL row is the http one with the TLS entry point — same
       // three arguments, same response-callback adapter. The https options
       // row is wider: rejectUnauthorized stays an i1, while its ScrStr or
       // ScrBytes CA value expands to the runtime's raw pointer + length.
+      // request(url, options[, cb]) is the URL row plus timeout/headers,
+      // and over TLS it carries the same CA expansion one slot earlier.
       const isTls = e.fn.startsWith("https.");
-      const isUrl = e.fn.includes("requestUrl");
-      const isTlsOptions = isTls && !isUrl;
+      const isUrlOpts = e.fn.includes("requestUrlOpts");
+      const isUrl = e.fn.includes("requestUrl") && !isUrlOpts;
+      const isTlsOptions = isTls && !isUrl && !isUrlOpts;
       const isAgent = e.fn.startsWith("http.requestAgent");
-      const cbIdx = isUrl ? 3 : isTlsOptions ? 9 : isAgent ? 8 : 7;
+      const cbIdx = isUrl ? 3 : isUrlOpts ? (isTls ? 7 : 5) : isTlsOptions ? 9 : isAgent ? 8 : 7;
+      /** The ScrStr/ScrBytes CA slot, expanded to pointer + length. */
+      const caIdx = isTlsOptions ? 8 : isTls && isUrlOpts ? 6 : -1;
       const hasCb = e.fn.endsWith("Cb");
       const args = e.args.map((a) => this.emitExpr(a));
       let cb = "null";
@@ -12507,12 +12516,13 @@ class LlEmitter {
       }
       const head = args.slice(0, cbIdx);
       const entry = isTlsOptions ? "scr_https_request"
+        : isUrlOpts ? (isTls ? "scr_https_request_url_opts" : "scr_http_request_url_opts")
         : isTls ? "scr_https_request_url"
         : isUrl ? "scr_http_request_url"
         : isAgent ? "scr_http_request_agent" : "scr_http_request";
       let callArgs = head.map((a) => `${this.llType(a.type)} ${a.name}`);
-      if (isTlsOptions) {
-        const ca = args[8]!;
+      if (caIdx >= 0) {
+        const ca = args[caIdx]!;
         const caLenPtr = B.tmp();
         const caLen = B.tmp();
         let caData: string;
@@ -12531,8 +12541,12 @@ class LlEmitter {
         } else {
           throw new Error(`llvm emitter bug: ${e.fn} CA is not a string or Buffer`);
         }
-        callArgs = [...callArgs.slice(0, 8), `ptr ${caData}`, `i64 ${caLen}`];
-        this.declare(`declare ptr @scr_https_request(ptr, double, ptr, ptr, double, ptr, i1 zeroext, i1 zeroext, ptr, i64, ptr, ptr)`);
+        callArgs = [...callArgs.slice(0, caIdx), `ptr ${caData}`, `i64 ${caLen}`];
+        this.declare(
+          isTlsOptions
+            ? `declare ptr @scr_https_request(ptr, double, ptr, ptr, double, ptr, i1 zeroext, i1 zeroext, ptr, i64, ptr, ptr)`
+            : `declare ptr @scr_https_request_url_opts(ptr, ptr, double, ptr, i1 zeroext, i1 zeroext, ptr, i64, ptr, ptr)`,
+        );
       } else {
         const decls = head.map((a) => (this.llType(a.type) === "i1" ? "i1 zeroext" : this.llType(a.type)));
         this.declare(`declare ptr @${entry}(${[...decls, "ptr", "ptr"].join(", ")})`);
