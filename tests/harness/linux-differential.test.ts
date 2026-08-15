@@ -365,7 +365,7 @@ function fixtureCases(root: string): { name: string; entry: string; driver: stri
     .sort()
     .filter((f) => filter === undefined || new RegExp(filter).test(f))
     .map((entry) => ({
-      name: entry.split("/").at(-2)!,
+      name: entry.split(/[\\/]/).at(-2)!,
       entry,
       driver: existsSync(join(entry, "../driver.mjs")) ? join(entry, "../driver.mjs") : null,
     }));
@@ -414,7 +414,7 @@ const nodeTestCases = enabled
   ? globSync(join(repoRoot, "tests/fixtures/node-test/cases/*.ts"))
       .sort()
       .filter((f) => filter === undefined || new RegExp(filter).test(f))
-      .map((entry) => ({ name: entry.split("/").at(-1)!.replace(/\.ts$/, ""), entry }))
+      .map((entry) => ({ name: entry.split(/[\\/]/).at(-1)!.replace(/\.ts$/, ""), entry }))
   : [];
 
 /* ── the piped-stdin differential (tests/harness/event-loop-cases.ts —

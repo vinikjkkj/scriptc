@@ -29,8 +29,22 @@ try {
   }
 }
 // ...and mode does NOT re-apply to an existing file (Node never chmods).
+// That is a POSIX truth: Windows Node DOES re-apply the readonly bit, so
+// this probe is GUARDED and reports its verdict. Unguarded it threw an
+// uncaught EPERM whose message carries the full scratch path — including
+// mkdtemp's random suffix (scr-fsw-PBWyQr on the run that reproduced it)
+// — so the program's own output could never agree with itself across two
+// runs, on any platform where the probe throws. Nothing here prints the
+// path.
 writeFileSync(join(dir, "a.txt"), "beta", { mode: 0o400 });
-accessSync(join(dir, "a.txt"), constants.W_OK);
+let existingWritable = true;
+try {
+  accessSync(join(dir, "a.txt"), constants.W_OK);
+} catch (e) {
+  existingWritable = false;
+  if (e instanceof Error) console.log("existing rewrite:", `${(e as NodeJS.ErrnoException).code}`);
+}
+console.log("existing writable:", existingWritable);
 console.log("existing keeps mode:", readFileSync(join(dir, "a.txt"), "utf-8"));
 
 // chmodSync: flip the write bit off and back on.
