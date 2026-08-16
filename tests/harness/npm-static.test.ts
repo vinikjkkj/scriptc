@@ -904,6 +904,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
         "field  = Own(1)",
         "elem   = Own(1)",
         "relet  = Own(1)",
+        "radix  = r0",
         "",
       ].join("\n"),
     );
@@ -920,6 +921,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
         "field  = [object Object]",
         "elem   = [object Object]",
         "relet  = [object Object]",
+        "radix  = [object Object]",
         "",
       ].join("\n"),
     );
