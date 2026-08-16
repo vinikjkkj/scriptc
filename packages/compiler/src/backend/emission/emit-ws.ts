@@ -512,9 +512,15 @@ function cStr(s: string): string {
           // the only one with neither a diagnostic nor a source location:
           // it is untagged (no "[SCxxxx at file:line]"), so the zapo trap
           // census cannot see it, and the SITE census has nothing to see
-          // even in principle. It IS live in zapo's TU -- one throw, in
-          // sc_wsw_0's second-argument union switch, inside the websocket
-          // dial (estado-instruments section 2.3). SCRIPTC_TRAP_TRACE does
-          // observe it: scr_error.c filters on the SC-numeric code, not on
-          // the tag. Giving it a location needs one plumbed here; that is
-          // a design question, not a patch.
+          // even in principle -- this wrapper is interned PER CONSTRUCT
+          // SIGNATURE TYPE and shared by every `new` site, so there is no
+          // one location to name. SCRIPTC_TRAP_TRACE does observe it:
+          // scr_error.c filters on the SC-numeric code, not on the tag.
+          // Giving it a location needs one plumbed here; that is a design
+          // question, not a patch.
+          //
+          // Since wsInitBagPlan it is no longer the shape zapo dials with:
+          // zapo's bag is `{ protocols, headers, dispatcher, agent }` with
+          // the last two undefined, which lowers. What is left in zapo's
+          // TU is the two runtime `refuseIfPresent` tests -- a bag that
+          // really carries a proxy -- and a bag no plan can account for.
