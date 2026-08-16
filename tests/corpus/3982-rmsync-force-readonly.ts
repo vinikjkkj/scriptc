@@ -13,7 +13,7 @@
 // write bit governs), so it always answered correctly here — which is why
 // both platforms print the same lines below and Node stays the oracle for
 // both. Paths carry mkdtemp's random component, so nothing prints a path.
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -33,14 +33,19 @@ chmodSync(one, 0o444);
 rmSync(one, { force: true });
 console.log("file gone:", !existsSync(one));
 
-// A read-only file nested a level down, so the recursive walk (not just
-// the top-level unlink) takes the same path.
-const deep = join(d2, "sub");
+// A plain writable file still goes through the same forced unlink.
 writeFileSync(join(d2, "keep.txt"), "keep");
 rmSync(join(d2, "keep.txt"), { force: true });
 console.log("plain gone:", !existsSync(join(d2, "keep.txt")));
 
-// force still swallows a missing path, and the directory itself goes.
+// A read-only file nested a level down, so the RECURSIVE walk — not just
+// the top-level unlink — has to clear the attribute too.
+const deep = join(d2, "sub");
+mkdirSync(deep);
+writeFileSync(join(deep, "nested.txt"), "deep", { mode: 0o400 });
+console.log("nested written:", existsSync(join(deep, "nested.txt")));
+
+// force still swallows a missing path, and the whole tree goes.
 rmSync(join(d2, "never-existed"), { force: true });
 console.log("missing ok");
 rmSync(d2, { recursive: true, force: true });
