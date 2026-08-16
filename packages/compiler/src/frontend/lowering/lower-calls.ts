@@ -5112,6 +5112,40 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       );
       if (prim) return prim;
     }
+    // The ELEMENT spelling of a method call on a DYN receiver --
+    // `bits[t](true)`, and protobufjs's `p.call(this)[t](!0)` where `t` is
+    // "toLong" or "toNumber", chosen once at configure time and read out
+    // of a closure at every 64-bit field.
+    //
+    // JS's `o[k](...)` is Get(o, ToPropertyKey(k)) followed by Call WITH
+    // `o` BOUND -- the same two steps as `o.m(...)`, differing only in
+    // where the name comes from. The callee-as-value path below answers it
+    // with a keyed read plus a receiverless scr_dyn_call, and that DROPS
+    // the receiver: the member runs under whatever the ambient-receiver
+    // window holds, which is the ENCLOSING function's `this`. Measured on
+    // this tree before the fix, the same source expression `b[k]()`
+    // reported `this === undefined` from a plain function and
+    // `this === <the caller's receiver>` from a method -- so the failure is
+    // not even stable, it is a function of the call site.
+    //
+    // That is the whole reason a compiled zapo decoded every 64-bit
+    // protobuf field wrong: LongBits#toLong reads `this.lo`, gets
+    // undefined, and `0 | undefined` is 0, while LongBits#toNumber reads
+    // the same undefined and `undefined + 4294967296*undefined` is NaN.
+    // One dropped receiver, two spellings, and no diagnostic on either.
+    //
+    // The dot spelling already goes to scr_dyn_invoke for exactly this
+    // reason (see lowerDynReceiverMethodCall's closing comment); this is
+    // the same answer for the other spelling of the same expression.
+    if (
+      ts.isElementAccessExpression(expr.expression) &&
+      !expr.expression.questionDotToken &&
+      !expr.questionDotToken &&
+      !expr.arguments.some((a) => ts.isSpreadElement(a))
+    ) {
+      const keyed = lowerDynKeyedMethodCall(L, expr, expr.expression);
+      if (keyed) return keyed;
+    }
     // Everything else: evaluate the callee as a value and call through it
     // (func-typed locals/params/captures, self-recursion, IIFEs, results of
     // calls). tsc guarantees the callee is callable; anything that lowers to
@@ -5330,6 +5364,75 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       (a, i) =>
         ts.isSpreadElement(a) && (restAt < 0 || i < restAt || shapes[restAt]!.mode !== "rest"),
     );
+  }
+
+/** The ELEMENT spelling of a method call on a dyn receiver -- `o[k](...)`.
+   *
+   * Returns a `dynInvoke` carrying a RUNTIME key, or null when the receiver
+   * is not a dyn value (typed receivers keep their own lowerings) or the
+   * key cannot be reduced to a string with the same rule the keyed READ
+   * uses -- a string key rides, an f64 key takes toString, anything else
+   * declines and the historical callee-as-value path answers as before.
+   * Sharing that rule is deliberate: `o[k]` and `o[k]()` must not disagree
+   * about which member they name.
+   *
+   * The receiver's IR is reused, never re-lowered: the probe returns the
+   * expression TREE, so the committed node holds the same one.
+   *
+   * Order note, the same one the dot arm documents: the Get moves INSIDE
+   * the runtime call, so a nullish receiver's "Cannot read properties of
+   * undefined (reading 'k')" now fires after the arguments evaluate rather
+   * than before. Unchanged in message and in kind. */
+  function lowerDynKeyedMethodCall(L: Lowerer, call: ts.CallExpression,
+    access: ts.ElementAccessExpression,): IrExpr | null {
+    if (L.chainBlocked(call, access)) return null;
+    // Probe, then claim exactly the dyn results. A checker-`any` receiver
+    // can still lower to a real string (`cfg.host.trim()["toUpperCase"]()`)
+    // and a checker-TYPED spelling can still lower dyn (an evolving
+    // `let h = {}` flowing back out of a JS helper), so the RUNTIME world
+    // decides, not the checker's.
+    //
+    // The probes run under a diagnostic sink that is only DRAINED when the
+    // arm commits. probeLower re-pushes what it captured, and on the
+    // declining path the caller lowers the whole element access again --
+    // which would report the receiver's diagnostics twice, and a runtime
+    // fence twice is a trap-census entry that does not exist. Declining
+    // discards the capture instead, so a decline is exactly as if this
+    // function had never run.
+    const saved = L.diagSink;
+    const captured: ScrDiagnostic[] = [];
+    L.diagSink = captured;
+    const decline = (): null => {
+      L.diagSink = saved;
+      return null;
+    };
+    const recv = probeLower(L, access.expression);
+    if (recv?.type.kind !== "dyn") return decline();
+    const rawKey = probeLower(L, access.argumentExpression);
+    if (rawKey === null) return decline();
+    const key: IrExpr | null =
+      rawKey.type.kind === "string"
+        ? rawKey
+        : rawKey.type.kind === "f64"
+          ? { kind: "toString", operand: rawKey, type: STRING, loc: rawKey.loc }
+          : null;
+    if (key === null) return decline();
+    // committing: restore the sink, then replay what the probes said
+    L.diagSink = saved;
+    for (const d of captured) L.pushDiag(d);
+    const args = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
+    return {
+      kind: "dynInvoke",
+      recv,
+      // `method` is the diagnostic spelling only when a runtime key is
+      // present -- the runtime reads the key, not this string.
+      method: access.argumentExpression.getText(),
+      methodKey: key,
+      calleeName: access.getText(),
+      args,
+      type: DYN,
+      loc: locOf(call),
+    };
   }
 
 /** METHOD calls on dyn receivers (`pkg.name.replace(...)`, `rawName.split`,
