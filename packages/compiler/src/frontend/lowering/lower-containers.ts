@@ -866,14 +866,39 @@ function lowerOptionalDefaultArg(
     // avoid. So every arm of the element must have an IDENTICAL arm in the
     // parameter — total, no lift, no strand. `(Env | null)[]` handed to
     // `(e: Env | null | undefined) => R` is zapo's other two spellings.
+    //
+    // ...and the WIDTH COPY into an arm, which is neither of the two
+    // dispositions ruled out above. `discovery.ts:111` and `parse.ts:226`
+    // hand `.map` a named parser whose parameter is
+    // `WaNewsletterMetadataEnvelope | null | undefined` over arrays whose
+    // element is a structurally NARROWER record (no `state`, no
+    // `viewer_metadata`); tsc admits it because every field is optional.
+    // The copy that completes the absent optionals is exactly what a DIRECT
+    // call of the same function performs — `rows.map((r) => parseOne(r))`
+    // compiles today and emits precisely this conversion at the call
+    // argument — so refusing the by-reference spelling was refusing a
+    // program the compiler already knows how to write, in the spelling
+    // zapo used. Restricted to `liftWrap` and `width`: both are pure
+    // copies with no runtime test, unlike `narrow` (a union element into
+    // one arm — every other arm throws), `emptyArr` (a non-empty trap) and
+    // `dynIn` (the deep copy that would stop the callback seeing the
+    // array's own element). The copy IS a divergence from Node's aliasing,
+    // and it is the one SEMANTICS.md 35 already documents for the arrow
+    // spelling of the same call.
+    const widthCopyOnly = (w: IrType, p: IrType): boolean => {
+      const plan = L.widthLiftPlan(w, p);
+      return plan !== null && (plan.how === "liftWrap" || plan.how === "width");
+    };
     const rewrapOnly = (w: IrType, p: IrType): boolean => {
       if (typeEquals(w, p)) return true;
-      if (p.kind !== "union") return false;
+      if (p.kind !== "union") return widthCopyOnly(w, p);
       if (L.armTag(p.unionId, w) >= 0) return true;
-      if (w.kind !== "union") return false;
-      const arms = L.unions.get(w.unionId)?.arms;
-      if (arms === undefined || arms.length === 0) return false;
-      return arms.every((a) => L.armTag(p.unionId, a) >= 0);
+      if (w.kind === "union") {
+        const arms = L.unions.get(w.unionId)?.arms;
+        if (arms === undefined || arms.length === 0) return false;
+        return arms.every((a) => L.armTag(p.unionId, a) >= 0);
+      }
+      return widthCopyOnly(w, p);
     };
     const want = full.slice(0, fnArg.type.params.length);
     if (!fnArg.type.params.every((p, i) => typeEquals(p, want[i]!))) {
