@@ -3597,18 +3597,50 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         // facade cannot BUILD a union type, so a union whose arms unwrap
         // to more than one distinct type returns undefined by design. The
         // arms are already mapped, so the payload set is in hand.)
+        //
+        // Computed PART BY PART, under the same unit rule the outer union
+        // loop uses a hundred lines up: a `null` PART contributes the NULL_T
+        // arm, an `undefined`/`void` PART the UNDEFINED_T one. That symmetry
+        // is load-bearing here. STANDALONE `null` maps to the unit-only
+        // union (`null | undefined`), because a lone unit arm has no home of
+        // its own; splicing THAT mapping in as `Promise<null>`'s payload
+        // gives `Promise<null> | Promise<boolean>` the payload
+        // `bool | null | undefined`, while `Promise<boolean | null>` — the
+        // same type, one spelling apart — gets `bool | null`. Two IR types
+        // for one type is what made `Promise.all`'s tuple-field comparison
+        // decline zapo's `cond ? Promise.resolve(null) : requirePreKey(...)`
+        // (SignalProtocol.ts:441): the collapse landed, the payload was one
+        // arm wider than the position the checker typed, and the entry could
+        // not be matched against its own result tuple.
+        //
+        // Only NULL and UNDEFINED payloads take the part-wise rule. A `void`
+        // payload keeps whatever its standalone mapping gives, so
+        // `Promise<void> | Promise<T>` refuses exactly as it did before.
         const payloadByKey = new Map<string, IrType>();
         let payloadSpliceable = true;
-        for (const a of arms) {
-          if (a.kind !== "promise") continue;
+        for (const part of widened.getTypes()) {
+          if (part.flags & ts.TypeFlags.Never || intersectionUninhabited(part)) continue;
+          const awaited = checker.getAwaitedType(part);
+          if (awaited !== undefined && (awaited.flags & ts.TypeFlags.Undefined) !== 0) {
+            payloadByKey.set(typeKey(UNDEFINED_T), UNDEFINED_T);
+            continue;
+          }
+          if (awaited !== undefined && (awaited.flags & ts.TypeFlags.Null) !== 0) {
+            payloadByKey.set(typeKey(NULL_T), NULL_T);
+            continue;
+          }
+          const a = mapType(part, ctx);
+          if (a === null || a.kind !== "promise") {
+            payloadSpliceable = false;
+            break;
+          }
           // Mirror the outer branch's nested-union SPLICE. A payload is
-          // often ALREADY a union — `Promise<null>`'s payload is the
-          // unit-only union standalone `null` maps to, and `Promise<A | B>`
-          // beside `Promise<C>` is a three-arm payload. `(A | B) | C` IS
-          // `A | B | C`, and the flat set is exactly what a runtime tag
-          // has to tell apart. A PENDING placeholder cannot be spliced
-          // (the frame filling its arms is still running), so it keeps the
-          // fence rather than contributing an empty arm set.
+          // often ALREADY a union — `Promise<A | B>` beside `Promise<C>` is
+          // a three-arm payload. `(A | B) | C` IS `A | B | C`, and the flat
+          // set is exactly what a runtime tag has to tell apart. A PENDING
+          // placeholder cannot be spliced (the frame filling its arms is
+          // still running), so it keeps the fence rather than contributing
+          // an empty arm set.
           if (a.inner.kind === "union") {
             const inner = unions.get(a.inner.unionId);
             if (inner === undefined || unions.isPending(a.inner.unionId) || inner.arms.length === 0) {

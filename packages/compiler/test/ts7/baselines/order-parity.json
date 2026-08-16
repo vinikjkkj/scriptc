@@ -7625,6 +7625,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3991-all-promise-union-payload-is-part-wise.ts": {
+   "order": [
+    "<repo>/tests/corpus/3991-all-promise-union-payload-is-part-wise.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3992-guarded-counting-loop-fills-every-index.ts": {
+   "order": [
+    "<repo>/tests/corpus/3992-guarded-counting-loop-fills-every-index.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/400-fib.ts": {
    "order": [
     "<repo>/tests/corpus/400-fib.ts"
