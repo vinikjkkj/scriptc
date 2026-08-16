@@ -272,11 +272,46 @@ export function lowerExpr(L: Lowerer, expr: ts.Expression): IrExpr {
     }
     lowerExprDepth++;
     try {
-      return lowerExprInner(L, expr);
+      const out = lowerExprInner(L, expr);
+      if (LOWER_FP_ON) lowerFpAccum(expr, out);
+      return out;
     } finally {
       lowerExprDepth--;
     }
   }
+
+/* SCRIPTC_LOWER_FP=1: a per-program LOWERING FINGERPRINT — every lowered
+ * expression's syntax kind, IR kind and type KEY, folded into one hash and
+ * printed once at exit. Two compilers agree on a program's whole lowering iff
+ * they print the same `n=` and `h=` for it.
+ *
+ * This is the instrument for the question a predictive count cannot answer:
+ * "does a new lowering rule change any OTHER site's lowered type?" Sweep the
+ * corpus on both sides and diff the hashes — a rule that fires nowhere in the
+ * corpus must leave all 1246 fingerprints untouched, and if it does not, the
+ * hash names the program.
+ *
+ * The gate is a hoisted const, not a per-expression `process.env` read, so an
+ * ordinary build pays one already-predicted boolean test per lowered
+ * expression and nothing else. Same unset/empty/"0" contract as
+ * SCRIPTC_RC_AUDIT and SCRIPTC_TRAP_TRACE. */
+const LOWER_FP_ON = ((v) => v !== undefined && v !== "" && v !== "0")(process.env["SCRIPTC_LOWER_FP"]);
+let lowerFpH1 = 0x811c9dc5;
+let lowerFpH2 = 0x01000193;
+let lowerFpN = 0;
+function lowerFpAccum(expr: ts.Expression, out: IrExpr): void {
+  const s = `${expr.kind}|${out.kind}|${typeKey(out.type)}`;
+  for (let i = 0; i < s.length; i++) {
+    lowerFpH1 = Math.imul(lowerFpH1 ^ s.charCodeAt(i), 0x01000193) >>> 0;
+    lowerFpH2 = (Math.imul(lowerFpH2 + s.charCodeAt(i), 0x85ebca6b) ^ (lowerFpH2 >>> 13)) >>> 0;
+  }
+  lowerFpN++;
+}
+if (LOWER_FP_ON) {
+  process.on("exit", () => {
+    console.error(`[lowerfp] n=${lowerFpN} h=${lowerFpH1.toString(16)}${lowerFpH2.toString(16)}`);
+  });
+}
 
 /** The stdlib globals whose VALUE is a real OBJECT here rather than the
  * identifier chokepoint's opaque identity token — today exactly one.
@@ -2206,6 +2241,19 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
               L.mapTypeOf(L.typeOf(expr.expression))?.kind === "dyn")))
       ) {
         const recv = L.lowerExpr(expr.expression);
+        // SCRIPTC_LENGTH_WHY=1: what this gate's probe actually answered, per
+        // site. The gate's whole job is to decide from the VALUE rather than
+        // the mapped type, so "which kind did the probe hand back" is the
+        // measurement — it is how the array arm below was found to be missing
+        // (the probe was already running and its array answer was discarded)
+        // and how the arm's blast radius is measured before it is written.
+        if (process.env["SCRIPTC_LENGTH_WHY"] !== undefined) {
+          console.error(
+            `[lenwhy] .${expr.name.text} probe=${recv.type.kind}` +
+              ` checker=${L.checker.typeToString(L.typeOf(expr.expression)).slice(0, 70)}` +
+              ` at ${loc.file}:${loc.start}`,
+          );
+        }
         if (recv.type.kind === "dyn") {
           const key: IrExpr = { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr.name) };
           const opt = chainGuardedByQuestionDot(expr.expression);
@@ -2213,6 +2261,34 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             { kind: "dynKeyGet", key, ...(opt ? { optional: true as const } : {}), value: recv, type: DYN, loc },
             expr,
           );
+        }
+        // The probe answered a STATIC ARRAY. `readonly unknown[]` and
+        // `unknown[]` map to `dyn` WHOLE — not to an array of dyn — so the
+        // mapped receiver never reaches the array tables and this read fell
+        // out to the last-resort fence (`SC1090 reading 'length' from a value
+        // of type 'readonly unknown[]'`) on a program tsc accepts. The value
+        // is not dynamic: the widening `as` is erased at run time, so
+        // `(c ? (xs as readonly unknown[]) : []).length` LOWERS to an
+        // `array<string>` and the ordinary array intrinsic answers exactly
+        // what Node answers. This is lowerArrayMethodCall's rule for the
+        // METHOD side, one level in — "dispatch follows the value", with
+        // tsc's own word that the receiver IS an array as the gate above.
+        //
+        // `length` is the WHOLE read surface this can reach, from Node rather
+        // than from the code: `Object.getOwnPropertyNames([])` is exactly
+        // `["length"]`, and on a populated array the only additions are the
+        // index keys (element access, a different syntax node that already
+        // follows the value). Every other array member lives on
+        // Array.prototype and is a method.
+        //
+        // NO second evaluation and no discarded lowering: `recv` is the probe
+        // the gate already computed, now USED instead of thrown away, which
+        // is the one thing that was missing. A receiver whose value really is
+        // dynamic took the `dyn` arm above and is untouched; a receiver whose
+        // value is a tuple RECORD reaches neither arm and keeps its fence
+        // (handing arrIntrinsic a record ICEs the validator).
+        if (recv.type.kind === "array" && expr.questionDotToken === undefined) {
+          return { kind: "arrIntrinsic", method: "length", receiver: recv, args: [], type: F64, loc };
         }
       }
       // `f.name` / `f.length` / own properties on a FUNCTION-typed JS
