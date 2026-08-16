@@ -7,7 +7,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { UNSUPPORTED } from "../../diagnostics/diagnostic.js";
-import { BOOL, BYTES_U8, CHILD_T, DYN, F64, FILEHANDLE_T, IrExpr, IrLibFn, IrParam, IrStmt, IrStrIntrinsicMethod, IrType, RUNTIME_ERROR_CLASSES, SPAWNRES_T, STATS_T, STRING, SrcLoc, URL_T, VOID, arrayOf, funcOf, typeEquals, } from "../../ir/nodes.js";
+import { BOOL, BYTES_U8, CHILD_T, DYN, F64, FILEHANDLE_T, IrExpr, IrLibFn, IrParam, IrStmt, IrStrIntrinsicMethod, IrType, KEYOBJ, RUNTIME_ERROR_CLASSES, SPAWNRES_T, STATS_T, STRING, SrcLoc, URL_T, VOID, arrayOf, funcOf, typeEquals, } from "../../ir/nodes.js";
 import { STR_INTRINSIC_SIGS } from "../../ir/validate.js";
 import { isJsSourceFile, isNodeTypesPath, locOf, requireSpecOf } from "../program.js";
 
@@ -1766,70 +1766,6 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     return viaNode;
   }
 
-/** `diffieHellman` taken as a VALUE rather than called.
-   *
-   * A builtin function normally has no closure representation -- it lowers
-   * to a libCall at its call sites, so the bare identifier fences. One
-   * consumer shape needs the value itself: the runtime PROBE that asks
-   * whether this Node exposes a callback-taking diffieHellman, which binds
-   * the function at module scope and only calls it later, inside a try.
-   * Fencing the BINDING turns a probe the program is prepared to lose into
-   * a throw at import time, which is not what Node does -- there the bind
-   * succeeds and the probe answers.
-   *
-   * The lift is the perf.now.bind(performance) story: a real function over
-   * the same libCall, memoized per program. Only the single-signature
-   * options form spells, which is the only form that lowers as a call. */
-  export function diffieHellmanFnValueOf(L: Lowerer, expr: ts.Identifier): IrExpr | null {
-    const loc = locOf(expr);
-    const sigs = L.checker.getCallSignatures(L.typeOf(expr));
-    if (sigs.length !== 1) return null;
-    const params = sigs[0]!.getParameters();
-    if (params.length !== 1) return null;
-    const optT = L.mapTypeOf(L.checker.getTypeOfSymbol(params[0]!));
-    if (optT === null || optT === undefined || optT.kind !== "record") return null;
-    const shape = L.shapes.get(optT.shapeId);
-    const priv = shape?.fields.find((f) => f.name === "privateKey");
-    const pub = shape?.fields.find((f) => f.name === "publicKey");
-    if (!shape || !priv || !pub) return null;
-    if (priv.type.kind !== "keyobj" || pub.type.kind !== "keyobj") return null;
-
-    const bytesT: IrType = { kind: "bytes", elem: "u8" };
-    const name = "%crypto.diffieHellman.value";
-    if (!L.liftedFns.some((f) => f.name === name)) {
-      const optsId = "opts.0";
-      const read = (field: string, t: IrType): IrExpr => ({
-        kind: "recordGet",
-        obj: { kind: "varRef", localId: optsId, type: optT, loc },
-        shapeId: optT.shapeId,
-        field,
-        type: t,
-        loc,
-      });
-      L.liftedFns.push({
-        name,
-        params: [{ localId: optsId, name: "opts", type: optT }],
-        returnType: bytesT,
-        locals: [{ id: optsId, name: "opts", type: optT, mutable: false }],
-        body: [
-          {
-            kind: "return",
-            value: {
-              kind: "libCall",
-              fn: "key.dh",
-              args: [read("privateKey", priv.type), read("publicKey", pub.type)],
-              type: bytesT,
-              loc,
-            },
-            loc,
-          },
-        ],
-        loc,
-      });
-    }
-    return { kind: "closure", fnName: name, captures: [], type: funcOf([optT], bytesT), loc };
-  }
-
 /** `Object.getOwnPropertyNames` — and its twin `Object.keys` — taken as a
    * VALUE rather than called. The diffieHellman lift, one surface over.
    *
@@ -2119,6 +2055,39 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
     if (!ts.isPropertyAccessExpression(inner)) return null;
     return isObjectOwnKeysFnValue(L, inner) ? OBJECT_OWN_KEYS_FN_VALUE_T : null;
+  }
+
+/** The module-global slot type for a FILE-SCOPE declaration whose
+   * initializer is the bare `crypto.diffieHellman` builtin reference
+   * (`const dh = diffieHellman` -- 2717's shape, and the callback-probe
+   * binding in zapo's X25519 module). The declaration's own type is the
+   * DECLARED one, and under real @types/node that is an OVERLOAD SET (the
+   * synchronous options form plus the callback form), which maps nowhere;
+   * the VALUE maps, because diffieHellmanFnValue lifts it to a real
+   * closure. Exactly the objectStaticFnValueDeclType story one surface
+   * over, and it must be spelled here as well as in lowerVarDecl because
+   * the file-scope slot is chosen by collectGlobals before any initializer
+   * is lowered.
+   *
+   * The shipped FALLBACK declarations spell diffieHellman with ONE
+   * signature, so under them the declared type already mapped and nothing
+   * here fires: this function is reachable only in the real-@types/node
+   * world, which is the world the corpus was never in and zapo always is.
+   *
+   * Kept in step with diffieHellmanFnValue's own `fnT` by construction:
+   * both intern the same two-field options record and return u8 bytes. */
+  export function diffieHellmanFnValueDeclType(L: Lowerer, init: ts.Expression | undefined): IrType | null {
+    if (init === undefined) return null;
+    let inner: ts.Expression = init;
+    while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+    if (!ts.isIdentifier(inner)) return null;
+    const bi = L.builtinImportOf(inner);
+    if (!bi || bi.module !== "crypto" || bi.member !== "diffieHellman") return null;
+    const optsShape = L.shapes.intern([
+      { name: "privateKey", type: KEYOBJ },
+      { name: "publicKey", type: KEYOBJ },
+    ]);
+    return funcOf([{ kind: "record", shapeId: optsShape }], BYTES_U8);
   }
 
 /** `String.prototype.charCodeAt` — a STRING method taken as a VALUE — as a

@@ -18,7 +18,7 @@ import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRe
 import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestSlotType, nullishGenericBindingUnitOf } from "./lower-calls.js";
 import { isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
-import { objectStaticFnValueDeclType, stdlibGlobalAliasDecl } from "./surfaces.js";
+import { diffieHellmanFnValueDeclType, objectStaticFnValueDeclType, stdlibGlobalAliasDecl } from "./surfaces.js";
 import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-namespaces.js";
 import { collectExpandoMembers, expandoBindStmts } from "./lower-expando.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
@@ -1666,7 +1666,15 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // initializer.
             const objFnValueT =
               ts.isIdentifier(decl.name) && nameNode === decl.name
-                ? objectStaticFnValueDeclType(L, decl.initializer)
+                ? (objectStaticFnValueDeclType(L, decl.initializer) ??
+                  // `const dh = diffieHellman` at file scope, the same
+                  // story: under real @types/node the DECLARED type is an
+                  // overload set that maps nowhere while the VALUE is the
+                  // lifted key.dh closure. Without a slot the binding
+                  // fences on its type here, which is why 2717 was green
+                  // in the corpus's fallback world and red in the world
+                  // every real project (zapo included) compiles in.
+                  diffieHellmanFnValueDeclType(L, decl.initializer))
                 : null;
             if (isJsSourceFile(sf) && objFnValueT === null && !L.mapTypeOf(L.typeOf(nameNode))) continue;
             if (objFnValueT !== null && process.env["SCRIPTC_OBJFNVALUE_WHY"] !== undefined) {
