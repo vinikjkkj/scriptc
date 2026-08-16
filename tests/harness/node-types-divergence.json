@@ -15,6 +15,39 @@
     "TYPE": 34,
     "FENCE": 18
   },
+  "fenceClusters": {
+    "NOTE": [
+      "A SNAPSHOT, not a checked field: the FENCE entries grouped by the message",
+      "their emitter produces, measured once by block/realtypes against",
+      "@types/node 24.13.3. The test checks CODES, not messages, so nothing here",
+      "can turn a stale note into a green run -- and nothing keeps it fresh",
+      "either. Re-measure before trusting it: copy each FENCE program into",
+      "tests/fixtures/node-types/.divergence and read analyze()'s messages."
+    ],
+    "address() where the result is not the {address, family, port} record": [
+      "3604-optional-chained-http-request-members.ts",
+      "3791-http-client-abort-signal.ts",
+      "3792-http-client-optional-options.ts",
+      "3831-incoming-message-as-readable.ts",
+      "3832-incoming-message-readable-teardown.ts"
+    ],
+    "ChildProcessByStdio<null, Readable, Readable> and its members": [
+      "1565-spawn-pipe-streams.ts",
+      "1657-spawn-async-neutral.ts"
+    ],
+    "singletons": [
+      "1447-stdin-closed-events.ts: SC1090 reading 'length' off a value of type any",
+      "1448-stream-columns.ts: SC2020 process.stdout/stderr.columns as a plain number",
+      "1567-server-close-override.ts: SC1090 optional/defaulted parameters as a value",
+      "1677-emitter-listeners.ts: SC2020 'Function[].length'",
+      "1686-stream-readable-paused.ts: SC1090 method calls like 'rest.toString'",
+      "1693-stream-pipe-backpressure.ts: SC1043 comparing non-number, non-string values",
+      "1770-assert-dyn-strict.ts: SC2020 assert.strictEqual across number/string",
+      "2462-qs-stringify.ts: SC2020 querystring.stringify over a wide value union",
+      "2620-ee-override-once-order.ts and 2622-ee-override-filter.ts: SC1090 .join() element type",
+      "3193-child-stream-into-unknown-round-trip.ts: SC2003 union re-tag ordering"
+    ]
+  },
   "programs": [
     {
       "name": "1447-stdin-closed-events.ts",
