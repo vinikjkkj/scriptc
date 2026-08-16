@@ -2142,6 +2142,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // BORROWED by scr_dyn_invoke (temps release with the frame); the
         // result is owned and may ride a pending exception.
         const recv = E.emitExpr(e.recv);
+        // The ELEMENT spelling evaluates its key between the receiver and
+        // the arguments, which is JS's order for `o[k](a)`.
+        const keyv = e.methodKey === undefined ? null : E.emitExpr(e.methodKey);
         const args = e.args.map((a) => E.emitExpr(a));
         let argsExpr = "NULL";
         if (args.length > 0) {
@@ -2151,6 +2154,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         }
         const method = cStringLiteral(Buffer.from(e.method, "utf8"));
         const what = cStringLiteral(Buffer.from(e.calleeName, "utf8"));
+        if (keyv !== null) {
+          return E.fallibleTemp(
+            e.type,
+            `scr_dyn_invoke_key(${recv.name}, ${keyv.name}, ${argsExpr}, ${args.length}, ${what})`,
+          );
+        }
         return E.fallibleTemp(
           e.type,
           `scr_dyn_invoke(${recv.name}, ${method}, ${argsExpr}, ${args.length}, ${what})`,
@@ -3246,6 +3255,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           }
           case "url.new":
             return finish(`scr_url_new(${arg(0)})`);
+          case "url.newRel":
+            return finish(`scr_url_new_rel(${arg(0)}, ${arg(1)})`);
           case "url.protocol":
             return finish(`scr_url_protocol(${arg(0)})`);
           case "url.host":

@@ -7727,6 +7727,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4121-url-relative-resolution.ts": {
+   "order": [
+    "<repo>/tests/corpus/4121-url-relative-resolution.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4122-url-base-forms.ts": {
+   "order": [
+    "<repo>/tests/corpus/4122-url-base-forms.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/4131-union-intrinsic-arms-answer-length.ts": {
    "order": [
     "<repo>/tests/corpus/4131-union-intrinsic-arms-answer-length.ts"
@@ -9797,6 +9809,30 @@
   "<repo>/tests/fixtures/npm/cases/4064-umd-bang-prototype-conjunction/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/4064-umd-bang-prototype-conjunction/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/4111-protobuf-uint64-computed-key-receiver/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/4111-protobuf-uint64-computed-key-receiver/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/4112-computed-key-method-call-receiver-axes/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/4112-computed-key-method-call-receiver-axes/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/4113-object-literal-method-receiver-on-purpose/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/4113-object-literal-method-receiver-on-purpose/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/4114-keyed-method-call-reach-on-purpose/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/4114-keyed-method-call-reach-on-purpose/main.ts"
    ],
    "diags": []
   },
