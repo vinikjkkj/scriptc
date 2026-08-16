@@ -61,7 +61,7 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
     // the price-list mini packages (cases 4031-4032, 4061-4064) and the
     // computed-key receiver pair (4111-4112)
     ...globSync(
-      join(fixturesRoot, "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong,pbkeyrecv}/**/*.{js,json}"),
+      join(fixturesRoot, "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong,pbkeyrecv,litrecv}/**/*.{js,json}"),
     ).sort(),
   ];
   for (const f of inputs) hash.update(f).update(readFileSync(f));
@@ -719,6 +719,51 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(out).toContain("dotName         = self lo=5 hi=7");
     expect(nativeRes.stdout.toString("utf8")).toBe(out);
     expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
+  /* -- 4113: a PRICE LIST, found while gridding 4112 and DECLINED --------
+   *
+   * `o.m()` where `o` is an object LITERAL whose fields have no one common
+   * type lowers to a typed RECORD with a function-typed field, and the
+   * call through that field DROPS the receiver: `this` is undefined inside
+   * `m` where Node binds `o`. No diagnostic, no fence, nothing in the trap
+   * census -- a wrong ANSWER, which is the failure mode this repo has
+   * learned to fear most, and the same failure mode 4111 is about.
+   *
+   * It is NOT the bug 4111/4112 fix, and this pin exists to say so with a
+   * measurement instead of a sentence. That one was the checked-dynamic
+   * path; this one never reaches the dyn tier. Measured on base fbabf176
+   * and on the branch, on BOTH backends, all four cells identical:
+   *
+   *     Node    lit=self L     arrEl=self A0   ctor=self C
+   *     here    lit=undefined  arrEl=undefined ctor=self C
+   *
+   * `ctor` is the control: the same member shape on a CONSTRUCTED object
+   * binds correctly, so this is specific to the record lowering.
+   *
+   * The pin asserts the DIVERGENCE, so whoever closes it gets a red test
+   * pointing at this note rather than a silent baseline drift.
+   */
+  test("4113: a method on an object literal loses its receiver (price list)", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4113-object-literal-method-receiver-on-purpose/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["litrecv"] });
+    expect(coverage.npmStatic).toEqual([{ package: "litrecv", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    // and there is no runtime fence either -- that is the whole complaint
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
+    const binary = await buildStatic(entry, ["litrecv"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    const node = nodeRes.stdout.toString("utf8");
+    const native = nativeRes.stdout.toString("utf8");
+    expect(node).toBe("lit   = self L\narrEl = self A0\nctor  = self C\n");
+    // THE PRICE, pinned exactly. When this fails, the gap closed.
+    expect(native).toBe("lit   = undefined\narrEl = undefined\nctor  = self C\n");
+    expect(native).not.toBe(node);
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
 
