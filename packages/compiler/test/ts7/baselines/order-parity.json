@@ -7837,6 +7837,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4241-array-and-tuple-tostring.ts": {
+   "order": [
+    "<repo>/tests/corpus/4241-array-and-tuple-tostring.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4243-as-cast-receiver-keeps-its-class.ts": {
+   "order": [
+    "<repo>/tests/corpus/4243-as-cast-receiver-keeps-its-class.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
@@ -9947,6 +9959,12 @@
   "<repo>/tests/fixtures/npm/cases/4181-monomorphized-var-hoisting/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/4181-monomorphized-var-hoisting/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/4242-dyn-prototype-method-read/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/4242-dyn-prototype-method-read/main.ts"
    ],
    "diags": []
   },
