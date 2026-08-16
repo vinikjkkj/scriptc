@@ -525,6 +525,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "abort.reason": "scr_abort_signal_reason",
   "abort.off": "scr_abort_signal_off",
   "url.new": "scr_url_new",
+  "url.newRel": "scr_url_new_rel",
   "url.protocol": "scr_url_protocol",
   "url.host": "scr_url_host",
   "url.hostname": "scr_url_hostname",
@@ -7091,6 +7092,9 @@ class LlEmitter {
         // BORROWED by scr_dyn_invoke; the result is owned and may ride a
         // pending exception.
         const recv = this.emitExpr(e.recv);
+        // The ELEMENT spelling evaluates its key between the receiver and
+        // the arguments, which is JS's order for `o[k](a)`.
+        const keyv = e.methodKey === undefined ? null : this.emitExpr(e.methodKey);
         const args = e.args.map((a) => this.emitExpr(a));
         let argsPtr = "null";
         if (args.length > 0) {
@@ -7103,11 +7107,18 @@ class LlEmitter {
           });
           argsPtr = arr;
         }
-        this.declare(`declare ptr @scr_dyn_invoke(ptr, ptr, ptr, i64, ptr)`);
         const t = B.tmp();
-        B.line(
-          `${t} = call ptr @scr_dyn_invoke(ptr ${recv.name}, ptr ${this.cstr(e.method)}, ptr ${argsPtr}, i64 ${args.length}, ptr ${this.cstr(e.calleeName)})`,
-        );
+        if (keyv !== null) {
+          this.declare(`declare ptr @scr_dyn_invoke_key(ptr, ptr, ptr, i64, ptr)`);
+          B.line(
+            `${t} = call ptr @scr_dyn_invoke_key(ptr ${recv.name}, ptr ${keyv.name}, ptr ${argsPtr}, i64 ${args.length}, ptr ${this.cstr(e.calleeName)})`,
+          );
+        } else {
+          this.declare(`declare ptr @scr_dyn_invoke(ptr, ptr, ptr, i64, ptr)`);
+          B.line(
+            `${t} = call ptr @scr_dyn_invoke(ptr ${recv.name}, ptr ${this.cstr(e.method)}, ptr ${argsPtr}, i64 ${args.length}, ptr ${this.cstr(e.calleeName)})`,
+          );
+        }
         const out = this.own({ name: t, type: e.type });
         this.emitPendingCheck();
         return out;

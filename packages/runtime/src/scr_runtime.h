@@ -2785,6 +2785,7 @@ const char *scr_fs_err_path(const ScrStr *path, char *buf /* PATH_MAX */);
 typedef struct ScrUrl ScrUrl;
 
 ScrUrl *scr_url_new(ScrStr *input); /* +1, or throws */
+ScrUrl *scr_url_new_rel(ScrStr *input, ScrUrl *base); /* +1, or throws */
 ScrUrl *scr_url_retain(ScrUrl *u);
 void scr_url_release(ScrUrl *u);
 void *scr_url_retain_v(void *p);
@@ -3967,6 +3968,20 @@ bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b);
  * function"; OBJ receivers call the own member. recv/args borrowed,
  * result owned (+1). MAY THROW (NULL with the exception pending). */
 ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc, const char *what);
+/* The ELEMENT spelling of the same dispatch -- `recv[k](...)` where the key
+ * is a runtime string. JS's o[k](...) is Get(o, ToPropertyKey(k)) followed
+ * by Call with `o` bound, exactly like the dot form, so this is
+ * scr_dyn_invoke over a key the caller already reduced to a string with
+ * the SAME rule the keyed READ uses (a string key rides, an f64 key takes
+ * toString) -- `o[k]` and `o[k]()` cannot disagree about which member they
+ * mean. protobufjs's 64-bit reader is exactly this shape:
+ * `p.call(this)[t](!0)`, where `t` is "toLong" or "toNumber" chosen once
+ * at configure time. recv/key/args borrowed, result owned (+1). MAY THROW.
+ *
+ * NARROWING, stated: the dispatch below takes a NUL-terminated name, so a
+ * key holding an embedded NUL truncates there. The dot spelling cannot
+ * express such a name at all, and no shipped package in this corpus does. */
+ScrDyn *scr_dyn_invoke_key(ScrDyn *recv, const ScrStr *key, ScrDyn *const *args, size_t argc, const char *what);
 /* Keyed read on a FUNC node: the own-property table first (defineProperties
  * writes land there), then "name" (the box's best-effort static name; ""
  * for anonymous) and "length" (the boxed arity). Returns +1, or NULL when
