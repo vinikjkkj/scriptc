@@ -58,6 +58,8 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
     ...globSync(join(pilotRoot, "**/node_modules/**/*.{js,mjs,cjs,json,d.ts}")).sort(),
     // the bundler-emitted-CJS mini packages (cases 2465-2469, 2556-2557)
     ...globSync(join(fixturesRoot, "npm/node_modules/gt*/**/*.{js,json}")).sort(),
+    // the price-list mini packages (cases 4031-4032)
+    ...globSync(join(fixturesRoot, "npm/node_modules/{bangvoid,protolong}/**/*.{js,json}")).sort(),
   ];
   for (const f of inputs) hash.update(f).update(readFileSync(f));
   const key = hash
@@ -481,6 +483,68 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     ]);
     expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
     expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+  }, 180_000);
+
+  /* ── 4031-4032: the UMD wrapper's forcing `!`, and the wall behind it ─
+   * A PRICE LIST, in the shape tests/corpus spells `-on-purpose`: the
+   * lowering that closes 4032 was written, measured on zapo, and REVERTED
+   * (see the revert commit). Both pins pass today because both refusals
+   * stand, and each fails the moment its construct lands — which is the
+   * point, because the next reader needs the ORDER, not the count.
+   *
+   * 4032 is zapo's own shape. A shipped package whose entire module body
+   * is `!function(root, factory){…}(globalRef, factory)`: the wrapper
+   * returns nothing, so `ensureBool` meets a `void` operand it has no arm
+   * for and the WHOLE module factory becomes one SC2001 fence. In zapo
+   * that factory is `node_modules/long/umd/index.js`, which is why a
+   * compiled zapo has never had `Long`, and why this fence is one of the
+   * two traps a plain QR run actually executes — at module init, before
+   * zapo's first log line.
+   *
+   * 4031 is why 4032 cannot simply be closed. Let the factory run and
+   * protobufjs decodes 64-bit fields as Long INSTANCES; zapo's
+   * `notAfter?: (number|Long|null)` then meets the emitted record matcher,
+   * which reads members with `scr_dyn_obj_get` — OWN-ONLY by construction,
+   * as its own header says — while a Long carries `toNumber` on its
+   * PROTOTYPE. No arm matches, the union coercion throws at `$.notAfter`,
+   * and zapo's noise handshake dies where it used to print a QR. 4031 is
+   * that wall with nothing else in it, and the shape of it is the alarming
+   * part: ten statements, ZERO fences, `coverage` says "fully static", and
+   * the binary still throws. No trap census can see this one.
+   */
+  test("4032: the UMD wrapper's forcing ! is still refused at the module factory", () => {
+    const entry = join(fixturesRoot, "npm/cases/4032-bang-void-umd-on-purpose/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["bangvoid"] });
+    expect(coverage.npmStatic).toEqual([{ package: "bangvoid", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0); // it BUILDS; the fence is runtime
+    const fences = coverage.runtimeFences ?? [];
+    expect(fences).toHaveLength(1);
+    expect(fences[0]?.code).toBe("SC2001");
+    expect(fences[0]?.message).toMatch(/values of type 'void' cannot be compiled yet/);
+  }, 120_000);
+
+  test("4031: a checked cast to a record with a method cannot see the prototype", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4031-prototype-method-record-cast-on-purpose/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["protolong"] });
+    expect(coverage.npmStatic).toEqual([{ package: "protolong", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    // The part that makes this dangerous: NOTHING is deferred. A trap
+    // census over this program reports a clean bill of health.
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
+    const binary = await buildStatic(entry, ["protolong"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    // The ONE assertion in this file that is not a byte-match, and it is
+    // inverted on purpose: Node answers, the binary throws
+    // `TypeError: expected function at $.toNumber, got undefined`.
+    expect(nodeRes.stdout.toString("utf8")).toBe("7 0 false 7\n");
+    expect(nodeRes.exitCode).toBe(0);
+    expect(nativeRes.stdout.toString("utf8")).toBe("");
+    expect(nativeRes.exitCode).not.toBe(0);
   }, 180_000);
 
   /* ── 2556-2557: esbuild's __toESM interop around EXTERNAL (unbundled)
