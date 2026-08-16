@@ -63,7 +63,7 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
     ...globSync(
       join(
         fixturesRoot,
-        "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong,pbkeyrecv,litrecv,keyedreach,keyedstrnum,recvmech,vshadow,tostrreach}/**/*.{js,json}",
+        "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong,pbkeyrecv,litrecv,keyedreach,keyedstrnum,recvmech,vshadow,tostrreach,protoread}/**/*.{js,json}",
       ),
     ).sort(),
   ];
@@ -846,16 +846,34 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
    * closed separately in 4151 -- which is why closing it moved three rows
    * here and left m1* untouched.
    *
-   * A FINDING NOT PREVIOUSLY RECORDED: the keyed READ and the keyed CALL
-   * resolve DIFFERENTLY. m2CallInhElem answers `true` while m2ReadInhElem
-   * answers `undefined` for the same member on the same object --
-   * scr_dyn_invoke walks the prototype chain, sc_dyn_key_get does not.
-   * m2ReadInhDot shows the DOT read is equally blind and m5ReadElem shows
-   * it is not specific to objects. Node says `function` to all three.
-   * Silent, no diagnostic, nothing in the trap census. Priced, not closed:
-   * making the dyn read walk the prototype chain is a change to what every
-   * `o[k]` in the corpus returns, which is not a thing to do on evidence
-   * gathered about method calls.
+   * MECHANISM 3, and it is now CLOSED: the keyed READ and the keyed CALL
+   * resolved DIFFERENTLY. m2CallInhElem answered `true` while
+   * m2ReadInhElem answered `undefined` for the same member on the same
+   * object; m2ReadInhDot showed the DOT read was equally blind and
+   * m5ReadElem that it was not specific to objects. Node says `function`
+   * to all of them. Silent, no diagnostic, nothing in the trap census --
+   * and the exact shape that makes a program feature-detecting with
+   * `if (o[k])` or `typeof o[k] === "function"` take the wrong branch.
+   *
+   * The attribution this case shipped with was half right and is worth
+   * keeping straight: scr_dyn_obj_key_get DOES walk the stored prototype
+   * chain, and always did. What it has no counterpart for is
+   * Object.prototype's methods and every PRIMITIVE prototype's, which
+   * this runtime holds as C branches inside scr_dyn_invoke.c, reachable
+   * from the CALL and from nowhere else. So the read had nothing to walk,
+   * not a walk it skipped. scr_dyn_intrinsic_method_get is the read's
+   * half of that same dispatch: it answers a callable bound to the
+   * receiver for exactly the names the dispatch implements or fences
+   * LOUDLY by name, and nothing else -- so the read can never claim a
+   * member the call would deny. Corpus 4242 walks that set row by row.
+   *
+   * The price the old note quoted -- "a change to what every `o[k]` in
+   * the corpus returns" -- was the right thing to be careful about and
+   * is answered by measurement rather than by argument: the answer only
+   * moves where the walk MISSED and the key names a real prototype
+   * method of the receiver's kind, which is the case Node answers too.
+   * Own members, `in`, Object.keys, JSON and structuredClone are
+   * own-only and untouched. The differential lanes are the evidence.
    *
    * CONTROLS BOTH WAYS: m1CtorControl (a constructed receiver binds, so
    * the dyn tier is not what is broken) and m1NoThisControl (a record
@@ -893,26 +911,53 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(rows.get("m1CallDotFromMethod")).toBe("obj tag=OUTER");
     expect(node.includes("m1CallDotFromMethod = obj tag=L")).toBe(true);
 
-    // -- MECHANISM 2: MEMBER RESOLUTION. Nothing resolved, so nothing to
-    // bind -- which is why 4151 closed the CALL rows below without
-    // touching either READ row.
-    expect(rows.get("m3ReadElem")).toBe("undefined");
-    expect(rows.get("m4ReadElem")).toBe("undefined");
+    // -- MECHANISM 2: MEMBER RESOLUTION, closed in two halves. 4151
+    // closed the CALL rows; the READ rows were a SECOND resolution gap
+    // in the same place and are closed now, so these agree with Node.
+    expect(rows.get("m3ReadElem")).toBe("function");
+    expect(rows.get("m4ReadElem")).toBe("function");
     expect(rows.get("m3CallElem")).toBe("[ab]");
     expect(rows.get("m4CallElem")).toBe("5");
     expect(rows.get("m3CallElem")).toBe(rows.get("m3CallDot"));
     expect(rows.get("m4CallElem")).toBe(rows.get("m4CallDot"));
 
-    // -- MECHANISM 3: the READ/CALL asymmetry, priced not closed.
+    // -- MECHANISM 3: the READ/CALL asymmetry -- CLOSED. Every one of
+    // these read `undefined` on base while the CALL beside it answered.
     expect(rows.get("m2CallInhElem")).toBe("true");
-    expect(rows.get("m2ReadInhElem")).toBe("undefined");
-    expect(rows.get("m2ReadInhDot")).toBe("undefined");
-    expect(rows.get("m5ReadElem")).toBe("undefined");
+    expect(rows.get("m2ReadInhElem")).toBe("function");
+    expect(rows.get("m2ReadInhDot")).toBe("function");
+    expect(rows.get("m5ReadElem")).toBe("function");
     expect(rows.get("m5CallElem")).toBe("1-2-3-4");
-    // Node disagrees with every one of those four reads.
+    // Node's answer for the row, quoted rather than assumed.
     expect(node.includes("m2ReadInhElem       = function")).toBe(true);
+    // The READ and the CALL now agree about every member either can
+    // name, which is the property the close is about -- asserted as a
+    // relation between the rows, not as two constants that happen to
+    // match. Corpus 4242 walks the whole listed set the same way.
+    for (const [read, call] of [
+      ["m2ReadOwnElem", "m2CallOwnElem"], ["m2ReadInhElem", "m2CallInhElem"],
+      ["m2ReadInhDot", "m2CallInhDot"], ["m3ReadElem", "m3CallElem"],
+      ["m4ReadElem", "m4CallElem"], ["m5ReadElem", "m5CallElem"],
+    ] as const) {
+      // the READ says the member is a function...
+      expect(`${read}=${rows.get(read)}`).toBe(`${read}=function`);
+      // ...and the CALL beside it does not answer "is not a function".
+      expect(`${call}:${(rows.get(call) ?? "").includes("is not a function")}`).toBe(`${call}:false`);
+    }
 
-    // The divergence is asserted, not merely described.
+    // STILL DIVERGENT, and now the ONLY divergence left in this case:
+    // the three m1 rows, which are 4113's receiver BINDING and a
+    // different mechanism (the decisive m1CallDotFromMethod row above
+    // says so). Ten of 25 lines differed from Node on base; three do
+    // now, and all three are m1.
+    const nodeRows = new Map(
+      node.split("\n").filter((l) => l.includes(" = "))
+        .map((l) => [l.slice(0, l.indexOf(" = ")).trim(), l.slice(l.indexOf(" = ") + 3)] as const),
+    );
+    const differing = [...rows.keys()].filter((k) => rows.get(k) !== nodeRows.get(k));
+    expect(differing.sort()).toEqual(["m1CallDot", "m1CallDotFromMethod", "m1CallElem"]);
+
+    // The remaining divergence is asserted, not merely described.
     expect(native).not.toBe(node);
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
@@ -1074,6 +1119,111 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(native).not.toBe(node);
     expect(node.includes("rSplitFenced   = a,b")).toBe(true);
     expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
+  /* -- 4242: the dyn prototype-method READ, gridded -----------------------
+   *
+   * BYTE-IDENTICAL to Node v25.9.0, 38 rows, on both backends. On base
+   * 15 of those 38 differ -- and one of the fifteen is `detect`, a
+   * feature-detecting `if (o[k])` that took the WRONG BRANCH.
+   *
+   * The gap: Object.prototype's methods and every primitive prototype's
+   * exist in this runtime as C branches inside scr_dyn_invoke.c,
+   * reachable from the CALL and from nowhere else. The READ walked own
+   * members and the STORED prototype chain -- which scr_dyn_obj_key_get
+   * really does walk -- missed, and answered the undefined singleton. So
+   * `o[k]("hasOwnProperty")` answered true while `typeof o[k]` answered
+   * undefined, for the same member on the same object. 4153 found four
+   * rows of that and priced it; this is the grid and the close.
+   *
+   * SILENT: no diagnostic, nothing in the trap census, and the trap
+   * census cannot ever see it -- which is why the pin is a program that
+   * runs and is diffed against Node, not a probe's CLEAN.
+   *
+   * THE CONTRACT, and it is two-sided on purpose. scr_dyn_intrinsic_method_get
+   * answers for EXACTLY the names the dispatch implements or fences
+   * LOUDLY by name. So:
+   *   - `strSplit` reads `function`: String.prototype HAS split, this
+   *     runtime fences it (the regex family, 4152), and Node says
+   *     `function`. Reading `undefined` was a lie about the MEMBER where
+   *     the truth is a missing IMPLEMENTATION.
+   *   - `objPush`/`objTrim`/every `*Nope` row still reads `undefined`:
+   *     a read that simply started answering everything would pass all
+   *     the positive rows and be a worse bug than the one being closed.
+   *     These are the rows that say it did not.
+   *   - `shadowType`/`shadowVal`/`ownUndef`: an OWN member wins, and an
+   *     own member whose VALUE is undefined is still an own member.
+   *   - `bareHop`: a null-prototype dictionary inherits nothing.
+   *     protobufjs's `_listeners` maps are that shape.
+   *   - `keys`/`inOwn`/`hasOwnStatic`/`json`/`spread`: the OWN-only
+   *     surfaces did not move. They are own-only by construction
+   *     (scr_dyn_obj_get, not the [[Get]] walk), and these rows are the
+   *     evidence rather than the argument.
+   *   - `inProto`/`inProtoVar`/`inProtoArr`: `in` walks the chain, so it
+   *     has to report every name the read answers -- both the
+   *     literal-key spelling (dynHasKey) and the runtime-key one
+   *     (dyn.hasKey -> scr_dyn_has_key_full). Closing the read without
+   *     these would have traded one disagreement for another.
+   *
+   * ONE DIVERGENCE INTRODUCED, stated rather than hidden: the answer is
+   * BOUND to the receiver, where Node's `o.hasOwnProperty` is unbound.
+   * `const f = o[k]; f("a")` therefore answers here and throws in Node
+   * ("Cannot convert undefined or null to object", ESM being strict).
+   * It follows scr_dyn_obj_member_get, which already binds an inherited
+   * callable on read for the same reason -- unbinding HERE would make
+   * the record builder's read and the dyn read disagree, which is a
+   * fresh split of exactly the kind this closes. Recorded in 4153.
+   *
+   * THE LINK LINE: scr_dyn_intrinsic_method_get lives in the GATED unit,
+   * so a dyn keyed read (or `in`) now pulls scr_dyn_invoke.c. That is
+   * deliberate. A registration table installed only when the program
+   * happens to make a dyn method call elsewhere would make `typeof o[k]`
+   * answer differently in two programs that spell it identically -- a
+   * false-green machine, and a worse trade than the size class. Measured
+   * on a minimal keyed-read program: 651 776 -> 680 448 bytes.
+   */
+  test("4242: a dyn prototype method is a function when read, not only when called", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4242-dyn-prototype-method-read/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["protoread"] });
+    expect(coverage.npmStatic).toEqual([{ package: "protoread", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    const binary = await buildStatic(entry, ["protoread"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    const node = nodeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+    const native = nativeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+    const rows = new Map(
+      native.split("\n").filter((l) => l.includes(" = "))
+        .map((l) => [l.slice(0, l.indexOf(" = ")).trim(), l.slice(l.indexOf(" = ") + 3)] as const),
+    );
+    expect(rows.size).toBe(38);
+
+    // The whole program, byte for byte. Every row is Node's.
+    expect(native).toBe(node);
+    expect(nativeRes.exitCode).toBe(0);
+
+    // ...and the rows that carry the meaning, named, so a future change
+    // that keeps the totals and moves a row still fails here.
+    expect(rows.get("objHopElem")).toBe("function");   // was undefined
+    expect(rows.get("objHopDot")).toBe("function");    // was undefined
+    expect(rows.get("strSplit")).toBe("function");     // real member, loud fence
+    expect(rows.get("detect")).toBe("has");            // was "missing"
+    // The other side of the contract: a name the kind does NOT have.
+    expect(rows.get("objPush")).toBe("undefined");
+    expect(rows.get("objNope")).toBe("undefined");
+    expect(rows.get("strNope")).toBe("undefined");
+    expect(rows.get("detectNope")).toBe("missing");
+    // An own member, and a null prototype, both still win.
+    expect(rows.get("shadowVal")).toBe("7");
+    expect(rows.get("ownUndef")).toBe("undefined");
+    expect(rows.get("bareHop")).toBe("undefined");
+    // The own-only surfaces did not move.
+    expect(rows.get("keys")).toBe("a");
+    expect(rows.get("hasOwnStatic")).toBe("false");
+    expect(rows.get("json")).toBe('{"a":1}');
   }, 180_000);
 
   /* -- 4113: a PRICE LIST, found while gridding 4112 and DECLINED --------
