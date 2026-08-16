@@ -250,6 +250,27 @@ export class LlDyn {
     return t;
   }
 
+  /** The record BUILDER's read for a field that can hold a function:
+   * the same walk, +1, an INHERITED callable bound to the receiver. */
+  private memberGetLit(B: BlockBuilder, d: string, key: string): string {
+    this.host.declare(`declare ptr @scr_dyn_obj_member_get(ptr, ptr, i64)`);
+    const t = B.tmp();
+    const len = Buffer.byteLength(key, "utf8");
+    B.line(`${t} = call ptr @scr_dyn_obj_member_get(ptr ${d}, ptr ${this.host.cstr(key)}, i64 ${len}) ; .${key}`);
+    return t;
+  }
+
+  /** Can a record FIELD of this type end up holding a callable? Only such
+   * a field takes the binding (+1) read; see emit-walkers.ts. */
+  private mayHoldFunc(t: IrType): boolean {
+    if (t.kind === "func") return true;
+    if (t.kind === "union") {
+      const def = this.host.unionsById.get(t.unionId);
+      return def ? def.arms.some((a) => a.kind === "func") : false;
+    }
+    return false;
+  }
+
   /** Appends an ScrStr's bytes into a ScrJsonBuf (walkers' putScrStr). */
   private putScrStr(B: BlockBuilder, buf: string, s: string): void {
     this.host.declare(`declare void @scr_jb_putc(ptr, i8)`);
@@ -825,7 +846,16 @@ export class LlDyn {
         for (const f of shape.fields) {
           const fieldWant = host.cstr(this.dynDesc(f.type));
           const utag = f.type.kind === "union" ? host.undefinedArmTag(f.type) : -1;
-          const m = this.dataGetLit(B, "%d", f.name);
+          const bind = this.mayHoldFunc(f.type);
+          const m = bind ? this.memberGetLit(B, "%d", f.name) : this.dataGetLit(B, "%d", f.name);
+          // +1 in the binding case: released after the field is built and
+          // BEFORE the pending check, exactly as the C lane orders it (the
+          // absent arms never reach here — `m` is null there).
+          const dropM = () => {
+            if (!bind) return;
+            host.declare(`declare void @scr_dyn_release(ptr)`);
+            B.line(`call void @scr_dyn_release(ptr ${m})`);
+          };
           if (f.type.kind === "dyn") {
             // An `unknown` field: a present key passes through, a missing
             // one IS the undefined dyn value.
@@ -851,6 +881,7 @@ export class LlDyn {
             const v = B.tmp();
             B.line(`${v} = call ptr @${this.dynCheckHelper(f.type)}(ptr ${m}, ptr ${pathSlot})`);
             storeInto(f.name, f.type, v);
+            dropM();
             this.pendingBail(B, "dcr", releaseR, "ptr null");
             B.br(lj);
             B.startBlock(lj);
@@ -870,6 +901,7 @@ export class LlDyn {
             const v = B.tmp();
             B.line(`${v} = call ${this.valTy(f.type)} @${this.dynCheckHelper(f.type)}(ptr ${m}, ptr ${pathSlot})`);
             storeInto(f.name, f.type, v);
+            dropM();
             this.pendingBail(B, "dcr", releaseR, "ptr null");
           }
         }
