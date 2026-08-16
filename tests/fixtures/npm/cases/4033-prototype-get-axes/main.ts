@@ -12,6 +12,7 @@
 import { make, makeK, makeHidden, makeShadow, makeDeep, makeBare, makeData } from "protolong"
 
 interface LongLike { low: number; high: number; unsigned: boolean; toNumber(): number }
+interface LongDyn { low: number; high: number; unsigned: boolean; toNumber(): unknown }
 interface KLike { v: number; twice(): number }
 interface HiddenLike { m: number; n: number }
 interface ShadowLike { tag: string }
@@ -74,3 +75,18 @@ function show(s: Slot): string {
 }
 t("union-arm-inherited-data", () => show(makeData(9) as Slot))
 t("union-arm-number", () => show(5 as unknown as Slot))
+
+// The DISCRIMINATOR for what is left. Same arm as 4034's, same object,
+// same everything -- except `toNumber` is declared `(): unknown`, so the
+// TARGET signature is `func()=>dyn`, which is what a shipped package's
+// untyped function actually boxes as. It matches, the method is called
+// with the receiver bound, and it byte-matches Node. So the refusal 4034
+// prices is the exact-signature strcmp and nothing else: not the read,
+// not the binding, not the arm order.
+type DynSlot = number | LongDyn | null
+function showDyn(s: DynSlot): string {
+    if (s === null) return "null"
+    if (typeof s === "number") return `num ${s}`
+    return `long ${s.toNumber()}`
+}
+t("union-arm-method-typed-unknown", () => showDyn(make(7, 0) as DynSlot))
