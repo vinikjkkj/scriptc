@@ -5276,6 +5276,25 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     // above, for the other spelling of the same fire-and-forget idiom.
     // VALUE positions keep ensureBool's fence: an operand whose type has no
     // ToBoolean (a `void` call result, a bigint) still has no boolean there.
+    // DEPENDENCY, AND IT IS LOAD-BEARING: this rule is only safe on a tree
+    // whose emitted record read WALKS THE PROTOTYPE (scr_dyn_obj_data_get /
+    // scr_dyn_obj_member_get, merged as 528bcf74). IF THAT IS EVER REVERTED,
+    // THIS BLOCK MUST COME OUT IN THE SAME COMMIT.
+    // Measured as a 2x2 on zapo's QR gate, and the removal control failed 4
+    // runs of 4:
+    //   base                     QR=1 exit 0  ~1.4s   fires SC2001
+    //   base + prototype walk    QR=1 exit 0  ~0.9s   fires SC2001
+    //   base + THIS RULE         QR=0 exit 1  ~20s    fires SC1090   BROKEN
+    //   both                     QR=1 exit 0  ~1.0s   fires SC1090
+    // Letting the `long` factory RUN is what makes its objects real, and
+    // every method read off one then goes through the emitted record read.
+    // Own-only, that read cannot see a prototype, the methods come back
+    // missing, and the noise handshake never completes (the socket opens and
+    // closes 1006 thirteen to sixteen times).
+    // And note which way the instruments point: the trap census IMPROVES in
+    // the BROKEN configuration too (57/47/0 -> 56/46/0, the move is entirely
+    // this rule and independent of the record read), so the census cannot be
+    // used to judge this rule. Only running zapo can.
     if (ts.isPrefixUnaryExpression(expr) && expr.operator === ts.SyntaxKind.ExclamationToken) {
       return lowerExprStatement(L, expr.operand);
     }
