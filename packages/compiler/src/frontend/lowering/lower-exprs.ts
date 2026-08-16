@@ -10,7 +10,7 @@ import type { Lowerer, WidthLift } from "./lowerer.js";
 import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
-import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, diffieHellmanFnValueOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
+import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import { UNSUPPORTED, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, strCharsCall } from "./lower-containers.js";
@@ -1196,14 +1196,14 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           if (isJsSourceFile(expr.getSourceFile())) {
             return { kind: "strLit", value: `[builtin ${bi.module}.${bi.member}]`, type: STRING, loc };
           }
-          // The one builtin function with a lifted VALUE: a consumer binds
-          // diffieHellman at module scope to probe for a callback form it
-          // is prepared not to find. Node's bind succeeds there, so fencing
-          // it would throw at import time over a probe.
-          if (bi.module === "crypto" && bi.member === "diffieHellman") {
-            const lifted = diffieHellmanFnValueOf(L, expr);
-            if (lifted) return lifted;
-          }
+          // (The shape-probing diffieHellman lift that used to sit here was
+          // DEAD: the branch above returns unconditionally for the same
+          // `crypto.diffieHellman` test, so nothing ever reached it. Its
+          // `getCallSignatures(...).length !== 1` guard read like the reason
+          // this surface fenced under real @types/node -- which declares two
+          // signatures -- and it was not: the fence is on the BINDING's type,
+          // not on the reference. Removed so the next reader measures instead
+          // of patching a function with no callers.)
           if (builtinModuleFnOf(L, bi.module, bi.member)) {
             L.unsupported(
               "SC1090",
