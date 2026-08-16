@@ -2432,7 +2432,9 @@ function validateFunction(
             if (sk.elem.kind !== "f64") {
               err(`bytesNew array source must hold f64, got ${sk.elem.kind}`, e.loc);
             }
-          } else if (sk.kind !== "f64") {
+          } else if (sk.kind !== "f64" && sk.kind !== "dyn") {
+            // dyn: the runtime tag dispatch (scr_bytes_from_dyn) — the
+            // constructor's own overload set, decided at run time.
             err(`bytesNew source of kind ${sk.kind}`, e.loc);
           }
         }

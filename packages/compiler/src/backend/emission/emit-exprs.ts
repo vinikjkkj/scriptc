@@ -1241,6 +1241,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         if (e.source.type.kind === "array") {
           return E.newTemp(e.type, `scr_bytes_from_arr(${kind}, ${src.name})`);
         }
+        if (e.source.type.kind === "dyn") {
+          // The runtime tag dispatch: number → length (Node's RangeError
+          // on a bad one, hence the pending check), typed array → copy,
+          // array → element-wise ToNumber, anything else → empty.
+          const t = E.newTemp(e.type, `scr_bytes_from_dyn(${kind}, ${src.name})`);
+          E.emitPendingCheck();
+          return t;
+        }
         throw new Error(`emitter bug: bytesNew source of kind ${e.source.type.kind}`);
       }
       case "bytesIntrinsic": {

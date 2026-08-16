@@ -6340,6 +6340,15 @@ class LlEmitter {
           B.line(`${t} = call ptr @scr_bytes_from_arr(i32 ${kind}, ptr ${src.name})`);
           return this.own({ name: t, type: e.type });
         }
+        if (e.source.type.kind === "dyn") {
+          // The runtime tag dispatch (see emit-exprs.ts); the length form
+          // inside it can throw, so the pending check rides here too.
+          this.declare(`declare ptr @scr_bytes_from_dyn(i32, ptr)`);
+          B.line(`${t} = call ptr @scr_bytes_from_dyn(i32 ${kind}, ptr ${src.name})`);
+          const out = this.own({ name: t, type: e.type });
+          this.emitPendingCheck();
+          return out;
+        }
         throw new Error(`llvm emitter bug: bytesNew source of kind ${e.source.type.kind}`);
       }
       case "bytesIntrinsic":
