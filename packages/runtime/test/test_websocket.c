@@ -324,9 +324,28 @@ int main(void) {
           "upgrade request protocol header");
   }
   {
+    /* The init bag's headers: already-formed lines, appended verbatim
+       after the handshake's own and before the terminating CRLF. */
+    char req[512];
+    size_t n = scr_ws_build_request(req, sizeof req, "h", "/", "KKKK", "chat",
+                                    "Cookie: sticky_routing=\r\nX-Probe: 1\r\n");
+    check(n > 0 &&
+              strstr(req, "Sec-WebSocket-Protocol: chat\r\n"
+                          "Cookie: sticky_routing=\r\nX-Probe: 1\r\n\r\n") != NULL,
+          "upgrade request extra header block");
+    check(n >= 4 && memcmp(req + n - 4, "\r\n\r\n", 4) == 0,
+          "extra headers keep the terminator");
+  }
+  {
     char tiny[16];
     check(scr_ws_build_request(tiny, sizeof tiny, "host", "/", "KEY", NULL, NULL) == 0,
           "upgrade request overflow returns 0");
+  }
+  {
+    char tiny[64];
+    check(scr_ws_build_request(tiny, sizeof tiny, "host", "/", "KEY", NULL,
+                               "X-Very-Long: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n") == 0,
+          "extra headers that overflow return 0");
   }
 
   /* Response validation. The accept for key "x3JJHMbDL1EzLkh9GBhXDw==" is
