@@ -63,7 +63,7 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
     ...globSync(
       join(
         fixturesRoot,
-        "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong,pbkeyrecv,litrecv,keyedreach,tostrreach}/**/*.{js,json}",
+        "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong,pbkeyrecv,litrecv,keyedreach,keyedstrnum,recvmech,vshadow,tostrreach}/**/*.{js,json}",
       ),
     ).sort(),
   ];
@@ -791,14 +791,288 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // HONEST REFUSALS -- still failing, no longer lying about why
     expect(rows.get("dReduce")).toBe("THREW 'Array.prototype.reduce' on a dynamic value is not supported yet");
     expect(rows.get("dFlat")).toBe("THREW 'Array.prototype.flat' on a dynamic value is not supported yet");
-    // THE RESIDUAL GAP -- the dot twin answers, the element spelling does not
-    expect(rows.get("dUpper")).toBe("THREW s[K5] is not a function");
-    expect(rows.get("dToString")).toBe("THREW n[KB] is not a function");
+    // THE RESIDUAL GAP -- HALF CLOSED, and the two halves went different
+    // ways, which is the whole reason this row is worth reading.
+    //
+    // dToString: CLOSED, wrong -> Node-exact. Base said `THREW n[KB] is
+    // not a function`, which was a LIE (Node has Number.prototype.
+    // toString), and it now answers 5, the same as its dot twin.
+    //
+    // dUpper: NOT closed. It moved LIE -> honest refusal, which is
+    // progress of a different and lesser kind. The reason is a LINK-LINE
+    // one, not a semantic one: toUpperCase's only correct implementation
+    // is scr_str_case_conv in scr_regex.c, behind libregexp's Unicode case
+    // tables, and naming it from scr_dyn_invoke.c would pull the regex
+    // engine into every binary making any dyn method call. An ASCII-only
+    // inline conversion was refused: silently wrong for non-ASCII is worse
+    // than a fence. Pinned with its own row in 4152.
+    //
+    // The closed row is asserted EQUAL to its dot twin rather than to a
+    // literal, because equality of the two spellings is the property that
+    // was broken; the fenced row is asserted against its exact message,
+    // because the message is what changed.
+    expect(rows.get("dUpper")).toBe("THREW 'String.prototype.toUpperCase' on a dynamic value is not supported yet");
+    expect(rows.get("dToString")).toBe("5");
     expect(rows.get("tUpper")).toBe("AB");
     expect(rows.get("tToString")).toBe("5");
+    expect(rows.get("dToString")).toBe(rows.get("tToString"));
     // and a name nothing declares is still Node's own message, both ways
     expect(rows.get("dMissing")).toBe("THREW o[K6] is not a function");
     expect(rows.get("dNumMiss")).toBe("THREW n[K6] is not a function");
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
+  /* -- 4153: how many receiver mechanisms are there? (discriminator) -----
+   *
+   * Three gaps in this repo have each been described as "the receiver
+   * machinery". This case answers, by measurement, how many mechanisms
+   * that is -- and the answer is more than one, which is what the eleven
+   * previous "do these share a root?" investigations also found.
+   *
+   * THE DECISIVE ROW is m1CallDotFromMethod. It makes the failing call
+   * from inside a METHOD whose receiver is a different object (tag=OUTER).
+   * A call primitive that merely forgot to bind leaves the ambient `this`
+   * window holding the ENCLOSING frame's receiver, so the callee reports
+   * OUTER rather than undefined -- a POSITIVE signature, not an absence.
+   * It reports OUTER. That is the same signature block/varint measured for
+   * the dyn tier before it routed the element spelling through
+   * scr_dyn_invoke, and it proves the record-tier gap (4113) is that same
+   * mechanism at a second call primitive: lowerRecordFieldCall emits a
+   * `callValue` through a `recordGet`, and nothing on that path pushes.
+   *
+   * THE SAME ROWS PROVE THE OTHER TWO ARE NOT THAT. m3ReadElem/m4ReadElem
+   * read `undefined` where Node says `function`: the member never
+   * resolved, so there was never a `this` to drop. Member RESOLUTION, and
+   * closed separately in 4151 -- which is why closing it moved three rows
+   * here and left m1* untouched.
+   *
+   * A FINDING NOT PREVIOUSLY RECORDED: the keyed READ and the keyed CALL
+   * resolve DIFFERENTLY. m2CallInhElem answers `true` while m2ReadInhElem
+   * answers `undefined` for the same member on the same object --
+   * scr_dyn_invoke walks the prototype chain, sc_dyn_key_get does not.
+   * m2ReadInhDot shows the DOT read is equally blind and m5ReadElem shows
+   * it is not specific to objects. Node says `function` to all three.
+   * Silent, no diagnostic, nothing in the trap census. Priced, not closed:
+   * making the dyn read walk the prototype chain is a change to what every
+   * `o[k]` in the corpus returns, which is not a thing to do on evidence
+   * gathered about method calls.
+   *
+   * CONTROLS BOTH WAYS: m1CtorControl (a constructed receiver binds, so
+   * the dyn tier is not what is broken) and m1NoThisControl (a record
+   * method that never reads `this` is correct everywhere, so M1 pins one
+   * thing and not two). Both hold on both sides and both backends.
+   */
+  test("4153: the receiver gaps are not one mechanism (discriminator)", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4153-receiver-mechanism-discriminator-on-purpose/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["recvmech"] });
+    expect(coverage.npmStatic).toEqual([{ package: "recvmech", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    const binary = await buildStatic(entry, ["recvmech"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    const node = nodeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+    const native = nativeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+    const rows = new Map(
+      native.split("\n").filter((l) => l.includes(" = "))
+        .map((l) => [l.slice(0, l.indexOf(" = ")).trim(), l.slice(l.indexOf(" = ") + 3)] as const),
+    );
+    expect(rows.size).toBe(25);
+
+    // -- CONTROLS. If either of these fails the rest measures nothing.
+    expect(rows.get("m1CtorControl")).toBe("obj tag=C");
+    expect(rows.get("m1NoThisControl")).toBe("no-this-ok");
+
+    // -- MECHANISM 1: RECEIVER BINDING, via the ambient window.
+    // The member resolves...
+    expect(rows.get("m1ReadDot")).toBe("function");
+    // ...the call runs, and only `this` is wrong...
+    expect(rows.get("m1CallDot")).toBe("undefined");
+    // ...and it is wrong by LEAKING THE CALLER, which is the signature.
+    expect(rows.get("m1CallDotFromMethod")).toBe("obj tag=OUTER");
+    expect(node.includes("m1CallDotFromMethod = obj tag=L")).toBe(true);
+
+    // -- MECHANISM 2: MEMBER RESOLUTION. Nothing resolved, so nothing to
+    // bind -- which is why 4151 closed the CALL rows below without
+    // touching either READ row.
+    expect(rows.get("m3ReadElem")).toBe("undefined");
+    expect(rows.get("m4ReadElem")).toBe("undefined");
+    expect(rows.get("m3CallElem")).toBe("[ab]");
+    expect(rows.get("m4CallElem")).toBe("5");
+    expect(rows.get("m3CallElem")).toBe(rows.get("m3CallDot"));
+    expect(rows.get("m4CallElem")).toBe(rows.get("m4CallDot"));
+
+    // -- MECHANISM 3: the READ/CALL asymmetry, priced not closed.
+    expect(rows.get("m2CallInhElem")).toBe("true");
+    expect(rows.get("m2ReadInhElem")).toBe("undefined");
+    expect(rows.get("m2ReadInhDot")).toBe("undefined");
+    expect(rows.get("m5ReadElem")).toBe("undefined");
+    expect(rows.get("m5CallElem")).toBe("1-2-3-4");
+    // Node disagrees with every one of those four reads.
+    expect(node.includes("m2ReadInhElem       = function")).toBe(true);
+
+    // The divergence is asserted, not merely described.
+    expect(native).not.toBe(node);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
+  /* -- 4151: `o[k](...)` reaches String and Number methods --------------
+   *
+   * BYTE-IDENTICAL to Node v25.9.0, 30 lines, on both backends. On base
+   * 28 of those 30 lines differ, identically on both backends -- so the
+   * gap and its close are in the frontend/runtime, not a backend artifact.
+   *
+   * The gap was two disjoint tables in two languages. `s.toUpperCase()` on
+   * a dyn receiver never reaches the runtime: the frontend claims it out
+   * of DYN_STRING_ONLY_METHODS and rewrites it to a static intrinsic. The
+   * ELEMENT spelling cannot consult a compile-time table -- its key is a
+   * runtime value -- so it went to scr_dyn_invoke, whose STR arm held
+   * seven names and whose NUM receiver had no arm at all, and answered
+   * "is not a function" for names Node plainly has.
+   *
+   * That answer was a LIE, not a fence, and the worst-shaped one: it reads
+   * as a missing MEMBER rather than a missing IMPLEMENTATION, so a program
+   * feature-detecting with `if (s[k])` takes the wrong branch in silence.
+   *
+   * MEMBER RESOLUTION, NOT RECEIVER BINDING -- measured, not argued.
+   * `typeof s[k]` was `undefined` on base where Node says `function`: the
+   * member never resolved, so there was never a `this` to drop. That is
+   * what separates this from 4113 below, where the member DOES resolve,
+   * the call DOES run, and only the receiver is wrong. Two gaps that both
+   * look like "the receiver machinery" and are not one mechanism.
+   *
+   * Every row is asserted against its own DOT twin as well as against
+   * Node, because equality of the two spellings is the property that was
+   * broken and the one a future change could break again.
+   */
+  test("4151: the element spelling reaches String and Number methods", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4151-keyed-string-number-methods/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["keyedstrnum"] });
+    expect(coverage.npmStatic).toEqual([{ package: "keyedstrnum", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    const binary = await buildStatic(entry, ["keyedstrnum"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    const node = nodeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+    const native = nativeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+    // A zero-denominator guard: a comparison of two empty strings is not a
+    // pass, and an assertion that never sees a row is not a measurement.
+    expect(node.split("\n").filter((l) => l.includes(" = ")).length).toBe(28);
+    expect(native).toBe(node);
+    // Every row computed its own verdict; not one may read DIFFER.
+    expect(native.includes("DIFFER")).toBe(false);
+    expect(native.includes("is not a function")).toBe(false);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
+  /* -- 4154: valueOf on a dyn receiver, and the shadowing control --------
+   *
+   * BYTE-IDENTICAL to Node v25.9.0, 9 lines, both backends. On base 5 of
+   * those 9 differ, and they differ in TWO different wrong ways for one
+   * name: `s.valueOf()` refused with SC1090 (the frontend's by-name
+   * decline) while `s[k]()` said "o[VO] is not a function" (the runtime's
+   * missing arm). Node answers valueOf for every receiver kind.
+   *
+   * THE CONTROL IS THE POINT of this case, not the fix. An Object.prototype
+   * arm that answered valueOf unconditionally would SHADOW a user's own
+   * member, which is the classic way this kind of change goes wrong.
+   * scr_dyn_invoke's OBJ arm does its own table lookup first and only falls
+   * through to dyn_object_proto_method on a miss, so it cannot -- and
+   * ownVoElem/ownVoDot/ownTsElem/ownTsDot/ownHopElem assert that. Those
+   * five rows pass on BASE too: they are not a claim about the change,
+   * they are the guard on it, and a guard that only holds after the change
+   * proves nothing.
+   *
+   * The moved rows assert IDENTITY (r === o), not a printed shape, because
+   * "returns the receiver" is the property and a structurally equal copy
+   * would satisfy a shape check while being the wrong answer.
+   *
+   * NOT MEASURED: a null-prototype dictionary, where Node throws for both
+   * spellings. Reaching that shape needs Object.setPrototypeOf, which is
+   * itself SC2020, so the row would fail for a reason this case is not
+   * about. Recorded as a gap rather than pinned wrongly.
+   */
+  test("4154: valueOf answers on every dyn kind, and own members still win", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4154-dyn-valueof-and-own-member-shadowing/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["vshadow"] });
+    expect(coverage.npmStatic).toEqual([{ package: "vshadow", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    const binary = await buildStatic(entry, ["vshadow"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    const node = nodeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+    const native = nativeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+    expect(node.split("\n").filter((l) => l.includes(" = ")).length).toBe(9);
+    // THE CONTROL, spelled out rather than left to the whole-output compare
+    expect(native.includes("ownVoElem   = OWN-VO")).toBe(true);
+    expect(native.includes("ownTsElem   = OWN-TS")).toBe(true);
+    expect(native.includes("ownHopElem  = OWN-HOP")).toBe(true);
+    // ...and identity, not shape
+    expect(native.includes("plainVoElem = true/")).toBe(true);
+    expect(native.includes("arrVoElem   = true/")).toBe(true);
+    expect(native).toBe(node);
+    expect(native.includes("is not a function")).toBe(false);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
+  /* -- 4152: what the element spelling still cannot do (price list) ------
+   *
+   * The residual after 4151, pinned so it cannot quietly become a lie
+   * again. Two of these rows are the good direction and two are not:
+   *
+   *   rSplitFenced / rToFixedFenced  LIE -> honest refusal. Base said
+   *     "s[SPL] is not a function" (Node has split); it now names the
+   *     unimplemented method. Still not Node's answer.
+   *   rSplitDot                      the DOT twin ANSWERS `a,b`, which is
+   *     what makes the row above an asymmetry rather than a shared gap.
+   *   rToFixedDot                    the dot twin refuses too, so toFixed
+   *     is the one name where both spellings agree and both are wrong.
+   *   rTrulyMissing                  the ANSWER is right, the MESSAGE is
+   *     not Node's: `s["nope"] is not a function` where Node prints
+   *     `s.nope is not a function`. Pre-existing, unchanged here.
+   */
+  test("4152: what a keyed String/Number call still refuses (price list)", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4152-keyed-strnum-residual-on-purpose/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["keyedstrnum"] });
+    expect(coverage.npmStatic).toEqual([{ package: "keyedstrnum", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    const binary = await buildStatic(entry, ["keyedstrnum"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    const node = nodeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+    const native = nativeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+    const rows = new Map(
+      native.split("\n").filter((l) => l.includes(" = "))
+        .map((l) => [l.slice(0, l.indexOf(" = ")).trim(), l.slice(l.indexOf(" = ") + 3)] as const),
+    );
+    expect(rows.size).toBe(7);
+    // THE PRICE, pinned exactly. When one of these fails, that gap closed.
+    //
+    // toUpperCase/toLowerCase are here for a LINK-LINE reason, not a
+    // semantic one: their only correct implementation is scr_str_case_conv
+    // in scr_regex.c, which reaches libregexp's Unicode case tables, and
+    // naming it from scr_dyn_invoke.c would pull the regex engine into
+    // every binary that makes any dyn method call. An ASCII-only inline
+    // conversion was refused outright -- it would be a silent wrong answer
+    // for non-ASCII, the failure mode this whole line of work is about.
+    expect(rows.get("rUpper")).toBe("THREW 'String.prototype.toUpperCase' on a dynamic value is not supported yet | AB | DIFFER");
+    expect(rows.get("rLower")).toBe("THREW 'String.prototype.toLowerCase' on a dynamic value is not supported yet | ab | DIFFER");
+    expect(rows.get("rSplitFenced")).toBe("THREW 'String.prototype.split' on a dynamic value is not supported yet");
+    expect(rows.get("rToFixedFenced")).toBe("THREW 'Number.prototype.toFixed' on a dynamic value is not supported yet");
+    expect(rows.get("rSplitDot")).toBe("a,b");
+    expect(rows.get("rTrulyMissing")).toBe('THREW s["nope"] is not a function');
+    // ...and the divergence from Node is asserted, not merely described.
+    expect(native).not.toBe(node);
+    expect(node.includes("rSplitFenced   = a,b")).toBe(true);
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
 
