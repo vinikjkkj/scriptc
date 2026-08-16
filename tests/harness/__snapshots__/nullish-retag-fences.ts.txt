@@ -1,6 +1,6 @@
-nullish-retag-fences.ts:27:17 - error SC1090: '??' on 'string[] | { from: string | undefined; tag: string | undefined } | undefined' (the non-nullish result is a sub-union; check a discriminant field first) is not supported yet
+nullish-retag-fences.ts:47:17 - error SC1090: '??' on 'string[] | { from: string | undefined; tag: string | undefined } | undefined' (the non-nullish result is a sub-union; check a discriminant field first) is not supported yet
 
-  26 | function forward(t: string[] | Opts | undefined): string {
-  27 |     return take((t as Opts | undefined) ?? {});
-     |                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  28 | }
+  46 | function forward(t: string[] | Opts | undefined): string {
+  47 |     return take((t as Narrow | undefined) ?? {});
+     |                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  48 | }
