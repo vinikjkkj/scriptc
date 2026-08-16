@@ -1200,6 +1200,19 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       recv->v.arr.len = newLen;
       return out;
     }
+    if (dyn_name_is(method, "toString")) {
+      /* Array.prototype.toString is join(",") and takes NO argument --
+       * `[1,2,3].toString(16)` is "1,2,3" in Node, the radix ignored. The
+       * DOT spelling reaches this through the dyn method surface now that
+       * a non-literal argument routes here instead of fencing in the
+       * frontend, so the name has to answer rather than refuse. One body:
+       * scr_dyn_to_string's ARR arm, the same one String(a) uses. */
+      ScrStr *s = scr_dyn_to_string(recv, NULL);
+      if (scr_exc_pending()) { if (s) scr_str_release(s); return NULL; }
+      ScrDyn *d = scr_dyn_new_str(s);
+      scr_str_release(s);
+      return d;
+    }
     if (dyn_arr_proto_unimpl(method)) {
       dyn_throw_unsupported("Array", method);
       return NULL;
