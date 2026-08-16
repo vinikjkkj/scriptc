@@ -154,6 +154,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "timers.immediateRef": { argTypes: [F64], result: F64 },
   "timers.immediateHasRef": { argTypes: [F64], result: BOOL },
   "timers.clearNoop": { argTypes: [], result: VOID },
+  "js.voidOperand": { argTypes: [], result: VOID },
   // Signal listeners are zero-param (the ambient shape); exit/stdin
   // callbacks carry program-dependent one-param shapes — null slots, the
   // libCall case checks them (child.onExit precedent).

@@ -2703,6 +2703,10 @@ export class Lowerer {
    * the instantiation context is appended so the user knows which concrete
    * types made the (source-anchored) construct fail. */
   pushDiag(diag: ScrDiagnostic): void {
+    if (process.env["SCRIPTC_DIAG_STACK"] !== undefined) {
+      console.error(`DIAGSTACK ${diag.code} ${String(diag.message).slice(0, 120)}\n` +
+        (new Error().stack ?? "").split("\n").slice(1, 16).join("\n"));
+    }
     const d = this.instantiationContext
       ? { ...diag, message: `${diag.message} (${this.instantiationContext})` }
       : diag;
