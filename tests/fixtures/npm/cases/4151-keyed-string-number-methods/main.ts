@@ -24,9 +24,7 @@
 // the call DOES run, and only the receiver is wrong.
 //
 // The residual -- names this deliberately does NOT implement -- is 4152.
-import { rUpper, rLower, rTrim, rTrimStart, rTrimEnd, rCharAt, rCharAtOob, rCharCodeAt, rCharCodeOob, rStartsWith, rStartsWithNo, rEndsWith, rSubstring, rSubstringOne, rRepeat, rRepeatZero, rPadStart, rPadStartFill, rPadEnd, rStrToString, rStrValueOf, rNumToString, rNumRadix2, rNumRadix16, rNumRadix36, rFracToString, rNumValueOf, rStrHasOwn, rNumHasOwn, rBoolToString } from "keyedstrnum"
-console.log("rUpper        = " + rUpper())
-console.log("rLower        = " + rLower())
+import { rTrim, rTrimStart, rTrimEnd, rCharAt, rCharAtOob, rCharCodeAt, rCharCodeOob, rStartsWith, rStartsWithNo, rEndsWith, rSubstring, rSubstringOne, rRepeat, rRepeatZero, rPadStart, rPadStartFill, rPadEnd, rStrToString, rStrValueOf, rNumToString, rNumRadix2, rNumRadix16, rNumRadix36, rFracToString, rNumValueOf, rStrHasOwn, rNumHasOwn, rBoolToString } from "keyedstrnum"
 console.log("rTrim         = " + rTrim())
 console.log("rTrimStart    = " + rTrimStart())
 console.log("rTrimEnd      = " + rTrimEnd())

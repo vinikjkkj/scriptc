@@ -593,7 +593,9 @@ static bool dyn_str_proto_unimpl(const char *m) {
   static const char *names[] = { "split", "replace", "replaceAll", "match",
     "matchAll", "search", "localeCompare", "normalize", "codePointAt",
     "toLocaleLowerCase", "toLocaleUpperCase", "isWellFormed", "toWellFormed",
-    "substr", NULL };
+    "substr",
+    /* Behind libregexp -- see the note in the STR arm. */
+    "toUpperCase", "toLowerCase", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
   return false;
 }
@@ -814,12 +816,23 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
      * reimplemented here; they fence loudly in dyn_str_proto_unimpl
      * below, which is a true statement where "is not a function" was a
      * false one. */
-    if (dyn_name_is(method, "toUpperCase") || dyn_name_is(method, "toLowerCase")) {
-      ScrStr *r = dyn_name_is(method, "toUpperCase") ? scr_str_to_upper(s) : scr_str_to_lower(s);
-      ScrDyn *d = scr_dyn_new_str(r);
-      scr_str_release(r);
-      return d;
-    }
+    /* toUpperCase/toLowerCase are NOT here, and the reason is a link-line
+     * one rather than a semantic one. Their only correct implementation is
+     * scr_str_case_conv in scr_regex.c, which reaches libregexp's Unicode
+     * case tables (lre_case_conv) for the non-ASCII half and the final-
+     * sigma rule. Naming it from this always-gated-together unit would put
+     * "scr_regex.c" in RUNTIME_UNIT_DEPS["scr_dyn_invoke.c"] and pull the
+     * vendored regex engine into every binary that makes ANY dyn method
+     * call -- which is the exact size-class property RUNTIME_UNIT_DEPS
+     * exists to protect, and a far worse trade than one fenced name.
+     *
+     * An ASCII-only inline conversion was considered and REFUSED: it would
+     * be a silent wrong answer for every non-ASCII string, which is the
+     * failure mode this whole line of work is about.
+     *
+     * So they fence, loudly and by name, through dyn_str_proto_unimpl
+     * below -- true where "is not a function" was false. Pinned as 4152.
+     */
     if (dyn_name_is(method, "trim") || dyn_name_is(method, "trimStart") ||
         dyn_name_is(method, "trimEnd")) {
       ScrStr *r = dyn_name_is(method, "trim")        ? scr_str_trim(s)

@@ -63,7 +63,7 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
     ...globSync(
       join(
         fixturesRoot,
-        "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong,pbkeyrecv,litrecv,keyedreach,keyedstrnum,recvmech}/**/*.{js,json}",
+        "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong,pbkeyrecv,litrecv,keyedreach,keyedstrnum,recvmech,vshadow}/**/*.{js,json}",
       ),
     ).sort(),
   ];
@@ -791,20 +791,30 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // HONEST REFUSALS -- still failing, no longer lying about why
     expect(rows.get("dReduce")).toBe("THREW 'Array.prototype.reduce' on a dynamic value is not supported yet");
     expect(rows.get("dFlat")).toBe("THREW 'Array.prototype.flat' on a dynamic value is not supported yet");
-    // THE RESIDUAL GAP, CLOSED. These two rows were the price list's whole
-    // remainder: `THREW s[K5] is not a function` and `THREW n[KB] is not a
-    // function`, which were LIES -- Node has toUpperCase and toString, and
-    // the dot twins in the same build answered them. block/recv gave
-    // scr_dyn_invoke's STR arm the names the frontend's
-    // DYN_STRING_ONLY_METHODS holds and its NUM receiver an arm at all, so
-    // the element spelling now answers what the dot spelling answers.
-    // The two columns are asserted EQUAL rather than each against a
-    // literal, because equality is the property that was broken.
-    expect(rows.get("dUpper")).toBe("AB");
+    // THE RESIDUAL GAP -- HALF CLOSED, and the two halves went different
+    // ways, which is the whole reason this row is worth reading.
+    //
+    // dToString: CLOSED, wrong -> Node-exact. Base said `THREW n[KB] is
+    // not a function`, which was a LIE (Node has Number.prototype.
+    // toString), and it now answers 5, the same as its dot twin.
+    //
+    // dUpper: NOT closed. It moved LIE -> honest refusal, which is
+    // progress of a different and lesser kind. The reason is a LINK-LINE
+    // one, not a semantic one: toUpperCase's only correct implementation
+    // is scr_str_case_conv in scr_regex.c, behind libregexp's Unicode case
+    // tables, and naming it from scr_dyn_invoke.c would pull the regex
+    // engine into every binary making any dyn method call. An ASCII-only
+    // inline conversion was refused: silently wrong for non-ASCII is worse
+    // than a fence. Pinned with its own row in 4152.
+    //
+    // The closed row is asserted EQUAL to its dot twin rather than to a
+    // literal, because equality of the two spellings is the property that
+    // was broken; the fenced row is asserted against its exact message,
+    // because the message is what changed.
+    expect(rows.get("dUpper")).toBe("THREW 'String.prototype.toUpperCase' on a dynamic value is not supported yet");
     expect(rows.get("dToString")).toBe("5");
     expect(rows.get("tUpper")).toBe("AB");
     expect(rows.get("tToString")).toBe("5");
-    expect(rows.get("dUpper")).toBe(rows.get("tUpper"));
     expect(rows.get("dToString")).toBe(rows.get("tToString"));
     // and a name nothing declares is still Node's own message, both ways
     expect(rows.get("dMissing")).toBe("THREW o[K6] is not a function");
@@ -888,7 +898,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // touching either READ row.
     expect(rows.get("m3ReadElem")).toBe("undefined");
     expect(rows.get("m4ReadElem")).toBe("undefined");
-    expect(rows.get("m3CallElem")).toBe("AB");
+    expect(rows.get("m3CallElem")).toBe("[ab]");
     expect(rows.get("m4CallElem")).toBe("5");
     expect(rows.get("m3CallElem")).toBe(rows.get("m3CallDot"));
     expect(rows.get("m4CallElem")).toBe(rows.get("m4CallDot"));
@@ -951,10 +961,63 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     const native = nativeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
     // A zero-denominator guard: a comparison of two empty strings is not a
     // pass, and an assertion that never sees a row is not a measurement.
-    expect(node.split("\n").filter((l) => l.includes(" = ")).length).toBe(30);
+    expect(node.split("\n").filter((l) => l.includes(" = ")).length).toBe(28);
     expect(native).toBe(node);
     // Every row computed its own verdict; not one may read DIFFER.
     expect(native.includes("DIFFER")).toBe(false);
+    expect(native.includes("is not a function")).toBe(false);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
+  /* -- 4154: valueOf on a dyn receiver, and the shadowing control --------
+   *
+   * BYTE-IDENTICAL to Node v25.9.0, 9 lines, both backends. On base 5 of
+   * those 9 differ, and they differ in TWO different wrong ways for one
+   * name: `s.valueOf()` refused with SC1090 (the frontend's by-name
+   * decline) while `s[k]()` said "o[VO] is not a function" (the runtime's
+   * missing arm). Node answers valueOf for every receiver kind.
+   *
+   * THE CONTROL IS THE POINT of this case, not the fix. An Object.prototype
+   * arm that answered valueOf unconditionally would SHADOW a user's own
+   * member, which is the classic way this kind of change goes wrong.
+   * scr_dyn_invoke's OBJ arm does its own table lookup first and only falls
+   * through to dyn_object_proto_method on a miss, so it cannot -- and
+   * ownVoElem/ownVoDot/ownTsElem/ownTsDot/ownHopElem assert that. Those
+   * five rows pass on BASE too: they are not a claim about the change,
+   * they are the guard on it, and a guard that only holds after the change
+   * proves nothing.
+   *
+   * The moved rows assert IDENTITY (r === o), not a printed shape, because
+   * "returns the receiver" is the property and a structurally equal copy
+   * would satisfy a shape check while being the wrong answer.
+   *
+   * NOT MEASURED: a null-prototype dictionary, where Node throws for both
+   * spellings. Reaching that shape needs Object.setPrototypeOf, which is
+   * itself SC2020, so the row would fail for a reason this case is not
+   * about. Recorded as a gap rather than pinned wrongly.
+   */
+  test("4154: valueOf answers on every dyn kind, and own members still win", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4154-dyn-valueof-and-own-member-shadowing/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["vshadow"] });
+    expect(coverage.npmStatic).toEqual([{ package: "vshadow", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    const binary = await buildStatic(entry, ["vshadow"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    const node = nodeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+    const native = nativeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+    expect(node.split("\n").filter((l) => l.includes(" = ")).length).toBe(9);
+    // THE CONTROL, spelled out rather than left to the whole-output compare
+    expect(native.includes("ownVoElem   = OWN-VO")).toBe(true);
+    expect(native.includes("ownTsElem   = OWN-TS")).toBe(true);
+    expect(native.includes("ownHopElem  = OWN-HOP")).toBe(true);
+    // ...and identity, not shape
+    expect(native.includes("plainVoElem = true/")).toBe(true);
+    expect(native.includes("arrVoElem   = true/")).toBe(true);
+    expect(native).toBe(node);
     expect(native.includes("is not a function")).toBe(false);
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
@@ -991,8 +1054,18 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
       native.split("\n").filter((l) => l.includes(" = "))
         .map((l) => [l.slice(0, l.indexOf(" = ")).trim(), l.slice(l.indexOf(" = ") + 3)] as const),
     );
-    expect(rows.size).toBe(5);
+    expect(rows.size).toBe(7);
     // THE PRICE, pinned exactly. When one of these fails, that gap closed.
+    //
+    // toUpperCase/toLowerCase are here for a LINK-LINE reason, not a
+    // semantic one: their only correct implementation is scr_str_case_conv
+    // in scr_regex.c, which reaches libregexp's Unicode case tables, and
+    // naming it from scr_dyn_invoke.c would pull the regex engine into
+    // every binary that makes any dyn method call. An ASCII-only inline
+    // conversion was refused outright -- it would be a silent wrong answer
+    // for non-ASCII, the failure mode this whole line of work is about.
+    expect(rows.get("rUpper")).toBe("THREW 'String.prototype.toUpperCase' on a dynamic value is not supported yet | AB | DIFFER");
+    expect(rows.get("rLower")).toBe("THREW 'String.prototype.toLowerCase' on a dynamic value is not supported yet | ab | DIFFER");
     expect(rows.get("rSplitFenced")).toBe("THREW 'String.prototype.split' on a dynamic value is not supported yet");
     expect(rows.get("rToFixedFenced")).toBe("THREW 'Number.prototype.toFixed' on a dynamic value is not supported yet");
     expect(rows.get("rSplitDot")).toBe("a,b");
