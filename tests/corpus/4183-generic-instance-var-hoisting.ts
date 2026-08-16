@@ -27,7 +27,9 @@
 //
 // 4181's npm-static twin reaches IR validation instead and reports
 // SC9001. One bug, two faces; this is the one an ordinary TypeScript
-// program can hit.
+// program can hit -- and THREE callers, not two: implicit-any JS
+// monomorphization (4181), generic FUNCTIONS (rows below), and generic
+// CLASSES (R8), which mint their instances in lower-classes.ts.
 //
 // CONTROLS, which behave identically on base: `cLet`/`cConst` (block
 // scoped bindings never enter hoistVarBinding at all) and `cOne` (the
@@ -91,6 +93,39 @@ function forward<T>(a: T): string {
     return before + "|" + peek()
 }
 
+// R8: a GENERIC CLASS. `lower-classes.ts` mints its own
+// `${family}%${ordinal}` instances and lowers each instance's METHOD
+// bodies, which is a third caller of the same hoistVarBinding -- neither
+// the npm-static implicit-any path nor the generic-FUNCTION path. On base
+// the second class instantiation is refused with the same false SC1030
+// ("instantiating class 'Box' with <string>"), and the first is accepted.
+class Box<T> {
+    v: T
+    constructor(v: T) { this.v = v }
+    describe(): string {
+        var k = typeof this.v
+        if (k !== "object") return k + "=" + String(this.v)
+        return "obj:" + k
+    }
+    // A second method with its own `var`, so the per-instance slot is not
+    // pinned by a single method's luck.
+    tagged(): string {
+        var t = typeof this.v
+        var n = t.length
+        return t + "#" + n
+    }
+}
+
+// CONTROL for R8: a generic class whose method uses `let`.
+class LetBox<T> {
+    v: T
+    constructor(v: T) { this.v = v }
+    describe(): string {
+        let k = typeof this.v
+        return k + "!"
+    }
+}
+
 // CONTROLS
 function cLet<T>(a: T): string {
     let x = typeof a
@@ -126,3 +161,13 @@ console.log("cLetStr   " + cLet<string>("a"))
 console.log("cConstNum " + cConst<number>(1))
 console.log("cConstStr " + cConst<string>("a"))
 console.log("cOneNum   " + cOne<number>(1))
+const bn = new Box<number>(7)
+const bs = new Box<string>("qq")
+console.log("boxNum    " + bn.describe())
+console.log("boxStr    " + bs.describe())
+console.log("tagNum    " + bn.tagged())
+console.log("tagStr    " + bs.tagged())
+const ln = new LetBox<number>(1)
+const ls = new LetBox<string>("a")
+console.log("cBoxNum   " + ln.describe())
+console.log("cBoxStr   " + ls.describe())
