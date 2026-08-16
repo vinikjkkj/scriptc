@@ -166,7 +166,7 @@ static bool scr_ws_append(char *out, size_t cap, size_t *p, const char *s) {
 
 size_t scr_ws_build_request(char *out, size_t cap, const char *host,
                             const char *path, const char *key_b64,
-                            const char *protocols) {
+                            const char *protocols, const char *extra) {
   size_t p = 0;
   bool ok = scr_ws_append(out, cap, &p, "GET ") &&
             scr_ws_append(out, cap, &p, path) &&
@@ -181,6 +181,10 @@ size_t scr_ws_build_request(char *out, size_t cap, const char *host,
     ok = scr_ws_append(out, cap, &p, "Sec-WebSocket-Protocol: ") &&
          scr_ws_append(out, cap, &p, protocols) &&
          scr_ws_append(out, cap, &p, "\r\n");
+  }
+  /* The caller's own header lines, verbatim and already terminated. */
+  if (ok && extra != NULL && extra[0] != '\0') {
+    ok = scr_ws_append(out, cap, &p, extra);
   }
   if (ok) ok = scr_ws_append(out, cap, &p, "\r\n");
   if (!ok) return 0;

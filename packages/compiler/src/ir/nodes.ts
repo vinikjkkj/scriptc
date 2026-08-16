@@ -7966,12 +7966,51 @@ export interface WsGlobalEventPlan {
  *  - "absent"   undefined/null — no Sec-WebSocket-Protocol header
  *  - "string"   the value verbatim
  *  - "strArray" joined with ", " (undici's list spelling, byte-checked)
- *  - "fence"    a shape with no WebSocket meaning (zapo's own
- *               `WaRawWebSocketInit` option bag, which only the `ws`
- *               package understands). Reached only if the program
+ *  - "init"     the `ws`/undici INIT BAG in the second position
+ *               (`new WebSocket(url, { protocols, headers })`). Node's
+ *               global WebSocket honours it -- measured against v25.9.0:
+ *               the bag's `headers` go out on the upgrade request, while
+ *               the same names in a THIRD argument are ignored by both
+ *               runtimes. So this arm is LOWERED, not fenced, whenever
+ *               wsInitBagPlan can account for every field of it.
+ *  - "fence"    a shape with no WebSocket meaning, or an init bag
+ *               carrying something this compiler cannot honour (a proxy
+ *               `dispatcher`/`agent`). Reached only if the program
  *               actually passes one; the arm throws the deferred fence
  *               rather than silently dropping headers on the floor. */
-export type WsProtocolsArm = "absent" | "string" | "strArray" | "fence";
+export type WsProtocolsArm = "absent" | "string" | "strArray" | "init" | "fence";
+
+/** One field of the init bag that this lowering cannot honour, and the
+ * runtime test that says whether the program actually supplied it. A bag
+ * with `dispatcher: undefined` is lowerable; the same bag with a real
+ * dispatcher is not, and the difference is only visible at runtime. */
+export interface WsInitRefusal {
+  /** The bag field's name (`dispatcher`, `agent`, ...). */
+  name: string;
+  /** `union`: present when the slot's tag is not `absentTag`.
+   *  `dyn`: present when the slot is truthy. */
+  kind: "union" | "dyn";
+  absentTag?: number;
+}
+
+/** The init bag, when scriptc can build the dial from it. Every field of
+ * the bag record is accounted for: `protocols` and `headers` are LOWERED,
+ * anything else must be provably absent at runtime (WsInitRefusal) or the
+ * deferred fence fires -- an unaccounted field would otherwise be dropped
+ * in silence, which is the failure this plan exists to prevent. */
+export interface WsInitBagPlan {
+  /** The bag record's shape. */
+  shapeId: string;
+  /** Which arm of the `protocols` parameter union the bag is. */
+  tag: number;
+  /** The bag's own `protocols`, planned exactly like the top-level one. */
+  protocols: { type: IrType; unionId?: string; arms: readonly WsProtocolsArm[] } | null;
+  /** The bag's `headers`: a string-keyed record with NO declared fields,
+   * so every entry lives in the overflow map the runtime flattens. */
+  headers: { unionId: string; valueTag: number; absentTag: number; recShapeId: string } | null;
+  /** Fields with no lowering, tested at runtime. */
+  refuseIfPresent: readonly WsInitRefusal[];
+}
 
 export interface WsGlobalPlan {
   /** The API record. */
@@ -7980,6 +8019,8 @@ export interface WsGlobalPlan {
   protocolsParam: IrType | undefined;
   /** Per-arm handling of `protocols`; empty when the signature has none. */
   protocolsArms: readonly WsProtocolsArm[];
+  /** The plan for the "init" arm, when there is one. */
+  initBag: WsInitBagPlan | null;
   /** Arity of the construct signature (1..3). Anything past `protocols`
    * is IGNORED, exactly as a browser's WebSocket ignores it. */
   arity: number;
@@ -8021,6 +8062,87 @@ function wsOptional(
   const layout = wsUnitArm(def.arms);
   if (!layout || !want(def.arms[layout.valueTag]!)) return null;
   return { unionId: t.unionId, ...layout };
+}
+
+/** The init bag's plan, or null when the bag carries something with no
+ * lowering. `protoArm` is the caller's arm classifier, reused so the
+ * bag's `protocols` is read by exactly the same rules as the top-level
+ * one -- two spellings of the same argument must not diverge. */
+function wsInitBagPlan(
+  a: IrType,
+  tag: number,
+  protoArm: (x: IrType) => WsProtocolsArm,
+  getRecord: (shapeId: string) => IrRecordShape | undefined,
+  getUnion: (unionId: string) => IrUnionDef | undefined,
+): WsInitBagPlan | null {
+  if (a.kind !== "record") return null;
+  const shape = getRecord(a.shapeId);
+  if (!shape || shape.tuple || shape.indexValue !== undefined || shapeHasAccessorSlots(shape)) {
+    return null;
+  }
+  let protocols: WsInitBagPlan["protocols"] = null;
+  let headers: WsInitBagPlan["headers"] = null;
+  const refuseIfPresent: WsInitRefusal[] = [];
+  for (const f of shape.fields) {
+    if (f.name === "protocols") {
+      let arms: WsProtocolsArm[];
+      let unionId: string | undefined;
+      if (f.type.kind === "union") {
+        const def = getUnion(f.type.unionId);
+        if (!def) return null;
+        arms = def.arms.map(protoArm);
+        unionId = f.type.unionId;
+      } else {
+        arms = [protoArm(f.type)];
+      }
+      // A bag whose own `protocols` is another bag is not a shape this
+      // unit can unfold, and nesting it would hide the same defect one
+      // level down.
+      if (arms.some((k) => k !== "absent" && k !== "string" && k !== "strArray")) return null;
+      protocols = unionId === undefined ? { type: f.type, arms } : { type: f.type, unionId, arms };
+      continue;
+    }
+    if (f.name === "headers") {
+      if (f.type.kind !== "union") return null;
+      const def = getUnion(f.type.unionId);
+      if (!def) return null;
+      const layout = wsUnitArm(def.arms);
+      if (!layout) return null;
+      const rec = def.arms[layout.valueTag]!;
+      if (rec.kind !== "record") return null;
+      const rshape = getRecord(rec.shapeId);
+      // `Record<string, string>` and nothing else: every entry lives in
+      // the overflow map, which is the only thing the runtime block
+      // builder can walk. A shape with declared fields would lose them.
+      if (!rshape || rshape.tuple || rshape.fields.length !== 0) return null;
+      if (rshape.indexValue === undefined || rshape.indexValue.kind !== "string") return null;
+      headers = {
+        unionId: f.type.unionId,
+        valueTag: layout.valueTag,
+        absentTag: layout.absentTag,
+        recShapeId: rec.shapeId,
+      };
+      continue;
+    }
+    // Everything else must be OPTIONAL, so the common case (the bag zapo
+    // builds, whose dispatcher and agent are undefined) lowers, and the
+    // uncommon one still refuses instead of dropping a proxy in silence.
+    if (f.type.kind === "dyn") {
+      refuseIfPresent.push({ name: f.name, kind: "dyn" });
+      continue;
+    }
+    if (f.type.kind === "union") {
+      const def = getUnion(f.type.unionId);
+      if (!def) return null;
+      const layout = wsUnitArm(def.arms);
+      if (!layout) return null;
+      refuseIfPresent.push({ name: f.name, kind: "union", absentTag: layout.absentTag });
+      continue;
+    }
+    return null;
+  }
+  if (protocols === null && headers === null) return null;
+  return { shapeId: a.shapeId, tag, protocols, headers, refuseIfPresent };
 }
 
 /** Structural proof that `t` is the WebSocket global's construct
@@ -8151,13 +8273,32 @@ export function wsGlobalPlan(
           : "fence";
   const protocolsParam = t.params[1];
   let protocolsArms: WsProtocolsArm[] = [];
+  let protocolsArmTypes: readonly IrType[] = [];
   if (protocolsParam !== undefined) {
     if (protocolsParam.kind === "union") {
       const def = getUnion(protocolsParam.unionId);
       if (!def) return null;
       protocolsArms = def.arms.map(protoArm);
+      protocolsArmTypes = def.arms;
     } else {
       protocolsArms = [protoArm(protocolsParam)];
+      protocolsArmTypes = [protocolsParam];
+    }
+  }
+
+  // A fenced arm gets one more look: the `ws`/undici init bag in the
+  // SECOND position is a real overload that Node honours (measured), so
+  // a bag this unit can account for is LOWERED. Exactly one may be:
+  // two record arms would make the dial's headers depend on which one
+  // the checker happened to order first.
+  let initBag: WsInitBagPlan | null = null;
+  const fenced = protocolsArms.map((k, i) => (k === "fence" ? i : -1)).filter((i) => i >= 0);
+  if (fenced.length === 1) {
+    const tag = fenced[0]!;
+    const planned = wsInitBagPlan(protocolsArmTypes[tag]!, tag, protoArm, getRecord, getUnion);
+    if (planned !== null) {
+      initBag = planned;
+      protocolsArms = protocolsArms.map((k, i) => (i === tag ? "init" : k));
     }
   }
 
@@ -8165,6 +8306,7 @@ export function wsGlobalPlan(
     shapeId: t.ret.shapeId,
     protocolsParam,
     protocolsArms,
+    initBag,
     arity: t.params.length,
     handlers,
     event: { shapeId: eventShapeId, fields: eventFields },

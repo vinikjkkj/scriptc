@@ -7709,6 +7709,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4081-websocket-init-bag.ts": {
+   "order": [
+    "<repo>/tests/corpus/4081-websocket-init-bag.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/409-params-async-generics.ts": {
    "order": [
     "<repo>/tests/corpus/409-params-async-generics.ts"
