@@ -11743,6 +11743,11 @@ class LlEmitter {
       for (const a of e.args) this.emitExpr(a);
       return { name: "", type: e.type };
     }
+    if (e.fn === "js.voidOperand") {
+      // `void e`'s value: the operand ran as the enclosing seqExpr's
+      // statement; the leaf emits nothing (see emit-exprs.ts).
+      return { name: "", type: e.type };
+    }
     if (e.fn === "qs.parse") {
       // The ParsedUrlQuery dictionary: a fresh pure-index-signature
       // record whose overflow map the runtime scan fills

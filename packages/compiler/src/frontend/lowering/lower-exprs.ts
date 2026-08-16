@@ -499,16 +499,32 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // classic undefined spelling; the surrounding slot's coercion wraps
       // the unit like any bare `undefined`). Effectful operands compile
       // where the value is DISCARDED — statement position
-      // (lowerExprStatement) and void-returning arrow bodies — but here
-      // the value is consumed and the effect would need to sequence before
-      // it, which no expression shape carries: fence by name.
+      // (lowerExprStatement) and void-returning arrow bodies — and here
+      // too: `void e` IS `(e, undefined)`, and the comma operator's own
+      // lowering a few hundred lines down already carries that shape as a
+      // seqExpr. The operand runs for effect exactly as its statement
+      // lowering, the value is the unit. The only operands that stay
+      // fenced are the ones the comma operator also fences: a statement
+      // lowering needing real control flow, which the seqExpr validator
+      // (the C emission point is mid-expression) does not accept.
       if (sideEffectFreeOptionValue(expr.expression)) {
         return { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: locOf(expr) };
+      }
+      const voidLoc = locOf(expr);
+      const voidEffect = L.lowerExprStatement(expr.expression);
+      if (seqExprSafeStmt(voidEffect)) {
+        return {
+          kind: "seqExpr",
+          stmts: [voidEffect],
+          result: { kind: "libCall", fn: "js.voidOperand", args: [], type: VOID, loc: voidLoc },
+          type: VOID,
+          loc: voidLoc,
+        };
       }
       L.unsupported(
         "SC1090",
         expr,
-        "'void' with an effectful operand in value position (hoist the operand to its own statement — statement-position 'void e' and void-returning arrow bodies compile)",
+        "'void' with an effectful operand in value position whose operand needs control flow (hoist the operand to its own statement — statement-position 'void e' and void-returning arrow bodies compile)",
       );
     }
     // Literals in an `any`-typed slot (the CONTEXTUAL type is what the

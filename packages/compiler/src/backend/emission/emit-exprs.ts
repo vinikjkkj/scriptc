@@ -5780,6 +5780,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // clearTimeout(null) and friends: Node silently ignores
             // non-handles — nothing runs.
             return { name: "", type: e.type };
+          case "js.voidOperand":
+            // `void e`'s value: the operand already ran as the enclosing
+            // seqExpr's statement, so the leaf itself emits nothing. The
+            // consumer (unionWrap's VOID-payload rule) produces the
+            // interned `undefined` instance.
+            return { name: "", type: e.type };
           case "process.onSignal": {
             // The registry owns the callback (zero-param — frontend-pinned)
             // until off/once removes it. The loop dispatches deliveries.
