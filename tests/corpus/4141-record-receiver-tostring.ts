@@ -43,6 +43,18 @@ class Silent {
     toNumber(): number { return this.low }
 }
 
+// An ABSTRACT toString reached through a record binding: there is no
+// %Abs.toString to call directly, so the dispatch has to be virtual or
+// decline. The concrete override below is what makes it reachable.
+abstract class Abs {
+    low = 6
+    toNumber(): number { return this.low }
+    abstract toString(): string
+}
+class Conc extends Abs {
+    override toString(): string { return "Conc(" + this.low + ")" }
+}
+
 type Rec = { low: number; toNumber(): number }
 interface IRec { low: number; toNumber(): number }
 type RecTs = { low: number; toString(): string }
@@ -102,7 +114,11 @@ function viaLocal(): string {
 }
 console.log("local     " + viaLocal())
 
-// 13. the record binding aliases the instance, so a later mutation shows
+// 13. an abstract toString with a concrete override below
+const p: Rec = new Conc()
+console.log("abstract  " + p.toString())
+
+// 14. the record binding aliases the instance, so a later mutation shows
 const n = new Own()
 const o: Rec = n
 n.low = 42
