@@ -520,11 +520,19 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
    * with the method taken out — it passes), and its
    * `union-arm-method-typed-unknown` is the discriminator (the same arm
    * with the method declared `(): unknown`, so the target signature is
-   * `func()=>dyn` — it passes too). One type annotation is the whole
-   * difference. zapo's own declaration is
-   * `spec/proto/index.d.ts:45`, `type Long = number | { low: number;
-   * high: number; unsigned: boolean; toNumber(): number }`, so the
-   * refusal applies to it verbatim.
+   * `func()=>dyn` — it passes too), and `union-arm-method-typed-number`
+   * is the same discriminator from the VALUE side: `makeTyped` is `make`
+   * with `>>>0` in the method body and nothing else, which makes the
+   * closure infer `() => number` and box `func()=>f64`, and it passes.
+   *
+   * That last line is why zapo works. Its declaration
+   * (`spec/proto/index.d.ts:45`, `toNumber(): number`) is the strict
+   * side, but the real `long` package's body is
+   * `this.unsigned?(this.high>>>0)*f+(this.low>>>0):this.high*f+(this.low>>>0)`
+   * — the `>>>0` types it, so it boxes `func()=>f64` and the signature
+   * test passes. The own-only read was zapo's ONLY blocker, and closing
+   * it takes the QR gate green with the `!` lowering applied on top.
+   * 4062's refusal is real and stands, but it is NOT zapo's case.
    *
    * The alarming shape is unchanged and is why all four exist: ZERO
    * fences, `coverage` says "fully static", and the binary still throws.
@@ -591,6 +599,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
         "union-arm-inherited-data data 9 3",
         "union-arm-number num 5",
         "union-arm-method-typed-unknown long 7",
+        "union-arm-method-typed-number long 7",
         "",
       ].join("\n"),
     );

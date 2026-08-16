@@ -9,7 +9,7 @@
 // prototype" from the signature refusal 4062 prices. On base it failed
 // with zapo's own message, `expected number | null | object at $, got
 // object`.
-import { make, makeK, makeHidden, makeShadow, makeDeep, makeBare, makeData } from "protolong"
+import { make, makeK, makeHidden, makeShadow, makeDeep, makeBare, makeData, makeTyped } from "protolong"
 
 interface LongLike { low: number; high: number; unsigned: boolean; toNumber(): number }
 interface LongDyn { low: number; high: number; unsigned: boolean; toNumber(): unknown }
@@ -90,3 +90,20 @@ function showDyn(s: DynSlot): string {
     return `long ${s.toNumber()}`
 }
 t("union-arm-method-typed-unknown", () => showDyn(make(7, 0) as DynSlot))
+
+// And the SAME discriminator from the other side, which is the one that
+// explains zapo. `makeTyped` is `make` with `>>>0` in the method body --
+// nothing else. That forces the closure to infer `() => number`, so it
+// boxes `func()=>f64`, so the EXACT-signature test passes against a
+// `toNumber(): number` arm and the only remaining obstacle was the
+// own-only read. The real `long` package's body is
+// `this.unsigned?(this.high>>>0)*f+(this.low>>>0):this.high*f+(this.low>>>0)`,
+// so this is zapo's Long and not an analogy: one operator is why zapo's
+// `notAfter?: number|Long|null` resolves and 4062's does not.
+type Slot2 = number | LongLike | null
+function show2(s: Slot2): string {
+    if (s === null) return "null"
+    if (typeof s === "number") return `num ${s}`
+    return `long ${s.toNumber()}`
+}
+t("union-arm-method-typed-number", () => show2(makeTyped(7, 0) as Slot2))
