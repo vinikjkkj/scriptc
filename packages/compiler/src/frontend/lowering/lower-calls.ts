@@ -6120,21 +6120,39 @@ const inliningPredicates = new Set<ts.Symbol>();
     const found = L.findMethodOn(info, "toString");
     if (!found) return null;
     // An abstract toString with no concrete override below has no
-    // implementation to call; a non-nullary or non-string one has no
-    // zero-argument string entry point. Both keep the old answer rather than
-    // turning a wrong string into a refusal.
+    // implementation to call; a non-string one has no string entry point.
+    // Both keep the old answer rather than turning a wrong string into a
+    // refusal.
     const virtual = L.overrideBelow(info, "toString");
     if (found.sig.abstract === true && !virtual) return null;
-    if (found.sig.params.length !== 0) return null;
     if (found.sig.ret.kind !== "string") return null;
+    // `toString(radix?: number)` DOES have a zero-argument entry point in
+    // JS -- `String(x)` and `x.toString()` call it with no argument, and
+    // the body's `radix ?? 0` is written for exactly that. The emitted C
+    // signature is arity-exact, so every declared parameter needs its
+    // absent-argument value; `omittedArgFor` mints the same interned
+    // undefined arm an ordinary omitted argument gets, so the callee
+    // cannot tell this call from `x.toString()` written by hand.
+    //
+    // Only OMITTABLE parameters have such a value. A REQUIRED one does
+    // not: `toString(sep: string)` is not callable with zero arguments in
+    // Node either, and inventing an argument for it would answer where
+    // the language does not. That keeps the fold.
+    const absent: IrExpr[] = [];
+    for (const p of found.sig.params) {
+      if (p.mode !== "omittable") return null;
+      const a = omittedArgFor(L, p.type, loc);
+      if (!a) return null;
+      absent.push(a);
+    }
     if (virtual) {
       L.noteVirtualEdge(info, "toString");
       return { kind: "virtualCall", className: info.def.name, method: "toString",
-        args: [L.upcastTo(recv, info.def.name)], type: STRING, loc };
+        args: [L.upcastTo(recv, info.def.name), ...absent], type: STRING, loc };
     }
     L.noteEdge(`%${found.declarer.def.name}.toString`);
     return { kind: "call", callee: `%${found.declarer.def.name}.toString`,
-      args: [L.upcastTo(recv, found.declarer.def.name)], type: STRING, loc };
+      args: [L.upcastTo(recv, found.declarer.def.name), ...absent], type: STRING, loc };
   }
 
 /** pureReceiverNode plus the empty object literal — the default-toString

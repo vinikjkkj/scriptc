@@ -79,12 +79,17 @@ console.log("field  = " + new Holder().r.toString())
 console.log("elem   = " + arr[0]!.toString())
 console.log("relet  = " + re.toString())
 
-// And one decline that is not about materialization at all: a class whose
-// toString takes an OPTIONAL parameter has no nullary entry point for the
-// dispatch to call, so it keeps the folded answer. Node calls it with no
-// argument and prints "r0". Identical on 8eb37c53 and on the branch --
-// widening the dispatch to feed trailing optionals undefined is the
-// obvious next step and is deliberately not taken here.
+// And one row that is not about materialization at all, and is now the
+// only CLOSED row in this price list: a class whose toString takes an
+// OPTIONAL parameter. It reads "r0" here, exactly Node -- the dispatch
+// mints each declared parameter's absent-argument value, which is the
+// widening this note used to say was deliberately not taken. Corpus 4182
+// is the positive case. The eleven rows around it did not move, and that
+// is what keeps them useful: they are the no-move control on that change.
+//
+// Still priced, narrower: a toString whose parameter is REQUIRED has no
+// absent-argument value for a bare `string` slot, so the fold stays where
+// Node calls the method with `undefined` and answers.
 class Radix {
     low = 2
     toNumber(): number { return this.low }

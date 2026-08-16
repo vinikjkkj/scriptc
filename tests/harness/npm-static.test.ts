@@ -1150,6 +1150,22 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
    *
    * The pin asserts the DIVERGENCE, so whoever closes it gets a red test
    * pointing at this note.
+   *
+   * ONE ROW HAS SINCE CLOSED, and it is not one of the materialization
+   * rows: `radix`. A `toString(radix?: number)` DOES have a
+   * zero-argument entry point in JS -- Node calls it with no argument and
+   * prints "r0" -- and this list priced the dispatch declining it because
+   * the emitted C signature is arity-exact. It now mints each declared
+   * parameter's absent-argument value, so the row reads `r0` on both
+   * backends. Corpus 4182 is the positive case (14 rows, Node-byte-exact,
+   * 9 of them wrong on base). The other eleven rows here are UNMOVED by
+   * that change, which is the useful part of keeping them in one program:
+   * they are its no-move control.
+   *
+   * STILL PRICED, and now the narrower statement: a toString whose
+   * parameter is REQUIRED. There is no absent-argument value for a bare
+   * `string` slot -- no undefined arm to intern -- so the fold stays
+   * where Node calls the method with `undefined` and answers.
    */
   test("4142: a materialized record loses the toString it was built from (price list)", async () => {
     const entry = join(fixturesRoot, "npm/cases/4142-record-receiver-tostring-reach-on-purpose/main.ts");
@@ -1196,7 +1212,8 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
         "field  = [object Object]",
         "elem   = [object Object]",
         "relet  = [object Object]",
-        "radix  = [object Object]",
+        // CLOSED: was "[object Object]". See the note above and corpus 4182.
+        "radix  = r0",
         "tuple  = [object Object]",
         "",
       ].join("\n"),
