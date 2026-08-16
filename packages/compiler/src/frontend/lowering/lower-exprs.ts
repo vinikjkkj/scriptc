@@ -12441,6 +12441,14 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
   function classInMemberNames(L: Lowerer, className: string): Set<string> | null {
     const leaf = L.classes.get(className);
     if (!leaf) return null;
+    // The receiver's STATIC class must be its RUNTIME class. `in` reads the
+    // real object's chain, so a `Base`-typed binding holding a `Derived`
+    // answers `true` for Derived's members and this set would say false —
+    // a silent wrong answer, not a fence. A class with no subclass in the
+    // compiled hierarchy cannot be holding one: the hierarchy is fixed at
+    // compile time (the same fact class decorators lean on), so a LEAF is
+    // exact. Anything with a subclass keeps the fence.
+    if (leaf.subclasses.length > 0) return null;
     const names = new Set<string>();
     // Instance FIELDS — leaf.fields already carries the inherited ones.
     // `%get:x` / `%set:x` are accessor slots (own properties to `in`;
