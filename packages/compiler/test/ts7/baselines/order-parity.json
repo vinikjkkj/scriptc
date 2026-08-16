@@ -7885,6 +7885,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4251-array-method-through-a-widening-unknown-cast.ts": {
+   "order": [
+    "<repo>/tests/corpus/4251-array-method-through-a-widening-unknown-cast.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"

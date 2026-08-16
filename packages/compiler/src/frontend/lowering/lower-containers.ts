@@ -121,6 +121,28 @@ function lowerOptionalDefaultArg(
         probedUntyped = true;
       }
     }
+    // A checker type tsc DOES call an array, whose ELEMENT mapType cannot
+    // represent: `readonly unknown[]` maps to `dyn` WHOLE, not to an array
+    // of dyn, so the dispatch below sees no array at all and the call falls
+    // out to the generic-method fence. The value need not be dynamic:
+    //
+    //   (Array.isArray(check?.suggestions) ? (check.suggestions as readonly unknown[]) : [])
+    //     .filter((s): s is string => typeof s === 'string')
+    //
+    // is zapo's spelling (WaProfileCoordinator.ts:400) and its operand
+    // really is a `readonly string[]` — the widening `as` is erased at run
+    // time, so the receiver LOWERS to `array<string>` and the ordinary
+    // tables answer exactly what Node answers. Same "dispatch follows the
+    // value" rule as the two probes around this one, with tsc's own word
+    // that the receiver IS an array as the gate: nothing the checker calls
+    // a scalar, a record or a union can enter here, and a receiver whose
+    // value really is dynamic keeps the dyn dispatch below unchanged
+    // because the probe only fires when the value lowered to a static
+    // array.
+    if (receiverIr?.kind === "dyn" && L.checker.isArrayType(L.typeOf(access.expression))) {
+      const probe = L.lowerExpr(access.expression);
+      if (probe.type.kind === "array") receiverIr = probe.type;
+    }
     // A UNIFORM-TUPLE receiver whose VALUE is a static array: the promise
     // combinators' plain bindings (their lowering builds a real array, and
     // with one shared element type the tuple describes the same value —
@@ -763,7 +785,7 @@ function lowerOptionalDefaultArg(
         if (!ts.isIdentifier(p.name) || p.type || p.initializer || p.dotDotDotToken) return;
         if (L.paramIrOverrides.has(p) || L.chainNarrowedType.has(p.name)) return;
         const t = L.checker.getTypeAtLocation(p.name);
-        if ((t.flags & ts.TypeFlags.Any) === 0) return;
+        if ((t.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) === 0) return;
         const elemTs = leadTs?.[i];
         const pname = p.name;
         if (elemTs !== undefined) {
