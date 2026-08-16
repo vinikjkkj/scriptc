@@ -248,10 +248,53 @@ ScrStr *scr_error_code(ScrError *e) {
   return e->code ? scr_str_retain(e->code) : NULL;
 }
 
+#ifdef SCR_TRAP_TRACE
+/* Which lowering traps a run actually EXECUTES. Built only when
+ * SCRIPTC_TRAP_TRACE is set at build time (cc.ts turns that into
+ * -DSCR_TRAP_TRACE, the SCRIPTC_RC_AUDIT contract exactly).
+ *
+ * A deferred compile fence -- the `runtimeFence` --best-effort emits for a
+ * statement whose construct has no static lowering -- is the ONLY throw in
+ * the tree whose `code` is SC-numeric: every runtime-parity throw spells
+ * Node's ERR_*. So the filter below is exact rather than a heuristic.
+ *
+ * The line is printed BEFORE the throw unwinds, so a fence the program
+ * catches and swallows is still observed; that is the whole point, since a
+ * fence that dies uncaught was already visible in the exit code. The cap is
+ * a flood guard only: a fence inside a retry loop must not fill the disk,
+ * and by the twenty-thousandth fire the run has long since answered the
+ * question.
+ *
+ * Compiled out entirely without the define, so the default binary is
+ * byte-identical, not merely the default emitted C. */
+static unsigned long scr_trap_trace_fires = 0;
+
+static void scr_trap_trace_note(const char *message, size_t len,
+                                const char *code) {
+  if (!(code && code[0] == 'S' && code[1] == 'C' && code[2] >= '0' &&
+        code[2] <= '9')) {
+    return;
+  }
+  scr_trap_trace_fires++;
+  if (scr_trap_trace_fires > 20000UL) {
+    if (scr_trap_trace_fires == 20001UL) {
+      fprintf(stderr, "SCTRAP TRUNCATED after 20000 fires\n");
+      fflush(stderr);
+    }
+    return;
+  }
+  fprintf(stderr, "SCTRAP %s %.*s\n", code, (int)len, message);
+  fflush(stderr);
+}
+#endif
+
 /* scr_throw_error_msg with the code stamped on the payload — the fs and
  * exec throwers' one-call spelling. */
 void scr_throw_error_msg_code(int kind, const char *message, size_t len,
                                const char *code) {
+#ifdef SCR_TRAP_TRACE
+  scr_trap_trace_note(message, len, code);
+#endif
   ScrStr *msg = scr_str_new(message, len);
   ScrError *e = scr_error_new(kind, msg);
   scr_str_release(msg); /* scr_error_new retained its copy */
