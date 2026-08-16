@@ -5089,6 +5089,70 @@ static bool scr_dyn_bytes_proto_name(const char *m) {
   return false;
 }
 
+/* `new Uint8Array(v)` where v is a CHECKED-DYNAMIC value: the runtime tag
+ * dispatch the constructor's own overload set is, and the one the frontend
+ * cannot make because only the runtime knows the kind.
+ *
+ * protobufjs's util.newBuffer is the site that needs it:
+ *
+ *   return "number"==typeof e ? (t.Buffer?t._Buffer_allocUnsafe(e):new t.Array(e))
+ *                             : (t.Buffer?t._Buffer_from(e):new Uint8Array(e))
+ *
+ * The `typeof e === "number"` test has already been taken the OTHER way on
+ * the branch that reaches here, so `e` is array-like and Node COPIES it.
+ * Coercing the operand to a LENGTH instead would make every protobuf
+ * `bytes` field decode as an empty buffer, which is why this dispatches
+ * rather than picking one overload.
+ *
+ * NUM is Node's length form (ToIndex, with Node's RangeError); BYTES is
+ * the element copy -- CROSS-kind, unlike the static spelling, because a
+ * runtime value carries no static elem to match against; ARR reads each
+ * element through ToNumber, exactly scr_bytes_from_arr; and every other
+ * kind is Node's ToObject-with-no-length, which is the EMPTY array. NULL
+ * with the exception pending only on the length form's RangeError.
+ * Borrows d; returns +1. */
+ScrBytes *scr_bytes_from_dyn(ScrBytesElem elem, const ScrDyn *d) {
+  if (d->kind == SCR_DYN_NUM) return scr_bytes_new(elem, d->v.num); /* may throw */
+  if (d->kind == SCR_DYN_BYTES || d->kind == SCR_DYN_ARRBUF) {
+    const ScrBytes *src = d->v.bytes;
+    /* Same element kind: the byte-for-byte copy, which is what Node's
+     * typed-array copy constructor is. The copy takes the CONSTRUCTOR's
+     * flavor, not the source's (scr_bytes_copy keeps the source's, so the
+     * plain mark rides at the call site exactly as the static spelling's
+     * markFlavor does). */
+    if (src->elem == elem) return scr_bytes_copy(src);
+    /* Cross-kind, and the ONLY source width the checked-dynamic tree
+     * carries is u8 (Buffer / Uint8Array): read each ELEMENT and store it
+     * through the destination's own conversion, which is Node's
+     * %TypedArray%(typedArray). Anything else is unmeasured and stays a
+     * LOUD refusal rather than a guess. */
+    if (src->elem != SCR_BYTES_U8) {
+      scr_throw_error_msg(SCR_ERR_ERROR,
+                          "cross-kind typed-array construction over a dynamic value is not supported yet",
+                          strlen("cross-kind typed-array construction over a dynamic value is not supported yet"));
+      return NULL;
+    }
+    ScrBytes *b = scr_bytes_new(elem, (double)src->len);
+    if (b == NULL) return NULL;
+    for (size_t i = 0; i < src->len; i++) scr_bytes_set(b, (double)i, (double)src->data[i]);
+    return b;
+  }
+  if (d->kind == SCR_DYN_ARR) {
+    size_t n = d->v.arr.len;
+    ScrBytes *b = scr_bytes_new(elem, (double)n);
+    if (b == NULL) return NULL;
+    for (size_t i = 0; i < n; i++) {
+      double v = scr_dyn_to_number(d->v.arr.items[i]);
+      if (scr_exc_pending()) { scr_bytes_release(b); return NULL; }
+      scr_bytes_set(b, (double)i, v);
+    }
+    return b;
+  }
+  /* undefined, null, strings, objects without a length: ToObject's
+   * length read answers 0 and Node builds an EMPTY typed array. */
+  return scr_bytes_new(elem, 0);
+}
+
 /* The runtime twin of the frontend's literal-encoding fold
  * (BUF_ENCODINGS, lower-containers.ts) for a RUNTIME-valued encoding:
  * canonicalizes, or throws Node's ERR_UNKNOWN_ENCODING TypeError. The
