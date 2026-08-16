@@ -10311,6 +10311,40 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         ) {
           return { kind: "bin", op: negated ? "!==" : "===", left, right, type: BOOL, loc };
         }
+        // A NUMBER against a CHECKED-DYNAMIC value. This is the one
+        // mixed-kind pair `==` can answer rather than fence, and it is
+        // the pair both of the bundle's SC1040 traps are:
+        // `0 != this.high` inside protobufjs's Long.getNumBitsAbs,
+        // where `this.high` is a dyn read of an int32 field.
+        //
+        // The whole algorithm is in the runtime because the spec
+        // compares TYPES before converting: null/undefined answer
+        // false WITHOUT conversion, an object runs ToPrimitive and
+        // the comparison repeats, and only the rest reaches ToNumber.
+        // A tag-test ladder here would need the operand twice and a
+        // hidden temp; one call needs neither.
+        {
+          const numFirst = left.type.kind === "f64" && right.type.kind === "dyn";
+          const numSecond = right.type.kind === "f64" && left.type.kind === "dyn";
+          // (number, value) argument order puts the NUMBER's evaluation
+          // first, so the reversed spelling `v == 0` is only taken when
+          // moving it there is unobservable: a literal or a plain read.
+          // Anything effectful keeps the fence - this can only refuse.
+          const reversedOk =
+            numSecond && (right.kind === "numLit" || pureReemittable(right));
+          if (numFirst || reversedOk) {
+            const numSide = numFirst ? left : right;
+            const dynSide = numFirst ? right : left;
+            const eq: IrExpr = {
+              kind: "libCall",
+              fn: "dyn.looseEqNum",
+              args: [numSide, dynSide],
+              type: BOOL,
+              loc,
+            };
+            return negated ? { kind: "unary", op: "!", operand: eq, type: BOOL, loc } : eq;
+          }
+        }
       }
       L.unsupported("SC1040", expr);
     }
