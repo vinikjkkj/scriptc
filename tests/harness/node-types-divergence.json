@@ -1,0 +1,384 @@
+{
+  "README": [
+    "Corpus programs that are CLEAN under the shipped fallback node declarations",
+    "and RED under the project's real @types/node 24.13.3 -- the world zapo and",
+    "every real project compile in, and the world tests/corpus is not in.",
+    "Re-derived by tests/harness/node-types-divergence.test.ts. Codes are the",
+    "distinct diagnostic codes analyze() reports in the real-types world.",
+    "mode TYPE = SC0001 only: a real tsc type error the fallback's looser",
+    "declaration hides. mode FENCE = a real lowering gap the fallback hides.",
+    "Remove an entry when its fence closes; the test fails until you do."
+  ],
+  "typesVersion": "24.13.3",
+  "counts": {
+    "total": 52,
+    "TYPE": 34,
+    "FENCE": 18
+  },
+  "programs": [
+    {
+      "name": "1447-stdin-closed-events.ts",
+      "mode": "FENCE",
+      "codes": [
+        "SC1090"
+      ]
+    },
+    {
+      "name": "1448-stream-columns.ts",
+      "mode": "FENCE",
+      "codes": [
+        "SC2020"
+      ]
+    },
+    {
+      "name": "1470-child-lifecycle.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "1565-spawn-pipe-streams.ts",
+      "mode": "FENCE",
+      "codes": [
+        "SC2020"
+      ]
+    },
+    {
+      "name": "1567-server-close-override.ts",
+      "mode": "FENCE",
+      "codes": [
+        "SC1090"
+      ]
+    },
+    {
+      "name": "1640-fd-read-decode.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "1657-spawn-async-neutral.ts",
+      "mode": "FENCE",
+      "codes": [
+        "SC2020"
+      ]
+    },
+    {
+      "name": "1662-string-decoder-encodings.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "1677-emitter-listeners.ts",
+      "mode": "FENCE",
+      "codes": [
+        "SC2020"
+      ]
+    },
+    {
+      "name": "1686-stream-readable-paused.ts",
+      "mode": "FENCE",
+      "codes": [
+        "SC1090"
+      ]
+    },
+    {
+      "name": "1693-stream-pipe-backpressure.ts",
+      "mode": "FENCE",
+      "codes": [
+        "SC1043"
+      ]
+    },
+    {
+      "name": "1721-assert-throws-regex-class.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "1750-http-agent-options.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "1751-options-record-stance.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "1770-assert-dyn-strict.ts",
+      "mode": "FENCE",
+      "codes": [
+        "SC2020"
+      ]
+    },
+    {
+      "name": "1780-http-res-surface.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "1781-http-server-shapes.cjs",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "1791-searchparams-core.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "1798-dyn-handle-typed-box.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "2094-diagnostics-channel.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "2160-dc-tracing-channel.cjs",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "2283-structured-clone.cjs",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "2331-tls-server-options-typed.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "2461-qs-parse-options.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "2462-qs-stringify.ts",
+      "mode": "FENCE",
+      "codes": [
+        "SC2020"
+      ]
+    },
+    {
+      "name": "2557-tls-ca-store.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "2595-fs-arg-ladders.cjs",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "2620-ee-override-once-order.ts",
+      "mode": "FENCE",
+      "codes": [
+        "SC1090"
+      ]
+    },
+    {
+      "name": "2622-ee-override-filter.ts",
+      "mode": "FENCE",
+      "codes": [
+        "SC1090"
+      ]
+    },
+    {
+      "name": "2644-http-client-url-argument.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "2645-https-client-url-argument.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "2672-http-request-response-callback.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "2688-record-with-methods-into-unknown.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "2732-create-secret-key.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "3193-child-stream-into-unknown-round-trip.ts",
+      "mode": "FENCE",
+      "codes": [
+        "SC2003"
+      ]
+    },
+    {
+      "name": "3381-fs-read-stream-basics.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "3385-fs-stream-event-order.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "3391-fs-stream-option-byte-ranges.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "3392-fs-stream-option-flags.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "3471-http-client-destroy-error.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "3472-http-client-pipe-upload.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "3604-optional-chained-http-request-members.ts",
+      "mode": "FENCE",
+      "codes": [
+        "SC2020"
+      ]
+    },
+    {
+      "name": "3712-net-socket-close-haderror.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "3761-http-client-url-with-options.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "3762-namespace-conditional-transport.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "3791-http-client-abort-signal.ts",
+      "mode": "FENCE",
+      "codes": [
+        "SC2020"
+      ]
+    },
+    {
+      "name": "3792-http-client-optional-options.ts",
+      "mode": "FENCE",
+      "codes": [
+        "SC2020"
+      ]
+    },
+    {
+      "name": "3831-incoming-message-as-readable.ts",
+      "mode": "FENCE",
+      "codes": [
+        "SC2020"
+      ]
+    },
+    {
+      "name": "3832-incoming-message-readable-teardown.ts",
+      "mode": "FENCE",
+      "codes": [
+        "SC2020"
+      ]
+    },
+    {
+      "name": "3854-tls-https-server-handler-arities.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "3921-http-client-teardown-errors.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    },
+    {
+      "name": "525-map-rc-stress.ts",
+      "mode": "TYPE",
+      "codes": [
+        "SC0001"
+      ]
+    }
+  ]
+}
