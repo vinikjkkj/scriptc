@@ -3676,6 +3676,35 @@ export class Lowerer {
     // union's slot (even a superset) would need a runtime re-tag — its own
     // diagnostic, not the record one. Arm-into-union coercions were already
     // wrapped by coerceToExpected before this check runs.
+    // MEASURED at 2b80d2ba (block/unknowns, estado-unknowns.md S5): all
+    // three of zapo's SC2003s land on this line, and the two type prints
+    // this diagnostic carries cannot tell them apart -- L.fmt caps at 4012
+    // characters, so two protobuf mega-records print identically and are
+    // still different types. An env-gated dump of the ARM SETS here said:
+    //
+    //   credentials-flow.ts:204   expected = union(2) [new(...) => RawWebSocket,
+    //     undefined],  actual = classval 'typeof WaMobileTcpSocket'. A class
+    //     constructor value has no identical arm. The SAME value in the same
+    //     slot type WITHOUT the undefined arm lowers, and so does a plain
+    //     binding it is new'ed through -- so the nominal-to-structural
+    //     construct-signature match exists on the plain-field path and is
+    //     missing only here. Fixable.
+    //
+    //   newsletter.ts:86   expected = ({code: string} | {})[],  actual =
+    //     {code?: string; count?: number}[]. The same element width-coerce
+    //     is performed when the destination is NOT reached through a union.
+    //     Fixable.
+    //
+    //   messages.ts:497   expected = union(6),  actual = ONE record: the
+    //     spread of a 6-arm union merged into a single shape whose 'type'
+    //     discriminant is no longer one literal. It width-lifts into FIVE
+    //     of the six arms, so the "width-coerces into exactly one
+    //     destination arm" rule this diagnostic states is NOT satisfied and
+    //     accepting it would pick an arm out of five -- a normalised voice
+    //     note built and sent as the wrong media message kind. CORRECT
+    //     FENCE. Any future widening of the arm test must keep "exactly
+    //     one" as a hard gate: this site is the counter-example and the two
+    //     above are the positive ones.
     if (containsUnion(actual) || containsUnion(expected)) {
       this.pushDiag(unionMismatchDiag(this.fmt(expected), this.fmt(actual), locOf(node)));
       throw new PoisonError();
