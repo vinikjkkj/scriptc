@@ -5260,6 +5260,19 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     // Value-position `void` keeps the syntax fence (a standalone undefined
     // VALUE needs a union slot to live in).
     if (ts.isVoidExpression(expr)) return lowerExprStatement(L, expr.expression);
+    // Statement-position `!e` -- the minifier's function-expression forcer
+    // (`!function(n,o){...}(...)`, the first byte of every UMD wrapper, and
+    // the whole body of the `long` module inside zapo's protobuf bundle).
+    // ToBoolean is TOTAL: it reads no user code (no valueOf, no toString, no
+    // getter), it cannot throw, and it cannot observe anything the operand
+    // did not already do. Statement position discards the boolean, so the
+    // statement IS its operand's statement -- the `void e` rule directly
+    // above, for the other spelling of the same fire-and-forget idiom.
+    // VALUE positions keep ensureBool's fence: an operand whose type has no
+    // ToBoolean (a `void` call result, a bigint) still has no boolean there.
+    if (ts.isPrefixUnaryExpression(expr) && expr.operator === ts.SyntaxKind.ExclamationToken) {
+      return lowerExprStatement(L, expr.operand);
+    }
     if (ts.isBinaryExpression(expr)) {
       const opKind = expr.operatorToken.kind;
       // Statement-position comma (`({} = a, [] = a);`, `i++, j++` in a
