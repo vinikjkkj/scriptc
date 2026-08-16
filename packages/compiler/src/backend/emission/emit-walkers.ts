@@ -11,6 +11,29 @@ import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vA
 import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { OVERFLOW_MEMBER } from "./emit-shapes.js";
 
+/** Can a record FIELD of this type end up holding a callable?
+ *
+ * Only such a field takes the binding member read (an inherited method
+ * comes back bound to the receiver, +1); every other field keeps the
+ * borrowed one, so the emitted TU pays two extra lines per callable
+ * field and nothing anywhere else. Nested records and arrays are NOT
+ * included on purpose: each has its own builder, which reads from its
+ * own receiver and binds there.
+ *
+ * `dyn` ('unknown') is not included either, and that is a real gap
+ * rather than a decision: an `unknown` field is retained as-is, so an
+ * inherited method reached through one is still unbound. Calling it
+ * needs a second cast, which lands on a func target with no receiver in
+ * hand. Named in tests/fixtures/npm/cases/4033. */
+function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
+  if (t.kind === "func") return true;
+  if (t.kind === "union") {
+    const def = E.unionsById.get(t.unionId);
+    return def ? def.arms.some((a) => a.kind === "func") : false;
+  }
+  return false;
+}
+
 /** The SCR_DYN_OBJINST boxing descriptor for one class:
  * `static const ScrDynClass sc_dcl_<n>` in the emitted TU, interned per
  * class name and referenced by address from the to-dyn converter.
@@ -1421,6 +1444,15 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           // missing key IS the undefined arm: the interned immortal
           // instance, no retain owed (rc == SIZE_MAX).
           const utag = f.type.kind === "union" ? E.undefinedArmTag(f.type) : -1;
+          // A field that can hold a FUNCTION takes the binding read: an
+          // inherited method comes back bound to `d`, because the record
+          // field is a COPY and calling it would otherwise leave `this`
+          // undefined. It answers +1, so the field's read is scoped and
+          // released; every other field keeps the borrowed read.
+          const bind = typeMayHoldFunc(E, f.type);
+          const readFn = bind ? "scr_dyn_obj_member_get" : "scr_dyn_obj_data_get";
+          const mDecl = bind ? "ScrDyn *m" : "const ScrDyn *m";
+          const drop = bind ? `    scr_dyn_release(m);` : null;
           d.push(`  {`);
           d.push(`    ScrDynPath p = { path, ${keyLit}, 0 };`);
           // The same [[Get]]-minus-accessors read the predicate above
@@ -1428,7 +1460,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           // invariant is "the matched arm's builder can no longer fail",
           // which a matcher that sees the prototype and a builder that
           // does not would break on the very next member.
-          d.push(`    const ScrDyn *m = scr_dyn_obj_data_get(d, ${keyLit}, ${keyLen});`);
+          d.push(`    ${mDecl} = ${readFn}(d, ${keyLit}, ${keyLen});`);
           if (f.type.kind === "dyn") {
             // An `unknown` field: a present key passes through, a missing
             // one IS the undefined dyn value (JS's missing-property read).
@@ -1440,11 +1472,13 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(`      r->${mangleField(f.name)} = ${unit}; /* absent key -> the undefined arm */`);
             d.push(`    } else {`);
             d.push(`      r->${mangleField(f.name)} = ${E.dynCheckHelper(f.type)}(m, &p);`);
+            if (drop) d.push(`  ${drop}`);
             d.push(`      if (scr_exc_pending()) { ${rel("r")}; return NULL; }`);
             d.push(`    }`);
           } else {
             d.push(`    if (!m) { scr_dyn_check_fail(&p, ${fieldWant}, NULL); ${rel("r")}; return NULL; }`);
             d.push(`    r->${mangleField(f.name)} = ${E.dynCheckHelper(f.type)}(m, &p);`);
+            if (drop) d.push(drop);
             d.push(`    if (scr_exc_pending()) { ${rel("r")}; return NULL; }`);
           }
           d.push(`  }`);
