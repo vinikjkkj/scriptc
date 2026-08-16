@@ -63,7 +63,7 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
     ...globSync(
       join(
         fixturesRoot,
-        "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong,pbkeyrecv,litrecv,keyedreach,keyedstrnum,recvmech,vshadow}/**/*.{js,json}",
+        "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong,pbkeyrecv,litrecv,keyedreach,keyedstrnum,recvmech,vshadow,tostrreach}/**/*.{js,json}",
       ),
     ).sort(),
   ];
@@ -1117,6 +1117,90 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(node).toBe("lit   = self L\narrEl = self A0\nctor  = self C\n");
     // THE PRICE, pinned exactly. When this fails, the gap closed.
     expect(native).toBe("lit   = undefined\narrEl = undefined\nctor  = self C\n");
+    expect(native).not.toBe(node);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
+  /* -- 4142: a PRICE LIST for the reach `toString` does NOT have ---------
+   *
+   * `x.toString()` on a record-typed receiver resolves to
+   * Object.prototype.toString in the CHECKER (the structural type declares
+   * no toString). Corpus 4141 closes the half where the runtime value is
+   * still the class instance -- the lowering now dispatches to the class's
+   * own toString. This is the OTHER half: where the binding MATERIALIZES a
+   * record, the class is gone and there is nothing left to reach.
+   *
+   * A REPRESENTATION loss, not a lookup miss, and measured identical on
+   * base 8eb37c53 and on this branch, so it is neither a regression of the
+   * 4141 fix nor closed by it:
+   *
+   *     Node  proto=L:7 own=O:8 shadow=own:9 none=[object Object] deep=deep:11
+   *           bare THREW "z.toString is not a function"
+   *           param/field/elem/relet = Own(1)
+   *     here  every row "[object Object]"
+   *
+   * `none` is the control: a value with no toString anywhere answers
+   * "[object Object]" in Node too, so the one row that AGREES says the pin
+   * is about the reach and not about the constant.
+   *
+   * The `proto` row is zapo's `Long.toString` in six lines -- a shipped
+   * package's class instance behind a checked cast, with toString on the
+   * prototype. It is why that fence stays: forcing it prints
+   * "[object Object]" where Node prints the certificate serial.
+   *
+   * The pin asserts the DIVERGENCE, so whoever closes it gets a red test
+   * pointing at this note.
+   */
+  test("4142: a materialized record loses the toString it was built from (price list)", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4142-record-receiver-tostring-reach-on-purpose/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["tostrreach"] });
+    expect(coverage.npmStatic).toEqual([{ package: "tostrreach", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    // and no fence either -- that is the whole complaint
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
+    const binary = await buildStatic(entry, ["tostrreach"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    const node = nodeRes.stdout.toString("utf8");
+    const native = nativeRes.stdout.toString("utf8");
+    expect(node).toBe(
+      [
+        "proto  = L:7",
+        "own    = O:8",
+        "shadow = own:9",
+        "none   = [object Object]",
+        "deep   = deep:11",
+        "bare   THREW z.toString is not a function",
+        "param  = Own(1)",
+        "field  = Own(1)",
+        "elem   = Own(1)",
+        "relet  = Own(1)",
+        "radix  = r0",
+        "tuple  = a,1",
+        "",
+      ].join("\n"),
+    );
+    // THE PRICE, pinned exactly. When this fails, the gap closed.
+    expect(native).toBe(
+      [
+        "proto  = [object Object]",
+        "own    = [object Object]",
+        "shadow = [object Object]",
+        "none   = [object Object]",
+        "deep   = [object Object]",
+        "bare   = [object Object]",
+        "param  = [object Object]",
+        "field  = [object Object]",
+        "elem   = [object Object]",
+        "relet  = [object Object]",
+        "radix  = [object Object]",
+        "tuple  = [object Object]",
+        "",
+      ].join("\n"),
+    );
     expect(native).not.toBe(node);
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);

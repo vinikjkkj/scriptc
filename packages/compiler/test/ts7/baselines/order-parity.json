@@ -7751,6 +7751,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4141-record-receiver-tostring.ts": {
+   "order": [
+    "<repo>/tests/corpus/4141-record-receiver-tostring.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4143-record-projection-of-a-subclass.ts": {
+   "order": [
+    "<repo>/tests/corpus/4143-record-projection-of-a-subclass.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/420-dead-strip-modules/main.ts": {
    "order": [
     "<repo>/tests/corpus/420-dead-strip-modules/side.ts",
@@ -9833,6 +9845,12 @@
   "<repo>/tests/fixtures/npm/cases/4114-keyed-method-call-reach-on-purpose/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/4114-keyed-method-call-reach-on-purpose/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/4142-record-receiver-tostring-reach-on-purpose/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/4142-record-receiver-tostring-reach-on-purpose/main.ts"
    ],
    "diags": []
   },

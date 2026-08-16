@@ -43,6 +43,8 @@ export function npmCases(fixturesRoot: string): NpmCase[] {
       // never reach the static walkers there. Measured, not assumed: all
       // six fail the flagless build with `SC2013: importing '<pkg>'
       // requires the embedded dynamic engine`.
+      // 4142 joins them for the same reason as 4113: it is a PRICE
+      // LIST, so it must not run in a lane that compares to Node.
       // 4111-4112 join them: `o[k](...)` binds `o` (protobufjs's uint64
       // reader), pinned in npm-static.test.ts. Measured on the branch, not
       // assumed: both fail the flagless build with `SC2013: importing
@@ -53,7 +55,7 @@ export function npmCases(fixturesRoot: string): NpmCase[] {
       // npm-static.test.ts, and both fail the flagless build with
       // `SC2013: importing 'keyedstrnum' requires the embedded dynamic
       // engine` plus one SC2013 per call site.
-      .filter((entry) => !/\/(246[5-9]|255[67]|(403[12]|406[1-4])|411[1-4]|415[1-4])-[^/]+\/main\.ts$/.test(entry))
+      .filter((entry) => !/\/(246[5-9]|255[67]|(403[12]|406[1-4])|411[1-4]|4142|415[1-4])-[^/]+\/main\.ts$/.test(entry))
       .map((entry) => ({ name: entry.split("/").at(-2)!, entry })),
     {
       // THE acceptance test: a calculator CLI on the real commander package

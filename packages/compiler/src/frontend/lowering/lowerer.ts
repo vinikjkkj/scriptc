@@ -4640,7 +4640,7 @@ export class Lowerer {
     // Probe every field BEFORE interning — a partial projection must not
     // be left half-built in the helper tables.
     type Plan =
-      | { how: "method"; name: string; fnT: IrType & { kind: "func" }; callee: string; virtual: boolean; wrap: { unionId: string; tag: number } | undefined; fieldT: IrType; ret: IrType; extraParams: IrType[] }
+      | { how: "method"; name: string; fnT: IrType & { kind: "func" }; callee: string; declarer: string; virtual: boolean; wrap: { unionId: string; tag: number } | undefined; fieldT: IrType; ret: IrType; extraParams: IrType[] }
       | { how: "lift"; name: string; src: IrType; lift: WidthLift; fieldT: IrType }
       | { how: "absent"; name: string; utag: number; fieldT: IrType };
     const plan: Plan[] = [];
@@ -4701,6 +4701,7 @@ export class Lowerer {
           wrap,
           fieldT: f.type,
           callee: `%${found.declarer.def.name}.${f.name}`,
+          declarer: found.declarer.def.name,
           virtual: this.overrideBelow(info, f.name),
           ret: found.sig.ret,
           extraParams,
@@ -4763,7 +4764,12 @@ export class Lowerer {
       const implName = `${builder}.${i}`;
       const params: IrParam[] = m.fnT.params.map((t, k) => ({ localId: `a.${k}`, name: `a${k}`, type: t }));
       const args: IrExpr[] = [
-        m.virtual ? this.upcastTo(self, info.def.name) : self,
+        // A DIRECT call goes to the DECLARER, which may sit above the
+        // receiver's own class. Without the upcast, projecting a
+        // SUBCLASS instance onto a record whose method the BASE
+        // declares fails IR validation (SC9001, a compiler crash on a
+        // five-line program).
+        m.virtual ? this.upcastTo(self, info.def.name) : this.upcastTo(self, m.declarer),
         ...m.fnT.params.map((t, k): IrExpr => ({ kind: "varRef", localId: `a.${k}`, type: t, loc })),
         // Extra trailing optional method params the field's arity omits: feed
         // undefined (wrapped into the param's own undefined-armed union),
@@ -8222,7 +8228,7 @@ export class Lowerer {
 
     // Probe every method BEFORE interning: a partial witness must not be
     // left half-built in the helper tables.
-    const plan: { name: string; fnT: IrType & { kind: "func" }; callee: string; virtual: boolean; ret: IrType }[] = [];
+    const plan: { name: string; fnT: IrType & { kind: "func" }; callee: string; declarer: string; virtual: boolean; ret: IrType }[] = [];
     for (const f of shape.fields) {
       if (f.type.kind !== "func" || f.type.rest === true) return null;
       const found = findMethodOn(this, info, f.name);
@@ -8234,6 +8240,7 @@ export class Lowerer {
         name: f.name,
         fnT: f.type,
         callee: `%${found.declarer.def.name}.${f.name}`,
+        declarer: found.declarer.def.name,
         virtual: this.overrideBelow(info, f.name),
         ret: found.sig.ret,
       });
@@ -8249,7 +8256,12 @@ export class Lowerer {
       const params: IrParam[] = m.fnT.params.map((t, k) => ({ localId: `a.${k}`, name: `a${k}`, type: t }));
       const self: IrExpr = { kind: "varRef", localId: "self.0", type: instT, loc };
       const args: IrExpr[] = [
-        m.virtual ? this.upcastTo(self, info.def.name) : self,
+        // The DIRECT call goes to the DECLARER, which may sit above the
+        // receiver's own class -- pass it a receiver of the declarer's
+        // type, exactly as an ordinary method call does. Without the
+        // upcast a subclass instance projected onto a record whose
+        // method the BASE declares fails IR validation (SC9001).
+        m.virtual ? this.upcastTo(self, info.def.name) : this.upcastTo(self, m.declarer),
         ...m.fnT.params.map((t, k): IrExpr => ({ kind: "varRef", localId: `a.${k}`, type: t, loc })),
       ];
       const callE: IrExpr = m.virtual
