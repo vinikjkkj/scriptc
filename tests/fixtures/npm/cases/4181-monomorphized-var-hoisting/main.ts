@@ -15,13 +15,20 @@
 //
 // The read count does NOT matter -- r2 (read zero times), r3 (read once)
 // and r1 (read twice) all ICE on base, and all three answer Node here.
-// What matters is TWO INSTANCES: c3 is the same `var` shape called at one
-// type only and builds on base.
+// What matters is TWO INSTANCES.
 //
 // CONTROLS: c1/c2 are the `let`/`const` twins of r1/r4 at two argument
-// types (block-scoped bindings never enter hoistVarBinding), and c3 is a
-// single-instantiation `var`. All three pass on BASE as well -- they are
-// the guard on the change, not a claim about it.
+// types (block-scoped bindings never enter hoistVarBinding at all), and
+// c3 is the same `var` shape called at ONE argument type. They are the
+// guard on the change, not a claim about it.
+//
+// Their base-side evidence is stated exactly, because on base this whole
+// PROGRAM fails to build and nothing in it can "pass" there: base's
+// eleven SC9001s name r1, r2, r3, r4 (twice -- three instances), r5
+// (twice -- two declarators), r6, r8 and r9, and name NEITHER c1, c2, c3
+// NOR r7. The c-shapes were also built in isolation on base, where they
+// compile and answer. The discriminator is measured, not inferred from
+// this file alone.
 import { r1a, r1b, r2a, r2b, r3a, r3b, r4a, r4b, r4c, r5a, r5b, r6a, r6b, r7a, r7b, r8a, r8b, r9a, r9b, c1a, c1b, c2a, c2b, c3a } from "monovar"
 console.log("r1a = " + r1a())
 console.log("r1b = " + r1b())
