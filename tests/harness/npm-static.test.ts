@@ -742,8 +742,12 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
    *   dHasOwn    is not a function   true                  true        true
    *   dFnApply   is not a function   2                     2           2
    *   dFnCall    is not a function   3                     -           3
-   *   dReduce    is not a function   LOUD not-supported    SC1090      6
-   *   dFlat      is not a function   LOUD not-supported    SC1090      1,2,3
+   *   dReduce    is not a function   LOUD not-supported    SC1090 rt   6
+   *   dFlat      is not a function   LOUD not-supported    SC1090 rt   1,2,3
+   *
+   * ("SC1090 rt" is a RUNTIME fence, not a compile refusal -- the dot rows
+   *  are caught by the program's own try/catch, which is why they print at
+   *  all. An SCxxxx tag does not imply compile time.)
    *   dUpper     is not a function   is not a function     AB          AB
    *   dToString  is not a function   is not a function     5           5
    *
