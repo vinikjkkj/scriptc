@@ -2588,24 +2588,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           const arrays = constituents.filter(
             (a) => L.checker.isArrayType(a) || L.checker.isTupleType(a),
           );
-          const sameRef = (a: ts.Expression, b: ts.Expression): boolean => {
-            let x = a;
-            let y = b;
-            while (ts.isParenthesizedExpression(x) || ts.isNonNullExpression(x)) x = x.expression;
-            while (ts.isParenthesizedExpression(y) || ts.isNonNullExpression(y)) y = y.expression;
-            if (ts.isIdentifier(x) && ts.isIdentifier(y)) {
-              // resolveValueSymbol answers NULL when it cannot resolve, so a
-              // truthiness test is required: `sx === sy` alone would make two
-              // UNRESOLVABLE identifiers compare equal and narrow a read that
-              // has nothing to do with the guard.
-              const sx = L.resolveValueSymbol(x);
-              return sx !== null && sx === L.resolveValueSymbol(y);
-            }
-            if (ts.isPropertyAccessExpression(x) && ts.isPropertyAccessExpression(y)) {
-              return x.name.text === y.name.text && sameRef(x.expression, y.expression);
-            }
-            return false;
-          };
+          const sameRef = (a: ts.Expression, c2: ts.Expression): boolean => isArrayNarrowSameRef(L, a, c2);
           if (arrays.length === 1 && L.mapTypeOf(arrays[0]!) !== null) {
             const collect = (n: ts.Node): void => {
               if (ts.isFunctionLike(n)) return;
@@ -2868,6 +2851,162 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
    * (unnarrowed use), to a SUB-union (partial narrowing — unrepresentable
    * without a re-tag), or to nothing (`never` in an exhaustive default)
    * leaves the expression union-typed. */
+/** Two syntactic REFERENCES that denote the same value: an identifier
+ * resolving to one symbol, or a chain of property reads off one. This is
+ * the identity the Array.isArray narrowing rules compare a read against the
+ * guard argument with, and it is deliberately syntactic — tsc's own
+ * reference identity for narrowing is the same shape. */
+function isArrayNarrowSameRef(L: Lowerer, a: ts.Expression, b: ts.Expression): boolean {
+  let x = a;
+  let y = b;
+  while (ts.isParenthesizedExpression(x) || ts.isNonNullExpression(x)) x = x.expression;
+  while (ts.isParenthesizedExpression(y) || ts.isNonNullExpression(y)) y = y.expression;
+  if (ts.isIdentifier(x) && ts.isIdentifier(y)) {
+    // resolveValueSymbol answers NULL when it cannot resolve, so a
+    // truthiness test is required: `sx === sy` alone would make two
+    // UNRESOLVABLE identifiers compare equal and narrow a read that
+    // has nothing to do with the guard.
+    const sx = L.resolveValueSymbol(x);
+    return sx !== null && sx === L.resolveValueSymbol(y);
+  }
+  if (ts.isPropertyAccessExpression(x) && ts.isPropertyAccessExpression(y)) {
+    return x.name.text === y.name.text && isArrayNarrowSameRef(L, x.expression, y.expression);
+  }
+  return false;
+}
+
+/** The ROOT identifier of a reference chain (a.b.c gives a), or null. */
+function narrowRefRoot(e: ts.Expression): ts.Identifier | null {
+  let x = e;
+  while (ts.isParenthesizedExpression(x) || ts.isNonNullExpression(x)) x = x.expression;
+  if (ts.isIdentifier(x)) return x;
+  if (ts.isPropertyAccessExpression(x)) return narrowRefRoot(x.expression);
+  return null;
+}
+
+/** True when the guarded REGION writes the reference's root binding — an
+ * assignment, a compound assignment or a ++/-- whose target chain roots at
+ * the same symbol. tsc resets a narrowing on such a write; this rule has no
+ * tsc narrowing to reset (that is the whole point of it), so it declines
+ * instead. Conservative in both directions: a write ANYWHERE in the region
+ * counts, including one after the read, and an unresolvable root declines. */
+function narrowRefWrittenIn(L: Lowerer, region: ts.Node, ref: ts.Expression): boolean {
+  const root = narrowRefRoot(ref);
+  if (!root) return true;
+  const sym = L.resolveValueSymbol(root);
+  if (sym === null) return true;
+  let hit = false;
+  const targets = (t: ts.Expression): boolean => {
+    const r = narrowRefRoot(t);
+    return r !== null && L.resolveValueSymbol(r) === sym;
+  };
+  const walk = (n: ts.Node): void => {
+    if (hit) return;
+    if (
+      ts.isBinaryExpression(n) &&
+      n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+      n.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+    ) {
+      const lhs = n.left;
+      if (ts.isIdentifier(lhs) || ts.isPropertyAccessExpression(lhs) || ts.isElementAccessExpression(lhs)) {
+        const base = ts.isElementAccessExpression(lhs) ? lhs.expression : lhs;
+        if (targets(base)) hit = true;
+      }
+    } else if (
+      (ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n)) &&
+      (n.operator === ts.SyntaxKind.PlusPlusToken || n.operator === ts.SyntaxKind.MinusMinusToken) &&
+      targets(n.operand)
+    ) {
+      hit = true;
+    }
+    if (!hit) n.forEachChild(walk);
+  };
+  walk(region);
+  return hit;
+}
+
+/** `Array.isArray(<ref>)` as the guard of a condition, or as its left-most
+ * `&&` conjunct (which guards the rest of the chain and the consequent
+ * alike) — the argument it proves, or null. */
+function isArrayGuardArgOf(L: Lowerer, cond: ts.Expression): ts.Expression | null {
+  let c = cond;
+  while (ts.isParenthesizedExpression(c)) c = c.expression;
+  if (ts.isBinaryExpression(c) && c.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
+    return isArrayGuardArgOf(L, c.left);
+  }
+  if (
+    ts.isCallExpression(c) &&
+    ts.isPropertyAccessExpression(c.expression) &&
+    c.arguments.length === 1 &&
+    L.stdlibGlobalMember(c.expression, "Array") === "isArray"
+  ) {
+    return c.arguments[0]!;
+  }
+  return null;
+}
+
+/** SYNTACTIC evidence that this read sits under an `Array.isArray(<same
+ * reference>)` guard — the proof maybeNarrow's isArray bridge normally
+ * takes from the CHECKER, for the reads where the checker has nothing left
+ * to give.
+ *
+ * The bridge's usual key is "tsc narrowed this read to `any[]`", which IS
+ * tsc's own record of the guard: the `arg is any[]` predicate cannot keep a
+ * `readonly T[]` constituent, so the true branch comes out bare `any[]`.
+ * That key needs tsc to have narrowed at all. One hop further out it has
+ * not: `const tosNode = Array.isArray(n.content) ? n.content.find(...) :
+ * undefined` types `tosNode` bare `any` (the quirk poisons the ternary's
+ * result and the const that binds it), so `tosNode.content` inside a SECOND
+ * `Array.isArray` guard is `any`, not `any[]`, and there is no tsc
+ * narrowing to read off. The VALUE is a real union all along — the field
+ * read already lowered it — and the guard is right there in the source.
+ * This reads it there. zapo's `parseTosQueryResponse` is that shape exactly.
+ *
+ * Deliberately narrow, and each restriction is the checker's own:
+ *   * only a read the checker gave up on ENTIRELY (`any`/`unknown`) is
+ *     eligible, so nothing that types today can move;
+ *   * only the TRUE side of an if / ternary / `&&`, never the else;
+ *   * nested functions stay out (they run later, when the proof is
+ *     stale — tsc's invalidation rule, and the ternary rule's);
+ *   * a region that WRITES the reference's root declines.
+ * The caller adds the last condition: the lowered union must have EXACTLY
+ * ONE array arm, so the arm the guard selects is never ambiguous. And the
+ * extraction is checkedArmBridge, the same tag-checked helper every
+ * checker-driven union narrowing goes through — a proof that is somehow
+ * wrong throws the catchable TypeError rather than reading one arm's
+ * payload through another arm's struct. */
+function isArrayGuardProven(L: Lowerer, node: ts.Expression): boolean {
+  let child: ts.Node = node;
+  for (let p: ts.Node | undefined = node.parent; p !== undefined; child = p, p = p.parent) {
+    if (ts.isFunctionLike(p)) return false;
+    let arg: ts.Expression | null = null;
+    let region: ts.Node | null = null;
+    if (ts.isIfStatement(p) && child === p.thenStatement) {
+      arg = isArrayGuardArgOf(L, p.expression);
+      region = p.thenStatement;
+    } else if (ts.isConditionalExpression(p) && child === p.whenTrue) {
+      arg = isArrayGuardArgOf(L, p.condition);
+      region = p.whenTrue;
+    } else if (
+      ts.isBinaryExpression(p) &&
+      p.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken &&
+      child === p.right
+    ) {
+      arg = isArrayGuardArgOf(L, p.left);
+      region = p.right;
+    }
+    if (
+      arg !== null &&
+      region !== null &&
+      isArrayNarrowSameRef(L, node, arg) &&
+      !narrowRefWrittenIn(L, region, arg)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
   export function maybeNarrow(L: Lowerer, expr: IrExpr, node: ts.Node): IrExpr {
     // A dyn read tsc narrowed to a SCALAR (a typeof test proved the kind):
     // bridge with a VALIDATED extraction — dynCheck, the checked-cast
@@ -2961,9 +3100,15 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     if (!narrowed || (narrowed.kind === "array" && narrowed.elem.kind === "jsval")) {
       const t = L.typeOf(node);
       const anyElem =
-        L.checker.isArrayType(t) &&
-        ((L.checker.getTypeArguments(t as ts.TypeReference)[0]?.flags ?? 0) &
-          (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
+        (L.checker.isArrayType(t) &&
+          ((L.checker.getTypeArguments(t as ts.TypeReference)[0]?.flags ?? 0) &
+            (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0) ||
+        // The read the checker gave up on ENTIRELY (bare `any`/`unknown`,
+        // one hop past the quirk), with the guard read off the source
+        // instead of off a narrowing tsc never recorded.
+        ((t.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0 &&
+          ts.isExpression(node) &&
+          isArrayGuardProven(L, node));
       if (anyElem) {
         const def = L.unions.get(expr.type.unionId);
         const arrayTags = def ? def.arms.flatMap((a, i) => (a.kind === "array" ? [i] : [])) : [];
@@ -5611,7 +5756,29 @@ function literalUnionArmOf(
     const li = L.mapTypeOf(L.checker.getBaseTypeOfLiteralType(litT));
     const fi = L.mapTypeOf(ftT);
     if (!li || !fi) return false;
-    return typeEquals(li, fi) || L.widthLiftPlan(li, fi) !== null;
+    if (typeEquals(li, fi) || L.widthLiftPlan(li, fi) !== null) return true;
+    // The source-union decomposition `fits` performs at the top level,
+    // ONE CONTAINER IN. `[c ? { code } : {}]` types as `({ code: string } |
+    // {})[]` and the arm's field is `readonly Entry[]`; widthLiftPlan
+    // recurses into the element, finds a UNION source against a RECORD
+    // destination, and has no rung for it — while the value never takes that
+    // rung anyway: selecting the arm re-lowers the array literal AT the
+    // arm's field type, so each element builds AS `Entry` from its own
+    // contextual type. That is the same coercion the NON-union destination
+    // one line over already performs, and the property is coerced and
+    // re-checked after the selection exactly as before, so a wrong guess
+    // here is still a fence and never a wrong answer. `every`, not `some`:
+    // an element arm with no home would be a value the chosen arm cannot
+    // hold.
+    if (li.kind === "array" && fi.kind === "array" && li.elem.kind === "union") {
+      const arms = L.unions.get(li.elem.unionId)?.arms;
+      const elem = fi.elem;
+      return (
+        arms !== undefined && arms.length > 0 &&
+        arms.every((a) => typeEquals(a, elem) || L.widthLiftPlan(a, elem) !== null)
+      );
+    }
+    return false;
   };
   /** The same test, plus the SOURCE-union decomposition. A property whose
    * CHECKER type is a union fits a field when EVERY arm of it fits — the
@@ -5939,6 +6106,18 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           }
         }
       }
+    }
+    if (process.env["SCRIPTC_OBJLIT_WHY"] !== undefined) {
+      const armInfo = ctxUnion
+        ? `ctxUnion=${ctxUnion.unionId} arms=${String(L.unions.get(ctxUnion.unionId)?.arms.length ?? -1)} recArms=${String((L.unions.get(ctxUnion.unionId)?.arms.filter((a) => a.kind === "record") ?? []).length)}`
+        : "ctxUnion=none";
+      console.error(
+        `OBJLIT ${loc.file.split("/").pop()}@${String(loc.start)} ctx0=${ctxType0 === undefined ? "NONE" : L.checker.typeToString(ctxType0).slice(0, 90)}` +
+        ` tsType=${L.checker.typeToString(tsType).slice(0, 90)} ${armInfo}` +
+        ` mapped=${mapped === null ? "null" : mapped.kind + (mapped.kind === "record" ? "#" + mapped.shapeId : "")}` +
+        ` shapeDeclared=${String(shapeDeclared)}` +
+        ` fields=${mapped?.kind === "record" ? (L.shapes.get(mapped.shapeId)?.fields ?? []).map((f) => f.name + ":" + L.fmt(f.type).slice(0, 40)).join(" | ") : "-"}`,
+      );
     }
     // The CJS EXPORT-TABLE literal in VALUE position (JS): importers reach
     // every member through alias plumbing and accessor lifts — the record

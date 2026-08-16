@@ -7408,8 +7408,31 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
     const node = v as { kind?: unknown; fn?: unknown };
     if (
       node.kind === "dynInvoke" ||
+      // The keyed/dot READ on a dyn value. `sc_dyn_key_get` now asks
+      // scr_dyn_intrinsic_method_get whether the receiver's PROTOTYPE has
+      // the name before answering undefined — Object.prototype's methods
+      // and every primitive prototype's live in that unit as dispatch
+      // arms, not as a stored chain, which is why the read and the CALL
+      // used to disagree about the same member on the same object.
+      //
+      // Gated together rather than behind a registration table ON
+      // PURPOSE: a table installed only when the program happens to make
+      // a dyn method call somewhere else would make `typeof o[k]` answer
+      // differently in two programs that spell it identically, which is a
+      // worse failure than the size class it would save. Measured: a
+      // minimal keyed-read program grows 651 776 -> 680 448 bytes.
+      node.kind === "dynKeyGet" ||
+      // `k in o` rides the same table, for the same reason: `in` walks
+      // the prototype chain, so a name the read answers has to be a name
+      // `in` reports.
+      node.kind === "dynHasKey" ||
       (node.kind === "libCall" &&
-        (node.fn === "dyn.defineProps" || node.fn === "dyn.defineProp" ||
+        // dyn.hasKey is the RUNTIME-key spelling of `in`, and it names
+        // scr_dyn_has_key_full, which lives in the gated unit for the
+        // same reason the read's helper does: scr_json.c is always
+        // linked and must not name the dispatch.
+        (node.fn === "dyn.hasKey" ||
+          node.fn === "dyn.defineProps" || node.fn === "dyn.defineProp" ||
           node.fn === "dyn.objCreateDescs" || node.fn === "dyn.objCreateNullDescs"))
     ) {
       found = true;
