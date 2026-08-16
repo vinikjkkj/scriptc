@@ -10,18 +10,23 @@
 //    throwing getter -- and both would run it, so a cast would call the
 //    getter TWICE where JS calls it once. Node answers `1 42`.
 //
-// 2. A union arm whose record shape carries a METHOD. This is zapo's
-//    `notAfter?: number | Long | null` exactly, and it is the wall behind
-//    the SC2001 at spec/proto/index.js:1 -- NOT the own-only read, which
-//    4061's `union-arm-inherited-data` proves is gone. The matcher's func
-//    leaf is an EXACT signature test (`strcmp(d->v.fn.sig, "func()=>f64")`)
-//    and a shipped package's untyped `L.prototype.toNumber` is boxed
-//    `func()=>dyn`, so the arm cannot match however the member is read.
+// 2. A union arm whose record shape carries a METHOD whose VALUE is an
+//    untyped JS function. The matcher's func leaf is an EXACT signature
+//    test (`strcmp(d->v.fn.sig, "func()=>f64")`) and this package's
+//    `L.prototype.toNumber` infers `() => unknown`, so it boxes
+//    `func()=>dyn` and the arm cannot match however the member is read.
 //    The strictness is deliberate and documented at the emitter: matching
 //    on callable-KIND alone would make `{a: () => number} | {a: () => string}`
 //    take arm 0 for a string-returning value. Relaxing it needs
 //    union-level ambiguity analysis, which is a different change from
 //    this one, so it is priced here rather than taken.
+//
+//    It is NOT zapo's case, and an earlier version of this comment said
+//    it was. zapo's declaration is the same strict `toNumber(): number`,
+//    but the real `long` package's body uses `>>>0`, so the closure
+//    infers `() => number` and boxes `func()=>f64` -- the signature test
+//    passes there. 4061's `union-arm-method-typed-number` is that case
+//    with one operator as the only difference.
 //
 // 3. The record -> dyn ROUND TRIP does not preserve own-ness. A checked
 //    cast MATERIALIZES a record struct, and converting that back to a dyn
