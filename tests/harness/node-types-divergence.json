@@ -11,9 +11,9 @@
   ],
   "typesVersion": "24.13.3",
   "counts": {
-    "total": 52,
+    "total": 51,
     "TYPE": 34,
-    "FENCE": 18
+    "FENCE": 17
   },
   "fenceClusters": {
     "NOTE": [
@@ -24,8 +24,16 @@
       "either. Re-measure before trusting it: copy each FENCE program into",
       "tests/fixtures/node-types/.divergence and read analyze()'s messages."
     ],
-    "address() where the result is not the {address, family, port} record": [
-      "3604-optional-chained-http-request-members.ts",
+    "reading a field off a UNION cast to a partial record shape (block/address)": [
+      "These four were reported as the address() fence until block/address",
+      "closed it. They do not share its mechanism: each writes",
+      "(server.address() as { port: number }).port, and the cast -- not",
+      "address() -- is what has no lowering. Reproduced with no address()",
+      "in the program at all: (u as { port: number }).port over a plain",
+      "user union AI | string | null is the same refusal on base, in the",
+      "FALLBACK world. Closing it means narrowing a union to the unique",
+      "arm that structurally satisfies the cast target, which is generic",
+      "union machinery and not a net/http change.",
       "3791-http-client-abort-signal.ts",
       "3792-http-client-optional-options.ts",
       "3831-incoming-message-as-readable.ts",
@@ -337,13 +345,6 @@
       ]
     },
     {
-      "name": "3604-optional-chained-http-request-members.ts",
-      "mode": "FENCE",
-      "codes": [
-        "SC2020"
-      ]
-    },
-    {
       "name": "3712-net-socket-close-haderror.ts",
       "mode": "TYPE",
       "codes": [
@@ -368,28 +369,28 @@
       "name": "3791-http-client-abort-signal.ts",
       "mode": "FENCE",
       "codes": [
-        "SC2020"
+        "SC1090"
       ]
     },
     {
       "name": "3792-http-client-optional-options.ts",
       "mode": "FENCE",
       "codes": [
-        "SC2020"
+        "SC1090"
       ]
     },
     {
       "name": "3831-incoming-message-as-readable.ts",
       "mode": "FENCE",
       "codes": [
-        "SC2020"
+        "SC1090"
       ]
     },
     {
       "name": "3832-incoming-message-readable-teardown.ts",
       "mode": "FENCE",
       "codes": [
-        "SC2020"
+        "SC1090"
       ]
     },
     {
