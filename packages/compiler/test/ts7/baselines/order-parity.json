@@ -7891,6 +7891,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4271-in-over-a-union-arm-that-is-a-primitive.ts": {
+   "order": [
+    "<repo>/tests/corpus/4271-in-over-a-union-arm-that-is-a-primitive.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4272-in-over-a-compiled-class-member-set.ts": {
+   "order": [
+    "<repo>/tests/corpus/4272-in-over-a-compiled-class-member-set.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
