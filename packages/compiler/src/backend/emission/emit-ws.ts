@@ -410,3 +410,13 @@ function ctorWrapper(
 function cStr(s: string): string {
   return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
+          // The only refusal the BACKEND raises on its own, and therefore
+          // the only one with neither a diagnostic nor a source location:
+          // it is untagged (no "[SCxxxx at file:line]"), so the zapo trap
+          // census cannot see it, and the SITE census has nothing to see
+          // even in principle. It IS live in zapo's TU -- one throw, in
+          // sc_wsw_0's second-argument union switch, inside the websocket
+          // dial (estado-instruments section 2.3). SCRIPTC_TRAP_TRACE does
+          // observe it: scr_error.c filters on the SC-numeric code, not on
+          // the tag. Giving it a location needs one plumbed here; that is
+          // a design question, not a patch.
