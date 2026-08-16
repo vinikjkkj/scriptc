@@ -574,12 +574,43 @@ static ScrDyn *dyn_object_proto_method(ScrDyn *recv, const char *method,
     if (scr_exc_pending()) return NULL;
     return scr_dyn_new_bool(r);
   }
+  /* Object.prototype.valueOf: the receiver itself. No kind this runtime
+   * models overrides it observably -- objects, arrays and functions
+   * answer themselves, and a primitive string/number/boolean answers the
+   * primitive, which is the same retained cell here. One body, reached
+   * from every arm's fall-through, for the reason hasOwnProperty is one
+   * body: two spellings of one question must not become two answers. */
+  if (dyn_name_is(method, "valueOf")) {
+    return scr_dyn_retain(recv);
+  }
   dyn_throw_not_fn(what);
   return NULL;
 }
 
 /* Names each prototype declares BEYOND what's implemented here — these
  * fence loudly instead of mis-answering "is not a function". */
+static bool dyn_str_proto_unimpl(const char *m) {
+  static const char *names[] = { "split", "replace", "replaceAll", "match",
+    "matchAll", "search", "localeCompare", "normalize", "codePointAt",
+    "toLocaleLowerCase", "toLocaleUpperCase", "isWellFormed", "toWellFormed",
+    "substr",
+    /* Behind libregexp -- see the note in the STR arm. */
+    "toUpperCase", "toLowerCase", NULL };
+  for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
+  return false;
+}
+
+/* Number/Boolean.prototype names the DOT spelling also refuses on a dyn
+ * receiver -- they sit in the frontend's DYN_PROTO_METHOD_NAMES and take
+ * its by-name decline. Fencing them here keeps the two spellings saying
+ * the same thing about the same name. */
+static bool dyn_num_proto_unimpl(const char *m) {
+  static const char *names[] = { "toFixed", "toExponential", "toPrecision",
+    "toLocaleString", NULL };
+  for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
+  return false;
+}
+
 static bool dyn_arr_proto_unimpl(const char *m) {
   static const char *names[] = { "reduce", "reduceRight", "flat",
     "fill", "copyWithin", "keys", "values", "entries", "toReversed", "toSorted", "toSpliced",
@@ -763,6 +794,121 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
         if (dyn_name_is(method, "indexOf")) return scr_dyn_new_num(scr_str_index_of(s, args[0]->v.str, 0));
         return scr_dyn_new_num(scr_str_last_index_of(s, args[0]->v.str));
       }
+      dyn_throw_unsupported("String", method);
+      return NULL;
+    }
+    /* PARITY WITH THE DOT SPELLING, not a new String surface.
+     *
+     * `s.toUpperCase()` on a dyn receiver is answered by the FRONTEND,
+     * out of DYN_STRING_ONLY_METHODS, before any runtime dispatch
+     * happens. The ELEMENT spelling `s[k]()` can never consult that
+     * table -- its key is a runtime value -- so it arrived here, found
+     * no arm, and answered "is not a function" for names Node plainly
+     * has. That is a LIE, and the worst-shaped one: it reads as a
+     * missing MEMBER rather than a missing IMPLEMENTATION, so a program
+     * feature-detecting with `if (s[k])` takes the wrong branch in
+     * silence.
+     *
+     * Every arm below calls the SAME scr_str_* helper the static string
+     * intrinsic calls for the dot spelling, so `s.trim()` and `s[k]()`
+     * cannot drift into two answers. Names the dot spelling reaches
+     * through the REGEX tables (split/replace/match/...) are not
+     * reimplemented here; they fence loudly in dyn_str_proto_unimpl
+     * below, which is a true statement where "is not a function" was a
+     * false one. */
+    /* toUpperCase/toLowerCase are NOT here, and the reason is a link-line
+     * one rather than a semantic one. Their only correct implementation is
+     * scr_str_case_conv in scr_regex.c, which reaches libregexp's Unicode
+     * case tables (lre_case_conv) for the non-ASCII half and the final-
+     * sigma rule. Naming it from this always-gated-together unit would put
+     * "scr_regex.c" in RUNTIME_UNIT_DEPS["scr_dyn_invoke.c"] and pull the
+     * vendored regex engine into every binary that makes ANY dyn method
+     * call -- which is the exact size-class property RUNTIME_UNIT_DEPS
+     * exists to protect, and a far worse trade than one fenced name.
+     *
+     * An ASCII-only inline conversion was considered and REFUSED: it would
+     * be a silent wrong answer for every non-ASCII string, which is the
+     * failure mode this whole line of work is about.
+     *
+     * So they fence, loudly and by name, through dyn_str_proto_unimpl
+     * below -- true where "is not a function" was false. Pinned as 4152.
+     */
+    if (dyn_name_is(method, "trim") || dyn_name_is(method, "trimStart") ||
+        dyn_name_is(method, "trimEnd")) {
+      ScrStr *r = dyn_name_is(method, "trim")        ? scr_str_trim(s)
+                : dyn_name_is(method, "trimStart")   ? scr_str_trim_start(s)
+                                                     : scr_str_trim_end(s);
+      ScrDyn *d = scr_dyn_new_str(r);
+      scr_str_release(r);
+      return d;
+    }
+    if (dyn_name_is(method, "charAt")) {
+      double i = dyn_index_arg(args, argc, 0, 0, what);
+      if (scr_exc_pending()) return NULL;
+      ScrStr *r = scr_str_char_at(s, i);
+      if (scr_exc_pending()) { if (r) scr_str_release(r); return NULL; }
+      ScrDyn *d = scr_dyn_new_str(r);
+      scr_str_release(r);
+      return d;
+    }
+    if (dyn_name_is(method, "charCodeAt")) {
+      double i = dyn_index_arg(args, argc, 0, 0, what);
+      if (scr_exc_pending()) return NULL;
+      double c = scr_str_char_code_at(s, i);
+      if (scr_exc_pending()) return NULL;
+      return scr_dyn_new_num(c);
+    }
+    if (dyn_name_is(method, "startsWith") || dyn_name_is(method, "endsWith")) {
+      if (argc < 1 || args[0]->kind != SCR_DYN_STR) {
+        dyn_throw_unsupported("String", method);
+        return NULL;
+      }
+      bool r = dyn_name_is(method, "startsWith") ? scr_str_starts_with(s, args[0]->v.str)
+                                                 : scr_str_ends_with(s, args[0]->v.str);
+      if (scr_exc_pending()) return NULL;
+      return scr_dyn_new_bool(r);
+    }
+    if (dyn_name_is(method, "substring")) {
+      double a0 = dyn_index_arg(args, argc, 0, 0, what);
+      if (scr_exc_pending()) return NULL;
+      double a1 = dyn_index_arg(args, argc, 1, scr_str_utf16_len(s), what);
+      if (scr_exc_pending()) return NULL;
+      ScrStr *r = scr_str_substring(s, a0, a1);
+      if (scr_exc_pending()) { if (r) scr_str_release(r); return NULL; }
+      ScrDyn *d = scr_dyn_new_str(r);
+      scr_str_release(r);
+      return d;
+    }
+    if (dyn_name_is(method, "repeat")) {
+      double n = dyn_index_arg(args, argc, 0, 0, what);
+      if (scr_exc_pending()) return NULL;
+      ScrStr *r = scr_str_repeat(s, n);
+      if (scr_exc_pending()) { if (r) scr_str_release(r); return NULL; }
+      ScrDyn *d = scr_dyn_new_str(r);
+      scr_str_release(r);
+      return d;
+    }
+    if (dyn_name_is(method, "padStart") || dyn_name_is(method, "padEnd")) {
+      double n = dyn_index_arg(args, argc, 0, 0, what);
+      if (scr_exc_pending()) return NULL;
+      ScrStr *fill = (argc >= 2 && args[1]->kind == SCR_DYN_STR)
+                       ? scr_str_retain(args[1]->v.str)
+                       : scr_str_new(" ", 1);
+      ScrStr *r = dyn_name_is(method, "padStart") ? scr_str_pad_start(s, n, fill)
+                                                  : scr_str_pad_end(s, n, fill);
+      scr_str_release(fill);
+      if (scr_exc_pending()) { if (r) scr_str_release(r); return NULL; }
+      ScrDyn *d = scr_dyn_new_str(r);
+      scr_str_release(r);
+      return d;
+    }
+    /* String.prototype.toString answers the primitive itself. valueOf is
+     * NOT here: it is Object.prototype's, answered once for every kind in
+     * dyn_object_proto_method, which this arm falls through to. */
+    if (dyn_name_is(method, "toString")) {
+      return scr_dyn_retain(recv);
+    }
+    if (dyn_str_proto_unimpl(method)) {
       dyn_throw_unsupported("String", method);
       return NULL;
     }
@@ -1088,6 +1234,42 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
     bool known = false;
     ScrDyn *r = scr_dyn_bytes_method(recv, method, args, argc, what, &known);
     if (known) return r;
+  }
+
+  /* NUMBER and BOOLEAN receivers. Before this arm they had no method of
+   * any kind: `n[k]()` for k="toString" fell through to
+   * dyn_object_proto_method and answered "is not a function", which Node
+   * never says about a number's toString. The DOT spelling answers it
+   * from the frontend (dyn.toString, and num.toStringRadix for the radix
+   * form); this arm answers from the SAME two runtime entry points, so
+   * `n.toString(2)` and `n[k](2)` are one answer computed once.
+   *
+   * `this` binding is not at issue here and never was -- these methods
+   * read the receiver through `recv`, not through the ambient window. */
+  if (recv->kind == SCR_DYN_NUM || recv->kind == SCR_DYN_BOOL) {
+    if (dyn_name_is(method, "toString")) {
+      if (recv->kind == SCR_DYN_NUM && argc >= 1 && args[0]->kind != SCR_DYN_UNDEF) {
+        double radix = dyn_index_arg(args, argc, 0, 10, what);
+        if (scr_exc_pending()) return NULL;
+        ScrStr *rs = scr_num_to_str_radix(recv->v.num, radix);
+        if (scr_exc_pending()) { if (rs) scr_str_release(rs); return NULL; }
+        ScrDyn *d = scr_dyn_new_str(rs);
+        scr_str_release(rs);
+        return d;
+      }
+      ScrStr *rs = scr_dyn_to_string(recv, NULL);
+      if (scr_exc_pending()) { if (rs) scr_str_release(rs); return NULL; }
+      ScrDyn *d = scr_dyn_new_str(rs);
+      scr_str_release(rs);
+      return d;
+    }
+    /* valueOf falls through to dyn_object_proto_method with every other
+     * kind's -- one body, one answer. */
+    if (dyn_num_proto_unimpl(method)) {
+      dyn_throw_unsupported(recv->kind == SCR_DYN_NUM ? "Number" : "Boolean", method);
+      return NULL;
+    }
+    return dyn_object_proto_method(recv, method, args, argc, what);
   }
 
   /* NUM/BOOL/BYTES-remainder: no method of this KIND — but every one of

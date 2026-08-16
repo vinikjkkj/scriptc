@@ -5753,6 +5753,16 @@ export const DYN_DISPATCH_METHODS = new Set<string>([
   // null-prototype dictionary inherits nothing, which is why the claim
   // is a runtime DISPATCH and not a fold.
   "hasOwnProperty",
+  // Object.prototype.valueOf -- the OTHER Object.prototype method every
+  // dyn kind inherits, and one no receiver kind overrides observably:
+  // Node answers the receiver itself for objects, arrays and functions,
+  // and the primitive for a string/number/boolean. Fenced by name before
+  // this line, so `s.valueOf()` refused while `s[k]()` -- which cannot
+  // consult a frontend table at all -- reached the runtime and answered.
+  // The two spellings must not disagree about a name Node answers for
+  // every kind, so it dispatches like hasOwnProperty and from the same
+  // place (dyn_object_proto_method).
+  "valueOf",
   "push", "pop", "shift", "unshift", "slice", "splice", "at",
   "indexOf", "lastIndexOf", "includes", "join", "concat", "reverse", "sort",
   "forEach", "map", "filter", "some", "every", "find", "findIndex",
@@ -6058,11 +6068,24 @@ const inliningPredicates = new Set<ts.Symbol>();
     }
     const loc = locOf(call);
     const constant: IrExpr = { kind: "strLit", value: "[object Object]", type: STRING, loc };
+    // A record-TYPED receiver whose LOWERED value is still the class
+    // instance: the checker sees the structural type (no toString on
+    // it, so the member resolves to Object.prototype.toString) while
+    // the runtime value carries the class's own toString. Node calls
+    // it; folding the constant here is a SILENT wrong answer. Lower
+    // once and reuse -- an effectful receiver must not be evaluated
+    // twice (lowerUnionToStringCall lowers-and-discards the same way).
+    let recv: IrExpr | null = null;
+    if (recvT.kind === "record") {
+      recv = L.lowerExpr(access.expression);
+      const dispatched = classToStringDispatch(L, recv, loc);
+      if (dispatched !== null) return dispatched;
+    }
     // `(<A>{}).toString()` — assertion-wrapped literals and plain reads
     // have nothing to evaluate; pureObjectToStringReceiver widens
     // pureReceiverNode with the empty object literal.
     if (pureObjectToStringReceiver(access.expression)) return constant;
-    const recv = L.lowerExpr(access.expression);
+    recv ??= L.lowerExpr(access.expression);
     const key = `objToStr:${typeKey(recv.type)}`;
     let helper = L.widthHelpers.get(key);
     if (!helper) {
@@ -6078,6 +6101,40 @@ const inliningPredicates = new Set<ts.Symbol>();
       });
     }
     return { kind: "call", callee: helper, args: [recv], type: STRING, loc };
+  }
+
+/** The record-typed receiver whose lowered value is a CLASS instance:
+   * dispatch to that class's toString instead of folding the default
+   * answer. A record-annotated binding, parameter or field does NOT
+   * always materialize a record struct -- a class instance assigned to
+   * one keeps its class pointer -- and the checker cannot see that,
+   * because the STRUCTURAL type it resolves the member against has no
+   * toString. Only source-declared classes qualify: a runtime-provided
+   * chain (Error, EventEmitter, streams) has no emitted `%X.toString`
+   * to call. Null keeps the caller on the existing fold. */
+  function classToStringDispatch(L: Lowerer, recv: IrExpr, loc: SrcLoc): IrExpr | null {
+    if (recv.type.kind !== "object") return null;
+    const info = L.classes.get(recv.type.className);
+    if (!info || !info.decl) return null;
+    if (findGenericMethodOn(L, info, "toString") !== null) return null;
+    const found = L.findMethodOn(info, "toString");
+    if (!found) return null;
+    // An abstract toString with no concrete override below has no
+    // implementation to call; a non-nullary or non-string one has no
+    // zero-argument string entry point. Both keep the old answer rather than
+    // turning a wrong string into a refusal.
+    const virtual = L.overrideBelow(info, "toString");
+    if (found.sig.abstract === true && !virtual) return null;
+    if (found.sig.params.length !== 0) return null;
+    if (found.sig.ret.kind !== "string") return null;
+    if (virtual) {
+      L.noteVirtualEdge(info, "toString");
+      return { kind: "virtualCall", className: info.def.name, method: "toString",
+        args: [L.upcastTo(recv, info.def.name)], type: STRING, loc };
+    }
+    L.noteEdge(`%${found.declarer.def.name}.toString`);
+    return { kind: "call", callee: `%${found.declarer.def.name}.toString`,
+      args: [L.upcastTo(recv, found.declarer.def.name)], type: STRING, loc };
   }
 
 /** pureReceiverNode plus the empty object literal — the default-toString
