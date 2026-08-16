@@ -501,6 +501,27 @@ ScrDyn *scr_dyn_proto_get(const ScrDyn *d, const char *key, size_t key_len) {
   return NULL;
 }
 
+/* JS's [[Get]] minus accessors, in one symbol: own DATA, else the
+ * prototype chain. The record walkers (dynMatch's predicate and
+ * dynCheck's builder, both backends) read a member through exactly this,
+ * so an inherited method — `L.prototype.toNumber = ...`, every JS class,
+ * protobufjs's Long — is as visible to a checked cast as JS makes it,
+ * while `scr_dyn_obj_get` stays own-only for the consumers that must be
+ * (Object.keys/values/entries, hasOwn, JSON, structuredClone,
+ * deepStrictEqual, Object.assign, the reserved "%error" marker).
+ *
+ * Everything this answers, JS's [[Get]] answers too, so it cannot match
+ * where JS would not; the one thing it does NOT answer is an
+ * ACCESSOR-provided member, exactly as the two halves it composes do not
+ * (a matcher returns bool and a builder runs before the record exists —
+ * neither holds an exception path for a throwing getter, and running one
+ * twice per cast is not what JS does either). */
+ScrDyn *scr_dyn_obj_data_get(const ScrDyn *d, const char *key, size_t key_len) {
+  ScrDyn *m = scr_dyn_obj_own_data(d, key, key_len);
+  if (m != NULL) return m;
+  return scr_dyn_proto_get(d, key, key_len);
+}
+
 /* True when the chain above `d` reaches a prototype object that a
  * FUNCTION value minted (scr_dyn_fn_prototype) — the one place where
  * Node has a `constructor` member and this runtime deliberately does

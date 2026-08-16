@@ -929,7 +929,12 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           if (f.type.kind === "dyn") continue;
           const keyLit = cStringLiteral(Buffer.from(f.name, "utf8"));
           const keyLen = Buffer.byteLength(f.name, "utf8");
-          d.push(`  m = scr_dyn_obj_get(d, ${keyLit}, ${keyLen});`);
+          // JS's [[Get]] minus accessors: own data, else the prototype
+          // chain. An own-only read made every INHERITED member invisible
+          // to the predicate, so a class instance never matched a record
+          // arm that named one of its methods — the shape protobufjs's
+          // Long has, and the shape every JS class has.
+          d.push(`  m = scr_dyn_obj_data_get(d, ${keyLit}, ${keyLen});`);
           if (E.undefinedArmTag(f.type) >= 0) {
             // Optional-flavored field: a MISSING key is the undefined arm
             // (a match); a PRESENT key must fit the union as usual.
@@ -1418,7 +1423,12 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           const utag = f.type.kind === "union" ? E.undefinedArmTag(f.type) : -1;
           d.push(`  {`);
           d.push(`    ScrDynPath p = { path, ${keyLit}, 0 };`);
-          d.push(`    const ScrDyn *m = scr_dyn_obj_get(d, ${keyLit}, ${keyLen});`);
+          // The same [[Get]]-minus-accessors read the predicate above
+          // takes, and it has to be the same one: the union builder's
+          // invariant is "the matched arm's builder can no longer fail",
+          // which a matcher that sees the prototype and a builder that
+          // does not would break on the very next member.
+          d.push(`    const ScrDyn *m = scr_dyn_obj_data_get(d, ${keyLit}, ${keyLen});`);
           if (f.type.kind === "dyn") {
             // An `unknown` field: a present key passes through, a missing
             // one IS the undefined dyn value (JS's missing-property read).
