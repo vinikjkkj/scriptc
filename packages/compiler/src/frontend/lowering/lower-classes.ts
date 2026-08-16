@@ -6755,11 +6755,104 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
  *   - the loop runs 0..n-1 by ones, over the SAME length expression (compared
  *     by source text, so `addresses.length` matches `addresses.length` and
  *     nothing else);
- *   - the body assigns `a[i]` at its TOP level, so no branch can skip it;
- *   - the body mentions `a` nowhere else — no read before the write, and no
- *     second write under a condition;
- *   - the body has no break/continue/return, which could leave the tail
- *     unwritten with the array still reachable. */
+ *   - EVERY path that finishes an iteration assigns `a[i]` before it does
+ *     (fillWalk below). A branch that writes the slot and then `continue`s
+ *     has finished its iteration honestly; a branch that reaches a
+ *     `continue` without writing has left a readable hole, and declines;
+ *   - the body mentions `a` nowhere but the left-hand side of those writes,
+ *     and no right-hand side reads it back;
+ *   - the body has no break/return, which could leave the TAIL unwritten
+ *     with the array still reachable, and no LABELLED continue, which can
+ *     abandon an outer loop the same way. */
+/** `a[i] = <rhs>` as a whole statement, for the array named `aName` at the
+ * loop variable named `iName`. `=` only: a compound assignment READS the slot
+ * first, which is the very thing the proof exists to prevent. */
+function isFillWrite(s: ts.Statement, aName: string, iName: string): s is ts.ExpressionStatement {
+  return (
+    ts.isExpressionStatement(s) && ts.isBinaryExpression(s.expression) &&
+    s.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+    ts.isElementAccessExpression(s.expression.left) &&
+    ts.isIdentifier(s.expression.left.expression) &&
+    s.expression.left.expression.text === aName &&
+    ts.isIdentifier(s.expression.left.argumentExpression) &&
+    s.expression.left.argumentExpression.text === iName
+  );
+}
+
+/** The definite-assignment walk behind the counting-loop proof.
+ *
+ * `written` is "the slot `a[i]` has been assigned on every path that reached
+ * here"; `flowsOut` is false when NO path reaches the end of this statement
+ * list (they all left through `continue`, each having written first). Null is
+ * a decline, and every shape the walk does not understand declines.
+ *
+ * The shape this exists for is the guarded fill, which the one-top-level-write
+ * rule could not see:
+ *
+ *   for (let i = 0; i < ids.length; i += 1) {
+ *     const hit = cache.get(ids[i])
+ *     if (!hit) { out[i] = null; continue }
+ *     if (hit.expiresAt <= now) { cache.delete(ids[i]); out[i] = null; continue }
+ *     out[i] = { secret: hit.secret, jid: hit.jid }
+ *   }
+ *
+ * Three writes on three paths, and the union of the paths is still every
+ * index. What must NOT pass is a `continue` that skips the write, or a
+ * `break`/`return` that leaves the tail of the array unwritten while the
+ * array is still reachable -- both leave a hole a later read can observe, and
+ * for a SCALAR element a hole reads 0 where Node reads undefined. */
+function fillWalk(
+  stmts: readonly ts.Statement[],
+  aName: string,
+  iName: string,
+  written = false,
+): { written: boolean; flowsOut: boolean } | null {
+  let w = written;
+  for (const s of stmts) {
+    if (ts.isBlock(s)) {
+      const r = fillWalk(s.statements, aName, iName, w);
+      if (r === null) return null;
+      if (!r.flowsOut) return { written: true, flowsOut: false };
+      w = r.written;
+      continue;
+    }
+    if (isFillWrite(s, aName, iName)) {
+      // The right-hand side must not read the array back.
+      if (mentionsIdentifier((s.expression as ts.BinaryExpression).right, aName)) return null;
+      w = true;
+      continue;
+    }
+    if (ts.isContinueStatement(s)) {
+      // The slot has to be written BEFORE the iteration is abandoned, and a
+      // labelled continue may abandon an outer loop entirely.
+      if (!w || s.label !== undefined) return null;
+      return { written: true, flowsOut: false };
+    }
+    if (ts.isIfStatement(s)) {
+      if (mentionsIdentifier(s.expression, aName)) return null;
+      const t = fillWalk([s.thenStatement], aName, iName, w);
+      if (t === null) return null;
+      const e =
+        s.elseStatement === undefined
+          ? { written: w, flowsOut: true }
+          : fillWalk([s.elseStatement], aName, iName, w);
+      if (e === null) return null;
+      if (!t.flowsOut && !e.flowsOut) return { written: true, flowsOut: false };
+      if (!t.flowsOut) { w = e.written; continue; }
+      if (!e.flowsOut) { w = t.written; continue; }
+      w = t.written && e.written;
+      continue;
+    }
+    // Anything else keeps the rule the proof has always had: it may not touch
+    // the array, and it may not cut the loop short. `throw` is admitted
+    // exactly as it was before this walk existed -- it unwinds the frame
+    // rather than continuing to read the array.
+    if (mentionsIdentifier(s, aName)) return null;
+    if (hasLoopJump(s)) return null;
+  }
+  return { written: w, flowsOut: true };
+}
+
 function fullFillLoopFollows(expr: ts.NewExpression): boolean {
   const lenArg = expr.arguments?.[0];
   if (!lenArg) return false;
@@ -6799,31 +6892,13 @@ function fullFillLoopFollows(expr: ts.NewExpression): boolean {
       ts.isIdentifier(inc.left) && inc.left.text === iName && inc.right.getText() === "1");
   if (!byOne) return false;
 
-  // The body: exactly one TOP-LEVEL `a[i] = ...`, no other mention of `a`,
-  // and no jump that could cut the loop short.
+  // The body: every path that finishes an iteration writes `a[i]` first.
   const body = loop.statement;
   const bodyStmts: readonly ts.Statement[] = ts.isBlock(body) ? body.statements : [body];
   const aName = decl.name.text;
-  let topLevelWrites = 0;
-  for (const s of bodyStmts) {
-    if (
-      ts.isExpressionStatement(s) && ts.isBinaryExpression(s.expression) &&
-      s.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-      ts.isElementAccessExpression(s.expression.left) &&
-      ts.isIdentifier(s.expression.left.expression) &&
-      s.expression.left.expression.text === aName &&
-      ts.isIdentifier(s.expression.left.argumentExpression) &&
-      s.expression.left.argumentExpression.text === iName
-    ) {
-      topLevelWrites++;
-      // The right-hand side must not read the array back.
-      if (mentionsIdentifier(s.expression.right, aName)) return false;
-      continue;
-    }
-    if (mentionsIdentifier(s, aName)) return false;
-    if (hasLoopJump(s)) return false;
-  }
-  if (topLevelWrites !== 1) return false;
+  const walked = fillWalk(bodyStmts, aName, iName);
+  if (walked === null) return false;
+  if (walked.flowsOut && !walked.written) return false;
   fullFillLoopProofs++;
   if (process.env["SCRIPTC_FILLLOOP_WHY"] !== undefined) {
     console.error(
