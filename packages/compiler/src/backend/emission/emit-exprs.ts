@@ -1241,6 +1241,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         if (e.source.type.kind === "array") {
           return E.newTemp(e.type, `scr_bytes_from_arr(${kind}, ${src.name})`);
         }
+        if (e.source.type.kind === "dyn") {
+          // The runtime tag dispatch: number → length (Node's RangeError
+          // on a bad one, hence the pending check), typed array → copy,
+          // array → element-wise ToNumber, anything else → empty.
+          const t = E.newTemp(e.type, `scr_bytes_from_dyn(${kind}, ${src.name})`);
+          E.emitPendingCheck();
+          return t;
+        }
         throw new Error(`emitter bug: bytesNew source of kind ${e.source.type.kind}`);
       }
       case "bytesIntrinsic": {
@@ -5793,6 +5801,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "timers.clearNoop":
             // clearTimeout(null) and friends: Node silently ignores
             // non-handles — nothing runs.
+            return { name: "", type: e.type };
+          case "js.voidOperand":
+            // `void e`'s value: the operand already ran as the enclosing
+            // seqExpr's statement, so the leaf itself emits nothing. The
+            // consumer (unionWrap's VOID-payload rule) produces the
+            // interned `undefined` instance.
             return { name: "", type: e.type };
           case "process.onSignal": {
             // The registry owns the callback (zero-param — frontend-pinned)

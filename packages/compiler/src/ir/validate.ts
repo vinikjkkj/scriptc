@@ -154,6 +154,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "timers.immediateRef": { argTypes: [F64], result: F64 },
   "timers.immediateHasRef": { argTypes: [F64], result: BOOL },
   "timers.clearNoop": { argTypes: [], result: VOID },
+  "js.voidOperand": { argTypes: [], result: VOID },
   // Signal listeners are zero-param (the ambient shape); exit/stdin
   // callbacks carry program-dependent one-param shapes — null slots, the
   // libCall case checks them (child.onExit precedent).
@@ -2269,7 +2270,15 @@ function validateFunction(
               (a) =>
                 a.kind === "undefinedT" || a.kind === "nullT" ||
                 a.kind === "string" || a.kind === "f64" || a.kind === "bool" ||
-                (a.kind === "bytes" && a.elem === "u8"),
+                (a.kind === "bytes" && a.elem === "u8") ||
+                // A plain data RECORD arm: Object.prototype.toString's
+                // constant, decidable here for the same reason the LONE
+                // record operand is — not a tuple (which prints its
+                // elements) and no `toString` FIELD (which JS would call).
+                (a.kind === "record" && (() => {
+                  const s = records.get(a.shapeId);
+                  return s !== undefined && !s.tuple && !s.fields.some((f) => f.name === "toString");
+                })()),
             )
           ) {
             err("toString union operand has a non-stringable arm (frontend must fence)", e.loc);
@@ -2423,7 +2432,9 @@ function validateFunction(
             if (sk.elem.kind !== "f64") {
               err(`bytesNew array source must hold f64, got ${sk.elem.kind}`, e.loc);
             }
-          } else if (sk.kind !== "f64") {
+          } else if (sk.kind !== "f64" && sk.kind !== "dyn") {
+            // dyn: the runtime tag dispatch (scr_bytes_from_dyn) — the
+            // constructor's own overload set, decided at run time.
             err(`bytesNew source of kind ${sk.kind}`, e.loc);
           }
         }
