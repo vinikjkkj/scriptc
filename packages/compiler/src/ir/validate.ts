@@ -3325,6 +3325,15 @@ function validateFunction(
         checkExpr(e.recv);
         expectType(e.recv, DYN, "dynInvoke receiver");
         if (e.type.kind !== "dyn") err(`dynInvoke must be dyn-typed, got ${e.type.kind}`, e.loc);
+        // The ELEMENT spelling's runtime key: a STRING, reduced by the
+        // lowering with the same rule the keyed read uses. Anything else
+        // would mean the two spellings can name different members.
+        if (e.methodKey !== undefined) {
+          checkExpr(e.methodKey);
+          if (e.methodKey.type.kind !== "string") {
+            err(`dynInvoke methodKey of kind ${e.methodKey.type.kind} (must be string)`, e.loc);
+          }
+        }
         for (const a of e.args) {
           checkExpr(a);
           if (a.type.kind !== "dyn") err(`dynInvoke argument of kind ${a.type.kind} (must be dyn)`, e.loc);
