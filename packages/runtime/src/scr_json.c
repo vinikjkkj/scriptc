@@ -1926,7 +1926,24 @@ double scr_dyn_to_number(const ScrDyn *d) {
     case SCR_DYN_BOOL: return d->v.b ? 1.0 : 0.0;
     case SCR_DYN_NULL: return 0.0;
     case SCR_DYN_UNDEF: return (double)NAN;
-    default: break;
+    case SCR_DYN_BIG: break; /* the documented BigInt refusal, unchanged */
+    default: {
+      /* A REFERENCE kind. ToNumber's first step is ToPrimitive with the
+       * NUMBER hint (7.1.4 step 1), which runs a user valueOf/toString;
+       * only an object that answers neither still takes the loud
+       * dynCheck throw that names the site. */
+      ScrDyn *p = scr_dyn_to_primitive(d, SCR_TOPRIM_NUMBER);
+      if (!p) return (double)NAN; /* pending */
+      double out;
+      if (scr_dyn_is_prim(p)) {
+        out = scr_dyn_to_number(p); /* depth 1: p is primitive */
+      } else {
+        scr_dyn_check_fail(NULL, "number", p);
+        out = (double)NAN;
+      }
+      scr_dyn_release(p);
+      return out;
+    }
     }
   }
   scr_dyn_check_fail(NULL, "number", d);
@@ -1942,14 +1959,26 @@ double scr_dyn_to_number(const ScrDyn *d) {
  * why its result KIND is decided here rather than by the compiler.
  * Borrows both; +1 result, or NULL with the exception pending when either
  * side is a reference kind. */
-ScrDyn *scr_dyn_add(const ScrDyn *a, const ScrDyn *b) {
+ScrDyn *scr_dyn_add(const ScrDyn *pa_in, const ScrDyn *pb_in) {
+  /* ToPrimitive BOTH with no hint, which is what the doc above always
+   * said the operator does and what the refusal below used to stand in
+   * for. A bigint survives ToPrimitive unchanged and is still not
+   * scr_dyn_is_prim, so `"x" + 5n` keeps its documented refusal. */
+  ScrDyn *a = scr_dyn_to_primitive(pa_in, SCR_TOPRIM_DEFAULT);
+  if (!a) return NULL;
+  ScrDyn *b = scr_dyn_to_primitive(pb_in, SCR_TOPRIM_DEFAULT);
+  if (!b) {
+    scr_dyn_release(a);
+    return NULL;
+  }
+  ScrDyn *scr_add_out = NULL;
   if (!scr_dyn_is_prim(a)) {
     scr_dyn_check_fail(NULL, "a number or a string", a);
-    return NULL;
+    goto scr_add_done;
   }
   if (!scr_dyn_is_prim(b)) {
     scr_dyn_check_fail(NULL, "a number or a string", b);
-    return NULL;
+    goto scr_add_done;
   }
   if (a->kind == SCR_DYN_STR || b->kind == SCR_DYN_STR) {
     /* scr_dyn_string_coerce is String() over the kind — the units render
@@ -1960,11 +1989,15 @@ ScrDyn *scr_dyn_add(const ScrDyn *a, const ScrDyn *b) {
     ScrStr *cat = scr_str_concat(ls, rs);
     scr_str_release(ls);
     scr_str_release(rs);
-    ScrDyn *out = scr_dyn_new_str(cat); /* retains cat into the node */
+    scr_add_out = scr_dyn_new_str(cat); /* retains cat into the node */
     scr_str_release(cat);
-    return out;
+    goto scr_add_done;
   }
-  return scr_dyn_new_num(scr_dyn_to_number(a) + scr_dyn_to_number(b));
+  scr_add_out = scr_dyn_new_num(scr_dyn_to_number(a) + scr_dyn_to_number(b));
+scr_add_done:
+  scr_dyn_release(a);
+  scr_dyn_release(b);
+  return scr_add_out;
 }
 
 /* Abstract relational comparison (ECMA-262 7.2.13 IsLessThan) over two dyn
@@ -1978,15 +2011,25 @@ ScrDyn *scr_dyn_add(const ScrDyn *a, const ScrDyn *b) {
  * strCmp node without `utf16`), so the two spellings of one comparison
  * agree with each other and carry one documented divergence between them,
  * not two. Borrows; throws only on the reference kinds. */
-static bool scr_dyn_rel(const ScrDyn *a, const ScrDyn *b, int op) {
+static bool scr_dyn_rel(const ScrDyn *pa_in, const ScrDyn *pb_in, int op) {
   int c;
+  /* Both sides ToPrimitive with the NUMBER hint, as 7.2.13 step 1 says.
+   * A bigint is still not scr_dyn_is_prim, so it keeps its refusal. */
+  ScrDyn *a = scr_dyn_to_primitive(pa_in, SCR_TOPRIM_NUMBER);
+  if (!a) return false;
+  ScrDyn *b = scr_dyn_to_primitive(pb_in, SCR_TOPRIM_NUMBER);
+  if (!b) {
+    scr_dyn_release(a);
+    return false;
+  }
+  bool scr_rel_out = false;
   if (!scr_dyn_is_prim(a)) {
     scr_dyn_check_fail(NULL, "a number or a string", a);
-    return false;
+    goto scr_rel_done;
   }
   if (!scr_dyn_is_prim(b)) {
     scr_dyn_check_fail(NULL, "a number or a string", b);
-    return false;
+    goto scr_rel_done;
   }
   if (a->kind == SCR_DYN_STR && b->kind == SCR_DYN_STR) {
     c = scr_str_cmp(a->v.str, b->v.str);
@@ -1994,15 +2037,19 @@ static bool scr_dyn_rel(const ScrDyn *a, const ScrDyn *b, int op) {
   } else {
     double x = scr_dyn_to_number(a);
     double y = scr_dyn_to_number(b);
-    if (x != x || y != y) return false; /* NaN: every relational op is false */
+    if (x != x || y != y) goto scr_rel_done; /* NaN: every relational op is false */
     c = x < y ? -1 : (x > y ? 1 : 0);   /* ±0 compare equal, like JS */
   }
   switch (op) {
-  case 0: return c < 0;   /* <  */
-  case 1: return c <= 0;  /* <= */
-  case 2: return c > 0;   /* >  */
-  default: return c >= 0; /* >= */
+  case 0: scr_rel_out = c < 0; break;   /* <  */
+  case 1: scr_rel_out = c <= 0; break;  /* <= */
+  case 2: scr_rel_out = c > 0; break;   /* >  */
+  default: scr_rel_out = c >= 0; break; /* >= */
   }
+scr_rel_done:
+  scr_dyn_release(a);
+  scr_dyn_release(b);
+  return scr_rel_out;
 }
 
 /* One entry point per operator, so the emitted call needs no synthesized
@@ -3066,6 +3113,129 @@ ScrStr *scr_dyn_string_coerce_js(const ScrDyn *d) {
  * Borrows; +1, or NULL with the exception pending (a method's throw
  * propagates, and a null-prototype object — which really does have no
  * toString to fall back to — raises the spec's TypeError). */
+/* ToPrimitive (ECMA-262 7.1.1) over a dyn value, returning a PRIMITIVE
+ * dyn rather than a string. This is the conversion every one of the JS
+ * operators below performs on an untyped operand BEFORE it decides what
+ * kind of operation it is, and the reason it cannot be spelled as
+ * scr_dyn_to_primitive_string is that the primitive's own KIND is
+ * load-bearing: `0 == {valueOf(){return false}}` is TRUE in JS, because
+ * ToPrimitive answers the BOOLEAN false and ToNumber(false) is 0, while
+ * String(false) is "false", whose ToNumber is NaN. Stringifying first
+ * answers the wrong boolean.
+ *
+ * OrdinaryToPrimitive runs "valueOf" then "toString" for hints `number`
+ * and `default`, and "toString" then "valueOf" for hint `string`. Only a
+ * USER method participates: JS's Object.prototype.valueOf answers the
+ * OBJECT, which is not a primitive, so ToPrimitive falls through it every
+ * time, and its absence from the member table means the same thing. That
+ * fall-through is not a corner - protobufjs's `Long` (the live consumer
+ * in zapo's bundle) defines toString and NO valueOf, so `long == 0` is
+ * decided entirely by the second method. A valueOf-only implementation
+ * would refuse it.
+ *
+ * The toString HALF, when no user method answered, is the built-in table
+ * scr_dyn_to_string already owns (Array#toString's comma join,
+ * Error.prototype's encoded form, the "[object Object]" constant), so
+ * this DELEGATES instead of growing a third copy. The one arm where JS
+ * really throws is a null-prototype object, which inherits neither
+ * method: measured on Node v25.9.0, `0 == Object.create(null)` is a
+ * TypeError, not false.
+ *
+ * Symbol.toPrimitive is not consulted: the dyn model has no symbol kind,
+ * so no dyn value can carry one.
+ *
+ * hint: SCR_TOPRIM_DEFAULT / _NUMBER / _STRING. A primitive (and a
+ * bigint, whose ToPrimitive is the identity) answers itself. Borrows;
+ * +1, or NULL with the exception pending. */
+static ScrDyn *scr_toprim_try(const ScrDyn *d, const char *name, size_t len) {
+  ScrDyn *m = scr_dyn_obj_own_data(d, name, len); /* borrowed */
+  if (!m) m = scr_dyn_proto_get(d, name, len);
+  if (m == NULL || m->kind != SCR_DYN_FUNC) return NULL;
+  /* JS calls it with the OBJECT as the receiver. */
+  scr_dyn_this_push_dyn(d);
+  ScrDyn *r = scr_dyn_call(m, NULL, 0, name);
+  scr_dyn_this_pop();
+  if (!r) return NULL; /* threw - pending, and the caller must not continue */
+  if (scr_dyn_is_prim(r) || r->kind == SCR_DYN_BIG) return r; /* +1 */
+  scr_dyn_release(r); /* non-primitive answer: try the next method */
+  return NULL;
+}
+
+ScrDyn *scr_dyn_to_primitive(const ScrDyn *d, int hint) {
+  if (d == NULL) {
+    scr_dyn_check_fail(NULL, "a primitive value", d);
+    return NULL;
+  }
+  if (scr_dyn_is_prim(d) || d->kind == SCR_DYN_BIG) return scr_dyn_retain((ScrDyn *)d);
+  /* Only SCR_DYN_OBJ carries a member table a user valueOf/toString can
+   * live in; every other reference kind takes the built-in table below. */
+  if (d->kind == SCR_DYN_OBJ) {
+    ScrDyn *r;
+    if (hint == SCR_TOPRIM_STRING) {
+      r = scr_toprim_try(d, "toString", 8);
+      if (r) return r;
+      if (scr_exc_pending()) return NULL;
+      r = scr_toprim_try(d, "valueOf", 7);
+      if (r) return r;
+      if (scr_exc_pending()) return NULL;
+    } else {
+      r = scr_toprim_try(d, "valueOf", 7);
+      if (r) return r;
+      if (scr_exc_pending()) return NULL;
+      r = scr_toprim_try(d, "toString", 8);
+      if (r) return r;
+      if (scr_exc_pending()) return NULL;
+    }
+    if (d->null_proto && scr_dyn_obj_get(d, "toString", 8) == NULL) {
+      /* Object.create(null) inherits neither method, so the protocol
+       * really is exhausted - this is the one arm where JS throws. */
+      static const char msg[] = "Cannot convert object to primitive value";
+      scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+      return NULL;
+    }
+  }
+  {
+    ScrStr *s = scr_dyn_to_string(d, NULL);
+    if (!s) return NULL; /* pending (an OBJINST fence, a throwing member) */
+    ScrDyn *out = scr_dyn_new_str(s); /* retains s into the node */
+    scr_str_release(s);
+    return out;
+  }
+}
+
+/* IsLooselyEqual (ECMA-262 7.2.14) with a NUMBER on one side and an
+ * untyped value on the other - the operand pair `n == v` lowers to, and
+ * the one the census's two SC1040 traps are.
+ *
+ * The spec compares TYPES before it converts, and that ordering is the
+ * whole content of this function:
+ *
+ *   null / undefined   FALSE, and it must be answered BEFORE any
+ *                      conversion: Number(null) is 0, but `0 == null` is
+ *                      false. Measured on Node v25.9.0.
+ *   an object          ToPrimitive with NO hint (which is `default`),
+ *                      then the comparison runs again on the result -
+ *                      including the null/undefined answer above, since
+ *                      `0 == {valueOf(){return null}}` is false too.
+ *   anything else      ToNumber, and NaN makes every comparison false.
+ *
+ * Borrowed; never allocates for the number side. Answers false with the
+ * exception pending when a user method throws or the operand is a kind
+ * ToNumber refuses (a bigint keeps the documented refusal). */
+bool scr_dyn_loose_eq_num(double n, const ScrDyn *d) {
+  if (d == NULL) return false;
+  if (d->kind == SCR_DYN_NULL || d->kind == SCR_DYN_UNDEF) return false;
+  ScrDyn *p = scr_dyn_to_primitive(d, SCR_TOPRIM_DEFAULT);
+  if (!p) return false; /* pending */
+  bool eq = false;
+  if (p->kind != SCR_DYN_NULL && p->kind != SCR_DYN_UNDEF) {
+    double m = scr_dyn_to_number(p);
+    eq = !scr_exc_pending() && n == m; /* NaN compares false, as JS does */
+  }
+  scr_dyn_release(p);
+  return eq;
+}
+
 ScrStr *scr_dyn_to_primitive_string(const ScrDyn *d) {
   if (d->kind != SCR_DYN_OBJ) return scr_dyn_string_coerce(d);
   ScrDyn *m = scr_dyn_obj_own_data(d, "valueOf", 7); /* borrowed */
