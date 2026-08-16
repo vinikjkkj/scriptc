@@ -118,6 +118,46 @@ console.log("counts one:", counts(ONE));
 console.log("counts two:", counts(TWO));
 console.log("counts full:", counts(FULL));
 
+// --- FROM THE NODE ORACLE, not from the implementation ----------------------
+// `.find` answers the ELEMENT, not a copy of it: `xs.find(p) === xs[i]` in
+// JS, so a later write through the found value is visible in the array and
+// `===` against the array slot is true. The re-tag this rule enables wraps
+// a payload under a different tag; a re-tag that LIFTED instead would get
+// the value right and the identity wrong, and no trap census could see it.
+// Nothing in the code under test suggested this case — JS's own contract
+// did.
+type Slot = { readonly type: "jid"; name: string };
+const MUT: Schema<ReadonlyArray<Slot>> = {
+  name: "mut",
+  indexParts: [
+    { type: "jid", name: "first" },
+    { type: "jid", name: "second" },
+  ],
+};
+function findAndRename<S extends Schema<ReadonlyArray<Slot>>>(schema: S): string {
+  const slot = schema.indexParts.find((p) => p.name === "second");
+  if (slot === undefined) return "missing";
+  const identical = slot === schema.indexParts[1];
+  slot.name = "renamed";
+  return `${identical}/${schema.indexParts[1]!.name}`;
+}
+console.log("identity:", findAndRename(MUT));
+console.log("after:", MUT.indexParts.map((p) => p.name).join(","));
+
+// The callback runs left to right and exactly until the first hit — JS's
+// order guarantee, observable through a side effect.
+function visitedBeforeHit<S extends Schema>(schema: S): string {
+  const seen: string[] = [];
+  const hit = schema.indexParts.find((p) => {
+    seen.push(p.type);
+    return p.type === "boolString";
+  });
+  return `${seen.join(">")}|${hit === undefined ? "none" : hit.type}`;
+}
+console.log("order one:", visitedBeforeHit(ONE));
+console.log("order two:", visitedBeforeHit(TWO));
+console.log("order full:", visitedBeforeHit(FULL));
+
 // --- CONTROL: findLast over the same shape ----------------------------------
 function lastNonLiteral<S extends Schema>(schema: S): string {
   const slot = schema.indexParts.findLast((p) => p.type !== "literal");

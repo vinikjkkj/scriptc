@@ -95,6 +95,42 @@ function byTypeof(u: A | B | string | undefined): string {
 }
 console.log("typeof:", byTypeof({ k: "a", x: 2 }), byTypeof({ k: "b", y: 4 }), byTypeof("s"), byTypeof(undefined));
 
+// --- FROM THE NODE ORACLE, not from the implementation ----------------------
+// Three properties JS guarantees that nothing in the lowering suggests, and
+// that a re-tag which COPIED instead of re-wrapping would break silently:
+//
+//   1. `a ?? b` answers the LEFT VALUE. `(u as A | undefined) ?? d` with a
+//      non-nullish `u` is `u` itself — `===` holds and a later write through
+//      the result is visible through the original.
+//   2. the default is LAZY: it is not evaluated at all when the left is
+//      non-nullish.
+//   3. `??` triggers on BOTH null and undefined, so a sub-union carrying a
+//      `null` arm has to strand and narrow the same way.
+type M = { k: "m"; n: number };
+const fallbackM: M = { k: "m", n: -1 };
+let defaultsTaken = 0;
+function makeDefault(): M {
+  defaultsTaken += 1;
+  return fallbackM;
+}
+function keptWhole(u: M | B | string | undefined): M {
+  return (u as M | undefined) ?? makeDefault();
+}
+const live: M = { k: "m", n: 1 };
+const back = keptWhole(live);
+console.log("identity:", back === live, "lazy:", defaultsTaken);
+back.n = 42;
+console.log("through:", live.n);
+const fell = keptWhole(undefined);
+console.log("fellback:", fell === fallbackM, "lazy:", defaultsTaken);
+
+// The null arm, and a sub-union that keeps null while dropping others.
+function withNull(u: M | B | string | null | undefined): string {
+  const r = (u as M | null | undefined) ?? { k: "m" as const, n: 0 };
+  return `${r.k}${r.n}`;
+}
+console.log("null:", withNull({ k: "m", n: 5 }), withNull(null), withNull(undefined));
+
 // --- a sub-union of THREE arms out of five, still sound ---------------------
 type C = { readonly k: "c"; readonly z: string };
 function three(u: A | B | C | string | undefined): string {
