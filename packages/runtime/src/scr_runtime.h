@@ -6369,6 +6369,9 @@ void scr_net_listen(ScrNetServer *s, double port, ScrClosure *cb /*moves, nullab
 void scr_net_listen_opts(ScrNetServer *s, double port, ScrStr *host /*borrowed*/,
                           bool ipv6_only, ScrClosure *cb /*moves, nullable*/);
 double scr_net_server_port(ScrNetServer *s); /* address().port */
+/* address()'s null discriminator: Node answers the record while the handle
+ * is bound, and null both before listen and after close. */
+bool scr_net_server_listening(ScrNetServer *s);
 ScrStr *scr_net_server_addr_ip(ScrNetServer *s);     /* +1 — address().address */
 ScrStr *scr_net_server_addr_family(ScrNetServer *s); /* +1 — address().family */
 void scr_net_server_close(ScrNetServer *s, ScrClosure *cb /*moves, nullable*/);

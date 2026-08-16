@@ -1499,6 +1499,15 @@ void scr_net_listen_opts(ScrNetServer *s, double port, ScrStr *host /*borrowed*/
 
 double scr_net_server_port(ScrNetServer *s) { return (double)s->port; }
 
+/* address()'s null discriminator. Node's server.address() reads the bound
+ * handle: null before it exists and after close(), the record while it
+ * does. `listening` tracks exactly that handle here, so the two agree in
+ * every state EXCEPT one: Node defers the bind to a later tick when
+ * listen() is given a host string to resolve, and answers null in the
+ * window before it; this listen binds synchronously and answers the
+ * record there. Measured, and recorded beside the fixture. */
+bool scr_net_server_listening(ScrNetServer *s) { return s->listening; }
+
 /* address()'s other two fields — the bound host ('::'/'0.0.0.0' for the
  * host-less any, the normalized explicit host otherwise) and the family
  * string. Answer the any-form defaults before listen (Node answers null
