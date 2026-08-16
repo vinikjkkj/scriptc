@@ -8951,10 +8951,26 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
       // JS-exact formatters. Ref arms (records, arrays, ...) stay fenced:
       // JS would print "[object Object]" and friends — narrow first.
       const def = L.unions.get(e.type.unionId);
+      // A plain data RECORD arm is decidable and it is the arm the union
+      // form was missing: JS prints Object.prototype.toString's constant
+      // for it, and the LONE-record rule at the bottom of this function
+      // already returns exactly that, under exactly this test — not a
+      // tuple (which prints its elements) and no `toString` FIELD (which
+      // would shadow the prototype's and have to be called). Applying the
+      // same test per arm keeps the two spellings answering alike:
+      // `${rec}` and `${num | rec}` after the arm dispatch.
+      //
+      // Array, class and every other ref arm stay fenced.
+      const recordArmStringable = (a: IrType): boolean => {
+        if (a.kind !== "record") return false;
+        const shape = L.shapes.get(a.shapeId);
+        return shape !== undefined && !shape.tuple && !shape.fields.some((f) => f.name === "toString");
+      };
       const stringable = def?.arms.every(
         (a) =>
           a.kind === "undefinedT" || a.kind === "nullT" ||
-          a.kind === "string" || a.kind === "f64" || a.kind === "bool",
+          a.kind === "string" || a.kind === "f64" || a.kind === "bool" ||
+          recordArmStringable(a),
       );
       if (stringable) {
         return { kind: "toString", operand: e, type: STRING, loc: e.loc };

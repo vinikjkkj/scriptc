@@ -4856,6 +4856,16 @@ class LlEmitter {
                 B.line(`store ptr ${r}, ptr ${slot}`);
                 break;
               }
+              case "record": {
+                // A plain data record arm: Object.prototype.toString's
+                // constant, the same interned literal the LONE-record
+                // case below emits. The frontend admits an arm here only
+                // when the shape is not a tuple and carries no `toString`
+                // field, so the constant IS JS's answer.
+                const sym = this.internLiteral("[object Object]");
+                B.line(`store ptr ${this.retainValue(sym, e.type)}, ptr ${slot}`);
+                break;
+              }
               default:
                 throw new LlvmUnsupportedError(`toString:union:${arm.kind}`, e.loc);
             }

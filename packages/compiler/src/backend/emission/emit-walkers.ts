@@ -292,6 +292,16 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
           d.push(`  case ${i}: return scr_bytes_to_str((ScrBytes *)scr_union_peek(v), (ScrStr *)&${enc});`);
           break;
         }
+        case "record": {
+          // A plain data record arm: Object.prototype.toString's constant,
+          // the same interned literal the LONE-record ToString emits (see
+          // emit-exprs.ts's `toString` case). The frontend admits an arm
+          // here only when the shape is not a tuple and carries no
+          // `toString` field, so the constant IS JS's answer.
+          const sym = E.internLiteral("[object Object]");
+          d.push(`  case ${i}: return scr_str_retain((ScrStr *)&${sym});`);
+          break;
+        }
         default:
           throw new Error(`emitter bug: ToString of union with a ${arm.kind} arm (frontend fences these)`);
       }
