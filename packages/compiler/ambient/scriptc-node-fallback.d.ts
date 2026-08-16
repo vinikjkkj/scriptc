@@ -1427,6 +1427,16 @@ declare module "crypto" {
     privateKey: KeyObject;
     publicKey: KeyObject;
   }): Buffer;
+  /* The CALLBACK form  Node's threadpool overload, which answers
+   * undefined and calls back with the secret. A compiled binary has no
+   * threadpool: the agreement runs synchronously and the callback is
+   * delivered on the microtask queue (the util.promisify settled-target
+   * stance). Declared here because it LOWERS; the probe idiom observes
+   * the undefined return through a cast, which needs no declaration. */
+  export function diffieHellman(
+    options: { privateKey: KeyObject; publicKey: KeyObject },
+    callback: (err: Error | null, secret: Buffer) => void,
+  ): void;
   export function sign(algorithm: null, data: Uint8Array, key: KeyObject): Buffer;
   export function verify(
     algorithm: null,
@@ -1705,6 +1715,24 @@ declare module "util" {
       windowsHide?: boolean;
     },
   ) => Promise<{ stdout: string; stderr: string }>;
+  /* The SECOND promisify target: crypto.diffieHellman's callback form,
+   * which answers `(options) => Promise<Buffer>` behind an
+   * already-settled promise. Declared AFTER execFile's overload so that
+   * spelling still resolves exactly where it did. The alias form the
+   * X25519 probe idiom uses  `const dh = diffieHellman as unknown as
+   * (o, cb) => void; promisify(dh)`  resolves through the const. */
+  export function promisify(
+    fn: (
+      options: {
+        privateKey: import("crypto").KeyObject;
+        publicKey: import("crypto").KeyObject;
+      },
+      callback: (err: Error | null, secret: Buffer) => void,
+    ) => void,
+  ): (options: {
+    privateKey: import("crypto").KeyObject;
+    publicKey: import("crypto").KeyObject;
+  }) => Promise<Buffer>;
   /* Declared surface without full lowering (the type-level tolerance
    * story: guarded/diagnostic-path code must TYPECHECK; a reached use
    * without a lowering fences at its site). inspect's options carry the
