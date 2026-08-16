@@ -8454,6 +8454,10 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         "for-in over tuples (the positions are fixed — a for loop over indices reads them)",
       );
     }
+    if (recvT?.kind === "union") {
+      const u = lowerForInUnion(L, stmt, labels);
+      if (u) return u;
+    }
     if (recvT?.kind === "object") {
       L.unsupported(
         "SC1052",
@@ -8466,6 +8470,101 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       stmt.expression,
       `for-in over '${L.checker.typeToString(L.typeOf(stmt.expression))}' receivers (records, index-signature shapes, arrays, and globalThis enumerate)`,
     );
+  }
+
+/** for-in over a UNION of fixed record shapes — the same key walk the
+   * single-record arm runs, chosen by the value's runtime TAG.
+   *
+   * Every arm of a lowered union carries its own shape, so "which keys does
+   * this value have" has one answer PER ARM and no answer for the union: the
+   * key list is the arm's, selected by the tag the value already carries.
+   * The receiver binds to a hidden local first, so the chain of tag tests
+   * reads it exactly once (JS evaluates the for-in operand once), and each
+   * arm's list comes from recordKeysArrayCall — the SAME interned helper the
+   * single-record path uses, so the undefined-arm skip (SEMANTICS.md 37) and
+   * declaration order are the record arm's, unchanged, not a second stance.
+   *
+   * A UNIT arm contributes an EMPTY list, which is Node exactly: `for (const
+   * k in undefined) {}` and `for (const k in null) {}` are legal and iterate
+   * zero times — unlike the `in` OPERATOR, which throws on them. Such an arm
+   * is one the checker narrowed away while the lowered union still carries
+   * it, and giving it zero iterations costs no trust in the narrowing.
+   *
+   * Declines — leaving the fence exactly as it stands — for anything whose
+   * per-arm answer is not the record walk: tuples (fixed positions),
+   * index-signature arms (their walk is objectIterOverIndexShape's, and a
+   * PURE one additionally needs the per-visit live-presence guard, which is
+   * a property of the arm and not of the loop), accessor-carrying shapes
+   * (the single-record path fences on those too — Node visits the accessor
+   * names and the static walk cannot), arrays, classes and dyn. */
+  function lowerForInUnion(L: Lowerer, stmt: ts.ForInStatement, labels: string[] | undefined): IrStmt | null {
+    const loc = locOf(stmt);
+    const receiver = L.lowerExpr(stmt.expression);
+    const walkable = (
+      t: IrType,
+    ): { declaredOrder?: string[]; fields: { name: string; type: IrType }[] } | null => {
+      if (t.kind !== "record") return null;
+      const s = L.shapes.get(t.shapeId);
+      if (!s || s.tuple || s.indexValue || shapeHasAccessorSlots(s)) return null;
+      return s;
+    };
+    // A union-typed SLOT whose value lowered to ONE arm (an object literal
+    // built directly at its arm, `{...} as A | B`): there is no tag to
+    // dispatch on and no union to narrow, so it is the single-record walk,
+    // reached here only because the CHECKER's type is the union and the
+    // record branch above never ran.
+    if (receiver.type.kind === "record") {
+      const only = walkable(receiver.type);
+      if (!only) return null;
+      return lowerForInOverKeys(L, stmt, recordKeysArrayCall(L, receiver, receiver.type, only, loc), labels);
+    }
+    if (receiver.type.kind !== "union") return null;
+    const unionId = receiver.type.unionId;
+    const arms = L.unions.get(unionId)?.arms ?? [];
+    if (arms.length === 0) return null;
+    type ArmPlan = { tag: number; arm: IrType; shape: { declaredOrder?: string[]; fields: { name: string; type: IrType }[] } | null };
+    const plans: ArmPlan[] = [];
+    for (const arm of arms) {
+      const tag = L.armTag(unionId, arm);
+      if (tag < 0) return null;
+      if (isUnitType(arm)) {
+        plans.push({ tag, arm, shape: null });
+        continue;
+      }
+      const shape = walkable(arm);
+      if (!shape) return null;
+      plans.push({ tag, arm, shape });
+    }
+    const keysT: IrType & { kind: "array" } = { kind: "array", elem: STRING };
+    const recvLocal = L.declareHiddenLocal("%inunion", receiver.type);
+    const recvRef = (): IrExpr => ({ kind: "varRef", localId: recvLocal.id, type: receiver.type, loc });
+    const emptyKeys = (): IrExpr => ({ kind: "arrayLit", elems: [], type: keysT, loc });
+    // Built back to front: the innermost else is the empty list, so no arm
+    // claims the answer for a tag it did not test.
+    let keys: IrExpr = emptyKeys();
+    for (let i = plans.length - 1; i >= 0; i -= 1) {
+      const plan = plans[i]!;
+      const armKeys =
+        plan.shape === null || plan.arm.kind !== "record"
+          ? emptyKeys()
+          : recordKeysArrayCall(
+              L,
+              { kind: "unionNarrow", unionId, tag: plan.tag, value: recvRef(), type: plan.arm, loc },
+              plan.arm,
+              plan.shape,
+              loc,
+            );
+      keys = {
+        kind: "ternary",
+        cond: { kind: "unionIsTag", unionId, tag: plan.tag, negated: false, value: recvRef(), type: BOOL, loc },
+        then: armKeys,
+        else_: keys,
+        type: keysT,
+        loc,
+      };
+    }
+    const loop = lowerForInOverKeys(L, stmt, keys, labels);
+    return { kind: "block", body: [{ kind: "varDecl", localId: recvLocal.id, init: receiver, loc }, loop], loc };
   }
 
 /** The record arms' shared tail: a for-of over the snapshotted keys array

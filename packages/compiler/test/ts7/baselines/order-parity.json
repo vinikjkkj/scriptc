@@ -7801,6 +7801,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4201-for-in-over-a-union-of-record-shapes.ts": {
+   "order": [
+    "<repo>/tests/corpus/4201-for-in-over-a-union-of-record-shapes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4202-array-isarray-guard-one-hop-past-the-checker.ts": {
+   "order": [
+    "<repo>/tests/corpus/4202-array-isarray-guard-one-hop-past-the-checker.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/4211-class-value-into-an-optional-construct-signature-field.ts": {
    "order": [
     "<repo>/tests/corpus/4211-class-value-into-an-optional-construct-signature-field.ts"
