@@ -4115,7 +4115,27 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       // adopting it would lose the only thing that can be constructed.
       // `let` keeps the declared type: a later assignment could name an
       // unrelated class.
-      (!isLet && init.type.kind === "classval" ? init.type : null);
+      (!isLet && init.type.kind === "classval" ? init.type : null) ??
+      // A CONST whose INITIALIZER already lowered to a real function value
+      // while its DECLARED type is an OVERLOAD SET. `const dh =
+      // diffieHellman` is the shape: the shipped fallback declarations spell
+      // crypto.diffieHellman with one signature, real @types/node spells it
+      // with two (the synchronous options form and the callback form), so
+      // the SAME program mapped its binding under the fallback and fenced on
+      // its TYPE under real types -- SC2020 naming @types/node here, SC2007
+      // where no node provenance applies. The corpus is entirely in the
+      // fallback world and zapo is entirely in the real one, which is why
+      // the fence was invisible to the suite.
+      //
+      // SC2007's rule is "a compiled function value is ONE signature", and
+      // that rule is satisfied here rather than bypassed: the initializer
+      // lowered, so exactly one compiled signature EXISTS and this adopts
+      // it. The overload set is a compile-time claim with no runtime
+      // content -- the same argument the classval case above makes. `let`
+      // keeps the declared type: a later assignment could pick another arm.
+      (!isLet && init.type.kind === "func" && L.checker.getCallSignatures(L.typeOf(decl.name)).length > 1
+        ? init.type
+        : null);
     // A JS `let x = {}`: TS's empty-object-literal type admits ANY later
     // non-nullish assignment (`envs = {}`, later `envs =
     // Object.fromEntries(...)` — tsc accepts every such write, since
