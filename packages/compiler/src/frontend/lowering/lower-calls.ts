@@ -5753,6 +5753,16 @@ export const DYN_DISPATCH_METHODS = new Set<string>([
   // null-prototype dictionary inherits nothing, which is why the claim
   // is a runtime DISPATCH and not a fold.
   "hasOwnProperty",
+  // Object.prototype.valueOf -- the OTHER Object.prototype method every
+  // dyn kind inherits, and one no receiver kind overrides observably:
+  // Node answers the receiver itself for objects, arrays and functions,
+  // and the primitive for a string/number/boolean. Fenced by name before
+  // this line, so `s.valueOf()` refused while `s[k]()` -- which cannot
+  // consult a frontend table at all -- reached the runtime and answered.
+  // The two spellings must not disagree about a name Node answers for
+  // every kind, so it dispatches like hasOwnProperty and from the same
+  // place (dyn_object_proto_method).
+  "valueOf",
   "push", "pop", "shift", "unshift", "slice", "splice", "at",
   "indexOf", "lastIndexOf", "includes", "join", "concat", "reverse", "sort",
   "forEach", "map", "filter", "some", "every", "find", "findIndex",
