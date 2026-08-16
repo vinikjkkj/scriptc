@@ -19,6 +19,7 @@
 // lines, and it is measured rather than argued.
 //
 //   Node    proto=L:7   own=O:8   shadow=own:9   none=[object Object]  deep=deep:11
+//           bare THREW "v.toString is not a function"
 //   here    proto/own/shadow/none/deep all "[object Object]"
 //
 // `none` is the CONTROL: a value with no toString anywhere answers
@@ -30,7 +31,7 @@
 // helpers, the two projection builders) in both backends -- a
 // representation change on the order of block/protoget's, and a block of
 // its own. Whoever takes it gets a red test here pointing at this note.
-import { makeProto, makeOwn, makeShadow, makeNone, makeDeep } from "tostrreach"
+import { makeProto, makeOwn, makeShadow, makeNone, makeDeep, makeBare } from "tostrreach"
 
 interface LongLike {
     low: number
@@ -47,6 +48,15 @@ console.log("own    = " + b.toString())
 console.log("shadow = " + c.toString())
 console.log("none   = " + d.toString())
 console.log("deep   = " + e.toString())
+// A null-prototype dictionary inherits nothing, toString included: Node
+// throws `v.toString is not a function`. The fold answers the constant, so
+// the divergence here is a THROW turned into a string.
+const z = makeBare(12) as LongLike
+try {
+    console.log("bare   = " + z.toString())
+} catch (err) {
+    console.log("bare   THREW " + (err as Error).message)
+}
 
 // The same loss with no package in sight: a record-typed PARAMETER, FIELD,
 // ARRAY ELEMENT and REASSIGNED LET each materialize a record struct out of

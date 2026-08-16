@@ -861,6 +861,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
    * 4141 fix nor closed by it:
    *
    *     Node  proto=L:7 own=O:8 shadow=own:9 none=[object Object] deep=deep:11
+   *           bare THREW "z.toString is not a function"
    *           param/field/elem/relet = Own(1)
    *     here  every row "[object Object]"
    *
@@ -898,6 +899,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
         "shadow = own:9",
         "none   = [object Object]",
         "deep   = deep:11",
+        "bare   THREW z.toString is not a function",
         "param  = Own(1)",
         "field  = Own(1)",
         "elem   = Own(1)",
@@ -913,6 +915,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
         "shadow = [object Object]",
         "none   = [object Object]",
         "deep   = [object Object]",
+        "bare   = [object Object]",
         "param  = [object Object]",
         "field  = [object Object]",
         "elem   = [object Object]",
