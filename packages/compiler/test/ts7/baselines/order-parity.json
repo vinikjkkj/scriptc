@@ -7781,6 +7781,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4182-record-receiver-tostring-optional-params.ts": {
+   "order": [
+    "<repo>/tests/corpus/4182-record-receiver-tostring-optional-params.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4183-generic-instance-var-hoisting.ts": {
+   "order": [
+    "<repo>/tests/corpus/4183-generic-instance-var-hoisting.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/420-dead-strip-modules/main.ts": {
    "order": [
     "<repo>/tests/corpus/420-dead-strip-modules/side.ts",
@@ -9893,6 +9905,12 @@
   "<repo>/tests/fixtures/npm/cases/4154-dyn-valueof-and-own-member-shadowing/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/4154-dyn-valueof-and-own-member-shadowing/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/4181-monomorphized-var-hoisting/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/4181-monomorphized-var-hoisting/main.ts"
    ],
    "diags": []
   },
