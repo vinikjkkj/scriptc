@@ -3246,6 +3246,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           }
           case "url.new":
             return finish(`scr_url_new(${arg(0)})`);
+          case "url.newRel":
+            return finish(`scr_url_new_rel(${arg(0)}, ${arg(1)})`);
           case "url.protocol":
             return finish(`scr_url_protocol(${arg(0)})`);
           case "url.host":
