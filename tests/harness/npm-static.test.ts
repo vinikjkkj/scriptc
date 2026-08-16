@@ -586,19 +586,31 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
    * a functionally BROKEN configuration got past every instrument in this
    * repo, because zapo needs both and nothing pinned the pair.
    *
-   * The 2x2, measured on zapo's QR gate, and again at lab scale here:
+   * The 2x2, measured on zapo's QR gate, and again at lab scale here on
+   * four compilers built from `528bcf74`:
    *
-   *   neither fix              `toNumber` never installed   THROWS
-   *   `!` rule only            `toNumber` invisible         THROWS
-   *   prototype walk only      `toNumber` never installed   THROWS
-   *   both                     `global 7 0 false 7`         Node's bytes
+   *   neither fix           SC2001 values of type 'void'      THROWS
+   *   prototype walk only   SC2001 values of type 'void'      THROWS
+   *   `!` rule only         expected function at $.toNumber   THROWS
+   *   both                  `global 7 0 false 7`              Node's bytes
    *
-   * Both failing rows throw the SAME message — `expected function at
-   * $.toNumber, got undefined` — which is why the two walls hid each
-   * other for two blocks running. And the trap census reads 57/47/0 for
-   * the first and third rows and 56/46/0 for the second and fourth, so it
-   * puts a broken configuration on the better-looking side. This program
-   * is the instrument that does not.
+   * Read the COLUMNS too, because that is the finding: 4031 is green in
+   * the "prototype walk only" configuration and 4032 is green in the
+   * "`!` rule only" one — and "`!` rule only" is the configuration that
+   * takes zapo from working to 0 QR / exit 1 / ~20 s. A single-fix
+   * fixture is green in a broken build by construction; it is testing its
+   * own fix and nothing else. 4064 is green in exactly one column and it
+   * is the working one.
+   *
+   * The two failing messages are also the reason the walls hid each other
+   * for two blocks: `expected function at $.toNumber, got undefined` is
+   * both what 4031 threw on ITS base and what block/protoinit saw at
+   * `$.notAfter`. Two blocks read one string as two different walls,
+   * because it was two different walls.
+   *
+   * And the trap census reads 57/47/0 for rows 1 and 2 and 56/46/0 for
+   * rows 3 and 4, so it puts the BROKEN configuration on the
+   * better-looking side. This program is the instrument that does not.
    */
   test("4064: the UMD bang and the prototype walk are needed TOGETHER", async () => {
     const entry = join(fixturesRoot, "npm/cases/4064-umd-bang-prototype-conjunction/main.ts");
