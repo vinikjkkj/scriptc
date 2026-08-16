@@ -14708,3 +14708,18 @@ function everyArmIsTuple(L: Lowerer, t: ts.Type): boolean {
   const parts = t.getTypes();
   return parts.length > 0 && parts.every((p) => L.checker.isTupleType(p));
 }
+          // UNTAGGED, unlike every other fence this file builds (5327,
+          // 5387, 631) and unlike deferredFenceStmt: the message goes out
+          // bare, with no "[SCxxxx at file:line]" suffix. Two consequences,
+          // both measured on zapo's TU (estado-instruments section 2):
+          //   1. a run-phase failure here does NOT name its blocker as
+          //      precisely as a compile diagnostic would, which is the
+          //      contract deferredFenceStmt documents for itself;
+          //   2. the zapo trap census greps '[SC', so refusals leaving
+          //      through this line are invisible to it. Exactly one does
+          //      on zapo (the EventEmitter 'emit'-as-a-value SC1090, in
+          //      lifted fn %fence.fn.240); emit-ws.ts's SC2020 is the
+          //      other untagged refusal in that TU.
+          // Tagging this is a real fix, not just an instrument fix -- it
+          // just needs the lowering gate (both differential lanes,
+          // order-parity, RC audit, QR pair) that a message change earns.
