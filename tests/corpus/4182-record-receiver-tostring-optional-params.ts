@@ -19,6 +19,15 @@
 // a different wrong answer. `nullary` is the already-working row -- if
 // it moves, the widening broke the case it was built on.
 //
+// NOT A ROW HERE, and also unchanged by this: the `as`-cast spelling,
+// `const m: Rec = new OptOver() as OptBase`. That MATERIALIZES the record
+// and the class pointer is gone before the dispatch can look, so it folds
+// where Node answers "V=6". Measured identical on base and branch -- it
+// is 4142's pre-existing materialization price, a different mechanism
+// from this one, and it cannot be a row here because a corpus fixture has
+// to match Node byte for byte. Rows 5/5b use the two-step spelling, which
+// is what actually reaches the virtual arm.
+//
 // NOT A ROW HERE, and still a price: a toString whose parameter is
 // REQUIRED. `toString(sep: string)` has no absent-argument value (the
 // ABI type is a bare string, with no undefined arm to intern), so the
@@ -67,6 +76,18 @@ class OptOver extends OptBase {
     override toString(pad?: string): string { return "V" + (pad ?? "=") + this.low }
 }
 
+// The same virtual arm where the override spells a DEFAULT against the
+// base's optional. Both sides of that pair have ABI type
+// `string | undefined`, so the compiler accepts the override (a signature
+// that differs any other way is already SC1090, "parameter and return
+// types must match the base declaration exactly" -- which is what makes
+// the synthesized argument list, built from the DECLARER's signature,
+// always the shape the vtable slot spells). The override's own default
+// must still be applied by its prologue: "W!6", never "Wundefined6".
+class OptOverDef extends OptBase {
+    override toString(pad: string = "!"): string { return "W" + pad + this.low }
+}
+
 // A class with no toString anywhere: the default answer is correct.
 class Silent {
     low = 7
@@ -96,6 +117,11 @@ console.log("inherited " + d.toString())
 const over: OptBase = new OptOver()
 const e: Rec = over
 console.log("override  " + e.toString())
+
+// 5b. the same virtual arm, override spelling a DEFAULT
+const overd: OptBase = new OptOverDef()
+const ed: Rec = overd
+console.log("ovdefault " + ed.toString())
 
 // 6. CONTROL: the nullary row that already worked
 const f: Rec = new Nullary()
