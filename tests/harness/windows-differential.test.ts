@@ -134,21 +134,23 @@ const WINDOWS_SKIPS: Record<string, string> = {
   "1461-process-pid-getuid-kill.ts": "process.getuid absent on Windows (Node too)",
   "1531-process-arch-versions.ts": "process.getuid/getgid absent on Windows Node (typed present here)",
   "1571-optional-call-tostring-tail.ts": "process.getuid?.() short-circuits on Windows Node (member exists here)",
-  // The errno-spelling gap 1520 used to name is FIXED (scr_fs_throw
-  // translates the CRT's EACCES to EPERM on win32 — libuv's
-  // ERROR_ACCESS_DENIED map; the program's caught branches print
-  // matching codes on both sides now). The unguarded accessSync(W_OK)
-  // that used to crash BOTH sides is fixed too — the probe is guarded and
-  // prints its verdict, so Node on Windows now runs the program to
-  // completion. What is left is a REAL runtime divergence, measured on a
-  // Windows host through the local differential lane: the program's
-  // closing rmSync(dir, {recursive,force}) has to remove the 0o400
-  // `ro.txt`, and Node clears the readonly attribute before unlinking
-  // while the runtime does not — the binary dies "EPERM: operation not
-  // permitted, unlink …\ro.txt" and never prints its last line. Minimal
-  // repro: writeFileSync(f,{mode:0o400}) then rmSync(dir,{recursive:true,
-  // force:true}). Unskip when the runtime's recursive remove clears it.
-  "1520-fs-wider-surface.ts": "runtime rmSync(recursive,force) will not remove a 0o400 file on Windows (Node clears the readonly bit first); the binary dies EPERM before the program's last line",
+  // 1520 LEFT this list. Its three named blockers are all closed now.
+  // The errno spelling was fixed earlier (scr_fs_throw translates the
+  // CRT's EACCES to EPERM on win32 — libuv's ERROR_ACCESS_DENIED map),
+  // and the unguarded accessSync(W_OK) that used to crash BOTH sides was
+  // fixed with it. The last one was the real runtime divergence this
+  // entry described: the closing rmSync(dir, {recursive,force}) has to
+  // remove the 0o400 `ro.txt`, and Node clears the readonly attribute
+  // before unlinking while the runtime did not, so the binary died
+  // "EPERM: operation not permitted, unlink …\ro.txt" before its last
+  // line. scr_rm_unlink_e now does what Node's rimraf does (chmod 0o666
+  // and retry, keeping the original errno if the retry still fails).
+  // Verified against the entry's OWN minimal repro —
+  // writeFileSync(f,{mode:0o400}) then rmSync(dir,{recursive:true,
+  // force:true}) — and then on the whole program, on a Windows 11 host
+  // through the local differential lane: stdout AND stderr byte-equal to
+  // Windows Node with exit 0, on both the C and the LLVM backend.
+  // 3982-rmsync-force-readonly.ts is the dedicated coverage.
   // (1480 left this list: GetAdaptersAddresses walks libuv's exact rows.)
   // os.userInfo: shell is null on Windows Node; the scriptc surface types
   // it string ("" here) — and username/homedir differ per box anyway.
