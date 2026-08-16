@@ -32,7 +32,10 @@ export function npmCases(fixturesRoot: string): NpmCase[] {
       // consumers exercise the static rewrite's surface (lexer-visible
       // names the shipped .d.ts never declares, the __toESM interop
       // family), so they stay out of the flagless island lane by design.
-      .filter((entry) => !/\/(246[5-9]|255[67])-[^/]+\/main\.ts$/.test(entry))
+      // 4031-4032 are the --npm-static PRICE LISTS (the `-on-purpose`
+      // convention): programs that deliberately do NOT match Node today,
+      // pinned in npm-static.test.ts so the refusal has a price tag.
+      .filter((entry) => !/\/(246[5-9]|255[67]|403[12])-[^/]+\/main\.ts$/.test(entry))
       .map((entry) => ({ name: entry.split("/").at(-2)!, entry })),
     {
       // THE acceptance test: a calculator CLI on the real commander package
