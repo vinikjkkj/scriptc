@@ -12416,6 +12416,26 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     "propertyIsEnumerable", "toString", "valueOf", "__proto__", "toLocaleString",
   ]);
 
+/** EventEmitter's INSTANCE STATE, which `in` sees and the API-member list
+   * does not. Measured on Node v25.9.0, not recalled: the constructor
+   * writes all three as OWN properties
+   * (`Object.getOwnPropertyNames(new EventEmitter())` is exactly
+   * `["_events","_eventsCount","_maxListeners"]`) and
+   * `EventEmitter.prototype` carries them as defaults too, so EVERY
+   * emitter-derived instance answers `true` for all three whether or not
+   * a listener was ever added.
+   *
+   * They matter at the site this rule serves. `install.ts:108` asks
+   * whether a plugin's chosen `exposeAs` collides with a client member,
+   * and a plugin naming itself `_events` collides in Node. Leaving them
+   * out would have been the same silent PASS as leaving `toString` out —
+   * the emitter flavour of the same bug.
+   *
+   * EMITTER_API_MEMBERS is otherwise exactly right:
+   * `Object.getOwnPropertyNames(EventEmitter.prototype)` minus
+   * `constructor` and these three is its fifteen names, name for name. */
+  const EMITTER_INSTANCE_STATE_NAMES: readonly string[] = ["_events", "_eventsCount", "_maxListeners"];
+
 /** Every name a compiled class INSTANCE answers `in` for — its declared
    * instance members (own and inherited, fields, methods and accessor
    * slots), the EventEmitter API when the chain roots at the runtime
@@ -12441,6 +12461,11 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
   function classInMemberNames(L: Lowerer, className: string): Set<string> | null {
     const leaf = L.classes.get(className);
     if (!leaf) return null;
+    // The receiver's own class must be a class the PROGRAM declares. A
+    // runtime builtin as the LEAF (a bare `new EventEmitter()`) is a
+    // different question from the same builtin as a BASE, and only the
+    // base form is answered below.
+    if (leaf.def.runtime) return null;
     // The receiver's STATIC class must be its RUNTIME class. `in` reads the
     // real object's chain, so a `Base`-typed binding holding a `Derived`
     // answers `true` for Derived's members and this set would say false —
@@ -12468,6 +12493,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     for (let info: ClassInfo | null = leaf; info; info = info.base) {
       if (info.builtinEmitter) {
         for (const m of EMITTER_API_MEMBERS) names.add(m);
+        for (const m of EMITTER_INSTANCE_STATE_NAMES) names.add(m);
         continue;
       }
       if (info.def.runtime) return null;

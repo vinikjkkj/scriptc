@@ -139,6 +139,28 @@ class Clientish extends EventEmitter {
   }
 }
 const c = new Clientish();
-for (const k of ["sessionId", "connect", "on", "once", "off", "emit", "eventNames", "toString", "nope"]) {
+for (const k of [
+  "sessionId",
+  "connect",
+  "on",
+  "once",
+  "off",
+  "emit",
+  "eventNames",
+  "setMaxListeners",
+  "getMaxListeners",
+  "prependOnceListener",
+  "rawListeners",
+  // EventEmitter's INSTANCE STATE. The constructor writes all three as own
+  // properties and the prototype carries them as defaults, so `in` answers
+  // true on every emitter-derived instance whether or not a listener was
+  // ever added. A plugin naming itself `_events` collides in Node, so the
+  // member set has to say so.
+  "_events",
+  "_eventsCount",
+  "_maxListeners",
+  "toString",
+  "nope",
+]) {
   console.log("emitter", k, k in c);
 }
