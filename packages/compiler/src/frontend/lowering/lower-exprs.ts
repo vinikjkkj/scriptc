@@ -2426,6 +2426,21 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             ` checker=${L.checker.typeToString(L.typeOf(expr.expression)).slice(0, 90)}`,
         );
       }
+      // The lowered receiver is a UNION the CHECKER spelled `any`.
+      // `Array.isArray(n.content)` over a `Uint8Array | string | readonly
+      // T[]` member narrows to `any[]` — `readonly T[]` is not assignable
+      // to the `arg is any[]` predicate — so `.find(...)`'s answer arrives
+      // here with checker type `any` while the VALUE still carries the
+      // real union. lowerUnionProperty cannot claim it: that path gates on
+      // `mapTypeOf(checkerType)`, which is `dyn` here, and returns null
+      // before it ever looks at the lowered value. The union field read is
+      // the same helper that path uses; it answers only when every arm can
+      // serve the field and declines otherwise, so this can only turn a
+      // fence into an answer — never change a read that lowers today.
+      if (recvLowered.type.kind === "union") {
+        const served = lowerUnionFieldRead(L, expr, recvLowered, expr.name.text);
+        if (served) return L.maybeNarrow(served, expr);
+      }
       L.unsupported(
         "SC1090",
         expr,

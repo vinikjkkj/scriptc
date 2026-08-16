@@ -7643,6 +7643,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4001-isarray-find-answers-the-lowered-union.ts": {
+   "order": [
+    "<repo>/tests/corpus/4001-isarray-find-answers-the-lowered-union.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4002-isarray-find-chained-attrs-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/4002-isarray-find-chained-attrs-read.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/401-mutual-recursion.ts": {
    "order": [
     "<repo>/tests/corpus/401-mutual-recursion.ts"
