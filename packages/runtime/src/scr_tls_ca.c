@@ -11,7 +11,8 @@
  * Divergences, documented: the host bundle stands in for Node's
  * compiled-in Mozilla roots ('bundled' and rootCertificates) AND for the
  * platform store ('system') — the same /etc/ssl/cert.pem stance
- * scr_tls.c's anchors established; and set-time validation is PEM-BLOCK
+ * scr_tls.c's anchors established, and on win32 the OS ROOT store is
+ * that host bundle (no PEM file ships there); and set-time validation is PEM-BLOCK
  * shaped (a well-formed block with corrupt DER inside is kept here where
  * Node's X509 parse would drop it — such a cert then fails verification
  * instead, the same observable outcome one step later). Deduplication is
@@ -24,6 +25,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#include <wincrypt.h> /* the OS ROOT store — see scr_ca_win_root_pem */
+#endif
 
 /* The per-type caches: +1 held here for the process lifetime (an atexit
  * teardown releases them so the RC audit stays clean). 'default' also
@@ -123,6 +128,127 @@ static char *scr_ca_read_file(const char *path, size_t *out_len) {
   return buf;
 }
 
+#ifdef _WIN32
+/* The win32 arm of the bundle probe. Windows answers none of the paths
+ * below -- it ships no PEM file, because its trust is a certificate
+ * DATABASE -- so this store used to read EMPTY there, and
+ * rootCertificates was an empty array while Node's is 145 entries. That
+ * is the same gap scr_tls.c's anchor probe had, and the two must move
+ * together: the anchor arm now reads the OS ROOT store, so a binary
+ * whose dials trust those roots must not report that it trusts nothing.
+ *
+ * Certificates come out DER-encoded, so they are re-encoded into the PEM
+ * text this unit is built around and handed to the SAME block extractor
+ * the POSIX bundles use -- entries are then byte-shaped identically on
+ * every platform (BEGIN/END markers, 64-column body, trailing newline
+ * included), which is what keeps `looksPem` and the concatenation
+ * round-trip platform-independent. Still no mbedTLS: this is base64 over
+ * bytes, and the lean link line only gains crypt32. */
+static void scr_ca_b64_append(char **buf, size_t *len, size_t *cap, const unsigned char *src,
+                              size_t n) {
+  static const char A[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  /* 4 chars per 3 bytes, a newline every 64 chars, plus slack. */
+  size_t need = *len + ((n + 2) / 3) * 4 + ((n / 48) + 2) * 1 + 8;
+  if (need > *cap) {
+    while (*cap < need) *cap = *cap * 2 + 1024;
+    char *nb = realloc(*buf, *cap);
+    if (nb == NULL) scr_ca_oom();
+    *buf = nb;
+  }
+  char *o = *buf + *len;
+  size_t col = 0;
+  for (size_t i = 0; i < n; i += 3) {
+    unsigned v = (unsigned)src[i] << 16;
+    if (i + 1 < n) v |= (unsigned)src[i + 1] << 8;
+    if (i + 2 < n) v |= (unsigned)src[i + 2];
+    *o++ = A[(v >> 18) & 0x3f];
+    *o++ = A[(v >> 12) & 0x3f];
+    *o++ = (i + 1 < n) ? A[(v >> 6) & 0x3f] : '=';
+    *o++ = (i + 2 < n) ? A[v & 0x3f] : '=';
+    col += 4;
+    if (col == 64) {
+      *o++ = '\n';
+      col = 0;
+    }
+  }
+  if (col != 0) *o++ = '\n';
+  *len = (size_t)(o - *buf);
+}
+
+static void scr_ca_append(char **buf, size_t *len, size_t *cap, const char *s) {
+  size_t n = strlen(s);
+  if (*len + n + 1 > *cap) {
+    while (*cap < *len + n + 1) *cap = *cap * 2 + 1024;
+    char *nb = realloc(*buf, *cap);
+    if (nb == NULL) scr_ca_oom();
+    *buf = nb;
+  }
+  memcpy(*buf + *len, s, n);
+  *len += n;
+}
+
+/* The OS ROOT store as PEM text, malloc'd, or NULL when the store will
+ * not open or holds nothing usable. */
+static char *scr_ca_win_root_pem(size_t *out_len) {
+  HCERTSTORE store = CertOpenSystemStoreW(0, L"ROOT");
+  if (store == NULL) return NULL;
+  char *buf = NULL;
+  size_t len = 0, cap = 0;
+  /* A certificate DATABASE may hold one root under several entries, and
+   * a PEM file does not: this box's ROOT store answers 99 contexts with
+   * repeats among them. Left in, the repeats would be byte-identical
+   * blocks, and setDefaultCACertificates' byte-exact dedupe would then
+   * collapse them -- so `setDefaultCACertificates(getCACertificates
+   * ('bundled'))` would not round-trip its length, which 2557 pins and
+   * Node holds. Dedupe the DER here instead, where the database shape
+   * is, and the store this unit exposes keeps a PEM file's shape. */
+  unsigned char **seen = NULL;
+  size_t *seen_len = NULL;
+  size_t seen_n = 0, seen_cap = 0;
+  PCCERT_CONTEXT ctx = NULL;
+  while ((ctx = CertEnumCertificatesInStore(store, ctx)) != NULL) {
+    if ((ctx->dwCertEncodingType & X509_ASN_ENCODING) == 0 || ctx->pbCertEncoded == NULL ||
+        ctx->cbCertEncoded == 0) {
+      continue;
+    }
+    size_t n = (size_t)ctx->cbCertEncoded;
+    bool dup = false;
+    for (size_t i = 0; i < seen_n; i++) {
+      if (seen_len[i] == n && memcmp(seen[i], ctx->pbCertEncoded, n) == 0) {
+        dup = true;
+        break;
+      }
+    }
+    if (dup) continue;
+    if (seen_n == seen_cap) {
+      seen_cap = seen_cap * 2 + 32;
+      unsigned char **ns = realloc(seen, seen_cap * sizeof *ns);
+      size_t *nl = realloc(seen_len, seen_cap * sizeof *nl);
+      if (ns == NULL || nl == NULL) scr_ca_oom();
+      seen = ns;
+      seen_len = nl;
+    }
+    unsigned char *copy = malloc(n);
+    if (copy == NULL) scr_ca_oom();
+    memcpy(copy, ctx->pbCertEncoded, n);
+    seen[seen_n] = copy;
+    seen_len[seen_n] = n;
+    seen_n++;
+    scr_ca_append(&buf, &len, &cap, "-----BEGIN CERTIFICATE-----\n");
+    scr_ca_b64_append(&buf, &len, &cap, ctx->pbCertEncoded, n);
+    scr_ca_append(&buf, &len, &cap, "-----END CERTIFICATE-----\n");
+  }
+  for (size_t i = 0; i < seen_n; i++) free(seen[i]);
+  free(seen);
+  free(seen_len);
+  CertCloseStore(store, 0);
+  if (buf == NULL) return NULL;
+  buf[len] = '\0'; /* scr_ca_append always leaves room for the NUL */
+  *out_len = len;
+  return buf;
+}
+#endif /* _WIN32 */
+
 /* The host bundle, probed in scr_tls.c's documented order. */
 static ScrArr *scr_ca_load_host_bundle(void) {
   ScrArr *arr = scr_arr_new(SCR_ELEM_STR, 128);
@@ -138,8 +264,18 @@ static ScrArr *scr_ca_load_host_bundle(void) {
     if (text == NULL) continue;
     scr_ca_push_pem_blocks(arr, text, len);
     free(text);
-    break; /* first bundle wins, like the anchor probe */
+    return arr; /* first bundle wins, like the anchor probe */
   }
+#ifdef _WIN32
+  {
+    size_t len = 0;
+    char *text = scr_ca_win_root_pem(&len);
+    if (text != NULL) {
+      scr_ca_push_pem_blocks(arr, text, len);
+      free(text);
+    }
+  }
+#endif
   return arr;
 }
 
