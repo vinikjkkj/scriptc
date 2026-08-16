@@ -7891,6 +7891,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4262-file-scope-new-behind-a-record-cast.ts": {
+   "order": [
+    "<repo>/tests/corpus/4262-file-scope-new-behind-a-record-cast.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4263-record-cast-of-a-new-refused-where-the-identifier-compiled.ts": {
+   "order": [
+    "<repo>/tests/corpus/4263-record-cast-of-a-new-refused-where-the-identifier-compiled.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/4271-in-over-a-union-arm-that-is-a-primitive.ts": {
    "order": [
     "<repo>/tests/corpus/4271-in-over-a-union-arm-that-is-a-primitive.ts"
@@ -7900,6 +7912,18 @@
   "<repo>/tests/corpus/4272-in-over-a-compiled-class-member-set.ts": {
    "order": [
     "<repo>/tests/corpus/4272-in-over-a-compiled-class-member-set.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4281-find-in-an-instantiated-generic-follows-the-value-element.ts": {
+   "order": [
+    "<repo>/tests/corpus/4281-find-in-an-instantiated-generic-follows-the-value-element.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4282-an-as-cast-to-a-sub-union-is-honoured.ts": {
+   "order": [
+    "<repo>/tests/corpus/4282-an-as-cast-to-a-sub-union-is-honoured.ts"
    ],
    "diags": []
   },
