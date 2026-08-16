@@ -501,6 +501,86 @@ ScrDyn *scr_dyn_proto_get(const ScrDyn *d, const char *key, size_t key_len) {
   return NULL;
 }
 
+/* JS's [[Get]] minus accessors, in one symbol: own DATA, else the
+ * prototype chain. The record walkers (dynMatch's predicate and
+ * dynCheck's builder, both backends) read a member through exactly this,
+ * so an inherited method — `L.prototype.toNumber = ...`, every JS class,
+ * protobufjs's Long — is as visible to a checked cast as JS makes it,
+ * while `scr_dyn_obj_get` itself is untouched.
+ *
+ * The header's list of own-only consumers above is a list of GUARANTEES,
+ * not of callers, and the difference was worth measuring before widening
+ * anything: of the eight it names, only hasOwn/hasOwnProperty
+ * (scr_dyn_obj_has_own_prop) and deepStrictEqual (scr_assert.c) actually
+ * read through scr_dyn_obj_get. Object.keys/values/entries, the JSON
+ * writer, structuredClone and Object.assign iterate `v.obj.entries`
+ * directly and are own-only by ITERATION. `delete` (scr_dyn_key_delete)
+ * belongs on the list and is not on it. None of the three is reachable
+ * from an emitted record walker.
+ *
+ * Everything this answers, JS's [[Get]] answers too, so it cannot match
+ * where JS would not; the one thing it does NOT answer is an
+ * ACCESSOR-provided member, exactly as the two halves it composes do not
+ * (a matcher returns bool and a builder runs before the record exists —
+ * neither holds an exception path for a throwing getter, and running one
+ * twice per cast is not what JS does either). */
+ScrDyn *scr_dyn_obj_data_get(const ScrDyn *d, const char *key, size_t key_len) {
+  ScrDyn *m = scr_dyn_obj_own_data(d, key, key_len);
+  if (m != NULL) return m;
+  return scr_dyn_proto_get(d, key, key_len);
+}
+
+/* caps[0] the function, caps[1] the receiver it was read from. */
+static ScrDyn *scr_bound_method_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  ScrDyn *fn = scr_box_get_ref(clo->caps[0]);   /* +1 */
+  ScrDyn *recv = scr_box_get_ref(clo->caps[1]); /* +1 */
+  scr_dyn_this_push_dyn(recv);
+  ScrDyn *r = scr_dyn_call(fn, args, argc, "method");
+  scr_dyn_this_pop();
+  scr_dyn_release(fn);
+  scr_dyn_release(recv);
+  return r;
+}
+
+/* The record BUILDER's read for a member that can hold a function: the
+ * same [[Get]]-minus-accessors walk, +1, and an INHERITED callable comes
+ * back BOUND to `d`.
+ *
+ * Binding is what makes reading the prototype worth anything. JS has no
+ * materialization step — `x as LongLike` is the identity, so `x.toNumber()`
+ * is a method call on the object the method was found through. The record
+ * builder DOES materialize: it copies the member into a struct field, and
+ * the field is then called with no receiver at all, so `this.high` reads
+ * undefined. The link JS keeps implicitly has to be made explicit exactly
+ * once, here, at the only point that still knows both halves.
+ *
+ * OWN function members are deliberately NOT bound: they come back as the
+ * very pointer that went in, which is the identity `unbox(box(x)) === x`
+ * the func builder's fast path exists to preserve, and an own function
+ * property is not a method-dispatch site in the way a prototype entry is
+ * (there is no other way to have obtained a prototype method). */
+ScrDyn *scr_dyn_obj_member_get(const ScrDyn *d, const char *key, size_t key_len) {
+  ScrDyn *own = scr_dyn_obj_own_data(d, key, key_len);
+  if (own != NULL) return scr_dyn_retain(own);
+  ScrDyn *m = scr_dyn_proto_get(d, key, key_len);
+  if (m == NULL) return NULL;
+  if (m->kind != SCR_DYN_FUNC) return scr_dyn_retain(m);
+  ScrClosure *clo = scr_closure_new((void *)scr_bound_method_thunk, 2);
+  clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  scr_box_set_ref(clo->caps[0], scr_dyn_retain(m));
+  clo->caps[1] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  scr_box_set_ref(clo->caps[1], scr_dyn_retain((ScrDyn *)d));
+  /* The signature is deliberately NOT the wrapped function's: a static
+   * signature string is a promise about the C CALLING CONVENTION of
+   * `clo`, and this closure's is the thunk's. "()" is the same answer
+   * every runtime-minted function gives, and it routes every consumer
+   * through the adapter path rather than the direct-closure one.
+   * SCR_FN_SRC_BOUND with a NULL name is Node's own answer for a bound
+   * function's toString. */
+  return scr_dyn_new_func_src(clo, scr_bound_method_thunk, m->v.fn.arity, "()", NULL,
+                              SCR_FN_SRC_BOUND);
+}
+
 /* True when the chain above `d` reaches a prototype object that a
  * FUNCTION value minted (scr_dyn_fn_prototype) — the one place where
  * Node has a `constructor` member and this runtime deliberately does
