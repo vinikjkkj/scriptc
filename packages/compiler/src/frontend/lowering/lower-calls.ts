@@ -5391,17 +5391,35 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // and a checker-TYPED spelling can still lower dyn (an evolving
     // `let h = {}` flowing back out of a JS helper), so the RUNTIME world
     // decides, not the checker's.
+    //
+    // The probes run under a diagnostic sink that is only DRAINED when the
+    // arm commits. probeLower re-pushes what it captured, and on the
+    // declining path the caller lowers the whole element access again --
+    // which would report the receiver's diagnostics twice, and a runtime
+    // fence twice is a trap-census entry that does not exist. Declining
+    // discards the capture instead, so a decline is exactly as if this
+    // function had never run.
+    const saved = L.diagSink;
+    const captured: ScrDiagnostic[] = [];
+    L.diagSink = captured;
+    const decline = (): null => {
+      L.diagSink = saved;
+      return null;
+    };
     const recv = probeLower(L, access.expression);
-    if (recv?.type.kind !== "dyn") return null;
+    if (recv?.type.kind !== "dyn") return decline();
     const rawKey = probeLower(L, access.argumentExpression);
-    if (rawKey === null) return null;
+    if (rawKey === null) return decline();
     const key: IrExpr | null =
       rawKey.type.kind === "string"
         ? rawKey
         : rawKey.type.kind === "f64"
           ? { kind: "toString", operand: rawKey, type: STRING, loc: rawKey.loc }
           : null;
-    if (key === null) return null;
+    if (key === null) return decline();
+    // committing: restore the sink, then replay what the probes said
+    L.diagSink = saved;
+    for (const d of captured) L.pushDiag(d);
     const args = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
     return {
       kind: "dynInvoke",
