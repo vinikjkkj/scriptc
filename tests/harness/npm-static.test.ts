@@ -515,8 +515,16 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
    * the union arm's func leaf is an EXACT signature test, and a shipped
    * package's untyped `L.prototype.toNumber` boxes as `func()=>dyn`
    * against a `func()=>f64` target. Reading the prototype cannot help
-   * that — 4033's `union-arm-inherited-data` is the removal control, the
-   * same union with the method taken out, and it passes.
+   * that, and 4033 isolates it from both sides: its
+   * `union-arm-inherited-data` is the removal control (the same union
+   * with the method taken out — it passes), and its
+   * `union-arm-method-typed-unknown` is the discriminator (the same arm
+   * with the method declared `(): unknown`, so the target signature is
+   * `func()=>dyn` — it passes too). One type annotation is the whole
+   * difference. zapo's own declaration is
+   * `spec/proto/index.d.ts:45`, `type Long = number | { low: number;
+   * high: number; unsigned: boolean; toNumber(): number }`, so the
+   * refusal applies to it verbatim.
    *
    * The alarming shape is unchanged and is why all four exist: ZERO
    * fences, `coverage` says "fully static", and the binary still throws.
@@ -582,6 +590,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
         "nullproto-inherits-nothing THREW",
         "union-arm-inherited-data data 9 3",
         "union-arm-number num 5",
+        "union-arm-method-typed-unknown long 7",
         "",
       ].join("\n"),
     );
