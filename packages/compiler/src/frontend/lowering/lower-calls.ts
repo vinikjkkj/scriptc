@@ -6733,6 +6733,45 @@ const inliningPredicates = new Set<ts.Symbol>();
         (innerRet.kind === "void" ? L.armTag(ctxRet.unionId, UNDEFINED_T) >= 0 : true)
       ) {
         ret = isAsyncLike ? { kind: "promise", inner: ctxRet } : ctxRet;
+      } else if (
+        // The RECORD twin of the union adoption above, and it exists for
+        // the same reason: an unannotated lambda whose body is an object
+        // LITERAL infers a return shape of its own, and that shape can be
+        // one the slot's shape does not equal. The literal itself lowers
+        // at the CONTEXTUAL shape (that is what a contextually-typed
+        // object literal is for), so the body VALUE and the ABI return
+        // slot came from two different types and the return coercion
+        // refused a pair tsc had already vetted:
+        //
+        //   patchCredentials((c) => ({ ...c, routingInfo: undefined }), …)
+        //
+        // infers `{ name: string; routingInfo: undefined }` — and a
+        // field whose type is the bare unit `undefined` maps to the
+        // PADDED unit-only union `null | undefined`, because a lone unit
+        // arm has no representation. The value is a `WaAuthCredentials`,
+        // whose `routingInfo` is `Uint8Array | undefined`, and that does
+        // not lift into `null | undefined`: SC2002, at
+        // auth/WaAuthClient.ts:308 in zapo.
+        //
+        // The spread is NOT the decliner and never was — the same refusal
+        // reproduces with the spread absent (tests/corpus/4172's second
+        // case), because the later-contributor skip in the object-spread
+        // lowering already drops a source field the literal overrides.
+        // What decides it is the unannotated lambda: writing `(c): Creds
+        // => …` compiles today.
+        //
+        // Adopting the slot's record makes the ABI and the body agree,
+        // and every return site still coerces into it — a return the
+        // width-copy cannot carry fences there with its own actionable
+        // message instead of here with two near-identical type prints.
+        // Kept to the DIVERGENT pair (equal shapes adopt nothing) and to
+        // a record-inferring body, so a void or union return keeps its
+        // own disposition above.
+        ctxRet?.kind === "record" &&
+        innerRet.kind === "record" &&
+        !typeEquals(innerRet, ctxRet)
+      ) {
+        ret = isAsyncLike ? { kind: "promise", inner: ctxRet } : ctxRet;
       }
       // A VOID slot discards the callback's result (TS's void-returning
       // assignability rule; JS ignores the value), so an UNANNOTATED
@@ -8360,7 +8399,14 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     const cond: IrExpr =
       test === "callback"
         ? { kind: "callValue", callee: ref("f.0", fnT), args: [v], type: BOOL, loc }
-        : { kind: "toBool", operand: v, type: BOOL, loc };
+        // ToBoolean of a BOOL element is the element: toBool's operand
+        // domain is f64|string|union|ref precisely because a bool needs no
+        // conversion, and handing it one is an IR-validator ICE (SC9001)
+        // rather than a fence — `(xs: boolean[]).filter(Boolean)` reached
+        // exactly that, measured on 1e8e3529.
+        : elem.kind === "bool"
+          ? v
+          : { kind: "toBool", operand: v, type: BOOL, loc };
     const kept: IrExpr =
       tag !== null && elem.kind === "union"
         ? (test === "callback"

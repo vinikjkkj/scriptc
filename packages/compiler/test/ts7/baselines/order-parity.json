@@ -7763,6 +7763,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4171-boolean-as-a-hof-callback-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/4171-boolean-as-a-hof-callback-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4172-unannotated-lambda-adopts-its-record-return-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/4172-unannotated-lambda-adopts-its-record-return-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4173-new-array-count-takes-its-element-from-the-fill-loop.ts": {
+   "order": [
+    "<repo>/tests/corpus/4173-new-array-count-takes-its-element-from-the-fill-loop.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/420-dead-strip-modules/main.ts": {
    "order": [
     "<repo>/tests/corpus/420-dead-strip-modules/side.ts",
