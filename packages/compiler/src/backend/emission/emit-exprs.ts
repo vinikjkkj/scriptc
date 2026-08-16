@@ -5924,6 +5924,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_dyn_gt(${arg(0)}, ${arg(1)})`);
           case "dyn.ge":
             return finish(`scr_dyn_ge(${arg(0)}, ${arg(1)})`);
+          case "dyn.looseEqNum":
+            return finish(`scr_dyn_loose_eq_num(${arg(0)}, ${arg(1)})`);
           case "dyn.objKeys":
             return finish(`scr_dyn_obj_keys(${arg(0)})`);
           case "dyn.assign":
