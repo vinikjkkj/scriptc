@@ -2083,6 +2083,13 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     if (!ts.isIdentifier(inner)) return null;
     const bi = L.builtinImportOf(inner);
     if (!bi || bi.module !== "crypto" || bi.member !== "diffieHellman") return null;
+    // Only where the DECLARED type has no home. Under the shipped fallback
+    // the single-signature declaration maps, and the slot it produces is
+    // the one this file-scope binding has always had -- overriding it here
+    // would swap an interned shape for an identically-spelled one and count
+    // as a change in a world this fix is not about. The fallback arm of the
+    // corpus sweep is the measurement; this is the construction.
+    if (L.mapTypeOf(L.typeOf(inner))) return null;
     const optsShape = L.shapes.intern([
       { name: "privateKey", type: KEYOBJ },
       { name: "publicKey", type: KEYOBJ },
