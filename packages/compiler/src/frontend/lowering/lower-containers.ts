@@ -4,7 +4,7 @@
  * method surfaces. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, BYTES_U8, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { BOOL, BYTES_U8, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
 import { captureParticipationOfPattern, checkedJsNumber, droppableStatic, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexTextOf } from "./lower-exprs.js";
 import { forOfVarTarget, lowerDestructuringAssign } from "./lower-stmts.js";
@@ -604,6 +604,79 @@ function lowerOptionalDefaultArg(
     return (elemTs.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0 ? undefined : elemTs;
   }
 
+/** `Boolean` as a HOF CALLBACK VALUE — `xs.some(Boolean)`,
+   * `xs.every(Boolean)`, `xs.map(Boolean)`, `xs.find(Boolean)`.
+   *
+   * `BooleanConstructor`'s call signature keeps a type parameter
+   * (`<T>(value?: T): boolean`), so the VALUE has no compiled instance of
+   * its own and types.ts pins the one concrete signature it can — the
+   * string-coercion form `(value: string) => boolean`, which is what the
+   * option-table idiom (`type: Boolean`, `opt.type === Boolean`) needs.
+   * Over any other element that pin is a parameter mismatch, and the
+   * callback slot reported the generic-signature fence SC2005 on the
+   * CONSTRUCTOR's type — zapo's `Object.values(persistDiff).some(Boolean)`
+   * (auth/WaAuthClient.ts:358) is that site.
+   *
+   * The predicate the desugared loop actually needs is ToBoolean of the
+   * element, and THAT is monomorphic per element type: mint one interned
+   * `(elem) => bool` module function per element type, body `return
+   * toBool(v)` — identity for a bool element, whose ToBoolean is the value
+   * and which toBool's operand domain excludes on purpose. This is the
+   * same answer `.filter(Boolean)` already computes inline; only the other
+   * HOFs were missing it.
+   *
+   * No new closure IDENTITY escapes. The value is built at the argument
+   * position of a stdlib array HOF and consumed by that HOF's own
+   * synthesized helper, which never compares it; every REFERENCE to
+   * `Boolean` that a program can observe still lowers to the single
+   * interned `%builtin.Boolean` of lower-exprs, so `opt.type === Boolean`
+   * keeps answering JS function identity. That is why this lives here and
+   * not in the identifier lowering: a contextually monomorphised
+   * `Boolean` VALUE would make `((b: boolean) => unknown) = Boolean` and
+   * a bare `Boolean` two different closures, and `f === Boolean` would
+   * answer false where Node answers true — a silent wrong answer traded
+   * for a refusal.
+   *
+   * Null (the caller keeps its own fence) when ToBoolean has no static
+   * answer for the element: dyn/jsval/void/unit elements, and unions
+   * carrying a dyn/caught/jsval/void arm — the gate `.filter(Boolean)`
+   * already applies, and the validator's own truthy-union rule. */
+  function booleanCtorHofCallback(L: Lowerer, argNode: ts.Expression, elem: IrType, loc: SrcLoc): IrExpr | null {
+    if (!ts.isIdentifier(argNode) || argNode.text !== "Boolean") return null;
+    if (isJsSourceFile(argNode.getSourceFile())) return null;
+    if (!L.isStdlibSymbol(L.resolveValueSymbol(argNode) ?? undefined)) return null;
+    if (elem.kind === "dyn" || elem.kind === "jsval" || elem.kind === "void" || isUnitType(elem)) return null;
+    if (elem.kind === "union") {
+      const arms = L.unions.get(elem.unionId)?.arms;
+      if (arms === undefined) return null;
+      if (arms.some((a) => a.kind === "dyn" || a.kind === "caught" || a.kind === "jsval" || a.kind === "void")) {
+        return null;
+      }
+    } else if (
+      elem.kind !== "bool" && elem.kind !== "f64" && elem.kind !== "string" &&
+      !REF_TRUTHY_KINDS.has(elem.kind)
+    ) {
+      return null;
+    }
+    const key = `boolCtorPred:${typeKey(elem)}`;
+    let name = L.arrHofHelpers.get(key);
+    if (name === undefined) {
+      name = `%builtin.Boolean.pred.${L.arrHofHelpers.size}`;
+      L.arrHofHelpers.set(key, name);
+      const v: IrExpr = { kind: "varRef", localId: "v.0", type: elem, loc };
+      const value: IrExpr = elem.kind === "bool" ? v : { kind: "toBool", operand: v, type: BOOL, loc };
+      L.liftedFns.push({
+        name,
+        params: [{ localId: "v.0", name: "value", type: elem }],
+        returnType: BOOL,
+        locals: [{ id: "v.0", name: "value", type: elem, mutable: false }],
+        body: [{ kind: "return", value, loc }],
+        loc,
+      });
+    }
+    return { kind: "closure", fnName: name, captures: [], type: funcOf([elem], BOOL), loc };
+  }
+
 /** Lowers and validates a HOF callback argument. The lib declares optional
    * trailing (index, array) parameters after `lead` (the element for the
    * map family, accumulator + element for reduce); a callback may declare
@@ -614,6 +687,18 @@ function lowerOptionalDefaultArg(
   function hofCallbackArg(L: Lowerer, argNode: ts.Expression, lead: IrType[], arrT: IrType,
     leadTs?: readonly (ts.Type | undefined)[]):
     { fnArg: IrExpr & { type: IrType & { kind: "func" } }; arity: number } {
+    // `Boolean` as the callback VALUE: the ToBoolean predicate over the
+    // element, minted at the element type (booleanCtorHofCallback). Only
+    // for a SINGLE-element lead — reduce's two-value lead is a different
+    // signature and `Boolean` never fits it. Ahead of every override rule
+    // below: those all key on an arrow/function EXPRESSION, and this
+    // argument is an identifier.
+    if (lead.length === 1) {
+      const boolPred = booleanCtorHofCallback(L, argNode, lead[0]!, locOf(argNode));
+      if (boolPred !== null) {
+        return { fnArg: boolPred as IrExpr & { type: IrType & { kind: "func" } }, arity: 1 };
+      }
+    }
     // A DYN-receiver HOF's callback (`parsed.flatMap((value) => ...)`):
     // the contextual signature types the unannotated param `any` (the
     // receiver is checker-`any[]`), while the VALUE each call receives is
