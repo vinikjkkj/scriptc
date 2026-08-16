@@ -3743,6 +3743,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           }
           case "net.serverPort":
             return finish(`scr_net_server_port(${arg(0)})`);
+          case "net.serverListening":
+            return finish(`scr_net_server_listening(${arg(0)})`);
           case "net.serverAddress": {
             // The AddressInfo record from the three runtime reads (the
             // dgram.address materialization; none of these throw).

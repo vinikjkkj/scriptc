@@ -10230,6 +10230,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/fixtures/node-types/server-address-states.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/server-address-states.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/fixtures/node-types/stream-capture.ts": {
    "order": [
     "<repo>/tests/fixtures/node-types/stream-capture.ts"

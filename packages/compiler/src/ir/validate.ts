@@ -384,6 +384,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // net.serverAddress's record result is shape-checked in the libCall case
   // (the dgram.address sentinel pattern).
   "net.serverAddress": { argTypes: [NETSERVER_T], result: VOID },
+  "net.serverListening": { argTypes: [NETSERVER_T], result: BOOL },
   "net.serverClose": { argTypes: [NETSERVER_T], result: VOID },
   "net.serverCloseCb": { argTypes: [NETSERVER_T, { kind: "func", params: [], ret: VOID }], result: VOID },
   "net.serverOnError": { argTypes: [NETSERVER_T, null, BOOL], result: VOID },

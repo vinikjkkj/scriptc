@@ -2612,6 +2612,10 @@ export type IrLibFn =
    * listen it answers the any-form defaults with port 0 where Node
    * answers null (the serverPort stance). */
   | "net.serverAddress"
+  /* address()'s null discriminator: true while the handle is bound. The
+   * real-@types/node `AddressInfo | string | null` return lowers to a
+   * ternary over it (lower-server.ts). */
+  | "net.serverListening"
   | "net.serverClose"
   | "net.serverCloseCb"
   /** The close-override pair (the portless close-proxy idiom).
