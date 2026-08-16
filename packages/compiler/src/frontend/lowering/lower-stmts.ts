@@ -4357,10 +4357,35 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       const atWidth = keyedReadLocalAtDynWidth(L, init, type);
       if (atWidth) { init = atWidth; type = DYN; }
     }
+    // A CONST whose slot is `classval:C` and whose initializer is a direct
+    // class reference to C is CLASS-PINNED: the binding cannot be
+    // reassigned and the value it was given IS C's class object, never a
+    // descendant's. Recorded so the construct-thunk sites can treat a read
+    // of it exactly like the classRef they already accept
+    // (pinnedClassValueOf). The three facts are all read HERE, where they
+    // are still available — `const`, a lowered `classRef`, and the slot
+    // this declaration actually took after the whole type chain above
+    // (a widening annotation like `const b: typeof Base = Derived` lands
+    // on classval:Base and the className test declines it).
+    const classPin =
+      !isLet &&
+      (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) !== 0 &&
+      init.kind === "classRef" &&
+      type.kind === "classval" &&
+      init.type.kind === "classval" &&
+      init.type.className === type.className
+        ? type.className
+        : null;
     // Slot coercion: `const r: A | B = bValue;` wraps implicitly; width
     // subtyping (`const p: {a: number} = wider;`) is rejected, not coerced.
     init = L.coerceInto(decl.initializer, init, type);
     const local = L.declareLocal(decl.name, decl.name.text, type, isLet);
+    if (classPin !== null) {
+      L.ctx.classPins.set(local.id, classPin);
+      if (process.env["SCRIPTC_CLASSPIN_WHY"] !== undefined) {
+        console.error(`[classpin] local ${locOf(decl.name).file}:${locOf(decl.name).start} ${local.id} -> ${classPin}`);
+      }
+    }
     return { kind: "varDecl", localId: local.id, init, loc: locOf(decl) };
   }
 
