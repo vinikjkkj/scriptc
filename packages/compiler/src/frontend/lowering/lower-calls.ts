@@ -8303,7 +8303,14 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     const cond: IrExpr =
       test === "callback"
         ? { kind: "callValue", callee: ref("f.0", fnT), args: [v], type: BOOL, loc }
-        : { kind: "toBool", operand: v, type: BOOL, loc };
+        // ToBoolean of a BOOL element is the element: toBool's operand
+        // domain is f64|string|union|ref precisely because a bool needs no
+        // conversion, and handing it one is an IR-validator ICE (SC9001)
+        // rather than a fence — `(xs: boolean[]).filter(Boolean)` reached
+        // exactly that, measured on 1e8e3529.
+        : elem.kind === "bool"
+          ? v
+          : { kind: "toBool", operand: v, type: BOOL, loc };
     const kept: IrExpr =
       tag !== null && elem.kind === "union"
         ? (test === "callback"
