@@ -81,6 +81,7 @@
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h> /* inet_pton, in6_addr */
+#include <wincrypt.h> /* CertOpenSystemStoreW — the ROOT store, see scr_tls_system_ca */
 #else
 #include <arpa/inet.h>
 #endif
@@ -342,11 +343,14 @@ typedef struct ScrTlsCli {
  * Fedora/RHEL's ca-bundle.crt, and openSUSE's ca-bundle.pem. On macOS
  * only the first path exists, so the probe order changes nothing there.
  * A host with none leaves the chain empty: verification fails, exactly
- * the no-roots behavior /etc/ssl/cert.pem-only had. Windows is that host
- * by construction (no PEM bundle ships; the OS store is cert-database-
- * shaped) — a no-`ca` client there fails verification like a bundle-less
- * Unix host, which agrees with the oracle wherever the fixtures tread
- * (their CAs are local, never in Node's Mozilla roots either). */
+ * the no-roots behavior /etc/ssl/cert.pem-only had. Windows used to be
+ * that host by construction (no PEM bundle ships; the OS store is
+ * cert-database-shaped) and therefore trusted NOTHING — which agreed
+ * with the oracle wherever the FIXTURES tread, because their CAs are
+ * local and are not in Node's Mozilla roots either, and disagreed with
+ * it everywhere a real program dials a public host. The win32 arm below
+ * reads the OS ROOT store, which is this target's spelling of the same
+ * host trust these four paths stand in for. */
 static mbedtls_x509_crt scr_tls_system_roots;
 static bool scr_tls_system_roots_loaded = false;
 
@@ -386,6 +390,37 @@ static mbedtls_x509_crt *scr_tls_system_ca(void) {
     for (size_t i = 0; i < sizeof bundles / sizeof bundles[0]; i++) {
       if (mbedtls_x509_crt_parse_file(&scr_tls_system_roots, bundles[i]) == 0) break;
     }
+#ifdef _WIN32
+    /* Windows answers NONE of the paths above -- it ships no PEM bundle,
+     * because its trust is a certificate DATABASE. That left the chain
+     * EMPTY on this target, so a compiled binary could not verify any
+     * public certificate at all and every https/wss dial failed with
+     * 'unable to verify the first certificate' unless the operator
+     * exported NODE_EXTRA_CA_CERTS. Node has no such requirement: it
+     * carries a compiled-in Mozilla root store (tls.rootCertificates,
+     * 145 entries on v25.9.0) and verifies out of the box. The OS ROOT
+     * store is this target's spelling of the same host trust the four
+     * bundle paths above stand in for on POSIX, so reading it here is
+     * the win32 arm of a probe that already exists rather than a new
+     * policy. Certificates arrive DER-encoded, one context at a time; a
+     * context that fails to parse is skipped, exactly like a bundle
+     * whose blocks partly fail. Read once, behind the same
+     * scr_tls_system_roots_loaded latch as the POSIX arm. */
+    {
+      HCERTSTORE store = CertOpenSystemStoreW(0, L"ROOT");
+      if (store != NULL) {
+        PCCERT_CONTEXT ctx = NULL;
+        while ((ctx = CertEnumCertificatesInStore(store, ctx)) != NULL) {
+          if ((ctx->dwCertEncodingType & X509_ASN_ENCODING) != 0 && ctx->pbCertEncoded != NULL &&
+              ctx->cbCertEncoded > 0) {
+            (void)mbedtls_x509_crt_parse_der(&scr_tls_system_roots, ctx->pbCertEncoded,
+                                             (size_t)ctx->cbCertEncoded);
+          }
+        }
+        CertCloseStore(store, 0);
+      }
+    }
+#endif /* _WIN32 */
     /* NODE_EXTRA_CA_CERTS EXTENDS the trust anchors for real dials --
      * that is what the variable does in Node, and scr_tls_ca.c only
      * ever surfaced it to the INTROSPECTION api (getCACertificates
