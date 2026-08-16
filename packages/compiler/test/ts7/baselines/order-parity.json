@@ -7727,6 +7727,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4121-url-relative-resolution.ts": {
+   "order": [
+    "<repo>/tests/corpus/4121-url-relative-resolution.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4122-url-base-forms.ts": {
+   "order": [
+    "<repo>/tests/corpus/4122-url-base-forms.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/420-dead-strip-modules/main.ts": {
    "order": [
     "<repo>/tests/corpus/420-dead-strip-modules/side.ts",

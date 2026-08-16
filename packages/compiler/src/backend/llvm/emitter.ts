@@ -525,6 +525,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "abort.reason": "scr_abort_signal_reason",
   "abort.off": "scr_abort_signal_off",
   "url.new": "scr_url_new",
+  "url.newRel": "scr_url_new_rel",
   "url.protocol": "scr_url_protocol",
   "url.host": "scr_url_host",
   "url.hostname": "scr_url_hostname",

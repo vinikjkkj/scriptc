@@ -2785,6 +2785,7 @@ const char *scr_fs_err_path(const ScrStr *path, char *buf /* PATH_MAX */);
 typedef struct ScrUrl ScrUrl;
 
 ScrUrl *scr_url_new(ScrStr *input); /* +1, or throws */
+ScrUrl *scr_url_new_rel(ScrStr *input, ScrUrl *base); /* +1, or throws */
 ScrUrl *scr_url_retain(ScrUrl *u);
 void scr_url_release(ScrUrl *u);
 void *scr_url_retain_v(void *p);
