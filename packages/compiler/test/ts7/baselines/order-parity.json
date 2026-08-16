@@ -7789,6 +7789,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4211-class-value-into-an-optional-construct-signature-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/4211-class-value-into-an-optional-construct-signature-field.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4212-hof-callback-value-whose-parameter-takes-the-width-copy.ts": {
+   "order": [
+    "<repo>/tests/corpus/4212-hof-callback-value-whose-parameter-takes-the-width-copy.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4213-async-return-of-a-union-payload-keeps-the-declared-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/4213-async-return-of-a-union-payload-keeps-the-declared-shape.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4214-union-arm-selection-over-a-field-whose-elements-are-a-union.ts": {
+   "order": [
+    "<repo>/tests/corpus/4214-union-arm-selection-over-a-field-whose-elements-are-a-union.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
