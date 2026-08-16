@@ -536,6 +536,151 @@ ScrUrl *scr_url_new(ScrStr *input) {
   return u;
 }
 
+/* -- the two-argument constructor: WHATWG relative resolution ---------
+ *
+ * new URL(input, base) resolves `input` against an ALREADY PARSED base by
+ * building the absolute spelling and handing THAT to scr_url_new, so the
+ * one parser stays the one parser: dot-segment removal, percent
+ * encoding, host lowercasing, default-port stripping and the "Invalid
+ * URL" TypeError are shared with the one-argument form by construction
+ * rather than by a second copy of the same code.
+ *
+ * The shapes are the spec's relative / relative-slash states:
+ *   ""       -> base without its fragment
+ *   "#f"     -> base without its fragment, plus "#f"
+ *   "?q"     -> base without query and fragment, plus "?q"
+ *   "//h/p"  -> base's scheme, a BRAND NEW authority
+ *   "/p"     -> base's scheme and authority, a new rooted path
+ *   "p"      -> base's scheme and authority, base's path up to and
+ *               including its last "/", with "p" appended
+ * An input carrying its OWN scheme is absolute, with the spec's one
+ * exception: a SPECIAL scheme equal to the base's and not followed by
+ * "//" re-enters the relative states, so `new URL("http:x", "http://a/b")`
+ * is "http://a/x" and not a host called "x" -- Node's answer, and the one
+ * case where a scheme prefix does not mean absolute.
+ *
+ * A base with an OPAQUE path (a non-special scheme with no authority and
+ * no rooted path -- "data:x") is not a resolution base: the spec's
+ * no-scheme state fails for every input but a fragment-only one, and so
+ * does this. */
+
+/* The length of `p`'s scheme prefix without the ":", or 0 when it has
+ * none. Same production as scr_url_new's, over a bare buffer. */
+static size_t scheme_prefix_len(const char *p, size_t len) {
+  if (len == 0) return 0;
+  if (!((p[0] >= 'a' && p[0] <= 'z') || (p[0] >= 'A' && p[0] <= 'Z'))) return 0;
+  size_t i = 1;
+  while (i < len && ((p[i] >= 'a' && p[i] <= 'z') || (p[i] >= 'A' && p[i] <= 'Z') ||
+                     (p[i] >= '0' && p[i] <= '9') || p[i] == '+' || p[i] == '-' || p[i] == '.')) {
+    i++;
+  }
+  if (i >= len || p[i] != ':') return 0;
+  return i;
+}
+
+ScrUrl *scr_url_new_rel(ScrStr *input, ScrUrl *base) {
+  /* scr_url_new's pre-processing, verbatim: trim leading/trailing
+   * C0-or-space, strip every TAB/LF/CR. */
+  size_t raw_len = input->len;
+  const char *raw = input->data;
+  size_t rb = 0, re = raw_len;
+  while (rb < re && (unsigned char)raw[rb] <= 0x20) rb++;
+  while (re > rb && (unsigned char)raw[re - 1] <= 0x20) re--;
+  char *tmp = malloc(re - rb + 1);
+  if (!tmp) {
+    scr_trap("scriptc: out of memory\n");
+  }
+  size_t len = 0;
+  for (size_t i = rb; i < re; i++) {
+    char c = raw[i];
+    if (c == '\t' || c == '\n' || c == '\r') continue;
+    tmp[len++] = c;
+  }
+  tmp[len] = '\0';
+  const char *r = tmp;
+
+  bool base_special = is_special_scheme(base->scheme->data, base->scheme->len);
+
+  size_t sl = scheme_prefix_len(r, len);
+  if (sl > 0) {
+    bool same = sl == base->scheme->len;
+    for (size_t i = 0; same && i < sl; i++) {
+      char c = r[i];
+      if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+      if (c != base->scheme->data[i]) same = false;
+    }
+    const char *rest = r + sl + 1;
+    size_t rest_len = len - sl - 1;
+    bool dslash = rest_len >= 2 && (rest[0] == '/' || rest[0] == '\\') &&
+                  (rest[1] == '/' || rest[1] == '\\');
+    if (!(same && base_special && !dslash)) {
+      free(tmp);
+      return scr_url_new(input); /* absolute -- the one-argument form */
+    }
+    r = rest; /* "http:x" against an http base: resolve the remainder */
+    len = rest_len;
+  }
+
+  char c0 = len > 0 ? r[0] : '\0';
+  char c1 = len > 1 ? r[1] : '\0';
+  bool slash0 = c0 == '/' || (base_special && c0 == '\\');
+  bool slash1 = c1 == '/' || (base_special && c1 == '\\');
+
+  bool opaque_base = !base->has_authority && (base->path->len == 0 || base->path->data[0] != '/');
+  if (opaque_base && !(len > 0 && c0 == '#')) {
+    free(tmp);
+    scr_url_throw_invalid();
+    return NULL;
+  }
+
+  UrlBuf out;
+  ub_init(&out);
+  ub_append(&out, base->scheme->data, base->scheme->len);
+  ub_push(&out, ':');
+  if (slash0 && slash1) {
+    ub_append(&out, r, len); /* "//host/..." -- a new authority */
+  } else {
+    if (base->has_authority) {
+      ub_append(&out, "//", 2);
+      if (base->userinfo->len > 0) {
+        ub_append(&out, base->userinfo->data, base->userinfo->len);
+        ub_push(&out, '@');
+      }
+      ub_append(&out, base->host->data, base->host->len);
+      if (base->port->len > 0) {
+        ub_push(&out, ':');
+        ub_append(&out, base->port->data, base->port->len);
+      }
+    }
+    if (slash0) {
+      ub_append(&out, r, len);
+    } else if (len == 0) {
+      ub_append(&out, base->path->data, base->path->len);
+      ub_append(&out, base->query->data, base->query->len);
+    } else if (c0 == '#') {
+      ub_append(&out, base->path->data, base->path->len);
+      ub_append(&out, base->query->data, base->query->len);
+      ub_append(&out, r, len);
+    } else if (c0 == '?') {
+      ub_append(&out, base->path->data, base->path->len);
+      ub_append(&out, r, len);
+    } else {
+      size_t cut = 0;
+      for (size_t i = 0; i < base->path->len; i++) {
+        if (base->path->data[i] == '/') cut = i + 1;
+      }
+      if (cut == 0 && base->has_authority) ub_push(&out, '/');
+      ub_append(&out, base->path->data, cut);
+      ub_append(&out, r, len);
+    }
+  }
+  free(tmp);
+  ScrStr *abs = ub_take(&out);
+  ScrUrl *u = scr_url_new(abs); /* throws "Invalid URL" itself */
+  scr_str_release(abs);
+  return u;
+}
+
 ScrStr *scr_url_protocol(ScrUrl *u) {
   UrlBuf b;
   ub_init(&b);
