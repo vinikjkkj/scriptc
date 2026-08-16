@@ -1484,7 +1484,16 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opts.nodeTest ? [rt(join(rtDir, "scr_test.c"))] : []),
     // The CA-store unit rides its own gate OR the tls one: scr_tls.c
     // references its default-set override unconditionally.
-    ...(opts.tlsCa || tls ? [rt(join(rtDir, "scr_tls_ca.c"))] : []),
+    // crypt32 rides this gate too, not only the tls one: on win32 the
+    // OS ROOT store IS the host bundle scr_tls_ca.c reads, so a
+    // getCACertificates-only binary needs the import even with no
+    // mbedTLS linked. Never present off win32.
+    ...(opts.tlsCa || tls
+      ? [
+          rt(join(rtDir, "scr_tls_ca.c")),
+          ...(targetPlatform(driver) === "win32" ? ["-lcrypt32"] : []),
+        ]
+      : []),
     ...(tlsArchive
       ? [
           "-I", join(vendorTlsDir(), "include"),
@@ -1492,9 +1501,12 @@ export async function compileC(opts: CcOptions): Promise<void> {
           tlsArchive,
           // mbedTLS's win32 entropy poll is BCryptGenRandom (bcrypt.h) —
           // an import the unconditional win32 libs above don't carry.
-          // Never present on the default path, so the historical TLS
-          // link line cannot change.
-          ...(targetPlatform(driver) === "win32" ? ["-lbcrypt"] : []),
+          // crypt32 joins it for the OS ROOT store scr_tls_system_ca
+          // reads there (CertOpenSystemStoreW/CertEnumCertificatesInStore
+          // — the win32 arm of the /etc/ssl bundle probe). Never present
+          // on the default path, so the historical TLS link line cannot
+          // change.
+          ...(targetPlatform(driver) === "win32" ? ["-lbcrypt", "-lcrypt32"] : []),
         ]
       : []),
     ...(engineArchive
