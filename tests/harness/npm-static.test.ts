@@ -58,9 +58,10 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
     ...globSync(join(pilotRoot, "**/node_modules/**/*.{js,mjs,cjs,json,d.ts}")).sort(),
     // the bundler-emitted-CJS mini packages (cases 2465-2469, 2556-2557)
     ...globSync(join(fixturesRoot, "npm/node_modules/gt*/**/*.{js,json}")).sort(),
-    // the price-list mini packages (cases 4031-4032, 4061-4064)
+    // the price-list mini packages (cases 4031-4032, 4061-4064) and the
+    // computed-key receiver pair (4111-4112)
     ...globSync(
-      join(fixturesRoot, "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong}/**/*.{js,json}"),
+      join(fixturesRoot, "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong,pbkeyrecv}/**/*.{js,json}"),
     ).sort(),
   ];
   for (const f of inputs) hash.update(f).update(readFileSync(f));
@@ -626,6 +627,97 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     ]);
     expect(nodeRes.stdout.toString("utf8")).toBe("global 7 0 false 7\n");
     expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
+    expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
+  /* -- 4111-4112: `o[k](...)` binds `o`, and the 64-bit decimal ----------
+   *
+   * 4064 proved a compiled zapo finally HAS `Long`. It could not show the
+   * VALUE: every 64-bit field decoded to 0, and to NaN on the tree before
+   * `long` was installed. The attribution stopped at "inside
+   * readLongVarint", which is wrong -- readLongVarint writes the correct
+   * bits on every payload, and 4111's `rawbits` row prints them
+   * (1:2097152, Node's exact low/high for 2^53+1) from the very same
+   * LongBits the wrong rows read.
+   *
+   * What was wrong is the line that turns those bits into a value:
+   *
+   *     var t = util.Long ? "toLong" : "toNumber";
+   *     util.merge(Reader.prototype, {
+   *       uint64: function () { return readLongVarint.call(this)[t](true); } });
+   *
+   * an ELEMENT-spelled method call, lowered as a keyed read plus a
+   * receiverless call. With the receiver dropped, toLong reads `this.lo`
+   * as undefined and `0 | undefined` is 0; toNumber reads the same
+   * undefined and `undefined + 4294967296 * undefined` is NaN. ONE bug,
+   * two spellings -- and 4111 prints both of them in one program on one
+   * build, next to the dot-spelled control that is correct, so the pair
+   * cannot be read as two separate faults again.
+   *
+   * On base, 4111 prints:
+   *
+   *     rawbits 2^53+1     = 1:2097152                        (reader OK)
+   *     computed 2^53+1    = 0 (low=0 high=0 unsigned=true)
+   *     static   2^53+1    = 9007199254740993 (low=1 high=2097152 ...)
+   *     num computed 42    = NaN
+   *     num static   42    = 42
+   *
+   * 9007199254740993 is 2^53+1, which a double cannot hold, so this row
+   * cannot be passed by a path that collapses 64-bit fields into a number.
+   *
+   * 4112 grids the axes and is the fixture that separates this failure
+   * from the several things it resembled: the member READ is fine
+   * (typeofMember says "function"), the function VALUE is fine (twoStep
+   * calls it correctly with an explicit receiver), the dot form was always
+   * fine -- and the four keyed rows were wrong in four different spellings
+   * of the key, so it was never about the key being dynamic. The row that
+   * names the mechanism is fromMethod against closureKey: the SAME source
+   * expression reported `this === undefined` from a plain function and
+   * `this === <the caller's receiver>` from a method, because the callee
+   * ran under the ambient-receiver window the ENCLOSING call had pushed.
+   */
+  test("4111: protobufjs's uint64 reader decodes 2^53+1 to its exact decimal", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4111-protobuf-uint64-computed-key-receiver/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["pbkeyrecv"] });
+    expect(coverage.npmStatic).toEqual([{ package: "pbkeyrecv", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
+    const binary = await buildStatic(entry, ["pbkeyrecv"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    const out = nodeRes.stdout.toString("utf8");
+    // the decimal itself, pinned rather than only compared
+    expect(out).toContain("computed 2^53+1    = 9007199254740993 (low=1 high=2097152 unsigned=true)");
+    expect(out).toContain("rawbits 2^53+1     = 1:2097152");
+    expect(out).toContain("computed i64max    = 9223372036854775807");
+    expect(out).toContain("num computed 42    = 42");
+    expect(nativeRes.stdout.toString("utf8")).toBe(out);
+    expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
+  test("4112: `o[k](...)` binds o, in every spelling of the key", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4112-computed-key-method-call-receiver-axes/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["pbkeyrecv"] });
+    expect(coverage.npmStatic).toEqual([{ package: "pbkeyrecv", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
+    const binary = await buildStatic(entry, ["pbkeyrecv"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    const out = nodeRes.stdout.toString("utf8");
+    // every keyed row answers what the dot row answers
+    expect(out).toContain("closureKey      = self lo=5 hi=7");
+    expect(out).toContain("fromMethod      = self lo=5 hi=7");
+    expect(out).toContain("dotName         = self lo=5 hi=7");
+    expect(nativeRes.stdout.toString("utf8")).toBe(out);
     expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
