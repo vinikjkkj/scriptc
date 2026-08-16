@@ -3708,6 +3708,16 @@ export type IrLibFn =
    * anything that is not a live handle — a VOID no-op the emitter drops
    * (only syntactically side-effect-free arguments take this path). */
   | "timers.clearNoop"
+  /** The value of `void e` in VALUE position: JS's void operator yields
+   * `undefined` after evaluating its operand, and the operand's effect
+   * rides the enclosing seqExpr's statement list. This is the void-typed
+   * LEAF that seqExpr's result slot needs — a no-op the emitter drops,
+   * exactly like timers.clearNoop. Typing it `void` rather than
+   * `undefinedT` is what lets every existing consumer work unchanged:
+   * unionWrap already has a VOID-payload rule (evaluate for effects,
+   * produce the interned unit instance), which a bare unitLit result
+   * could not use. */
+  | "js.voidOperand"
   /** process.nextTick(cb, ...args) — the user tick queue. args: [cb
    * (() => void; trailing call arguments ride the timer surface's
    * interned dyn thunk)]. Ticks drain BEFORE promise jobs at every loop
@@ -7398,8 +7408,31 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
     const node = v as { kind?: unknown; fn?: unknown };
     if (
       node.kind === "dynInvoke" ||
+      // The keyed/dot READ on a dyn value. `sc_dyn_key_get` now asks
+      // scr_dyn_intrinsic_method_get whether the receiver's PROTOTYPE has
+      // the name before answering undefined — Object.prototype's methods
+      // and every primitive prototype's live in that unit as dispatch
+      // arms, not as a stored chain, which is why the read and the CALL
+      // used to disagree about the same member on the same object.
+      //
+      // Gated together rather than behind a registration table ON
+      // PURPOSE: a table installed only when the program happens to make
+      // a dyn method call somewhere else would make `typeof o[k]` answer
+      // differently in two programs that spell it identically, which is a
+      // worse failure than the size class it would save. Measured: a
+      // minimal keyed-read program grows 651 776 -> 680 448 bytes.
+      node.kind === "dynKeyGet" ||
+      // `k in o` rides the same table, for the same reason: `in` walks
+      // the prototype chain, so a name the read answers has to be a name
+      // `in` reports.
+      node.kind === "dynHasKey" ||
       (node.kind === "libCall" &&
-        (node.fn === "dyn.defineProps" || node.fn === "dyn.defineProp" ||
+        // dyn.hasKey is the RUNTIME-key spelling of `in`, and it names
+        // scr_dyn_has_key_full, which lives in the gated unit for the
+        // same reason the read's helper does: scr_json.c is always
+        // linked and must not name the dispatch.
+        (node.fn === "dyn.hasKey" ||
+          node.fn === "dyn.defineProps" || node.fn === "dyn.defineProp" ||
           node.fn === "dyn.objCreateDescs" || node.fn === "dyn.objCreateNullDescs"))
     ) {
       found = true;

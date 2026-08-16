@@ -6507,6 +6507,21 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
           "cross-kind typed-array conversion has no lowering — copy element by element",
         );
       }
+      // A CHECKED-DYNAMIC operand: the constructor's overload set IS a
+      // runtime tag dispatch (number → length, typed array → copy, array
+      // → element-wise ToNumber, anything else → empty), and only the
+      // runtime knows the tag. protobufjs's `util.newBuffer` is the site:
+      //
+      //   "number"==typeof e ? ... : (t.Buffer ? t._Buffer_from(e)
+      //                                        : new Uint8Array(e))
+      //
+      // The typeof test has already been taken the other way here, so `e`
+      // is array-like and Node COPIES it. Coercing the operand to a
+      // LENGTH — the cheap closure a trap census rewards — would make
+      // every protobuf `bytes` field decode as an empty buffer.
+      if (src.type.kind === "dyn") {
+        return markFlavor({ kind: "bytesNew", source: src, type, loc }, "plain", loc);
+      }
       L.noLowering(
         `new ${name} over '${L.fmt(src.type)}' values`,
         argNode,
