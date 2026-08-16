@@ -10152,6 +10152,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/fixtures/node-types/builtin-fn-value.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/builtin-fn-value.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/fixtures/node-types/fenced.ts": {
    "order": [
     "<repo>/tests/fixtures/node-types/fenced.ts"
