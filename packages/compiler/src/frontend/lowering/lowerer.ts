@@ -206,6 +206,21 @@ export interface FnCtx {
   locals: IrLocal[];
   scopes: Map<ts.Symbol, IrLocal>[];
   localCounters: Map<string, number>;
+  /** `var` bindings hoisted to THIS frame's root (hoistVarBinding /
+   * predeclareForwardVar), keyed by the checker's merged symbol — every
+   * same-name `var` in one function is one symbol, so one slot.
+   * Module-scope vars live in globalsBySymbol instead.
+   *
+   * PER FRAME, not per Lowerer, and that is the whole point. One JS
+   * function body is lowered ONCE PER MONOMORPHIZATION (implicit-any
+   * instances, lowerGenericInstance), and every instance re-lowers the
+   * same AST, so the checker hands back the SAME `ts.Symbol` for the same
+   * `var`. A Lowerer-wide map therefore answered the second instance with
+   * the FIRST instance's IrLocal: no varDecl was pushed into instance 1's
+   * root and no local was registered in its frame, while its declaration
+   * statement still lowered to a plain `assign` — the IR validator's
+   * `assign to undeclared local/global "x.0"` SC9001. */
+  hoistedVars: Map<ts.Symbol, IrLocal>;
   /** Lifted functions only: capture entries (also present in `locals`,
    * boxed), in closure caps[] order. undefined ⇔ plain declared function. */
   captures: IrParam[] | null;
@@ -261,6 +276,7 @@ export function newFnCtx(
     locals: [],
     scopes: [new Map()],
     localCounters: new Map(),
+    hoistedVars: new Map(),
     captures: lifted ? [] : null,
     captureSources: [],
     captureBySymbol: new Map(),
@@ -1484,11 +1500,6 @@ export class Lowerer {
    * operand for these, because re-lowering the left would run the effect
    * TWICE. Registered and cleared around one statement. */
   readonly hoistedSeqEffects = new Set<ts.BinaryExpression>();
-  /** `var` bindings hoisted to their function root (hoistVarBinding), keyed
-   * by the checker's merged symbol — every same-name `var` in one function
-   * is one symbol, so one slot. Module-scope vars live in globalsBySymbol
-   * instead. */
-  readonly hoistedVars = new Map<ts.Symbol, IrLocal>();
   /** Per-file `var` module globals whose type carries an undefined arm:
    * lowerFileInit assigns them the interned undefined right after the
    * run-once guard — JS hoists module vars to `undefined` at entry, so a
@@ -2692,6 +2703,10 @@ export class Lowerer {
    * the instantiation context is appended so the user knows which concrete
    * types made the (source-anchored) construct fail. */
   pushDiag(diag: ScrDiagnostic): void {
+    if (process.env["SCRIPTC_DIAG_STACK"] !== undefined) {
+      console.error(`DIAGSTACK ${diag.code} ${String(diag.message).slice(0, 120)}\n` +
+        (new Error().stack ?? "").split("\n").slice(1, 16).join("\n"));
+    }
     const d = this.instantiationContext
       ? { ...diag, message: `${diag.message} (${this.instantiationContext})` }
       : diag;
@@ -4306,6 +4321,31 @@ export class Lowerer {
           if (armIdx >= 0 && adapter) {
             const adapted: IrExpr = { kind: "call", callee: adapter, args: [expr], type: arm, loc: expr.loc };
             return { kind: "unionWrap", unionId: expected.unionId, tag: armIdx, value: adapted, type: expected, loc: expr.loc };
+          }
+        }
+      }
+      // A CLASS VALUE against a union carrying a CONSTRUCT-SIGNATURE arm —
+      // zapo's `rawWebSocketConstructor: WaMobileTcpSocketCtor` flowing into
+      // a `readonly rawWebSocketConstructor?: RawWebSocketConstructor` field,
+      // whose optionality makes the destination the two-arm
+      // `new (url, protocols?, options?) => RawWebSocket | undefined`.
+      // widthCoerce already turns a classRef into the construct THUNK for the
+      // PLAIN func slot (classCtorThunk, a few rungs down) and a plain
+      // binding it is `new`ed through lowers too; the OPTIONAL spelling was
+      // the only difference, and the union position simply had no rung for
+      // it. ONE func arm only — the promise-arm and func-arm ambiguity stance
+      // directly above — and direct classRef sources only, which is
+      // classCtorThunk's own gate (the thunk names the class statically, so
+      // a classval-typed expression could hold a widened subclass).
+      if (expr.type.kind === "classval" && expr.kind === "classRef") {
+        const def = this.unions.get(expected.unionId);
+        const ctorArms = def?.arms.filter((a) => a.kind === "func") ?? [];
+        const arm = ctorArms.length === 1 ? ctorArms[0] : undefined;
+        if (arm !== undefined && arm.kind === "func") {
+          const armIdx = this.armTag(expected.unionId, arm);
+          const thunk = armIdx >= 0 ? this.classCtorThunk(expr.type.className, arm, expr.loc) : null;
+          if (thunk) {
+            return { kind: "unionWrap", unionId: expected.unionId, tag: armIdx, value: thunk, type: expected, loc: expr.loc };
           }
         }
       }
@@ -6817,7 +6857,19 @@ export class Lowerer {
     //   trap is unreachable there), then the stranded TypeError.
     let strandParams = false;
     for (let i = 0; i < Math.min(fromT.params.length, toT.params.length); i++) {
-      if (!this.coercibleValue(toT.params[i]!, fromT.params[i]!)) strandParams = true;
+      if (this.coercibleValue(toT.params[i]!, fromT.params[i]!)) continue;
+      // ...and the WIDTH family, which coerceToExpected applies to this very
+      // pair one call frame down (the `converted` below is built by it) but
+      // which coercibleValue never learned — it answers for arm wraps,
+      // re-tags, narrows and the dyn boundary, and a record that width-lifts
+      // into the parameter is none of those. Probing it here rather than
+      // widening coercibleValue keeps widthLiftPlan's own func rung
+      // (cleanFuncAdaptable) exactly where it was, so no NEW pair becomes
+      // width-liftable and no recursion is introduced. Strictly a bridge
+      // where there was a strand: the adapter body below already builds the
+      // conversion, and its `stopped coercing` assertion is the arming.
+      if (this.widthLiftPlan(toT.params[i]!, fromT.params[i]!) !== null) continue;
+      strandParams = true;
     }
     let voidRet: "jsval" | "strand" | null = null;
     let strandRet = false;

@@ -1150,6 +1150,22 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
    *
    * The pin asserts the DIVERGENCE, so whoever closes it gets a red test
    * pointing at this note.
+   *
+   * ONE ROW HAS SINCE CLOSED, and it is not one of the materialization
+   * rows: `radix`. A `toString(radix?: number)` DOES have a
+   * zero-argument entry point in JS -- Node calls it with no argument and
+   * prints "r0" -- and this list priced the dispatch declining it because
+   * the emitted C signature is arity-exact. It now mints each declared
+   * parameter's absent-argument value, so the row reads `r0` on both
+   * backends. Corpus 4182 is the positive case (14 rows, Node-byte-exact,
+   * 9 of them wrong on base). The other eleven rows here are UNMOVED by
+   * that change, which is the useful part of keeping them in one program:
+   * they are its no-move control.
+   *
+   * STILL PRICED, and now the narrower statement: a toString whose
+   * parameter is REQUIRED. There is no absent-argument value for a bare
+   * `string` slot -- no undefined arm to intern -- so the fold stays
+   * where Node calls the method with `undefined` and answers.
    */
   test("4142: a materialized record loses the toString it was built from (price list)", async () => {
     const entry = join(fixturesRoot, "npm/cases/4142-record-receiver-tostring-reach-on-purpose/main.ts");
@@ -1196,7 +1212,8 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
         "field  = [object Object]",
         "elem   = [object Object]",
         "relet  = [object Object]",
-        "radix  = [object Object]",
+        // CLOSED: was "[object Object]". See the note above and corpus 4182.
+        "radix  = r0",
         "tuple  = [object Object]",
         "",
       ].join("\n"),
@@ -1444,6 +1461,94 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
   // never gate — the package is the program author's own workspace code —
   // and the flagless build reports the same island-capable per-package
   // attribution the symlinked twin gets.
+  /* -- 4181: a `var` in a body that is MONOMORPHIZED more than once ------
+   *
+   * FAILS ON BASE, and as a BUILD error: `hoistVarBinding`'s memo lived on
+   * the LOWERER, keyed by the checker's `ts.Symbol`. `--npm-static`
+   * compiles one implicit-any JS body ONCE PER ARGUMENT-TYPE INSTANCE and
+   * every instance re-lowers the same AST, so instance 1 was handed
+   * instance 0's IrLocal -- no `varDecl` in instance 1's frame, no local
+   * registered in it, and the declaration still lowering to a plain
+   * `assign`. Base emits ELEVEN of them across eight of the nine row
+   * families here, `SC9001: assign to undeclared local/global "x.0"`, and
+   * `--best-effort` correctly refuses to defer an ICE, so nothing built.
+   *
+   * WHAT THE DISCRIMINATOR IS, measured on a one-variable-at-a-time grid
+   * rather than argued: TWO INSTANCES. Not the read count -- r2 (read
+   * zero times), r3 (read once) and r1 (read twice) all ICE on base and
+   * all three answer Node here. c3 is the same `var` shape called at ONE
+   * argument type and builds on base; r4 is called at three and base
+   * emits TWO ICEs for it (`%m0.r4%1` and `%m0.r4%2`), which is the
+   * instance count showing through the diagnostic.
+   *
+   * CONTROLS: c1 and c2 are the `let`/`const` twins of r1 and r4 at two
+   * argument types (block-scoped bindings never enter hoistVarBinding at
+   * all), and c3 is the single-instantiation `var`. All three pass on
+   * BASE as well -- they are the guard on the change, not a claim about
+   * it, and a guard that only holds after the change proves nothing.
+   *
+   * The rows are not all one shape: r5 is two declarators in one `var`
+   * statement, r6 a redeclaration that must MERGE onto one slot, r7 the
+   * parameter-merge branch, r8 a `var` written in a loop whose `i` and
+   * `t` outlive it, r9 a `for (var v of ...)` binding that still holds
+   * the last element afterwards. Each is a different writer of the memo.
+   *
+   * NOT MEASURED HERE: `var p = typeof p` over a number-bound parameter.
+   * It is a separate, pre-existing SC1090 runtime fence ("'string' values
+   * where 'number' is expected"), reachable on both sides once the ICE is
+   * gone, so r7 keeps the merge inside the parameter's bound type rather
+   * than pinning a refusal this case is not about.
+   */
+  test("4181: a `var` in a monomorphized body gets one slot per instance", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4181-monomorphized-var-hoisting/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["monovar"] });
+    expect(coverage.npmStatic).toEqual([{ package: "monovar", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    const binary = await buildStatic(entry, ["monovar"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    const node = nodeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+    const native = nativeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+    // A zero-denominator guard: comparing two empty strings is not a pass,
+    // and an assertion that never sees a row is not a measurement.
+    const rows = new Map(
+      native.split("\n").filter((l) => l.includes(" = "))
+        .map((l) => [l.slice(0, l.indexOf(" = ")).trim(), l.slice(l.indexOf(" = ") + 3)] as const),
+    );
+    expect(node.split("\n").filter((l) => l.includes(" = ")).length).toBe(24);
+    expect(rows.size).toBe(24);
+
+    // -- CONTROLS FIRST. If any of these fails the rest measures nothing.
+    expect(rows.get("c1a")).toBe("number");
+    expect(rows.get("c1b")).toBe("obj");
+    expect(rows.get("c2a")).toBe("number/number");
+    expect(rows.get("c2b")).toBe("object/object");
+    expect(rows.get("c3a")).toBe("number!");
+
+    // -- Each instance answers for ITS OWN argument type. The failure this
+    // pins would have been a shared slot, so a row where the two instances
+    // agree could not tell the two apart: every pair below differs.
+    expect(rows.get("r1a")).toBe("number");
+    expect(rows.get("r1b")).toBe("obj");
+    expect(rows.get("r3a")).toBe("number");
+    expect(rows.get("r3b")).toBe("object");
+    expect(rows.get("r4a")).toBe("number/number");
+    expect(rows.get("r4b")).toBe("string/string");
+    expect(rows.get("r4c")).toBe("object/object");
+    // r8/r9: `i`, `t` and `v` are read AFTER their loops -- one
+    // function-scoped slot per instance, re-assigned and never reset.
+    expect(rows.get("r8a")).toBe("nnn:3:number");
+    expect(rows.get("r8b")).toBe("ooo:3:object");
+    expect(rows.get("r9a")).toBe("number122");
+    expect(rows.get("r9b")).toBe("object122");
+
+    expect(native).toBe(node);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
   test("a copied workspace member classifies identically to a symlinked one", () => {
     const { coverage } = analyze(join(fixturesRoot, "npm/cases/workspace-copied/main.ts"));
     expect(coverage.preflightFailed).toBe(false);

@@ -5740,7 +5740,29 @@ function literalUnionArmOf(
     const li = L.mapTypeOf(L.checker.getBaseTypeOfLiteralType(litT));
     const fi = L.mapTypeOf(ftT);
     if (!li || !fi) return false;
-    return typeEquals(li, fi) || L.widthLiftPlan(li, fi) !== null;
+    if (typeEquals(li, fi) || L.widthLiftPlan(li, fi) !== null) return true;
+    // The source-union decomposition `fits` performs at the top level,
+    // ONE CONTAINER IN. `[c ? { code } : {}]` types as `({ code: string } |
+    // {})[]` and the arm's field is `readonly Entry[]`; widthLiftPlan
+    // recurses into the element, finds a UNION source against a RECORD
+    // destination, and has no rung for it — while the value never takes that
+    // rung anyway: selecting the arm re-lowers the array literal AT the
+    // arm's field type, so each element builds AS `Entry` from its own
+    // contextual type. That is the same coercion the NON-union destination
+    // one line over already performs, and the property is coerced and
+    // re-checked after the selection exactly as before, so a wrong guess
+    // here is still a fence and never a wrong answer. `every`, not `some`:
+    // an element arm with no home would be a value the chosen arm cannot
+    // hold.
+    if (li.kind === "array" && fi.kind === "array" && li.elem.kind === "union") {
+      const arms = L.unions.get(li.elem.unionId)?.arms;
+      const elem = fi.elem;
+      return (
+        arms !== undefined && arms.length > 0 &&
+        arms.every((a) => typeEquals(a, elem) || L.widthLiftPlan(a, elem) !== null)
+      );
+    }
+    return false;
   };
   /** The same test, plus the SOURCE-union decomposition. A property whose
    * CHECKER type is a union fits a field when EVERY arm of it fits — the
@@ -6068,6 +6090,18 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           }
         }
       }
+    }
+    if (process.env["SCRIPTC_OBJLIT_WHY"] !== undefined) {
+      const armInfo = ctxUnion
+        ? `ctxUnion=${ctxUnion.unionId} arms=${String(L.unions.get(ctxUnion.unionId)?.arms.length ?? -1)} recArms=${String((L.unions.get(ctxUnion.unionId)?.arms.filter((a) => a.kind === "record") ?? []).length)}`
+        : "ctxUnion=none";
+      console.error(
+        `OBJLIT ${loc.file.split("/").pop()}@${String(loc.start)} ctx0=${ctxType0 === undefined ? "NONE" : L.checker.typeToString(ctxType0).slice(0, 90)}` +
+        ` tsType=${L.checker.typeToString(tsType).slice(0, 90)} ${armInfo}` +
+        ` mapped=${mapped === null ? "null" : mapped.kind + (mapped.kind === "record" ? "#" + mapped.shapeId : "")}` +
+        ` shapeDeclared=${String(shapeDeclared)}` +
+        ` fields=${mapped?.kind === "record" ? (L.shapes.get(mapped.shapeId)?.fields ?? []).map((f) => f.name + ":" + L.fmt(f.type).slice(0, 40)).join(" | ") : "-"}`,
+      );
     }
     // The CJS EXPORT-TABLE literal in VALUE position (JS): importers reach
     // every member through alias plumbing and accessor lifts — the record
