@@ -11,9 +11,9 @@
   ],
   "typesVersion": "24.13.3",
   "counts": {
-    "total": 51,
+    "total": 49,
     "TYPE": 34,
-    "FENCE": 17
+    "FENCE": 15
   },
   "fenceClusters": {
     "NOTE": [
@@ -52,7 +52,7 @@
       "1693-stream-pipe-backpressure.ts: SC1043 comparing non-number, non-string values",
       "1770-assert-dyn-strict.ts: SC2020 assert.strictEqual across number/string",
       "2462-qs-stringify.ts: SC2020 querystring.stringify over a wide value union",
-      "2620-ee-override-once-order.ts and 2622-ee-override-filter.ts: SC1090 .join() element type",
+      "(CLOSED by block/elemresolve: 2620-ee-override-once-order.ts and 2622-ee-override-filter.ts, SC1090 .join() element type - the checker's element was wider than the array's own, and .join's joinable-union test read the checker's)",
       "3193-child-stream-into-unknown-round-trip.ts: SC2003 union re-tag ordering"
     ]
   },
@@ -244,20 +244,6 @@
       "mode": "TYPE",
       "codes": [
         "SC0001"
-      ]
-    },
-    {
-      "name": "2620-ee-override-once-order.ts",
-      "mode": "FENCE",
-      "codes": [
-        "SC1090"
-      ]
-    },
-    {
-      "name": "2622-ee-override-filter.ts",
-      "mode": "FENCE",
-      "codes": [
-        "SC1090"
       ]
     },
     {
