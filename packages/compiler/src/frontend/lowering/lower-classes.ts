@@ -3548,8 +3548,39 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
   export function constructedClassInfoOf(L: Lowerer, expr: ts.Expression | undefined): ClassInfo | null {
     if (expr === undefined) return null;
     let e: ts.Expression = expr;
-    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    // An UPCAST wrapper is peeled, and the class the binding adopts is
+    // the CAST TARGET's, not the constructed one: `new D() as B` lowers
+    // to B's pointer (the emitted C is a pointer cast through the upcast
+    // bridge), so a slot typed D would need a DOWNCAST of its own
+    // initializer and fences — measured, `SC1090: 'B1' values where 'D4'
+    // is expected`. Typing the slot B is exact: the value IS a B, and
+    // `m.toString()` reaches D's override through the virtual arm, which
+    // is what the two-step spelling already did.
+    //
+    // Only an OBJECT target peels. A cast to a RECORD materializes the
+    // shape (4142's price) and a cast to `unknown`/`any` leaves the
+    // static world; both keep answering null so the binding takes the
+    // representation the cast actually produces.
+    //
+    // Without this, `const m: Rec = new D() as B` folded
+    // Object.prototype.toString where `const o: B = new D(); const m:
+    // Rec = o` answered D's — two spellings of one thing, one of them
+    // silently wrong, and no diagnostic either way. Corpus 4243.
+    let castTarget: ClassInfo | null = null;
+    for (;;) {
+      if (ts.isParenthesizedExpression(e)) { e = e.expression; continue; }
+      if (ts.isAsExpression(e) || ts.isTypeAssertion(e) || ts.isSatisfiesExpression(e)) {
+        const t = L.mapTypeOf(L.typeOf(e));
+        const info = t?.kind === "object" ? (L.classes.get(t.className) ?? null) : null;
+        if (info === null) break;
+        castTarget ??= info; // the OUTERMOST target is the value's type
+        e = e.expression;
+        continue;
+      }
+      break;
+    }
     if (!ts.isNewExpression(e) || !ts.isIdentifier(e.expression)) return null;
+    if (castTarget !== null) return castTarget;
     const symbol = L.resolveValueSymbol(e.expression);
     return (
       (symbol ? L.classBySymbol.get(symbol) : undefined) ??

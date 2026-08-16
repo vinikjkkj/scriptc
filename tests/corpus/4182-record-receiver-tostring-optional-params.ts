@@ -19,13 +19,16 @@
 // a different wrong answer. `nullary` is the already-working row -- if
 // it moves, the widening broke the case it was built on.
 //
-// NOT A ROW HERE, and also unchanged by this: the `as`-cast spelling,
-// `const m: Rec = new OptOver() as OptBase`. That MATERIALIZES the record
-// and the class pointer is gone before the dispatch can look, so it folds
-// where Node answers "V=6". Measured identical on base and branch -- it
-// is 4142's pre-existing materialization price, a different mechanism
-// from this one, and it cannot be a row here because a corpus fixture has
-// to match Node byte for byte. Rows 5/5b use the two-step spelling, which
+// NOT A ROW HERE, and SINCE CLOSED: the `as`-cast spelling,
+// `const m: Rec = new OptOver() as OptBase`. It folded where Node answers
+// "V=6", and the reading recorded here -- that the cast MATERIALIZES the
+// record, 4142's pre-existing price -- was wrong. constructedClassInfoOf
+// peeled parentheses and nothing else, so the `as` wrapper simply hid the
+// `new` from the adoption arm; it now peels an OBJECT-targeted cast and
+// adopts the cast TARGET's class, and the row answers Node on both
+// backends. A cast to a RECORD really does materialize, and that one
+// still folds. Corpus 4243 is the positive case, with the record-target
+// cast as its control. Rows 5/5b use the two-step spelling, which
 // is what actually reaches the virtual arm.
 //
 // NOT A ROW HERE, and still a price: a toString whose parameter is
