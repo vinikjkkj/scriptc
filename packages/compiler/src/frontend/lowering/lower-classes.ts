@@ -5922,8 +5922,21 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           // if read before assignment (SEMANTICS.md 46) rather than
           // answering a value Node never would.
           const n = L.lowerExprExpecting(args[0]!, F64);
-          if (staticArr === null) L.badType(expr, L.typeOf(expr));
-          const arrT = staticArr;
+          // No static array type, but the checker DID spell an array — it
+          // just spelled `any[]`, because `new Array(n)` is not one of the
+          // initializers TS's evolving-array analysis follows. The
+          // counting-loop proof below already knows every write this array
+          // will ever receive; when they all name one type, that is the
+          // element type (newArrayFillElemType). The declaration then
+          // adopts the initializer's type through lowerVarDecl's existing
+          // checkerAnyArray rule, so the writes and the uses see the same
+          // array the value is.
+          const inferred =
+            staticArr === null && !isJsSourceFile(expr.getSourceFile()) && L.checkerAnyArray(expr)
+              ? newArrayFillElemType(L, expr)
+              : null;
+          if (staticArr === null && inferred === null) L.badType(expr, L.typeOf(expr));
+          const arrT = staticArr ?? inferred!;
           const elem = arrT.elem;
           // `new Array(n).fill(v)` is a COMPOSED form: the whole-range
           // fill writes every slot before anything can read one, so a
@@ -6841,11 +6854,12 @@ function fillWalk(
   aName: string,
   iName: string,
   written = false,
+  writes?: ts.Expression[],
 ): { written: boolean; flowsOut: boolean } | null {
   let w = written;
   for (const s of stmts) {
     if (ts.isBlock(s)) {
-      const r = fillWalk(s.statements, aName, iName, w);
+      const r = fillWalk(s.statements, aName, iName, w, writes);
       if (r === null) return null;
       if (!r.flowsOut) return { written: true, flowsOut: false };
       w = r.written;
@@ -6854,6 +6868,7 @@ function fillWalk(
     if (isFillWrite(s, aName, iName)) {
       // The right-hand side must not read the array back.
       if (mentionsIdentifier((s.expression as ts.BinaryExpression).right, aName)) return null;
+      writes?.push((s.expression as ts.BinaryExpression).right);
       w = true;
       continue;
     }
@@ -6865,12 +6880,12 @@ function fillWalk(
     }
     if (ts.isIfStatement(s)) {
       if (mentionsIdentifier(s.expression, aName)) return null;
-      const t = fillWalk([s.thenStatement], aName, iName, w);
+      const t = fillWalk([s.thenStatement], aName, iName, w, writes);
       if (t === null) return null;
       const e =
         s.elseStatement === undefined
           ? { written: w, flowsOut: true }
-          : fillWalk([s.elseStatement], aName, iName, w);
+          : fillWalk([s.elseStatement], aName, iName, w, writes);
       if (e === null) return null;
       if (!t.flowsOut && !e.flowsOut) return { written: true, flowsOut: false };
       if (!t.flowsOut) { w = e.written; continue; }
@@ -6889,59 +6904,131 @@ function fillWalk(
 }
 
 function fullFillLoopFollows(expr: ts.NewExpression): boolean {
+  const ok = fullFillLoopWrites(expr) !== null;
+  if (ok) noteFillLoopProof(expr);
+  return ok;
+}
+
+/** The counting-loop proof itself, handing back the RIGHT-HAND SIDES of the
+ * writes it admitted. `fullFillLoopFollows` is this, asked as a yes/no.
+ *
+ * The RHS list is what newArrayFillElemType reads to give an UNANNOTATED
+ * `new Array(n)` an element type. Nothing else changed about the proof: the
+ * same shapes pass, the same shapes decline, and the counter still ticks
+ * once per admitted site, so SCRIPTC_FILLLOOP_WHY reads exactly as before. */
+function fullFillLoopWrites(expr: ts.NewExpression): ts.Expression[] | null {
   const lenArg = expr.arguments?.[0];
-  if (!lenArg) return false;
+  if (!lenArg) return null;
   const decl = expr.parent;
-  if (!ts.isVariableDeclaration(decl) || !ts.isIdentifier(decl.name)) return false;
+  if (!ts.isVariableDeclaration(decl) || !ts.isIdentifier(decl.name)) return null;
   const list = decl.parent;
-  if (!ts.isVariableDeclarationList(list) || list.declarations.length !== 1) return false;
+  if (!ts.isVariableDeclarationList(list) || list.declarations.length !== 1) return null;
   const stmt = list.parent;
-  if (!ts.isVariableStatement(stmt)) return false;
+  if (!ts.isVariableStatement(stmt)) return null;
   const owner = stmt.parent as ts.Node & { statements?: readonly ts.Statement[] };
   const stmts = owner.statements;
-  if (!stmts) return false;
+  if (!stmts) return null;
   const at = stmts.indexOf(stmt);
   const loop = at >= 0 ? stmts[at + 1] : undefined;
-  if (!loop || !ts.isForStatement(loop)) return false;
+  if (!loop || !ts.isForStatement(loop)) return null;
 
   // for (let i = 0; i < <same length>; i += 1 | i++)
   const init = loop.initializer;
-  if (!init || !ts.isVariableDeclarationList(init) || init.declarations.length !== 1) return false;
+  if (!init || !ts.isVariableDeclarationList(init) || init.declarations.length !== 1) return null;
   const iDecl = init.declarations[0]!;
-  if (!ts.isIdentifier(iDecl.name) || !iDecl.initializer) return false;
-  if (iDecl.initializer.kind !== ts.SyntaxKind.NumericLiteral || iDecl.initializer.getText() !== "0") return false;
+  if (!ts.isIdentifier(iDecl.name) || !iDecl.initializer) return null;
+  if (iDecl.initializer.kind !== ts.SyntaxKind.NumericLiteral || iDecl.initializer.getText() !== "0") return null;
   const iName = iDecl.name.text;
   const cond = loop.condition;
   if (!cond || !ts.isBinaryExpression(cond) ||
       cond.operatorToken.kind !== ts.SyntaxKind.LessThanToken ||
       !ts.isIdentifier(cond.left) || cond.left.text !== iName ||
       cond.right.getText() !== lenArg.getText()) {
-    return false;
+    return null;
   }
   const inc = loop.incrementor;
-  if (!inc) return false;
+  if (!inc) return null;
   const byOne =
     (ts.isPostfixUnaryExpression(inc) && inc.operator === ts.SyntaxKind.PlusPlusToken &&
       ts.isIdentifier(inc.operand) && inc.operand.text === iName) ||
     (ts.isBinaryExpression(inc) && inc.operatorToken.kind === ts.SyntaxKind.PlusEqualsToken &&
       ts.isIdentifier(inc.left) && inc.left.text === iName && inc.right.getText() === "1");
-  if (!byOne) return false;
+  if (!byOne) return null;
 
   // The body: every path that finishes an iteration writes `a[i]` first.
   const body = loop.statement;
   const bodyStmts: readonly ts.Statement[] = ts.isBlock(body) ? body.statements : [body];
   const aName = decl.name.text;
-  const walked = fillWalk(bodyStmts, aName, iName);
-  if (walked === null) return false;
-  if (walked.flowsOut && !walked.written) return false;
+  const writes: ts.Expression[] = [];
+  const walked = fillWalk(bodyStmts, aName, iName, false, writes);
+  if (walked === null) return null;
+  if (walked.flowsOut && !walked.written) return null;
+  return writes;
+}
+
+/** The counter tick, kept OUT of fullFillLoopWrites on purpose: an
+ * unannotated `new Array(n)` asks the proof TWICE — once through
+ * newArrayFillElemType for the element type, once through
+ * fullFillLoopFollows for the absent-slot gate — and a counter inside the
+ * proof would report one site as two. fullFillLoopFollows runs exactly once
+ * per site that reaches the gate, on both the annotated and the inferred
+ * path, so the tick belongs here and the SCRIPTC_FILLLOOP_WHY probe keeps
+ * the meaning its own comment gives it: how many SITES the proof admitted. */
+function noteFillLoopProof(expr: ts.NewExpression): void {
   fullFillLoopProofs++;
   if (process.env["SCRIPTC_FILLLOOP_WHY"] !== undefined) {
+    const decl = expr.parent;
+    const aName = ts.isVariableDeclaration(decl) && ts.isIdentifier(decl.name) ? decl.name.text : "?";
     console.error(
       `[fillloopwhy] #${fullFillLoopProofs} ${expr.getSourceFile().fileName}:` +
         `${expr.getSourceFile().getLineAndCharacterOfPosition(expr.getStart()).line + 1} ${aName}`,
     );
   }
-  return true;
+}
+
+/** The element type of an UNANNOTATED `new Array(n)` that the counting-loop
+ * proof admits, read off the writes the proof already collected.
+ *
+ *   const distributions = new Array(participants.length)
+ *   for (let index = 0; index < participants.length; index += 1) {
+ *     distributions[index] = { groupId, sender: participants[index], … }
+ *   }
+ *
+ * is zapo's `signal/group/SenderKeyManager.ts:185`, and tsc types it
+ * `any[]`: `new Array(n)` is not one of the initializers TS's evolving-array
+ * analysis follows, so no element type exists to map and the site reported
+ * three diagnostics in one host function — SC2011 on the `any[]`
+ * declaration, SC1090 on the element write beneath it, and SC2004 on the
+ * use of the blocked binding.
+ *
+ * The proof this reuses is strictly stronger than an inference would need:
+ * it already establishes that the very next statement is a counting loop
+ * over the SAME length expression, that every path finishing an iteration
+ * writes `a[i]` first, and that nothing else in the body touches `a`. So
+ * the writes ARE the array's contents, exhaustively, and their common type
+ * is the element type — not a guess about it.
+ *
+ * Nothing is widened or invented. Every write must map, and they must all
+ * map to the SAME IR type (typeEquals): two writes of different shapes name
+ * no single element type, and inventing a union for them would build a
+ * representation the source never asked for. That is a decline, and the
+ * existing `any[]` diagnostic stands.
+ *
+ * The absent-slot question is NOT re-answered here — the caller's own
+ * `absent` gate runs after this and keeps the ratified stance (SEMANTICS.md
+ * 46). This decides only WHICH element type, never whether holes are
+ * readable. */
+function newArrayFillElemType(L: Lowerer, expr: ts.NewExpression): (IrType & { kind: "array" }) | null {
+  const writes = fullFillLoopWrites(expr);
+  if (writes === null || writes.length === 0) return null;
+  let elem: IrType | null = null;
+  for (const w of writes) {
+    const t = L.mapTypeOf(L.typeOf(w));
+    if (t === null) return null;
+    if (elem === null) elem = t;
+    else if (!typeEquals(elem, t)) return null;
+  }
+  return elem === null ? null : (arrayOf(elem) as IrType & { kind: "array" });
 }
 
 /** SCRIPTC_FILLLOOP_WHY probe: how many `new Array(n)` sites the

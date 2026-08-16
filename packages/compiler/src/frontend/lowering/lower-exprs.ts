@@ -8465,7 +8465,22 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
         "symbol-keyed property writes outside class fields keyed by a module-level `const k = Symbol('desc')` (static shapes have no symbol-keyed storage)",
       );
     }
-    const receiverIr = L.mapTypeOf(L.typeOf(target.expression));
+    let receiverIr = L.mapTypeOf(L.typeOf(target.expression));
+    // Dispatch follows the RUNTIME world here too. A receiver the checker
+    // spells `any[]` has no mapped type, but its VALUE can still be a real
+    // static array: an unannotated `const a = new Array(n)` whose element
+    // type came off the counting-loop proof (newArrayFillElemType) is
+    // exactly that — lowerVarDecl's checkerAnyArray rule gave the binding
+    // the initializer's array type, and only this read of the CHECKER's
+    // type still says `any[]`. Without this the very writes that PROVED
+    // the element type fenced as "assignment to non-array elements", one
+    // statement below the declaration they typed. Probe-lowered (the dyn
+    // arm below is the same pattern), so a receiver that is not an array
+    // keeps every fence it had.
+    if (receiverIr === null && L.checkerAnyArray(target.expression)) {
+      const probe = probeLower(L, target.expression);
+      if (probe !== null && probe.type.kind === "array") receiverIr = probe.type;
+    }
     if (receiverIr?.kind === "jsval") {
       const obj = L.lowerExpr(target.expression);
       // Dispatch follows the RUNTIME world (383(d)): a checker-'any'
