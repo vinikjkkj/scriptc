@@ -574,6 +574,15 @@ static ScrDyn *dyn_object_proto_method(ScrDyn *recv, const char *method,
     if (scr_exc_pending()) return NULL;
     return scr_dyn_new_bool(r);
   }
+  /* Object.prototype.valueOf: the receiver itself. No kind this runtime
+   * models overrides it observably -- objects, arrays and functions
+   * answer themselves, and a primitive string/number/boolean answers the
+   * primitive, which is the same retained cell here. One body, reached
+   * from every arm's fall-through, for the reason hasOwnProperty is one
+   * body: two spellings of one question must not become two answers. */
+  if (dyn_name_is(method, "valueOf")) {
+    return scr_dyn_retain(recv);
+  }
   dyn_throw_not_fn(what);
   return NULL;
 }
@@ -880,8 +889,10 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       scr_str_release(r);
       return d;
     }
-    /* String.prototype.toString/valueOf answer the primitive itself. */
-    if (dyn_name_is(method, "toString") || dyn_name_is(method, "valueOf")) {
+    /* String.prototype.toString answers the primitive itself. valueOf is
+     * NOT here: it is Object.prototype's, answered once for every kind in
+     * dyn_object_proto_method, which this arm falls through to. */
+    if (dyn_name_is(method, "toString")) {
       return scr_dyn_retain(recv);
     }
     if (dyn_str_proto_unimpl(method)) {
@@ -1239,7 +1250,8 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       scr_str_release(rs);
       return d;
     }
-    if (dyn_name_is(method, "valueOf")) return scr_dyn_retain(recv);
+    /* valueOf falls through to dyn_object_proto_method with every other
+     * kind's -- one body, one answer. */
     if (dyn_num_proto_unimpl(method)) {
       dyn_throw_unsupported(recv->kind == SCR_DYN_NUM ? "Number" : "Boolean", method);
       return NULL;
