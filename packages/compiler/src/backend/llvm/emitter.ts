@@ -224,6 +224,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.le": "scr_dyn_le",
   "dyn.gt": "scr_dyn_gt",
   "dyn.ge": "scr_dyn_ge",
+  "dyn.looseEqNum": "scr_dyn_loose_eq_num",
   "num.toExponential": "scr_num_to_exponential",
   "num.toFixed0": "scr_num_to_fixed0",
   "num.toFixed": "scr_num_to_fixed",

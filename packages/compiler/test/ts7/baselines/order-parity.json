@@ -7921,6 +7921,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4301-loose-equality-against-a-number-asks-toprimitive.js": {
+   "order": [
+    "<repo>/tests/corpus/4301-loose-equality-against-a-number-asks-toprimitive.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4302-arithmetic-and-relational-over-an-object-run-toprimitive.js": {
+   "order": [
+    "<repo>/tests/corpus/4302-arithmetic-and-relational-over-an-object-run-toprimitive.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
