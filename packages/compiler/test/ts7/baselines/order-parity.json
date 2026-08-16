@@ -7739,6 +7739,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4131-union-intrinsic-arms-answer-length.ts": {
+   "order": [
+    "<repo>/tests/corpus/4131-union-intrinsic-arms-answer-length.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4132-union-length-unit-arm-throws-node-typeerror.ts": {
+   "order": [
+    "<repo>/tests/corpus/4132-union-length-unit-arm-throws-node-typeerror.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/4141-record-receiver-tostring.ts": {
    "order": [
     "<repo>/tests/corpus/4141-record-receiver-tostring.ts"

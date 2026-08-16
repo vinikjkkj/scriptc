@@ -13441,7 +13441,110 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const key: IrExpr = { kind: "strLit", value: field, type: STRING, loc: locOf(expr.name) };
     const keyed = lowerUnionKeyedRead(L, expr, value.type.unionId, value, key, field);
     if (keyed) return keyed;
-    return lowerUnionFieldJoinRead(L, expr, value, field);
+    const joined = lowerUnionFieldJoinRead(L, expr, value, field);
+    if (joined) return joined;
+    return lowerUnionIntrinsicLengthRead(L, expr, value, field);
+  }
+
+  /** The FOURTH way a union receiver answers a literal read, and the only
+   * one whose arms declare no field at all: `.length` over a union of
+   * INTRINSIC arms. `inner.content.length` on
+   * `Uint8Array | string | readonly BinaryNode[]` reads a field all three
+   * arms answer in JavaScript and none of them answers in the IR — the
+   * three paths above walk `def.arms` looking for a declared field and a
+   * `bytes`/`string`/`array` arm has none, so the whole read declines and
+   * the caller fences. There is nothing to look up: each arm's length is
+   * an INTRINSIC of that arm's own representation
+   * (`bytesIntrinsic`/`strIntrinsic`/`arrIntrinsic`), every one already
+   * typed f64, so the join is f64 and the answer is a tag switch over the
+   * three reads — the same lifted-function shape lowerUnionFieldJoinRead
+   * writes, with the recordGet replaced by the arm's intrinsic.
+   *
+   * `length` is the whole rule, deliberately. It is the one name every
+   * one of these representations answers with the SAME meaning the direct
+   * read gives (this helper emits the identical node the non-union path
+   * emits for that arm, so a union read and a narrowed read cannot
+   * disagree). `byteLength` is NOT here: only the bytes arm answers it,
+   * and inventing an answer for the other two is the wrong-answer trade
+   * this codebase reverts.
+   *
+   * A UNIT arm is the `content?:` case, and it does not decline: it is
+   * exactly the arm the checker proved away (the read only reaches here
+   * behind `Array.isArray(...)` or a narrowing the lowering erased), so
+   * it takes the stranded-arm stance unionRetagHelper already draws —
+   * a runtime case throwing the CATCHABLE TypeError Node itself throws,
+   * word for word ("Cannot read properties of undefined (reading
+   * 'length')"). Sound narrowing never reaches it; an unsound one throws
+   * what Node throws instead of answering a made-up number. At least one
+   * arm must be intrinsic, so a unit-only union still declines. */
+  function lowerUnionIntrinsicLengthRead(L: Lowerer, expr: ts.PropertyAccessExpression, value: IrExpr, field: string): IrExpr | null {
+    if (field !== "length") return null;
+    if (value.type.kind !== "union") return null;
+    const fromId = value.type.unionId;
+    const def = L.unions.get(fromId);
+    if (!def || def.arms.length === 0) return null;
+    const INTRINSIC = { bytes: "bytesIntrinsic", string: "strIntrinsic", array: "arrIntrinsic" } as const;
+    const nodeKindOf = (k: string): (typeof INTRINSIC)[keyof typeof INTRINSIC] | null =>
+      k === "bytes" || k === "string" || k === "array" ? INTRINSIC[k] : null;
+    let intrinsicArms = 0;
+    for (const arm of def.arms) {
+      if (nodeKindOf(arm.kind) !== null) intrinsicArms++;
+      else if (!isUnitType(arm)) return null;
+    }
+    if (intrinsicArms === 0) return null;
+    const loc = locOf(expr);
+    const key = `ulength:${fromId}`;
+    let name = L.widthHelpers.get(key);
+    if (name === undefined) {
+      name = `%union.length.${L.widthHelpers.size}`;
+      L.widthHelpers.set(key, name);
+      const fromT: IrType = { kind: "union", unionId: fromId };
+      const u: IrExpr = { kind: "varRef", localId: "u.0", type: fromT, loc };
+      const body: IrStmt[] = [];
+      def.arms.forEach((arm, i) => {
+        const nk = nodeKindOf(arm.kind);
+        const read: IrExpr =
+          nk === null
+            ? nodeThrowExpr(
+                1,
+                "",
+                `Cannot read properties of ${arm.kind === "undefinedT" ? "undefined" : "null"} (reading 'length')`,
+                F64,
+                loc,
+              )
+            : ({
+                kind: nk,
+                method: "length",
+                receiver: { kind: "unionNarrow", unionId: fromId, tag: i, value: u, type: arm, loc },
+                args: [],
+                type: F64,
+                loc,
+              } as unknown as IrExpr);
+        body.push({
+          kind: "if",
+          cond: { kind: "unionIsTag", unionId: fromId, tag: i, negated: false, value: u, type: BOOL, loc },
+          then: [{ kind: "return", value: read, loc }],
+          else_: null,
+          loc,
+        });
+      });
+      // Unreachable while the tag is one of the arms' — the same backstop
+      // lowerUnionFieldJoinRead writes.
+      body.push({
+        kind: "throw",
+        value: { kind: "strLit", value: "scriptc: internal error: invalid union tag", type: STRING, loc },
+        loc,
+      });
+      L.liftedFns.push({
+        name,
+        params: [{ localId: "u.0", name: "u", type: fromT }],
+        returnType: F64,
+        locals: [{ id: "u.0", name: "u", type: fromT, mutable: true }],
+        body,
+        loc,
+      });
+    }
+    return { kind: "call", callee: name, args: [value], type: F64, loc };
   }
 
   /** unionKeyGet's arm answers must SURFACE as the join — each is the join
@@ -14723,3 +14826,23 @@ function everyArmIsTuple(L: Lowerer, t: ts.Type): boolean {
           // Tagging this is a real fix, not just an instrument fix -- it
           // just needs the lowering gate (both differential lanes,
           // order-parity, RC audit, QR pair) that a message change earns.
+          // RE-MEASURED at 5d8e2103 (estado-inventory section 4): the count
+          // above is one short, and the shape of the miss has changed.
+          // zapo's TU carries THREE untagged refusals, not two:
+          //   * this one, the EventEmitter 'emit'-as-a-value SC1090, in
+          //     lifted fn %fence.fn.240 -- still exactly one, still with a
+          //     synthetic location (the entry file's last line), because the
+          //     fence function is interned per signature and shared;
+          //   * TWO from emit-ws.ts, not one. Since wsInitBagPlan the
+          //     generic option-bag refusal no longer occurs in zapo's TU at
+          //     all; what survives is the pair of refuseIfPresent tests, one
+          //     for 'dispatcher' and one for 'agent'.
+          // Whole-TU accounting at 5d8e2103, so the next block does not have
+          // to re-derive it: 140 scr_throw_error_msg_code calls = 53 the
+          // census sees (message-tagged) + 3 untagged refusals + 84 SC9002
+          // 'unreachable' guards, which are per-function boilerplate and not
+          // refusals. The frontend captured 56 diagnostics onto fences: the
+          // 53 + this untagged one + 2 that deferredFenceStmt DROPPED because
+          // they were not captured[0] of their statement (the SC2004 cascade
+          // markers for 'pickActiveSyncKey' and 'fetchLatestWaMobileVersion'
+          // -- neither reaches the emitted C at all).
