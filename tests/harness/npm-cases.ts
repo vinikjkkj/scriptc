@@ -53,7 +53,7 @@ export function npmCases(fixturesRoot: string): NpmCase[] {
       // npm-static.test.ts, and both fail the flagless build with
       // `SC2013: importing 'keyedstrnum' requires the embedded dynamic
       // engine` plus one SC2013 per call site.
-      .filter((entry) => !/\/(246[5-9]|255[67]|(403[12]|406[1-4])|411[1-4]|415[1-3])-[^/]+\/main\.ts$/.test(entry))
+      .filter((entry) => !/\/(246[5-9]|255[67]|(403[12]|406[1-4])|411[1-4]|415[1-4])-[^/]+\/main\.ts$/.test(entry))
       .map((entry) => ({ name: entry.split("/").at(-2)!, entry })),
     {
       // THE acceptance test: a calculator CLI on the real commander package

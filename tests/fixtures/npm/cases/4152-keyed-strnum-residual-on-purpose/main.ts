@@ -22,7 +22,9 @@
 //   spelling `s["nope"] is not a function` where Node prints `s.nope is not
 //   a function`. Pre-existing, unchanged by this branch, pinned here
 //   because it is the only remaining Node divergence in the package.
-import { rSplitFenced, rSplitDot, rToFixedFenced, rToFixedDot, rTrulyMissing } from "keyedstrnum"
+import { rUpper, rLower, rSplitFenced, rSplitDot, rToFixedFenced, rToFixedDot, rTrulyMissing } from "keyedstrnum"
+console.log("rUpper         = " + rUpper())
+console.log("rLower         = " + rLower())
 console.log("rSplitFenced   = " + rSplitFenced())
 console.log("rSplitDot      = " + rSplitDot())
 console.log("rToFixedFenced = " + rToFixedFenced())
