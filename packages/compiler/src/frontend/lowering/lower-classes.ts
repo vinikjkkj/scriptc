@@ -6904,7 +6904,9 @@ function fillWalk(
 }
 
 function fullFillLoopFollows(expr: ts.NewExpression): boolean {
-  return fullFillLoopWrites(expr) !== null;
+  const ok = fullFillLoopWrites(expr) !== null;
+  if (ok) noteFillLoopProof(expr);
+  return ok;
 }
 
 /** The counting-loop proof itself, handing back the RIGHT-HAND SIDES of the
@@ -6961,14 +6963,27 @@ function fullFillLoopWrites(expr: ts.NewExpression): ts.Expression[] | null {
   const walked = fillWalk(bodyStmts, aName, iName, false, writes);
   if (walked === null) return null;
   if (walked.flowsOut && !walked.written) return null;
+  return writes;
+}
+
+/** The counter tick, kept OUT of fullFillLoopWrites on purpose: an
+ * unannotated `new Array(n)` asks the proof TWICE — once through
+ * newArrayFillElemType for the element type, once through
+ * fullFillLoopFollows for the absent-slot gate — and a counter inside the
+ * proof would report one site as two. fullFillLoopFollows runs exactly once
+ * per site that reaches the gate, on both the annotated and the inferred
+ * path, so the tick belongs here and the SCRIPTC_FILLLOOP_WHY probe keeps
+ * the meaning its own comment gives it: how many SITES the proof admitted. */
+function noteFillLoopProof(expr: ts.NewExpression): void {
   fullFillLoopProofs++;
   if (process.env["SCRIPTC_FILLLOOP_WHY"] !== undefined) {
+    const decl = expr.parent;
+    const aName = ts.isVariableDeclaration(decl) && ts.isIdentifier(decl.name) ? decl.name.text : "?";
     console.error(
       `[fillloopwhy] #${fullFillLoopProofs} ${expr.getSourceFile().fileName}:` +
         `${expr.getSourceFile().getLineAndCharacterOfPosition(expr.getStart()).line + 1} ${aName}`,
     );
   }
-  return writes;
 }
 
 /** The element type of an UNANNOTATED `new Array(n)` that the counting-loop
