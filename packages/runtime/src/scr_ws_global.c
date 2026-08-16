@@ -222,7 +222,92 @@ static ScrStr *wsg_normalize_url(ScrStr *url) {
   return s;
 }
 
-ScrWsGlobal *scr_ws_global_new(ScrStr *url, ScrStr *protocols, ScrWsGlobalFire fire) {
+/* Case-insensitive match of a header NAME against a lowercase literal. */
+static bool wsg_name_is(const ScrStr *k, const char *lit, size_t n) {
+  if (k == NULL || k->len != n) return false;
+  for (size_t i = 0; i < n; i++) {
+    char c = k->data[i];
+    if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
+    if (c != lit[i]) return false;
+  }
+  return true;
+}
+
+/* The names the handshake writes itself. Sending them twice is not a
+ * stronger request, it is a malformed one -- and undici drops exactly
+ * this set from the same bag, so dropping them is what agrees with the
+ * oracle. `Sec-WebSocket-*` goes by prefix: the version, the key, the
+ * protocol list and the extension offer are all ours. */
+static bool wsg_name_reserved(const ScrStr *k) {
+  static const char host[] = "host";
+  static const char upgrade[] = "upgrade";
+  static const char connection[] = "connection";
+  static const char sec[] = "sec-websocket-";
+  if (wsg_name_is(k, host, sizeof host - 1)) return true;
+  if (wsg_name_is(k, upgrade, sizeof upgrade - 1)) return true;
+  if (wsg_name_is(k, connection, sizeof connection - 1)) return true;
+  if (k != NULL && k->len >= sizeof sec - 1) {
+    bool pre = true;
+    for (size_t i = 0; i < sizeof sec - 1; i++) {
+      char c = k->data[i];
+      if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
+      if (c != sec[i]) { pre = false; break; }
+    }
+    if (pre) return true;
+  }
+  return false;
+}
+
+/* A header value may not carry CR or LF: a bag that tries to is response
+ * splitting, not a header. Such an entry is dropped whole. */
+static bool wsg_value_clean(const ScrStr *v) {
+  if (v == NULL) return false;
+  for (size_t i = 0; i < v->len; i++)
+    if (v->data[i] == '\r' || v->data[i] == '\n') return false;
+  return true;
+}
+
+ScrStr *scr_ws_headers_block(const ScrMap *headers) {
+  if (headers == NULL) return NULL;
+  double n = scr_map_iter_count(headers);
+  size_t cap = 0;
+  for (double i = 0; i < n; i += 1) {
+    if (!scr_map_iter_live(headers, i)) continue;
+    ScrStr *k = scr_map_iter_key_str(headers, i);
+    ScrStr *v = (ScrStr *)scr_map_iter_val_ref(headers, i);
+    if (k != NULL && v != NULL) cap += k->len + v->len + 4; /* ": " + CRLF */
+    scr_str_release(k);
+    scr_str_release(v);
+  }
+  if (cap == 0) return NULL;
+  char *buf = malloc(cap + 1);
+  if (buf == NULL) return NULL;
+  size_t p = 0;
+  for (double i = 0; i < n; i += 1) {
+    if (!scr_map_iter_live(headers, i)) continue;
+    ScrStr *k = scr_map_iter_key_str(headers, i);
+    ScrStr *v = (ScrStr *)scr_map_iter_val_ref(headers, i);
+    if (k != NULL && v != NULL && k->len > 0 && !wsg_name_reserved(k) && wsg_value_clean(v)) {
+      memcpy(buf + p, k->data, k->len);
+      p += k->len;
+      buf[p++] = ':';
+      buf[p++] = ' ';
+      memcpy(buf + p, v->data, v->len);
+      p += v->len;
+      buf[p++] = '\r';
+      buf[p++] = '\n';
+    }
+    scr_str_release(k);
+    scr_str_release(v);
+  }
+  if (p == 0) { free(buf); return NULL; }
+  ScrStr *out = scr_str_new(buf, p);
+  free(buf);
+  return out;
+}
+
+ScrWsGlobal *scr_ws_global_new(ScrStr *url, ScrStr *protocols, ScrStr *headers,
+                               ScrWsGlobalFire fire) {
   static const ScrWsClientCallbacks cb = {
       .on_open = &wsg_on_open,
       .on_message = &wsg_on_message,
@@ -243,7 +328,7 @@ ScrWsGlobal *scr_ws_global_new(ScrStr *url, ScrStr *protocols, ScrWsGlobalFire f
       .ctx = &scr_tls_fetch_client_ctx,
       .wrap = &scr_tls_fetch_client_wrap,
   };
-  g->c = scr_ws_client_connect(norm, protocols, &cb, g, &tls);
+  g->c = scr_ws_client_connect(norm, protocols, headers, &cb, g, &tls);
   scr_str_release(norm);
   if (g->c == NULL) { /* the dial could not even start: exception pending */
     free(g);

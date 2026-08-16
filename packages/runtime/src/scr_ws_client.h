@@ -44,8 +44,11 @@ typedef struct {
 
 /* Dial `url` (ws:// or wss://) and start the handshake. Returns NULL with
  * a pending exception if the URL is not a WebSocket URL. `protocols` is
- * the Sec-WebSocket-Protocol value, or NULL for none. */
+ * the Sec-WebSocket-Protocol value, or NULL for none. `headers` is a block
+ * of already-formed "Name: value\r\n" lines appended to the upgrade
+ * request, or NULL for none -- see scr_ws_build_request. */
 ScrWsClient *scr_ws_client_connect(ScrStr *url /*borrowed*/, ScrStr *protocols /*borrowed, nullable*/,
+                                   ScrStr *headers /*borrowed, nullable*/,
                                    const ScrWsClientCallbacks *cb, void *user,
                                    const ScrWsTlsOps *tls /*nullable*/);
 

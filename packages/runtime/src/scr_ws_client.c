@@ -126,6 +126,7 @@ static void wsc_throw(const char *msg) {
 }
 
 ScrWsClient *scr_ws_client_connect(ScrStr *url, ScrStr *protocols,
+                                   ScrStr *headers,
                                    const ScrWsClientCallbacks *cb, void *user,
                                    const ScrWsTlsOps *tls) {
   ScrUrl *u = scr_url_new(url); /* throws "Invalid URL" itself */
@@ -224,11 +225,13 @@ ScrWsClient *scr_ws_client_connect(ScrStr *url, ScrStr *protocols,
    * buffers until its handshake ends — the ordering scr_http.c relies on. */
   if (secure) tls->wrap(c->sock, tls->ctx != NULL ? tls->ctx(u->host, true) : NULL);
 
-  char *req = malloc(pn + hn + 512 + (protocols ? protocols->len : 0));
+  size_t reqcap = pn + hn + 512 + (protocols ? protocols->len : 0) +
+                  (headers ? headers->len : 0);
+  char *req = malloc(reqcap);
   if (req != NULL) {
-    size_t rn = scr_ws_build_request(req, pn + hn + 512 + (protocols ? protocols->len : 0),
-                                     hostbuf, pbuf, key_b64,
-                                     protocols != NULL ? protocols->data : NULL);
+    size_t rn = scr_ws_build_request(req, reqcap, hostbuf, pbuf, key_b64,
+                                     protocols != NULL ? protocols->data : NULL,
+                                     headers != NULL ? headers->data : NULL);
     scr_net_sock_write_native(c->sock, req, rn);
     free(req);
   }

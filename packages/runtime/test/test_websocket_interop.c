@@ -103,7 +103,7 @@ int main(int argc, char **argv) {
   char req[512];
   char host[64];
   snprintf(host, sizeof host, "127.0.0.1:%d", port);
-  size_t reqn = scr_ws_build_request(req, sizeof req, host, "/", key_b64, NULL);
+  size_t reqn = scr_ws_build_request(req, sizeof req, host, "/", key_b64, NULL, NULL);
   size_t sent = 0;
   while (sent < reqn) {
     int r = send(s, req + sent, (int)(reqn - sent), 0);
