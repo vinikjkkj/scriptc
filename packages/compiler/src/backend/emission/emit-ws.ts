@@ -41,6 +41,7 @@ import {
   mangleWsSend,
 } from "../mangle.js";
 import { cDecl, cType, releaseCallC } from "./emit-types.js";
+import { OVERFLOW_MEMBER } from "./emit-shapes.js";
 import { IrType, WsGlobalPlan, typeKey, wsGlobalPlan } from "../../ir/nodes.js";
 
 /** The interned immortal closure symbol for one WebSocket construct
@@ -305,10 +306,26 @@ function closeMethod(plan: WsGlobalPlan, sym: string, params: string): string[] 
 }
 
 /** `new WebSocket(url, protocols?, options?)`: dial, then build the API
- * record. A browser's WebSocket takes two arguments — a third is IGNORED
- * here for the same reason it is there, and the option bag a Node `ws`
- * signature declares in the second position takes the deferred fence
- * rather than being silently dropped on the floor. */
+ * record.
+ *
+ * THE THIRD ARGUMENT IS IGNORED, and that is not a shortcut — it is what
+ * the oracle does. Measured against Node v25.9.0 on zapo's own ctor type,
+ * dialing a header-recording server:
+ *
+ *     new WS(url, undefined, { headers: { Cookie: 'x' } })   no Cookie
+ *     new WS(url, { headers: { Cookie: 'x' } })              Cookie SENT
+ *
+ * Node's global WebSocket takes (url, protocols|init) and drops a third
+ * argument on the floor exactly as a browser does. So a program that puts
+ * headers in position three loses them on BOTH runtimes; refusing it here
+ * would refuse a program the oracle accepts.
+ *
+ * The SECOND-position init bag is the one that carries meaning, and it is
+ * lowered (wsInitBagPlan): `protocols` reads like the plain argument and
+ * `headers` becomes the block scr_ws_build_request appends. A bag with a
+ * field this unit cannot honour -- a live `dispatcher` or `agent` -- still
+ * takes the deferred fence, tested at runtime, because an undefined one is
+ * lowerable and a real one is not. */
 function ctorWrapper(
   E: CEmitter,
   plan: WsGlobalPlan,
@@ -324,36 +341,37 @@ function ctorWrapper(
     );
   }
 
-  // `protocols` → the Sec-WebSocket-Protocol header value.
-  lines.push(`  ScrStr *sc_proto = NULL;`);
+  // `protocols` → the Sec-WebSocket-Protocol header value, and (from the
+  // init bag only) `headers` → the extra request block.
+  lines.push(`  ScrStr *sc_proto = NULL;`, `  ScrStr *sc_hdrs = NULL;`);
   const protoT = plan.protocolsParam;
   if (protoT !== undefined) {
-    const armLines = (kind: string, expr: string): string[] => {
+    // The arm's BODY, with no `break` of its own: the caller adds one
+    // where a switch is what it is nested in.
+    const armBody = (kind: string, expr: string, ind: string): string[] => {
       switch (kind) {
         case "absent":
-          return [`      break;`];
+          return [];
         case "string":
-          return [`      sc_proto = scr_str_retain((ScrStr *)${expr});`, `      break;`];
+          return [`${ind}sc_proto = scr_str_retain((ScrStr *)${expr});`];
         case "strArray":
           return [
             // ", " and not ",": undici joins the list that way, and the
             // header value goes out on the wire verbatim.
-            `      { ScrStr *sc_sep = scr_str_new(", ", 2);`,
-            `        sc_proto = scr_arr_join((ScrArr *)${expr}, sc_sep);`,
-            `        scr_str_release(sc_sep); }`,
-            `      break;`,
+            `${ind}{ ScrStr *sc_sep = scr_str_new(", ", 2);`,
+            `${ind}  sc_proto = scr_arr_join((ScrArr *)${expr}, sc_sep);`,
+            `${ind}  scr_str_release(sc_sep); }`,
           ];
-        default: {
-          const msg =
-            "the 'ws' package's option-bag second argument to a WebSocket constructor has no " +
-            "scriptc lowering yet -- globalThis.WebSocket takes (url, protocols)";
-          return [
-            `      scr_throw_error_msg_code(SCR_ERR_ERROR, ${cStr(msg)}, ${msg.length}, "SC2020");`,
-            `      break;`,
-          ];
-        }
+        case "init":
+          return initBagBody(plan, expr, ind);
+        default:
+          return [`${ind}${refuseC(FENCE_MSG)}`];
       }
     };
+    const armLines = (kind: string, expr: string): string[] => [
+      ...armBody(kind, expr, "      "),
+      `      break;`,
+    ];
     if (protoT.kind === "union") {
       lines.push(`  switch (sc_a1->tag) {`);
       plan.protocolsArms.forEach((k, tag) => {
@@ -361,7 +379,7 @@ function ctorWrapper(
       });
       lines.push(`    default: break;`, `  }`);
     } else {
-      lines.push(`  {`, ...armLines(plan.protocolsArms[0]!, "sc_a1"), `  }`);
+      lines.push(`  {`, ...armBody(plan.protocolsArms[0]!, "sc_a1", "    "), `  }`);
     }
     lines.push(`  ${releaseCallC(protoT, "sc_a1")};`);
   }
@@ -370,11 +388,13 @@ function ctorWrapper(
     `  if (scr_exc_pending()) {`,
     `    scr_str_release(sc_a0);`,
     `    scr_str_release(sc_proto);`,
+    `    scr_str_release(sc_hdrs);`,
     `    return NULL;`,
     `  }`,
-    `  ScrWsGlobal *sc_g = scr_ws_global_new(sc_a0, sc_proto, &${names.dispatch});`,
+    `  ScrWsGlobal *sc_g = scr_ws_global_new(sc_a0, sc_proto, sc_hdrs, &${names.dispatch});`,
     `  scr_str_release(sc_a0);`,
     `  scr_str_release(sc_proto);`,
+    `  scr_str_release(sc_hdrs);`,
     `  if (sc_g == NULL) return NULL; /* a bad URL / non-ws scheme: pending */`,
     `  ${names.rec} *sc_r = ${mangleRecordNew(plan.shapeId)}();`,
     // "blob" is the API's default binaryType, in browsers and in Node.
@@ -406,6 +426,84 @@ function ctorWrapper(
   return lines;
 }
 
+/** The deferred refusal's text. It is the ONE refusal the backend raises
+ * on its own, so it has no diagnostic and no source location — see the
+ * note at the foot of this file. */
+const FENCE_MSG =
+  "the 'ws' package's option-bag second argument to a WebSocket constructor has no " +
+  "scriptc lowering yet -- globalThis.WebSocket takes (url, protocols)";
+
+/** The same refusal, narrowed to the one field that earned it: a bag whose
+ * `dispatcher`/`agent` is undefined lowers, and only a live one refuses. */
+function initFieldMsg(field: string): string {
+  return (
+    `the 'ws' package's option-bag second argument to a WebSocket constructor carries ` +
+    `'${field}', which has no scriptc lowering yet -- only protocols and headers do`
+  );
+}
+
+function refuseC(msg: string): string {
+  return `scr_throw_error_msg_code(SCR_ERR_ERROR, ${cStr(msg)}, ${msg.length}, "SC2020");`;
+}
+
+/** The init bag unfolded: refuse what cannot be honoured, then read the
+ * bag's `protocols` and `headers` into the two locals the dial takes. */
+function initBagBody(plan: WsGlobalPlan, expr: string, ind: string): string[] {
+  const ib = plan.initBag;
+  if (ib === undefined || ib === null) return [`${ind}${refuseC(FENCE_MSG)}`];
+  const rec = mangleRecordStruct(ib.shapeId);
+  const out = [`${ind}{ ${rec} *sc_ib = (${rec} *)${expr};`];
+  const b = `${ind}  `;
+  for (const r of ib.refuseIfPresent) {
+    const slot = `sc_ib->${mangleField(r.name)}`;
+    const present = r.kind === "dyn" ? `scr_dyn_truthy(${slot})` : `${slot}->tag != ${r.absentTag!}`;
+    out.push(`${b}if (${present}) { ${refuseC(initFieldMsg(r.name))} }`);
+  }
+  if (ib.refuseIfPresent.length > 0) out.push(`${b}if (!scr_exc_pending()) {`);
+  const c = ib.refuseIfPresent.length > 0 ? `${b}  ` : b;
+  if (ib.protocols !== null) {
+    const slot = `sc_ib->${mangleField("protocols")}`;
+    if (ib.protocols.unionId !== undefined) {
+      out.push(`${c}switch (${slot}->tag) {`);
+      ib.protocols.arms.forEach((k, tag) => {
+        out.push(`${c}  case ${tag}:`, ...bagProtoArm(k, `scr_union_peek(${slot})`, `${c}    `), `${c}    break;`);
+      });
+      out.push(`${c}  default: break;`, `${c}}`);
+    } else {
+      out.push(...bagProtoArm(ib.protocols.arms[0]!, slot, c));
+    }
+  }
+  if (ib.headers !== null) {
+    const slot = `sc_ib->${mangleField("headers")}`;
+    const hrec = mangleRecordStruct(ib.headers.recShapeId);
+    out.push(
+      `${c}if (${slot}->tag == ${ib.headers.valueTag}) {`,
+      `${c}  sc_hdrs = scr_ws_headers_block(((${hrec} *)scr_union_peek(${slot}))->${OVERFLOW_MEMBER});`,
+      `${c}}`,
+    );
+  }
+  if (ib.refuseIfPresent.length > 0) out.push(`${b}}`);
+  out.push(`${ind}}`);
+  return out;
+}
+
+/** The bag's own `protocols` arm — the same three shapes the plain second
+ * argument takes, read out of a struct slot instead of the parameter. */
+function bagProtoArm(kind: string, expr: string, ind: string): string[] {
+  switch (kind) {
+    case "string":
+      return [`${ind}sc_proto = scr_str_retain((ScrStr *)${expr});`];
+    case "strArray":
+      return [
+        `${ind}{ ScrStr *sc_sep = scr_str_new(", ", 2);`,
+        `${ind}  sc_proto = scr_arr_join((ScrArr *)${expr}, sc_sep);`,
+        `${ind}  scr_str_release(sc_sep); }`,
+      ];
+    default:
+      return [];
+  }
+}
+
 /** A C string literal for an ASCII diagnostic message. */
 function cStr(s: string): string {
   return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
@@ -414,9 +512,15 @@ function cStr(s: string): string {
           // the only one with neither a diagnostic nor a source location:
           // it is untagged (no "[SCxxxx at file:line]"), so the zapo trap
           // census cannot see it, and the SITE census has nothing to see
-          // even in principle. It IS live in zapo's TU -- one throw, in
-          // sc_wsw_0's second-argument union switch, inside the websocket
-          // dial (estado-instruments section 2.3). SCRIPTC_TRAP_TRACE does
-          // observe it: scr_error.c filters on the SC-numeric code, not on
-          // the tag. Giving it a location needs one plumbed here; that is
-          // a design question, not a patch.
+          // even in principle -- this wrapper is interned PER CONSTRUCT
+          // SIGNATURE TYPE and shared by every `new` site, so there is no
+          // one location to name. SCRIPTC_TRAP_TRACE does observe it:
+          // scr_error.c filters on the SC-numeric code, not on the tag.
+          // Giving it a location needs one plumbed here; that is a design
+          // question, not a patch.
+          //
+          // Since wsInitBagPlan it is no longer the shape zapo dials with:
+          // zapo's bag is `{ protocols, headers, dispatcher, agent }` with
+          // the last two undefined, which lowers. What is left in zapo's
+          // TU is the two runtime `refuseIfPresent` tests -- a bag that
+          // really carries a proxy -- and a bag no plan can account for.

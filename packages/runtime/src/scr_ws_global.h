@@ -41,11 +41,22 @@ typedef void (*ScrWsGlobalFire)(void *user, int which, int state,
                                 bool was_clean);
 
 /* Dial `url` (ws:// or wss://) with the handshake already in flight on
- * return. `protocols` is the Sec-WebSocket-Protocol value or NULL. +1, or
- * NULL with an exception pending (a bad URL, a non-ws scheme). Callbacks
- * cannot fire before scr_ws_global_set_user names the record. */
+ * return. `protocols` is the Sec-WebSocket-Protocol value or NULL.
+ * `headers` is the init bag's header block ("Name: value\r\n" lines) or
+ * NULL. +1, or NULL with an exception pending (a bad URL, a non-ws
+ * scheme). Callbacks cannot fire before scr_ws_global_set_user names the
+ * record. */
 ScrWsGlobal *scr_ws_global_new(ScrStr *url /*borrowed*/, ScrStr *protocols /*borrowed, nullable*/,
+                               ScrStr *headers /*borrowed, nullable*/,
                                ScrWsGlobalFire fire);
+
+/* `{ headers: { Name: value } }` from the init bag, flattened into the
+ * request block scr_ws_build_request appends. The map is the header
+ * record's string-keyed overflow map; entries whose name the handshake
+ * owns (Host, Upgrade, Connection, Sec-WebSocket-*) are DROPPED rather
+ * than duplicated, which is what undici does with the same bag. +1, and
+ * NULL for an empty map (no block at all, not an empty one). */
+ScrStr *scr_ws_headers_block(const ScrMap *headers /*borrowed, nullable*/);
 /* Hand the handle its API record. The reference is STRONG for as long
  * as the socket can still fire (see the .c) -- `retain`/`release` are
  * the record shape's own _v adapters, which only the emitted code

@@ -83,11 +83,15 @@ void scr_ws_key_b64(const uint8_t seed[16], char b64[25]);
  * (capacity `cap`). `host` is the Host header value (host, or host:port
  * when non-default), `path` the request target (at least "/"), `key_b64`
  * the Sec-WebSocket-Key. `protocols` (nullable) becomes the
- * Sec-WebSocket-Protocol value verbatim. Returns the request length, or 0
- * if it would not fit in `cap`. */
+ * Sec-WebSocket-Protocol value verbatim. `extra` (nullable) is a block of
+ * already-formed "Name: value\r\n" lines -- the init bag's `headers`, which
+ * undici's WebSocket sends and this one now sends too; it goes out AFTER
+ * the handshake's own headers and is emitted verbatim, so the caller owns
+ * both the formatting and the decision about which names are legal.
+ * Returns the request length, or 0 if it would not fit in `cap`. */
 size_t scr_ws_build_request(char *out, size_t cap, const char *host,
                             const char *path, const char *key_b64,
-                            const char *protocols);
+                            const char *protocols, const char *extra);
 
 /* Handshake-response outcomes (scr_ws_check_handshake). */
 #define SCR_WS_HS_OK 0

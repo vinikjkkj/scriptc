@@ -75,7 +75,7 @@ int main(int argc, char **argv) {
       .on_close = &on_close,
       .on_error = &on_error,
   };
-  g_client = scr_ws_client_connect(u, NULL, &cb, NULL, NULL);
+  g_client = scr_ws_client_connect(u, NULL, NULL, &cb, NULL, NULL);
   scr_str_release(u);
   if (g_client == NULL) {
     fprintf(stderr, "connect returned NULL\n");

@@ -501,18 +501,147 @@ function closeMethod(host: WsHost, plan: WsGlobalPlan, names: WsNames): string[]
   ];
 }
 
+/** The deferred refusal's text, shared with emit-ws.ts byte for byte: the
+ * two backends must refuse the same program with the same message. */
+const FENCE_MSG =
+  "the 'ws' package's option-bag second argument to a WebSocket constructor has no " +
+  "scriptc lowering yet -- globalThis.WebSocket takes (url, protocols)";
+
+function initFieldMsg(field: string): string {
+  return (
+    `the 'ws' package's option-bag second argument to a WebSocket constructor carries ` +
+    `'${field}', which has no scriptc lowering yet -- only protocols and headers do`
+  );
+}
+
+/** The init bag unfolded on the LLVM tier, arm for arm with
+ * emit-ws.ts's initBagBody: refuse what cannot be honoured, then read the
+ * bag's `protocols` and `headers`. `expr` is the bag record pointer.
+ * Leaves control flow on an open block, as every arm here must. */
+function initBagArm(
+  host: WsHost,
+  B: Ir,
+  plan: WsGlobalPlan,
+  expr: string,
+  storeProto: (kind: string, e: string) => void,
+  refuse: (msg: string) => void,
+): void {
+  const ib = plan.initBag;
+  if (ib === undefined || ib === null) {
+    refuse(FENCE_MSG);
+    return;
+  }
+  const rec = mangleRecordStruct(ib.shapeId);
+  const slot = (name: string): string => {
+    const p = B.tmp();
+    B.line(
+      `${p} = getelementptr inbounds %${rec}, ptr ${expr}, i64 0, i32 ${fieldIdx(host, ib.shapeId, name)}`,
+    );
+    const v = B.tmp();
+    B.line(`${v} = load ptr, ptr ${p}`);
+    return v;
+  };
+  const unionTag = (u: string): string => {
+    const p = B.tmp();
+    const v = B.tmp();
+    B.line(`${p} = getelementptr inbounds %ScrUnion, ptr ${u}, i64 0, i32 1`);
+    B.line(`${v} = load i32, ptr ${p}`);
+    return v;
+  };
+  const unionPayload = (u: string): string => {
+    const p = B.tmp();
+    const v = B.tmp();
+    B.line(`${p} = getelementptr inbounds %ScrUnion, ptr ${u}, i64 0, i32 5`);
+    B.line(`${v} = load ptr, ptr ${p}`);
+    return v;
+  };
+  const done = B.lbl("bagdone");
+
+  for (const r of ib.refuseIfPresent) {
+    const v = slot(r.name);
+    const cond = B.tmp();
+    if (r.kind === "dyn") {
+      host.declare(`declare zeroext i1 @scr_dyn_truthy(ptr)`);
+      B.line(`${cond} = call zeroext i1 @scr_dyn_truthy(ptr ${v})`);
+    } else {
+      B.line(`${cond} = icmp ne i32 ${unionTag(v)}, ${r.absentTag!}`);
+    }
+    const bad = B.lbl("bagbad");
+    const ok = B.lbl("bagok");
+    B.line(`br i1 ${cond}, label %${bad}, label %${ok}`);
+    B.label(bad);
+    refuse(initFieldMsg(r.name));
+    B.line(`br label %${done}`);
+    B.label(ok);
+  }
+
+  if (ib.protocols !== null) {
+    const v = slot("protocols");
+    if (ib.protocols.unionId !== undefined) {
+      const merge = B.lbl("bagpm");
+      const arms = ib.protocols.arms.map((kind, tag) => ({ kind, tag, lbl: B.lbl("bagparm") }));
+      B.line(
+        `switch i32 ${unionTag(v)}, label %${merge} [ ` +
+          arms.map((a) => `i32 ${a.tag}, label %${a.lbl}`).join(" ") +
+          ` ]`,
+      );
+      for (const a of arms) {
+        B.label(a.lbl);
+        if (a.kind !== "absent") storeProto(a.kind, unionPayload(v));
+        B.line(`br label %${merge}`);
+      }
+      B.label(merge);
+    } else {
+      storeProto(ib.protocols.arms[0]!, v);
+    }
+  }
+
+  if (ib.headers !== null) {
+    host.declare(`declare ptr @scr_ws_headers_block(ptr)`);
+    const hrShape = host.recordsById.get(ib.headers.recShapeId);
+    if (!hrShape) throw new Error(`llvm emitter bug: unknown record shape ${ib.headers.recShapeId}`);
+    const hrec = mangleRecordStruct(ib.headers.recShapeId);
+    const v = slot("headers");
+    const cond = B.tmp();
+    B.line(`${cond} = icmp eq i32 ${unionTag(v)}, ${ib.headers.valueTag}`);
+    const yes = B.lbl("baghdr");
+    const merge = B.lbl("baghm");
+    B.line(`br i1 ${cond}, label %${yes}, label %${merge}`);
+    B.label(yes);
+    const recp = unionPayload(v);
+    const ovfp = B.tmp();
+    const ovf = B.tmp();
+    const blk = B.tmp();
+    // The overflow ScrMap sits one past the declared fields, past the rc.
+    B.line(
+      `${ovfp} = getelementptr inbounds %${hrec}, ptr ${recp}, i64 0, i32 ${hrShape.fields.length + 1}`,
+    );
+    B.line(`${ovf} = load ptr, ptr ${ovfp}`);
+    B.line(`${blk} = call ptr @scr_ws_headers_block(ptr ${ovf})`);
+    B.line(`store ptr ${blk}, ptr %hdrsp`);
+    B.line(`br label %${merge}`);
+    B.label(merge);
+  }
+
+  B.line(`br label %${done}`);
+  B.label(done);
+}
+
 /** `new WebSocket(url, protocols?, options?)`: dial, then build the API
- * record. A browser's WebSocket takes two arguments — a third is IGNORED
- * here for the same reason it is there, and the option bag a Node `ws`
- * signature declares in the second position takes the deferred fence
- * rather than being silently dropped on the floor. */
+ * record. The THIRD argument is ignored — Node's own global WebSocket
+ * ignores it too (measured against v25.9.0: headers in position three
+ * never reach the wire, on either runtime), so dropping it is agreement
+ * with the oracle rather than a shortcut. The SECOND-position init bag is
+ * the overload that carries meaning and it is lowered here, arm for arm
+ * with emit-ws.ts; a bag with a live `dispatcher`/`agent` still takes the
+ * deferred fence. */
 function ctorWrapper(
   host: WsHost,
   plan: WsGlobalPlan,
   t: IrType & { kind: "func" },
   names: WsNames,
 ): string[] {
-  host.declare(`declare ptr @scr_ws_global_new(ptr, ptr, ptr)`);
+  host.declare(`declare ptr @scr_ws_global_new(ptr, ptr, ptr, ptr)`);
   host.declare(`declare void @scr_ws_global_set_user(ptr, ptr, ptr, ptr)`);
   host.declare(`declare ptr @scr_ws_global_retain_v(ptr)`);
   host.declare(`declare void @scr_ws_global_release_v(ptr)`);
@@ -532,45 +661,55 @@ function ctorWrapper(
   }
   B.line(`%protop = alloca ptr`);
   B.line(`store ptr null, ptr %protop`);
+  B.line(`%hdrsp = alloca ptr`);
+  B.line(`store ptr null, ptr %hdrsp`);
+
+  const refuse = (msg: string): void => {
+    host.declare(`declare void @scr_throw_error_msg_code(i32, ptr, i64, ptr)`);
+    B.line(
+      `call void @scr_throw_error_msg_code(i32 0, ptr ${host.cstr(msg)}, i64 ${msg.length}, ptr ${host.cstr("SC2020")})`,
+    );
+  };
 
   // `protocols` → the Sec-WebSocket-Protocol header value.
   const protoT = plan.protocolsParam;
   if (protoT !== undefined) {
     const done = B.lbl("pdone");
+    const storeProto = (kind: string, expr: string): void => {
+      if (kind === "string") {
+        host.declare(`declare ptr @scr_str_retain_v(ptr)`);
+        const r = B.tmp();
+        B.line(`${r} = call ptr @scr_str_retain_v(ptr ${expr})`);
+        B.line(`store ptr ${r}, ptr %protop`);
+        return;
+      }
+      if (kind === "strArray") {
+        // ", " and not ",": undici joins the list that way, and the
+        // header value goes out on the wire verbatim.
+        host.declare(`declare ptr @scr_str_new(ptr, i64)`);
+        host.declare(`declare ptr @scr_arr_join(ptr, ptr)`);
+        const sep = B.tmp();
+        const j = B.tmp();
+        B.line(`${sep} = call ptr @scr_str_new(ptr ${host.cstr(", ")}, i64 2)`);
+        B.line(`${j} = call ptr @scr_arr_join(ptr ${expr}, ptr ${sep})`);
+        B.line(`store ptr ${j}, ptr %protop`);
+        B.line(`call void @scr_str_release(ptr ${sep})`);
+      }
+    };
     const armLines = (kind: string, expr: string): void => {
       switch (kind) {
         case "absent":
           break;
-        case "string": {
-          host.declare(`declare ptr @scr_str_retain_v(ptr)`);
-          const r = B.tmp();
-          B.line(`${r} = call ptr @scr_str_retain_v(ptr ${expr})`);
-          B.line(`store ptr ${r}, ptr %protop`);
+        case "string":
+        case "strArray":
+          storeProto(kind, expr);
           break;
-        }
-        case "strArray": {
-          // ", " and not ",": undici joins the list that way, and the
-          // header value goes out on the wire verbatim.
-          host.declare(`declare ptr @scr_str_new(ptr, i64)`);
-          host.declare(`declare ptr @scr_arr_join(ptr, ptr)`);
-          const sep = B.tmp();
-          const j = B.tmp();
-          B.line(`${sep} = call ptr @scr_str_new(ptr ${host.cstr(", ")}, i64 2)`);
-          B.line(`${j} = call ptr @scr_arr_join(ptr ${expr}, ptr ${sep})`);
-          B.line(`store ptr ${j}, ptr %protop`);
-          B.line(`call void @scr_str_release(ptr ${sep})`);
+        case "init":
+          initBagArm(host, B, plan, expr, storeProto, refuse);
           break;
-        }
-        default: {
-          const msg =
-            "the 'ws' package's option-bag second argument to a WebSocket constructor has no " +
-            "scriptc lowering yet -- globalThis.WebSocket takes (url, protocols)";
-          host.declare(`declare void @scr_throw_error_msg_code(i32, ptr, i64, ptr)`);
-          B.line(
-            `call void @scr_throw_error_msg_code(i32 0, ptr ${host.cstr(msg)}, i64 ${msg.length}, ptr ${host.cstr("SC2020")})`,
-          );
+        default:
+          refuse(FENCE_MSG);
           break;
-        }
       }
     };
     if (protoT.kind === "union") {
@@ -605,23 +744,29 @@ function ctorWrapper(
   const thrown = B.lbl("wthrew");
   const dial = B.lbl("wdial");
   const pr1 = B.tmp();
+  const hd1 = B.tmp();
   B.line(`${pend} = call zeroext i1 @scr_exc_pending()`);
   B.line(`br i1 ${pend}, label %${thrown}, label %${dial}`);
   B.label(thrown);
   B.line(`${pr1} = load ptr, ptr %protop`);
+  B.line(`${hd1} = load ptr, ptr %hdrsp`);
   B.line(`call void @scr_str_release(ptr %a0)`);
   B.line(`call void @scr_str_release(ptr ${pr1})`);
+  B.line(`call void @scr_str_release(ptr ${hd1})`);
   B.line(`ret ptr null`);
   B.label(dial);
   const pr = B.tmp();
+  const hd = B.tmp();
   const g = B.tmp();
   const bad = B.tmp();
   const nourl = B.lbl("wnourl");
   const build = B.lbl("wbuild");
   B.line(`${pr} = load ptr, ptr %protop`);
-  B.line(`${g} = call ptr @scr_ws_global_new(ptr %a0, ptr ${pr}, ptr @${names.dispatch})`);
+  B.line(`${hd} = load ptr, ptr %hdrsp`);
+  B.line(`${g} = call ptr @scr_ws_global_new(ptr %a0, ptr ${pr}, ptr ${hd}, ptr @${names.dispatch})`);
   B.line(`call void @scr_str_release(ptr %a0)`);
   B.line(`call void @scr_str_release(ptr ${pr})`);
+  B.line(`call void @scr_str_release(ptr ${hd})`);
   // A bad URL / non-ws scheme: pending.
   B.line(`${bad} = icmp eq ptr ${g}, null`);
   B.line(`br i1 ${bad}, label %${nourl}, label %${build}`);
