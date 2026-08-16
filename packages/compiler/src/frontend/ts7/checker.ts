@@ -550,7 +550,29 @@ export class CheckerFacade {
       // (5.9.3 answers the input type — string | null stays string | null).
       if (awaited.every((arm, i) => arm === arms[i])) return type;
       const distinct = [...new Set(awaited as Type[])];
-      return distinct.length === 1 ? distinct[0] : undefined;
+      if (distinct.length === 1) return distinct[0];
+      // `PromiseLike<T | null> | T | null` — an async function's return
+      // position when the payload is itself a union, which is the shape
+      // `async (): Promise<R | null>` gives EVERY `return { ... }` in it.
+      // Each arm unwraps, but to more than one distinct type, so the
+      // identity collapse above cannot answer and the client cannot BUILD
+      // `T | null` to answer with. It does not have to: the awaited union is
+      // already one of the results in hand — the PromiseLike arm's own type
+      // argument. Take it only when its arms are EXACTLY the arms of
+      // everything awaited, which is the definition of the answer rather
+      // than a guess; anything else still declines and the caller still
+      // falls back to the input.
+      const leaves = new Set<Type>();
+      for (const a of distinct) {
+        if (a.isUnionType()) for (const l of a.getTypes()) leaves.add(l);
+        else leaves.add(a);
+      }
+      for (const cand of distinct) {
+        if (!cand.isUnionType()) continue;
+        const own = cand.getTypes();
+        if (own.length === leaves.size && own.every((l) => leaves.has(l))) return cand;
+      }
+      return undefined;
     }
     const unwrapped = this.promiseArgumentOf(type);
     if (unwrapped === null) return type;

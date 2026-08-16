@@ -2703,6 +2703,10 @@ export class Lowerer {
    * the instantiation context is appended so the user knows which concrete
    * types made the (source-anchored) construct fail. */
   pushDiag(diag: ScrDiagnostic): void {
+    if (process.env["SCRIPTC_DIAG_STACK"] !== undefined) {
+      console.error(`DIAGSTACK ${diag.code} ${String(diag.message).slice(0, 120)}\n` +
+        (new Error().stack ?? "").split("\n").slice(1, 16).join("\n"));
+    }
     const d = this.instantiationContext
       ? { ...diag, message: `${diag.message} (${this.instantiationContext})` }
       : diag;
@@ -4317,6 +4321,31 @@ export class Lowerer {
           if (armIdx >= 0 && adapter) {
             const adapted: IrExpr = { kind: "call", callee: adapter, args: [expr], type: arm, loc: expr.loc };
             return { kind: "unionWrap", unionId: expected.unionId, tag: armIdx, value: adapted, type: expected, loc: expr.loc };
+          }
+        }
+      }
+      // A CLASS VALUE against a union carrying a CONSTRUCT-SIGNATURE arm —
+      // zapo's `rawWebSocketConstructor: WaMobileTcpSocketCtor` flowing into
+      // a `readonly rawWebSocketConstructor?: RawWebSocketConstructor` field,
+      // whose optionality makes the destination the two-arm
+      // `new (url, protocols?, options?) => RawWebSocket | undefined`.
+      // widthCoerce already turns a classRef into the construct THUNK for the
+      // PLAIN func slot (classCtorThunk, a few rungs down) and a plain
+      // binding it is `new`ed through lowers too; the OPTIONAL spelling was
+      // the only difference, and the union position simply had no rung for
+      // it. ONE func arm only — the promise-arm and func-arm ambiguity stance
+      // directly above — and direct classRef sources only, which is
+      // classCtorThunk's own gate (the thunk names the class statically, so
+      // a classval-typed expression could hold a widened subclass).
+      if (expr.type.kind === "classval" && expr.kind === "classRef") {
+        const def = this.unions.get(expected.unionId);
+        const ctorArms = def?.arms.filter((a) => a.kind === "func") ?? [];
+        const arm = ctorArms.length === 1 ? ctorArms[0] : undefined;
+        if (arm !== undefined && arm.kind === "func") {
+          const armIdx = this.armTag(expected.unionId, arm);
+          const thunk = armIdx >= 0 ? this.classCtorThunk(expr.type.className, arm, expr.loc) : null;
+          if (thunk) {
+            return { kind: "unionWrap", unionId: expected.unionId, tag: armIdx, value: thunk, type: expected, loc: expr.loc };
           }
         }
       }
@@ -6828,7 +6857,19 @@ export class Lowerer {
     //   trap is unreachable there), then the stranded TypeError.
     let strandParams = false;
     for (let i = 0; i < Math.min(fromT.params.length, toT.params.length); i++) {
-      if (!this.coercibleValue(toT.params[i]!, fromT.params[i]!)) strandParams = true;
+      if (this.coercibleValue(toT.params[i]!, fromT.params[i]!)) continue;
+      // ...and the WIDTH family, which coerceToExpected applies to this very
+      // pair one call frame down (the `converted` below is built by it) but
+      // which coercibleValue never learned — it answers for arm wraps,
+      // re-tags, narrows and the dyn boundary, and a record that width-lifts
+      // into the parameter is none of those. Probing it here rather than
+      // widening coercibleValue keeps widthLiftPlan's own func rung
+      // (cleanFuncAdaptable) exactly where it was, so no NEW pair becomes
+      // width-liftable and no recursion is introduced. Strictly a bridge
+      // where there was a strand: the adapter body below already builds the
+      // conversion, and its `stopped coercing` assertion is the arming.
+      if (this.widthLiftPlan(toT.params[i]!, fromT.params[i]!) !== null) continue;
+      strandParams = true;
     }
     let voidRet: "jsval" | "strand" | null = null;
     let strandRet = false;
