@@ -626,7 +626,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.iterPack": "scr_dyn_iter_pack",
   "dyn.arrLen": "scr_dyn_arr_len",
   "dyn.arrAt": "scr_dyn_arr_at",
-  "dyn.hasKey": "scr_dyn_has_key",
+  // the stored walk PLUS the unstored prototype methods (emit-exprs.ts twin)
+  "dyn.hasKey": "scr_dyn_has_key_full",
   "dyn.construct": "scr_dyn_construct",
   "dyn.instanceOf": "scr_dyn_instance_of",
   "dyn.defineProps": "scr_dyn_define_props",
@@ -4856,6 +4857,16 @@ class LlEmitter {
                 B.line(`store ptr ${r}, ptr ${slot}`);
                 break;
               }
+              case "record": {
+                // A plain data record arm: Object.prototype.toString's
+                // constant, the same interned literal the LONE-record
+                // case below emits. The frontend admits an arm here only
+                // when the shape is not a tuple and carries no `toString`
+                // field, so the constant IS JS's answer.
+                const sym = this.internLiteral("[object Object]");
+                B.line(`store ptr ${this.retainValue(sym, e.type)}, ptr ${slot}`);
+                break;
+              }
               default:
                 throw new LlvmUnsupportedError(`toString:union:${arm.kind}`, e.loc);
             }
@@ -6330,6 +6341,15 @@ class LlEmitter {
           B.line(`${t} = call ptr @scr_bytes_from_arr(i32 ${kind}, ptr ${src.name})`);
           return this.own({ name: t, type: e.type });
         }
+        if (e.source.type.kind === "dyn") {
+          // The runtime tag dispatch (see emit-exprs.ts); the length form
+          // inside it can throw, so the pending check rides here too.
+          this.declare(`declare ptr @scr_bytes_from_dyn(i32, ptr)`);
+          B.line(`${t} = call ptr @scr_bytes_from_dyn(i32 ${kind}, ptr ${src.name})`);
+          const out = this.own({ name: t, type: e.type });
+          this.emitPendingCheck();
+          return out;
+        }
         throw new Error(`llvm emitter bug: bytesNew source of kind ${e.source.type.kind}`);
       }
       case "bytesIntrinsic":
@@ -7266,8 +7286,21 @@ class LlEmitter {
         B.line(`store i1 ${fenced}, ptr ${slot}`);
         B.br(lj);
         B.startBlock(lj);
+        const stored = B.tmp();
+        B.line(`${stored} = load i1, ptr ${slot}`);
+        // ...and the PROTOTYPE methods that are not stored anywhere:
+        // Object.prototype's and every primitive prototype's live as
+        // dispatch arms in scr_dyn_invoke.c, so the stored walk above
+        // cannot see them. The keyed READ answers them now, and `in` has
+        // to report every name the read answers or the close would trade
+        // one disagreement for another. The helper answers false for
+        // every kind whose prototype IS stored, so this is a plain
+        // unconditional OR; the C backend's twin is in emit-exprs.ts.
+        this.declare(`declare zeroext i1 @scr_dyn_has_intrinsic_method(ptr, ptr, i64)`);
+        const intr = B.tmp();
+        B.line(`${intr} = call zeroext i1 @scr_dyn_has_intrinsic_method(ptr ${d.name}, ptr ${this.cstr(e.key)}, i64 ${keyBytes})`);
         const raw = B.tmp();
-        B.line(`${raw} = load i1, ptr ${slot}`);
+        B.line(`${raw} = or i1 ${stored}, ${intr}`);
         this.emitPendingCheck();
         if (!e.negated) return { name: raw, type: e.type };
         const neg = B.tmp();
@@ -11741,6 +11774,11 @@ class LlEmitter {
       // clearTimeout(null) and friends: Node silently ignores
       // non-handles — nothing runs (arguments still evaluate).
       for (const a of e.args) this.emitExpr(a);
+      return { name: "", type: e.type };
+    }
+    if (e.fn === "js.voidOperand") {
+      // `void e`'s value: the operand ran as the enclosing seqExpr's
+      // statement; the leaf emits nothing (see emit-exprs.ts).
       return { name: "", type: e.type };
     }
     if (e.fn === "qs.parse") {

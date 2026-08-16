@@ -614,7 +614,7 @@ static bool dyn_num_proto_unimpl(const char *m) {
 static bool dyn_arr_proto_unimpl(const char *m) {
   static const char *names[] = { "reduce", "reduceRight", "flat",
     "fill", "copyWithin", "keys", "values", "entries", "toReversed", "toSorted", "toSpliced",
-    "with", "toString", "toLocaleString", NULL };
+    "with", "toLocaleString", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
   return false;
 }
@@ -639,6 +639,182 @@ ScrDyn *scr_dyn_invoke_key(ScrDyn *recv, const ScrStr *key, ScrDyn *const *args,
   /* ScrStr is always NUL-terminated (scr_str_new), so ->data is a valid
    * C string for the name-keyed dispatch. */
   return scr_dyn_invoke(recv, key->data, args, argc, what);
+}
+
+/* ── the keyed/dot READ's half of the dispatch below ──────────────────
+ *
+ * `o.m()` and `o[k]()` reach the arms below and answer. `typeof o.m` and
+ * `typeof o[k]` did NOT: the read walked own members and the STORED
+ * prototype chain and then answered the undefined singleton, because
+ * Object.prototype's and every primitive prototype's methods exist in
+ * this runtime only as C branches inside this file — reachable from the
+ * CALL and from nowhere else.
+ *
+ * So the same member on the same object was a function when called and
+ * `undefined` when read. Node says `function` to both. Silent, no
+ * diagnostic, invisible to the trap census, and the exact shape that
+ * makes a program feature-detecting with `if (o[k])` or
+ * `typeof o[k] === "function"` take the wrong branch: protobufjs writes
+ * both spellings.
+ *
+ * dyn_kind_knows is the READ's view of the arms below, and the contract
+ * between them is narrow and checkable: a name is listed here IF AND
+ * ONLY IF the arm for that kind either implements it or fences it
+ * LOUDLY by name. Names the arm would answer with Node's
+ * is-not-a-function stay out, so the read keeps saying `undefined`
+ * exactly where the call keeps saying "is not a function" — the two
+ * spellings agree about every name either way, which is the whole point.
+ * Corpus 4242 walks this list row by row and asserts that agreement, so
+ * a name added to an arm without being added here (or the reverse) is a
+ * red test rather than a new silent divergence. */
+static bool dyn_name_in(const char *m, const char *const *names) {
+  for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
+  return false;
+}
+
+/* Object.prototype's methods this runtime ANSWERS (dyn_object_proto_method).
+ * isPrototypeOf / propertyIsEnumerable / toLocaleString are Node's and are
+ * NOT here: the call answers them with is-not-a-function, so a read that
+ * claimed `function` would create a fresh disagreement in the other
+ * direction. They are priced, not guessed at. */
+static bool dyn_objproto_knows(const char *m) {
+  static const char *const names[] = { "hasOwnProperty", "valueOf", NULL };
+  return dyn_name_in(m, names);
+}
+
+static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
+  switch (recv->kind) {
+    case SCR_DYN_STR: {
+      static const char *const impl[] = { "at", "charAt", "charCodeAt", "concat",
+        "endsWith", "includes", "indexOf", "lastIndexOf", "padEnd", "padStart",
+        "repeat", "slice", "startsWith", "substring", "toString", "trim",
+        "trimEnd", "trimStart", NULL };
+      return dyn_name_in(m, impl) || dyn_str_proto_unimpl(m) || dyn_objproto_knows(m);
+    }
+    case SCR_DYN_ARR: {
+      /* `toString` moved OUT of dyn_arr_proto_unimpl and into this list
+       * when the ARR arm started answering it: the two lists feed this
+       * predicate with `||`, so dyn_kind_knows is unchanged either way and
+       * the READ keeps saying `function` — but a name that is IMPLEMENTED
+       * must not sit in a list called *_unimpl, and the estado-eight report
+       * that discovered the arm had told the next block to delete it as
+       * dead text. Deleting it while it was the only thing making
+       * dyn_kind_knows true would have made `typeof a[k]` answer
+       * `undefined` while `a[k]()` answered "1,2,3" -- the very split this
+       * predicate exists to prevent, reintroduced by a tidy-up. */
+      static const char *const impl[] = { "at", "concat", "every", "filter",
+        "find", "findIndex", "flatMap", "forEach", "includes", "indexOf",
+        "join", "lastIndexOf", "map", "pop", "push", "reverse", "shift",
+        "slice", "some", "sort", "splice", "toString", "unshift", NULL };
+      return dyn_name_in(m, impl) || dyn_arr_proto_unimpl(m) || dyn_objproto_knows(m);
+    }
+    case SCR_DYN_BYTES:
+      /* ONE name, and only because this branch flipped it. The BYTES call
+       * arm (scr_dyn_bytes_method) answers `toString` now where it used to
+       * fence loudly, so leaving BYTES in the default:false arm below would
+       * make `typeof b[k]` answer `undefined` while `b[k]()` answered "hi"
+       * -- measured, on a Buffer and on a plain Uint8Array, before this
+       * line was written. The REST of the BYTES surface (at/slice/subarray/
+       * set, and the loud fences in scr_dyn_bytes_proto_name, which is
+       * static in another unit) stays unclaimed: widening the read to a
+       * table nobody measured is how the read/call split happened in the
+       * first place, and it is not this branch's name to claim. */
+      return dyn_name_is(m, "toString");
+    case SCR_DYN_NUM:
+    case SCR_DYN_BOOL:
+      return dyn_name_is(m, "toString") || dyn_num_proto_unimpl(m) || dyn_objproto_knows(m);
+    case SCR_DYN_FUNC: {
+      /* `bind` and `toString` fence loudly; apply/call run. A FUNC box's
+       * OWN properties are answered by the read's own scr_dyn_fn_get arm
+       * before this is consulted, so nothing here can shadow one. */
+      static const char *const impl[] = { "apply", "bind", "call", "toString", NULL };
+      return dyn_name_in(m, impl) || dyn_objproto_knows(m);
+    }
+    case SCR_DYN_OBJ:
+      /* A null-prototype dictionary inherits NOTHING — Object.create(null)
+       * .hasOwnProperty is `undefined` in Node, and the call arm already
+       * refuses it for the same reason. The OWN/chain walk has already
+       * missed by the time this is asked (the caller checks), so this is
+       * only ever Object.prototype's set. */
+      return !recv->null_proto && dyn_objproto_knows(m);
+    default:
+      /* BYTES, HANDLE, JSVAL, OBJINST, BIG, ARRBUF and PROMISE. Each has
+       * its own arm in the emitted read (a modeled-property table, the
+       * engine, or a loud fence) that answers before the tail this
+       * serves, and a PROMISE receiver's element access never reaches
+       * the dyn read at all: the frontend fences it (SC1090, "element
+       * access on non-array values") while the receiver is still typed.
+       * A `then` arm was written here and REMOVED for exactly that
+       * reason -- it could not be exercised by any program 4242 can
+       * spell, and an unexercised arm is how a control comes to pass
+       * because its guarded region never runs. Widening the read to
+       * those kinds is a separate question with its own evidence;
+       * answering it here from a table nobody measured is how the
+       * read/call split happened in the first place. */
+      return false;
+  }
+}
+
+/* The bound intrinsic method a READ answers with. The captures are the
+ * RECEIVER and the NAME, and the body is one call into the dispatch
+ * below — so the value a read produces and the value a call produces are
+ * computed by the same code, and cannot drift into two behaviours.
+ *
+ * A DIVERGENCE stated rather than hidden: Node's `o.hasOwnProperty` is
+ * UNBOUND, so `const f = o.hasOwnProperty; f("a")` throws there and
+ * answers here. This runtime binds, following scr_dyn_obj_member_get,
+ * whose header records the same choice for the same reason: an unbound
+ * native method extracted from a receiver has no `this` to run under,
+ * and the shapes that extract-then-call are rarer than the shapes that
+ * feature-detect. Pinned in 4242. */
+static ScrDyn *dyn_bound_intrinsic_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  ScrDyn *recv = (ScrDyn *)scr_box_get_ref(clo->caps[0]); /* +1 */
+  ScrDyn *name = (ScrDyn *)scr_box_get_ref(clo->caps[1]); /* +1 */
+  ScrDyn *r = scr_dyn_invoke(recv, name->v.str->data, args, argc, "a bound method");
+  scr_dyn_release(recv);
+  scr_dyn_release(name);
+  return r;
+}
+
+/* `k in o`'s half of the same question. `in` walks the prototype chain,
+ * so a name the READ now answers has to be a name `in` reports — Node
+ * says true to both, and answering the read `function` while `in` still
+ * said false would be a fresh disagreement in place of the one being
+ * closed. One table, three callers (read, `in`, call), no drift. */
+bool scr_dyn_has_intrinsic_method(const ScrDyn *recv, const char *key, size_t key_len) {
+  (void)key_len; /* the tests are on the NUL-terminated spelling */
+  if (recv->kind == SCR_DYN_OBJ && recv->null_proto) return false;
+  return dyn_kind_knows(recv, key);
+}
+
+/* `k in o` with a RUNTIME key (the dyn.hasKey libCall) — scr_dyn_has_key's
+ * stored walk, plus the same unstored prototype methods. It lives HERE
+ * rather than beside scr_dyn_has_key because scr_json.c is always linked
+ * and this unit is gated: a call the other way would put the dispatch in
+ * every binary that asks `k in o`. The emitters name this one, which is
+ * what puts `dyn.hasKey` on the dynInvoke link switch. */
+bool scr_dyn_has_key_full(const ScrDyn *v, const ScrStr *key) {
+  if (scr_dyn_has_key(v, key)) return true;
+  if (scr_exc_pending()) return false;
+  return scr_dyn_has_intrinsic_method(v, key->data, key->len);
+}
+
+ScrDyn *scr_dyn_intrinsic_method_get(ScrDyn *recv, const ScrStr *key) {
+  /* ScrStr is NUL-terminated (scr_str_new), so ->data is a C string for
+   * the same name-keyed tests the dispatch makes. */
+  if (!dyn_kind_knows(recv, key->data)) return NULL;
+  /* An OWN or INHERITED member of the same name SHADOWS the prototype's,
+   * and the caller has already read it — but `o.toString = undefined`
+   * stores a member whose VALUE is undefined, which the caller cannot
+   * tell from a miss. `in` can. */
+  if (recv->kind == SCR_DYN_OBJ && scr_dyn_obj_key_present(recv, key->data, key->len)) return NULL;
+  ScrClosure *clo = scr_closure_new((void *)dyn_bound_intrinsic_thunk, 2);
+  clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  scr_box_set_ref(clo->caps[0], scr_dyn_retain(recv));
+  clo->caps[1] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  ScrDyn *nameBox = scr_dyn_new_str((ScrStr *)key); /* retains key */
+  scr_box_set_ref(clo->caps[1], nameBox);           /* takes the +1 */
+  return scr_dyn_new_func(clo, dyn_bound_intrinsic_thunk, 0, "()", "bound");
 }
 
 ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc, const char *what) {
@@ -1199,6 +1375,19 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       for (size_t i = 0; i < ins; i++) recv->v.arr.items[start + i] = scr_dyn_retain(args[i + 2]);
       recv->v.arr.len = newLen;
       return out;
+    }
+    if (dyn_name_is(method, "toString")) {
+      /* Array.prototype.toString is join(",") and takes NO argument --
+       * `[1,2,3].toString(16)` is "1,2,3" in Node, the radix ignored. The
+       * DOT spelling reaches this through the dyn method surface now that
+       * a non-literal argument routes here instead of fencing in the
+       * frontend, so the name has to answer rather than refuse. One body:
+       * scr_dyn_to_string's ARR arm, the same one String(a) uses. */
+      ScrStr *s = scr_dyn_to_string(recv, NULL);
+      if (scr_exc_pending()) { if (s) scr_str_release(s); return NULL; }
+      ScrDyn *d = scr_dyn_new_str(s);
+      scr_str_release(s);
+      return d;
     }
     if (dyn_arr_proto_unimpl(method)) {
       dyn_throw_unsupported("Array", method);

@@ -99,13 +99,19 @@ const rx: Rec = new Radix()
 console.log("radix  = " + rx.toString())
 
 // And one that is not about classes at all, found while gridding the
-// receiver shapes: a TUPLE is a record shape with `tuple: true`, and the
-// fold claims it. In JS a tuple IS an array, so Node answers
-// Array.prototype.toString -- "a,1". We answer "[object Object]".
-// Identical on 8eb37c53 and on the branch. Not taken here because
-// `arr.toString()` on a real array is an SC2020 fence today
-// ('number[].toString' ... has no scriptc lowering yet), and teaching
-// tuples to answer while arrays keep refusing would make the surface
-// inconsistent in a second way rather than fixing it.
+// receiver shapes, and now the SECOND closed row here: a TUPLE is a
+// record shape with `tuple: true`, and the fold claimed it. In JS a
+// tuple IS an array, so Node answers Array.prototype.toString -- "a,1"
+// -- and we answered "[object Object]", silently.
+//
+// This list declined it because `arr.toString()` on a real array was an
+// SC2020 fence ('number[].toString' ... has no scriptc lowering yet),
+// and teaching tuples to answer while arrays kept refusing would have
+// moved the inconsistency rather than fixed it. So BOTH moved: one
+// lowering now answers both spellings with join(","), which is what
+// `${arr}` and String(arr) had lowered to all along. Corpus 4241 is the
+// positive case. The ten materialization rows above did not move, and
+// that is what keeps them useful: they are the no-move control on this
+// change as well as on the radix one.
 const tup: [string, number] = ["a", 1]
 console.log("tuple  = " + tup.toString())

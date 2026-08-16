@@ -7837,6 +7837,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4221-void-operator-in-value-position.ts": {
+   "order": [
+    "<repo>/tests/corpus/4221-void-operator-in-value-position.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4222-dyn-tostring-dispatches-on-the-receiver.ts": {
+   "order": [
+    "<repo>/tests/corpus/4222-dyn-tostring-dispatches-on-the-receiver.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4223-union-record-arm-in-a-string-conversion.ts": {
+   "order": [
+    "<repo>/tests/corpus/4223-union-record-arm-in-a-string-conversion.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4224-new-uint8array-over-a-dynamic-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/4224-new-uint8array-over-a-dynamic-value.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/4231-a-class-pinned-const-into-a-construct-signature-field.ts": {
    "order": [
     "<repo>/tests/corpus/4231-a-class-pinned-const-into-a-construct-signature-field.ts"
@@ -7846,6 +7870,18 @@
   "<repo>/tests/corpus/4232-a-construct-thunk-parameter-that-takes-the-width-lift-plan.ts": {
    "order": [
     "<repo>/tests/corpus/4232-a-construct-thunk-parameter-that-takes-the-width-lift-plan.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4241-array-and-tuple-tostring.ts": {
+   "order": [
+    "<repo>/tests/corpus/4241-array-and-tuple-tostring.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4243-as-cast-receiver-keeps-its-class.ts": {
+   "order": [
+    "<repo>/tests/corpus/4243-as-cast-receiver-keeps-its-class.ts"
    ],
    "diags": []
   },
@@ -9965,6 +10001,12 @@
   "<repo>/tests/fixtures/npm/cases/4181-monomorphized-var-hoisting/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/4181-monomorphized-var-hoisting/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/4242-dyn-prototype-method-read/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/4242-dyn-prototype-method-read/main.ts"
    ],
    "diags": []
   },

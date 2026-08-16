@@ -5089,6 +5089,124 @@ static bool scr_dyn_bytes_proto_name(const char *m) {
   return false;
 }
 
+/* `new Uint8Array(v)` where v is a CHECKED-DYNAMIC value: the runtime tag
+ * dispatch the constructor's own overload set is, and the one the frontend
+ * cannot make because only the runtime knows the kind.
+ *
+ * protobufjs's util.newBuffer is the site that needs it:
+ *
+ *   return "number"==typeof e ? (t.Buffer?t._Buffer_allocUnsafe(e):new t.Array(e))
+ *                             : (t.Buffer?t._Buffer_from(e):new Uint8Array(e))
+ *
+ * The `typeof e === "number"` test has already been taken the OTHER way on
+ * the branch that reaches here, so `e` is array-like and Node COPIES it.
+ * Coercing the operand to a LENGTH instead would make every protobuf
+ * `bytes` field decode as an empty buffer, which is why this dispatches
+ * rather than picking one overload.
+ *
+ * NUM is Node's length form (ToIndex, with Node's RangeError); BYTES is
+ * the element copy -- CROSS-kind, unlike the static spelling, because a
+ * runtime value carries no static elem to match against; ARR reads each
+ * element through ToNumber, exactly scr_bytes_from_arr; and every other
+ * kind is Node's ToObject-with-no-length, which is the EMPTY array. NULL
+ * with the exception pending only on the length form's RangeError.
+ * Borrows d; returns +1. */
+ScrBytes *scr_bytes_from_dyn(ScrBytesElem elem, const ScrDyn *d) {
+  if (d->kind == SCR_DYN_NUM) return scr_bytes_new(elem, d->v.num); /* may throw */
+  if (d->kind == SCR_DYN_BYTES || d->kind == SCR_DYN_ARRBUF) {
+    const ScrBytes *src = d->v.bytes;
+    /* Same element kind: the byte-for-byte copy, which is what Node's
+     * typed-array copy constructor is. The copy takes the CONSTRUCTOR's
+     * flavor, not the source's (scr_bytes_copy keeps the source's, so the
+     * plain mark rides at the call site exactly as the static spelling's
+     * markFlavor does). */
+    if (src->elem == elem) return scr_bytes_copy(src);
+    /* Cross-kind, and the ONLY source width the checked-dynamic tree
+     * carries is u8 (Buffer / Uint8Array): read each ELEMENT and store it
+     * through the destination's own conversion, which is Node's
+     * %TypedArray%(typedArray). Anything else is unmeasured and stays a
+     * LOUD refusal rather than a guess. */
+    if (src->elem != SCR_BYTES_U8) {
+      scr_throw_error_msg(SCR_ERR_ERROR,
+                          "cross-kind typed-array construction over a dynamic value is not supported yet",
+                          strlen("cross-kind typed-array construction over a dynamic value is not supported yet"));
+      return NULL;
+    }
+    ScrBytes *b = scr_bytes_new(elem, (double)src->len);
+    if (b == NULL) return NULL;
+    for (size_t i = 0; i < src->len; i++) scr_bytes_set(b, (double)i, (double)src->data[i]);
+    return b;
+  }
+  if (d->kind == SCR_DYN_ARR) {
+    size_t n = d->v.arr.len;
+    ScrBytes *b = scr_bytes_new(elem, (double)n);
+    if (b == NULL) return NULL;
+    for (size_t i = 0; i < n; i++) {
+      double v = scr_dyn_to_number(d->v.arr.items[i]);
+      if (scr_exc_pending()) { scr_bytes_release(b); return NULL; }
+      scr_bytes_set(b, (double)i, v);
+    }
+    return b;
+  }
+  /* PRIMITIVES are not objects, so Node's constructor never takes the
+   * array-like path for them: it takes ToIndex(ToNumber(v)). MEASURED
+   * against Node v25.9.0 rather than assumed, because the difference is
+   * invisible for three of the four spellings and decides the fourth:
+   *   new Uint8Array(undefined) -> length 0   (ToNumber NaN -> ToIndex 0)
+   *   new Uint8Array(null)      -> length 0
+   *   new Uint8Array("hi")      -> length 0   (NaN again)
+   *   new Uint8Array("3")       -> length 3   <- and this one
+   *   new Uint8Array(true)      -> length 1   <- and this one
+   * An "everything else is empty" rule gets the first three right and
+   * both of the last two wrong; the corpus fixture's `boolean` row is
+   * what caught it. */
+  if (d->kind == SCR_DYN_UNDEF || d->kind == SCR_DYN_NULL ||
+      d->kind == SCR_DYN_BOOL || d->kind == SCR_DYN_STR) {
+    double n = scr_dyn_to_number(d);
+    if (scr_exc_pending()) return NULL;
+    return scr_bytes_new(elem, n); /* may throw Node's RangeError */
+  }
+  /* Every remaining kind IS an object. Without a `length` property Node's
+   * ToObject-with-no-length answers the EMPTY typed array; WITH one it is
+   * an array-like whose indexed reads this tier has not measured, so that
+   * shape keeps a loud refusal rather than a guess. */
+  if (d->kind == SCR_DYN_OBJ && scr_dyn_obj_get(d, "length", 6) != NULL) {
+    scr_throw_error_msg(SCR_ERR_ERROR,
+                        "new Uint8Array over an array-LIKE object (a 'length' property with indexed reads) is not supported yet",
+                        strlen("new Uint8Array over an array-LIKE object (a 'length' property with indexed reads) is not supported yet"));
+    return NULL;
+  }
+  return scr_bytes_new(elem, 0);
+}
+
+/* The runtime twin of the frontend's literal-encoding fold
+ * (BUF_ENCODINGS, lower-containers.ts) for a RUNTIME-valued encoding:
+ * canonicalizes, or throws Node's ERR_UNKNOWN_ENCODING TypeError. The
+ * same table scr_stream.c's scr_stream_dynopt_encoding carries — it is
+ * static there and this unit is always linked while that one is not, so
+ * the copy is deliberate; the two must stay in step with the frontend's
+ * table, which is the single source both mirror. Returns +1, or NULL with
+ * the exception pending. */
+static ScrStr *scr_dyn_bytes_enc_canon(const ScrStr *raw) {
+  static const struct { const char *from; const char *to; } map[] = {
+    {"utf8", "utf8"}, {"utf-8", "utf8"}, {"hex", "hex"}, {"base64", "base64"},
+    {"base64url", "base64url"}, {"latin1", "latin1"}, {"binary", "latin1"},
+    {"ascii", "ascii"}, {"utf16le", "utf16le"}, {"utf-16le", "utf16le"},
+    {"ucs2", "utf16le"}, {"ucs-2", "utf16le"},
+  };
+  for (size_t i = 0; i < sizeof map / sizeof map[0]; i++) {
+    size_t n = strlen(map[i].from);
+    if (raw->len == n && memcmp(raw->data, map[i].from, n) == 0) {
+      return scr_str_new(map[i].to, strlen(map[i].to));
+    }
+  }
+  char msg[128];
+  int len = snprintf(msg, sizeof msg, "Unknown encoding: %.*s",
+                     (int)(raw->len < 64 ? raw->len : 64), raw->data);
+  scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)(len < 0 ? 0 : len), "ERR_UNKNOWN_ENCODING");
+  return NULL;
+}
+
 /* Every typed-array METHOD, over a BYTES receiver — the ONE body, and
  * the reason it lives in this unit rather than in scr_dyn_invoke.c: the
  * %TypedArray%.prototype thunks below are reachable from an
@@ -5203,6 +5321,51 @@ ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *ar
      * guessing: Node converts them through ToObject and reads a `length`
      * property, and answering that from here would be a shape claim this
      * tier has not measured. */
+  }
+  if (strcmp(method, "toString") == 0) {
+    /* A dyn receiver reaching `toString(enc)` through the METHOD spelling
+     * — the frontend routes here when the argument is not a literal
+     * encoding, because the same call on a NUM or OBJ receiver is a radix
+     * or a user toString and only the runtime knows which. Without this
+     * arm the name fell into the proto_name fence below, which would have
+     * relocated the frontend's compile-time refusal into a runtime one
+     * rather than answering.
+     *
+     * Buffer decodes; a PLAIN Uint8Array inherits Array.prototype
+     * .toString (the element join), which takes no encoding at all —
+     * scr_dyn_to_string already spells that split and is reused so the
+     * two cannot drift. */
+    if (!recv->buffer) {
+      ScrStr *s = scr_dyn_to_string(recv, NULL);
+      if (scr_exc_pending()) { if (s) scr_str_release(s); return NULL; }
+      ScrDyn *d = scr_dyn_new_str(s);
+      scr_str_release(s);
+      return d;
+    }
+    ScrStr *enc = NULL;
+    if (argc >= 1 && args[0]->kind != SCR_DYN_UNDEF) {
+      /* Node ToString's the argument and then validates it. */
+      ScrStr *raw = scr_dyn_to_string(args[0], NULL);
+      if (scr_exc_pending()) { if (raw) scr_str_release(raw); return NULL; }
+      enc = scr_dyn_bytes_enc_canon(raw);
+      scr_str_release(raw);
+      if (enc == NULL) return NULL; /* ERR_UNKNOWN_ENCODING pending */
+    }
+    ScrStr *s;
+    if (argc >= 2) {
+      double st = scr_dyn_index_arg(args, argc, 1, 0, what);
+      if (scr_exc_pending()) { if (enc) scr_str_release(enc); return NULL; }
+      double en = scr_dyn_index_arg(args, argc, 2, (double)blen, what);
+      if (scr_exc_pending()) { if (enc) scr_str_release(enc); return NULL; }
+      s = scr_bytes_to_str_range(bytes, enc, st, en);
+    } else {
+      s = scr_bytes_to_str(bytes, enc);
+    }
+    if (enc) scr_str_release(enc);
+    if (scr_exc_pending()) { if (s) scr_str_release(s); return NULL; }
+    ScrDyn *d = scr_dyn_new_str(s);
+    scr_str_release(s);
+    return d;
   }
   if (scr_dyn_bytes_proto_name(method)) {
     ScrJsonBuf b;

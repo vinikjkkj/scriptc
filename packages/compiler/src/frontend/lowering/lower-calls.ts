@@ -4891,6 +4891,11 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         // Union receivers whose every arm has a text — the ngrok
         // `(chunk: Buffer | string) => chunk.toString()` idiom.
         lowerUnionToStringCall(L, expr, expr.expression) ??
+        // Array.prototype.toString IS join(",") — the same intrinsic
+        // `${arr}` / String(arr) already lower to. Before the default
+        // fold, which would otherwise claim a TUPLE (a record shape) and
+        // answer "[object Object]" where Node prints its elements.
+        lowerArrayToStringCall(L, expr, expr.expression) ??
         // Object.prototype.toString's default answer on records and
         // override-free program classes — "[object Object]", folded.
         lowerDefaultToStringCall(L, expr, expr.expression) ??
@@ -5520,6 +5525,34 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           type: STRING, loc: locOf(call),
         };
       }
+      // An argument that is neither statically NumberLike nor a literal
+      // encoding is the MINIFIED-JS shape, and it is what the protobufjs
+      // bundle's `Long.prototype.toString(e)` calls look like: the radix
+      // is a parameter, so `typeOf` answers `any` and the radix branch
+      // above declines. Baking utf8 in would answer a byte decoding where
+      // Node answers hex digits; fencing declines a call Node performs.
+      //
+      // The third answer is the one the BRACKET spelling has had all
+      // along: scr_dyn_invoke dispatches on the RECEIVER's runtime kind —
+      // a NUM receiver takes num.toStringRadix with the argument as its
+      // radix, an OBJ receiver calls its own/inherited toString WITH the
+      // argument (Long's own recursion), a BYTES receiver decodes per the
+      // encoding. The frontend comment at scr_dyn_invoke.c's NUM arm
+      // already states the contract this restores: "`n.toString(2)` and
+      // `n[k](2)` are one answer computed once."
+      if (call.arguments.length === 1 && !ts.isSpreadElement(call.arguments[0]!) &&
+          !call.questionDotToken && !access.questionDotToken &&
+          !L.typeOf(call.arguments[0]!).isStringLiteralType()) {
+        return {
+          kind: "dynInvoke",
+          recv,
+          method: "toString",
+          calleeName: access.getText(),
+          args: [L.lowerExprExpecting(call.arguments[0]!, DYN)],
+          type: DYN,
+          loc: locOf(call),
+        };
+      }
       const enc = call.arguments[0]
         ? bufEncoding(L, "toString", call.arguments[0])
         : "utf8";
@@ -6037,6 +6070,123 @@ const inliningPredicates = new Set<ts.Symbol>();
     const operand = L.lowerExpr(access.expression);
     if (operand.type.kind !== "union") return null;
     return { kind: "toString", operand, type: STRING, loc: locOf(call) };
+  }
+
+/** The element kinds `Array.prototype.join` lowers over — f64, string,
+   * bool, and interned unions of those with unit arms (which print EMPTY,
+   * exactly as JS joins undefined/null). Declared once so the METHOD
+   * spelling below and `ensureString`'s array arm cannot claim different
+   * sets of the same operation. */
+  function joinableElem(L: Lowerer, elem: IrType): boolean {
+    if (elem.kind === "f64" || elem.kind === "string" || elem.kind === "bool") return true;
+    if (elem.kind !== "union") return false;
+    return (
+      L.unions.get(elem.unionId)?.arms.every(
+        (a) => a.kind === "f64" || a.kind === "string" || a.kind === "bool" || isUnitType(a),
+      ) ?? false
+    );
+  }
+
+/** `arr.toString()` / `tup.toString()` (stdlib provenance, zero
+   * arguments). Array.prototype.toString IS `join(",")` — which is what
+   * `${arr}` and `String(arr)` ALREADY lower to (ensureString's array
+   * arm). Only the METHOD spelling was missing, and it was missing in
+   * two different ways:
+   *
+   *   `[1,2].toString()`          SC2020 'number[].toString' has no
+   *                               lowering — a refusal for an operation
+   *                               the conversion spelling next to it
+   *                               performs.
+   *   `(["a",1] as [string, number]).toString()`
+   *                               folded to "[object Object]" through
+   *                               lowerDefaultToStringCall's record arm,
+   *                               because a tuple IS a record shape with
+   *                               `tuple: true`. Node prints "a,1", so
+   *                               that one was a SILENT wrong answer.
+   *
+   * Both answer here, from one entry point, so the two spellings cannot
+   * disagree about one operation. A TUPLE is a fixed-shape record, so it
+   * snapshots into an array first (lowerTupleReadMethodCall's stance) —
+   * inside a LIFTED helper, so the positions are read off a PARAMETER and
+   * an effectful receiver is evaluated exactly once.
+   *
+   * Every decline is "keep the existing answer", never "add a refusal":
+   * an element/position kind outside join's set, a union-typed position,
+   * or an empty tuple returns null and the caller keeps the SC2020 fence
+   * (arrays) or the constant fold (tuples). */
+  export function lowerArrayToStringCall(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,): IrExpr | null {
+    if (L.chainBlocked(call, access)) return null;
+    if (access.name.text !== "toString" || call.arguments.length !== 0) return null;
+    if (!L.isStdlibMember(access)) return null;
+    const recvT = L.mapTypeOf(L.typeOf(access.expression));
+    if (!recvT) return null;
+    const loc = locOf(call);
+
+    if (recvT.kind === "array") {
+      if (!joinableElem(L, recvT.elem)) return null;
+      const recv = L.lowerExpr(access.expression);
+      // The lowered value must really be a static array — an island
+      // handle behind an array-typed surface stays jsval and belongs to
+      // the island path, never to a static arrIntrinsic (the validator
+      // ICE lowerArrayMethodCall guards the same way).
+      if (recv.type.kind !== "array" || !joinableElem(L, recv.type.elem)) return null;
+      return L.ensureString(recv, call);
+    }
+
+    if (recvT.kind !== "record") return null;
+    const shape = L.shapes.get(recvT.shapeId);
+    if (!shape?.tuple) return null;
+    const byIndex = [...shape.fields].sort((a, b) => Number(a.name) - Number(b.name));
+    if (byIndex.length === 0) return null; // `[].toString()` is "" — no positions to read
+    const arms: IrType[] = [];
+    for (const f of byIndex) {
+      // A union POSITION would need its arms folded into the snapshot's
+      // own union; lowerTupleReadMethodCall declines the same shape.
+      if (f.type.kind === "union") return null;
+      if (!arms.some((a) => typeEquals(a, f.type))) arms.push(f.type);
+    }
+    const elemT: IrType = arms.length === 1 ? arms[0]! : { kind: "union", unionId: L.unions.intern(arms) };
+    if (!joinableElem(L, elemT)) return null;
+    const recv = L.lowerExpr(access.expression);
+    // A UNIFORM tuple's VALUE is a static array (lowerVarDecl's rule, the
+    // same probe lowerArrayMethodCall makes one receiver kind over):
+    // dispatch follows the VALUE, so those take the array arm and never
+    // build a snapshot of a thing that already is one.
+    if (recv.type.kind === "array") {
+      if (!joinableElem(L, recv.type.elem)) return null;
+      return L.ensureString(recv, call);
+    }
+    if (recv.type.kind !== "record" || recv.type.shapeId !== recvT.shapeId) return null;
+
+    const key = `tupToStr:${typeKey(recv.type)}`;
+    let helper = L.widthHelpers.get(key);
+    if (!helper) {
+      helper = `%tup.tostr.${L.widthHelpers.size}`;
+      L.widthHelpers.set(key, helper);
+      const recvType = recv.type;
+      const param: IrExpr = { kind: "varRef", localId: "t.0", type: recvType, loc };
+      const snapshot: IrExpr = {
+        kind: "arrayLit",
+        elems: byIndex.map((f) => {
+          const read: IrExpr = {
+            kind: "recordGet", obj: param, shapeId: recvType.shapeId, field: f.name, type: f.type, loc,
+          };
+          return typeEquals(f.type, elemT) ? read : L.coerceInto(access.expression, read, elemT);
+        }),
+        type: arrayOf(elemT),
+        loc,
+      };
+      L.liftedFns.push({
+        name: helper,
+        params: [{ localId: "t.0", name: "t", type: recvType }],
+        returnType: STRING,
+        locals: [{ id: "t.0", name: "t", type: recvType, mutable: false }],
+        body: [{ kind: "return", value: L.ensureString(snapshot, call), loc }],
+        loc,
+      });
+    }
+    return { kind: "call", callee: helper, args: [recv], type: STRING, loc };
   }
 
 /** `x.toString()` resolving to Object.prototype.toString (stdlib
