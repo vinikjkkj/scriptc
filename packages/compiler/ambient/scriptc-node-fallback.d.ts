@@ -1427,16 +1427,18 @@ declare module "crypto" {
     privateKey: KeyObject;
     publicKey: KeyObject;
   }): Buffer;
-  /* The CALLBACK form  Node's threadpool overload, which answers
-   * undefined and calls back with the secret. A compiled binary has no
-   * threadpool: the agreement runs synchronously and the callback is
-   * delivered on the microtask queue (the util.promisify settled-target
-   * stance). Declared here because it LOWERS; the probe idiom observes
-   * the undefined return through a cast, which needs no declaration. */
-  export function diffieHellman(
-    options: { privateKey: KeyObject; publicKey: KeyObject },
-    callback: (err: Error | null, secret: Buffer) => void,
-  ): void;
+  /* The CALLBACK form is NOT declared here, and that is a MEASURED trade
+   * rather than an omission. It lowers -- tests/corpus/4021 runs the
+   * two-argument call byte-identically to Node v25.9.0 on both backends,
+   * in a directory with real @types/node -- but declaring the second
+   * overload HERE makes `const dh = diffieHellman` a value of an
+   * overloaded type, which SC2007 refuses, and that binding is exactly
+   * what tests/corpus/2717 pins. Adding it turned 2717 red on both
+   * backends in the differential lane; this comment is the price list.
+   * Against real @types/node, which HAS both overloads, 2717 already
+   * fails on main with 7 errors -- so the value fence is the older gap
+   * and it is not this declaration's to close. The cast spelling the
+   * probe idiom (and zapo) uses needs no declaration at all. */
   export function sign(algorithm: null, data: Uint8Array, key: KeyObject): Buffer;
   export function verify(
     algorithm: null,
@@ -1719,8 +1721,8 @@ declare module "util" {
    * which answers `(options) => Promise<Buffer>` behind an
    * already-settled promise. Declared AFTER execFile's overload so that
    * spelling still resolves exactly where it did. The alias form the
-   * X25519 probe idiom uses  `const dh = diffieHellman as unknown as
-   * (o, cb) => void; promisify(dh)`  resolves through the const. */
+   * X25519 probe idiom uses -- `const dh = diffieHellman as unknown as
+   * (o, cb) => void; promisify(dh)` -- resolves through the const. */
   export function promisify(
     fn: (
       options: {

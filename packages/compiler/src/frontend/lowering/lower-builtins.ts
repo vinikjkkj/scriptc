@@ -2556,7 +2556,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
   }
 
 /** The `{ privateKey, publicKey }` options argument of a diffieHellman
-   * call, as the two KEYOBJ reads the agreement takes  the object-literal
+   * call, as the two KEYOBJ reads the agreement takes -- the object-literal
    * spelling and the BOUND-record one, exactly the pair the synchronous
    * arm above accepts. Null when the argument is neither. */
   function dhOptionKeys(L: Lowerer, optNode: ts.Expression, loc: SrcLoc): { priv: IrExpr; pub: IrExpr } | null {
@@ -2608,7 +2608,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * JS's arity rule is honoured by CONSTRUCTION: the callback is called
    * with as many of (null, secret) as it declared, so the probe's
    * `() => {}` takes neither. Null when the callback's shape cannot
-   * receive them  the caller keeps a fence there. */
+   * receive them -- the caller keeps a fence there. */
   function dhNotifyClosure(L: Lowerer, cbT: IrType, loc: SrcLoc): IrExpr | null {
     const sec = (t: IrType): IrExpr => ({ kind: "varRef", localId: "sec.0", type: t, loc });
     const nullUnit: IrExpr = { kind: "unitLit", unit: "null", type: NULL_T, loc };
@@ -2676,11 +2676,11 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     return { kind: "closure", fnName: name, captures: ["cb.0", "sec.0"], type: funcOf([], VOID), loc };
   }
 
-/** `crypto.diffieHellman(options, callback)`  Node's CALLBACK form.
+/** `crypto.diffieHellman(options, callback)` -- Node's CALLBACK form.
    *
    * @types/node declares it (the second overload, returning void) and Node
    * v25.9.0 answers `undefined` from it while calling `callback(null,
-   * secret)` off libuv's threadpool  MEASURED, not assumed: the probe
+   * secret)` off libuv's threadpool -- MEASURED, not assumed: the probe
    * `(diffieHellman as (o, cb) => Buffer | undefined)(opts, () => {})`
    * prints `async-capable` there. So the extra argument may NOT simply be
    * dropped onto the one-argument agreement: that answers a Buffer where
@@ -2688,7 +2688,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * this form gets a lowering instead of an arity fence.
    *
    * A compiled binary has no threadpool, so the agreement runs
-   * synchronously and the callback is delivered on the MICROTASK queue 
+   * synchronously and the callback is delivered on the MICROTASK queue --
    * the already-settled stance util.promisify's callback builtins take
    * (divergence 23), and the two now agree with each other: promisify(dh)
    * (opts) settles exactly one microtask hop away, which is where
@@ -2809,7 +2809,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    *     const diffieHellmanWithCallback = diffieHellman as unknown as (...)
    *
    * and promisifies THAT, so the cast-alias hop is the whole reason the
-   * site is not already served. The hop is narrow on purpose  a const
+   * site is not already served. The hop is narrow on purpose -- a const
    * whose initializer strips to a builtin-import identifier IS that
    * function, and nothing else resolves here. */
   function isDiffieHellmanPromisifyTarget(L: Lowerer, node: ts.Expression): boolean {
@@ -2827,7 +2827,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     return via !== null && via.module === "crypto" && via.member === "diffieHellman";
   }
 
-/** `promisify(diffieHellman)` AS A VALUE  a lifted
+/** `promisify(diffieHellman)` AS A VALUE -- a lifted
    * `(opts) => Promise<Buffer>` closure over the same agreement, behind an
    * already-settled promise (the PROMISIFY_SETTLED stance, divergence 23:
    * Node runs this on the threadpool, a compiled binary has none, so the
@@ -2838,7 +2838,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * module ASSIGNS this to a nullable `let` and later branches on it. A
    * declaration-shaped registration that emits nothing would leave that
    * `let` holding null, and the module would silently keep the synchronous
-   * fallback where Node takes the async path  a quiet divergence in place
+   * fallback where Node takes the async path -- a quiet divergence in place
    * of the loud fence. As a value it works in every position. */
   export function lowerPromisifiedDiffieHellmanValue(L: Lowerer, expr: ts.CallExpression, bi: { module: string; member: string }, loc: SrcLoc): IrExpr | null {
     if (bi.module !== "util" || bi.member !== "promisify") return null;
