@@ -65,6 +65,50 @@ async function diagnosticsOf(file: string): Promise<string[]> {
   return result.diagnostics.map((d) => `${d.code}: ${d.message}`);
 }
 
+/* --best-effort must DISCOVER what it EMITS.
+ *
+ * The build lowers twice: a discovery pass computes the reachable set, a
+ * fresh emit pass lowers only those bodies. Discovery used to run without
+ * bestEffort, so it poisoned and abandoned a statement that emit — which
+ * defers — lowered right through, losing every resolution edge in the
+ * abandoned tail. A callee whose ONLY edge lived there was never emitted
+ * and the call emit produced failed IR validation as `call to undeclared
+ * function`: an SC9001 ICE, the one thing --best-effort refuses to defer.
+ *
+ * The fixture is one statement with three func-valued members: an
+ * unloweraable probe first, then a bound private method and an arrow into
+ * another class's method — neither reachable any other way. */
+describe("--best-effort discovery agrees with emit", () => {
+  test("edges after a deferred member are still discovered", async () => {
+    const outDir = join(cacheDir, `deadstrip-be${sanitize ? "-san" : ""}`);
+    const result = await compile(join(repoRoot, "tests/deadstrip/best-effort-edge/main.ts"), {
+      outPath: join(outDir, "program"),
+      outDir,
+      sanitize,
+      bestEffort: true,
+      // Pinned: this test greps the emitted C for the two callees.
+      backend: "c",
+    });
+    if (!result.ok) {
+      throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+    }
+    const c = readFileSync(result.cPath, "utf8");
+    // Both callees are emitted — their only edges are the members that
+    // follow the deferred one.
+    expect(c, "the bound private method must be emitted").toContain("onlyBound");
+    expect(c, "the arrow's cross-class callee must be emitted").toContain("Sink_take");
+    // ...and the probe really did defer (otherwise the test proves nothing).
+    expect(c, "the unloweraable member must have become a trap").toContain("SC2020");
+  });
+
+  test("without --best-effort the same program fails on the construct, not an ICE", async () => {
+    const diags = await diagnosticsOf("tests/deadstrip/best-effort-edge/main.ts");
+    expect(diags).toHaveLength(1);
+    expect(diags[0]).toContain("SC2020");
+    expect(diags[0]).toContain("Reflect.ownKeys");
+  });
+});
+
 describe("the same constructs, reached, fail exactly as before", () => {
   test("a reached class-instance for-in fails the build", async () => {
     const diags = await diagnosticsOf("tests/deadstrip/reached-for-in.ts");
