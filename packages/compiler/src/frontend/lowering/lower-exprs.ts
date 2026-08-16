@@ -14826,3 +14826,23 @@ function everyArmIsTuple(L: Lowerer, t: ts.Type): boolean {
           // Tagging this is a real fix, not just an instrument fix -- it
           // just needs the lowering gate (both differential lanes,
           // order-parity, RC audit, QR pair) that a message change earns.
+          // RE-MEASURED at 5d8e2103 (estado-inventory section 4): the count
+          // above is one short, and the shape of the miss has changed.
+          // zapo's TU carries THREE untagged refusals, not two:
+          //   * this one, the EventEmitter 'emit'-as-a-value SC1090, in
+          //     lifted fn %fence.fn.240 -- still exactly one, still with a
+          //     synthetic location (the entry file's last line), because the
+          //     fence function is interned per signature and shared;
+          //   * TWO from emit-ws.ts, not one. Since wsInitBagPlan the
+          //     generic option-bag refusal no longer occurs in zapo's TU at
+          //     all; what survives is the pair of refuseIfPresent tests, one
+          //     for 'dispatcher' and one for 'agent'.
+          // Whole-TU accounting at 5d8e2103, so the next block does not have
+          // to re-derive it: 140 scr_throw_error_msg_code calls = 53 the
+          // census sees (message-tagged) + 3 untagged refusals + 84 SC9002
+          // 'unreachable' guards, which are per-function boilerplate and not
+          // refusals. The frontend captured 56 diagnostics onto fences: the
+          // 53 + this untagged one + 2 that deferredFenceStmt DROPPED because
+          // they were not captured[0] of their statement (the SC2004 cascade
+          // markers for 'pickActiveSyncKey' and 'fetchLatestWaMobileVersion'
+          // -- neither reaches the emitted C at all).
