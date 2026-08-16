@@ -5530,7 +5530,17 @@ export type IrExpr =
    * `o[k]()` name the same member by construction. Evaluation order is
    * recv, key, args -- the Get itself happens inside the runtime, AFTER
    * the arguments evaluate, which is the same ordering divergence the
-   * name-keyed arm already documents. */
+   * name-keyed arm already documents.
+   *
+   * LINK SWITCH, measured because the obvious guess is wrong: this is a
+   * dynInvoke, so moduleUsesDynInvoke claims it, so a program whose ONLY
+   * dyn method call is the element spelling now pulls scr_dyn_invoke.c
+   * where it previously did not. A program that is one `o[k]()` and
+   * nothing else goes 648 704 -> 674 816 bytes, +26 112 -- the dispatch it
+   * now calls. A program with no dyn method call of either spelling is
+   * byte-for-byte unchanged (hello-world: 645 632 both sides, identical
+   * TU), so the historical size classes only move for programs that use
+   * the construct. */
   | { kind: "dynInvoke"; recv: IrExpr; method: string; methodKey?: IrExpr; calleeName: string; args: IrExpr[]; type: IrType; loc: SrcLoc }
   /** A dyn ARRAY built element-by-element (JS mixed-element literals —
    * `['pwd', []]` — and evolving `[]` declarations): each element is
