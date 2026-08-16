@@ -488,19 +488,36 @@ export function lowerToIr(
   const ffiImports = options.ffiImports ?? [];
   const validation = new Lowerer(program, entry, moduleOrder, dynamic, {
     targetPlatform,
+    bestEffort,
     ffiImports,
   });
   const ffiValidation = validateFfiImports(validation);
-  // Discovery must use the same exact-symbol ownership as emit. Otherwise a
-  // local function shadowing a configured ambient name is mistaken for FFI
-  // while computing reachability, even though emit would correctly lower it
-  // as ordinary TypeScript. FFI-free builds reuse the validation lowerer
-  // (validation is an immediate no-op there), retaining the historical
-  // two-pass construction cost.
+  // Discovery must lower under the SAME rules as emit, or the reachable
+  // set it computes does not describe the program emit produces.
+  //
+  //  - the same exact-symbol ownership: otherwise a local function
+  //    shadowing a configured ambient name is mistaken for FFI while
+  //    computing reachability, even though emit would correctly lower it
+  //    as ordinary TypeScript.
+  //  - the same DEFERRAL rule (bestEffort): --best-effort makes emit lower
+  //    PAST a construct that has no lowering — the statement becomes a
+  //    runtime fence, or a function-valued object member becomes a trap
+  //    closure — so emit reaches resolution sites that a poisoning
+  //    discovery pass abandoned. Every edge between the poison and the end
+  //    of that statement is then missing from `reachable`, the callee is
+  //    never emitted, and the call emit DID produce validates as
+  //    "call to undeclared function": an SC9001 ICE that --best-effort
+  //    cannot defer, in a build whose whole point was deferral. Discovery
+  //    must defer wherever emit defers.
+  //
+  // FFI-free builds reuse the validation lowerer (validation is an
+  // immediate no-op there), retaining the historical two-pass
+  // construction cost.
   const discovery = ffiImports.length === 0
     ? validation
     : new Lowerer(program, entry, moduleOrder, dynamic, {
         targetPlatform,
+        bestEffort,
         ffiImports,
         ffiBindingSymbols: ffiValidation.symbolsByName,
       });

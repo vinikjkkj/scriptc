@@ -504,6 +504,12 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
           } else if (!(e instanceof PoisonError)) {
             throw e;
           }
+          if (process.env["SCRIPTC_POISON_WHY"] !== undefined && sf !== undefined) {
+            const pw = ts.getLineAndCharacterOfPosition(sf, stmt.getStart(sf));
+            console.error(
+              `[poison] ${L.reachable === null ? "disco" : "emit"} defer=${deferFences} ${sf.fileName}:${pw.line + 1}`,
+            );
+          }
           if (!L.suppressStats) {
             L.stats.statementsFailed++;
             if (sf !== undefined) L.bumpFileStat(sf.fileName, "failed");
