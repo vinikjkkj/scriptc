@@ -32,10 +32,15 @@ export function npmCases(fixturesRoot: string): NpmCase[] {
       // consumers exercise the static rewrite's surface (lexer-visible
       // names the shipped .d.ts never declares, the __toESM interop
       // family), so they stay out of the flagless island lane by design.
-      // 4031-4032 are the --npm-static PRICE LISTS (the `-on-purpose`
-      // convention): programs that deliberately do NOT match Node today,
-      // pinned in npm-static.test.ts so the refusal has a price tag.
-      .filter((entry) => !/\/(246[5-9]|255[67]|403[12])-[^/]+\/main\.ts$/.test(entry))
+      // 4031-4034 are the --npm-static [[Get]] family. 4032 and 4034 are
+      // PRICE LISTS (the `-on-purpose` convention): programs that
+      // deliberately do NOT match Node today, pinned in
+      // npm-static.test.ts so the refusal has a price tag. 4031 and 4033
+      // DO match Node now, but they still need the opt-in — a named
+      // import from an unopted package is an island call under
+      // --dynamic, and the shapes they are about (a prototype method
+      // behind a checked cast) never reach the static walkers there.
+      .filter((entry) => !/\/(246[5-9]|255[67]|403[1-4])-[^/]+\/main\.ts$/.test(entry))
       .map((entry) => ({ name: entry.split("/").at(-2)!, entry })),
     {
       // THE acceptance test: a calculator CLI on the real commander package
