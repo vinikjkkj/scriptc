@@ -437,7 +437,7 @@ const FENCE_MSG =
  * `dispatcher`/`agent` is undefined lowers, and only a live one refuses. */
 function initFieldMsg(field: string): string {
   return (
-    `the 'ws' package's option-bag second argument to a WebSocket constructor carries a ` +
+    `the 'ws' package's option-bag second argument to a WebSocket constructor carries ` +
     `'${field}', which has no scriptc lowering yet -- only protocols and headers do`
   );
 }
