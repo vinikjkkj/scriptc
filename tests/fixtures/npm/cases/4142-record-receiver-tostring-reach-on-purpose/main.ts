@@ -92,3 +92,15 @@ class Radix {
 }
 const rx: Rec = new Radix()
 console.log("radix  = " + rx.toString())
+
+// And one that is not about classes at all, found while gridding the
+// receiver shapes: a TUPLE is a record shape with `tuple: true`, and the
+// fold claims it. In JS a tuple IS an array, so Node answers
+// Array.prototype.toString -- "a,1". We answer "[object Object]".
+// Identical on 8eb37c53 and on the branch. Not taken here because
+// `arr.toString()` on a real array is an SC2020 fence today
+// ('number[].toString' ... has no scriptc lowering yet), and teaching
+// tuples to answer while arrays keep refusing would make the surface
+// inconsistent in a second way rather than fixing it.
+const tup: [string, number] = ["a", 1]
+console.log("tuple  = " + tup.toString())
