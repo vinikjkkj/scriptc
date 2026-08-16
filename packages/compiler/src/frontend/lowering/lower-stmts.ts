@@ -956,12 +956,12 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
    * classic capture semantics fall out: closures made in a loop share the
    * single boxed binding, where `let` gets a fresh box per iteration. */
   export function hoistVarBinding(L: Lowerer, symbol: ts.Symbol, nameNode: ts.Identifier): IrLocal {
-    const existing = L.hoistedVars.get(symbol);
+    const existing = L.ctx.hoistedVars.get(symbol);
     if (existing) return existing;
     // The parameter merge: the symbol already binds a function-root local.
     const bound = L.bindingIn(L.ctx, symbol);
     if (bound) {
-      L.hoistedVars.set(symbol, bound);
+      L.ctx.hoistedVars.set(symbol, bound);
       return bound;
     }
     const type = varBindingType(L, nameNode);
@@ -979,7 +979,7 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     // engine undefined for jsval).
     const wrapped = type.kind === "dyn" ? dynUndefinedExpr(locOf(nameNode)) : L.unassignedSlotInit(type, locOf(nameNode));
     root.out.push({ kind: "varDecl", localId: local.id, init: wrapped, loc: locOf(nameNode) });
-    L.hoistedVars.set(symbol, local);
+    L.ctx.hoistedVars.set(symbol, local);
     return local;
   }
 
@@ -997,7 +997,6 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
    * would yield if the capture ran early, and guessing "it won't" is the
    * silent-wrong-output sin. */
   export function predeclareForwardVar(L: Lowerer, symbol: ts.Symbol): boolean {
-    if (L.hoistedVars.has(symbol)) return false; // would have resolved
     // A binding that already owns MODULE-GLOBAL storage never predeclares:
     // the global is reachable from every function in the program, the
     // declaration assigns THAT slot, and minting a local here would shadow
@@ -1033,6 +1032,14 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     }
     if (!owner) return false;
     const ctx = owner.ctx;
+    // Already hoisted IN ITS OWN FUNCTION FRAME: resolution would have
+    // found it. The frame is the scope of the question — a symbol-keyed
+    // check on the Lowerer answers "yes" for a slot minted in a DIFFERENT
+    // monomorphization of the same body, and this instance would then get
+    // the unresolved-symbol fence where the first instance got a working
+    // forward slot (the silent half of the SC9001 hoistVarBinding shared
+    // across instances used to produce).
+    if (ctx.hoistedVars.has(symbol)) return false;
     // Only a slot that can hold `undefined` can carry the pre-
     // initialization reads: an undefined-armed union (the interned arm),
     // a checked-dynamic binding (the dyn undefined), or a jsval 'any'
@@ -1091,7 +1098,7 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     ctx.locals.push(local);
     ctx.scopes[0]!.set(symbol, local);
     root.out.push({ kind: "varDecl", localId: local.id, init: wrapped, loc: locOf(decl) });
-    L.hoistedVars.set(symbol, local);
+    ctx.hoistedVars.set(symbol, local);
     return true;
   }
 

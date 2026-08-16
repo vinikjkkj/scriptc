@@ -206,6 +206,21 @@ export interface FnCtx {
   locals: IrLocal[];
   scopes: Map<ts.Symbol, IrLocal>[];
   localCounters: Map<string, number>;
+  /** `var` bindings hoisted to THIS frame's root (hoistVarBinding /
+   * predeclareForwardVar), keyed by the checker's merged symbol — every
+   * same-name `var` in one function is one symbol, so one slot.
+   * Module-scope vars live in globalsBySymbol instead.
+   *
+   * PER FRAME, not per Lowerer, and that is the whole point. One JS
+   * function body is lowered ONCE PER MONOMORPHIZATION (implicit-any
+   * instances, lowerGenericInstance), and every instance re-lowers the
+   * same AST, so the checker hands back the SAME `ts.Symbol` for the same
+   * `var`. A Lowerer-wide map therefore answered the second instance with
+   * the FIRST instance's IrLocal: no varDecl was pushed into instance 1's
+   * root and no local was registered in its frame, while its declaration
+   * statement still lowered to a plain `assign` — the IR validator's
+   * `assign to undeclared local/global "x.0"` SC9001. */
+  hoistedVars: Map<ts.Symbol, IrLocal>;
   /** Lifted functions only: capture entries (also present in `locals`,
    * boxed), in closure caps[] order. undefined ⇔ plain declared function. */
   captures: IrParam[] | null;
@@ -261,6 +276,7 @@ export function newFnCtx(
     locals: [],
     scopes: [new Map()],
     localCounters: new Map(),
+    hoistedVars: new Map(),
     captures: lifted ? [] : null,
     captureSources: [],
     captureBySymbol: new Map(),
@@ -1484,11 +1500,6 @@ export class Lowerer {
    * operand for these, because re-lowering the left would run the effect
    * TWICE. Registered and cleared around one statement. */
   readonly hoistedSeqEffects = new Set<ts.BinaryExpression>();
-  /** `var` bindings hoisted to their function root (hoistVarBinding), keyed
-   * by the checker's merged symbol — every same-name `var` in one function
-   * is one symbol, so one slot. Module-scope vars live in globalsBySymbol
-   * instead. */
-  readonly hoistedVars = new Map<ts.Symbol, IrLocal>();
   /** Per-file `var` module globals whose type carries an undefined arm:
    * lowerFileInit assigns them the interned undefined right after the
    * run-once guard — JS hoists module vars to `undefined` at entry, so a
