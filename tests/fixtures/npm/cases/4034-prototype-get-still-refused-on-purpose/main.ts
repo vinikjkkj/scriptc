@@ -22,10 +22,22 @@
 //    take arm 0 for a string-returning value. Relaxing it needs
 //    union-level ambiguity analysis, which is a different change from
 //    this one, so it is priced here rather than taken.
-import { makeGetter, make } from "protolong"
+//
+// 3. The record -> dyn ROUND TRIP does not preserve own-ness. A checked
+//    cast MATERIALIZES a record struct, and converting that back to a dyn
+//    writes every declared field as an OWN enumerable key -- so an
+//    inherited member re-emerges as an own one and JSON.stringify,
+//    Object.keys and for-in all see it. That is a pre-existing property
+//    of record materialization (JS has no materialization step at all:
+//    `x as T` is the identity), and reading the prototype is what first
+//    makes it REACHABLE, which is why it is named here rather than left
+//    for the next reader to find. On base the same program dies one line
+//    earlier with `expected number at $.w, got undefined`.
+import { makeGetter, make, makeData } from "protolong"
 
 interface GetterLike { low: number; hi: number }
 interface LongLike { low: number; high: number; unsigned: boolean; toNumber(): number }
+interface DataLike { z: number; w: number }
 
 type Slot = number | LongLike | null
 
@@ -48,3 +60,8 @@ function show(s: Slot): string {
     return `long ${s.toNumber()}`
 }
 t("union-arm-with-method", () => show(make(7, 0) as Slot))
+
+t("roundtrip-owns-the-inherited", () => {
+    const v = makeData(9) as DataLike
+    return `${v.z} ${v.w} ${JSON.stringify(v as unknown)}`
+})

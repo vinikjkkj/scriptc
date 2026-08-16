@@ -506,9 +506,17 @@ ScrDyn *scr_dyn_proto_get(const ScrDyn *d, const char *key, size_t key_len) {
  * dynCheck's builder, both backends) read a member through exactly this,
  * so an inherited method — `L.prototype.toNumber = ...`, every JS class,
  * protobufjs's Long — is as visible to a checked cast as JS makes it,
- * while `scr_dyn_obj_get` stays own-only for the consumers that must be
- * (Object.keys/values/entries, hasOwn, JSON, structuredClone,
- * deepStrictEqual, Object.assign, the reserved "%error" marker).
+ * while `scr_dyn_obj_get` itself is untouched.
+ *
+ * The header's list of own-only consumers above is a list of GUARANTEES,
+ * not of callers, and the difference was worth measuring before widening
+ * anything: of the eight it names, only hasOwn/hasOwnProperty
+ * (scr_dyn_obj_has_own_prop) and deepStrictEqual (scr_assert.c) actually
+ * read through scr_dyn_obj_get. Object.keys/values/entries, the JSON
+ * writer, structuredClone and Object.assign iterate `v.obj.entries`
+ * directly and are own-only by ITERATION. `delete` (scr_dyn_key_delete)
+ * belongs on the list and is not on it. None of the three is reachable
+ * from an emitted record walker.
  *
  * Everything this answers, JS's [[Get]] answers too, so it cannot match
  * where JS would not; the one thing it does NOT answer is an

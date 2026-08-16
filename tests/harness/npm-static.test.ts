@@ -608,14 +608,26 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
       runBinary(binary, []),
     ]);
     expect(nodeRes.stdout.toString("utf8")).toBe(
-      "prototype-accessor 1 42\nunion-arm-with-method long 7\n",
+      [
+        "prototype-accessor 1 42",
+        "union-arm-with-method long 7",
+        'roundtrip-owns-the-inherited 9 3 {"z":9}',
+        "",
+      ].join("\n"),
     );
     expect(nodeRes.exitCode).toBe(0);
-    // Inverted on purpose, and the two lines have DIFFERENT causes: the
+    // Inverted on purpose, and the three lines have THREE causes: the
     // accessor is out of the borrow-only walk's contract; the union arm
-    // is the exact-signature test on `func()=>dyn` vs `func()=>f64`.
+    // is the exact-signature test on `func()=>dyn` vs `func()=>f64`; the
+    // round trip is record materialization writing every declared field
+    // as an own key, so `w` re-emerges owned.
     expect(nativeRes.stdout.toString("utf8")).toBe(
-      "prototype-accessor THREW\nunion-arm-with-method THREW\n",
+      [
+        "prototype-accessor THREW",
+        "union-arm-with-method THREW",
+        'roundtrip-owns-the-inherited 9 3 {"z":9,"w":3}',
+        "",
+      ].join("\n"),
     );
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
