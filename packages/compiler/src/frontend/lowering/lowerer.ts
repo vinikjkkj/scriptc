@@ -221,6 +221,15 @@ export interface FnCtx {
    * statement still lowered to a plain `assign` — the IR validator's
    * `assign to undeclared local/global "x.0"` SC9001. */
   hoistedVars: Map<ts.Symbol, IrLocal>;
+  /** CLASS-PINNED bindings of THIS frame: localId → the class name whose
+   * class object the binding provably holds (classPinnedBinding's proof —
+   * a const initialized from a direct class reference). PER FRAME, like
+   * hoistedVars and for the same reason: localIds are minted from a
+   * per-frame counter (`name.N`), so two functions each declaring `const
+   * C = …` both own `C.0` and a Lowerer-wide map would answer one frame
+   * with the other frame's class. Module globals are keyed by their
+   * `%g.`-prefixed ids instead, which ARE unique — see globalClassPins. */
+  classPins: Map<string, string>;
   /** Lifted functions only: capture entries (also present in `locals`,
    * boxed), in closure caps[] order. undefined ⇔ plain declared function. */
   captures: IrParam[] | null;
@@ -277,6 +286,7 @@ export function newFnCtx(
     scopes: [new Map()],
     localCounters: new Map(),
     hoistedVars: new Map(),
+    classPins: new Map(),
     captures: lifted ? [] : null,
     captureSources: [],
     captureBySymbol: new Map(),
@@ -1316,6 +1326,16 @@ export class Lowerer {
    * (arrows inside methods lower within this window, so they see it too). */
   currentClass: ClassInfo | null = null;
   readonly globalsBySymbol = new Map<ts.Symbol, IrGlobal>();
+  /** CLASS-PINNED module globals: the `%g.`-prefixed id of an immutable
+   * global whose value is provably one class's class object → that class
+   * name (classPinnedBinding's proof). Module global ids are unique
+   * program-wide, so unlike a frame's locals these live on the Lowerer.
+   * Read through pinnedClassValueOf. */
+  readonly globalClassPins = new Map<string, string>();
+  /** Nonzero while classCtorThunk is planning a thunk's arguments — the
+   * window in which varRefs are the thunk's SYNTHETIC parameters rather
+   * than the current frame's bindings. See pinnedClassValueOf. */
+  ctorThunkDepth = 0;
   /** Expando function members (`foo.bar = 12` on a module-level function
    * or callable const): per function symbol, each written member's module
    * global — string keys for spelled/folded names, ts.Symbols for
@@ -4336,16 +4356,22 @@ export class Lowerer {
       // it. ONE func arm only — the promise-arm and func-arm ambiguity stance
       // directly above — and direct classRef sources only, which is
       // classCtorThunk's own gate (the thunk names the class statically, so
-      // a classval-typed expression could hold a widened subclass).
-      if (expr.type.kind === "classval" && expr.kind === "classRef") {
-        const def = this.unions.get(expected.unionId);
-        const ctorArms = def?.arms.filter((a) => a.kind === "func") ?? [];
-        const arm = ctorArms.length === 1 ? ctorArms[0] : undefined;
-        if (arm !== undefined && arm.kind === "func") {
-          const armIdx = this.armTag(expected.unionId, arm);
-          const thunk = armIdx >= 0 ? this.classCtorThunk(expr.type.className, arm, expr.loc) : null;
-          if (thunk) {
-            return { kind: "unionWrap", unionId: expected.unionId, tag: armIdx, value: thunk, type: expected, loc: expr.loc };
+      // a classval-typed expression could hold a widened subclass) — read
+      // through pinnedClassValueOf, which answers for a class-PINNED
+      // binding too: zapo passes `WaMobileTcpSocketCtor`, a module const
+      // bound to the class, and the const IS the class object.
+      {
+        const pinned = this.pinnedClassValueOf(expr);
+        if (pinned !== null) {
+          const def = this.unions.get(expected.unionId);
+          const ctorArms = def?.arms.filter((a) => a.kind === "func") ?? [];
+          const arm = ctorArms.length === 1 ? ctorArms[0] : undefined;
+          if (arm !== undefined && arm.kind === "func") {
+            const armIdx = this.armTag(expected.unionId, arm);
+            const thunk = armIdx >= 0 ? this.classCtorThunk(pinned, arm, expr.loc) : null;
+            if (thunk) {
+              return { kind: "unionWrap", unionId: expected.unionId, tag: armIdx, value: thunk, type: expected, loc: expr.loc };
+            }
           }
         }
       }
@@ -4502,11 +4528,14 @@ export class Lowerer {
     // over interface instances to func types): the value enters as a
     // construct THUNK — a zero-capture closure of the slot's exact
     // signature whose body constructs the class and projects the instance
-    // into the slot's return shape. Direct classRef sources only: the
-    // thunk names the class statically, so the runtime value must BE that
-    // class (a classval-typed expression could hold a widened subclass).
-    if (expected.kind === "func" && expr.type.kind === "classval" && expr.kind === "classRef") {
-      const thunk = this.classCtorThunk(expr.type.className, expected, expr.loc);
+    // into the slot's return shape. Sources that PROVABLY name one class
+    // only (pinnedClassValueOf — a direct classRef, or a read of a
+    // class-pinned const): the thunk names the class statically, so the
+    // runtime value must BE that class, and a plain classval-typed
+    // expression could hold a widened subclass.
+    if (expected.kind === "func" && expr.type.kind === "classval") {
+      const pinned = this.pinnedClassValueOf(expr);
+      const thunk = pinned === null ? null : this.classCtorThunk(pinned, expected, expr.loc);
       if (thunk) return thunk;
     }
     if (expected.kind === "array" && expr.type.kind === "array" && expected.elem.kind !== "jsval") {
@@ -4542,6 +4571,57 @@ export class Lowerer {
       return { kind: "call", callee: helper, args: [expr], type: expected, loc: expr.loc };
     }
     return null;
+  }
+
+  /** THE CLASS A `classval` EXPRESSION STATICALLY NAMES, or null.
+   *
+   * `classval:C` on its own does NOT name C: the IR's class-value story
+   * (nodes.ts) admits C's class object OR a STRICT DESCENDANT's, which is
+   * why every construct-thunk and statics-projection site gated on
+   * `expr.kind === "classRef"` — a syntactic class reference is the one
+   * shape that cannot be holding a subclass. That gate's REASON is
+   * "provably this class", not "syntactically a classRef", and a
+   * REFERENCE TO A CLASS-PINNED BINDING satisfies it just as completely:
+   * the binding is immutable and its initializer was a direct class
+   * reference, so its runtime value IS that class object (see
+   * classPinnedBinding, and FnCtx.classPins / globalClassPins for where
+   * the two scopes record it).
+   *
+   * This is the whole of the binding analysis these sites needed, and
+   * almost all of it already existed — castAliasedClassRefOf (file scope)
+   * and lowerVarDecl's classval adoption (function scope) each already
+   * prove const-ness and a direct class initializer in order to PIN the
+   * binding's type; the only thing missing was carrying that conclusion
+   * to the use site. Nothing here widens what a classval means: an
+   * unpinned classval binding, a `let`, a parameter, a captured copy and
+   * a widening annotation (`const b: typeof Base = Derived`) all still
+   * answer null and keep their fences.
+   *
+   * The pin is re-checked against the expression's own className so a
+   * stale or mismatched entry can only ever DECLINE. */
+  pinnedClassValueOf(expr: IrExpr): string | null {
+    if (expr.type.kind !== "classval") return null;
+    if (expr.kind === "classRef") return expr.className;
+    if (expr.kind !== "varRef") return null;
+    // Inside a construct thunk's own argument planning the varRefs are
+    // SYNTHETIC (`p.0`, `p.1` — the slot's parameters), and they are
+    // minted against the ENCLOSING frame's counter space rather than a
+    // frame of their own. A source `const p = Foo` in that frame owns
+    // `p.0` too, so consulting the frame's pins there could answer a
+    // thunk parameter with an unrelated binding's class — the one way
+    // this lookup could be WRONG rather than merely absent. Module
+    // globals are unaffected: their `%g.`-prefixed ids are unique
+    // program-wide and no synthetic name can collide with them.
+    const pinned = expr.localId.startsWith("%g.")
+      ? this.globalClassPins.get(expr.localId)
+      : this.ctorThunkDepth > 0
+        ? undefined
+        : this.ctx.classPins.get(expr.localId);
+    if (pinned === undefined || pinned !== expr.type.className) return null;
+    if (process.env["SCRIPTC_CLASSPIN_WHY"] !== undefined) {
+      console.error(`[classpin] use ${expr.localId} -> ${pinned}`);
+    }
+    return pinned;
   }
 
   /** The construct THUNK a class value becomes in a construct-signature
@@ -4587,39 +4667,78 @@ export class Lowerer {
       return null;
     }
     const args: IrExpr[] = [];
-    for (let i = 0; i < info.ctorParams.length; i++) {
-      const shape = info.ctorParams[i]!;
-      const src = i < expected.params.length ? expected.params[i]! : null;
-      if (src === null) {
-        // The slot's signature omits this ctor param: only an omittable
-        // one completes (tsc's assignability says required ones cannot
-        // reach here, but decline rather than trust).
-        const absent =
-          shape.type.kind === "dyn"
-            ? dynUndefinedExpr(loc)
-            : shape.type.kind === "jsval"
-              ? ({ kind: "jsOp", op: "undefLit", args: [], type: JSVAL, loc } as IrExpr)
-              : this.wrappedUndefined(shape.type, loc);
-        if (shape.mode !== "omittable" || !absent) return null;
-        args.push(absent);
-        continue;
+    this.ctorThunkDepth++;
+    try {
+      for (let i = 0; i < info.ctorParams.length; i++) {
+        const shape = info.ctorParams[i]!;
+        const src = i < expected.params.length ? expected.params[i]! : null;
+        if (src === null) {
+          // The slot's signature omits this ctor param: only an omittable
+          // one completes (tsc's assignability says required ones cannot
+          // reach here, but decline rather than trust).
+          const absent =
+            shape.type.kind === "dyn"
+              ? dynUndefinedExpr(loc)
+              : shape.type.kind === "jsval"
+                ? ({ kind: "jsOp", op: "undefLit", args: [], type: JSVAL, loc } as IrExpr)
+                : this.wrappedUndefined(shape.type, loc);
+          if (shape.mode !== "omittable" || !absent) return null;
+          args.push(absent);
+          continue;
+        }
+        const ref: IrExpr = { kind: "varRef", localId: `p.${i}`, type: src, loc };
+        if (typeEquals(src, shape.type)) {
+          args.push(ref);
+          continue;
+        }
+        if (shape.type.kind === "union" && this.armTag(shape.type.unionId, src) >= 0) {
+          args.push({ kind: "unionWrap", unionId: shape.type.unionId, tag: this.armTag(shape.type.unionId, src), value: ref, type: shape.type, loc });
+          continue;
+        }
+        if (shape.type.kind === "dyn" && this.dynConvertible(src)) {
+          args.push({ kind: "dynFrom", value: ref, type: DYN, loc });
+          continue;
+        }
+        const w = this.widthCoerce(ref, shape.type);
+        if (w) {
+          args.push(w);
+          continue;
+        }
+        // …and the WIDTH-LIFT plan for the pairs widthCoerce has no rung
+        // for, which at a construct signature means the UNION ones: zapo's
+        // `options?: { headers?; dispatcher?; agent? }` slot parameter
+        // against the constructor's own `_options?: WaRawWebSocketInit`,
+        // two optional records differing by one further optional field.
+        // widthLiftPlan already answers `retag` for that pair — the plan
+        // this very function's CALLER uses one rung over (the union
+        // destination in coerceToExpected) — so the thunk was declining a
+        // conversion the compiler knows how to build, in the one position
+        // where declining costs the whole class value rather than one
+        // field.
+        //
+        // Every plan EXCEPT the checked ones: `narrow` extracts a proven
+        // arm and THROWS on the others, and `ovfCapture` validates declared
+        // collisions at run time. tsc's assignability says a ctor parameter
+        // can only ever be WIDER than the slot parameter it receives, so
+        // neither shape can arise from a checked flow — and if one ever
+        // did, taking it would put an unconditional runtime throw inside a
+        // constructor the checker proved total. Those keep the fence.
+        const lift = this.widthLiftPlan(src, shape.type);
+        if (lift !== null && lift.how !== "narrow" && lift.how !== "ovfCapture") {
+          args.push(this.applyWidthLift(lift, ref, shape.type, loc));
+          continue;
+        }
+        if (process.env["SCRIPTC_CTORTHUNK_WHY"] !== undefined) {
+          console.error(
+            `[ctorthunk] ${className} DECLINE param ${i}: src='${this.fmt(src)}' (${src.kind}) ` +
+              `ctor='${this.fmt(shape.type)}' (${shape.type.kind}) mode=${shape.mode} ` +
+              `liftPlan=${JSON.stringify(lift)}`,
+          );
+        }
+        return null;
       }
-      const ref: IrExpr = { kind: "varRef", localId: `p.${i}`, type: src, loc };
-      if (typeEquals(src, shape.type)) {
-        args.push(ref);
-        continue;
-      }
-      if (shape.type.kind === "union" && this.armTag(shape.type.unionId, src) >= 0) {
-        args.push({ kind: "unionWrap", unionId: shape.type.unionId, tag: this.armTag(shape.type.unionId, src), value: ref, type: shape.type, loc });
-        continue;
-      }
-      if (shape.type.kind === "dyn" && this.dynConvertible(src)) {
-        args.push({ kind: "dynFrom", value: ref, type: DYN, loc });
-        continue;
-      }
-      const w = this.widthCoerce(ref, shape.type);
-      if (!w) return null;
-      args.push(w);
+    } finally {
+      this.ctorThunkDepth--;
     }
     const key = `ctorthunk:${className}:${typeKey(expected)}`;
     const existing = this.widthHelpers.get(key);
