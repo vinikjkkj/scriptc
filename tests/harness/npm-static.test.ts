@@ -58,9 +58,13 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
     ...globSync(join(pilotRoot, "**/node_modules/**/*.{js,mjs,cjs,json,d.ts}")).sort(),
     // the bundler-emitted-CJS mini packages (cases 2465-2469, 2556-2557)
     ...globSync(join(fixturesRoot, "npm/node_modules/gt*/**/*.{js,json}")).sort(),
-    // the price-list mini packages (cases 4031-4032, 4061-4064)
+    // the price-list mini packages (cases 4031-4032, 4061-4064) and the
+    // computed-key receiver pair (4111-4112)
     ...globSync(
-      join(fixturesRoot, "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong}/**/*.{js,json}"),
+      join(
+        fixturesRoot,
+        "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong,pbkeyrecv,litrecv,keyedreach}/**/*.{js,json}",
+      ),
     ).sort(),
   ];
   for (const f of inputs) hash.update(f).update(readFileSync(f));
@@ -627,6 +631,219 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(nodeRes.stdout.toString("utf8")).toBe("global 7 0 false 7\n");
     expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
     expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
+  /* -- 4111-4112: `o[k](...)` binds `o`, and the 64-bit decimal ----------
+   *
+   * 4064 proved a compiled zapo finally HAS `Long`. It could not show the
+   * VALUE: every 64-bit field decoded to 0, and to NaN on the tree before
+   * `long` was installed. The attribution stopped at "inside
+   * readLongVarint", which is wrong -- readLongVarint writes the correct
+   * bits on every payload, and 4111's `rawbits` row prints them
+   * (1:2097152, Node's exact low/high for 2^53+1) from the very same
+   * LongBits the wrong rows read.
+   *
+   * What was wrong is the line that turns those bits into a value:
+   *
+   *     var t = util.Long ? "toLong" : "toNumber";
+   *     util.merge(Reader.prototype, {
+   *       uint64: function () { return readLongVarint.call(this)[t](true); } });
+   *
+   * an ELEMENT-spelled method call, lowered as a keyed read plus a
+   * receiverless call. With the receiver dropped, toLong reads `this.lo`
+   * as undefined and `0 | undefined` is 0; toNumber reads the same
+   * undefined and `undefined + 4294967296 * undefined` is NaN. ONE bug,
+   * two spellings -- and 4111 prints both of them in one program on one
+   * build, next to the dot-spelled control that is correct, so the pair
+   * cannot be read as two separate faults again.
+   *
+   * On base, 4111 prints:
+   *
+   *     rawbits 2^53+1     = 1:2097152                        (reader OK)
+   *     computed 2^53+1    = 0 (low=0 high=0 unsigned=true)
+   *     static   2^53+1    = 9007199254740993 (low=1 high=2097152 ...)
+   *     num computed 42    = NaN
+   *     num static   42    = 42
+   *
+   * 9007199254740993 is 2^53+1, which a double cannot hold, so this row
+   * cannot be passed by a path that collapses 64-bit fields into a number.
+   *
+   * 4112 grids the axes and is the fixture that separates this failure
+   * from the several things it resembled: the member READ is fine
+   * (typeofMember says "function"), the function VALUE is fine (twoStep
+   * calls it correctly with an explicit receiver), the dot form was always
+   * fine -- and the four keyed rows were wrong in four different spellings
+   * of the key, so it was never about the key being dynamic. The row that
+   * names the mechanism is fromMethod against closureKey: the SAME source
+   * expression reported `this === undefined` from a plain function and
+   * `this === <the caller's receiver>` from a method, because the callee
+   * ran under the ambient-receiver window the ENCLOSING call had pushed.
+   */
+  test("4111: protobufjs's uint64 reader decodes 2^53+1 to its exact decimal", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4111-protobuf-uint64-computed-key-receiver/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["pbkeyrecv"] });
+    expect(coverage.npmStatic).toEqual([{ package: "pbkeyrecv", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
+    const binary = await buildStatic(entry, ["pbkeyrecv"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    const out = nodeRes.stdout.toString("utf8");
+    // the decimal itself, pinned rather than only compared
+    expect(out).toContain("computed 2^53+1    = 9007199254740993 (low=1 high=2097152 unsigned=true)");
+    expect(out).toContain("rawbits 2^53+1     = 1:2097152");
+    expect(out).toContain("computed i64max    = 9223372036854775807");
+    expect(out).toContain("num computed 42    = 42");
+    expect(nativeRes.stdout.toString("utf8")).toBe(out);
+    expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
+  test("4112: `o[k](...)` binds o, in every spelling of the key", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4112-computed-key-method-call-receiver-axes/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["pbkeyrecv"] });
+    expect(coverage.npmStatic).toEqual([{ package: "pbkeyrecv", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
+    const binary = await buildStatic(entry, ["pbkeyrecv"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    const out = nodeRes.stdout.toString("utf8");
+    // every keyed row answers what the dot row answers
+    expect(out).toContain("closureKey      = self lo=5 hi=7");
+    expect(out).toContain("fromMethod      = self lo=5 hi=7");
+    expect(out).toContain("dotName         = self lo=5 hi=7");
+    expect(nativeRes.stdout.toString("utf8")).toBe(out);
+    expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
+  /* -- 4114: HOW FAR the element spelling now reaches, and where it stops
+   *
+   * 4111 and 4112 pin the receiver. This pins the REACH, in both
+   * directions at once, because "the receiver binds now" understates what
+   * changed and "keyed calls work" overstates it.
+   *
+   * On BASE the element spelling could not reach a prototype method at
+   * ALL: every row below answers "is not a function", push and slice and
+   * hasOwnProperty included, because a keyed READ finds nothing on a
+   * prototype and a receiverless call then calls undefined.
+   *
+   *   row        base (element)      branch (element)      dot (both)  Node
+   *   dPush      is not a function   1-2-3-4               1-2-3-4     1-2-3-4
+   *   dSlice     is not a function   2-3                   2-3         2-3
+   *   dHasOwn    is not a function   true                  true        true
+   *   dFnApply   is not a function   2                     2           2
+   *   dFnCall    is not a function   3                     -           3
+   *   dReduce    is not a function   LOUD not-supported    SC1090 rt   6
+   *   dFlat      is not a function   LOUD not-supported    SC1090 rt   1,2,3
+   *
+   * ("SC1090 rt" is a RUNTIME fence, not a compile refusal -- the dot rows
+   *  are caught by the program's own try/catch, which is why they print at
+   *  all. An SCxxxx tag does not imply compile time.)
+   *   dUpper     is not a function   is not a function     AB          AB
+   *   dToString  is not a function   is not a function     5           5
+   *
+   * dReduce/dFlat CHANGE MESSAGE and still fail: "is not a function" was a
+   * lie (Node has reduce), and the loud refusal is the stance the dot
+   * spelling already takes. The two spellings now agree about what they
+   * cannot do, where before they disagreed about what it even was.
+   *
+   * dUpper/dToString are the RESIDUAL GAP and this is their price tag: a
+   * dyn STRING or NUMBER receiver is answered by the frontend's static
+   * method tables on the dot path, and the element path routes through the
+   * runtime dispatch, which has no such arm. Not a regression -- base is
+   * equally wrong -- but the parity is improved, not complete.
+   */
+  test("4114: how far a keyed method call reaches on a dyn receiver (price list)", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4114-keyed-method-call-reach-on-purpose/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["keyedreach"] });
+    expect(coverage.npmStatic).toEqual([{ package: "keyedreach", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    const binary = await buildStatic(entry, ["keyedreach"]);
+    const nativeRes = await runBinary(binary, []);
+    const rows = new Map(
+      nativeRes.stdout
+        .toString("utf8")
+        .split("\n")
+        .filter((l) => l.includes(" = "))
+        .map((l) => [l.slice(0, l.indexOf(" = ")).trim(), l.slice(l.indexOf(" = ") + 3)] as const),
+    );
+    // WHAT THE FIX BOUGHT -- these five were "is not a function" on base
+    expect(rows.get("dPush")).toBe("1-2-3-4");
+    expect(rows.get("dSlice")).toBe("2-3");
+    expect(rows.get("dHasOwn")).toBe("true");
+    expect(rows.get("dFnApply")).toBe("2");
+    expect(rows.get("dFnCall")).toBe("3");
+    // ... and each answers exactly what its DOT twin answers
+    expect(rows.get("dPush")).toBe(rows.get("tPush"));
+    expect(rows.get("dSlice")).toBe(rows.get("tSlice"));
+    expect(rows.get("dHasOwn")).toBe(rows.get("tHasOwn"));
+    expect(rows.get("dFnApply")).toBe(rows.get("tFnApply"));
+    // HONEST REFUSALS -- still failing, no longer lying about why
+    expect(rows.get("dReduce")).toBe("THREW 'Array.prototype.reduce' on a dynamic value is not supported yet");
+    expect(rows.get("dFlat")).toBe("THREW 'Array.prototype.flat' on a dynamic value is not supported yet");
+    // THE RESIDUAL GAP -- the dot twin answers, the element spelling does not
+    expect(rows.get("dUpper")).toBe("THREW s[K5] is not a function");
+    expect(rows.get("dToString")).toBe("THREW n[KB] is not a function");
+    expect(rows.get("tUpper")).toBe("AB");
+    expect(rows.get("tToString")).toBe("5");
+    // and a name nothing declares is still Node's own message, both ways
+    expect(rows.get("dMissing")).toBe("THREW o[K6] is not a function");
+    expect(rows.get("dNumMiss")).toBe("THREW n[K6] is not a function");
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
+  /* -- 4113: a PRICE LIST, found while gridding 4112 and DECLINED --------
+   *
+   * `o.m()` where `o` is an object LITERAL whose fields have no one common
+   * type lowers to a typed RECORD with a function-typed field, and the
+   * call through that field DROPS the receiver: `this` is undefined inside
+   * `m` where Node binds `o`. No diagnostic, no fence, nothing in the trap
+   * census -- a wrong ANSWER, which is the failure mode this repo has
+   * learned to fear most, and the same failure mode 4111 is about.
+   *
+   * It is NOT the bug 4111/4112 fix, and this pin exists to say so with a
+   * measurement instead of a sentence. That one was the checked-dynamic
+   * path; this one never reaches the dyn tier. Measured on base fbabf176
+   * and on the branch, on BOTH backends, all four cells identical:
+   *
+   *     Node    lit=self L     arrEl=self A0   ctor=self C
+   *     here    lit=undefined  arrEl=undefined ctor=self C
+   *
+   * `ctor` is the control: the same member shape on a CONSTRUCTED object
+   * binds correctly, so this is specific to the record lowering.
+   *
+   * The pin asserts the DIVERGENCE, so whoever closes it gets a red test
+   * pointing at this note rather than a silent baseline drift.
+   */
+  test("4113: a method on an object literal loses its receiver (price list)", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4113-object-literal-method-receiver-on-purpose/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["litrecv"] });
+    expect(coverage.npmStatic).toEqual([{ package: "litrecv", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    // and there is no runtime fence either -- that is the whole complaint
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
+    const binary = await buildStatic(entry, ["litrecv"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    const node = nodeRes.stdout.toString("utf8");
+    const native = nativeRes.stdout.toString("utf8");
+    expect(node).toBe("lit   = self L\narrEl = self A0\nctor  = self C\n");
+    // THE PRICE, pinned exactly. When this fails, the gap closed.
+    expect(native).toBe("lit   = undefined\narrEl = undefined\nctor  = self C\n");
+    expect(native).not.toBe(node);
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
 

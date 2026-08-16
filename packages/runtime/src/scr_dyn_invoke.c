@@ -588,6 +588,28 @@ static bool dyn_arr_proto_unimpl(const char *m) {
   return false;
 }
 
+/* `recv[k](...)`: the ELEMENT spelling of the dispatch below.
+ *
+ * JS's o[k](...) is Get(o, ToPropertyKey(k)) followed by Call with `o` as
+ * the receiver -- the SAME two steps as o.m(...), differing only in where
+ * the name comes from. The lowering used to answer the element spelling
+ * with a keyed READ plus a plain scr_dyn_call, which drops the receiver:
+ * the member then ran under whatever the ambient-receiver window happened
+ * to hold, so a body that says `this.lo` read the CALLER's `this` and
+ * answered undefined -- silently, with no diagnostic. protobufjs's
+ * `p.call(this)[t](!0)` is that shape, which is why a compiled zapo
+ * decoded every 64-bit field to 0 (toLong: `0|undefined`) or NaN
+ * (toNumber: `undefined + 4294967296*undefined`).
+ *
+ * The key arrives already reduced to a string by the same rule the keyed
+ * read uses, so the two spellings cannot disagree about which member they
+ * name. Borrows all three, returns +1, may throw. */
+ScrDyn *scr_dyn_invoke_key(ScrDyn *recv, const ScrStr *key, ScrDyn *const *args, size_t argc, const char *what) {
+  /* ScrStr is always NUL-terminated (scr_str_new), so ->data is a valid
+   * C string for the name-keyed dispatch. */
+  return scr_dyn_invoke(recv, key->data, args, argc, what);
+}
+
 ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc, const char *what) {
   if (recv->kind == SCR_DYN_UNDEF || recv->kind == SCR_DYN_NULL) {
     ScrJsonBuf b;
