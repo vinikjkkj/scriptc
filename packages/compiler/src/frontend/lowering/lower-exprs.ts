@@ -912,6 +912,33 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (operand.kind === "dynCheck" && operand.value.type.kind === "dyn") {
         operand = operand.value;
       }
+      // An index-signature keyed read in typeof position is the PRESENCE
+      // TEST idiom. zapo's WaBotCoordinator.ts:204 --
+      // `typeof section.attrs.name === 'string' ? section.attrs.name : undefined`
+      // -- is asking whether the key is there at all. The checker types the
+      // read by the signature's VALUE type, so at that width a MISS has
+      // nowhere to go and ABORTS ("record has no key 'name' (typed 'string'
+      // -- no undefined is representable)") on precisely the input the guard
+      // exists to reject. Read it at the undefined-armed width instead: the
+      // rung `recordKeyReadAtUndefinedArm` already offers `??`'s right
+      // operand for the same stated reason -- that consumer "is asking
+      // whether there is a value at all" -- and typeof is the purest form
+      // of that question.
+      //
+      // The test that says this is right rather than merely more permissive:
+      // the BOUND spelling already answers "undefined" here. `const jid =
+      // node.attrs.jid; typeof jid !== 'string'` is the very next line of
+      // the same zapo function and it compiles and answers Node-exactly
+      // today, because the declaration's slot carries the undefined arm.
+      // So this makes the DIRECT spelling agree with the bound spelling --
+      // which is the spelling the fence's own hint was telling authors to
+      // write. Where the rung declines (a declared field, a non-index
+      // shape, a read already undefined-armed) nothing changes.
+      if (operand.kind === "recordKeyGet") {
+        const armedT = L.withUndefinedArmOf(operand.type);
+        const armed = armedT ? L.recordKeyReadAtUndefinedArm(operand, armedT) : null;
+        if (armed) operand = armed;
+      }
       const FOLD: Partial<Record<string, string>> = {
         f64: "number", string: "string", bool: "boolean", func: "function",
         array: "object", object: "object", record: "object",
@@ -924,28 +951,77 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (folded && droppableStatic(operand)) {
         return { kind: "strLit", value: folded, type: STRING, loc };
       }
+      // The ANSWER is static but the OPERAND is not droppable: `typeof
+      // decodeLength(buf)`, `typeof makeTag()`. JS evaluates a typeof
+      // operand exactly like any other expression and only then reports its
+      // type, so the answer is the same interned string the fold above
+      // returns -- all the effectful case needs is somewhere to put the
+      // evaluation, and `seqExpr` is that place. It is the shape the COMMA
+      // operator already builds for this exact job ("left runs for effect,
+      // right is the value" -- lowerBinary's CommaToken arm), and the one
+      // value-position `void e` was fenced for want of: "the effect would
+      // need to sequence before it, which no expression shape carries".
+      // It does carry it, 9 700 lines further down the same file.
+      //
+      // The statement is an `exprStmt` over the ALREADY-LOWERED operand --
+      // re-lowering the syntax would run every lowering side effect twice,
+      // and `exprStmt` is in seqExprSafeStmt's straight-line set, so no
+      // seqExpr region rule is bent. Purely additive: this arm only runs
+      // where `droppableStatic` said no and the code below therefore
+      // called `unsupported`. Operands whose TYPE has no static answer
+      // (jsval, dyn, union) never reach here -- they are answered above,
+      // and their own fences are untouched.
+      if (folded) {
+        return {
+          kind: "seqExpr",
+          stmts: [{ kind: "exprStmt", expr: operand, loc }],
+          result: { kind: "strLit", value: folded, type: STRING, loc },
+          type: STRING,
+          loc,
+        };
+      }
       // A union operand: every arm's typeof answer is static, so the value
       // form is a ternary chain over runtime TAG tests (arms grouped by
       // answer; the last group needs no test). The operand rides several
       // tests, so only side-effect-free reads compose — and when every arm
       // agrees the whole expression folds to that one string (dropping only
       // the pure read, the trust-the-checker bet lowerUnitComparison makes).
-      if (operand.type.kind === "union" && pureReemittable(operand)) {
+      if (operand.type.kind === "union") {
         const def = L.unions.get(operand.type.unionId);
         const answers = def?.arms.map(typeofAnswer);
         if (def && answers && answers.every((s): s is string => s !== null)) {
           const groups = new Map<string, number[]>();
           answers.forEach((s, i) => groups.set(s, [...(groups.get(s) ?? []), i]));
           const ordered = [...groups.entries()];
+          // An operand that is not a pure re-emittable read rides the tag
+          // chain once per answer GROUP, so it is BOUND first and the chain
+          // reads the binding -- literally "bind the value to a const
+          // first", the advice the fence below used to give the author,
+          // performed by the lowering. seqExpr carries the binding (the
+          // comma operator's shape) and declareHiddenLocal's `%` name puts
+          // the local in seqScopedLocals, so its live range ends with the
+          // region and no unwind path grows. One answer group needs no
+          // binding at all -- the operand still evaluates, for effect.
+          const stmts: IrStmt[] = [];
+          let src: IrExpr = operand;
+          if (!pureReemittable(operand)) {
+            if (ordered.length === 1) {
+              stmts.push({ kind: "exprStmt", expr: operand, loc });
+            } else {
+              const tmp = L.declareHiddenLocal("%typeofArm", operand.type);
+              stmts.push({ kind: "varDecl", localId: tmp.id, init: operand, loc });
+              src = { kind: "varRef", localId: tmp.id, type: operand.type, loc };
+            }
+          }
           let result: IrExpr = { kind: "strLit", value: ordered[ordered.length - 1]![0], type: STRING, loc };
           for (const [answer, tags] of ordered.slice(0, -1).reverse()) {
-            let test: IrExpr = { kind: "unionIsTag", unionId: operand.type.unionId, tag: tags[0]!, negated: false, value: operand, type: BOOL, loc };
+            let test: IrExpr = { kind: "unionIsTag", unionId: operand.type.unionId, tag: tags[0]!, negated: false, value: src, type: BOOL, loc };
             for (const t of tags.slice(1)) {
-              test = { kind: "logical", op: "||", left: test, right: { kind: "unionIsTag", unionId: operand.type.unionId, tag: t, negated: false, value: operand, type: BOOL, loc }, type: BOOL, loc };
+              test = { kind: "logical", op: "||", left: test, right: { kind: "unionIsTag", unionId: operand.type.unionId, tag: t, negated: false, value: src, type: BOOL, loc }, type: BOOL, loc };
             }
             result = { kind: "ternary", cond: test, then: { kind: "strLit", value: answer, type: STRING, loc }, else_: result, type: STRING, loc };
           }
-          return result;
+          return stmts.length === 0 ? result : { kind: "seqExpr", stmts, result, type: STRING, loc };
         }
       }
       if (operand.type.kind === "dyn") {
