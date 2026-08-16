@@ -7673,12 +7673,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/4031-a-discarded-bang-still-evaluates-its-operand.ts": {
-   "order": [
-    "<repo>/tests/corpus/4031-a-discarded-bang-still-evaluates-its-operand.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/404-rc-stress.ts": {
    "order": [
     "<repo>/tests/corpus/404-rc-stress.ts"
@@ -9743,12 +9737,6 @@
   "<repo>/tests/fixtures/npm/cases/2557-toesm-drift/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/2557-toesm-drift/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/npm/cases/4032-bang-void-umd/main.ts": {
-   "order": [
-    "<repo>/tests/fixtures/npm/cases/4032-bang-void-umd/main.ts"
    ],
    "diags": []
   },
