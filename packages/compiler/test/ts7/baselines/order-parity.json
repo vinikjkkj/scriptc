@@ -7891,15 +7891,15 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/4281-find-in-an-instantiated-generic-follows-the-value-element.ts": {
+  "<repo>/tests/corpus/4262-file-scope-new-behind-a-record-cast.ts": {
    "order": [
-    "<repo>/tests/corpus/4281-find-in-an-instantiated-generic-follows-the-value-element.ts"
+    "<repo>/tests/corpus/4262-file-scope-new-behind-a-record-cast.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/4282-an-as-cast-to-a-sub-union-is-honoured.ts": {
+  "<repo>/tests/corpus/4263-record-cast-of-a-new-refused-where-the-identifier-compiled.ts": {
    "order": [
-    "<repo>/tests/corpus/4282-an-as-cast-to-a-sub-union-is-honoured.ts"
+    "<repo>/tests/corpus/4263-record-cast-of-a-new-refused-where-the-identifier-compiled.ts"
    ],
    "diags": []
   },

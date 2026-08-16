@@ -18,10 +18,19 @@
 // IS a B, and the override is reached through the virtual arm, which is
 // precisely what the two-step spelling already did.
 //
-// Only an OBJECT cast target peels. `as Rec` materializes the record
-// (4142's price list) and `as unknown` leaves the static world; both
-// keep the old answer, and the `viaRecord` row is the control that says
-// so.
+// `as unknown` leaves the static world and keeps the old answer.
+//
+// This block also said "only an OBJECT cast target peels; `as Rec`
+// materializes the record (4142's price list)", and read `viaRecord` as
+// the control that said so. That reading was wrong, and 4262 corrects it:
+// `viaRecord` asserts that the FIELDS still read, which is true under
+// either representation, so it was never evidence about which one was
+// chosen. A record target does not force a materialization -- the
+// identifier spelling `const b = new D4(); const g = b as Rec` kept the
+// class pointer at file scope even then, through adoptedInstanceClassOf,
+// and the same declaration inside a function kept it for both spellings.
+// `as Rec` now peels here too, `viaRecord` still prints "fields ok", and
+// 4262 pins the six rows that moved.
 
 class B1 {
     low = 1
