@@ -524,3 +524,10 @@ function cStr(s: string): string {
           // the last two undefined, which lowers. What is left in zapo's
           // TU is the two runtime `refuseIfPresent` tests -- a bag that
           // really carries a proxy -- and a bag no plan can account for.
+          // RE-MEASURED at 5d8e2103 (estado-inventory section 4). The
+          // paragraph above is right and the count it implies is now
+          // measured: zapo's TU carries exactly TWO throws from this
+          // function, the 'dispatcher' and 'agent' refuseIfPresent tests,
+          // and ZERO of the generic FENCE_MSG. With lower-exprs.ts's
+          // EventEmitter 'emit'-as-a-value fence that makes THREE untagged
+          // refusals in the TU, not the two an earlier note recorded.
