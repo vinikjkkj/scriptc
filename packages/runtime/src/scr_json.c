@@ -5148,8 +5148,34 @@ ScrBytes *scr_bytes_from_dyn(ScrBytesElem elem, const ScrDyn *d) {
     }
     return b;
   }
-  /* undefined, null, strings, objects without a length: ToObject's
-   * length read answers 0 and Node builds an EMPTY typed array. */
+  /* PRIMITIVES are not objects, so Node's constructor never takes the
+   * array-like path for them: it takes ToIndex(ToNumber(v)). MEASURED
+   * against Node v25.9.0 rather than assumed, because the difference is
+   * invisible for three of the four spellings and decides the fourth:
+   *   new Uint8Array(undefined) -> length 0   (ToNumber NaN -> ToIndex 0)
+   *   new Uint8Array(null)      -> length 0
+   *   new Uint8Array("hi")      -> length 0   (NaN again)
+   *   new Uint8Array("3")       -> length 3   <- and this one
+   *   new Uint8Array(true)      -> length 1   <- and this one
+   * An "everything else is empty" rule gets the first three right and
+   * both of the last two wrong; the corpus fixture's `boolean` row is
+   * what caught it. */
+  if (d->kind == SCR_DYN_UNDEF || d->kind == SCR_DYN_NULL ||
+      d->kind == SCR_DYN_BOOL || d->kind == SCR_DYN_STR) {
+    double n = scr_dyn_to_number(d);
+    if (scr_exc_pending()) return NULL;
+    return scr_bytes_new(elem, n); /* may throw Node's RangeError */
+  }
+  /* Every remaining kind IS an object. Without a `length` property Node's
+   * ToObject-with-no-length answers the EMPTY typed array; WITH one it is
+   * an array-like whose indexed reads this tier has not measured, so that
+   * shape keeps a loud refusal rather than a guess. */
+  if (d->kind == SCR_DYN_OBJ && scr_dyn_obj_get(d, "length", 6) != NULL) {
+    scr_throw_error_msg(SCR_ERR_ERROR,
+                        "new Uint8Array over an array-LIKE object (a 'length' property with indexed reads) is not supported yet",
+                        strlen("new Uint8Array over an array-LIKE object (a 'length' property with indexed reads) is not supported yet"));
+    return NULL;
+  }
   return scr_bytes_new(elem, 0);
 }
 
