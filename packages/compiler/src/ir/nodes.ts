@@ -3901,6 +3901,24 @@ export type IrLibFn =
   | "dyn.le"
   | "dyn.gt"
   | "dyn.ge"
+  /** IsLooselyEqual (ECMA-262 7.2.14) with a NUMBER on one side and a
+   * checked-dynamic value on the other (scr_json.c) - `n == v` / `n != v`,
+   * the one mixed-kind loose comparison with a runtime answer.
+   *
+   * It is a libCall rather than an IR ladder because the spec compares
+   * TYPES before it converts and the ordering is not expressible as a
+   * tag test plus a ToNumber: null and undefined answer FALSE without
+   * being converted (Number(null) is 0, but `0 == null` is false), an
+   * OBJECT runs ToPrimitive with no hint and then the whole comparison
+   * repeats on its result - so `0 == {valueOf(){return null}}` is false
+   * too - and only what survives both runs ToNumber. Doing it here also
+   * evaluates each operand exactly once with no hidden temp.
+   *
+   * Args borrowed, no allocation for the number side; throws only where
+   * ToPrimitive does (a user valueOf/toString that throws, a
+   * null-prototype object, a bigint's kept refusal), so it is in the
+   * may-throw seed set. */
+  | "dyn.looseEqNum"
   /** Object.keys/values/entries over a CHECKED-DYNAMIC receiver
    * (scr_json.c): the runtime walks the dyn node's own members in JS
    * own-key order (array-index keys ascending first, then insertion
@@ -8898,6 +8916,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.le",
   "dyn.gt",
   "dyn.ge",
+  "dyn.looseEqNum",
   // the dyn Object walks throw on null/undefined receivers
   "dyn.objKeys",
   "dyn.hasOwn",
