@@ -58,7 +58,7 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
     ...globSync(join(pilotRoot, "**/node_modules/**/*.{js,mjs,cjs,json,d.ts}")).sort(),
     // the bundler-emitted-CJS mini packages (cases 2465-2469, 2556-2557)
     ...globSync(join(fixturesRoot, "npm/node_modules/gt*/**/*.{js,json}")).sort(),
-    // the price-list mini packages (cases 4031-4032)
+    // the price-list mini packages (cases 4031-4032, 4061-4062)
     ...globSync(join(fixturesRoot, "npm/node_modules/{bangvoid,protolong}/**/*.{js,json}")).sort(),
   ];
   for (const f of inputs) hash.update(f).update(readFileSync(f));
@@ -508,14 +508,14 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
    * carries `toNumber` on its PROTOTYPE. The walkers now take
    * `scr_dyn_obj_data_get` — JS's [[Get]] minus accessors — and an
    * inherited method reaches a record field BOUND to its receiver, so
-   * 4031 byte-matches Node and 4033 pins the other five axes plus the
+   * 4031 byte-matches Node and 4061 pins the other five axes plus the
    * union-arm control.
    *
-   * 4034 is what is LEFT of that wall, and it is what still stops zapo:
+   * 4062 is what is LEFT of that wall, and it is what still stops zapo:
    * the union arm's func leaf is an EXACT signature test, and a shipped
    * package's untyped `L.prototype.toNumber` boxes as `func()=>dyn`
    * against a `func()=>f64` target. Reading the prototype cannot help
-   * that, and 4033 isolates it from both sides: its
+   * that, and 4061 isolates it from both sides: its
    * `union-arm-inherited-data` is the removal control (the same union
    * with the method taken out — it passes), and its
    * `union-arm-method-typed-unknown` is the discriminator (the same arm
@@ -563,13 +563,13 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
 
-  // 4033: the other five [[Get]] axes plus the union-ARM control (the
+  // 4061: the other five [[Get]] axes plus the union-ARM control (the
   // matcher, a different emitted function from the builder 4031 drives).
   // Node's answers were measured first; the pin is a byte-match, and the
   // `THREW` line is Node's too — a null-prototype dictionary inherits
   // nothing, so `v.toNumber is not a function` on both sides.
-  test("4033: [[Get]] axes — inherited, non-enumerable, shadowed, deep, null-proto, union arm", async () => {
-    const entry = join(fixturesRoot, "npm/cases/4033-prototype-get-axes/main.ts");
+  test("4061: [[Get]] axes — inherited, non-enumerable, shadowed, deep, null-proto, union arm", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4061-prototype-get-axes/main.ts");
     const { coverage } = analyze(entry, { npmStatic: ["protolong"] });
     expect(coverage.npmStatic).toEqual([{ package: "protolong", status: "static" }]);
     expect(coverage.preflightFailed).toBe(false);
@@ -599,11 +599,11 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
 
-  // 4034: ON PURPOSE. Both lines diverge from Node, both with zero
+  // 4062: ON PURPOSE. Both lines diverge from Node, both with zero
   // fences and a "fully static" coverage report, and the second one is
   // the wall zapo's SC2001 is still behind.
-  test("4034: a prototype ACCESSOR and a method-bearing union arm are still refused", async () => {
-    const entry = join(fixturesRoot, "npm/cases/4034-prototype-get-still-refused-on-purpose/main.ts");
+  test("4062: a prototype ACCESSOR and a method-bearing union arm are still refused", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4062-prototype-get-still-refused-on-purpose/main.ts");
     const { coverage } = analyze(entry, { npmStatic: ["protolong"] });
     expect(coverage.npmStatic).toEqual([{ package: "protolong", status: "static" }]);
     expect(coverage.preflightFailed).toBe(false);

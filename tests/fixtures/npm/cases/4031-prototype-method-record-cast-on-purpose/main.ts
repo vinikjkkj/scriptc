@@ -13,7 +13,7 @@
 // so without the binding `this.high` reads undefined).
 //
 // The directory keeps its `-on-purpose` name so the ts7 order-parity
-// baseline stays additive. The cases that ARE still on purpose are 4034.
+// baseline stays additive. The cases that ARE still on purpose are 4062.
 import { make } from "protolong"
 
 interface LongLike {

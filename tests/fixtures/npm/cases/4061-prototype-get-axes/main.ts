@@ -6,7 +6,7 @@
 // picks the union arm) rather than the record BUILDER. It is the shape
 // zapo's `notAfter?: number | Long | null` has, with the METHOD removed
 // -- the removal control that separates "the matcher cannot see the
-// prototype" from the signature refusal 4034 prices. On base it failed
+// prototype" from the signature refusal 4062 prices. On base it failed
 // with zapo's own message, `expected number | null | object at $, got
 // object`.
 import { make, makeK, makeHidden, makeShadow, makeDeep, makeBare, makeData } from "protolong"
@@ -76,11 +76,11 @@ function show(s: Slot): string {
 t("union-arm-inherited-data", () => show(makeData(9) as Slot))
 t("union-arm-number", () => show(5 as unknown as Slot))
 
-// The DISCRIMINATOR for what is left. Same arm as 4034's, same object,
+// The DISCRIMINATOR for what is left. Same arm as 4062's, same object,
 // same everything -- except `toNumber` is declared `(): unknown`, so the
 // TARGET signature is `func()=>dyn`, which is what a shipped package's
 // untyped function actually boxes as. It matches, the method is called
-// with the receiver bound, and it byte-matches Node. So the refusal 4034
+// with the receiver bound, and it byte-matches Node. So the refusal 4062
 // prices is the exact-signature strcmp and nothing else: not the read,
 // not the binding, not the arm order.
 type DynSlot = number | LongDyn | null
