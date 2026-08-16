@@ -1166,6 +1166,20 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
    * parameter is REQUIRED. There is no absent-argument value for a bare
    * `string` slot -- no undefined arm to intern -- so the fold stays
    * where Node calls the method with `undefined` and answers.
+   *
+   * A SECOND ROW HAS SINCE CLOSED, and it is also not a materialization
+   * row: `tuple`. A tuple is a record shape with `tuple: true`, so the
+   * default fold claimed it and answered "[object Object]" where Node
+   * prints "a,1". This list declined it because `arr.toString()` on a
+   * REAL array was an SC2020 fence, and teaching tuples to answer while
+   * arrays kept refusing would have moved the inconsistency rather than
+   * fixed it. Both spellings now go through one lowering
+   * (lowerArrayToStringCall) and both answer join(","), which is what
+   * `${arr}` and String(arr) had already lowered to all along. Corpus
+   * 4241 is the positive case (14 rows, Node-byte-exact on both
+   * backends, 4 of them refused-to-compile and 3 silently wrong on
+   * base). The ten materialization rows are UNMOVED by it, and that is
+   * what keeps them useful: they are its no-move control too.
    */
   test("4142: a materialized record loses the toString it was built from (price list)", async () => {
     const entry = join(fixturesRoot, "npm/cases/4142-record-receiver-tostring-reach-on-purpose/main.ts");
@@ -1214,7 +1228,8 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
         "relet  = [object Object]",
         // CLOSED: was "[object Object]". See the note above and corpus 4182.
         "radix  = r0",
-        "tuple  = [object Object]",
+        // CLOSED: was "[object Object]". See the note above and corpus 4241.
+        "tuple  = a,1",
         "",
       ].join("\n"),
     );
