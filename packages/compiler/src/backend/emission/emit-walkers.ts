@@ -24,7 +24,7 @@ import { OVERFLOW_MEMBER } from "./emit-shapes.js";
  * rather than a decision: an `unknown` field is retained as-is, so an
  * inherited method reached through one is still unbound. Calling it
  * needs a second cast, which lands on a func target with no receiver in
- * hand. Named in tests/fixtures/npm/cases/4033. */
+ * hand. Named in tests/fixtures/npm/cases/4061. */
 function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
   if (t.kind === "func") return true;
   if (t.kind === "union") {

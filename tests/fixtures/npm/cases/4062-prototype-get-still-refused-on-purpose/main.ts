@@ -13,7 +13,7 @@
 // 2. A union arm whose record shape carries a METHOD. This is zapo's
 //    `notAfter?: number | Long | null` exactly, and it is the wall behind
 //    the SC2001 at spec/proto/index.js:1 -- NOT the own-only read, which
-//    4033's `union-arm-inherited-data` proves is gone. The matcher's func
+//    4061's `union-arm-inherited-data` proves is gone. The matcher's func
 //    leaf is an EXACT signature test (`strcmp(d->v.fn.sig, "func()=>f64")`)
 //    and a shipped package's untyped `L.prototype.toNumber` is boxed
 //    `func()=>dyn`, so the arm cannot match however the member is read.
