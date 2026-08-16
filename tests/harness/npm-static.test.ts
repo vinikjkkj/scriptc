@@ -58,6 +58,8 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
     ...globSync(join(pilotRoot, "**/node_modules/**/*.{js,mjs,cjs,json,d.ts}")).sort(),
     // the bundler-emitted-CJS mini packages (cases 2465-2469, 2556-2557)
     ...globSync(join(fixturesRoot, "npm/node_modules/gt*/**/*.{js,json}")).sort(),
+    // the UMD-wrapper mini package (case 4032)
+    ...globSync(join(fixturesRoot, "npm/node_modules/bangvoid/**/*.{js,json}")).sort(),
   ];
   for (const f of inputs) hash.update(f).update(readFileSync(f));
   const key = hash
@@ -475,6 +477,31 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(coverage.preflightFailed).toBe(false);
     expect(coverage.diagnostics).toHaveLength(0); // builds — fences are runtime
     const binary = await buildStatic(entry, [pkg]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
+    expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+  }, 180_000);
+
+  /* ── 4032: the UMD wrapper's forcing `!` ─ a shipped package whose whole
+   * module body is `!function(root, factory){…}(globalRef, factory)`. The
+   * `!` is there only to make the function parse as an expression; the
+   * wrapper returns nothing, so the operand's type is `void`, which has no
+   * ToBoolean. Statement position discards the boolean, so the statement is
+   * its operand's — the factory runs, its output interleaves with the
+   * consumer's, and the whole program byte-matches Node. Before that rule
+   * the package's module init threw `SC2001 values of type 'void'` on load,
+   * which is the shape that kept the `long` module inside zapo's protobuf
+   * bundle from ever initialising. */
+  test("the UMD wrapper's forcing ! compiles statically and byte-matches Node", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4032-bang-void-umd/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["bangvoid"] });
+    expect(coverage.npmStatic).toEqual([{ package: "bangvoid", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    const binary = await buildStatic(entry, ["bangvoid"]);
     const [nodeRes, nativeRes] = await Promise.all([
       runBinary("node", [entry]),
       runBinary(binary, []),
