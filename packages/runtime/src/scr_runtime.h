@@ -3968,6 +3968,38 @@ bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b);
  * function"; OBJ receivers call the own member. recv/args borrowed,
  * result owned (+1). MAY THROW (NULL with the exception pending). */
 ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc, const char *what);
+/* The READ's half of that dispatch — the emitted sc_dyn_key_get's tail,
+ * and its OBJ arm's miss.
+ *
+ * Object.prototype's methods and every primitive prototype's exist in
+ * this runtime only as C branches inside scr_dyn_invoke.c, reachable
+ * from the CALL and from nowhere else. So `o[k]("hasOwnProperty")`
+ * answered `true` while `typeof o[k]` answered `undefined` for the same
+ * member on the same object — Node says `function` to both, and nothing
+ * in the trap census could see the difference.
+ *
+ * Answers a callable dyn (+1) BOUND to `recv` when the receiver's kind
+ * really has that prototype method, and NULL — leaving the caller's
+ * undefined answer alone — otherwise. Never throws. The listed set is
+ * exactly the names the dispatch implements or fences loudly by name, so
+ * a read cannot claim a member a call would deny; corpus 4242 walks the
+ * list and asserts that row by row.
+ *
+ * Because it is defined in the GATED unit, a module that emits a dyn
+ * keyed read pulls scr_dyn_invoke.c (moduleUsesDynInvoke) — deliberately,
+ * so this answer can never depend on whether the program happens to make
+ * a dyn method call somewhere else. */
+ScrDyn *scr_dyn_intrinsic_method_get(ScrDyn *recv, const ScrStr *key);
+/* `k in o` over the same set. `in` walks the prototype chain, so every
+ * name the READ above answers has to be a name `in` reports — otherwise
+ * the close would trade one disagreement for another. Borrows; never
+ * throws. */
+bool scr_dyn_has_intrinsic_method(const ScrDyn *recv, const char *key, size_t key_len);
+/* `k in v` with a RUNTIME key (the dyn.hasKey libCall): scr_dyn_has_key's
+ * stored walk plus the line above. In the GATED unit because scr_json.c
+ * is always linked and must not name the dispatch — which is what puts
+ * dyn.hasKey on the dynInvoke link switch. Borrows; never throws. */
+bool scr_dyn_has_key_full(const ScrDyn *v, const ScrStr *key);
 /* The ELEMENT spelling of the same dispatch -- `recv[k](...)` where the key
  * is a runtime string. JS's o[k](...) is Get(o, ToPropertyKey(k)) followed
  * by Call with `o` bound, exactly like the dot form, so this is
