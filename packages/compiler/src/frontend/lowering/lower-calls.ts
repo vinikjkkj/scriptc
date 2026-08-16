@@ -5525,6 +5525,34 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           type: STRING, loc: locOf(call),
         };
       }
+      // An argument that is neither statically NumberLike nor a literal
+      // encoding is the MINIFIED-JS shape, and it is what the protobufjs
+      // bundle's `Long.prototype.toString(e)` calls look like: the radix
+      // is a parameter, so `typeOf` answers `any` and the radix branch
+      // above declines. Baking utf8 in would answer a byte decoding where
+      // Node answers hex digits; fencing declines a call Node performs.
+      //
+      // The third answer is the one the BRACKET spelling has had all
+      // along: scr_dyn_invoke dispatches on the RECEIVER's runtime kind —
+      // a NUM receiver takes num.toStringRadix with the argument as its
+      // radix, an OBJ receiver calls its own/inherited toString WITH the
+      // argument (Long's own recursion), a BYTES receiver decodes per the
+      // encoding. The frontend comment at scr_dyn_invoke.c's NUM arm
+      // already states the contract this restores: "`n.toString(2)` and
+      // `n[k](2)` are one answer computed once."
+      if (call.arguments.length === 1 && !ts.isSpreadElement(call.arguments[0]!) &&
+          !call.questionDotToken && !access.questionDotToken &&
+          !L.typeOf(call.arguments[0]!).isStringLiteralType()) {
+        return {
+          kind: "dynInvoke",
+          recv,
+          method: "toString",
+          calleeName: access.getText(),
+          args: [L.lowerExprExpecting(call.arguments[0]!, DYN)],
+          type: DYN,
+          loc: locOf(call),
+        };
+      }
       const enc = call.arguments[0]
         ? bufEncoding(L, "toString", call.arguments[0])
         : "utf8";

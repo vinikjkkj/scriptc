@@ -4857,6 +4857,16 @@ class LlEmitter {
                 B.line(`store ptr ${r}, ptr ${slot}`);
                 break;
               }
+              case "record": {
+                // A plain data record arm: Object.prototype.toString's
+                // constant, the same interned literal the LONE-record
+                // case below emits. The frontend admits an arm here only
+                // when the shape is not a tuple and carries no `toString`
+                // field, so the constant IS JS's answer.
+                const sym = this.internLiteral("[object Object]");
+                B.line(`store ptr ${this.retainValue(sym, e.type)}, ptr ${slot}`);
+                break;
+              }
               default:
                 throw new LlvmUnsupportedError(`toString:union:${arm.kind}`, e.loc);
             }
@@ -6330,6 +6340,15 @@ class LlEmitter {
           this.declare(`declare ptr @scr_bytes_from_arr(i32, ptr)`);
           B.line(`${t} = call ptr @scr_bytes_from_arr(i32 ${kind}, ptr ${src.name})`);
           return this.own({ name: t, type: e.type });
+        }
+        if (e.source.type.kind === "dyn") {
+          // The runtime tag dispatch (see emit-exprs.ts); the length form
+          // inside it can throw, so the pending check rides here too.
+          this.declare(`declare ptr @scr_bytes_from_dyn(i32, ptr)`);
+          B.line(`${t} = call ptr @scr_bytes_from_dyn(i32 ${kind}, ptr ${src.name})`);
+          const out = this.own({ name: t, type: e.type });
+          this.emitPendingCheck();
+          return out;
         }
         throw new Error(`llvm emitter bug: bytesNew source of kind ${e.source.type.kind}`);
       }
@@ -11755,6 +11774,11 @@ class LlEmitter {
       // clearTimeout(null) and friends: Node silently ignores
       // non-handles — nothing runs (arguments still evaluate).
       for (const a of e.args) this.emitExpr(a);
+      return { name: "", type: e.type };
+    }
+    if (e.fn === "js.voidOperand") {
+      // `void e`'s value: the operand ran as the enclosing seqExpr's
+      // statement; the leaf emits nothing (see emit-exprs.ts).
       return { name: "", type: e.type };
     }
     if (e.fn === "qs.parse") {
