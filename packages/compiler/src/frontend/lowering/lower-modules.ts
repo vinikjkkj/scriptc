@@ -1903,6 +1903,24 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             };
             L.globalsBySymbol.set(symbol, g);
             L.globalsList.push(g);
+            // The file-scope face of lowerVarDecl's class PIN: an
+            // immutable global the cast-alias rule just pinned to
+            // `classval:C` holds C's class object and nothing else —
+            // castAliasedClassRefOf already proved const-ness and a
+            // direct (cast-peeled) class reference to get here. Recorded
+            // so reads of it satisfy the construct-thunk sites' "provably
+            // this class" gate (pinnedClassValueOf). This is the shape
+            // zapo's `export const WaMobileTcpSocketCtor:
+            // RawWebSocketConstructor = WaMobileTcpSocket` takes.
+            if (
+              castClass !== null && !g.mutable &&
+              g.type.kind === "classval" && g.type.className === castClass.def.name
+            ) {
+              L.globalClassPins.set(g.id, castClass.def.name);
+              if (process.env["SCRIPTC_CLASSPIN_WHY"] !== undefined) {
+                console.error(`[classpin] global ${locOf(nameNode).file}:${locOf(nameNode).start} ${g.id} -> ${castClass.def.name}`);
+              }
+            }
             // Mutable checked-dynamic LET globals ride the same entry
             // init: a closure called above the declaration statement
             // reads the dyn undefined instead of faulting on NULL — the
