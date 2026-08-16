@@ -58,7 +58,7 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
     ...globSync(join(pilotRoot, "**/node_modules/**/*.{js,mjs,cjs,json,d.ts}")).sort(),
     // the bundler-emitted-CJS mini packages (cases 2465-2469, 2556-2557)
     ...globSync(join(fixturesRoot, "npm/node_modules/gt*/**/*.{js,json}")).sort(),
-    // the price-list mini packages (cases 4031-4032)
+    // the price-list mini packages (cases 4031-4032, 4061-4062)
     ...globSync(join(fixturesRoot, "npm/node_modules/{bangvoid,protolong}/**/*.{js,json}")).sort(),
   ];
   for (const f of inputs) hash.update(f).update(readFileSync(f));
@@ -501,16 +501,42 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
    * two traps a plain QR run actually executes — at module init, before
    * zapo's first log line.
    *
-   * 4031 is why 4032 cannot simply be closed. Let the factory run and
-   * protobufjs decodes 64-bit fields as Long INSTANCES; zapo's
-   * `notAfter?: (number|Long|null)` then meets the emitted record matcher,
-   * which reads members with `scr_dyn_obj_get` — OWN-ONLY by construction,
-   * as its own header says — while a Long carries `toNumber` on its
-   * PROTOTYPE. No arm matches, the union coercion throws at `$.notAfter`,
-   * and zapo's noise handshake dies where it used to print a QR. 4031 is
-   * that wall with nothing else in it, and the shape of it is the alarming
-   * part: ten statements, ZERO fences, `coverage` says "fully static", and
-   * the binary still throws. No trap census can see this one.
+   * 4031 was why 4032 cannot simply be closed, and HALF of that is now
+   * fixed. Let the factory run and protobufjs decodes 64-bit fields as
+   * Long INSTANCES; zapo's `notAfter?: (number|Long|null)` then meets the
+   * emitted record walkers, which read members OWN-ONLY while a Long
+   * carries `toNumber` on its PROTOTYPE. The walkers now take
+   * `scr_dyn_obj_data_get` — JS's [[Get]] minus accessors — and an
+   * inherited method reaches a record field BOUND to its receiver, so
+   * 4031 byte-matches Node and 4061 pins the other five axes plus the
+   * union-arm control.
+   *
+   * 4062 is what is LEFT of that wall, and it is what still stops zapo:
+   * the union arm's func leaf is an EXACT signature test, and a shipped
+   * package's untyped `L.prototype.toNumber` boxes as `func()=>dyn`
+   * against a `func()=>f64` target. Reading the prototype cannot help
+   * that, and 4061 isolates it from both sides: its
+   * `union-arm-inherited-data` is the removal control (the same union
+   * with the method taken out — it passes), and its
+   * `union-arm-method-typed-unknown` is the discriminator (the same arm
+   * with the method declared `(): unknown`, so the target signature is
+   * `func()=>dyn` — it passes too), and `union-arm-method-typed-number`
+   * is the same discriminator from the VALUE side: `makeTyped` is `make`
+   * with `>>>0` in the method body and nothing else, which makes the
+   * closure infer `() => number` and box `func()=>f64`, and it passes.
+   *
+   * That last line is why zapo works. Its declaration
+   * (`spec/proto/index.d.ts:45`, `toNumber(): number`) is the strict
+   * side, but the real `long` package's body is
+   * `this.unsigned?(this.high>>>0)*f+(this.low>>>0):this.high*f+(this.low>>>0)`
+   * — the `>>>0` types it, so it boxes `func()=>f64` and the signature
+   * test passes. The own-only read was zapo's ONLY blocker, and closing
+   * it takes the QR gate green with the `!` lowering applied on top.
+   * 4062's refusal is real and stands, but it is NOT zapo's case.
+   *
+   * The alarming shape is unchanged and is why all four exist: ZERO
+   * fences, `coverage` says "fully static", and the binary still throws.
+   * No trap census can see any of it.
    */
   test("4032: the UMD wrapper's forcing ! is still refused at the module factory", () => {
     const entry = join(fixturesRoot, "npm/cases/4032-bang-void-umd-on-purpose/main.ts");
@@ -524,27 +550,104 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(fences[0]?.message).toMatch(/values of type 'void' cannot be compiled yet/);
   }, 120_000);
 
-  test("4031: a checked cast to a record with a method cannot see the prototype", async () => {
+  test("4031: a checked cast to a record with a method reads the prototype", async () => {
     const entry = join(fixturesRoot, "npm/cases/4031-prototype-method-record-cast-on-purpose/main.ts");
     const { coverage } = analyze(entry, { npmStatic: ["protolong"] });
     expect(coverage.npmStatic).toEqual([{ package: "protolong", status: "static" }]);
     expect(coverage.preflightFailed).toBe(false);
     expect(coverage.diagnostics).toHaveLength(0);
-    // The part that makes this dangerous: NOTHING is deferred. A trap
-    // census over this program reports a clean bill of health.
+    // The part that made this dangerous: NOTHING is deferred. A trap
+    // census over this program reported a clean bill of health while the
+    // binary threw `expected function at $.toNumber, got undefined`.
     expect(coverage.runtimeFences ?? []).toHaveLength(0);
     const binary = await buildStatic(entry, ["protolong"]);
     const [nodeRes, nativeRes] = await Promise.all([
       runBinary("node", [entry]),
       runBinary(binary, []),
     ]);
-    // The ONE assertion in this file that is not a byte-match, and it is
-    // inverted on purpose: Node answers, the binary throws
-    // `TypeError: expected function at $.toNumber, got undefined`.
     expect(nodeRes.stdout.toString("utf8")).toBe("7 0 false 7\n");
+    expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
+    expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
+  // 4061: the other five [[Get]] axes plus the union-ARM control (the
+  // matcher, a different emitted function from the builder 4031 drives).
+  // Node's answers were measured first; the pin is a byte-match, and the
+  // `THREW` line is Node's too — a null-prototype dictionary inherits
+  // nothing, so `v.toNumber is not a function` on both sides.
+  test("4061: [[Get]] axes — inherited, non-enumerable, shadowed, deep, null-proto, union arm", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4061-prototype-get-axes/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["protolong"] });
+    expect(coverage.npmStatic).toEqual([{ package: "protolong", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
+    const binary = await buildStatic(entry, ["protolong"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    expect(nodeRes.stdout.toString("utf8")).toBe(
+      [
+        "inherited-enumerable-method 7 0 false 7",
+        "inherited-nonenumerable-method 21 42",
+        "own-nonenumerable-data 1 5",
+        "shadow-own-wins own",
+        "two-levels-up 9 9",
+        "nullproto-inherits-nothing THREW",
+        "union-arm-inherited-data data 9 3",
+        "union-arm-number num 5",
+        "union-arm-method-typed-unknown long 7",
+        "union-arm-method-typed-number long 7",
+        "",
+      ].join("\n"),
+    );
+    expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
+    expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
+  // 4062: ON PURPOSE. Both lines diverge from Node, both with zero
+  // fences and a "fully static" coverage report, and the second one is
+  // the wall zapo's SC2001 is still behind.
+  test("4062: a prototype ACCESSOR and a method-bearing union arm are still refused", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4062-prototype-get-still-refused-on-purpose/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["protolong"] });
+    expect(coverage.npmStatic).toEqual([{ package: "protolong", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    // Neither refusal is a fence — this is what "no trap census can see
+    // it" means, stated as an assertion rather than a comment.
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
+    const binary = await buildStatic(entry, ["protolong"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    expect(nodeRes.stdout.toString("utf8")).toBe(
+      [
+        "prototype-accessor 1 42",
+        "union-arm-with-method long 7",
+        'roundtrip-owns-the-inherited 9 3 {"z":9}',
+        "",
+      ].join("\n"),
+    );
     expect(nodeRes.exitCode).toBe(0);
-    expect(nativeRes.stdout.toString("utf8")).toBe("");
-    expect(nativeRes.exitCode).not.toBe(0);
+    // Inverted on purpose, and the three lines have THREE causes: the
+    // accessor is out of the borrow-only walk's contract; the union arm
+    // is the exact-signature test on `func()=>dyn` vs `func()=>f64`; the
+    // round trip is record materialization writing every declared field
+    // as an own key, so `w` re-emerges owned.
+    expect(nativeRes.stdout.toString("utf8")).toBe(
+      [
+        "prototype-accessor THREW",
+        "union-arm-with-method THREW",
+        'roundtrip-owns-the-inherited 9 3 {"z":9,"w":3}',
+        "",
+      ].join("\n"),
+    );
+    expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
 
   /* ── 2556-2557: esbuild's __toESM interop around EXTERNAL (unbundled)
