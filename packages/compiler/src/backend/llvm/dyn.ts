@@ -237,6 +237,19 @@ export class LlDyn {
     return t;
   }
 
+  /** The record walkers' member read: JS's [[Get]] minus accessors — own
+   * data, else the prototype chain. The C backend's walkers call the same
+   * runtime symbol, so the two lanes cannot disagree about where a member
+   * lives — the split that scr_dyn_obj_key_get already prevents for the
+   * keyed read. objGetLit stays, for the own-only readers. */
+  private dataGetLit(B: BlockBuilder, d: string, key: string): string {
+    this.host.declare(`declare ptr @scr_dyn_obj_data_get(ptr, ptr, i64)`);
+    const t = B.tmp();
+    const len = Buffer.byteLength(key, "utf8");
+    B.line(`${t} = call ptr @scr_dyn_obj_data_get(ptr ${d}, ptr ${this.host.cstr(key)}, i64 ${len}) ; .${key}`);
+    return t;
+  }
+
   /** Appends an ScrStr's bytes into a ScrJsonBuf (walkers' putScrStr). */
   private putScrStr(B: BlockBuilder, buf: string, s: string): void {
     this.host.declare(`declare void @scr_jb_putc(ptr, i8)`);
@@ -447,7 +460,7 @@ export class LlDyn {
         // dyn ('unknown') fields match ANY value, present or missing.
         for (const f of shape.fields) {
           if (f.type.kind === "dyn") continue;
-          const m = this.objGetLit(B, "%d", f.name);
+          const m = this.dataGetLit(B, "%d", f.name);
           const has = B.tmp();
           B.line(`${has} = icmp ne ptr ${m}, null`);
           const lTest = B.newLabel("dm.t");
@@ -812,7 +825,7 @@ export class LlDyn {
         for (const f of shape.fields) {
           const fieldWant = host.cstr(this.dynDesc(f.type));
           const utag = f.type.kind === "union" ? host.undefinedArmTag(f.type) : -1;
-          const m = this.objGetLit(B, "%d", f.name);
+          const m = this.dataGetLit(B, "%d", f.name);
           if (f.type.kind === "dyn") {
             // An `unknown` field: a present key passes through, a missing
             // one IS the undefined dyn value.

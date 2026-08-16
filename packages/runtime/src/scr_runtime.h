@@ -3427,6 +3427,18 @@ ScrDyn *scr_dyn_obj_get(const ScrDyn *d, const char *key, size_t key_len);
  * scr_dyn_obj_set_proto installs the link (retains; releases any previous
  * one). Only `new` calls it today. */
 ScrDyn *scr_dyn_proto_get(const ScrDyn *d, const char *key, size_t key_len);
+/* The record walkers' member read: JS's [[Get]] MINUS accessors -- own
+ * data (member table, then the hidden table's DATA entries), else the
+ * same question up the [[Prototype]] chain. BORROWED, or NULL when the
+ * whole chain misses.
+ *
+ * This is scr_dyn_obj_own_data + scr_dyn_proto_get, the pair the
+ * coercion protocols already ask in that order, behind one symbol so
+ * the C and LLVM record walkers cannot answer differently. Accessors
+ * stay out on purpose: a matcher returns bool and a builder runs before
+ * the record exists, so neither holds a place to run a getter that
+ * throws -- and both would run it a SECOND time, which JS does not. */
+ScrDyn *scr_dyn_obj_data_get(const ScrDyn *d, const char *key, size_t key_len);
 /* An OWN property a BORROW-only caller can have: the member table, then
  * the hidden table's DATA entries. The coercion protocols (toString /
  * valueOf / Symbol.toPrimitive / inspect's %s) ask through this and
