@@ -2539,6 +2539,12 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       if (symbol) L.promisifiedSettled.set(symbol, settled);
       return true;
     }
+    // crypto.diffieHellman promisifies to a VALUE, not to a registered
+    // binding (lowerPromisifiedDiffieHellmanValue): return false so the
+    // ORDINARY declaration path lowers the initializer as an expression
+    // and the const holds a real function, exactly as the assignment
+    // spelling does.
+    if (argNode !== null && isDiffieHellmanPromisifyTarget(L, argNode)) return false;
     L.noLowering(
       "util.promisify of this target",
       argNode ?? e,
@@ -2548,6 +2554,345 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     );
     return true;
   }
+
+/** The `{ privateKey, publicKey }` options argument of a diffieHellman
+   * call, as the two KEYOBJ reads the agreement takes -- the object-literal
+   * spelling and the BOUND-record one, exactly the pair the synchronous
+   * arm above accepts. Null when the argument is neither. */
+  function dhOptionKeys(L: Lowerer, optNode: ts.Expression, loc: SrcLoc): { priv: IrExpr; pub: IrExpr } | null {
+    if (ts.isObjectLiteralExpression(optNode)) {
+      let privNode: ts.Expression | undefined;
+      let pubNode: ts.Expression | undefined;
+      for (const prop of optNode.properties) {
+        if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) return null;
+        if (prop.name.text === "privateKey") privNode = prop.initializer;
+        else if (prop.name.text === "publicKey") pubNode = prop.initializer;
+        else return null;
+      }
+      if (!privNode || !pubNode) return null;
+      const priv = L.lowerExpr(privNode);
+      const pub = L.lowerExpr(pubNode);
+      if (priv.type.kind !== "keyobj" || pub.type.kind !== "keyobj") return null;
+      return { priv, pub };
+    }
+    if (!ts.isIdentifier(optNode)) return null;
+    const rec = L.lowerExpr(optNode);
+    if (rec.type.kind !== "record") return null;
+    const shapeId = rec.type.shapeId;
+    const shape = L.shapes.get(shapeId);
+    const privF = shape?.fields.find((f) => f.name === "privateKey");
+    const pubF = shape?.fields.find((f) => f.name === "publicKey");
+    if (!shape || shape.fields.length !== 2 || !privF || !pubF) return null;
+    if (privF.type.kind !== "keyobj" || pubF.type.kind !== "keyobj") return null;
+    // A bare identifier read is pure, so reading it twice is unobservable
+    // (the repeatability rule the synchronous arm uses for the same shape).
+    const readF = (name: string, t: IrType): IrExpr => ({
+      kind: "recordGet", obj: L.lowerExpr(optNode), shapeId, field: name, type: t, loc,
+    });
+    return { priv: readF("privateKey", privF.type), pub: readF("publicKey", pubF.type) };
+  }
+
+/** The deferred `callback(null, secret)` delivery shared by every
+   * diffieHellman callback-form call site: a zero-parameter closure over
+   * the callback and the computed secret, handed to the microtask queue.
+   *
+   * TYPED, not boxed, and that is forced rather than chosen: the callback
+   * @types/node declares here is `(err: Error | null, secret: Buffer) =>
+   * void`, whose first parameter has no dyn representation, so the
+   * checked-dynamic route the timer surfaces use refuses it. The typed
+   * thunk carries the two values straight into the parameters they were
+   * declared for, which is the same answer with no boundary left to cross
+   * (the shape makeTimerArgsThunk falls back to for exactly this reason).
+   * A dyn-typed callback still rides dynCall.
+   *
+   * JS's arity rule is honoured by CONSTRUCTION: the callback is called
+   * with as many of (null, secret) as it declared, so the probe's
+   * `() => {}` takes neither. Null when the callback's shape cannot
+   * receive them -- the caller keeps a fence there. */
+  function dhNotifyClosure(L: Lowerer, cbT: IrType, loc: SrcLoc): IrExpr | null {
+    const sec = (t: IrType): IrExpr => ({ kind: "varRef", localId: "sec.0", type: t, loc });
+    const nullUnit: IrExpr = { kind: "unitLit", unit: "null", type: NULL_T, loc };
+    let call: IrExpr;
+    if (cbT.kind === "dyn") {
+      call = {
+        kind: "dynCall",
+        callee: { kind: "varRef", localId: "cb.0", type: DYN, loc },
+        calleeName: "callback",
+        args: [
+          { kind: "dynFrom", value: nullUnit, type: DYN, loc },
+          { kind: "dynFrom", value: sec(BYTES_U8), type: DYN, loc },
+        ],
+        type: DYN,
+        loc,
+      };
+    } else if (cbT.kind === "func" && !cbT.rest && cbT.params.length <= 2) {
+      const args: IrExpr[] = [];
+      const errT = cbT.params[0];
+      if (errT !== undefined) {
+        if (errT.kind === "nullT") {
+          args.push(nullUnit);
+        } else if (errT.kind === "dyn") {
+          args.push({ kind: "dynFrom", value: nullUnit, type: DYN, loc });
+        } else if (errT.kind === "union") {
+          const def = L.unions.get(errT.unionId);
+          const tag = def ? def.arms.findIndex((a) => a.kind === "nullT") : -1;
+          if (tag < 0) return null;
+          args.push({ kind: "unionWrap", unionId: errT.unionId, tag, value: nullUnit, type: errT, loc });
+        } else {
+          return null;
+        }
+      }
+      const secT = cbT.params[1];
+      if (secT !== undefined) {
+        if (secT.kind === "bytes" && secT.elem === "u8") args.push(sec(secT));
+        else if (secT.kind === "dyn") args.push({ kind: "dynFrom", value: sec(BYTES_U8), type: DYN, loc });
+        else return null;
+      }
+      call = { kind: "callValue", callee: { kind: "varRef", localId: "cb.0", type: cbT, loc }, args, type: cbT.ret, loc };
+    } else {
+      return null;
+    }
+    const key = `dh.notify:${typeKey(cbT)}`;
+    const existing = L.arrHofHelpers.get(key);
+    const name = existing ?? `%crypto.dh.notify.${L.arrHofHelpers.size}`;
+    if (!existing) {
+      L.arrHofHelpers.set(key, name);
+      L.liftedFns.push({
+        name,
+        params: [],
+        returnType: VOID,
+        captures: [
+          { localId: "cb.0", name: "cb", type: cbT },
+          { localId: "sec.0", name: "sec", type: BYTES_U8 },
+        ],
+        locals: [
+          { id: "cb.0", name: "cb", type: cbT, mutable: false, boxed: true },
+          { id: "sec.0", name: "sec", type: BYTES_U8, mutable: false, boxed: true },
+        ],
+        body: [{ kind: "exprStmt", expr: call, loc }],
+        loc,
+      });
+    }
+    return { kind: "closure", fnName: name, captures: ["cb.0", "sec.0"], type: funcOf([], VOID), loc };
+  }
+
+/** `crypto.diffieHellman(options, callback)` -- Node's CALLBACK form.
+   *
+   * @types/node declares it (the second overload, returning void) and Node
+   * v25.9.0 answers `undefined` from it while calling `callback(null,
+   * secret)` off libuv's threadpool -- MEASURED, not assumed: the probe
+   * `(diffieHellman as (o, cb) => Buffer | undefined)(opts, () => {})`
+   * prints `async-capable` there. So the extra argument may NOT simply be
+   * dropped onto the one-argument agreement: that answers a Buffer where
+   * Node answers undefined, which is a silent divergence, and it is why
+   * this form gets a lowering instead of an arity fence.
+   *
+   * A compiled binary has no threadpool, so the agreement runs
+   * synchronously and the callback is delivered on the MICROTASK queue --
+   * the already-settled stance util.promisify's callback builtins take
+   * (divergence 23), and the two now agree with each other: promisify(dh)
+   * (opts) settles exactly one microtask hop away, which is where
+   * dh(opts, cb) calls back. The DIVERGENCE that remains is ordering
+   * against timers and I/O, not the value.
+   *
+   * The result is `undefined`: void at the declared overload, and the
+   * undefined ARM when the call site casts to `Buffer | undefined` to
+   * observe it. Any other result type keeps the caller's fence. */
+  export function lowerDiffieHellmanCallbackCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrExpr | null {
+    if (expr.arguments.length !== 2 || expr.arguments.some(ts.isSpreadElement)) return null;
+    const callee = stripTypeCasts(expr.expression);
+    if (!ts.isIdentifier(callee)) return null;
+    const bi = L.builtinImportOf(callee);
+    if (!bi || bi.module !== "crypto" || bi.member !== "diffieHellman") return null;
+
+    // The RESULT type decides the helper's shape, and it is settled before
+    // anything lowers: an unrecognised one must leave the call untouched
+    // for the existing fence rather than half-lower it.
+    const mapped = L.mapTypeOf(L.typeOf(expr));
+    let retT: IrType;
+    let undefTag = -1;
+    let undefUnionId: string | null = null;
+    if (mapped === null || mapped === undefined || mapped.kind === "void") {
+      retT = VOID;
+    } else if (mapped.kind === "union") {
+      const def = L.unions.get(mapped.unionId);
+      const tag = def ? def.arms.findIndex((a) => a.kind === "undefinedT") : -1;
+      if (tag < 0) return null;
+      retT = mapped;
+      undefTag = tag;
+      undefUnionId = mapped.unionId;
+    } else {
+      return null;
+    }
+
+    const keys = dhOptionKeys(L, expr.arguments[0]!, loc);
+    if (keys === null) return null;
+
+    const cbNode = expr.arguments[1]!;
+    const cb = L.lowerExpr(cbNode);
+    const cbT = cb.type;
+    const notify = dhNotifyClosure(L, cbT, loc);
+    if (notify === null) {
+      L.noLowering(
+        `crypto.diffieHellman with a '${L.fmt(cbT)}' callback`,
+        cbNode,
+        "the callback takes (err: Error | null, secret: Buffer) and at most those two",
+      );
+    }
+
+    const key = `dh.cb:${undefUnionId ?? "void"}:${typeKey(cbT)}`;
+    const existing = L.arrHofHelpers.get(key);
+    const name = existing ?? `%crypto.dh.cb.${L.arrHofHelpers.size}`;
+    if (existing === undefined) {
+      L.arrHofHelpers.set(key, name);
+      const body: IrStmt[] = [
+        {
+          kind: "varDecl",
+          localId: "sec.0",
+          init: {
+            kind: "libCall",
+            fn: "key.dh",
+            args: [
+              { kind: "varRef", localId: "priv.0", type: KEYOBJ, loc },
+              { kind: "varRef", localId: "pub.0", type: KEYOBJ, loc },
+            ],
+            type: BYTES_U8,
+            loc,
+          },
+          loc,
+        },
+        {
+          kind: "exprStmt",
+          expr: { kind: "libCall", fn: "timers.queueMicrotask", args: [notify], type: VOID, loc },
+          loc,
+        },
+      ];
+      if (undefUnionId !== null) {
+        body.push({
+          kind: "return",
+          value: {
+            kind: "unionWrap",
+            unionId: undefUnionId,
+            tag: undefTag,
+            value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc },
+            type: retT,
+            loc,
+          },
+          loc,
+        });
+      }
+      L.liftedFns.push({
+        name,
+        params: [
+          { localId: "priv.0", name: "priv", type: KEYOBJ },
+          { localId: "pub.0", name: "pub", type: KEYOBJ },
+          { localId: "cb.0", name: "cb", type: cbT },
+        ],
+        returnType: retT,
+        locals: [
+          { id: "priv.0", name: "priv", type: KEYOBJ, mutable: false },
+          { id: "pub.0", name: "pub", type: KEYOBJ, mutable: false },
+          { id: "cb.0", name: "cb", type: cbT, mutable: false, boxed: true },
+          { id: "sec.0", name: "sec", type: BYTES_U8, mutable: false, boxed: true },
+        ],
+        body,
+        loc,
+      });
+    }
+    return { kind: "call", callee: name, args: [keys.priv, keys.pub, cb], type: retT, loc };
+  }
+
+/** True when `node` names crypto.diffieHellman as a promisify TARGET: the
+   * import binding itself, or a one-hop const alias of it. The X25519
+   * module writes
+   *
+   *     const diffieHellmanWithCallback = diffieHellman as unknown as (...)
+   *
+   * and promisifies THAT, so the cast-alias hop is the whole reason the
+   * site is not already served. The hop is narrow on purpose -- a const
+   * whose initializer strips to a builtin-import identifier IS that
+   * function, and nothing else resolves here. */
+  function isDiffieHellmanPromisifyTarget(L: Lowerer, node: ts.Expression): boolean {
+    const e = stripTypeCasts(node);
+    if (!ts.isIdentifier(e)) return false;
+    const direct = L.builtinImportOf(e);
+    if (direct) return direct.module === "crypto" && direct.member === "diffieHellman";
+    const sym = L.checker.getSymbolAtLocation(e);
+    const decl = sym ? L.checker.declarationsOf(sym)[0] : undefined;
+    if (!decl || !ts.isVariableDeclaration(decl) || !ts.isIdentifier(decl.name)) return false;
+    if ((decl.parent.flags & ts.NodeFlags.Const) === 0 || decl.initializer === undefined) return false;
+    const init = stripTypeCasts(decl.initializer);
+    if (!ts.isIdentifier(init)) return false;
+    const via = L.builtinImportOf(init);
+    return via !== null && via.module === "crypto" && via.member === "diffieHellman";
+  }
+
+/** `promisify(diffieHellman)` AS A VALUE -- a lifted
+   * `(opts) => Promise<Buffer>` closure over the same agreement, behind an
+   * already-settled promise (the PROMISIFY_SETTLED stance, divergence 23:
+   * Node runs this on the threadpool, a compiled binary has none, so the
+   * work is synchronous and the await still yields to the microtask queue).
+   *
+   * A VALUE rather than a registered binding, which the settled table's
+   * other targets are, and the difference is load-bearing: the X25519
+   * module ASSIGNS this to a nullable `let` and later branches on it. A
+   * declaration-shaped registration that emits nothing would leave that
+   * `let` holding null, and the module would silently keep the synchronous
+   * fallback where Node takes the async path -- a quiet divergence in place
+   * of the loud fence. As a value it works in every position. */
+  export function lowerPromisifiedDiffieHellmanValue(L: Lowerer, expr: ts.CallExpression, bi: { module: string; member: string }, loc: SrcLoc): IrExpr | null {
+    if (bi.module !== "util" || bi.member !== "promisify") return null;
+    if (expr.arguments.length !== 1 || expr.arguments.some(ts.isSpreadElement)) return null;
+    if (!isDiffieHellmanPromisifyTarget(L, expr.arguments[0]!)) return null;
+    // The promisified signature comes from the USE site's own mapping, so
+    // the options record is the very shape its callers pass (a shape built
+    // here instead could intern a second, unequal one).
+    const fnT = L.mapTypeOf(L.typeOf(expr));
+    if (fnT === null || fnT === undefined || fnT.kind !== "func") return null;
+    if (fnT.rest || fnT.params.length !== 1) return null;
+    const optT = fnT.params[0]!;
+    if (optT.kind !== "record") return null;
+    const shape = L.shapes.get(optT.shapeId);
+    const privF = shape?.fields.find((f) => f.name === "privateKey");
+    const pubF = shape?.fields.find((f) => f.name === "publicKey");
+    if (!shape || shape.fields.length !== 2 || !privF || !pubF) return null;
+    if (privF.type.kind !== "keyobj" || pubF.type.kind !== "keyobj") return null;
+    if (fnT.ret.kind !== "promise" || fnT.ret.inner.kind !== "bytes" || fnT.ret.inner.elem !== "u8") return null;
+    const promiseT = fnT.ret;
+    const name = `%crypto.dh.promisified.${optT.shapeId}`;
+    if (!L.liftedFns.some((f) => f.name === name)) {
+      const read = (field: string): IrExpr => ({
+        kind: "recordGet",
+        obj: { kind: "varRef", localId: "opts.0", type: optT, loc },
+        shapeId: optT.shapeId,
+        field,
+        type: KEYOBJ,
+        loc,
+      });
+      L.liftedFns.push({
+        name,
+        params: [{ localId: "opts.0", name: "opts", type: optT }],
+        returnType: promiseT,
+        locals: [{ id: "opts.0", name: "opts", type: optT, mutable: false }],
+        body: [
+          {
+            kind: "return",
+            value: {
+              kind: "intrinsic",
+              name: "promise.resolve",
+              args: [{ kind: "libCall", fn: "key.dh", args: [read("privateKey"), read("publicKey")], type: BYTES_U8, loc }],
+              type: promiseT,
+              loc,
+            },
+            loc,
+          },
+        ],
+        loc,
+      });
+    }
+    return { kind: "closure", fnName: name, captures: [], type: funcOf([optT], promiseT), loc };
+  }
+
 
   /** `promisify(<module>.<member>)` → the lib fn its call lowers to, for
    * the targets whose work is a synchronous lowering behind a settled

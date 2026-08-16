@@ -1476,12 +1476,19 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // bad promisify target reports here (recorded once; the statement
         // lowering poisons too, like every collectGlobals failure).
         if (ts.isIdentifier(decl.name) && decl.initializer && isPromisifyCall(L, decl.initializer)) {
+          // ...unless the decl hook DECLINES it. A promisify target whose
+          // lowering is a VALUE (crypto.diffieHellman) registers no symbol
+          // and emits a real closure, so the binding needs its global like
+          // any other const; skipping registration left every use reading
+          // 'a binding form with no lowering'. The statement lowering makes
+          // the same call and returns null only when it answers true.
+          let claimed = true;
           try {
-            L.promisifiedExecFileDecl(decl.name, decl.initializer);
+            claimed = L.promisifiedExecFileDecl(decl.name, decl.initializer);
           } catch (e) {
             if (!(e instanceof PoisonError)) throw e;
           }
-          continue;
+          if (claimed) continue;
         }
         // `const inspect = require("util").inspect` at file scope: a
         // named import in const clothing (builtinImportOf resolves uses)

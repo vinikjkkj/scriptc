@@ -39,6 +39,7 @@ import { isJsSourceFile } from "../program.js";
 import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { pureReemittable } from "./lower-exprs.js";
+import { lowerPromisifiedDiffieHellmanValue } from "./lower-builtins.js";
 
 /* ── IR construction shorthand ───────────────────────────────────────── */
 
@@ -1385,6 +1386,10 @@ export function lowerUtilModuleCall(
       return lowerFormatCall(L, expr, loc, true);
     case "getCallSites":
       return lowerGetCallSitesCall(L, expr, loc);
+    case "promisify":
+      // The one promisify target with a VALUE lowering; every other target
+      // keeps the declaration-form registry and its fence.
+      return lowerPromisifiedDiffieHellmanValue(L, expr, bi, loc);
     default:
       return null;
   }

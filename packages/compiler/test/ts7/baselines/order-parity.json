@@ -7667,6 +7667,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4021-diffie-hellman-callback-form-and-promisify.ts": {
+   "order": [
+    "<repo>/tests/corpus/4021-diffie-hellman-callback-form-and-promisify.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/403-void-and-params.ts": {
    "order": [
     "<repo>/tests/corpus/403-void-and-params.ts"
