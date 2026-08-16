@@ -2270,7 +2270,15 @@ function validateFunction(
               (a) =>
                 a.kind === "undefinedT" || a.kind === "nullT" ||
                 a.kind === "string" || a.kind === "f64" || a.kind === "bool" ||
-                (a.kind === "bytes" && a.elem === "u8"),
+                (a.kind === "bytes" && a.elem === "u8") ||
+                // A plain data RECORD arm: Object.prototype.toString's
+                // constant, decidable here for the same reason the LONE
+                // record operand is — not a tuple (which prints its
+                // elements) and no `toString` FIELD (which JS would call).
+                (a.kind === "record" && (() => {
+                  const s = records.get(a.shapeId);
+                  return s !== undefined && !s.tuple && !s.fields.some((f) => f.name === "toString");
+                })()),
             )
           ) {
             err("toString union operand has a non-stringable arm (frontend must fence)", e.loc);
