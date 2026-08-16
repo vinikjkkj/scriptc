@@ -3890,6 +3890,20 @@ ScrStr *scr_dyn_string_coerce_js(const ScrDyn *d);
  * different conversions and answer differently for an object carrying
  * both methods. Borrows; +1 or NULL with the exception pending. */
 ScrStr *scr_dyn_to_primitive_string(const ScrDyn *d);
+/* ToPrimitive (ECMA-262 7.1.1) returning the PRIMITIVE itself rather
+ * than its string. The kind is load-bearing: `0 == {valueOf(){return
+ * false}}` is TRUE (ToPrimitive answers the boolean, ToNumber(false)
+ * is 0) while String(false) is "false", whose ToNumber is NaN - so the
+ * operators below cannot be routed through the _string spelling. A
+ * primitive (and a bigint) answers itself; an object runs the user
+ * valueOf/toString in the hint's order and otherwise falls back to
+ * scr_dyn_to_string's built-in table; a null-prototype object throws
+ * the spec's TypeError. Borrows; +1 or NULL with the exception
+ * pending. */
+#define SCR_TOPRIM_DEFAULT 0
+#define SCR_TOPRIM_NUMBER 1
+#define SCR_TOPRIM_STRING 2
+ScrDyn *scr_dyn_to_primitive(const ScrDyn *d, int hint);
 
 /* `d instanceof TypeError` (and the other builtin error classes) on a
  * checked-dynamic value: the from_error cache resolves the dyn encoding
@@ -3957,6 +3971,15 @@ bool scr_dyn_lt(const ScrDyn *a, const ScrDyn *b);
 bool scr_dyn_le(const ScrDyn *a, const ScrDyn *b);
 bool scr_dyn_gt(const ScrDyn *a, const ScrDyn *b);
 bool scr_dyn_ge(const ScrDyn *a, const ScrDyn *b);
+/* IsLooselyEqual (7.2.14) with a NUMBER on one side: null/undefined
+ * answer FALSE before any conversion (Number(null) is 0, but
+ * `0 == null` is false), an object runs ToPrimitive with no hint and
+ * the comparison repeats on the result, everything else runs ToNumber
+ * with NaN answering false. This is the one loose comparison that
+ * needed a runtime primitive rather than a lowering; `==` over two
+ * same-kind operands is still strict equality in the frontend.
+ * Borrowed; no allocation for the number side. */
+bool scr_dyn_loose_eq_num(double n, const ScrDyn *d);
 /* JS === over two dyn values: scalars by value, units by kind, everything
  * reference-shaped by node identity. Borrowed; never throws. */
 bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b);
