@@ -2428,7 +2428,15 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // disagree: `f.k = 1` then `f.k` answers 1 while `"k" in f`
         // still said false.
         const fnTest = `scr_dyn_fn_has(${d.name}, ${keyLit}, ${keyBytes.length})`;
-        const test = `(${d.name}->kind == SCR_DYN_OBJ ? (${objTest}) : ${d.name}->kind == SCR_DYN_ARR ? (${arrTest}) : ${d.name}->kind == SCR_DYN_FUNC ? (${fnTest}) : scr_dyn_isl_fence(${d.name}, "'in'"))`;
+        const stored = `(${d.name}->kind == SCR_DYN_OBJ ? (${objTest}) : ${d.name}->kind == SCR_DYN_ARR ? (${arrTest}) : ${d.name}->kind == SCR_DYN_FUNC ? (${fnTest}) : scr_dyn_isl_fence(${d.name}, "'in'"))`;
+        // ...and the PROTOTYPE methods that are not stored anywhere:
+        // Object.prototype's and every primitive prototype's live as
+        // dispatch arms in scr_dyn_invoke.c, so the stored walk above
+        // cannot see them. The keyed READ answers them now, and `in`
+        // has to report every name the read answers or the close would
+        // trade one disagreement for another. Same table, one call.
+        const intrinsic = `scr_dyn_has_intrinsic_method(${d.name}, ${keyLit}, ${keyBytes.length})`;
+        const test = `(${stored} || ${intrinsic})`;
         return E.fallibleTemp(e.type, e.negated ? `!${test}` : test);
       }
       case "dynScalarEq": {
@@ -2834,8 +2842,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_dyn_define_prop(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "dyn.hasKey":
             // `k in v` with a runtime key: the dyn presence answer (both
-            // borrowed, no allocation, never throws).
-            return finish(`scr_dyn_has_key(${arg(0)}, ${arg(1)})`);
+            // borrowed, no allocation, never throws). The _full spelling
+            // is that stored walk PLUS the prototype methods that are
+            // not stored anywhere — Object.prototype's and every
+            // primitive prototype's, which live as dispatch arms in
+            // scr_dyn_invoke.c. `in` walks the chain, so it has to report
+            // every name the keyed READ answers; the literal-key `in`
+            // (dynHasKey above) ORs the same table in.
+            return finish(`scr_dyn_has_key_full(${arg(0)}, ${arg(1)})`);
           case "dyn.construct":
             // `new f(args)` over a dyn function value: callee, the
             // argument pack (a dyn ARRAY built by dynArrLit) and the

@@ -1220,7 +1220,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`     * Own-only consumers (Object.keys, hasOwn, JSON,`);
     d.push(`     * structuredClone) call scr_dyn_obj_get directly and are`);
     d.push(`     * unaffected — an accessor is not in the member table. */`);
-    d.push(`    return scr_dyn_obj_key_get(d, k->data, k->len);`);
+    d.push(`    ScrDyn *m = scr_dyn_obj_key_get(d, k->data, k->len);`);
+    d.push(`    if (m == NULL || m->kind != SCR_DYN_UNDEF) return m;`);
+    d.push(`    /* The walk MISSED, so the question left is Object.prototype's,`);
+    d.push(`     * which this runtime holds as C branches in scr_dyn_invoke.c`);
+    d.push(`     * and not as a stored chain — the reason \`o[k]("hasOwnProperty")\``);
+    d.push(`     * answered true while \`typeof o[k]\` answered undefined. */`);
+    d.push(`    { ScrDyn *im = scr_dyn_intrinsic_method_get(d, k); if (im) { scr_dyn_release(m); return im; } }`);
+    d.push(`    return m;`);
     d.push(`  }`);
     d.push(`  if (d->kind == SCR_DYN_JSVAL) {`);
     d.push(`    /* Island-held: o[k] reads the REAL engine property (getters`);
@@ -1313,6 +1320,13 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`      }`);
     d.push(`    }`);
     d.push(`  }`);
+    /* The kinds whose PROTOTYPE this runtime models as dispatch arms
+     * rather than as a stored chain — a string's trim, an array's push, a
+     * number's toString, a promise's then. Each read `undefined` where
+     * Node says `function`, which is what makes `if (s[k])` take the
+     * wrong branch in silence. Answers only names the CALL also answers
+     * or fences loudly by name, so the two spellings agree. */
+    d.push(`  { ScrDyn *im = scr_dyn_intrinsic_method_get(d, k); if (im) return im; }`);
     d.push(`  return scr_dyn_retain(scr_dyn_undefined());`);
     d.push(`}`, ``);
     E.walkerDefs.push(...d);

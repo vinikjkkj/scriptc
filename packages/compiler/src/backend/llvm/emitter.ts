@@ -626,7 +626,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.iterPack": "scr_dyn_iter_pack",
   "dyn.arrLen": "scr_dyn_arr_len",
   "dyn.arrAt": "scr_dyn_arr_at",
-  "dyn.hasKey": "scr_dyn_has_key",
+  // the stored walk PLUS the unstored prototype methods (emit-exprs.ts twin)
+  "dyn.hasKey": "scr_dyn_has_key_full",
   "dyn.construct": "scr_dyn_construct",
   "dyn.instanceOf": "scr_dyn_instance_of",
   "dyn.defineProps": "scr_dyn_define_props",
@@ -7266,8 +7267,21 @@ class LlEmitter {
         B.line(`store i1 ${fenced}, ptr ${slot}`);
         B.br(lj);
         B.startBlock(lj);
+        const stored = B.tmp();
+        B.line(`${stored} = load i1, ptr ${slot}`);
+        // ...and the PROTOTYPE methods that are not stored anywhere:
+        // Object.prototype's and every primitive prototype's live as
+        // dispatch arms in scr_dyn_invoke.c, so the stored walk above
+        // cannot see them. The keyed READ answers them now, and `in` has
+        // to report every name the read answers or the close would trade
+        // one disagreement for another. The helper answers false for
+        // every kind whose prototype IS stored, so this is a plain
+        // unconditional OR; the C backend's twin is in emit-exprs.ts.
+        this.declare(`declare zeroext i1 @scr_dyn_has_intrinsic_method(ptr, ptr, i64)`);
+        const intr = B.tmp();
+        B.line(`${intr} = call zeroext i1 @scr_dyn_has_intrinsic_method(ptr ${d.name}, ptr ${this.cstr(e.key)}, i64 ${keyBytes})`);
         const raw = B.tmp();
-        B.line(`${raw} = load i1, ptr ${slot}`);
+        B.line(`${raw} = or i1 ${stored}, ${intr}`);
         this.emitPendingCheck();
         if (!e.negated) return { name: raw, type: e.type };
         const neg = B.tmp();

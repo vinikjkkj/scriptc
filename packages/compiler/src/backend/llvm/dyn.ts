@@ -2070,6 +2070,29 @@ export class LlDyn {
       const r = this.retainDyn(B, u);
       B.terminate(`ret ptr ${r}`);
     };
+    /* The MISS answer, everywhere the walk for a kind has come up empty:
+     * ask the dispatch unit whether the receiver's PROTOTYPE has this
+     * name before settling for undefined. Object.prototype's methods and
+     * every primitive prototype's live as C branches in scr_dyn_invoke.c
+     * rather than as a stored chain, which is why `o[k]("hasOwnProperty")`
+     * answered true while `typeof o[k]` answered undefined. The C emitter
+     * splices the same call at the same points, so the two lanes cannot
+     * answer a member differently. NOT used on the `?.` nullish arm: that
+     * undefined is the optional step's own answer, not a miss. */
+    const intrinsicOrUndef = (): void => {
+      host.declare(`declare ptr @scr_dyn_intrinsic_method_get(ptr, ptr)`);
+      const im = B.tmp();
+      B.line(`${im} = call ptr @scr_dyn_intrinsic_method_get(ptr %d, ptr %k)`);
+      const hasIm = B.tmp();
+      B.line(`${hasIm} = icmp ne ptr ${im}, null`);
+      const lIm = B.newLabel("kg.im");
+      const lU = B.newLabel("kg.iu");
+      B.condBr(hasIm, lIm, lU);
+      B.startBlock(lIm);
+      B.terminate(`ret ptr ${im}`);
+      B.startBlock(lU);
+      retainUndef();
+    };
     // undefined/null receivers: opt answers undefined; otherwise throw
     // Node's TypeError with the key spliced in.
     {
@@ -2147,6 +2170,40 @@ export class LlDyn {
       host.declare(`declare ptr @scr_dyn_obj_key_get(ptr, ptr, i64)`);
       const r = B.tmp();
       B.line(`${r} = call ptr @scr_dyn_obj_key_get(ptr %d, ptr ${kParts.data}, i64 ${kParts.len})`);
+      // The walk missed (or threw) — a NULL is the getter's exception or
+      // the `constructor` fence and rides out; an UNDEF is the miss, and
+      // the question left is Object.prototype's, which lives in the
+      // dispatch unit rather than in a stored chain.
+      const isNull = B.tmp();
+      B.line(`${isNull} = icmp eq ptr ${r}, null`);
+      const lOut = B.newLabel("kg.obo");
+      const lLive = B.newLabel("kg.obl");
+      B.condBr(isNull, lOut, lLive);
+      B.startBlock(lOut);
+      B.terminate(`ret ptr ${r}`);
+      B.startBlock(lLive);
+      const rk = this.kindOf(B, r);
+      const wasUndef = B.tmp();
+      B.line(`${wasUndef} = icmp eq i32 ${rk}, ${DK.UNDEF}`);
+      const lMiss = B.newLabel("kg.obm");
+      const lHit = B.newLabel("kg.obh");
+      B.condBr(wasUndef, lMiss, lHit);
+      B.startBlock(lHit);
+      B.terminate(`ret ptr ${r}`);
+      B.startBlock(lMiss);
+      host.declare(`declare ptr @scr_dyn_intrinsic_method_get(ptr, ptr)`);
+      host.declare(`declare void @scr_dyn_release(ptr)`);
+      const oim = B.tmp();
+      B.line(`${oim} = call ptr @scr_dyn_intrinsic_method_get(ptr %d, ptr %k)`);
+      const hasOim = B.tmp();
+      B.line(`${hasOim} = icmp ne ptr ${oim}, null`);
+      const lOim = B.newLabel("kg.obi");
+      const lKeep = B.newLabel("kg.obk");
+      B.condBr(hasOim, lOim, lKeep);
+      B.startBlock(lOim);
+      B.line(`call void @scr_dyn_release(ptr ${r})`);
+      B.terminate(`ret ptr ${oim}`);
+      B.startBlock(lKeep);
       B.terminate(`ret ptr ${r}`);
       B.startBlock(lNext);
     }
@@ -2372,7 +2429,7 @@ export class LlDyn {
       B.line(`${r1} = call ptr @scr_dyn_new_num(double ${bd})`);
       B.terminate(`ret ptr ${r1}`);
       B.startBlock(lMiss);
-      retainUndef();
+      intrinsicOrUndef();
       B.startBlock(lNext);
     }
     // FUNC: own props (defineProperties writes), then name/length.
@@ -2394,7 +2451,7 @@ export class LlDyn {
       B.startBlock(lHit);
       B.terminate(`ret ptr ${m}`);
       B.startBlock(lMiss);
-      retainUndef();
+      intrinsicOrUndef();
       B.startBlock(lNext);
     }
     // ARR / STR: length + canonical-index element/char reads.
@@ -2475,11 +2532,11 @@ export class LlDyn {
         B.line(`call void @scr_str_release(ptr ${ch})`);
         B.terminate(`ret ptr ${r2}`);
         B.startBlock(lMiss);
-        retainUndef();
+        intrinsicOrUndef();
       }
       B.startBlock(lNext);
     }
-    retainUndef();
+    intrinsicOrUndef();
     this.defs.push(
       `define internal ptr @${name}(ptr %d, ptr %k, i1 zeroext %opt) ${FN_ATTRS} { ; d[k] on dyn`,
       B.render(),

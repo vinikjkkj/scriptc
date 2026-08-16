@@ -25,13 +25,23 @@
 // never resolved, so there was never a `this` to drop. Those are member
 // RESOLUTION, closed separately in 4151.
 //
-// A THIRD FINDING, not previously recorded anywhere: the keyed READ and
-// the keyed CALL resolve DIFFERENTLY. m2CallInhElem answers `true` while
-// m2ReadInhElem answers `undefined` for the same member on the same
-// object -- scr_dyn_invoke walks the prototype chain and sc_dyn_key_get
-// does not. m2ReadInhDot shows the DOT read is equally blind, and
-// m5ReadElem shows it is not specific to objects. Node says `function` to
-// all three. Silent, and nothing in the trap census sees it.
+// A THIRD FINDING, not previously recorded anywhere, and now CLOSED:
+// the keyed READ and the keyed CALL resolved DIFFERENTLY. m2CallInhElem
+// answered `true` while m2ReadInhElem answered `undefined` for the same
+// member on the same object; m2ReadInhDot showed the DOT read was
+// equally blind, and m5ReadElem that it was not specific to objects.
+// Node says `function` to all three, and so do we now.
+//
+// The attribution here was half right, and the correction is worth
+// keeping: scr_dyn_obj_key_get DOES walk the stored prototype chain, and
+// always did. What the read had no counterpart for is Object.prototype's
+// methods and every PRIMITIVE prototype's, which live as C branches
+// inside scr_dyn_invoke.c reachable from the CALL alone -- so there was
+// nothing to walk, not a walk that was skipped.
+// scr_dyn_intrinsic_method_get is the read's half of that same dispatch,
+// and it answers exactly the names the dispatch implements or fences
+// loudly, so a read can never claim a member a call would deny. Corpus
+// 4242 is the positive case and walks that set row by row.
 //
 // CONTROLS, both directions: m1CtorControl (a constructed receiver binds
 // correctly, so the dyn tier is not the thing under test) and
