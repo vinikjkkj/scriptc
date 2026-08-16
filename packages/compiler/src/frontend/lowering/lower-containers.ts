@@ -6814,6 +6814,22 @@ export function knownBufEncoding(name: string): string | undefined {
 
 /** The literal encoding argument of a Buffer surface, normalized — or a
  * fence when it isn't a literal alias Node knows. */
+// MEASURED at 2b80d2ba (block/unknowns, estado-unknowns.md S4.4): the two
+// 'toString with this encoding' traps in zapo's emitted C reach this gate
+// from lower-calls.ts's DYN-RECEIVER toString path (the bare "toString"
+// spelling), not from a Buffer. The minified protobufjs bundle contains
+// exactly five `.toString(` calls: four are Long.prototype.toString(radix)
+// whose argument is not statically NumberLike -- so lower-calls.ts's radix
+// branch declines them and they fall through to this literal-only gate --
+// and the fifth passes the literal "utf-8", which IS in BUF_ENCODINGS and
+// lowers. Two traps, four candidates, one non-candidate.
+//
+// Defaulting a non-literal argument to utf8 would make Long.toString(16)
+// answer a utf8 decoding of the value's bytes instead of its hex digits.
+// The correct closure is the dispatch Node performs -- number to radix,
+// string to encoding -- and the runtime already has both halves
+// (num.toStringRadix, and dyn.toString which already takes the encoding as
+// a string argument rather than baking it in).
 export function bufEncoding(L: Lowerer, what: string, encNode: ts.Expression): string {
   const t = L.typeOf(encNode);
   const v = t.isStringLiteralType() ? own(BUF_ENCODINGS, t.value) : undefined;
