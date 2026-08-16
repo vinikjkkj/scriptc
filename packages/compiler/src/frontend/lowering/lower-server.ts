@@ -241,6 +241,78 @@ function isAddressInfoRecord(L: Lowerer, t: IrType): boolean {
   return shape.fields.every((f, i) => f.name === want[i]![0] && f.type.kind === want[i]![1]);
 }
 
+/** `server.address()` under the REAL @types/node declaration,
+ * `AddressInfo | string | null`, which is what Node answers rather than a
+ * looser spelling of the record. Measured on v25.9.0, every state:
+ *
+ *   before listen()            null
+ *   while the handle is bound  the {address, family, port} record
+ *   after close()              null
+ *   a PIPE/unix server         the pathname STRING
+ *
+ * The record arm rides the existing net.serverAddress libCall; the null
+ * arm is the interned unit. The STRING arm is representable and never
+ * produced: listen() here takes `port[, host]` and the options object,
+ * with no path form, so no compiled server can be a pipe server. It is
+ * kept in the union because the DECLARED type carries it and a program
+ * that tests `typeof a !== "string"` (the discriminating shape) has to
+ * keep compiling.
+ *
+ * NOT a widening of the record: the null arm is real, and a program that
+ * reads `.port` straight off the union without proving the arm gets the
+ * union machinery's checked-cast throw rather than an invented record.
+ *
+ * The receiver is read TWICE (the listening test and the record build),
+ * so it must be duplicable -- a plain reference. A call receiver keeps
+ * the fence rather than running twice. */
+function serverAddressUnion(
+  L: Lowerer,
+  result: IrType | null,
+  access: ts.PropertyAccessExpression,
+  loc: SrcLoc,
+): IrExpr | null {
+  if (!result || result.kind !== "union") return null;
+  const def = L.unions.get(result.unionId);
+  if (!def) return null;
+  const recTag = def.arms.findIndex((a) => isAddressInfoRecord(L, a));
+  const nullTag = def.arms.findIndex((a) => a.kind === "nullT");
+  if (recTag < 0 || nullTag < 0) return null;
+  // Every remaining arm must be the pipe server's string: a union
+  // carrying anything else is not address()'s declared type, and
+  // wrapping into it would be guessing (the lower-ws.ts stance).
+  if (!def.arms.every((a, i) => i === recTag || i === nullTag || a.kind === "string")) return null;
+  const receiver = handleReceiver(L, access.expression, NETSERVER_T);
+  if (receiver.kind !== "varRef" &&
+      !(receiver.kind === "dynCheck" && receiver.value.kind === "varRef")) {
+    return null;
+  }
+  return {
+    kind: "ternary",
+    cond: { kind: "libCall", fn: "net.serverListening", args: [receiver], type: BOOL, loc },
+    then: {
+      kind: "unionWrap",
+      unionId: result.unionId,
+      tag: recTag,
+      value: {
+        kind: "libCall", fn: "net.serverAddress", args: [receiver],
+        type: def.arms[recTag]!, loc,
+      },
+      type: result,
+      loc,
+    },
+    else_: {
+      kind: "unionWrap",
+      unionId: result.unionId,
+      tag: nullTag,
+      value: { kind: "unitLit", unit: "null", type: def.arms[nullTag]!, loc },
+      type: result,
+      loc,
+    },
+    type: result,
+    loc,
+  };
+}
+
 function handleReceiver(L: Lowerer, node: ts.Expression, want: IrType): IrExpr {
   const recv = L.lowerExpr(node);
   if (recv.type.kind === "dyn" && DYN_HANDLE_KINDS.has(want.kind)) {
@@ -1337,15 +1409,19 @@ function lowerNetServerMethodCall(L: Lowerer, call: ts.CallExpression,
       L.noLowering(`address with ${args.length} arguments`, call, "address() takes no arguments");
     }
     const result = L.mapTypeOf(L.typeOf(call));
-    if (!result || !isAddressInfoRecord(L, result)) {
-      L.noLowering(
-        "address() where the result is not the {address, family, port} record",
-        call,
-        "the AddressInfo shape is the supported result",
-      );
+    if (result && isAddressInfoRecord(L, result)) {
+      const receiver = handleReceiver(L, access.expression, NETSERVER_T);
+      return { kind: "libCall", fn: "net.serverAddress", args: [receiver], type: result, loc };
     }
-    const receiver = handleReceiver(L, access.expression, NETSERVER_T);
-    return { kind: "libCall", fn: "net.serverAddress", args: [receiver], type: result, loc };
+    // Real @types/node declares the wider `AddressInfo | string | null`,
+    // which is what Node actually answers (measured across every state).
+    const union = serverAddressUnion(L, result, access, loc);
+    if (union) return union;
+    L.noLowering(
+      "address() where the result is not the {address, family, port} record",
+      call,
+      "the AddressInfo shape is the supported result",
+    );
   }
   L.noLowering(
     `Server.${name}`,
