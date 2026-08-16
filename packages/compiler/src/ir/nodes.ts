@@ -2386,6 +2386,12 @@ export type IrLibFn =
    * encoded slashes, and non-empty hosts. url.pathToFileURL resolves the
    * path (getcwd) and never throws. */
   | "url.new"
+  /** new URL(input, base): the WHATWG relative resolution. The base is
+   * an ALREADY PARSED URL value (a string base lowers as url.new first),
+   * and the result is url.new's, over the absolute spelling the
+   * resolution builds -- so the "Invalid URL" TypeError, dot-segment
+   * removal and percent encoding are the one-argument form's. */
+  | "url.newRel"
   | "url.protocol"
   | "url.host"
   | "url.hostname"
@@ -8895,6 +8901,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.readdirSync",
   "fs.readdirTypesSync",
   "url.new",
+  "url.newRel",
   "url.fileURLToPathUrl",
   "url.fileURLToPathStr",
   // The win32-target flavor of pathToFileURL (same runtime entry point —

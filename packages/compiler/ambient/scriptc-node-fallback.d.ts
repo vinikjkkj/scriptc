@@ -1238,7 +1238,9 @@ declare module "node:os" {
 
 /* The WHATWG URL class (a Node global; the es2023 lib doesn't declare it),
  * typed as exactly the supported surface: construction from ONE absolute-
- * URL string (invalid input throws a catchable TypeError, like Node), the
+ * URL string, or from an input and a `base` it is resolved against with
+ * the WHATWG relative algorithm (invalid input throws a catchable
+ * TypeError, like Node), the
  * protocol/pathname/href/host/hostname/search getters, searchParams (the
  * LIVE query view — mutations through it re-serialize into the URL, so
  * href reflects immediately; every read answers the same object, Node's
@@ -1260,8 +1262,9 @@ interface URL {
   toString(): string;
 }
 declare var URL: {
-  new (input: string): URL;
+  new (input: string, base?: string | URL): URL;
 };
+
 
 /* URLSearchParams — the WHATWG application/x-www-form-urlencoded list.
  * Constructed standalone (string / string[][] pairs / inline record

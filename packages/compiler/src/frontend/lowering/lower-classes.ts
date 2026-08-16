@@ -5704,16 +5704,51 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
       }
       if (symbol && symbol.name === "URL" && L.isStdlibSymbol(symbol)) {
         const args = expr.arguments ?? [];
-        if (args.length !== 1) {
+        if (args.length !== 1 && args.length !== 2) {
           L.noLowering(
             `new URL with ${args.length} argument${args.length === 1 ? "" : "s"}`,
             expr,
-            "one absolute-URL string is the supported form (resolve relative inputs against a base yourself)",
+            "one absolute-URL string, or an input plus a base, are the supported forms",
             symbol,
           );
         }
         const input = L.lowerExprExpecting(args[0]!, STRING);
-        return { kind: "libCall", fn: "url.new", args: [input], type: URL_T, loc };
+        if (args.length === 1) {
+          return { kind: "libCall", fn: "url.new", args: [input], type: URL_T, loc };
+        }
+        // new URL(input, base) -- WHATWG relative resolution, in the
+        // runtime, against a PARSED base (scr_url_new_rel). A string base
+        // is that same call with the base parsed first, which is also
+        // Node's order: an unparsable base throws "Invalid URL" before the
+        // input is looked at.
+        //
+        // A base whose type is neither exactly URL nor exactly string --
+        // `string | URL`, or one that admits undefined -- keeps fencing:
+        // there is one runtime entry point and it takes one parsed base,
+        // so a union base would need a runtime dispatch this lowering does
+        // not build. Naming the type is what tells the reader which arm to
+        // narrow.
+        const baseNode = args[1]!;
+        const baseTy = L.mapTypeOf(L.typeOf(baseNode));
+        if (baseTy?.kind !== "url" && baseTy?.kind !== "string") {
+          L.noLowering(
+            `new URL with a '${L.checker.typeToString(L.typeOf(baseNode))}' base`,
+            baseNode,
+            "a URL value or one absolute-URL string is the lowered base -- narrow a 'string | URL' or optional base first",
+            symbol,
+          );
+        }
+        const base: IrExpr =
+          baseTy.kind === "url"
+            ? L.lowerExprExpecting(baseNode, URL_T)
+            : {
+                kind: "libCall",
+                fn: "url.new",
+                args: [L.lowerExprExpecting(baseNode, STRING)],
+                type: URL_T,
+                loc,
+              };
+        return { kind: "libCall", fn: "url.newRel", args: [input, base], type: URL_T, loc };
       }
       // `new URLSearchParams(init?)`: the WHATWG list (stdlib provenance —
       // see lowerSearchParamsNew for the lowered init shapes).
