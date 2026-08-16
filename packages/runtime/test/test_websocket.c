@@ -306,7 +306,7 @@ int main(void) {
   {
     char req[512];
     size_t n = scr_ws_build_request(req, sizeof req, "example.com:443", "/chat",
-                                    "dGhlIHNhbXBsZSBub25jZQ==", NULL);
+                                    "dGhlIHNhbXBsZSBub25jZQ==", NULL, NULL);
     const char *expect =
         "GET /chat HTTP/1.1\r\n"
         "Host: example.com:443\r\n"
@@ -319,13 +319,13 @@ int main(void) {
   }
   {
     char req[512];
-    size_t n = scr_ws_build_request(req, sizeof req, "h", "/", "KKKK", "chat,superchat");
+    size_t n = scr_ws_build_request(req, sizeof req, "h", "/", "KKKK", "chat,superchat", NULL);
     check(n > 0 && strstr(req, "Sec-WebSocket-Protocol: chat,superchat\r\n") != NULL,
           "upgrade request protocol header");
   }
   {
     char tiny[16];
-    check(scr_ws_build_request(tiny, sizeof tiny, "host", "/", "KEY", NULL) == 0,
+    check(scr_ws_build_request(tiny, sizeof tiny, "host", "/", "KEY", NULL, NULL) == 0,
           "upgrade request overflow returns 0");
   }
 
