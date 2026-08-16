@@ -5530,8 +5530,28 @@ export type IrExpr =
    * shadow prototypes in JS too); undefined/null receivers throw Node's
    * "Cannot read properties of ...". Arguments are already dyn.
    * `calleeName` is the source spelling for the error texts. Receiver and
-   * args are borrowed; the result is owned (+1). MAY THROW. */
-  | { kind: "dynInvoke"; recv: IrExpr; method: string; calleeName: string; args: IrExpr[]; type: IrType; loc: SrcLoc }
+   * args are borrowed; the result is owned (+1). MAY THROW.
+   *
+   * `methodKey`, when present, is the ELEMENT spelling `recv[k](...)`: the
+   * member name is a runtime STRING rather than a compile-time one, and
+   * `method` carries the source spelling of the key for the diagnostics
+   * only. The key is reduced to a string by the same rule the keyed READ
+   * uses (a string key rides, an f64 key takes toString), so `o[k]` and
+   * `o[k]()` name the same member by construction. Evaluation order is
+   * recv, key, args -- the Get itself happens inside the runtime, AFTER
+   * the arguments evaluate, which is the same ordering divergence the
+   * name-keyed arm already documents.
+   *
+   * LINK SWITCH, measured because the obvious guess is wrong: this is a
+   * dynInvoke, so moduleUsesDynInvoke claims it, so a program whose ONLY
+   * dyn method call is the element spelling now pulls scr_dyn_invoke.c
+   * where it previously did not. A program that is one `o[k]()` and
+   * nothing else goes 648 704 -> 674 816 bytes, +26 112 -- the dispatch it
+   * now calls. A program with no dyn method call of either spelling is
+   * byte-for-byte unchanged (hello-world: 645 632 both sides, identical
+   * TU), so the historical size classes only move for programs that use
+   * the construct. */
+  | { kind: "dynInvoke"; recv: IrExpr; method: string; methodKey?: IrExpr; calleeName: string; args: IrExpr[]; type: IrType; loc: SrcLoc }
   /** A dyn ARRAY built element-by-element (JS mixed-element literals —
    * `['pwd', []]` — and evolving `[]` declarations): each element is
    * already a dyn value; the result owns them. Never throws. */
