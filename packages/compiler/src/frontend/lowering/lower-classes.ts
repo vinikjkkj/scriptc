@@ -3557,10 +3557,26 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     // `m.toString()` reaches D's override through the virtual arm, which
     // is what the two-step spelling already did.
     //
-    // Only an OBJECT target peels. A cast to a RECORD materializes the
-    // shape (4142's price) and a cast to `unknown`/`any` leaves the
-    // static world; both keep answering null so the binding takes the
-    // representation the cast actually produces.
+    // An OBJECT target peels to the target; a RECORD target peels to the
+    // CONSTRUCTED class. A cast to `unknown`/`any` leaves the static world
+    // and still answers null, so that binding takes the representation the
+    // cast actually produces.
+    //
+    // The record arm was measured, not reasoned. This function used to
+    // break on a record target on the grounds that "a cast to a RECORD
+    // materializes the shape (4142's price)". Its own sibling disproves
+    // that: adoptedInstanceClassOf peels exactly this cast for the
+    // IDENTIFIER spelling, and one build of the two spellings emits
+    //     static sc_o_Own *sc_g_e_v4;   /* const b = new Own(); b as Rec */
+    //     static sc_rs_r0 *sc_g_e_v3;   /* (new Own()) as Rec            */
+    // — the record target does not force a materialization, it was simply
+    // hiding the `new` from this syntactic test. The same program at BLOCK
+    // scope already answered the class for both spellings (lowerVarDecl's
+    // adoption arm reads the LOWERED initializer), so before this the one
+    // declaration meant two different things at the two scopes — the
+    // asymmetry the file-scope adoption arm in lower-modules.ts was added
+    // to remove for `const v = live as unknown as { … }`, reaching the one
+    // spelling it did not cover. Corpus 4262.
     //
     // Without this, `const m: Rec = new D() as B` folded
     // Object.prototype.toString where `const o: B = new D(); const m:
@@ -3572,7 +3588,15 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       if (ts.isAsExpression(e) || ts.isTypeAssertion(e) || ts.isSatisfiesExpression(e)) {
         const t = L.mapTypeOf(L.typeOf(e));
         const info = t?.kind === "object" ? (L.classes.get(t.className) ?? null) : null;
-        if (info === null) break;
+        if (info === null) {
+          // A RECORD target erases: there is no class to upcast to, so
+          // castTarget stays null and the constructed class below is the
+          // value's own type. Narrower than adoptedInstanceClassOf's
+          // predicate by construction — dyn/jsval/unknown/any targets do
+          // not map to `record` and still break here.
+          if (t?.kind === "record") { e = e.expression; continue; }
+          break;
+        }
         castTarget ??= info; // the OUTERMOST target is the value's type
         e = e.expression;
         continue;
