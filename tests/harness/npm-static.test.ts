@@ -61,7 +61,10 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
     // the price-list mini packages (cases 4031-4032, 4061-4064) and the
     // computed-key receiver pair (4111-4112)
     ...globSync(
-      join(fixturesRoot, "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong,pbkeyrecv,litrecv}/**/*.{js,json}"),
+      join(
+        fixturesRoot,
+        "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong,pbkeyrecv,litrecv,keyedreach}/**/*.{js,json}",
+      ),
     ).sort(),
   ];
   for (const f of inputs) hash.update(f).update(readFileSync(f));
@@ -719,6 +722,79 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(out).toContain("dotName         = self lo=5 hi=7");
     expect(nativeRes.stdout.toString("utf8")).toBe(out);
     expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
+  /* -- 4114: HOW FAR the element spelling now reaches, and where it stops
+   *
+   * 4111 and 4112 pin the receiver. This pins the REACH, in both
+   * directions at once, because "the receiver binds now" understates what
+   * changed and "keyed calls work" overstates it.
+   *
+   * On BASE the element spelling could not reach a prototype method at
+   * ALL: every row below answers "is not a function", push and slice and
+   * hasOwnProperty included, because a keyed READ finds nothing on a
+   * prototype and a receiverless call then calls undefined.
+   *
+   *   row        base (element)      branch (element)      dot (both)  Node
+   *   dPush      is not a function   1-2-3-4               1-2-3-4     1-2-3-4
+   *   dSlice     is not a function   2-3                   2-3         2-3
+   *   dHasOwn    is not a function   true                  true        true
+   *   dFnApply   is not a function   2                     2           2
+   *   dFnCall    is not a function   3                     -           3
+   *   dReduce    is not a function   LOUD not-supported    SC1090      6
+   *   dFlat      is not a function   LOUD not-supported    SC1090      1,2,3
+   *   dUpper     is not a function   is not a function     AB          AB
+   *   dToString  is not a function   is not a function     5           5
+   *
+   * dReduce/dFlat CHANGE MESSAGE and still fail: "is not a function" was a
+   * lie (Node has reduce), and the loud refusal is the stance the dot
+   * spelling already takes. The two spellings now agree about what they
+   * cannot do, where before they disagreed about what it even was.
+   *
+   * dUpper/dToString are the RESIDUAL GAP and this is their price tag: a
+   * dyn STRING or NUMBER receiver is answered by the frontend's static
+   * method tables on the dot path, and the element path routes through the
+   * runtime dispatch, which has no such arm. Not a regression -- base is
+   * equally wrong -- but the parity is improved, not complete.
+   */
+  test("4114: how far a keyed method call reaches on a dyn receiver (price list)", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4114-keyed-method-call-reach-on-purpose/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["keyedreach"] });
+    expect(coverage.npmStatic).toEqual([{ package: "keyedreach", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    const binary = await buildStatic(entry, ["keyedreach"]);
+    const nativeRes = await runBinary(binary, []);
+    const rows = new Map(
+      nativeRes.stdout
+        .toString("utf8")
+        .split("\n")
+        .filter((l) => l.includes(" = "))
+        .map((l) => [l.slice(0, l.indexOf(" = ")).trim(), l.slice(l.indexOf(" = ") + 3)] as const),
+    );
+    // WHAT THE FIX BOUGHT -- these five were "is not a function" on base
+    expect(rows.get("dPush")).toBe("1-2-3-4");
+    expect(rows.get("dSlice")).toBe("2-3");
+    expect(rows.get("dHasOwn")).toBe("true");
+    expect(rows.get("dFnApply")).toBe("2");
+    expect(rows.get("dFnCall")).toBe("3");
+    // ... and each answers exactly what its DOT twin answers
+    expect(rows.get("dPush")).toBe(rows.get("tPush"));
+    expect(rows.get("dSlice")).toBe(rows.get("tSlice"));
+    expect(rows.get("dHasOwn")).toBe(rows.get("tHasOwn"));
+    expect(rows.get("dFnApply")).toBe(rows.get("tFnApply"));
+    // HONEST REFUSALS -- still failing, no longer lying about why
+    expect(rows.get("dReduce")).toBe("THREW 'Array.prototype.reduce' on a dynamic value is not supported yet");
+    expect(rows.get("dFlat")).toBe("THREW 'Array.prototype.flat' on a dynamic value is not supported yet");
+    // THE RESIDUAL GAP -- the dot twin answers, the element spelling does not
+    expect(rows.get("dUpper")).toBe("THREW s[K5] is not a function");
+    expect(rows.get("dToString")).toBe("THREW n[KB] is not a function");
+    expect(rows.get("tUpper")).toBe("AB");
+    expect(rows.get("tToString")).toBe("5");
+    // and a name nothing declares is still Node's own message, both ways
+    expect(rows.get("dMissing")).toBe("THREW o[K6] is not a function");
+    expect(rows.get("dNumMiss")).toBe("THREW n[K6] is not a function");
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
 
