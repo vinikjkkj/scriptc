@@ -9776,6 +9776,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/fixtures/npm/cases/4063-bang-void-value-position-on-purpose/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/4063-bang-void-value-position-on-purpose/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/4064-umd-bang-prototype-conjunction/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/4064-umd-bang-prototype-conjunction/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/fixtures/npm/cases/abandoned-handles/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/abandoned-handles/main.ts"

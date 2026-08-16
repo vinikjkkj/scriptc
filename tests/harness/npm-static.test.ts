@@ -58,8 +58,10 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
     ...globSync(join(pilotRoot, "**/node_modules/**/*.{js,mjs,cjs,json,d.ts}")).sort(),
     // the bundler-emitted-CJS mini packages (cases 2465-2469, 2556-2557)
     ...globSync(join(fixturesRoot, "npm/node_modules/gt*/**/*.{js,json}")).sort(),
-    // the price-list mini packages (cases 4031-4032, 4061-4062)
-    ...globSync(join(fixturesRoot, "npm/node_modules/{bangvoid,protolong}/**/*.{js,json}")).sort(),
+    // the price-list mini packages (cases 4031-4032, 4061-4064)
+    ...globSync(
+      join(fixturesRoot, "npm/node_modules/{bangvoid,bangvoidval,bangprotolong,protolong}/**/*.{js,json}"),
+    ).sort(),
   ];
   for (const f of inputs) hash.update(f).update(readFileSync(f));
   const key = hash
@@ -486,32 +488,40 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
   }, 180_000);
 
   /* ── 4031-4032: the UMD wrapper's forcing `!`, and the wall behind it ─
-   * A PRICE LIST, in the shape tests/corpus spells `-on-purpose`: the
-   * lowering that closes 4032 was written, measured on zapo, and REVERTED
-   * (see the revert commit). Both pins pass today because both refusals
-   * stand, and each fails the moment its construct lands — which is the
-   * point, because the next reader needs the ORDER, not the count.
+   * This WAS a price list and is now a receipt. The lowering that closes
+   * 4032 was written by one block, measured on zapo, and REVERTED because
+   * the QR gate went red 4 runs of 4; the wall behind it was fixed by the
+   * next block; and it is now shipped on top of that wall. What is left
+   * of the price list is 4062 and 4063, and the ORDER is the thing to
+   * carry away, not the count.
    *
    * 4032 is zapo's own shape. A shipped package whose entire module body
    * is `!function(root, factory){…}(globalRef, factory)`: the wrapper
-   * returns nothing, so `ensureBool` meets a `void` operand it has no arm
-   * for and the WHOLE module factory becomes one SC2001 fence. In zapo
+   * returns nothing, so `ensureBool` met a `void` operand it had no arm
+   * for and the WHOLE module factory became one SC2001 fence. In zapo
    * that factory is `node_modules/long/umd/index.js`, which is why a
-   * compiled zapo has never had `Long`, and why this fence is one of the
-   * two traps a plain QR run actually executes — at module init, before
-   * zapo's first log line.
+   * compiled zapo had never had `Long`, and why that fence was the ONE
+   * trap a plain QR run executed — at module init, before zapo's first
+   * log line. Statement position discards the boolean, so the statement
+   * is now its operand's statement and the factory runs. 4063 is the
+   * control that keeps the VALUE-position fence honest.
    *
-   * 4031 was why 4032 cannot simply be closed, and HALF of that is now
-   * fixed. Let the factory run and protobufjs decodes 64-bit fields as
-   * Long INSTANCES; zapo's `notAfter?: (number|Long|null)` then meets the
-   * emitted record walkers, which read members OWN-ONLY while a Long
-   * carries `toNumber` on its PROTOTYPE. The walkers now take
-   * `scr_dyn_obj_data_get` — JS's [[Get]] minus accessors — and an
-   * inherited method reaches a record field BOUND to its receiver, so
-   * 4031 byte-matches Node and 4061 pins the other five axes plus the
-   * union-arm control.
+   * 4031 was why 4032 could not simply be closed, and it is not a
+   * historical note — it is a HARD DEPENDENCY, measured as a 2x2 on
+   * zapo's QR gate. Let the factory run and protobufjs decodes 64-bit
+   * fields as Long INSTANCES; zapo's `notAfter?: (number|Long|null)` then
+   * meets the emitted record walkers, which read members OWN-ONLY while a
+   * Long carries `toNumber` on its PROTOTYPE. Ship the `!` rule WITHOUT
+   * the prototype-walking read and zapo goes from working to 0 QR /
+   * exit 1 / ~20 s, the socket closing 1006 thirteen to sixteen times.
+   * The walkers now take `scr_dyn_obj_data_get` — JS's [[Get]] minus
+   * accessors — and an inherited method reaches a record field BOUND to
+   * its receiver, so 4031 byte-matches Node and 4061 pins the other five
+   * axes plus the union-arm control. If 4031's fix is ever reverted, the
+   * `!` rule must come out in the same commit.
    *
-   * 4062 is what is LEFT of that wall, and it is what still stops zapo:
+   * 4062 is what is LEFT of that wall. It no longer stops zapo (the QR
+   * prints), but the refusal is real:
    * the union arm's func leaf is an EXACT signature test, and a shipped
    * package's untyped `L.prototype.toNumber` boxes as `func()=>dyn`
    * against a `func()=>f64` target. Reading the prototype cannot help
@@ -534,14 +544,101 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
    * it takes the QR gate green with the `!` lowering applied on top.
    * 4062's refusal is real and stands, but it is NOT zapo's case.
    *
-   * The alarming shape is unchanged and is why all four exist: ZERO
-   * fences, `coverage` says "fully static", and the binary still throws.
-   * No trap census can see any of it.
+   * The alarming shape is why all of these exist: ZERO fences,
+   * `coverage` says "fully static", and the binary still throws. No trap
+   * census can see any of it — and worse, on this exact change the trap
+   * census moved 57/47/0 -> 56/46/0 in the configuration that was
+   * BROKEN as well as the one that works, so it could not tell them
+   * apart either.
    */
-  test("4032: the UMD wrapper's forcing ! is still refused at the module factory", () => {
+  // 4032 was the PRICE LIST for the forcing `!`, and the price has now
+  // been paid: statement-position `!e` lowers as its operand's statement,
+  // so the UMD factory runs and the module body's single SC2001 is gone.
+  // The directory keeps its `-on-purpose` suffix so the ts7 order-parity
+  // baseline stays additive; the suffix is historical, like 4031's.
+  //
+  // The zero-fence assertion is the load-bearing one. Before, this
+  // program had exactly one runtime fence and a "fully static" coverage
+  // report at the same time; now it has neither the fence nor the
+  // divergence, and the binary byte-matches Node.
+  test("4032: the UMD wrapper's forcing ! runs the module factory", async () => {
     const entry = join(fixturesRoot, "npm/cases/4032-bang-void-umd-on-purpose/main.ts");
     const { coverage } = analyze(entry, { npmStatic: ["bangvoid"] });
     expect(coverage.npmStatic).toEqual([{ package: "bangvoid", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
+    const binary = await buildStatic(entry, ["bangvoid"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    expect(nodeRes.stdout.toString("utf8")).toBe("factory ran: global\nok true\n");
+    expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
+    expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
+  /* ── 4064: THE CONJUNCTION, and the instrument the suite did not have ─
+   * Every pin above tests ONE fix. 4032 needs only the `!` rule; 4031 and
+   * 4061 need only the prototype-walking record read. Each passed on a
+   * tree that had its own fix and not the other — and that is exactly how
+   * a functionally BROKEN configuration got past every instrument in this
+   * repo, because zapo needs both and nothing pinned the pair.
+   *
+   * The 2x2, measured on zapo's QR gate, and again at lab scale here on
+   * four compilers built from `528bcf74`:
+   *
+   *   neither fix           SC2001 values of type 'void'      THROWS
+   *   prototype walk only   SC2001 values of type 'void'      THROWS
+   *   `!` rule only         expected function at $.toNumber   THROWS
+   *   both                  `global 7 0 false 7`              Node's bytes
+   *
+   * Read the COLUMNS too, because that is the finding: 4031 is green in
+   * the "prototype walk only" configuration and 4032 is green in the
+   * "`!` rule only" one — and "`!` rule only" is the configuration that
+   * takes zapo from working to 0 QR / exit 1 / ~20 s. A single-fix
+   * fixture is green in a broken build by construction; it is testing its
+   * own fix and nothing else. 4064 is green in exactly one column and it
+   * is the working one.
+   *
+   * The two failing messages are also the reason the walls hid each other
+   * for two blocks: `expected function at $.toNumber, got undefined` is
+   * both what 4031 threw on ITS base and what block/protoinit saw at
+   * `$.notAfter`. Two blocks read one string as two different walls,
+   * because it was two different walls.
+   *
+   * And the trap census reads 57/47/0 for rows 1 and 2 and 56/46/0 for
+   * rows 3 and 4, so it puts the BROKEN configuration on the
+   * better-looking side. This program is the instrument that does not.
+   */
+  test("4064: the UMD bang and the prototype walk are needed TOGETHER", async () => {
+    const entry = join(fixturesRoot, "npm/cases/4064-umd-bang-prototype-conjunction/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["bangprotolong"] });
+    expect(coverage.npmStatic).toEqual([{ package: "bangprotolong", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
+    const binary = await buildStatic(entry, ["bangprotolong"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    expect(nodeRes.stdout.toString("utf8")).toBe("global 7 0 false 7\n");
+    expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
+    expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
+  // 4063: the VALUE position is untouched, and this is the control that
+  // says so. `const b = !voidCall()` still needs a boolean where the
+  // operand's type has no ToBoolean, and ensureBool still refuses it.
+  // Without this, "statement-position `!` lowers" would be indistinguishable
+  // from "`!` stopped fencing".
+  test("4063: a VALUE-position ! over a void operand is still refused", () => {
+    const entry = join(fixturesRoot, "npm/cases/4063-bang-void-value-position-on-purpose/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["bangvoidval"] });
+    expect(coverage.npmStatic).toEqual([{ package: "bangvoidval", status: "static" }]);
     expect(coverage.preflightFailed).toBe(false);
     expect(coverage.diagnostics).toHaveLength(0); // it BUILDS; the fence is runtime
     const fences = coverage.runtimeFences ?? [];
