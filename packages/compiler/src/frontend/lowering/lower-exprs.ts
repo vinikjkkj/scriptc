@@ -9403,12 +9403,45 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
       // the asserted arm's payload comes out, any other arm throws the
       // catchable TypeError (divergence 38's lying-assertion stance; an
       // erasure would just move the failure to the next typed slot as an
-      // opaque union-mismatch fence). Sub-union targets and same-type
-      // casts keep the historic erasure.
+      // opaque union-mismatch fence). Same-type casts keep the historic
+      // erasure.
       if (inner.type.kind === "union") {
         const target = L.mapTypeOf(targetTs0);
         if (target && target.kind !== "union" && !typeEquals(target, inner.type)) {
           const helper = L.narrowedArmHelper(inner.type.unionId, target, locOf(expr));
+          if (helper) {
+            return { kind: "call", callee: helper, args: [inner], type: target, loc: locOf(expr) };
+          }
+        }
+        // `u as (T | undefined)` — a strict SUB-UNION target: the same
+        // extraction one arm wider, and the sixth member of this
+        // function's "the cast performs the conversion the slot performs"
+        // family. coerceToExpected ALREADY runs exactly this bridge when a
+        // union value meets a narrower union slot (narrowedRetagHelper, on
+        // the node's own checker type), so `f(u as T | undefined)` and
+        // `const v: T | undefined = u` both narrow today while the CAST
+        // position alone erased — and an erased cast hands its consumer the
+        // operand's whole union. zapo's `(second as WaSendReceiptEventOptions
+        // | undefined) ?? {}` (WaMessageCoordinator.ts:421) is that
+        // consumer: `??` reads `left.type` directly, before any coercion
+        // can run, so it saw four arms where the assertion named two and
+        // reported the sub-union fence — correctly, for what it was handed.
+        //
+        // The arms the assertion excluded compile to the stranded-arm trap
+        // unionRetagHelper already writes for a checker-NARROWED union
+        // (divergence 38's lying-assertion stance): a sound assertion never
+        // reaches them, a lying one throws the catchable TypeError instead
+        // of smuggling the wrong arm into a slot typed for another. That is
+        // the identical trade the single-arm extraction above has taken
+        // since it was written; a sub-union target is not a different
+        // question, only a wider answer.
+        //
+        // narrowedRetagHelper declines — and the erasure stands unchanged —
+        // whenever the target is NOT a genuine sub-union (an arm the source
+        // does not have) or nothing is stranded (the same arm set, where
+        // erasure is already right).
+        if (target && target.kind === "union" && !typeEquals(target, inner.type)) {
+          const helper = L.narrowedRetagHelper(expr, inner.type.unionId, target.unionId, locOf(expr));
           if (helper) {
             return { kind: "call", callee: helper, args: [inner], type: target, loc: locOf(expr) };
           }

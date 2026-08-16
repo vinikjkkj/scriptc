@@ -214,6 +214,40 @@ function lowerOptionalDefaultArg(
         receiverIr = receiver.type;
         elem = receiver.type.elem;
       }
+      // The STATIC twin of the adoption above, one level in. Inside an
+      // INSTANTIATED generic body the checker's element is the CONSTRAINT's
+      // union while the receiver's VALUE carries the instantiation's own,
+      // narrower element: zapo's `schema.indexParts` is the symbolic
+      // seven-arm `WaAppstateIndexPart` (three shapes after discriminant
+      // widening) at both instantiations of
+      // `buildMutationIndexFromSchema`, while instance %0's argument lowers
+      // `array<{type, value}>` and instance %1's a two-arm union of its own.
+      // Nothing downstream can be right about both: every helper below takes
+      // the receiver as `array<elem>`, so the CHECKER's element hands the
+      // validator an ill-typed argument, and `.find`'s re-tag route declined
+      // rather than build one (its own comment says so). Dispatch follows
+      // the VALUE — the same rule the two probes above this one apply at the
+      // receiver, applied to the element.
+      //
+      // Guarded by the RE-WRAP relation, which is what makes the adoption
+      // free of new refusals: the value's element must be an ARM of the
+      // checker's element union, or a sub-union every arm of which is. That
+      // is exactly hofCallbackArg's own `rewrapOnly` admission test, so the
+      // callback — whose parameter the checker still types at the wide
+      // element — is bridged by the adapter that function already builds,
+      // and the found element still has a home in the checker's result
+      // union (an identical arm, or the arm-wise re-tag). Anything else —
+      // an unrelated element, a WIDER one, a non-union checker element —
+      // keeps today's behaviour untouched, which is why the corpus's ten
+      // disagreeing sites (all four `dyn-evolving-array-*` fixtures, whose
+      // checker element is a FUNCTION type) do not move.
+      if (
+        receiverIr !== null && receiverIr.kind === "array" &&
+        receiver.type.kind === "array" && elemRewrapsInto(L, receiver.type.elem, elem)
+      ) {
+        receiverIr = receiver.type;
+        elem = receiver.type.elem;
+      }
     }
     if (name === "sort" || name === "toSorted") {
       return lowerArraySortCall(L, call, access, elem, receiverIr);
@@ -624,6 +658,29 @@ function lowerOptionalDefaultArg(
     const elemTs = L.checker.getTypeArguments(recvTs as ts.TypeReference)[0];
     if (elemTs === undefined) return undefined;
     return (elemTs.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0 ? undefined : elemTs;
+  }
+
+/** True when a receiver's LOWERED element `from` re-wraps losslessly into
+   * the CHECKER's element `to` — `to` is a union and `from` is one of its
+   * arms, or a union every arm of which is an identical arm of `to`.
+   *
+   * This is hofCallbackArg's `rewrapOnly` narrowed to its two
+   * IDENTITY-PRESERVING dispositions, and it is the admission test for
+   * adopting the value's element in lowerArrayMethodCall. Width lifts are
+   * deliberately excluded even though the callback adapter would take them:
+   * a lifted arm is a COPY (divergence 35), and this rule exists to make
+   * the element the loop passes the one the array actually holds, not to
+   * introduce a per-element rebuild. A `to` that is not a union, an
+   * identical pair, or an element with an arm `to` cannot hold, all answer
+   * false and leave the call exactly as it lowers today. */
+  function elemRewrapsInto(L: Lowerer, from: IrType, to: IrType): boolean {
+    if (to.kind !== "union" || typeEquals(from, to)) return false;
+    if (L.armTag(to.unionId, from) >= 0) return true;
+    if (from.kind === "union") {
+      const arms = L.unions.get(from.unionId)?.arms;
+      return arms !== undefined && arms.length > 0 && arms.every((a) => L.armTag(to.unionId, a) >= 0);
+    }
+    return false;
   }
 
 /** `Boolean` as a HOF CALLBACK VALUE — `xs.some(Boolean)`,

@@ -7903,6 +7903,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4281-find-in-an-instantiated-generic-follows-the-value-element.ts": {
+   "order": [
+    "<repo>/tests/corpus/4281-find-in-an-instantiated-generic-follows-the-value-element.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4282-an-as-cast-to-a-sub-union-is-honoured.ts": {
+   "order": [
+    "<repo>/tests/corpus/4282-an-as-cast-to-a-sub-union-is-honoured.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/4291-length-through-a-widening-unknown-cast.ts": {
    "order": [
     "<repo>/tests/corpus/4291-length-through-a-widening-unknown-cast.ts"
