@@ -5860,6 +5860,14 @@ ScrBytes *scr_bytes_copy(const ScrBytes *src); /* +1 */
  * (SCR_ELEM_F64). Never throws. */
 ScrBytes *scr_bytes_from_arr(ScrBytesElem elem, const ScrArr *arr); /* +1 */
 
+/* `new Uint8Array(v)` over a CHECKED-DYNAMIC value (scr_json.c): the
+ * runtime tag dispatch the constructor's overload set is -- a number is
+ * the length, a typed array/Buffer is an element COPY, an array reads
+ * each element through ToNumber, and everything else is Node's
+ * ToObject-with-no-length, the empty array. Borrows d; +1, or NULL with
+ * the exception pending. */
+ScrBytes *scr_bytes_from_dyn(ScrBytesElem elem, const struct ScrDyn *d);
+
 static inline ScrBytes *scr_bytes_retain(ScrBytes *b) {
   if (b->rc != SIZE_MAX) b->rc++;
   return b;

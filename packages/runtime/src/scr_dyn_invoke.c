@@ -614,7 +614,7 @@ static bool dyn_num_proto_unimpl(const char *m) {
 static bool dyn_arr_proto_unimpl(const char *m) {
   static const char *names[] = { "reduce", "reduceRight", "flat",
     "fill", "copyWithin", "keys", "values", "entries", "toReversed", "toSorted", "toSpliced",
-    "with", "toString", "toLocaleString", NULL };
+    "with", "toLocaleString", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
   return false;
 }
@@ -692,12 +692,34 @@ static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
       return dyn_name_in(m, impl) || dyn_str_proto_unimpl(m) || dyn_objproto_knows(m);
     }
     case SCR_DYN_ARR: {
+      /* `toString` moved OUT of dyn_arr_proto_unimpl and into this list
+       * when the ARR arm started answering it: the two lists feed this
+       * predicate with `||`, so dyn_kind_knows is unchanged either way and
+       * the READ keeps saying `function` — but a name that is IMPLEMENTED
+       * must not sit in a list called *_unimpl, and the estado-eight report
+       * that discovered the arm had told the next block to delete it as
+       * dead text. Deleting it while it was the only thing making
+       * dyn_kind_knows true would have made `typeof a[k]` answer
+       * `undefined` while `a[k]()` answered "1,2,3" -- the very split this
+       * predicate exists to prevent, reintroduced by a tidy-up. */
       static const char *const impl[] = { "at", "concat", "every", "filter",
         "find", "findIndex", "flatMap", "forEach", "includes", "indexOf",
         "join", "lastIndexOf", "map", "pop", "push", "reverse", "shift",
-        "slice", "some", "sort", "splice", "unshift", NULL };
+        "slice", "some", "sort", "splice", "toString", "unshift", NULL };
       return dyn_name_in(m, impl) || dyn_arr_proto_unimpl(m) || dyn_objproto_knows(m);
     }
+    case SCR_DYN_BYTES:
+      /* ONE name, and only because this branch flipped it. The BYTES call
+       * arm (scr_dyn_bytes_method) answers `toString` now where it used to
+       * fence loudly, so leaving BYTES in the default:false arm below would
+       * make `typeof b[k]` answer `undefined` while `b[k]()` answered "hi"
+       * -- measured, on a Buffer and on a plain Uint8Array, before this
+       * line was written. The REST of the BYTES surface (at/slice/subarray/
+       * set, and the loud fences in scr_dyn_bytes_proto_name, which is
+       * static in another unit) stays unclaimed: widening the read to a
+       * table nobody measured is how the read/call split happened in the
+       * first place, and it is not this branch's name to claim. */
+      return dyn_name_is(m, "toString");
     case SCR_DYN_NUM:
     case SCR_DYN_BOOL:
       return dyn_name_is(m, "toString") || dyn_num_proto_unimpl(m) || dyn_objproto_knows(m);
@@ -1353,6 +1375,19 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       for (size_t i = 0; i < ins; i++) recv->v.arr.items[start + i] = scr_dyn_retain(args[i + 2]);
       recv->v.arr.len = newLen;
       return out;
+    }
+    if (dyn_name_is(method, "toString")) {
+      /* Array.prototype.toString is join(",") and takes NO argument --
+       * `[1,2,3].toString(16)` is "1,2,3" in Node, the radix ignored. The
+       * DOT spelling reaches this through the dyn method surface now that
+       * a non-literal argument routes here instead of fencing in the
+       * frontend, so the name has to answer rather than refuse. One body:
+       * scr_dyn_to_string's ARR arm, the same one String(a) uses. */
+      ScrStr *s = scr_dyn_to_string(recv, NULL);
+      if (scr_exc_pending()) { if (s) scr_str_release(s); return NULL; }
+      ScrDyn *d = scr_dyn_new_str(s);
+      scr_str_release(s);
+      return d;
     }
     if (dyn_arr_proto_unimpl(method)) {
       dyn_throw_unsupported("Array", method);

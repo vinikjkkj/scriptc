@@ -7837,6 +7837,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4221-void-operator-in-value-position.ts": {
+   "order": [
+    "<repo>/tests/corpus/4221-void-operator-in-value-position.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4222-dyn-tostring-dispatches-on-the-receiver.ts": {
+   "order": [
+    "<repo>/tests/corpus/4222-dyn-tostring-dispatches-on-the-receiver.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4223-union-record-arm-in-a-string-conversion.ts": {
+   "order": [
+    "<repo>/tests/corpus/4223-union-record-arm-in-a-string-conversion.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4224-new-uint8array-over-a-dynamic-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/4224-new-uint8array-over-a-dynamic-value.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/4231-a-class-pinned-const-into-a-construct-signature-field.ts": {
    "order": [
     "<repo>/tests/corpus/4231-a-class-pinned-const-into-a-construct-signature-field.ts"

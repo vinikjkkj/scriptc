@@ -3708,6 +3708,16 @@ export type IrLibFn =
    * anything that is not a live handle — a VOID no-op the emitter drops
    * (only syntactically side-effect-free arguments take this path). */
   | "timers.clearNoop"
+  /** The value of `void e` in VALUE position: JS's void operator yields
+   * `undefined` after evaluating its operand, and the operand's effect
+   * rides the enclosing seqExpr's statement list. This is the void-typed
+   * LEAF that seqExpr's result slot needs — a no-op the emitter drops,
+   * exactly like timers.clearNoop. Typing it `void` rather than
+   * `undefinedT` is what lets every existing consumer work unchanged:
+   * unionWrap already has a VOID-payload rule (evaluate for effects,
+   * produce the interned unit instance), which a bare unitLit result
+   * could not use. */
+  | "js.voidOperand"
   /** process.nextTick(cb, ...args) — the user tick queue. args: [cb
    * (() => void; trailing call arguments ride the timer surface's
    * interned dyn thunk)]. Ticks drain BEFORE promise jobs at every loop
