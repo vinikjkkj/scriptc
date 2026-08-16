@@ -7655,6 +7655,130 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4021-diffie-hellman-callback-form-and-promisify.ts": {
+   "order": [
+    "<repo>/tests/corpus/4021-diffie-hellman-callback-form-and-promisify.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC0001",
+     "message": "Type '(file: string, args?: string[] | undefined, options?: { encoding?: \"utf-8\" | \"utf8\" | undefined; cwd?: string | undefined; env?: { [k: string]: string | undefined; } | undefined; timeout?: number | undefined; maxBuffer?: number | undefined; killSignal?: string | undefined; windowsHide?: boolean | undefined; } | unde...' is not assignable to type 'DiffieHellmanAsync'.\n  Types of parameters 'file' and 'options' are incompatible.\n    Type '{ privateKey: KeyObject; publicKey: KeyObject; }' is not assignable to type 'string'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4021-diffie-hellman-callback-form-and-promisify.ts",
+      "start": 3002,
+      "end": 3019
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(options: { privateKey: KeyObject; publicKey: KeyObject; }, callback: DiffieHellmanCallback) => void' is not assignable to parameter of type '(file: string, args?: string[] | null | undefined, options?: object | undefined) => unknown'.\n  Types of parameters 'options' and 'file' are incompatible.\n    Type 'string' is not assignable to type '{ privateKey: KeyObject; publicKey: KeyObject; }'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4021-diffie-hellman-callback-form-and-promisify.ts",
+      "start": 3052,
+      "end": 3077
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Type '(file: string, args?: string[] | undefined, options?: { encoding?: \"utf-8\" | \"utf8\" | undefined; cwd?: string | undefined; env?: { [k: string]: string | undefined; } | undefined; timeout?: number | undefined; maxBuffer?: number | undefined; killSignal?: string | undefined; windowsHide?: boolean | undefined; } | unde...' is not assignable to type 'DiffieHellmanAsync'.\n  Types of parameters 'file' and 'options' are incompatible.\n    Type '{ privateKey: KeyObject; publicKey: KeyObject; }' is not assignable to type 'string'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4021-diffie-hellman-callback-form-and-promisify.ts",
+      "start": 3687,
+      "end": 3703
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(options: { privateKey: KeyObject; publicKey: KeyObject; }, callback: DiffieHellmanCallback) => void' is not assignable to parameter of type '(file: string, args?: string[] | null | undefined, options?: object | undefined) => unknown'.\n  Types of parameters 'options' and 'file' are incompatible.\n    Type 'string' is not assignable to type '{ privateKey: KeyObject; publicKey: KeyObject; }'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4021-diffie-hellman-callback-form-and-promisify.ts",
+      "start": 3716,
+      "end": 3741
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Expected 1 arguments, but got 2.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4021-diffie-hellman-callback-form-and-promisify.ts",
+      "start": 5220,
+      "end": 5324
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Parameter 'err' implicitly has an 'any' type.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4021-diffie-hellman-callback-form-and-promisify.ts",
+      "start": 5221,
+      "end": 5224
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Parameter 'secret' implicitly has an 'any' type.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4021-diffie-hellman-callback-form-and-promisify.ts",
+      "start": 5226,
+      "end": 5232
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Expected 1 arguments, but got 2.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4021-diffie-hellman-callback-form-and-promisify.ts",
+      "start": 5745,
+      "end": 5783
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Expected 1 arguments, but got 2.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4021-diffie-hellman-callback-form-and-promisify.ts",
+      "start": 7176,
+      "end": 7235
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Parameter '_err' implicitly has an 'any' type.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4021-diffie-hellman-callback-form-and-promisify.ts",
+      "start": 7177,
+      "end": 7181
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Parameter 'secret' implicitly has an 'any' type.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4021-diffie-hellman-callback-form-and-promisify.ts",
+      "start": 7183,
+      "end": 7189
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Type '(file: string, args?: string[] | undefined, options?: { encoding?: \"utf-8\" | \"utf8\" | undefined; cwd?: string | undefined; env?: { [k: string]: string | undefined; } | undefined; timeout?: number | undefined; maxBuffer?: number | undefined; killSignal?: string | undefined; windowsHide?: boolean | undefined; } | unde...' is not assignable to type 'DiffieHellmanAsync'.\n  Types of parameters 'file' and 'options' are incompatible.\n    Type '{ privateKey: KeyObject; publicKey: KeyObject; }' is not assignable to type 'string'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4021-diffie-hellman-callback-form-and-promisify.ts",
+      "start": 7604,
+      "end": 7615
+     }
+    },
+    {
+     "code": "SC0001",
+     "message": "Argument of type '(options: { privateKey: KeyObject; publicKey: KeyObject; }, callback: DiffieHellmanCallback) => void' is not assignable to parameter of type '(file: string, args?: string[] | null | undefined, options?: object | undefined) => unknown'.\n  Types of parameters 'options' and 'file' are incompatible.\n    Type 'string' is not assignable to type '{ privateKey: KeyObject; publicKey: KeyObject; }'.",
+     "loc": {
+      "file": "<repo>/tests/corpus/4021-diffie-hellman-callback-form-and-promisify.ts",
+      "start": 7648,
+      "end": 7673
+     }
+    }
+   ]
+  },
   "<repo>/tests/corpus/403-void-and-params.ts": {
    "order": [
     "<repo>/tests/corpus/403-void-and-params.ts"
