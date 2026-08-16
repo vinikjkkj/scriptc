@@ -7837,6 +7837,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4231-a-class-pinned-const-into-a-construct-signature-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/4231-a-class-pinned-const-into-a-construct-signature-field.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4232-a-construct-thunk-parameter-that-takes-the-width-lift-plan.ts": {
+   "order": [
+    "<repo>/tests/corpus/4232-a-construct-thunk-parameter-that-takes-the-width-lift-plan.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
