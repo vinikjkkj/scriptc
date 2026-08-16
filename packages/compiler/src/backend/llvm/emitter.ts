@@ -755,6 +755,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   // are may-throw (generic pending check). Listener registrations and
   // the client request forms have non-generic shapes — special-cased.
   "net.serverPort": "scr_net_server_port",
+  "net.serverListening": "scr_net_server_listening",
   "net.sockWrite": "scr_net_sock_write_str",
   "net.sockWriteBytes": "scr_net_sock_write_bytes",
   "net.sockEnd": "scr_net_sock_end",
