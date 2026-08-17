@@ -812,6 +812,9 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
       returnType: VOID,
       locals: [],
       captures: [],
+      // CENSUS: `message` arrives from exportDynValue with no `[SCxxxx at
+      // file:line]`, so this refusal is untagged.  Attributed by host name
+      // (`%fnN_dyntrap`) in `scripts/tu-census.mjs`.
       body: [{ kind: "runtimeFence", code: "SC1090", message, loc }],
       loc,
     });
