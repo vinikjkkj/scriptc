@@ -3377,7 +3377,27 @@ const MAP_ITER_METHODS = new Set(["keys", "values", "entries"]);
       ts.isPropertyAccessExpression(call.parent.expression) &&
       call.parent.expression.name.text === "from" &&
       L.isStdlibGlobal(call.parent.expression.expression, "Array");
-    if (!inArraySpread && !inFirstStep && !inArrayFrom) {
+    // The FOURTH immediate drain: the sole argument of a call whose slot is
+    // typed `Iterable<T>`. Such a slot can only be iterated (its one member
+    // is [Symbol.iterator]), and types.ts represents it as an array
+    // snapshot; a sole argument means nothing else evaluates between the
+    // iterator's creation and its drain, so the snapshot is exactly what the
+    // live iterator would have produced. This is `Array.from(m.values())`
+    // one line up with a STRICTLY narrower consumer, and it is what lets
+    // `pickActiveSyncKey(this.keys.values())` compile.
+    const inIterableSoleArg = (() => {
+      const parent = call.parent;
+      if (!ts.isCallExpression(parent)) return false;
+      if (parent.arguments.length !== 1 || parent.arguments[0] !== call) return false;
+      const ctxT = L.checker.getContextualType(call);
+      if (ctxT === undefined) return false;
+      const sym = ctxT.getSymbol();
+      if (sym === undefined || sym.name !== "Iterable") return false;
+      return L.checker
+        .declarationsOf(sym)
+        .some((d) => ts.isInterfaceDeclaration(d) && L.isStdlibFile(d.getSourceFile()));
+    })();
+    if (!inArraySpread && !inFirstStep && !inArrayFrom && !inIterableSoleArg) {
       L.noLowering(
         `.${method}() outside an immediate array spread`,
         call,

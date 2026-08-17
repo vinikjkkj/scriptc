@@ -8077,6 +8077,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4491-iterable-parameter-is-an-array-snapshot.ts": {
+   "order": [
+    "<repo>/tests/corpus/4491-iterable-parameter-is-an-array-snapshot.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/4511-a-unit-literal-nullish-default-keeps-the-null-its-destination-declares.ts": {
    "order": [
     "<repo>/tests/corpus/4511-a-unit-literal-nullish-default-keeps-the-null-its-destination-declares.ts"
