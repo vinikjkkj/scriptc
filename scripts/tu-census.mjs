@@ -120,13 +120,18 @@ const UNTAGGED_REFUSAL_SITES = [
   { re: /export is .* of the compiled program, which cannot cross into 'unknown' yet/, site: "lower-island.ts:815 dynTrapFnValue" },
   { re: /^this function's body has no static lowering$/,           site: "lower-exprs.ts:5845 fenceClosureProbe (fallback msg)" },
   { re: /the 'ws' package's option-bag second argument/,           site: "emit-ws.ts:446 (backend, no loc)" },
-  { re: /the 'ws' package's '(agent|dispatcher)' option/,          site: "emit-ws.ts:446 (backend, no loc)" },
 ];
 // Two untagged constructors lift the refusal into a NAMED function, and the
 // name is a unique template — so the row is attributable even though its
 // message is an arbitrary diagnostic text.  `%fence.fn.N` and `%fnN_dyntrap`
 // mangle `%` to `_x25_` and `.` to `_`.
 const HOST_ATTRIB = [
+  // The stranded dyn func thunk carries SC2009 since block/newvisible (it was
+  // an UNCODED refusal before, and the UNCODED_REFUSAL rule below still
+  // classifies the older TUs so a base measurement stays readable).  Coded
+  // and still BRACKETLESS: the box is interned per SIGNATURE, so it has no
+  // one source location.
+  { re: /^sc_dfs_\d+_thunk$/,       site: "emit-walkers.ts:2077 strandedDynFuncBoxHelper" },
   { re: /^sc_f__x25_fence_fn_\d+$/, site: "lower-exprs.ts:5845 fenceClosureProbe" },
   { re: /^sc_f__x25_fn\d+_dyntrap$/, site: "lower-island.ts:815 dynTrapFnValue" },
   { re: /^sc_wsw_/,                 site: "emit-ws.ts:446 (backend, no loc)" },
@@ -144,9 +149,13 @@ const ABORT_REAL = [
   { re: /^scriptc: TypeError: record has no key '%\.\*s' \(typed '([^']*)'/, what: "keyed read, absent key" },
 ];
 
+// Kept for TUs emitted BEFORE the stranded box took its SC2009 code (every
+// preserved TU in this workspace, and cen-keep's a3 plant): the same emitter,
+// the older uncoded spelling.  A current compiler emits the coded form, which
+// HOST_ATTRIB above attributes by host name instead.
 const UNCODED_REFUSAL = [
   { re: /cannot be called through it \(its parameters have no checked-dynamic form\)/,
-    site: "emit-walkers.ts:2077 strandedDynFuncBoxHelper" },
+    site: "emit-walkers.ts:2077 strandedDynFuncBoxHelper (pre-SC2009 spelling)" },
 ];
 const UNCODED_PARITY = [
   { re: /^a 'data' listener declaring a (Buffer chunk received a string|string chunk received a Buffer)/,
