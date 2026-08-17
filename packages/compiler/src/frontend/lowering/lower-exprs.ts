@@ -6208,6 +6208,256 @@ function literalUnionArmOf(
   return recordArms.find((a) => a.shapeId === only) ?? null;
 }
 
+/** The IDENTITY-ARM union-slot spread — `{ ...src, ...(c ? { k: v } : {}) }`
+ * where the SLOT's record arms ARE the source's record arms (the very same
+ * interned shape ids), which is zapo's
+ * `src/message/addons/link-preview/fetcher.ts:92`
+ * (`WaLinkPreviewThumbnailInput` spread into `WaLinkPreviewThumbnailInput |
+ * undefined`).
+ *
+ * The union-typed-slot fence below refuses this family because "the source's
+ * arm decides which arm the literal builds, and a literal builds one shape".
+ * That is true, and it is exactly why this case has an answer while the
+ * general one does not: when the arms are the IDENTITY map, the arm the
+ * result must build is the arm the source already holds, so nothing has to
+ * be invented — the desugar is a dispatch on the source's own tag where each
+ * branch rebuilds THAT arm's shape and wraps it back at the SAME tag. N
+ * copies of a problem the record-target path has always solved, chained on a
+ * tag test the emitter already emits.
+ *
+ * The gate is arm IDENTITY and nothing weaker, and that is deliberate. It
+ * admits `fetcher.ts:92` and NOTHING else in zapo:
+ * `content.ts:183`, `incoming.ts:397` and `mex-notification.ts:192` are all
+ * `ARMS=disjoint` (their slot arms are DIFFERENT interned shapes — for the
+ * last two, records five fields wider than anything the source holds), so
+ * they keep the fence. Anything looser — pairing arms merely by field NAME —
+ * would also claim `content.ts:183`, which is a separate feature (a per-arm
+ * width coercion) and a separate decision; `SCRIPTC_UNIONSLOT_WHY=1` reports
+ * which relation any site has, and `estado-content3.md` §3.3 prices the
+ * looser rules.
+ *
+ * Preconditions, all of them checked on the CHECKER's mapped types before
+ * anything is lowered, so a decline costs nothing and leaves the fence's own
+ * message standing:
+ *
+ *  - the literal is one PLAIN spread FIRST, then only single-property
+ *    conditional spreads `...(c ? { k: v } : {})` and plain named
+ *    properties, each name contributed exactly once;
+ *  - every arm of the source union is a RECORD (a unit arm would mean the
+ *    spread may copy nothing, and then the result's arm is NOT the source's);
+ *  - the source's record arms and the slot's are the same shape ids at the
+ *    same count;
+ *  - every overridden name is declared by EVERY source arm (a name missing
+ *    from one arm would be DROPPED there — divergence 36's stance for a
+ *    plain spread, but here it would silently change which fields the result
+ *    carries per arm, and this rule is not the place to decide that);
+ *  - no arm carries accessor slots or an index signature (the field-copy
+ *    desugar cannot model getter calls or runtime overflow keys);
+ *  - every override's CONDITION is side-effect-free. Conditions are
+ *    re-emitted once per arm and the record literal evaluates its fields in
+ *    the SHAPE's canonical order, not the literal's, so a condition whose
+ *    evaluation is observable could be seen at a position JS never puts it.
+ *    The override VALUES need no such test: exactly one arm branch runs, and
+ *    inside it the value sits behind its own condition, so it evaluates
+ *    exactly when and as often as JS evaluates it.
+ *
+ * Returns null when any of that fails — the caller's fence then speaks. */
+function lowerIdentityArmUnionSpread(
+  L: Lowerer,
+  expr: ts.ObjectLiteralExpression,
+  ctxUnion: IrType & { kind: "union" },
+  loc: SrcLoc,
+): IrExpr | null {
+  /** Why this site was NOT closed, under the same dial as the relation
+   * report. A rule that silently declines is a rule nobody can measure. */
+  const no = (why: string): null => {
+    if (process.env["SCRIPTC_UNIONSLOT_WHY"] !== undefined) {
+      console.error(`UNIONSLOT ${loc.file}@${String(loc.start)} NOT-CLOSED=${why}`);
+    }
+    return null;
+  };
+  const props = expr.properties;
+  const head = props[0];
+  if (!head || !ts.isSpreadAssignment(head)) return no("head-not-a-spread");
+  if (conditionalSpreadOf(head.expression) !== null) return no("head-is-conditional");
+  type Override =
+    | { kind: "cond"; node: ts.SpreadAssignment; cs: { cond: ts.Expression; props: CondSpreadProp[]; whenTrue: boolean }; name: string }
+    | { kind: "plain"; node: ts.PropertyAssignment | ts.ShorthandPropertyAssignment; name: string };
+  const overrides: Override[] = [];
+  for (const p of props.slice(1)) {
+    if (ts.isSpreadAssignment(p)) {
+      const cs = conditionalSpreadOf(p.expression);
+      if (cs === null || cs === "unsupported" || cs.props.length !== 1) return no("later-spread-not-a-single-prop-conditional");
+      overrides.push({ kind: "cond", node: p, cs, name: cs.props[0]!.name.text });
+      continue;
+    }
+    if (!ts.isPropertyAssignment(p) && !ts.isShorthandPropertyAssignment(p)) return no("later-prop-form");
+    if (!(ts.isIdentifier(p.name) || ts.isStringLiteral(p.name))) return no("later-prop-name");
+    overrides.push({ kind: "plain", node: p, name: p.name.text });
+  }
+  const names = overrides.map((o) => o.name);
+  if (new Set(names).size !== names.length) return no("duplicate-override-name");
+
+  const srcNode = head.expression;
+  const st = L.mapTypeOf(L.typeOf(srcNode));
+  if (st?.kind !== "union") return no(`src-not-union:${st?.kind ?? "none"}`);
+  const sdef = L.unions.get(st.unionId);
+  const cdef = L.unions.get(ctxUnion.unionId);
+  if (!sdef || !cdef) return no("union-def-missing");
+  if (!sdef.arms.every((a) => a.kind === "record")) return no("src-has-a-non-record-arm");
+  const srcRecIds = sdef.arms.map((a) => (a as IrType & { kind: "record" }).shapeId);
+  if (srcRecIds.length < 2) return no("src-under-two-arms");
+  const ctxRecIds = cdef.arms.filter((a) => a.kind === "record").map((a) => (a as IrType & { kind: "record" }).shapeId);
+  const sSorted = [...srcRecIds].sort();
+  const cSorted = [...ctxRecIds].sort();
+  if (sSorted.length !== cSorted.length || !sSorted.every((i, k) => i === cSorted[k])) return no(`arms-not-identity:[${sSorted.join(",")}]vs[${cSorted.join(",")}]`);
+
+  const armShapes = srcRecIds.map((id) => L.shapes.get(id));
+  if (armShapes.some((s) => s === undefined)) return no("arm-shape-missing");
+  for (const s of armShapes) {
+    if (!s || s.indexValue || s.tuple || shapeHasAccessorSlots(s)) return no("arm-shape-index-tuple-or-accessor");
+  }
+  // Every override name declared by EVERY arm.
+  for (const n of names) {
+    if (!armShapes.every((s) => s!.fields.some((f) => f.name === n))) return no(`override-not-in-every-arm:${n}`);
+  }
+
+  // Committed from here on: the source lowers ONCE into a hidden local at
+  // the position the spread occupies (it is the first property, so that IS
+  // its position), and every arm branch re-READS that local.
+  const srcLowered = L.lowerExpr(srcNode);
+  if (srcLowered.type.kind !== "union") return no(`lowered-src-not-union:${srcLowered.type.kind}`);
+  const srcUnionId = srcLowered.type.unionId;
+  // The union id the emitted READS carry can be a DIFFERENT interning of the
+  // same declared type than `mapTypeOf` gave (lower-exprs' own note at the
+  // record-target union spread records the validator ICE that causes:
+  // "unionIsTag operand: expected union:u8, got union:u6"). Everything below
+  // — arm list, tags, tests — comes from the id the reads actually have, and
+  // if THAT id is not the same identity relation the fence still speaks.
+  //
+  // The lowered read can also be WIDER than the checker's view: at zapo's
+  // `fetcher.ts:92` the source is a parameter-like binding narrowed by an
+  // enclosing `!== undefined`, and the READ still carries the declared
+  // `Thumb | undefined` union while the checker has already excluded the unit
+  // arm. So the unit arms of the LOWERED union are tolerated — but only
+  // because the CHECKER's own view of this same source (`sdef`, tested above)
+  // has none of them, which is the trust-the-checker precondition
+  // `unionNarrow` is documented on. Every non-record lowered arm must be a
+  // UNIT: anything else (a dyn box, an array arm) is a value the tag chain
+  // would silently mis-route.
+  const ldef = L.unions.get(srcUnionId);
+  if (!ldef) return no("lowered-src-union-def-missing");
+  if (!ldef.arms.every((a) => a.kind === "record" || isUnitType(a))) return no("lowered-src-has-a-non-record-non-unit-arm");
+  /** The lowered union's record arms, each with the TAG it actually carries
+   * there — never the index into a record-only list, which is what a unit arm
+   * in the middle would make of it. */
+  const loweredArms: { tag: number; shapeId: string }[] = [];
+  ldef.arms.forEach((a, tag) => {
+    if (a.kind === "record") loweredArms.push({ tag, shapeId: a.shapeId });
+  });
+  const lSorted = loweredArms.map((a) => a.shapeId).sort();
+  if (lSorted.length !== cSorted.length || !lSorted.every((i, k) => i === cSorted[k])) return no(`lowered-arms-not-identity:[${lSorted.join(",")}]vs[${cSorted.join(",")}]`);
+
+  const slot = L.declareHiddenLocal("%uspread", srcLowered.type);
+  const srcRef = (): IrExpr => ({ kind: "varRef", localId: slot.id, type: srcLowered.type, loc });
+
+  /** One override's lowered pieces, built ONCE and re-emitted per arm: only
+   * one arm branch runs, so a shared subtree is evaluated exactly once. */
+  const lowered = new Map<string, { cond: IrExpr | null; whenTrue: boolean; value: IrExpr; valueNode: ts.Node }>();
+  for (const ov of overrides) {
+    if (ov.kind === "cond") {
+      const csProp = ov.cs.props[0]!;
+      const cond = L.lowerCondition(ov.cs.cond);
+      if (!pureCondExpr(cond)) return no(`condition-not-pure:${ov.name}:${cond.kind}`);
+      const valueNode: ts.Node = ts.isPropertyAssignment(csProp) ? csProp.initializer : csProp;
+      const value = ts.isPropertyAssignment(csProp)
+        ? L.lowerExpr(csProp.initializer)
+        : L.lowerShorthandValue(csProp);
+      lowered.set(ov.name, { cond, whenTrue: ov.cs.whenTrue, value, valueNode });
+      continue;
+    }
+    const valueNode: ts.Node = ts.isPropertyAssignment(ov.node) ? ov.node.initializer : ov.node;
+    const value = ts.isPropertyAssignment(ov.node)
+      ? L.lowerExpr(ov.node.initializer)
+      : L.lowerShorthandValue(ov.node);
+    lowered.set(ov.name, { cond: null, whenTrue: true, value, valueNode });
+  }
+
+  /** The arm branch: rebuild THIS arm's shape field by field out of the
+   * narrowed source, with the overridden names taking their own value (or,
+   * for a conditional spread, the source's field when the condition is
+   * false — JS's last-write-wins with an empty arm leaves the earlier
+   * contributor standing), and wrap it back into the slot at the arm the
+   * source itself holds. */
+  const armValue = (ai: number): IrExpr => {
+    const shapeId = loweredArms[ai]!.shapeId;
+    const srcTag = loweredArms[ai]!.tag;
+    const shape = L.shapes.get(shapeId);
+    if (!shape) throw new Error(`lowerer bug: identity-arm spread of unknown shape ${shapeId}`);
+    const armType: IrType = { kind: "record", shapeId };
+    const narrowed = (): IrExpr => ({ kind: "unionNarrow", unionId: srcUnionId, tag: srcTag, value: srcRef(), type: armType, loc });
+    const fields = shape.fields.map((f) => {
+      const base: IrExpr = { kind: "recordGet", obj: narrowed(), shapeId, field: f.name, type: f.type, loc };
+      const ov = lowered.get(f.name);
+      if (!ov) return { name: f.name, value: base };
+      let v = L.coerceInto(ov.valueNode, ov.value, f.type);
+      if (!typeEquals(v.type, f.type)) L.badType(ov.valueNode, L.typeOf(ov.valueNode));
+      if (ov.cond === null) return { name: f.name, value: v };
+      v = {
+        kind: "ternary",
+        cond: ov.cond,
+        then: ov.whenTrue ? v : base,
+        else_: ov.whenTrue ? base : v,
+        type: f.type,
+        loc,
+      };
+      return { name: f.name, value: v };
+    });
+    const ctxTag = cdef.arms.findIndex((a) => a.kind === "record" && a.shapeId === shapeId);
+    if (ctxTag < 0) throw new Error(`lowerer bug: identity-arm spread arm ${shapeId} has no slot tag`);
+    return {
+      kind: "unionWrap",
+      unionId: ctxUnion.unionId,
+      tag: ctxTag,
+      value: { kind: "recordLit", fields, type: armType, loc },
+      type: ctxUnion,
+      loc,
+    };
+  };
+
+  // The LAST record arm needs no tag test: the CHECKER says every arm this
+  // source can hold is one of these records, so they are exhaustive and a
+  // final `else` testing its own tag would be an unreachable branch the
+  // emitter would still have to give a value. (This is the one place the rule
+  // trusts the checker, and it is the same trust `unionNarrow` itself rests
+  // on — the lowered union's unit arms are arms tsc has already excluded.)
+  let chain = armValue(loweredArms.length - 1);
+  for (let ai = loweredArms.length - 2; ai >= 0; ai--) {
+    chain = {
+      kind: "ternary",
+      cond: { kind: "unionIsTag", unionId: srcUnionId, tag: loweredArms[ai]!.tag, negated: false, value: srcRef(), type: BOOL, loc },
+      then: armValue(ai),
+      else_: chain,
+      type: ctxUnion,
+      loc,
+    };
+  }
+  if (process.env["SCRIPTC_UNIONSLOT_WHY"] !== undefined) {
+    console.error(
+      `UNIONSLOT ${loc.file}@${String(loc.start)} CLOSED-BY=identity-arm` +
+        ` arms=${String(loweredArms.length)} srcUnion=${srcUnionId} slotUnion=${ctxUnion.unionId}` +
+        ` overrides=[${names.join(",")}]`,
+    );
+  }
+  return {
+    kind: "seqExpr",
+    stmts: [{ kind: "varDecl", localId: slot.id, init: srcLowered, loc }],
+    result: chain,
+    type: ctxUnion,
+    loc,
+  };
+}
+
 export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression): IrExpr {
     const loc = locOf(expr);
     // A literal the LOWERING marked as a dyn object (the property-
@@ -6547,6 +6797,13 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // source when the TARGET shape is known); badType keeps every other
     // literal unchanged.
     if ((!mapped || mapped.kind !== "record") && ctxUnion) {
+      // ... unless the slot's record arms ARE the source's (the identity arm
+      // relation), where the arm the result must build is the arm the source
+      // already holds and the dispatch has an answer. Placed one step before
+      // the fence so it can only turn a refusal into a build: every literal
+      // that reaches it was about to be refused.
+      const identity = lowerIdentityArmUnionSpread(L, expr, ctxUnion, loc);
+      if (identity) return identity;
       for (const prop of expr.properties) {
         if (!ts.isSpreadAssignment(prop)) continue;
         if (conditionalSpreadOf(prop.expression)) continue;
