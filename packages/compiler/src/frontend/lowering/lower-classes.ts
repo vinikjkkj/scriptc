@@ -6007,9 +6007,14 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             ts.isCallExpression(expr.parent.parent) &&
             expr.parent.parent.expression === expr.parent &&
             expr.parent.parent.arguments.length === 1;
+          // The prefix-fill proof is asked LAST on purpose: it is the only
+          // disjunct whose instrument is meant to read "sites that would have
+          // fenced without me", so it must not run for an element kind that
+          // already carries an absent value.
           const absent =
             filledWhole || fullFillLoopFollows(expr) ||
-            (elem.kind === "union" ? L.wrappedUndefined(elem, loc) !== null : isRefCounted(elem));
+            (elem.kind === "union" ? L.wrappedUndefined(elem, loc) !== null : isRefCounted(elem)) ||
+            prefixFillTruncateFollows(expr);
           if (!absent) {
             // Scalars have no absent value that isn't a LIE on read (0
             // where Node says undefined) -- the Array.from fence's wording.
@@ -7091,6 +7096,398 @@ function newArrayFillElemType(L: Lowerer, expr: ts.NewExpression): (IrType & { k
  * "nothing changed" and "the branch never ran" are otherwise the same
  * observation. */
 let fullFillLoopProofs = 0;
+
+/* ── the RESERVE / PREFIX-FILL / TRUNCATE idiom ───────────────────────────
+ *
+ * The counting-loop proof above answers "every slot is written". This one
+ * answers the OTHER way a program keeps a scalar hole from ever being read:
+ * it reserves an upper bound, fills a PREFIX under its own counter, and then
+ * throws the unwritten tail away with `a.length = counter`.
+ *
+ *   const prepareTargetIndices = new Array<number>(missingIndices.length)
+ *   const preparePromises      = new Array<Promise<...>>(missingIndices.length)
+ *   let prepareCount = 0
+ *   const missingBundleTargets: { jid: string; reason: string }[] = []
+ *   for (let index = 0; index < missingIndices.length; index += 1) {
+ *     ...
+ *     if (!batchResult?.bundle) { missingBundleTargets.push(...); continue }
+ *     ...
+ *     prepareTargetIndices[prepareCount] = targetIndex
+ *     preparePromises[prepareCount]      = ...
+ *     prepareCount += 1
+ *   }
+ *   if (prepareCount === 0) { return collectResolvedTargets() }
+ *   prepareTargetIndices.length = prepareCount
+ *
+ * That is zapo's `src/signal/session/resolver.ts` verbatim, and the reason it
+ * needs its own proof is that the counting-loop proof cannot see it: the
+ * writes are indexed by the COUNTER and not by the loop variable, and the
+ * body's `continue` is the whole point rather than a reason to decline.
+ *
+ * The two sites it unblocks are a PAIR and are proven together on purpose --
+ * `new Array<number>(N)` at the reserve and `a.length = c` at the truncation
+ * are the same fact stated twice, and admitting either alone would leave a
+ * readable scalar hole. Both entry points below run THIS function, and both
+ * require it to name the very node they are lowering.
+ *
+ * The invariant, and where each clause of the proof buys it:
+ *
+ *   I.  Every slot in [0, c) has been written.
+ *       `c` starts at 0 (C2) and its ONLY mutation is the `c += 1` that is
+ *       the LAST statement of the loop body (C5, C6), reached only by falling
+ *       out of the bottom of the body, which is only possible after the
+ *       straight-line run of `a[c] = ...` writes that precedes it (C7). So
+ *       the slot the counter is about to leave behind was written on that
+ *       same pass. A `continue` above the first write abandons the iteration
+ *       WITHOUT advancing c, which preserves I rather than breaking it.
+ *
+ *   II. c <= N, so the write index is always in range and the truncation is
+ *       always a SHRINK.
+ *       The loop is the counting form over the SAME length expression (C4),
+ *       its variable is never reassigned in the body (C8), and the root of
+ *       that length expression is never mutated between the reserve and the
+ *       truncation (C3) -- so the trip count is exactly N and c advances at
+ *       most once per trip. At the write in trip k, c <= k <= N-1.
+ *
+ *   III. No hole is READ before the truncation.
+ *       `a` is mentioned nowhere between the reserve and the loop, nowhere in
+ *       the loop but as the receiver of those writes, and nowhere between the
+ *       loop and the truncation (C1, C7, C9). After the truncation the array
+ *       has length c and, by I, no hole at all.
+ *
+ * Anything at all outside that shape DECLINES and keeps both fences. A
+ * decline costs a diagnostic that was already there; a wrong admit costs a
+ * scalar 0 read where Node reads undefined, which is the wrong-answer shape
+ * this whole gate exists to prevent. */
+
+/** `<ident>[<ident>] = rhs` as a top-level statement: the prefix write. */
+function prefixWriteOf(s: ts.Statement, idxName: string): ts.BinaryExpression | null {
+  if (!ts.isExpressionStatement(s)) return null;
+  const e = s.expression;
+  if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return null;
+  if (!ts.isElementAccessExpression(e.left) || e.left.questionDotToken) return null;
+  if (!ts.isIdentifier(e.left.expression)) return null;
+  if (!ts.isIdentifier(e.left.argumentExpression) || e.left.argumentExpression.text !== idxName) return null;
+  return e;
+}
+
+/** `c += 1;` / `c++;` as a statement -- the counter tick, and the name it
+ * ticks. Prefix `++c` and `c = c + 1` are equally sound and equally declined:
+ * the narrower the spelling the smaller the surface, and a decline is free. */
+function counterTickName(s: ts.Statement): string | null {
+  if (!ts.isExpressionStatement(s)) return null;
+  const e = s.expression;
+  if (ts.isPostfixUnaryExpression(e) && e.operator === ts.SyntaxKind.PlusPlusToken && ts.isIdentifier(e.operand)) {
+    return e.operand.text;
+  }
+  if (
+    ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.PlusEqualsToken &&
+    ts.isIdentifier(e.left) && e.right.getText() === "1"
+  ) {
+    return e.left.text;
+  }
+  return null;
+}
+
+/** `let <name> = 0;` as a single-declaration statement. */
+function isLetZeroDecl(s: ts.Statement, name: string): boolean {
+  if (!ts.isVariableStatement(s)) return false;
+  const list = s.declarationList;
+  if (list.declarations.length !== 1) return false;
+  if ((list.flags & ts.NodeFlags.Let) === 0) return false;
+  const d = list.declarations[0]!;
+  return (
+    ts.isIdentifier(d.name) && d.name.text === name &&
+    d.initializer !== undefined && d.initializer.kind === ts.SyntaxKind.NumericLiteral &&
+    d.initializer.getText() === "0"
+  );
+}
+
+/** Every REFERENCE to `name` under `node` -- the same "a property NAME binds
+ * nothing" rule mentionsIdentifier uses, but handing back the nodes so the
+ * caller can say which positions it will accept. */
+function referencesTo(node: ts.Node, name: string): ts.Identifier[] {
+  const out: ts.Identifier[] = [];
+  const walk = (n: ts.Node): void => {
+    if (ts.isPropertyAccessExpression(n)) {
+      walk(n.expression);
+      return;
+    }
+    if (ts.isIdentifier(n)) {
+      if (n.text === name) out.push(n);
+      return;
+    }
+    ts.forEachChild(n, walk);
+  };
+  walk(node);
+  return out;
+}
+
+/** Is this reference the target of a write -- an assignment's left-hand side,
+ * or the operand of `++`/`--`? Element and property paths rooted at it count:
+ * `a[i] = v` and `a.f = v` both mutate what `a` names. */
+function isWriteTarget(id: ts.Identifier): boolean {
+  let n: ts.Node = id;
+  let p = n.parent;
+  while (
+    p !== undefined &&
+    ((ts.isPropertyAccessExpression(p) && p.expression === n) ||
+      (ts.isElementAccessExpression(p) && p.expression === n))
+  ) {
+    n = p;
+    p = n.parent;
+  }
+  if (p === undefined) return false;
+  if (ts.isBinaryExpression(p) && p.left === n) {
+    const k = p.operatorToken.kind;
+    return k === ts.SyntaxKind.EqualsToken || COMPOUND_ASSIGN_KINDS.has(k);
+  }
+  return (
+    (ts.isPostfixUnaryExpression(p) || ts.isPrefixUnaryExpression(p)) &&
+    (p.operator === ts.SyntaxKind.PlusPlusToken || p.operator === ts.SyntaxKind.MinusMinusToken)
+  );
+}
+
+const COMPOUND_ASSIGN_KINDS: ReadonlySet<ts.SyntaxKind> = new Set([
+  ts.SyntaxKind.PlusEqualsToken, ts.SyntaxKind.MinusEqualsToken, ts.SyntaxKind.AsteriskEqualsToken,
+  ts.SyntaxKind.SlashEqualsToken, ts.SyntaxKind.PercentEqualsToken, ts.SyntaxKind.AsteriskAsteriskEqualsToken,
+  ts.SyntaxKind.LessThanLessThanEqualsToken, ts.SyntaxKind.GreaterThanGreaterThanEqualsToken,
+  ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken, ts.SyntaxKind.AmpersandEqualsToken,
+  ts.SyntaxKind.BarEqualsToken, ts.SyntaxKind.CaretEqualsToken, ts.SyntaxKind.AmpersandAmpersandEqualsToken,
+  ts.SyntaxKind.BarBarEqualsToken, ts.SyntaxKind.QuestionQuestionEqualsToken,
+]);
+
+/** Any assignment to `name` (or through it) under `node`. */
+function assignsIdentifier(node: ts.Node, name: string): boolean {
+  return referencesTo(node, name).some(isWriteTarget);
+}
+
+/** Could `name`'s VALUE change under `node`? Written to, incremented, handed
+ * to a method of its own (`xs.push(...)`), or simply used as a bare value --
+ * the last one because a reference that escapes can be mutated out of sight.
+ * A pure read through a member or an index (`xs.length`, `xs[i]`) is not a
+ * mutation, and those are the two spellings the bound is read through. */
+function mayMutateIdentifier(node: ts.Node, name: string): boolean {
+  if (name === "") return false;
+  for (const id of referencesTo(node, name)) {
+    if (isWriteTarget(id)) return true;
+    const p = id.parent;
+    if (p !== undefined && ts.isPropertyAccessExpression(p) && p.expression === id) {
+      const gp = p.parent;
+      if (gp !== undefined && ts.isCallExpression(gp) && gp.expression === p) return true; // xs.push(...)
+      continue; // xs.length
+    }
+    if (p !== undefined && ts.isElementAccessExpression(p) && p.expression === id) continue; // xs[i]
+    return true; // the bare reference escapes
+  }
+  return false;
+}
+
+/** The identifier whose value the bound depends on: `n` for `n`, `xs` for
+ * `xs.length`, and "" for a numeric literal (nothing to protect). Anything
+ * else has no root this proof can watch, and declines. */
+function boundRootOf(lenArg: ts.Expression): string | null {
+  if (lenArg.kind === ts.SyntaxKind.NumericLiteral) return "";
+  if (ts.isIdentifier(lenArg)) return lenArg.text;
+  if (
+    ts.isPropertyAccessExpression(lenArg) && !lenArg.questionDotToken &&
+    lenArg.name.text === "length" && ts.isIdentifier(lenArg.expression)
+  ) {
+    return lenArg.expression.text;
+  }
+  return null;
+}
+
+/** The proof. Answers the `a.length = c` STATEMENT that truncates the array
+ * `expr` reserves, or null. Naming the statement is what lets the two entry
+ * points agree: the `.length` site asks "is the statement I am lowering the
+ * one this proof named", so neither site can be admitted by a proof about a
+ * different statement. */
+function prefixFillTruncationOf(expr: ts.NewExpression): ts.ExpressionStatement | null {
+  const lenArg = expr.arguments?.[0];
+  if (!lenArg || (expr.arguments?.length ?? 0) !== 1) return null;
+
+  // C1: `const a = new Array(N);` alone in its statement, in a statement list.
+  const decl = expr.parent;
+  if (!ts.isVariableDeclaration(decl) || !ts.isIdentifier(decl.name)) return null;
+  if (decl.initializer !== expr) return null;
+  const list = decl.parent;
+  if (!ts.isVariableDeclarationList(list) || list.declarations.length !== 1) return null;
+  if ((list.flags & ts.NodeFlags.Const) === 0) return null;
+  const stmt = list.parent;
+  if (!ts.isVariableStatement(stmt)) return null;
+  const owner = stmt.parent as ts.Node & { statements?: readonly ts.Statement[] };
+  const stmts = owner.statements;
+  if (!stmts) return null;
+  const at = stmts.indexOf(stmt);
+  if (at < 0) return null;
+  const aName = decl.name.text;
+
+  // C3 (first half): the bound must have a root this proof can watch.
+  const nRoot = boundRootOf(lenArg);
+  if (nRoot === null || nRoot === aName) return null;
+
+  // C1 (second half): the first `for` after the reserve is the fill loop, and
+  // nothing before it touches the array or the bound.
+  let loopIdx = -1;
+  for (let k = at + 1; k < stmts.length; k++) {
+    const s = stmts[k]!;
+    if (ts.isForStatement(s)) { loopIdx = k; break; }
+    if (mentionsIdentifier(s, aName)) return null;
+    if (mayMutateIdentifier(s, nRoot)) return null;
+  }
+  if (loopIdx < 0) return null;
+  const loop = stmts[loopIdx] as ts.ForStatement;
+
+  // C4: `for (let i = 0; i < <the SAME length expression>; i += 1 | i++)`.
+  const init = loop.initializer;
+  if (!init || !ts.isVariableDeclarationList(init) || init.declarations.length !== 1) return null;
+  const iDecl = init.declarations[0]!;
+  if (!ts.isIdentifier(iDecl.name) || !iDecl.initializer) return null;
+  if (iDecl.initializer.kind !== ts.SyntaxKind.NumericLiteral || iDecl.initializer.getText() !== "0") return null;
+  const iName = iDecl.name.text;
+  const cond = loop.condition;
+  if (
+    !cond || !ts.isBinaryExpression(cond) ||
+    cond.operatorToken.kind !== ts.SyntaxKind.LessThanToken ||
+    !ts.isIdentifier(cond.left) || cond.left.text !== iName ||
+    cond.right.getText() !== lenArg.getText()
+  ) {
+    return null;
+  }
+  const inc = loop.incrementor;
+  if (!inc) return null;
+  const byOne =
+    (ts.isPostfixUnaryExpression(inc) && inc.operator === ts.SyntaxKind.PlusPlusToken &&
+      ts.isIdentifier(inc.operand) && inc.operand.text === iName) ||
+    (ts.isBinaryExpression(inc) && inc.operatorToken.kind === ts.SyntaxKind.PlusEqualsToken &&
+      ts.isIdentifier(inc.left) && inc.left.text === iName && inc.right.getText() === "1");
+  if (!byOne) return null;
+
+  // C5: the body is a block whose LAST statement is the counter tick.
+  const body = loop.statement;
+  if (!ts.isBlock(body)) return null;
+  const bodyStmts = body.statements;
+  if (bodyStmts.length < 2) return null;
+  const tick = bodyStmts[bodyStmts.length - 1]!;
+  const cName = counterTickName(tick);
+  if (cName === null || cName === aName || cName === iName || cName === nRoot) return null;
+
+  // C2: `let c = 0` between the reserve and the loop, unassigned after it.
+  let cDeclIdx = -1;
+  for (let k = at + 1; k < loopIdx; k++) {
+    if (isLetZeroDecl(stmts[k]!, cName)) { cDeclIdx = k; break; }
+  }
+  if (cDeclIdx < 0) return null;
+  for (let k = cDeclIdx + 1; k < loopIdx; k++) if (assignsIdentifier(stmts[k]!, cName)) return null;
+
+  // C7: the array is mentioned in the body only as `a[c] = rhs`, those writes
+  // are top-level statements, and from the first of them to the tick the flow
+  // is straight-line -- no jump can leave the counter behind un-ticked.
+  const aRefs = referencesTo(body, aName);
+  if (aRefs.length === 0) return null;
+  let firstWriteAt = -1;
+  let ownWrites = 0;
+  for (let k = 0; k < bodyStmts.length - 1; k++) {
+    const w = prefixWriteOf(bodyStmts[k]!, cName);
+    if (w === null) continue;
+    if (!ts.isIdentifier((w.left as ts.ElementAccessExpression).expression)) continue;
+    if (((w.left as ts.ElementAccessExpression).expression as ts.Identifier).text !== aName) continue;
+    if (mentionsIdentifier(w.right, aName) || mentionsIdentifier(w.right, cName)) return null;
+    ownWrites++;
+    if (firstWriteAt < 0) firstWriteAt = k;
+  }
+  if (ownWrites === 0 || ownWrites !== aRefs.length) return null;
+  for (let k = firstWriteAt; k < bodyStmts.length - 1; k++) {
+    const s = bodyStmts[k]!;
+    if (prefixWriteOf(s, cName) !== null) continue; // a[c]= / other[c]= , both fine
+    if (mentionsIdentifier(s, aName) || assignsIdentifier(s, cName) || hasLoopJump(s)) return null;
+  }
+  // C6: the tick is the counter's only mutation anywhere in the body.
+  for (let k = 0; k < bodyStmts.length - 1; k++) if (assignsIdentifier(bodyStmts[k]!, cName)) return null;
+  // C8 + C3 (second half): the trip count is what the header says it is.
+  if (assignsIdentifier(body, iName)) return null;
+  if (mayMutateIdentifier(body, nRoot)) return null;
+
+  // C9: the first thing after the loop that touches the array is the
+  // truncation, and nothing before it moves the counter.
+  for (let k = loopIdx + 1; k < stmts.length; k++) {
+    const s = stmts[k]!;
+    if (!mentionsIdentifier(s, aName)) {
+      if (assignsIdentifier(s, cName)) return null;
+      continue;
+    }
+    if (!ts.isExpressionStatement(s)) return null;
+    const e = s.expression;
+    if (
+      ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isPropertyAccessExpression(e.left) && !e.left.questionDotToken &&
+      e.left.name.text === "length" && ts.isIdentifier(e.left.expression) &&
+      e.left.expression.text === aName &&
+      ts.isIdentifier(e.right) && e.right.text === cName
+    ) {
+      return s;
+    }
+    return null;
+  }
+  return null;
+}
+
+/** SCRIPTC_PREFIXFILL_WHY probe: which RESERVE sites the prefix-fill proof
+ * admitted, and how many.
+ *
+ * Deduplicated by NODE, and that is not tidiness -- MEASURED: the lowerer
+ * asks each site twice (a probe pass and the real one), so a bare counter
+ * reported one idiom as two and the first run of this instrument printed 4
+ * lines for 2 arrays. An instrument whose number has to be halved before it
+ * can be read is an instrument that will be misread. */
+let prefixFillProofs = 0;
+const prefixFillSeen = new WeakSet<ts.NewExpression>();
+function prefixFillTruncateFollows(expr: ts.NewExpression): boolean {
+  const t = prefixFillTruncationOf(expr);
+  if (t === null) return false;
+  if (prefixFillSeen.has(expr)) return true;
+  prefixFillSeen.add(expr);
+  prefixFillProofs++;
+  if (process.env["SCRIPTC_PREFIXFILL_WHY"] !== undefined) {
+    const sf = expr.getSourceFile();
+    const decl = expr.parent;
+    const aName = ts.isVariableDeclaration(decl) && ts.isIdentifier(decl.name) ? decl.name.text : "?";
+    console.error(
+      `[prefixfillwhy] #${prefixFillProofs} ${sf.fileName}:` +
+        `${sf.getLineAndCharacterOfPosition(expr.getStart()).line + 1} ${aName} ` +
+        `truncated at :${sf.getLineAndCharacterOfPosition(t.getStart()).line + 1}`,
+    );
+  }
+  return true;
+}
+
+/** The truncation half, for lower-stmts: is `stmt` the `a.length = c` a
+ * prefix-fill proof named?
+ *
+ * The array's declaration is found LEXICALLY, by scanning back through the
+ * very statement list the proof requires it to share -- so no checker query,
+ * and no chance of resolving to an outer binding a nearer `const` shadows. */
+export function isProvenPrefixTruncation(stmt: ts.Statement, arrName: string): boolean {
+  const owner = stmt.parent as ts.Node & { statements?: readonly ts.Statement[] };
+  const stmts = owner.statements;
+  if (!stmts) return false;
+  const at = stmts.indexOf(stmt);
+  if (at < 0) return false;
+  for (let k = at - 1; k >= 0; k--) {
+    const s = stmts[k]!;
+    if (!ts.isVariableStatement(s)) continue;
+    const list = s.declarationList;
+    if (list.declarations.length !== 1) continue;
+    const d = list.declarations[0]!;
+    if (!ts.isIdentifier(d.name) || d.name.text !== arrName) continue;
+    const initExpr = d.initializer;
+    if (initExpr === undefined || !ts.isNewExpression(initExpr)) return false;
+    if (!ts.isIdentifier(initExpr.expression) || initExpr.expression.text !== "Array") return false;
+    return prefixFillTruncationOf(initExpr) === stmt;
+  }
+  return false;
+}
 
 /** Any reference to `name` anywhere under `node`.
  *
