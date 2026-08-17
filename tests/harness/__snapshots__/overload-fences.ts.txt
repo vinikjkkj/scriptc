@@ -1,4 +1,4 @@
-overload-fences.ts:12:13 - error SC1090: calls selecting an overload signature of a generic function (only the implementation signature monomorphizes) is not supported yet
+overload-fences.ts:12:13 - error SC1090: calls selecting an overload signature of a generic function whose type parameters have no mappable constraint is not supported yet
 
   11 | }
   12 | console.log(twice("q").length);
@@ -13,12 +13,3 @@ overload-fences.ts:22:7 - error SC2007: values of type '{ (x: "a"): string; (x: 
   23 | console.log(typeof asValue);
 
   hint: annotate the slot with the ONE signature the program actually calls (e.g. '(x: number) => string'), or wrap the overloaded function in a single-signature arrow
-
-overload-fences.ts:23:20 - error SC2004: uses of 'asValue' inherit the blocker on its declaration
-
-  22 | const asValue = pick;
-  23 | console.log(typeof asValue);
-     |                    ^~~~~~~
-  24 | 
-
-  hint: the declaration of 'asValue' did not compile — fix the diagnostic reported there and these sites clear with it
