@@ -4272,14 +4272,40 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       }
     }
     const rest = def.arms.filter((a) => !isUnitType(a));
-    if (rest.length !== 1) {
+    // The guard proves ONE thing — "not nullish" — and when the receiver
+    // carries more than one non-unit arm, what survives it is a SUB-UNION.
+    // The chain then binds the RECEIVER BOX itself (tag intact) instead of
+    // a peeked payload, types chainRecv as that same union, and hands the
+    // body the checker's non-nullable type. The body's own union-property
+    // read then does the narrowing it already knows how to do: it sees a
+    // value typed by the wide union and a checker type that is a strict
+    // sub-union, and re-tags through narrowedRetagHelper — the identical
+    // route a control-flow-narrowed union receiver takes today
+    // (lowerUnionProperty's `value.type.unionId !== receiverIr.unionId`
+    // retry). Nothing here decides that the read is SERVABLE: if no arm
+    // answers the member, that function raises its own fence, so this
+    // admits a shape rather than forcing an answer for it.
+    //
+    // Deliberately narrow, three ways. A single-STEP member READ only
+    // (`a?.b`, the whole chain): a `f?.()` callee has no member dispatch
+    // to re-enter, an `a?.[i]` and an `a?.m()` reach lowerings whose
+    // union-receiver behaviour is not the one proved here, and a TAIL
+    // (`a?.b.c`) would carry the sub-union past a second step. And every
+    // surviving arm must be a RECORD — the shape whose per-arm field read
+    // lowerUnionFieldRead serves.
+    const subUnionRecv =
+      rest.length > 1 &&
+      dotNode === expr &&
+      ts.isPropertyAccessExpression(expr) &&
+      rest.every((a) => a.kind === "record");
+    if (rest.length !== 1 && !subUnionRecv) {
       L.unsupported(
         "SC1090",
         expr,
         `'?.' on '${L.fmt(receiver.type)}' (the guarded receiver is a sub-union; check a discriminant field first)`,
       );
     }
-    const narrowed = rest[0]!;
+    const narrowed = subUnionRecv ? receiver.type : rest[0]!;
     const id = `chain.${L.chainCounter++}`;
     const recvRef: IrExpr = { kind: "chainRecv", id, type: narrowed, loc: locOf(recvNode) };
 
