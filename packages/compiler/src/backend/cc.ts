@@ -984,12 +984,44 @@ async function ensureTlsArchive(sanitize: boolean, driver: CcDriver): Promise<st
  * carrying it would owe the embedder a symbol from a unit library links
  * exclude (the async_free gate refuses the crypto.randomFill surface long
  * before that, so no library build ever wanted it). */
+/* The always-linked core with scr_url.c restored to its HISTORICAL POSITION
+ * when the url gate is on — immediately after scr_path.c, where it sat while
+ * it was unconditional.
+ *
+ * The position is not cosmetic. The linker lays .text out in input order, so
+ * selecting the unit anywhere else relocates every function after it: measured
+ * on zapo (a URL-using program whose link SET is unchanged either way), the
+ * binary stayed exactly 29,851,136 bytes but 1,831,052 bytes of .text,
+ * 510,120 of .rdata and 25,886 of .pdata differed — pure address shift, no
+ * behaviour, and no way to tell that apart from a real change by reading a
+ * hash. Placing the gated unit in its old slot makes a URL-using binary
+ * BYTE-IDENTICAL to the pre-gate one, which is the standard the `net` gate
+ * above already holds itself to ("no currently-linking binary changes by a
+ * byte"). Only programs that shed the unit change, and they change by
+ * -16,384. */
+function coreRuntimeSources(url: boolean): string[] {
+  const out: string[] = [];
+  for (const f of RUNTIME_SOURCES) {
+    out.push(f);
+    if (url && f === "scr_path.c") out.push("scr_url.c");
+  }
+  return out;
+}
+
 const LIB_RUNTIME_SOURCES = [
   ...RUNTIME_SOURCES.filter(
     (f) => f !== "scr_async.c" && f !== "scr_child.c" && f !== "scr_random_fill.c",
   ),
   "scr_library.c",
 ];
+
+/** LIB_RUNTIME_SOURCES with scr_url.c in its historical slot when the archive
+ * needs it (the searchParams unit calls into it, so that gate implies this
+ * one) — the coreRuntimeSources reason, applied to the archive lane. */
+const LIB_RUNTIME_SOURCES_ORDERED = (url: boolean): string[] =>
+  LIB_RUNTIME_SOURCES.flatMap((f) =>
+    url && f === "scr_path.c" ? [f, "scr_url.c"] : [f],
+  );
 
 export interface LibArchiveOptions {
   /** The program TU (.c or .ll — clang compiles either with -c). */
@@ -1021,7 +1053,7 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
   const lreObjects = regex ? await ensureLreObjects(sanitize, driver) : [];
   const zlibObjects = opts.zlib ? await ensureZlibObjects(sanitize, driver) : [];
   const sources = [
-    ...LIB_RUNTIME_SOURCES,
+    ...LIB_RUNTIME_SOURCES_ORDERED(opts.url || opts.searchParams || false),
     // win32 targets compile the libc-shim TU into the archive (stpcpy,
     // arc4random_buf — scr_number.c/scr_lib.c/scr_bytes_io.c call them and
     // mingw's CRT has neither), exactly like compileC's unconditional win32
@@ -1035,9 +1067,6 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     ...(opts.assert || regex || opts.symbol ? ["scr_assert.c"] : []),
     ...(opts.inspect ? ["scr_inspect.c"] : []),
     ...(opts.symbol ? ["scr_symbol.c"] : []),
-    // The searchParams unit calls into scr_url.c, so it implies the gate
-    // here exactly as it does in compileC.
-    ...(opts.url || opts.searchParams ? ["scr_url.c"] : []),
     ...(opts.searchParams ? ["scr_url_params.c"] : []),
     ...(opts.emitter ? ["scr_events_emitter.c", "scr_dyn_handle.c"] : []),
     ...(opts.zlib ? ["scr_zlib.c"] : []),
@@ -1414,7 +1443,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     "-fno-strict-aliasing",
     "-Wno-deprecated-declarations", // ucontext fibers (scr_async.c)
     "-I", rtDir,
-    ...RUNTIME_SOURCES.map((f) => rt(join(rtDir, f))),
+    ...coreRuntimeSources(url).map((f) => rt(join(rtDir, f))),
     ...(opts.copying ? [rt(join(rtDir, "scr_copying.c"))] : []),
     // win32 targets compile the libc-shim TU (stpcpy, arc4random_buf,
     // gmtime_r, strcasestr — the _WIN32 block in scr_runtime.h declares
@@ -1484,7 +1513,6 @@ export async function compileC(opts: CcOptions): Promise<void> {
       ? [rt(join(rtDir, "scr_dyn_handle.c"))]
       : []),
     ...(opts.symbol ? [rt(join(rtDir, "scr_symbol.c"))] : []),
-    ...(url ? [rt(join(rtDir, "scr_url.c"))] : []),
     ...(opts.searchParams ? [rt(join(rtDir, "scr_url_params.c"))] : []),
     // node:querystring's own escape/unescape live in scr_qs.c: the unit
     // names NO scr_url_ symbol (measured — the only mentions in it are
