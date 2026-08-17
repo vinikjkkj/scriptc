@@ -5687,7 +5687,15 @@ class LlEmitter {
         const unitTags = def.arms.flatMap((a, i) => (isUnitType(a) ? [i] : []));
         const narrowIdx = def.arms.findIndex((a) => !isUnitType(a));
         if (unitTags.length === 0 || narrowIdx < 0) throw new Error("llvm emitter bug: optChain union arms");
-        const narrowed = def.arms[narrowIdx]!;
+        // MORE THAN ONE non-unit arm: the guard proves only "not nullish"
+        // and what survives it is a SUB-UNION, so the bind is the RECEIVER
+        // BOX itself, retained, tag intact — the frontend typed chainRecv
+        // as this same union and owns the narrowing. CEmitter's subUnion,
+        // derived from the arms on both ends so they cannot disagree.
+        const subUnion = def.arms.length - unitTags.length > 1;
+        const narrowed = subUnion ? e.receiver.type : def.arms[narrowIdx]!;
+        const bindFrom = (u: string): string =>
+          subUnion ? this.retainValue(u, narrowed) : this.unionExtract(u, narrowed);
         const r = this.emitExpr(e.receiver);
         const bind = B.slot();
         B.entryAllocas.push(`${bind} = alloca ${this.llType(narrowed)}`);
@@ -5702,7 +5710,7 @@ class LlEmitter {
           const lj = B.newLabel("oc.j");
           B.condBr(isUnit, lj, lb);
           B.startBlock(lb);
-          B.line(`store ${this.llType(narrowed)} ${this.unionExtract(r.name, narrowed)}, ptr ${bind}`);
+          B.line(`store ${this.llType(narrowed)} ${bindFrom(r.name)}, ptr ${bind}`);
           this.chainSlots.set(e.id, { name: bind, type: narrowed, slot: true });
           this.frames.push([]);
           this.emitExpr(e.body);
@@ -5732,7 +5740,7 @@ class LlEmitter {
           B.line(`store ptr ${ur}, ptr ${slotD}`);
           B.br(lj);
           B.startBlock(lb);
-          B.line(`store ${this.llType(narrowed)} ${this.unionExtract(r.name, narrowed)}, ptr ${bind}`);
+          B.line(`store ${this.llType(narrowed)} ${bindFrom(r.name)}, ptr ${bind}`);
           this.chainSlots.set(e.id, { name: bind, type: narrowed, slot: true });
           this.emitBranchInto(slotD, e.body);
           this.chainSlots.delete(e.id);
@@ -5756,7 +5764,7 @@ class LlEmitter {
         B.line(`store ptr ${this.unitInstanceRef(e.type.unionId, undefTag)}, ptr ${slot}`);
         B.br(lj);
         B.startBlock(lb);
-        B.line(`store ${this.llType(narrowed)} ${this.unionExtract(r.name, narrowed)}, ptr ${bind}`);
+        B.line(`store ${this.llType(narrowed)} ${bindFrom(r.name)}, ptr ${bind}`);
         this.chainSlots.set(e.id, { name: bind, type: narrowed, slot: true });
         this.emitBranchInto(slot, e.body);
         this.chainSlots.delete(e.id);

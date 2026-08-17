@@ -7957,6 +7957,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4341-optional-chain-over-a-sub-union-receiver.ts": {
+   "order": [
+    "<repo>/tests/corpus/4341-optional-chain-over-a-sub-union-receiver.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4342-optional-chain-sub-union-member-representations.ts": {
+   "order": [
+    "<repo>/tests/corpus/4342-optional-chain-sub-union-member-representations.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/4351-a-closure-over-a-catch-binding.ts": {
    "order": [
     "<repo>/tests/corpus/4351-a-closure-over-a-catch-binding.ts"
