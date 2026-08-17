@@ -1,20 +1,13 @@
-computed-key-and-union-spread-two-decliners.ts:61:42 - error SC1090: object spread of 'Aud | Img | Vid' into the union-typed slot '{ ptt?: boolean | undefined; viewOnce: boolean; } | { url?: string | undefine...' (the source's arm decides which arm the literal builds, and a literal builds one shape — narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) is not supported yet
+computed-key-and-union-spread-two-decliners.ts:67:42 - error SC1090: object spread of 'Aud | Img | Vid' into the union-typed slot '{ ptt?: boolean | undefined; viewOnce: boolean; } | { url?: string | undefine...' (the source's arm decides which arm the literal builds, and a literal builds one shape — narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) is not supported yet
 
-  60 |     const media = m[field];
-  61 |     if (media) return { ...m, [field]: { ...media, viewOnce: true } };
+  66 |     const media = m[field];
+  67 |     if (media) return { ...m, [field]: { ...media, viewOnce: true } };
      |                                          ^~~~~~~~
-  62 |   }
+  68 |   }
 
-computed-key-and-union-spread-two-decliners.ts:84:38 - error SC1090: object spread of 'Aud | Img | Vid' into the union-typed slot 'Aud | Img | Vid | undefined' (the source's arm decides which arm the literal builds, and a literal builds one shape — narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) is not supported yet
+computed-key-and-union-spread-two-decliners.ts:105:12 - error SC1090: computed property keys (compile-time-known keys fold — a pure expression whose checker type is one string or number literal: consts, enum members, quoted keys, templates of those — `{ [MARKER]: v }`; runtime string keys write through an index-signature target; symbol keys stay out) are not supported yet
 
-  83 |   const media = m.media;
-  84 |   if (media) return { ...m, media: { ...media, viewOnce: true } };
-     |                                      ^~~~~~~~
-  85 |   return m;
-
-computed-key-and-union-spread-two-decliners.ts:95:12 - error SC1090: computed property keys (compile-time-known keys fold — a pure expression whose checker type is one string or number literal: consts, enum members, quoted keys, templates of those — `{ [MARKER]: v }`; runtime string keys write through an index-signature target; symbol keys stay out) are not supported yet
-
-  94 | export function wrapD(m: Msg, field: string): Msg {
-  95 |   return { [field]: m.conversation } as Msg;
-     |            ^~~~~~~
-  96 | }
+  104 | export function wrapD(m: Msg, field: string): Msg {
+  105 |   return { [field]: m.conversation } as Msg;
+      |            ^~~~~~~
+  106 | }

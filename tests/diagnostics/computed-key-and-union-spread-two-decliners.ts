@@ -26,12 +26,18 @@
 //      well as here (measured: zapo's `content.ts:183` moved from col 41 to
 //      col 52 and from the computed-key message to this one).
 //
-//      Layer 3 is NOT free to take. The same fence is the whole reason three
-//      must-not-close rows are graded "a wrong answer if forced" —
-//      `incoming.ts:397`, `mex-notification.ts:192`, `fetcher.ts:92`, all
-//      spreading a multi-arm union into a union slot. A rule broad enough to
-//      close this one closes those, and their grade rests on exactly the
-//      premise such a rule would remove.
+//      Layer 3 is still NOT free to take HERE, and the reason is now a
+//      measurement rather than a worry. The fence's four zapo rows split by
+//      ARM RELATION (SCRIPTC_UNIONSLOT_WHY=1), not by spelling:
+//      `fetcher.ts:92` is ARMS=identity — the slot's record arms ARE the
+//      source's — while `content.ts:183`, `incoming.ts:397` and
+//      `mex-notification.ts:192` are ARMS=disjoint. The identity-arm rule
+//      (lower-exprs' lowerIdentityArmUnionSpread) closes the first and only
+//      the first: at identity the arm to build is the arm the source already
+//      holds, so nothing is invented. `wrapA` here is disjoint — its slot
+//      arms make `viewOnce` REQUIRED where the source arms have it optional,
+//      so they are different interned shapes — and it keeps the fence, which
+//      is what this snapshot pins.
 //
 // `estado-fifth` §3.4 also predicted a "correlated store" behind the two
 // decliners — the union-typed media value going into a single-record slot.
@@ -76,8 +82,12 @@ export function wrapB(m: Msg): Msg {
 }
 
 // C — layer 3 in its own right, with no computed key anywhere: a union source
-// spread into a union-typed slot. This is the shape of the three
-// must-not-close rows.
+// spread into a union-typed slot whose record arms ARE the source's arms.
+// C was in this snapshot and is GONE, and its absence is the pin: this is the
+// ARMS=identity relation — zapo's `fetcher.ts:92`, not the other three — and
+// the identity-arm rule builds it. An earlier revision of this comment called
+// C "the shape of the three must-not-close rows"; measured, it is the shape of
+// exactly ONE of them, and A above is the shape of the other kind.
 interface Msg2 { media?: Img | Vid | Aud; conversation?: string }
 export function wrapC(m: Msg2): Msg2 {
   const media = m.media;
