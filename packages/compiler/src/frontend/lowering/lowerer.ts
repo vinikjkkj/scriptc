@@ -109,7 +109,7 @@ import { lowerAssertModuleCall, lowerAssertDirectCall } from "./lower-assert.js"
 import { lowerUtilModuleCall } from "./lower-inspect.js";
 import { lowerComptime, comptimeBakeable, rejectComptimeCaptures, comptimeValueToIr } from "./lower-comptime.js";
 import { lowerDeleteValue, lowerStmts, noteBlockedBindings, isBlockedBinding, lowerScopedBlock, predeclareForwardCapture, probeBindWhy, predeclareForwardFnDecl, predeclareForwardVar, rejectJumpCrossingFinally, lowerStmt, lowerVarStatement, lowerDestructuringDecl, lowerDestructuringAssignParts, lowerBindingPattern, lowerJsvalBindingPattern, checkBindingElement, bindPatternTarget, lowerVarDeclList, lowerVarDecl, lowerSwitch, lowerTry, lowerExprStatement, lowerForOf, lowerForStatement } from "./lower-stmts.js";
-import { recordKeyResultOk, FieldTarget, lowerDynObjectLiteral, lowerExpr, maybeNarrow, lowerUnitComparison, lowerNullishCoalesce, lowerOptionalChain, finishOptionalChain, lowerCondition, ensureBool, requireTruthyUnion, eqComparableUnion, lowerIntrinsicProperty, lowerArrayLiteral, lowerObjectLiteral, lowerShorthandValue, rejectThisInObjectMethod, lowerElementAccess, lowerElementWrite, lowerRecordKeyRead, ensureString, lowerTemplate, lowerAsExpression, lowerPrefixUnary, lowerBinary, lowerCaughtTypeofTest, caughtRead, caughtLocalOf, caughtToString, lowerInstanceOf, lowerRegexLiteral, lowerFieldRead, lowerUnionProperty, fieldTarget, fieldGetExpr, fieldSetStmt, lowerFieldCompound, uniqueSymbolKeyOf, foldedStringKeyOf } from "./lower-exprs.js";
+import { recordKeyResultOk, narrowBridgeDyn, FieldTarget, lowerDynObjectLiteral, lowerExpr, maybeNarrow, lowerUnitComparison, lowerNullishCoalesce, lowerOptionalChain, finishOptionalChain, lowerCondition, ensureBool, requireTruthyUnion, eqComparableUnion, lowerIntrinsicProperty, lowerArrayLiteral, lowerObjectLiteral, lowerShorthandValue, rejectThisInObjectMethod, lowerElementAccess, lowerElementWrite, lowerRecordKeyRead, ensureString, lowerTemplate, lowerAsExpression, lowerPrefixUnary, lowerBinary, lowerCaughtTypeofTest, caughtRead, caughtLocalOf, caughtToString, lowerInstanceOf, lowerRegexLiteral, lowerFieldRead, lowerUnionProperty, fieldTarget, fieldGetExpr, fieldSetStmt, lowerFieldCompound, uniqueSymbolKeyOf, foldedStringKeyOf } from "./lower-exprs.js";
 import { assertExpandoAccounting, expandoCounters, type ExpandoBind, type ExpandoMember } from "./lower-expando.js";
 import { lowerRecordFieldCall, lowerObjectMethodCall } from "./lower-calls.js";
 import { fenceCrossBlockNsRef, nsPathPrefix } from "./lower-namespaces.js";
@@ -3949,6 +3949,62 @@ export class Lowerer {
     return { ...expr, type: expected };
   }
 
+  /** THE SAME PER-DESTINATION QUESTION, ONE BINDING LATER — asked of a
+   * REFERENCE to a local that already holds such a read at dyn width.
+   *
+   * `keyedReadLocalAtDynWidth` (lower-stmts.ts) widens the BINDING so an
+   * absent key answers undefined instead of aborting, and then says, in its
+   * own doc, what happens next: "the destination decides all over again —
+   * one level down, at every REFERENCE: tsc narrows each use to the scalar
+   * it believes, and maybeNarrow bridges that with a VALIDATED extraction.
+   * So a use that needs the value throws the catchable dyn-boundary
+   * TypeError where Node would throw its own."
+   *
+   * That is true of a use that DEREFERENCES the value — `id.length` on
+   * undefined throws in Node too, so the two programs agree. It is NOT
+   * true of a use whose DECLARED destination admits `undefined`: Node
+   * hands the undefined straight over and the callee's own `v ===
+   * undefined` answers it, where the bridge threw `expected string at $,
+   * got undefined` several frames early. The bet was made for the
+   * dereferencing use and applied to both, which is the whole defect.
+   *
+   * The two rungs that already ask this question at a destination —
+   * `lowerArgExpecting` below and the record-literal field in
+   * lower-exprs.ts — both require the lowered value to BE the read
+   * (`recordKeyGet`). A reference therefore declines for a reason that is
+   * not the reason: the destination is the same destination and the value
+   * is the same value, one binding later. This is exactly the
+   * `?? narrowBridgeDyn(e)` tail that `stringConvAtDynWidth` already
+   * spells for the String() destination, and that the `??` middle operand
+   * already spells with a `coerceInto` from the bridged dyn.
+   *
+   * Soundness is the bridge's own, and the bridge's doc states it: what
+   * dropping it removes is a VALIDATION, never the operand, so nothing
+   * effectful is lost. The dyn then converts into the armed union through
+   * the ORDINARY boundary, whose walker builds the undefined arm from a
+   * dyn undefined and validates every other kind. A hit is the value it
+   * always was; a miss is the arm the destination itself declared; a kind
+   * that is neither still throws. Nothing becomes silent.
+   *
+   * The width gate is the sibling rung's, unchanged: `expected` strips to
+   * the bridge's own narrowed type EXACTLY. Anything wider is a conversion
+   * the author asked for and keeps its own coercion.
+   *
+   * `SCRIPTC_REFARM_OFF=1` ablates it, so one binary emits both sides. */
+  keyedReadRefAtUndefinedArm(expr: IrExpr, expected: IrType): IrExpr | null {
+    if (process.env["SCRIPTC_REFARM_OFF"] === "1") return null;
+    if (expected.kind !== "union") return null;
+    if (this.armTag(expected.unionId, UNDEFINED_T) < 0) return null;
+    const bridged = narrowBridgeDyn(expr);
+    if (bridged === null) return null;
+    if (!typeEquals(this.stripUndefinedArm(expected), expr.type)) return null;
+    // The armed destination must itself be a checkable target, or the
+    // conversion below would leave the value at dyn width in a typed slot.
+    if (!canDynCheckTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id))) return null;
+    const out = this.coerceToExpected(bridged, expected);
+    return typeEquals(out.type, expected) ? out : null;
+  }
+
   /** THE ARGUMENT DESTINATION for recordKeyReadAtUndefinedArm.
    *
    * `parseOptionalInt(node.attrs.abprops)` — zapo
@@ -4033,11 +4089,21 @@ export class Lowerer {
         x = inner;
       }
       if (
-        (ts.isPropertyAccessExpression(x) || ts.isElementAccessExpression(x)) &&
-        x.questionDotToken === undefined
+        // An IDENTIFIER is admitted for the reason `keyedAccessSyntax`
+        // already admits one: the value may be the READ, or a REFERENCE to
+        // the local that holds it at dyn width, and this rung's soundness
+        // argument is about the DESTINATION, which is the same either way.
+        // The syntactic guard's own justification carries verbatim — an
+        // identifier is not an `Object.freeze` call, an array literal or an
+        // object literal, so for it too the fallback below IS
+        // `lowerExprExpecting`'s tail and a declined rung changes nothing.
+        ts.isIdentifier(x) ||
+        ((ts.isPropertyAccessExpression(x) || ts.isElementAccessExpression(x)) &&
+          x.questionDotToken === undefined)
       ) {
         const raw = this.lowerExpr(cast === null ? node : x);
-        const armed = this.recordKeyReadAtUndefinedArm(raw, expected);
+        const armed = this.recordKeyReadAtUndefinedArm(raw, expected)
+          ?? this.keyedReadRefAtUndefinedArm(raw, expected);
         if (process.env["SCRIPTC_ARGARM_WHY"]) {
           const l = locOf(node);
           console.error(
