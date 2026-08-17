@@ -8083,6 +8083,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4531-some-over-a-union-of-array-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/4531-some-over-a-union-of-array-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4532-a-nullish-default-that-is-itself-a-widened-keyed-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/4532-a-nullish-default-that-is-itself-a-widened-keyed-read.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4533-a-converted-promise-shares-its-sources-rejection-handling.ts": {
+   "order": [
+    "<repo>/tests/corpus/4533-a-converted-promise-shares-its-sources-rejection-handling.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"

@@ -3211,9 +3211,14 @@ function isArrayGuardProven(L: Lowerer, node: ts.Expression): boolean {
     if (!narrowed || (narrowed.kind === "array" && narrowed.elem.kind === "jsval")) {
       const t = L.typeOf(node);
       const anyElem =
-        (L.checker.isArrayType(t) &&
-          ((L.checker.getTypeArguments(t as ts.TypeReference)[0]?.flags ?? 0) &
-            (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0) ||
+        // `checkerAnyArray` IS this test — it was spelled out inline here
+        // and the two copies then disagreed. It also knows the second
+        // spelling tsc uses when the guarded union's non-array arms are
+        // LITERAL types and cannot be discarded: the union of the per-arm
+        // `& any[]` intersections. zapo's `RETRY_REASON_MATCHERS` produces
+        // exactly that, and with TWO nested-tuple entries in the table the
+        // inline copy answered false and the value never narrowed.
+        (ts.isExpression(node) && L.checkerAnyArray(node)) ||
         // The read the checker gave up on ENTIRELY (bare `any`/`unknown`,
         // one hop past the quirk), with the guard read off the source
         // instead of off a narrowing tsc never recorded.
