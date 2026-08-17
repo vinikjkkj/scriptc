@@ -2432,6 +2432,25 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           );
         }
         if (recvShape?.indexValue !== undefined && !recvShape.tuple) {
+          // SCRIPTC_KEYREAD_CENSUS, the THIRD keyed-read seat. A dot
+          // access on a HYBRID record (declared fields plus an index
+          // signature) whose name matches no declared field lowers here,
+          // not through fieldGetExpr's recordOvf arm — so an instrument
+          // hooked at the other two seats reports the site as
+          // unattributed and its destination is never classified.
+          if (process.env["SCRIPTC_KEYREAD_CENSUS"]) {
+            const iv = recvShape.indexValue;
+            const armedRead = iv.kind === "union" && L.armTag(iv.unionId, UNDEFINED_T) >= 0;
+            recordKeyReadRow(L.checker as never, expr, {
+              file: loc.file,
+              start: loc.start,
+              key: expr.name.text,
+              shapeId: String(recvLowered.type.shapeId),
+              valueType: L.fmt(iv),
+              readArmed: armedRead,
+              abortCapable: !armedRead,
+            });
+          }
           return L.maybeNarrow(
             {
               kind: "recordKeyGet",
@@ -9293,6 +9312,36 @@ export function isImmutablePrimitiveWidth(L: Lowerer, t: IrType): boolean {
     def !== undefined &&
     def.arms.length > 0 &&
     def.arms.every((a) => a.kind === "string" || a.kind === "f64" || a.kind === "bool")
+  );
+}
+
+/** The same width question with the UNIT arms allowed.
+ *
+ * `isImmutablePrimitiveWidth` exists to answer one thing — "does widening
+ * this to dyn cost a `dynFrom` DEEP COPY, and so sever aliasing the
+ * binding has today?" — and it answers it by listing the three scalars.
+ * A `null`, an `undefined` or a string-literal arm has no identity to
+ * lose either, so it belongs on the same side of that line, and leaving
+ * it off is not a stance: it is the list being short.
+ *
+ * Measured, not argued. zapo's app-state index arguments are
+ * `Readonly<Record<string, string | boolean | null>>`, and
+ * `WaAppStateMutationCoordinator.ts:87`'s `const arg = args[part.name]`
+ * — the very site `keyedReadLocalAtDynWidth`'s own doc comment names as
+ * the reason the union case exists — still ABORTED at
+ * `524e9cd3`, because the shape gained a `null` arm the list does not
+ * carry. The next line of that function is `if (arg === null || arg ===
+ * undefined)`. Correct, and incomplete by one arm kind. */
+export function isDynSafeReadWidth(L: Lowerer, t: IrType): boolean {
+  if (isImmutablePrimitiveWidth(L, t)) return true;
+  if (t.kind !== "union") return false;
+  const def = L.unions.get(t.unionId);
+  if (def === undefined || def.arms.length === 0) return false;
+  // At least one arm must be a real scalar: a union of nothing but units
+  // is not a keyed-read width this rule has anything to say about.
+  if (!def.arms.some((a) => a.kind === "string" || a.kind === "f64" || a.kind === "bool")) return false;
+  return def.arms.every(
+    (a) => a.kind === "string" || a.kind === "f64" || a.kind === "bool" || isUnitType(a),
   );
 }
 
