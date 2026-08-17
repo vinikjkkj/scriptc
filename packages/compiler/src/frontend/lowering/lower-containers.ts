@@ -4,7 +4,7 @@
  * method surfaces. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, BYTES_U8, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { BOOL, BYTES_U8, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
 import { captureParticipationOfPattern, checkedJsNumber, droppableStatic, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexTextOf } from "./lower-exprs.js";
 import { forOfVarTarget, lowerDestructuringAssign } from "./lower-stmts.js";
@@ -8400,6 +8400,50 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
    * exists (the recordWidthPlan/recordWidthHelper split, one flow over).
    * MUST stay in sync with the helper's own return-null gates below; the
    * describeRecordWidthBlocker precedent mirrors gate logic the same way. */
+  /** The MIRROR of slotLift's `"dyn"` arm below. That arm lets a TYPED
+   * source value enter a DYN target slot (dynFrom — nothing to validate,
+   * the slot says anything fits). This one is the other direction: a DYN
+   * ('unknown') source value entering a TYPED slot, which is exactly what
+   * `dynCheck` is — a tag test and an unwrap, throwing the catchable
+   * TypeError on a value the slot cannot hold.
+   *
+   * The two conversions it composes both already existed; only the PAIR
+   * had no arm. A source slot typed `unknown` can only ever hold values
+   * canConvertToDyn admitted, and the check is emitted only where
+   * canDynCheckTo can test the destination, so nothing crosses here that
+   * has not already crossed one way on its own.
+   *
+   * WHAT IT IS FOR. zapo's `mutations.set()` refuses TWICE IN SERIES, and
+   * this is the second row —
+   * `src/client/coordinators/WaAppStateMutationCoordinator.ts:1116`,
+   * `indexArgs as unknown as IndexArgsForSchema<typeof resolved>`:
+   *
+   *   from  Readonly<Record<string, unknown>>     indexValue = dyn
+   *   to    IndexArgsForSchema<WaAppstateSchema>  indexValue =
+   *                                        boolean | null | string
+   *
+   * BOTH with ZERO declared fields, so the to.fields loop, the
+   * from.fields loop and the dispatch-writes gate are all vacuous and
+   * `if (fIv && slotLift(fIv) === null)` is the only gate that decides
+   * the pair. Corpus 4571 is that pair reduced; 3453 is the same shapes
+   * with the source ALREADY typed at the destination's value type, which
+   * is why that one always compiled and this one never did.
+   *
+   * A per-entry mismatch throws the catchable TypeError the keyed writes
+   * below already throw — divergence 34, the stance that makes the `as`
+   * honest. Not a new stance: a bare `u as boolean | null | string` on a
+   * plain build throws the identical message today (G:\ss\lab\d1116d.ts).
+   *
+   * Ordered AFTER widthLiftPlan at both call sites, so no pair that lifts
+   * today can change its answer. widthLiftPlan has no dyn-SOURCE arm at
+   * all, so the order is provably immaterial; it is written this way to
+   * keep that obvious rather than to fix anything. */
+  export function dynSlotCheckOk(L: Lowerer, t: IrType, tIv: IrType): boolean {
+    if (t.kind !== "dyn") return false;
+    if (tIv.kind === "dyn") return false; // the existing "dyn" arm owns that pair
+    return canDynCheckTo(tIv, (id) => L.shapes.get(id), (id) => L.unions.get(id));
+  }
+
   export function ovfCapturePlannable(L: Lowerer, fromId: string, toId: string): boolean {
     const from = L.shapes.get(fromId);
     const to = L.shapes.get(toId);
@@ -8409,7 +8453,8 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     const slotOk = (t: IrType): boolean =>
       typeEquals(t, tIv) ||
       (tIv.kind === "dyn" && (t.kind === "dyn" || L.dynConvertible(t))) ||
-      L.widthLiftPlan(t, tIv) !== null;
+      L.widthLiftPlan(t, tIv) !== null ||
+      dynSlotCheckOk(L, t, tIv);
     if (fIv && !slotOk(fIv)) return false;
     const consumed = new Set<string>();
     for (const tf of to.fields) {
@@ -8445,10 +8490,12 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     const tIv = to.indexValue;
     // How a source value enters the target's value slot: identity, the
     // dyn conversion, or a width lift (wrap/retag/nested reshape).
-    const slotLift = (t: IrType): WidthLift | "dyn" | null => {
+    const slotLift = (t: IrType): WidthLift | "dyn" | "dyncheck" | null => {
       if (typeEquals(t, tIv)) return { how: "copy" };
       if (tIv.kind === "dyn" && (t.kind === "dyn" || L.dynConvertible(t))) return "dyn";
-      return L.widthLiftPlan(t, tIv);
+      const lift = L.widthLiftPlan(t, tIv);
+      if (lift) return lift;
+      return dynSlotCheckOk(L, t, tIv) ? "dyncheck" : null;
     };
     // The overflow value slot must line up (sources without an index
     // signature have no overflow to carry over).
@@ -8494,7 +8541,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
           return f ? [f] : [];
         })
       : from.fields;
-    const fieldLifts = new Map<string, WidthLift | "dyn">();
+    const fieldLifts = new Map<string, WidthLift | "dyn" | "dyncheck">();
     for (const ff of orderedFields) {
       if (consumed.has(ff.name)) continue; // direct-initialized above
       const lift = slotLift(ff.type);
@@ -8530,10 +8577,12 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
     const sRef = ref("s.0", fromT);
     const outRef = ref("out.0", toT);
-    const intoSlot = (v: IrExpr, lift: WidthLift | "dyn"): IrExpr =>
+    const intoSlot = (v: IrExpr, lift: WidthLift | "dyn" | "dyncheck"): IrExpr =>
       lift === "dyn"
         ? { kind: "dynFrom", value: v, type: DYN, loc }
-        : L.applyWidthLift(lift, v, tIv, loc);
+        : lift === "dyncheck"
+          ? { kind: "dynCheck", value: v, type: tIv, loc }
+          : L.applyWidthLift(lift, v, tIv, loc);
     const body: IrStmt[] = [
       {
         kind: "varDecl",
