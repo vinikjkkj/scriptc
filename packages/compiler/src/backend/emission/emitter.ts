@@ -568,6 +568,17 @@ export class CEmitter {
         // through the handle.
         case "abortSignal":
         case "abortController":
+        // A dyn value carries a collector header of its own (scr_json.c's
+        // scr_dyn_trace) and its members, [[Prototype]] link and accessor
+        // table all point at further dyn values, so an `unknown`-typed
+        // field can hold a graph that points back at the shape holding it.
+        // Missing here was the SHAPE-LEVEL face of the untraced-dyn defect:
+        // traceAdapterC now answers `scr_dyn_trace_v` for a dyn field, but
+        // a shape whose ONLY cycle-capable field is dyn was still dropped
+        // from tracedShapes by this fixpoint and got no header at all — so
+        // the ring was invisible because the NODE was not a node. Twelve of
+        // zapo's 2120 shapes were in exactly that state.
+        case "dyn":
           return true;
         case "object":
           return this.tracedShapes.has(`object:${t.className}`);
