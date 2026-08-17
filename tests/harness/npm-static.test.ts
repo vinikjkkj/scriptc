@@ -235,42 +235,39 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     }
   }, 120_000);
 
-  // protobufjs static-module's ONEOF ACCESSOR family, pinned in REFUSAL
-  // ORDER rather than as a differential — oneofish does not compile, and
-  // the point of the pin is WHICH construct refuses first.
+  // protobufjs static-module's ONEOF ACCESSOR family. This was pinned in
+  // REFUSAL ORDER at seven runtime fences across four families, because
+  // oneofish did not compile and the point was WHICH construct refused
+  // first: `Msg.prototype.field = null` (2, assignment to non-variables),
+  // `Object.hasOwnProperty.call(m, k)` (2), `new Payload(p)` (1), and the
+  // two `Object.defineProperty` oneof accessors whose hint named the
+  // RECEIVER — a prototype object is not a value — rather than the
+  // descriptor. A census of the QR-path closure of a real generated
+  // protobuf bundle counted 45 defineProperty refusals, 44 of them this
+  // shape, and the note said: when any of the four lands, this pin fails
+  // and the next reader gets a corrected picture instead of the stale 45.
   //
-  // A census of the QR-path closure of a real generated protobuf bundle
-  // counts 45 `Object.defineProperty` refusals inside it and 44 of them are
-  // this shape. That count is misleading, and this fixture is the
-  // reproduction: replacing those 44 calls with a bare read of the SAME
-  // receiver leaves the total trap count byte-identical and moves all 44
-  // onto the `.prototype` fence one for one. The receiver is the blocker —
-  // a prototype object is not a value here — so a descriptor-side
-  // `defineProperty` lowering would uncover it at the same statement and
-  // move nothing. The four families below are the whole idiom, and each is
-  // owned by a different rule; when any of them lands, this pin fails and
-  // the next reader gets a corrected picture instead of the stale 45.
-  test("the protobufjs oneof-accessor idiom refuses at the receiver, not the descriptor", () => {
+  // All four have landed. The idiom now compiles with NOTHING left over —
+  // no build diagnostic, no runtime fence, no island statement, no skipped
+  // function — so the pin inverts: it is now a regression tripwire in the
+  // other direction, and a fence coming back fails it with the fence's own
+  // message rather than a bare count. `runtimeFences` is absent (not empty)
+  // when there are none: index.ts omits the key, so `?? []` is what makes
+  // "no fences" and "no such field" read alike, and the statement stats
+  // below are the independent check that this is really zero.
+  test("the protobufjs oneof-accessor idiom compiles with nothing left over", () => {
     const { coverage } = analyze(join(pilotRoot, "oneof-cli.ts"), { npmStatic: ["oneofish"] });
     expect(coverage.npmStatic).toEqual([{ package: "oneofish", status: "static" }]);
     expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.diagnostics).toHaveLength(0); // builds — fences are runtime
-    const fences = coverage.runtimeFences ?? [];
-    const byFamily = (re: RegExp): number => fences.filter((f) => re.test(f.message)).length;
-    expect(fences.length).toBe(7);
-    // `Msg.prototype.field = null` — the prototype DEFAULTS.
-    expect(byFamily(/assignment to non-variables/)).toBe(2);
-    // `Object.hasOwnProperty.call(m, k)` — encode's presence predicate.
-    expect(byFamily(/Function\.prototype\.call on a compiled function value/)).toBe(2);
-    // `new Payload(p)` — [[Construct]] on a plain JS function.
-    expect(byFamily(/constructing values other than classes declared in the program/)).toBe(1);
-    // The two oneof accessors themselves — and the hint names the receiver.
-    const defprop = fences.filter((f) => /'Object\.defineProperty'/.test(f.message));
-    expect(defprop).toHaveLength(2);
-    for (const f of defprop) {
-      expect(f.code).toBe("SC2020");
-      expect(f.hint).toMatch(/the RECEIVER is a prototype object/);
-    }
+    expect(coverage.diagnostics).toHaveLength(0);
+    expect(coverage.runtimeFences ?? []).toEqual([]);
+    // Not a restatement of the line above: these come from the lowerer's
+    // own counters, so a fence that stopped being REPORTED but still cost
+    // a statement would show up here.
+    expect(coverage.stats.statementsFailed).toBe(0);
+    expect(coverage.stats.statementsIsland).toBe(0);
+    expect(coverage.stats.functionsSkipped).toBe(0);
+    expect(coverage.stats.statementsTotal).toBeGreaterThan(20);
   }, 120_000);
 
   // The BUNDLER MODULE TABLE, pinned with nothing left over: esbuild's
