@@ -48,3 +48,21 @@ unions.ts:100:10 - error SC1090: '?.' on 'number | string | undefined' (the guar
   100 |   return x?.valueOf === undefined ? 0 : 1;
       |          ^~~~~~~~~~
   101 | }
+
+unions.ts:128:10 - error SC2003: union types must match exactly: expected '{ a: string; b: number; c: string | undefined } | { a: string; b: number; d: string | undefined }', got '{ a: string; b: number }' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  127 | function ambiguousWholeValue(): WholeA | WholeB {
+  128 |   return bothWhole;
+      |          ^~~~~~~~~
+  129 | }
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
+
+unions.ts:147:10 - error SC2003: union types must match exactly: expected '{ a: string; z: number | undefined } | { b: number; y: string | undefined }', got '{ a: string; b: number }' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  146 | function partialEverywhere(): PartA | PartB {
+  147 |   return merged;
+      |          ^~~~~~
+  148 | }
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
