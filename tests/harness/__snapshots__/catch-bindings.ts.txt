@@ -1,10 +1,3 @@
-catch-bindings.ts:15:32 - error SC1090: closures capturing catch bindings (narrow into a typed local first) are not supported yet
-
-  14 | } catch (e) {
-  15 |   const probe = (): boolean => e instanceof Error; // capture by a closure
-     |                                ^
-  16 |   console.log(probe());
-
 catch-bindings.ts:21:7 - error SC1090: 'instanceof' on a catch binding against the standalone class 'Standalone' (only classes in extends hierarchies carry the vtable the payload test needs) is not supported yet
 
   20 | } catch (e) {
