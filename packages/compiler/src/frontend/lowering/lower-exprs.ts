@@ -6393,6 +6393,125 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           const s = L.checker.typeToString(t);
           return s.length <= 80 ? s : `${s.slice(0, 77)}...`;
         };
+        // SCRIPTC_UNIONSLOT_WHY=1 — the STRUCTURAL instrument for this
+        // fence. The message above names two TYPES; what a reader deciding
+        // whether some narrower rule could admit this site needs is the
+        // relation between the source's arms and the slot's arms, and that
+        // relation is nowhere in the text. One row per fence hit, keyed
+        // `file@offset` like SCRIPTC_DC_WHERE, reporting:
+        //
+        //   ARMS=identity   the source's record arms ARE the slot's record
+        //                   arms (same shape ids). The result's arm is the
+        //                   SOURCE's arm, carried through — the tightest
+        //                   structural precondition any "runtime-selected
+        //                   union arm" rule could be gated on.
+        //   ARMS=subset     every source arm is a slot arm, but not
+        //                   conversely (a slot with extra arms to spare).
+        //   ARMS=disjoint   the slot's arms are strictly WIDER shapes than
+        //                   the source's (`{ ...normalized, errors }`, where
+        //                   each target arm is a source arm plus a field) —
+        //                   the case where an arm really would have to be
+        //                   INVENTED, not carried.
+        //
+        // plus `extras=` (the literal's own property names) and
+        // `extrasInEveryArm=` (whether every source arm declares them all),
+        // which is what decides whether a clone-and-overwrite is even
+        // type-correct per arm.
+        //
+        // Diagnostic only: it prints and returns, changes no `mapped`, no
+        // shape, and no diagnostic, so an instrumented tree censuses
+        // identically to an uninstrumented one.
+        if (process.env["SCRIPTC_UNIONSLOT_WHY"] !== undefined) {
+          const ctxRecs = (L.unions.get(ctxUnion.unionId)?.arms ?? []).filter((a) => a.kind === "record");
+          const idsOf = (arms: readonly IrType[]): string[] =>
+            arms.map((a) => String((a as IrType & { kind: "record" }).shapeId)).sort();
+          const sIds = idsOf(srecs);
+          const cIds = idsOf(ctxRecs);
+          const sSet = new Set(sIds);
+          const cSet = new Set(cIds);
+          const rel =
+            sIds.length === cIds.length && sIds.every((i, k) => i === cIds[k])
+              ? "identity"
+              : sIds.every((i) => cSet.has(i))
+                ? "subset"
+                : cIds.every((i) => sSet.has(i))
+                  ? "superset"
+                  : "disjoint";
+          const extras: string[] = [];
+          // Names contributed by a CONDITIONAL spread (`...(c ? { w } : {})`).
+          // The fence loop skips those spreads, so they never appear as a
+          // decliner — but they are still names the result carries, and
+          // `fetcher.ts:92` adds ALL of its extra names that way. A reading
+          // that ignored them would compare that site against
+          // `content.ts:183` on an axis neither one really differs on.
+          const condExtras: string[] = [];
+          let condSpreads = 0;
+          let spreads = 0;
+          for (const p of expr.properties) {
+            if (ts.isSpreadAssignment(p)) {
+              spreads++;
+              const cs = conditionalSpreadOf(p.expression);
+              if (cs) {
+                condSpreads++;
+                if (cs !== "unsupported") for (const cp of cs.props) condExtras.push(cp.name.text);
+              }
+              continue;
+            }
+            if (p.name && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name))) extras.push(p.name.text);
+            else extras.push("<computed>");
+          }
+          const armFieldNames = srecs.map(
+            (a) => new Set((L.shapes.get((a as IrType & { kind: "record" }).shapeId)?.fields ?? []).map((f) => f.name)),
+          );
+          // VACUOUSLY TRUE with no non-spread properties, which is exactly
+          // zapo's `fetcher.ts:92` (`{ ...fetched, ...(c ? { width } : {}) }`
+          // — every added name arrives through a CONDITIONAL spread, which
+          // the fence loop above skips). Reporting `false` there would have
+          // manufactured a difference between that site and
+          // `content.ts:183` that the source does not have.
+          const extrasInEveryArm = extras.every(
+            (n) => n !== "<computed>" && armFieldNames.every((s) => s.has(n)),
+          );
+          // WHY the relation is what it is. `ARMS=disjoint` over two unions
+          // that LOOK like the same declared types has two very different
+          // causes and the verdict alone cannot tell them apart:
+          //   - the types really are different (`{ ...normalized, errors }`,
+          //     where each target arm is a source arm plus a field), or
+          //   - the same declared type was interned as two shapes.
+          // So the fingerprints go out too: each arm as `shapeId/fieldCount`,
+          // and `pairedByNames` — how many SOURCE arms have a slot arm with
+          // an IDENTICAL field-name set. `pairedByNames=n/n` with
+          // `ARMS=disjoint` is the interning story; anything less is a real
+          // width difference, and the count says how many arms differ.
+          const fp = (arms: readonly IrType[]): string =>
+            arms
+              .map((a) => {
+                const id = (a as IrType & { kind: "record" }).shapeId;
+                return `${String(id)}/${String((L.shapes.get(id)?.fields ?? []).length)}`;
+              })
+              .join(",");
+          const nameSet = (a: IrType): string =>
+            (L.shapes.get((a as IrType & { kind: "record" }).shapeId)?.fields ?? [])
+              .map((f) => f.name)
+              .sort()
+              .join(",");
+          const ctxNameSets = new Set(ctxRecs.map(nameSet));
+          const pairedByNames = srecs.filter((a) => ctxNameSets.has(nameSet(a))).length;
+          const l = locOf(prop);
+          console.error(
+            `UNIONSLOT ${l.file}@${String(l.start)} ARMS=${rel}` +
+              ` pairedByNames=${String(pairedByNames)}/${String(srecs.length)}` +
+              ` srcShapes=[${fp(srecs)}] ctxShapes=[${fp(ctxRecs)}]` +
+              ` ctx0=${ctxType0 === undefined ? "NONE" : `'${name(ctxType0)}'`}` +
+              ` srcArms=${String(srecs.length)}/${String(L.unions.get(st.unionId)?.arms.length ?? -1)}` +
+              ` ctxArms=${String(ctxRecs.length)}/${String(L.unions.get(ctxUnion.unionId)?.arms.length ?? -1)}` +
+              ` spreads=${String(spreads)} condSpreads=${String(condSpreads)}` +
+              ` extras=[${extras.join(",")}] extrasInEveryArm=${String(extrasInEveryArm)}` +
+              ` condExtras=[${condExtras.join(",")}]` +
+              ` condExtrasInEveryArm=${String(condExtras.every((n) => armFieldNames.every((s) => s.has(n))))}` +
+              ` src='${name(L.typeOf(prop.expression))}' ctx='${name(tsType)}'`,
+          );
+        }
         L.unsupported(
           "SC1090",
           prop,
