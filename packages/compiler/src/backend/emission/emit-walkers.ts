@@ -6,6 +6,7 @@
  * interning ORDER is part of the emitted C, so the registries stay on
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
+import { rcSitesRequested } from "./emitter.js";
 import { canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
@@ -2154,6 +2155,9 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     if (existing) return existing;
     const name = `sc_dfa_${E.dynFuncAdapters.size}`;
     E.dynFuncAdapters.set(key, name);
+    // RC-audit per-SITE attribution: an adapter has no source position of
+    // its own -- its identity is the target signature it adapts to.
+    if (rcSitesRequested()) E.closureSites.set(name, `<dyn fn adapter to ${key}>`);
     const params = ["ScrClosure *sc_env", ...t.params.map((p, i) => cDecl(p, `a${i}`))].join(", ");
     const sig = `static ${cType(t.ret)}${cType(t.ret).endsWith("*") ? "" : " "}${name}(${params})`;
     E.walkerProtos.push(`${sig}; /* dyn fn adapter to ${key} */`);

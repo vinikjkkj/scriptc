@@ -33,6 +33,10 @@
 #ifdef SCR_RC_AUDIT
 static long scr_live_dyns = 0;
 long scr_dyn_live_count(void) { return scr_live_dyns; }
+/* The by-KIND split of that same total (scr_closure.c owns the array and
+ * prints it): one number for 36997 live dyn values says nothing about
+ * what the leaked tree is made of. */
+extern long scr_dyn_live_by_kind[];
 #endif
 
 static void scr_json_oom(void) {
@@ -351,6 +355,7 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
   fresh->kind = kind;
 #ifdef SCR_RC_AUDIT
   scr_live_dyns++;
+  scr_dyn_live_by_kind[kind]++;
 #endif
   return fresh;
 }
@@ -422,6 +427,7 @@ void scr_dyn_release(ScrDyn *d) {
   }
 #ifdef SCR_RC_AUDIT
   scr_live_dyns--;
+  scr_dyn_live_by_kind[d->kind]--;
 #endif
 #ifndef SCR_RC_AUDIT
   if (scr_dyn_free_count < SCR_DYN_FREE_MAX) {
