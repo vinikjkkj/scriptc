@@ -1518,6 +1518,77 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     return { kind: "libCall", fn: fn.fn, args: [packed], type: fn.result, loc };
   }
 
+/** `String.fromCharCode.apply(<thisArg>, codes)` — the pre-spread spelling
+   * of `String.fromCharCode(...codes)`, and the ONLY way to write the
+   * whole-array call in ES5. protobufjs's base64 encoder writes it three
+   * times in one function:
+   *
+   *     s > 8191 && ((i || (i = [])).push(String.fromCharCode.apply(String, a)), s = 0)
+   *     ...
+   *     i ? (s && i.push(String.fromCharCode.apply(String, a.slice(0, s))), i.join(""))
+   *       : String.fromCharCode.apply(String, a.slice(0, s))
+   *
+   * and those three sites are the WHOLE `Function.prototype.apply`
+   * population of zapo's compiled bundle. They are not the general
+   * runtime-length pack the SC1090 fence describes and correctly refuses
+   * ("no runtime 'this' or arguments object exists to re-route"): the
+   * lowering `String.fromCharCode(...codes)` already has takes exactly
+   * this array and passes it to `scr_str_from_units` whole, so the
+   * argument list never has to become a call frame at all.
+   *
+   * The equivalence is the language's, not an approximation.
+   * `String.fromCharCode` is a plain function of its argument list and
+   * reads no receiver — `%String.fromCharCode%` is not a method and its
+   * spec text never mentions `this` — so `f.apply(X, arr)` and
+   * `f(...arr)` differ in nothing observable for ANY X. What is dropped
+   * is X's EVALUATION, so X must be effect-free (`String`, a binding,
+   * `this`, `null`, `undefined`) exactly as Reflect.apply demands above;
+   * a computed thisArg declines and keeps the fence.
+   *
+   * `apply` with no argument list, or with `null`/`undefined` for it, is
+   * the zero-argument call, whose answer is the empty string. Every other
+   * shape (a spread in the apply call itself, a third argument, an
+   * argsArray whose type is not an array or bytes) declines to null and
+   * keeps the fence, which still names the direct spelling. */
+  export function lowerStringFromCharCodeApply(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,): IrExpr | null {
+    if (L.chainBlocked(call)) return null;
+    if (access.name.text !== "apply" || access.questionDotToken !== undefined) return null;
+    const inner = access.expression;
+    if (!ts.isPropertyAccessExpression(inner)) return null;
+    if (L.stdlibGlobalMember(inner, "String") !== "fromCharCode") return null;
+    if (call.arguments.length > 2 || call.arguments.some(ts.isSpreadElement)) return null;
+    const loc = locOf(call);
+    const thisNode = call.arguments[0];
+    if (thisNode !== undefined) {
+      const effectFree =
+        thisNode.kind === ts.SyntaxKind.ThisKeyword ||
+        thisNode.kind === ts.SyntaxKind.NullKeyword ||
+        ts.isIdentifier(thisNode) ||
+        ts.isLiteralExpression(thisNode);
+      if (!effectFree) return null;
+    }
+    const argsNode = call.arguments[1];
+    // `fromCharCode.apply(X)` / `.apply(X, null)` / `.apply(X, undefined)`
+    // — Node's zero-argument call, whose answer is "".
+    if (argsNode === undefined) return { kind: "strLit", value: "", type: STRING, loc };
+    const argsT = L.mapTypeOf(L.typeOf(argsNode));
+    if (argsT === null) return null;
+    if (isUnitType(argsT)) return { kind: "strLit", value: "", type: STRING, loc };
+    // A typed-array/Buffer argsArray rides the same runtime entry the
+    // spread form's bytes arm uses; every other shape must be the f64[]
+    // the helper reads, and lowerExprExpecting fences honestly if the
+    // value cannot become one.
+    if (argsT.kind === "bytes") {
+      const packed = L.lowerExpr(argsNode);
+      if (packed.type.kind !== "bytes") return null;
+      return { kind: "libCall", fn: "string.fromCharCode", args: [packed], type: STRING, loc };
+    }
+    if (argsT.kind !== "array") return null;
+    const packed = L.lowerExprExpecting(argsNode, arrayOf(F64));
+    return { kind: "libCall", fn: "string.fromCharCode", args: [packed], type: STRING, loc };
+  }
+
 /** The child-process args list: one string[] value. An omitted list
    * completes to an empty literal (Node's default); an array LITERAL
    * builds element-wise (its contextual type is the optional parameter's
