@@ -2074,6 +2074,11 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     E.strandedDynFuncBoxes.set(key, name);
     const thunkName = `${name}_thunk`;
     const thunkSig = `static ScrDyn *${thunkName}(ScrClosure *c, ScrDyn *const *args, size_t argc)`;
+    // CENSUS: an UNCODED refusal — scr_throw_error_msg carries no SC code at
+    // all, so it is invisible to the bracket census, to the scr_trap census,
+    // AND to SCRIPTC_TRAP_TRACE (which filters on the code argument).  zapo's
+    // TU holds five, on the pre-key and app-state store members.
+    // `scripts/tu-census.mjs` counts them as REFUSAL.uncoded.
     const msg = `a '${key}' function carried into 'unknown' cannot be called through it (its parameters have no checked-dynamic form)`;
     const msgLit = cStringLiteral(Buffer.from(msg, "utf8"));
     E.walkerProtos.push(`${thunkSig}; /* stranded dyn call thunk for ${key} */`);

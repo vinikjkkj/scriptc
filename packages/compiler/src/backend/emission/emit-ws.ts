@@ -442,6 +442,13 @@ function initFieldMsg(field: string): string {
   );
 }
 
+/* CENSUS: this refusal is emitted in the BACKEND, so it has no diagnostic and
+ * no source location to tag with — it carries a code and no `[SCxxxx at
+ * file:line]`, and no bracket-keyed census contains it.  Two of them sit in
+ * zapo's WebSocket dial (the `agent` and `dispatcher` options) and fire on a
+ * VALUE rather than on a construct, so they are dark until a user configures
+ * a proxy.  `scripts/tu-census.mjs` counts them by host (`sc_wsw_N`).
+ */
 function refuseC(msg: string): string {
   return `scr_throw_error_msg_code(SCR_ERR_ERROR, ${cStr(msg)}, ${msg.length}, "SC2020");`;
 }
