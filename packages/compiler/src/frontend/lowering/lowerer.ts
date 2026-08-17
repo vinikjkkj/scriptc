@@ -80,6 +80,7 @@ import { settleOrValueArms,
   describeRecordMemberBlocker,
   formatIrType,
   ISLAND_AMBIENT_TYPES,
+  isConstAssertionTypeNode,
   isUnitOnlyTsType,
   mapType,
   ShapeRegistry,
@@ -3966,21 +3967,59 @@ export class Lowerer {
     // the same compiler with only this rung removed.
     if (process.env["SCRIPTC_ARGARM_OFF"] === "1") return this.lowerExprExpecting(node, expected);
     if (expected !== undefined && expected.kind === "union" && this.armTag(expected.unionId, UNDEFINED_T) >= 0) {
+      // The parens/cast chain is skipped, and the CAST is the third
+      // decliner of this same shape — measured, not guessed.
+      //
+      // `parseOptionalInt(child.attrs.id as string | undefined)`,
+      // `WaProfileCoordinator.ts:256/294/295`. The census says
+      // `wantArmed=yes`: the callee IS `parseOptionalInt`, its parameter
+      // IS declared `string | undefined`, and the rung nonetheless
+      // declined — because the argument node is an `AsExpression` and
+      // the guard below only ever looked through parentheses. The author
+      // wrote the arm twice, in the cast and in the signature, and the
+      // program still aborted.
+      //
+      // Skipping the cast is sound for exactly the reason the rung's own
+      // gate is: `stripUndefinedArm(expected)` must equal the READ's own
+      // type, so a cast that actually changed the value's type declines
+      // here as it always did. `as const` is not skipped — it is a
+      // literal-narrowing assertion, not a widening one, and its result
+      // is not the read's type. A cast the rung declines still lowers
+      // through `lowerExprExpecting` on the ORIGINAL node, so nothing a
+      // cast does is lost on the decline path.
       let x: ts.Expression = node;
       while (ts.isParenthesizedExpression(x)) x = x.expression;
+      // A CAST is only stripped for the rung's own attempt. If the rung
+      // declines, the ORIGINAL node lowers through lowerExprExpecting
+      // with the cast intact, so a declined cast is byte-for-byte what it
+      // was — the same "a declined rung changes nothing" property the
+      // paren case has.
+      let cast: ts.Expression | null = null;
+      if (
+        process.env["SCRIPTC_ARGCAST_OFF"] !== "1" &&
+        (ts.isAsExpression(x) || ts.isSatisfiesExpression(x)) &&
+        !isConstAssertionTypeNode(x.type)
+      ) {
+        cast = x;
+        let inner: ts.Expression = x.expression;
+        while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+        x = inner;
+      }
       if (
         (ts.isPropertyAccessExpression(x) || ts.isElementAccessExpression(x)) &&
         x.questionDotToken === undefined
       ) {
-        const raw = this.lowerExpr(node);
+        const raw = this.lowerExpr(cast === null ? node : x);
         const armed = this.recordKeyReadAtUndefinedArm(raw, expected);
         if (process.env["SCRIPTC_ARGARM_WHY"]) {
           const l = locOf(node);
           console.error(
-            `ARGARM ${armed ? "FIRES" : "declines"} ${l.file}@${l.start} read=${this.fmt(raw.type)} want=${this.fmt(expected)} kind=${raw.kind}`,
+            `ARGARM ${armed ? "FIRES" : "declines"} ${l.file}@${l.start} read=${this.fmt(raw.type)} want=${this.fmt(expected)} kind=${raw.kind}${cast ? " (cast)" : ""}`,
           );
         }
-        return armed ?? this.coerceInto(node, raw, expected);
+        if (armed) return armed;
+        // Declined: lower the original node, cast and all.
+        return cast === null ? this.coerceInto(node, raw, expected) : this.lowerExprExpecting(node, expected);
       }
     }
     return this.lowerExprExpecting(node, expected);

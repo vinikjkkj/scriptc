@@ -7987,6 +7987,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4361-absent-index-key-into-an-undefined-armed-parameter.ts": {
+   "order": [
+    "<repo>/tests/corpus/4361-absent-index-key-into-an-undefined-armed-parameter.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4391-keyed-read-inside-the-authors-own-miss-handler.ts": {
+   "order": [
+    "<repo>/tests/corpus/4391-keyed-read-inside-the-authors-own-miss-handler.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4392-keyed-read-argument-through-a-widening-cast.ts": {
+   "order": [
+    "<repo>/tests/corpus/4392-keyed-read-argument-through-a-widening-cast.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
