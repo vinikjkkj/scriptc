@@ -12,7 +12,8 @@
 import * as http from "node:http";
 
 // The port is EPHEMERAL, like every other listening fixture in the corpus
-// (31 of 33 already were). This one hardcoded 18994, and it is run more
+// (of the 33 that listen, 31 spell it `listen(0` and one `{ port: 0 }`;
+// this was the only fixed one). This one hardcoded 18994, and it is run more
 // than once at a time — the C and LLVM lanes cover the same corpus, and
 // agents run lanes concurrently — so the loser of the race died on
 // EADDRINUSE before the listen callback, printing NOTHING. That looked
