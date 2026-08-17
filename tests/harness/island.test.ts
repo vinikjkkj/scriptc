@@ -26,7 +26,12 @@ import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { exeName } from "./exe.js";
-import { ENGINE_CLASS_MIN, STATIC_CLASS_MAX } from "./size-class.js";
+import {
+  ENGINE_CLASS_MIN,
+  STATIC_CLASS_MAX,
+  STATIC_CLASS_RECORDED,
+  recordedSizeComplaint,
+} from "./size-class.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -385,6 +390,15 @@ console.log(greet("world"), 6 * 7);
     // regex.test.ts's regex-class pin.
     expect(staticSize).toBeLessThan(STATIC_CLASS_MAX);
     expect(dynamicSize).toBeGreaterThan(ENGINE_CLASS_MIN);
+    // The ceiling above protects the DISTANCE between classes and is
+    // deliberately coarse; this is the loud half, two-sided against the
+    // figure size-class.ts records. It fails on one page in EITHER
+    // direction, so the next unexplained page is named here instead of
+    // accumulating silently until a ceiling trips with no cause attached.
+    // size-class-armed.test.ts proves the comparator actually fires.
+    expect(
+      recordedSizeComplaint("the static hello-world", staticSize, STATIC_CLASS_RECORDED),
+    ).toBeNull();
   });
 
   /* ── the `any` boundary (validated exits) ─────────────────────────────
