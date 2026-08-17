@@ -5374,6 +5374,59 @@ export class Lowerer {
         if (overlapping.length === 1) {
           return { how: "liftWrap", tag: overlapping[0]!.tag, arm: overlapping[0]!.arm };
         }
+        // THE WHOLE-VALUE REFINEMENT, the second tier of the same argument.
+        // The zero-overlap rule above is the degenerate case of a more general
+        // one: an arm that shares NO name with the source drops ALL of it, and
+        // "the copy reads none of the value" is why it is not what the program
+        // meant. The same objection applies, weaker but still decisive, to an
+        // arm that drops SOME of it — when a sibling arm drops NOTHING.
+        //
+        // Measured on zapo's own public API, the row `block/sixteen` attributed
+        // to the test driver rather than to zapo:
+        //
+        //   client.message.send(jid, { type: 'text', text }, { quote: target })
+        //
+        // where `target` is a plain `{ remoteJid; id; fromMe }` binding and
+        // `WaSendMessageOptions.quote` is the THREE-arm
+        // `WaIncomingMessageEvent | WaQuoteRef | WaMessageKey`. The zero-overlap
+        // rule drops the EVENT arm (`{key; rawNode; …}`, no shared name) and
+        // leaves two:
+        //   WaMessageKey  {remoteJid; id; fromMe; participant?}  — holds all three
+        //   WaQuoteRef    {id; participant?; remoteJid?; message?} — DROPS `fromMe`
+        // Two candidates, so the site kept its fence and the quote-reply step
+        // aborted, costing 2 stanzas. The sibling site one arm over —
+        // `WaMessageTargetInput = WaMessageKey | WaMessageRef`, two arms — lowers
+        // today, so the pair `send(…, {target})` / `send(…, {quote: target})`
+        // behaved differently for no reason the author could see.
+        //
+        // The rule: among the name-overlapping candidates, an arm that can hold
+        // EVERY member the source has reads the whole value; the others must
+        // silently discard a member the program wrote. Take it only when exactly
+        // one arm does, so this is strictly a refinement in the accepting
+        // direction and no pair that lifts today changes its answer.
+        //
+        // It AGREES with the fresh-literal spelling. `{ quote: { remoteJid, id,
+        // fromMe } }` written inline already lowers here (tsc picks the arm
+        // contextually and leaves no conversion); only the BINDING spelling
+        // aborted. This makes the two spellings of the same value agree, which
+        // is the same stance the tuple-into-array pass above takes.
+        //
+        // The counter-example it must NOT swallow is messages.ts:497, where one
+        // merged record width-lifts into FIVE of six media-message arms: each of
+        // those arms omits the fields belonging to the other media kinds, so
+        // EVERY candidate drops part of the source, the filter selects zero, and
+        // the site keeps its (correct) fence. Verified by census both sides.
+        if (overlapping.length > 1) {
+          const whole = overlapping.filter((c) => {
+            if (c.arm.kind !== "record") return false;
+            const armNames = new Set((this.shapes.get(c.arm.shapeId)?.fields ?? []).map((f) => f.name));
+            for (const n of srcNames) if (!armNames.has(n)) return false;
+            return true;
+          });
+          if (whole.length === 1) {
+            return { how: "liftWrap", tag: whole[0]!.tag, arm: whole[0]!.arm };
+          }
+        }
       }
       if (candidates.length !== 1) return null;
       return { how: "liftWrap", tag: candidates[0]!.tag, arm: candidates[0]!.arm };
