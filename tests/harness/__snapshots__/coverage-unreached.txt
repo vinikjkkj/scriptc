@@ -6,5 +6,5 @@ scriptc coverage tests/coverage-fixtures/unreached.ts
 
   in unreached code   (never lowered — cannot fail a build)
       ×1  for-in over class instances (which keys exist on an instance depends on runtime property creation the class model does not track — for-in over records and arrays compiles)  SC1052
-      ×1  'break outer' targeting this statement form (the labeled statement lowers through a desugar that has no label point)                                                         SC1050
-      ×1  async generators (async function*)                                                                                                                                           SC1071
+      ×1  'break outer' targeting this statement form (the labeled statement lowers through a desugar that has no label point)  SC1050
+      ×1  async generators (async function*)                                                                    SC1071
