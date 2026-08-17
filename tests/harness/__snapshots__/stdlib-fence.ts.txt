@@ -102,15 +102,6 @@ stdlib-fence.ts:25:12 - error SC2020: 'new Proxy' is part of the standard librar
 
   hint: property-access metaprogramming has no static lowering (every property read must resolve at compile time)
 
-stdlib-fence.ts:26:7 - error SC2020: 'ArrayBuffer' is part of the standard library types but has no scriptc lowering yet
-
-  25 | const px = new Proxy({ a: 1 }, {});
-  26 | const buf = new ArrayBuffer(8);
-     |       ^~~
-  27 | const st = new Set(new Set([1, 2])); // array seeds lower; Set/iterable seeds stay fenced
-
-  hint: no free-standing ArrayBuffer value exists — typed arrays own their storage (new Uint8Array(n) allocates; new Uint8Array(new ArrayBuffer(n)) erases the buffer into the view)
-
 stdlib-fence.ts:26:13 - error SC2020: 'new ArrayBuffer' is part of the standard library types but has no scriptc lowering yet
 
   25 | const px = new Proxy({ a: 1 }, {});
@@ -156,15 +147,6 @@ stdlib-fence.ts:32:15 - error SC2020: 'Error.stack' is part of the standard libr
 
   hint: stack traces are not captured (frames would need runtime bookkeeping); name, message, and toString() are available
 
-stdlib-fence.ts:35:15 - error SC2020: 'Math.SQRT2' is part of the standard library types but has no scriptc lowering yet
-
-  34 | // Unlowered members on lowered containers.
-  35 | const sqrt2 = Math.SQRT2;
-     |               ^~~~~~~~~~
-  36 | // (n-ary Math.min/max LOWER now — the variadic battery lives in the
-
-  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
-
 stdlib-fence.ts:38:17 - error SC2020: 'Math.min' is part of the standard library types but has no scriptc lowering yet
 
   37 | // corpus; the mixed spread/positional list is the form that stays fenced.)
@@ -198,15 +180,6 @@ stdlib-fence.ts:41:14 - error SC2020: 'string.normalize' is part of the standard
   41 | const norm = "abc".normalize();
      |              ^~~~~~~~~~~~~~~
   42 | const limited = "a,b,c".split(",", 2); // the string-separator split lowers; the limit form stays fenced
-
-  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
-
-stdlib-fence.ts:42:17 - error SC2020: '.split with 2 arguments on strings' is part of the standard library types but has no scriptc lowering yet
-
-  41 | const norm = "abc".normalize();
-  42 | const limited = "a,b,c".split(",", 2); // the string-separator split lowers; the limit form stays fenced
-     |                 ^~~~~~~~~~~~~~~~~~~~~
-  43 | const fixed = (1.5).toFixed(); // digit-free toFixed lowers now (the static ties-up integer)
 
   hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
 
@@ -273,15 +246,6 @@ stdlib-fence.ts:60:16 - error SC2020: 'JSON.stringify with replacer/space parame
 
   hint: the serializer is type-directed — shape the value before stringifying
 
-stdlib-fence.ts:66:16 - error SC2020: 'then with 2 arguments' is part of the standard library types but has no scriptc lowering yet
-
-  65 | }
-  66 | const thened = work().then((v) => v + 1, () => 0);
-     |                ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  67 | const caught = work().catch(() => 0);
-
-  hint: the supported form takes exactly one fulfillment handler — chain .catch(...) for the rejection half
-
 stdlib-fence.ts:73:15 - error SC2020: 'Object.is over a dynamic operand' is part of the standard library types but has no scriptc lowering yet
 
   72 | // unions needing narrowing.
@@ -299,26 +263,3 @@ stdlib-fence.ts:75:10 - error SC2020: 'Object.is over these union operands' is p
   76 | }
 
   hint: union-typed comparisons need one comparable shape (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms)
-
-stdlib-fence.ts:81:7 - error SC2001: values of type '10n' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
-
-  80 | // declaration is a value Node builds and drops — it compiles to nothing).
-  81 | const big = 10n;
-     |       ^~~
-  82 | console.log(big);
-
-stdlib-fence.ts:81:13 - error SC1090: syntax 'BigIntLiteral' is not supported yet
-
-  80 | // declaration is a value Node builds and drops — it compiles to nothing).
-  81 | const big = 10n;
-     |             ^~~
-  82 | console.log(big);
-
-stdlib-fence.ts:82:13 - error SC2004: uses of 'big' inherit the blocker on its declaration
-
-  81 | const big = 10n;
-  82 | console.log(big);
-     |             ^~~
-  83 | 
-
-  hint: the declaration of 'big' did not compile — fix the diagnostic reported there and these sites clear with it
