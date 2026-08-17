@@ -34,7 +34,16 @@ import type { IrType } from "../src/ir/nodes.js";
 import { BOOL, F64, isRefCounted, STRING, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES } from "../src/ir/nodes.js";
 
 const repoRoot = join(import.meta.dirname, "../../..");
-const headerPath = join(repoRoot, "packages/runtime/src/scr_runtime.h");
+const runtimeSrcDir = join(repoRoot, "packages/runtime/src");
+/* The ABI surface is the SET of runtime headers the emitted TU can
+ * include — which emitter.ts spells out as `#include "scr_*.h"` lines:
+ * scr_runtime.h always, plus scr_ws_global.h when the program builds a
+ * global WebSocket. Checking against one file only was a real gap: the
+ * C backend type-checks its ws calls against scr_ws_global.h, so nine
+ * correct `declare`s in ws.ts reported as "no prototype" purely because
+ * the parser could not see the header they agree with. The guard test
+ * below fails if the emitter ever grows a third include. */
+const HEADER_FILES = ["scr_runtime.h", "scr_ws_global.h"];
 const llvmSrcDir = join(import.meta.dirname, "../src/backend/llvm");
 const corpusDir = join(repoRoot, "tests/corpus");
 
@@ -129,6 +138,22 @@ function splitParams(argsText: string): string[] {
  * no linkage symbol the emitter could declare, so a declare against one
  * must report as missing. */
 async function parseHeader(): Promise<{ protos: Map<string, CProto>; dataSyms: Set<string> }> {
+  const protos = new Map<string, CProto>();
+  const dataSyms = new Set<string>();
+  for (const file of HEADER_FILES) {
+    // Parsed one file at a time: the typedef tables (enums, function
+    // pointers) are per-header, and a concatenation would also let one
+    // header's trailing text become the next one's "return type".
+    const one = await parseOneHeader(join(runtimeSrcDir, file));
+    for (const [k, v] of one.protos) if (!protos.has(k)) protos.set(k, v);
+    for (const s of one.dataSyms) dataSyms.add(s);
+  }
+  return { protos, dataSyms };
+}
+
+async function parseOneHeader(
+  headerPath: string,
+): Promise<{ protos: Map<string, CProto>; dataSyms: Set<string> }> {
   const raw = await readFile(headerPath, "utf8");
   const src = raw
     .replace(/\/\*[\s\S]*?\*\//g, " ")
@@ -202,7 +227,9 @@ function parseDeclare(text: string): LlDeclare | undefined {
 
 function checkDeclare(d: LlDeclare, protos: Map<string, CProto>): string | undefined {
   const proto = protos.get(d.name);
-  if (!proto) return `${d.name}: declared by the LLVM backend but scr_runtime.h has no prototype`;
+  if (!proto) {
+    return `${d.name}: declared by the LLVM backend but no runtime header (${HEADER_FILES.join(", ")}) has a prototype`;
+  }
   const issues: string[] = [];
   if (d.ret !== proto.ret) issues.push(`return ${d.ret} vs C ${proto.ret}`);
   if (d.params.length !== proto.params.length) {
@@ -218,6 +245,22 @@ function checkDeclare(d: LlDeclare, protos: Map<string, CProto>): string | undef
 }
 
 describe("LLVM backend declares match scr_runtime.h prototypes", () => {
+  /* HEADER_FILES is the whole ABI surface these scans check against, so a
+   * header the emitted TU includes and this list omits is not a smaller
+   * check — it is a check that reports every symbol in that header as
+   * MISSING (which is exactly what scr_ws_global.h's nine did) or, worse
+   * after someone silences those, one that stops looking. Pin the list to
+   * the emitter's own include lines so the two cannot drift. */
+  test("HEADER_FILES covers every runtime header the emitted TU includes", async () => {
+    const emitterSrc = await readFile(
+      join(repoRoot, "packages/compiler/src/backend/emission/emitter.ts"),
+      "utf8",
+    );
+    const included = [...emitterSrc.matchAll(/#include\s+"(scr_[a-z0-9_]+\.h)"/g)].map((m) => m[1]!);
+    expect(included.length).toBeGreaterThan(0); // extractor guard
+    expect([...new Set(included)].sort()).toEqual([...HEADER_FILES].sort());
+  });
+
   test("every literal declare in the backend sources", async () => {
     const { protos } = await parseHeader();
     const failures: string[] = [];
@@ -265,7 +308,7 @@ describe("LLVM backend declares match scr_runtime.h prototypes", () => {
     const failures: string[] = [];
     for (const [name, file] of names) {
       if (protos.has(name) || dataSyms.has(name)) continue;
-      failures.push(`${file}: ${name} — the backend can emit this symbol but scr_runtime.h declares no such prototype or extern data symbol`);
+      failures.push(`${file}: ${name} — the backend can emit this symbol but no runtime header (${HEADER_FILES.join(", ")}) declares such a prototype or extern data symbol`);
     }
     // Extractor guard: the tables alone carry hundreds of names — finding
     // few means the scan rotted, not that the backend went quiet.
