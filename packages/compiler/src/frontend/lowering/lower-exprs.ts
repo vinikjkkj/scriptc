@@ -8463,9 +8463,13 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
             loc,
           }];
         }
-        // Bind the read to a local: the arm chain tests it once per arm and
-        // extracts from it once, and a repeated `recordGet` would be a
-        // repeated read of a refcounted slot.
+        // Bind the read to a local so the arm tests and the extraction name
+        // one evaluated value instead of repeating the `recordGet`. MEASURED,
+        // and the honest note is that it is NOT load-bearing: the ablation
+        // that repeats the read instead builds, answers Node identically and
+        // passes the RC audit, because the receiver here is the helper's own
+        // parameter and the field read is pure. It is kept for the smaller
+        // emission, not for correctness.
         const mId = `m.${i}`;
         extraLocals.push({ id: mId, name: `m${i}`, type: plan.src, mutable: false });
         const mRef: IrExpr = { kind: "varRef", localId: mId, type: plan.src, loc };
