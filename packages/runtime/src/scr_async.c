@@ -112,6 +112,12 @@ struct ScrPromise {
   struct ScrPromiseAdapt *adapts;
   /* Unhandled-rejection tracking: set when rejected, cleared on await. */
   bool rejection_observed;
+  /* How many of the awaits still owed on this promise belong to a
+   * PAYLOAD-CONVERSION ADAPTER rather than to the source program. One per
+   * adapter filed in `adapts` (each adapter awaits its source exactly
+   * once, by construction of promiseCoerceAdapter), decremented by the
+   * first observation that arrives. See scr_prom_observe. */
+  unsigned adapter_observes_pending;
   /* Set when the checkpoint report delivered THIS promise to
    * 'unhandledRejection' listeners — a handler attached after that is
    * Node's 'rejectionHandled' moment (scr_prom_observe below). */
@@ -227,10 +233,68 @@ void (*scr_rjh_notify_fn)(ScrPromise *p) = NULL;
  * out of the report entirely). The flag clears on the first attach, so
  * one report fires at most one 'rejectionHandled' — Node's pairing. */
 static void scr_prom_observe(ScrPromise *p) {
+  /* Is THIS the await a conversion adapter owes its source? An adapter is
+   * not a handler the source program wrote, so it must not make the
+   * source's rejection look handled to the program — but it does have to
+   * keep the source out of the report, which setting the flag below
+   * already does. Counting is what separates the two, and it is exact
+   * rather than heuristic: promiseCoerceAdapter's body awaits its source
+   * exactly once (the settle-or-value variant's second await is on the
+   * awaited VALUE, not on the source), so one credit per filed adapter
+   * accounts for every await an adapter will ever perform. Whichever
+   * observation arrives first spends the credit — the two are woken from
+   * the same settle and their order is not fixed — and any observation
+   * beyond the credits is one the program itself wrote. */
+  bool by_adapter = false;
+  if (p->adapter_observes_pending > 0) {
+    p->adapter_observes_pending--;
+    by_adapter = true;
+  }
   p->rejection_observed = true;
   if (p->reported_unhandled) {
     p->reported_unhandled = false;
     if (scr_rjh_notify_fn != NULL) scr_rjh_notify_fn(p);
+  }
+  /* A PAYLOAD-CONVERSION ADAPTER IS THE SAME PROMISE IN THE SOURCE
+   * PROGRAM. `const u: Promise<unknown> = a` is an assignment in JS —
+   * one object, one rejection, one place to handle it. Here the payload
+   * representations differ (`promise<f64>` vs `promise<dyn>`), so the
+   * lowerer mints an adapter promise and memoizes it on the source so
+   * repeated conversions keep `===`. That adapter is a SECOND promise
+   * this runtime tracks, and handling the one the program can name left
+   * the other rejected with nobody attached: a spurious
+   * "Unhandled promise rejection" and exit 1 where Node exits 0.
+   *
+   * zapo `infra/perf/PromiseDedup.ts` is the site — `inFlight` is a
+   * `Map<string, Promise<unknown>>`, so filing the in-flight promise
+   * converts it — and it killed the client at window open on the
+   * `requestHistorySync` failure path, where the driver step had already
+   * caught the very same error.
+   *
+   * Propagation is deliberately ONE WAY, source -> adapters, because the
+   * other two cases were already right and must not move — both were
+   * MEASURED against Node v25.9.0 before this changed, and the first
+   * attempt at this fix broke the first of them:
+   *   - neither handled (lab/y1): Node reports and exits 1, and so does
+   *     this runtime. The source's only observation is the adapter's, it
+   *     spends the credit above, nothing propagates, and the adapter is
+   *     still there to be reported.
+   *   - only the ADAPTER handled (lab/y2): both exit 0.
+   * Only "the source was handled, the adapter was not" (lab/x3) was
+   * wrong. Recursion terminates on the already-observed flag; an adapter
+   * of an adapter is reached through its own list.
+   *
+   * NOT short-circuited on "already observed": the adapter's await and
+   * the program's await are woken from the SAME settlement, so the
+   * adapter's frequently lands first and sets the flag. Returning early
+   * on it threw the program's own observation away and left every case
+   * reporting again — measured, on the first attempt at this. The
+   * per-adapter `rejection_observed` test below is what bounds the walk. */
+  if (by_adapter) return;
+  for (ScrPromiseAdapt *a = p->adapts; a != NULL; a = a->next) {
+    if (a->adapted != NULL && !a->adapted->rejection_observed) {
+      scr_prom_observe(a->adapted);
+    }
   }
 }
 
@@ -289,6 +353,7 @@ void scr_promise_release(ScrPromise *p) {
 static void scr_promise_adapts_free(ScrPromise *p, bool release) {
   ScrPromiseAdapt *a = p->adapts;
   p->adapts = NULL;
+  p->adapter_observes_pending = 0;
   while (a) {
     ScrPromiseAdapt *next = a->next;
     if (release) scr_promise_release(a->adapted);
@@ -334,6 +399,18 @@ ScrPromise *scr_promise_adapt_put(ScrPromise *src, double id, ScrPromise *made) 
     a->id = id;
     a->adapted = scr_promise_retain(made);
     src->adapts = a;
+    /* One await credit for the adapter just filed (scr_prom_observe). */
+    src->adapter_observes_pending++;
+  }
+  /* The other order of the same fact: a conversion written AFTER the
+   * source was already handled inherits the handling, because in the
+   * source program there is only ever the one promise and it is handled.
+   * scr_prom_observe cannot see this case — by then the source has no
+   * further observation coming, so nothing would propagate. Applied on a
+   * memo HIT too: the hit hands back an adapter minted earlier, and the
+   * source may have been handled in between. */
+  if (src != NULL && src->rejection_observed && made != NULL) {
+    made->rejection_observed = true;
   }
   return scr_promise_retain(made);
 }

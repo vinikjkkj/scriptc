@@ -153,6 +153,15 @@ function lowerOptionalDefaultArg(
       const probe = L.lowerExpr(access.expression);
       if (probe.type.kind === "array") receiverIr = probe.type;
     }
+    // A UNION-OF-ARRAYS receiver — every arm an array, the arms' ELEMENTS
+    // different, so no single `elem` describes the value and the dispatch
+    // below sees no array at all. Answered by a per-arm dispatch over the
+    // existing union nodes; see unionArrayArmPredicate for the full account
+    // of what it admits and why.
+    if (receiverIr?.kind === "union" && (name === "some" || name === "every")) {
+      const armed = unionArrayArmPredicate(L, call, access, name, receiverIr);
+      if (armed) return armed;
+    }
     if (receiverIr?.kind !== "array") return null;
     if (!probedUntyped && !L.isStdlibMember(access)) return null;
     let elem = receiverIr.elem;
@@ -995,6 +1004,150 @@ function lowerOptionalDefaultArg(
       fnArg: fnArg as IrExpr & { type: IrType & { kind: "func" } },
       arity: (fnArg.type as IrType & { kind: "func" }).params.length,
     };
+  }
+
+/** Is this receiver expression safe to EVALUATE TWICE? The arm dispatch
+   * below tests the receiver's tag and then reads it again inside the arm
+   * it picked, so the C names it twice and the run evaluates it twice.
+   * `repeatableIndexExpr` in lower-stmts is the same doctrine for `a[i] +=
+   * v`; this is its receiver-shaped twin.
+   *
+   * Admitted: an identifier, `this`, and a dot chain over those. A dot read
+   * is a struct field load in the compiled program — EXCEPT through a
+   * get ACCESSOR, which is a call and can do anything, so an accessor
+   * anywhere in the chain declines. Element access, calls, `?.` and
+   * everything else decline: `xs[i++].matches`, `next().matches` and
+   * `maybe?.matches` all either move or re-run something. */
+  function repeatableReceiverExpr(L: Lowerer, e: ts.Expression): boolean {
+    let n: ts.Expression = e;
+    while (ts.isParenthesizedExpression(n)) n = n.expression;
+    if (ts.isIdentifier(n)) return true;
+    if (n.kind === ts.SyntaxKind.ThisKeyword) return true;
+    if (ts.isPropertyAccessExpression(n) && n.questionDotToken === undefined) {
+      const sym = L.checker.getSymbolAtLocation(n.name);
+      if (sym && (sym.flags & (ts.SymbolFlags.GetAccessor | ts.SymbolFlags.SetAccessor)) !== 0) {
+        return false;
+      }
+      return repeatableReceiverExpr(L, n.expression);
+    }
+    return false;
+  }
+
+/** `.some(f)` / `.every(f)` on a receiver whose type is a UNION OF ARRAYS
+   * with DIFFERENT element types.
+   *
+   * zapo's `src/retry/reason.ts:52` is the site: `RETRY_REASON_MATCHERS` is
+   * an `as const` array of 13 object literals, so a `for…of` binding over it
+   * has a 13-arm union type and `matcher.matches` is a union of 13 readonly
+   * TUPLE types. Eleven of them are tuples of string literals and two are
+   * tuples of a nested tuple, so the union LOWERS to exactly two arms —
+   * `string[] | string[][]` — and `matcher.matches.some(...)` met the stdlib
+   * member fence with the whole union printed as the surface name. Live text
+   * and the `pushDiag` stack in `estado-retry`; the cost is three stanzas,
+   * because `mapRetryReasonFromError` is what builds the outbound retry
+   * receipt and `sendDecryptFailureAck` shares its `try`.
+   *
+   * WHY A DISPATCH AND NOT A WIDENING. The obvious alternative is to hand
+   * the call an `array<string | string[]>` built from the union. That is a
+   * COPY: a fresh array with every element re-tagged. For `.some` nobody can
+   * observe it, but it allocates per call and it is the disposition
+   * `hofCallbackArg` and `elemRewrapsInto` both refuse by name. The dispatch
+   * copies nothing — it tests the tag the value already carries and hands
+   * the arm's own array to the arm's own interned helper.
+   *
+   * WHAT IT ADMITS, and why each restriction is there:
+   *   - `some`/`every` only. Both are read-only, both answer `bool`, and
+   *     neither lets an element escape into the result — so no arm's element
+   *     has to re-tag on the way OUT. `find`/`filter`/`map` all do, and
+   *     their result type would have to be the join of the arms' answers;
+   *     that is a different question and it keeps the fence it has today.
+   *   - Exactly one argument, and it is an inline arrow or function
+   *     expression. The callback is lowered ONCE PER ARM (each arm needs its
+   *     own adapter and its own interned helper), and lowering an arbitrary
+   *     expression twice would evaluate it twice. An inline function
+   *     expression has no evaluation effects; `xs.some(makeCb())` keeps the
+   *     fence. Only the taken arm's closure is reached at run time, but both
+   *     are BUILT — that is a dead allocation, never a divergence.
+   *   - A repeatable receiver (above).
+   *   - The callback declares ONE parameter, and its type is a union with an
+   *     IDENTICAL arm for every receiver arm's element. This is
+   *     `hofCallbackArg`'s own `rewrapOnly` test, asked BEFORE anything is
+   *     lowered: inside, a parameter it cannot wrap into reports `badType`,
+   *     and turning a fence into a hard type error would be strictly worse
+   *     than the fence. Asked here, a mismatch simply declines.
+   *   - A bool-answerable callback return, the same `truthyRet` domain
+   *     `lowerArrayFindLikeCall` applies.
+   *
+   * The shape built is `tag(r) === A ? some_A(narrow(r,A), fA) : some_B(...)`,
+   * nested right for more than two arms with the LAST arm as the final else —
+   * a union value always carries one of its own tags, so no arm is missing
+   * and no default is needed. */
+  function unionArrayArmPredicate(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,
+    method: "some" | "every",
+    recvT: IrType & { kind: "union" },): IrExpr | null {
+    if (call.questionDotToken !== undefined || access.questionDotToken !== undefined) return null;
+    if (!L.isStdlibMember(access)) return null;
+    if (call.arguments.length !== 1) return null;
+    const argNode = call.arguments[0]!;
+    if (!ts.isArrowFunction(argNode) && !ts.isFunctionExpression(argNode)) return null;
+    if (argNode.parameters.length !== 1) return null;
+    const param = argNode.parameters[0]!;
+    if (param.dotDotDotToken !== undefined) return null;
+    if (!repeatableReceiverExpr(L, access.expression)) return null;
+    const arms = L.unions.get(recvT.unionId)?.arms;
+    if (arms === undefined || arms.length < 2) return null;
+    if (!arms.every((a) => a.kind === "array")) return null;
+    // The callback's declared parameter, as the loop will have to fill it.
+    const paramT = L.mapTypeOf(L.checker.getTypeAtLocation(param.name));
+    if (paramT === null || paramT === undefined) return null;
+    const fits = (elem: IrType): boolean =>
+      typeEquals(elem, paramT) ||
+      (paramT.kind === "union" && L.armTag(paramT.unionId, elem) >= 0);
+    if (!arms.every((a) => a.kind === "array" && fits(a.elem))) return null;
+    const tags = arms.map((a) => L.armTag(recvT.unionId, a));
+    if (tags.some((t) => t < 0)) return null;
+    const loc = locOf(call);
+    const receiver = L.lowerExpr(access.expression);
+    if (!typeEquals(receiver.type, recvT)) return null;
+    // Build the arms back to front so the last one is the final `else`.
+    let out: IrExpr | null = null;
+    for (let i = arms.length - 1; i >= 0; i--) {
+      const arm = arms[i]!;
+      if (arm.kind !== "array") return null;
+      const armArrT = arrayOf(arm.elem);
+      const { fnArg, arity } = hofCallbackArg(L, argNode, [arm.elem], armArrT);
+      const fnRet = fnArg.type.ret;
+      const truthyRet =
+        fnRet.kind === "bool" || fnRet.kind === "f64" || fnRet.kind === "string" ||
+        (fnRet.kind === "union" &&
+          (L.unions.get(fnRet.unionId)?.arms ?? []).every(
+            (a) => a.kind !== "dyn" && a.kind !== "caught" && a.kind !== "jsval",
+          ));
+      if (!truthyRet) return null;
+      const helper = someEveryHelper(L, method, arm.elem, fnRet, arity, loc);
+      const armCall: IrExpr = {
+        kind: "call",
+        callee: helper,
+        args: [
+          { kind: "unionNarrow", unionId: recvT.unionId, tag: tags[i]!, value: receiver, type: armArrT, loc },
+          fnArg,
+        ],
+        type: BOOL,
+        loc,
+      };
+      out = out === null
+        ? armCall
+        : {
+          kind: "ternary",
+          cond: { kind: "unionIsTag", unionId: recvT.unionId, tag: tags[i]!, negated: false, value: receiver, type: BOOL, loc },
+          then: armCall,
+          else_: out,
+          type: BOOL,
+          loc,
+        };
+    }
+    return out;
   }
 
 /** `a.map(fn)` / `a.filter(fn)` / `a.forEach(fn)` desugar to a direct
