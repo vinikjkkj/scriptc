@@ -6358,6 +6358,9 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     if (!mapped || mapped.kind !== "record") {
       const want = L.emitPayloadShapes.get(expr);
       if (want !== undefined && want.kind === "record") {
+        if (process.env["SCRIPTC_EMIT_WHY"] !== undefined) {
+          console.error(`[payload] ${loc.file}@${String(loc.start)} builds at ${L.fmt(want).slice(0, 100)}`);
+        }
         mapped = want;
         // The tuple position came from a LISTENER's declared parameter type,
         // not from anything inferred for this literal.
