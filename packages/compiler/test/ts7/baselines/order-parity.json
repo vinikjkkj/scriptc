@@ -7963,6 +7963,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4342-optional-chain-sub-union-member-representations.ts": {
+   "order": [
+    "<repo>/tests/corpus/4342-optional-chain-sub-union-member-representations.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
