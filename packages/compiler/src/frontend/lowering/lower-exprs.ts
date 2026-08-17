@@ -5563,36 +5563,57 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
    *
    * `null` for everything else, and the two exclusions are the point:
    *   - one literal is `literalComputedKey`'s job, not this one;
-   *   - a key typed plain `string` has NO finite name set and keeps its
-   *     refusal. zapo's OTHER computed-key site,
-   *     `src/client/coordinators/WaAppStateMutationCoordinator.ts:205`, is
-   *     exactly that shape and is a must-not-close row: the literal-union
-   *     gate is what separates the two.
+   *   - a key typed plain `string` has NO finite name set, and THIS gate
+   *     keeps refusing it. What changed is that the fold no longer has
+   *     to get its candidates from here: see the target-declared-fields
+   *     branch in `unionKeyNames`, which runs only after this function
+   *     has answered null and takes the finite set from the TARGET
+   *     instead. `literalUnionComputedKeys` is byte-identical to what it
+   *     was on the day it was written.
    *
-   * WHAT :205 IS ACTUALLY WORTH, measured rather than assumed. A narrower
-   * rule than widening this gate DOES exist and DOES work: take the
-   * candidate set from the TARGET's declared fields instead of from the
-   * key's type (the target is a closed record with no index signature, so
-   * the slots the write can land in are finite even when the key's type is
-   * not), behind the same `shapeDeclared` gate `dropsAreHonest` uses so a
-   * key naming no declared field is dropped only where that is divergence
-   * 68. Built and measured: it admits exactly ONE site in 129 MB of zapo TU
-   * (:205, 82 candidates), closes it, opens nothing (census 26 -> 25, one
-   * closed / zero new), costs 355 KB of C, and matches Node byte for byte
-   * at 4 and at 82 candidates.
+   * :205 WAS A MUST-NOT-CLOSE ROW AND IS NOT ONE ANY MORE, and the reason
+   * the grading changed is worth stating precisely, because the old
+   * grading was not wrong about what it actually guarded. It guarded
+   * THIS GATE. A key typed plain `string` still has no finite name set,
+   * and admitting one here would let a runtime-decided name reach a
+   * record shape. That has not been done. The candidates now come from
+   * the TARGET's declared fields — a different, finite set, obtained
+   * after this function has already declined — behind the same
+   * `shapeDeclared` gate `dropsAreHonest` uses, so a key naming no
+   * declared field is dropped only where that is divergence 68.
    *
-   * It buys ZERO STANZAS, which is why the gate below is still the right
-   * one and why :205 stays a must-not-close row. `set()` refuses TWICE in
-   * series: :205 in `wrapData`, then SC2002 at :1116 —
-   * `indexArgs as unknown as IndexArgsForSchema<typeof resolved>`, the same
-   * `as WaAppstateSchema` widening resolving to the base's index signature
-   * (corpus 3453's subject). With :205 closed, the profile.setPushName step
-   * throws SC2002 at :1116 instead and the run is stanza-for-stanza
-   * identical: 74 both sides, same tags, dumps, decrypts, exit code. Only
-   * the census can see the difference. The ninth `iq w:sync:app:state`
-   * costs TWO rows, not one, and the second needs a value-side rule
-   * (an `unknown`-valued index signature width-coercing into a
-   * `string | boolean` one) that nobody has built.
+   * MEASURED at f6371ce4, on rtmax3.ts against @zapo-js/fake-server. The
+   * rule admits exactly ONE site in 129 MB of zapo TU (:205, 82
+   * candidates), and it had to land together with a SECOND row, because
+   * `set()` refuses TWICE IN SERIES:
+   *
+   *   :205   here, in `wrapData`
+   *   :1116  SC2002 — `indexArgs as unknown as
+   *          IndexArgsForSchema<typeof resolved>`, the same
+   *          `as WaAppstateSchema` widening resolving to the base's
+   *          index signature (corpus 3453's subject), refused by
+   *          lowerRecordOvfCaptureHelper's overflow-slot gate. See
+   *          dynSlotCheckOk in lower-containers.ts, and corpus 4571.
+   *
+   * Either row ALONE is worth zero stanzas — block/series built this one
+   * first and measured 74 vs 74, stanza for stanza, because :1116 sat
+   * behind it. TOGETHER they are worth the ninth
+   * `iq type=set xmlns=w:sync:app:state`: 74 -> 75 of an oracle 76,
+   * census REFUSALS 26 -> 24, both rows closed, nothing opened, and the
+   * only class still short of the oracle is `receipt type=read`, which
+   * is the harness's own uncoded refusal and not zapo's.
+   *
+   * A CAUTION FOR WHOEVER WIDENS THIS NEXT. The fold's value-fit check
+   * below (`typeEquals(coerced.type, fieldType)`) passes for coercions
+   * that can only be SETTLED at run time, and one of those throws where
+   * Node prints a value. `G:\ss\lab\k205u.ts` reproduces it through the
+   * LITERAL-UNION gate with no new rule involved at all — a target field
+   * typed `{ name: string }`, a `Record<string, unknown>` value, and an
+   * uncaught `not representable in the target union`. That is a
+   * pre-existing gap in this fold, not a cost of the candidate set, and
+   * it is the reason the value-fit check needs a compile-time plan
+   * rather than a type-equality test. zapo does not reach it: protobuf
+   * I-types declare every member optional.
    *
    * The key must be PURE for the same reason the single-literal fold
    * requires it: the desugar re-reads it once per candidate name. */
@@ -7052,8 +7073,38 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       if (shape.indexValue || shape.tuple) return null;
       if (!ts.isPropertyAssignment(p) || !ts.isComputedPropertyName(p.name)) return null;
       if (literalComputedKey(L, p.name) !== null) return null;
-      const names = literalUnionComputedKeys(L, p.name);
-      if (names === null) return null;
+      let names = literalUnionComputedKeys(L, p.name);
+      if (names === null) {
+        // THE TARGET-DECLARED-FIELDS CANDIDATE SET. Where the key is
+        // plain `string` its TYPE has no finite name set — but the
+        // TARGET does. A closed record with no index signature and no
+        // tuple can only ever receive a write into one of the slots it
+        // DECLARES, so the candidate set is finite even though the key
+        // type is not, and the fold below is the same fold: one
+        // conditional contributor per name, no runtime-decided name
+        // reaching a record shape.
+        //
+        // The key gate above is NOT widened. literalUnionComputedKeys is
+        // byte-identical to what it was; this is a second, narrower way
+        // to obtain candidates, taken only after it has answered null.
+        //
+        // Behind `shapeDeclared`, the same gate `dropsAreHonest` uses.
+        // Against a shape the PROGRAM DECLARED, a key naming no declared
+        // field has no slot and dropping it is divergence 68. Against a
+        // shape tsc merely INFERRED for this literal, dropping it is a
+        // silent wrong answer, so the fence has to stand.
+        if (!shapeDeclared) return null;
+        if (!pureKeyExpr(L, p.name.expression)) return null;
+        const kt = L.typeOf(p.name.expression);
+        if ((kt.flags & ts.TypeFlags.String) === 0) return null; // plain `string` only
+        if (shape.fields.length === 0) return null;
+        names = shape.fields.map((f) => f.name);
+        if (process.env["SCRIPTC_TARGETKEY_WHY"] !== undefined) {
+          const sf2 = p.getSourceFile();
+          const pos2 = ts.getLineAndCharacterOfPosition(sf2, p.getStart(sf2));
+          console.error(`[targetkey] ${sf2.fileName}:${pos2.line + 1} candidates=${names.length}`);
+        }
+      }
       if (!names.every((n) => fieldTypes.has(n))) return null;
       // LAST property only. The fold hoists the key and the value into the
       // prelude (once each, key first — JS's own per-property order), so it
