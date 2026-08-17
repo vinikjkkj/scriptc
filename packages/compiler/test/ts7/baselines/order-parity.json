@@ -8077,6 +8077,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4481-identity-arm-union-spread-into-a-union-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/4481-identity-arm-union-spread-into-a-union-slot.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/4491-iterable-parameter-is-an-array-snapshot.ts": {
    "order": [
     "<repo>/tests/corpus/4491-iterable-parameter-is-an-array-snapshot.ts"
