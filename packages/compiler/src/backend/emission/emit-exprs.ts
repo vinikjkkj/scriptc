@@ -441,19 +441,32 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const unitTags = def.arms.flatMap((a, i) => (isUnitType(a) ? [i] : []));
         const narrowIdx = def.arms.findIndex((a) => !isUnitType(a));
         if (unitTags.length === 0 || narrowIdx < 0) throw new Error("emitter bug: optChain union arms");
-        const narrowed = def.arms[narrowIdx]!;
+        // MORE THAN ONE non-unit arm: the guard proves only "not nullish",
+        // and what survives it is a SUB-UNION, not one arm — there is no
+        // single payload type to peek. The bind is then the RECEIVER BOX
+        // itself, retained, still carrying its own tag, and the FRONTEND
+        // owns the narrowing (it typed chainRecv as this same receiver
+        // union and set the body's checker type to the non-nullable one,
+        // so the body's union-property read re-tags into the sub-union
+        // through the ordinary narrowedRetagHelper). The shape of the
+        // decision is derived from the arms, not carried on the node, so
+        // the two ends cannot disagree: the frontend emits a multi-arm
+        // optChain ONLY when it typed chainRecv this way.
+        const subUnion = def.arms.length - unitTags.length > 1;
+        const narrowed: IrType = subUnion ? e.receiver.type : def.arms[narrowIdx]!;
         const r = E.emitExpr(e.receiver);
         const bind = `sc_t${E.tempCounter++}`;
         E.line(`${cDecl(narrowed, bind)} = ${isRefCounted(narrowed) ? "NULL" : "0"};`);
         if (isRefCounted(narrowed)) E.currentFrame().push({ name: bind, type: narrowed });
         const test = unitTags.map((t) => `${r.name}->tag == ${t}`).join(" || ");
-        const extract =
-          (narrowed.kind === "f64"
-            ? `scr_union_get_f64(${r.name})`
-            : narrowed.kind === "bool"
-              ? `scr_union_get_bool(${r.name})`
-              : retainCallC(narrowed, `(${cType(narrowed).trim()})scr_union_peek(${r.name})`)) +
-          armNoteC(E, e.receiver.type.unionId, narrowed, narrowIdx);
+        const extract = subUnion
+          ? retainCallC(narrowed, r.name)
+          : (narrowed.kind === "f64"
+              ? `scr_union_get_f64(${r.name})`
+              : narrowed.kind === "bool"
+                ? `scr_union_get_bool(${r.name})`
+                : retainCallC(narrowed, `(${cType(narrowed).trim()})scr_union_peek(${r.name})`)) +
+            armNoteC(E, e.receiver.type.unionId, narrowed, narrowIdx);
         if (e.type.kind === "void") {
           // Statement form (cb?.()): no result value at all.
           E.line(`if (!(${test})) {`);
