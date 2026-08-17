@@ -42,16 +42,25 @@ static void scr_cyc_oom(void) {
   scr_trap("scriptc: out of memory\n");
 }
 
+/* Cycle-headered objects currently allocated — the pacing denominator, see
+ * the "pacing" note under the candidate-root buffer. Declared here because
+ * the two functions that move it are the allocator and the free below. */
+static size_t scr_cyc_live = 0;
+
 void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
   ScrCycHdr *h = calloc(1, sizeof(ScrCycHdr) + size);
   if (!h) scr_cyc_oom();
   h->trace = trace;
   h->free_fn = free_fn;
   h->color = SCR_CYC_BLACK;
+  scr_cyc_live++; /* the pacing denominator; see below */
   return h + 1;
 }
 
-void scr_cyc_free(void *obj) { free(scr_cyc_hdr(obj)); }
+void scr_cyc_free(void *obj) {
+  scr_cyc_live--;
+  free(scr_cyc_hdr(obj));
+}
 
 /* ── the candidate-root buffer ────────────────────────────────────────── */
 
@@ -68,6 +77,39 @@ static size_t scr_cyc_threshold(void) {
   }
   return cached;
 }
+
+/* ── pacing ───────────────────────────────────────────────────────────
+ * The threshold counts BUFFERED CANDIDATES, but a pass costs O(the graph
+ * reachable from them), not O(the buffer): markGray visits every node
+ * reachable from every candidate, and scan/scanBlack/collectWhite walk it
+ * again. With a FIXED threshold the total cost of a run is
+ * O(churn / threshold * live) — quadratic in the live set.
+ *
+ * That was survivable while the candidate population was boxes, closures,
+ * shapes and containers. It stopped being survivable when dyn values
+ * became cycle nodes, because the checked-dynamic tree is both the largest
+ * live population in a compiled program and the most churned: a program
+ * holding a 20 000-entry live dyn graph while churning rings went from
+ * 294 ms to 17.8 s — 58x — with an identical trace and an identical
+ * answer. Raising SCR_CYCLE_THRESHOLD by hand fixed it exactly
+ * (256 -> 17.0 s, 4096 -> 1.35 s, 65536 -> 0.41 s), which is what
+ * identifies the FREQUENCY rather than the walk as the cost.
+ *
+ * So the interval scales with the live node count instead of being fixed:
+ * one pass per live/SCR_CYC_PACE nodes buffered, never below the base
+ * threshold. Then a run's total collection work is
+ * O(churn / (live/PACE) * live) = O(PACE * churn) — amortized LINEAR in
+ * the churn, independent of how big the live graph is. It also bounds the
+ * garbage held between passes by a fraction of the live set rather than by
+ * an absolute constant, so it self-scales in both directions: a small
+ * program keeps the historic 256 exactly.
+ *
+ * What this deliberately does NOT touch: the other collection points.
+ * Exit, event-loop quiescence and an explicit scr_collect_cycles() all run
+ * a full pass regardless of the budget, so WHAT a program has freed by the
+ * time it exits is unchanged — only how often it pays for a pass mid-run.
+ */
+#define SCR_CYC_PACE 8
 
 void scr_cyc_on_dead(void *obj) {
   ScrCycHdr *h = scr_cyc_hdr(obj);
@@ -96,7 +138,9 @@ void scr_cyc_on_release(void *obj) {
   /* Threshold trigger. Never re-entered: a teardown's releases of untraced
    * children can buffer new candidates mid-collection, but they only wait
    * for the next pass. */
-  if (!scr_collecting && scr_nroots >= scr_cyc_threshold()) {
+  size_t paced = scr_cyc_live / SCR_CYC_PACE;
+  size_t base = scr_cyc_threshold();
+  if (!scr_collecting && scr_nroots >= (paced > base ? paced : base)) {
     scr_collect_cycles();
   }
 }
