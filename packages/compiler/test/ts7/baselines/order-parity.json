@@ -7993,6 +7993,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4381-record-into-union-arm-zero-overlap.ts": {
+   "order": [
+    "<repo>/tests/corpus/4381-record-into-union-arm-zero-overlap.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/4391-keyed-read-inside-the-authors-own-miss-handler.ts": {
    "order": [
     "<repo>/tests/corpus/4391-keyed-read-inside-the-authors-own-miss-handler.ts"
