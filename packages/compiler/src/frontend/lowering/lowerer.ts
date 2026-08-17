@@ -3506,11 +3506,38 @@ export class Lowerer {
    * test. */
   checkerAnyArray(node: ts.Expression): boolean {
     const t = this.typeOf(node);
-    return (
-      this.checker.isArrayType(t) &&
-      ((this.checker.getTypeArguments(t as ts.TypeReference)[0]?.flags ?? 0) &
-        (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0
-    );
+    const anyElemArray = (c: ts.Type): boolean =>
+      this.checker.isArrayType(c) &&
+      ((this.checker.getTypeArguments(c as ts.TypeReference)[0]?.flags ?? 0) &
+        (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
+    if (anyElemArray(t)) return true;
+    // THE SAME NARROWING, IN THE SPELLING tsc USES WHEN IT CANNOT DISCARD
+    // THE OTHER ARMS. `Array.isArray(x)` is declared `arg is any[]`. Over
+    // `string | readonly string[]` tsc drops the non-array arms and the
+    // true branch is bare `any[]` — the case above. Over a union whose
+    // non-array arms are LITERAL types (`'adv' | readonly ['b','e']`, which
+    // is what `as const` on a table produces) it cannot drop them, so it
+    // intersects instead and hands back the UNION of the per-arm
+    // intersections — printed `("adv" | readonly ["b", "e"]) & any[]`, but
+    // carrying the Union flag, not the Intersection one.
+    //
+    // It is the identical claim: every arm says `any[]`, so tsc has decided
+    // the value IS an array here and has lost the element type doing it.
+    // Requiring EVERY arm to carry the `any[]` constituent is what keeps it
+    // a statement about the value rather than about one possibility, and
+    // every caller of this predicate re-checks that the VALUE lowers to a
+    // real static array before it uses the answer — this only widens who
+    // gets asked. zapo `src/retry/reason.ts:54` is the site:
+    // `candidate.every(...)` inside `Array.isArray(candidate)`, where the
+    // element type had already been lost and four consumers in a row fenced
+    // on the `any` the value never had.
+    const armIsAnyArray = (c: ts.Type): boolean =>
+      anyElemArray(c) ||
+      ((c.flags & ts.TypeFlags.Intersection) !== 0 &&
+        (c as ts.UnionOrIntersectionType).getTypes().some(anyElemArray));
+    if (!t.isUnionType()) return false;
+    const parts = t.getTypes();
+    return parts.length > 0 && parts.every(armIsAnyArray);
   }
 
   /** Substitutes a bound type parameter anywhere inside mapType's recursion
