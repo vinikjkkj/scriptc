@@ -1782,7 +1782,32 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             const fv = f.type.kind === "func"
               ? dynFuncFieldBoxC(E, f.type, `v->${mangleField(f.name)}`)
               : toDynExprC(E, f.type, `v->${mangleField(f.name)}`);
-            d.push(`  scr_dyn_obj_set(d, ${keyLit}, ${keyLen}, ${fv});`);
+            // An OPTIONAL-flavored field (an undefined-armed union) holding
+            // the undefined arm is an ABSENT key, not a present one whose
+            // value is undefined — the explicit-undefined-is-absent stance
+            // the RECORD side already takes everywhere (Object.keys over a
+            // record, Object.hasOwn, the `in` operator, the JSON writer
+            // twenty lines up, recordKeysArrayCall's for-in walk). Without
+            // this test the converter published every declared slot, so the
+            // SAME value answered a different key set depending on which
+            // side of the dyn boundary it was asked on: measured on
+            // `{ a?: number; b?: string; c?: boolean } = {}`, Object.keys
+            // answered [] through the record and ["a","b","c"] through
+            // `as object`, where Node answers [] for both. Every dyn
+            // consumer read that: the keys/values/entries walk, the assign
+            // copy, util.inspect, `in`, hasOwn and a keyed read (which
+            // answered the undefined dyn value where the key does not
+            // exist — indistinguishable there, which is why this survived).
+            // The round trip is unaffected: the from-dyn side already maps
+            // an ABSENT key back to the undefined arm.
+            const utag = E.undefinedArmTag(f.type);
+            if (utag >= 0) {
+              d.push(`  if (v->${mangleField(f.name)}->tag != ${utag}) { /* undefined arm: the key is ABSENT, like Node */`);
+              d.push(`    scr_dyn_obj_set(d, ${keyLit}, ${keyLen}, ${fv});`);
+              d.push(`  }`);
+            } else {
+              d.push(`  scr_dyn_obj_set(d, ${keyLit}, ${keyLen}, ${fv});`);
+            }
           }
         }
         if (shape.indexValue) {
