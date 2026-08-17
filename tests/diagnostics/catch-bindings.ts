@@ -12,7 +12,7 @@ class Standalone {
 try {
   throw 2;
 } catch (e) {
-  const probe = (): boolean => e instanceof Error; // capture by a closure
+  const probe = (): boolean => e instanceof Error; // a closure capture COMPILES now
   console.log(probe());
 }
 try {
