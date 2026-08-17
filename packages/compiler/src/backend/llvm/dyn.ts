@@ -1288,28 +1288,6 @@ export class LlDyn {
         for (const f of dynFields) {
           const klen = Buffer.byteLength(f.name, "utf8");
           const fv = loadFieldOf(f.name, f.type);
-          // An OPTIONAL-flavored field holding the undefined arm is an
-          // ABSENT key — the C emitter's toDynHelper carries the same test
-          // and the same reason (the record side already answers this way
-          // for Object.keys, hasOwn, `in` and the JSON writer). The skip
-          // has to be HERE and not only there: this walker is the one the
-          // LLVM lane runs, and with the test on one backend only, the
-          // same program's key set would depend on which backend built it
-          // — which order-parity exists to catch.
-          const utag = host.undefinedArmTag(f.type);
-          let skip: string | null = null;
-          if (utag >= 0) {
-            const tp = B.tmp();
-            const tag = B.tmp();
-            B.line(`${tp} = getelementptr inbounds %ScrUnion, ptr ${fv}, i64 0, i32 1`);
-            B.line(`${tag} = load i32, ptr ${tp}`);
-            const isu = B.tmp();
-            B.line(`${isu} = icmp eq i32 ${tag}, ${utag}`);
-            const lw = B.newLabel("tdf.w");
-            skip = B.newLabel("tdf.s");
-            B.condBr(isu, skip, lw);
-            B.startBlock(lw);
-          }
           const conv = B.tmp();
           // Same rule as the ordered pass above: a FUNCTION field boxes
           // through the closure path, stranded when its signature has no
@@ -1323,10 +1301,6 @@ export class LlDyn {
             B.line(`${conv} = call ptr @${this.toDynHelper(f.type)}(${this.valTy(f.type)} ${fv})`);
           }
           B.line(`call void @scr_dyn_obj_set(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
-          if (skip !== null) {
-            B.br(skip);
-            B.startBlock(skip);
-          }
         }
         if (shape.indexValue) {
           const iv = shape.indexValue;
