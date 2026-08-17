@@ -66,6 +66,7 @@
  * entries (158 corpus-wide) — and, worse, left 84 of the 461 sampled
  * entries downstream of an abort NEVER COMPARED. */
 
+import { execFileSync } from "node:child_process";
 import { globSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -102,6 +103,51 @@ const baseline = JSON.parse(readFileSync(baselinePath, "utf8")) as {
 const posix = (s: string): string => s.split("\\").join("/");
 const repoRootPosix = posix(repoRoot);
 const rel = (s: string): string => posix(s).split(repoRootPosix + "/").join("<repo>/");
+
+/* ── WHOSE FIXTURE IS THIS? ───────────────────────────────────────────────
+ * Adding a corpus entry and recording its baseline are two separate acts
+ * with nothing tying them at commit time, so a red "baseline accounting"
+ * lane used to be AMBIGUOUS: the reader could not tell an unrecorded
+ * fixture that arrived on somebody else's merge (chase it to its author)
+ * from one they had just written themselves (record it before shipping).
+ * Both mistakes have been made here — six fixtures across four blocks
+ * shipped unrecorded, four of them found in one day, and at least one
+ * agent burned a session chasing a ghost that was its own file.
+ *
+ * So the offender list NAMES the commit that introduced (or, for a stale
+ * key, removed) the path. The distinction that matters most is cheap and
+ * exact: a path git has never recorded an add for is in the READER'S OWN
+ * working tree, and the answer is "record it in this same commit", not
+ * "go ask whoever wrote it".
+ *
+ * Cost: one `git log` per OFFENDER, and the offender lists are empty on a
+ * green lane — so the common path spends nothing. `stdio` closes stdin and
+ * discards stderr so a git that wants to prompt or complain cannot hang or
+ * pollute the run, and every failure mode degrades to a label. */
+function gitAttribution(relKey: string, filter: "A" | "D"): string {
+  const path = relKey.startsWith("<repo>/") ? relKey.slice("<repo>/".length) : relKey;
+  let out: string;
+  try {
+    out = execFileSync(
+      "git",
+      ["log", `--diff-filter=${filter}`, "-1", "--format=%h %ad %s", "--date=short", "--", path],
+      { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15_000 },
+    ).trim();
+  } catch {
+    return "unattributed (git unavailable here)";
+  }
+  if (out === "") {
+    return filter === "A"
+      ? "UNCOMMITTED — this path has no add commit, so it is in YOUR working tree: record it in the same commit"
+      : "UNCOMMITTED — no delete commit, so the removal is in YOUR working tree";
+  }
+  const line = out.split("\n")[0] ?? "";
+  return line.length <= 100 ? line : `${line.slice(0, 97)}...`;
+}
+
+/** `<repo>/tests/corpus/x.ts  ← added by <sha> <date> <subject>` */
+const attributed = (keys: readonly string[], filter: "A" | "D"): string[] =>
+  keys.map((k) => `${k}  ← ${filter === "A" ? "added" : "removed"} by ${gitAttribution(k, filter)}`);
 
 function nativeAnswer(host: Ts7Host, entry: string): BaselineEntry {
   const t7 = checkPreflightTs7(entry, host);
@@ -274,12 +320,32 @@ if (UPDATE) {
     const corpusSet = new Set(corpus);
     const stale = [...recordedKeys].filter((k) => !corpusSet.has(k));
     expect(
-      { unrecorded, stale },
+      // Attribution is computed only for offenders, so a green lane spends
+      // no git at all. Each line names the commit that added (or removed)
+      // the path — or says the path is in the reader's own working tree.
+      { unrecorded: attributed(unrecorded, "A"), stale: attributed(stale, "D") },
       `${corpus.length} corpus entries vs ${recordedKeys.size} recorded. ` +
         `unrecorded = shipped without a baseline (add them: SCRIPTC_UPDATE_BASELINES=1, which is ADDITIVE and cannot ` +
         `overwrite a live divergence). stale = recorded but gone from the corpus. Neither is a behavior regression; ` +
-        `a chunk failure above is.`,
+        `a chunk failure above is. Each offender is tagged with the commit that introduced it: an "UNCOMMITTED" tag ` +
+        `means the file is in THIS working tree and the fix is to record it in the same commit, not to chase a ghost.`,
     ).toEqual({ unrecorded: [], stale: [] });
+  });
+
+  /* The instrument's own self-test, armed with a PLANTED offender: a
+   * committed path (this very file) must attribute to a real commit, and a
+   * path git has never seen must come back UNCOMMITTED. Without this, a
+   * `gitAttribution` that silently returned "unattributed" for everything
+   * would look exactly like a passing accounting lane. */
+  test("the offender attribution names a commit for a tracked path and flags an untracked one", () => {
+    const tracked = "<repo>/packages/compiler/test/ts7/order-parity.test.ts";
+    const trackedLine = attributed([tracked], "A")[0] ?? "";
+    expect(trackedLine.startsWith(`${tracked}  ← added by `)).toBe(true);
+    // "<sha> <yyyy-mm-dd> <subject>" — a real commit, not a fallback label.
+    expect(trackedLine).toMatch(/← added by [0-9a-f]{7,} \d{4}-\d{2}-\d{2} /);
+
+    const planted = "<repo>/tests/corpus/0000-a-deliberately-unrecorded-fixture.ts";
+    expect(attributed([planted], "A")[0]).toContain("UNCOMMITTED");
   });
 
   afterAll(() => {
