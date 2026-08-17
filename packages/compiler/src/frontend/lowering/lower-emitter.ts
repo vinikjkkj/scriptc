@@ -1836,7 +1836,30 @@ export function erasableSuperDelegation(
 function boundEmitKeySet(L: Lowerer, ctxTs: ts.Type): { keys: string[]; map: ts.Type } | null {
   const sigs = L.checker.getCallSignatures(ctxTs);
   if (sigs.length !== 1) return null;
-  const decl = L.checker.signatureDeclaration(sigs[0]!);
+  return keySetOfSignature(L, sigs[0]!);
+}
+
+/** The same read over an OVERLOADED member: the class's own `emit` declares
+ * the typed arm and the forwarding arm side by side, and the typed arm is the
+ * one carrying `<K extends keyof M>`. First arm that has it wins — a class
+ * declares at most one event map, and the forwarding arm has no type
+ * parameter at all, so there is nothing to choose between. */
+function emitterClassKeySet(L: Lowerer, member: ts.Expression): { keys: string[]; map: ts.Type } | null {
+  let t: ts.Type;
+  try {
+    t = L.typeOf(member);
+  } catch {
+    return null;
+  }
+  for (const sig of L.checker.getCallSignatures(t)) {
+    const found = keySetOfSignature(L, sig);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+function keySetOfSignature(L: Lowerer, sig: ts.Signature): { keys: string[]; map: ts.Type } | null {
+  const decl = L.checker.signatureDeclaration(sig);
   if (decl === undefined || !ts.isFunctionLike(decl)) return null;
   const tps = decl.typeParameters;
   if (tps === undefined || tps.length !== 1) return null;
@@ -2018,6 +2041,211 @@ function unionRegroupHelper(
   return name;
 }
 
+
+/** `X.emit.bind(X)` against a LOOSE emit surface — the plugin-context shape
+ *
+ *     readonly emit: (event: string | symbol, ...args: unknown[]) => boolean
+ *
+ * which the type mapping renders as `(string | symbol, ONE dyn payload) →
+ * bool`: the rest parameter collapses to a single dyn slot, so the surface
+ * can only ever carry one payload, and the event parameter admits symbols
+ * that name no compiled event.
+ *
+ * It is the SAME dispatcher idea as the key-map one, over a slot that carries
+ * none of the key-map's information, so everything it needs comes from
+ * elsewhere and every part of it is gated:
+ *
+ *   * the KEY SET is the receiver CLASS's own declared event map, read off
+ *     its `emit` overload's `<K extends keyof M>` — the events this emitter
+ *     declares, which is exactly the set a holder of the surface may name.
+ *     NOT the program's registration set: that carries every OTHER emitter's
+ *     events too (zapo's untyped `WaNodeTransport` registers a two-payload
+ *     `node_in`), and an event this class cannot emit has no business
+ *     shaping this class's dispatcher;
+ *   * each armed event's DECLARED arity must be at most one, because the
+ *     surface has one payload slot. An event the map declares wider is
+ *     unreachable through this value — the mapped func type has nowhere to
+ *     put the second argument — so the whole dispatcher declines rather than
+ *     silently dropping it;
+ *   * the payload extraction is the CHECKED one (`dynCheck`, the machinery
+ *     `x as T` uses), so a caller who pairs the wrong name with the wrong
+ *     payload gets a catchable TypeError, not another event's struct;
+ *   * a name that is not one of the arms falls through to `false`, which is
+ *     what Node answers for an event with no listeners, and what the
+ *     listenerless no-op already compiles a direct emit of such a name to.
+ *
+ * A SYMBOL name reaches the same fallthrough. Event names must be
+ * compile-time string literals for any emit to lower at all (eventNameOf), so
+ * no compiled listener bucket is reachable by a symbol and answering `false`
+ * is the honest result rather than a guess. */
+function looseEmitDispatcher(
+  L: Lowerer,
+  call: ts.CallExpression,
+  methodAccess: ts.PropertyAccessExpression,
+  info: ClassInfo,
+  recvClass: string,
+  slot: IrType & { kind: "func" },
+  ctxTs: ts.Type,
+  why: (r: string) => null,
+): IrExpr | null {
+  const loc = locOf(call);
+  const nameT = slot.params[0]!;
+  const payloadT = slot.params[1]!;
+  if (payloadT.kind !== "dyn") return why(`the loose slot's payload parameter is '${L.fmt(payloadT)}'`);
+  const retsBool = slot.ret.kind === "bool";
+  if (!retsBool && slot.ret.kind !== "void") return why(`the loose slot returns '${L.fmt(slot.ret)}'`);
+  // `string`, or the `string | symbol` union the Node typings spell.
+  let strTag = -1;
+  if (nameT.kind === "union") {
+    strTag = L.armTag(nameT.unionId, STRING);
+    if (strTag < 0) return why(`the loose slot's event parameter is '${L.fmt(nameT)}'`);
+  } else if (nameT.kind !== "string") {
+    return why(`the loose slot's event parameter is '${L.fmt(nameT)}'`);
+  }
+  // Is the payload parameter a REST? Both spellings map to the same single
+  // dyn — `(event: E, ...args: unknown[])` and `(event: E, payload: unknown)`
+  // are indistinguishable in the IR — and they mean different things at the
+  // ABI: a rest call PACKS its trailing arguments into one dyn array, so the
+  // event's payload is that array's element 0, while a plain parameter IS the
+  // payload. Getting this wrong is a wrong VALUE, not a fence (the dynCheck
+  // catches it only because a record and an array differ), so it is read off
+  // the declaration rather than guessed.
+  const restPacked = ((): boolean | null => {
+    const sigs = L.checker.getCallSignatures(ctxTs);
+    if (sigs.length !== 1) return null;
+    const decl = L.checker.signatureDeclaration(sigs[0]!);
+    if (decl === undefined || !ts.isFunctionLike(decl) || decl.parameters.length !== 2) return null;
+    return decl.parameters[1]!.dotDotDotToken !== undefined;
+  })();
+  if (restPacked === null) return why("the loose slot's payload parameter has no plain declaration");
+  const keySet = emitterClassKeySet(L, methodAccess);
+  if (keySet === null) return why("the receiver class declares no 'keyof' event map on its own emit");
+  const table = emitterEvents(L);
+
+  const arms: { name: string; tuple: IrType[] }[] = [];
+  for (const key of keySet.keys) {
+    const sig = table.get(key);
+    // Named by no emit and no listener in the whole program: emitting it is
+    // a no-op, which is exactly what the fallthrough does.
+    if (!sig) continue;
+    if (key === "error" || META_EVENTS.has(key)) return why(`'${key}' carries a forced tuple`);
+    if (sig.conflict) return why(`'${key}' has conflicting argument types`);
+    if (sig.dynListener) return why(`'${key}' has a dyn-flavored listener`);
+    if (streamForcedTuple(L, info, key) !== null) return why(`'${key}' is a stream event`);
+    const arity = keyMapArity(L, keySet.map, key);
+    if (arity === null) return why(`the key map does not spell '${key}' plainly`);
+    if (arity > 1) return why(`'${key}' declares ${arity} payload arguments where the loose slot has one`);
+    if (sig.tuple.length > 1) return why(`'${key}' unifies to ${sig.tuple.length} arguments where the loose slot has one`);
+    const want = sig.tuple[0];
+    if (
+      want !== undefined && want.kind !== "dyn" &&
+      !canDynCheckTo(want, (id) => L.shapes.get(id), (id) => L.unions.get(id))
+    ) {
+      return why(`'${key}' carries '${L.fmt(want)}', which a dyn payload cannot be checked into`);
+    }
+    arms.push({ name: key, tuple: sig.tuple });
+  }
+  // ZERO arms is a legitimate dispatcher, unlike the key-map one: every name
+  // then falls through to `false`, which is exactly what Node answers for an
+  // event nobody listens to — the listenerless no-op's stance, reached
+  // through a value instead of a direct call.
+
+  const ikey = `emitloose:${recvClass}:${restPacked ? "rest" : "one"}:${typeKey(slot)}`;
+  let fname = L.widthHelpers.get(ikey);
+  if (fname === undefined) {
+    fname = `%emit.loose.${L.widthHelpers.size}`;
+    L.widthHelpers.set(ikey, fname);
+    const selfT: IrType = { kind: "object", className: recvClass };
+    const locals: IrLocal[] = [
+      { id: "self.0", name: "self", type: selfT, mutable: false, boxed: true },
+      { id: "ev.0", name: "ev", type: nameT, mutable: false },
+      { id: "p.0", name: "p", type: DYN, mutable: false },
+    ];
+    const body: IrStmt[] = [];
+    const evRaw = (): IrExpr => ({ kind: "varRef", localId: "ev.0", type: nameT, loc });
+    let evStr: () => IrExpr = evRaw;
+    if (nameT.kind === "union") {
+      // A symbol (or any other arm) names no compiled event: answer like an
+      // event with no listeners rather than narrowing a value that is not a
+      // string.
+      body.push({
+        kind: "if",
+        cond: {
+          kind: "unionIsTag", unionId: nameT.unionId, tag: strTag, negated: true,
+          value: evRaw(), type: BOOL, loc,
+        },
+        then: [{ kind: "return", value: retsBool ? boolLit(false, loc) : null, loc }],
+        else_: null,
+        loc,
+      });
+      locals.push({ id: "evs.0", name: "evs", type: STRING, mutable: false });
+      body.push({
+        kind: "varDecl",
+        localId: "evs.0",
+        init: { kind: "unionNarrow", unionId: nameT.unionId, tag: strTag, value: evRaw(), type: STRING, loc },
+        loc,
+      });
+      evStr = (): IrExpr => ({ kind: "varRef", localId: "evs.0", type: STRING, loc });
+    }
+    for (const arm of arms) {
+      const self: IrExpr = { kind: "varRef", localId: "self.0", type: selfT, loc };
+      const payload: IrExpr[] = [];
+      const want = arm.tuple[0];
+      if (want !== undefined) {
+        const raw: IrExpr = { kind: "varRef", localId: "p.0", type: DYN, loc };
+        // A rest call packed its trailing arguments into one dyn array; the
+        // event's single payload is that array's element 0 (the dyn keyed
+        // read every dyn indexing already uses, with the canonical string
+        // key JS itself would form).
+        const read: IrExpr = restPacked
+          ? { kind: "dynKeyGet", key: strLit("0", loc), value: raw, type: DYN, loc }
+          : raw;
+        payload.push(want.kind === "dyn" ? read : { kind: "dynCheck", value: read, type: want, loc });
+      }
+      const dispatch = emitDispatchExpr(L, info, arm.name, arm.tuple, self, payload, undefined, loc);
+      body.push({
+        kind: "if",
+        cond: { kind: "strEq", negated: false, left: evStr(), right: strLit(arm.name, loc), type: BOOL, loc },
+        then: retsBool
+          ? [{ kind: "return", value: dispatch, loc }]
+          : [{ kind: "exprStmt", expr: dispatch, loc }, { kind: "return", value: null, loc }],
+        else_: null,
+        loc,
+      });
+    }
+    body.push({ kind: "return", value: retsBool ? boolLit(false, loc) : null, loc });
+    L.liftedFns.push({
+      name: fname,
+      params: [
+        { localId: "ev.0", name: "ev", type: nameT },
+        { localId: "p.0", name: "p", type: DYN },
+      ],
+      returnType: slot.ret,
+      captures: [{ localId: "self.0", name: "self", type: selfT }],
+      locals,
+      body,
+      loc,
+    });
+  }
+  const recv = L.lowerExpr(methodAccess.expression);
+  if (recv.type.kind !== "object") return why(`the lowered receiver is '${L.fmt(recv.type)}'`);
+  const ctx = L.ctx;
+  const count = ctx.localCounters.get("%bmrecv") ?? 0;
+  ctx.localCounters.set("%bmrecv", count + 1);
+  const recvId = `%bmrecv.${count}`;
+  ctx.locals.push({ id: recvId, name: "%bmrecv", type: recv.type, mutable: false, boxed: true });
+  if (process.env["SCRIPTC_BEMIT_WHY"] !== undefined) {
+    console.error(`[bemit] BUILT-LOOSE ${fname} for ${recvClass}: ${arms.map((a) => a.name).join(",")}`);
+  }
+  return {
+    kind: "seqExpr",
+    stmts: [{ kind: "varDecl", localId: recvId, init: recv, loc }],
+    result: { kind: "closure", fnName: fname, captures: [recvId], type: slot, loc },
+    type: slot,
+    loc,
+  };
+}
+
 /** `X.emit.bind(X)` against a generic key-map slot: the dispatcher, or null
  * when any part of the shape above does not hold (the caller then keeps the
  * existing member-as-a-value diagnostic, which names the real gap). */
@@ -2043,15 +2271,46 @@ export function boundEmitDispatcher(
   if (recvIr?.kind !== "object") return why(`the receiver maps to '${recvIr ? L.fmt(recvIr) : "nothing"}'`);
   const info = L.classes.get(recvIr.className);
   if (!info || !emitterRooted(L, info)) return why("the receiver is not emitter-rooted");
-  const ctxTs = L.checker.getContextualType(call);
+  let ctxTs = L.checker.getContextualType(call);
+  // `X.emit.bind(X) as unknown as Slot` — the cast every consumer of a LOOSE
+  // plugin surface writes, because the bound value's own type does not fit
+  // the surface's. tsc gives the inner expression the contextual type
+  // `unknown`, which erases the destination the program actually named. Walk
+  // the assertion chain and take the OUTERMOST asserted type: that is the
+  // slot the value lands in, and it is what the author wrote down.
+  if (ctxTs === undefined || L.mapTypeOf(ctxTs)?.kind !== "func") {
+    let outer: ts.Node = call;
+    while (
+      ts.isParenthesizedExpression(outer.parent) ||
+      ts.isAsExpression(outer.parent) ||
+      ts.isTypeAssertion(outer.parent)
+    ) {
+      outer = outer.parent;
+    }
+    if (outer !== call && ts.isExpression(outer)) {
+      try {
+        const asserted = L.typeOf(outer);
+        if (L.mapTypeOf(asserted)?.kind === "func") ctxTs = asserted;
+      } catch { /* keep the contextual type */ }
+    }
+  }
   if (ctxTs === undefined) return why("the bind site has no contextual type");
   const slot = L.mapTypeOf(ctxTs);
-  if (slot?.kind !== "func") return why(`the slot maps to '${slot ? L.fmt(slot) : "nothing"}'`);
+  if (slot?.kind !== "func") {
+    if (process.env["SCRIPTC_BEMIT_WHY"] !== undefined) {
+      console.error(`[bemit] CTXTS ${L.checker.typeToString(ctxTs).slice(0, 200)}`);
+    }
+    return why(`the slot maps to '${slot ? L.fmt(slot) : "nothing"}'`);
+  }
   // The one shape a key-map slot wears once its type parameter is erased to
   // its constraint: (name, payload array) → void.
-  if (slot.rest === true || slot.params.length !== 2) return why(`the slot takes ${slot.params.length} parameters`);
+  if (process.env["SCRIPTC_BEMIT_WHY"] !== undefined) console.error(`[bemit] SLOTKEY ${typeKey(slot)}`);
+  if (slot.rest === true || slot.params.length !== 2) return why(`the slot takes ${slot.params.length} parameters (rest=${String(slot.rest === true)})`);
   const nameT = slot.params[0]!;
   const argsT = slot.params[1]!;
+  // The LOOSE surface: one dyn payload slot instead of a payload array, and
+  // no key-map constraint anywhere in the type.
+  if (argsT.kind === "dyn") return looseEmitDispatcher(L, call, methodAccess, info, recvIr.className, slot, ctxTs, why);
   if (nameT.kind !== "string") return why(`the slot's event parameter is '${L.fmt(nameT)}'`);
   if (argsT.kind !== "array") return why(`the slot's payload parameter is '${L.fmt(argsT)}'`);
   if (slot.ret.kind !== "void") return why(`the slot returns '${L.fmt(slot.ret)}'`);
