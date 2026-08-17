@@ -79,7 +79,14 @@ static const char web_prelude[] =
     "    }\n"
     "    ref() { this._reffed = true; host.refTimer(this._id, true); return this; }\n"
     "    unref() { this._reffed = false; host.refTimer(this._id, false); return this; }\n"
-    "    hasRef() { return host.timerHasRef(this._id); }\n"
+    /* hasRef() is the OBJECT's flag, not the heap's. Node keeps kHasRef on
+     * the Timeout and ref()/unref() are the only things that move it, so a
+     * FIRED one-shot that was ref()'d afterwards still answers true --
+     * asking the timer heap answers false there, because the entry is gone.
+     * That was a real divergence: the island-timers fixture ref()s a
+     * 450ms timeout inside a 600ms continuation and Node prints true.
+     * `_reffed` is already maintained right above and needs no host call. */
+    "    hasRef() { return this._reffed; }\n"
     "    refresh() {\n"
     "      host.clearTimer(this._id);\n"
     "      this._id = host.setTimer(this._fn, this._delay, this._repeat);\n"
