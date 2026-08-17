@@ -1,4 +1,4 @@
-/* The  canBoxFuncIntoDyn,dyn (ScrDyn dyn) helper EMITTERS for the LLVM backend — the .ll
+/* The dyn (ScrDyn) helper EMITTERS for the LLVM backend — the .ll
  * mirror of emit-walkers.ts's dyn slice: per-type match predicates
  * (dynMatchHelper), checked builders (dynCheckHelper), static→dyn
  * converters (toDynHelper), the type-independent singletons (String
@@ -22,7 +22,7 @@
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrType } from "../../ir/nodes.js";
-import { canAdaptDynFuncTo, canBoxFuncIntoDyn, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, typeKey } from "../../ir/nodes.js";
+import { canAdaptDynFuncTo, canBoxFuncIntoDyn, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
 import { arrNewCall, elemAccess, llFieldType, releaseSym, traceAdapter, traceArg, vAdapters } from "./shapes.js";
@@ -3074,15 +3074,20 @@ export class LlDyn {
     this.strandedDynFuncBoxes.set(key, name);
     const host = this.host;
     const thunk = `${name}_thunk`;
-    const msg = `a '${key}' function carried into 'unknown' cannot be called through it (its parameters have no checked-dynamic form)`;
+    // The message and its SC2009 code are the C twin's, built by the ONE
+    // shared reason function so the two lanes cannot drift (emit-walkers.ts
+    // has the note on why it carries a code and no bracket).
+    const msg =
+      `a '${key}' function carried into 'unknown' cannot be called through it: ` +
+      strandedFuncReason(t, (id: string) => this.host.recordsById.get(id), (id: string) => this.host.unionsById.get(id));
     const msgLit = host.cstr(msg);
-    host.declare(`declare void @scr_throw_error_msg(i32, ptr, i64)`);
+    host.declare(`declare void @scr_throw_error_msg_code(i32, ptr, i64, ptr)`);
     host.declare(`declare ptr @scr_closure_retain_v(ptr)`);
     host.declare(`declare ptr @scr_dyn_new_func_src(ptr, ptr, i32, ptr, ptr, ptr)`);
     this.defs.push(
       `define internal ptr @${thunk}(ptr %c, ptr %args, i64 %argc) ${FN_ATTRS} { ; stranded dyn call thunk for ${key}`,
       `entry:`,
-      `  call void @scr_throw_error_msg(i32 1, ptr ${msgLit}, i64 ${Buffer.byteLength(msg, "utf8")})`,
+      `  call void @scr_throw_error_msg_code(i32 1, ptr ${msgLit}, i64 ${Buffer.byteLength(msg, "utf8")}, ptr ${host.cstr("SC2009")})`,
       `  ret ptr null`,
       `}`,
       ``,
