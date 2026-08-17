@@ -9,6 +9,7 @@ import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
 import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
+import { recordKeyReadRow } from "./keyread-census.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import { UNSUPPORTED, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
@@ -8685,6 +8686,24 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
         expr,
         `dynamic keyed reads of '${L.fmt({ kind: "record", shapeId })}' as '${L.fmt(declared)}' (every declared field must be readable at that type)`,
       );
+    }
+    // SCRIPTC_KEYREAD_CENSUS: one row per index-signature keyed read, with
+    // the DESTINATION it flows into. The read whose miss path is the
+    // untagged abort is `shape.indexValue && !undefined-armed` — the
+    // instrument names it ABORTABLE, and the site census cannot, because
+    // that abort carries no [SCxxxx] tag. Recorded here, at the read
+    // itself, so it counts the REAL sites and not a probe's.
+    if (process.env["SCRIPTC_KEYREAD_CENSUS"]) {
+      const armedRead = declared.kind === "union" && L.armTag(declared.unionId, UNDEFINED_T) >= 0;
+      recordKeyReadRow(L.checker as never, expr, {
+        file: loc.file,
+        start: loc.start,
+        key: litKey ?? "*computed*",
+        shapeId: String(shapeId),
+        valueType: L.fmt(declared),
+        readArmed: armedRead,
+        abortCapable: !!shape.indexValue && !armedRead,
+      });
     }
     return L.maybeNarrow(
       { kind: "recordKeyGet", obj, shapeId, key, ...(overflowOnly ? { overflowOnly: true as const } : {}), type: declared, loc },
