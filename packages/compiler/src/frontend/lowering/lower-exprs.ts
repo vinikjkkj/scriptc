@@ -3806,7 +3806,8 @@ function nullishTestedByParent(expr: ts.Expression): boolean {
       // question than this one.
       const want = atWidth ? L.irTypeOf(expr) : VOID;
       if (atWidth && (want.kind === "dyn" || isImmutablePrimitiveWidth(L, want))) {
-        const right = L.coerceToExpected(L.lowerExpr(expr.right), DYN);
+        const rightRaw = L.lowerExpr(expr.right);
+        const right = L.coerceToExpected(rightRaw, DYN);
         if (right.type.kind === "dyn") {
           const test: IrExpr = { kind: "nullish", left: atWidth, right, type: DYN, loc };
           // `attrs.a ?? attrs.b ?? "tail"` — BOTH keys absent. The
@@ -3858,32 +3859,45 @@ function nullishTestedByParent(expr: ts.Expression): boolean {
           // already there (`(s: string | null) ?? null`), so a checker that
           // was already honest costs nothing — no new union is interned and
           // the emitted check is the one `main` emits.
-          // THE NEIGHBOUR THIS DELIBERATELY DOES NOT SERVE, with its price
-          // measured, because it is the next fix and not this one.
+          // THE NEIGHBOUR, NOW SERVED — `block/sixteen` priced it here and
+          // left it; this is that fix.
           //
-          // When the right operand is itself a widened index-signature read
-          // rather than a unit literal, the honest type is `want | undefined`
-          // (both keys can be absent) and the SAME destination licence applies
-          // with `unit = undefined`. `SCRIPTC_NULLISH_UNIT=1` on zapo at
-          // `250f9af5229a` reports 51 firings of this rung: 9 with a unit
-          // literal (all licensed, all widened) and 42 without, of which
-          // exactly **8** have `ctx=string | undefined` — a destination that
-          // would license the widening. Those 8 are the candidate set.
+          // When the right operand is itself a WIDENED KEYED READ rather than
+          // a unit literal, the honest type is `want | undefined` for exactly
+          // the same reason: BOTH keys can be absent, and when both are, JS
+          // evaluates the whole `??` to the right read's `undefined`. The unit
+          // is not written in the source, so `unitLiteralDefaultOf` cannot see
+          // it — but `recordKeyReadAtSlotWidth` can, and it is the SAME
+          // predicate this rung already applied to the LEFT operand three
+          // lines up. A right operand it accepts is an index-signature read
+          // whose checker type cannot say undefined and whose runtime value
+          // can; that is the definition of the missing arm.
           //
-          // One of them is worth two stanzas: `src/retry/parse.ts:124`,
+          // The licence is unchanged: the DESTINATION must admit undefined.
+          // `SCRIPTC_NULLISH_UNIT=1` on zapo at `250f9af5229a` reports 51
+          // firings of this rung — 9 with a unit literal, 42 without, of which
+          // exactly **8** carry `ctx=string | undefined`. Those 8 widen and
+          // the other 34 keep main's behaviour, so the blast radius of this
+          // change on zapo is 8 sites, not 42: the predicate is cheap to
+          // satisfy and the licence is what actually gates.
+          //
+          // One of the 8 is worth two stanzas: `src/retry/parse.ts:124`,
           // `parseOptionalInt(retry.attrs.error ?? node.attrs.error)`. In a
-          // paired run against `@zapo-js/fake-server` it throws `expected
+          // paired run against `@zapo-js/fake-server` it threw `expected
           // string at $, got undefined` inside `parseRetryReceiptRequest`, so
-          // the client neither RESENDS on an inbound `<receipt type=retry>` nor
-          // acks it (`shouldAck = true` sits after the parse). The field
-          // destinations of the same function are already served and do NOT
-          // throw — `repro-sx/s3.ts` shows all four side by side — so the gap
-          // is specifically the CALL-ARGUMENT destination.
+          // the client neither RESENT on an inbound `<receipt type=retry>` nor
+          // acked it (`shouldAck = true` sits after the parse). The FIELD
+          // destinations of the same function were already served and did not
+          // throw — `repro-sx/s3.ts` shows all four side by side — which is
+          // what isolated the CALL-ARGUMENT destination as the gap.
           //
-          // It is not taken here because it is a wider change than the unit
-          // literal (42 sites see the predicate instead of 9), and this block
-          // had one verified zapo build to spend.
-          const unit = unitLiteralDefaultOf(expr.right);
+          // The right operand is lowered ONCE (`rightRaw` above) and the
+          // predicate reads that IR: asking the question a second time would
+          // lower the expression twice, and a right operand with effects must
+          // not be built twice even when the second copy is discarded.
+          const litUnit = unitLiteralDefaultOf(expr.right);
+          const unit = litUnit ??
+            (L.recordKeyReadAtSlotWidth(rightRaw, DYN) !== null ? UNDEFINED_T : null);
           const honest = unit ? L.withUnitArmOf(want, unit) : null;
           const licensed = unit !== null && honest !== null && honest !== want &&
             contextualAdmitsUnit(L, expr, unit);
@@ -3908,6 +3922,7 @@ function nullishTestedByParent(expr: ts.Expression): boolean {
             console.error(
               `NULLISHUNIT ${loc.file}@${String(loc.start)}` +
               ` unit=${unit ? unit.kind : "-"}` +
+              ` via=${litUnit ? "lit" : unit ? "keyed" : "-"}` +
               ` want=${short(L.fmt(want))}` +
               ` honest=${honest ? short(L.fmt(honest)) : "-"}` +
               ` widen=${licensed ? "1" : "0"}` +
