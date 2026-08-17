@@ -13,12 +13,12 @@ console.log("bytes-empty:", JSON.stringify(String.fromCharCode.apply(String, new
 console.log("bytes-subarray:", String.fromCharCode.apply(String, bytes.subarray(0, 2)));
 
 // --- the base64 encoder, verbatim in shape ------------------------------------
-var b64 = new Array(64);
-for (var n = 0; n < 64; n++) {
+const b64 = new Array(64);
+for (let n = 0; n < 64; n++) {
   b64[n] = n < 26 ? n + 65 : n < 52 ? n + 71 : n < 62 ? n - 4 : n - 59 | 43;
 }
-function encode(buffer, start, end) {
-  var parts = null, chunk = [], i = 0, j = 0, t;
+const encode = function (buffer, start, end) {
+  let parts = null, chunk = [], i = 0, j = 0, t = 0;
   while (start < end) {
     var b = buffer[start++];
     switch (j) {
@@ -41,7 +41,7 @@ function encode(buffer, start, end) {
     return parts.join("");
   }
   return String.fromCharCode.apply(String, chunk.slice(0, i));
-}
+};
 
 const src = [];
 for (let k = 0; k < 40; k++) src.push((k * 37 + 11) & 255);
