@@ -162,6 +162,40 @@ console.log("18", show(lazy(pick(b), { imageWidth: 3 })), order.join(">"));
 // The result of one identity-arm spread feeds the next.
 console.log("19", show(force(retag(force(bwh, 7)), 8)));
 
+// REF-COUNTED payloads. zapo's real arms carry a `Uint8Array` and a
+// `Readable`, not two strings: the per-arm rebuild READS every field of the
+// narrowed source and stores it into a fresh record, so a field whose value is
+// a heap object is retained once and released once on each path. A miscount
+// here is a leak or a double free, not a wrong string.
+interface Blob1 {
+  readonly data: Uint8Array;
+  readonly tags: readonly string[];
+  readonly note?: string;
+}
+interface Blob2 {
+  readonly chunks: readonly Uint8Array[];
+  readonly total: number;
+  readonly note?: string;
+}
+type Blob = Blob1 | Blob2;
+function showBlob(x: Blob): string {
+  const n = x.note === undefined ? "-" : x.note;
+  if ("data" in x) return `d[${String(x.data.length)}]:${String(x.data[0] ?? -1)}/${x.tags.join("+")}/${n}`;
+  return `c[${String(x.chunks.length)}]/${String(x.total)}/${n}`;
+}
+function note(x: Blob, s: string | undefined): Blob {
+  return { ...x, ...(s !== undefined ? { note: s } : {}) };
+}
+const bl1: Blob = { data: new Uint8Array([7, 8, 9]), tags: ["a", "b"] };
+const bl2: Blob = { chunks: [new Uint8Array([1]), new Uint8Array([2, 3])], total: 3, note: "kept" };
+for (let i = 0; i < 3; i++) {
+  console.log("20", showBlob(note(bl1, `n${String(i)}`)), showBlob(note(bl2, undefined)));
+}
+// The rebuilt record's payload must outlive the temporaries the copy made.
+const held: Blob[] = [];
+for (let i = 0; i < 4; i++) held.push(note(note(bl1, "x"), undefined));
+console.log("21", held.length, showBlob(held[3]!));
+
 // CONTROLS that must keep answering exactly as they always have.
 // (a) the SINGLE-record-arm union source — the optional-options merge.
 interface Opts {
