@@ -1026,6 +1026,10 @@ export interface GenericInstance {
     }
     body.push({
       kind: "runtimeFence",
+      // CENSUS: BOILERPLATE, not a refusal — one per non-void function whose
+      // fall-through the lowering cannot prove dead.  85 of zapo's 110 coded
+      // throws are these, so a raw `scr_throw_error_msg_code` count overstates
+      // the refusal load by ~4x.  `scripts/tu-census.mjs` reports it apart.
       code: "SC9002",
       message:
         "unreachable: a non-void function completed without returning " +

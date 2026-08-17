@@ -5844,6 +5844,13 @@ function fenceClosureProbe(
         {
           kind: "runtimeFence",
           code: first?.code ?? "SC1090",
+          // CENSUS: this message is the diagnostic's own, BARE — the three
+          // sibling constructors append `[${code} at ${file}:${line}]` and this
+          // one does not, so every refusal that lands here is invisible to a
+          // bracket-keyed trap census.  zapo's `this.emit.bind(this)` is one of
+          // them, and it is what kills a wide entry at its first call
+          // (estado-deeper §3.3).  `scripts/tu-census.mjs` counts it by HOST
+          // name (`%fence.fn.N`) instead; see estado-census2.md.
           message: first?.message ?? "this function's body has no static lowering",
           loc,
         },
