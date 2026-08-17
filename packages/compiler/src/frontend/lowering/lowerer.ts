@@ -5416,7 +5416,43 @@ export class Lowerer {
         // those arms omits the fields belonging to the other media kinds, so
         // EVERY candidate drops part of the source, the filter selects zero, and
         // the site keeps its (correct) fence. Verified by census both sides.
-        if (overlapping.length > 1) {
+        // THE PRESENCE GUARD, and it is not optional — MEASURED, not reasoned.
+        // Without it this refinement closes `messages.ts:497`, the very
+        // counter-example the rule above is written to protect, and the census
+        // caught it: base 29 refusals -> 27, with BOTH `drmax3.ts:313` and
+        // `messages.ts:497` gone where only the first was intended.
+        //
+        // The whole-value argument is "the winning arm reads every member the
+        // program WROTE". That is only sound when every member the source has
+        // is actually THERE. A member typed `T | undefined` may be absent at
+        // run time, so an arm "holding" it says nothing about whether the
+        // program wrote it, and the count of dropped members stops being
+        // evidence of anything.
+        //
+        // That is exactly what separates the two sites, read off the emitted
+        // messages rather than guessed:
+        //   drmax3.ts:313   src `{ remoteJid: string; id: string; fromMe: boolean }`
+        //                   — three members, ALL REQUIRED, a literal binding.
+        //   messages.ts:497 src `{ $unknowns: Uint8Array[] | undefined;
+        //                   accessibilityLabel: null | string | undefined;
+        //                   backgroundArgb: number | null | undefined; … }`
+        //                   — the MERGE of a six-arm union produced by
+        //                   `{ ...content, media, mimetype }`, whose members are
+        //                   optional precisely BECAUSE they come from different
+        //                   arms. A merged-union spread is the canonical shape
+        //                   this must not resolve, and "every member is
+        //                   required" is the property it can never have.
+        //
+        // So: require every member of the SOURCE to be present-by-type. Any
+        // undefined-admitting member and the refinement declines and the site
+        // keeps whatever fence it had.
+        const admitsUndefined = (t: IrType): boolean =>
+          t.kind === "undefinedT" ||
+          (t.kind === "union" && this.armTag(t.unionId, UNDEFINED_T) >= 0);
+        const srcFields = this.shapes.get(src.shapeId)?.fields ?? [];
+        const everySrcMemberPresent =
+          srcFields.length > 0 && !srcFields.some((f) => admitsUndefined(f.type));
+        if (overlapping.length > 1 && everySrcMemberPresent) {
           const whole = overlapping.filter((c) => {
             if (c.arm.kind !== "record") return false;
             const armNames = new Set((this.shapes.get(c.arm.shapeId)?.fields ?? []).map((f) => f.name));
