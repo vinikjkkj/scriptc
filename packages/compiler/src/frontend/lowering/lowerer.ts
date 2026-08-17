@@ -5452,16 +5452,43 @@ export class Lowerer {
         const srcFields = this.shapes.get(src.shapeId)?.fields ?? [];
         const everySrcMemberPresent =
           srcFields.length > 0 && !srcFields.some((f) => admitsUndefined(f.type));
-        if (overlapping.length > 1 && everySrcMemberPresent) {
-          const whole = overlapping.filter((c) => {
-            if (c.arm.kind !== "record") return false;
-            const armNames = new Set((this.shapes.get(c.arm.shapeId)?.fields ?? []).map((f) => f.name));
-            for (const n of srcNames) if (!armNames.has(n)) return false;
-            return true;
-          });
-          if (whole.length === 1) {
-            return { how: "liftWrap", tag: whole[0]!.tag, arm: whole[0]!.arm };
-          }
+        const whole =
+          overlapping.length > 1 && everySrcMemberPresent
+            ? overlapping.filter((c) => {
+                if (c.arm.kind !== "record") return false;
+                const armNames = new Set((this.shapes.get(c.arm.shapeId)?.fields ?? []).map((f) => f.name));
+                for (const n of srcNames) if (!armNames.has(n)) return false;
+                return true;
+              })
+            : [];
+        // SCRIPTC_ARMSET_WHY=1 — the ARM-SET dump. The comment on the SC2003
+        // diagnostic records that an env-gated dump of exactly this was used to
+        // tell zapo's three SC2003s apart and that the two type prints the
+        // diagnostic carries CANNOT do it (L.fmt caps at 4012 characters, so two
+        // protobuf mega-records print identically and are still different
+        // types). It was not left in the tree, and the next block had to build
+        // it again. It prints NAMES, which is what the three filters actually
+        // decide on, and it names which filter declined.
+        if (process.env["SCRIPTC_ARMSET_WHY"]) {
+          const names = (t: IrType): string =>
+            t.kind === "record"
+              ? "{" + (this.shapes.get(t.shapeId)?.fields ?? []).map((f) => f.name).join(",") + "}"
+              : t.kind;
+          const verdict =
+            whole.length === 1
+              ? "LIFTS (whole-value)"
+              : overlapping.length === 1
+                ? "LIFTS (zero-overlap)"
+                : !everySrcMemberPresent && overlapping.length > 1
+                  ? "DECLINES (presence guard: a source member admits undefined)"
+                  : `DECLINES (${candidates.length} candidates, ${overlapping.length} overlapping, ${whole.length} whole)`;
+          process.stderr.write(
+            `ARMSET ${verdict}\n  src=${names(src)}\n` +
+              def.arms.map((a, i) => `  arm[${i}]=${names(a)}\n`).join(""),
+          );
+        }
+        if (whole.length === 1) {
+          return { how: "liftWrap", tag: whole[0]!.tag, arm: whole[0]!.arm };
         }
       }
       if (candidates.length !== 1) return null;
