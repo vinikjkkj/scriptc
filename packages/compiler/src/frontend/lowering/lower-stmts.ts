@@ -8,6 +8,7 @@ import { lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators
 import { BIGINT, type IrLibFn, BOOL, isRefCounted, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrJsOp, IrLocal, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
+import { recordKeyReadRow } from "./keyread-census.js";
 import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, isCjsWholeExportAssign, isJsSourceFile, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
 import { COMPOUND_ASSIGN_OPS, CompoundOp, STR_METHODS, UNSUPPORTED_STMT, isStdlibMember, sideEffectFreeOptionValue, stdlibGlobalAliasDecl, stdlibGlobalNameOf } from "./surfaces.js";
 import { isProvenanceSourceFile } from "../provenance-registry.js";
@@ -23,7 +24,7 @@ import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment } fr
 import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
-import { ctorObjectGlobalValue, isImmutablePrimitiveWidth } from "./lower-exprs.js";
+import { ctorObjectGlobalValue, isDynSafeReadWidth, isImmutablePrimitiveWidth } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
@@ -2382,6 +2383,23 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
         // claimed V), or binds the undefined arm (where a default applies
         // like any field's).
         const loc = locOf(el);
+        // SCRIPTC_KEYREAD_CENSUS, the FOURTH keyed-read seat: a
+        // DESTRUCTURING binding of an undeclared key. It is a real source
+        // read with a real miss path and no census hook stood here, so
+        // every one of these landed in the study's unattributed pile.
+        if (process.env["SCRIPTC_KEYREAD_CENSUS"]) {
+          const iv = shape.indexValue;
+          const armedRead = iv.kind === "union" && L.armTag(iv.unionId, UNDEFINED_T) >= 0;
+          recordKeyReadRow(L.checker as never, el, {
+            file: loc.file,
+            start: loc.start,
+            key: propName,
+            shapeId: String(srcType.shapeId),
+            valueType: L.fmt(iv),
+            readArmed: armedRead,
+            abortCapable: !armedRead,
+          });
+        }
         let value: IrExpr = {
           kind: "recordKeyGet",
           obj: srcRef(),
@@ -3679,14 +3697,100 @@ function tableElemType(L: Lowerer, t: IrType): IrType {
  *   its own coercion. */
 function keyedReadLocalAtDynWidth(L: Lowerer, init: IrExpr, slot: IrType): IrExpr | null {
   if (init.kind !== "recordKeyGet") return null;
-  if (!isImmutablePrimitiveWidth(L, init.type)) return null;
-  const sameWidth =
-    typeEquals(slot, init.type) ||
+  // SCRIPTC_UNITARM_OFF=1 ablates the unit-arm widening alone, so the two
+  // rungs in this block can be measured apart from each other and from
+  // the rule they extend.
+  const widthOk = process.env["SCRIPTC_UNITARM_OFF"] === "1"
+    ? isImmutablePrimitiveWidth(L, init.type)
+    : isDynSafeReadWidth(L, init.type);
+  if (!widthOk) return null;
+  if (!keyedReadBindingSameWidth(L, slot, init.type)) return null;
+  return L.recordKeyReadAtSlotWidth(init, DYN);
+}
+
+/** "The slot must be the READ's OWN width, or that width plus an
+ * undefined arm" — the second of keyedReadLocalAtDynWidth's two
+ * restrictions, lifted out so the short-circuit forms below draw exactly
+ * the same line and cannot drift from it. */
+function keyedReadBindingSameWidth(L: Lowerer, slot: IrType, read: IrType): boolean {
+  return (
+    typeEquals(slot, read) ||
     (slot.kind === "union" &&
       L.armTag(slot.unionId, UNDEFINED_T) >= 0 &&
-      typeEquals(L.stripUndefinedArm(slot), init.type));
-  if (!sameWidth) return null;
-  return L.recordKeyReadAtSlotWidth(init, DYN);
+      typeEquals(L.stripUndefinedArm(slot), read))
+  );
+}
+
+/** THE SAME BINDING WHEN THE READ IS INSIDE THE AUTHOR'S OWN MISS
+ * HANDLER — `??` and `?:`, the two short circuits whose entire purpose
+ * is to say what an absent value becomes.
+ *
+ * ```ts
+ * const type = input.typeOverride ?? input.node.attrs.type   // ack builder
+ * if (type) { attrs.type = type }
+ * const from = node.attrs.from ? toUserJid(node.attrs.from) : node.attrs.from
+ * ```
+ *
+ * `keyedReadLocalAtDynWidth` matches when the binding's WHOLE value is
+ * the read. Here it is one operand of a short circuit, so the rule
+ * declined and the read stayed bare — and the abort fires one operator
+ * before the guard the author wrote. Both spellings above are live in
+ * zapo at `524e9cd3`: the first two are `buildAckNode`/`buildAckOrReceipt`
+ * on a `<message>` stanza that carries no `type` and no `participant`,
+ * which is the ordinary case, not the edge one.
+ *
+ * The reasoning is the binding rule's, unchanged — the LOCAL takes dyn,
+ * every REFERENCE re-decides, a use that needs the value gets the
+ * catchable dyn-boundary TypeError and a use that only asks whether it is
+ * there answers. What is new is only WHERE the read sits, so the
+ * restrictions carry across literally:
+ *
+ * - every operand that can reach the binding must be a DYN-SAFE width, so
+ *   no `dynFrom` deep-copies a composite and severs aliasing;
+ * - the slot must be the READ's own width, or that plus an undefined arm
+ *   (`keyedReadBindingSameWidth`);
+ * - at least one operand must be a bare index-signature read that
+ *   `recordKeyReadAtSlotWidth` will actually serve. A short circuit with
+ *   no abortable read in it is not this rule's business and is left
+ *   byte-for-byte alone.
+ *
+ * The `nullish` and `ternary` nodes both accept a dyn left/arms in both
+ * emitters and in the validator (`scr_dyn_is_nullish`; the ternary is
+ * type-uniform), so this is a re-typing of an existing shape and not a
+ * new one.
+ *
+ * `SCRIPTC_LOCALSC_OFF=1` ablates it. */
+function keyedReadLocalShortCircuitAtDynWidth(L: Lowerer, init: IrExpr, slot: IrType): IrExpr | null {
+  if (process.env["SCRIPTC_LOCALSC_OFF"] === "1") return null;
+  if (init.kind !== "nullish" && init.kind !== "ternary") return null;
+  const operands: IrExpr[] = init.kind === "nullish" ? [init.left, init.right] : [init.then, init.else_];
+  // The read this rule exists for: a bare keyed read among the operands,
+  // whose own width is the binding's. Without one there is nothing to
+  // serve and the rung declines, leaving the expression untouched.
+  let served = false;
+  for (const o of operands) {
+    if (o.kind !== "recordKeyGet") continue;
+    if (L.recordKeyReadAtSlotWidth(o, DYN) === null) continue;
+    if (!isDynSafeReadWidth(L, o.type)) return null;
+    if (!keyedReadBindingSameWidth(L, slot, o.type)) return null;
+    served = true;
+  }
+  if (!served) return null;
+  // Every operand must survive the widening without a deep copy. An
+  // operand that is itself a keyed read widens in place; anything else
+  // must already be a dyn-safe width (or dyn/undefined) to take dynFrom.
+  const widened: IrExpr[] = [];
+  for (const o of operands) {
+    const atWidth = o.kind === "recordKeyGet" ? L.recordKeyReadAtSlotWidth(o, DYN) : null;
+    if (atWidth !== null) { widened.push(atWidth); continue; }
+    if (o.type.kind === "dyn") { widened.push(o); continue; }
+    if (!isDynSafeReadWidth(L, o.type) && !isUnitType(o.type)) return null;
+    widened.push(L.coerceToExpected(o, DYN));
+  }
+  if (widened.some((w) => w.type.kind !== "dyn")) return null;
+  return init.kind === "nullish"
+    ? { kind: "nullish", left: widened[0]!, right: widened[1]!, type: DYN, loc: init.loc }
+    : { kind: "ternary", cond: init.cond, then: widened[0]!, else_: widened[1]!, type: DYN, loc: init.loc };
 }
 
 /** The same binding at FILE scope, asked from the syntax. A global's type
@@ -4354,7 +4458,9 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // index-signature keyed read: it holds the read at dyn width, so an
     // absent key answers undefined the way JS does instead of trapping.
     {
-      const atWidth = keyedReadLocalAtDynWidth(L, init, type);
+      const atWidth =
+        keyedReadLocalAtDynWidth(L, init, type) ??
+        keyedReadLocalShortCircuitAtDynWidth(L, init, type);
       if (atWidth) { init = atWidth; type = DYN; }
     }
     // A CONST whose slot is `classval:C` and whose initializer is a direct
