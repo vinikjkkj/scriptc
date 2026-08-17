@@ -95,12 +95,40 @@ export function wrapC(m: Msg2): Msg2 {
   return m;
 }
 
-// D — the must-not-close sibling: a runtime `string` key into a
-// SIGNATURE-FREE record. It KEEPS its refusal, and that is the property the
-// literal-union gate exists to preserve. The return type matters: give this a
-// `Record<string, unknown>` instead and it COMPILES, because an
-// index-signature target takes the merge path — which is exactly the mistake
-// that makes a control inert without making it look wrong.
+// D — a runtime `string` key into a SIGNATURE-FREE record. It KEEPS its
+// refusal, and the snapshot still pins that — but READ THE CODE IT PINS,
+// because the mechanism changed and this comment used to claim the wrong
+// one. It said the literal-union gate is what preserves the refusal here.
+// It is not, any more.
+//
+// `unionKeyNames` now has a second way to obtain candidates when the key
+// type has no finite name set: the TARGET's declared fields (block/lastrow,
+// with :1116 — together they are the ninth `iq w:sync:app:state`). So the
+// key no longer stops D. What stops D is the VALUE: `m.conversation` is
+// `string | undefined` and the media slots this key can spell hold
+// `{ ptt; viewOnce } | undefined`, so the fold's per-candidate fit check
+// refuses — SC2003 at the value, where it used to be SC1090 at the key.
+//
+// THAT MAKES D A CONTROL CARRIED BY ITS FIELD TYPES, not by a gate, which
+// is the inertness its own last sentence warned about. So the real
+// behaviour is pinned here as prose instead, measured, the way 3351 pins
+// its negative controls (a diverging program cannot be a corpus entry):
+//
+//   interface Msg3 { conversation?: string; caption?: string; title?: string }
+//   function wrapD3(m: Msg3, field: string): Msg3 {
+//     return { [field]: m.conversation } as Msg3;   // value fits EVERY slot
+//   }
+//
+//   wrapD3(m, "caption")    Node {"caption":"hello"}    scriptc SAME
+//   wrapD3(m, "title")      Node {"title":"hello"}      scriptc SAME
+//   wrapD3(m, "notAField")  Node {"notAField":"hello"}  scriptc {}
+//
+// The third line is DIVERGENCE 68 and it is the price of closing :205: a
+// key naming no declared field has no slot in a monomorphic struct, and
+// dropping it is honest exactly because the program DECLARED the target as
+// `Msg3` — the `shapeDeclared` gate the rule sits behind. Give D a
+// `Record<string, unknown>` return instead and it has always compiled, by
+// the index-signature merge path.
 export function wrapD(m: Msg, field: string): Msg {
   return { [field]: m.conversation } as Msg;
 }

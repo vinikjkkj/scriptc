@@ -5,9 +5,11 @@ computed-key-and-union-spread-two-decliners.ts:67:42 - error SC1090: object spre
      |                                          ^~~~~~~~
   68 |   }
 
-computed-key-and-union-spread-two-decliners.ts:105:12 - error SC1090: computed property keys (compile-time-known keys fold — a pure expression whose checker type is one string or number literal: consts, enum members, quoted keys, templates of those — `{ [MARKER]: v }`; runtime string keys write through an index-signature target; symbol keys stay out) are not supported yet
+computed-key-and-union-spread-two-decliners.ts:133:21 - error SC2003: union types must match exactly: expected '{ ptt: boolean | undefined; viewOnce: boolean | undefined } | undefined', got 'string | undefined' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
 
-  104 | export function wrapD(m: Msg, field: string): Msg {
-  105 |   return { [field]: m.conversation } as Msg;
-      |            ^~~~~~~
-  106 | }
+  132 | export function wrapD(m: Msg, field: string): Msg {
+  133 |   return { [field]: m.conversation } as Msg;
+      |                     ^~~~~~~~~~~~~~
+  134 | }
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
