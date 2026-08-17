@@ -1,0 +1,27 @@
+computed-key-and-union-spread-two-decliners.ts:39:31 - error SC1090: computed property keys (compile-time-known keys fold — a pure expression whose checker type is one string or number literal: consts, enum members, quoted keys, templates of those — `{ [MARKER]: v }`; runtime string keys write through an index-signature target; symbol keys stay out) are not supported yet
+
+  38 |     const media = m[field];
+  39 |     if (media) return { ...m, [field]: { ...media, viewOnce: true } };
+     |                               ^~~~~~~
+  40 |   }
+
+computed-key-and-union-spread-two-decliners.ts:50:47 - error SC1090: object spread of '{ url: string | undefined; viewOnce: boolean | undefined } | { seconds: number | undefined; viewOnce: boolean | undefined } | { ptt: boolean | undefined; viewOnce: boolean | undefined }' sources (only known record shapes spread — narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) are not supported yet
+
+  49 |     const media = m[field];
+  50 |     if (media) return { ...m, imageMessage: { ...media, viewOnce: true } };
+     |                                               ^~~~~~~~
+  51 |   }
+
+computed-key-and-union-spread-two-decliners.ts:61:38 - error SC1090: object spread of 'Aud | Img | Vid' into the union-typed slot 'Aud | Img | Vid | undefined' (the source's arm decides which arm the literal builds, and a literal builds one shape — narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) is not supported yet
+
+  60 |   const media = m.media;
+  61 |   if (media) return { ...m, media: { ...media, viewOnce: true } };
+     |                                      ^~~~~~~~
+  62 |   return m;
+
+computed-key-and-union-spread-two-decliners.ts:73:12 - error SC1090: computed property keys (compile-time-known keys fold — a pure expression whose checker type is one string or number literal: consts, enum members, quoted keys, templates of those — `{ [MARKER]: v }`; runtime string keys write through an index-signature target; symbol keys stay out) are not supported yet
+
+  72 | export function wrapD(m: Msg, field: string): Msg {
+  73 |   return { [field]: m.conversation } as Msg;
+     |            ^~~~~~~
+  74 | }
