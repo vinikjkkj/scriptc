@@ -92,3 +92,20 @@ for (const k of ["a", "b", "present", "c"]) {
   acc += optional(attrs[k]) + ";";
 }
 console.log(acc);
+
+// 10 — the TAIL of an OPTIONAL CHAIN. zapo
+// `parseOptionalInt(findNodeChild(node, EPHEMERAL)?.attrs.expiration)`:
+// the receiver is present and the key is simply absent. The checker's own
+// type for the whole chain is `string | undefined` — the `?.` guard put
+// the arm there — so every reader already handles it.
+type Wrapped = { attrs: Attrs };
+const wrapped: Wrapped = { attrs: { present: "7" } };
+function findIt(tag: string): Wrapped | undefined { return tag === "yes" ? wrapped : undefined; }
+console.log(optional(findIt("yes")?.attrs.chainMiss));
+console.log(optional(findIt("yes")?.attrs.present));
+console.log(optional(findIt("no")?.attrs.present));
+console.log(show(parseOptionalInt(findIt("yes")?.attrs.chainMiss)));
+console.log(show(parseOptionalInt(findIt("yes")?.attrs.present)));
+const chainField: { a?: string } = { a: findIt("yes")?.attrs.chainField };
+console.log(chainField.a === undefined ? "chainField:undef" : "chainField:" + chainField.a);
+console.log(findIt("yes")?.attrs.chainNullish ?? "chainNullish:undef");

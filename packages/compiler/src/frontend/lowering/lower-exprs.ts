@@ -4367,7 +4367,31 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         `'?.' where the result '${L.fmt(type)}' has no undefined arm (narrow the receiver with 'if (x !== undefined)' instead)`,
       );
     }
-    const wrapped = L.coerceToExpected(body, type);
+    // An index-signature keyed read as the chain's TAIL —
+    // `parseOptionalInt(findNodeChild(node, EPHEMERAL)?.attrs.expiration)`,
+    // zapo client/events/group.ts and message/primitives/incoming.ts. The
+    // checker types the read by the signature's VALUE type, so its miss
+    // had nowhere to go and ABORTED — on a present receiver whose key is
+    // simply absent, which is the ordinary case for a stanza attribute.
+    //
+    // This is the CLEANEST destination the rung has: `type` here is the
+    // checker's own type for the whole chain expression, and the checker
+    // put the undefined arm in it — the `?.` guard's arm. So every reader
+    // of this expression was compiled against `T | undefined` already, by
+    // tsc, at this very node. There is no narrowing question to ask: the
+    // arm is not something the lowering is adding, it is something the
+    // consumer is already handling because the SHORT-CIRCUIT can produce
+    // it. A miss on a present receiver now answers the same arm the
+    // absent receiver does, which is exactly what Node does.
+    //
+    // Where the rung declines (a declared field, a non-index shape, a read
+    // already armed, a chain result wider than read+undefined) the
+    // coercion below is unchanged.
+    // SCRIPTC_CHAINARM_OFF=1 — the ablation lever for this rung alone.
+    const armed = process.env["SCRIPTC_CHAINARM_OFF"] === "1"
+      ? null
+      : L.recordKeyReadAtUndefinedArm(body, type);
+    const wrapped = armed ?? L.coerceToExpected(body, type);
     if (!typeEquals(wrapped.type, type)) L.badType(expr, L.typeOf(expr));
     return { kind: "optChain", id, receiver, body: wrapped, type, loc };
   }
