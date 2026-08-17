@@ -41,7 +41,7 @@ import type { Lowerer } from "./lowerer.js";
 import { dynFallbackType, newFnCtx } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { isJsSourceFile, locOf } from "../program.js";
-import { arrayOf, BOOL, canBoxFuncIntoDyn, canConvertToDyn, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, isUnitType, STRING, SrcLoc, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { arrayOf, BOOL, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, isUnitType, STRING, SrcLoc, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { streamForcedTuple, streamSidesOf } from "./lower-stream.js";
 import { handlerFnTypeNodeOf } from "../types.js";
 
@@ -165,10 +165,28 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
    * position past what a listener declared is the unsound direction — the
    * listener would be handed a shape it never agreed to read — so it keeps
    * the conflict. */
+  /** True when a dyn value can be extracted into `t` — the same predicate
+   * `x as T` and coerceInto's automatic dyn bridge already apply, so a
+   * position this admits is one the emit site will actually build. */
+  const checkable = (t: IrType): boolean =>
+    canDynCheckTo(t, (id) => L.shapes.get(id), (id) => L.unions.get(id));
   const unifyPos = (recorded: IrType, incoming: IrType, unionSide: "recorded" | "incoming"): IrType | null => {
     if (typeEquals(recorded, incoming)) return recorded;
     if (unionSide === "recorded" && isArmOf(recorded, incoming)) return recorded;
     if (unionSide === "incoming" && isArmOf(incoming, recorded)) return incoming;
+    // A DYN position against a DECLARED one. The declared side is a
+    // LISTENER's parameter type — the type the value is actually read at —
+    // and the dyn side is an emit whose argument came out of an untyped
+    // emitter's callback. Unifying to the listener's type is not a widening
+    // of what anyone may assume: the emit site converts through the CHECKED
+    // extraction (coerceInto's dynCheck, the same machinery `x as T` uses),
+    // so a payload that does not match throws a catchable TypeError instead
+    // of being peeked through the wrong struct. Demanding typeEquals here
+    // conflicted the event instead, which fences EVERY site that touches it
+    // — including the library's own constructor, for no reason but that a
+    // consumer wrote a listener. Only for targets the extraction can check.
+    if (unionSide === "recorded" && incoming.kind === "dyn" && recorded.kind !== "dyn" && checkable(recorded)) return recorded;
+    if (unionSide === "incoming" && recorded.kind === "dyn" && incoming.kind !== "dyn" && checkable(incoming)) return incoming;
     return null;
   };
   const mergeEmit = (name: string, args: (IrType | null)[]): void => {
@@ -1040,18 +1058,76 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
       };
     }
     const tuple = streamForcedTuple(L, info, name) ?? tupleOf(L, table, name, call);
+    const sig = table.get(name);
     if (args.length - 1 !== tuple.length) {
       // An event nothing listens to: the call has no observable effect,
       // so the arity it disagrees on cannot matter.
       const noop = listenerlessEmitNoop(L, info, name, call, access, superRecv, loc);
       if (noop !== null) return noop;
-      L.noLowering(
-        `emit('${name}') with ${args.length - 1} arguments where the event's tuple has ${tuple.length}`,
-        call,
-        "every emit site of one event name must supply the same argument tuple (listeners may declare a prefix)",
-      );
+      // EXTRA arguments past a tuple NO EMIT ever pinned. The tuple is then
+      // the longest LISTENER's parameter list, and the rule this fence's own
+      // hint recites — "listeners may declare a prefix" — says the trailing
+      // positions are unobserved: the table's tuple is the maximum over every
+      // registered listener, so nothing anywhere in the program declares a
+      // parameter to receive them. Node passes them and the listeners ignore
+      // them; the lowered dispatch drops them and the listeners see the same
+      // thing.
+      //
+      // This is the SC2020 zapo dies on. `WaClient`'s constructor re-emits
+      // `debug_transport_node_in` with one payload; a consumer who writes
+      // `client.on('debug_transport_node_in', () => { n += 1 })` — a listener
+      // that ignores the payload — pins the event's tuple to ZERO, and the
+      // library's own constructor stopped compiling because of it.
+      //
+      // Held to arguments that are INERT (the same predicate the listenerless
+      // no-op uses): dropping an expression is only sound when producing its
+      // value is unobservable, and a dyn-flavored listener is excluded
+      // outright — its adapter unboxes by position and would be handed
+      // undefined where Node hands the payload.
+      const droppable =
+        sig !== undefined && !sig.fromEmit && !sig.dynListener &&
+        args.length - 1 > tuple.length &&
+        args.slice(1 + tuple.length).every((a) => inertEmitArg(L, a));
+      if (!droppable) {
+        L.noLowering(
+          `emit('${name}') with ${args.length - 1} arguments where the event's tuple has ${tuple.length}`,
+          call,
+          "every emit site of one event name must supply the same argument tuple (listeners may declare a prefix)",
+        );
+      }
     }
-    const payload = args.slice(1).map((a, i) => L.lowerExprExpecting(a, tuple[i]));
+    // Tell each object-literal payload what its event's tuple says it is. The
+    // typed-events overload pair makes tsc contextually type these arguments
+    // `unknown` (the forwarding `(event: string, ...args: unknown[])` arm
+    // wins overload resolution), so a literal assembled out of an UNTYPED
+    // emitter's callback parameters has no mappable type from EITHER
+    // direction and the literal lowering refuses it — while the emitter
+    // itself has known the answer since the table was built. Recording the
+    // position is all that is needed; lowerObjectLiteral consults it one step
+    // before its type fence, so nothing that lowers today changes.
+    for (let i = 1; i < args.length && i - 1 < tuple.length; i++) {
+      let a: ts.Expression = args[i]!;
+      while (ts.isParenthesizedExpression(a)) a = a.expression;
+      const want = tuple[i - 1];
+      if (want !== undefined && want.kind === "record" && ts.isObjectLiteralExpression(a)) {
+        L.emitPayloadShapes.set(a, want);
+      }
+    }
+    if (process.env["SCRIPTC_EMIT_WHY"] !== undefined) {
+      const parts = args.slice(1).map((a, i) => {
+        let ck = "?";
+        let mp = "?";
+        let lw = "?";
+        try { ck = L.checker.typeToString(L.typeOf(a)); } catch { ck = "<throws>"; }
+        try { const m = L.mapTypeOf(L.typeOf(a)); mp = m === null ? "null" : L.fmt(m); } catch { mp = "<throws>"; }
+        try { lw = L.fmt(L.lowerExpr(a).type); } catch (e) { lw = `<fences: ${String((e as { diag?: { message?: string } }).diag?.message ?? (e as Error).message ?? e).slice(0, 160)}>`; }
+        let cx = "?";
+        try { const c = L.checker.getContextualType(a); cx = c === undefined ? "none" : L.checker.typeToString(c); } catch { cx = "<throws>"; }
+        return `arg${i}: checker='${ck}' ctx='${cx}' mapped='${mp}' lowered='${lw}' want='${tuple[i] ? L.fmt(tuple[i]!) : "<none>"}'`;
+      });
+      console.error(`[emit] ${loc.file}@${loc.start} '${name}' tuple=${tuple.length}[${tuple.map((t) => L.fmt(t)).join(", ")}] ${parts.join(" | ")}`);
+    }
+    const payload = args.slice(1, 1 + tuple.length).map((a, i) => L.lowerExprExpecting(a, tuple[i]));
     return emitDispatchExpr(L, info, name, tuple, receiver, payload, superRecv?.cls, loc);
   }
 
@@ -1951,7 +2027,10 @@ export function boundEmitDispatcher(
   methodAccess: ts.PropertyAccessExpression,
 ): IrExpr | null {
   const why = (r: string): null => {
-    if (process.env["SCRIPTC_BEMIT_WHY"] !== undefined) console.error(`[bemit] ${r}`);
+    if (process.env["SCRIPTC_BEMIT_WHY"] !== undefined) {
+      const l = locOf(call);
+      console.error(`[bemit] ${l.file}@${l.start} ${r}`);
+    }
     return null;
   };
   if (methodAccess.name.text !== "emit") return null;
@@ -2053,7 +2132,30 @@ export function boundEmitDispatcher(
     if (streamForcedTuple(L, info, key) !== null) return why(`'${key}' is a stream event`);
     const arity = keyMapArity(L, keySet.map, key);
     if (arity === null) return why(`the key map does not spell '${key}' plainly`);
-    if (arity !== sig.tuple.length) {
+    // The gate is the ARRAY's end, not equality. The slot hands the arms one
+    // payload array the caller filled from `Parameters<EvMap[K]>`, so the key
+    // map's arity is that array's LENGTH: a tuple LONGER than it would index
+    // past the allocation, and that is the one shape this must refuse.
+    //
+    // A tuple SHORTER than the map's arity is the ordinary state of a typed
+    // events library, not a defect. The program-wide table unifies an event's
+    // tuple from the `.emit(` and `.on(` sites the syntactic scan can see, and
+    // an emit routed THROUGH this very slot — `runtime.emitEvent('e', payload)`,
+    // a call on a function-typed field — is not one of them. So a consumer who
+    // registers `client.on('debug_privacy_token', () => …)`, a listener that
+    // ignores its payload, leaves that event's tuple at ZERO while the map
+    // declares one; demanding equality then declined the WHOLE dispatcher, and
+    // `WaClient`'s own `this.emit.bind(this)` fell back to the emit-as-a-value
+    // fence — a library constructor re-lowering because a consumer added a
+    // listener, which is the exact coupling this file exists to avoid.
+    //
+    // Dropping the trailing slots is what the emitter already promises
+    // everywhere else ("listeners may declare a prefix"): the arm builds the
+    // unified tuple, and NO listener of that event anywhere in the program
+    // declared a parameter past it — the table's tuple is the maximum over all
+    // of them. The values in the unread slots are the caller's to release, and
+    // the array owns them exactly as before.
+    if (sig.tuple.length > arity) {
       return why(`'${key}' unifies to ${sig.tuple.length} arguments where the key map declares ${arity}`);
     }
     const payload: IrExpr[] = [];
