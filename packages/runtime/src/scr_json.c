@@ -5195,7 +5195,11 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
  * function object per closure, not one per boundary crossing. +1. */
 ScrDyn *scr_dyn_fn_props(ScrDyn *d) {
   if (!d->v.fn.clo->props) {
-    ScrBox *box = scr_box_new_obj(&scr_dyn_retain_v, &scr_dyn_release_v, NULL);
+    /* TRACED: the table can hold a function value that captures the very
+     * closure this table belongs to (`Foo.create = () => new Foo()`), which
+     * is a ring, and scr_closure_trace visits this box for exactly that
+     * reason. Safe because ScrDyn carries a header of its own. */
+    ScrBox *box = scr_box_new_obj(&scr_dyn_retain_v, &scr_dyn_release_v, &scr_dyn_trace_v);
     ScrDyn *table = scr_dyn_new_obj();
     scr_box_set_ref(box, table); /* the box owns the fresh table */
     d->v.fn.clo->props = box;
