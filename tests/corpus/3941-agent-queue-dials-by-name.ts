@@ -11,13 +11,23 @@
 // serialising three requests through one socket.
 import * as http from "node:http";
 
-const PORT = 18994;
+// The port is EPHEMERAL, like every other listening fixture in the corpus
+// (of the 33 that listen, 31 spell it `listen(0` and one `{ port: 0 }`;
+// this was the only fixed one). This one hardcoded 18994, and it is run more
+// than once at a time — the C and LLVM lanes cover the same corpus, and
+// agents run lanes concurrently — so the loser of the race died on
+// EADDRINUSE before the listen callback, printing NOTHING. That looked
+// like a backend disagreement (empty stdout on one lane, three correct
+// lines on the other) from a program that passed the C-vs-Node
+// differential whenever it happened to get the port. Dialing by NAME is
+// what the fixture pins, and that is the `host` below, not the port.
 const server = http.createServer((req, res) => {
   res.writeHead(200, { "content-type": "text/plain" });
   res.end("ok " + String(req.url));
 });
 
-server.listen(PORT, "127.0.0.1", () => {
+server.listen(0, "127.0.0.1", () => {
+  const PORT = server.address().port;
   const agent = new http.Agent({ maxSockets: 1, keepAlive: false });
   let left = 3;
   const fire = (tag: string): void => {

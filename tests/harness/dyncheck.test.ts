@@ -901,9 +901,15 @@ console.log("recovered");
     expect(r.stdout).toBe("assigned 2\nnever: boom\nrecovered\n");
   });
 
-  test("a NAMED record into an `any` slot is a deep copy — dyn writes never alias the original", async () => {
-    // dynFrom's aliasing stance (documented for 'unknown' slots) applies
-    // to any-typed storage identically: JS would alias, the dyn copies.
+  test("a dyn write through a NAMED record's copy REFUSES rather than landing on the copy", async () => {
+    // The crossing into an any/unknown slot copies a record (the static
+    // and dynamic representations are different memory), so a write
+    // through the copy cannot reach the object the caller still names --
+    // Node prints "2 2" here. This used to answer "1 2", the silent
+    // divergence; scr_dyn_static_copy_refuse replaced it with a loud one
+    // ("loud beats lost") and every mutating dyn entry point shares it.
+    // Aliasing the original is the real fix and is not built yet; until
+    // it is, THIS is the behaviour, and nothing else pinned it.
     const r = await compileAndRun(
       "any-record-copy",
       `const base = { a: 1 };
@@ -912,8 +918,11 @@ boxed.a = 2;
 console.log(base.a, boxed.a);
 `,
     );
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout).toBe("1 2\n");
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toContain(
+      "assigning a property through a value that crossed into an 'unknown' (dynamic) slot",
+    );
   });
 
   test("an uninitialized `any` binding is the dyn undefined, not a trap", async () => {

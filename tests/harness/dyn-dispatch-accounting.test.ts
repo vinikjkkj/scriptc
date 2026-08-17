@@ -76,6 +76,19 @@ const NOT_ROUTED: ReadonlyMap<string, string> = new Map([
   // the FUNC arm names it only to refuse loudly if it is ever reached
   // through `f.bind.call(...)`.
   ["bind", "no implementation — the FUNC arm refuses loudly, the frontend fences"],
+  // The DYN_STRING_ONLY_METHODS family. lower-calls.ts consults that set
+  // (~5518) BEFORE the dispatch set (~5627) and returns unconditionally, so
+  // the DOTTED spelling `<dyn>.trim()` never reaches DYN_DISPATCH_METHODS:
+  // it takes a checked string receiver and the dedicated string lowering,
+  // which answers a static string instead of a boxed dyn. The runtime arms
+  // are not dead — the ELEMENT spelling `d[k](...)` reaches them, which is
+  // what they exist for (npm-static's 4151) — so routing the name would be
+  // a regression, not a fix: it would take the dotted form away from the
+  // better lowering. Same structure as toString and flatMap above.
+  ...(["charAt", "charCodeAt", "endsWith", "padEnd", "padStart", "repeat",
+    "startsWith", "substring", "trim", "trimEnd", "trimStart"] as const).map(
+    (n) => [n, "claimed by DYN_STRING_ONLY_METHODS before the dispatch set; the element spelling reaches the runtime arm"] as const,
+  ),
 ]);
 
 describe("the dyn method dispatch and the fence set", () => {
@@ -87,15 +100,19 @@ describe("the dyn method dispatch and the fence set", () => {
   });
 
   test("every name the runtime dispatch ANSWERS is routed by the compiler", () => {
-    for (const name of [...dispatchNames].sort()) {
-      if (DYN_DISPATCH_METHODS.has(name)) continue;
-      expect(
-        NOT_ROUTED.has(name),
-        `scr_dyn_invoke.c handles '${name}' but no compiler path routes it: add it to ` +
-          `DYN_DISPATCH_METHODS, or record in NOT_ROUTED why the implementation is ` +
-          `unreachable through '<dyn>.${name}(...)'`,
-      ).toBe(true);
-    }
+    // Collected and asserted ONCE rather than asserted per name: a hard
+    // expect inside the loop reports only the alphabetically first
+    // offender, which is how eleven unrouted names sat behind 'charAt'
+    // reading as a single row. The whole set or nothing.
+    const unrouted = [...dispatchNames]
+      .sort()
+      .filter((name) => !DYN_DISPATCH_METHODS.has(name) && !NOT_ROUTED.has(name));
+    expect(
+      unrouted,
+      `scr_dyn_invoke.c handles these but no compiler path routes them: add each to ` +
+        `DYN_DISPATCH_METHODS, or record in NOT_ROUTED why the implementation is ` +
+        `unreachable through '<dyn>.<name>(...)'`,
+    ).toEqual([]);
   });
 
   test("the NOT_ROUTED classifications are all still real", () => {
