@@ -6472,9 +6472,37 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           const extrasInEveryArm = extras.every(
             (n) => n !== "<computed>" && armFieldNames.every((s) => s.has(n)),
           );
+          // WHY the relation is what it is. `ARMS=disjoint` over two unions
+          // that LOOK like the same declared types has two very different
+          // causes and the verdict alone cannot tell them apart:
+          //   - the types really are different (`{ ...normalized, errors }`,
+          //     where each target arm is a source arm plus a field), or
+          //   - the same declared type was interned as two shapes.
+          // So the fingerprints go out too: each arm as `shapeId/fieldCount`,
+          // and `pairedByNames` — how many SOURCE arms have a slot arm with
+          // an IDENTICAL field-name set. `pairedByNames=n/n` with
+          // `ARMS=disjoint` is the interning story; anything less is a real
+          // width difference, and the count says how many arms differ.
+          const fp = (arms: readonly IrType[]): string =>
+            arms
+              .map((a) => {
+                const id = (a as IrType & { kind: "record" }).shapeId;
+                return `${String(id)}/${String((L.shapes.get(id)?.fields ?? []).length)}`;
+              })
+              .join(",");
+          const nameSet = (a: IrType): string =>
+            (L.shapes.get((a as IrType & { kind: "record" }).shapeId)?.fields ?? [])
+              .map((f) => f.name)
+              .sort()
+              .join(",");
+          const ctxNameSets = new Set(ctxRecs.map(nameSet));
+          const pairedByNames = srecs.filter((a) => ctxNameSets.has(nameSet(a))).length;
           const l = locOf(prop);
           console.error(
             `UNIONSLOT ${l.file}@${String(l.start)} ARMS=${rel}` +
+              ` pairedByNames=${String(pairedByNames)}/${String(srecs.length)}` +
+              ` srcShapes=[${fp(srecs)}] ctxShapes=[${fp(ctxRecs)}]` +
+              ` ctx0=${ctxType0 === undefined ? "NONE" : `'${name(ctxType0)}'`}` +
               ` srcArms=${String(srecs.length)}/${String(L.unions.get(st.unionId)?.arms.length ?? -1)}` +
               ` ctxArms=${String(ctxRecs.length)}/${String(L.unions.get(ctxUnion.unionId)?.arms.length ?? -1)}` +
               ` spreads=${String(spreads)} condSpreads=${String(condSpreads)}` +
