@@ -4255,11 +4255,23 @@ export function isUnitOnlyTsType(t: ts.Type): boolean {
  * admits, `(() => void) | undefined`) so the interned union is IDENTICAL
  * to what mapping the checker's own `T | undefined` produces. */
 export function withUndefinedArm(t: IrType, unions: UnionRegistry): IrType | null {
+  return withUnitArm(t, UNDEFINED_T, unions);
+}
+
+/** The same canonicalizer for EITHER unit arm. `withUndefinedArm` is this
+ * with `undefined`; `?? null` needs it with `null` (the honest type of
+ * `attrs.k ?? null` is `string | null`, because JS guarantees `null` IS the
+ * value when an absent key makes the left nullish — see
+ * `lowerNullishCoalesce`'s dyn rung). Returns `t` unchanged when the arm is
+ * already there, so a caller can tell "already admits it" from "widened"
+ * by identity on the union id. */
+export function withUnitArm(t: IrType, unit: IrType, unions: UnionRegistry): IrType | null {
+  if (!isUnitType(unit)) return null;
   if (t.kind === "union") {
     const def = unions.get(t.unionId);
     if (!def) return null;
-    if (def.arms.some((a) => a.kind === "undefinedT")) return t;
-    const arms = [...def.arms, UNDEFINED_T];
+    if (def.arms.some((a) => a.kind === unit.kind)) return t;
+    const arms = [...def.arms, unit];
     arms.sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
     return { kind: "union", unionId: unions.intern(arms) };
   }
@@ -4271,7 +4283,7 @@ export function withUndefinedArm(t: IrType, unions: UnionRegistry): IrType | nul
   ) {
     return null;
   }
-  const arms = [t, UNDEFINED_T];
+  const arms = [t, unit];
   arms.sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
   return { kind: "union", unionId: unions.intern(arms) };
 }
