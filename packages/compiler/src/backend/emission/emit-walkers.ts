@@ -2130,7 +2130,26 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
   }
 
 /** How a record FIELD of function type boxes: the ordinary thunk when the
-   * signature has one, the stranded box otherwise. */
+   * signature has one, the stranded box otherwise.
+   *
+   * CENSUS / ATTRIBUTION (block/all24, measured on zapo's 129 MB TU at
+   * 59cd34db): the two `NULL, NULL` below are `fname` and `fsrc` — the two
+   * parameters `scr_dyn_new_func_src` takes precisely so a boxed function
+   * value can name its origin — and EVERY one of zapo's ten field-box call
+   * sites passes them empty:
+   *
+   *     v->sc_fld_getOrGenPreKeys, NULL, NULL))
+   *
+   * That is why the five stranded boxes in that program have been dark to
+   * every instrument this project has: the census can only attribute them by
+   * interned host name, and the emitted C carries no origin at all.  The
+   * field name IS in scope at the caller (it is what `expr` reads), so
+   * threading it here would give all five a source location for a one-line
+   * change and no behaviour change.  See estado-todas24.md §2.1 and §6.1
+   * rank 1; the five rows are getOrGenPreKeys, getOrGenSinglePreKey,
+   * getCollectionState, getCollectionStates and setCollectionStates, boxed
+   * for `destroyIfSupported(value: unknown)` at src/store/createStore.ts:104,
+   * which only ever asks `'destroy' in value`. */
   export function dynFuncFieldBoxC(E: CEmitter, t: IrType & { kind: "func" }, expr: string): string {
     const boxable = canBoxFuncIntoDyn(t, (id: string) => E.recordsById.get(id), (id: string) => E.unionsById.get(id));
     const helper = boxable ? E.dynFuncBoxHelper(t) : strandedDynFuncBoxHelper(E, t);
