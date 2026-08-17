@@ -3858,6 +3858,31 @@ function nullishTestedByParent(expr: ts.Expression): boolean {
           // already there (`(s: string | null) ?? null`), so a checker that
           // was already honest costs nothing — no new union is interned and
           // the emitted check is the one `main` emits.
+          // THE NEIGHBOUR THIS DELIBERATELY DOES NOT SERVE, with its price
+          // measured, because it is the next fix and not this one.
+          //
+          // When the right operand is itself a widened index-signature read
+          // rather than a unit literal, the honest type is `want | undefined`
+          // (both keys can be absent) and the SAME destination licence applies
+          // with `unit = undefined`. `SCRIPTC_NULLISH_UNIT=1` on zapo at
+          // `250f9af5229a` reports 51 firings of this rung: 9 with a unit
+          // literal (all licensed, all widened) and 42 without, of which
+          // exactly **8** have `ctx=string | undefined` — a destination that
+          // would license the widening. Those 8 are the candidate set.
+          //
+          // One of them is worth two stanzas: `src/retry/parse.ts:124`,
+          // `parseOptionalInt(retry.attrs.error ?? node.attrs.error)`. In a
+          // paired run against `@zapo-js/fake-server` it throws `expected
+          // string at $, got undefined` inside `parseRetryReceiptRequest`, so
+          // the client neither RESENDS on an inbound `<receipt type=retry>` nor
+          // acks it (`shouldAck = true` sits after the parse). The field
+          // destinations of the same function are already served and do NOT
+          // throw — `repro-sx/s3.ts` shows all four side by side — so the gap
+          // is specifically the CALL-ARGUMENT destination.
+          //
+          // It is not taken here because it is a wider change than the unit
+          // literal (42 sites see the predicate instead of 9), and this block
+          // had one verified zapo build to spend.
           const unit = unitLiteralDefaultOf(expr.right);
           const honest = unit ? L.withUnitArmOf(want, unit) : null;
           const licensed = unit !== null && honest !== null && honest !== want &&
