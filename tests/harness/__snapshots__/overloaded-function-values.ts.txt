@@ -7,15 +7,6 @@ overloaded-function-values.ts:10:7 - error SC2007: values of type '{ (x: "a"): s
 
   hint: annotate the slot with the ONE signature the program actually calls (e.g. '(x: number) => string'), or wrap the overloaded function in a single-signature arrow
 
-overloaded-function-values.ts:11:13 - error SC2004: uses of 'stored' inherit the blocker on its declaration
-
-  10 | const stored = pick;
-  11 | console.log(stored("a"));
-     |             ^~~~~~
-  12 | 
-
-  hint: the declaration of 'stored' did not compile — fix the diagnostic reported there and these sites clear with it
-
 overloaded-function-values.ts:16:7 - error SC2007: values of type '{ (event: "exit", code: number): void; (event: "error", err: string): void; }' cannot be compiled: the type declares multiple call signatures (overloads), and a compiled function value is always one concrete signature
 
   15 | // compile to Node's ReferenceError at the root instead).
@@ -34,20 +25,9 @@ overloaded-function-values.ts:17:7 - error SC2007: values of type '{ (event: "ex
 
   hint: annotate the slot with the ONE signature the program actually calls (e.g. '(x: number) => string'), or wrap the overloaded function in a single-signature arrow
 
-overloaded-function-values.ts:17:18 - error SC2004: uses of 'on' inherit the blocker on its declaration
-
-  16 | const on = ((() => {}) as unknown) as { (event: "exit", code: number): void; (event: "error", err: string): void };
-  17 | const listener = on;
-     |                  ^~
-  18 | console.log(listener("exit", 0));
-
-  hint: the declaration of 'on' did not compile — fix the diagnostic reported there and these sites clear with it
-
-overloaded-function-values.ts:18:13 - error SC2004: uses of 'listener' inherit the blocker on its declaration
+overloaded-function-values.ts:18:13 - error SC1090: console.log of a void call result (call it as its own statement, then console.log(undefined)) is not supported yet
 
   17 | const listener = on;
   18 | console.log(listener("exit", 0));
-     |             ^~~~~~~~
+     |             ^~~~~~~~~~~~~~~~~~~
   19 | 
-
-  hint: the declaration of 'listener' did not compile — fix the diagnostic reported there and these sites clear with it
