@@ -3896,6 +3896,67 @@ export class Lowerer {
     return { ...expr, type: expected };
   }
 
+  /** THE ARGUMENT DESTINATION for recordKeyReadAtUndefinedArm.
+   *
+   * `parseOptionalInt(node.attrs.abprops)` — zapo
+   * `transport/stream/parse.ts:79` and
+   * `client/coordinators/WaIncomingNodeCoordinator.ts:508`. The checker
+   * types an index-signature read by the signature's VALUE type, so the
+   * read is spelled `string`; the key is absent on the wire; the helper's
+   * miss path is `scr_trap_fmt` — a process ABORT with no `[SCxxxx]` tag,
+   * past every one of zapo's 206 catch clauses, where Node hands the
+   * callee `undefined` and the callee's own `if (!value) return undefined`
+   * answers it.
+   *
+   * WHY A PARAMETER IS A KEEP-CASE, which is the rung's whole admission
+   * rule. tsc narrows `string | undefined` away at a DECLARATION, an
+   * ASSIGNMENT and a PROPERTY WRITE — the destinations the rung refuses,
+   * because their readers were compiled as "definitely the string arm"
+   * and a stored undefined is the r03 segfault. A PARAMETER cannot be
+   * narrowed that way: the callee is compiled ONCE against its DECLARED
+   * signature, and no call site can change what the body was checked
+   * against. Every reader inside the callee already discriminates,
+   * because tsc made it. That is a fact about the declaration, not an
+   * argument about this call — and it is measurable per site, which is
+   * what SCRIPTC_KEYREAD_CENSUS records (`wantArmed`).
+   *
+   * The gate is the rung's own and nothing else: `expected` is a union
+   * carrying an undefined arm, `stripUndefinedArm(expected)` equals the
+   * read's own type EXACTLY (a wider slot is a conversion the author
+   * asked for and keeps its own coercion), the shape has an index
+   * signature, and `recordKeyResultOk`. A parameter typed bare `string`
+   * has no arm to offer and is untouched — it keeps the abort, honestly,
+   * because there is nowhere for the undefined to go.
+   *
+   * The syntactic guard is `keyedAccessSyntax`'s access forms, for the
+   * reason the `??` consumer gives: lowering the argument here must be
+   * exactly what `lowerExprExpecting` would have done with it. That
+   * function's own early rules are for `Object.freeze`, array literals
+   * and object literals — none of which is a property or element access
+   * — so for the admitted syntax the fallback below IS its tail,
+   * lowerExpr + coerceInto, and a declined rung changes nothing. */
+  lowerArgExpecting(node: ts.Expression, expected: IrType | undefined): IrExpr {
+    if (expected !== undefined && expected.kind === "union" && this.armTag(expected.unionId, UNDEFINED_T) >= 0) {
+      let x: ts.Expression = node;
+      while (ts.isParenthesizedExpression(x)) x = x.expression;
+      if (
+        (ts.isPropertyAccessExpression(x) || ts.isElementAccessExpression(x)) &&
+        x.questionDotToken === undefined
+      ) {
+        const raw = this.lowerExpr(node);
+        const armed = this.recordKeyReadAtUndefinedArm(raw, expected);
+        if (process.env["SCRIPTC_ARGARM_WHY"]) {
+          const l = locOf(node);
+          console.error(
+            `ARGARM ${armed ? "FIRES" : "declines"} ${l.file}@${l.start} read=${this.fmt(raw.type)} want=${this.fmt(expected)} kind=${raw.kind}`,
+          );
+        }
+        return armed ?? this.coerceInto(node, raw, expected);
+      }
+    }
+    return this.lowerExprExpecting(node, expected);
+  }
+
   /** Implicit union construction. Wherever a value flows into a typed slot
    * (initializer, assignment, call argument, return, field write, record
    * literal field, ternary arm) whose expected type is a union and the
