@@ -17,7 +17,7 @@ import { ForOfIterProjection, lowerForOfArrayIter, lowerForOfMap, lowerForOfSear
 import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestFunctionLiteral, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall } from "./lower-calls.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import type { ClassInfo, ClassIteratorInfo } from "./lower-classes.js";
-import { bindingHoldsItsInitializer, genericIfaceBindingKeepsClass } from "./lower-classes.js";
+import { bindingHoldsItsInitializer, genericIfaceBindingKeepsClass, isProvenPrefixTruncation } from "./lower-classes.js";
 import { lowerStreamUnderscoreAssign, streamClassAliasDecl, streamSidesOf } from "./lower-stream.js";
 import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment } from "./lower-server.js";
 import { namespaceConditionalOf } from "./lower-nsvalue.js";
@@ -5404,7 +5404,16 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
               // -- the arrayNewLen / new Array(count) rule, same wording.
               const elem = recvT.elem;
               const growable = elem.kind === "union" ? L.wrappedUndefined(elem, loc) !== null : isRefCounted(elem);
-              if (!growable) {
+              // ...unless the array is the RESERVE half of the prefix-fill
+              // idiom and this statement is the truncation its proof named
+              // (lower-classes.ts). Then the write is a SHRINK by
+              // construction, and the tail it drops is exactly the slots the
+              // fill loop never reached -- the pair is proven together, and
+              // the same proof admits the `new Array<number>(N)` above it.
+              const provenTruncation =
+                !growable && ts.isExpressionStatement(expr.parent) && ts.isIdentifier(expr.left.expression) &&
+                isProvenPrefixTruncation(expr.parent, expr.left.expression.text);
+              if (!growable && !provenTruncation) {
                 L.noLowering(
                   `assigning '.length' on '${L.fmt(elem)}'-element arrays`,
                   expr.left,
