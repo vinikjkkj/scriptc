@@ -320,6 +320,46 @@ static size_t scr_dyn_free_count;
 #define SCR_DYN_FREE_MAX 8192
 #endif
 
+/* ── ScrDyn is a cycle-collector node ─────────────────────────────────
+ * Every reference edge OUT of a dyn value used to be invisible to the
+ * collector, because the node had no cycle header: `scr_runtime.h`'s
+ * SCR_DYN_FUNC arm called that a "documented divergence — a cycle THROUGH
+ * a dyn-boxed function is merely never collected". It is not merely
+ * never collected. A dyn tree is how every JS-shaped object graph in a
+ * compiled program is represented — prototype chains, accessor
+ * descriptor tables, and any `unknown`-typed field — so one back-link
+ * through a dyn object pins the whole graph reachable from it, and
+ * protobufjs's reflection tree (whose entries all carry a `parent`
+ * back-link) pinned 8020 closures and 36990 dyn values in zapo.
+ *
+ * The header costs sizeof(ScrCycHdr) per dyn value and buys the edges
+ * below. What is TRACED is exactly the set of children that are
+ * themselves guaranteed to carry a header: other ScrDyns (array
+ * elements, object member values, the [[Prototype]] link, the
+ * non-enumerable/accessor table) and the ScrClosure a FUNC dyn boxes.
+ * Immortal children (the interned `undefined`, interned closure
+ * literals) have no header at all and the collector's own child filter
+ * skips them on `rc == SIZE_MAX` before it touches one.
+ *
+ * What is deliberately NOT traced, and why each is released by the
+ * teardown below instead:
+ *   inst.o    a boxed CLASS INSTANCE. Whether a shape carries a header is
+ *             the emitter's per-shape grading (traceAdapterC): 1377 of
+ *             zapo's 2120 shapes are graded acyclic and are plain
+ *             calloc'd, so visiting one would make the collector read and
+ *             write 32 bytes BEFORE the allocation. There is no runtime
+ *             test that distinguishes the two.
+ *   promise   headered, but its release runs through an INSTALLED ops
+ *             pointer so this always-linked core never references the
+ *             gated fiber unit; tracing the edge without owning its
+ *             release would split one edge's accounting across two units.
+ *   str/bytes/handle/jsval/big   no header by construction.
+ * An incomplete trace is the SAFE direction: a ring through an untraced
+ * edge is uncollectable (what the whole tree was before this change),
+ * whereas a traced edge the teardown also releases is a double free. */
+static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx);
+static void scr_dyn_gcfree(void *o);
+
 static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
 #ifndef SCR_RC_AUDIT
   ScrDyn **list = kind == SCR_DYN_ARR   ? &scr_dyn_free_arr
@@ -329,6 +369,11 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
   if (d) {
     *list = (ScrDyn *)d->v.str; /* freelist link */
     scr_dyn_free_count--;
+    /* A recycled node re-enters the graph BLACK. Its `buffered` flag was
+     * already cleared by scr_cyc_on_dead on the way out, but its color is
+     * whatever the last life left (PURPLE for anything that was ever a
+     * candidate), and markRoots keys on exactly that. */
+    scr_cyc_mark_live(d);
     d->rc = 1;
     d->kind = kind;
     d->buffer = false;
@@ -349,8 +394,7 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
     return d;
   }
 #endif
-  ScrDyn *fresh = calloc(1, sizeof *fresh);
-  if (!fresh) scr_json_oom();
+  ScrDyn *fresh = scr_cyc_alloc(sizeof *fresh, &scr_dyn_trace, &scr_dyn_gcfree);
   fresh->rc = 1;
   fresh->kind = kind;
 #ifdef SCR_RC_AUDIT
@@ -362,9 +406,99 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
 
 static void scr_dyn_handle_release(void *h, ScrDynHandleTag tag);
 
+/* The traced children: every one is a ScrDyn or a ScrClosure, so every one
+ * carries a header (or is immortal, which the visit filter skips). */
+static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
+  ScrDyn *d = (ScrDyn *)o;
+  switch (d->kind) {
+  case SCR_DYN_ARR:
+    for (size_t i = 0; i < d->v.arr.len; i++) visit(d->v.arr.items[i], ctx);
+    break;
+  case SCR_DYN_OBJ:
+    for (size_t i = 0; i < d->v.obj.len; i++) visit(d->v.obj.entries[i].value, ctx);
+    /* The [[Prototype]] link and the non-enumerable/ACCESSOR table. The
+     * table is where a getter/setter pair lives (an OBJ dyn of ARR dyn
+     * entries holding two FUNC dyns), which is the edge that makes an
+     * accessor descriptor collectible at all. Both are NULL-tolerant. */
+    visit(d->v.obj.proto, ctx);
+    visit(d->v.obj.hidden, ctx);
+    break;
+  case SCR_DYN_FUNC:
+    visit(d->v.fn.clo, ctx);
+    break;
+  default:
+    break; /* scalars, strings, bytes, handles, promises, jsvals, bigints,
+            * boxed class instances: nothing traced (see scr_dyn_alloc) */
+  }
+}
+
+void scr_dyn_trace_v(void *o, ScrTraceVisit visit, void *ctx) {
+  scr_dyn_trace(o, visit, ctx);
+}
+
+/* Teardown for the collector: releases exactly the complement of the trace
+ * — never an array element, an object member value, a proto link, the
+ * hidden table or a FUNC's closure, all of which the collector has already
+ * accounted for. Buffers and malloc'd keys are this function's, because
+ * they are not references at all. */
+static void scr_dyn_gcfree(void *o) {
+  ScrDyn *d = (ScrDyn *)o;
+  switch (d->kind) {
+  case SCR_DYN_STR:
+    scr_str_release(d->v.str);
+    break;
+  case SCR_DYN_BYTES:
+  case SCR_DYN_ARRBUF:
+    scr_bytes_release(d->v.bytes);
+    break;
+  case SCR_DYN_OBJ:
+    /* keys only — the values are traced */
+    for (size_t i = 0; i < d->v.obj.len; i++) free(d->v.obj.entries[i].key);
+    break;
+  case SCR_DYN_HANDLE:
+    scr_dyn_handle_release(d->v.handle.ptr, d->v.handle.tag);
+    break;
+  case SCR_DYN_PROMISE:
+    scr_dyn_promise_release_fn(d->v.promise);
+    break;
+  case SCR_DYN_JSVAL:
+    scr_dyn_jsval_ops()->release(d->v.jsval.cell);
+    break;
+  case SCR_DYN_BIG:
+    scr_dyn_big_ops()->release(d->v.big);
+    break;
+  case SCR_DYN_OBJINST:
+    d->v.inst.cls->release(d->v.inst.o);
+    break;
+  default:
+    break; /* ARR items and FUNC clo are traced; scalars own nothing */
+  }
+#ifdef SCR_RC_AUDIT
+  scr_live_dyns--;
+  scr_dyn_live_by_kind[d->kind]--;
+#endif
+  if (d->kind == SCR_DYN_ARR) free(d->v.arr.items);
+  else if (d->kind == SCR_DYN_OBJ) free(d->v.obj.entries);
+  scr_cyc_free(d);
+}
+
 void scr_dyn_release(ScrDyn *d) {
   if (!d || d->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
-  if (--d->rc != 0) return;
+  if (--d->rc != 0) {
+    /* Candidate-root buffering is restricted to the three kinds that OWN a
+     * traced child. A scalar, string, bytes, handle, promise, jsval,
+     * bigint or boxed-instance dyn points at nothing the collector walks,
+     * so it can never be a MEMBER of a cycle — only reachable from one,
+     * which the visit filter handles without it ever being a root.
+     * Buffering them would cost a full graph walk per 256 releases of the
+     * hottest allocation in the runtime and could never find anything. */
+    if (d->kind == SCR_DYN_ARR || d->kind == SCR_DYN_OBJ ||
+        d->kind == SCR_DYN_FUNC) {
+      scr_cyc_on_release(d); /* may collect — d is done being touched */
+    }
+    return;
+  }
+  scr_cyc_on_dead(d); /* drop any candidate-buffer entry before teardown */
   switch (d->kind) {
   case SCR_DYN_STR:
     scr_str_release(d->v.str);
@@ -442,7 +576,7 @@ void scr_dyn_release(ScrDyn *d) {
 #endif
   if (d->kind == SCR_DYN_ARR) free(d->v.arr.items);
   else if (d->kind == SCR_DYN_OBJ) free(d->v.obj.entries);
-  free(d);
+  scr_cyc_free(d);
 }
 
 ScrDyn *scr_dyn_obj_get(const ScrDyn *d, const char *key, size_t key_len) {
@@ -983,9 +1117,16 @@ static void scr_dyn_obj_put(ScrDyn *obj, char *key, size_t key_len, ScrDyn *valu
   for (size_t i = 0; i < obj->v.obj.len; i++) {
     ScrDynEntry *e = &obj->v.obj.entries[i];
     if (e->key_len == key_len && memcmp(e->key, key, key_len) == 0) {
-      scr_dyn_release(e->value);
+      /* UNLINK BEFORE RELEASE (scr_cycle.c's second global invariant): the
+       * slot must already hold the new value when the old one's release
+       * runs, because that release can trigger a collection and the walk
+       * must not see an edge whose count was just given up. Harmless while
+       * dyn values were invisible to the collector; a double decrement now
+       * that they are nodes. */
+      ScrDyn *old = e->value;
       e->value = value;
       free(key);
+      scr_dyn_release(old);
       return;
     }
   }
@@ -3501,11 +3642,14 @@ static void scr_dyn_obj_unset(ScrDyn *obj, const char *key, size_t key_len) {
   for (size_t i = 0; i < obj->v.obj.len; i++) {
     ScrDynEntry *e = &obj->v.obj.entries[i];
     if (e->key_len == key_len && memcmp(e->key, key, key_len) == 0) {
+      /* unlink before release: the entry must be out of the table before
+       * the value's release can trigger a collection */
+      ScrDyn *old = e->value;
       free(e->key);
-      scr_dyn_release(e->value);
       memmove(&obj->v.obj.entries[i], &obj->v.obj.entries[i + 1],
               (obj->v.obj.len - i - 1) * sizeof *obj->v.obj.entries);
       obj->v.obj.len--;
+      scr_dyn_release(old);
       return;
     }
   }
@@ -3890,8 +4034,11 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
       while (recv->v.arr.len <= idx) {
         scr_dyn_arr_push(recv, scr_dyn_retain(scr_dyn_undefined()));
       }
-      scr_dyn_release(recv->v.arr.items[idx]);
+      /* unlink before release, and retain before either: `value` may BE
+       * the element already stored here */
+      ScrDyn *old = recv->v.arr.items[idx];
       recv->v.arr.items[idx] = scr_dyn_retain(value);
+      scr_dyn_release(old);
       return;
     }
   }
