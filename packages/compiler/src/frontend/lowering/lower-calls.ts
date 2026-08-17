@@ -17,7 +17,7 @@ import { ffiBindingDiag, ffiSignatureDiag, requiresDynamicDiag } from "../../dia
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerBytesStaticFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerObjectIterOverIndexShape, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
-import { lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDiffieHellmanCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerWatcherMethodCall } from "./lower-builtins.js";
+import { lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDiffieHellmanCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
 import { droppableStatic, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, templateRawTextOf } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { EMITTER_API_MEMBERS, definePropSlotSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js";
@@ -4819,6 +4819,14 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         // Reflect.apply of a builtin rest-parameter fn (fixtures.js's
         // fixturesPath idiom) — before the stdlib member fence claims it.
         lowerReflectApplyCall(L, expr, expr.expression) ??
+        // `String.fromCharCode.apply(String, codes)` — the ES5 spelling of
+        // the whole-array call lowerStringStaticCall already lowers under
+        // its spread form. Here, beside Reflect.apply and for the same
+        // reason: the Function.prototype.apply fence below would claim it
+        // first (`fromCharCode`'s type carries call signatures), and that
+        // fence's advice — "spell the call directly" — is a spelling this
+        // one already knows.
+        lowerStringFromCharCodeApply(L, expr, expr.expression) ??
         L.lowerNumberStaticCall(expr, expr.expression) ??
         L.lowerDateCall(expr, expr.expression) ??
         L.lowerTextCodecCall(expr, expr.expression) ??
