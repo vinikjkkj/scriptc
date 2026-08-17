@@ -3880,7 +3880,7 @@ function nullishTestedByParent(expr: ts.Expression): boolean {
             //            taken.
             const ctxT = (() => { try { return L.checker.getContextualType(expr); } catch { return undefined; } })();
             const short = (s: string): string => (s.length <= 60 ? s : `${s.slice(0, 57)}...`);
-            process.stderr.write(
+            console.error(
               `NULLISHUNIT ${loc.file}@${String(loc.start)}` +
               ` unit=${unit ? unit.kind : "-"}` +
               ` want=${short(L.fmt(want))}` +
@@ -3888,7 +3888,7 @@ function nullishTestedByParent(expr: ts.Expression): boolean {
               ` widen=${licensed ? "1" : "0"}` +
               ` admits=${unit && contextualAdmitsUnit(L, expr, unit) ? "1" : "0"}` +
               ` tested=${nullishTestedByParent(expr) ? "1" : "0"}` +
-              ` ctx=${ctxT ? short(L.checker.typeToString(ctxT)) : "none"}\n`
+              ` ctx=${ctxT ? short(L.checker.typeToString(ctxT)) : "none"}`
             );
           }
           return want.kind === "dyn" || nullishTestedByParent(expr)
