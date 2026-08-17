@@ -4721,6 +4721,9 @@ function isNumericCaseTest(e: ts.Expression): boolean {
             ? L.declareHiddenLocal(`${vd.name.text}$dyn`, DYN)
             : null;
           if (twin) L.caughtDynTwins.set(local, twin);
+          if (twin && process.env["SCRIPTC_CATCHTWIN_WHY"] !== undefined) {
+            console.error(`[catchtwin] ${twinLoc.file}:${twinLoc.start} ${vd.name.text}`);
+          }
           const lowered = lowerGuarded(stmt.catchClause.block);
           catchBody = twin
             ? [

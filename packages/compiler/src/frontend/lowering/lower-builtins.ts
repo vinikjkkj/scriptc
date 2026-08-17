@@ -1589,6 +1589,9 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     // another untyped table, so checkJs types it `any[]` and `mapTypeOf`
     // does not answer `array` — the spread form lowers it and the apply
     // form declined. Both spellings now take the same path.
+    if (process.env["SCRIPTC_FCCAPPLY_WHY"] !== undefined) {
+      console.error(`[fccapply] ${loc.file}:${loc.start} args=${argsT?.kind ?? "<unmappable>"}`);
+    }
     if (argsT?.kind === "bytes") {
       const packed = L.lowerExpr(argsNode);
       if (packed.type.kind === "bytes") {
