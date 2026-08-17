@@ -5569,6 +5569,31 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
    *     exactly that shape and is a must-not-close row: the literal-union
    *     gate is what separates the two.
    *
+   * WHAT :205 IS ACTUALLY WORTH, measured rather than assumed. A narrower
+   * rule than widening this gate DOES exist and DOES work: take the
+   * candidate set from the TARGET's declared fields instead of from the
+   * key's type (the target is a closed record with no index signature, so
+   * the slots the write can land in are finite even when the key's type is
+   * not), behind the same `shapeDeclared` gate `dropsAreHonest` uses so a
+   * key naming no declared field is dropped only where that is divergence
+   * 68. Built and measured: it admits exactly ONE site in 129 MB of zapo TU
+   * (:205, 82 candidates), closes it, opens nothing (census 26 -> 25, one
+   * closed / zero new), costs 355 KB of C, and matches Node byte for byte
+   * at 4 and at 82 candidates.
+   *
+   * It buys ZERO STANZAS, which is why the gate below is still the right
+   * one and why :205 stays a must-not-close row. `set()` refuses TWICE in
+   * series: :205 in `wrapData`, then SC2002 at :1116 —
+   * `indexArgs as unknown as IndexArgsForSchema<typeof resolved>`, the same
+   * `as WaAppstateSchema` widening resolving to the base's index signature
+   * (corpus 3453's subject). With :205 closed, the profile.setPushName step
+   * throws SC2002 at :1116 instead and the run is stanza-for-stanza
+   * identical: 74 both sides, same tags, dumps, decrypts, exit code. Only
+   * the census can see the difference. The ninth `iq w:sync:app:state`
+   * costs TWO rows, not one, and the second needs a value-side rule
+   * (an `unknown`-valued index signature width-coercing into a
+   * `string | boolean` one) that nobody has built.
+   *
    * The key must be PURE for the same reason the single-literal fold
    * requires it: the desugar re-reads it once per candidate name. */
   function literalUnionComputedKeys(L: Lowerer, name: ts.ComputedPropertyName): string[] | null {
