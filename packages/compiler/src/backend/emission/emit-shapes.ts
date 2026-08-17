@@ -690,6 +690,21 @@ export interface ClassMeta {
         return E.tracedUnions.has(t.unionId) ? "scr_union_trace_v" : null;
       case "promise":
         return "scr_promise_trace_v";
+      // A dyn value is unconditionally cycle-capable, and it was the one
+      // reference kind with no row here at all — so a shape whose only
+      // cycle-capable path ran through an `unknown`-typed field fell to
+      // `null` below, was graded acyclic, and got NO cycle header: the ring
+      // was invisible not because an edge was untraced but because the NODE
+      // was not a node. Twelve of zapo's 2120 shapes were in that state.
+      // The same row is what puts a trace on the dyn capture boxes boxNewC
+      // builds (`traceArgC` reads this function), which is the other and
+      // larger half: a closure capturing an `unknown` local held it in an
+      // SCR_BOX_OBJ box whose trace argument was NULL.
+      // Safe only because ScrDyn now carries a header of its own
+      // (scr_json.c's scr_dyn_trace); before that this row would have made
+      // the collector read and write the 32 bytes before a dyn allocation.
+      case "dyn":
+        return "scr_dyn_trace_v";
       case "object":
         if (!E.tracedShapes.has(`object:${t.className}`)) return null;
         if (RUNTIME_ERROR_CLASSES.has(t.className)) return "scr_error_trace";

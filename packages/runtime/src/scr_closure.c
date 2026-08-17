@@ -175,6 +175,36 @@ void scr_box_set_ref(ScrBox *b, void *v) {
 static void scr_closure_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrClosure *c = (ScrClosure *)o;
   for (size_t i = 0; i < c->ncaps; i++) visit(c->caps[i], ctx);
+  /* The OWN-PROPERTY table. It is a box like any capture, and it was the
+   * last untraced strong edge out of a closure — which made the single
+   * commonest ring in real JavaScript invisible:
+   *
+   *   function Foo() {}
+   *   Foo.create = function () { return new Foo(); };   // captures Foo
+   *
+   * Foo -> props (box) -> the property dyn -> "create" (a FUNC dyn) -> that
+   * closure -> its capture box -> Foo. protobufjs's generated code emits
+   * exactly that for every message type, and zapo's spec has 2920 of them:
+   * with this edge untraced, every one of those constructors was
+   * permanently live, and with it every accessor pair hanging off its
+   * prototype through implicit_proto -- measured as 8020 live closures and
+   * 36990 live dyn values at exit, of which 5840 were one library's oneof
+   * getter/setter pair.
+   *
+   * A probe pins it to this one edge and nothing else: 20 constructors with
+   * two accessors each and a capturing static leak 80 closures; the same 20
+   * with a NON-capturing static property are clean.
+   *
+   * implicit_proto is deliberately NOT traced. The constructor registry
+   * (scr_json.c) keys on the prototype's ADDRESS and holds a borrowed
+   * closure pointer, and its safety argument is precisely that the closure
+   * owns the prototype so the key cannot be freed or recycled while the
+   * entry lives. Tracing that edge would let the collector free the
+   * prototype before the closure's teardown erases the entry. It is also
+   * not needed: breaking the props ring frees the constructor, and the
+   * constructor's teardown drops implicit_proto -- and with it the
+   * accessor table -- by ordinary refcount. */
+  visit(c->props, ctx);
 }
 
 /* NULL until the dyn unit mints its first implicit prototype object; see
@@ -190,10 +220,10 @@ static void scr_closure_drop_ctor(ScrClosure *c) {
 }
 
 static void scr_closure_gcfree(void *o) {
-  /* Caps are all boxes — all traced. The own-property table (props) is
-   * an untraced box: released here like any external owned edge. */
+  /* Caps and the own-property table are all boxes and all traced, so the
+   * complement this teardown owes is just the minted prototype — dropped
+   * through the ctor hook, which erases the registry entry first. */
   scr_closure_drop_ctor((ScrClosure *)o);
-  scr_box_release(((ScrClosure *)o)->props);
 #ifdef SCR_RC_AUDIT
   scr_live_closures--;
   scr_clo_bump(((ScrClosure *)o)->fn, -1);
