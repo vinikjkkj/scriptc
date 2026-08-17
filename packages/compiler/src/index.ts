@@ -22,7 +22,7 @@ import {
 import { validateSidecar } from "./library/sidecar-validate.js";
 import { entryFunctionExports, type EntryExportInfo } from "./frontend/lib-exports.js";
 import { entryContractFacts, type ContractFacts } from "./frontend/lib-contract.js";
-import { moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsBuiltin, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesStream, moduleUsesSymbol, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesBigInt,
+import { moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsBuiltin, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesBigInt,
   moduleUsesAsym, moduleUsesCipher, moduleUsesZlib, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc } from "./ir/nodes.js";
 import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
@@ -814,6 +814,10 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
       // The link switch for scr_symbol.c: sym.* libCalls or a symbol-kind
       // type anywhere on the IR.
       symbol: moduleUsesSymbol(lowered.module),
+      // The link switch for scr_url.c: url.* libCalls or a url-kind type
+      // on the IR. The unit used to be unconditional and cost every
+      // binary in the project four win32 pages it could not reach.
+      url: moduleUsesUrl(lowered.module),
       // The link switch for scr_url_params.c: sp.* libCalls, the
       // url.searchParams getter, or a searchParams-kind type on the IR.
       searchParams: moduleUsesSearchParams(lowered.module),
@@ -1512,6 +1516,7 @@ export async function compileLibrary(opts: CompileLibraryOptions): Promise<Compi
     assert: moduleUsesAssert(mod),
     inspect: moduleUsesInspect(mod),
     symbol: moduleUsesSymbol(mod),
+    url: moduleUsesUrl(mod),
     searchParams: moduleUsesSearchParams(mod),
     emitter: moduleUsesEmitter(mod),
     bigint: moduleUsesBigInt(mod),
