@@ -8751,6 +8751,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       const u = lowerForInUnion(L, stmt, labels);
       if (u) return u;
     }
+    if (recvT?.kind === "dyn") return lowerForInDyn(L, stmt, labels);
     if (recvT?.kind === "object") {
       L.unsupported(
         "SC1052",
@@ -9053,6 +9054,104 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     } finally {
       L.scopes.pop();
     }
+  }
+
+/** for-in over a CHECKED-DYNAMIC receiver. `object` — the NonPrimitive
+   * top type, which tsc admits every record, array, function and class
+   * instance into — and `unknown` both map to dyn (types.ts's
+   * NonPrimitive/Unknown arms), so a value whose declared type is either
+   * of them has a key set that is only knowable at RUN time. Before this
+   * arm both fenced SC1052 at lowerForIn's final fallback, printing the
+   * checker's own type text ("for-in over 'object' receivers").
+   *
+   *   { const %indyn = <expr>;
+   *     if (!nullish(%indyn)) {
+   *       const %inkeys = <string[]>(dyn.objKeys(%indyn));
+   *       for (const k of %inkeys) {
+   *         if (dyn.hasOwn(%indyn, k)) { <body> } } } }
+   *
+   * The key list is `scr_dyn_obj_keys` — EXACTLY the list `Object.keys`
+   * answers for the same value, which is already this project's answer
+   * for every one of these runtime kinds and is not a second stance: an
+   * OBJ's own enumerable members in JS own-key order (the shared
+   * projection, integer-like keys first), an ARR's and a BYTES' ascending
+   * index strings and never `length` (Node's is non-enumerable, and the
+   * own-NAMES walk that DOES append it is a different helper), a STR's
+   * code-unit indices, a FUNC's property table minus the three keys Node
+   * makes non-enumerable, and the EMPTY list for every scalar and every
+   * handle. An island-held value routes to the ENGINE's own walk.
+   *
+   * NULLISH is the one kind where for-in and Object.keys DISAGREE, and it
+   * is why this cannot simply be the keys call: `Object.keys(null)` throws
+   * Node's TypeError and so does the walk behind it, while
+   * `for (const k in null) {}` is legal and iterates zero times. The
+   * correction is a dynTest at the site, not a change to the runtime —
+   * the walk's throw is right for its other caller.
+   *
+   * SNAPSHOT + PER-VISIT PRESENCE, the same pair the PURE index-signature
+   * arm above runs and for the same reason: a dyn object is the other
+   * record kind whose keys can DISAPPEAR mid-walk. The list snapshots at
+   * loop entry, so keys added during the body are not visited (V8's
+   * own-keys snapshot); every visit re-checks `dyn.hasOwn`, Node's
+   * HasProperty re-check, so a key deleted before its turn is skipped.
+   * `hasOwn` differs from the keys walk by ENUMERABILITY only, and every
+   * key asked about here came OUT of the keys walk, so the two can only
+   * disagree about a key that was removed — which is the question being
+   * asked.
+   *
+   * TWO divergences, both INHERITED and both measured rather than argued,
+   * so that neither is discovered later as if this arm had introduced it:
+   *
+   * (1) Node's for-in also visits INHERITED enumerable properties, and a
+   * checked-dynamic object has no prototype chain to inherit any from.
+   * That is the same model `Object.keys`, the `in` operator and a keyed
+   * read already carry (SEMANTICS.md), so no receiver can tell this arm
+   * apart from them.
+   *
+   * (2) A RECORD reaching an `object` slot converts through `dynFrom`,
+   * which is a static COPY (the two representations cannot alias — the
+   * emitter marks the copy so a WRITE through it refuses loudly). The walk
+   * therefore sees the copy, so a `delete` performed on the ORIGINAL
+   * record while the loop is running is not skipped. Measured on
+   * `d9c00e5a` with no for-in involved at all: after `delete o["c"]`,
+   * `Object.keys(o)` answers ["a","b"] and `Object.keys(o as object)`
+   * answers ["a","b","c"], where Node answers ["a","b"] for both. The
+   * per-visit `hasOwn` guard below is still the right code — it is exact
+   * whenever the receiver IS the dyn everyone else holds, which is every
+   * receiver that did not come through a converter — and it is simply
+   * powerless against a snapshot taken before the loop started. */
+  function lowerForInDyn(L: Lowerer, stmt: ts.ForInStatement, labels: string[] | undefined): IrStmt {
+    const loc = locOf(stmt);
+    let recv = L.lowerExpr(stmt.expression);
+    if (recv.type.kind !== "dyn") recv = { kind: "dynFrom", value: recv, type: DYN, loc };
+    const d = L.declareHiddenLocal("%indyn", DYN);
+    const dRef = (): IrExpr => ({ kind: "varRef", localId: d.id, type: DYN, loc });
+    // The walk answers a checked-dynamic list; the loop's key binding is a
+    // STRING, so the list crosses the validated exit exactly once, at loop
+    // entry, rather than per visit. It cannot fail — every element the
+    // walk pushes is a dyn string — but it is the same exit every other
+    // dyn-to-typed read takes, not a special case that skips one.
+    const keys = L.coerceInto(
+      stmt.expression,
+      { kind: "libCall", fn: "dyn.objKeys", args: [dRef()], type: DYN, loc },
+      arrayOf(STRING),
+    );
+    const guard = (kRef: IrExpr): IrExpr => ({ kind: "libCall", fn: "dyn.hasOwn", args: [dRef(), kRef], type: BOOL, loc });
+    const loop = lowerForInOverKeys(L, stmt, keys, labels, guard);
+    return {
+      kind: "block",
+      body: [
+        { kind: "varDecl", localId: d.id, init: recv, loc },
+        {
+          kind: "if",
+          cond: { kind: "dynTest", test: "nullish", negated: true, value: dRef(), type: BOOL, loc },
+          then: [loop],
+          else_: null,
+          loc,
+        },
+      ],
+      loc,
+    };
   }
 
 /** `for await (const chunk of process.stdin)` — the ONE lowered async
