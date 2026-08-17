@@ -9,6 +9,8 @@ static long scr_live_boxes = 0;
 static long scr_live_closures = 0;
 long scr_box_live_count(void) { return scr_live_boxes; }
 long scr_closure_live_count(void) { return scr_live_closures; }
+/* The per-creation-site live table below; both teardown paths sit above it. */
+static void scr_clo_bump(const void *fn, long d);
 #endif
 
 /* ── boxes ──────────────────────────────────────────────────────────────
@@ -194,10 +196,112 @@ static void scr_closure_gcfree(void *o) {
   scr_box_release(((ScrClosure *)o)->props);
 #ifdef SCR_RC_AUDIT
   scr_live_closures--;
+  scr_clo_bump(((ScrClosure *)o)->fn, -1);
 #endif
   scr_cyc_free(o);
 }
 
+#ifdef SCR_RC_AUDIT
+/* live closures, keyed by their emitted body (scr_runtime.h) */
+
+typedef struct { const void *fn; long live; } ScrCloBucket;
+static ScrCloBucket *scr_clo_tab = NULL;
+static size_t scr_clo_cap = 0; /* a power of two, or 0 */
+static size_t scr_clo_used = 0;
+static const ScrClosureSite *scr_clo_sites = NULL;
+static size_t scr_clo_nsites = 0;
+
+void scr_closure_sites_install(const ScrClosureSite *tbl, size_t n) {
+  scr_clo_sites = tbl;
+  scr_clo_nsites = n;
+}
+
+static size_t scr_clo_probe(ScrCloBucket *tab, size_t cap, const void *fn) {
+  uintptr_t x = (uintptr_t)fn;
+  x ^= x >> 33;
+  x *= (uintptr_t)0xff51afd7ed558ccdULL;
+  x ^= x >> 29;
+  size_t mask = cap - 1, i = (size_t)x & mask;
+  while (tab[i].fn != NULL && tab[i].fn != fn) i = (i + 1) & mask;
+  return i;
+}
+
+static void scr_clo_grow(void) {
+  size_t ncap = scr_clo_cap ? scr_clo_cap * 2 : 256;
+  ScrCloBucket *ntab = calloc(ncap, sizeof *ntab);
+  if (!ntab) scr_trap("scriptc: out of memory\n");
+  for (size_t i = 0; i < scr_clo_cap; i++) {
+    if (!scr_clo_tab[i].fn) continue;
+    ntab[scr_clo_probe(ntab, ncap, scr_clo_tab[i].fn)] = scr_clo_tab[i];
+  }
+  free(scr_clo_tab);
+  scr_clo_tab = ntab;
+  scr_clo_cap = ncap;
+}
+
+static void scr_clo_bump(const void *fn, long d) {
+  if (scr_clo_used * 10 >= scr_clo_cap * 7) scr_clo_grow();
+  size_t i = scr_clo_probe(scr_clo_tab, scr_clo_cap, fn);
+  if (!scr_clo_tab[i].fn) {
+    scr_clo_tab[i].fn = fn;
+    scr_clo_used++;
+  }
+  scr_clo_tab[i].live += d;
+}
+
+static const char *scr_clo_site_of(const void *fn) {
+  for (size_t i = 0; i < scr_clo_nsites; i++) {
+    if (scr_clo_sites[i].fn == fn) return scr_clo_sites[i].site;
+  }
+  return NULL;
+}
+
+/* Live dyn values by KIND -- the other half of the same problem: the
+ * audit's single dyn total says nothing about what the leaked tree is
+ * made of. Bumped by scr_json.c's alloc/release, printed here so both
+ * tables come out of one entry point. */
+long scr_dyn_live_by_kind[SCR_DYN_BIG + 1];
+static const char *const scr_dyn_kind_names[SCR_DYN_BIG + 1] = {
+    "null", "bool", "num", "str", "arr", "obj", "undef", "bytes", "func", "handle", "promise", "jsval", "objinst", "arrbuf", "bigint",
+};
+
+void scr_rc_audit_sites_report(void) {
+  fprintf(stderr, "scriptc RC AUDIT SITES: live closures by creation site\n");
+  /* Selection sort over the occupied buckets: a few thousand at most,
+   * once, on a run that is already failing. */
+  long printed = 0, unnamed = 0, unnamed_rows = 0;
+  for (;;) {
+    size_t best = scr_clo_cap;
+    for (size_t i = 0; i < scr_clo_cap; i++) {
+      if (!scr_clo_tab[i].fn || scr_clo_tab[i].live <= 0) continue;
+      if (best == scr_clo_cap || scr_clo_tab[i].live > scr_clo_tab[best].live) best = i;
+    }
+    if (best == scr_clo_cap) break;
+    const char *site = scr_clo_site_of(scr_clo_tab[best].fn);
+    if (site) {
+      fprintf(stderr, "  %8ld  %s\n", scr_clo_tab[best].live, site);
+    } else {
+      fprintf(stderr, "  %8ld  <unnamed fn %p>\n", scr_clo_tab[best].live,
+              scr_clo_tab[best].fn);
+      unnamed += scr_clo_tab[best].live;
+      unnamed_rows++;
+    }
+    printed += scr_clo_tab[best].live;
+    scr_clo_tab[best].live = 0; /* consumed */
+  }
+  fprintf(stderr,
+          "  -- %ld live closure(s) above; %ld of them in %ld unnamed row(s)%s\n",
+          printed, unnamed, unnamed_rows,
+          scr_clo_nsites == 0 ? " (no site table: build with SCRIPTC_RC_SITES=1)" : "");
+  fprintf(stderr, "scriptc RC AUDIT SITES: live dyn values by kind\n");
+  for (size_t k = 0; k <= (size_t)SCR_DYN_BIG; k++) {
+    if (scr_dyn_live_by_kind[k] != 0) {
+      fprintf(stderr, "  %8ld  %s\n", scr_dyn_live_by_kind[k],
+              scr_dyn_kind_names[k]);
+    }
+  }
+}
+#endif /* SCR_RC_AUDIT */
 ScrClosure *scr_closure_new(void *fn, size_t ncaps) {
   ScrClosure *c = scr_cyc_alloc(sizeof(ScrClosure) + ncaps * sizeof(ScrBox *),
                                  &scr_closure_trace, &scr_closure_gcfree);
@@ -208,6 +312,7 @@ ScrClosure *scr_closure_new(void *fn, size_t ncaps) {
   c->implicit_proto = NULL; /* lazily minted by scr_dyn_fn_prototype */
 #ifdef SCR_RC_AUDIT
   scr_live_closures++;
+  scr_clo_bump(fn, +1);
 #endif
   return c;
 }
@@ -221,6 +326,7 @@ void scr_closure_release(ScrClosure *c) {
     scr_box_release(c->props); /* NULL-tolerant */
 #ifdef SCR_RC_AUDIT
     scr_live_closures--;
+    scr_clo_bump(c->fn, -1);
 #endif
     scr_cyc_free(c);
   } else {

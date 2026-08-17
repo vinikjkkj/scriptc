@@ -3277,6 +3277,32 @@ static inline ScrDynThunk scr_box_get_thunk(const ScrBox *b) {
 void scr_box_set_thunk_fn(ScrBox *b, ScrDynThunk f);
 ScrDynThunk scr_box_get_thunk_fn(const ScrBox *b);
 
+/* per-SITE attribution for the exit RC audit (SCR_RC_AUDIT only)
+ *
+ * The audit line counts live objects by TYPE, which is where every leak
+ * hunt in this tree has stalled: "36997 dyn value(s) live at exit" names
+ * no call site, so the next question has nowhere to go.
+ *
+ * Closures are the key that works. Every emitted closure body is its own
+ * C function, so a live count keyed by the closure's `fn` pointer IS a
+ * per-site count -- and the compiler knows each of those functions'
+ * source position. It emits the table below (opt in with
+ * SCRIPTC_RC_SITES=1 at build time; without it the TU is byte-identical
+ * to an uninstrumented build) and the audit resolves the pointers
+ * through it. A closure that leaks names the lambda that made it.
+ *
+ * The counting itself is unconditional under SCR_RC_AUDIT and an
+ * unresolved fn prints as a bare pointer rather than vanishing, because
+ * an instrument that silently drops what it cannot name reads as zero. */
+typedef struct ScrClosureSite {
+  const void *fn;   /* the emitted closure body */
+  const char *site; /* "file:line:col name" -- a static literal */
+} ScrClosureSite;
+void scr_closure_sites_install(const ScrClosureSite *tbl, size_t n);
+/* Print the live-closure-by-site and live-dyn-by-kind tables to stderr.
+ * Called by the exit audit when it is about to fail. */
+void scr_rc_audit_sites_report(void);
+
 /* Object member. Keys are malloc'd UTF-8 bytes (NUL-terminated for
  * convenience; key_len excludes the NUL) — duplicate keys were already
  * collapsed at parse time (later wins, like JS JSON.parse). */

@@ -2,6 +2,7 @@
  * expression lands in a fresh C temp, with RC ownership tracked on the
  * emitter's frames (see the discipline comment in emitter core). */
 import type { CEmitter, Temp } from "./emitter.js";
+import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
 import { arrayOf, BOOL, BYTES_U8, bytesOf, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals } from "../../ir/nodes.js";
 import { boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct } from "../mangle.js";
@@ -1824,6 +1825,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             e.type,
             retainCallC(e.type, `(ScrClosure *)&${mangleFnClosure(e.fnName)}`),
           );
+        }
+        if (rcSitesRequested()) {
+          // RC-audit per-SITE attribution: this closure body's C symbol,
+          // against the source position of the lambda that made it.
+          E.closureSites.set(E.callTargetC(e.fnName), rcSiteLabel(target.loc, target.name));
         }
         const t = E.newTemp(
           e.type,
