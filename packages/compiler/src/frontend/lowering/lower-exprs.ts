@@ -5370,6 +5370,37 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     return foldedStringKeyOf(L, name.expression);
   }
 
+  /** The DISTINCT property names a computed key can spell when its checker
+   * type is a UNION of string/number literals — `[field]` inside
+   * `for (const field of FIELDS)` over an `as const` tuple, zapo's
+   * `src/message/encode/content.ts:183`. Two or more names, all known at
+   * compile time, so the write is one of finitely many DECLARED slots picked
+   * at run time and folds into one conditional contributor per name.
+   *
+   * `null` for everything else, and the two exclusions are the point:
+   *   - one literal is `literalComputedKey`'s job, not this one;
+   *   - a key typed plain `string` has NO finite name set and keeps its
+   *     refusal. zapo's OTHER computed-key site,
+   *     `src/client/coordinators/WaAppStateMutationCoordinator.ts:205`, is
+   *     exactly that shape and is a must-not-close row: the literal-union
+   *     gate is what separates the two.
+   *
+   * The key must be PURE for the same reason the single-literal fold
+   * requires it: the desugar re-reads it once per candidate name. */
+  function literalUnionComputedKeys(L: Lowerer, name: ts.ComputedPropertyName): string[] | null {
+    const expr = name.expression;
+    if (!pureKeyExpr(L, expr)) return null;
+    const t = L.typeOf(expr);
+    if (!t.isUnionType()) return null;
+    const out: string[] = [];
+    for (const arm of t.getTypes()) {
+      const s = arm.isStringLiteralType() ? arm.value : arm.isNumberLiteralType() ? String(arm.value) : null;
+      if (s === null) return null;
+      if (!out.includes(s)) out.push(s);
+    }
+    return out.length >= 2 ? out : null;
+  }
+
   export function foldedStringKeyOf(L: Lowerer, expr: ts.Expression): string | null {
     if (ts.isParenthesizedExpression(expr)) return foldedStringKeyOf(L, expr.expression);
     if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr)) return expr.text;
@@ -6419,6 +6450,27 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       p.name !== undefined &&
       ts.isComputedPropertyName(p.name) &&
       literalComputedKey(L, p.name) === null;
+    /** A runtime-computed key that this literal can still fold: its checker
+     * type is a union of string literals, EVERY one of which names a field
+     * this target DECLARES. The property becomes one conditional
+     * contributor per name (`key === n ? value : earlier`) — no runtime-
+     * decided name ever reaches a record shape, which is what the refusal
+     * below is actually about. An index-signature or tuple target keeps the
+     * paths it already has. */
+    const unionKeyNames = (p: ts.ObjectLiteralElementLike): string[] | null => {
+      if (shape.indexValue || shape.tuple) return null;
+      if (!ts.isPropertyAssignment(p) || !ts.isComputedPropertyName(p.name)) return null;
+      if (literalComputedKey(L, p.name) !== null) return null;
+      const names = literalUnionComputedKeys(L, p.name);
+      if (names === null) return null;
+      if (!names.every((n) => fieldTypes.has(n))) return null;
+      // LAST property only. The fold hoists the key and the value into the
+      // prelude (once each, key first — JS's own per-property order), so it
+      // must not step over a later contributor's evaluation, and no later
+      // property may overwrite a slot whose entry is now a ternary carrying
+      // this property's whole evaluation. Being last settles both.
+      return p === expr.properties[expr.properties.length - 1] ? names : null;
+    };
     // DECLARED fields ride along too: `{ jid, ...groupAttrs }` typed
     // `{ [k: string]: string; jid: string }` — the attribute-builder
     // shape tsc infers for a literal that spreads a `Record<string, T>`.
@@ -6600,9 +6652,11 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       }
     }
     // Unfoldable computed keys outside the index-signature merge path:
-    // no record shape can hold a runtime-decided name.
+    // no record shape can hold a runtime-decided name — unless the set of
+    // names it can spell is FINITE and every one of them is declared, which
+    // `unionKeyNames` decides and the property loop folds.
     for (const prop of expr.properties) {
-      if (isRuntimeComputedKey(prop)) {
+      if (isRuntimeComputedKey(prop) && unionKeyNames(prop) === null) {
         L.unsupported("SC1090", (prop as ts.PropertyAssignment).name, "computed property keys (compile-time-known keys fold — a pure expression whose checker type is one string or number literal: consts, enum members, quoted keys, templates of those — `{ [MARKER]: v }`; runtime string keys write through an index-signature target; symbol keys stay out)");
       }
     }
@@ -6909,11 +6963,20 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         // arm; absent keeps the earlier contributor's value (both reads
         // are pure, so the reorder into the ternary is unobservable).
         if (srcType?.kind === "union") {
-          const def = L.unions.get(srcType.unionId);
+          // The union id the EMITTED reads will carry. `srcType` is the
+          // checker's view of the source node; where the source was not
+          // hoisted, lowering it can intern a DIFFERENT id for the same
+          // type, and a tag test built from the other one is a validator
+          // ICE ("unionIsTag operand: expected union:u8, got union:u6").
+          // Everything below — arm list, tags, tests — comes from the id
+          // the reads actually have.
+          const probedSrc = srcLowered ?? probeLower(L, srcNode);
+          const srcUnionId = probedSrc?.type.kind === "union" ? probedSrc.type.unionId : srcType.unionId;
+          const def = L.unions.get(srcUnionId);
           const recArms = def?.arms.filter((a) => a.kind === "record") ?? [];
           if (
             !def ||
-            recArms.length !== 1 ||
+            recArms.length < 1 ||
             !def.arms.every((a) => a.kind === "record" || isUnitType(a))
           ) {
             L.unsupported(
@@ -6929,13 +6992,28 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
               "object spread of computed sources (the field copies re-read the source — bind it to a const first)",
             );
           }
-          const recArm = recArms[0]! as IrType & { kind: "record" };
-          const recTag = def.arms.indexOf(recArm);
+          // SEVERAL record arms — `{ ...media, viewOnce: true }` where
+          // `media` is `Image | Video | Ptv | Audio`, zapo's
+          // `src/message/encode/content.ts:183`. Nothing about the desugar
+          // is specific to there being one: a target field takes its value
+          // from whichever arm the source actually holds, so the
+          // `present ? extracted : earlier` ternary becomes a CHAIN, one
+          // link per arm that declares the field, ending in the same
+          // `earlier`. Tags are exclusive, so at most one link fires and an
+          // arm without the field falls through to `earlier` — which is
+          // what JS leaves there, since that arm never carried the key.
+          // With exactly one record arm the chain is one link and the IR is
+          // byte-for-byte what it was before.
+          const armTags = recArms.map((a) => def.arms.indexOf(a));
+          const armShapes = recArms.map((a) => {
+            const s = L.shapes.get((a as IrType & { kind: "record" }).shapeId);
+            if (!s) throw new Error(`lowerer bug: spread of unknown shape ${(a as IrType & { kind: "record" }).shapeId}`);
+            return s;
+          });
           // A checked-dynamic VALUE under the union-mapped checker type
           // (a JS dyn-holding binding): the present/absent desugar tests
           // union tags a dyn box does not carry — fence honestly instead
           // of the validator's ICE.
-          const probedSrc = srcLowered ?? probeLower(L, srcNode);
           if (probedSrc?.type.kind === "dyn") {
             L.unsupported(
               "SC1090",
@@ -6943,15 +7021,15 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
               `object spread of a checked-dynamic '${L.fmt(srcType)}' source (${NARROW_FIRST})`,
             );
           }
-          const srcShape = L.shapes.get(recArm.shapeId);
-          if (!srcShape) throw new Error(`lowerer bug: spread of unknown shape ${recArm.shapeId}`);
-          fenceAccessorSpreadSource(L, prop, srcShape);
-          if (srcShape.indexValue || shape.indexValue) {
-            L.unsupported(
-              "SC1090",
-              prop,
-              "object spread involving index-signature shapes (overflow keys are runtime state — copy the fields you need explicitly)",
-            );
+          for (const srcShape of armShapes) {
+            fenceAccessorSpreadSource(L, prop, srcShape);
+            if (srcShape.indexValue || shape.indexValue) {
+              L.unsupported(
+                "SC1090",
+                prop,
+                "object spread involving index-signature shapes (overflow keys are runtime state — copy the fields you need explicitly)",
+              );
+            }
           }
           const laterNames = new Set<string>();
           for (const later of expr.properties.slice(expr.properties.indexOf(prop) + 1)) {
@@ -6974,28 +7052,82 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
             }
           }
           const srcRef = (): IrExpr => srcLowered ?? L.lowerExpr(srcNode);
-          for (const f of srcShape.fields) {
-            if (laterNames.has(f.name)) continue;
-            const targetType = fieldTypes.get(f.name);
+          // Every name any arm declares, in arm-then-field order.
+          const spreadNames: string[] = [];
+          for (const s of armShapes) {
+            for (const f of s.fields) if (!spreadNames.includes(f.name)) spreadNames.push(f.name);
+          }
+          for (const fieldName of spreadNames) {
+            if (laterNames.has(fieldName)) continue;
+            const targetType = fieldTypes.get(fieldName);
             // No slot on the target shape: the copy DROPS the field
             // (divergence 36's stance, same as the plain-record spread).
             if (!targetType) continue;
-            if (conditionalNames.has(f.name)) {
+            if (conditionalNames.has(fieldName)) {
               L.unsupported(
                 "SC1090",
                 prop,
-                `spread of '${f.name}' over an earlier conditional spread (the desugar keeps one entry per name — restructure so each name has one contributor)`,
+                `spread of '${fieldName}' over an earlier conditional spread (the desugar keeps one entry per name — restructure so each name has one contributor)`,
               );
             }
+            // One link per arm that DECLARES this field, in arm order.
+            const links: { cond: IrExpr; then: IrExpr }[] = [];
+            for (let ai = 0; ai < recArms.length; ai++) {
+              const recArm = recArms[ai]! as IrType & { kind: "record" };
+              const recTag = armTags[ai]!;
+              const f = armShapes[ai]!.fields.find((x) => x.name === fieldName);
+              if (!f) continue;
+              links.push(armLink(recArm, recTag, f, targetType));
+            }
+            if (links.length === 0) continue;
+            const at = fields.findIndex((x) => x.name === fieldName && !x.drop);
+            if (at >= 0 && overwriteObservable()) {
+              if (process.env.SCRIPTC_SPREADORD_WHY) {
+                console.error(`SPREADORD refuse-overwrite-union ${fieldName} @${locOf(prop).start}`);
+              }
+              L.unsupported(
+                "SC1090",
+                prop,
+                `spread of '${fieldName}' over an earlier contributor whose evaluation is observable (the present-test would make it conditional — give '${fieldName}' one contributor, or move the spread first)`,
+              );
+            }
+            const elseVal = at >= 0 ? fields[at]!.value : L.wrappedUndefined(targetType, locOf(prop));
+            if (!elseVal) {
+              L.unsupported(
+                "SC1090",
+                prop,
+                `object spread of '${L.fmt(srcType)}' sources where '${fieldName}' has no earlier contributor (the absent arm leaves the required field unset — spread defaults first: { ...defaults, ...overrides })`,
+              );
+            }
+            // A chain of length one is exactly the single-arm ternary this
+            // path has always built; the extra links only add tag tests
+            // that are false whenever an earlier one was true.
+            const merged = links.reduceRight<IrExpr>(
+              (acc, l): IrExpr => ({ kind: "ternary", cond: l.cond, then: l.then, else_: acc, type: targetType, loc: locOf(prop) }),
+              elseVal,
+            );
+            if (at >= 0) fields[at] = { name: fieldName, value: merged };
+            else fields.push({ name: fieldName, value: merged });
+          }
+          continue;
+
+          /** The `tag matches (and the optional field is present) ? the
+           * arm's field, lifted into the slot` link for ONE record arm. */
+          function armLink(
+            recArm: IrType & { kind: "record" },
+            recTag: number,
+            f: { name: string; type: IrType },
+            targetType: IrType,
+          ): { cond: IrExpr; then: IrExpr } {
             const fRead = (): IrExpr => ({
               kind: "recordGet",
-              obj: { kind: "unionNarrow", unionId: srcType.unionId, tag: recTag, value: srcRef(), type: recArm, loc: locOf(prop) },
+              obj: { kind: "unionNarrow", unionId: srcUnionId, tag: recTag, value: srcRef(), type: recArm, loc: locOf(prop) },
               shapeId: recArm.shapeId,
               field: f.name,
               type: f.type,
               loc: locOf(prop),
             });
-            let cond: IrExpr = { kind: "unionIsTag", unionId: srcType.unionId, tag: recTag, negated: false, value: srcRef(), type: BOOL, loc: locOf(prop) };
+            let cond: IrExpr = { kind: "unionIsTag", unionId: srcUnionId, tag: recTag, negated: false, value: srcRef(), type: BOOL, loc: locOf(prop) };
             let thenVal: IrExpr;
             if (typeEquals(f.type, targetType)) {
               thenVal = fRead();
@@ -7043,30 +7175,8 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
               }
               thenVal = L.applyWidthLift(lift, fRead(), targetType, locOf(prop));
             }
-            const at = fields.findIndex((x) => x.name === f.name && !x.drop);
-            if (at >= 0 && overwriteObservable()) {
-              if (process.env.SCRIPTC_SPREADORD_WHY) {
-                console.error(`SPREADORD refuse-overwrite-union ${f.name} @${locOf(prop).start}`);
-              }
-              L.unsupported(
-                "SC1090",
-                prop,
-                `spread of '${f.name}' over an earlier contributor whose evaluation is observable (the present-test would make it conditional — give '${f.name}' one contributor, or move the spread first)`,
-              );
-            }
-            const elseVal = at >= 0 ? fields[at]!.value : L.wrappedUndefined(targetType, locOf(prop));
-            if (!elseVal) {
-              L.unsupported(
-                "SC1090",
-                prop,
-                `object spread of '${L.fmt(srcType)}' sources where '${f.name}' has no earlier contributor (the absent arm leaves the required field unset — spread defaults first: { ...defaults, ...overrides })`,
-              );
-            }
-            const merged: IrExpr = { kind: "ternary", cond, then: thenVal, else_: elseVal, type: targetType, loc: locOf(prop) };
-            if (at >= 0) fields[at] = { name: f.name, value: merged };
-            else fields.push({ name: f.name, value: merged });
+            return { cond, then: thenVal };
           }
-          continue;
         }
         if (srcType?.kind !== "record") {
           L.unsupported(
@@ -7283,6 +7393,96 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         const closure = L.coerceInto(prop, L.lowerLambda(prop), slotT);
         if (!typeEquals(closure.type, slotT)) L.badType(prop, L.typeOf(prop));
         fields.push({ name: slotName, value: closure, expl: true });
+        continue;
+      }
+      // A FINITE-NAME computed key — `{ ...m, [field]: v }` where `field`'s
+      // checker type is a union of string literals and every one of them
+      // names a declared field (zapo's `content.ts:183`). JS writes exactly
+      // ONE of those slots, decided at run time, so the property folds into
+      // one contributor per candidate name: `key === n ? value : earlier`.
+      // Nothing here is a trap. The key and the value each evaluate exactly
+      // once, hoisted in that order (JS's own per-property order) into the
+      // prelude, which is unobservable because `unionKeyNames` only admits
+      // the LAST property of a literal whose earlier explicit contributors
+      // are all droppable-static. The final else-arm keeps the earlier
+      // contributor's value, which is the value JS leaves in a slot the key
+      // did not name.
+      const ukNames = ts.isPropertyAssignment(prop) ? unionKeyNames(prop) : null;
+      if (ukNames !== null && ts.isPropertyAssignment(prop) && ts.isComputedPropertyName(prop.name)) {
+        if (overwriteObservable()) {
+          // An earlier EXPLICIT contributor whose evaluation is observable
+          // would be stepped over by the prelude hoist.
+          L.unsupported(
+            "SC1090",
+            prop.name,
+            "a finite-name computed key after a contributor whose evaluation is observable (the key and value hoist ahead of it — bind them to consts first)",
+          );
+        }
+        const kNode = prop.name.expression;
+        const keyRaw = L.lowerExpr(kNode);
+        if (keyRaw.type.kind !== "string") {
+          L.unsupported(
+            "SC1090",
+            prop.name,
+            `'${L.fmt(keyRaw.type)}'-typed computed property keys (a finite-name key folds only where the key is a string)`,
+          );
+        }
+        const kLocal = L.declareHiddenLocal("%ukey", keyRaw.type);
+        prelude.push({ kind: "varDecl", localId: kLocal.id, init: keyRaw, loc: locOf(kNode) });
+        const keyRef = (): IrExpr => ({ kind: "varRef", localId: kLocal.id, type: keyRaw.type, loc: locOf(kNode) });
+        const valRaw = L.lowerExpr(prop.initializer);
+        const vLocal = L.declareHiddenLocal("%uval", valRaw.type);
+        prelude.push({ kind: "varDecl", localId: vLocal.id, init: valRaw, loc: locOf(prop.initializer) });
+        const valRef = (): IrExpr => ({
+          kind: "varRef",
+          localId: vLocal.id,
+          type: valRaw.type,
+          loc: locOf(prop.initializer),
+        });
+        for (const cand of ukNames) {
+          const fieldType = fieldTypes.get(cand)!; // gated by unionKeyNames
+          if (conditionalNames.has(cand)) {
+            L.unsupported(
+              "SC1090",
+              prop,
+              `'${cand}' after a conditional spread of the same name (the desugar keeps one entry per name — restructure so each name has one contributor)`,
+            );
+          }
+          const coerced = L.coerceInto(prop.initializer, valRef(), fieldType);
+          if (!typeEquals(coerced.type, fieldType)) {
+            L.unsupported(
+              "SC1090",
+              prop,
+              `a finite-name computed key whose value does not fit every name it can spell ('${cand}' holds '${L.fmt(fieldType)}', the value is '${L.fmt(valRaw.type)}')`,
+            );
+          }
+          const at = fields.findIndex((x) => x.name === cand && !x.drop);
+          const earlier = at >= 0 ? fields[at]!.value : L.wrappedUndefined(fieldType, locOf(prop));
+          if (!earlier) {
+            L.unsupported(
+              "SC1090",
+              prop,
+              `a finite-name computed key over required field '${cand}' (the names the key does NOT spell keep their earlier value, and this one has none — spread a base first)`,
+            );
+          }
+          const value: IrExpr = {
+            kind: "ternary",
+            cond: {
+              kind: "strEq",
+              negated: false,
+              left: keyRef(),
+              right: { kind: "strLit", value: cand, type: keyRaw.type, loc: locOf(kNode) },
+              type: BOOL,
+              loc: locOf(prop),
+            },
+            then: coerced,
+            else_: earlier,
+            type: fieldType,
+            loc: locOf(prop),
+          };
+          if (at >= 0) fields[at] = { name: cand, value, expl: true };
+          else fields.push({ name: cand, value, expl: true });
+        }
         continue;
       }
       const name = propNameText(L, prop.name!); // key-form-checked above
