@@ -8041,6 +8041,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4431-computed-key-finite-name.ts": {
+   "order": [
+    "<repo>/tests/corpus/4431-computed-key-finite-name.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4432-spread-union-several-record-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/4432-spread-union-several-record-arms.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/4441-armed-parameter-takes-a-widened-keyed-read-reference.ts": {
    "order": [
     "<repo>/tests/corpus/4441-armed-parameter-takes-a-widened-keyed-read-reference.ts"
