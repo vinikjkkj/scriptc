@@ -2134,12 +2134,24 @@ function validateFunction(
           break;
         }
         const rest = def.arms.filter((a) => !isUnitType(a));
-        if (rest.length !== 1 || rest.length === def.arms.length) {
-          err("optChain receiver must have unit arms and exactly one non-unit arm", e.loc);
+        if (rest.length === 0 || rest.length === def.arms.length) {
+          err("optChain receiver must have unit arms and at least one non-unit arm", e.loc);
+          break;
+        }
+        // ONE non-unit arm: the bind is that arm's peeked payload. MORE
+        // than one: nothing survives the guard but a SUB-UNION, so the
+        // bind is the RECEIVER BOX itself, tag intact, and the body owns
+        // the narrowing (lowerOptionalChain's subUnionRecv). The arms
+        // decide which, on all three of the frontend, the C emitter and
+        // the LLVM emitter, so the three cannot disagree — and the
+        // multi-arm form is admitted only over RECORD arms, the shape the
+        // body's per-arm field read serves.
+        if (rest.length > 1 && !rest.every((a) => a.kind === "record")) {
+          err("multi-arm optChain receiver must have record non-unit arms", e.loc);
           break;
         }
         if (activeChains.has(e.id)) err(`optChain id "${e.id}" shadows an active chain`, e.loc);
-        activeChains.set(e.id, rest[0]!);
+        activeChains.set(e.id, rest.length === 1 ? rest[0]! : e.receiver.type);
         checkExpr(e.body);
         activeChains.delete(e.id);
         if (e.type.kind === "void") {
