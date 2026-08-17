@@ -11973,6 +11973,15 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     // narrowed, and the conversion is the same one, so refusing the second
     // spelling only refuses the rejection half of the same idiom.
     if (narrowed?.kind === "dyn" || (L.typeOf(node).flags & ts.TypeFlags.Any) !== 0) {
+      // Where lowerTry lifted this binding to a DYN TWIN (its block hands
+      // the binding to a nested function), the twin IS this conversion,
+      // already done once at catch entry — read it instead of converting
+      // again. Not an optimization: converting per read would give the
+      // closure's `e` and this one two distinct dyn objects where JS has
+      // one value, and `cb(e)` compared against the `e` the same catch
+      // passed elsewhere would answer false.
+      const twin = L.caughtDynTwins.get(local);
+      if (twin) return { kind: "varRef", localId: twin.id, type: DYN, loc };
       return { kind: "caughtToDyn", value: ref, type: DYN, loc };
     }
     L.unsupported("SC1063", node);
