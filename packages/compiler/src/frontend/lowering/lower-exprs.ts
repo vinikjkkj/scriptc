@@ -2531,6 +2531,27 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             loc,
           };
         }
+        // The OPTIONAL field the adopted class does not declare. The
+        // checker types the binding as the record, so `x.label` is legal
+        // TypeScript and reads `undefined` at runtime -- there is no slot,
+        // and there never can be one, because the instance is a Point.
+        // objToRecordPlan already draws exactly this rule for the
+        // PROJECTION route ("if the target field is a union with an
+        // undefinedT arm, plan it absent"); adoption bypasses that route,
+        // so the same shape fenced here instead. Answer the interned
+        // undefined arm, which is what the projection would have stored.
+        // Guarded the same way as the field read above: an accessor or a
+        // method of that name is the class's own answer, not an absence.
+        if (
+          adoptedInfo !== undefined &&
+          adoptedFieldT === undefined &&
+          L.findMethodOn(adoptedInfo, `get:${expr.name.text}`) === null &&
+          L.findMethodOn(adoptedInfo, expr.name.text) === null
+        ) {
+          const readT = L.mapTypeOf(L.typeOf(expr));
+          const absent = readT === null ? null : L.wrappedUndefined(readT, loc);
+          if (absent !== null) return L.maybeNarrow(absent, expr);
+        }
       }
       if (process.env["SCRIPTC_READ_WHY"] !== undefined) {
         console.error(
