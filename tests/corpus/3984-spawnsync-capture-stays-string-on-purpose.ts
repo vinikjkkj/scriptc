@@ -37,6 +37,34 @@
 // and a flat trap census scores it as an IMPROVEMENT, because a program
 // that never compiles emits no traps at all. Do not take that trade.
 //
+// RE-MEASURED (block/spawn). The mechanism above is exactly right and the
+// SC9001 text is verbatim, but the PRICE was understated in two ways, so
+// the counts are corrected here rather than left to be rediscovered:
+//
+//   * The refusal counts are larger: 1360 answers SC9001 x11, not x2
+//     (every capture read in the file, stdout and stderr both), 1482 x1,
+//     1537 x2.
+//   * A FOURTH file breaks, and it is one that passes today on BOTH
+//     platforms: 1655-spawnsync-neutral, SC9001 x4. That is the
+//     platform-neutral spawn fixture -- the one written precisely because
+//     "the older spawn fixtures reach for /bin/sh, which no Windows box
+//     has". Widening the type takes out the replacement along with the
+//     three it was meant to rescue.
+//
+// AND THE NEXT WALL, measured rather than predicted. Doing the first TWO
+// items of the list below together -- the lowering AND the IR verifier's
+// signature (result: VOID plus the arms check, exactly how spawnRes.status
+// and spawnRes.signal already do it) -- gets 1537 to COMPILE. The binary
+// then dies at the first capture read with an ACCESS VIOLATION, exit
+// 0xC0000005, after printing only the two os.release() lines. So the
+// honest price of a partial is not a compile refusal at all: it is a
+// SEGFAULT, which is worse than both the wrong answer and the fence. The
+// third item is not optional plumbing to be done later -- the emitters
+// build a union out of a libCall whose C function still hands back a plain
+// ScrStr *, and nothing in between checks.
+//
+// The fourth item stayed untested: nothing reached it.
+//
 // WHAT A REAL FIX NEEDS, in the order the compile refusals name it:
 // the IR verifier's signature for spawnRes.stdout/stderr; the C emitter
 // and the LLVM emitter's union construction for those libCalls; a runtime
