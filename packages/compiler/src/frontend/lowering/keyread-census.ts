@@ -267,6 +267,59 @@ export interface KeyReadRowInput {
   abortCapable: boolean;
 }
 
+/** THE SECOND PASS, and the reason there is one.
+ *
+ * The row above is written where the read is LOWERED — before any
+ * destination rung has had a chance to re-read it at an undefined-armed
+ * or dyn width. So its `abortCapable` is honestly "bare AT THE READ", and
+ * it over-counts: `recordField`, `typeof`, `??` and the declaration slots
+ * all arm or widen the very same node a moment later.
+ *
+ * This pass walks the FINAL IR and records, per (file, offset), the width
+ * the `recordKeyGet` actually kept. Joining the two files is what makes
+ * the study's abortable count agree with the emitted TU's own call-site
+ * count instead of merely bounding it. Measured after the fact rather
+ * than predicted, because the first version of this instrument reported
+ * 28 abortable reads for a program whose TU contained 15. */
+export function emitFinalKeyReadWidths(mod: unknown, path: string): void {
+  const m = mod as {
+    unions?: { arms: { kind: string }[] }[];
+  } & Record<string, unknown>;
+  const unionArmed = new Map<string, boolean>();
+  const defs = (m.unions ?? []) as { arms?: { kind: string }[] }[];
+  defs.forEach((d, i) => {
+    unionArmed.set("u" + String(i), (d.arms ?? []).some((a) => a.kind === "undefinedT"));
+  });
+  const out: string[] = [];
+  const seen = new Set<unknown>();
+  const walk = (v: unknown): void => {
+    if (v === null || typeof v !== "object") return;
+    if (seen.has(v)) return;
+    seen.add(v);
+    if (Array.isArray(v)) { for (const x of v) walk(x); return; }
+    const o = v as Record<string, unknown>;
+    if (o["kind"] === "recordKeyGet") {
+      const t = o["type"] as { kind?: string; unionId?: string } | undefined;
+      const loc = o["loc"] as { file?: string; start?: number } | undefined;
+      const armed = t?.kind === "union" && t.unionId !== undefined
+        ? (unionArmed.get(t.unionId) ?? false)
+        : t?.kind === "dyn";
+      const key = o["key"] as { value?: string } | undefined;
+      out.push([
+        loc?.file ?? "?",
+        String(loc?.start ?? -1),
+        key?.value ?? "*computed*",
+        String(o["shapeId"] ?? "?"),
+        t?.kind === "union" ? "union:" + String(t.unionId) : String(t?.kind ?? "?"),
+        armed ? "FINAL_ARMED" : "FINAL_BARE",
+      ].join("\t"));
+    }
+    for (const k of Object.keys(o)) walk(o[k]);
+  };
+  walk(m);
+  appendFileSync(path, out.join("\n") + "\n");
+}
+
 export function recordKeyReadRow(checker: CheckerLike, node: ts.Node, row: KeyReadRowInput): void {
   if (sinkPath() === null) return;
   let dest: string;

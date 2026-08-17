@@ -14872,6 +14872,22 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           `reading '${target.field}' through a receiver whose value shape differs from its asserted type (a '… as T' cast retypes but does not reshape the value — read the property on each arm, or index a single concrete record)`,
         );
       }
+      // SCRIPTC_KEYREAD_CENSUS, the DOT twin. `node.attrs.abprops` is this
+      // path, not the bracket one, and it is where zapo's abortable reads
+      // overwhelmingly live — an instrument hooked only at the bracket
+      // read would have reported a handful of sites and missed the class.
+      if (process.env["SCRIPTC_KEYREAD_CENSUS"]) {
+        const armedRead = t.kind === "union" && L.armTag(t.unionId, UNDEFINED_T) >= 0;
+        recordKeyReadRow(L.checker as never, blame, {
+          file: loc.file,
+          start: loc.start,
+          key: target.field,
+          shapeId: String(target.shapeId),
+          valueType: L.fmt(t),
+          readArmed: armedRead,
+          abortCapable: !armedRead,
+        });
+      }
       return {
         kind: "recordKeyGet",
         obj: target.obj,

@@ -2,7 +2,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { CcCompileError, compileC, compileLibArchive, resolveCc, targetPlatform } from "./backend/cc.js";
 import { emitModule } from "./backend/emission/emitter.js";
-import { flushKeyReadCensus, keyReadCensusOnly } from "./frontend/lowering/keyread-census.js";
+import { emitFinalKeyReadWidths, flushKeyReadCensus, keyReadCensusOnly } from "./frontend/lowering/keyread-census.js";
 import { emitLlvmModule, LlvmUnsupportedError } from "./backend/llvm/emitter.js";
 import { checkerPanicDiag, ffiNativeBuildDiag, libAsyncExportDiag, libAsyncSurfaceDiag, libExportUnresolvedDiag, libGenericExportDiag, libIntBoundaryDiag, libNpmIneligibleDiag, libSidecarDiag, libUnmappableSignatureDiag, iceDiag, isCheckerPanic, LIB_INBOUND_BYTES_TRAP_CODE, LIB_RUNTIME_TRAP_CODES, type ScrDiagnostic } from "./diagnostics/diagnostic.js";
 import { checkLibraryIntegerSlots, classSeed, hasIntSlots, numberCarrierKind, type FnIntSlots, type IntSlotConfig } from "./library/int-infer.js";
@@ -696,6 +696,9 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
   // instrument from ever racing a build: it writes its rows and reports a
   // failed compile with no artifact, so nothing downstream can mistake a
   // census run for a build.
+  if (process.env["SCRIPTC_KEYREAD_CENSUS"]) {
+    emitFinalKeyReadWidths(lowered.module, process.env["SCRIPTC_KEYREAD_CENSUS"] + ".final.tsv");
+  }
   if (keyReadCensusOnly()) {
     flushKeyReadCensus();
     return {
