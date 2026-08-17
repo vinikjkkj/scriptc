@@ -3575,6 +3575,18 @@ static const char isl_modules_bootstrap[] =
      * Entry modules loaded from the compiled (ESM-like) world have no
      * parent, exactly like Node's ESM→CJS boundary. */
     "  const parents = Object.create(null);\n"
+    /* Node prints paths with the OS separator; the island's module KEYS
+     * are slash-normalized on win32 because they reach the emitted TU and
+     * must stay byte-deterministic. So the keys stay "/" everywhere —
+     * cache, parents, resolution — and only the USER-FACING copy (the
+     * Require stack text and err.requireStack, both native in Node) is
+     * rendered through here. Mirrors nativePath() in the frontend's
+     * shared.ts, which does the same job for build-time messages. */
+#ifdef _WIN32
+    "  const nativePath = (p) => p.replace(/\\//g, '\\\\');\n"
+#else
+    "  const nativePath = (p) => p;\n"
+#endif
     "  const requireStackOf = (from) => {\n"
     "    const stack = [];\n"
     "    for (let m = from; m !== undefined; m = parents[m]) stack.push(m);\n"
@@ -3595,7 +3607,7 @@ static const char isl_modules_bootstrap[] =
     "    if (to === undefined) {\n"
     "      const name = spec.startsWith('node:') ? spec.slice(5) : spec;\n"
     "      if (builtins[name]) return 'node:' + name;\n"
-    "      const stack = requireStackOf(from);\n"
+    "      const stack = requireStackOf(from).map(nativePath);\n"
     "      const err = new Error(\"Cannot find module '\" + spec + \"'\" +\n"
     "        (stack.length ? '\\nRequire stack:\\n- ' + stack.join('\\n- ') : ''));\n"
     "      err.code = 'MODULE_NOT_FOUND';\n"

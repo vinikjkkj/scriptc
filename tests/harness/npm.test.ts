@@ -132,15 +132,19 @@ describe(`typed-callback boundary (scriptc-only${sanitize ? ", sanitized" : ""})
   test("require of a .node native addon throws ERR_DLOPEN_FAILED at the call", async () => {
     const binary = await build(join(fixturesRoot, "npm/divergent/nativeaddon.ts"));
     const res = await runBinary(binary, []);
-    // The message quotes the compiler's MODULE KEY, which is a resolved
-    // path normalized to forward slashes on every host — the keys reach
-    // the emitted TU, so they cannot carry a platform separator and stay
-    // byte-deterministic. realpathSync/join hand back the host's
-    // separator, so on Windows the reconstruction must be normalized the
-    // same way or this asserts `\` against the compiler's `/`.
+    // The message names a FILE ON DISK, so it is rendered the way Node
+    // renders paths: with the host separator. The compiler's module KEY
+    // stays slash-normalized on every host (it reaches the emitted TU and
+    // must stay byte-deterministic) — nativePath() in shared.ts converts
+    // at the message boundary only. So realpathSync/join, which already
+    // hand back the host separator, ARE the right reconstruction here and
+    // must NOT be normalized: an earlier revision normalized this
+    // expectation to "/" to close the row without a compiler change, and
+    // baked in behaviour the two Node-differential rows in this file
+    // (dynamic-import-local, lazy-traps) proved wrong.
     const addonKey = realpathSync(
       join(fixturesRoot, "npm/node_modules/nativezoo/addon.node"),
-    ).replaceAll("\\", "/");
+    );
     expect(res.stdout.toString("utf8")).toBe(
       "caught:true:ERR_DLOPEN_FAILED\n" +
         "caught:true:ERR_DLOPEN_FAILED\n" +
