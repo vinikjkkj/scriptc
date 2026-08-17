@@ -174,13 +174,14 @@ console.log(/${"(a)".repeat(300)}/.test("a"));
     // size-class.ts — island.test.ts weighs the same classes.
     const plainSize = statSync(plainBuild.binaryPath).size;
     const regexSize = statSync(regexBuild.binaryPath).size;
-    expect(plainSize).toBeLessThan(STATIC_CLASS_MAX);
-    expect(regexSize).toBeLessThan(REGEX_CLASS_MAX);
-    // The loud half (see island.test.ts). Both figures are recorded and
-    // checked separately BECAUSE the two classes do not move together —
-    // scr_url.c's gate moved this one 512 bytes further than the static
-    // one, and an earlier change moved it twice as far.
+    // Recorded checks FIRST, for the reason island.test.ts spells out: the
+    // first failed expect is the only message a reader gets. Both figures
+    // are recorded and checked separately BECAUSE the two classes do not
+    // move together — scr_url.c's gate moved this one 512 bytes further
+    // than the static one, and an earlier change moved it twice as far.
     expect(recordedSizeComplaint("the regex-free program", plainSize, STATIC_CLASS_RECORDED)).toBeNull();
     expect(recordedSizeComplaint("the regex program", regexSize, REGEX_CLASS_RECORDED)).toBeNull();
+    expect(plainSize).toBeLessThan(STATIC_CLASS_MAX);
+    expect(regexSize).toBeLessThan(REGEX_CLASS_MAX);
   });
 });
