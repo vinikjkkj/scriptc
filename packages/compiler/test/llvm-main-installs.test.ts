@@ -75,6 +75,22 @@ function predicatesOf(gate: string, locals: Map<string, string>): Set<string> {
   ]);
 }
 
+/* Installs gated on PROGRAM CONTENT rather than on a module predicate.
+ * These are not optional-unit hooks: they are debug instrumentation that
+ * only exists under an #ifdef, so "does the program contain any closure
+ * site" is the right gate and there is no moduleX predicate to name. They
+ * are excluded from the table by SYMBOL, never by relaxing the assertion,
+ * so an unrecognized predicate-less gate still fails loudly — that
+ * assertion is what catches a real hook whose gate lost its predicate.
+ *
+ * scr_closure_sites_install: the RC-audit per-site table (SCRIPTC_RC_SITES=1,
+ * inside #ifdef SCR_RC_AUDIT), gated on `rcSiteRows.length > 0`. C-only
+ * today; the LLVM backend builds no closure-site table at all. That
+ * asymmetry is real but it is not the failure shape this file exists to
+ * reject — a missing AUDIT table costs a diagnostic, not a poll — and it
+ * is pinned explicitly in its own test below so it cannot drift unnoticed. */
+const AUDIT_ONLY_INSTALLS = new Set(["scr_closure_sites_install"]);
+
 /** install symbol → the module predicates its gate names. */
 function installTable(src: string): Map<string, Set<string>> {
   const locals = localGates(src);
@@ -83,7 +99,9 @@ function installTable(src: string): Map<string, Set<string>> {
   // emitter's gates contain a `?` of their own, which the "no predicate"
   // assertion below would catch if that ever changed.
   for (const row of src.matchAll(/\.\.\.\(([^?]*?)\?\s*\[([\s\S]*?)\]\s*:\s*\[\]\)/g)) {
-    const installs = [...row[2]!.matchAll(/scr_[a-z0-9_]*_install/g)].map((m) => m[0]!);
+    const installs = [...row[2]!.matchAll(/scr_[a-z0-9_]*_install/g)]
+      .map((m) => m[0]!)
+      .filter((s) => !AUDIT_ONLY_INSTALLS.has(s));
     if (installs.length === 0) continue;
     const preds = predicatesOf(row[1]!, locals);
     expect(preds.size, `gate with no module predicate: ${row[1]!.trim()}`).toBeGreaterThan(0);
@@ -145,6 +163,25 @@ describe("the two mains install the same hooks on the same predicates", () => {
         "moduleUsesWsGlobal",
       ]);
     }
+  });
+
+  /* The one install the table above deliberately does not compare, pinned
+   * by hand so the exclusion can never quietly become a blind spot. If the
+   * LLVM tier grows a closure-site table this fails, and the right response
+   * is to delete the exclusion and let the table compare the row properly. */
+  test("the RC-audit closure-site table is C-only, and nothing else is excluded", async () => {
+    const c = await readFile(cEmitter, "utf8");
+    const ll = await readFile(llvmEmitter, "utf8");
+    expect(c).toContain("scr_closure_sites_install(sc_clo_site_tbl");
+    expect(c).toContain("ScrClosureSite sc_clo_site_tbl[]");
+    // Not merely absent from main: the LLVM tier builds no such table.
+    expect(ll).not.toContain("scr_closure_sites_install");
+    expect(ll).not.toContain("ScrClosureSite");
+    // The exclusion list stays a list of ONE until someone justifies more:
+    // every excluded symbol must be a real install in the C main, so a
+    // typo'd or stale entry cannot silently widen the hole.
+    expect([...AUDIT_ONLY_INSTALLS]).toEqual(["scr_closure_sites_install"]);
+    for (const sym of AUDIT_ONLY_INSTALLS) expect(c).toContain(sym);
   });
 
   test("the npm-table registration, which is not _install-shaped, is on BOTH sides", async () => {
