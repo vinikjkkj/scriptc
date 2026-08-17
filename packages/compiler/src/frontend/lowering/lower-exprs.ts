@@ -30,7 +30,7 @@ import { lowerYield } from "./lower-generators.js";
 import { lowerStreamProperty, lowerStreamStateProperty, streamInstanceOfExpr, streamSidesOf } from "./lower-stream.js";
 import { lowerWebSocketGlobal } from "./lower-ws.js";
 import { emitterRooted } from "./lower-emitter.js";
-import { EMITTER_API_MEMBERS } from "./lower-classes.js";
+import { EMITTER_API_MEMBERS, type ClassInfo } from "./lower-classes.js";
 
 /** SCRIPTC_DTSTWIN_WHY probe: how many reads have taken the declaration-
  * module fence instead of the silent erasure stance. Read in the SAME run
@@ -12546,6 +12546,144 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * the fence for the whole test, as do dyn/unknown receivers. Keys are
    * literal strings — a computed key over a shape would need the runtime
    * key table. */
+/** `Object.getOwnPropertyNames(Object.prototype)` — measured on Node
+   * v25.9.0, not recalled. `in` walks the PROTOTYPE CHAIN, so every
+   * object-rooted value answers true for all twelve, and the cheap
+   * "a compiled class has a closed member set" closure is measurably
+   * WRONG on `toString`, `hasOwnProperty` and `constructor` — at
+   * zapo's `install.ts:108`, the one line written to catch exactly the
+   * collision a plugin naming itself `toString` would cause. */
+  const OBJECT_PROTOTYPE_NAMES: ReadonlySet<string> = new Set([
+    "constructor", "__defineGetter__", "__defineSetter__", "hasOwnProperty",
+    "__lookupGetter__", "__lookupSetter__", "isPrototypeOf",
+    "propertyIsEnumerable", "toString", "valueOf", "__proto__", "toLocaleString",
+  ]);
+
+/** EventEmitter's INSTANCE STATE, which `in` sees and the API-member list
+   * does not. Measured on Node v25.9.0, not recalled: the constructor
+   * writes all three as OWN properties
+   * (`Object.getOwnPropertyNames(new EventEmitter())` is exactly
+   * `["_events","_eventsCount","_maxListeners"]`) and
+   * `EventEmitter.prototype` carries them as defaults too, so EVERY
+   * emitter-derived instance answers `true` for all three whether or not
+   * a listener was ever added.
+   *
+   * They matter at the site this rule serves. `install.ts:108` asks
+   * whether a plugin's chosen `exposeAs` collides with a client member,
+   * and a plugin naming itself `_events` collides in Node. Leaving them
+   * out would have been the same silent PASS as leaving `toString` out —
+   * the emitter flavour of the same bug.
+   *
+   * EMITTER_API_MEMBERS is otherwise exactly right:
+   * `Object.getOwnPropertyNames(EventEmitter.prototype)` minus
+   * `constructor` and these three is its fifteen names, name for name. */
+  const EMITTER_INSTANCE_STATE_NAMES: readonly string[] = ["_events", "_eventsCount", "_maxListeners"];
+
+/** Every name a compiled class INSTANCE answers `in` for — its declared
+   * instance members (own and inherited, fields, methods and accessor
+   * slots), the EventEmitter API when the chain roots at the runtime
+   * emitter, and Object.prototype's twelve — or null when the set is NOT
+   * closed and the honest answer is the fence.
+   *
+   * What makes the set closed is not "a class is a class": it is that
+   * every construct which could ADD a member to an instance at run time
+   * is itself refused. tsc rejects `o[k] = v` on a class without an
+   * index signature, and the one construct that bypasses tsc —
+   * `Object.defineProperty(o, k, …)` with a string key — has no
+   * lowering (zapo's own `install.ts:114`, six lines below the `in`
+   * this closure serves, is exactly that refusal). Only the unique-
+   * SYMBOL data-descriptor form is modeled, and its slot is `%`-named,
+   * so no string key can ever reach it.
+   *
+   * Not closed, and why: a chain rooted in a RUNTIME builtin other than
+   * the emitter (%Error, %DOMException, the stream classes) reaches a
+   * prototype whose members the object model does not carry — `stack`
+   * on an Error is the standing example, and answering `false` for it
+   * would be a lie rather than a fence. Statics are excluded: Node
+   * answers `false` for them on an instance. */
+  function classInMemberNames(L: Lowerer, className: string): Set<string> | null {
+    const leaf = L.classes.get(className);
+    if (!leaf) return null;
+    // The receiver's own class must be a class the PROGRAM declares. A
+    // runtime builtin as the LEAF (a bare `new EventEmitter()`) is a
+    // different question from the same builtin as a BASE, and only the
+    // base form is answered below.
+    if (leaf.def.runtime) return null;
+    // The receiver's STATIC class must be its RUNTIME class. `in` reads the
+    // real object's chain, so a `Base`-typed binding holding a `Derived`
+    // answers `true` for Derived's members and this set would say false —
+    // a silent wrong answer, not a fence. A class with no subclass in the
+    // compiled hierarchy cannot be holding one: the hierarchy is fixed at
+    // compile time (the same fact class decorators lean on), so a LEAF is
+    // exact. Anything with a subclass keeps the fence.
+    if (leaf.subclasses.length > 0) return null;
+    const names = new Set<string>();
+    // Instance FIELDS — leaf.fields already carries the inherited ones.
+    // `%get:x` / `%set:x` are accessor slots (own properties to `in`;
+    // Node answers true without invoking the getter); every other
+    // `%`-prefixed name is compiler-internal storage (a unique-symbol
+    // slot, an error's `%code`) that no STRING key can name.
+    for (const name of leaf.fields.keys()) {
+      if (name.startsWith("%get:") || name.startsWith("%set:")) {
+        const member = name.slice(5);
+        if (!member.startsWith("#")) names.add(member);
+        continue;
+      }
+      if (name.startsWith("%") || name.startsWith("#")) continue;
+      names.add(name);
+    }
+    // METHODS are own-per-class, so the base chain is walked.
+    for (let info: ClassInfo | null = leaf; info; info = info.base) {
+      if (info.builtinEmitter) {
+        for (const m of EMITTER_API_MEMBERS) names.add(m);
+        for (const m of EMITTER_INSTANCE_STATE_NAMES) names.add(m);
+        continue;
+      }
+      if (info.def.runtime) return null;
+      for (const name of info.methods.keys()) {
+        const member = name.startsWith("get:") || name.startsWith("set:") ? name.slice(4) : name;
+        if (member.startsWith("#") || member.startsWith("%")) continue;
+        names.add(member);
+      }
+    }
+    for (const n of OBJECT_PROTOTYPE_NAMES) names.add(n);
+    return names;
+  }
+
+/** The interned per-class key-presence helper the RUNTIME-key `in` calls:
+   * `%cls.haskey.<n>(k)` — a string-equality chain over the closed member
+   * set. The answer depends on the KEY alone (unlike a record's, no
+   * optional slot decides per value), so the receiver is not a parameter;
+   * the call site still evaluates it, because JS does. */
+  function classHasKeyHelper(L: Lowerer, className: string, members: ReadonlySet<string>, loc: SrcLoc): string {
+    const hkey = `clshaskey:${className}`;
+    const existing = L.widthHelpers.get(hkey);
+    if (existing) return existing;
+    const helper = `%cls.haskey.${L.widthHelpers.size}`;
+    L.widthHelpers.set(hkey, helper);
+    const k: IrExpr = { kind: "varRef", localId: "k.0", type: STRING, loc };
+    const body: IrStmt[] = [];
+    for (const name of members) {
+      body.push({
+        kind: "if",
+        cond: { kind: "strEq", negated: false, left: k, right: { kind: "strLit", value: name, type: STRING, loc }, type: BOOL, loc },
+        then: [{ kind: "return", value: { kind: "boolLit", value: true, type: BOOL, loc }, loc }],
+        else_: null,
+        loc,
+      });
+    }
+    body.push({ kind: "return", value: { kind: "boolLit", value: false, type: BOOL, loc }, loc });
+    L.liftedFns.push({
+      name: helper,
+      params: [{ localId: "k.0", name: "k", type: STRING }],
+      returnType: BOOL,
+      locals: [{ id: "k.0", name: "k", type: STRING, mutable: true }],
+      body,
+      loc,
+    });
+    return helper;
+  }
+
   export function lowerInExpression(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr {
     // `#name in obj` — the ergonomic brand check (ES2022) — resolves
     // before any string-key machinery: the left operand is a private
@@ -12603,6 +12741,47 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
               return { kind: "libCall", fn: "dyn.hasKey", args: [recvD, k], type: BOOL, loc };
             }
           }
+        }
+      }
+      // A runtime key over a compiled CLASS INSTANCE (`exposeAs in
+      // client` — zapo's reserved-member collision check): the closed
+      // member set answers per NAME, so the test is a string-equality
+      // chain over the key. Object.prototype's twelve are IN that set,
+      // which is the whole difference between this and the cheap
+      // closure that would have let a plugin named `toString` through
+      // the very guard written to stop it.
+      {
+        const probed = probeLower(L, expr.right);
+        if (probed?.type.kind === "object" && L.mapTypeOf(L.typeOf(expr.left))?.kind === "string") {
+          const members = classInMemberNames(L, probed.type.className);
+          if (members) {
+            const helper = classHasKeyHelper(L, probed.type.className, members, loc);
+            // JS evaluates the key, then the receiver — and the receiver
+            // is evaluated even though the answer does not read it.
+            const keyIr = L.lowerExprExpecting(expr.left, STRING);
+            const kTmp = L.declareHiddenLocal("%inKey", STRING);
+            const recvIr = L.lowerExpr(expr.right);
+            const rTmp = L.declareHiddenLocal("%inRecv", recvIr.type);
+            return {
+              kind: "seqExpr",
+              stmts: [
+                { kind: "varDecl", localId: kTmp.id, init: keyIr, loc },
+                { kind: "varDecl", localId: rTmp.id, init: recvIr, loc },
+              ],
+              result: { kind: "call", callee: helper, args: [{ kind: "varRef", localId: kTmp.id, type: STRING, loc }], type: BOOL, loc },
+              type: BOOL,
+              loc,
+            };
+          }
+        }
+        // SCRIPTC_IN_RECV=1 — what the runtime-key fence is actually
+        // looking at: the LOWERED receiver kind (the checker's type is
+        // what the message quotes, and the two disagree at the sites
+        // that matter).
+        if (process.env.SCRIPTC_IN_RECV) {
+          const line = ts.getLineAndCharacterOfPosition(expr.getSourceFile(), loc.start).line + 1;
+          const cls = probed?.type.kind === "object" ? probed.type.className : "-";
+          console.error(`INRECV ${loc.file}:${line} recvLowered=${probed?.type.kind ?? "?"} class=${cls} keyType=${L.mapTypeOf(L.typeOf(expr.left))?.kind ?? "?"}`);
         }
       }
       L.unsupported(
@@ -12670,6 +12849,20 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           `'in' with the key '${key}' on Error receivers (code answers from the error's code slot; message and name are always present)`,
         );
       }
+      // A LITERAL key over a compiled class instance: the same closed
+      // member set the runtime key walks, decided at compile time. The
+      // %Error and %DOMException arms above answered first and
+      // classInMemberNames declines those roots, so this cannot
+      // shadow them.
+      {
+        const members = classInMemberNames(L, recv.type.className);
+        if (members) {
+          if (recv.kind === "varRef" || recv.kind === "recordGet" || recv.kind === "fieldGet" || pureRecvNode) {
+            return { kind: "boolLit", value: members.has(key), type: BOOL, loc };
+          }
+          L.unsupported("SC1090", expr, "statically-decided 'in' on computed receivers (bind the value to a variable first)");
+        }
+      }
     }
     // A dyn receiver (`"portless" in pkg` after the `typeof pkg ===
     // "object"` guard): own-member presence on the checked-dynamic tree — tsc admits `in`
@@ -12695,7 +12888,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
        * optional field's (undefined-armed) type to read off the narrowed
        * arm, `unit` is the throwing arm. Exactly one of the three is
        * live per entry. */
-      type InArmAnswer = { tag: number; has: boolean; slot: IrType | null; unit: "undefined" | "null" | null; arm: IrType };
+      type InArmAnswer = { tag: number; has: boolean; slot: IrType | null; unit: "undefined" | "null" | null; prim: boolean; arm: IrType };
       const answers: InArmAnswer[] = [];
       let armWise = arms.length > 0;
       let staticAnswers = arms.length > 0;
@@ -12714,7 +12907,26 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         // arm Node's own TypeError is that arm's honest answer and costs
         // no trust in the narrowing: the term stands on its own tag test.
         if (isUnitType(arm)) {
-          answers.push({ tag, has: false, slot: null, unit: arm.kind === "undefinedT" ? "undefined" : "null", arm });
+          answers.push({ tag, has: false, slot: null, unit: arm.kind === "undefinedT" ? "undefined" : "null", prim: false, arm });
+          staticAnswers = false;
+          continue;
+        }
+        // A PRIMITIVE arm — string, number, boolean — is the unit arm's
+        // case one step out: `'k' in "abc"` throws in Node for exactly the
+        // reason `'k' in undefined` does (RequireObjectCoercible is not
+        // what `in` asks for; `in` asks for an OBJECT, and a primitive
+        // never is one). tsc rejects such an operand outright, so a
+        // primitive arm reaching here is one the CHECKER narrowed away
+        // while the LOWERED union still carries it — the same provenance
+        // as a unit arm, and the same discipline: the term stands on its
+        // own tag test and claims nothing about the arms beside it.
+        //
+        // The ONE thing that is not the unit arm's shape: Node's message
+        // interpolates the VALUE (`... to search for 'k' in abc`), not a
+        // literal word, so the term reads the narrowed value at run time
+        // and String()s it. That is why prim carries no text here.
+        if (arm.kind === "string" || arm.kind === "f64" || arm.kind === "bool") {
+          answers.push({ tag, has: false, slot: null, unit: null, prim: true, arm });
           staticAnswers = false;
           continue;
         }
@@ -12726,7 +12938,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         }
         const f = shape.fields.find((x) => x.name === key);
         if (f && f.type.kind === "union" && L.armTag(f.type.unionId, UNDEFINED_T) >= 0) {
-          answers.push({ tag, has: false, slot: f.type, unit: null, arm });
+          answers.push({ tag, has: false, slot: f.type, unit: null, prim: false, arm });
           staticAnswers = false; // an optional slot: presence is per-value
           continue;
         }
@@ -12734,7 +12946,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         // true without invoking the getter) — either slot present makes
         // the name a member.
         const acc = shape.fields.some((x) => x.name === `%get:${key}` || x.name === `%set:${key}`);
-        answers.push({ tag, has: f !== undefined || acc, slot: null, unit: null, arm });
+        answers.push({ tag, has: f !== undefined || acc, slot: null, unit: null, prim: false, arm });
       }
       // SCRIPTC_IN_WHY=1 — the `in` census probe: for every UNION
       // receiver reaching the decision, the site, the key, whether every
@@ -12743,7 +12955,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // and the kind that stopped it is the next one in arm order.
       if (process.env.SCRIPTC_IN_WHY) {
         const line = ts.getLineAndCharacterOfPosition(expr.getSourceFile(), loc.start).line + 1;
-        const verdicts = answers.map((a) => (a.unit !== null ? `throw:${a.unit}` : a.slot !== null ? "perValue" : a.has ? "yes" : "no"));
+        const verdicts = answers.map((a) => (a.unit !== null ? `throw:${a.unit}` : a.prim ? `throw:${a.arm.kind}` : a.slot !== null ? "perValue" : a.has ? "yes" : "no"));
         const stopper = answers.length < arms.length ? arms[answers.length]!.kind : "-";
         console.error(`INWHY ${loc.file}:${line} key='${key}' arms=${arms.length} taken=${answers.length} stopped-at=${stopper} static=${staticAnswers} armwise=${armWise} recv=${recv.kind} [${verdicts.join(",")}]`);
       }
@@ -12816,6 +13028,42 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
                 kind: "ternary",
                 cond: isTag(a.tag),
                 then: nodeThrowExpr(1, "", `Cannot use 'in' operator to search for '${key}' in ${a.unit}`, BOOL, loc),
+                else_: falseLit(),
+                type: BOOL,
+                loc,
+              });
+              continue;
+            }
+            if (a.prim) {
+              // Node's own TypeError, with the VALUE interpolated: the
+              // narrowed arm read off the tag-checked narrow, String()d
+              // by the same conversion `${v}` uses (JS number formatting
+              // included — `1e+21`, `NaN`, `-0` as "0"). The message is
+              // therefore a runtime string, which error.nodeThrow takes:
+              // its args are TYPE-checked (F64, STRING, STRING), never
+              // required to be literals.
+              const narrowed: IrExpr = { kind: "unionNarrow", unionId, tag: a.tag, value: recv, type: a.arm, loc };
+              const msg: IrExpr = {
+                kind: "strConcat",
+                left: { kind: "strLit", value: `Cannot use 'in' operator to search for '${key}' in `, type: STRING, loc },
+                right: L.ensureString(narrowed, expr.right),
+                type: STRING,
+                loc,
+              };
+              terms.push({
+                kind: "ternary",
+                cond: isTag(a.tag),
+                then: {
+                  kind: "libCall",
+                  fn: "error.nodeThrow",
+                  args: [
+                    { kind: "numLit", value: 1, type: F64, loc },
+                    { kind: "strLit", value: "", type: STRING, loc },
+                    msg,
+                  ],
+                  type: BOOL,
+                  loc,
+                },
                 else_: falseLit(),
                 type: BOOL,
                 loc,
