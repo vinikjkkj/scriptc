@@ -12,13 +12,6 @@ generics.ts:30:10 - error SC1090: '.join()' on arrays of this element type (numb
      |          ^~~~~~~~~~~
   31 | }
 
-generics.ts:44:7 - error SC2001: values of type 'typeof Box' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
-
-  43 | // The uninstantiated family as a value: no thunk, no single ctor ABI.
-  44 | const BoxAlias = Box;
-     |       ^~~~~~~~
-  45 | // A base that mentions the class's own type parameters would differ per
-
 generics.ts:44:18 - error SC1090: generic classes as values ('typeof Box' keeps the type parameter — instantiation expressions ('Box<number>') and concrete constructor-typed slots compile) are not supported yet
 
   43 | // The uninstantiated family as a value: no thunk, no single ctor ABI.
