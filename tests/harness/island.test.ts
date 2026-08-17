@@ -26,7 +26,12 @@ import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { exeName } from "./exe.js";
-import { ENGINE_CLASS_MIN, STATIC_CLASS_MAX } from "./size-class.js";
+import {
+  ENGINE_CLASS_MIN,
+  STATIC_CLASS_MAX,
+  STATIC_CLASS_RECORDED,
+  recordedSizeComplaint,
+} from "./size-class.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -383,6 +388,19 @@ console.log(greet("world"), 6 * 7);
     // The class is toolchain-specific and page-granular; the per-platform
     // calibration and its measurements live in size-class.ts, shared with
     // regex.test.ts's regex-class pin.
+    // The RECORDED check goes FIRST, deliberately. It is the one that names
+    // the delta, the direction and what to do about it, and vitest stops a
+    // test at its first failed expect — so ordering it after the ceiling
+    // means a binary that breaches both reports only "expected 646144 to be
+    // less than 646000", which is the uninformative message this whole
+    // change exists to replace. Measured: planting two pages in
+    // scr_cycle.c with the checks in the other order produced exactly that.
+    expect(
+      recordedSizeComplaint("the static hello-world", staticSize, STATIC_CLASS_RECORDED),
+    ).toBeNull();
+    // The coarse half: the class ceiling protects the DISTANCE between
+    // classes (a library-sized or engine-sized jump), which a recorded
+    // figure with a one-page tolerance is far too tight to express.
     expect(staticSize).toBeLessThan(STATIC_CLASS_MAX);
     expect(dynamicSize).toBeGreaterThan(ENGINE_CLASS_MIN);
   });

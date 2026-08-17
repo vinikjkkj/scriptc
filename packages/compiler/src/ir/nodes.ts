@@ -7633,14 +7633,60 @@ export function moduleUsesSymbol(mod: IrModule): boolean {
   return found;
 }
 
+/** True when the module uses the WHATWG URL surface — url.* libCalls or a
+ * url-kind type anywhere on the IR (a fenced statement can leave a typed
+ * local whose release call still needs scr_url_release linked, the
+ * moduleUsesSearchParams reason) — the link switch that pulls scr_url.c
+ * into the binary.
+ *
+ * scr_url.c was UNCONDITIONAL until a measurement said what that cost: a
+ * hello-world that has never heard of a URL links the whole parser, and
+ * dropping the unit from its link set leaves it linking CLEAN at 637,952
+ * bytes against 654,336 — 16,384 bytes, four win32 pages, on EVERY binary
+ * in the project. The unit is also what CROSSED the static size class:
+ * 68f2e12b (new URL(input, base), 145 lines into this TU) took a
+ * hello-world from 645,632 to 649,216 past a 646,000 bound, and no
+ * hello-world can reach a line of it.
+ *
+ * The gate is the moduleUsesSearchParams shape because scr_url.c is the
+ * same kind of unit: pure parsing/data, no loop hooks, cross-compiles
+ * everywhere. Four other units call into it (scr_http.c, scr_url_params.c,
+ * scr_ws_client.c, scr_ws_global.c, plus scr_fetch.c and scr_island.c on
+ * the dynamic side) — cc.ts's derived `url` closes over their gates and
+ * RUNTIME_UNIT_DEPS holds the measured edges, so a missing implication is
+ * a named build error and never an lld-link "undefined symbol". */
+export function moduleUsesUrl(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && typeof node.fn === "string" && node.fn.startsWith("url.")) {
+      found = true;
+      return;
+    }
+    if (node.kind === "url") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 /** True when the module uses the URLSearchParams surface — sp.* libCalls,
  * the url.searchParams getter, or a searchParams-kind type anywhere on
  * the IR (a fenced statement can leave a typed local whose release call
  * still needs the unit linked) — the link switch that pulls
  * scr_url_params.c into the binary (the moduleUsesSymbol precedent: pure
  * data structure, no loop hooks, cross-compiles everywhere). sp-free
- * programs keep their exact link line; scr_url.c itself stays
- * always-linked and never references the unit. */
+ * programs keep their exact link line. scr_url.c is itself link-gated now
+ * (moduleUsesUrl); this unit calls into it, so cc.ts's derived `url`
+ * closes over the searchParams gate. */
 export function moduleUsesSearchParams(mod: IrModule): boolean {
   let found = false;
   const visit = (v: unknown): void => {

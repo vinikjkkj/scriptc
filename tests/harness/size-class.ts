@@ -136,6 +136,66 @@
  * cannot be weighed from this box, so they move by exactly what the
  * change costs here — +512 each — which preserves whatever headroom each
  * had rather than inventing new headroom for a platform nobody measured.
+ *
+ * 2026-08-17 — THE BOUNDS DID NOT MOVE, AND THIS TIME THAT IS THE RESULT.
+ *
+ * Both win32 ceilings had been RED for days, and the pair above cannot say
+ * why: a ceiling reports "651264 is not less than 646000" and names no
+ * cause, no delta and no owner, so the only cheap response is to raise it.
+ * Raising it is also the one response that clears the gate without testing
+ * anything, and this pair had been raised four times in three days, three
+ * of those times mostly for drift.
+ *
+ * Bisecting the static assertion over the 108 first-parent merges since the
+ * 2026-08-11 calibration (which measured 642,048) names the crossing
+ * exactly:
+ *
+ *   68556310   645,632   last revision under the bound — 368 bytes spare
+ *   8eb37c53   649,216   +3,584, first over. Its 68f2e12b put 145 lines of
+ *                        base-URL resolution into scr_url.c.
+ *
+ * scr_url.c was in RUNTIME_SOURCES — unconditional, in every binary the
+ * project builds. So the bound was crossed by growing a translation unit
+ * that a hello-world links and CANNOT REACH A LINE OF. Weighed:
+ *
+ *   static hello-world   654,336        16,384 of it scr_url.c (4 pages)
+ *   regex program        794,624        16,896 of it scr_url.c
+ *
+ * and with the unit dropped from the link set both programs link CLEAN.
+ * The unit is now link-gated on moduleUsesUrl (backend/cc.ts's `url`), so:
+ *
+ *   static   654,336 -> 637,952   bound 646,000, was 8,336 OVER, now 8,048 under
+ *   regex    794,624 -> 777,728   bound 785,000, was 9,624 OVER, now 7,272 under
+ *
+ * Both bands go green with the numbers they already had. Note the regex
+ * class moved 512 bytes MORE than the static one, exactly as the warning
+ * further up this file says it does — measured separately, not derived.
+ *
+ * -ffunction-sections -fdata-sections -Wl,--gc-sections was tried FIRST and
+ * refuted: it recovers 48 bytes of .rdata virtual size and zero bytes of
+ * file size. The runtime is densely cross-referenced through static ops
+ * tables, so its unreachable code is not linker-dead; it is dead by PROGRAM
+ * reachability, which only a gate can see. Do not re-try the flags.
+ *
+ * Section attribution of the pre-gate 654,336, so the next reader does not
+ * start from nothing (file-aligned raw sizes, every byte accounted):
+ *
+ *   .text 518,144 | .rdata 110,080 | .pdata 22,528 | headers 1,024
+ *   .buildid 512 | .data 512 | .tls 512 | .reloc 1,024
+ *
+ * Of the .text, the 21 always-linked TUs contribute 325,215 bytes; the rest
+ * is mingw's static CRT and the program TU. The four biggest always-linked
+ * TUs are scr_json.o (105,845 .text), scr_lib.o (46,480), scr_bytes.o
+ * (24,649) and scr_string.o (24,085). scr_json.c CANNOT be gated the way
+ * scr_url.c was — it holds the scr_dyn_* core and a hello-world's link
+ * fails on 16 undefined symbols without it. scr_console.o looks like 66 KB
+ * and is not: 65,536 of that is .bss, which costs address space and zero
+ * bytes on disk.
+ *
+ * Still on the table, measured but NOT taken here (one gate at a time, and
+ * one is enough to make both bands green): dropping scr_bytes_io.c as well
+ * links clean and takes the static class to 625,664, and scr_random_fill.c
+ * on top of that to 624,640.
  */
 const platform = process.platform;
 
@@ -146,6 +206,63 @@ export const STATIC_CLASS_MAX =
 /** A program that uses regex: libregexp + libunicode, never the engine. */
 export const REGEX_CLASS_MAX =
   platform === "linux" ? 552_680 : platform === "win32" ? 785_000 : 519_680;
+
+/* ── the ARMED half of the guard ───────────────────────────────────────
+ *
+ * The ceilings above protect the DISTANCE between size classes: a 2 KB dyn
+ * kind must not be able to hide a 135 KB library or a 620 KB engine. They
+ * are deliberately coarse, and being coarse is why they sat red for days
+ * saying nothing.
+ *
+ * These RECORDED figures are the other half, and the loud one. They are
+ * what the canonical programs actually weighed when last measured, and the
+ * check is TWO-SIDED with a tolerance of one page: a full page of growth
+ * fails, and so does a full page of shrink. A shrink matters because it is
+ * the failure the ceiling structurally cannot see — this very change is a
+ * 16 KB shrink, and no assertion in the suite would have noticed it.
+ *
+ * When one fails, the fix is never to nudge the number. It is to say in
+ * this file what the page BOUGHT, the way every entry above does, and then
+ * record the new measurement.
+ *
+ * win32 only. linux and darwin cannot be weighed from this box, and
+ * inventing a figure for a platform nobody measured is the exact mistake
+ * the calibrations above keep warning about. Whoever can weigh them should
+ * record theirs here; until then they keep the ceilings alone. */
+export const SIZE_DRIFT_PAGE = 4_096;
+
+/** The static hello-world, measured 2026-08-17 (x86_64-windows-gnu, zig cc
+ * 0.16.0, -O2), after scr_url.c became link-gated. */
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 637_952 : null;
+
+/** The regex program, measured in the same run on the same tree. */
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 777_728 : null;
+
+/** The complaint a recorded-figure check makes, or null when the size is
+ * within one page of what was recorded. A string rather than a thrown
+ * error so the caller supplies the assertion — and so this function is
+ * itself testable, which is what "armed" means: size-class-armed.test.ts
+ * plants a page and requires a complaint back. */
+export function recordedSizeComplaint(
+  what: string,
+  actual: number,
+  recorded: number | null,
+  page: number = SIZE_DRIFT_PAGE,
+): string | null {
+  if (recorded === null) return null;
+  const delta = actual - recorded;
+  if (Math.abs(delta) < page) return null;
+  const dir = delta > 0 ? "GREW" : "SHRANK";
+  return (
+    `${what} ${dir} by ${Math.abs(delta)} bytes: ${actual} against the recorded ${recorded} ` +
+    `(tolerance one ${page}-byte page; this is ${(Math.abs(delta) / page).toFixed(2)} of one).\n` +
+    `This is not a number to nudge. Find what the bytes bought — an always-linked runtime TU that ` +
+    `grew, or a new one that a program which cannot reach it now links — and WRITE IT IN ` +
+    `tests/harness/size-class.ts beside the other calibrations, then record the new figure. ` +
+    `A ${dir === "GREW" ? "growth" : "shrink"} nobody explains is how this pair stopped meaning ` +
+    `anything before.`
+  );
+}
 
 /** An --dynamic build that actually enters an island carries the engine.
  * A floor rather than a ceiling — the assertion is that the engine IS

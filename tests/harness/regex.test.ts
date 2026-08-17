@@ -23,7 +23,13 @@ import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { expectAbort } from "./cc.js";
 import { exeName } from "./exe.js";
-import { REGEX_CLASS_MAX, STATIC_CLASS_MAX } from "./size-class.js";
+import {
+  REGEX_CLASS_MAX,
+  REGEX_CLASS_RECORDED,
+  STATIC_CLASS_MAX,
+  STATIC_CLASS_RECORDED,
+  recordedSizeComplaint,
+} from "./size-class.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -166,7 +172,16 @@ console.log(/${"(a)".repeat(300)}/.test("a"));
     // page.
     // The per-platform calibration and its measurements live in
     // size-class.ts — island.test.ts weighs the same classes.
-    expect(statSync(plainBuild.binaryPath).size).toBeLessThan(STATIC_CLASS_MAX);
-    expect(statSync(regexBuild.binaryPath).size).toBeLessThan(REGEX_CLASS_MAX);
+    const plainSize = statSync(plainBuild.binaryPath).size;
+    const regexSize = statSync(regexBuild.binaryPath).size;
+    // Recorded checks FIRST, for the reason island.test.ts spells out: the
+    // first failed expect is the only message a reader gets. Both figures
+    // are recorded and checked separately BECAUSE the two classes do not
+    // move together — scr_url.c's gate moved this one 512 bytes further
+    // than the static one, and an earlier change moved it twice as far.
+    expect(recordedSizeComplaint("the regex-free program", plainSize, STATIC_CLASS_RECORDED)).toBeNull();
+    expect(recordedSizeComplaint("the regex program", regexSize, REGEX_CLASS_RECORDED)).toBeNull();
+    expect(plainSize).toBeLessThan(STATIC_CLASS_MAX);
+    expect(regexSize).toBeLessThan(REGEX_CLASS_MAX);
   });
 });

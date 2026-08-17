@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-const RUNTIME_SOURCES = ["scr_number.c", "scr_string.c", "scr_array.c", "scr_bytes.c", "scr_bytes_io.c", "scr_map.c", "scr_closure.c", "scr_object.c", "scr_union.c", "scr_exception.c", "scr_error.c", "scr_console.c", "scr_lib.c", "scr_path.c", "scr_url.c", "scr_json.c", "scr_async.c", "scr_child.c", "scr_cycle.c", "scr_random_fill.c"];
+const RUNTIME_SOURCES = ["scr_number.c", "scr_string.c", "scr_array.c", "scr_bytes.c", "scr_bytes_io.c", "scr_map.c", "scr_closure.c", "scr_object.c", "scr_union.c", "scr_exception.c", "scr_error.c", "scr_console.c", "scr_lib.c", "scr_path.c", "scr_json.c", "scr_async.c", "scr_child.c", "scr_cycle.c", "scr_random_fill.c"];
 
 /* ---------------------- the runtime link-closure check ---------------------
  * The selection above and the gated arms in compileC/compileLibArchive are a
@@ -47,7 +47,7 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   "scr_dgram.c": ["scr_loop_kqueue.c", "scr_loop_epoll.c", "scr_loop_wsapoll.c"],
   "scr_dyn_invoke.c": ["scr_async_dyn.c"],
   "scr_events_emitter.c": ["scr_dyn_handle.c"],
-  "scr_http.c": ["scr_dyn_handle.c", "scr_net.c"],
+  "scr_http.c": ["scr_dyn_handle.c", "scr_net.c", "scr_url.c"],
   // The pipe-into-a-ClientRequest adapter: a Writable over a request, so
   // it needs BOTH sides. Split out of scr_http.c precisely so that plain
   // http programs do not owe the linker the stream unit.
@@ -61,19 +61,23 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   "scr_regex.c": ["scr_assert.c"],
   "scr_stream.c": ["scr_events_emitter.c"],
   "scr_symbol.c": ["scr_assert.c"],
+  // scr_url_params.c retains/releases the ScrUrl its getter came off, so
+  // the searchParams gate implies the url one. Measured: scr_url_release,
+  // scr_url_retain.
+  "scr_url_params.c": ["scr_url.c"],
   "scr_tls.c": ["scr_dyn_handle.c", "scr_http.c", "scr_net.c", "scr_tls_ca.c"],
-  "scr_ws_client.c": ["scr_net.c", "scr_websocket.c"],
-  "scr_ws_global.c": ["scr_tls.c", "scr_ws_client.c"],
+  "scr_ws_client.c": ["scr_net.c", "scr_url.c", "scr_websocket.c"],
+  "scr_ws_global.c": ["scr_tls.c", "scr_url.c", "scr_ws_client.c"],
   "scr_zlib_island.c": ["scr_zlib.c"],
 };
 
 /** The edges an SCR_DYNAMIC build ADDS (the island exists only there, and
  * scr_regex.c's host hooks reach for its JSContext only under the define). */
 const RUNTIME_UNIT_DEPS_DYNAMIC: Readonly<Record<string, readonly string[]>> = {
-  "scr_fetch.c": ["scr_http.c", "scr_island.c", "scr_net.c", "scr_net_island.c", "scr_tls.c"],
+  "scr_fetch.c": ["scr_http.c", "scr_island.c", "scr_net.c", "scr_net_island.c", "scr_tls.c", "scr_url.c"],
   "scr_fetch_curl.c": ["scr_island.c"],
   "scr_inspect_island.c": ["scr_inspect.c", "scr_island.c"],
-  "scr_island.c": ["scr_web.c"],
+  "scr_island.c": ["scr_url.c", "scr_web.c"],
   "scr_net_island.c": ["scr_http.c", "scr_island.c", "scr_net.c", "scr_tls.c"],
   "scr_regex.c": ["scr_island.c"],
   "scr_web.c": ["scr_island.c"],
@@ -251,11 +255,30 @@ export interface CcOptions {
    * registry initializes lazily), so it cross-compiles everywhere.
    * Symbol-free binaries keep their exact link line. */
   symbol?: boolean;
+  /** The program uses the WHATWG URL surface (moduleUsesUrl on the IR):
+   * compiles scr_url.c into the binary.
+   *
+   * The unit was UNCONDITIONAL until it was weighed. A hello-world links
+   * the whole parser and cannot reach a line of it: dropped from its link
+   * set the same program links CLEAN, 637,952 bytes against 654,336 —
+   * 16,384 bytes, four win32 pages, on EVERY binary in the project. It is
+   * also the unit that CROSSED the static size class (68f2e12b put 145
+   * lines of base-URL resolution in it and took a hello-world from
+   * 645,632 to 649,216 past a 646,000 bound), which is what makes the
+   * gate a size FIX and not a size tidy-up.
+   *
+   * Six units call in — scr_http.c, scr_url_params.c, scr_ws_client.c and
+   * scr_ws_global.c always, scr_fetch.c and scr_island.c under
+   * SCR_DYNAMIC — so the derived `url` below closes over their gates and
+   * RUNTIME_UNIT_DEPS carries the measured edges. The scr_abort.c
+   * precedent applies exactly: gate the unit, and the size class holds. */
+  url?: boolean;
   /** The program uses the URLSearchParams surface (moduleUsesSearchParams
    * on the IR): compiles scr_url_params.c into the binary — the symbol
    * gating precedent: pure data structure (no loop hooks, no install),
    * cross-compiles everywhere. sp-free binaries keep their exact link
-   * line (scr_url.c never references the unit). */
+   * line. The unit retains/releases the ScrUrl its getter came off, so
+   * this gate IMPLIES the url one (see the derived `url`). */
   searchParams?: boolean;
   /** The program uses the node:querystring surface (moduleUsesQs on the
    * IR): compiles scr_qs.c into the binary — the searchParams gating
@@ -961,12 +984,44 @@ async function ensureTlsArchive(sanitize: boolean, driver: CcDriver): Promise<st
  * carrying it would owe the embedder a symbol from a unit library links
  * exclude (the async_free gate refuses the crypto.randomFill surface long
  * before that, so no library build ever wanted it). */
+/* The always-linked core with scr_url.c restored to its HISTORICAL POSITION
+ * when the url gate is on — immediately after scr_path.c, where it sat while
+ * it was unconditional.
+ *
+ * The position is not cosmetic. The linker lays .text out in input order, so
+ * selecting the unit anywhere else relocates every function after it: measured
+ * on zapo (a URL-using program whose link SET is unchanged either way), the
+ * binary stayed exactly 29,851,136 bytes but 1,831,052 bytes of .text,
+ * 510,120 of .rdata and 25,886 of .pdata differed — pure address shift, no
+ * behaviour, and no way to tell that apart from a real change by reading a
+ * hash. Placing the gated unit in its old slot makes a URL-using binary
+ * BYTE-IDENTICAL to the pre-gate one, which is the standard the `net` gate
+ * above already holds itself to ("no currently-linking binary changes by a
+ * byte"). Only programs that shed the unit change, and they change by
+ * -16,384. */
+function coreRuntimeSources(url: boolean): string[] {
+  const out: string[] = [];
+  for (const f of RUNTIME_SOURCES) {
+    out.push(f);
+    if (url && f === "scr_path.c") out.push("scr_url.c");
+  }
+  return out;
+}
+
 const LIB_RUNTIME_SOURCES = [
   ...RUNTIME_SOURCES.filter(
     (f) => f !== "scr_async.c" && f !== "scr_child.c" && f !== "scr_random_fill.c",
   ),
   "scr_library.c",
 ];
+
+/** LIB_RUNTIME_SOURCES with scr_url.c in its historical slot when the archive
+ * needs it (the searchParams unit calls into it, so that gate implies this
+ * one) — the coreRuntimeSources reason, applied to the archive lane. */
+const LIB_RUNTIME_SOURCES_ORDERED = (url: boolean): string[] =>
+  LIB_RUNTIME_SOURCES.flatMap((f) =>
+    url && f === "scr_path.c" ? [f, "scr_url.c"] : [f],
+  );
 
 export interface LibArchiveOptions {
   /** The program TU (.c or .ll — clang compiles either with -c). */
@@ -979,6 +1034,7 @@ export interface LibArchiveOptions {
   assert?: boolean;
   inspect?: boolean;
   symbol?: boolean;
+  url?: boolean;
   searchParams?: boolean;
   emitter?: boolean;
   zlib?: boolean;
@@ -997,7 +1053,7 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
   const lreObjects = regex ? await ensureLreObjects(sanitize, driver) : [];
   const zlibObjects = opts.zlib ? await ensureZlibObjects(sanitize, driver) : [];
   const sources = [
-    ...LIB_RUNTIME_SOURCES,
+    ...LIB_RUNTIME_SOURCES_ORDERED(opts.url || opts.searchParams || false),
     // win32 targets compile the libc-shim TU into the archive (stpcpy,
     // arc4random_buf — scr_number.c/scr_lib.c/scr_bytes_io.c call them and
     // mingw's CRT has neither), exactly like compileC's unconditional win32
@@ -1299,6 +1355,18 @@ export async function compileC(opts: CcOptions): Promise<void> {
   const abortSignal = (opts.abortSignal ?? false) || abortHttp;
   const http = (opts.http ?? false) || tls || http2 || nativeFetch || netIsland || wsGlobal || abortHttp || httpBody;
   const net = (opts.net ?? false) || http || tls || http2 || nativeFetch || netIsland || wsGlobal;
+  /* scr_url.c's gate closes over every unit that calls into it, the `net`
+   * discipline one line up. Measured edges (objects paired U-against-T,
+   * the RUNTIME_UNIT_DEPS recipe): scr_http.c, scr_url_params.c,
+   * scr_ws_client.c and scr_ws_global.c in both modes; scr_fetch.c and
+   * scr_island.c under SCR_DYNAMIC — those two need the vendored engine
+   * headers to compile, so their edges were read off the source
+   * (scr_fetch.c:304, scr_island.c:3169) rather than off an object.
+   * `dynamic` stands in for the island's own gate (engineArchive, derived
+   * further down) because every --dynamic build links scr_island.c and
+   * such a build already carries the ~620KB engine — spending a
+   * conservative 16KB there costs nothing anyone measures. */
+  const url = (opts.url ?? false) || http || (opts.searchParams ?? false) || wsGlobal || fetchOn || dynamic;
   const driver = resolveCc();
   if (driver.target !== null) {
     // See the resolveCc block: these inputs are built on and for the HOST
@@ -1375,7 +1443,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     "-fno-strict-aliasing",
     "-Wno-deprecated-declarations", // ucontext fibers (scr_async.c)
     "-I", rtDir,
-    ...RUNTIME_SOURCES.map((f) => rt(join(rtDir, f))),
+    ...coreRuntimeSources(url).map((f) => rt(join(rtDir, f))),
     ...(opts.copying ? [rt(join(rtDir, "scr_copying.c"))] : []),
     // win32 targets compile the libc-shim TU (stpcpy, arc4random_buf,
     // gmtime_r, strcasestr — the _WIN32 block in scr_runtime.h declares
@@ -1446,6 +1514,9 @@ export async function compileC(opts: CcOptions): Promise<void> {
       : []),
     ...(opts.symbol ? [rt(join(rtDir, "scr_symbol.c"))] : []),
     ...(opts.searchParams ? [rt(join(rtDir, "scr_url_params.c"))] : []),
+    // node:querystring's own escape/unescape live in scr_qs.c: the unit
+    // names NO scr_url_ symbol (measured — the only mentions in it are
+    // comments), so qs does not imply the url gate.
     ...(opts.qs ? [rt(join(rtDir, "scr_qs.c"))] : []),
     ...(abortSignal ? [rt(join(rtDir, "scr_abort.c"))] : []),
     ...(abortHttp ? [rt(join(rtDir, "scr_abort_http.c"))] : []),
