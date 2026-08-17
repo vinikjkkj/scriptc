@@ -1294,6 +1294,31 @@ export class Lowerer {
   readonly chainRecvByNode = new Map<ts.Node, IrExpr>();
   readonly chainNarrowedType = new Map<ts.Node, ts.Type>();
   readonly chainHandled = new Set<ts.Node>();
+  /** The DYN TWIN of a catch binding whose block hands the binding to a
+   * NESTED FUNCTION (`catch (e) { setTimeout(function () { cb(e) }, 0) }`
+   * — protobufjs's rpc/service.js writes exactly that). A `caught` local
+   * is a snapshot box that may not travel in a capture (validate.ts:
+   * `capture "e" is caught-typed`), and the fence's own message names the
+   * fix: "narrow into a typed local first". This map IS that lift, done by
+   * the compiler instead of demanded of the source — lowerTry declares one
+   * hidden DYN local per such catch, initializes it with the caughtToDyn
+   * the un-narrowed read would have produced anyway, and registers it
+   * here keyed by the caught local it stands for.
+   *
+   * ONE twin per catch clause, and every un-narrowed read in the block
+   * goes through it (caughtRead), because two independent caughtToDyn
+   * conversions of one snapshot would be two dyn OBJECTS: `cb(e)` inside
+   * the closure and `emit("error", e)` outside it must be the same value,
+   * which is what JS guarantees and what a per-read conversion would
+   * quietly break. Narrowed reads (caughtNarrow under a proven test) and
+   * `throw e` still read the snapshot directly — they extract, they do not
+   * convert, and rethrow needs the original cell.
+   *
+   * Keyed by the IrLocal OBJECT, not by its id: localIds are minted from a
+   * PER-FRAME counter (`e.0`), so two functions each with a `catch (e)`
+   * both own `e.0` and an id-keyed map would answer one frame with the
+   * other frame's twin — the same hazard FnCtx.classPins documents. */
+  readonly caughtDynTwins = new Map<IrLocal, IrLocal>();
   /** for-of-over-matchAll bindings whose `.index` reads the companion-index
    * array: binding SYMBOL → the hidden number[] of match start indices plus
    * the hidden cursor holding THIS iteration's position (registered while
@@ -9687,7 +9712,7 @@ export class Lowerer {
 
     // Search enclosing functions, innermost first.
     for (let depth = this.fnStack.length - 2; depth >= 0; depth--) {
-      const origin = this.bindingIn(this.fnStack[depth]!, symbol);
+      let origin = this.bindingIn(this.fnStack[depth]!, symbol);
       if (!origin) continue;
       // dyn captures ride an UNTRACED obj-box (scr_dyn_retain_v/release_v
       // — boxNewC): the mustCall wrapper closing over its implicit-any
@@ -9701,12 +9726,23 @@ export class Lowerer {
       // the island's documented collection stance, not the box's.
       if (origin.type.kind === "caught") {
         // A catch binding never escapes its catch (KEEP NARROW): narrow it
-        // into a typed local and capture THAT.
-        this.unsupported(
-          "SC1090",
-          blame ?? this.checker.declarationsOf(symbol)[0] ?? this.entry,
-          "closures capturing catch bindings (narrow into a typed local first)",
-        );
+        // into a typed local and capture THAT — and where the block's
+        // reads are all UN-narrowed, lowerTry already did that lift and
+        // left the DYN twin here (caughtDynTwins). Capturing the twin is
+        // capturing the very local the fence's message asks the source to
+        // write, so the capture threads below like any other dyn binding.
+        // No twin ⇔ lowerTry saw a read the lift cannot serve (a rethrow,
+        // or a narrowing test whose extraction needs the snapshot cell):
+        // the fence is still the answer and still names the workaround.
+        const twin = this.caughtDynTwins.get(origin);
+        if (twin === undefined) {
+          this.unsupported(
+            "SC1090",
+            blame ?? this.checker.declarationsOf(symbol)[0] ?? this.entry,
+            "closures capturing catch bindings (narrow into a typed local first)",
+          );
+        }
+        origin = twin;
       }
       // The binding escapes into a nested function: it must live in a box,
       // shared by everyone (that's what makes mutation visible everywhere).

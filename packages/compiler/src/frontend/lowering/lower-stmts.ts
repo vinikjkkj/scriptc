@@ -4645,6 +4645,47 @@ function isNumericCaseTest(e: ts.Expression): boolean {
    *   restriction on jumps.
    * Each block is its own lexical scope (the binding lives in a scope
    * WRAPPING the catch block, like the spec's catch environment). */
+/** Does any reference to this catch binding sit inside a NESTED FUNCTION
+   * of the catch block? That — and only that — is what the caught-capture
+   * fence refuses, so it is exactly the question the DYN twin is declared
+   * to answer (lowerTry). Syntactic and cheap: one walk of the block,
+   * stopping the "am I nested" question at the first function-like node,
+   * with the checker resolving each identifier so a same-named inner
+   * binding (`catch (e) { const f = (e) => e }`) is NOT mistaken for the
+   * catch's own.
+   *
+   * A CLASS body counts as nested for the same reason a function does:
+   * its methods and field initializers are function bodies, and its
+   * heritage clause is not — the walk keeps descending and lets the
+   * function-like test decide, rather than special-casing containers.
+   *
+   * Answering `true` when nothing captures would only declare an unused
+   * hidden local; answering `false` when something does keeps the fence
+   * that stands today. Neither is unsound, so the walk is allowed to be
+   * a syntactic over-approximation and is not allowed to be a silent
+   * under-one — which is why the identifier test is the CHECKER's symbol
+   * comparison and not a name match. */
+  function catchBindingEscapesIntoFunction(
+    L: Lowerer,
+    name: ts.Identifier,
+    block: ts.Block,
+  ): boolean {
+    const symbol = L.checker.getSymbolAtLocation(name);
+    if (!symbol) return false;
+    let found = false;
+    const walk = (n: ts.Node, inFn: boolean): void => {
+      if (found) return;
+      if (inFn && ts.isIdentifier(n) && L.checker.getSymbolAtLocation(n) === symbol) {
+        found = true;
+        return;
+      }
+      const nested = inFn || ts.isFunctionLike(n);
+      n.forEachChild((c) => walk(c, nested));
+    };
+    block.forEachChild((c) => walk(c, false));
+    return found;
+  }
+
   export function lowerTry(L: Lowerer, stmt: ts.TryStatement): IrStmt {
     const hasFinally = stmt.finallyBlock !== undefined;
     // try/catch bodies are jump-fenced only when a finally guards them.
@@ -4665,7 +4706,38 @@ function isNumericCaseTest(e: ts.Expression): boolean {
         try {
           const local = L.declareLocal(vd.name, vd.name.text, CAUGHT, false);
           catchLocalId = local.id;
-          catchBody = lowerGuarded(stmt.catchClause.block);
+          // THE LIFT the fence's message asks the source for. A `caught`
+          // local may not travel in a capture box, so a closure over the
+          // binding was SC1090 "closures capturing catch bindings (narrow
+          // into a typed local first)". When the block hands the binding
+          // to a nested function, declare that typed local HERE — one
+          // hidden DYN twin, initialized with the same caughtToDyn an
+          // un-narrowed read produces — and let the capture thread it
+          // (resolveKey). One twin, not one per read: JS's `e` is ONE
+          // value, and two conversions of one snapshot would be two dyn
+          // objects.
+          const twinLoc = locOf(vd.name);
+          const twin = catchBindingEscapesIntoFunction(L, vd.name, stmt.catchClause.block)
+            ? L.declareHiddenLocal(`${vd.name.text}$dyn`, DYN)
+            : null;
+          if (twin) L.caughtDynTwins.set(local, twin);
+          const lowered = lowerGuarded(stmt.catchClause.block);
+          catchBody = twin
+            ? [
+                {
+                  kind: "varDecl",
+                  localId: twin.id,
+                  init: {
+                    kind: "caughtToDyn",
+                    value: { kind: "varRef", localId: local.id, type: CAUGHT, loc: twinLoc },
+                    type: DYN,
+                    loc: twinLoc,
+                  },
+                  loc: twinLoc,
+                },
+                ...lowered,
+              ]
+            : lowered;
         } finally {
           L.scopes.pop();
         }
