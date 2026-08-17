@@ -57,12 +57,3 @@ tuples.ts:37:13 - error SC1090: '.join()' on arrays of this element type (number
   37 | console.log(tuples.join(";"));
      |             ^~~~~~~~~~~~~~~~
   38 | 
-
-tuples.ts:41:7 - error SC2009: values of type 'Map<string, number>[]' cannot be compiled: the array shape is supported, but 'Map<string, number>' elements have no array representation yet
-
-  40 | // element kind).
-  41 | const maps: Map<string, number>[] = [];
-     |       ^~~~
-  42 | 
-
-  hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
