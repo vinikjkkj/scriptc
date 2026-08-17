@@ -6402,7 +6402,13 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // gate DECLINED it (a project-declared typedef that absorbed to the
     // island through checker-`any` field residue): the literal builds at
     // its own type like every unmappable context.
-    if (mapped === null || mapped.kind === "union" || mapped.kind === "dyn" || mapped.kind === "object" || mapped.kind === "jsval") {
+    // An ARRAY context is no home either: an object literal never builds an
+    // array. It became reachable when Iterable<T> started mapping (types.ts)
+    // -- `Uint8Array.from({})` contextually types its `{}` as Iterable<number>
+    // through the lib overload, and Node answers [] for it. Before that arm the
+    // context was unmappable and the literal fell back here; keep it falling
+    // back, and let the slot coercion tell the story if there is one.
+    if (mapped === null || mapped.kind === "union" || mapped.kind === "dyn" || mapped.kind === "object" || mapped.kind === "jsval" || mapped.kind === "array") {
       ctxUnion = mapped?.kind === "union" ? mapped : null;
       mapped = L.mapTypeOf(L.typeOf(expr)) ?? mapped;
       shapeDeclared = false;
