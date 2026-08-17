@@ -152,6 +152,11 @@ void *scr_box_get_ref(ScrBox *b) {
 
 void scr_box_set_f64(ScrBox *b, double v) { memcpy(&b->slot, &v, sizeof v); }
 
+/* The dyn-function adapter's call descriptor (scr_runtime.h): the LLVM
+ * lane emits calls and cannot reach the inline forms. */
+void scr_box_set_thunk_fn(ScrBox *b, ScrDynThunk f) { scr_box_set_thunk(b, f); }
+ScrDynThunk scr_box_get_thunk_fn(const ScrBox *b) { return scr_box_get_thunk(b); }
+
 void scr_box_set_bool(ScrBox *b, bool v) { b->slot = v ? 1 : 0; }
 
 void scr_box_set_ref(ScrBox *b, void *v) {

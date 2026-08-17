@@ -3244,6 +3244,39 @@ typedef struct ScrJsval ScrJsval; /* opaque island cell (C11 repeat; the
  * result as an owned (+1) dyn value. `args` entries are BORROWED. */
 typedef ScrDyn *(*ScrDynThunk)(ScrClosure *clo, ScrDyn *const *args, size_t argc);
 
+/* A dyn-boxed function's CALL DESCRIPTOR parked in a scalar box: the
+ * thunk pointer, unowned (it is a compiler-emitted static function).
+ *
+ * The checked-dynamic func adapter needs two things from the dyn value
+ * it adapts — the closure and that closure's thunk — and it used to
+ * keep the whole ScrDyn to get them, in an SCR_BOX_OBJ box with a NULL
+ * trace.  ScrDyn carries no cycle header, so that edge was invisible to
+ * the collector and every ring through an adapted listener leaked (the
+ * emitter registry traces its entries' closures, the adapter's dyn did
+ * not, and one untraced reference is all trial deletion needs to call a
+ * dead ring externally referenced).  The adapter now holds the CLOSURE
+ * in an SCR_BOX_FUNC box — traced by construction — and the thunk here,
+ * where there is nothing to trace: a function pointer owns nothing and
+ * no cycle can pass through it.  SCR_BOX_F64 because every scalar box
+ * kind is ignored by the trace, the teardown and the release alike.
+ *
+ * memcpy in both directions rather than a cast: a function pointer and
+ * an object pointer need not interconvert, and the slot is a uint64_t. */
+static inline void scr_box_set_thunk(ScrBox *b, ScrDynThunk f) {
+  b->slot = 0;
+  memcpy(&b->slot, &f, sizeof f);
+}
+static inline ScrDynThunk scr_box_get_thunk(const ScrBox *b) {
+  ScrDynThunk f;
+  memcpy(&f, &b->slot, sizeof f);
+  return f;
+}
+
+/* The same pair as callable symbols: the LLVM backend emits calls, not
+ * C, so it cannot reach a static inline. */
+void scr_box_set_thunk_fn(ScrBox *b, ScrDynThunk f);
+ScrDynThunk scr_box_get_thunk_fn(const ScrBox *b);
+
 /* Object member. Keys are malloc'd UTF-8 bytes (NUL-terminated for
  * convenience; key_len excludes the NUL) — duplicate keys were already
  * collapsed at parse time (later wins, like JS JSON.parse). */
