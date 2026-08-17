@@ -575,7 +575,12 @@ export interface GenericInstance {
           "spread arguments into fixed parameter positions (a spread can only fill a rest parameter)",
         );
       }
-      if (arg) return L.lowerExprExpecting(arg, shape.type);
+      // The ARGUMENT destination for recordKeyReadAtUndefinedArm: an
+      // index-signature keyed read into a parameter DECLARED with an
+      // undefined arm reads at that arm's width instead of trapping on the
+      // miss (lowerArgExpecting; identical to lowerExprExpecting wherever
+      // the rung declines).
+      if (arg) return L.lowerArgExpecting(arg, shape.type);
       if (shape.mode !== "omittable") {
         // A missing argument for a CHECKED-DYNAMIC param (an implicit-any
         // JS signature called short — `mustCall(fn)` with `expected`
@@ -797,7 +802,7 @@ export interface GenericInstance {
     if (expr.arguments.some((a) => ts.isSpreadElement(a))) return null;
     const out = expr.arguments
       .slice(0, fixed)
-      .map((a, i) => L.lowerExprExpecting(a, params[i]));
+      .map((a, i) => L.lowerArgExpecting(a, params[i]));
     if (restT.kind === "dyn") {
       const dynElems = expr.arguments.slice(fixed).map((a) => L.lowerExprExpecting(a, DYN));
       out.push({ kind: "dynArrLit", elems: dynElems, type: DYN, loc });
@@ -4680,7 +4685,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       if (callee) {
         if (callee.type.kind !== "func") L.badType(expr.expression, L.typeOf(expr.expression));
         const params = callee.type.params;
-        const args = expr.arguments.map((a, i) => L.lowerExprExpecting(a, params[i]));
+        const args = expr.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
         for (let i = args.length; i < params.length; i++) {
           const absent = omittedArgFor(L, params[i]!, loc);
           if (!absent) {
@@ -4725,7 +4730,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         if (callee.type.kind === "record") callee = L.hybridCallUnwrap(callee);
         if (callee.type.kind !== "func") L.badType(expr.expression, L.typeOf(expr.expression));
         const params = callee.type.params;
-        const args = expr.arguments.map((a, i) => L.lowerExprExpecting(a, params[i]));
+        const args = expr.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
         for (let i = args.length; i < params.length; i++) {
           const absent = omittedArgFor(L, params[i]!, loc);
           if (!absent) {
@@ -4785,7 +4790,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       if (callee.type.kind === "record") callee = L.hybridCallUnwrap(callee);
       if (callee.type.kind !== "func") L.badType(expr.expression, L.typeOf(expr.expression));
       const params = callee.type.params;
-      const args = expr.arguments.map((a, i) => L.lowerExprExpecting(a, params[i]));
+      const args = expr.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
       for (let i = args.length; i < params.length; i++) {
         const absent = omittedArgFor(L, params[i]!, loc);
         if (!absent) {
@@ -5211,7 +5216,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       const fixed = callee.type.params.slice(0, -1);
       const args: IrExpr[] = fixed.map((p, i) => {
         const a = expr.arguments[i];
-        if (a) return L.lowerExprExpecting(a, p);
+        if (a) return L.lowerArgExpecting(a, p);
         const absent = omittedArgFor(L, p, loc);
         if (!absent) {
           L.unsupported("SC1090", expr, "calls omitting a non-optional parameter of the callee's type");
@@ -5242,7 +5247,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     const params = callee.type.params;
     const packed = restPackedArgs(L, expr, params, loc);
     if (packed) return { kind: "callValue", callee, args: packed, type: callee.type.ret, loc };
-    const args = expr.arguments.map((a, i) => L.lowerExprExpecting(a, params[i]));
+    const args = expr.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
     // Optional-param func TYPES map their `x?: T` slots as `T | undefined`
     // ABI unions, and tsc admits calls that omit the optional suffix —
     // complete the missing trailing args with the interned undefined arm,
@@ -10361,7 +10366,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     if (packedRest) {
       return { kind: "callValue", callee, args: packedRest, type: callee.type.ret, loc: locOf(call) };
     }
-    const args = call.arguments.map((a, i) => L.lowerExprExpecting(a, params[i]));
+    const args = call.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
     // Trailing OPTIONAL parameters the call omits complete with the
     // undefined arm, exactly as every other call-through-a-value path does
     // (`logger.child({ scope })` against `child(b, extra?)`). Without this
@@ -11471,7 +11476,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
               kind: "callValue", callee, args: packedField, type: callee.type.ret, loc: locOf(call),
             };
           }
-          const args = call.arguments.map((a, i) => L.lowerExprExpecting(a, params[i]));
+          const args = call.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
           for (let i = args.length; i < params.length; i++) {
             const absent = omittedArgFor(L, params[i]!, locOf(call));
             if (!absent) {
