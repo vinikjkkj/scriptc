@@ -9,7 +9,7 @@ import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
 import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
-import { recordKeyReadRow } from "./keyread-census.js";
+import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import { UNSUPPORTED, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
@@ -3136,6 +3136,21 @@ function isArrayGuardProven(L: Lowerer, node: ts.Expression): boolean {
         if (narrowed.kind === "bigint" && process.env["SCRIPTC_BIGNARROW_WHY"]) {
           const p = ts.getLineAndCharacterOfPosition(node.getSourceFile(), locOf(node).start);
           process.stderr.write(`[bignarrow] ${locOf(node).file}:${p.line + 1} ${node.getText().slice(0, 40)}\n`);
+        }
+        // SCRIPTC_NBRIDGE_CENSUS: one row per narrow bridge, with the
+        // DESTINATION it flows into. This bridge is the population behind
+        // `expected <scalar> at $, got undefined`: a reference to a local
+        // holding a widened keyed read, checked back to a width that cannot
+        // say undefined. The census names which destinations could have
+        // said it instead. (keyread-census.ts, "THE NARROW-BRIDGE CENSUS")
+        if (process.env["SCRIPTC_NBRIDGE_CENSUS"]) {
+          const at = locOf(node);
+          recordNarrowBridgeRow(L.checker as never, node, {
+            file: at.file,
+            start: at.start,
+            narrowed: narrowed.kind,
+            valueKind: expr.kind,
+          });
         }
         return { kind: "dynCheck", value: expr, type: narrowed, narrowBridge: true, loc: expr.loc };
       }
@@ -7627,7 +7642,17 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       // declaration/assignment/property-write destinations, which tsc
       // DOES narrow and which recordKeyReadAtUndefinedArm is therefore
       // never offered.
-      value = L.recordKeyReadAtUndefinedArm(value, fieldType) ?? value;
+      // ...and the same field one binding later — `const p =
+      // event.rawNode.attrs.participant` on the line above, then
+      // `participantJid: p`. The read has been widened to dyn by
+      // keyedReadLocalAtDynWidth and tsc narrows the REFERENCE back to
+      // `string`, so what arrives here is maybeNarrow's validated bridge
+      // rather than the read: the rung declined on the node's kind while
+      // the destination — an optional field whose readers keep the declared
+      // union — is the same destination it was admitted for.
+      value = L.recordKeyReadAtUndefinedArm(value, fieldType)
+        ?? L.keyedReadRefAtUndefinedArm(value, fieldType)
+        ?? value;
       value = L.coerceInto(valueNode, value, fieldType); // union-typed fields wrap arm values
       if (!typeEquals(value.type, fieldType)) L.badType(valueNode, L.typeOf(valueNode));
       // An explicit property overrides a spread-copied field: JS

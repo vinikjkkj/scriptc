@@ -8011,6 +8011,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4401-emit-payload-from-an-untyped-emitters-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/4401-emit-payload-from-an-untyped-emitters-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4402-bound-emit-dispatcher-over-a-listener-declared-prefix.ts": {
+   "order": [
+    "<repo>/tests/corpus/4402-bound-emit-dispatcher-over-a-listener-declared-prefix.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4403-emit-as-a-value-through-a-loose-plugin-surface.ts": {
+   "order": [
+    "<repo>/tests/corpus/4403-emit-as-a-value-through-a-loose-plugin-surface.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/4411-object-literal-spread-and-in-over-a-literal.ts": {
    "order": [
     "<repo>/tests/corpus/4411-object-literal-spread-and-in-over-a-literal.ts"
@@ -8032,6 +8050,24 @@
   "<repo>/tests/corpus/4432-spread-union-several-record-arms.ts": {
    "order": [
     "<repo>/tests/corpus/4432-spread-union-several-record-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4441-armed-parameter-takes-a-widened-keyed-read-reference.ts": {
+   "order": [
+    "<repo>/tests/corpus/4441-armed-parameter-takes-a-widened-keyed-read-reference.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4442-optional-field-takes-a-widened-keyed-read-reference.ts": {
+   "order": [
+    "<repo>/tests/corpus/4442-optional-field-takes-a-widened-keyed-read-reference.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4443-a-nullish-chain-of-absent-keys-binds-at-dyn-width.ts": {
+   "order": [
+    "<repo>/tests/corpus/4443-a-nullish-chain-of-absent-keys-binds-at-dyn-width.ts"
    ],
    "diags": []
   },

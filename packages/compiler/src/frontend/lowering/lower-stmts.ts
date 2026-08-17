@@ -3793,6 +3793,108 @@ function keyedReadLocalShortCircuitAtDynWidth(L: Lowerer, init: IrExpr, slot: Ir
     : { kind: "ternary", cond: init.cond, then: widened[0]!, else_: widened[1]!, type: DYN, loc: init.loc };
 }
 
+/** THE SAME BINDING WHEN THE `??` HAS ALREADY WIDENED ITSELF — the shape
+ * `lowerNullishCoalesce` hands back, which the rung above cannot see.
+ *
+ * ```ts
+ * const rawRemoteJidAlt = attrs.sender_pn ?? attrs.sender_lid
+ * ```
+ *
+ * zapo `message/primitives/incoming.ts:66-68`
+ * (`extractMessageIdentityAttrs`), and it is the site the SCRIPTC_DC_WHERE
+ * instrument names ELEVEN times in one paired run — every inbound decrypt
+ * plus one. Both keys are absent on an ordinary 1:1 message, and the
+ * author's next line is `...keyIdentity` spreading only the defined ones.
+ *
+ * `keyedReadLocalShortCircuitAtDynWidth` was written for exactly this
+ * spelling and never fires on it, for a reason that is not the reason. Its
+ * gate is `init.kind !== "nullish" && init.kind !== "ternary"`, and when the
+ * LEFT operand is a bare index-signature read — not a union —
+ * `lowerNullishCoalesce`'s own dyn rung has already run first: it widens
+ * both operands, builds the `nullish` at dyn width, and then checks the
+ * result BACK to the checker's type, returning a `dynCheck` WRAPPING the
+ * nullish. So `init.kind` is `dynCheck`, the rung declines, and the
+ * validated exit throws `expected string at $, got undefined` where Node
+ * prints nothing at all because both keys are simply absent.
+ *
+ * The rung above fires on `const type = input.typeOverride ?? node.attrs.type`
+ * — whose left IS a union, so the `??` takes its union path and hands back a
+ * bare `nullish`. That is why the rule reads as working: it does, on the
+ * spelling where the left is not itself a keyed read.
+ *
+ * What this adds is only the ability to see through that wrapper, and the
+ * reasoning is the binding rule's, unchanged and quoted from it: the LOCAL
+ * takes dyn, every REFERENCE re-decides, a use that needs the value gets the
+ * catchable dyn-boundary TypeError and a use that only asks whether it is
+ * there answers. Dropping the wrapper drops a VALIDATION and never the
+ * operand — the same thing `narrowBridgeDyn` does for a test, and the same
+ * thing `lowerNullishCoalesce` itself already does when the enclosing
+ * consumer is another `??`.
+ *
+ * The restrictions carry literally:
+ *
+ * - the check's own width must be a DYN-SAFE read width, so the operands
+ *   inside it were widened without a `dynFrom` deep copy severing aliasing;
+ * - the slot must be that width, or that width plus an undefined arm
+ *   (`keyedReadBindingSameWidth`);
+ * - at least one operand must be an index-signature read the `??` actually
+ *   widened — a `recordKeyGet` already AT dyn width over a shape with an
+ *   index signature. A short circuit with no such read in it is not this
+ *   rule's business and is left byte-for-byte alone;
+ * - the wrapper must be the `??`'s own validated exit, not a narrow bridge
+ *   and not an `as` cast: the inner node is a `nullish`/`ternary` already
+ *   typed dyn, which is the one shape lowerNullishCoalesce's dyn rung
+ *   builds, and a written cast's check is the program's own request.
+ *
+ * `SCRIPTC_LOCALSC2_OFF=1` ablates it. */
+function keyedReadLocalShortCircuitAlreadyWidened(L: Lowerer, init: IrExpr, slot: IrType): IrExpr | null {
+  if (process.env["SCRIPTC_LOCALSC2_OFF"] === "1") return null;
+  // Two shapes, and they are the SAME `??` at two chain lengths. A chain of
+  // two comes back WRAPPED in the validated exit (`a ?? b` typed `string`);
+  // a chain of three comes back BARE and dyn-typed, because the inner `??`
+  // is `nullishTestedByParent` and is handed over at dyn width, which makes
+  // the outer `??`'s left a dyn and sends it down lowerNullishCoalesce's
+  // dyn arm. Both are the same question about the same binding.
+  let inner = init;
+  if (init.kind === "dynCheck") {
+    if (init.narrowBridge === true) return null;
+    // The wrapper's own type must be the read's width, or that plus an
+    // undefined arm — the binding rule's second restriction, verbatim.
+    if (!keyedReadBindingSameWidth(L, slot, init.type)) return null;
+    inner = init.value;
+  }
+  if (inner.kind !== "nullish" && inner.kind !== "ternary") return null;
+  if (inner.type.kind !== "dyn") return null;
+  // The width no `dynFrom` deep-copies: the SLOT is the checker's type for
+  // the short circuit, so it is the width the operands were widened from.
+  const bare = slot.kind === "union" && L.armTag(slot.unionId, UNDEFINED_T) >= 0
+    ? L.stripUndefinedArm(slot)
+    : slot;
+  if (!isDynSafeReadWidth(L, bare)) return null;
+  if (!widenedKeyedReadInside(L, inner, 0)) return null;
+  return inner;
+}
+
+/** Is there an index-signature keyed read ALREADY at dyn width somewhere in
+ * this short circuit's operands? That is the "at least one operand must be a
+ * read this rule can actually serve" restriction, asked of the widened tree
+ * instead of the unwidened one — and it recurses, because a chain of three
+ * nests one short circuit inside another. Depth-bounded so a malformed tree
+ * cannot spin. */
+function widenedKeyedReadInside(L: Lowerer, e: IrExpr, depth: number): boolean {
+  if (depth > 8) return false;
+  if (e.kind === "recordKeyGet") {
+    return e.type.kind === "dyn" && !!L.shapes.get(e.shapeId)?.indexValue;
+  }
+  if (e.kind === "nullish") {
+    return widenedKeyedReadInside(L, e.left, depth + 1) || widenedKeyedReadInside(L, e.right, depth + 1);
+  }
+  if (e.kind === "ternary") {
+    return widenedKeyedReadInside(L, e.then, depth + 1) || widenedKeyedReadInside(L, e.else_, depth + 1);
+  }
+  return false;
+}
+
 /** The same binding at FILE scope, asked from the syntax. A global's type
  * is fixed before any body lowers, so the rule below cannot inspect a
  * lowered read; it asks the checker instead — an index-signature receiver,
@@ -4460,7 +4562,8 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     {
       const atWidth =
         keyedReadLocalAtDynWidth(L, init, type) ??
-        keyedReadLocalShortCircuitAtDynWidth(L, init, type);
+        keyedReadLocalShortCircuitAtDynWidth(L, init, type) ??
+        keyedReadLocalShortCircuitAlreadyWidened(L, init, type);
       if (atWidth) { init = atWidth; type = DYN; }
     }
     // A CONST whose slot is `classval:C` and whose initializer is a direct
