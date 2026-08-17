@@ -1,6 +1,0 @@
-expressions.ts:3:13 - error SC1090: object spread of computed sources (the field copies re-read the source — bind it to a const first) are not supported yet
-
-  2 | const t = n > 0 ? "pos" : "neg";
-  3 | const o = { ...{ a: 1 } };
-    |             ^~~~~~~~~~~
-  4 | const b = "a" in { a: 1 };
