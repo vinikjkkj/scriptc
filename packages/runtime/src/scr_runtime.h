@@ -3244,6 +3244,65 @@ typedef struct ScrJsval ScrJsval; /* opaque island cell (C11 repeat; the
  * result as an owned (+1) dyn value. `args` entries are BORROWED. */
 typedef ScrDyn *(*ScrDynThunk)(ScrClosure *clo, ScrDyn *const *args, size_t argc);
 
+/* A dyn-boxed function's CALL DESCRIPTOR parked in a scalar box: the
+ * thunk pointer, unowned (it is a compiler-emitted static function).
+ *
+ * The checked-dynamic func adapter needs two things from the dyn value
+ * it adapts — the closure and that closure's thunk — and it used to
+ * keep the whole ScrDyn to get them, in an SCR_BOX_OBJ box with a NULL
+ * trace.  ScrDyn carries no cycle header, so that edge was invisible to
+ * the collector and every ring through an adapted listener leaked (the
+ * emitter registry traces its entries' closures, the adapter's dyn did
+ * not, and one untraced reference is all trial deletion needs to call a
+ * dead ring externally referenced).  The adapter now holds the CLOSURE
+ * in an SCR_BOX_FUNC box — traced by construction — and the thunk here,
+ * where there is nothing to trace: a function pointer owns nothing and
+ * no cycle can pass through it.  SCR_BOX_F64 because every scalar box
+ * kind is ignored by the trace, the teardown and the release alike.
+ *
+ * memcpy in both directions rather than a cast: a function pointer and
+ * an object pointer need not interconvert, and the slot is a uint64_t. */
+static inline void scr_box_set_thunk(ScrBox *b, ScrDynThunk f) {
+  b->slot = 0;
+  memcpy(&b->slot, &f, sizeof f);
+}
+static inline ScrDynThunk scr_box_get_thunk(const ScrBox *b) {
+  ScrDynThunk f;
+  memcpy(&f, &b->slot, sizeof f);
+  return f;
+}
+
+/* The same pair as callable symbols: the LLVM backend emits calls, not
+ * C, so it cannot reach a static inline. */
+void scr_box_set_thunk_fn(ScrBox *b, ScrDynThunk f);
+ScrDynThunk scr_box_get_thunk_fn(const ScrBox *b);
+
+/* per-SITE attribution for the exit RC audit (SCR_RC_AUDIT only)
+ *
+ * The audit line counts live objects by TYPE, which is where every leak
+ * hunt in this tree has stalled: "36997 dyn value(s) live at exit" names
+ * no call site, so the next question has nowhere to go.
+ *
+ * Closures are the key that works. Every emitted closure body is its own
+ * C function, so a live count keyed by the closure's `fn` pointer IS a
+ * per-site count -- and the compiler knows each of those functions'
+ * source position. It emits the table below (opt in with
+ * SCRIPTC_RC_SITES=1 at build time; without it the TU is byte-identical
+ * to an uninstrumented build) and the audit resolves the pointers
+ * through it. A closure that leaks names the lambda that made it.
+ *
+ * The counting itself is unconditional under SCR_RC_AUDIT and an
+ * unresolved fn prints as a bare pointer rather than vanishing, because
+ * an instrument that silently drops what it cannot name reads as zero. */
+typedef struct ScrClosureSite {
+  const void *fn;   /* the emitted closure body */
+  const char *site; /* "file:line:col name" -- a static literal */
+} ScrClosureSite;
+void scr_closure_sites_install(const ScrClosureSite *tbl, size_t n);
+/* Print the live-closure-by-site and live-dyn-by-kind tables to stderr.
+ * Called by the exit audit when it is about to fail. */
+void scr_rc_audit_sites_report(void);
+
 /* Object member. Keys are malloc'd UTF-8 bytes (NUL-terminated for
  * convenience; key_len excludes the NUL) — duplicate keys were already
  * collapsed at parse time (later wins, like JS JSON.parse). */

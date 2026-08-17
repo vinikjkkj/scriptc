@@ -82,6 +82,11 @@ static void scr_rc_audit_at_exit(void) {
             strings, arrays, maps, boxes, closures, objects, unions, dyns,
             bytes, jsvals, bigints, keyobjs, hashes, hmacs, ciphers,
             abortsigs, abortctls);
+    /* The line above counts by TYPE, which is where a leak hunt stops:
+     * it names no call site. The tables below name one -- live closures
+     * by the source position of the lambda that made them, and live dyn
+     * values by kind. See scr_runtime.h's ScrClosureSite. */
+    scr_rc_audit_sites_report();
     _Exit(99);
   }
 }

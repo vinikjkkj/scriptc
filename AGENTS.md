@@ -45,6 +45,21 @@ so the differential corpus becomes a leak suite. The define is part of the
 build-cache key, so audited and plain binaries never share an entry, and
 leaving the variable unset reproduces the historical command line exactly.
 
+Two traps in reading that line. It counts by TYPE, so it names no call site
+— and it never runs at all after `process.exit()`, which skips every
+`atexit` handler, so a leaking program that ends that way exits 0 in
+silence. Measure on an entry that RETURNS.
+
+```bash
+SCRIPTC_RC_AUDIT=1 SCRIPTC_RC_SITES=1 scriptc build prog.ts   # + per-site attribution
+```
+
+`SCRIPTC_RC_SITES=1` makes the emitter plant a table mapping each emitted
+closure body to the source position it was written at; the audit then prints
+its live closures grouped by that site, plus the live dyn values split by
+kind. It is a switch and not an `#ifdef` so that with it off the emitted C
+is byte-identical to an uninstrumented build.
+
 Corpus programs are differential tests against Node: every program runs under Node and as a compiled native binary, and stdout, stderr, and exit codes must match byte-for-byte. A new feature lands with corpus programs that pin its behavior both ways.
 
 ## Where things live
