@@ -1,12 +1,3 @@
-options-record.ts:15:7 - error SC2020: 'AgentOptions' is part of the standard library types but has no scriptc lowering yet
-
-  14 | // LITERAL options object; a runtime options value cannot be walked.
-  15 | const agentOpts: http.AgentOptions = { maxSockets: 1 };
-     |       ^~~~~~~~~
-  16 | const agent = new http.Agent(agentOpts);
-
-  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
-
 options-record.ts:16:30 - error SC2020: 'new http.Agent with a non-literal options value' is part of the standard library types but has no scriptc lowering yet
 
   15 | const agentOpts: http.AgentOptions = { maxSockets: 1 };
