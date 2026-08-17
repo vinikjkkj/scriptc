@@ -7152,8 +7152,18 @@ let fullFillLoopProofs = 0;
  *   III. No hole is READ before the truncation.
  *       `a` is mentioned nowhere between the reserve and the loop, nowhere in
  *       the loop but as the receiver of those writes, and nowhere between the
- *       loop and the truncation (C1, C7, C9). After the truncation the array
- *       has length c and, by I, no hole at all.
+ *       loop and the truncation (C1, C7, C9). `a` is a `const` declared AT
+ *       the reserve, so nothing earlier can hold it, and it is not exported,
+ *       so nothing outside the module body can read it through the window.
+ *       After the truncation the array has length c and, by I, no hole at all.
+ *
+ * II's "the trip count is exactly N" needs one clause the straight-line scans
+ * cannot supply, and C10 is it: a function created elsewhere in the enclosing
+ * body and invoked from inside the loop -- a callback, anything across an
+ * `await` -- is invisible to a statement scan, and one that pushed to the
+ * bound's array would make the loop outrun the reserved length and turn the
+ * truncation into a GROW. So no function in the enclosing body may mention
+ * the bound's root at all.
  *
  * Anything at all outside that shape DECLINES and keeps both fences. A
  * decline costs a diagnostic that was already there; a wrong admit costs a
@@ -7283,6 +7293,39 @@ function mayMutateIdentifier(node: ts.Node, name: string): boolean {
   return false;
 }
 
+/** Does any FUNCTION inside `root` mention `name`?
+ *
+ * The statement scans in the proof below are straight-line: they see what the
+ * code between the reserve and the truncation does, and nothing else. A
+ * function created somewhere else in the same enclosing body and invoked from
+ * inside the loop -- a callback, or anything reached across an `await` --
+ * would not appear in them at all, and if it pushed to the array the bound is
+ * read from, the trip count would exceed the reserved length and the
+ * truncation would GROW. Asking that no function so much as mentions the
+ * bound's root is more than that argument needs and is free: zapo's
+ * `missingIndices` is pushed only by a plain `for` at the same level, and is
+ * captured by nothing. */
+function mentionedInsideAnyFunction(root: ts.Node, name: string): boolean {
+  let found = false;
+  const walk = (n: ts.Node): void => {
+    if (found) return;
+    if (ts.isFunctionLike(n)) {
+      if (mentionsIdentifier(n, name)) found = true;
+      return;
+    }
+    ts.forEachChild(n, walk);
+  };
+  ts.forEachChild(root, walk);
+  return found;
+}
+
+/** The nearest function body (or the source file) that encloses `n`. */
+function enclosingBodyOf(n: ts.Node): ts.Node {
+  let p: ts.Node | undefined = n.parent;
+  while (p !== undefined && !ts.isFunctionLike(p) && !ts.isSourceFile(p)) p = p.parent;
+  return p ?? n.getSourceFile();
+}
+
 /** The identifier whose value the bound depends on: `n` for `n`, `xs` for
  * `xs.length`, and "" for a numeric literal (nothing to protect). Anything
  * else has no root this proof can watch, and declines. */
@@ -7316,6 +7359,10 @@ function prefixFillTruncationOf(expr: ts.NewExpression): ts.ExpressionStatement 
   if ((list.flags & ts.NodeFlags.Const) === 0) return null;
   const stmt = list.parent;
   if (!ts.isVariableStatement(stmt)) return null;
+  // An EXPORTED binding is readable from outside this module body, and a
+  // circular import can read it while the body is still running -- which is
+  // exactly the window between the reserve and the truncation.
+  if (stmt.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) return null;
   const owner = stmt.parent as ts.Node & { statements?: readonly ts.Statement[] };
   const stmts = owner.statements;
   if (!stmts) return null;
@@ -7323,9 +7370,11 @@ function prefixFillTruncationOf(expr: ts.NewExpression): ts.ExpressionStatement 
   if (at < 0) return null;
   const aName = decl.name.text;
 
-  // C3 (first half): the bound must have a root this proof can watch.
+  // C3 (first half): the bound must have a root this proof can watch, and no
+  // function anywhere in the enclosing body may touch it (C10).
   const nRoot = boundRootOf(lenArg);
   if (nRoot === null || nRoot === aName) return null;
+  if (nRoot !== "" && mentionedInsideAnyFunction(enclosingBodyOf(stmt), nRoot)) return null;
 
   // C1 (second half): the first `for` after the reserve is the fill loop, and
   // nothing before it touches the array or the bound.
