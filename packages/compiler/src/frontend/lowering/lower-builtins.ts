@@ -1573,18 +1573,28 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     // — Node's zero-argument call, whose answer is "".
     if (argsNode === undefined) return { kind: "strLit", value: "", type: STRING, loc };
     const argsT = L.mapTypeOf(L.typeOf(argsNode));
-    if (argsT === null) return null;
-    if (isUnitType(argsT)) return { kind: "strLit", value: "", type: STRING, loc };
-    // A typed-array/Buffer argsArray rides the same runtime entry the
-    // spread form's bytes arm uses; every other shape must be the f64[]
-    // the helper reads, and lowerExprExpecting fences honestly if the
-    // value cannot become one.
-    if (argsT.kind === "bytes") {
+    if (argsT !== null && isUnitType(argsT)) return { kind: "strLit", value: "", type: STRING, loc };
+    // From here the construct is CLAIMED and the argument lowers on its own
+    // terms — the same contract the spread arm above keeps, and the reason
+    // the two arms must be spelled the same way. A typed-array/Buffer
+    // argsArray rides the runtime entry directly; everything else becomes
+    // the f64[] the helper reads, and if it cannot, lowerExprExpecting
+    // fences NAMING THE CONVERSION rather than leaving the apply fence's
+    // advice ("spell the call directly") standing over a direct spelling
+    // that would fence in exactly the same place.
+    //
+    // The gate here was `argsT.kind === "array"` for one revision and that
+    // was measured wrong on the site this rule exists for: protobufjs's
+    // accumulator is `var a = []` written through `a[s++] = o[…]` off
+    // another untyped table, so checkJs types it `any[]` and `mapTypeOf`
+    // does not answer `array` — the spread form lowers it and the apply
+    // form declined. Both spellings now take the same path.
+    if (argsT?.kind === "bytes") {
       const packed = L.lowerExpr(argsNode);
-      if (packed.type.kind !== "bytes") return null;
-      return { kind: "libCall", fn: "string.fromCharCode", args: [packed], type: STRING, loc };
+      if (packed.type.kind === "bytes") {
+        return { kind: "libCall", fn: "string.fromCharCode", args: [packed], type: STRING, loc };
+      }
     }
-    if (argsT.kind !== "array") return null;
     const packed = L.lowerExprExpecting(argsNode, arrayOf(F64));
     return { kind: "libCall", fn: "string.fromCharCode", args: [packed], type: STRING, loc };
   }
