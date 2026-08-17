@@ -2844,6 +2844,38 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     if (!inner) return null;
     return { kind: "promise", inner };
   }
+  // Iterable<T> — the structural iterable interface, whose ONLY member is
+  // [Symbol.iterator](). A value of this type can be iterated and nothing
+  // else: it publishes no length, no index, no method a consumer could call.
+  // The representation is therefore an ARRAY SNAPSHOT of the elements, which
+  // is what `[...it]` already builds; the producer side is where the snapshot
+  // is taken, and every producer admitted there is one whose drain runs no
+  // user code (arrays are the identity, and the map/set iterator methods
+  // drain in place — lowerMapIterDrainCall). Chosen over the `generator`
+  // kind deliberately: an Iterable may be iterated TWICE and an array gets
+  // that right where a one-shot pull handle would silently answer nothing
+  // the second time (lab case r1h: 202 on Node).
+  //
+  // The DIVERGENCE this buys, stated so nobody has to rediscover it: the
+  // elements are read where the value is converted, not lazily as the
+  // consumer pulls. A consumer that stops early still pays the full drain
+  // (work, never a wrong answer), and a consumer that could mutate the
+  // SOURCE mid-iteration would observe the snapshot rather than a live
+  // iterator — which needs a second binding to the source, because
+  // Iterable<T> itself exposes no mutator. That is the same stance the
+  // three immediate-drain contexts already take.
+  if (isStdlibInterface("Iterable")) {
+    const iterArgs = checker.getTypeArguments(widened as ts.TypeReference);
+    if (iterArgs.length === 1 && iterArgs[0]) {
+      const el = mapType(iterArgs[0], ctx);
+      if (!el) {
+        mapTrace(`ITERABLE ${checker.typeToString(type).slice(0, 46)}`);
+        return null;
+      }
+      return arrayOf(el);
+    }
+    return null;
+  }
   // Generator<T, TReturn, TNext> (and the lib's IterableIterator<T, ...>,
   // the older annotation spelling — Generator extends it): the sync
   // generator kind. Channel normalization keeps the runtime honest:
