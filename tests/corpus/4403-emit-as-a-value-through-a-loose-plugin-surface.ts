@@ -53,9 +53,17 @@ class Client extends EventEmitter {
         return super.on(event, listener);
     }
 
+    // The forwarding arm takes `string`, not `string | symbol`: the corpus
+    // compiles against scriptc's FALLBACK node declarations, whose
+    // `EventEmitter.emit` is `(event: string, ...)`, so `super.emit(event, …)`
+    // with a `string | symbol` parameter is a type error there and compiles
+    // only against the real @types/node. The LOOSE SLOT below keeps
+    // `string | symbol` -- it is this file's own interface, it is what the
+    // dispatcher reads, and it is what makes the symbol call at the bottom
+    // exercise the union-name arm.
     emit<K extends keyof ClientEvents>(event: K, ...args: Parameters<ClientEvents[K]>): boolean;
-    emit(event: string | symbol, ...args: unknown[]): boolean;
-    emit(event: string | symbol, ...args: unknown[]): boolean {
+    emit(event: string, ...args: unknown[]): boolean;
+    emit(event: string, ...args: unknown[]): boolean {
         return super.emit(event, ...args);
     }
 }
