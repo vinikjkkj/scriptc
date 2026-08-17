@@ -98,6 +98,11 @@ export function computeTraced(mod: IrModule): { shapes: Set<string>; unions: Set
     switch (t.kind) {
       case "func":
       case "promise":
+      // A dyn value is a collector node with its own header — emitter.ts's
+      // row has the story. (This copy is also still missing that file's
+      // abortSignal/abortController rows; that divergence is pre-existing
+      // and out of this change's scope.)
+      case "dyn":
         return true;
       case "object":
         return tracedShapes.has(`object:${t.className}`);
@@ -290,6 +295,11 @@ export function traceAdapter(host: ShapeHost, t: IrType): string | null {
       // is an arbitrary thrown value) — emit-shapes.ts's row.
       host.declare(`declare void @scr_promise_trace_v(ptr, ptr, ptr)`);
       return "@scr_promise_trace_v";
+    // Unconditionally cycle-capable, and the row that was missing entirely
+    // — emit-shapes.ts's `dyn` row has the whole story.
+    case "dyn":
+      host.declare(`declare void @scr_dyn_trace_v(ptr, ptr, ptr)`);
+      return "@scr_dyn_trace_v";
     case "union":
       if (!host.tracedUnions.has(t.unionId)) return null;
       host.declare(`declare void @scr_union_trace_v(ptr, ptr, ptr)`);

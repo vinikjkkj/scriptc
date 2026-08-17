@@ -187,7 +187,12 @@ void scr_library_bytes_out(ScrBytes *b, const uint8_t **out, size_t *out_len);
  * function (frees the object WITHOUT releasing traced children), and the
  * trial-deletion bookkeeping (color + candidate-root buffer state). Types
  * that can never be in a cycle — strings above all, plus arrays of scalar/
- * string/bytes elements, dyn trees, and shapes whose fields are all acyclic
+ * string/bytes elements, and shapes whose fields are all acyclic
+ * (dyn values used to be on this list and are not: the checked-dynamic
+ * tree is how a compiled program represents a JS-shaped object graph, its
+ * members/[[Prototype]] links/accessor tables all point at further dyn
+ * values, so one back-link makes a ring -- and every such ring was
+ * uncollectable for as long as the node carried no header)
  * — keep the lean 1-word `rc` header and pay nothing. Arrays and maps are
  * cycle-capable exactly when their element/value type is (a record element
  * can point back at the array holding it).
@@ -3096,11 +3101,15 @@ typedef enum {
    * layout is needed for. What the box IS for is CARRYING the value
    * across a boundary and handing it back narrowed.
    *
-   * The dyn→instance edge is NOT visible to the cycle collector (the
-   * dyn→closure stance — ScrDyn has no trace header): trial deletion
-   * treats it as an external root, so nothing dangles, and a cycle
-   * THROUGH a dyn-boxed instance is merely never collected (documented
-   * divergence). A BORROWED pointer was the alternative and is unsound
+   * The dyn→instance edge is NOT visible to the cycle collector, and it
+   * is the ONE dyn edge that stayed that way when ScrDyn became a node:
+   * whether a shape carries a cycle header is the emitter's per-shape
+   * grading, most shapes are graded acyclic and plain calloc'd, and no
+   * runtime test distinguishes the two — so visiting one would read and
+   * write the 32 bytes before the allocation. Trial deletion treats it as
+   * an external root, so nothing dangles, and a cycle THROUGH a dyn-boxed
+   * instance is merely never collected (documented divergence, and the
+   * arming case for the exit audit). A BORROWED pointer was the alternative and is unsound
    * here: a dyn value outlives no particular scope — it can be stored in
    * a global, returned, or captured — so the box owns a strong
    * reference.
@@ -3407,10 +3416,12 @@ struct ScrDyn {
     /* SCR_DYN_FUNC: the boxed closure (owned) + its call descriptor. `sig`,
      * `name` and `src` are static compiler-emitted literals (never freed);
      * name may be NULL (anonymous — inspect prints [Function (anonymous)]).
-     * The dyn→closure edge is NOT visible to the cycle collector (ScrDyn
-     * has no trace header): trial deletion treats it as an external root,
-     * so nothing dangles — a cycle THROUGH a dyn-boxed function is merely
-     * never collected (documented divergence).
+     * The dyn→closure edge IS visible to the cycle collector: ScrDyn now
+     * carries a trace header and scr_dyn_trace visits this closure, so a
+     * cycle through a dyn-boxed function collects. It did not until
+     * `scr_dyn_trace` existed, and the "documented divergence" that stood
+     * here was measured at 8020 closures and 36990 dyn values live at
+     * exit in one program.
      *
      * `src` is what Function.prototype.toString answers — JS returns the
      * function's SOURCE TEXT, exactly as written, and `[native code]` is
@@ -3457,11 +3468,23 @@ struct ScrDyn {
 };
 
 static inline ScrDyn *scr_dyn_retain(ScrDyn *d) {
-  if (d->rc != SIZE_MAX) d->rc++;
+  if (d->rc != SIZE_MAX) {
+    d->rc++;
+    /* A dyn value carries a cycle header (scr_json.c): a re-retained
+     * candidate is certainly not garbage. Guarded by the immortality test
+     * above because the interned `undefined` has no header at all. */
+    scr_cyc_mark_live(d);
+  }
   return d;
 }
 
 void scr_dyn_release(ScrDyn *d); /* releases the tree recursively; NULL-tolerant */
+
+/* ScrDyn's trace entry point, for containers and emitted shapes that hold
+ * a dyn-typed field/element/value (the `_v` shape every collector-visible
+ * edge is stored as). The traced children are other dyn values and a FUNC
+ * dyn's closure; see the contract at scr_dyn_alloc. */
+void scr_dyn_trace_v(void *o, ScrTraceVisit visit, void *ctx);
 
 /* RFC 8259 parse of a UTF-8 string. Borrows text; returns +1, or throws a
  * catchable Node-flavored SyntaxError string and returns NULL (callers are
