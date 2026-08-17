@@ -89,7 +89,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import ts from "typescript5";
 import { cjsLexedExportsOf } from "./cjs-lexer.js";
-import { tsgoPath } from "./shared.js";
+import { nativePath, pathFileUrl, tsgoPath } from "./shared.js";
 
 export type EmbeddedFormat = "esm" | "cjs" | "json";
 
@@ -607,8 +607,8 @@ export function probeNodeImportRefusal(
         code: "ERR_PACKAGE_PATH_NOT_EXPORTED",
         message:
           subpath === "."
-            ? `No "exports" main defined in ${join(pkgDir, "package.json")} imported from ${importer}`
-            : `Package subpath '${subpath}' is not defined by "exports" in ${join(pkgDir, "package.json")} imported from ${importer}`,
+            ? `No "exports" main defined in ${nativePath(join(pkgDir, "package.json"))} imported from ${nativePath(importer)}`
+            : `Package subpath '${subpath}' is not defined by "exports" in ${nativePath(join(pkgDir, "package.json"))} imported from ${nativePath(importer)}`,
       };
     }
     const file = join(pkgDir, target);
@@ -616,8 +616,8 @@ export function probeNodeImportRefusal(
     if (host.isDirectory(file)) return null; // ERR_UNSUPPORTED_DIR_IMPORT territory — conservative
     return {
       code: "ERR_MODULE_NOT_FOUND",
-      message: `Cannot find module '${file}' imported from ${importer}`,
-      url: `file://${file}`,
+      message: `Cannot find module '${nativePath(file)}' imported from ${nativePath(importer)}`,
+      url: pathFileUrl(file),
     };
   };
   // Node's PACKAGE_SELF_RESOLVE first: the nearest package scope above the
@@ -645,7 +645,7 @@ export function probeNodeImportRefusal(
     if (parent === dir) {
       return {
         code: "ERR_MODULE_NOT_FOUND",
-        message: `Cannot find package '${name}' imported from ${importer}`,
+        message: `Cannot find package '${name}' imported from ${nativePath(importer)}`,
       };
     }
     dir = parent;
@@ -694,7 +694,7 @@ export function probeNodeRequireRefusal(
     dir = parent;
   }
   return {
-    message: `Cannot find module '${specifier}'\nRequire stack:\n- ${importer}`,
+    message: `Cannot find module '${specifier}'\nRequire stack:\n- ${nativePath(importer)}`,
   };
 }
 
@@ -791,7 +791,7 @@ export class NpmGraphBuilder {
       const ext = extname(key);
       if (ext !== ".js" && ext !== ".mjs" && ext !== ".cjs" && ext !== ".json") {
         if (!this.modules.has(key)) {
-          const msg = `Unknown file extension "${ext}" for ${key}`;
+          const msg = `Unknown file extension "${ext}" for ${nativePath(key)}`;
           this.modules.set(key, {
             key,
             source:
@@ -1028,10 +1028,10 @@ export class NpmGraphBuilder {
     let url: string | null = null;
     if (spec.startsWith("./") || spec.startsWith("../") || spec.startsWith("/")) {
       const abs = spec.startsWith("/") ? spec : resolve(dirname(from), spec);
-      msg = `Cannot find module '${abs}' imported from ${from}`;
-      url = `file://${abs}`;
+      msg = `Cannot find module '${nativePath(abs)}' imported from ${nativePath(from)}`;
+      url = pathFileUrl(abs);
     } else {
-      msg = `Cannot find package '${packageNameOf(spec)}' imported from ${from}`;
+      msg = `Cannot find package '${packageNameOf(spec)}' imported from ${nativePath(from)}`;
     }
     const props =
       `{code:"ERR_MODULE_NOT_FOUND"` + (url === null ? `}` : `,url:${JSON.stringify(url)}}`);
@@ -1050,7 +1050,7 @@ export class NpmGraphBuilder {
    * for a throwing module, so every retry throws again, like Node. */
   static nativeAddonStub(key: string): string {
     const msg =
-      `Cannot load native addon '${key}': scriptc binaries cannot load .node addons ` +
+      `Cannot load native addon '${nativePath(key)}': scriptc binaries cannot load .node addons ` +
       `(the island has no process.dlopen)`;
     return `throw Object.assign(new Error(${JSON.stringify(msg)}),{code:"ERR_DLOPEN_FAILED"});\n`;
   }

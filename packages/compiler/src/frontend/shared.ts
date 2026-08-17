@@ -16,6 +16,41 @@ export function tsgoPath(path: string, platform: NodeJS.Platform = process.platf
   return platform === "win32" ? path.replaceAll("\\", "/") : path;
 }
 
+/** The inverse of tsgoPath, for USER-FACING TEXT only.
+ *
+ * Module keys are slash-normalized (tsgoPath) because they reach the
+ * emitted TU and must stay byte-deterministic — that part is correct and
+ * must not change. But Node prints paths with the OS separator, so a key
+ * interpolated VERBATIM into an error message diverges from Node on
+ * win32 by exactly the separators ("G:/a/b.js" where Node says
+ * "G:\a\b.js"). Every message that quotes a path renders it through here;
+ * the keys themselves stay "/". Safe on already-native input: replacing
+ * "/" with "\" leaves existing backslashes alone.
+ *
+ * POSIX is the identity — backslashes are valid filename characters
+ * there, exactly as in tsgoPath. */
+export function nativePath(path: string, platform: NodeJS.Platform = process.platform): string {
+  return platform === "win32" ? path.replaceAll("/", "\\") : path;
+}
+
+/** A path as Node's pathToFileURL().href renders it — the `url` property
+ * of an ERR_MODULE_NOT_FOUND. Note the THREE slashes on win32:
+ * "G:/a/b.js" is "file:///G:/a/b.js", not "file://G:\a\b.js". Accepts
+ * either separator; the URL form is always "/"-separated.
+ *
+ * The percent-encoding covers the characters Node escapes in a path
+ * segment that would otherwise re-parse as URL syntax. Node also escapes
+ * a literal backslash on POSIX; that is what the platform-guarded
+ * tsgoPath call below leaves alone, so it is encoded here too. */
+export function pathFileUrl(path: string, platform: NodeJS.Platform = process.platform): string {
+  const slashed = tsgoPath(path, platform);
+  const encoded = slashed.replace(/[%?#\\]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  // POSIX absolute paths already begin with "/", so "file://" + "/a" is
+  // the canonical three-slash form; win32 keys begin with a drive letter
+  // and need the third slash spelled out.
+  return platform === "win32" ? `file:///${encoded}` : `file://${encoded}`;
+}
+
 /** Path of the shipped ambient declarations — the always-shipped CORE
  * (comptime/__island_eval, setTimeout). Part of EVERY program scriptc
  * builds, the project-world preflight program included. */
