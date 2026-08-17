@@ -7,7 +7,7 @@ maps.ts:8:7 - error SC2009: values of type 'Map<boolean, string>' cannot be comp
 
   hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
 
-maps.ts:8:16 - error SC1090: Map keys of type 'boolean' (Map keys must be string or number) is not supported yet
+maps.ts:8:16 - error SC1090: Map keys of type 'boolean' (Map keys must be a string, a number, or a CLASS INSTANCE - those key by reference identity. A record/interface type cannot: a width coercion copies it, and a copy would miss its own entry) is not supported yet
 
   7 | // exactly those) — the new-site diagnostic names the key type.
   8 | const byFlag = new Map<boolean, string>();
@@ -30,46 +30,12 @@ maps.ts:11:18 - error SC1090: Map values of type '() => void' (Map values must b
      |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   12 | 
 
-maps.ts:14:7 - error SC2009: values of type 'Map<string, Map<string, number>>' cannot be compiled: the Map shape is supported, but 'Map<string, number>' values have no Map slot yet (functions, promises, and nested Maps stay out)
-
-  13 | // ... and nested Maps (no maps of maps this round).
-  14 | const nested = new Map<string, Map<string, number>>();
-     |       ^~~~~~
-  15 | 
-
-  hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
-
-maps.ts:14:16 - error SC1090: Map values of type 'Map<string, number>' (Map values must be number, string, boolean, records, class instances, arrays, promises, or unions of those — not functions, Maps, 'unknown', or 'any') is not supported yet
-
-  13 | // ... and nested Maps (no maps of maps this round).
-  14 | const nested = new Map<string, Map<string, number>>();
-     |                ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  15 | 
-
 maps.ts:17:17 - error SC2009: values of type 'Map<boolean, number>' cannot be compiled: the Map shape is supported, but keys are limited to numbers and strings — 'boolean' is outside that domain
 
   16 | // Map-typed slots elsewhere report the ordinary unsupported-type diagnostic.
   17 | function useBad(m: Map<boolean, number>): number {
      |                 ^
   18 |   return m.size;
-
-  hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
-
-maps.ts:22:10 - error SC2009: values of type 'Map<string, number> | undefined' cannot be compiled: the union shape is supported, but 'Map<string, number>' arms have no home in a compiled union yet (no runtime narrowing test exists against sibling arms)
-
-  21 | // Maps as union arms have no narrowing test — rejected like function arms.
-  22 | function maybeMap(cond: boolean): Map<string, number> | undefined {
-     |          ^~~~~~~~
-  23 |   return undefined;
-
-  hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
-
-maps.ts:27:7 - error SC2009: values of type 'Map<string, number>[]' cannot be compiled: the array shape is supported, but 'Map<string, number>' elements have no array representation yet
-
-  26 | // Maps as array elements: ScrArr has no map element kind.
-  27 | const rows: Map<string, number>[] = [];
-     |       ^~~~
-  28 | 
 
   hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
 
@@ -95,12 +61,3 @@ maps.ts:39:1 - error SC2004: uses of 'useBad' inherit the blocker on its declara
   40 | maybeMap(true);
 
   hint: the declaration of 'useBad' did not compile — fix the diagnostic reported there and these sites clear with it
-
-maps.ts:40:1 - error SC2004: uses of 'maybeMap' inherit the blocker on its declaration
-
-  39 | useBad(new Map<boolean, number>());
-  40 | maybeMap(true);
-     | ^~~~~~~~
-  41 | 
-
-  hint: the declaration of 'maybeMap' did not compile — fix the diagnostic reported there and these sites clear with it

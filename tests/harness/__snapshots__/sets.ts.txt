@@ -23,46 +23,12 @@ sets.ts:12:16 - error SC1090: Set elements of type 'boolean' (Set elements must 
      |                ^~~~~~~~~~~~~~~~~~
   13 | 
 
-sets.ts:16:7 - error SC2009: values of type 'Set<{ id: number; }>' cannot be compiled: the Set shape is supported, but elements are limited to numbers and strings — '{ id: number; }' is outside that domain
-
-  15 | // fenced for now.
-  16 | const recs = new Set<{ id: number }>();
-     |       ^~~~
-  17 | 
-
-  hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
-
-sets.ts:16:14 - error SC1090: Set elements of type '{ id: number; }' (Set elements must be string or number — Map's key kinds — or a server handle, which stores under reference identity) is not supported yet
-
-  15 | // fenced for now.
-  16 | const recs = new Set<{ id: number }>();
-     |              ^~~~~~~~~~~~~~~~~~~~~~~~~
-  17 | 
-
 sets.ts:19:17 - error SC2009: values of type 'Set<boolean>' cannot be compiled: the Set shape is supported, but elements are limited to numbers and strings — 'boolean' is outside that domain
 
   18 | // Set-typed slots elsewhere report the ordinary unsupported-type diagnostic.
   19 | function useBad(s: Set<boolean>): number {
      |                 ^
   20 |   return s.size;
-
-  hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
-
-sets.ts:24:10 - error SC2009: values of type 'Set<string> | undefined' cannot be compiled: the union shape is supported, but 'Set<string>' arms have no home in a compiled union yet (no runtime narrowing test exists against sibling arms)
-
-  23 | // Sets as union arms have no narrowing test — rejected like Map arms.
-  24 | function maybeSet(cond: boolean): Set<string> | undefined {
-     |          ^~~~~~~~
-  25 |   return undefined;
-
-  hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
-
-sets.ts:29:7 - error SC2009: values of type 'Set<string>[]' cannot be compiled: the array shape is supported, but 'Set<string>' elements have no array representation yet
-
-  28 | // Sets as array elements: ScrArr has no set element kind.
-  29 | const rows: Set<string>[] = [];
-     |       ^~~~
-  30 | 
 
   hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
 
@@ -88,12 +54,3 @@ sets.ts:41:1 - error SC2004: uses of 'useBad' inherit the blocker on its declara
   42 | maybeSet(true);
 
   hint: the declaration of 'useBad' did not compile — fix the diagnostic reported there and these sites clear with it
-
-sets.ts:42:1 - error SC2004: uses of 'maybeSet' inherit the blocker on its declaration
-
-  41 | useBad(new Set<boolean>());
-  42 | maybeSet(true);
-     | ^~~~~~~~
-  43 | 
-
-  hint: the declaration of 'maybeSet' did not compile — fix the diagnostic reported there and these sites clear with it

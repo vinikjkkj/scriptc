@@ -1,4 +1,4 @@
-dynamic-import/main.ts:13:9 - error SC1090: dynamic import() of computed specifiers (the module graph embeds at build time — the specifier must be a string literal) are not supported yet
+dynamic-import/main.ts:13:9 - error SC1090: dynamic import() of computed specifiers (the module graph embeds at build time — the specifier must be a string literal or a constant whose type pins one) are not supported yet
 
   12 |   const name = "greeter" + tag();
   13 |   await import(name);

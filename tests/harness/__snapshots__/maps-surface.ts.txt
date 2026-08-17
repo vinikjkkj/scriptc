@@ -1,12 +1,3 @@
-maps-surface.ts:9:16 - error SC2020: 'new Map(entries)' is part of the standard library types but has no scriptc lowering yet
-
-   8 | // other seeds (another Map, general iterables) stay fenced.
-   9 | const seeded = new Map(m);
-     |                ^~~~~~~~~~
-  10 | 
-
-  hint: supported seeds: an array literal of [key, value] pair literals, or a [K, V][]-typed tuple-array value — construct the Map empty and set() each entry otherwise
-
 maps-surface.ts:13:7 - error SC2020: 'MapIterator<string>' is part of the standard library types but has no scriptc lowering yet
 
   12 | // on the spot ([...m.keys()]); a stored iterator would need the protocol.
@@ -23,7 +14,7 @@ maps-surface.ts:13:12 - error SC2020: '.keys() outside an immediate array spread
      |            ^~~~~~~~
   14 | const vs = m.values();
 
-  hint: iterator objects have no lowering — drain it into an array where it is made: [...m.keys()]
+  hint: iterator objects have no lowering — drain it into an array where it is made ([...m.keys()]), or step a fresh one once (m.keys().next().value)
 
 maps-surface.ts:14:7 - error SC2020: 'MapIterator<number>' is part of the standard library types but has no scriptc lowering yet
 
@@ -41,7 +32,7 @@ maps-surface.ts:14:12 - error SC2020: '.values() outside an immediate array spre
      |            ^~~~~~~~~~
   15 | const es = m.entries();
 
-  hint: iterator objects have no lowering — drain it into an array where it is made: [...m.values()]
+  hint: iterator objects have no lowering — drain it into an array where it is made ([...m.values()]), or step a fresh one once (m.values().next().value)
 
 maps-surface.ts:15:7 - error SC2020: 'MapIterator<[string, number]>' is part of the standard library types but has no scriptc lowering yet
 
@@ -59,7 +50,7 @@ maps-surface.ts:15:12 - error SC2020: '.entries() outside an immediate array spr
      |            ^~~~~~~~~~~
   16 | 
 
-  hint: iterator objects have no lowering — drain it into an array where it is made: [...m.entries()]
+  hint: iterator objects have no lowering — drain it into an array where it is made ([...m.entries()]), or step a fresh one once (m.entries().next().value)
 
 maps-surface.ts:20:17 - error SC1090: spreading 'Map<string, number>' into a '[string, number][]' literal (only a same-element-type array spreads) is not supported yet
 
@@ -77,11 +68,9 @@ maps-surface.ts:23:1 - error SC2020: 'chained Map method calls' is part of the s
 
   hint: the lowered set() produces no value — call each set(k, v) as its own statement
 
-maps-surface.ts:26:11 - error SC2011: values of type '(v: number, k: string, theMap: Map<string, number>) => void' have no static representation but run in the embedded dynamic engine, which this build does not include
+maps-surface.ts:26:11 - error SC2001: values of type '(v: number, k: string, theMap: Map<string, number>) => void' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
 
   25 | // The forEach callback receives (value, key) — no third map parameter.
   26 | m.forEach((v, k, theMap) => console.log(k, v));
      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   27 | 
-
-  hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)

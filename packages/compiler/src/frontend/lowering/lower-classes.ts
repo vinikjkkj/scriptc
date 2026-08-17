@@ -24,6 +24,16 @@ import { lowerHttpAgentNew, lowerHttpServerNew } from "./lower-server.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, fenceEarlyAliasUse, fenceEarlyNsMemberRef, nsMemberIdentOf, nsUndefRead } from "./lower-namespaces.js";
 import { mixinResultBindingClassOf, type MixinInstanceInfo } from "./lower-mixins.js";
 
+/** The weak collections' constructor hints. Shared: the stdlib `new`
+ * chokepoint reads them out of its ctorHints table, and the Map branch —
+ * which claims the WeakMap symbol so a class-instance-keyed WeakMap can
+ * ride the identity Map — routes the non-riding shapes here rather than
+ * report them as Map key errors. */
+const WEAK_COLLECTION_HINTS = {
+  WeakMap: "weak collections observe garbage collection, which reference counting never exposes — a strong Map behaves identically in-language: use Map",
+  WeakSet: "weak collections observe garbage collection, which reference counting never exposes — a strong Set behaves identically in-language: use Set",
+} as const;
+
 export interface ClassInfo {
   def: IrClassDef;
   /** ALL fields visible on instances — the inherited ones included — for
@@ -6130,6 +6140,22 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         ) {
           return { kind: "dynObjLit", type: DYN, loc };
         }
+        // A WeakMap that does NOT ride the identity-keyed Map (types.ts's
+        // stance: only a CLASS INSTANCE key does) owes the weak-collection
+        // fence, not Map's key report. The Map branch claims the WeakMap
+        // symbol, so `new WeakMap()` (WeakKey, any) and
+        // `new WeakMap<object, V>()` used to walk into the key message
+        // below — which names a type the program never wrote and hands out
+        // advice a WeakMap cannot take ("use a string or number key" is
+        // impossible for a container whose keys must be objects). The
+        // stdlib constructor chokepoint already carries the honest hint;
+        // route there instead.
+        if (symbol?.name === "WeakMap") {
+          const weakKeyIr = targs[0] ? L.mapTypeOf(targs[0]) : null;
+          if (!targs[0] || !weakKeyIr || !isSupportedMapKey(weakKeyIr)) {
+            L.noLowering("new WeakMap", expr, WEAK_COLLECTION_HINTS.WeakMap, symbol);
+          }
+        }
         const keyIr = targs[0] ? L.mapTypeOf(targs[0]) : null;
         if (targs[0] && (!keyIr || !isSupportedMapKey(keyIr))) {
           L.unsupported(
@@ -6424,8 +6450,8 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           String: "boxed wrapper objects have no lowering — use the string primitive (the box is only distinguishable via typeof/identity, which nothing here can honor)",
           Number: "boxed wrapper objects have no lowering — use the number primitive",
           Boolean: "boxed wrapper objects have no lowering — use the boolean primitive",
-          WeakMap: "weak collections observe garbage collection, which reference counting never exposes — a strong Map behaves identically in-language: use Map",
-          WeakSet: "weak collections observe garbage collection, which reference counting never exposes — a strong Set behaves identically in-language: use Set",
+          WeakMap: WEAK_COLLECTION_HINTS.WeakMap,
+          WeakSet: WEAK_COLLECTION_HINTS.WeakSet,
           WeakRef: "deref()-after-collect exposes GC timing — genuinely dynamic; hold a strong reference instead",
           FinalizationRegistry: "finalization callbacks expose GC timing — genuinely dynamic; release resources explicitly instead",
           SharedArrayBuffer: "no shared-memory threads exist in a compiled program — Uint8Array is the byte storage",

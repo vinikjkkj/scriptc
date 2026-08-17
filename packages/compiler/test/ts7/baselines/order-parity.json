@@ -7993,6 +7993,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4381-record-into-union-arm-zero-overlap.ts": {
+   "order": [
+    "<repo>/tests/corpus/4381-record-into-union-arm-zero-overlap.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/4391-keyed-read-inside-the-authors-own-miss-handler.ts": {
    "order": [
     "<repo>/tests/corpus/4391-keyed-read-inside-the-authors-own-miss-handler.ts"
@@ -8002,6 +8008,18 @@
   "<repo>/tests/corpus/4392-keyed-read-argument-through-a-widening-cast.ts": {
    "order": [
     "<repo>/tests/corpus/4392-keyed-read-argument-through-a-widening-cast.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4411-object-literal-spread-and-in-over-a-literal.ts": {
+   "order": [
+    "<repo>/tests/corpus/4411-object-literal-spread-and-in-over-a-literal.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4412-a-brand-only-intersection-is-a-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/4412-a-brand-only-intersection-is-a-value.ts"
    ],
    "diags": []
   },
@@ -9006,6 +9024,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/computed-key-and-union-spread-two-decliners.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/computed-key-and-union-spread-two-decliners.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/create-require.ts": {
    "order": [
     "<repo>/tests/diagnostics/create-require.ts"
@@ -9175,12 +9199,6 @@
   "<repo>/tests/diagnostics/exceptions.ts": {
    "order": [
     "<repo>/tests/diagnostics/exceptions.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/expressions.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/expressions.ts"
    ],
    "diags": []
   },
@@ -9442,12 +9460,6 @@
   "<repo>/tests/diagnostics/inheritance.ts": {
    "order": [
     "<repo>/tests/diagnostics/inheritance.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/intersection-values.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/intersection-values.ts"
    ],
    "diags": []
   },
@@ -9853,12 +9865,6 @@
   "<repo>/tests/diagnostics/private-members.ts": {
    "order": [
     "<repo>/tests/diagnostics/private-members.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/promise-all-fences.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/promise-all-fences.ts"
    ],
    "diags": []
   },
