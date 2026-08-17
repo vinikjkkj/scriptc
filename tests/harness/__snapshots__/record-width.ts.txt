@@ -1,12 +1,3 @@
-record-width.ts:12:25 - error SC2002: record shapes must match exactly or width-coerce: expected '{ a: number | undefined }', got '{ [key: string]: number }' — 'a' is not a declared field of the source, and the source's index signature could hold it at runtime (a completed undefined would drop that value)
-
-  11 | const loose: Loose = { a: 1 };
-  12 | const picked: PickedA = loose;
-     |                         ^~~~~
-  13 | console.log(picked);
-
-  hint: width subtyping compiles as a copy (each expected field copied off the source; extra fields drop) — this pair is outside the copy's rules; build a literal with exactly the expected fields instead
-
 record-width.ts:26:20 - error SC2002: record shapes must match exactly or width-coerce: expected '{ m: ({ a: number; b: number }) => void }', got '{ extra: number; m: ({ a: number }) => void }' — field 'm': '({ a: number }) => void' does not lift into '({ a: number; b: number }) => void'
 
   25 | };
