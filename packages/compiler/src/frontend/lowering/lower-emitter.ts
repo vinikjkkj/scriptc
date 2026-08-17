@@ -165,28 +165,19 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
    * position past what a listener declared is the unsound direction — the
    * listener would be handed a shape it never agreed to read — so it keeps
    * the conflict. */
-  /** True when a dyn value can be extracted into `t` — the same predicate
-   * `x as T` and coerceInto's automatic dyn bridge already apply, so a
-   * position this admits is one the emit site will actually build. */
-  const checkable = (t: IrType): boolean =>
-    canDynCheckTo(t, (id) => L.shapes.get(id), (id) => L.unions.get(id));
   const unifyPos = (recorded: IrType, incoming: IrType, unionSide: "recorded" | "incoming"): IrType | null => {
     if (typeEquals(recorded, incoming)) return recorded;
     if (unionSide === "recorded" && isArmOf(recorded, incoming)) return recorded;
     if (unionSide === "incoming" && isArmOf(incoming, recorded)) return incoming;
-    // A DYN position against a DECLARED one. The declared side is a
-    // LISTENER's parameter type — the type the value is actually read at —
-    // and the dyn side is an emit whose argument came out of an untyped
-    // emitter's callback. Unifying to the listener's type is not a widening
-    // of what anyone may assume: the emit site converts through the CHECKED
-    // extraction (coerceInto's dynCheck, the same machinery `x as T` uses),
-    // so a payload that does not match throws a catchable TypeError instead
-    // of being peeked through the wrong struct. Demanding typeEquals here
-    // conflicted the event instead, which fences EVERY site that touches it
-    // — including the library's own constructor, for no reason but that a
-    // consumer wrote a listener. Only for targets the extraction can check.
-    if (unionSide === "recorded" && incoming.kind === "dyn" && recorded.kind !== "dyn" && checkable(recorded)) return recorded;
-    if (unionSide === "incoming" && recorded.kind === "dyn" && incoming.kind !== "dyn" && checkable(incoming)) return incoming;
+    // A DYN position against a DECLARED one was unified here for a while —
+    // the emit converts through the checked extraction, so it would have been
+    // sound. It is REMOVED because it fired nowhere: not in any corpus entry,
+    // not in any repro of mine, and not once in zapo's 46 225 statements
+    // under the [unify] probe. A rule with no exercise is a rule nobody can
+    // say is right, and this file has enough of those already. The shape that
+    // looked like it needed it — `{node, frame}` out of an untyped emitter's
+    // callback — is a RECORD whose FIELDS are dyn, not a dyn position, and it
+    // is answered by the emit-payload shape instead.
     return null;
   };
   const mergeEmit = (name: string, args: (IrType | null)[]): void => {
@@ -1088,6 +1079,9 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
         sig !== undefined && !sig.fromEmit && !sig.dynListener &&
         args.length - 1 > tuple.length &&
         args.slice(1 + tuple.length).every((a) => inertEmitArg(L, a));
+      if (droppable && process.env["SCRIPTC_EMIT_WHY"] !== undefined) {
+        console.error(`[drop] ${loc.file}@${loc.start} '${name}': ${args.length - 1} args, tuple ${tuple.length}`);
+      }
       if (!droppable) {
         L.noLowering(
           `emit('${name}') with ${args.length - 1} arguments where the event's tuple has ${tuple.length}`,
@@ -1844,16 +1838,45 @@ function boundEmitKeySet(L: Lowerer, ctxTs: ts.Type): { keys: string[]; map: ts.
  * one carrying `<K extends keyof M>`. First arm that has it wins — a class
  * declares at most one event map, and the forwarding arm has no type
  * parameter at all, so there is nothing to choose between. */
-function emitterClassKeySet(L: Lowerer, member: ts.Expression): { keys: string[]; map: ts.Type } | null {
-  let t: ts.Type;
-  try {
-    t = L.typeOf(member);
-  } catch {
+function emitterClassKeySet(
+  L: Lowerer,
+  member: ts.Expression,
+  info: ClassInfo,
+): { keys: string[]; map: ts.Type } | null {
+  const fromType = ((): { keys: string[]; map: ts.Type } | null => {
+    let t: ts.Type;
+    try {
+      t = L.typeOf(member);
+    } catch {
+      return null;
+    }
+    for (const sig of L.checker.getCallSignatures(t)) {
+      const found = keySetOfSignature(L, sig);
+      if (found !== null) return found;
+    }
     return null;
-  }
-  for (const sig of L.checker.getCallSignatures(t)) {
-    const found = keySetOfSignature(L, sig);
-    if (found !== null) return found;
+  })();
+  if (fromType !== null) return fromType;
+  // The receiver's STATIC type may be a generic interface whose constraint is
+  // `keyof (M & TPluginEvents)` — the plugin-extensible client surface zapo
+  // publishes. Its keys do not enumerate while the type parameter is open,
+  // but the VALUE behind it is one class, and that class's own `emit`
+  // declares the closed map. Walk the base chain: the declaring class may be
+  // an ancestor of the receiver's.
+  for (let c: ClassInfo | null = info; c; c = c.base) {
+    for (const m of c.decl?.members ?? []) {
+      if (!ts.isMethodDeclaration(m)) continue;
+      if (m.name === undefined || !ts.isIdentifier(m.name) || m.name.text !== "emit") continue;
+      let sig: ts.Signature | undefined;
+      try {
+        sig = L.checker.getSignatureFromDeclaration(m);
+      } catch {
+        sig = undefined;
+      }
+      if (sig === undefined) continue;
+      const found = keySetOfSignature(L, sig);
+      if (found !== null) return found;
+    }
   }
   return null;
 }
@@ -2118,7 +2141,7 @@ function looseEmitDispatcher(
     return decl.parameters[1]!.dotDotDotToken !== undefined;
   })();
   if (restPacked === null) return why("the loose slot's payload parameter has no plain declaration");
-  const keySet = emitterClassKeySet(L, methodAccess);
+  const keySet = emitterClassKeySet(L, methodAccess, info);
   if (keySet === null) return why("the receiver class declares no 'keyof' event map on its own emit");
   const table = emitterEvents(L);
 
