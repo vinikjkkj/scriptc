@@ -9,6 +9,7 @@ import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
 import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
+import { recordKeyReadRow } from "./keyread-census.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import { UNSUPPORTED, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
@@ -4392,7 +4393,31 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         `'?.' where the result '${L.fmt(type)}' has no undefined arm (narrow the receiver with 'if (x !== undefined)' instead)`,
       );
     }
-    const wrapped = L.coerceToExpected(body, type);
+    // An index-signature keyed read as the chain's TAIL —
+    // `parseOptionalInt(findNodeChild(node, EPHEMERAL)?.attrs.expiration)`,
+    // zapo client/events/group.ts and message/primitives/incoming.ts. The
+    // checker types the read by the signature's VALUE type, so its miss
+    // had nowhere to go and ABORTED — on a present receiver whose key is
+    // simply absent, which is the ordinary case for a stanza attribute.
+    //
+    // This is the CLEANEST destination the rung has: `type` here is the
+    // checker's own type for the whole chain expression, and the checker
+    // put the undefined arm in it — the `?.` guard's arm. So every reader
+    // of this expression was compiled against `T | undefined` already, by
+    // tsc, at this very node. There is no narrowing question to ask: the
+    // arm is not something the lowering is adding, it is something the
+    // consumer is already handling because the SHORT-CIRCUIT can produce
+    // it. A miss on a present receiver now answers the same arm the
+    // absent receiver does, which is exactly what Node does.
+    //
+    // Where the rung declines (a declared field, a non-index shape, a read
+    // already armed, a chain result wider than read+undefined) the
+    // coercion below is unchanged.
+    // SCRIPTC_CHAINARM_OFF=1 — the ablation lever for this rung alone.
+    const armed = process.env["SCRIPTC_CHAINARM_OFF"] === "1"
+      ? null
+      : L.recordKeyReadAtUndefinedArm(body, type);
+    const wrapped = armed ?? L.coerceToExpected(body, type);
     if (!typeEquals(wrapped.type, type)) L.badType(expr, L.typeOf(expr));
     return { kind: "optChain", id, receiver, body: wrapped, type, loc };
   }
@@ -8711,6 +8736,24 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
         expr,
         `dynamic keyed reads of '${L.fmt({ kind: "record", shapeId })}' as '${L.fmt(declared)}' (every declared field must be readable at that type)`,
       );
+    }
+    // SCRIPTC_KEYREAD_CENSUS: one row per index-signature keyed read, with
+    // the DESTINATION it flows into. The read whose miss path is the
+    // untagged abort is `shape.indexValue && !undefined-armed` — the
+    // instrument names it ABORTABLE, and the site census cannot, because
+    // that abort carries no [SCxxxx] tag. Recorded here, at the read
+    // itself, so it counts the REAL sites and not a probe's.
+    if (process.env["SCRIPTC_KEYREAD_CENSUS"]) {
+      const armedRead = declared.kind === "union" && L.armTag(declared.unionId, UNDEFINED_T) >= 0;
+      recordKeyReadRow(L.checker as never, expr, {
+        file: loc.file,
+        start: loc.start,
+        key: litKey ?? "*computed*",
+        shapeId: String(shapeId),
+        valueType: L.fmt(declared),
+        readArmed: armedRead,
+        abortCapable: !!shape.indexValue && !armedRead,
+      });
     }
     return L.maybeNarrow(
       { kind: "recordKeyGet", obj, shapeId, key, ...(overflowOnly ? { overflowOnly: true as const } : {}), type: declared, loc },
@@ -14878,6 +14921,22 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           blame,
           `reading '${target.field}' through a receiver whose value shape differs from its asserted type (a '… as T' cast retypes but does not reshape the value — read the property on each arm, or index a single concrete record)`,
         );
+      }
+      // SCRIPTC_KEYREAD_CENSUS, the DOT twin. `node.attrs.abprops` is this
+      // path, not the bracket one, and it is where zapo's abortable reads
+      // overwhelmingly live — an instrument hooked only at the bracket
+      // read would have reported a handful of sites and missed the class.
+      if (process.env["SCRIPTC_KEYREAD_CENSUS"]) {
+        const armedRead = t.kind === "union" && L.armTag(t.unionId, UNDEFINED_T) >= 0;
+        recordKeyReadRow(L.checker as never, blame, {
+          file: loc.file,
+          start: loc.start,
+          key: target.field,
+          shapeId: String(target.shapeId),
+          valueType: L.fmt(t),
+          readArmed: armedRead,
+          abortCapable: !armedRead,
+        });
       }
       return {
         kind: "recordKeyGet",
