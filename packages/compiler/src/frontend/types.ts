@@ -2864,17 +2864,21 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // iterator — which needs a second binding to the source, because
   // Iterable<T> itself exposes no mutator. That is the same stance the
   // three immediate-drain contexts already take.
+  // The lib spells it `Iterable<T, TReturn = any, TNext = any>` (three
+  // parameters since TS 5.6). Only T is read: the RETURN and NEXT channels
+  // describe the iterator's done-value and its resume argument, and `for-of`
+  // — the one thing an Iterable permits — observes neither (it discards the
+  // done-value and sends nothing), so the snapshot loses nothing a consumer
+  // of this type could have seen.
   if (isStdlibInterface("Iterable")) {
-    const iterArgs = checker.getTypeArguments(widened as ts.TypeReference);
-    if (iterArgs.length === 1 && iterArgs[0]) {
-      const el = mapType(iterArgs[0], ctx);
-      if (!el) {
-        mapTrace(`ITERABLE ${checker.typeToString(type).slice(0, 46)}`);
-        return null;
-      }
-      return arrayOf(el);
+    const iterElem = checker.getTypeArguments(widened as ts.TypeReference)[0];
+    if (!iterElem) return null;
+    const el = mapType(iterElem, ctx);
+    if (!el) {
+      mapTrace(`ITERABLE ${checker.typeToString(type).slice(0, 46)} -> ${checker.typeToString(iterElem).slice(0, 40)}`);
+      return null;
     }
-    return null;
+    return arrayOf(el);
   }
   // Generator<T, TReturn, TNext> (and the lib's IterableIterator<T, ...>,
   // the older annotation spelling — Generator extends it): the sync
