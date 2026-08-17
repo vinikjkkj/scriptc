@@ -5196,6 +5196,52 @@ export class Lowerer {
       };
       collect(false);
       if (candidates.length === 0) collect(true);
+      // THE ZERO-OVERLAP REFINEMENT. "Exactly one candidate" stays the hard
+      // gate — this only decides WHICH arms were ever candidates, and only
+      // in the direction that turns a refusal into an acceptance, so no pair
+      // that lifts today changes its answer.
+      //
+      // An arm whose every member is undefined-admitting (all-optional, or a
+      // required member typed 'unknown') width-lifts from ANY record: the
+      // plan fills each of its members with undefined and DROPS every member
+      // the source actually has. Such an arm is a candidate for every record
+      // in the program, so a union that contains one can never resolve a
+      // record source — measured on zapo through its own public API:
+      //
+      //   client.message.send(jid, { type: 'reaction', emoji, target })
+      //   client.message.send(jid, { type: 'text', text }, { quote: target })
+      //
+      // where `target` is a plain `{ remoteJid; id; fromMe }` binding and the
+      // destination is `WaMessageTargetInput` = `WaMessageKey |
+      // WaIncomingMessageEvent`. The KEY arm takes all three members; the
+      // EVENT arm (`{ key?: …; rawNode: unknown }`) shares NOT ONE name with
+      // the source and only "fits" by dropping everything — two candidates,
+      // an unconditional runtime throw, and both spellings die. An inline
+      // literal in the same slot lowers (tsc picks the arm contextually and
+      // no conversion is left), which is what made the pair look arbitrary.
+      //
+      // The refinement: when several record arms are candidates, an arm that
+      // shares NO member NAME with the source record is not what the program
+      // meant — the copy it plans reads none of the value's members. Drop
+      // those, and take the result only if it leaves exactly one. Arms of
+      // other families are never dropped (they keep the ambiguity, and the
+      // pair keeps its fence).
+      //
+      // The counter-example this must NOT swallow is messages.ts:497, where
+      // one record width-lifts into FIVE of six media-message arms: those
+      // arms all share member names with the source, so all five survive the
+      // filter and the site keeps its (correct) fence. Verified by census
+      // both sides.
+      if (candidates.length > 1 && src.kind === "record") {
+        const srcNames = new Set((this.shapes.get(src.shapeId)?.fields ?? []).map((f) => f.name));
+        const overlapping = candidates.filter((c) => {
+          if (c.arm.kind !== "record") return true;
+          return (this.shapes.get(c.arm.shapeId)?.fields ?? []).some((f) => srcNames.has(f.name));
+        });
+        if (overlapping.length === 1) {
+          return { how: "liftWrap", tag: overlapping[0]!.tag, arm: overlapping[0]!.arm };
+        }
+      }
       if (candidates.length !== 1) return null;
       return { how: "liftWrap", tag: candidates[0]!.tag, arm: candidates[0]!.arm };
     }
