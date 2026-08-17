@@ -17,10 +17,21 @@
  *   disjoint  every slot arm is strictly wider than the source arm it
  *             corresponds to, so an arm would have to be INVENTED.
  *
- * On zapo at main those two relations split the fence's four rows two and two,
- * and the split does not line up with the must-not-close grades — which is the
- * whole reason the instrument exists, and the reason it must not be allowed to
- * go quietly silent. */
+ * On zapo the four rows split ONE identity (`fetcher.ts:92`) against THREE
+ * disjoint (`content.ts:183`, `incoming.ts:397`, `mex-notification.ts:192`),
+ * and that split is now load-bearing: the identity-arm rule CLOSES the first
+ * and refuses the other three. So the instrument reports a third thing as
+ * well, and this test pins all three:
+ *
+ *   CLOSED-BY=identity-arm   the arms are the identity map and the literal's
+ *                            own spelling lets the rule build it — no fence,
+ *                            and therefore no `ARMS=` row at that site at all;
+ *   NOT-CLOSED=<reason>      the rule declined, and WHY, before the fence;
+ *   ARMS=<relation>          the fence's own relation report, which now only
+ *                            ever appears where the rule declined.
+ *
+ * A rule that silently declined would leave this file looking exactly as it
+ * did when the rule did not exist. */
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -56,14 +67,30 @@ function unionslotRows(source: string, on: boolean): string[] {
   return captured.filter((l) => l.startsWith("UNIONSLOT "));
 }
 
-/* Three literals, one per outcome. `armIdentity` is zapo's
- * `content.ts:183` / `fetcher.ts:92` shape; `armDisjoint` is
- * `mex-notification.ts:192`'s (`{ ...normalized, errors }`, where every target
- * arm is a source arm plus a required field); `singleArmSlot` must produce NO
- * row at all, because the `recordArms.length === 1` rule above the fence
- * answers it and no fence is reached. That third case is the armed half: an
- * instrument that printed a row for everything would pass the first two
- * assertions. */
+/* Four literals, one per outcome, and every expected value below is readable
+ * off these twenty lines rather than off the implementation.
+ *
+ *   armIdentityClosed  zapo's `fetcher.ts:92` shape — the slot's record arms
+ *                      ARE the source's, so the rule builds it and NO fence is
+ *                      reached. `viewOnce` is declared on both `Img` and `Vid`,
+ *                      which is why the override is legal in every arm.
+ *   armIdentityLate    the SAME arms with the spread written AFTER an explicit
+ *                      property. The rule requires the union spread FIRST (its
+ *                      desugar rebuilds the source's arm, and a contributor the
+ *                      spread then overwrites is a different merge), so this
+ *                      one declines and the fence still reports `ARMS=identity`
+ *                      — which is what keeps the relation report itself tested
+ *                      now that the plain identity case no longer reaches it.
+ *   armDisjoint        `mex-notification.ts:192`'s shape (`{ ...normalized,
+ *                      errors }`): `errors` is required on both `ImgE`/`VidE`
+ *                      and absent from both `Img`/`Vid`, so no source arm can
+ *                      share a field-name set with a slot arm and the pairing
+ *                      must be 0/2. An arm would have to be INVENTED.
+ *   singleArmSlot      must produce NO row at all — the
+ *                      `recordArms.length === 1` rule above the fence answers
+ *                      it and neither the rule nor the fence is reached. That
+ *                      is the armed half: an instrument that printed a row for
+ *                      every object literal would pass everything else here. */
 const SOURCE = `
 interface Img { readonly url: string; readonly viewOnce?: boolean }
 interface Vid { readonly url: string; readonly seconds: number; readonly viewOnce?: boolean }
@@ -73,8 +100,11 @@ interface ImgE { readonly url: string; readonly viewOnce?: boolean; readonly err
 interface VidE { readonly url: string; readonly seconds: number; readonly viewOnce?: boolean; readonly errors: number }
 type MediaE = ImgE | VidE
 
-export function armIdentity(m: Media): Media {
+export function armIdentityClosed(m: Media): Media {
     return { ...m, viewOnce: true }
+}
+export function armIdentityLate(m: Media): Media {
+    return { viewOnce: true, ...m }
 }
 export function armDisjoint(m: Media): MediaE {
     return { ...m, errors: 1 }
@@ -82,7 +112,7 @@ export function armDisjoint(m: Media): MediaE {
 export function singleArmSlot(m: Img): Img | null {
     return { ...m, viewOnce: true }
 }
-console.log(typeof armIdentity, typeof armDisjoint, typeof singleArmSlot)
+console.log(typeof armIdentityClosed, typeof armIdentityLate, typeof armDisjoint, typeof singleArmSlot)
 `;
 
 test("the instrument names the ARM RELATION at each fence, and nothing where there is no fence", () => {
@@ -90,12 +120,35 @@ test("the instrument names the ARM RELATION at each fence, and nothing where the
   // Lowering runs collection more than once per program, so a site can be
   // reported repeatedly; the CLAIM is about the distinct rows.
   const distinct = [...new Set(rows)].sort();
-  expect(distinct.length, `rows:\n${distinct.join("\n")}`).toBe(2);
+  const why = `rows:\n${distinct.join("\n")}`;
 
-  const identity = distinct.filter((l) => l.includes(" ARMS=identity "));
-  const disjoint = distinct.filter((l) => l.includes(" ARMS=disjoint "));
-  expect(identity.length, `rows:\n${distinct.join("\n")}`).toBe(1);
-  expect(disjoint.length, `rows:\n${distinct.join("\n")}`).toBe(1);
+  /* THE RULE FIRED, EXACTLY ONCE, AND ON THE ONE LITERAL THAT QUALIFIES.
+   * `armIdentityClosed` is the only one of the four whose arms are the
+   * identity map AND whose spread is first, so it must be the only
+   * `CLOSED-BY` row — and it must not also appear as a fence. */
+  const closed = distinct.filter((l) => l.includes(" CLOSED-BY="));
+  expect(closed.length, why).toBe(1);
+  expect(closed[0]).toContain("CLOSED-BY=identity-arm");
+  expect(closed[0]).toContain("arms=2");
+  expect(closed[0]).toContain("overrides=[viewOnce]");
+
+  /* AND IT DECLINED FOR A NAMED REASON EVERYWHERE ELSE. `armIdentityLate`'s
+   * spread is not first; `armDisjoint`'s arms are not the identity map, and
+   * that reason carries BOTH shape lists so a reader can see which arms
+   * differed. `singleArmSlot` reaches neither. */
+  const declined = distinct.filter((l) => l.includes(" NOT-CLOSED="));
+  expect(declined.length, why).toBe(2);
+  expect(declined.some((l) => l.includes("NOT-CLOSED=head-not-a-spread")), why).toBe(true);
+  expect(declined.some((l) => /NOT-CLOSED=arms-not-identity:\[\w+,\w+\]vs\[\w+,\w+\]/.test(l)), why).toBe(true);
+
+  // TWO fences, not three: the closed literal is gone from this population.
+  const fences = distinct.filter((l) => l.includes(" ARMS="));
+  expect(fences.length, why).toBe(2);
+
+  const identity = fences.filter((l) => l.includes(" ARMS=identity "));
+  const disjoint = fences.filter((l) => l.includes(" ARMS=disjoint "));
+  expect(identity.length, why).toBe(1);
+  expect(disjoint.length, why).toBe(1);
 
   // The identity row is the one whose added name every source arm declares —
   // the precondition a clone-and-carry lowering would be gated on.
@@ -107,8 +160,14 @@ test("the instrument names the ARM RELATION at each fence, and nothing where the
   // arm can be carried through.
   expect(disjoint[0]).toContain("extras=[errors] extrasInEveryArm=false");
 
-  // Both rows are keyed `file@offset`, the SCRIPTC_DC_WHERE spelling.
-  for (const l of distinct) expect(l).toMatch(/UNIONSLOT \S+main\.ts@\d+ ARMS=/);
+  // Every row is keyed `file@offset`, the SCRIPTC_DC_WHERE spelling. The
+  // fence's key is the SPREAD PROPERTY's offset (it is the decliner); the
+  // rule's own rows are keyed at the LITERAL, which is the thing it built or
+  // declined to build, so the two are deliberately not the same number.
+  for (const l of fences) expect(l).toMatch(/UNIONSLOT \S+main\.ts@\d+ ARMS=/);
+  for (const l of [...closed, ...declined]) {
+    expect(l).toMatch(/UNIONSLOT \S+main\.ts@\d+ (CLOSED-BY|NOT-CLOSED)=/);
+  }
 
   /* THE FINGERPRINTS. `ARMS=disjoint` over two unions that LOOK like the same
    * declared types has two very different causes — a real width difference, or
@@ -128,7 +187,7 @@ test("the instrument names the ARM RELATION at each fence, and nothing where the
   // Shapes go out as `shapeId/fieldCount` per arm, so a reader can see the
   // widths rather than infer them; the two arms here have 2 and 3 fields, and
   // the disjoint slot's arms have one more field each.
-  for (const l of distinct) {
+  for (const l of fences) {
     expect(l).toMatch(/srcShapes=\[\w+\/\d+,\w+\/\d+\] ctxShapes=\[\w+\/\d+,\w+\/\d+\]/);
   }
   // The identity row's two sides are the SAME shape ids; the disjoint row's are
