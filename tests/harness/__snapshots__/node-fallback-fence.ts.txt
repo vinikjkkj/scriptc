@@ -16,15 +16,6 @@ node-fallback-fence.ts:18:13 - error SC2020: 'Buffer<ArrayBufferLike>.reverse' i
 
   hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
 
-node-fallback-fence.ts:21:7 - error SC2012: a value of type 'AbortSignal' runs in the embedded dynamic engine, which this build does not include
-
-  20 | const dec = new TextDecoder().decode(enc);
-  21 | const signal = AbortSignal.timeout(1000);
-     |       ^~~~~~
-  22 | const res = fetch("https://example.com", { signal });
-
-  hint: build with --dynamic to run this call in the embedded engine (adds ~620KB to the binary); static builds never include it
-
 node-fallback-fence.ts:21:16 - error SC2012: 'AbortSignal.timeout' runs in the embedded dynamic engine, which this build does not include
 
   20 | const dec = new TextDecoder().decode(enc);
@@ -70,11 +61,11 @@ node-fallback-fence.ts:32:28 - error SC2020: 'deflateSync of 'string' data' is p
 
   hint: zlib works on Buffers: deflateSync(Buffer.from(s, "utf8"))
 
-node-fallback-fence.ts:33:16 - error SC2020: 'zlib.gzipSync' is part of the standard library types but has no scriptc lowering yet
+node-fallback-fence.ts:33:25 - error SC2020: 'gzipSync of 'string' data' is part of the standard library types but has no scriptc lowering yet
 
   32 | const packed = deflateSync("data"); // string data: the wrap-it-first hint
   33 | const zipped = gzipSync("data"); // beyond the lowered pair: fenced
-     |                ^~~~~~~~~~~~~~~~
+     |                         ^~~~~~
   34 | 
 
-  hint: deflateSync and inflateSync are the lowered zlib surface
+  hint: zlib works on Buffers: gzipSync(Buffer.from(s, "utf8"))

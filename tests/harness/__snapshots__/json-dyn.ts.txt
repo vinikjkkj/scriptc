@@ -14,7 +14,7 @@ json-dyn.ts:21:35 - error SC1101: converting typed values to 'unknown' is not su
      |                                   ^~~~~~~~~~~~~~~~~~~~~~~~~
   22 | function wantsUnknown(x: unknown): void {}
 
-  hint: numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value never aliases the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet
+  hint: numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value does not alias the original, so a write through it is refused rather than lost), Uint8Array/Buffer (shared by reference — writes through the 'unknown' value DO reach the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet
 
 json-dyn.ts:23:14 - error SC1101: converting typed values to 'unknown' is not supported yet
 
@@ -23,7 +23,7 @@ json-dyn.ts:23:14 - error SC1101: converting typed values to 'unknown' is not su
      |              ^~~~~~~~~~~~~~~~~~~~~~~~~
   24 | const stringifyClosure = JSON.stringify((x: number) => x + 1);
 
-  hint: numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value never aliases the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet
+  hint: numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value does not alias the original, so a write through it is refused rather than lost), Uint8Array/Buffer (shared by reference — writes through the 'unknown' value DO reach the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet
 
 json-dyn.ts:24:41 - error SC1090: JSON.stringify of '(number) => number' values (only number, string, boolean, records, arrays, unions of those, and 'unknown' stringify) are not supported yet
 
@@ -31,20 +31,6 @@ json-dyn.ts:24:41 - error SC1090: JSON.stringify of '(number) => number' values 
   24 | const stringifyClosure = JSON.stringify((x: number) => x + 1);
      |                                         ^~~~~~~~~~~~~~~~~~~~
   25 | class Point {
-
-json-dyn.ts:28:19 - error SC1090: a checked cast of 'unknown' to 'Point' (a dynamic value can only be validated against JSON-representable types: number, string, boolean, records, arrays, and unions of those) is not supported yet
-
-  27 | }
-  28 | const intoClass = JSON.parse("{}") as Point;
-     |                   ^~~~~~~~~~~~~~~~~~~~~~~~~
-  29 | // (casts of unknown to ADAPTABLE function types compile now — the kind
-
-json-dyn.ts:38:3 - error SC1090: 'unknown'-typed class fields are not supported yet
-
-  37 | class Holder {
-  38 |   data: unknown = JSON.parse("{}");
-     |   ^~~~
-  39 | }
 
 json-dyn.ts:42:7 - error SC2007: values of type '{ (text: string, reviver?: ((this: any, key: string, value: any) => any) | undefined): any; (text: string): unknown; }' cannot be compiled: the type declares multiple call signatures (overloads), and a compiled function value is always one concrete signature
 
@@ -68,10 +54,3 @@ json-dyn.ts:51:39 - error SC1090: JSON.stringify of 'string | undefined' values 
   51 | const stringifyUndef = JSON.stringify(mkMaybe());
      |                                       ^~~~~~~~~
   52 | 
-
-json-dyn.ts:59:1 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
-
-  58 | // them relevant; these references are what makes them count.
-  59 | new Holder();
-     | ^~~~~~~~~~~~
-  60 | 

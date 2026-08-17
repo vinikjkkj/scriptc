@@ -16,24 +16,6 @@ npm-imports/main.ts:6:1 - error SC2013: importing '@acme/units' requires the emb
 
   hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
 
-npm-imports/main.ts:9:7 - error SC2013: values from the 'mathkit' package run in the embedded dynamic engine, which this build does not include
-
-   8 | 
-   9 | const point: Vector = { x: 3, y: 4 };
-     |       ^~~~~
-  10 | console.log(point.x);
-
-  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
-
-npm-imports/main.ts:10:13 - error SC2013: values from the 'mathkit' package run in the embedded dynamic engine, which this build does not include
-
-   9 | const point: Vector = { x: 3, y: 4 };
-  10 | console.log(point.x);
-     |             ^~~~~~~
-  11 | 
-
-  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
-
 npm-imports/main.ts:12:7 - error SC2013: values from the 'mathkit' package run in the embedded dynamic engine, which this build does not include
 
   11 | 
@@ -52,15 +34,6 @@ npm-imports/main.ts:12:14 - error SC2013: values from the 'mathkit' package run 
 
   hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
 
-npm-imports/main.ts:13:13 - error SC2013: values from the 'mathkit' package run in the embedded dynamic engine, which this build does not include
-
-  12 | const calc = new Calc(1);
-  13 | console.log(calc.value());
-     |             ^~~~~~~~~~
-  14 | console.log(convert(3, "km"));
-
-  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
-
 npm-imports/main.ts:14:13 - error SC2013: values from the '@acme/units' package run in the embedded dynamic engine, which this build does not include
 
   13 | console.log(calc.value());
@@ -74,7 +47,7 @@ npm-imports/main.ts:15:13 - error SC2013: values from the 'mathkit' package run 
 
   14 | console.log(convert(3, "km"));
   15 | console.log(origin.x);
-     |             ^~~~~~~~
+     |             ^~~~~~
   16 | 
 
   hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
