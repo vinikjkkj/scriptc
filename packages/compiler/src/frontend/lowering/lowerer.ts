@@ -88,6 +88,7 @@ import { settleOrValueArms,
   type TypeMapperCtx,
   UnionRegistry,
   withUndefinedArm as withUndefinedArmCanonical,
+  withUnitArm as withUnitArmCanonical,
 } from "../types.js";
 import { CompoundOp, IslandFnEntry, boundaryIntoIslandMsg, boundaryOutOfIslandMsg, BuiltinModuleFn, builtinConstLit, builtinModuleConstOf, builtinModulesArrayLit, builtinFenceHintOf, builtinModuleFnOf, stdlibMemberFence, isStdlibMember, isStdlibSymbol, isStdlibGlobal, stdlibGlobalMember, nodeTypesOnlySymbol } from "./surfaces.js";
 import { FileParts, splitFiles, collectProgram, collectNpmImports, collectJsonImports,
@@ -8966,6 +8967,15 @@ export class Lowerer {
    * noUncheckedIndexedAccess. Null when the type cannot take the arm. */
   withUndefinedArmOf(t: IrType): IrType | null {
     return withUndefinedArmCanonical(t, this.unions);
+  }
+
+  /** IR-level `t | <unit>` through the same shared canonicalizer, for
+   * either unit arm. `t` comes back UNCHANGED (same union id) when the arm
+   * is already present, which is how `lowerNullishCoalesce`'s dyn rung
+   * tells "the checker already admits this default" from "the checker's
+   * type is a lie the `??` is there to correct". */
+  withUnitArmOf(t: IrType, unit: IrType): IrType | null {
+    return withUnitArmCanonical(t, unit, this.unions);
   }
 
   /** True when a static type converts to a dyn value (the dynFrom

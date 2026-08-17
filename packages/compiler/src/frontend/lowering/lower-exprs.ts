@@ -3682,6 +3682,58 @@ function keyedAccessSyntax(n: ts.Expression): boolean {
   );
 }
 
+/** The `??` default is a UNIT LITERAL written right there — `?? null`,
+ * `?? undefined` (parentheses tolerated). Deliberately syntactic, like
+ * `nullishTestedByParent`: the fact being relied on is that the value the
+ * right branch produces is a literal THIS COMPILER emitted, so no
+ * validation of it is possible or needed, and JS guarantees it IS the
+ * result whenever the left is nullish. A unit-TYPED non-literal (a call
+ * returning `null`, a reference to a `null` local) is deliberately NOT
+ * admitted: its value is not visible here. */
+function unitLiteralDefaultOf(n: ts.Expression): IrType | null {
+  let e: ts.Expression = n;
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (e.kind === ts.SyntaxKind.NullKeyword) return NULL_T;
+  if (ts.isIdentifier(e) && e.text === "undefined") return UNDEFINED_T;
+  return null;
+}
+
+/** Does the DESTINATION of this expression declare the unit the `??`'s
+ * right operand produces? Asked of the contextual type, structurally, and
+ * only ever used to widen a type the checker got wrong — never to narrow
+ * one it got right, so a `false` here is always main's behaviour.
+ *
+ * `any`/`unknown` count as admitting: those destinations take the value
+ * dynamically, and one of them is the case
+ * `estado-content3.md` §5.4 called "no destination at all" —
+ * `console.log(attrs.k ?? null)`, whose contextual type MEASURES as
+ * `unknown` (the rest parameter's element), not as absent. The genuinely
+ * contextless positions are the RECEIVER ones (`(attrs.k ?? null).length`),
+ * where tsc has already resolved a member against the narrow type and a
+ * widened static type can only be refused.
+ *
+ * A type parameter, a generic inference position, or anything else that is
+ * neither open nor unit-armed answers false: this predicate is a licence to
+ * widen, and it withholds the licence whenever it cannot see the licence
+ * being safe. */
+function contextualAdmitsUnit(L: Lowerer, expr: ts.Expression, unit: IrType): boolean {
+  let ctx: ts.Type | undefined;
+  try {
+    ctx = L.checker.getContextualType(expr);
+  } catch {
+    return false;
+  }
+  if (ctx === undefined) return false;
+  // `void` counts for the undefined arm the same way `isUnitOnlyTsType`
+  // groups them: a `void` destination holds JS undefined.
+  const unitFlags = unit.kind === "nullT"
+    ? ts.TypeFlags.Null
+    : ts.TypeFlags.Undefined | ts.TypeFlags.Void;
+  const openFlags = ts.TypeFlags.Any | ts.TypeFlags.Unknown;
+  const parts: readonly ts.Type[] = ctx.isUnionType() ? ctx.getTypes() : [ctx];
+  return parts.some((p) => (p.flags & (unitFlags | openFlags)) !== 0);
+}
+
 /** Is this expression's value tested for nullish by the operator that
  * consumes it — i.e. is it the LEFT operand of an enclosing `??`
  * (parentheses tolerated)? Deliberately syntactic and deliberately
@@ -3767,9 +3819,81 @@ function nullishTestedByParent(expr: ts.Expression): boolean {
           // `main` (repro-pt/lab/n1.ts). Hand it over at dyn width
           // instead; the enclosing `??` has a total dyn arm, and the
           // predicate guarantees that arm is the consumer.
+          // HORN B (`abprops.ts:52`, `estado-content3.md` §5.4): `attrs.k ??
+          // null` into `abKey: string | null`. tsc types an index-signature
+          // read by the signature's VALUE type, so it types the whole `??`
+          // `string` — the `?? null` is dead as far as the checker is
+          // concerned. `want` is then `string`, and the validated exit
+          // refuses the `null` the right operand just produced and the
+          // destination field explicitly declares. Node prints `null`.
+          //
+          // The honest type of `L ?? <unit literal>` is `want | unit`: JS
+          // guarantees the unit IS the value when the left is nullish, and
+          // here the left is a widened index-signature read that really can
+          // be. Checking back to `want | unit` keeps the validation of the
+          // LEFT arm — every non-nullish kind still has to be the width the
+          // checker promised — and stops asserting a falsehood about the
+          // right one.
+          //
+          // And the widening is LICENSED BY THE DESTINATION, because the
+          // unlicensed form regresses a program that used to be correct.
+          // `(attrs.k ?? null).length` with the key PRESENT compiles on main
+          // and prints the length; widen it unconditionally and the member
+          // access meets `requireExactShape` — `SC2003 union types must
+          // match exactly: expected 'string', got 'null | string'` — a NEW
+          // `[SCxxxx]` in the emitted C, on the one case main got right.
+          // Measured, `repro-sx/s2.ts` A9/A10.
+          //
+          // §5.4 of `estado-content3.md` called a destination-aware rule
+          // "provably incomplete" on the strength of its case 5,
+          // `console.log(attrs.k ?? null)`, described as having "no
+          // destination to read". MEASURED with the dial below, case 5's
+          // contextual type is `unknown` — the rest parameter's element —
+          // and `unknown` admits the unit, so the destination-aware rule
+          // DOES serve it. The positions that genuinely have no contextual
+          // type are the RECEIVER ones, and those are exactly the ones that
+          // must NOT be widened. The two facts are the same fact.
+          //
+          // `withUnitArmOf` hands back `want` UNCHANGED when the arm is
+          // already there (`(s: string | null) ?? null`), so a checker that
+          // was already honest costs nothing — no new union is interned and
+          // the emitted check is the one `main` emits.
+          const unit = unitLiteralDefaultOf(expr.right);
+          const honest = unit ? L.withUnitArmOf(want, unit) : null;
+          const licensed = unit !== null && honest !== null && honest !== want &&
+            contextualAdmitsUnit(L, expr, unit);
+          const checkT = licensed && honest ? honest : want;
+          if (process.env["SCRIPTC_NULLISH_UNIT"] !== undefined) {
+            // SCRIPTC_NULLISH_UNIT=1 — the site instrument for this rung.
+            // The thrown text is `sc_dc_N`'s, interned per TARGET TYPE, so
+            // it names the type and never the site, and zapo's TU holds
+            // hundreds of them. One row per firing, keyed `file@offset`
+            // like SCRIPTC_DC_WHERE.
+            //
+            //   honest=  the type `want | unit`, i.e. what the checker
+            //            would have said with `noUncheckedIndexedAccess`
+            //   widen=1  the retype was APPLIED (destination licensed it)
+            //   admits=0 with a non-`-` unit is the AT-RISK set: a site
+            //            whose destination cannot hold the default it is
+            //            written with. Those keep main's behaviour, and
+            //            counting them is the count §5.4 said nobody had
+            //            taken.
+            const ctxT = (() => { try { return L.checker.getContextualType(expr); } catch { return undefined; } })();
+            const short = (s: string): string => (s.length <= 60 ? s : `${s.slice(0, 57)}...`);
+            process.stderr.write(
+              `NULLISHUNIT ${loc.file}@${String(loc.start)}` +
+              ` unit=${unit ? unit.kind : "-"}` +
+              ` want=${short(L.fmt(want))}` +
+              ` honest=${honest ? short(L.fmt(honest)) : "-"}` +
+              ` widen=${licensed ? "1" : "0"}` +
+              ` admits=${unit && contextualAdmitsUnit(L, expr, unit) ? "1" : "0"}` +
+              ` tested=${nullishTestedByParent(expr) ? "1" : "0"}` +
+              ` ctx=${ctxT ? short(L.checker.typeToString(ctxT)) : "none"}\n`
+            );
+          }
           return want.kind === "dyn" || nullishTestedByParent(expr)
             ? test
-            : { kind: "dynCheck", value: test, type: want, loc };
+            : { kind: "dynCheck", value: test, type: checkT, loc };
         }
       }
     }
