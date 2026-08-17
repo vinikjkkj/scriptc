@@ -25,14 +25,14 @@ es2025-fences.ts:11:15 - error SC2020: 'ArrayBuffer.transfer' is part of the sta
 
   hint: resize/transfer/maxByteLength need the buffer to exist as a runtime value, and no free-standing ArrayBuffer value does — typed arrays own fixed-length storage (new Uint8Array(n)); allocate a new view and copy instead
 
-es2025-fences.ts:15:27 - error SC2020: 'new ArrayBuffer' is part of the standard library types but has no scriptc lowering yet
+es2025-fences.ts:15:27 - error SC2020: 'new Uint8Array over a resizable ArrayBuffer' is part of the standard library types but has no scriptc lowering yet
 
   14 | // fixed-length new Uint8Array(new ArrayBuffer(8)) lowers).
   15 | const rz = new Uint8Array(new ArrayBuffer(8, { maxByteLength: 16 }));
      |                           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   16 | 
 
-  hint: no free-standing ArrayBuffer value exists — typed arrays own their storage: allocate the view directly (new Uint8Array(n)), or erase a fresh buffer into one (new Uint8Array(new ArrayBuffer(n)), new DataView(new ArrayBuffer(n), ...))
+  hint: a maxByteLength options bag makes the buffer resizable, and resizing needs the buffer to exist as a runtime value — no free-standing ArrayBuffer value exists (the buffer here erases into the view): drop the options bag
 
 es2025-fences.ts:18:7 - error SC2020: 'SharedArrayBuffer' is part of the standard library types but has no scriptc lowering yet
 
