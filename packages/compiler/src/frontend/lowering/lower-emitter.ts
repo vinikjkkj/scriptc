@@ -41,7 +41,7 @@ import type { Lowerer } from "./lowerer.js";
 import { dynFallbackType, newFnCtx } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { isJsSourceFile, locOf } from "../program.js";
-import { arrayOf, BOOL, canBoxFuncIntoDyn, canConvertToDyn, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, isUnitType, STRING, SrcLoc, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { arrayOf, BOOL, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, isUnitType, STRING, SrcLoc, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { streamForcedTuple, streamSidesOf } from "./lower-stream.js";
 import { handlerFnTypeNodeOf } from "../types.js";
 
@@ -169,6 +169,15 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
     if (typeEquals(recorded, incoming)) return recorded;
     if (unionSide === "recorded" && isArmOf(recorded, incoming)) return recorded;
     if (unionSide === "incoming" && isArmOf(incoming, recorded)) return incoming;
+    // A DYN position against a DECLARED one was unified here for a while —
+    // the emit converts through the checked extraction, so it would have been
+    // sound. It is REMOVED because it fired nowhere: not in any corpus entry,
+    // not in any repro of mine, and not once in zapo's 46 225 statements
+    // under the [unify] probe. A rule with no exercise is a rule nobody can
+    // say is right, and this file has enough of those already. The shape that
+    // looked like it needed it — `{node, frame}` out of an untyped emitter's
+    // callback — is a RECORD whose FIELDS are dyn, not a dyn position, and it
+    // is answered by the emit-payload shape instead.
     return null;
   };
   const mergeEmit = (name: string, args: (IrType | null)[]): void => {
@@ -1040,18 +1049,79 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
       };
     }
     const tuple = streamForcedTuple(L, info, name) ?? tupleOf(L, table, name, call);
+    const sig = table.get(name);
     if (args.length - 1 !== tuple.length) {
       // An event nothing listens to: the call has no observable effect,
       // so the arity it disagrees on cannot matter.
       const noop = listenerlessEmitNoop(L, info, name, call, access, superRecv, loc);
       if (noop !== null) return noop;
-      L.noLowering(
-        `emit('${name}') with ${args.length - 1} arguments where the event's tuple has ${tuple.length}`,
-        call,
-        "every emit site of one event name must supply the same argument tuple (listeners may declare a prefix)",
-      );
+      // EXTRA arguments past a tuple NO EMIT ever pinned. The tuple is then
+      // the longest LISTENER's parameter list, and the rule this fence's own
+      // hint recites — "listeners may declare a prefix" — says the trailing
+      // positions are unobserved: the table's tuple is the maximum over every
+      // registered listener, so nothing anywhere in the program declares a
+      // parameter to receive them. Node passes them and the listeners ignore
+      // them; the lowered dispatch drops them and the listeners see the same
+      // thing.
+      //
+      // This is the SC2020 zapo dies on. `WaClient`'s constructor re-emits
+      // `debug_transport_node_in` with one payload; a consumer who writes
+      // `client.on('debug_transport_node_in', () => { n += 1 })` — a listener
+      // that ignores the payload — pins the event's tuple to ZERO, and the
+      // library's own constructor stopped compiling because of it.
+      //
+      // Held to arguments that are INERT (the same predicate the listenerless
+      // no-op uses): dropping an expression is only sound when producing its
+      // value is unobservable, and a dyn-flavored listener is excluded
+      // outright — its adapter unboxes by position and would be handed
+      // undefined where Node hands the payload.
+      const droppable =
+        sig !== undefined && !sig.fromEmit && !sig.dynListener &&
+        args.length - 1 > tuple.length &&
+        args.slice(1 + tuple.length).every((a) => inertEmitArg(L, a));
+      if (droppable && process.env["SCRIPTC_EMIT_WHY"] !== undefined) {
+        console.error(`[drop] ${loc.file}@${loc.start} '${name}': ${args.length - 1} args, tuple ${tuple.length}`);
+      }
+      if (!droppable) {
+        L.noLowering(
+          `emit('${name}') with ${args.length - 1} arguments where the event's tuple has ${tuple.length}`,
+          call,
+          "every emit site of one event name must supply the same argument tuple (listeners may declare a prefix)",
+        );
+      }
     }
-    const payload = args.slice(1).map((a, i) => L.lowerExprExpecting(a, tuple[i]));
+    // Tell each object-literal payload what its event's tuple says it is. The
+    // typed-events overload pair makes tsc contextually type these arguments
+    // `unknown` (the forwarding `(event: string, ...args: unknown[])` arm
+    // wins overload resolution), so a literal assembled out of an UNTYPED
+    // emitter's callback parameters has no mappable type from EITHER
+    // direction and the literal lowering refuses it — while the emitter
+    // itself has known the answer since the table was built. Recording the
+    // position is all that is needed; lowerObjectLiteral consults it one step
+    // before its type fence, so nothing that lowers today changes.
+    for (let i = 1; i < args.length && i - 1 < tuple.length; i++) {
+      let a: ts.Expression = args[i]!;
+      while (ts.isParenthesizedExpression(a)) a = a.expression;
+      const want = tuple[i - 1];
+      if (want !== undefined && want.kind === "record" && ts.isObjectLiteralExpression(a)) {
+        L.emitPayloadShapes.set(a, want);
+      }
+    }
+    if (process.env["SCRIPTC_EMIT_WHY"] !== undefined) {
+      const parts = args.slice(1).map((a, i) => {
+        let ck = "?";
+        let mp = "?";
+        let lw = "?";
+        try { ck = L.checker.typeToString(L.typeOf(a)); } catch { ck = "<throws>"; }
+        try { const m = L.mapTypeOf(L.typeOf(a)); mp = m === null ? "null" : L.fmt(m); } catch { mp = "<throws>"; }
+        try { lw = L.fmt(L.lowerExpr(a).type); } catch (e) { lw = `<fences: ${String((e as { diag?: { message?: string } }).diag?.message ?? (e as Error).message ?? e).slice(0, 160)}>`; }
+        let cx = "?";
+        try { const c = L.checker.getContextualType(a); cx = c === undefined ? "none" : L.checker.typeToString(c); } catch { cx = "<throws>"; }
+        return `arg${i}: checker='${ck}' ctx='${cx}' mapped='${mp}' lowered='${lw}' want='${tuple[i] ? L.fmt(tuple[i]!) : "<none>"}'`;
+      });
+      console.error(`[emit] ${loc.file}@${loc.start} '${name}' tuple=${tuple.length}[${tuple.map((t) => L.fmt(t)).join(", ")}] ${parts.join(" | ")}`);
+    }
+    const payload = args.slice(1, 1 + tuple.length).map((a, i) => L.lowerExprExpecting(a, tuple[i]));
     return emitDispatchExpr(L, info, name, tuple, receiver, payload, superRecv?.cls, loc);
   }
 
@@ -1760,7 +1830,59 @@ export function erasableSuperDelegation(
 function boundEmitKeySet(L: Lowerer, ctxTs: ts.Type): { keys: string[]; map: ts.Type } | null {
   const sigs = L.checker.getCallSignatures(ctxTs);
   if (sigs.length !== 1) return null;
-  const decl = L.checker.signatureDeclaration(sigs[0]!);
+  return keySetOfSignature(L, sigs[0]!);
+}
+
+/** The same read over an OVERLOADED member: the class's own `emit` declares
+ * the typed arm and the forwarding arm side by side, and the typed arm is the
+ * one carrying `<K extends keyof M>`. First arm that has it wins — a class
+ * declares at most one event map, and the forwarding arm has no type
+ * parameter at all, so there is nothing to choose between. */
+function emitterClassKeySet(
+  L: Lowerer,
+  member: ts.Expression,
+  info: ClassInfo,
+): { keys: string[]; map: ts.Type } | null {
+  const fromType = ((): { keys: string[]; map: ts.Type } | null => {
+    let t: ts.Type;
+    try {
+      t = L.typeOf(member);
+    } catch {
+      return null;
+    }
+    for (const sig of L.checker.getCallSignatures(t)) {
+      const found = keySetOfSignature(L, sig);
+      if (found !== null) return found;
+    }
+    return null;
+  })();
+  if (fromType !== null) return fromType;
+  // The receiver's STATIC type may be a generic interface whose constraint is
+  // `keyof (M & TPluginEvents)` — the plugin-extensible client surface zapo
+  // publishes. Its keys do not enumerate while the type parameter is open,
+  // but the VALUE behind it is one class, and that class's own `emit`
+  // declares the closed map. Walk the base chain: the declaring class may be
+  // an ancestor of the receiver's.
+  for (let c: ClassInfo | null = info; c; c = c.base) {
+    for (const m of c.decl?.members ?? []) {
+      if (!ts.isMethodDeclaration(m)) continue;
+      if (m.name === undefined || !ts.isIdentifier(m.name) || m.name.text !== "emit") continue;
+      let sig: ts.Signature | undefined;
+      try {
+        sig = L.checker.getSignatureFromDeclaration(m);
+      } catch {
+        sig = undefined;
+      }
+      if (sig === undefined) continue;
+      const found = keySetOfSignature(L, sig);
+      if (found !== null) return found;
+    }
+  }
+  return null;
+}
+
+function keySetOfSignature(L: Lowerer, sig: ts.Signature): { keys: string[]; map: ts.Type } | null {
+  const decl = L.checker.signatureDeclaration(sig);
   if (decl === undefined || !ts.isFunctionLike(decl)) return null;
   const tps = decl.typeParameters;
   if (tps === undefined || tps.length !== 1) return null;
@@ -1942,6 +2064,211 @@ function unionRegroupHelper(
   return name;
 }
 
+
+/** `X.emit.bind(X)` against a LOOSE emit surface — the plugin-context shape
+ *
+ *     readonly emit: (event: string | symbol, ...args: unknown[]) => boolean
+ *
+ * which the type mapping renders as `(string | symbol, ONE dyn payload) →
+ * bool`: the rest parameter collapses to a single dyn slot, so the surface
+ * can only ever carry one payload, and the event parameter admits symbols
+ * that name no compiled event.
+ *
+ * It is the SAME dispatcher idea as the key-map one, over a slot that carries
+ * none of the key-map's information, so everything it needs comes from
+ * elsewhere and every part of it is gated:
+ *
+ *   * the KEY SET is the receiver CLASS's own declared event map, read off
+ *     its `emit` overload's `<K extends keyof M>` — the events this emitter
+ *     declares, which is exactly the set a holder of the surface may name.
+ *     NOT the program's registration set: that carries every OTHER emitter's
+ *     events too (zapo's untyped `WaNodeTransport` registers a two-payload
+ *     `node_in`), and an event this class cannot emit has no business
+ *     shaping this class's dispatcher;
+ *   * each armed event's DECLARED arity must be at most one, because the
+ *     surface has one payload slot. An event the map declares wider is
+ *     unreachable through this value — the mapped func type has nowhere to
+ *     put the second argument — so the whole dispatcher declines rather than
+ *     silently dropping it;
+ *   * the payload extraction is the CHECKED one (`dynCheck`, the machinery
+ *     `x as T` uses), so a caller who pairs the wrong name with the wrong
+ *     payload gets a catchable TypeError, not another event's struct;
+ *   * a name that is not one of the arms falls through to `false`, which is
+ *     what Node answers for an event with no listeners, and what the
+ *     listenerless no-op already compiles a direct emit of such a name to.
+ *
+ * A SYMBOL name reaches the same fallthrough. Event names must be
+ * compile-time string literals for any emit to lower at all (eventNameOf), so
+ * no compiled listener bucket is reachable by a symbol and answering `false`
+ * is the honest result rather than a guess. */
+function looseEmitDispatcher(
+  L: Lowerer,
+  call: ts.CallExpression,
+  methodAccess: ts.PropertyAccessExpression,
+  info: ClassInfo,
+  recvClass: string,
+  slot: IrType & { kind: "func" },
+  ctxTs: ts.Type,
+  why: (r: string) => null,
+): IrExpr | null {
+  const loc = locOf(call);
+  const nameT = slot.params[0]!;
+  const payloadT = slot.params[1]!;
+  if (payloadT.kind !== "dyn") return why(`the loose slot's payload parameter is '${L.fmt(payloadT)}'`);
+  const retsBool = slot.ret.kind === "bool";
+  if (!retsBool && slot.ret.kind !== "void") return why(`the loose slot returns '${L.fmt(slot.ret)}'`);
+  // `string`, or the `string | symbol` union the Node typings spell.
+  let strTag = -1;
+  if (nameT.kind === "union") {
+    strTag = L.armTag(nameT.unionId, STRING);
+    if (strTag < 0) return why(`the loose slot's event parameter is '${L.fmt(nameT)}'`);
+  } else if (nameT.kind !== "string") {
+    return why(`the loose slot's event parameter is '${L.fmt(nameT)}'`);
+  }
+  // Is the payload parameter a REST? Both spellings map to the same single
+  // dyn — `(event: E, ...args: unknown[])` and `(event: E, payload: unknown)`
+  // are indistinguishable in the IR — and they mean different things at the
+  // ABI: a rest call PACKS its trailing arguments into one dyn array, so the
+  // event's payload is that array's element 0, while a plain parameter IS the
+  // payload. Getting this wrong is a wrong VALUE, not a fence (the dynCheck
+  // catches it only because a record and an array differ), so it is read off
+  // the declaration rather than guessed.
+  const restPacked = ((): boolean | null => {
+    const sigs = L.checker.getCallSignatures(ctxTs);
+    if (sigs.length !== 1) return null;
+    const decl = L.checker.signatureDeclaration(sigs[0]!);
+    if (decl === undefined || !ts.isFunctionLike(decl) || decl.parameters.length !== 2) return null;
+    return decl.parameters[1]!.dotDotDotToken !== undefined;
+  })();
+  if (restPacked === null) return why("the loose slot's payload parameter has no plain declaration");
+  const keySet = emitterClassKeySet(L, methodAccess, info);
+  if (keySet === null) return why("the receiver class declares no 'keyof' event map on its own emit");
+  const table = emitterEvents(L);
+
+  const arms: { name: string; tuple: IrType[] }[] = [];
+  for (const key of keySet.keys) {
+    const sig = table.get(key);
+    // Named by no emit and no listener in the whole program: emitting it is
+    // a no-op, which is exactly what the fallthrough does.
+    if (!sig) continue;
+    if (key === "error" || META_EVENTS.has(key)) return why(`'${key}' carries a forced tuple`);
+    if (sig.conflict) return why(`'${key}' has conflicting argument types`);
+    if (sig.dynListener) return why(`'${key}' has a dyn-flavored listener`);
+    if (streamForcedTuple(L, info, key) !== null) return why(`'${key}' is a stream event`);
+    const arity = keyMapArity(L, keySet.map, key);
+    if (arity === null) return why(`the key map does not spell '${key}' plainly`);
+    if (arity > 1) return why(`'${key}' declares ${arity} payload arguments where the loose slot has one`);
+    if (sig.tuple.length > 1) return why(`'${key}' unifies to ${sig.tuple.length} arguments where the loose slot has one`);
+    const want = sig.tuple[0];
+    if (
+      want !== undefined && want.kind !== "dyn" &&
+      !canDynCheckTo(want, (id) => L.shapes.get(id), (id) => L.unions.get(id))
+    ) {
+      return why(`'${key}' carries '${L.fmt(want)}', which a dyn payload cannot be checked into`);
+    }
+    arms.push({ name: key, tuple: sig.tuple });
+  }
+  // ZERO arms is a legitimate dispatcher, unlike the key-map one: every name
+  // then falls through to `false`, which is exactly what Node answers for an
+  // event nobody listens to — the listenerless no-op's stance, reached
+  // through a value instead of a direct call.
+
+  const ikey = `emitloose:${recvClass}:${restPacked ? "rest" : "one"}:${typeKey(slot)}`;
+  let fname = L.widthHelpers.get(ikey);
+  if (fname === undefined) {
+    fname = `%emit.loose.${L.widthHelpers.size}`;
+    L.widthHelpers.set(ikey, fname);
+    const selfT: IrType = { kind: "object", className: recvClass };
+    const locals: IrLocal[] = [
+      { id: "self.0", name: "self", type: selfT, mutable: false, boxed: true },
+      { id: "ev.0", name: "ev", type: nameT, mutable: false },
+      { id: "p.0", name: "p", type: DYN, mutable: false },
+    ];
+    const body: IrStmt[] = [];
+    const evRaw = (): IrExpr => ({ kind: "varRef", localId: "ev.0", type: nameT, loc });
+    let evStr: () => IrExpr = evRaw;
+    if (nameT.kind === "union") {
+      // A symbol (or any other arm) names no compiled event: answer like an
+      // event with no listeners rather than narrowing a value that is not a
+      // string.
+      body.push({
+        kind: "if",
+        cond: {
+          kind: "unionIsTag", unionId: nameT.unionId, tag: strTag, negated: true,
+          value: evRaw(), type: BOOL, loc,
+        },
+        then: [{ kind: "return", value: retsBool ? boolLit(false, loc) : null, loc }],
+        else_: null,
+        loc,
+      });
+      locals.push({ id: "evs.0", name: "evs", type: STRING, mutable: false });
+      body.push({
+        kind: "varDecl",
+        localId: "evs.0",
+        init: { kind: "unionNarrow", unionId: nameT.unionId, tag: strTag, value: evRaw(), type: STRING, loc },
+        loc,
+      });
+      evStr = (): IrExpr => ({ kind: "varRef", localId: "evs.0", type: STRING, loc });
+    }
+    for (const arm of arms) {
+      const self: IrExpr = { kind: "varRef", localId: "self.0", type: selfT, loc };
+      const payload: IrExpr[] = [];
+      const want = arm.tuple[0];
+      if (want !== undefined) {
+        const raw: IrExpr = { kind: "varRef", localId: "p.0", type: DYN, loc };
+        // A rest call packed its trailing arguments into one dyn array; the
+        // event's single payload is that array's element 0 (the dyn keyed
+        // read every dyn indexing already uses, with the canonical string
+        // key JS itself would form).
+        const read: IrExpr = restPacked
+          ? { kind: "dynKeyGet", key: strLit("0", loc), value: raw, type: DYN, loc }
+          : raw;
+        payload.push(want.kind === "dyn" ? read : { kind: "dynCheck", value: read, type: want, loc });
+      }
+      const dispatch = emitDispatchExpr(L, info, arm.name, arm.tuple, self, payload, undefined, loc);
+      body.push({
+        kind: "if",
+        cond: { kind: "strEq", negated: false, left: evStr(), right: strLit(arm.name, loc), type: BOOL, loc },
+        then: retsBool
+          ? [{ kind: "return", value: dispatch, loc }]
+          : [{ kind: "exprStmt", expr: dispatch, loc }, { kind: "return", value: null, loc }],
+        else_: null,
+        loc,
+      });
+    }
+    body.push({ kind: "return", value: retsBool ? boolLit(false, loc) : null, loc });
+    L.liftedFns.push({
+      name: fname,
+      params: [
+        { localId: "ev.0", name: "ev", type: nameT },
+        { localId: "p.0", name: "p", type: DYN },
+      ],
+      returnType: slot.ret,
+      captures: [{ localId: "self.0", name: "self", type: selfT }],
+      locals,
+      body,
+      loc,
+    });
+  }
+  const recv = L.lowerExpr(methodAccess.expression);
+  if (recv.type.kind !== "object") return why(`the lowered receiver is '${L.fmt(recv.type)}'`);
+  const ctx = L.ctx;
+  const count = ctx.localCounters.get("%bmrecv") ?? 0;
+  ctx.localCounters.set("%bmrecv", count + 1);
+  const recvId = `%bmrecv.${count}`;
+  ctx.locals.push({ id: recvId, name: "%bmrecv", type: recv.type, mutable: false, boxed: true });
+  if (process.env["SCRIPTC_BEMIT_WHY"] !== undefined) {
+    console.error(`[bemit] BUILT-LOOSE ${fname} for ${recvClass}: ${arms.map((a) => a.name).join(",")}`);
+  }
+  return {
+    kind: "seqExpr",
+    stmts: [{ kind: "varDecl", localId: recvId, init: recv, loc }],
+    result: { kind: "closure", fnName: fname, captures: [recvId], type: slot, loc },
+    type: slot,
+    loc,
+  };
+}
+
 /** `X.emit.bind(X)` against a generic key-map slot: the dispatcher, or null
  * when any part of the shape above does not hold (the caller then keeps the
  * existing member-as-a-value diagnostic, which names the real gap). */
@@ -1951,7 +2278,10 @@ export function boundEmitDispatcher(
   methodAccess: ts.PropertyAccessExpression,
 ): IrExpr | null {
   const why = (r: string): null => {
-    if (process.env["SCRIPTC_BEMIT_WHY"] !== undefined) console.error(`[bemit] ${r}`);
+    if (process.env["SCRIPTC_BEMIT_WHY"] !== undefined) {
+      const l = locOf(call);
+      console.error(`[bemit] ${l.file}@${l.start} ${r}`);
+    }
     return null;
   };
   if (methodAccess.name.text !== "emit") return null;
@@ -1964,15 +2294,46 @@ export function boundEmitDispatcher(
   if (recvIr?.kind !== "object") return why(`the receiver maps to '${recvIr ? L.fmt(recvIr) : "nothing"}'`);
   const info = L.classes.get(recvIr.className);
   if (!info || !emitterRooted(L, info)) return why("the receiver is not emitter-rooted");
-  const ctxTs = L.checker.getContextualType(call);
+  let ctxTs = L.checker.getContextualType(call);
+  // `X.emit.bind(X) as unknown as Slot` — the cast every consumer of a LOOSE
+  // plugin surface writes, because the bound value's own type does not fit
+  // the surface's. tsc gives the inner expression the contextual type
+  // `unknown`, which erases the destination the program actually named. Walk
+  // the assertion chain and take the OUTERMOST asserted type: that is the
+  // slot the value lands in, and it is what the author wrote down.
+  if (ctxTs === undefined || L.mapTypeOf(ctxTs)?.kind !== "func") {
+    let outer: ts.Node = call;
+    while (
+      ts.isParenthesizedExpression(outer.parent) ||
+      ts.isAsExpression(outer.parent) ||
+      ts.isTypeAssertion(outer.parent)
+    ) {
+      outer = outer.parent;
+    }
+    if (outer !== call && ts.isExpression(outer)) {
+      try {
+        const asserted = L.typeOf(outer);
+        if (L.mapTypeOf(asserted)?.kind === "func") ctxTs = asserted;
+      } catch { /* keep the contextual type */ }
+    }
+  }
   if (ctxTs === undefined) return why("the bind site has no contextual type");
   const slot = L.mapTypeOf(ctxTs);
-  if (slot?.kind !== "func") return why(`the slot maps to '${slot ? L.fmt(slot) : "nothing"}'`);
+  if (slot?.kind !== "func") {
+    if (process.env["SCRIPTC_BEMIT_WHY"] !== undefined) {
+      console.error(`[bemit] CTXTS ${L.checker.typeToString(ctxTs).slice(0, 200)}`);
+    }
+    return why(`the slot maps to '${slot ? L.fmt(slot) : "nothing"}'`);
+  }
   // The one shape a key-map slot wears once its type parameter is erased to
   // its constraint: (name, payload array) → void.
-  if (slot.rest === true || slot.params.length !== 2) return why(`the slot takes ${slot.params.length} parameters`);
+  if (process.env["SCRIPTC_BEMIT_WHY"] !== undefined) console.error(`[bemit] SLOTKEY ${typeKey(slot)}`);
+  if (slot.rest === true || slot.params.length !== 2) return why(`the slot takes ${slot.params.length} parameters (rest=${String(slot.rest === true)})`);
   const nameT = slot.params[0]!;
   const argsT = slot.params[1]!;
+  // The LOOSE surface: one dyn payload slot instead of a payload array, and
+  // no key-map constraint anywhere in the type.
+  if (argsT.kind === "dyn") return looseEmitDispatcher(L, call, methodAccess, info, recvIr.className, slot, ctxTs, why);
   if (nameT.kind !== "string") return why(`the slot's event parameter is '${L.fmt(nameT)}'`);
   if (argsT.kind !== "array") return why(`the slot's payload parameter is '${L.fmt(argsT)}'`);
   if (slot.ret.kind !== "void") return why(`the slot returns '${L.fmt(slot.ret)}'`);
@@ -2053,7 +2414,30 @@ export function boundEmitDispatcher(
     if (streamForcedTuple(L, info, key) !== null) return why(`'${key}' is a stream event`);
     const arity = keyMapArity(L, keySet.map, key);
     if (arity === null) return why(`the key map does not spell '${key}' plainly`);
-    if (arity !== sig.tuple.length) {
+    // The gate is the ARRAY's end, not equality. The slot hands the arms one
+    // payload array the caller filled from `Parameters<EvMap[K]>`, so the key
+    // map's arity is that array's LENGTH: a tuple LONGER than it would index
+    // past the allocation, and that is the one shape this must refuse.
+    //
+    // A tuple SHORTER than the map's arity is the ordinary state of a typed
+    // events library, not a defect. The program-wide table unifies an event's
+    // tuple from the `.emit(` and `.on(` sites the syntactic scan can see, and
+    // an emit routed THROUGH this very slot — `runtime.emitEvent('e', payload)`,
+    // a call on a function-typed field — is not one of them. So a consumer who
+    // registers `client.on('debug_privacy_token', () => …)`, a listener that
+    // ignores its payload, leaves that event's tuple at ZERO while the map
+    // declares one; demanding equality then declined the WHOLE dispatcher, and
+    // `WaClient`'s own `this.emit.bind(this)` fell back to the emit-as-a-value
+    // fence — a library constructor re-lowering because a consumer added a
+    // listener, which is the exact coupling this file exists to avoid.
+    //
+    // Dropping the trailing slots is what the emitter already promises
+    // everywhere else ("listeners may declare a prefix"): the arm builds the
+    // unified tuple, and NO listener of that event anywhere in the program
+    // declared a parameter past it — the table's tuple is the maximum over all
+    // of them. The values in the unread slots are the caller's to release, and
+    // the array owns them exactly as before.
+    if (sig.tuple.length > arity) {
       return why(`'${key}' unifies to ${sig.tuple.length} arguments where the key map declares ${arity}`);
     }
     const payload: IrExpr[] = [];
