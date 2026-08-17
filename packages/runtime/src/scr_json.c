@@ -3194,6 +3194,19 @@ ScrDyn *scr_dyn_to_primitive(const ScrDyn *d, int hint) {
       return NULL;
     }
   }
+  /* A compiled class instance has no member table to dispatch a user
+   * valueOf/toString through, so the built-in table below cannot answer for
+   * it and its arm there is a fence -- a fence whose wording names String().
+   * That wording is wrong HERE: every caller of this function is an operator
+   * that wanted a PRIMITIVE (`+`, `<`, ToNumber, `==`), and none of them
+   * asked for a string. Refuse in this function's own terms instead, which
+   * also gets the error CLASS right: JS's own failure to convert an object
+   * to a primitive is a TypeError, and scr_dyn_check_fail throws one.
+   * Refusal before, refusal after -- only the message changes. */
+  if (d->kind == SCR_DYN_OBJINST) {
+    scr_dyn_check_fail(NULL, "a primitive value", d);
+    return NULL;
+  }
   {
     ScrStr *s = scr_dyn_to_string(d, NULL);
     if (!s) return NULL; /* pending (an OBJINST fence, a throwing member) */
