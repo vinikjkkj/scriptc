@@ -6860,6 +6860,43 @@ export function canBoxFuncIntoDyn(
   );
 }
 
+/** WHY canBoxFuncIntoDyn declined - the message body BOTH backends' stranded
+ * box uses, so the two lanes cannot drift and so the reason is DERIVED from
+ * the predicate rather than restated beside it.
+ *
+ * It exists because the text it replaces was wrong on most of its
+ * population. Both stranded boxes said "its parameters have no
+ * checked-dynamic form" for every decline, and of zapo's five rows only
+ * THREE decline on a parameter: `getCollectionState`
+ * (`func(string)=>promise<record:r145>`) and `getCollectionStates` decline on
+ * the RETURN, whose record carries a `ReadonlyMap` that has no dyn
+ * representation at all. A reader who took the message at face value would
+ * have gone looking at `collection: AppStateCollectionName`, which is a
+ * string and converts fine.
+ *
+ * The idiom is componentTypeDiag's (diagnostics/diagnostic.ts): the container
+ * is not the blocker, the named COMPONENT and the slot it cannot fill are.
+ * Never returns "": callers reach it only when the predicate already said no,
+ * and if a future predicate change made the two disagree the fallback says
+ * that rather than emitting a confident lie. */
+export function strandedFuncReason(
+  t: IrType & { kind: "func" },
+  getRecord: (shapeId: string) => IrRecordShape | undefined,
+  getUnion: (unionId: string) => IrUnionDef | undefined,
+  fmt: (x: IrType) => string = typeKey,
+): string {
+  for (let i = 0; i < t.params.length; i++) {
+    const p = t.params[i]!;
+    if (p.kind === "dyn" || p.kind === "jsval" || canDynCheckTo(p, getRecord, getUnion)) continue;
+    return `its parameter ${i + 1} '${fmt(p)}' cannot be validated out of a dynamic value`;
+  }
+  const r = t.ret;
+  if (!(r.kind === "void" || r.kind === "dyn" || r.kind === "jsval" || canConvertToDyn(r, getRecord, getUnion))) {
+    return `its return '${fmt(r)}' has no dynamic conversion`;
+  }
+  return "its signature has no checked-dynamic form";
+}
+
 /** A closure type a dyn function value can ADAPT to (dynCheck): every
  * param dyn or dyn-convertible (the adapter converts typed arguments into
  * dyn), return void, dyn, or dynCheckable (the adapter validates the dyn

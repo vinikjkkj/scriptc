@@ -6,7 +6,7 @@
  * interning ORDER is part of the emitted C, so the registries stay on
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
-import { canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, typeEquals, typeKey } from "../../ir/nodes.js";
+import { canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { OVERFLOW_MEMBER } from "./emit-shapes.js";
@@ -2074,18 +2074,30 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     E.strandedDynFuncBoxes.set(key, name);
     const thunkName = `${name}_thunk`;
     const thunkSig = `static ScrDyn *${thunkName}(ScrClosure *c, ScrDyn *const *args, size_t argc)`;
-    // CENSUS: an UNCODED refusal — scr_throw_error_msg carries no SC code at
-    // all, so it is invisible to the bracket census, to the scr_trap census,
-    // AND to SCRIPTC_TRAP_TRACE (which filters on the code argument).  zapo's
-    // TU holds five, on the pre-key and app-state store members.
-    // `scripts/tu-census.mjs` counts them as REFUSAL.uncoded.
-    const msg = `a '${key}' function carried into 'unknown' cannot be called through it (its parameters have no checked-dynamic form)`;
+    // CENSUS: this used to be an UNCODED refusal - scr_throw_error_msg carries
+    // no SC code at all, so it was invisible to the bracket census, to the
+    // scr_trap census, AND to SCRIPTC_TRAP_TRACE, whose hook
+    // (scr_trap_trace_note, called from scr_throw_error_msg_code and nowhere
+    // else) returns early unless the code is SC-numeric.  zapo's TU holds
+    // five of these, on the pre-key and app-state store members, and no
+    // instrument in this project could see any of them.
+    //
+    // It carries SC2009 now - componentTypeDiag's code, whose own definition
+    // already names "function parameters/returns" as one of its slots, so a
+    // function shape whose component cannot fill the checked-dynamic slot is
+    // exactly what that code is for.  There is still no bracket: the box is
+    // interned per SIGNATURE and shared by every record field of that type,
+    // so it has no one source location to name and a synthesized one would
+    // point at whichever field happened to be emitted first.
+    const msg =
+      `a '${key}' function carried into 'unknown' cannot be called through it: ` +
+      strandedFuncReason(t, (id: string) => E.recordsById.get(id), (id: string) => E.unionsById.get(id));
     const msgLit = cStringLiteral(Buffer.from(msg, "utf8"));
     E.walkerProtos.push(`${thunkSig}; /* stranded dyn call thunk for ${key} */`);
     E.walkerDefs.push(
       `${thunkSig} { /* stranded dyn call thunk for ${key} */`,
       `  (void)c; (void)args; (void)argc;`,
-      `  scr_throw_error_msg(SCR_ERR_TYPE, ${msgLit}, ${Buffer.byteLength(msg, "utf8")});`,
+      `  scr_throw_error_msg_code(SCR_ERR_TYPE, ${msgLit}, ${Buffer.byteLength(msg, "utf8")}, "SC2009");`,
       `  return NULL;`,
       `}`,
       ``,
