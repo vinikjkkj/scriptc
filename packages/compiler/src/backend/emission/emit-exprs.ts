@@ -6995,7 +6995,19 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // releases the dummy (NULL for refcounted targets) harmlessly.
         const dyn = E.emitExpr(e.value);
         const helper = E.dynCheckHelper(e.type);
-        return E.fallibleTemp(e.type, `${helper}(${dyn.name}, NULL)`);
+        // SCRIPTC_DC_WHERE=1 — the RUNTIME instrument for this family. The
+        // helper is interned per TARGET TYPE (`sc_dc_0` is every check into
+        // `string`), so a thrown `expected string at $, got undefined` names
+        // the type and not the site, and zapo's TU holds hundreds of them.
+        // The path argument is otherwise NULL and renders as the bare root
+        // `$`; a one-segment path whose KEY is `file@offset` renders the
+        // site into the very message, with no runtime change and no effect
+        // on which values pass. Off by default: it is a diagnostic spelling
+        // of an error text, not a behaviour.
+        const where = process.env["SCRIPTC_DC_WHERE"] === "1"
+          ? `&(ScrDynPath){ NULL, ${cStringLiteral(Buffer.from(`${e.loc.file}@${String(e.loc.start)}`, "utf8"))}, 0 }`
+          : "NULL";
+        return E.fallibleTemp(e.type, `${helper}(${dyn.name}, ${where})`);
       }
       case "yieldExpr": {
         // Park the operand in the generator's OUT slot (moved in, typed by

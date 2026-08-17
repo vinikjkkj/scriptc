@@ -320,6 +320,106 @@ export function emitFinalKeyReadWidths(mod: unknown, path: string): void {
   appendFileSync(path, out.join("\n") + "\n");
 }
 
+/* ── THE NARROW-BRIDGE CENSUS ──────────────────────────────────────────
+ *
+ * The rung above stops the untagged ABORT by reading the key at dyn width.
+ * It then says, in its own doc, what happens next: "the destination decides
+ * all over again — one level down, at every REFERENCE: tsc narrows each use
+ * to the scalar it believes, and maybeNarrow bridges that with a VALIDATED
+ * extraction. So a use that needs the value throws the catchable
+ * dyn-boundary TypeError where Node would throw its own."
+ *
+ * That last clause is a bet, and it is the one this census measures. It
+ * holds for a use that DEREFERENCES the value (`id.length` on undefined
+ * throws in Node too). It does NOT hold for a use whose declared
+ * destination admits `undefined` — a parameter typed `string | undefined`,
+ * an optional record field — where Node passes the undefined along and the
+ * bridge throws `expected string at $, got undefined` instead.
+ *
+ * `SCRIPTC_NBRIDGE_CENSUS=<path>` appends one TSV row per narrow-bridge
+ * dynCheck as maybeNarrow builds it, with the same DESTINATION taxonomy and
+ * the same `wantArmed` parameter fact the keyed-read census uses — so the
+ * two files join on (file, offset) and the study is one study.
+ *
+ * Deliberately every narrow bridge, not only the ones over a widened keyed
+ * read: whether the dyn under a bridge came from this family is not
+ * knowable at the bridge, and a census that guessed would be a census of
+ * the guess. The join against the keyed-read census is what narrows it. */
+export function recordNarrowBridgeRow(
+  checker: CheckerLike,
+  node: ts.Node,
+  row: { file: string; start: number; narrowed: string; valueKind: string },
+): void {
+  if (nbridgeSinkPath() === null) return;
+  let dest: string;
+  let pf: { want: string; wantArmed: string; callee: string };
+  try {
+    dest = destinationOf(node);
+    pf = dest === "callArg" || dest === "newArg"
+      ? paramFacts(checker, node)
+      : { want: "-", wantArmed: "-", callee: "-" };
+  } catch (e) {
+    dest = "?error";
+    pf = { want: String((e as Error)?.message ?? e).slice(0, 60), wantArmed: "?", callee: "-" };
+  }
+  nbridgeBuffered.push(
+    [row.file, String(row.start), row.narrowed, row.valueKind, dest, pf.want, pf.wantArmed, pf.callee].join("\t"),
+  );
+  if (nbridgeBuffered.length >= 2000) flushNarrowBridgeCensus();
+}
+
+let nbridgeSink: string | null | undefined;
+let nbridgeBuffered: string[] = [];
+
+function nbridgeSinkPath(): string | null {
+  if (nbridgeSink === undefined) {
+    nbridgeSink = process.env["SCRIPTC_NBRIDGE_CENSUS"] ?? null;
+    if (nbridgeSink !== null) process.on("exit", flushNarrowBridgeCensus);
+  }
+  return nbridgeSink;
+}
+
+export function flushNarrowBridgeCensus(): void {
+  const p = nbridgeSink;
+  if (p === null || p === undefined || nbridgeBuffered.length === 0) return;
+  appendFileSync(p, nbridgeBuffered.join("\n") + "\n");
+  nbridgeBuffered = [];
+}
+
+/** THE SECOND PASS FOR THE NARROW BRIDGES, and the reason there is one.
+ *
+ * The row above is written where maybeNarrow BUILDS the bridge — before any
+ * consumer has had a chance to unwrap it. So it over-counts, and it
+ * over-counts on purpose: `ensureString` unwraps the bridge for a
+ * `templateSpan`, `ensureBool` for a truthiness test, the unit comparisons
+ * for a `compare`, and this rung for an armed argument or an optional
+ * field. Every one of those still appears as a constructed bridge.
+ *
+ * This pass walks the FINAL IR and counts the bridges that SURVIVED, which
+ * is the population the emitted TU actually holds. Joining the two is what
+ * makes "my rung moved N sites" a measurement rather than a bound — and it
+ * is the same correction the keyed-read census needed, for the same reason
+ * (its first version reported 28 abortable reads for a TU holding 15). */
+export function emitFinalNarrowBridges(mod: unknown, path: string): void {
+  const out: string[] = [];
+  const seen = new Set<unknown>();
+  const walk = (v: unknown): void => {
+    if (v === null || typeof v !== "object") return;
+    if (seen.has(v)) return;
+    seen.add(v);
+    if (Array.isArray(v)) { for (const x of v) walk(x); return; }
+    const o = v as Record<string, unknown>;
+    if (o["kind"] === "dynCheck" && o["narrowBridge"] === true) {
+      const t = o["type"] as { kind?: string } | undefined;
+      const loc = o["loc"] as { file?: string; start?: number } | undefined;
+      out.push([loc?.file ?? "?", String(loc?.start ?? -1), String(t?.kind ?? "?"), "FINAL_BRIDGE"].join("\t"));
+    }
+    for (const k of Object.keys(o)) walk(o[k]);
+  };
+  walk(mod);
+  appendFileSync(path, out.join("\n") + "\n");
+}
+
 export function recordKeyReadRow(checker: CheckerLike, node: ts.Node, row: KeyReadRowInput): void {
   if (sinkPath() === null) return;
   let dest: string;
