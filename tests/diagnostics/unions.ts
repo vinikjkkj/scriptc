@@ -104,3 +104,46 @@ console.log(chainSubUnion(1));
 // Multi-step chains over RECORD tails compile now — the undefined-armed
 // receiver's keyed-read JOIN answers the short-circuit (corpus 1541);
 // `o?.inner.size ?? 0` is no longer a fence.
+
+// The two fences the WHOLE-VALUE refinement must keep. Corpus 4541 is the
+// population it opens — a record binding whose members exactly ONE surviving
+// arm can hold; these are the two ways that can fail to be true, and both stay
+// compile-time refusals rather than a guessed arm.
+
+// A — TWO arms hold the whole value. "Exactly one" is still the hard gate: both
+// arms read every member, so nothing distinguishes them and picking either
+// would be a coin flip over which optional tail the value acquires.
+interface WholeA {
+  readonly a: string;
+  readonly b: number;
+  readonly c?: string;
+}
+interface WholeB {
+  readonly a: string;
+  readonly b: number;
+  readonly d?: string;
+}
+const bothWhole = { a: "x", b: 1 };
+function ambiguousWholeValue(): WholeA | WholeB {
+  return bothWhole;
+}
+console.log(ambiguousWholeValue());
+
+// B — EVERY candidate drops part of the value. This is zapo's `messages.ts:497`
+// in miniature: a merged record that width-lifts into several arms, each of
+// which omits the members belonging to the other kinds. The whole-value filter
+// selects ZERO arms, so the site keeps the fence it must keep — accepting it
+// would send a normalised payload as the wrong message kind.
+interface PartA {
+  readonly a: string;
+  readonly z?: number;
+}
+interface PartB {
+  readonly b: number;
+  readonly y?: string;
+}
+const merged = { a: "x", b: 1 };
+function partialEverywhere(): PartA | PartB {
+  return merged;
+}
+console.log(partialEverywhere());

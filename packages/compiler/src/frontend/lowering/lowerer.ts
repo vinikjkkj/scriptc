@@ -5401,6 +5401,122 @@ export class Lowerer {
         if (overlapping.length === 1) {
           return { how: "liftWrap", tag: overlapping[0]!.tag, arm: overlapping[0]!.arm };
         }
+        // THE WHOLE-VALUE REFINEMENT, the second tier of the same argument.
+        // The zero-overlap rule above is the degenerate case of a more general
+        // one: an arm that shares NO name with the source drops ALL of it, and
+        // "the copy reads none of the value" is why it is not what the program
+        // meant. The same objection applies, weaker but still decisive, to an
+        // arm that drops SOME of it — when a sibling arm drops NOTHING.
+        //
+        // Measured on zapo's own public API, the row `block/sixteen` attributed
+        // to the test driver rather than to zapo:
+        //
+        //   client.message.send(jid, { type: 'text', text }, { quote: target })
+        //
+        // where `target` is a plain `{ remoteJid; id; fromMe }` binding and
+        // `WaSendMessageOptions.quote` is the THREE-arm
+        // `WaIncomingMessageEvent | WaQuoteRef | WaMessageKey`. The zero-overlap
+        // rule drops the EVENT arm (`{key; rawNode; …}`, no shared name) and
+        // leaves two:
+        //   WaMessageKey  {remoteJid; id; fromMe; participant?}  — holds all three
+        //   WaQuoteRef    {id; participant?; remoteJid?; message?} — DROPS `fromMe`
+        // Two candidates, so the site kept its fence and the quote-reply step
+        // aborted, costing 2 stanzas. The sibling site one arm over —
+        // `WaMessageTargetInput = WaMessageKey | WaMessageRef`, two arms — lowers
+        // today, so the pair `send(…, {target})` / `send(…, {quote: target})`
+        // behaved differently for no reason the author could see.
+        //
+        // The rule: among the name-overlapping candidates, an arm that can hold
+        // EVERY member the source has reads the whole value; the others must
+        // silently discard a member the program wrote. Take it only when exactly
+        // one arm does, so this is strictly a refinement in the accepting
+        // direction and no pair that lifts today changes its answer.
+        //
+        // It AGREES with the fresh-literal spelling. `{ quote: { remoteJid, id,
+        // fromMe } }` written inline already lowers here (tsc picks the arm
+        // contextually and leaves no conversion); only the BINDING spelling
+        // aborted. This makes the two spellings of the same value agree, which
+        // is the same stance the tuple-into-array pass above takes.
+        //
+        // The counter-example it must NOT swallow is messages.ts:497, where one
+        // merged record width-lifts into FIVE of six media-message arms: each of
+        // those arms omits the fields belonging to the other media kinds, so
+        // EVERY candidate drops part of the source, the filter selects zero, and
+        // the site keeps its (correct) fence. Verified by census both sides.
+        // THE PRESENCE GUARD, and it is not optional — MEASURED, not reasoned.
+        // Without it this refinement closes `messages.ts:497`, the very
+        // counter-example the rule above is written to protect, and the census
+        // caught it: base 29 refusals -> 27, with BOTH `drmax3.ts:313` and
+        // `messages.ts:497` gone where only the first was intended.
+        //
+        // The whole-value argument is "the winning arm reads every member the
+        // program WROTE". That is only sound when every member the source has
+        // is actually THERE. A member typed `T | undefined` may be absent at
+        // run time, so an arm "holding" it says nothing about whether the
+        // program wrote it, and the count of dropped members stops being
+        // evidence of anything.
+        //
+        // That is exactly what separates the two sites, read off the emitted
+        // messages rather than guessed:
+        //   drmax3.ts:313   src `{ remoteJid: string; id: string; fromMe: boolean }`
+        //                   — three members, ALL REQUIRED, a literal binding.
+        //   messages.ts:497 src `{ $unknowns: Uint8Array[] | undefined;
+        //                   accessibilityLabel: null | string | undefined;
+        //                   backgroundArgb: number | null | undefined; … }`
+        //                   — the MERGE of a six-arm union produced by
+        //                   `{ ...content, media, mimetype }`, whose members are
+        //                   optional precisely BECAUSE they come from different
+        //                   arms. A merged-union spread is the canonical shape
+        //                   this must not resolve, and "every member is
+        //                   required" is the property it can never have.
+        //
+        // So: require every member of the SOURCE to be present-by-type. Any
+        // undefined-admitting member and the refinement declines and the site
+        // keeps whatever fence it had.
+        const admitsUndefined = (t: IrType): boolean =>
+          t.kind === "undefinedT" ||
+          (t.kind === "union" && this.armTag(t.unionId, UNDEFINED_T) >= 0);
+        const srcFields = this.shapes.get(src.shapeId)?.fields ?? [];
+        const everySrcMemberPresent =
+          srcFields.length > 0 && !srcFields.some((f) => admitsUndefined(f.type));
+        const whole =
+          overlapping.length > 1 && everySrcMemberPresent
+            ? overlapping.filter((c) => {
+                if (c.arm.kind !== "record") return false;
+                const armNames = new Set((this.shapes.get(c.arm.shapeId)?.fields ?? []).map((f) => f.name));
+                for (const n of srcNames) if (!armNames.has(n)) return false;
+                return true;
+              })
+            : [];
+        // SCRIPTC_ARMSET_WHY=1 — the ARM-SET dump. The comment on the SC2003
+        // diagnostic records that an env-gated dump of exactly this was used to
+        // tell zapo's three SC2003s apart and that the two type prints the
+        // diagnostic carries CANNOT do it (L.fmt caps at 4012 characters, so two
+        // protobuf mega-records print identically and are still different
+        // types). It was not left in the tree, and the next block had to build
+        // it again. It prints NAMES, which is what the three filters actually
+        // decide on, and it names which filter declined.
+        if (process.env["SCRIPTC_ARMSET_WHY"]) {
+          const names = (t: IrType): string =>
+            t.kind === "record"
+              ? "{" + (this.shapes.get(t.shapeId)?.fields ?? []).map((f) => f.name).join(",") + "}"
+              : t.kind;
+          const verdict =
+            whole.length === 1
+              ? "LIFTS (whole-value)"
+              : overlapping.length === 1
+                ? "LIFTS (zero-overlap)"
+                : !everySrcMemberPresent && overlapping.length > 1
+                  ? "DECLINES (presence guard: a source member admits undefined)"
+                  : `DECLINES (${candidates.length} candidates, ${overlapping.length} overlapping, ${whole.length} whole)`;
+          process.stderr.write(
+            `ARMSET ${verdict}\n  src=${names(src)}\n` +
+              def.arms.map((a, i) => `  arm[${i}]=${names(a)}\n`).join(""),
+          );
+        }
+        if (whole.length === 1) {
+          return { how: "liftWrap", tag: whole[0]!.tag, arm: whole[0]!.arm };
+        }
       }
       if (candidates.length !== 1) return null;
       return { how: "liftWrap", tag: candidates[0]!.tag, arm: candidates[0]!.arm };
