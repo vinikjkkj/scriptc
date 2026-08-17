@@ -1492,6 +1492,33 @@ export class Lowerer {
    * construction — the runtime reads it key by key. Marked by the
    * lowering that knows the position, never inferred. */
   readonly dynObjectLiterals = new Set<ts.ObjectLiteralExpression>();
+  /** Object literals whose destination SHAPE the lowering knows better than
+   * the checker's contextual type does — an EMIT PAYLOAD, whose position in
+   * the event's unified tuple is the type the registered listeners actually
+   * receive.
+   *
+   * The contextual type is the poison here, for the same reason it is in
+   * `dynObjectLiterals` one field up. A typed-events class declares the pair
+   *
+   *     emit<K extends keyof M>(event: K, payload: Parameters<M[K]>[0]): boolean
+   *     emit(event: string, ...args: unknown[]): boolean
+   *
+   * and tsc contextually types the payload argument through the SECOND
+   * overload — `unknown`. So a literal assembled out of an untyped emitter's
+   * `any`-typed callback parameters (`this.raw.on('node_in', (node, frame) =>
+   * this.emit('debug_transport_node_in', { node, frame }))`) has an
+   * unmappable own type AND an unmappable context, and the last-resort type
+   * fence fires with the context's word: "values of type 'unknown'".
+   *
+   * The emitter knows the answer. Its program-wide table already unified the
+   * event's tuple from every listener the program registers, and the listener
+   * is who receives this record. Building at the tuple position is therefore
+   * neither a guess nor a widening: it is the declared type of the value's
+   * one consumer, and each property coerces into its field exactly as a
+   * hand-written `node as BinaryNode` would (the checked dyn extraction, not
+   * a reinterpret). Consulted ONE STEP before the type fence, so no literal
+   * that lowers today changes its answer. */
+  readonly emitPayloadShapes = new Map<ts.ObjectLiteralExpression, IrType>();
   readonly ambient = ambientDtsPath();
   readonly overridesAmbient = overridesDtsPath();
   readonly fallbackAmbient = fallbackDtsPath();
