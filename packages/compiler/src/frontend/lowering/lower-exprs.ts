@@ -6349,6 +6349,21 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         );
       }
     }
+    // THE EMIT PAYLOAD's position in its event's unified tuple — the shape
+    // the registered listeners actually receive, which the emitter lowering
+    // recorded before it lowered this argument (Lowerer.emitPayloadShapes has
+    // the whole story). Placed one step before the last-resort fence, so this
+    // can only turn a fence into an answer: every literal that reaches here
+    // was about to be refused.
+    if (!mapped || mapped.kind !== "record") {
+      const want = L.emitPayloadShapes.get(expr);
+      if (want !== undefined && want.kind === "record") {
+        mapped = want;
+        // The tuple position came from a LISTENER's declared parameter type,
+        // not from anything inferred for this literal.
+        shapeDeclared = true;
+      }
+    }
     if (!mapped || mapped.kind !== "record") L.badType(expr, tsType);
     let type = mapped;
     let shape = L.shapes.get(type.shapeId)!;
