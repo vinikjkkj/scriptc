@@ -8406,8 +8406,43 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     if (fields.some((f) => f === undefined)) return null;
     const resultT = L.mapTypeOf(L.typeOf(expr));
     if (resultT === null || resultT.kind !== "union") return null;
-    const tags = fields.map((f) => L.armTag(resultT.unionId, f!.type));
-    if (tags.some((t) => t < 0)) return null;
+    // Each named field's payload has to reach the result union. Two shapes,
+    // and the second is the one every optional-field record actually has.
+    //
+    //  WRAP  — the field's type IS one arm of the result (`backend[kind]`
+    //          with `stores: StoreA` and `caches: CacheB`): one `unionWrap`.
+    //  RETAG — the field's type is itself a UNION and every one of ITS arms
+    //          is an arm of the result (`imageMessage?: IImage | null` in a
+    //          protobuf shape, whose read types `IImage | IVideo | IAudio |
+    //          null | undefined`): the payload is re-tagged arm by arm.
+    //
+    // RETAG is admitted only when the map is TOTAL — every source arm has a
+    // destination. A partial map would need a fall-through, and a
+    // fall-through here is an UNCODED runtime TypeError standing where a
+    // coded fence used to be, which this project has priced twice and
+    // refused twice (the `??` sub-union rule, `lowerNullishCoalesce`; the
+    // record-slot re-tag at `conv` above, which pays for its throw with a
+    // real narrowing obligation this read does not have). tsc computed the
+    // result AS the union of exactly these fields' types, so totality is
+    // the ordinary case and its absence means the map lost something.
+    type KeyArm =
+      | { kind: "wrap"; tag: number }
+      | { kind: "retag"; src: IrType & { kind: "union" }; pairs: { arm: IrType; srcTag: number; dstTag: number }[] };
+    const plans: KeyArm[] = [];
+    for (const f of fields) {
+      const ft = f!.type;
+      const tag = L.armTag(resultT.unionId, ft);
+      if (tag >= 0) {
+        plans.push({ kind: "wrap", tag });
+        continue;
+      }
+      if (ft.kind !== "union") return null;
+      const srcDef = L.unions.get(ft.unionId);
+      if (!srcDef || srcDef.arms.length === 0) return null;
+      const pairs = srcDef.arms.map((arm, srcTag) => ({ arm, srcTag, dstTag: L.armTag(resultT.unionId, arm) }));
+      if (pairs.some((p) => p.dstTag < 0)) return null;
+      plans.push({ kind: "retag", src: ft as IrType & { kind: "union" }, pairs });
+    }
     const helperKey = `keydisp:${shapeId}:${resultT.unionId}:${names.join(",")}`;
     let name = L.retagHelpers.get(helperKey);
     if (!name) {
@@ -8416,6 +8451,48 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
       const objT: IrType = { kind: "record", shapeId };
       const oRef: IrExpr = { kind: "varRef", localId: "o.0", type: objT, loc };
       const kRef: IrExpr = { kind: "varRef", localId: "k.0", type: STRING, loc };
+      const extraLocals: { id: string; name: string; type: IrType; mutable: boolean }[] = [];
+      // The payload for one named field, once the key test has matched.
+      const armFor = (n: string, i: number): IrStmt[] => {
+        const plan = plans[i]!;
+        const read: IrExpr = { kind: "recordGet", obj: oRef, shapeId, field: n, type: fields[i]!.type, loc };
+        if (plan.kind === "wrap") {
+          return [{
+            kind: "return",
+            value: { kind: "unionWrap", unionId: resultT.unionId, tag: plan.tag, value: read, type: resultT, loc },
+            loc,
+          }];
+        }
+        // Bind the read to a local: the arm chain tests it once per arm and
+        // extracts from it once, and a repeated `recordGet` would be a
+        // repeated read of a refcounted slot.
+        const mId = `m.${i}`;
+        extraLocals.push({ id: mId, name: `m${i}`, type: plan.src, mutable: false });
+        const mRef: IrExpr = { kind: "varRef", localId: mId, type: plan.src, loc };
+        const chain = (j: number): IrStmt[] => {
+          const p = plan.pairs[j];
+          if (p === undefined) return [];
+          const payload: IrExpr = isUnitType(p.arm)
+            ? { kind: "unitLit", unit: p.arm.kind === "undefinedT" ? "undefined" : "null", type: p.arm, loc }
+            : { kind: "unionNarrow", unionId: plan.src.unionId, tag: p.srcTag, value: mRef, type: p.arm, loc };
+          return [{
+            kind: "if",
+            cond: { kind: "unionIsTag", unionId: plan.src.unionId, tag: p.srcTag, negated: false, value: mRef, type: BOOL, loc },
+            then: [{
+              kind: "return",
+              value: { kind: "unionWrap", unionId: resultT.unionId, tag: p.dstTag, value: payload, type: resultT, loc },
+              loc,
+            }],
+            else_: chain(j + 1),
+            loc,
+          }];
+        };
+        // The innermost `else_` is the empty tail: the map is TOTAL, so the
+        // value always matched an arm above and control never reaches it.
+        // Falling out here would meet the trailing key throw, not a
+        // mis-tagged value.
+        return [{ kind: "varDecl", localId: mId, init: read, loc }, ...chain(0)];
+      };
       const body: IrStmt[] = names.map((n, i) => ({
         kind: "if",
         cond: {
@@ -8426,20 +8503,7 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
           type: BOOL,
           loc,
         },
-        then: [
-          {
-            kind: "return",
-            value: {
-              kind: "unionWrap",
-              unionId: resultT.unionId,
-              tag: tags[i]!,
-              value: { kind: "recordGet", obj: oRef, shapeId, field: n, type: fields[i]!.type, loc },
-              type: resultT,
-              loc,
-            },
-            loc,
-          },
-        ],
+        then: armFor(n, i),
         else_: null,
         loc,
       }));
@@ -8471,6 +8535,7 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
         locals: [
           { id: "o.0", name: "o", type: objT, mutable: false },
           { id: "k.0", name: "k", type: STRING, mutable: false },
+          ...extraLocals,
         ],
         body,
         loc,
