@@ -3936,6 +3936,10 @@ export class Lowerer {
    * — so for the admitted syntax the fallback below IS its tail,
    * lowerExpr + coerceInto, and a declined rung changes nothing. */
   lowerArgExpecting(node: ts.Expression, expected: IrType | undefined): IrExpr {
+    // SCRIPTC_ARGARM_OFF=1 — the ABLATION lever. One binary can then emit
+    // both sides of the A/B, so "the abort is gone" is checkable against
+    // the same compiler with only this rung removed.
+    if (process.env["SCRIPTC_ARGARM_OFF"] === "1") return this.lowerExprExpecting(node, expected);
     if (expected !== undefined && expected.kind === "union" && this.armTag(expected.unionId, UNDEFINED_T) >= 0) {
       let x: ts.Expression = node;
       while (ts.isParenthesizedExpression(x)) x = x.expression;
