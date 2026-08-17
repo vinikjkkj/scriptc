@@ -386,6 +386,40 @@ export function flushNarrowBridgeCensus(): void {
   nbridgeBuffered = [];
 }
 
+/** THE SECOND PASS FOR THE NARROW BRIDGES, and the reason there is one.
+ *
+ * The row above is written where maybeNarrow BUILDS the bridge — before any
+ * consumer has had a chance to unwrap it. So it over-counts, and it
+ * over-counts on purpose: `ensureString` unwraps the bridge for a
+ * `templateSpan`, `ensureBool` for a truthiness test, the unit comparisons
+ * for a `compare`, and this rung for an armed argument or an optional
+ * field. Every one of those still appears as a constructed bridge.
+ *
+ * This pass walks the FINAL IR and counts the bridges that SURVIVED, which
+ * is the population the emitted TU actually holds. Joining the two is what
+ * makes "my rung moved N sites" a measurement rather than a bound — and it
+ * is the same correction the keyed-read census needed, for the same reason
+ * (its first version reported 28 abortable reads for a TU holding 15). */
+export function emitFinalNarrowBridges(mod: unknown, path: string): void {
+  const out: string[] = [];
+  const seen = new Set<unknown>();
+  const walk = (v: unknown): void => {
+    if (v === null || typeof v !== "object") return;
+    if (seen.has(v)) return;
+    seen.add(v);
+    if (Array.isArray(v)) { for (const x of v) walk(x); return; }
+    const o = v as Record<string, unknown>;
+    if (o["kind"] === "dynCheck" && o["narrowBridge"] === true) {
+      const t = o["type"] as { kind?: string } | undefined;
+      const loc = o["loc"] as { file?: string; start?: number } | undefined;
+      out.push([loc?.file ?? "?", String(loc?.start ?? -1), String(t?.kind ?? "?"), "FINAL_BRIDGE"].join("\t"));
+    }
+    for (const k of Object.keys(o)) walk(o[k]);
+  };
+  walk(mod);
+  appendFileSync(path, out.join("\n") + "\n");
+}
+
 export function recordKeyReadRow(checker: CheckerLike, node: ts.Node, row: KeyReadRowInput): void {
   if (sinkPath() === null) return;
   let dest: string;
