@@ -109,6 +109,35 @@ test("the instrument names the ARM RELATION at each fence, and nothing where the
 
   // Both rows are keyed `file@offset`, the SCRIPTC_DC_WHERE spelling.
   for (const l of distinct) expect(l).toMatch(/UNIONSLOT \S+main\.ts@\d+ ARMS=/);
+
+  /* THE FINGERPRINTS. `ARMS=disjoint` over two unions that LOOK like the same
+   * declared types has two very different causes — a real width difference, or
+   * one declared type interned as two shapes — and the verdict alone cannot
+   * tell them apart. `pairedByNames` does: it counts source arms that have a
+   * slot arm with an IDENTICAL field-name set.
+   *
+   * Here the two cases are known by construction and they must read
+   * differently, which is what makes this an assertion and not a printout:
+   *   identity — every arm pairs with itself, 2/2;
+   *   disjoint — `errors` is required on both slot arms and on NEITHER source
+   *              arm, so no field-name set matches and it is 0/2. A
+   *              `pairedByNames` that always returned the arm count would pass
+   *              the identity case and fail here. */
+  expect(identity[0]).toContain("pairedByNames=2/2");
+  expect(disjoint[0]).toContain("pairedByNames=0/2");
+  // Shapes go out as `shapeId/fieldCount` per arm, so a reader can see the
+  // widths rather than infer them; the two arms here have 2 and 3 fields, and
+  // the disjoint slot's arms have one more field each.
+  for (const l of distinct) {
+    expect(l).toMatch(/srcShapes=\[\w+\/\d+,\w+\/\d+\] ctxShapes=\[\w+\/\d+,\w+\/\d+\]/);
+  }
+  // The identity row's two sides are the SAME shape ids; the disjoint row's are
+  // not, and its slot arms are one field WIDER (the required `errors`) — which
+  // is the difference `pairedByNames` exists to report.
+  expect(identity[0]).toMatch(/srcShapes=\[(\w+\/\d+,\w+\/\d+)\] ctxShapes=\[\1\]/);
+  expect(disjoint[0]).not.toMatch(/srcShapes=\[(\w+\/\d+,\w+\/\d+)\] ctxShapes=\[\1\]/);
+  expect(identity[0]).toContain("ctx0='Media'");
+  expect(disjoint[0]).toContain("ctx0='MediaE'");
 });
 
 test("the instrument is silent with the dial unset", () => {
