@@ -54,7 +54,48 @@ import { VtSlot, ClassMeta, emitStructDefs, vtEntriesFor, vtSlotParams, emitVtab
 import { emitAsyncScaffolding, childDataThunkFor, childExitThunkFor, childExitThunkFor2, closeBindThunkFor, connectSockThunkFor, closeOverrideWrapFor, dgramMsgThunkFor, dnsLookupThunkFor, netLookupAnswerThunkFor, emitterInvokeThunkFor, streamCbThunkFor, streamDataThunkFor, promiseAdoptAdapterFor, raceAdapterFor, resolveThunkFor, sniAnswerThunkFor } from "./emit-async.js";
 import { emitNpmEmbedding, islandAdapter, islandTypedAdapter } from "./emit-island.js";
 import { emitFunction, emitBlock, emitStmts, emitStmt, emitTryCatch, emitSwitch, mergeBrace, emitBranchInto, emitCondition } from "./emit-stmts.js";
+import fs from "node:fs";
 import { emitExpr } from "./emit-exprs.js";
+
+/** SCRIPTC_RC_SITES=1 at BUILD time: emit the RC-audit per-SITE table — one
+ * row per emitted closure body, carrying the source position it was written
+ * at, so the exit audit can resolve a live closure's `fn` pointer to a
+ * lambda instead of reporting "8690 closure(s)" and stopping there.
+ *
+ * A switch and not an `#ifdef` because the table is EMITTED C: with the
+ * switch off the TU is byte-identical to an uninstrumented build, which is
+ * what makes "the instrument changed nothing" checkable by diff rather than
+ * by argument. Same unset/empty/"0" contract as SCRIPTC_RC_AUDIT. */
+export function rcSitesRequested(): boolean {
+  const v = process.env.SCRIPTC_RC_SITES;
+  return v !== undefined && v !== "" && v !== "0";
+}
+
+/** file:line for a SrcLoc — the backend holds character offsets, not lines,
+ * and no SourceFile, so the file is read once and indexed. Only ever called
+ * under rcSitesRequested(); an unreadable file degrades to the offset. */
+const rcLineIndex = new Map<string, number[] | null>();
+export function rcSiteLabel(loc: { file: string; start: number } | undefined, name: string): string {
+  if (!loc) return name;
+  let starts = rcLineIndex.get(loc.file);
+  if (starts === undefined) {
+    try {
+      const text = fs.readFileSync(loc.file, "utf8");
+      starts = [0];
+      for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) starts.push(i + 1);
+    } catch {
+      starts = null;
+    }
+    rcLineIndex.set(loc.file, starts);
+  }
+  if (!starts) return `${loc.file}@${loc.start} ${name}`;
+  let lo = 0, hi = starts.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (starts[mid]! <= loc.start) lo = mid; else hi = mid - 1;
+  }
+  return `${loc.file}:${lo + 1}:${loc.start - starts[lo]! + 1} ${name}`;
+}
 
 export function emitModule(mod: IrModule, sourceText?: string): string {
   return new CEmitter(mod, sourceText).emit();
@@ -243,6 +284,13 @@ export class CEmitter {
    * dyn call thunk (emit-walkers' strandedDynFuncBoxHelper). */
   readonly strandedDynFuncBoxes = new Map<string, string>();
   readonly dynFuncAdapters = new Map<string, string>();
+  /** RC-AUDIT per-SITE attribution (SCRIPTC_RC_SITES=1 only): emitted
+   * closure body symbol -> the source position it was written at. The exit
+   * audit resolves a live closure's `fn` pointer through this table, which
+   * turns "8690 closure(s) live at exit" into a list of lambdas. Empty —
+   * and the table and its install call unemitted, so the TU is byte-
+   * identical — when the switch is off. */
+  readonly closureSites = new Map<string, string>();
   /** dyn-promise settle adapters (sc_pda_*), per INNER typeKey: convert a
    * typed fulfillment payload into the boxed destination's dyn payload
    * (scr_dyn_new_promise_adapting's callback — toDynHelper's promise arm). */
@@ -819,11 +867,33 @@ export class CEmitter {
         `${needsRelease ? `${runExitListeners}sc_release_globals(); ` : ""}return 1;`,
       `${indent}}`,
     ];
+    // The RC-audit per-SITE table (SCRIPTC_RC_SITES=1 only — see
+    // rcSitesRequested). Emitted here, immediately before main, so every
+    // closure body it names is already prototyped.
+    const rcSiteRows = [...this.closureSites].filter(([sym]) => sym.length > 0);
+    if (rcSiteRows.length > 0) {
+      out.push(
+        `#ifdef SCR_RC_AUDIT`,
+        `static const ScrClosureSite sc_clo_site_tbl[] = {`,
+        ...rcSiteRows.map(([sym, site]) =>
+          `  { (const void *)&${sym}, ${cStringLiteral(Buffer.from(site, "utf8"))} },`),
+        `};`,
+        `#endif`,
+        ``,
+      );
+    }
     out.push(
       // Real argc/argv feed the library's interned process.argv (see
       // scr_lib_init — lazy, so argv-free programs allocate nothing).
       `int main(int argc, char **argv) {`,
       `  scr_init();`,
+      ...(rcSiteRows.length > 0
+        ? [
+            `#ifdef SCR_RC_AUDIT`,
+            `  scr_closure_sites_install(sc_clo_site_tbl, sizeof sc_clo_site_tbl / sizeof sc_clo_site_tbl[0]);`,
+            `#endif`,
+          ]
+        : []),
       // The builtin error classes' preorder intervals are program-dependent
       // (they share this module's class-forest numbering, so instanceof and
       // the uncaught printer's Error-range test agree between runtime-made

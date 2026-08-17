@@ -6,6 +6,7 @@
  * interning ORDER is part of the emitted C, so the registries stay on
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
+import { rcSitesRequested } from "./emitter.js";
 import { canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
@@ -1607,8 +1608,20 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // same ABI) unwraps the closure directly (identity preserved:
         // `mustCall(fn)` handed back to a slot of fn's own type IS fn's
         // wrapper, retained); anything else wraps in the per-target
-        // adapter closure, whose caps[0] obj-box owns the dyn value
-        // (untraced — cycles through dyn never collect, SEMANTICS.md).
+        // adapter closure, which keeps the two things it needs from the
+        // dyn value SEPARATELY: the CLOSURE in a FUNC box (caps[0]) and
+        // that closure's thunk in a scalar box (caps[1]).
+        //
+        // It kept the whole ScrDyn in ONE untraced obj-box until now.
+        // ScrDyn carries no cycle header, so that edge was invisible to
+        // the collector — and one invisible strong reference is all trial
+        // deletion needs to declare a dead ring externally referenced. A
+        // listener registered through this adapter had rc 2 (the emitter
+        // registry's traced `orig` and the adapter's untraced dyn),
+        // markGray reached one of them, scan saw rc > 0 and blackened the
+        // whole subgraph: the client graph behind the listener leaked. A
+        // FUNC box is traced by construction and a function pointer owns
+        // nothing and closes no ring, so both edges are now accounted.
         // NON-adaptable targets have no adapter to wrap in: exact unwrap
         // or the path-annotated TypeError (the frontend's unwrap-only
         // cast semantics — only a value boxed from the slot's own type
@@ -1619,9 +1632,11 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         if (canAdaptDynFuncTo(t, (id) => E.recordsById.get(id), (id) => E.unionsById.get(id))) {
           const adapter = dynFuncAdapterHelper(E, t);
           d.push(`  {`);
-          d.push(`    ScrClosure *a = scr_closure_new((void *)&${adapter}, 1);`);
-          d.push(`    a->caps[0] = scr_box_new_obj(&scr_dyn_retain_v, &scr_dyn_release_v, NULL);`);
-          d.push(`    scr_box_set_ref(a->caps[0], scr_dyn_retain((ScrDyn *)d));`);
+          d.push(`    ScrClosure *a = scr_closure_new((void *)&${adapter}, 2);`);
+          d.push(`    a->caps[0] = scr_box_new(SCR_BOX_FUNC); /* TRACED — the ring closes here */`);
+          d.push(`    scr_box_set_ref(a->caps[0], scr_closure_retain(d->v.fn.clo));`);
+          d.push(`    a->caps[1] = scr_box_new(SCR_BOX_F64); /* the call descriptor: owns nothing */`);
+          d.push(`    scr_box_set_thunk(a->caps[1], d->v.fn.thunk);`);
           d.push(`    return a;`);
           d.push(`  }`);
         } else {
@@ -2152,13 +2167,19 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     if (existing) return existing;
     const name = `sc_dfa_${E.dynFuncAdapters.size}`;
     E.dynFuncAdapters.set(key, name);
+    // RC-audit per-SITE attribution: an adapter has no source position of
+    // its own -- its identity is the target signature it adapts to.
+    if (rcSitesRequested()) E.closureSites.set(name, `<dyn fn adapter to ${key}>`);
     const params = ["ScrClosure *sc_env", ...t.params.map((p, i) => cDecl(p, `a${i}`))].join(", ");
     const sig = `static ${cType(t.ret)}${cType(t.ret).endsWith("*") ? "" : " "}${name}(${params})`;
     E.walkerProtos.push(`${sig}; /* dyn fn adapter to ${key} */`);
     const dummy =
       t.ret.kind === "void" ? "" : t.ret.kind === "f64" ? "0" : t.ret.kind === "bool" ? "false" : "NULL";
     const d: string[] = [`${sig} { /* dyn fn adapter to ${key} */`];
-    d.push(`  ScrDyn *sc_fn = (ScrDyn *)scr_box_get_ref(sc_env->caps[0]); /* +1 */`);
+    // caps[0] is the adapted function's CLOSURE (a FUNC box — traced, so
+    // a ring through this adapter is collectable), caps[1] its thunk.
+    d.push(`  ScrClosure *sc_fn = (ScrClosure *)scr_box_get_ref(sc_env->caps[0]); /* +1 */`);
+    d.push(`  ScrDynThunk sc_th = scr_box_get_thunk(sc_env->caps[1]);`);
     // The adapter OWNS its params (closure ABI); each converts to a dyn
     // argument (toDynExprC borrows) and releases.
     if (t.params.length > 0) {
@@ -2168,12 +2189,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         if (isRefCounted(p)) d.push(`  ${releaseCallC(p, `a${i}`)};`);
       });
     }
-    // The kind is FUNC by construction (the dynCheck that built this
-    // adapter tested it), so `what` is unreachable — spelled anyway.
+    // The kind was FUNC by construction (the dynCheck that built this
+    // adapter tested it), which is exactly why the dyn value itself is
+    // not kept: scr_dyn_call's only remaining work on a FUNC dyn is the
+    // thunk call, and the "not a function" arm was unreachable from here.
     d.push(
-      `  ScrDyn *sc_r = scr_dyn_call(sc_fn, ${t.params.length > 0 ? "sc_args" : "NULL"}, ${t.params.length}, "value");`,
+      `  ScrDyn *sc_r = sc_th(sc_fn, ${t.params.length > 0 ? "sc_args" : "NULL"}, ${t.params.length});`,
     );
-    d.push(`  scr_dyn_release(sc_fn);`);
+    d.push(`  scr_closure_release(sc_fn);`);
     t.params.forEach((_, i) => d.push(`  scr_dyn_release(sc_args[${i}]);`));
     d.push(`  if (scr_exc_pending()) return ${dummy};`.replace("return ;", "return;"));
     if (t.ret.kind === "void") {

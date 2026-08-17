@@ -1092,22 +1092,43 @@ export class LlDyn {
         }
         const adapter = this.dynFuncAdapterHelper(t);
         host.declare(`declare ptr @scr_closure_new(ptr, i64)`);
-        host.declare(`declare ptr @scr_box_new_obj(ptr, ptr, ptr)`);
+        host.declare(`declare ptr @scr_box_new(i32)`);
         host.declare(`declare void @scr_box_set_ref(ptr, ptr)`);
-        host.declare(`declare ptr @scr_dyn_retain_v(ptr)`);
-        host.declare(`declare void @scr_dyn_release_v(ptr)`);
+        host.declare(`declare void @scr_box_set_thunk_fn(ptr, ptr)`);
+        host.declare(`declare ptr @scr_closure_retain_v(ptr)`);
         const a = B.tmp();
-        B.line(`${a} = call ptr @scr_closure_new(ptr @${adapter}, i64 1)`);
-        const box = B.tmp();
-        B.line(`${box} = call ptr @scr_box_new_obj(ptr @scr_dyn_retain_v, ptr @scr_dyn_release_v, ptr null)`);
+        B.line(`${a} = call ptr @scr_closure_new(ptr @${adapter}, i64 2)`);
         const capp = B.tmp();
         // caps[0] is one WHOLE %ScrClosure past the base — never a byte
         // literal: the struct grew a field and every hardcoded 32 in this
         // backend became a write into it instead.
         B.line(`${capp} = getelementptr inbounds %ScrClosure, ptr ${a}, i64 1 ; caps[0]`);
-        B.line(`store ptr ${box}, ptr ${capp}`);
-        const rd = this.retainDyn(B, "%d");
-        B.line(`call void @scr_box_set_ref(ptr ${box}, ptr ${rd})`);
+        // caps[0]: the adapted function's CLOSURE in a FUNC box, which the
+        // collector traces by construction. The whole ScrDyn used to ride
+        // here in an untraced obj-box, and a dyn carries no cycle header —
+        // see the C lane's dynCheckHelper for the ring that leaked.
+        const fbox = B.tmp();
+        B.line(`${fbox} = call ptr @scr_box_new(i32 4) ; SCR_BOX_FUNC`);
+        B.line(`store ptr ${fbox}, ptr ${capp}`);
+        const clop2 = B.tmp();
+        const clo2 = B.tmp();
+        const rclo = B.tmp();
+        B.line(`${clop2} = getelementptr inbounds i8, ptr %d, i64 16 ; ->v.fn.clo`);
+        B.line(`${clo2} = load ptr, ptr ${clop2}`);
+        B.line(`${rclo} = call ptr @scr_closure_retain_v(ptr ${clo2})`);
+        B.line(`call void @scr_box_set_ref(ptr ${fbox}, ptr ${rclo})`);
+        // caps[1]: that closure's thunk, in a scalar box — a function
+        // pointer owns nothing and no ring can pass through it.
+        const capp1 = B.tmp();
+        B.line(`${capp1} = getelementptr inbounds ptr, ptr ${capp}, i64 1 ; caps[1]`);
+        const tbox = B.tmp();
+        B.line(`${tbox} = call ptr @scr_box_new(i32 0) ; SCR_BOX_F64`);
+        B.line(`store ptr ${tbox}, ptr ${capp1}`);
+        const thp = B.tmp();
+        const th = B.tmp();
+        B.line(`${thp} = getelementptr inbounds i8, ptr %d, i64 24 ; ->v.fn.thunk`);
+        B.line(`${th} = load ptr, ptr ${thp}`);
+        B.line(`call void @scr_box_set_thunk_fn(ptr ${tbox}, ptr ${th})`);
         B.terminate(`ret ptr ${a}`);
         break;
       }
@@ -3118,17 +3139,26 @@ export class LlDyn {
     const host = this.host;
     const B = new BlockBuilder();
     host.declare(`declare ptr @scr_box_get_ref(ptr)`);
-    host.declare(`declare ptr @scr_dyn_call(ptr, ptr, i64, ptr)`);
+    host.declare(`declare ptr @scr_box_get_thunk_fn(ptr)`);
+    host.declare(`declare void @scr_closure_release(ptr)`);
     host.declare(`declare void @scr_dyn_release(ptr)`);
     const retTy = t.ret.kind === "void" ? "void" : this.valTy(t.ret);
     const dummy =
       t.ret.kind === "void" ? "void" : retTy === "double" ? `double ${f64Lit(0)}` : retTy === "i1" ? "i1 false" : "ptr null";
+    // caps[0] is the adapted function's CLOSURE (a FUNC box — traced),
+    // caps[1] its thunk. See dynCheckHelper's func arm.
     const capp = B.tmp();
     const box = B.tmp();
     B.line(`${capp} = getelementptr inbounds %ScrClosure, ptr %sc_env, i64 1 ; caps[0]`);
     B.line(`${box} = load ptr, ptr ${capp}`);
     const fnv = B.tmp();
     B.line(`${fnv} = call ptr @scr_box_get_ref(ptr ${box}) ; +1`);
+    const capp1 = B.tmp();
+    const tbox = B.tmp();
+    const thunk = B.tmp();
+    B.line(`${capp1} = getelementptr inbounds ptr, ptr ${capp}, i64 1 ; caps[1]`);
+    B.line(`${tbox} = load ptr, ptr ${capp1}`);
+    B.line(`${thunk} = call ptr @scr_box_get_thunk_fn(ptr ${tbox})`);
     // The adapter OWNS its params (closure ABI); each converts to a dyn
     // argument (borrowed by the conversion) and releases.
     let argsPtr = "null";
@@ -3146,11 +3176,12 @@ export class LlDyn {
       });
       argsPtr = arr;
     }
-    // The kind is FUNC by construction; `what` is unreachable — spelled
-    // anyway (the C's "value").
+    // The kind WAS FUNC by construction, which is why the dyn value is
+    // not kept: scr_dyn_call's only remaining work on a FUNC dyn was this
+    // thunk call, and its "not a function" arm was unreachable from here.
     const r = B.tmp();
-    B.line(`${r} = call ptr @scr_dyn_call(ptr ${fnv}, ptr ${argsPtr}, i64 ${t.params.length}, ptr ${host.cstr("value")})`);
-    B.line(`call void @scr_dyn_release(ptr ${fnv})`);
+    B.line(`${r} = call ptr ${thunk}(ptr ${fnv}, ptr ${argsPtr}, i64 ${t.params.length})`);
+    B.line(`call void @scr_closure_release(ptr ${fnv})`);
     for (const v of argVals) B.line(`call void @scr_dyn_release(ptr ${v})`);
     this.pendingBail(B, "dfa", () => {}, dummy === "void" ? "void" : dummy);
     if (t.ret.kind === "void") {
