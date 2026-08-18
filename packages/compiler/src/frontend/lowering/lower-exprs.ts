@@ -24,7 +24,7 @@ import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
 import { lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { fenceNamespaceConditionalValue, lowerNamespaceConditionalDecl } from "./lower-nsvalue.js";
 import { findGenericMethodOn, lowerStaticFieldRead } from "./lower-classes.js";
-import { bindingNeverReassigned, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
+import { bindingNeverReassigned, classHasOwnValueOf, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js";
 import { isConstAssertionTypeNode, isGenericCallableMemberType, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
@@ -10523,6 +10523,13 @@ export function ensureStringForPlus(L: Lowerer, e: IrExpr, node: ts.Node): IrExp
     const atWidth = stringConvAtDynWidth(L, e);
     if (atWidth) return { kind: "toString", operand: atWidth, hint: "default", type: STRING, loc: e.loc };
   }
+  // The DEFAULT hint asks valueOf FIRST. ensureString's class arm is the
+  // STRING hint's answer, so a class that declares its own valueOf must
+  // not reach it: `"" + {valueOf:()=>42, toString:()=>"TS"}` is "42" and
+  // String() of the same object is "TS". Object.prototype.valueOf returns
+  // the object itself and falls through to toString, which is why only a
+  // SOURCE-DECLARED one is asked about.
+  if (classHasOwnValueOf(L, e.type)) L.badType(node, L.typeOf(node));
   return ensureString(L, e, node);
 }
 
@@ -10618,6 +10625,14 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
           return { kind: "libCall", fn: "error.toString", args: [L.upcastTo(e, "%Error")], type: STRING, loc: e.loc };
         }
       }
+      // `${obj}` / String(obj) over a PROGRAM CLASS: the class's own
+      // toString, exactly as `obj.toString()` already dispatches it, or
+      // Object.prototype.toString's constant where the class has none.
+      // This arm did not exist -- a class receiver fell through every
+      // branch to badType -- so one spelling of ToString answered and the
+      // other refused the program.
+      const dispatched = classInstanceToString(L, e, e.loc);
+      if (dispatched !== null) return dispatched;
     }
     if (e.type.kind === "union") {
       // `${u}` — the arm's ToString via a per-union interned helper
