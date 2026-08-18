@@ -302,7 +302,7 @@ export interface CcOptions {
    * the IR): pulls in scr_dyn_handle.c, whose child-stdio ops let
    * `child.stdout` cross into the checked-dynamic tree. The STREAM itself
    * lives in the always-linked scr_child.c; only the dyn ops are gated,
-   * and they must be, because they use that units listener adapters 
+   * and they must be, because they use that unit’s listener adapters —
    * an always-linked TU referencing a gated one is an undefined symbol in
    * every handle-free binary. */
   childStream?: boolean;
@@ -561,12 +561,52 @@ function trapTraceRequested(): boolean {
  * unchanged, plain builds at -O2 plus the audit define only when asked.
  * compileC's two option sets and compileLibArchive must stay in lockstep —
  * see buildArgs' -fno-strict-aliasing note. */
+/** SCRIPTC_OPT_LEVEL at BUILD time: the optimization level plain builds
+ * compile at, default "-O2". The performance front needs -Os and -O0 lanes
+ * that are otherwise unreachable -- cc.ts's only other -Os is the VENDORED
+ * quickjs/mbedtls/lre archives, never scriptc's own runtime or the emitted
+ * TU. Same contract as SCRIPTC_RC_AUDIT: unset/empty keeps the historical
+ * command line byte for byte, and when it IS set the level lands in the
+ * build-cache key like any other flag, so an -Os binary and an -O2 binary
+ * never share an entry. Only a -O<x> spelling is accepted, so this knob
+ * cannot smuggle arbitrary argv in through the back door. */
+function optLevelArg(): string {
+  const v = process.env.SCRIPTC_OPT_LEVEL;
+  if (v === undefined || v === "") return "-O2";
+  if (!/^-O[0123sz]$/.test(v)) throw new Error(`SCRIPTC_OPT_LEVEL must be one of -O0 -O1 -O2 -O3 -Os -Oz (got ${JSON.stringify(v)})`);
+  return v;
+}
+
+/** SCRIPTC_PROF_CFLAGS at BUILD time: extra flags appended to every compile
+ * and to the link, whitespace-separated. This is the profiling seam -- it
+ * is what lets a build carry -finstrument-functions (verified working on
+ * x86_64-windows-gnu) or -ffunction-sections -Wl,--gc-sections without a
+ * source edit per experiment.
+ *
+ * NOT a general escape hatch, and deliberately last in the argv so it can
+ * only ADD. Same contract as the knobs above: unset/empty keeps the
+ * historical command line byte for byte, and when set the flags land in the
+ * build-cache key, so an instrumented binary never shares a cache entry
+ * with a clean one.
+ *
+ * Recorded for whoever reaches for --wrap: zig's linker REJECTS it on this
+ * target -- "error: unsupported linker arg: --wrap" for
+ * x86_64-windows-gnu. Allocation interposition has to go through the
+ * preprocessor, not the linker. */
+function profCflags(): string[] {
+  const v = process.env.SCRIPTC_PROF_CFLAGS;
+  if (v === undefined || v === "") return [];
+  return v.split(/\s+/).filter((s) => s.length > 0);
+}
+
 function optAuditArgs(sanitize: boolean): string[] {
   // Appended last and only when asked, so an untraced build's argv is
   // the historical one, element for element.
   const trap = trapTraceRequested() ? ["-DSCR_TRAP_TRACE"] : [];
-  if (sanitize) return ["-O1", "-fsanitize=address", "-DSCR_RC_AUDIT", ...trap];
-  return rcAuditRequested() ? ["-O2", "-DSCR_RC_AUDIT", ...trap] : ["-O2", ...trap];
+  const prof = profCflags();
+  if (sanitize) return ["-O1", "-fsanitize=address", "-DSCR_RC_AUDIT", ...trap, ...prof];
+  const opt = optLevelArg();
+  return rcAuditRequested() ? [opt, "-DSCR_RC_AUDIT", ...trap, ...prof] : [opt, ...trap, ...prof];
 }
 
 /** The engine archive for one flavor, built lazily on the first --dynamic
