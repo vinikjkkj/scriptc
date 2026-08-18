@@ -3,9 +3,9 @@
  * emitter's frames (see the discipline comment in emitter core). */
 import type { CEmitter, Temp } from "./emitter.js";
 import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
-import { arrayOf, BOOL, BYTES_U8, bytesOf, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals } from "../../ir/nodes.js";
+import { arrayOf, BOOL, BYTES_U8, bytesOf, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals } from "../../ir/nodes.js";
 import { boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
-import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct } from "../mangle.js";
+import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { OVERFLOW_MEMBER } from "./emit-shapes.js";
 import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper } from "./emit-walkers.js";
 import { genResultThunkFor } from "./emit-async.js";
@@ -1821,6 +1821,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // Declared function as a value: the interned immortal closure —
           // every mention yields the same pointer, so `f === f` is true.
           E.fnValues.add(e.fnName);
+          // Its JS name, keyed by the ENTRY POINT the interned literal
+          // stores in `fn` (the env-signature wrapper, not the body) —
+          // that pointer is what a walker-built box sees.
+          const jsName = irFunctionJsName(target);
+          if (jsName !== null) E.fnNames.set(mangleWrapper(e.fnName), jsName);
           return E.newTemp(
             e.type,
             retainCallC(e.type, `(ScrClosure *)&${mangleFnClosure(e.fnName)}`),
@@ -1831,6 +1836,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // against the source position of the lambda that made it.
           E.closureSites.set(E.callTargetC(e.fnName), rcSiteLabel(target.loc, target.name));
         }
+        const jsName = irFunctionJsName(target);
+        if (jsName !== null) E.fnNames.set(E.callTargetC(e.fnName), jsName);
         const t = E.newTemp(
           e.type,
           `scr_closure_new((void *)&${E.callTargetC(e.fnName)}, ${e.captures.length})`,

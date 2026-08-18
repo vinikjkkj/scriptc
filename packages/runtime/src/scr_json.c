@@ -1332,14 +1332,22 @@ const char SCR_FN_SRC_NATIVE[] = "<native>";
 const char SCR_FN_SRC_BOUND[] = "<bound>";
 
 /* A boxed static function value (the compiler's static→dyn converters).
- * Ownership of the closure MOVES in; sig/name/src are static literals. */
+ * Ownership of the closure MOVES in; sig/name/src are static literals.
+ *
+ * A NULL `name` is not "no name", it is "this SITE could not name it":
+ * the walker-built boxes (a function reaching dyn as a record field, a
+ * union arm) hold a bare closure and have nothing to name it from. The
+ * closure's entry point does, through the program's emitted name table
+ * — which is keyed on exactly that pointer for exactly this reason
+ * (scr_runtime.h, ScrFnName). Still NULL after the lookup means the
+ * function really is anonymous, and the renderers already say so. */
 ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity, const char *sig, const char *name,
                              const char *src) {
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_FUNC);
   d->v.fn.clo = clo;
   d->v.fn.thunk = thunk;
   d->v.fn.sig = sig;
-  d->v.fn.name = name;
+  d->v.fn.name = (name != NULL || clo == NULL) ? name : scr_fn_name_of(clo->fn);
   d->v.fn.src = src;
   d->v.fn.arity = arity;
   return d;

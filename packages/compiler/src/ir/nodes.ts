@@ -439,6 +439,39 @@ export const NULL_T: IrType = { kind: "nullT" };
  * exist only inside unions: a unit-armed union instance is tag-only, so
  * wrapping allocates no payload, narrowing to a unit arm produces no value
  * (the frontend never emits it), and releasing has nothing to release. */
+/** The JS `Function.prototype.name` of the function VALUE a body backs,
+ * or null when this program cannot prove one.
+ *
+ * Two sources, and neither is a guess. A LIFTED body carries `jsName`,
+ * which the lift site read off the creation node under JS's own naming
+ * rules (NamedEvaluation included); the empty string there means the
+ * value really is anonymous, which is an answer, so it maps to null and
+ * the renderers print `[Function (anonymous)]` — what node prints.
+ * Anything else is a DECLARED function, whose IR name is the TS name it
+ * was declared with: `function helper(){}` is named `helper` however far
+ * from the declaration the value travels.
+ *
+ * A declared function IMPORTED from another module carries the module
+ * qualifier (`%m0.libFn`); the qualifier is the compiler's and the tail
+ * is the program's, so the tail is the answer.
+ *
+ * Everything else declines, and the list of what "everything else" is
+ * matters more than what is accepted: a MEMBER is `%<class>.<member>`
+ * where the member half can be `get:x` / `set:x` / `static:x` /
+ * `constructor`, and an accessor's JS name really is `get x` with the
+ * space — answering `x` there would be a wrong answer, which is the one
+ * outcome this whole item exists to avoid. Compiler-synthesized bodies
+ * (`%init_0`, a promise continuation) have no JS name at all. Both fall
+ * outside the two accepted shapes by construction: a member's name has
+ * either two dots or a colon, and a synthetic one has neither the bare
+ * form nor the `%m<N>.` prefix. */
+export function irFunctionJsName(fn: IrFunction): string | null {
+  if (fn.jsName !== undefined) return fn.jsName === "" ? null : fn.jsName;
+  const qualified = /^%m\d+\.([A-Za-z_$][A-Za-z0-9_$]*)$/.exec(fn.name);
+  if (qualified) return qualified[1]!;
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(fn.name) ? fn.name : null;
+}
+
 export function isUnitType(t: IrType): boolean {
   return t.kind === "undefinedT" || t.kind === "nullT";
 }
@@ -1302,6 +1335,20 @@ export interface IrFunction {
   /** Original TS name (mangling is a backend concern). Lifted lambdas get
    * synthetic '%'-prefixed names ('%' can't appear in a TS identifier). */
   name: string;
+  /** The JS `Function.prototype.name` of the function VALUE this body
+   * backs, when the lift site proved one — `name` above is a SYMBOL
+   * (`%fn0`), and JS's naming rules are about the CREATION site, not the
+   * symbol. `{ inline: (n) => n }` names its arrow `inline` by
+   * NamedEvaluation, `{ method(n){} }` names it `method`, and a genuinely
+   * anonymous value (`arr.map((x) => x)`) gets `""`.
+   *
+   * Absent on a function the frontend did not lift as a value: a plain
+   * declared function's `name` IS its JS name, and the backends derive
+   * that (irFunctionJsName). Read only by the emitted function-name table
+   * the walker-built boxes resolve through (scr_runtime.h, ScrFnName) —
+   * never by codegen, so a wrong answer here is a wrong PRINTED name and
+   * nothing else. */
+  jsName?: string;
   params: IrParam[];
   returnType: IrType;
   /** All locals including params, pre-collected and scope-flat: ids are
