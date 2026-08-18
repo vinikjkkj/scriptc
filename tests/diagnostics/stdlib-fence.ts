@@ -29,7 +29,10 @@ const st = new Set(new Set([1, 2])); // array seeds lower; Set/iterable seeds st
 // battery lives in the corpus; what stays fenced is the rest of the family
 // and the unlowered members of lowered error objects.)
 const agg = new AggregateError([]);
-const stack = new Error("boom").stack;
+// (`.stack` READS now lower — the header line a zero-frame capture
+// produces, corpus 4622 — so the member that still fences on a lowered
+// error object is `.cause`, whose slot the ScrError layout does not carry.)
+const cause = new Error("boom").cause;
 
 // Unlowered members on lowered containers.
 const sqrt2 = Math.SQRT2;
