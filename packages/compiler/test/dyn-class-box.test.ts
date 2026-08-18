@@ -29,8 +29,8 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compile } from "../src/index.js";
 import { DK } from "../src/backend/llvm/dyn.js";
-import { canBoxClassIntoDyn, canConvertToDyn, canDynCheckTo, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, RUNTIME_EMITTER_CLASS } from "../src/ir/nodes.js";
-import type { IrType } from "../src/ir/nodes.js";
+import { canBoxClassIntoDyn, canConvertToDyn, canDynCheckTo, typeKey, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, RUNTIME_EMITTER_CLASS } from "../src/ir/nodes.js";
+import type { IrRecordShape, IrType, IrUnionDef } from "../src/ir/nodes.js";
 
 const repoRoot = join(import.meta.dirname, "../../..");
 const headerPath = join(repoRoot, "packages/runtime/src/scr_runtime.h");
@@ -191,5 +191,157 @@ describe("the class-instance dyn box's bookkeeping", () => {
       expect(canConvertToDyn(obj(cls), noRec, noRec), `${cls} widens`).toBe(expected);
       expect(canDynCheckTo(obj(cls), noRec, noRec), `${cls} narrows`).toBe(expected);
     }
+  });
+});
+
+/* ── the %Error LEAF, and the one thing that separates it from a record ──
+ *
+ * `canDynCheckTo` admits `%Error` STANDING ALONE and its own NESTED walker
+ * answered `canBoxClassIntoDyn`, which is false for the whole error
+ * hierarchy — so one IR type was checkable as the target and uncheckable as
+ * a record FIELD, sixty lines apart in the same function. Meanwhile
+ * `canConvertToDyn`'s record rule recurses with the FULL predicate, so the
+ * field has ALWAYS converted IN. That asymmetry is the method-bundle
+ * failure mode, and it is what fenced the `emit` trampoline: zapo's
+ * `debug_client_error` carries `{ error: Error }`, one event out of
+ * twenty-seven, and one declining event takes the whole dispatcher.
+ *
+ * The leaf is emittable because the error encoding is EXACT in both walkers:
+ * dynCheck validates the reserved `"%error"` marker and extracts through the
+ * runtime's identity cache, and dynMatch asks the SAME question. Those two
+ * agreeing is what lets a union arm be matched here and built there.
+ *
+ * What this block pins is the part that would go quietly wrong: the encoding
+ * is an ordinary SCR_DYN_OBJ, so a `{ name: string; message: string }`
+ * RECORD matcher matches it too, and the only reasons a real Error does not
+ * come back as that record are (a) the marker test above and (b) the
+ * canonical arm order, which puts `object:%Error` before `record:*` because
+ * unions intern their arms in typeKey order and 'o' < 'r'. Corpus 4642 is
+ * the same statement as a running program.
+ */
+const ERROR_LEAF_PROGRAM = `
+type Bag = { error: Error };
+type OptBag = { error?: Error };
+const e = new Error("boom");
+const carried: unknown = { error: e };
+const back = carried as Bag;
+console.log(back.error.message, back.error === e);
+const opt = carried as OptBag;
+console.log(opt.error === undefined ? "none" : opt.error.message);
+`;
+
+async function compileErrorLeaf(): Promise<{ c: string; ll: string }> {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-errleaf-"));
+  const src = join(dir, "main.ts");
+  await writeFile(src, ERROR_LEAF_PROGRAM, "utf8");
+  const out: Record<string, string> = {};
+  for (const backend of ["c", "llvm"] as const) {
+    const res = await compile(src, {
+      outPath: join(dir, `program-${backend}`),
+      outDir: dir,
+      backend,
+      emitOnly: true,
+    });
+    if (!res.ok) {
+      throw new Error(`${backend} backend refused the error-leaf program: ${res.diagnostics[0]?.message ?? "?"}`);
+    }
+    out[backend] = await readFile(res.cPath, "utf8");
+  }
+  return { c: out.c!, ll: out.llvm! };
+}
+
+describe("an %Error leaf crosses nested, which is the shape the emit trampoline needs", () => {
+  const noRec = (): undefined => undefined;
+  const err: IrType = { kind: "object", className: "%Error" };
+  const bagShape = {
+    id: "rE",
+    fields: [{ name: "error", type: err }],
+  } as unknown as IrRecordShape;
+  const optUnion = {
+    id: "uE",
+    arms: [err, { kind: "undefinedT" } as IrType],
+  } as unknown as IrUnionDef;
+  const optBagShape = {
+    id: "rO",
+    fields: [{ name: "error", type: { kind: "union", unionId: "uE" } as IrType }],
+  } as unknown as IrRecordShape;
+  const subShape = {
+    id: "rT",
+    fields: [{ name: "error", type: { kind: "object", className: "%TypeError" } as IrType }],
+  } as unknown as IrRecordShape;
+  const shapes = new Map<string, IrRecordShape>([
+    ["rE", bagShape],
+    ["rO", optBagShape],
+    ["rT", subShape],
+  ]);
+  const unions = new Map<string, IrUnionDef>([["uE", optUnion]]);
+  const getRecord = (id: string): IrRecordShape | undefined => shapes.get(id);
+  const getUnion = (id: string): IrUnionDef | undefined => unions.get(id);
+  const rec = (id: string): IrType => ({ kind: "record", shapeId: id });
+
+  test("a record FIELD of type Error crosses in BOTH directions", () => {
+    // IN was already true and is the half that made the asymmetry a
+    // stranding rather than a symmetric refusal.
+    expect(canConvertToDyn(rec("rE"), getRecord, getUnion), "{ error: Error } widens").toBe(true);
+    expect(canDynCheckTo(rec("rE"), getRecord, getUnion), "{ error: Error } narrows").toBe(true);
+  });
+
+  test("an OPTIONAL error field crosses too — the arm that needs the MATCHER", () => {
+    // `Error | undefined` is a union, so the union builder asks each arm's
+    // matcher before it builds one. Without the %Error dynMatch arm this
+    // shape reached `classMeta.get("%Error")` and threw an emitter bug —
+    // a predicate that admits a leaf its walkers cannot emit trades a fence
+    // for a crash.
+    expect(canConvertToDyn(rec("rO"), getRecord, getUnion), "{ error?: Error } widens").toBe(true);
+    expect(canDynCheckTo(rec("rO"), getRecord, getUnion), "{ error?: Error } narrows").toBe(true);
+  });
+
+  test("an array of errors crosses, and the ROOT only — subclasses stay out", () => {
+    const arr: IrType = { kind: "array", elem: err };
+    expect(canConvertToDyn(arr, getRecord, getUnion), "Error[] widens").toBe(true);
+    expect(canDynCheckTo(arr, getRecord, getUnion), "Error[] narrows").toBe(true);
+    // %TypeError and the rest keep declining, nested as standing alone, and
+    // the reason is exactness: the encoding records a `name` STRING, not a
+    // class interval, so a dyn error validated into a `%TypeError` slot
+    // would answer that slot for every error there is. Only the root is a
+    // test the encoding can actually pass or fail.
+    for (const cls of RUNTIME_ERROR_CLASSES.keys()) {
+      if (cls === "%Error") continue;
+      const nested: IrType = { kind: "array", elem: { kind: "object", className: cls } };
+      expect(canConvertToDyn(nested, getRecord, getUnion), `${cls}[] widens`).toBe(false);
+      expect(canDynCheckTo(nested, getRecord, getUnion), `${cls}[] narrows`).toBe(false);
+    }
+    expect(canDynCheckTo(rec("rT"), getRecord, getUnion), "{ error: TypeError } narrows").toBe(false);
+  });
+
+  test("an %Error arm is TRIED BEFORE any record arm, by the canonical order", () => {
+    // Unions intern their arms in typeKey order (frontend/types.ts's
+    // `arms.sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1))`), and a
+    // record matcher for { name: string; message: string } matches the
+    // error encoding exactly — same kind, both fields present, both
+    // strings. Order is what resolves the overlap, and this is the
+    // assertion that fails if the key scheme ever stops resolving it in the
+    // correct direction. It is a property of the KEYS, not of one program:
+    // "object:%Error" < "record:" for every record id there can be.
+    expect(typeKey(err)).toBe("object:%Error");
+    expect(typeKey(err) < typeKey({ kind: "record", shapeId: "r0" })).toBe(true);
+    expect(typeKey(err) < typeKey({ kind: "record", shapeId: "" })).toBe(true);
+  });
+
+  test("both backends match an %Error by the MARKER, not by a class interval", async () => {
+    const { c, ll } = await compileErrorLeaf();
+    // C: the matcher's own comment names the type it matches.
+    const cm = /static bool (sc_dm_\d+)\(const ScrDyn \*d\) \{ \/\* matches object:%Error \*\/\n([^\n]*)\n\}/.exec(c);
+    expect(cm, "no C matcher for object:%Error — this test has gone blind").not.toBeNull();
+    expect(cm![2]).toContain(`scr_dyn_obj_get(d, "%error", 6)`);
+    expect(cm![2]).not.toContain("scr_dyn_objinst_is");
+    // LLVM: same question, same answer, in its own spelling.
+    const lm = /define internal zeroext i1 @sc_dm_\d+\(ptr %d\) #\d+ \{ ; matches object:%Error\n([\s\S]*?)\n\}/.exec(ll);
+    expect(lm, "no LLVM matcher for object:%Error — this test has gone blind").not.toBeNull();
+    expect(lm![1]).toContain("@scr_dyn_obj_get");
+    expect(lm![1]).not.toContain("scr_dyn_objinst_is");
+    // And the CHECK builder asks the identical question, so nothing can be
+    // matched here and then fail to build there.
+    expect(c).toContain(`if (d->kind != SCR_DYN_OBJ || !scr_dyn_obj_get(d, "%error", 6))`);
   });
 });

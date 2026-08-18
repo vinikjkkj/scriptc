@@ -1067,7 +1067,21 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // instance's OWN vtable inside the runtime helper, so a box made
         // from a base-typed slot still matches the derived arm; a
         // standalone class has no subclasses and matches only itself.
-        // %Error keeps its encoding and never reaches here.
+        //
+        // %Error keeps the checked-dynamic tree's ERROR ENCODING, so it
+        // gets its own arm rather than an interval: the reserved "%error"
+        // marker caughtToDyn stamps, which is EXACTLY the test
+        // dynCheckHelper's %Error branch performs. Match and check ask the
+        // same question, so no union arm can be matched here and then fail
+        // to build below — the property the union builder relies on.
+        // Before the nested %Error leaf was admitted this line threw
+        // "dynMatch of unknown class %Error", because classMeta has no
+        // entry for it; a leaf admitted by the predicate and unemittable
+        // here would have traded a fence for an emitter crash.
+        if (t.className === "%Error") {
+          d.push(`  return d->kind == SCR_DYN_OBJ && scr_dyn_obj_get(d, "%error", 6) != NULL;`);
+          break;
+        }
         const meta = E.classMeta.get(t.className);
         if (!meta) throw new Error(`emitter bug: dynMatch of unknown class ${t.className}`);
         // The descriptor is interned here as well as at the to-dyn site:
