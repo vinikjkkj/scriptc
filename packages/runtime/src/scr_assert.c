@@ -444,6 +444,9 @@ static bool scr_assert_dyn_same_value(const ScrDyn *a, const ScrDyn *b) {
        * content plays no part here even though deepStrictEqual below
        * compares bytes. */
       return a->v.bytes == b->v.bytes;
+    case SCR_DYN_MAP:
+      /* Identity is the ScrMap (the strict_eq stance). */
+      return a->v.map.m == b->v.map.m;
     case SCR_DYN_BIG:
       /* And NOT identity: SameValue over a PRIMITIVE is the VALUE, so
        * two boxes of 1n are the same value — the strict_eq stance for a
@@ -505,6 +508,26 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
        * runs needs a member table the box does not carry, so identity is
        * the only honest answer (documented with the handle stance). */
       return a->v.inst.o == b->v.inst.o;
+    case SCR_DYN_MAP:
+      /* The SAME ScrMap is equal, and Node agrees without qualification.
+       * Two DIFFERENT maps are where this arm stops: Node compares
+       * ENTRIES, and the box carries the interned typeKey, not a
+       * per-element comparator, so it cannot walk them. A plain `false`
+       * would mint a fabricated AssertionError for values Node calls
+       * equal — the JSVAL arm's reasoning above, and the reason this is
+       * a FENCE and not the identity answer the HANDLE and OBJINST arms
+       * settle for.
+       *
+       * This arm is load-bearing rather than defensive. Admitting maps to
+       * canConvertToDyn removed a COMPILE-TIME refusal that used to stand
+       * here (`assert.deepStrictEqual of 'unknown' and 'Map<string,
+       * number>' values ... has no scriptc lowering yet`, SC2020, in
+       * tests/diagnostics/assert-fences.ts). Replacing a loud refusal
+       * with a quiet wrong boolean is the one trade this project does not
+       * make, so the loudness moves here rather than disappearing. */
+      if (a->v.map.m == b->v.map.m) return true;
+      scr_dyn_map_fence(a, "deepStrictEqual");
+      return false;
     case SCR_DYN_PROMISE:
       /* Node compares promises structurally (no own props → equal); the
        * honest arm here is identity — two distinct promises with equal
@@ -668,6 +691,15 @@ static void scr_assert_cf_value(ScrAssertBuf *b, const ScrDyn *d, size_t indent,
        * story, and it too only appears inside FAILURE diffs. */
       ab_char(b, '[');
       ab_cstr(b, scr_dyn_objinst_cls(d));
+      ab_char(b, ']');
+      return;
+    }
+    case SCR_DYN_MAP: {
+      /* The depth-elided form ([Map] / [Set]) — Node renders the entries;
+       * the instance arm's story, and it too only appears inside FAILURE
+       * diffs, which already diverge in report format. */
+      ab_char(b, '[');
+      ab_cstr(b, scr_dyn_map_cls(d));
       ab_char(b, ']');
       return;
     }

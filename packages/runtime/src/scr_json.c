@@ -470,6 +470,13 @@ static void scr_dyn_gcfree(void *o) {
   case SCR_DYN_OBJINST:
     d->v.inst.cls->release(d->v.inst.o);
     break;
+  case SCR_DYN_MAP:
+    /* Owned, and NOT traced — the dyn→map edge is invisible to the
+     * collector (the OBJINST stance and its reason), so the map must be
+     * released here rather than left to the trace. `tkey` is a static
+     * literal and owns nothing. */
+    scr_map_release(d->v.map.m);
+    break;
   default:
     break; /* ARR items and FUNC clo are traced; scalars own nothing */
   }
@@ -555,6 +562,12 @@ void scr_dyn_release(ScrDyn *d) {
      * dispatches on the instance's vtable, so a base-typed box still
      * tears down the derived object. */
     d->v.inst.cls->release(d->v.inst.o);
+    break;
+  case SCR_DYN_MAP:
+    /* The strong reference the box took at construction. scr_map.c is in
+     * the same always-linked core as this file, so unlike the three arms
+     * above there is no installed-ops indirection to go through. */
+    scr_map_release(d->v.map.m);
     break;
   default:
     break; /* null/bool/num have no children */
@@ -1478,6 +1491,9 @@ const char *scr_dyn_specific_type(const ScrDyn *cb, char *detail, size_t cap) {
     snprintf(detail, cap, "an instance of %s", scr_dyn_objinst_cls(cb));
     break;
   case SCR_DYN_ARRBUF: d = "an instance of ArrayBuffer"; break;
+  case SCR_DYN_MAP:
+    snprintf(detail, cap, "an instance of %s", scr_dyn_map_cls(cb));
+    break;
   case SCR_DYN_BIG: {
     /* "type bigint (5n)" — a PRIMITIVE row, like the boolean and number
      * rows below and unlike every reference kind above. Measured
@@ -1688,6 +1704,77 @@ bool scr_dyn_objinst_fence(const ScrDyn *d, const char *what) {
   scr_jb_puts(&b, what);
   scr_jb_puts(&b, " on a dynamic ");
   scr_jb_puts(&b, scr_dyn_objinst_cls(d));
+  scr_jb_puts(&b, " is not supported yet");
+  scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+  return false;
+}
+
+/* ── maps and sets in the checked-dynamic tree (SCR_DYN_MAP) ──────────
+ * Five functions, and the shape is the OBJINST block's exactly: a Map is
+ * an OPAQUE box on this side of the boundary. It carries a payload the
+ * static side still owns, four questions have constant answers (typeof,
+ * truthiness, String(), JSON) and every other one is answered by the
+ * loud ladder rather than by a fabricated shape.
+ *
+ * The one thing that is NOT the OBJINST block's is the identity test.
+ * OBJINST has a compiler-emitted descriptor with a preorder interval to
+ * check against; ScrMap has nothing — key_kind, val_kind and three RC
+ * hooks, none of which names an IR type. So the box carries the interned
+ * typeKey, and both `_is` and `_unbox` go through it. See the kind's
+ * comment in scr_runtime.h for the Map<string,number> / Set<string>
+ * collision that makes that mandatory rather than tidy.
+ *
+ * scr_map.c sits in the same always-linked RUNTIME_SOURCES core as this
+ * file (cc.ts:11), so scr_map_retain/scr_map_release are named directly
+ * here — no installed ops table, unlike the bigint and island kinds
+ * whose units are gated. */
+
+ScrDyn *scr_dyn_new_map_ref(ScrMap *m, const char *tkey) {
+  if (tkey == NULL) {
+    /* An untagged box is the ONE shape that turns this kind into the
+     * silent wrong answer it exists to prevent: dynMatch and dynCheck
+     * would have nothing to compare and would have to fall back to the
+     * kind test, which cannot tell a Map from a Set. A compiler that
+     * reaches here has a bug, and a loud abort is the only honest
+     * response — a fence would let the box escape into a union tag. */
+    scr_trap("emitter bug: a dyn Map box with no interned type key");
+  }
+  ScrDyn *d = scr_dyn_alloc(SCR_DYN_MAP);
+  /* The SAME ScrMap, retained — a write through either side is seen by
+   * the other, the reference stance the shared representation forces. */
+  d->v.map.m = scr_map_retain(m);
+  d->v.map.tkey = tkey; /* a static emitted literal; never owned */
+  return d;
+}
+
+bool scr_dyn_map_is(const ScrDyn *d, const char *tkey) {
+  if (d->kind != SCR_DYN_MAP) return false;
+  return strcmp(d->v.map.tkey, tkey) == 0;
+}
+
+ScrMap *scr_dyn_map_unbox(const ScrDyn *d, const char *tkey,
+                          const ScrDynPath *path, const char *want) {
+  if (!scr_dyn_map_is(d, tkey)) {
+    scr_dyn_check_fail(path, want, d);
+    return NULL;
+  }
+  /* The SAME pointer, retained — identity survives box/unbox. */
+  return scr_map_retain(d->v.map.m);
+}
+
+const char *scr_dyn_map_cls(const ScrDyn *d) {
+  /* The typeKey's own spelling decides the word: nodes.ts renders a map
+   * as "map<K,V>" and a set as "set<E>", so the first byte separates
+   * them and no second field is needed. */
+  return d->v.map.tkey[0] == 's' ? "Set" : "Map";
+}
+
+bool scr_dyn_map_fence(const ScrDyn *d, const char *what) {
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_jb_puts(&b, what);
+  scr_jb_puts(&b, " on a dynamic ");
+  scr_jb_puts(&b, scr_dyn_map_cls(d));
   scr_jb_puts(&b, " is not supported yet");
   scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
   return false;
@@ -2002,6 +2089,7 @@ bool scr_dyn_truthy(const ScrDyn *d) {
   case SCR_DYN_FUNC:
   case SCR_DYN_HANDLE:
   case SCR_DYN_OBJINST: /* a class instance is a JS object: always truthy */
+  case SCR_DYN_MAP: /* a Map/Set is a JS object — an EMPTY one too */
   case SCR_DYN_PROMISE: return true;
   case SCR_DYN_BIG:
     /* The ONE non-scalar kind whose truthiness is not constant: 0n is
@@ -2225,6 +2313,7 @@ static const char *scr_dyn_typeof_native(const ScrDyn *d) {
   case SCR_DYN_ARRBUF:
   case SCR_DYN_HANDLE:
   case SCR_DYN_OBJINST:
+  case SCR_DYN_MAP:
   case SCR_DYN_PROMISE: return "object";
   case SCR_DYN_BOOL: return "boolean";
   case SCR_DYN_NUM: return "number";
@@ -2570,6 +2659,14 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
     /* An ArrayBuffer has no own enumerable properties, so Node writes
      * {} — a real answer, not an approximation, and NOT the typed
      * array's index-keyed form. */
+    scr_jb_puts(b, "{}");
+    return true;
+  case SCR_DYN_MAP:
+    /* A Map's and a Set's entries live in internal slots, not in own
+     * enumerable properties, so Node writes {} here as well —
+     * JSON.stringify(new Map([["a",1]])) really is "{}". A real answer,
+     * measured against v25.9.0, and the ONE place the "husk" shape that
+     * keeps a Map out of isJsonSafeType is exactly what JS asks for. */
     scr_jb_puts(b, "{}");
     return true;
   case SCR_DYN_BIG:
@@ -3059,6 +3156,14 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
      * String(buf) really is "[object ArrayBuffer]" and NOT the element
      * join a typed array gives. */
     return scr_str_new("[object ArrayBuffer]", 20);
+  case SCR_DYN_MAP:
+    /* Object.prototype.toString with the Map / Set @@toStringTag —
+     * measured against v25.9.0: neither has an own toString, so
+     * String(new Map()) is "[object Map]" and String(new Set()) is
+     * "[object Set]". An ANSWER, like the ArrayBuffer arm above and
+     * unlike the OBJINST arm, because the shape is known and constant. */
+    return d->v.map.tkey[0] == 's' ? scr_str_new("[object Set]", 12)
+                                   : scr_str_new("[object Map]", 12);
   case SCR_DYN_PROMISE:
     /* Object.prototype.toString with the Promise @@toStringTag. */
     return scr_str_new("[object Promise]", 16);
@@ -3214,7 +3319,7 @@ ScrStr *scr_dyn_string_coerce_js(const ScrDyn *d) {
       if (!r) return NULL; /* the method threw — pending */
       if (r->kind == SCR_DYN_OBJ || r->kind == SCR_DYN_ARR ||
           r->kind == SCR_DYN_FUNC || r->kind == SCR_DYN_HANDLE ||
-          r->kind == SCR_DYN_ARRBUF ||
+          r->kind == SCR_DYN_ARRBUF || r->kind == SCR_DYN_MAP ||
           r->kind == SCR_DYN_OBJINST || r->kind == SCR_DYN_PROMISE) {
         scr_dyn_release(r); /* non-primitive answer: try the next method */
         continue;
@@ -3408,7 +3513,8 @@ ScrStr *scr_dyn_to_primitive_string(const ScrDyn *d) {
     if (!r) return NULL; /* threw — pending */
     if (r->kind != SCR_DYN_OBJ && r->kind != SCR_DYN_ARR && r->kind != SCR_DYN_FUNC &&
         r->kind != SCR_DYN_HANDLE && r->kind != SCR_DYN_OBJINST &&
-        r->kind != SCR_DYN_ARRBUF && r->kind != SCR_DYN_PROMISE) {
+        r->kind != SCR_DYN_ARRBUF && r->kind != SCR_DYN_MAP &&
+        r->kind != SCR_DYN_PROMISE) {
       ScrStr *s = scr_dyn_string_coerce(r);
       scr_dyn_release(r);
       return s;
@@ -4061,6 +4167,13 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
     scr_dyn_big_fence(recv, "a property write");
     return;
   }
+  if (recv->kind == SCR_DYN_MAP) {
+    /* Node takes an EXPANDO here too (a Map is an ordinary extensible
+     * object), and this tier has nowhere to keep one. A write that goes
+     * nowhere is the static_copy stance's forbidden answer, so refuse. */
+    scr_dyn_map_fence(recv, "assigning a property");
+    return;
+  }
   if (recv->kind == SCR_DYN_ARRBUF) {
     /* Node takes an EXPANDO here (an ArrayBuffer is an ordinary
      * extensible object), and `buf[0] = 1` is a silent no-op because
@@ -4276,6 +4389,11 @@ static void scr_jb_put_dyn_raw(ScrJsonBuf *b, const ScrDyn *d) {
      * standing in for an unknown shape: the shape is known and empty. */
     scr_jb_puts(b, "{}");
     return;
+  case SCR_DYN_MAP:
+    /* {} — a Map's and a Set's own enumerable properties, of which there
+     * are none either. The sibling writer's arm, same measurement. */
+    scr_jb_puts(b, "{}");
+    return;
   case SCR_DYN_BIG:
     /* V8's own TypeError, not a scriptc fence — see the sibling writer. */
     scr_dyn_big_json_throw();
@@ -4391,6 +4509,12 @@ static const char *scr_dyn_kind_name(const ScrDyn *d) {
     * because a bigint is a primitive with no class to name */
   case SCR_DYN_HANDLE: return scr_dyn_handle_cls(d); /* "got IncomingMessage" */
   case SCR_DYN_OBJINST: return scr_dyn_objinst_cls(d); /* "got Readable" */
+  case SCR_DYN_MAP: return scr_dyn_map_cls(d); /* "got Map" / "got Set" —
+    * and this is the arm that makes the kind's whole point READABLE:
+    * `u as Map<string,number>` over a boxed Set<string> fails with
+    * "expected Map at $, got Set" instead of unwrapping into the wrong
+    * slot. Two DIFFERENT map types still both say "Map", which is what
+    * Node's own vocabulary has to offer; the path names the site. */
   case SCR_DYN_PROMISE: return "Promise"; /* "got Promise" */
   case SCR_DYN_JSVAL: return "an island value"; /* "got an island value" — validated
     * extraction of engine-held values has no armed route yet (lane
@@ -4975,6 +5099,14 @@ bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b) {
      * one buffer compare ===-equal — the same stance the shared
      * representation already forces on aliasing. */
     return a->v.bytes == b->v.bytes;
+  case SCR_DYN_MAP:
+    /* And the MAP: the ScrMap is the JS value, the box is a boundary
+     * artifact, so two boxes of one map compare ===-equal and
+     * `unbox(box(m)) === m` holds by the same pointer. The typeKey is
+     * NOT compared: two boxes of the same map necessarily carry the same
+     * key, and comparing it would only add a way to answer false for a
+     * value that IS itself. */
+    return a->v.map.m == b->v.map.m;
   case SCR_DYN_BIG:
     /* And NOT the bigint: it is a PRIMITIVE, so === compares the VALUE.
      * The four kinds above answer with a pointer and the default tail
@@ -6532,7 +6664,7 @@ ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *wh
    * anything else (the overwhelmingly common `return;`) is discarded. */
   if (r != NULL && (r->kind == SCR_DYN_OBJ || r->kind == SCR_DYN_ARR ||
                     r->kind == SCR_DYN_FUNC || r->kind == SCR_DYN_BYTES ||
-                    r->kind == SCR_DYN_ARRBUF ||
+                    r->kind == SCR_DYN_ARRBUF || r->kind == SCR_DYN_MAP ||
                     r->kind == SCR_DYN_HANDLE || r->kind == SCR_DYN_PROMISE ||
                     r->kind == SCR_DYN_JSVAL || r->kind == SCR_DYN_OBJINST)) {
     scr_dyn_release(inst);
@@ -6646,6 +6778,16 @@ static ScrDyn *scr_sc_clone(const ScrDyn *v, const ScrScParent *up) {
      * cannot enumerate them, and a fabricated {} would be a silent wrong
      * answer (the JSVAL arm's reasoning). */
     scr_dyn_objinst_fence(v, "structuredClone");
+    return NULL;
+  case SCR_DYN_MAP:
+    /* Node CLONES a Map or Set, entry by entry (both are on the
+     * structured-clone list), so the DataCloneError default below would
+     * be a wrong claim — but the box cannot walk the entries: it holds
+     * the interned typeKey, not the per-element retain/copy the walk
+     * would need to rebuild a value of the same static type. A fabricated
+     * empty map would be a silent wrong answer of exactly the shape
+     * estado-dynfunc.md 3.5 warns about. Loud fence. */
+    scr_dyn_map_fence(v, "structuredClone");
     return NULL;
   case SCR_DYN_BIG:
     /* Bigints ARE cloneable (measured: structuredClone(5n) is 5n), so
@@ -7122,6 +7264,12 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
    * Node, so false is a wrong ANSWER where the neighbours refuse. The
    * method spelling `inst.hasOwnProperty(k)` lands here too. */
   if (v->kind == SCR_DYN_OBJINST) return scr_dyn_objinst_fence(v, "Object.hasOwn");
+  /* A MAP box is exact in the OTHER direction and it is worth saying why
+   * it does NOT join the OBJINST arm: a Map's entries are internal slots,
+   * not own properties, so `Object.hasOwn(new Map([["a",1]]), "a")` is
+   * FALSE in Node (measured) — the same answer BIG, ARRBUF and PROMISE
+   * get from the default tail below, and for the same reason. Fencing
+   * here would refuse a question this tier can answer correctly. */
   /* HANDLE keeps FALSE, and it is the answer `in` already gives over the
    * same value: which members a native handle OWNS rather than inherits
    * is a distinction this tier has not measured, and the two spellings

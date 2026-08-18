@@ -70,15 +70,6 @@ assert-fences.ts:28:29 - error SC2020: 'assert.deepStrictEqual of 'unknown' and 
 
   hint: the unknown boundary cannot carry the Buffer-vs-Uint8Array brand Node compares — narrow the unknown side to a typed array and compare those
 
-assert-fences.ts:29:29 - error SC2020: 'assert.deepStrictEqual of 'unknown' and 'Map<string, number>' values' is part of the standard library types but has no scriptc lowering yet
-
-  28 | assert.deepStrictEqual(unk, new Uint8Array([1])); // bytes static side: the dyn copy cannot carry the brand
-  29 | assert.deepStrictEqual(unk, new Map<string, number>()); // not dyn-convertible
-     |                             ^~~~~~~~~~~~~~~~~~~~~~~~~
-  30 | 
-
-  hint: the static side must convert into the checked-dynamic tree (numbers, strings, booleans, null/undefined, boxable functions, or JSON-safe structures under the deep forms) — narrow the unknown side instead
-
 assert-fences.ts:31:1 - error SC2020: 'assert.deepStrictEqual of 'number[]' and 'string[]' values' is part of the standard library types but has no scriptc lowering yet
 
   30 | 

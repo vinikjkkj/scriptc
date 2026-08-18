@@ -1001,6 +1001,13 @@ static const char *isl_dyn_unmarshalable(const ScrDyn *d) {
      * compiled struct, so the crossing names the world honestly rather
      * than falling into the generic tail. */
     return "a class instance";
+  case SCR_DYN_MAP:
+    /* A Map or Set held by reference: the engine has its own Map, and
+     * this bridge does not model the entry-by-entry transfer that
+     * handing one over would need. Named, not silently copied — the
+     * OBJINST arm's stance, and a copy would break the aliasing the
+     * static side is relying on. */
+    return "a Map";
   case SCR_DYN_ARRBUF:
     /* The engine's ArrayBuffer is its own allocation, so handing it the
      * compiled payload would need a transfer this bridge does not

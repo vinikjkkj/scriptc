@@ -6597,6 +6597,24 @@ export function canConvertToDyn(
   // member without the copy lying about it.
   if (t.kind === "object" && canBoxClassIntoDyn(t.className)) return true;
   if (t.kind === "func") return canBoxFuncIntoDyn(t, getRecord, getUnion);
+  // A MAP or a SET boxes by REFERENCE (SCR_DYN_MAP): the retained ScrMap
+  // plus the interned typeKey of THIS type, a static emitted literal
+  // exactly like the FUNC box's `sig`. No condition on the key or value
+  // type, and that is sound rather than lax: the contents are never
+  // converted and never readable through the dyn side (the box meets the
+  // loud ladder for `get`, `size`, indexing and iteration), so the only
+  // thing the crossing can do with a map is CARRY it and hand it back
+  // through canDynCheckTo's twin — which demands the same typeKey and so
+  // returns the identical static type.
+  //
+  // The typeKey is what makes admitting this a closure and not a wrong
+  // answer. ScrMap names no IR type: `Map<string, number>` and
+  // `Set<string>` both emit
+  // `scr_map_new(SCR_MAP_KEY_STR, SCR_MAP_VAL_F64, NULL, NULL, NULL)`,
+  // byte for byte, so a keyless box would let `u as Map<string, number>`
+  // unwrap a Set and answer its unused f64 slot from `m.get(k)` where
+  // Node throws "m.get is not a function".
+  if (t.kind === "map" || t.kind === "set") return true;
   if (DYN_HANDLE_KINDS.has(t.kind)) return true;
   // Promises box by REFERENCE (SCR_DYN_PROMISE): promise<dyn> carries its
   // ScrPromise directly (the payload is already a dyn value), any other
@@ -6796,6 +6814,14 @@ export function canDynCheckTo(
   // refusal with the runtime answer the `as` spelling of the identical
   // cast already gives.
   if (t.kind === "func") return true;
+  // The OUT direction of the map box: a kind test, a typeKey strcmp and a
+  // RETAINED unwrap (+1 — the same ScrMap, so identity survives the round
+  // trip). Admitted in lockstep with canConvertToDyn above, and the
+  // lockstep is the load-bearing half rather than the tidy one: letting a
+  // map IN without letting it back OUT is exactly what stranded the
+  // method bundles, and here it would strand every record that carries a
+  // `ReadonlyMap` — which is the whole population this kind exists for.
+  if (t.kind === "map" || t.kind === "set") return true;
   if (DYN_HANDLE_KINDS.has(t.kind)) return true;
   if (t.kind === "union") {
     const def = getUnion(t.unionId);
@@ -6843,6 +6869,16 @@ export function canDynCheckTo(
     // union-arm comment above records, where the fence merely moved to
     // the declaration that asked for the value back.
     if (x.kind === "object") return canBoxClassIntoDyn(x.className);
+    // A MAP or SET leaf — the record field a widened value carries one
+    // container down, which is the ONLY shape zapo needs: the
+    // `ReadonlyMap` inside `getCollectionState`'s returned record and
+    // inside `setCollectionStates`' accepted one. Admitted here for the
+    // reason the class leaf is, and the walkers can emit it for the same
+    // reason: dynMatch has the typeKey strcmp and dynCheck has the
+    // key-checked retained unwrap, both added with the kind. Refusing it
+    // here while canConvertToDyn admits it would let the value IN and
+    // strand it — the method-bundle lesson, one container down.
+    if (x.kind === "map" || x.kind === "set") return true;
     if (stack.has(x)) return true;
     const deeper = new Set(stack).add(x);
     // A FUNCTION leaf — a callable record field, which is how every
