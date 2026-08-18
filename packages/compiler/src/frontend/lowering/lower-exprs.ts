@@ -7141,9 +7141,23 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // still builds: the rule tests its preconditions on the CHECKER's types
     // before lowering anything, and it is the CALLER below — not this call —
     // that owns the fence.
+    // ...and ONLY where `mapped` is the literal's OWN merged type. A `mapped`
+    // that IS one of the slot's record arms was put there by the two rules
+    // above (the lone-record-arm rule, and `literalUnionArmOf`), which have
+    // already decided which arm the literal builds; taking it over here would
+    // re-emit a decided case as a dispatch and buy nothing. The test is the
+    // exact one that separates them, and it is also why `singleArmSlot` in
+    // `unionslot-why.test.ts` still reaches neither the rule nor the fence.
     if (ctxUnion && mapped?.kind === "record") {
-      const pairedMerged = lowerPairedArmUnionSpread(L, expr, ctxUnion, loc);
-      if (pairedMerged) return pairedMerged;
+      const slotArmShapes = new Set(
+        (L.unions.get(ctxUnion.unionId)?.arms ?? [])
+          .filter((a) => a.kind === "record")
+          .map((a) => (a as IrType & { kind: "record" }).shapeId),
+      );
+      if (!slotArmShapes.has(mapped.shapeId)) {
+        const pairedMerged = lowerPairedArmUnionSpread(L, expr, ctxUnion, loc);
+        if (pairedMerged) return pairedMerged;
+      }
     }
     // The slot IS a union, its arms map, and no single arm fit — so the
     // literal has a static home and the type fence's "no static
