@@ -1910,10 +1910,58 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
    * call site to prove freshness at, so its body could only be identity —
    * and then `var f = Object.freeze; f(aliased)` would silently answer
    * where `Object.freeze(aliased)` loudly refuses. The value position of
-   * `freeze` stays fenced; only the existence question is answered. */
+   * `freeze` stays fenced; only the existence question is answered.
+   *
+   * ONE EXCEPTION, AND IT IS THE POINT OF `EXISTENCE_REFUSED` BELOW. Part 1
+   * of the theorem is a statement about the DECLARATION — "the standard
+   * library says this function is always defined" — and the declaration is
+   * a statement about NODE. It is not a statement about the runtime this
+   * compiler is building for. Where the two disagree, answering `true` is
+   * the worst of the three possible answers: the program is told the
+   * capability exists, takes the arm that uses it, and that arm REFUSES,
+   * so the fallback the library wrote for exactly this case is dropped on
+   * the floor and the whole construct becomes an unconditional throw.
+   * That is what happened to every protobufjs `CustomError`. */
+  /** Stdlib members whose CALL this compiler refuses, so the capability
+   * test above must answer `false` and let the program's own fallback run.
+   *
+   * A member belongs here only when all three hold, and each entry names
+   * its evidence:
+   *   1. the call form has no lowering (an SC2020/SC1090 refusal),
+   *   2. the read appears in a feature detect whose OTHER arm is a real
+   *      fallback the library ships,
+   *   3. taking that fallback is a behaviour this compiler can produce.
+   *
+   * `Error.captureStackTrace` — V8's own stack API, declared by
+   * @types/node and by no other lib file, and refused by this compiler
+   * ("'Error.captureStackTrace' is typed by @types/node but has no scriptc
+   * lowering yet", SC2020). protobufjs's `util.newError` spells
+   *
+   *     Error.captureStackTrace
+   *       ? Error.captureStackTrace(this, t)
+   *       : Object.defineProperty(this, "stack", { value: (new Error).stack || "" })
+   *
+   * — the library's own sanctioned path for an engine without the V8 API,
+   * and one this compiler compiles. Answering `true` folded the detect,
+   * selected the refusing arm, and dropped the else arm, so EVERY
+   * construction of a protobufjs custom error threw. Answering `false`
+   * runs the fallback and the error constructs.
+   *
+   * The price, stated plainly: Node HAS the API and answers `true`, so
+   * this is a DIVERGENCE, not a match — `err.stack` is scriptc's stack
+   * string rather than V8's frame list. It is the same string the else arm
+   * would produce under any non-V8 engine, which is the case the library
+   * wrote it for, and protobufjs only ever displays it. Everything else
+   * about the error — `message`, `name`, `toString()`, `instanceof` — is
+   * byte-identical to Node, and that is measurable (block/rank123,
+   * repro/cst.js). A refusal here is not the safer answer: it is a throw
+   * where Node returns an object. */
+  const EXISTENCE_REFUSED: ReadonlySet<string> = new Set(["Error.captureStackTrace"]);
+
   export function stdlibExistenceTestOf(L: Lowerer, access: ts.PropertyAccessExpression): IrExpr | null {
     if (L.chainBlocked(access)) return null;
-    if (stdlibGlobalNameOf(L, access.expression) === null) return null;
+    const globalName = stdlibGlobalNameOf(L, access.expression);
+    if (globalName === null) return null;
     if (!boolOnlyConsumer(access)) return null;
     const propSym =
       L.checker.getSymbolAtLocation(access.name) ??
@@ -1923,11 +1971,16 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     const decls = L.checker.declarationsOf(propSym);
     if (decls.length === 0 || !decls.every((d) => L.isStdlibFile(d.getSourceFile()))) return null;
     if (L.checker.getCallSignatures(L.checker.getTypeOfSymbol(propSym)).length === 0) return null;
+    // Every gate above has passed, so this IS a capability test over a
+    // declared stdlib method. The only remaining question is whether THIS
+    // compiler provides the capability; where it does not, the truthful
+    // answer about the runtime being built is `false`.
+    const refused = EXISTENCE_REFUSED.has(`${globalName}.${access.name.text}`);
     if (process.env["SCRIPTC_EXISTTEST_WHY"] !== undefined) {
       const loc = locOf(access);
-      console.error(`[existtest] ${loc.file}:${loc.start} ${access.name.text}`);
+      console.error(`[existtest] ${loc.file}:${loc.start} ${globalName}.${access.name.text} -> ${!refused}`);
     }
-    return { kind: "boolLit", value: true, type: BOOL, loc: locOf(access) };
+    return { kind: "boolLit", value: !refused, type: BOOL, loc: locOf(access) };
   }
 
 /** `Object.getOwnPropertyNames` over a CHECKED-DYNAMIC receiver, as a
