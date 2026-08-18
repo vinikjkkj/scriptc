@@ -123,7 +123,16 @@ describe("the class-instance dyn box's bookkeeping", () => {
     // order — no `= n` initialisers appear in this enum, so position IS
     // the value, which is exactly the fragile part.
     const stripped = body!.replace(/\/\*[\s\S]*?\*\//g, "");
-    const names = [...stripped.matchAll(/\bSCR_DYN_(\w+)\b/g)].map((m) => m[1]!);
+    const all = [...stripped.matchAll(/\bSCR_DYN_(\w+)\b/g)].map((m) => m[1]!);
+    // KIND_COUNT closes the enum and is not a kind — it is the count, so
+    // per-kind tables size themselves rather than being written out and
+    // going stale. It must be LAST, because that is exactly what makes
+    // every real kind's position its value; asserting the POSITION rather
+    // than merely filtering the name is what keeps this test's own premise
+    // ("position IS the value") honest.
+    expect(all[all.length - 1], "SCR_DYN_KIND_COUNT must be the LAST enumerator")
+      .toBe("KIND_COUNT");
+    const names = all.slice(0, -1);
     expect(names.length).toBeGreaterThan(10);
     const fromHeader = Object.fromEntries(names.map((n, i) => [n, i]));
     // Every DK row must name a real enum member AND carry its position.
