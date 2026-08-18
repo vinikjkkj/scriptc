@@ -6434,7 +6434,7 @@ function armFieldFits(L: Lowerer, from: IrType, to: IrType): boolean {
  *    exactly when and as often as JS evaluates it.
  *
  * Returns null when any of that fails — the caller's fence then speaks. */
-function lowerIdentityArmUnionSpread(
+function lowerPairedArmUnionSpread(
   L: Lowerer,
   expr: ts.ObjectLiteralExpression,
   ctxUnion: IrType & { kind: "union" },
@@ -6628,7 +6628,7 @@ function lowerIdentityArmUnionSpread(
     const shapeId = loweredArms[ai]!.shapeId;
     const srcTag = loweredArms[ai]!.tag;
     const shape = L.shapes.get(shapeId);
-    if (!shape) throw new Error(`lowerer bug: identity-arm spread of unknown shape ${shapeId}`);
+    if (!shape) throw new Error(`lowerer bug: paired-arm spread of unknown shape ${shapeId}`);
     // The shape the branch BUILDS is the paired SLOT arm — the same shape
     // under identity, a differently-interned twin under name pairing. The
     // shape it READS from is always the source's.
@@ -7066,13 +7066,14 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // source when the TARGET shape is known); badType keeps every other
     // literal unchanged.
     if ((!mapped || mapped.kind !== "record") && ctxUnion) {
-      // ... unless the slot's record arms ARE the source's (the identity arm
-      // relation), where the arm the result must build is the arm the source
-      // already holds and the dispatch has an answer. Placed one step before
-      // the fence so it can only turn a refusal into a build: every literal
-      // that reaches it was about to be refused.
-      const identity = lowerIdentityArmUnionSpread(L, expr, ctxUnion, loc);
-      if (identity) return identity;
+      // ... unless the slot's record arms PAIR one-to-one with the source's
+      // by field-name set (identity being the special case where they are
+      // the same arms), so the arm the result must build is decided by the
+      // arm the source already holds and the dispatch has an answer. Placed
+      // one step before the fence so it can only turn a refusal into a
+      // build: every literal that reaches it was about to be refused.
+      const paired = lowerPairedArmUnionSpread(L, expr, ctxUnion, loc);
+      if (paired) return paired;
       for (const prop of expr.properties) {
         if (!ts.isSpreadAssignment(prop)) continue;
         if (conditionalSpreadOf(prop.expression)) continue;
