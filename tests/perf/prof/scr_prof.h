@@ -43,7 +43,8 @@
  *     -g                       no .debug_* section reaches the PE
  *     the PE itself            no COFF symbol table - nsyms=0 in every
  *                              variant built, stripped or not
- *     WSL llvm-symbolizer      not installed
+ *     WSL llvm-symbolizer      the package was not installed. THIS ONE WAS
+ *                              THE WRONG PREMISE - see below.
  *
  * A string literal needs none of them, reads better in a report, and covers
  * every allocation written in the sources - which is the population being
@@ -52,12 +53,22 @@
  * here, and the report says so rather than implying its total is the whole
  * process.
  *
- * The CPU lane has no such escape: -finstrument-functions hands over a
- * function ADDRESS and there is no macro context to name it with. It
- * therefore reports exact counts against rvas, plus names for the runtime
- * entry points listed in the registry below, which are the ones worth
- * naming. That limitation is the toolchain's, and it is stated in the
- * report rather than papered over.
+ * The CPU lane has no such escape INSIDE C: -finstrument-functions hands
+ * over a function ADDRESS and there is no macro context to name it with.
+ * It is resolved OUTSIDE C instead, and the wall the list above describes
+ * turns out to have a door in it:
+ *
+ *   zig cc for x86_64-windows-gnu ALREADY writes a .pdb beside every
+ *   binary this repo builds - no flag, it has always been there - and
+ *   that PDB carries publics AND per-module S_LPROC32 records, so even a
+ *   `static` function in the emitted program TU resolves, with its code
+ *   size. nsyms=0 in the PE is correct AND irrelevant.
+ *
+ * tests/perf/pdb-symbols.mjs reads it through WSL llvm-pdbutil and
+ * exe-profile.mjs joins the result onto these rows, marking anything that
+ * lands between two symbols INEXACT rather than giving it the preceding
+ * name. Every one of the eight routes above is still exactly as dead as
+ * it was; the ninth was never tried.
  *
  * Nothing here runs, or is even compiled, unless a -D asks for it, so an
  * ordinary build is untouched byte for byte.
