@@ -6239,15 +6239,23 @@ let digestInputValueDispatches = 0;
     );
   }
 
-/** `.code` on an error-hierarchy receiver — NodeJS.ErrnoException's
-   * member (the fallback declares the same shape): the runtime Error's
-   * code slot as `string | undefined` — the errno name where a throw site
-   * stamped one (fs, exec spawn/timeout, process.kill, the spawn 'error'
-   * event), undefined everywhere else. Stdlib provenance required (a user
-   * class's own `code` field takes the ordinary field paths — its
-   * declaration is not stdlib). Reads only: writes keep their fence (no
-   * compiled program constructs an errno error). Null for non-error
-   * receivers and non-stdlib members, so the chain keeps trying. */
+/** `.code` and `.stack` on an error-hierarchy receiver.
+   *
+   * `.code` is NodeJS.ErrnoException's member (the fallback declares the
+   * same shape): the runtime Error's code slot as `string | undefined` —
+   * the errno name where a throw site stamped one (fs, exec spawn/timeout,
+   * process.kill, the spawn 'error' event), undefined everywhere else.
+   *
+   * `.stack` is `stack?: string` from lib.es5.d.ts, answered as the header
+   * line a zero-frame capture produces — see the measurement at the arm
+   * below, which is why the two live in one function on one receiver test.
+   *
+   * Stdlib provenance required for both (a user class's own `code` or
+   * `stack` field takes the ordinary field paths — its declaration is not
+   * stdlib). Reads only: writes keep their fence (no compiled program
+   * constructs an errno error, and none writes a frame list). Null for
+   * non-error receivers and non-stdlib members, so the chain keeps
+   * trying. */
   export function lowerErrorCodeProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     // `?.code` re-dispatches through the optional-chain machinery (the
     // mdns `(r.error as ErrnoException | undefined)?.code` idiom): the
@@ -6271,20 +6279,73 @@ let digestInputValueDispatches = 0;
         return { kind: "libCall", fn: "error.domCause", args: [receiver], type: DYN, loc: locOf(expr) };
       }
     }
-    if (expr.name.text !== "code") return null;
+    const member = expr.name.text;
+    if (member !== "code" && member !== "stack") return null;
     // Error-rooted classes only — builtin or user subclass (both embed the
     // code slot in their layout prefix).
     let info = L.classes.get(recvT.className) ?? null;
     while (info && info.base) info = info.base;
     if (!info || info.def.name !== "%Error") return null;
     if (!L.isStdlibMember(expr)) return null;
+    const loc = locOf(expr);
     const receiver = L.lowerExpr(expr.expression);
+    // `.stack` — V8's non-standard stack property, `stack?: string` in
+    // lib.es5.d.ts. This runtime captures no frames, and the question the
+    // fence used to refuse to answer is: what does a frameless capture
+    // answer? MEASURED on node v25.9.0 rather than argued:
+    //
+    //     Error.stackTraceLimit = 0
+    //     new Error("boom").stack   === "Error: boom"
+    //     new TypeError("t").stack  === "TypeError: t"
+    //     new Error().stack         === "Error"
+    //
+    // — that is V8's own answer when it captures zero frames, and it is
+    // ECMA-262's `Error.prototype.toString` over the same two slots, which
+    // is why this needs no new runtime code and no new libCall: it is the
+    // `error.toString` the compiler already emits, wrapped into the
+    // declared `string | undefined` at its string arm.
+    //
+    // Why a STRING and not `undefined`, the other type-correct answer:
+    // `undefined` differs from Node in TYPE under EVERY configuration of
+    // Node, so `e.stack.split("\n")` — a working expression in Node —
+    // becomes a TypeError, while `"Error: boom"` is byte-identical to a
+    // real Node run under `Error.stackTraceLimit = 0`. That is the same
+    // discriminator this project used to REFUSE `Function.prototype
+    // .toString`: `[native code]` is a string no Node produces for a user
+    // function, so it would be a fabrication; this one Node produces.
+    //
+    // The named cost, and it is the whole cost: the FRAME LINES are
+    // absent, because there are no frames. `typeof`, truthiness, the
+    // header line and everything derived from it agree with Node; the
+    // line COUNT does not. `surfaces.ts`'s EXISTENCE_REFUSED entry already
+    // priced this out loud — "err.stack is scriptc's stack string rather
+    // than V8's frame list" — and this is that string.
+    //
+    // One further divergence, stated: V8 formats the header at FIRST READ
+    // and memoises it, so `e.name = "X"` AFTER a read does not change a
+    // later read; this recomputes on every read. Unreachable here — a
+    // write to an error's `.name` has no lowering (the fence stands), so
+    // no compiled program can observe the difference.
+    if (member === "stack") {
+      const t = L.envValueType();
+      if (t.kind !== "union") throw new Error("lowerer bug: envValueType is not a union");
+      const strTag = (L.unions.get(t.unionId)?.arms ?? []).findIndex((a) => a.kind === "string");
+      if (strTag < 0) throw new Error("lowerer bug: the 'string | undefined' union has no string arm");
+      return {
+        kind: "unionWrap",
+        unionId: t.unionId,
+        tag: strTag,
+        value: { kind: "libCall", fn: "error.toString", args: [L.upcastTo(receiver, "%Error")], type: STRING, loc },
+        type: t,
+        loc,
+      };
+    }
     return {
       kind: "libCall",
       fn: "error.code",
       args: [receiver],
       type: L.envValueType(),
-      loc: locOf(expr),
+      loc,
     };
   }
 

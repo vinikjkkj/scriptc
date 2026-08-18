@@ -7,7 +7,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { UNSUPPORTED } from "../../diagnostics/diagnostic.js";
-import { BOOL, BYTES_U8, CHILD_T, DYN, F64, FILEHANDLE_T, IrExpr, IrLibFn, IrParam, IrStmt, IrStrIntrinsicMethod, IrType, KEYOBJ, RUNTIME_ERROR_CLASSES, SPAWNRES_T, STATS_T, STRING, SrcLoc, URL_T, VOID, arrayOf, funcOf, typeEquals, } from "../../ir/nodes.js";
+import { BOOL, BYTES_U8, CHILD_T, DYN, F64, FILEHANDLE_T, IrExpr, IrLibFn, IrParam, IrStmt, IrStrIntrinsicMethod, IrType, KEYOBJ, SPAWNRES_T, STATS_T, STRING, SrcLoc, URL_T, VOID, arrayOf, funcOf, typeEquals, } from "../../ir/nodes.js";
 import { STR_INTRINSIC_SIGS } from "../../ir/validate.js";
 import { isJsSourceFile, isNodeTypesPath, locOf, requireSpecOf } from "../program.js";
 
@@ -1465,14 +1465,16 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       hint =
         "flat has no lowering (flatMap does) — flatten into an accumulator instead: " +
         "for (const x of xs) for (const y of x) out.push(y)";
-    } else if (
-      recvIr?.kind === "object" &&
-      RUNTIME_ERROR_CLASSES.has(recvIr.className) &&
-      member === "stack"
-    ) {
-      hint =
-        "stack traces are not captured (frames would need runtime bookkeeping); " +
-        "name, message, and toString() are available";
+    // NO `.stack` ARM ANY MORE, and its absence is deliberate rather than an
+    // oversight. The read LOWERS (lowerErrorCodeProperty's `.stack` arm: the
+    // header line a zero-frame capture produces, which is what node itself
+    // answers under `Error.stackTraceLimit = 0`), on every Error-rooted
+    // receiver including %DOMException, so this branch could only fire where
+    // the read did NOT lower — and no program was found that reaches it:
+    // a write takes SC1090 at the assignment ("assignment to non-variables"),
+    // an optional chain lowers, and a non-stdlib `stack` field is an ordinary
+    // field. Dead machinery that prints a sentence about a capability the
+    // compiler now has is worse than no hint at all.
     } else if (container === "process.stdin" || (container === "process" && member === "stdin")) {
       hint =
         "isTTY, destroy(), on/once of the data/end/error events, and " +
