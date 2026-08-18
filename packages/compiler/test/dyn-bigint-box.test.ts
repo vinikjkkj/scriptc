@@ -52,7 +52,17 @@ function dynKinds(): string[] {
   const body = /typedef enum \{([\s\S]*?)\} ScrDynKind;/.exec(header)?.[1];
   expect(body, "ScrDynKind not found in scr_runtime.h").toBeDefined();
   const stripped = body!.replace(/\/\*[\s\S]*?\*\//g, "");
-  return [...stripped.matchAll(/\bSCR_DYN_\w+\b/g)].map((m) => m[0]);
+  const all = [...stripped.matchAll(/\bSCR_DYN_\w+\b/g)].map((m) => m[0]);
+  // SCR_DYN_KIND_COUNT closes the enum and is NOT a kind: it is the count,
+  // so per-kind tables size themselves instead of being written out and
+  // going stale. It exists because one of them DID go stale —
+  // `scr_dyn_live_by_kind[SCR_DYN_BIG + 1]` was one entry short the day
+  // SCR_DYN_MAP landed, and nothing in a default build compiles that line.
+  // Excluded BY NAME rather than by a pattern, and its presence asserted,
+  // so deleting the sentinel fails here instead of quietly re-arming this
+  // file against a value no ScrDyn ever holds.
+  expect(all, "SCR_DYN_KIND_COUNT must close ScrDynKind").toContain("SCR_DYN_KIND_COUNT");
+  return all.filter((k) => k !== "SCR_DYN_KIND_COUNT");
 }
 
 /** The text of one C function body, brace-matched from its signature.
