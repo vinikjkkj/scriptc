@@ -1233,8 +1233,15 @@ export function lowerStreamStaticCall(L: Lowerer, call: ts.CallExpression,
     const arr: IrExpr = { kind: "arrayLit", elems: [v], type: arrayOf(v.type), loc };
     return { kind: "libCall", fn: "readable.fromArr", args: [arr, boolLit(strings, loc)], type, loc };
   }
+  // A source with NO static mapping (an async generator, an AsyncIterable,
+  // a package-declared iterable) reached `L.fmt(null)` and printed `'?'` —
+  // an anonymous refusal. zapo's `Readable.from(zipChunks(entries))` has
+  // carried that `?` through five censuses and no instrument could say what
+  // the source type was; the CHECKER always can, so name it. MESSAGE TEXT
+  // ONLY: which branch fires, and the code the branches above emit, are
+  // untouched.
   L.noLowering(
-    `Readable.from over a '${srcT ? L.fmt(srcT) : "?"}' source`,
+    `Readable.from over a '${srcT ? L.fmt(srcT) : L.checker.typeToString(L.typeOf(args[0]!))}' source`,
     args[0]!,
     "string[] / Buffer[] arrays (and a single string or Buffer) are the supported sources — generators and async iterables have no lowering yet",
   );
