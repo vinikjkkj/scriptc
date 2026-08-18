@@ -2898,6 +2898,56 @@ export function islandPrimitiveExit(L: Lowerer, call: ts.CallExpression, result:
 
   function makeTimerArgsThunk(L: Lowerer, cbNode: ts.Expression, argNodes: readonly ts.Expression[], what: string, loc: SrcLoc): IrExpr {
     const cbLowered = L.lowerExpr(cbNode);
+    // THE TYPED THUNK GOES FIRST, AND THE REASON IS A WRONG ANSWER RATHER
+    // THAN A PREFERENCE.
+    //
+    // The dyn thunk BOXES every trailing argument, and boxing a reference
+    // COPIES it — dynFrom of an array builds a fresh SCR_DYN_ARR. Node
+    // passes the very object:
+    //
+    //     const shared = [1, 2];
+    //     process.nextTick((n: number, xs: number[]) => {
+    //       console.log(xs.length, xs === shared);   // Node: 3 true
+    //     }, 0, shared);
+    //     shared.push(3);                            // AFTER the deferral
+    //
+    // compiled to the dyn thunk answers `2 false` — the length before the
+    // mutation, and a copy. That is a silent wrong answer, and it was
+    // reachable at 5b52d202 with no Error and no union anywhere in it; the
+    // typed thunk was only ever consulted as the FALLBACK for callbacks the
+    // boundary could not express, so the shapes that could box got the
+    // copy and the shapes that could not got the correct answer.
+    //
+    // 2734 pinned the correct answer for `(err: Error | null, xs: number[])`
+    // and kept it only because that callback could not box. Admitting an
+    // %Error leaf made it boxable and moved it onto the copying path — the
+    // fence-to-wrong-answer trade the whole widening exists to avoid — which
+    // is how this was found.
+    //
+    // Where the typed thunk applies it is strictly the more faithful of the
+    // two: the arguments were checked into the parameter types HERE, at the
+    // deferring call, so there is nothing left for a fire-time dynCall to
+    // validate; the callback is called through `callValue` at its real
+    // signature; and each argument is retained into the capture box at its
+    // own type, so a reference stays the same reference. It declines (and
+    // the dyn thunk takes over unchanged) for every shape it cannot carry:
+    // a dyn callback, a dyn or unit PARAMETER, a rest signature, fewer
+    // arguments than parameters, or an argument that does not land in its
+    // parameter exactly.
+    //
+    // The structural half of that test is asked BEFORE the arguments are
+    // lowered, so the speculative lowering only happens where the typed
+    // thunk has a real chance — an argument node lowered twice would push a
+    // dead lifted function for a lambda.
+    const cbT = cbLowered.type;
+    if (
+      cbT.kind === "func" && cbT.rest !== true &&
+      cbT.params.length <= argNodes.length &&
+      !cbT.params.some((p) => p.kind === "dyn" || isUnitType(p))
+    ) {
+      const typed = deferredCallThunk(L, cbLowered, argNodes.map((a) => L.lowerExpr(a)), loc);
+      if (typed !== null) return typed;
+    }
     let boxedCb: IrExpr;
     if (cbLowered.type.kind === "dyn") {
       boxedCb = cbLowered;
@@ -2907,14 +2957,11 @@ export function islandPrimitiveExit(L: Lowerer, call: ts.CallExpression, result:
     ) {
       boxedCb = { kind: "dynFrom", value: cbLowered, type: DYN, loc };
     } else {
-      // The dyn thunk cannot express this callback — but a callback is
-      // only unboxable because one of its PARAMETER TYPES has no dyn
-      // representation, and that is a statement about the boundary, not
-      // about the call. When the arguments as written already land in
-      // those parameters, the typed thunk below carries them and no
-      // check is left for the boundary to perform.
-      const typed = deferredCallThunk(L, cbLowered, argNodes.map((a) => L.lowerExpr(a)), loc);
-      if (typed !== null) return typed;
+      // The dyn thunk cannot express this callback, and the typed one
+      // above already declined (its structural precondition is the same
+      // one that used to be asked here, and `deferredCallThunk` answers
+      // null for everything that precondition lets through and it cannot
+      // carry). Nothing is left but the fence.
       L.noLowering(
         `${what} with trailing arguments and a '${L.fmt(cbLowered.type)}' callback`,
         cbNode,

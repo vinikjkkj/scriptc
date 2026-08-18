@@ -620,6 +620,30 @@ export class LlDyn {
         break;
       }
       case "object": {
+        // %Error keeps the checked-dynamic tree's ERROR ENCODING, so it
+        // gets the reserved "%error" marker test rather than an interval —
+        // EXACTLY the test the dynCheck builder above performs, so match
+        // and check ask the same question and no arm matched here can fail
+        // to build. The C walker's arm. (Before the nested %Error leaf was
+        // admitted, classInterval("%Error") was unreachable and untested;
+        // a predicate that admits the leaf without this arm trades a fence
+        // for an emitter crash.)
+        if (t.className === "%Error") {
+          const fail = B.newLabel("dm.f");
+          const kd = this.kindOf(B, "%d");
+          const isObj = B.tmp();
+          B.line(`${isObj} = icmp eq i32 ${kd}, ${DK.OBJ}`);
+          const l0 = B.newLabel("dm.eo");
+          B.condBr(isObj, l0, fail);
+          B.startBlock(l0);
+          const marker = this.objGetLit(B, "%d", "%error");
+          const has = B.tmp();
+          B.line(`${has} = icmp ne ptr ${marker}, null`);
+          B.terminate(`ret i1 ${has}`);
+          B.startBlock(fail);
+          B.terminate(`ret i1 false`);
+          break;
+        }
         // "Is this dyn an instance of C?" — the same preorder-interval
         // test `x instanceof C` compiles to, run inside the runtime helper
         // so both lanes ask it exactly once. The C walker's arm.
