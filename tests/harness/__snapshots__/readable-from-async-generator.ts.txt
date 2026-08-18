@@ -1,0 +1,17 @@
+readable-from-async-generator.ts:34:24 - error SC2020: 'Readable.from over a 'AsyncGenerator<Uint8Array<ArrayBufferLike>, any, any>' source' is part of the standard library types but has no scriptc lowering yet
+
+  33 | export function make(): Readable {
+  34 |   return Readable.from(chunks());
+     |                        ^~~~~~~~
+  35 | }
+
+  hint: string[] / Buffer[] arrays (and a single string or Buffer) are the supported sources — generators and async iterables have no lowering yet
+
+readable-from-async-generator.ts:50:24 - error SC2020: 'Readable.from over a 'Generator<Uint8Array, void, unknown>' source' is part of the standard library types but has no scriptc lowering yet
+
+  49 | export function makeSync(): Readable {
+  50 |   return Readable.from(syncChunks());
+     |                        ^~~~~~~~~~~~
+  51 | }
+
+  hint: string[] / Buffer[] arrays (and a single string or Buffer) are the supported sources — generators and async iterables have no lowering yet
