@@ -386,3 +386,53 @@ void scr_closure_static_teardown(ScrClosure *c) {
 void scr_closure_trace_v(void *c, ScrTraceVisit visit, void *ctx) {
   scr_closure_trace(c, visit, ctx);
 }
+
+/* ── the function-name table (scr_runtime.h) ────────────────────────────
+ *
+ * Installed once by main() from a static table the compiler emits, and
+ * read by every box built away from its creation site. A linear scan
+ * would be O(names) per box and this sits on the record-to-dyn walker's
+ * path, so the install builds an open-addressed index over the rows —
+ * the same probe the RC audit's site table uses, minus the growth (the
+ * row count is known at install).
+ *
+ * Failure to allocate is not fatal: the index stays NULL and lookups
+ * answer NULL, which is the pre-table behaviour (`[Function
+ * (anonymous)]`). A name is a nicety; refusing to start is not. */
+static const ScrFnName **scr_fnname_idx = NULL;
+static size_t scr_fnname_idx_cap = 0; /* a power of two, or 0 */
+
+static size_t scr_fnname_probe(const ScrFnName **tab, size_t cap, const void *fn) {
+  uintptr_t x = (uintptr_t)fn;
+  x ^= x >> 33;
+  x *= (uintptr_t)0xff51afd7ed558ccdULL;
+  x ^= x >> 29;
+  size_t mask = cap - 1, i = (size_t)x & mask;
+  while (tab[i] != NULL && tab[i]->fn != fn) i = (i + 1) & mask;
+  return i;
+}
+
+void scr_fn_names_install(const ScrFnName *tbl, size_t n) {
+  free(scr_fnname_idx);
+  scr_fnname_idx = NULL;
+  scr_fnname_idx_cap = 0;
+  if (tbl == NULL || n == 0) return;
+  size_t cap = 16;
+  while (cap < n * 2) cap *= 2;
+  const ScrFnName **idx = (const ScrFnName **)calloc(cap, sizeof *idx);
+  if (idx == NULL) return; /* names degrade to (anonymous); see above */
+  for (size_t i = 0; i < n; i++) {
+    if (tbl[i].fn == NULL) continue;
+    size_t k = scr_fnname_probe(idx, cap, tbl[i].fn);
+    if (idx[k] == NULL) idx[k] = &tbl[i]; /* first row wins; rows are unique */
+  }
+  scr_fnname_idx = idx;
+  scr_fnname_idx_cap = cap;
+}
+
+const char *scr_fn_name_of(const void *fn) {
+  if (scr_fnname_idx == NULL || fn == NULL) return NULL;
+  size_t i = scr_fnname_probe(scr_fnname_idx, scr_fnname_idx_cap, fn);
+  const ScrFnName *row = scr_fnname_idx[i];
+  return (row != NULL && row->fn == fn) ? row->name : NULL;
+}

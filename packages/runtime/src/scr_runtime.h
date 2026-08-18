@@ -3384,6 +3384,38 @@ void scr_closure_sites_install(const ScrClosureSite *tbl, size_t n);
  * Called by the exit audit when it is about to fail. */
 void scr_rc_audit_sites_report(void);
 
+/* The JS name of every function value this program can create, keyed by
+ * the closure ENTRY POINT the creation site stores in ScrClosure.fn.
+ *
+ * JS fixes a function's `.name` once, at its CREATION site, and every
+ * later binding carries that one name. A box built at the creation site
+ * itself (dynFrom) can therefore be handed the name as a literal -- and
+ * is. A box built by a WALKER cannot: the record-to-dyn walker sees a
+ * bare `ScrClosure *` in a field and knows only the field's own name,
+ * which is a different thing the moment the field holds a function made
+ * elsewhere (`{ aliased: helper }` -- node answers `helper`). Naming it
+ * from the field would trade a missing answer for a wrong one.
+ *
+ * The closure's `fn` pointer is the missing key. Every distinct function
+ * value in a program has its own emitted body (or, for a declared
+ * function used as a value, its own `sc_w_*` wrapper), so the pointer
+ * identifies WHICH function the value is -- exactly what the name
+ * depends on. The compiler emits the table below from its closure
+ * creation sites, main() installs it, and a box with no static name
+ * resolves through it. Unlike ScrClosureSite this is unconditional: it
+ * is a program ANSWER, not an instrument.
+ *
+ * A name absent from the table stays absent: `[Function (anonymous)]`
+ * is what node prints for a function value that really has no name, so
+ * the fallback is already the right answer rather than a guess. */
+typedef struct ScrFnName {
+  const void *fn;    /* the closure entry point (ScrClosure.fn) */
+  const char *name;  /* its JS Function.prototype.name -- a static literal */
+} ScrFnName;
+void scr_fn_names_install(const ScrFnName *tbl, size_t n);
+/* NULL when this program never named that entry point. */
+const char *scr_fn_name_of(const void *fn);
+
 /* Object member. Keys are malloc'd UTF-8 bytes (NUL-terminated for
  * convenience; key_len excludes the NUL) — duplicate keys were already
  * collapsed at parse time (later wins, like JS JSON.parse). */

@@ -44,6 +44,16 @@
  *            (SC5002), and a TypeScript signature that does not match its
  *            declared native ABI classes (SC5003), and native toolchain
  *            failures while applying a valid profile (SC5004)
+ *   SC6xxx  ADVICE: the program compiles, and something about what it
+ *            compiles TO is worth saying anyway. The band exists because
+ *            every other code here is fatal by construction — a refusal
+ *            stops the build, and under --best-effort it becomes a runtime
+ *            throw at the statement, which for a construct that merely
+ *            LOSES something is a cure worse than the disease. An SC6xxx
+ *            never reaches `diagnostics`; it rides its own list and can
+ *            never fail a build or defer to a fence. SC6001 — a double
+ *            type assertion whose target shape drops members the source
+ *            value carries.
  *   SC9xxx  internal compiler errors (still source-anchored)
  */
 import type { SrcLoc } from "../ir/nodes.js";
@@ -65,6 +75,75 @@ export interface ScrDiagnostic {
    * recognizably the profile's. Only library-mode refusals carry one —
    * the text always arrives prefixed `from the '<profile name>' profile:`. */
   note?: string;
+  /** ADVICE rather than a refusal (the SC6xxx band). The compiler
+   * compiled the construct; this says something true about what it
+   * compiled to that the source does not show.
+   *
+   * The distinction is structural, not cosmetic: an advisory is carried
+   * on its OWN list from the lowerer outward (LowerResult.advisories) and
+   * never enters `diagnostics`, so it cannot make `module` null, cannot
+   * be spliced into a runtime fence by the --best-effort deferral, and
+   * cannot be counted as an error by anything downstream. The field is
+   * here so the type says what the value is; the LIST is what enforces
+   * it. Nothing may promote an advisory into `diagnostics`. */
+  severity?: "advice";
+}
+
+/* ── SC6xxx: advice ───────────────────────────────────────────────────── */
+
+/** How much of a TYPE render an advisory message may carry. A real
+ * program's inferred types run to thousands of characters (zapo's message
+ * event renders at ~5 000), and a diagnostic that long buries its own
+ * hint. Past this the render is DROPPED, not truncated: a half-printed
+ * type reads as a compiler bug. */
+const TYPE_RENDER_BUDGET = 160;
+
+/** SC6001 — `x as unknown as T` where the source's shape carries members
+ * `T` does not name. scriptc's records are CLOSED (a monomorphic struct
+ * with exactly the fields its shape declares), so the double assertion is
+ * a reshape and the reshape keeps only what `T` mentions. In JS the object
+ * is open and every member survives, which makes this a silent divergence
+ * at the cast — and a LOUD one somewhere else entirely, where a later
+ * widening back to a shape that names the dropped members finds them gone
+ * and traps at a site that did nothing wrong.
+ *
+ * It is advice and not a refusal on purpose. Refusing would be worse than
+ * the loss it reports: under --best-effort the refusal becomes a runtime
+ * throw at THIS statement, so a `push(e as unknown as T)` inside a message
+ * handler would stop pushing anything at all. The value of saying it is
+ * that the loss becomes findable at the site that causes it. */
+export function assertionDropsMembersDiag(
+  dropped: string[],
+  sourceType: string,
+  targetType: string,
+  loc: SrcLoc,
+): ScrDiagnostic {
+  const list = dropped.map((d) => `'${d}'`).join(", ");
+  const one = dropped.length === 1;
+  // The DROPPED MEMBERS are the information; the two type renders are
+  // context, and on a real program either of them can be five thousand
+  // characters of nested protobuf. A message nobody can read is not a
+  // message, so a render over the budget is dropped rather than truncated
+  // — a half-printed type reads as a compiler bug, and the member list
+  // above it already says everything the reader has to act on.
+  const brief = (t: string): string | null => (t.length <= TYPE_RENDER_BUDGET ? t : null);
+  const src = brief(sourceType);
+  const dst = brief(targetType);
+  return {
+    code: "SC6001",
+    severity: "advice",
+    message:
+      `this assertion DROPS ${one ? "the member" : "the members"} ${list}: ` +
+      `${src !== null ? `'${src}'` : "the value's type"} carries ${one ? "it" : "them"} and ` +
+      `the asserted type ${dst !== null ? `'${dst}'` : "it is asserted to"} does not name ` +
+      `${one ? "it" : "them"}`,
+    loc,
+    hint:
+      "scriptc records are closed — a record value holds exactly the members its type names, so " +
+      "'as unknown as T' reshapes rather than relabels and the unnamed members have nowhere to " +
+      "live. In JavaScript they survive the cast. Name them on the asserted type (or keep the " +
+      "value at its original type) if anything downstream reads them back",
+  };
 }
 
 /* ── SC5xxx: native FFI ───────────────────────────────────────────────── */

@@ -7397,6 +7397,13 @@ const inliningPredicates = new Set<ts.Symbol>();
       !ts.isArrowFunction(node) && node.name && ts.isIdentifier(node.name) ? node.name : null;
     const baseName = nameIdent ? nameIdent.text : "";
     const fnName = `%fn${L.lambdaCounter++}${baseName ? `_${baseName}` : ""}`;
+    // The VALUE's JS name, which the symbol above is not: JS names a
+    // function at its creation site, and an anonymous arrow in a binding
+    // or property position takes that binding's name (NamedEvaluation) —
+    // jsFuncNameOf is exactly that set. ACCESSORS decline: node spells
+    // their name `get x`/`set x`, and half of it would be a wrong answer.
+    // The empty string is the honest answer for `arr.map((x) => x)`.
+    const jsName = ts.isAccessor(node) ? "" : (nameIdent ? nameIdent.text : (jsFuncNameOf(node) ?? ""));
     // Named function expressions/declarations can self-reference by name; an
     // object-literal method's name is a PROPERTY, not a binding — no self.
     const selfSymbol =
@@ -7506,6 +7513,7 @@ const inliningPredicates = new Set<ts.Symbol>();
       const ctx = L.ctx;
       const lifted: IrFunction = {
         name: fnName,
+        jsName,
         params,
         returnType: bodyReturn,
         locals: ctx.locals,
@@ -7556,6 +7564,7 @@ const inliningPredicates = new Set<ts.Symbol>();
       }
       const lifted: IrFunction = {
         name: fnName,
+        jsName,
         params,
         returnType: bodyReturn,
         locals: params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),

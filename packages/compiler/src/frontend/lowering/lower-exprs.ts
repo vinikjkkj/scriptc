@@ -12,7 +12,7 @@ import { lowerAbortProperty } from "./lower-abort.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
-import { UNSUPPORTED, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
+import { UNSUPPORTED, assertionDropsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, strCharsCall } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
@@ -10760,7 +10760,52 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
    *   those types cannot be found inside a JSON dyn. */
   /** `e as T` and the old-style assertion `<T>e` — one node shape (both
    * carry `.type` and `.expression`), one lowering. */
+  /** `x as unknown as T` — the double assertion, and the one place where
+   * scriptc's CLOSED records lose data with nothing said.
+   *
+   * TypeScript's double assertion is a relabel: the object keeps every
+   * member and only the static type changes. scriptc's records are
+   * monomorphic structs holding exactly the members their shape declares,
+   * so the same spelling is a RESHAPE — `T`'s members are copied out of
+   * the dyn the inner `as unknown` produced, and the rest have nowhere to
+   * live. Nothing fails; the value is simply smaller than the program
+   * thinks, and the failure surfaces later at whatever widens it back.
+   *
+   * Reported as ADVICE and not as a refusal, because the refusal costs
+   * more than the loss: under --best-effort it becomes a runtime throw at
+   * this very statement, so a `push(e as unknown as T)` inside a handler
+   * would stop pushing at all. See assertionDropsMembersDiag.
+   *
+   * Strictly the double form: a single `x as T` between two record types
+   * is a checker-legal widening or narrowing and gets its own rules
+   * (SC2002 names the missing members for the widening direction). The
+   * `unknown`/`any` waypoint is what makes this cast one the checker
+   * stopped reasoning about. */
+  function noteDoubleAssertionDrops(L: Lowerer, expr: ts.AsExpression | ts.TypeAssertion): void {
+    let inner: ts.Expression = expr.expression;
+    while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+    if (!ts.isAsExpression(inner) && !ts.isTypeAssertion(inner)) return;
+    const waypoint = L.checker.getTypeFromTypeNode(inner.type);
+    if ((waypoint.flags & (ts.TypeFlags.Unknown | ts.TypeFlags.Any)) === 0) return;
+    let source: ts.Expression = inner.expression;
+    while (ts.isParenthesizedExpression(source)) source = source.expression;
+    const src = L.mapTypeOf(L.typeOf(source));
+    const dst = L.mapTypeOf(L.checker.getTypeFromTypeNode(expr.type));
+    if (src?.kind !== "record" || dst?.kind !== "record") return;
+    const srcShape = L.shapes.get(src.shapeId);
+    const dstShape = L.shapes.get(dst.shapeId);
+    if (!srcShape || !dstShape) return;
+    // A destination that CAN hold undeclared keys drops nothing: the
+    // dynCheck captures them into the overflow map (IrRecordShape.indexValue).
+    if (dstShape.indexValue || srcShape.tuple || dstShape.tuple) return;
+    const kept = new Set(dstShape.fields.map((f) => f.name));
+    const dropped = srcShape.fields.map((f) => f.name).filter((n) => !kept.has(n));
+    if (dropped.length === 0) return;
+    L.pushAdvice(assertionDropsMembersDiag(dropped, L.fmt(src), L.fmt(dst), locOf(expr)));
+  }
+
   export function lowerAsExpression(L: Lowerer, expr: ts.AsExpression | ts.TypeAssertion): IrExpr {
+    noteDoubleAssertionDrops(L, expr);
     // `[] as const` — tsgo panics computing the expression's `readonly []`
     // type (the facade's fence answers `any`), but the syntax pins the
     // value exactly: the empty tuple, ridden as the unit-element array
