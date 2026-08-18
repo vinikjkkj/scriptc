@@ -1283,7 +1283,7 @@ export class LlDyn {
           if (f.type.kind === "func") {
             const fbox = canBoxFuncIntoDyn(f.type, (id: string) => this.host.recordsById.get(id), (id: string) => this.host.unionsById.get(id))
               ? this.dynFuncBoxHelper(f.type)
-              : this.strandedDynFuncBoxHelper(f.type);
+              : this.strandedDynFuncBoxHelper(f.type, f.name);
             B.line(`${conv} = call ptr @${fbox}(ptr ${fv}, ptr null, ptr null)`);
           } else {
             B.line(`${conv} = call ptr @${this.toDynHelper(f.type)}(${this.valTy(f.type)} ${fv})`);
@@ -1316,7 +1316,7 @@ export class LlDyn {
           if (f.type.kind === "func") {
             const fbox = canBoxFuncIntoDyn(f.type, (id: string) => this.host.recordsById.get(id), (id: string) => this.host.unionsById.get(id))
               ? this.dynFuncBoxHelper(f.type)
-              : this.strandedDynFuncBoxHelper(f.type);
+              : this.strandedDynFuncBoxHelper(f.type, f.name);
             B.line(`${conv} = call ptr @${fbox}(ptr ${fv}, ptr null, ptr null)`);
           } else {
             B.line(`${conv} = call ptr @${this.toDynHelper(f.type)}(${this.valTy(f.type)} ${fv})`);
@@ -3066,19 +3066,23 @@ export class LlDyn {
    * still boxed, so the object keeps the key and `"m" in v` answers what Node
    * answers; only CALLING it through the dyn side throws. Record fields only:
    * a bare function or a union arm keeps the compile-time fence. */
-  strandedDynFuncBoxHelper(t: IrType & { kind: "func" }): string {
+  strandedDynFuncBoxHelper(t: IrType & { kind: "func" }, field: string): string {
     const key = typeKey(t);
-    const existing = this.strandedDynFuncBoxes.get(key);
+    // Interned per (SIGNATURE, FIELD NAME) — the C twin's rule and its
+    // reason (emit-walkers.ts): the field name is the only attribution this
+    // site has, and it is worthless if two fields share one message.
+    const ikey = `${key} ${field}`;
+    const existing = this.strandedDynFuncBoxes.get(ikey);
     if (existing) return existing;
     const name = `sc_dfs_${this.strandedDynFuncBoxes.size}`;
-    this.strandedDynFuncBoxes.set(key, name);
+    this.strandedDynFuncBoxes.set(ikey, name);
     const host = this.host;
     const thunk = `${name}_thunk`;
     // The message and its SC2009 code are the C twin's, built by the ONE
     // shared reason function so the two lanes cannot drift (emit-walkers.ts
     // has the note on why it carries a code and no bracket).
     const msg =
-      `a '${key}' function carried into 'unknown' cannot be called through it: ` +
+      `a '${key}' function carried into 'unknown' in field '${field}' cannot be called through it: ` +
       strandedFuncReason(t, (id: string) => this.host.recordsById.get(id), (id: string) => this.host.unionsById.get(id));
     const msgLit = host.cstr(msg);
     host.declare(`declare void @scr_throw_error_msg_code(i32, ptr, i64, ptr)`);

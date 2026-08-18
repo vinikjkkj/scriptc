@@ -1795,7 +1795,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             // by the time a field flows through here), which the per-type
             // converter has no case for.
             const fv = f.type.kind === "func"
-              ? dynFuncFieldBoxC(E, f.type, `v->${mangleField(f.name)}`)
+              ? dynFuncFieldBoxC(E, f.type, `v->${mangleField(f.name)}`, f.name)
               : toDynExprC(E, f.type, `v->${mangleField(f.name)}`);
             d.push(`  scr_dyn_obj_set(d, ${keyLit}, ${keyLen}, ${fv});`);
           }
@@ -2081,12 +2081,22 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
    * Only reachable from the record walker. A bare function, or a union arm,
    * keeps the compile-time fence: there the value exists to be called, and a
    * runtime trap would be a worse answer than a named refusal. */
-  function strandedDynFuncBoxHelper(E: CEmitter, t: IrType & { kind: "func" }): string {
+  function strandedDynFuncBoxHelper(E: CEmitter, t: IrType & { kind: "func" }, field: string): string {
     const key = typeKey(t);
-    const existing = E.strandedDynFuncBoxes.get(key);
+    // Interned per (SIGNATURE, FIELD NAME), not per signature alone. The
+    // field name is the only attribution this site has (a shape's fields
+    // carry `{ name, type }` and NO loc — IrRecordShape, ir/nodes.ts:1232),
+    // and naming it in the message is worthless if two different fields of
+    // the same signature share one box and one message: the survivor would
+    // name whichever field was emitted first. Keying on both makes each
+    // message true of every call site that reaches it. In zapo this is free
+    // — its five stranded fields have five distinct signatures, so the box
+    // count is 5 either way (measured, block/rank123).
+    const ikey = `${key} ${field}`;
+    const existing = E.strandedDynFuncBoxes.get(ikey);
     if (existing) return existing;
     const name = `sc_dfs_${E.strandedDynFuncBoxes.size}`;
-    E.strandedDynFuncBoxes.set(key, name);
+    E.strandedDynFuncBoxes.set(ikey, name);
     const thunkName = `${name}_thunk`;
     const thunkSig = `static ScrDyn *${thunkName}(ScrClosure *c, ScrDyn *const *args, size_t argc)`;
     // CENSUS: this used to be an UNCODED refusal - scr_throw_error_msg carries
@@ -2100,12 +2110,15 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     // It carries SC2009 now - componentTypeDiag's code, whose own definition
     // already names "function parameters/returns" as one of its slots, so a
     // function shape whose component cannot fill the checked-dynamic slot is
-    // exactly what that code is for.  There is still no bracket: the box is
-    // interned per SIGNATURE and shared by every record field of that type,
-    // so it has no one source location to name and a synthesized one would
-    // point at whichever field happened to be emitted first.
+    // exactly what that code is for.  There is still no `[SCxxxx at
+    // file:line]` bracket, and there CANNOT be one from here: the record
+    // walker is emitted per SHAPE, and a shape's fields carry a name and a
+    // type and no location at all.  What the message CAN carry, and now
+    // does, is the FIELD the value was carried in - which is what every
+    // instrument in this project has had to recover by hand out of the
+    // emitted C.
     const msg =
-      `a '${key}' function carried into 'unknown' cannot be called through it: ` +
+      `a '${key}' function carried into 'unknown' in field '${field}' cannot be called through it: ` +
       strandedFuncReason(t, (id: string) => E.recordsById.get(id), (id: string) => E.unionsById.get(id));
     const msgLit = cStringLiteral(Buffer.from(msg, "utf8"));
     E.walkerProtos.push(`${thunkSig}; /* stranded dyn call thunk for ${key} */`);
@@ -2132,27 +2145,67 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
 /** How a record FIELD of function type boxes: the ordinary thunk when the
    * signature has one, the stranded box otherwise.
    *
-   * CENSUS / ATTRIBUTION (block/all24, measured on zapo's 129 MB TU at
-   * 59cd34db): the two `NULL, NULL` below are `fname` and `fsrc` — the two
-   * parameters `scr_dyn_new_func_src` takes precisely so a boxed function
-   * value can name its origin — and EVERY one of zapo's ten field-box call
-   * sites passes them empty:
+   * THE `NULL, NULL` IS CORRECT, AND THE STANDING NOTE THAT IT IS AN
+   * ATTRIBUTION DEFECT IS WRONG.  estado-todas24.md §2.1/§3.9/§6.1 rank 1
+   * reads the two arguments as "the two parameters that exist precisely to
+   * name the value's origin", prices filling them at one line, and calls it
+   * a change with no behaviour.  Neither half survives reading what the two
+   * slots ARE:
    *
-   *     v->sc_fld_getOrGenPreKeys, NULL, NULL))
+   *   fname  is the boxed value's JS `.name` PROPERTY.  Read at
+   *          scr_json.c:5154 (the `name` member of a SCR_DYN_FUNC), and by
+   *          the inspect walker (scr_inspect.c:845), the assert renderer
+   *          (scr_assert.c:646) and the "is not a function" message
+   *          (scr_json.c:1472).  Not a location.
+   *   fsrc   is the `Function.prototype.toString()` ANSWER — the function's
+   *          source TEXT, or one of the SCR_FN_SRC_* sentinel addresses
+   *          (scr_fn_to_string, scr_json.c:1354).  Not a location either.
    *
-   * That is why the five stranded boxes in that program have been dark to
-   * every instrument this project has: the census can only attribute them by
-   * interned host name, and the emitted C carries no origin at all.  The
-   * field name IS in scope at the caller (it is what `expr` reads), so
-   * threading it here would give all five a source location for a one-line
-   * change and no behaviour change.  See estado-todas24.md §2.1 and §6.1
-   * rank 1; the five rows are getOrGenPreKeys, getOrGenSinglePreKey,
-   * getCollectionState, getCollectionStates and setCollectionStates, boxed
-   * for `destroyIfSupported(value: unknown)` at src/store/createStore.ts:104,
+   * So filling them cannot give any row a source location: tu-census.mjs
+   * attributes REFUSAL.tagged from a `[SCxxxx at file:line]` bracket in the
+   * message TEXT, and these are arguments to the box builder.  And filling
+   * them with the field name would be a WRONG ANSWER, measured against Node
+   * v25.9.0 rather than argued (block/rank123, repro/fname.ts):
+   *
+   *     const bag = { inline: (n) => n + 1, aliased: helper, method(n) {...} };
+   *     console.log(bag as unknown);
+   *
+   *     Node    { inline: [Function: inline], aliased: [Function: helper],
+   *               method: [Function: method] }
+   *     scriptc { inline: [Function (anonymous)], ... }   <- today
+   *     "fix"   { inline: [Function: inline],
+   *               aliased: [Function: aliased],           <- WRONG, Node says
+   *               method: [Function: method] }               `helper`
+   *
+   * JS names a function at its CREATION site.  The field name agrees for an
+   * inline arrow, an inline function expression and a method, and DISAGREES
+   * for `{ m: someOtherFn }` and for anything assigned into the field later.
+   * This walker is emitted per SHAPE and sees a struct field read, so it
+   * cannot tell those apart — the field name here is a guess, and trading
+   * `[Function (anonymous)]` (visibly no answer) for a confident wrong name
+   * is the direction the standing bar forbids.  `fsrc` has no honest value
+   * at all: NULL makes scr_fn_to_string refuse loudly, the field name would
+   * make `String(f)` answer `"getOrGenPreKeys"`, and SCR_FN_SRC_NATIVE would
+   * be the "silent lie about a function that HAS source" scr_json.c:1356
+   * names.
+   *
+   * The `[Function (anonymous)]` divergence above IS a real bug, and closing
+   * it means carrying the name on the CLOSURE from its creation site (where
+   * the lowering already proves one — dynFrom's `fnName`/`fnSrc`,
+   * ir/nodes.ts:5490-5511) and letting the box fall back to it.  ScrClosure
+   * has no such slot today.  That is a runtime-representation change in both
+   * backends, not a one-line argument fix.
+   *
+   * What this site CAN do, and now does, is thread the FIELD NAME into the
+   * stranded box's refusal MESSAGE — real attribution, no runtime value
+   * changes, and the census categories do not move.  zapo's five rows are
+   * getOrGenPreKeys, getOrGenSinglePreKey, getCollectionState,
+   * getCollectionStates and setCollectionStates, boxed for
+   * `destroyIfSupported(value: unknown)` at src/store/createStore.ts:104,
    * which only ever asks `'destroy' in value`. */
-  export function dynFuncFieldBoxC(E: CEmitter, t: IrType & { kind: "func" }, expr: string): string {
+  export function dynFuncFieldBoxC(E: CEmitter, t: IrType & { kind: "func" }, expr: string, field: string): string {
     const boxable = canBoxFuncIntoDyn(t, (id: string) => E.recordsById.get(id), (id: string) => E.unionsById.get(id));
-    const helper = boxable ? E.dynFuncBoxHelper(t) : strandedDynFuncBoxHelper(E, t);
+    const helper = boxable ? E.dynFuncBoxHelper(t) : strandedDynFuncBoxHelper(E, t, field);
     return `${helper}(${expr}, NULL, NULL)`;
   }
 
