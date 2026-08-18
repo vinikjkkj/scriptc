@@ -1,0 +1,22 @@
+tostring-conversions-that-must-not-answer.ts:16:26 - error SC2001: values of type 'Both' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
+
+  15 | const both = new Both()
+  16 | console.log("plus   " + (both + ''))
+     |                          ^~~~
+  17 | 
+
+tostring-conversions-that-must-not-answer.ts:29:26 - error SC2020: 'Rec.toString' is part of the standard library types but has no scriptc lowering yet
+
+  28 | const asRec: Rec = viaBase
+  29 | console.log("subOnly " + asRec.toString())
+     |                          ^~~~~~~~~~~~~~
+  30 | 
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+tostring-conversions-that-must-not-answer.ts:37:27 - error SC1090: this call form is not supported yet
+
+  36 | const req: Rec = new ReqParam()
+  37 | console.log("reqParam " + req.toString())
+     |                           ^~~~~~~~~~~~~~
+  38 | 
