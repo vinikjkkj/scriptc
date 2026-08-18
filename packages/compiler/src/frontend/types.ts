@@ -17,6 +17,36 @@ export { typeKey };
  * consumed by the lowerer's badType for the static-build wording. */
 export const ISLAND_AMBIENT_TYPES = ["Response", "RequestInit", "AbortSignal", "Headers"] as const;
 
+/** The shapes a double assertion RESHAPES INTO, named by a pass-stable
+ * structural key (see overflowShapeKey). A shape in this set is interned
+ * WITH a `dyn` overflow portion, so the members the asserted type does not
+ * name ride along instead of being dropped — which is what Node does,
+ * and what `JSON.stringify` / `Object.keys` then agree with.
+ *
+ * WHY A SET AND NOT A MUTATION. `indexValue` is part of a shape's interned
+ * IDENTITY, so it cannot be added to a shape that already exists: every
+ * `recordLit`, every interned key-walk helper and every width helper built
+ * before the mutation would describe a struct the emitter no longer emits.
+ * The set is populated by the DISCOVERY pass (which lowers under the same
+ * rules as emit and therefore sees every reachable cast) and consulted by
+ * the EMIT pass's registry, so the grant is in place before emit interns
+ * anything. lowerToIr clears it per compilation.
+ *
+ * The key is field NAMES plus each field's IR type KIND — never a shape
+ * id, because ids are per-registry and the two passes mint their own. Two
+ * genuinely different types with the same names and the same top-level
+ * kinds share a key and are granted together; the cost of that is one
+ * pointer per value, never an answer. */
+export const overflowShapeKeys = new Set<string>();
+
+/** The pass-stable structural key of a field list (see overflowShapeKeys). */
+export function overflowShapeKey(fields: readonly { name: string; type: IrType }[]): string {
+  return fields
+    .map((f) => `${f.name}:${f.type.kind}`)
+    .sort()
+    .join(",");
+}
+
 /** The frontend's record-shape interner. Records are monomorphic structural
  * shapes: fields sorted by name form the canonical identity, and two types
  * with the same canonical field list share one shapeId (and later one C
@@ -25,6 +55,9 @@ export const ISLAND_AMBIENT_TYPES = ["Response", "RequestInit", "AbortSignal", "
 export class ShapeRegistry {
   private readonly byKey = new Map<string, string>();
   private readonly byId = new Map<string, IrRecordShape>();
+  /** Shape ids whose index-signature portion came from the OVERFLOW GRANT
+   * (see dialIndexValue / grantedOverflow), not from the program. */
+  private readonly granted = new Set<string>();
   /** All interned shapes in first-seen (`r0`, `r1`, ...) order. */
   readonly shapes: IrRecordShape[] = [];
   /** ts.Types currently being mapped — a BACK-REFERENCE to one of these is
@@ -49,6 +82,41 @@ export class ShapeRegistry {
    * permanently pending when the outer mapping failed (such shapes are
    * referenced by nothing reachable and prune at module assembly). */
   private readonly pendingRec = new Set<string>();
+
+  /** THE OVERFLOW GRANT. A record shape named by `overflowShapeKeys` gets
+   * a `dyn` overflow portion, so a reshape INTO it (`x as unknown as T`)
+   * keeps the members `T` does not name instead of dropping them — the
+   * capture and the JSON/keys append already exist for hybrid shapes, and
+   * the only thing missing was granting the flag to a shape the program
+   * did not declare with an index signature. Applied inside the registry,
+   * BEFORE keyOf, so both registration paths agree and the shape's
+   * INTERNED IDENTITY is the granted one (see IrRecordShape.indexValue:
+   * the flag is part of that identity, which is exactly why the grant has
+   * to happen here and not by mutation afterwards).
+   *
+   * Declines: tuples (positional), EMPTY field lists (a PURE index shape
+   * has its own delete/live-presence semantics — granting it here would
+   * turn every `{}` into one), and shapes already carrying an index value.
+   *
+   * SCRIPTC_OVERFLOW_ALL=1 is the MEASUREMENT dial, not a shipping mode:
+   * it grants the portion to every ordinary record shape, which is how
+   * the price of a universal grant was counted (estado-indexvalue.md). */
+  private dialIndexValue(fields: { name: string; type: IrType }[], tuple: boolean, indexValue?: IrType): IrType | undefined {
+    if (indexValue !== undefined || tuple) return indexValue;
+    if (fields.length === 0) return indexValue;
+    if (process.env["SCRIPTC_OVERFLOW_ALL"]) return DYN;
+    return overflowShapeKeys.has(overflowShapeKey(fields)) ? DYN : indexValue;
+  }
+
+  /** True when THIS shape's index-signature portion came from the grant
+   * rather than from an index signature the program wrote. The two are
+   * indistinguishable afterwards — the flag is the flag — and exactly one
+   * rule needs to tell them apart: SC6001, which describes what the grant
+   * did to a double assertion's members and must not say it about a
+   * `Record<string, unknown>` the author declared. */
+  grantedOverflow(shapeId: string): boolean {
+    return this.granted.has(shapeId);
+  }
 
   /** The interning key of a canonical field list — shared by intern and
    * finalizeRecursive so the two registration paths can never disagree. */
@@ -127,6 +195,9 @@ export class ShapeRegistry {
   finalizeRecursive(t: ts.Type, fields: { name: string; type: IrType }[], indexValue?: IrType, declaredOrder?: string[]): string {
     const id = this.recIds.get(t);
     if (id === undefined) throw new Error("shape registry bug: finalizeRecursive without a placeholder");
+    const declaredIndexValue = indexValue;
+    indexValue = this.dialIndexValue(fields, false, indexValue);
+    if (indexValue !== declaredIndexValue) this.granted.add(id);
     if (this.pendingRec.has(id)) {
       const shape = this.byId.get(id)!;
       shape.fields = fields;
@@ -155,8 +226,11 @@ export class ShapeRegistry {
    * declared fields with and without an overflow portion — or with
    * differently-typed ones — are different structs. */
   intern(fields: { name: string; type: IrType }[], tuple = false, indexValue?: IrType, declaredOrder?: string[],): string {
+    const declaredIndexValue = indexValue;
+    indexValue = this.dialIndexValue(fields, tuple, indexValue);
     const key = this.keyOf(fields, tuple, indexValue);
     let id = this.byKey.get(key);
+    if (id !== undefined && indexValue !== declaredIndexValue) this.granted.add(id);
     if (id === undefined) {
       id = `r${this.shapes.length}`;
       const shape: IrRecordShape = {
@@ -172,6 +246,7 @@ export class ShapeRegistry {
       this.byKey.set(key, id);
       this.byId.set(id, shape);
       this.shapes.push(shape);
+      if (indexValue !== declaredIndexValue) this.granted.add(id);
     }
     return id;
   }

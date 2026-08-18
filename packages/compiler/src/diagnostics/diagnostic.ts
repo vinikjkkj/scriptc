@@ -99,20 +99,32 @@ export interface ScrDiagnostic {
 const TYPE_RENDER_BUDGET = 160;
 
 /** SC6001 — `x as unknown as T` where the source's shape carries members
- * `T` does not name. scriptc's records are CLOSED (a monomorphic struct
- * with exactly the fields its shape declares), so the double assertion is
- * a reshape and the reshape keeps only what `T` mentions. In JS the object
- * is open and every member survives, which makes this a silent divergence
- * at the cast — and a LOUD one somewhere else entirely, where a later
- * widening back to a shape that names the dropped members finds them gone
- * and traps at a site that did nothing wrong.
+ * `T` does not name.
+ *
+ * WHAT IT USED TO SAY, AND WHY IT NO LONGER SAYS IT. scriptc's records are
+ * CLOSED (a monomorphic struct with exactly the fields its shape declares),
+ * so the double assertion is a reshape; the members `T` does not name used
+ * to have nowhere to live and were DROPPED, which JavaScript never does.
+ * The OVERFLOW GRANT (frontend/types.ts, overflowShapeKeys) gives such a
+ * destination shape a `dyn` overflow portion, so the reshape CAPTURES them
+ * and `JSON.stringify` / `Object.keys` answer what Node answers. The
+ * divergence this rule was written to report is gone, so the rule no
+ * longer reports one.
+ *
+ * WHAT IT SAYS NOW, and why it is still worth one line. The members are no
+ * longer in the value's STRUCT: they are runtime entries in an overflow
+ * map. Two consequences the author cannot see from the source text — a
+ * widening back to a type that names one reads it through a CHECKED
+ * extraction (it throws where the value genuinely does not carry the key,
+ * instead of quietly producing undefined the way JS would), and the
+ * destination shape pays an overflow pointer on every value of it,
+ * everywhere in the program, not only at the cast.
  *
  * It is advice and not a refusal on purpose. Refusing would be worse than
- * the loss it reports: under --best-effort the refusal becomes a runtime
+ * anything it reports: under --best-effort the refusal becomes a runtime
  * throw at THIS statement, so a `push(e as unknown as T)` inside a message
- * handler would stop pushing anything at all. The value of saying it is
- * that the loss becomes findable at the site that causes it. */
-export function assertionDropsMembersDiag(
+ * handler would stop pushing anything at all. */
+export function assertionOverflowsMembersDiag(
   dropped: string[],
   sourceType: string,
   targetType: string,
@@ -133,16 +145,20 @@ export function assertionDropsMembersDiag(
     code: "SC6001",
     severity: "advice",
     message:
-      `this assertion DROPS ${one ? "the member" : "the members"} ${list}: ` +
+      `this assertion moves ${one ? "the member" : "the members"} ${list} into an OVERFLOW STORE: ` +
       `${src !== null ? `'${src}'` : "the value's type"} carries ${one ? "it" : "them"} and ` +
       `the asserted type ${dst !== null ? `'${dst}'` : "it is asserted to"} does not name ` +
       `${one ? "it" : "them"}`,
     loc,
     hint:
-      "scriptc records are closed — a record value holds exactly the members its type names, so " +
-      "'as unknown as T' reshapes rather than relabels and the unnamed members have nowhere to " +
-      "live. In JavaScript they survive the cast. Name them on the asserted type (or keep the " +
-      "value at its original type) if anything downstream reads them back",
+      "scriptc records are closed — a record value holds exactly the members its type names — so " +
+      "'as unknown as T' reshapes rather than relabels. The unnamed members are no longer dropped: " +
+      "the destination shape is granted an overflow portion and they ride in it, so " +
+      "JSON.stringify and Object.keys report them exactly as JavaScript does. Two things change " +
+      "anyway: widening back to a type that NAMES one reads it through a run-time checked " +
+      "extraction (it throws if the value really has no such key), and every value of the " +
+      "destination shape carries the overflow pointer. Name them on the asserted type if you want " +
+      "them in the struct",
   };
 }
 
