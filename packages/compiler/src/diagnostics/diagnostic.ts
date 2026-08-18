@@ -91,6 +91,13 @@ export interface ScrDiagnostic {
 
 /* ── SC6xxx: advice ───────────────────────────────────────────────────── */
 
+/** How much of a TYPE render an advisory message may carry. A real
+ * program's inferred types run to thousands of characters (zapo's message
+ * event renders at ~5 000), and a diagnostic that long buries its own
+ * hint. Past this the render is DROPPED, not truncated: a half-printed
+ * type reads as a compiler bug. */
+const TYPE_RENDER_BUDGET = 160;
+
 /** SC6001 — `x as unknown as T` where the source's shape carries members
  * `T` does not name. scriptc's records are CLOSED (a monomorphic struct
  * with exactly the fields its shape declares), so the double assertion is
@@ -112,13 +119,24 @@ export function assertionDropsMembersDiag(
   loc: SrcLoc,
 ): ScrDiagnostic {
   const list = dropped.map((d) => `'${d}'`).join(", ");
+  const one = dropped.length === 1;
+  // The DROPPED MEMBERS are the information; the two type renders are
+  // context, and on a real program either of them can be five thousand
+  // characters of nested protobuf. A message nobody can read is not a
+  // message, so a render over the budget is dropped rather than truncated
+  // — a half-printed type reads as a compiler bug, and the member list
+  // above it already says everything the reader has to act on.
+  const brief = (t: string): string | null => (t.length <= TYPE_RENDER_BUDGET ? t : null);
+  const src = brief(sourceType);
+  const dst = brief(targetType);
   return {
     code: "SC6001",
     severity: "advice",
     message:
-      `this assertion DROPS ${dropped.length === 1 ? "the member" : "the members"} ${list}: ` +
-      `'${sourceType}' carries ${dropped.length === 1 ? "it" : "them"} and the asserted type ` +
-      `'${targetType}' does not name ${dropped.length === 1 ? "it" : "them"}`,
+      `this assertion DROPS ${one ? "the member" : "the members"} ${list}: ` +
+      `${src !== null ? `'${src}'` : "the value's type"} carries ${one ? "it" : "them"} and ` +
+      `the asserted type ${dst !== null ? `'${dst}'` : "it is asserted to"} does not name ` +
+      `${one ? "it" : "them"}`,
     loc,
     hint:
       "scriptc records are closed — a record value holds exactly the members its type names, so " +
