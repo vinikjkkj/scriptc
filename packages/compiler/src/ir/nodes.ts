@@ -6868,7 +6868,33 @@ export function canDynCheckTo(
     // would let the value IN and strand it — the method-bundle lesson the
     // union-arm comment above records, where the fence merely moved to
     // the declaration that asked for the value back.
-    if (x.kind === "object") return canBoxClassIntoDyn(x.className);
+    // An %Error LEAF — the record field a widened value carries one
+    // container down, which is the shape zapo's whole plugin surface turns
+    // on: `debug_client_error` carries `{ error: Error }`.
+    //
+    // This line and the TOP-LEVEL arm sixty lines above it (`t.kind ===
+    // "object" && t.className === "%Error"`) used to disagree about the
+    // SAME IR type — the rows-3-and-4 shape exactly, a predicate answering
+    // one way standing alone and another as a record field. And the
+    // disagreement was one-directional in the worst way: canConvertToDyn's
+    // record rule recurses with the FULL predicate, so an %Error field has
+    // ALWAYS converted IN. Letting a value in without letting it back out
+    // is the method-bundle lesson, and here it stranded every record that
+    // carries an Error.
+    //
+    // The walkers can emit the leaf for the reason the class leaf can:
+    // dynCheck has the %error-marker test and the identity-cached
+    // extraction (emit-walkers.ts's object case, llvm/dyn.ts's), and
+    // dynMatch has the marker test added beside it — the SAME test
+    // dynCheck performs, so no arm can match and then fail to check.
+    //
+    // canBoxClassIntoDyn stays the answer for every OTHER class: the
+    // error hierarchy's SUBCLASSES (%TypeError, %RangeError, %SyntaxError,
+    // %DOMException) keep declining, because the error encoding records a
+    // `name` string and not a class interval, so a dyn error validated
+    // into a `%TypeError` slot would answer that slot for any error at
+    // all. Only the ROOT is exact.
+    if (x.kind === "object") return x.className === "%Error" || canBoxClassIntoDyn(x.className);
     // A MAP or SET leaf — the record field a widened value carries one
     // container down, which is the ONLY shape zapo needs: the
     // `ReadonlyMap` inside `getCollectionState`'s returned record and
