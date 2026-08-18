@@ -6439,19 +6439,29 @@ export function canMarshalTypedFuncIntoIsland(
  * must convert BACK to dyn (dynFrom's domain, functions included — a
  * wrapper returning a wrapper boxes recursively).
  *
- * OUT (canAdaptDynFuncTo, the dynCheck domain's function arm): a dyn
- * function landing in a typed func slot either unwraps directly (the boxed
- * signature key equals the target's — same type, same ABI) or wraps in a
- * per-target ADAPTER closure that converts each typed argument INTO dyn
- * (so params must be dyn-convertible) and validates the dyn result into
- * the target's return type (so the return must be dynCheckable).
+ * OUT (the dynCheck domain's function arm): a dyn function landing in a
+ * typed func slot either unwraps directly (the boxed signature key equals
+ * the target's — same type, same ABI) or, when canAdaptDynFuncTo says the
+ * pieces convert, wraps in a per-target ADAPTER closure that converts each
+ * typed argument INTO dyn and validates the dyn result into the target's
+ * return type.
+ *
+ * The ADAPTER is the optional half, and canDynCheckTo says so: EVERY func
+ * target is checkable, because the exact-signature unwrap is a complete
+ * answer on its own and both emitters emit it unconditionally. A target
+ * they cannot adapt they can still exact-unwrap; anything else throws the
+ * path-annotated TypeError. canDynCheckTo used to answer canAdaptDynFuncTo
+ * here while its own nested walker answered true, which made one IR type
+ * checkable as a record field and uncheckable standing alone — see the
+ * comment on the func arm of canDynCheckTo below.
  *
  * Deliberately fenced OUT of both directions: generic signatures (no
  * concrete IR type exists), this-parameters, construct signatures (`new`
  * through a dyn value), properties ON function values, and params/results
- * outside the conversion domains (Maps, class instances, ...). Promises
- * CONVERT in (canConvertToDyn's promise arm — an async dyn-boxed closure's
- * return) but do not check OUT (`u as Promise<T>` stays fenced).
+ * outside the conversion domains (Maps above all — there is no dyn kind
+ * for one at all). Promises CONVERT in (canConvertToDyn's promise arm — an
+ * async dyn-boxed closure's return) but do not check OUT (`u as Promise<T>`
+ * stays fenced).
  */
 
 /** The runtime HANDLE kinds that cross the checked-dynamic boundary as
@@ -6907,6 +6917,15 @@ export function canBoxFuncIntoDyn(
  * representation at all. A reader who took the message at face value would
  * have gone looking at `collection: AppStateCollectionName`, which is a
  * string and converts fine.
+ *
+ * Since the func arm of canDynCheckTo stopped being narrower than the
+ * emitters behind it, TWO of those five box and only ONE still declines on a
+ * parameter — `setCollectionStates`, whose `array<record>` carries the same
+ * `ReadonlyMap`. So all three surviving rows have ONE leaf between them, and
+ * it is the Map, in both directions: the two RETURN rows need a map→dyn
+ * conversion and the parameter row needs the reverse. Neither exists,
+ * because no `SCR_DYN_MAP` exists (scr_runtime.h lists fifteen dyn kinds and
+ * a Map is none of them).
  *
  * The idiom is componentTypeDiag's (diagnostics/diagnostic.ts): the container
  * is not the blocker, the named COMPONENT and the slot it cannot fill are.
