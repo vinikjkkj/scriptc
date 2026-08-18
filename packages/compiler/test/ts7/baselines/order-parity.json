@@ -8222,6 +8222,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4711-a-union-slot-spread-whose-literal-supplies-the-missing-name.ts": {
+   "order": [
+    "<repo>/tests/corpus/4711-a-union-slot-spread-whose-literal-supplies-the-missing-name.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
@@ -10154,6 +10160,12 @@
   "<repo>/tests/diagnostics/unassigned-fields.ts": {
    "order": [
     "<repo>/tests/diagnostics/unassigned-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/union-slot-literal-supplied-name.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/union-slot-literal-supplied-name.ts"
    ],
    "diags": []
   },
