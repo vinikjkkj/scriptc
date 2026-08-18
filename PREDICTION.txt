@@ -1,42 +1,131 @@
-block/libsurface — PREDICTION, written BEFORE any measurement
-base main d31c34b9   worktree G:\scriptc-ls   caches zig-ls-local / scriptc-ls / provenance-ls
+PREDICTION — block/spawn, worktree G:\scriptc-sp, base b0180665
+Written 2026-08-17, BEFORE any native-side measurement of the three
+spawnSync rows and BEFORE any edit to packages/*/src/.
 
-Rows in my block: 15 (Readable.from over an async generator + SC1071)
-                  19 (Request/Response as IrTypes)
+================================================================
+P1. The spawnSync surface — ONE mechanism, named
+================================================================
 
-P1  Row 15's recorded decliner is lower-stream.ts:1238 L.noLowering
-    "Readable.from over a '?' source". I predict the stack dump CONFIRMS
-    that site (it is the only noLowering with that wording).
-P2  The '?' means mapTypeOf(typeOf(args[0])) returned NULL for
-    AsyncGenerator<Uint8Array>, i.e. mapType has no async-generator case at
-    all. Frame above = lowerBuiltinStreamStatic in lower-stream.ts.
-P3  Row 15's capability is ABSENT, not unreachable: there is a
-    lower-generators.ts for SYNC generators (fiber-based, genResume) and
-    nothing for async ones. Closing it needs (a) an async-generator
-    lowering and (b) a readable.fromAsyncIter libCall on both backends.
-    PREDICTION: I will REFUSE row 15 and price it.
-P4  Row 19's FIRST decliner is the ISLAND_AMBIENT_TYPES gate. The two
-    sites are frontend/types.ts:2162 (mapType) and
-    lowering/lowerer.ts:2958 (badType wording). Leaf = `Request` inside
-    `typeof fetch` = (input: RequestInfo|URL, init?: RequestInit) =>
-    Promise<Response>, RequestInfo = Request | string.
-P5  Row 19's SECOND decliner, per the survey, is `options.fetch ?? fetch`
-    where bare `fetch` as a VALUE misses lower-island.ts's lowerFetchCall
-    (call-form only). I predict the stack dump names a DIFFERENT site than
-    the survey's :248 — five of the last closures were found because the
-    recorded frame was wrong or one frame off.
-P6  Cheap-shape check: I predict row 19 is NOT cheap — `Request` really is
-    absent from the four-name list and adding a name to a list is exactly
-    the "widen a gate" move the brief forbids without a counterexample.
-    But I predict the ROW-15 side has a cheap sub-shape I have not seen
-    named: `Readable.from` over a SYNC generator (SC2020) may already be
-    reachable, since lower-generators.ts exists and genResume works.
-P7  Neither row is closed by me. I predict I move 0 of 2, and that both
-    refusals stand with a counterexample. (Scored in the report.)
-P8  Census after my change is IDENTICAL to base on every category:
-    refusals 15, ABORT.real 23/94, ABORT.structural 3773, boilerplate 85,
-    DYNCHECK 2254, parity 0, unknown 0.
-P9  No accounting test or corpus program asserts either row (I have not
-    checked yet; I predict tests/diagnostics has a fetch-typed-option-member
-    test that DOES pin row 19 as correct — the survey says so — and that
-    nothing pins row 15).
+Measured already (oracle side only, node v25.9.0, this Windows host):
+
+  spawnSync("/bin/sh", ...) on win32 cannot spawn. Node's result is
+      status: null, signal: null, pid: 0, output: null,
+      stdout: undefined, stderr: undefined, error: Error("spawnSync
+      /bin/sh ENOENT")
+  i.e. on a SPAWN FAILURE Node leaves stdout/stderr ABSENT (undefined),
+  not "".
+
+PREDICTION P1a: scriptc's runtime models a failed spawn with EMPTY
+STRINGS ("") for stdout/stderr rather than undefined/absent. Named
+sites I expect to carry it:
+    packages/runtime/src/scr_child.c            (the spawnSync impl)
+    packages/compiler/src/frontend/lowering/lower-calls.ts  (result
+        record shape / slot types for the spawnSync return)
+    packages/compiler/src/frontend/lowering/surfaces.ts     (the
+        child_process surface declaration)
+
+PREDICTION P1b: this single difference explains ALL THREE rows,
+because on this host every /bin/* spawn fails:
+  * 1360-spawn-sync.ts        — Node THROWS at line 29
+        (killed.stdout.length, stdout===undefined ->
+         "TypeError: Cannot read properties of undefined (reading
+         'length')"), exit 1. scriptc, answering "", prints
+        "true 0 0" and keeps going. Divergence = stdout + exit code.
+  * 1482-spawnsync-error.ts   — Node THROWS at line 24
+        (ok.stdout.trim()), exit 1. Same cause.
+  * 1537-os-release-spawnsync-stdio.ts — Node does NOT throw
+        (it only JSON.stringify's stdout) and prints
+        "-1 undefined" twice. scriptc will print '-1 ""' twice.
+        Divergence = stdout only, no crash.
+  So the SAME single mechanism produces two crash-shaped rows and one
+  plain-text row. That is why it was never grouped: the failure text
+  looks different in 1537.
+
+PREDICTION P1c: therefore it is ONE fix, not three — make the
+spawnSync result's stdout/stderr ABSENT when the spawn itself failed
+(error set / pid 0), matching Node exactly. 1537 additionally needs
+os.release() to be byte-exact ("10.0.26200" on this host); I predict
+that half already works, because os.release() is not part of the
+spawn surface.
+
+PREDICTION P1d (a real risk I am recording so it cannot be
+retro-fitted): the three fixtures may be POSIX-SHAPED FIXTURES, i.e.
+their author assumed /bin/sh exists. If so the honest classification
+of at least part of these rows is "fixture defect", exactly like the
+previous block's row 6. I will state which of the two it is AFTER
+measuring, and I will not silently reclassify.
+
+================================================================
+P2. The path-separator rows — three named sites
+================================================================
+Sites, inherited from block/fullsuite and to be verified as real:
+    packages/compiler/src/.../npm.ts:697
+    packages/compiler/src/.../npm.ts:794
+    packages/runtime/src/scr_island.c:3600
+
+PREDICTION P2a: all three interpolate a module KEY (normalized to "/")
+into a USER-FACING message where Node interpolates an OS-native path.
+The keys must stay "/" (byte-determinism of the emitted TU); only the
+rendering may become native.
+
+PREDICTION P2b: fixing the rendering will FAIL the previous block's
+row-3 test (the .node ERR_DLOPEN_FAILED expectation it normalized to
+"/"), and that failure is the CORRECT outcome. I predict exactly one
+test row breaks there and I will fix it in the same commit.
+
+PREDICTION P2c: the census cannot move. These are message-rendering
+sites, not refusal sites: no pushDiag, no fence, no abort. I predict
+refusals stay 26 (18 tagged + 8 untagged + 0 uncoded), abort call
+sites 94, DYNCHECK 2015 — UNCHANGED — and I will measure both sides
+rather than subtract.
+
+================================================================
+P3. The five compile refusals
+================================================================
+    1453-pmap-settled.ts            SC2020 x1
+    1983-array-tuple-surfaces.ts    SC2020 x4
+    2240-width-class-into-record.ts SC1090 x1
+    2242-width-statics-into-record.ts SC1090 x2
+    2560-arraybuffer-dataview-set.ts SC2020 x2
+
+PREDICTION P3a: SC2020 is a generic "unsupported surface/expression"
+decliner and SC1090 a "property/member not supported on this widened
+type" decliner; I expect at most 2 distinct pushDiag call sites to
+account for all 5 fixtures (SC2020 from one surface-dispatch default,
+SC1090 from one member-access default). I will dump the real stacks
+rather than assert this.
+
+PREDICTION P3b: of the five, I predict `new ArrayBuffer` (2560) is
+the most tractable and `String.raw` (1983) the least. I expect to fix
+at most 2 of the 5 within budget, and to deliver counterexamples for
+the rest.
+
+================================================================
+P4. Gate figures I expect to be UNCHANGED by everything above
+================================================================
+    PROVE 146 (int-infer 37 + library-int 80 + surface-manifest 29)
+    order-parity green, baseline 1670, parsed == raw
+    diagnostics 104 / 0 red
+    census: 26 refusals both sides, aborts 94, DYNCHECK 2015
+    zapo: 74/76 stanzas, 46/46 dumps, 6/6 decrypts, exit 0
+
+PREDICTION P4a: the differential failing-set hash WILL change from
+55cd12ae9cf5ce874515896c9c516130 if P1 lands. I will publish the new
+hash with a row-by-row delta.
+
+================================================================
+P5. The SC9001 ICE (third priority, explicitly separate)
+================================================================
+    src/message/addons/link-preview/fetcher.ts:386:32
+    in %m254.httpGetStreamWithRedirects:
+    call %%m155.WaMediaTransferClient.downloadStream arg 0:
+    expected object, got jsval
+
+PREDICTION P5a: an IR-validation failure in packages/compiler/src/ir/
+validate.ts, raised because a lowered call argument kept its jsval
+representation where the callee's parameter was typed `object` — i.e.
+a MISSING UNBOX/COERCE at the call-argument lowering, not a bad
+signature. --dynamic is disqualified for the product goal, so this
+blocks nothing shippable; but an ICE is a compile error --best-effort
+cannot fence, so it is a real bug on a path we do not ship. Third
+priority and stated as such.
