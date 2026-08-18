@@ -200,6 +200,12 @@ static void dyn_str_buf(ScrJsonBuf *b, const ScrDyn *d, bool protocol) {
     scr_str_release(s);
     return;
   }
+  case SCR_DYN_MAP:
+    /* Object.prototype.toString with the Map / Set tag — a constant in
+     * both modes for the ARRBUF arm's reason: neither has an own
+     * toString for a user to override. */
+    scr_jb_puts(b, d->v.map.tkey[0] == 's' ? "[object Set]" : "[object Map]");
+    return;
   case SCR_DYN_ARRBUF:
     /* Object.prototype.toString with the ArrayBuffer tag — a constant in
      * both modes, because an ArrayBuffer has no own toString for a user
@@ -349,6 +355,7 @@ static void dyn_notfn_buf(ScrJsonBuf *b, const ScrDyn *cb) {
   case SCR_DYN_ARRBUF:
   case SCR_DYN_HANDLE:
   case SCR_DYN_OBJINST:
+  case SCR_DYN_MAP:
   case SCR_DYN_PROMISE: scr_jb_puts(b, "object"); return;
   }
 }

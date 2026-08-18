@@ -7,24 +7,6 @@ json-dyn.ts:12:9 - error SC1100: switch statements on 'unknown' values are not s
 
   hint: validate with 'as <type>' first — the cast checks the dynamic value at runtime and throws on mismatch
 
-json-dyn.ts:21:35 - error SC1101: converting typed values to 'unknown' is not supported yet
-
-  20 | // dyn representation (Maps, classes, bytes).
-  21 | const typedIntoUnknown: unknown = new Map<string, number>();
-     |                                   ^~~~~~~~~~~~~~~~~~~~~~~~~
-  22 | function wantsUnknown(x: unknown): void {}
-
-  hint: numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value does not alias the original, so a write through it is refused rather than lost), Uint8Array/Buffer (shared by reference — writes through the 'unknown' value DO reach the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet
-
-json-dyn.ts:23:14 - error SC1101: converting typed values to 'unknown' is not supported yet
-
-  22 | function wantsUnknown(x: unknown): void {}
-  23 | wantsUnknown(new Map<string, number>());
-     |              ^~~~~~~~~~~~~~~~~~~~~~~~~
-  24 | const stringifyClosure = JSON.stringify((x: number) => x + 1);
-
-  hint: numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value does not alias the original, so a write through it is refused rather than lost), Uint8Array/Buffer (shared by reference — writes through the 'unknown' value DO reach the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet
-
 json-dyn.ts:24:41 - error SC1090: JSON.stringify of '(number) => number' values (only number, string, boolean, records, arrays, unions of those, and 'unknown' stringify) are not supported yet
 
   23 | wantsUnknown(new Map<string, number>());

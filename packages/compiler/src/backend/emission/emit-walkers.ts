@@ -1045,6 +1045,21 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         d.push(`  return strcmp(d->v.fn.sig, ${sigLit}) == 0;`);
         break;
       }
+      case "map":
+      case "set": {
+        // The MAP box's matcher, and it is the FUNC arm's argument
+        // verbatim: a kind test alone is NOT sound here, because ScrMap
+        // names no IR type. `Map<string, number>` and `Set<string>` are
+        // the SAME scr_map_new call — SCR_MAP_KEY_STR, SCR_MAP_VAL_F64,
+        // all three RC hooks NULL — so a kind-only match would give a
+        // union the wrong tag for two values JS does not even give the
+        // same methods. The box carries the interned typeKey precisely so
+        // this line can be an exact test.
+        const tkeyLit = cStringLiteral(Buffer.from(key, "utf8"));
+        d.push(`  if (d->kind != SCR_DYN_MAP) return false;`);
+        d.push(`  return strcmp(d->v.map.tkey, ${tkeyLit}) == 0;`);
+        break;
+      }
       case "object": {
         // "Is this dyn an instance of C?" — the SAME preorder-interval
         // test `x instanceof C` compiles to, asked of the box's instance
@@ -1303,6 +1318,21 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`    scr_dyn_objinst_fence(d, "a property read");`);
     d.push(`    return NULL;`);
     d.push(`  }`);
+    d.push(`  if (d->kind == SCR_DYN_MAP) {`);
+    d.push(`    /* A Map's entries are internal slots and its size/get/has/add`);
+    d.push(`     * live on a prototype the box carries no table for. The`);
+    d.push(`     * undefined tail would answer undefined for 'size' and for`);
+    d.push(`     * every method Node returns — the OBJINST arm's silent wrong`);
+    d.push(`     * answer, one kind over. Loud ladder, named Map or Set.`);
+    d.push(`     *`);
+    d.push(`     * Note this arm must come BEFORE any v.obj read: v.map`);
+    d.push(`     * OVERLAYS v.obj in the payload union, so an unguarded`);
+    d.push(`     * d->v.obj.len on a MAP box reads the ScrMap pointer as a`);
+    d.push(`     * length. Every reader below is kind-guarded; this arm keeps`);
+    d.push(`     * it that way by construction. */`);
+    d.push(`    scr_dyn_map_fence(d, "a property read");`);
+    d.push(`    return NULL;`);
+    d.push(`  }`);
     d.push(`  if (d->kind == SCR_DYN_FUNC) {`);
     d.push(`    /* own props (defineProperties writes), then name/length —`);
     d.push(`     * the function-instance members test/common copies. */`);
@@ -1405,6 +1435,17 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         d.push(`  return scr_dyn_bytes_copy_out(d);`);
         break;
       }
+      case "map":
+      case "set":
+        // `u as Map<K, V>` / a map-typed record field validated out of a
+        // dyn: kind test, typeKey strcmp, then a RETAINED unwrap (+1 —
+        // the SAME ScrMap, no copy, so `unbox(box(m)) === m`, which is
+        // the half of this kind that makes it worth having). A miss —
+        // including a map of a DIFFERENT element type, which is the case
+        // a kind-only test would get silently wrong — is the usual
+        // path-annotated catchable TypeError.
+        d.push(`  return scr_dyn_map_unbox(d, ${cStringLiteral(Buffer.from(key, "utf8"))}, path, ${want});`);
+        break;
       case "object":
         // A CLASS TARGET, two representations apart. Everything but
         // %Error is the instance box's interval-checked unwrap;
@@ -1752,6 +1793,18 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             ? `  return scr_dyn_new_arrbuf_ref(v);`
             : `  return scr_dyn_new_bytes_ref(v);`);
         }
+        break;
+      case "map":
+      case "set":
+        // A Map/Set boxes BY REFERENCE — the same ScrMap, retained, so a
+        // write through either side is seen by both (the bytes and
+        // instance arms' aliasing, for the same reason: one
+        // representation, not two). The second argument is the interned
+        // typeKey of THIS type, the static literal that makes the box's
+        // matcher and its unwrap exact; see the kind's comment in
+        // scr_runtime.h for the Map<string,number>/Set<string> collision
+        // that makes it necessary rather than tidy.
+        d.push(`  return scr_dyn_new_map_ref(v, ${cStringLiteral(Buffer.from(key, "utf8"))});`);
         break;
       case "record": {
         const shape = E.recordsById.get(t.shapeId);
