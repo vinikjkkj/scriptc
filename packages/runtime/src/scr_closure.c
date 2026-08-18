@@ -290,10 +290,15 @@ static const char *scr_clo_site_of(const void *fn) {
  * audit's single dyn total says nothing about what the leaked tree is
  * made of. Bumped by scr_json.c's alloc/release, printed here so both
  * tables come out of one entry point. */
-long scr_dyn_live_by_kind[SCR_DYN_BIG + 1];
-static const char *const scr_dyn_kind_names[SCR_DYN_BIG + 1] = {
-    "null", "bool", "num", "str", "arr", "obj", "undef", "bytes", "func", "handle", "promise", "jsval", "objinst", "arrbuf", "bigint",
+long scr_dyn_live_by_kind[SCR_DYN_KIND_COUNT];
+static const char *const scr_dyn_kind_names[SCR_DYN_KIND_COUNT] = {
+    "null", "bool", "num", "str", "arr", "obj", "undef", "bytes", "func", "handle", "promise", "jsval", "objinst", "arrbuf", "bigint", "map",
 };
+/* A missing name would print as a NULL pointer for a kind that leaked,
+ * which is the one moment this table is read. Sized from the enum so the
+ * compiler catches a short initializer instead of the audit doing it. */
+_Static_assert(sizeof scr_dyn_kind_names / sizeof scr_dyn_kind_names[0] == SCR_DYN_KIND_COUNT,
+               "scr_dyn_kind_names must name every ScrDynKind");
 
 void scr_rc_audit_sites_report(void) {
   fprintf(stderr, "scriptc RC AUDIT SITES: live closures by creation site\n");
@@ -324,7 +329,7 @@ void scr_rc_audit_sites_report(void) {
           printed, unnamed, unnamed_rows,
           scr_clo_nsites == 0 ? " (no site table: build with SCRIPTC_RC_SITES=1)" : "");
   fprintf(stderr, "scriptc RC AUDIT SITES: live dyn values by kind\n");
-  for (size_t k = 0; k <= (size_t)SCR_DYN_BIG; k++) {
+  for (size_t k = 0; k < (size_t)SCR_DYN_KIND_COUNT; k++) {
     if (scr_dyn_live_by_kind[k] != 0) {
       fprintf(stderr, "  %8ld  %s\n", scr_dyn_live_by_kind[k],
               scr_dyn_kind_names[k]);

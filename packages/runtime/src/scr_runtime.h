@@ -3259,6 +3259,16 @@ typedef enum {
    * Enum position: LAST — the LLVM backend hardcodes the kind numbers,
    * so a new kind APPENDS and nothing renumbers. */
   SCR_DYN_MAP,
+  /* NOT A KIND. The count, so per-kind tables size themselves and a new
+   * kind cannot silently overrun one. It exists because adding
+   * SCR_DYN_MAP DID overrun one: the RC audit's `scr_dyn_live_by_kind`
+   * and its name table were both spelled `[SCR_DYN_BIG + 1]`, so the
+   * first Map boxed under SCR_RC_AUDIT wrote one long past the end of a
+   * file-scope array and read one past the end of another. Nothing in a
+   * default build touches those two lines, so every gate in this project
+   * stayed green for it — which is precisely why the bound is now derived
+   * and not written out again. Append new kinds ABOVE this. */
+  SCR_DYN_KIND_COUNT,
 } ScrDynKind;
 
 /* The per-class BOXING DESCRIPTOR carried by a SCR_DYN_OBJINST box: one
