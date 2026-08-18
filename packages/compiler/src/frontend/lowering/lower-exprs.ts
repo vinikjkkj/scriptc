@@ -6278,18 +6278,45 @@ function literalUnionArmOf(
 /** Pair a source union's record arms to a slot union's record arms by
  * identical field-NAME set, TOTALLY and UNAMBIGUOUSLY, or not at all.
  *
+ * `extraNames` are the names the LITERAL itself supplies unconditionally —
+ * the plain overrides. They are part of the shape each branch BUILDS and
+ * never part of the shape it reads, so they join the SOURCE side of the
+ * key and nothing else changes. Without them the rule compares the wrong
+ * two things: `{ ...normalized, errors }` builds source-arm ∪ {errors},
+ * and every slot arm declares `errors` that no source arm does, so a
+ * relation that is exact by construction read `not-total`
+ * (`mex-notification.ts:192`, measured at `extras=[errors]
+ * extrasInEveryArm=false` under SCRIPTC_UNIONSLOT_WHY). A CONDITIONAL
+ * override is deliberately NOT an extra: when its condition is false JS
+ * leaves the source's own field standing, so that name must still be
+ * readable from the source arm.
+ *
  * IDENTITY (the same interned ids on both sides) is a special case and it
  * takes a fast path that cannot be refused: two arms of one union can share
  * a field-name set at different types, and the by-name pairing would call
  * that ambiguous where the identity relation has an obvious answer. So the
  * generalisation can only ever ADD sites, never take one away, and that is
- * checked here rather than argued.
+ * checked here rather than argued. The fast path is taken only when every
+ * source arm already declares every extra — otherwise src→src would pair a
+ * source arm with a slot arm that does not declare the override, which the
+ * caller's own `override-not-in-every-slot-arm` test declines one step
+ * later. Falling to the by-name path there can therefore only ADD sites
+ * too: every configuration it now reaches is one identity already refused.
+ *
+ * The source list may be SHORTER than the slot's: the pairing has to be
+ * INJECTIVE, not bijective. Every source arm needs exactly one determinate
+ * slot arm to build; a slot arm no source arm maps to is simply never
+ * built, which is correct precisely because the source cannot be it — the
+ * same reason the containment path gives. `mex-notification.ts:192` maps 7
+ * normalizer arms onto 8 parsed arms (the 8th is the `kind: 'unknown'`
+ * literal the same function returns on its other path).
  *
  * Returns the src→slot shape-id map, or why it could not be built.
- *  - "not-total"  some arm on either side has no partner (`incoming.ts:397`
- *                 at 0/8 and `mex-notification.ts:192` at 0/7 land here —
- *                 their slot arms are records five fields wider than
- *                 anything the source holds, and no pairing exists);
+ *  - "not-total"  some SOURCE arm has no partner, or the source list is
+ *                 longer than the slot's (`incoming.ts:397` lands here:
+ *                 its slot arms are five fields wider than anything the
+ *                 source holds, and the five come from a SECOND spread
+ *                 this rule does not model);
  *  - "ambiguous"  two arms on one side carry the SAME field-name set, so
  *                 "the arm with these names" does not name one arm. Left
  *                 refused: picking either would be a coin toss the source
@@ -6319,36 +6346,44 @@ function pairArmsByFieldName(
   L: Lowerer,
   srcIds: readonly string[],
   ctxIds: readonly string[],
+  extraNames: readonly string[] = [],
 ): Map<string, string> | "not-total" | "ambiguous" {
+  /** Does this shape already declare every name the literal supplies? Only
+   * then is src→src the shape the branch BUILDS (see the header). */
+  const declaresEveryExtra = (id: string): boolean => {
+    const s = L.shapes.get(id);
+    return s !== undefined && extraNames.every((n) => s.fields.some((f) => f.name === n));
+  };
   // IDENTITY / CONTAINMENT, before anything else and refusable by nothing:
   // every source shape is itself a slot arm, so pair each to itself.
   const ctxSet = new Set(ctxIds);
-  if (srcIds.length > 0 && srcIds.every((id) => ctxSet.has(id))) {
+  if (srcIds.length > 0 && srcIds.every((id) => ctxSet.has(id)) && srcIds.every(declaresEveryExtra)) {
     return new Map(srcIds.map((id) => [id, id]));
   }
-  // The by-NAME pairing is total only between equal-sized arm lists.
-  if (srcIds.length !== ctxIds.length) return "not-total";
+  // The by-NAME pairing is INJECTIVE: every source arm needs a partner, a
+  // slot arm without one is never built.
+  if (srcIds.length > ctxIds.length) return "not-total";
   /** The pairing key. JSON of the SORTED field names — sorted because a
    * shape's field order is canonical but two shapes interned by different
    * routes need not present it identically, and JSON because a separator
    * chosen by hand is how a raw NUL got into this tree once already. */
-  const key = (id: string): string | null => {
+  const key = (id: string, extra: readonly string[]): string | null => {
     const s = L.shapes.get(id);
     if (!s) return null;
-    return JSON.stringify([...s.fields.map((f) => f.name)].sort());
+    return JSON.stringify([...new Set([...s.fields.map((f) => f.name), ...extra])].sort());
   };
-  const byKey = (ids: readonly string[]): Map<string, string> | "ambiguous" | null => {
+  const byKey = (ids: readonly string[], extra: readonly string[]): Map<string, string> | "ambiguous" | null => {
     const m = new Map<string, string>();
     for (const id of ids) {
-      const k = key(id);
+      const k = key(id, extra);
       if (k === null) return null;
       if (m.has(k)) return "ambiguous";
       m.set(k, id);
     }
     return m;
   };
-  const sMap = byKey(srcIds);
-  const cMap = byKey(ctxIds);
+  const sMap = byKey(srcIds, extraNames);
+  const cMap = byKey(ctxIds, []);
   if (sMap === null || cMap === null) return "not-total";
   if (sMap === "ambiguous" || cMap === "ambiguous") return "ambiguous";
   const out = new Map<string, string>();
@@ -6530,7 +6565,7 @@ function lowerPairedArmUnionSpread(
   const sSorted = [...srcRecIds].sort();
   const cSorted = [...ctxRecIds].sort();
 
-  const paired = pairArmsByFieldName(L, srcRecIds, ctxRecIds);
+  const paired = pairArmsByFieldName(L, srcRecIds, ctxRecIds, plainNames);
   if (paired === "not-total") return no(`arms-not-paired:[${sSorted.join(",")}]vs[${cSorted.join(",")}]`);
   if (paired === "ambiguous") return no(`arms-pair-ambiguously-by-name:[${sSorted.join(",")}]vs[${cSorted.join(",")}]`);
 
@@ -6541,15 +6576,28 @@ function lowerPairedArmUnionSpread(
   for (const s of [...armShapes, ...dstShapes]) {
     if (!s || s.indexValue || s.tuple || shapeHasAccessorSlots(s)) return no("arm-shape-index-tuple-or-accessor");
   }
-  // Every override name declared by EVERY arm — on BOTH sides now. The
-  // source side is the old test (a name missing from one source arm would
-  // be dropped there); the DESTINATION side is new and is what keeps the
-  // generalisation honest: the shape the branch builds is the SLOT's arm,
-  // so a name the slot arm does not declare has nowhere to go and the
-  // override would silently vanish. Identity made the two tests the same
-  // test; pairing does not.
+  // Every override name declared by EVERY arm — on BOTH sides. The
+  // DESTINATION side holds for every override: the shape the branch builds
+  // is the SLOT's arm, so a name the slot arm does not declare has nowhere
+  // to go and the override would silently vanish.
+  //
+  // The SOURCE side holds for CONDITIONAL overrides only, and the split is
+  // the point rather than a relaxation. A conditional override falls back
+  // to the source's own field when its condition is false, so that read has
+  // to exist — a name missing from one source arm would be DROPPED there
+  // (divergence 36's stance for a plain spread), and here that would
+  // silently change which fields the result carries per arm. A PLAIN
+  // override supplies the name outright in every branch, so no source read
+  // is ever emitted for it and there is nothing to drop; requiring the
+  // source to declare it refused a relation that is exact by construction
+  // (`{ ...normalized, errors }` over a source that is the slot's arms
+  // MINUS `errors`). The name still has to reach a slot arm that declares
+  // it — the destination test above — and it is what `pairArmsByFieldName`
+  // was told about, so the arm the branch builds is the arm that holds it.
   for (const n of names) {
-    if (!armShapes.every((s) => s!.fields.some((f) => f.name === n))) return no(`override-not-in-every-arm:${n}`);
+    if (!plainNames.includes(n) && !armShapes.every((s) => s!.fields.some((f) => f.name === n))) {
+      return no(`cond-override-not-in-every-arm:${n}`);
+    }
     if (!dstShapes.every((s) => s!.fields.some((f) => f.name === n))) return no(`override-not-in-every-slot-arm:${n}`);
   }
   // Per-field FEASIBILITY, before anything is lowered. A paired arm whose
@@ -6633,7 +6681,7 @@ function lowerPairedArmUnionSpread(
   // above gives. Re-run every per-field test against THIS map: the two
   // internings agree in practice, and a rule that assumes they must is a
   // rule that mis-routes a tag the day they do not.
-  const lPaired = pairArmsByFieldName(L, lSorted, cSorted);
+  const lPaired = pairArmsByFieldName(L, lSorted, cSorted, plainNames);
   if (lPaired === "not-total") return no(`lowered-arms-not-paired:[${lSorted.join(",")}]vs[${cSorted.join(",")}]`);
   if (lPaired === "ambiguous") return no(`lowered-arms-pair-ambiguously:[${lSorted.join(",")}]vs[${cSorted.join(",")}]`);
   for (const [sId, cId] of lPaired) {
@@ -6712,21 +6760,32 @@ function lowerPairedArmUnionSpread(
       throw new Error(`lowerer bug: paired-arm spread cannot widen ${L.fmt(e.type)} into ${L.fmt(to)}`);
     };
     const fields = dstShape.fields.map((f) => {
-      // Every slot field has a source field of the same name: the pairing
-      // is by identical NAME SET, and every override name was required in
-      // every source arm as well. A miss is a lowerer bug, and a
-      // conditional override whose false branch had no source read would
-      // be exactly that bug arriving as a wrong VALUE rather than a throw.
-      const srcT = shape.fields.find((x) => x.name === f.name)?.type;
-      if (srcT === undefined) throw new Error(`lowerer bug: paired-arm spread has no source for field ${f.name}`);
       const ov = lowered.get(f.name);
+      // Every slot field the branch has to READ has a source field of the
+      // same name: the pairing is by field-name set with the PLAIN
+      // overrides folded in, and a conditional override was required in
+      // every source arm. A miss is a lowerer bug, and a conditional
+      // override whose false branch had no source read would be exactly
+      // that bug arriving as a wrong VALUE rather than a throw. A plain
+      // override emits no source read at all (`base()` is never called),
+      // so its name legitimately has no source field — that is the whole
+      // of `{ ...normalized, errors }`.
+      const needsSourceRead = ov === undefined || ov.cond !== null;
+      const srcT = shape.fields.find((x) => x.name === f.name)?.type;
+      if (needsSourceRead && srcT === undefined) {
+        throw new Error(`lowerer bug: paired-arm spread has no source for field ${f.name}`);
+      }
       // LAZY, and that is the whole of `content.ts:183`. Its one differing
       // field is `viewOnce`, read at `boolean | null | undefined` and stored
       // at `boolean` — a NARROWING, and `widen` would (correctly) refuse it.
       // The plain override means the read never happens, so building it
       // eagerly would have refused the site this rule exists to build.
-      const base = (): IrExpr =>
-        widen({ kind: "recordGet", obj: narrowed(), shapeId, field: f.name, type: srcT, loc }, f.type);
+      const base = (): IrExpr => {
+        if (srcT === undefined) {
+          throw new Error(`lowerer bug: paired-arm spread read of unsourced field ${f.name}`);
+        }
+        return widen({ kind: "recordGet", obj: narrowed(), shapeId, field: f.name, type: srcT, loc }, f.type);
+      };
       if (!ov) return { name: f.name, value: base() };
       let v = L.coerceInto(ov.valueNode, ov.value, f.type);
       if (!typeEquals(v.type, f.type)) L.badType(ov.valueNode, L.typeOf(ov.valueNode));

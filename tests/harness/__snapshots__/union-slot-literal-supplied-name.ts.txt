@@ -1,0 +1,13 @@
+union-slot-literal-supplied-name.ts:49:12 - error SC1090: object spread of 'AmbSrcA | AmbSrcB' into the union-typed slot 'AmbDstA | AmbDstB' (the source's arm decides which arm the literal builds, and a literal builds one shape — narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) is not supported yet
+
+  48 | function ambiguousAfterSuppliedName(x: AmbSrcA | AmbSrcB): AmbDstA | AmbDstB {
+  49 |   return { ...x, tag: "T" };
+     |            ^~~~
+  50 | }
+
+union-slot-literal-supplied-name.ts:76:12 - error SC1090: object spread of 'IxSrcA | IxSrcB' into the union-typed slot 'IxDstA | IxDstB' (the source's arm decides which arm the literal builds, and a literal builds one shape — narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) is not supported yet
+
+  75 | function indexSignatureArm(x: IxSrcA | IxSrcB): IxDstA | IxDstB {
+  76 |   return { ...x, tag: "T" };
+     |            ^~~~
+  77 | }
