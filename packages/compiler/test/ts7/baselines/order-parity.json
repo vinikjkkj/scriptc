@@ -8197,6 +8197,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4651-a-union-spread-whose-source-is-a-narrowed-arm-of-its-own-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/4651-a-union-spread-whose-source-is-a-narrowed-arm-of-its-own-slot.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
