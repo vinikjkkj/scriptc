@@ -231,12 +231,55 @@ export const REGEX_CLASS_MAX =
  * record theirs here; until then they keep the ceilings alone. */
 export const SIZE_DRIFT_PAGE = 4_096;
 
-/** The static hello-world, measured 2026-08-17 (x86_64-windows-gnu, zig cc
- * 0.16.0, -O2), after scr_url.c became link-gated. */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 637_952 : null;
+/* 2026-08-18 — SCR_DYN_MAP (the Map/Set dyn kind) joined the same
+ * always-linked dyn core, and THE BOUNDS DO NOT MOVE. Measured A/B on two
+ * worktrees at the same commit, same toolchain (x86_64-windows-gnu, zig cc
+ * 0.16.0, -O2), the two class programs built with default options:
+ *
+ *   base fb578bc0   637,440 static   777,216 regex
+ *   this change     638,976 static   778,240 regex
+ *                   +1,536           +1,024
+ *
+ * against ceilings of 646,000 and 785,000 — 7,024 and 6,760 bytes of
+ * headroom left after the change. Neither is reached, and the file's own
+ * rule applies: raising a ceiling one has not reached only loosens the
+ * canary. So the MAX bounds below are untouched, as they were for
+ * SCR_DYN_BIG.
+ *
+ * The fourth dyn kind in a row costs a page or less (+2,048 OBJINST,
+ * +1,536 ARRBUF, +1,536 BIG, +1,536 here), which is now a series worth
+ * planning against. This one is at the cheap end for the ARRBUF reason
+ * rather than the BIG one: the ScrMap machinery scr_map.c was ALREADY in
+ * RUNTIME_SOURCES for every binary, so what the kind adds is the switch
+ * arms, three small functions and one payload struct — no new unit and no
+ * ops table, because a gated table would have been indirection for a unit
+ * that is never gated.
+ *
+ * The regex class moved 512 bytes LESS than the static one, not more —
+ * the third time this pair has moved by different amounts, and the second
+ * direction it has done it in. Measured separately, as the warning
+ * further up this file demands, and NOT derived from the static delta.
+ *
+ * One number worth carrying that is nobody's change: base measures 637,440
+ * here against the 637,952 RECORDED on 2026-08-17, i.e. main is 512 bytes
+ * BELOW its own anchor. The drift page absorbed it silently in both
+ * directions. The RECORDED figures below are re-anchored to THIS
+ * measurement so the next reader's ±4,096 is measured from something true,
+ * which is the whole lesson of the 2026-08-17 bisection above.
+ *
+ * linux and darwin cannot be weighed from this box. They keep the ceilings
+ * alone (there is nothing to move: no bound tipped), for the reason every
+ * calibration above gives. */
 
-/** The regex program, measured in the same run on the same tree. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 777_728 : null;
+/** The static hello-world, measured 2026-08-18 (x86_64-windows-gnu, zig cc
+ * 0.16.0, -O2), after SCR_DYN_MAP. Base at fb578bc0 weighed 637,440 in the
+ * same run; the +1,536 is the kind. */
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 638_976 : null;
+
+/** The regex program, measured in the same run on the same tree. Base
+ * weighed 777,216; the +1,024 is the kind, and it is deliberately NOT the
+ * static delta. */
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 778_240 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown
