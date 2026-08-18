@@ -8131,6 +8131,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4621-a-union-spread-whose-arms-pair-only-by-field-name.ts": {
+   "order": [
+    "<repo>/tests/corpus/4621-a-union-spread-whose-arms-pair-only-by-field-name.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4622-the-stack-of-a-runtime-that-captured-no-frames.ts": {
+   "order": [
+    "<repo>/tests/corpus/4622-the-stack-of-a-runtime-that-captured-no-frames.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
