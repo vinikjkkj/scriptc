@@ -8173,6 +8173,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4641-emit-as-a-value-over-an-error-carrying-event.ts": {
+   "order": [
+    "<repo>/tests/corpus/4641-emit-as-a-value-over-an-error-carrying-event.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4642-an-error-must-not-take-a-record-arm.ts": {
+   "order": [
+    "<repo>/tests/corpus/4642-an-error-must-not-take-a-record-arm.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4643-error-leaves-through-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/4643-error-leaves-through-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4644-a-deferred-reference-argument-is-not-copied.ts": {
+   "order": [
+    "<repo>/tests/corpus/4644-a-deferred-reference-argument-is-not-copied.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
