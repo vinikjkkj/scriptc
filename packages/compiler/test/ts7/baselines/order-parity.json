@@ -8191,6 +8191,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4644-a-deferred-reference-argument-is-not-copied.ts": {
+   "order": [
+    "<repo>/tests/corpus/4644-a-deferred-reference-argument-is-not-copied.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
