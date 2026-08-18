@@ -78,6 +78,15 @@ process.nextTick((a: number[]): void => {
   out.push(`extra ${a === xs} bumped=${String(bumped)}`);
 }, xs, bump());
 
+// THE FLUSH IS ORDERING-PROOF, AND IT HAS TO BE. `setImmediate` (check
+// phase) and a small `setTimeout` (timers phase) scheduled from the same
+// top-level tick have NO defined order in Node — the first run of this file
+// printed the `imm` line on three of four executions and dropped it on the
+// fourth, which is a flake, not a finding. This file is about WHAT each
+// callback received, never about when; 2734 is the one that pins ordering.
+// So the flush waits long enough for the check phase to have run, and the
+// lines are SORTED before printing: each is uniquely prefixed, so the sort
+// is total and the interleaving cannot be observed.
 setTimeout(() => {
-  console.log(out.join(" | "));
-}, 1);
+  console.log(out.slice().sort().join(" | "));
+}, 50);
