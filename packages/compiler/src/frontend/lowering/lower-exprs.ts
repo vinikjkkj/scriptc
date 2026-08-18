@@ -14525,13 +14525,12 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         // away. Applied to the TAG-CHECKED narrow, so the term claims
         // nothing about a value carrying a different tag.
         if (shape.indexValue) {
-          const armHelper = arm.kind === "record" ? recordHasKeyHelper(L, arm.shapeId, loc) : null;
-          if (armHelper === null) {
-            armWise = false;
-            staticAnswers = false;
-            break;
-          }
-          answers.push({ tag, has: false, slot: null, unit: null, prim: false, helper: armHelper, arm });
+          // The SHAPE ID, not the helper: interning it here would leave an
+          // orphaned lifted function behind whenever a LATER arm makes the
+          // classifier bail. The helper is built in the armWise branch
+          // below, once every arm has answered.
+          if (arm.kind !== "record") throw new Error("lowerer bug: 'in' index-signature arm is not a record");
+          answers.push({ tag, has: false, slot: null, unit: null, prim: false, helper: arm.shapeId, arm });
           staticAnswers = false; // presence is per-value
           continue;
         }
@@ -14672,13 +14671,15 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             if (a.helper !== null) {
               // An index-signature arm: the presence helper, on the narrow.
               if (a.arm.kind !== "record") throw new Error("lowerer bug: 'in' helper arm is not a record");
+              const armHelper = recordHasKeyHelper(L, a.helper, loc);
+              if (armHelper === null) throw new Error("lowerer bug: 'in' helper arm has no presence helper");
               const narrowed: IrExpr = { kind: "unionNarrow", unionId, tag: a.tag, value: recv, type: a.arm, loc };
               terms.push({
                 kind: "ternary",
                 cond: isTag(a.tag),
                 then: {
                   kind: "call",
-                  callee: a.helper,
+                  callee: armHelper,
                   args: [{ kind: "strLit", value: key, type: STRING, loc }, narrowed],
                   type: BOOL,
                   loc,
