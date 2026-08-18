@@ -75,6 +75,10 @@ export const DK = {
   ARRBUF: 13, /* SCR_DYN_ARRBUF — ArrayBuffer, payload shared by reference */
   BIG: 14, /* SCR_DYN_BIG — a bigint, the digits shared by reference and
             * compared BY VALUE (a primitive, unlike the four above) */
+  MAP: 15, /* SCR_DYN_MAP — a Map or Set, the ScrMap shared by reference
+            * beside the interned typeKey that identifies its IR type
+            * (ScrMap itself names none: Map<string,number> and
+            * Set<string> are the identical scr_map_new call) */
 } as const;
 
 /** What the dyn helpers need beyond the walker host: interned immortal
@@ -383,6 +387,13 @@ export class LlDyn {
       }
       case "func":
         return "function";
+      // "expected Map at $.ids, got Set" — the C emitter's arm
+      // (emit-walkers.ts's dynDesc), which has carried these two words
+      // since before a Map could reach a dynCheck target at all.
+      case "map":
+        return "Map";
+      case "set":
+        return "Set";
       default: {
         const h = DYN_HANDLE_KINDS.get(t.kind);
         if (h) return h.cls;
@@ -620,6 +631,20 @@ export class LlDyn {
         B.terminate(`ret i1 ${r}`);
         break;
       }
+      case "map":
+      case "set": {
+        // "Is this dyn a Map/Set of exactly THIS type?" — the interned
+        // typeKey strcmp, run inside the runtime helper so both lanes ask
+        // it exactly once. The C walker's arm, and the func arm's
+        // argument: a kind test alone cannot tell a Map<string,number>
+        // from a Set<string>, because ScrMap names no IR type and the two
+        // are the identical scr_map_new call.
+        this.host.declare(`declare zeroext i1 @scr_dyn_map_is(ptr, ptr)`);
+        const r = B.tmp();
+        B.line(`${r} = call zeroext i1 @scr_dyn_map_is(ptr %d, ptr ${this.host.cstr(key)})`);
+        B.terminate(`ret i1 ${r}`);
+        break;
+      }
       default:
         throw new LlvmUnsupportedError(`dynMatch:${t.kind}`);
     }
@@ -698,6 +723,18 @@ export class LlDyn {
         host.declare(`declare ptr @scr_dyn_big_unbox(ptr, ptr, ptr)`);
         const r = B.tmp();
         B.line(`${r} = call ptr @scr_dyn_big_unbox(ptr %d, ptr %path, ptr ${want})`);
+        B.terminate(`ret ptr ${r}`);
+        break;
+      }
+      case "map":
+      case "set": {
+        // `u as Map<K,V>`: the SAME ScrMap back, retained, after the
+        // typeKey strcmp. The runtime does the kind check, the key check
+        // and the throw, so there is no requireKind here — the ARRBUF and
+        // bigint arms' shape, and the C twin carries the reasoning.
+        host.declare(`declare ptr @scr_dyn_map_unbox(ptr, ptr, ptr, ptr)`);
+        const r = B.tmp();
+        B.line(`${r} = call ptr @scr_dyn_map_unbox(ptr %d, ptr ${host.cstr(key)}, ptr %path, ptr ${want})`);
         B.terminate(`ret ptr ${r}`);
         break;
       }
@@ -1534,6 +1571,18 @@ export class LlDyn {
         B.terminate(`unreachable`);
         break;
       }
+      case "map":
+      case "set": {
+        // A Map/Set boxes by REFERENCE (SCR_DYN_MAP — identity is the
+        // ScrMap), beside the interned typeKey that makes the box's
+        // matcher and its unwrap exact. scr_dyn_new_map_ref retains the
+        // borrowed operand. The C twin carries the reasoning.
+        host.declare(`declare ptr @scr_dyn_new_map_ref(ptr, ptr)`);
+        const r = B.tmp();
+        B.line(`${r} = call ptr @scr_dyn_new_map_ref(ptr %v, ptr ${host.cstr(key)})`);
+        B.terminate(`ret ptr ${r}`);
+        break;
+      }
       case "promise": {
         // Promises box by REFERENCE (SCR_DYN_PROMISE — identity is the
         // promise): promise<dyn> carries its ScrPromise directly (the
@@ -2258,6 +2307,27 @@ export class LlDyn {
       B.startBlock(lCi);
       host.declare(`declare zeroext i1 @scr_dyn_objinst_fence(ptr, ptr)`);
       B.line(`call zeroext i1 @scr_dyn_objinst_fence(ptr %d, ptr ${host.cstr("a property read")})`);
+      B.terminate(`ret ptr null`);
+      B.startBlock(lNext);
+    }
+    // MAP: a Map's entries are internal slots and its size/get/has/add
+    // live on a prototype the box carries no table for. The undefined tail
+    // would answer undefined for every one of them — the OBJINST arm's
+    // silent wrong answer, one kind over. Loud ladder, same runtime entry
+    // point as the C emitter's arm.
+    //
+    // It must also come before any v.obj read: v.map OVERLAYS v.obj in the
+    // payload union, so an unguarded load of ->v.obj.len on a MAP box
+    // reads the ScrMap pointer as a length.
+    {
+      const isMp = B.tmp();
+      B.line(`${isMp} = icmp eq i32 ${kd}, ${DK.MAP}`);
+      const lMp = B.newLabel("kg.mp");
+      const lNext = B.newLabel("kg.n");
+      B.condBr(isMp, lMp, lNext);
+      B.startBlock(lMp);
+      host.declare(`declare zeroext i1 @scr_dyn_map_fence(ptr, ptr)`);
+      B.line(`call zeroext i1 @scr_dyn_map_fence(ptr %d, ptr ${host.cstr("a property read")})`);
       B.terminate(`ret ptr null`);
       B.startBlock(lNext);
     }

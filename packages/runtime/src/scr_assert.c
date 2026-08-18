@@ -444,6 +444,9 @@ static bool scr_assert_dyn_same_value(const ScrDyn *a, const ScrDyn *b) {
        * content plays no part here even though deepStrictEqual below
        * compares bytes. */
       return a->v.bytes == b->v.bytes;
+    case SCR_DYN_MAP:
+      /* Identity is the ScrMap (the strict_eq stance). */
+      return a->v.map.m == b->v.map.m;
     case SCR_DYN_BIG:
       /* And NOT identity: SameValue over a PRIMITIVE is the VALUE, so
        * two boxes of 1n are the same value — the strict_eq stance for a
@@ -505,6 +508,13 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
        * runs needs a member table the box does not carry, so identity is
        * the only honest answer (documented with the handle stance). */
       return a->v.inst.o == b->v.inst.o;
+    case SCR_DYN_MAP:
+      /* Node's deepStrictEqual over two Maps compares ENTRIES, which the
+       * box cannot walk (it carries the interned typeKey, not a
+       * per-element comparator). Identity is the only honest answer —
+       * the handle and instance stance, documented with them: two
+       * distinct maps with equal entries diverge from Node here. */
+      return a->v.map.m == b->v.map.m;
     case SCR_DYN_PROMISE:
       /* Node compares promises structurally (no own props → equal); the
        * honest arm here is identity — two distinct promises with equal
@@ -668,6 +678,15 @@ static void scr_assert_cf_value(ScrAssertBuf *b, const ScrDyn *d, size_t indent,
        * story, and it too only appears inside FAILURE diffs. */
       ab_char(b, '[');
       ab_cstr(b, scr_dyn_objinst_cls(d));
+      ab_char(b, ']');
+      return;
+    }
+    case SCR_DYN_MAP: {
+      /* The depth-elided form ([Map] / [Set]) — Node renders the entries;
+       * the instance arm's story, and it too only appears inside FAILURE
+       * diffs, which already diverge in report format. */
+      ab_char(b, '[');
+      ab_cstr(b, scr_dyn_map_cls(d));
       ab_char(b, ']');
       return;
     }

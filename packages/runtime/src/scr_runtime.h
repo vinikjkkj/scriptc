@@ -3197,6 +3197,68 @@ typedef enum {
    * Enum position: LAST — the LLVM backend hardcodes the kind numbers,
    * so a new kind APPENDS and nothing renumbers. */
   SCR_DYN_BIG,
+  /* A MAP (or SET) value. Never produced by the parser — it enters the
+   * checked-dynamic tree through the compiler's static→dyn converters: a
+   * `Map`/`ReadonlyMap`/`Set` flowing into an `unknown` slot, and — the
+   * motivating crossing — a RECORD FIELD of map type inside a value
+   * carried through `unknown` (zapo's `getCollectionState`,
+   * `getCollectionStates` and `setCollectionStates`, whose returned and
+   * accepted records each carry a `ReadonlyMap`).
+   *
+   * Holds a RETAINED ScrMap — the SAME object the static side holds, so
+   * the crossing SHARES (the OBJINST / ARRBUF reference stance) — PLUS
+   * the compiler-interned TYPE KEY of the IR type it was boxed from, a
+   * static emitted literal exactly like the FUNC box's `sig`.
+   *
+   * THE TYPE KEY IS LOAD-BEARING, AND HERE IS THE MEASUREMENT THAT SAYS
+   * SO. ScrMap carries key_kind, val_kind and three RC hooks, and
+   * NOTHING that names an IR type. `Map<string, number>` and
+   * `Set<string>` both emit, byte for byte,
+   *
+   *     scr_map_new(SCR_MAP_KEY_STR, SCR_MAP_VAL_F64, NULL, NULL, NULL)
+   *
+   * so every field that could serve as a tag is equal for two values JS
+   * does not even give the same methods. Without the key, `u as
+   * Map<string, number>` over a boxed `Set<string>` would pass the kind
+   * test, unwrap, and answer the Set's UNUSED f64 value slot from
+   * `m.get(k)` — a number where Node throws `TypeError: m.get is not a
+   * function`. A silent wrong answer, which is worse than the refusal it
+   * replaces. With the key, that cast throws the path-annotated dynCheck
+   * TypeError at the boundary. (`Map<string, Uint8Array>` vs
+   * `Map<string, string>` collide on (key_kind, val_kind) too and differ
+   * only in RC hooks, which are per-shape emitted statics and not a type
+   * identity.)
+   *
+   * dynMatch is therefore a strcmp on the key, exactly as the FUNC arm
+   * matches on `sig`; dynCheck is that test plus a retained unwrap, so
+   * identity survives the round trip.
+   *
+   * BEHAVIOUR, and the split between exact and loud. typeof answers
+   * "object" and truthiness is unconditionally true (a Map is a JS
+   * object — the two answers that need no layout). String() renders
+   * "[object Map]" / "[object Set]" (Object.prototype.toString — neither
+   * has an own toString). JSON.stringify serializes {} — Node exactly,
+   * since neither has own enumerable properties. Everything else meets
+   * the LOUD LADDER: a keyed read, an index, `size`, `get`, `has`,
+   * iteration and structuredClone all refuse by name rather than answer.
+   * That is deliberate, and it is the lesson estado-dynfunc.md 3.5 left:
+   * boxing a Map as SCR_DYN_OBJ with no entries gets JSON.stringify and
+   * Object.keys exactly right and then answers `undefined` for
+   * `m.get(k)`, which is a wrong answer with a later, misattributed
+   * throw. A distinct kind makes the sixty readers of SCR_DYN_OBJ
+   * exclude a Map by construction.
+   *
+   * The dyn→map edge is NOT visible to the cycle collector — the OBJINST
+   * stance, and for the OBJINST reason: whether a map allocates with the
+   * collector header is the emitter's per-type grading (`val_trace`
+   * non-NULL), no runtime test distinguishes the two, and visiting an
+   * unheadered one would read the 32 bytes before the allocation. Trial
+   * deletion treats it as an external root, so nothing dangles; a cycle
+   * THROUGH a dyn-boxed map is merely never collected.
+   *
+   * Enum position: LAST — the LLVM backend hardcodes the kind numbers,
+   * so a new kind APPENDS and nothing renumbers. */
+  SCR_DYN_MAP,
 } ScrDynKind;
 
 /* The per-class BOXING DESCRIPTOR carried by a SCR_DYN_OBJINST box: one
@@ -3464,6 +3526,13 @@ struct ScrDyn {
      * ops so this always-linked core never references the gated bigint
      * unit (the jsval cell's stance, same reason). */
     ScrBigInt *big;
+    /* SCR_DYN_MAP: the retained ScrMap + the compiler-interned typeKey of
+     * the IR type it was boxed from. `m` is the SAME pointer the static
+     * side holds (identity survives the round trip); `tkey` is a static
+     * emitted literal and is never owned — the FUNC box's `sig`, and for
+     * the same job. See the kind's comment for why a bare `ScrMap *`
+     * would be a silent wrong answer. */
+    struct { ScrMap *m; const char *tkey; } map;
   } v;
 };
 
@@ -4379,6 +4448,42 @@ const char *scr_dyn_objinst_cls(const ScrDyn *d);
  * throws catchably; returns false so callers can `return
  * scr_dyn_objinst_fence(...)` from a bool tail. */
 bool scr_dyn_objinst_fence(const ScrDyn *d, const char *what);
+
+/* ── maps and sets in the checked-dynamic tree (SCR_DYN_MAP) ──────────
+ * The static→dyn BOUNDARY constructor: wraps the SAME ScrMap, retained
+ * (+1 on m; m stays borrowed by the caller), beside the compiler's
+ * interned typeKey for the IR type being boxed. `tkey` is a static
+ * emitted literal, never owned and never freed — the FUNC box's `sig`,
+ * doing the FUNC box's job. Passing NULL for `tkey` is a compiler bug and
+ * the constructor traps on it rather than boxing an unidentifiable map:
+ * an untagged box is the one shape that turns this kind into the silent
+ * wrong answer it exists to avoid. */
+ScrDyn *scr_dyn_new_map_ref(ScrMap *m, const char *tkey);
+/* `dynMatch` against a map/set target: a MAP box whose interned typeKey
+ * is byte-equal to `tkey`. False for every other kind and for every other
+ * map type — never throws. The strcmp is not belt-and-braces: ScrMap
+ * names no IR type, and `Map<string,number>` and `Set<string>` are the
+ * identical scr_map_new call. */
+bool scr_dyn_map_is(const ScrDyn *d, const char *tkey);
+/* `dynCheck` extraction (`u as Map<K,V>`, a map-typed record field
+ * validated out of a dyn): a key-equal box answers the RETAINED ScrMap
+ * (+1 — the SAME object, no copy, so identity survives the round trip);
+ * anything else throws the path-annotated catchable TypeError and
+ * returns NULL. */
+ScrMap *scr_dyn_map_unbox(const ScrDyn *d, const char *tkey,
+                          const ScrDynPath *path, const char *want);
+/* The boxed type's display word for error texts — "Map" or "Set",
+ * decided by the interned typeKey's own spelling. */
+const char *scr_dyn_map_cls(const ScrDyn *d);
+/* The loud ladder for every operation the box has no layout to answer
+ * (keyed access and indexing, `size`, `get`/`has`/`add`, iteration,
+ * structuredClone): "<what> on a dynamic Map is not supported yet".
+ * Always throws catchably; returns false so callers can `return
+ * scr_dyn_map_fence(...)` from a bool tail.
+ *
+ * typeof, truthiness, String() and JSON.stringify are NOT on this ladder
+ * — those four are answered exactly (see the kind's comment). */
+bool scr_dyn_map_fence(const ScrDyn *d, const char *what);
 
 /* ── bigints in the checked-dynamic tree (SCR_DYN_BIG) ────────
  * The five value questions this always-linked core must ask a bigint,
