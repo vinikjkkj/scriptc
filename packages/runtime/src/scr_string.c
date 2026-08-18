@@ -64,8 +64,25 @@ static ScrSidx *scr_sidx(const ScrStr *s) {
 
 /* ── allocation ─────────────────────────────────────────────────────── */
 
+/* Blocks freed by scr_str_release come back here instead of going to the
+ * CRT. Every string this file allocates and every string it frees goes
+ * through these two functions, so the pool is self-consistent by
+ * construction: a block is only ever given back to the class its own
+ * `cap` puts it in, and `cap` is the field the size was computed from.
+ *
+ * This is the one line the previous block's allocation profile named:
+ * scr_string.c:68 was 85.6% of every allocation and 92.5% of every byte
+ * on the messaging workload, at a mean of 76 bytes - squarely inside the
+ * pool's range and nowhere near the 512-byte floor of the one-slot spare
+ * block below, which is why the spare could never touch it. */
+static ScrPool scr_str_blocks;
+
 static ScrStr *scr_str_alloc(size_t len, size_t cap) {
-  ScrStr *s = malloc(sizeof(ScrStr) + cap + 1);
+  size_t want = sizeof(ScrStr) + cap + 1;
+  ScrStr *s = scr_pool_take(&scr_str_blocks, want);
+  /* scr_pool_bytes, not want: a recycled block is a whole class wide and
+   * the class is what give() will put it back into. */
+  if (!s) s = malloc(scr_pool_bytes(want));
   if (!s) scr_oom();
   s->rc = 1;
   s->len = len;
@@ -122,7 +139,7 @@ ScrStr *scr_str_alloc_raw(size_t len, size_t cap) {
 
 ScrStr *scr_str_regrow(ScrStr *s, size_t newcap) {
   scr_sidx_purge(s); /* realloc may move; the old address may be recycled */
-  ScrStr *r = realloc(s, sizeof(ScrStr) + newcap + 1);
+  ScrStr *r = realloc(s, scr_pool_bytes(sizeof(ScrStr) + newcap + 1));
   if (!r) scr_oom();
   r->cap = newcap;
   return r;
@@ -136,6 +153,10 @@ void scr_str_release(ScrStr *s) {
     scr_live_strings--;
 #endif
 #ifndef SCR_RC_AUDIT
+    /* The pool first: it covers the small end (mean 76 bytes), the spare
+     * block below covers the large end (>= 512), and the two ranges do
+     * not overlap, so neither can steal the other's blocks. */
+    if (scr_pool_give(&scr_str_blocks, s, sizeof(ScrStr) + s->cap + 1)) return;
     if (s->cap >= 512) {
       ScrStr *old = scr_str_spare;
       scr_str_spare = s;

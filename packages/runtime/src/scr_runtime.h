@@ -221,12 +221,136 @@ typedef void (*ScrCycFreeFn)(void *obj);
 
 enum { SCR_CYC_BLACK = 0, SCR_CYC_PURPLE = 1, SCR_CYC_GRAY = 2, SCR_CYC_WHITE = 3 };
 
+/* ── the small-block pool ─────────────────────────────────────────────
+ * A size-class free list in front of malloc, for the two allocation
+ * sites a compiled program spends most of its allocator time in.
+ *
+ * WHY, with the numbers that motivated it. A per-function cycle profile
+ * of the messaging bench (the realistic axis) puts 7.4% of all run
+ * cycles inside scr_str_alloc and 7.5% inside scr_str_release - and
+ * those two functions are almost nothing BUT a malloc and a free, so
+ * that is ~15% of the run spent in the C allocator on strings whose
+ * mean size is 76 bytes. On the closure axis the same profile puts 5.2%
+ * in scr_cyc_alloc (a calloc) and 5.4% in scr_cyc_free (a free). The
+ * allocation COUNTS were already known - one line, scr_string.c:68, is
+ * 85.6% of every allocation a messaging run makes - but a count is not
+ * a cost until something times it.
+ *
+ * WHAT IT IS. Blocks are rounded up to a 16-byte grain; a freed block
+ * goes on the list for its class instead of back to the CRT, and the
+ * next request for that class pops it. Nothing else changes: the block
+ * is still an ordinary malloc block, the pointer is still
+ * max-aligned (every class is a multiple of 16 and the block IS the
+ * malloc pointer), and a block never migrates between classes because
+ * the size handed to give() is derived from the same field the size
+ * handed to take() was.
+ *
+ * WHAT IT IS NOT. It is not an arena and it does not defer frees: a
+ * pooled block is reusable immediately and the pool never walks. The
+ * depth cap is what keeps it from becoming a memory leak with good
+ * manners - peak RSS is one of the compiled binary's real wins (14-27x
+ * better than Node) and an unbounded free list would spend it. At
+ * SCR_POOL_DEPTH 64 and 32 classes the worst case a pool can hold is
+ * 64 * (8 + 16 + ... + 256) = 270 KiB, and there are two pools.
+ *
+ * THE GRAIN IS 8, NOT 16, AND THAT WAS MEASURED. 16 is the obvious
+ * choice - it is malloc's own alignment - and it is 7% faster here
+ * because coarser classes hit more often. It also costs 3.26 MB of peak
+ * RSS on the messaging bench AT FIXED WORK, and peak RSS is one of this
+ * binary's real wins. A control build with the pool switched off but the
+ * rounding left in reproduced the whole 3.26 MB, which locates the cost
+ * in the ROUNDING and not in the retention. An 8-byte grain measures
+ * 36,720 KiB against the base's 36,688 - inside run-to-run noise - and
+ * still takes 16% off CPU time. The depth was swept too, 8/16/32/64,
+ * and moved peak RSS by 0.16%: the retention was never the term.
+ *
+ * DISABLED UNDER SCR_RC_AUDIT, exactly like scr_string.c's one-slot
+ * spare block above it: the audit lane exists to prove every logical
+ * free is a real free, and a pool that keeps blocks alive would hide
+ * precisely the use-after-free the lane is built to catch. The gate is
+ * inside take/give, so no caller can forget it.
+ */
+#ifndef SCR_POOL_GRAIN
+#define SCR_POOL_GRAIN 8u
+#endif
+#ifndef SCR_POOL_MAX
+#define SCR_POOL_MAX 256u
+#endif
+#define SCR_POOL_CLASSES ((int)(SCR_POOL_MAX / SCR_POOL_GRAIN))
+/* Overridable at build time so the RSS/CPU trade can be swept without
+ * editing the header (SCRIPTC_PROF_CFLAGS appends -D last). */
+#ifndef SCR_POOL_DEPTH
+#define SCR_POOL_DEPTH 64
+#endif
+
+typedef struct ScrPool {
+  void *head[SCR_POOL_CLASSES];
+  unsigned n[SCR_POOL_CLASSES];
+} ScrPool;
+
+/* The physical size of the block backing a request of n bytes. Callers
+ * MUST malloc/realloc this rather than n, or a recycled block would be
+ * smaller than the class that hands it out. */
+static inline size_t scr_pool_bytes(size_t n) {
+  return (n + (SCR_POOL_GRAIN - 1)) & ~(size_t)(SCR_POOL_GRAIN - 1);
+}
+
+/* NULL when the class is empty, the size is out of range, or the audit
+ * lane has turned the pool off. */
+static inline void *scr_pool_take(ScrPool *p, size_t n) {
+#ifdef SCR_RC_AUDIT
+  (void)p; (void)n;
+  return NULL;
+#else
+  size_t r = scr_pool_bytes(n);
+  if (r == 0 || r > SCR_POOL_MAX) return NULL;
+  int c = (int)(r / SCR_POOL_GRAIN) - 1;
+  void *b = p->head[c];
+  if (!b) return NULL;
+  /* the free-list link lives in the block's first word; every class is
+   * at least 16 bytes, so it always fits and is always aligned. */
+  void *next;
+  __builtin_memcpy(&next, b, sizeof next);
+  p->head[c] = next;
+  p->n[c]--;
+  return b;
+#endif
+}
+
+/* true when the pool took the block: the caller must NOT free it then. */
+static inline bool scr_pool_give(ScrPool *p, void *b, size_t n) {
+#ifdef SCR_RC_AUDIT
+  (void)p; (void)b; (void)n;
+  return false;
+#else
+  size_t r = scr_pool_bytes(n);
+  if (r == 0 || r > SCR_POOL_MAX) return false;
+  int c = (int)(r / SCR_POOL_GRAIN) - 1;
+  if (p->n[c] >= SCR_POOL_DEPTH) return false;
+  __builtin_memcpy(b, &p->head[c], sizeof(void *));
+  p->head[c] = b;
+  p->n[c]++;
+  return true;
+#endif
+}
+
 typedef struct ScrCycHdr {
   ScrTraceFn trace;
   ScrCycFreeFn free_fn;
   uint32_t color;    /* SCR_CYC_* */
   uint32_t buffered; /* 1 = sitting in the candidate-root buffer */
-  size_t buf_index;  /* position there (O(1) removal when rc hits 0) */
+  /* Position in the candidate-root buffer (O(1) removal when rc hits 0).
+   * uint32 rather than size_t so the block class below fits WITHOUT
+   * growing the header: it stays exactly 32 bytes, which matters
+   * because every cycle-headered object in a compiled program carries
+   * one. The buffer holds candidate roots, not objects, and 4 billion
+   * of them is not a limit any program reaches. */
+  uint32_t buf_index;
+  /* The block's physical size in SCR_POOL_GRAIN units, stamped by
+   * scr_cyc_alloc so scr_cyc_free can hand the block back to the right
+   * pool class without every one of the ~16 object teardowns having to
+   * pass its own size down. 0 = not pooled, free it. */
+  uint32_t blk;
 } ScrCycHdr;
 
 static inline ScrCycHdr *scr_cyc_hdr(void *obj) { return (ScrCycHdr *)obj - 1; }
