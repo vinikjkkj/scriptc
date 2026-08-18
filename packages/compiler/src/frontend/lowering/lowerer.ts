@@ -879,6 +879,18 @@ export function jsFuncNameOf(node: ts.Node): string | null {
     if (p && ts.isPropertyAssignment(p) && p.initializer === n && ts.isIdentifier(p.name)) {
       return p.name.text;
     }
+    // `mut = () => …`. NamedEvaluation covers assignment to a plain
+    // IdentifierReference and nothing else: `o.f = () => …` leaves the
+    // name empty in every engine, so a property target declines here.
+    if (
+      p &&
+      ts.isBinaryExpression(p) &&
+      p.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      p.right === n &&
+      ts.isIdentifier(p.left)
+    ) {
+      return p.left.text;
+    }
   }
   return null;
 }

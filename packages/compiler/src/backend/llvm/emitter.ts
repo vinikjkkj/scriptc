@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { settleOrValuePromiseTag, canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals } from "../emission/emit-stmts.js";
 import { mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
@@ -1188,6 +1188,14 @@ class LlEmitter {
   /** Declared functions referenced as values: each needs an env-signature
    * wrapper + an interned immortal closure (so `f === f` holds). */
   private readonly fnValues = new Set<string>();
+  /** Emitted closure ENTRY POINT symbol -> the interned cstr holding the
+   * JS `Function.prototype.name` of the value it backs. The C twin's
+   * `fnNames` (emitter.ts) — filled at the closure creation sites so the
+   * key is exactly what lands in `ScrClosure.fn`, which is all a box
+   * built by a WALKER has to name the function by. The cstr is interned
+   * HERE rather than at emission time for dynClassDesc's reason: the
+   * string pool is closed by then. */
+  private readonly fnNames = new Map<string, string>();
   private needsOom = false;
   private needsBadTag = false;
   private needsBadKey = false;
@@ -1751,6 +1759,11 @@ class LlEmitter {
       // struct's `bool vt` occupies an i8 with 7 bytes of tail padding
       // before the two function pointers, which is what this mirrors.
       `%ScrDynClass = type { ptr, i64, i64, i8, ptr, ptr }`,
+      // One row of the function-name table { fn, name } — the closure
+      // entry point and the JS name of the value it backs (ScrFnName in
+      // scr_runtime.h). main() installs the array; walker-built boxes
+      // resolve `[Function: name]` through it.
+      `%ScrFnName = type { ptr, ptr }`,
       // The runtime emitter prefix { rc, vt, reg, cls } — user subclasses
       // embed it (classes.ts), and bare-emitter GEPs address through it.
       `%ScrEmitter = type { i64, ptr, ptr, ptr }`,
@@ -1839,6 +1852,18 @@ class LlEmitter {
       out.push(`@${d.sym} = internal constant ${d.body} ; dyn box: class ${className}`);
     }
     if (this.dynClassDescSyms.size > 0) out.push(``);
+    // The function-name table (ScrFnName). Sorted so the .ll is a
+    // function of the program and not of emission order.
+    const fnNameRows = [...this.fnNames].filter(([sym]) => sym.length > 0).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    if (fnNameRows.length > 0) {
+      out.push(
+        `declare void @scr_fn_names_install(ptr, i64)`,
+        `@sc_fn_name_tbl = internal constant [${fnNameRows.length} x %ScrFnName] [` +
+          fnNameRows.map(([sym, lit]) => `%ScrFnName { ptr @${sym}, ptr ${lit} }`).join(", ") +
+          `]`,
+        ``,
+      );
+    }
     for (const g of globals) {
       const ty = this.llType(g.type);
       const zero = ty === "double" ? f64Lit(0) : ty === "ptr" ? "null" : "false";
@@ -1917,6 +1942,9 @@ class LlEmitter {
       `define i32 @main(i32 %argc, ptr %argv) ${FN_ATTRS} {`,
       `entry:`,
       `  call void @scr_init()`,
+      ...(fnNameRows.length > 0
+        ? [`  call void @scr_fn_names_install(ptr @sc_fn_name_tbl, i64 ${fnNameRows.length})`]
+        : []),
       ...stamps,
       // Event-surface programs (signal/exit listeners) fill the loop's
       // nullable event hooks before %main — scr_events.c links only when
@@ -5789,11 +5817,17 @@ class LlEmitter {
           // Declared function as a value: the interned immortal closure —
           // every mention yields the same pointer, so `f === f` is true.
           this.fnValues.add(e.fnName);
+          // Its JS name, keyed by the ENTRY POINT the interned literal
+          // stores in `fn` (the env-signature wrapper, not the body).
+          const declName = irFunctionJsName(target);
+          if (declName !== null) this.fnNames.set(mangleWrapper(e.fnName), this.cstr(declName));
           return this.own({
             name: this.retainValue(`@${mangleFnClosure(e.fnName)}`, e.type),
             type: e.type,
           });
         }
+        const liftedName = irFunctionJsName(target);
+        if (liftedName !== null) this.fnNames.set(this.callTarget(e.fnName), this.cstr(liftedName));
         // Lifted async lambdas enter through their spawn wrapper (which
         // takes sc_env first, like every lifted function).
         this.declare(`declare ptr @scr_closure_new(ptr, i64)`);
