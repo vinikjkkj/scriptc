@@ -291,6 +291,14 @@ export class CEmitter {
    * and the table and its install call unemitted, so the TU is byte-
    * identical — when the switch is off. */
   readonly closureSites = new Map<string, string>();
+  /** Emitted closure ENTRY POINT symbol -> the JS `Function.prototype.name`
+   * of the function value it backs. Filled at the closure creation sites
+   * themselves, so the key is exactly what lands in `ScrClosure.fn` — the
+   * only handle a box built by a WALKER has on which function the value
+   * is. main() installs it (scr_fn_names_install) and every walker-built
+   * box resolves through it; a function this program cannot name has no
+   * row, and `[Function (anonymous)]` stays the answer. */
+  readonly fnNames = new Map<string, string>();
   /** dyn-promise settle adapters (sc_pda_*), per INNER typeKey: convert a
    * typed fulfillment payload into the boxed destination's dyn payload
    * (scr_dyn_new_promise_adapting's callback — toDynHelper's promise arm). */
@@ -893,11 +901,31 @@ export class CEmitter {
         ``,
       );
     }
+    // The function-name table (scr_runtime.h, ScrFnName). Unlike the
+    // RC-audit table above this is unconditional: it is the ANSWER
+    // `[Function: name]` needs for every box a WALKER builds, which has
+    // only the closure's entry point to go on. Sorted so the TU is a
+    // function of the program and not of emission order. Emitted here,
+    // with the RC table, for the same reason — the bodies it names are
+    // all prototyped by now.
+    const fnNameRows = [...this.fnNames].filter(([sym]) => sym.length > 0).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    if (fnNameRows.length > 0) {
+      out.push(
+        `static const ScrFnName sc_fn_name_tbl[] = {`,
+        ...fnNameRows.map(([sym, name]) =>
+          `  { (const void *)&${sym}, ${cStringLiteral(Buffer.from(name, "utf8"))} },`),
+        `};`,
+        ``,
+      );
+    }
     out.push(
       // Real argc/argv feed the library's interned process.argv (see
       // scr_lib_init — lazy, so argv-free programs allocate nothing).
       `int main(int argc, char **argv) {`,
       `  scr_init();`,
+      ...(fnNameRows.length > 0
+        ? [`  scr_fn_names_install(sc_fn_name_tbl, sizeof sc_fn_name_tbl / sizeof sc_fn_name_tbl[0]);`]
+        : []),
       ...(rcSiteRows.length > 0
         ? [
             `#ifdef SCR_RC_AUDIT`,
