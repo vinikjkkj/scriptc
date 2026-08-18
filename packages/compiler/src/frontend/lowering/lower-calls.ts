@@ -6294,6 +6294,11 @@ const inliningPredicates = new Set<ts.Symbol>();
       recv = L.lowerExpr(access.expression);
       const dispatched = classToStringDispatch(L, recv, loc);
       if (dispatched !== null) return dispatched;
+      // ... and where the instance HAS a toString this cannot call, the
+      // fold is a wrong answer, not a default. Decline, and lowerCall's
+      // stdlibMemberFence answers exactly what the OBJECT-receiver
+      // spelling of the same call already answers.
+      if (classToStringUncallable(L, recv.type)) return null;
     }
     // `(<A>{}).toString()` — assertion-wrapped literals and plain reads
     // have nothing to evaluate; pureObjectToStringReceiver widens
@@ -6326,7 +6331,7 @@ const inliningPredicates = new Set<ts.Symbol>();
    * toString. Only source-declared classes qualify: a runtime-provided
    * chain (Error, EventEmitter, streams) has no emitted `%X.toString`
    * to call. Null keeps the caller on the existing fold. */
-  function classToStringDispatch(L: Lowerer, recv: IrExpr, loc: SrcLoc): IrExpr | null {
+  export function classToStringDispatch(L: Lowerer, recv: IrExpr, loc: SrcLoc): IrExpr | null {
     if (recv.type.kind !== "object") return null;
     const info = L.classes.get(recv.type.className);
     if (!info || !info.decl) return null;
@@ -6367,6 +6372,84 @@ const inliningPredicates = new Set<ts.Symbol>();
     L.noteEdge(`%${found.declarer.def.name}.toString`);
     return { kind: "call", callee: `%${found.declarer.def.name}.toString`,
       args: [L.upcastTo(recv, found.declarer.def.name), ...absent], type: STRING, loc };
+  }
+
+/** `${obj}` / `String(obj)` / `obj + ''` over a CLASS INSTANCE, which is
+   * the SAME operation `obj.toString()` already answers (4141) and the one
+   * `ensureString` had no arm for at all: a class receiver fell through
+   * every branch to `badType`, so the two spellings of one operation
+   * disagreed — one dispatched, the other refused the program.
+   *
+   * ToPrimitive with the STRING hint is `toString` first, and every
+   * qualifying toString here returns a string (classToStringDispatch's own
+   * gate), so `valueOf` is never consulted — String() and templates are
+   * exactly the dispatch. The DEFAULT hint (`+`) is the other way round
+   * and `ensureStringForPlus` asks the valueOf question before it gets
+   * here.
+   *
+   * A class with NO toString anywhere — none of its own, none inherited
+   * from a source-declared base, and none on any override below it — has
+   * Object.prototype.toString and nothing else, so the constant IS Node's
+   * answer; that is the same fold lowerDefaultToStringCall already emits
+   * for `x.toString()` on such a class (4141 row 6, the silent control).
+   * Anything else — a runtime-provided chain, a generic toString, an
+   * abstract one with no concrete override, a non-string return, a
+   * required parameter — keeps the fence rather than folding a wrong
+   * answer over a toString that exists. */
+  export function classInstanceToString(L: Lowerer, recv: IrExpr, loc: SrcLoc): IrExpr | null {
+    if (recv.type.kind !== "object") return null;
+    const info = L.classes.get(recv.type.className);
+    if (!info || !info.decl) return null;
+    const dispatched = classToStringDispatch(L, recv, loc);
+    if (dispatched !== null) return dispatched;
+    if (findGenericMethodOn(L, info, "toString") !== null) return null;
+    if (L.findMethodOn(info, "toString") !== null) return null;
+    if (L.overrideBelow(info, "toString")) return null;
+    return { kind: "strLit", value: "[object Object]", type: STRING, loc };
+  }
+
+/** A class instance that HAS a toString the dispatch cannot call: an
+   * abstract one with no concrete override, a non-string return, a
+   * required parameter, a generic one, or a toString declared only BELOW
+   * the receiver's static class (no declaration on the base chain, so
+   * there is no virtual slot to dispatch through -- measured: emitting the
+   * virtualCall anyway is SC9001 "no declaration on the base chain").
+   *
+   * The OBJECT-receiver spelling already refuses all of these: it returns
+   * null and lowerCall's stdlibMemberFence answers SC2020. The RECORD
+   * receiver folded "[object Object]" instead, which is a SILENT wrong
+   * answer over a toString that exists -- measured on Node v25.9.0,
+   * `class NoTs {}` / `class SubTs extends NoTs { toString() }` through a
+   * record-annotated binding prints "SubTs(1)" and this printed
+   * "[object Object]", and `toString(sep: string)` prints
+   * "Req[undefined]2" and this printed "[object Object]" too.
+   *
+   * A class with NO toString anywhere is NOT this: the constant is its
+   * Node answer and classInstanceToString returns it. */
+  export function classToStringUncallable(L: Lowerer, t: IrType): boolean {
+    if (t.kind !== "object") return false;
+    const info = L.classes.get(t.className);
+    if (!info || !info.decl) return false;
+    return L.findMethodOn(info, "toString") !== null ||
+      L.overrideBelow(info, "toString") ||
+      findGenericMethodOn(L, info, "toString") !== null;
+  }
+
+/** Does this class instance answer `+` through its OWN valueOf? ToPrimitive
+   * with the DEFAULT hint asks valueOf FIRST, so `obj + ''` is not the
+   * toString dispatch when the class declares one — measured on Node
+   * v25.9.0, `"" + {valueOf:()=>42, toString:()=>"TS"}` is "42" while
+   * String() of the same object is "TS". Object.prototype.valueOf returns
+   * the object itself and so falls through to toString; only a
+   * SOURCE-DECLARED one changes the answer, and where there is one the
+   * conversion keeps its fence rather than guessing. */
+  export function classHasOwnValueOf(L: Lowerer, t: IrType): boolean {
+    if (t.kind !== "object") return false;
+    const info = L.classes.get(t.className);
+    if (!info || !info.decl) return false;
+    return L.findMethodOn(info, "valueOf") !== null ||
+      findGenericMethodOn(L, info, "valueOf") !== null ||
+      L.overrideBelow(info, "valueOf");
   }
 
 /** pureReceiverNode plus the empty object literal — the default-toString
