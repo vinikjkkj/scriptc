@@ -6501,13 +6501,31 @@ function lowerPairedArmUnionSpread(
 
   const srcNode = head.expression;
   const st = L.mapTypeOf(L.typeOf(srcNode));
-  if (st?.kind !== "union") return no(`src-not-union:${st?.kind ?? "none"}`);
-  const sdef = L.unions.get(st.unionId);
+  // A single RECORD source is a ONE-ARM source, not a different rule. It is
+  // what a user type PREDICATE leaves behind, and zapo's
+  // `src/client/messaging/messages.ts:497` is exactly that:
+  // `shouldNormalizeVoiceNote(options.media, content)` is declared
+  // `content is WaSendMediaMessage & { type: 'audio' }`, so the spread source
+  // at the assignment is ONE arm while the slot is still the parameter's
+  // declared six. Nothing downstream needs a tag test for it -- the arm is
+  // known at compile time -- and everything else the rule checks applies
+  // unchanged. Admitting it here rather than in a rule of its own is what
+  // keeps the containment test, the per-field fit and the override tests
+  // from having to exist twice.
+  //
+  // The prize is exactly the one `requireExactShape` names at this site: the
+  // merged record it would otherwise build "width-lifts into FIVE of the six
+  // arms", so accepting THAT would pick an arm out of five. Building the
+  // source's own arm picks nothing.
+  if (st?.kind !== "union" && st?.kind !== "record") return no(`src-not-union-or-record:${st?.kind ?? "none"}`);
+  const sdef = st.kind === "union" ? L.unions.get(st.unionId) : null;
   const cdef = L.unions.get(ctxUnion.unionId);
-  if (!sdef || !cdef) return no("union-def-missing");
-  if (!sdef.arms.every((a) => a.kind === "record")) return no("src-has-a-non-record-arm");
-  const srcRecIds = sdef.arms.map((a) => (a as IrType & { kind: "record" }).shapeId);
-  if (srcRecIds.length < 2) return no("src-under-two-arms");
+  if ((st.kind === "union" && !sdef) || !cdef) return no("union-def-missing");
+  if (sdef && !sdef.arms.every((a) => a.kind === "record")) return no("src-has-a-non-record-arm");
+  const srcRecIds = sdef
+    ? sdef.arms.map((a) => (a as IrType & { kind: "record" }).shapeId)
+    : [(st as IrType & { kind: "record" }).shapeId];
+  if (sdef && srcRecIds.length < 2) return no("src-under-two-arms");
   const ctxRecIds = cdef.arms.filter((a) => a.kind === "record").map((a) => (a as IrType & { kind: "record" }).shapeId);
   const sSorted = [...srcRecIds].sort();
   const cSorted = [...ctxRecIds].sort();
@@ -6567,8 +6585,15 @@ function lowerPairedArmUnionSpread(
   // the position the spread occupies (it is the first property, so that IS
   // its position), and every arm branch re-READS that local.
   const srcLowered = L.lowerExpr(srcNode);
-  if (srcLowered.type.kind !== "union") return no(`lowered-src-not-union:${srcLowered.type.kind}`);
-  const srcUnionId = srcLowered.type.unionId;
+  if (srcLowered.type.kind !== "union" && srcLowered.type.kind !== "record") {
+    return no(`lowered-src-not-union-or-record:${srcLowered.type.kind}`);
+  }
+  // A record source that LOWERED to a union (or the reverse) is two different
+  // views of one value and the tag arithmetic below belongs to neither: the
+  // checker-side tests were built from the other one. Decline rather than
+  // reconcile -- the caller's fence keeps its own message.
+  if (srcLowered.type.kind !== st.kind) return no(`lowered-src-kind-moved:${st.kind}->${srcLowered.type.kind}`);
+  const srcUnionId = srcLowered.type.kind === "union" ? srcLowered.type.unionId : null;
   // The union id the emitted READS carry can be a DIFFERENT interning of the
   // same declared type than `mapTypeOf` gave (lower-exprs' own note at the
   // record-target union spread records the validator ICE that causes:
@@ -6586,16 +6611,22 @@ function lowerPairedArmUnionSpread(
   // `unionNarrow` is documented on. Every non-record lowered arm must be a
   // UNIT: anything else (a dyn box, an array arm) is a value the tag chain
   // would silently mis-route.
-  const ldef = L.unions.get(srcUnionId);
-  if (!ldef) return no("lowered-src-union-def-missing");
-  if (!ldef.arms.every((a) => a.kind === "record" || isUnitType(a))) return no("lowered-src-has-a-non-record-non-unit-arm");
+  const ldef = srcUnionId === null ? null : L.unions.get(srcUnionId);
+  if (srcUnionId !== null && !ldef) return no("lowered-src-union-def-missing");
+  if (ldef && !ldef.arms.every((a) => a.kind === "record" || isUnitType(a))) return no("lowered-src-has-a-non-record-non-unit-arm");
   /** The lowered union's record arms, each with the TAG it actually carries
    * there — never the index into a record-only list, which is what a unit arm
-   * in the middle would make of it. */
+   * in the middle would make of it. A RECORD source is one arm at tag −1, and
+   * −1 is not a tag any `unionNarrow`/`unionIsTag` ever sees: the one-arm
+   * chain below emits neither. */
   const loweredArms: { tag: number; shapeId: string }[] = [];
-  ldef.arms.forEach((a, tag) => {
-    if (a.kind === "record") loweredArms.push({ tag, shapeId: a.shapeId });
-  });
+  if (ldef) {
+    ldef.arms.forEach((a, tag) => {
+      if (a.kind === "record") loweredArms.push({ tag, shapeId: a.shapeId });
+    });
+  } else {
+    loweredArms.push({ tag: -1, shapeId: (srcLowered.type as IrType & { kind: "record" }).shapeId });
+  }
   const lSorted = loweredArms.map((a) => a.shapeId).sort();
   // The LOWERED arms get their own pairing, from the ids the emitted reads
   // actually carry — never the checker's, for the reason the paragraph
@@ -6663,7 +6694,12 @@ function lowerPairedArmUnionSpread(
     if (!dstShape) throw new Error(`lowerer bug: paired-arm spread of unknown slot shape ${dstShapeId}`);
     const armType: IrType = { kind: "record", shapeId };
     const dstType: IrType = { kind: "record", shapeId: dstShapeId };
-    const narrowed = (): IrExpr => ({ kind: "unionNarrow", unionId: srcUnionId, tag: srcTag, value: srcRef(), type: armType, loc });
+    // A RECORD source is already at its arm type: the hidden local IS the
+    // arm, so there is nothing to narrow and no tag to test.
+    const narrowed = (): IrExpr =>
+      srcUnionId === null
+        ? srcRef()
+        : { kind: "unionNarrow", unionId: srcUnionId, tag: srcTag, value: srcRef(), type: armType, loc };
     /** The source field at the SLOT field's type. `armFieldFits` already
      * proved this is a same-type read or a widening into one of the slot
      * type's own arms; the throw is a lowerer bug, never a user program. */
@@ -6725,6 +6761,7 @@ function lowerPairedArmUnionSpread(
   // on — the lowered union's unit arms are arms tsc has already excluded.)
   let chain = armValue(loweredArms.length - 1);
   for (let ai = loweredArms.length - 2; ai >= 0; ai--) {
+    if (srcUnionId === null) throw new Error("lowerer bug: a record source cannot have a second arm");
     chain = {
       kind: "ternary",
       cond: { kind: "unionIsTag", unionId: srcUnionId, tag: loweredArms[ai]!.tag, negated: false, value: srcRef(), type: BOOL, loc },
@@ -7080,6 +7117,33 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // consumers ride the keyed-dyn paths. TypeScript keeps the fence.
     if ((!mapped || mapped.kind === "dyn") && isJsSourceFile(expr.getSourceFile())) {
       return lowerDynObjectLiteral(L, expr);
+    }
+    // THE PAIRED-ARM RULE, reached a SECOND way: when the literal's own type
+    // mapped to ONE merged record. The union-slot branch below can only run
+    // where the own type did NOT map to a record, so a union-spread literal
+    // whose merge succeeded never reaches the rule at all — and that is where
+    // zapo's `src/client/messaging/messages.ts:497` sits. Measured with
+    // SCRIPTC_OBJLIT_WHY=1 on the real 129 MB TU: the literal is
+    // `{ ...content, media, mimetype }` against the slot `WaSendMediaMessage`,
+    // its own type merges to ONE record, and the refusal arrives a frame LATER
+    // at `coerceInto`/`requireExactShape` as SC2003 — which is why every prior
+    // report named requireExactShape as the decliner and graded the row
+    // "per-arm union dispatch, feature-sized". The dispatch was already here.
+    //
+    // `requireExactShape`'s own note on this site is the reason to prefer the
+    // rule over the merge wherever both apply: the merged record "width-lifts
+    // into FIVE of the six arms", so accepting it would pick an arm out of
+    // five. The paired-arm rule picks NOTHING — it dispatches on the tag the
+    // source already carries and rebuilds that same arm — so where it answers,
+    // it answers with the arm JS would leave standing.
+    //
+    // A decline falls straight through and every literal that builds today
+    // still builds: the rule tests its preconditions on the CHECKER's types
+    // before lowering anything, and it is the CALLER below — not this call —
+    // that owns the fence.
+    if (ctxUnion && mapped?.kind === "record") {
+      const pairedMerged = lowerPairedArmUnionSpread(L, expr, ctxUnion, loc);
+      if (pairedMerged) return pairedMerged;
     }
     // The slot IS a union, its arms map, and no single arm fit — so the
     // literal has a static home and the type fence's "no static

@@ -214,3 +214,88 @@ function wrapWidened(x: SongIn | ClipIn): SongOut | ClipOut {
 
 console.log(JSON.stringify(wrapWidened({ title: "s", bitrate: 320, tag: "raw" })));
 console.log(JSON.stringify(wrapWidened({ title: "c", bitrate: 96, frames: 24, tag: "raw" })));
+
+// ── THE REAL messages.ts:497: a ONE-ARM source ──────────────────────────
+// The measurement that matters, and it is not what the surveys recorded.
+// zapo's narrowing is not the early `return` above — it is a user type
+// PREDICATE one line earlier:
+//
+//     shouldNormalizeVoiceNote(media, content): content is
+//         WaSendMediaMessage & { type: 'audio' }
+//
+// so at `:497` the spread source is ONE arm while the slot is still the
+// parameter's declared six. The literal's own type therefore merges to ONE
+// record, the union-slot branch of `lowerObjectLiteral` is unreachable
+// (measured: `OBJLIT messages.ts@18490 ctx0=WaSendMediaMessage ctxUnion=u893
+// arms=6 recArms=6 mapped=record#r2429`), and the refusal arrives a frame
+// later at `coerceInto`/`requireExactShape` — which is why every prior report
+// named requireExactShape as the decliner.
+//
+// What makes it REFUSE rather than pick, and what this section reproduces:
+// the arms all come from `UserMediaFields<Proto.Message.I*Message>`, so their
+// optional field sets overlap and the merged record width-lifts into FIVE of
+// the six arms. `Media` below is `string | Uint8Array` for exactly that
+// reason — with a single-typed `media` the merged record is IDENTICAL to the
+// audio arm and coerceInto finds its one arm without help, which is how the
+// first two reductions of this site quietly failed to reproduce it at all.
+//
+// A one-arm source needs no tag test and invents nothing: the arm is known at
+// compile time. `arms=1 srcUnion=null pairs=[r0->r0]`.
+
+type Media = string | Uint8Array;
+
+interface AudN { readonly type: "audio"; readonly media: Media; readonly mimetype: string; readonly ptt?: boolean }
+interface ImgN { readonly type: "image"; readonly media: Media; readonly mimetype: string; readonly ptt?: boolean; readonly jpegThumbnail?: string }
+interface VidN { readonly type: "video"; readonly media: Media; readonly mimetype: string; readonly ptt?: boolean; readonly gifPlayback?: boolean }
+interface DocN { readonly type: "document"; readonly media: Media; readonly mimetype: string; readonly ptt?: boolean; readonly fileName?: string }
+
+type SendN = AudN | ImgN | VidN | DocN;
+
+function isVoiceNote(c: SendN): c is SendN & { type: "audio" } {
+    return c.type === "audio" && c.ptt === true;
+}
+
+function mediaText(m: Media): string {
+    return typeof m === "string" ? m : "bytes:" + String(m.length);
+}
+
+function describe(c: SendN): string {
+    let extra = "-";
+    if (c.type === "image") {
+        extra = "jpeg=" + String(c.jpegThumbnail);
+    } else if (c.type === "video") {
+        extra = "gif=" + String(c.gifPlayback);
+    } else if (c.type === "document") {
+        extra = "file=" + String(c.fileName);
+    } else {
+        extra = "ptt=" + String(c.ptt);
+    }
+    return c.type + " " + mediaText(c.media) + " " + c.mimetype + " " + extra;
+}
+
+function normalizeVoice(content: SendN, normalized: string): string {
+    if (isVoiceNote(content)) {
+        content = { ...content, media: normalized, mimetype: "audio/ogg; codecs=opus" };
+    }
+    return describe(content);
+}
+
+console.log(normalizeVoice({ type: "audio", media: "a.ogg", mimetype: "audio/mp4", ptt: true }, "V1"));
+console.log(normalizeVoice({ type: "audio", media: "b.ogg", mimetype: "audio/mp4", ptt: false }, "V2"));
+console.log(normalizeVoice({ type: "audio", media: new Uint8Array([1, 2, 3]), mimetype: "audio/mp4", ptt: true }, "V3"));
+console.log(normalizeVoice({ type: "image", media: "i.jpg", mimetype: "image/jpeg", jpegThumbnail: "t" }, "V4"));
+console.log(normalizeVoice({ type: "video", media: "v.mp4", mimetype: "video/mp4", gifPlayback: true }, "V5"));
+console.log(normalizeVoice({ type: "document", media: "d.pdf", mimetype: "application/pdf", fileName: "d" }, "V6"));
+
+// The rebuilt value must still be the AUDIO arm and nothing else: read it
+// back through the discriminant, not through a printer.
+function armAfter(content: SendN, normalized: string): string {
+    if (isVoiceNote(content)) {
+        const out: SendN = { ...content, media: normalized, mimetype: "audio/ogg" };
+        return "rebuilt-as:" + out.type;
+    }
+    return "untouched:" + content.type;
+}
+
+console.log(armAfter({ type: "audio", media: "a.ogg", mimetype: "audio/mp4", ptt: true }, "W1"));
+console.log(armAfter({ type: "video", media: "v.mp4", mimetype: "video/mp4" }, "W2"));

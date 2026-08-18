@@ -3800,16 +3800,29 @@ export class Lowerer {
     //     is performed when the destination is NOT reached through a union.
     //     Fixable.
     //
-    //   messages.ts:497   expected = union(6),  actual = ONE record: the
-    //     spread of a 6-arm union merged into a single shape whose 'type'
-    //     discriminant is no longer one literal. It width-lifts into FIVE
-    //     of the six arms, so the "width-coerces into exactly one
-    //     destination arm" rule this diagnostic states is NOT satisfied and
-    //     accepting it would pick an arm out of five -- a normalised voice
-    //     note built and sent as the wrong media message kind. CORRECT
-    //     FENCE. Any future widening of the arm test must keep "exactly
-    //     one" as a hard gate: this site is the counter-example and the two
-    //     above are the positive ones.
+    //   messages.ts:497   CLOSED UPSTREAM, and the note that stood here was
+    //     wrong about WHY it arrived. It said "the spread of a 6-arm union
+    //     merged into a single shape". Measured with SCRIPTC_OBJLIT_WHY=1 on
+    //     the 129 MB TU, the source is ONE arm, not six:
+    //     `shouldNormalizeVoiceNote` is declared
+    //     `content is WaSendMediaMessage & { type: 'audio' }`, so at :497 the
+    //     spread source is the audio arm while the slot is still the
+    //     parameter's declared six. The merge is what the LITERAL does when
+    //     no rule builds it, not what the source is.
+    //
+    //     Everything the note said about THIS path remains true and remains
+    //     the reason the path must not be widened: the merged record
+    //     width-lifts into FIVE of the six arms, so accepting it here would
+    //     pick an arm out of five -- a normalised voice note built and sent
+    //     as the wrong media message kind. Any future widening of the arm
+    //     test must keep "exactly one" as a hard gate; the two sites above
+    //     are the positive ones and this remains the counter-example.
+    //
+    //     What closed it is lowerObjectLiteral's paired-arm union spread
+    //     reaching a one-arm source (corpus 4651): the arm is known at
+    //     compile time, so the literal is BUILT as that arm and never
+    //     reaches this pair at all. Nothing is chosen, which is exactly what
+    //     this test could not say.
     if (containsUnion(actual) || containsUnion(expected)) {
       this.pushDiag(unionMismatchDiag(this.fmt(expected), this.fmt(actual), locOf(node)));
       throw new PoisonError();
