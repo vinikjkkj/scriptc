@@ -128,6 +128,26 @@ const preKeyShape: IrRecordShape = {
     { name: "pub", type: BYTES },
   ],
 };
+/** `setCollectionStates(updates: readonly WaAppStateCollectionStateUpdate[])`
+ * — zapo's `sc_dfs_4`, and the row that still declines on a PARAMETER. The
+ * array and the record are both fine; the same `ReadonlyMap` is the leaf,
+ * measured by deleting it (probe d5b boxes, d5 does not). */
+const updShape: IrRecordShape = {
+  id: "r146",
+  fields: [
+    { name: "collection", type: STRING },
+    { name: "hash", type: BYTES },
+    { name: "indexValueMap", type: { kind: "map", key: STRING, value: BYTES } },
+    { name: "version", type: F64 },
+  ],
+};
+
+const setCollectionStates: IrType & { kind: "func" } = {
+  kind: "func",
+  params: [{ kind: "array", elem: { kind: "record", shapeId: "r146" } }],
+  ret: { kind: "promise", inner: { kind: "void" } },
+};
+
 /** The generator's return, `PreKeyRecord | Promise<PreKeyRecord>` — the arm
  * that cannot be validated back OUT of a dynamic value. */
 const genRetUnion: IrUnionDef = {
@@ -141,6 +161,7 @@ const genRetUnion: IrUnionDef = {
 const shapes = new Map<string, IrRecordShape>([
   [stateShape.id, stateShape],
   [preKeyShape.id, preKeyShape],
+  [updShape.id, updShape],
 ]);
 const unions = new Map<string, IrUnionDef>([[genRetUnion.id, genRetUnion]]);
 const getRecord = (id: string): IrRecordShape | undefined => shapes.get(id);
@@ -154,12 +175,18 @@ const getCollectionState: IrType & { kind: "func" } = {
   ret: { kind: "promise", inner: { kind: "record", shapeId: "r145" } },
 };
 
-/** `getOrGenPreKeys(count, generator)` — zapo's `sc_dfs_0`. */
+/** `getOrGenPreKeys(count, generator)` — zapo's `sc_dfs_0`, which BOXES now.
+ * Its generator parameter cannot be ADAPTED out of a dyn value (the arm
+ * `Promise<PreKeyRecord>` has no out-direction validation), but it can be
+ * EXACT-UNWRAPPED, and canDynCheckTo's func arm answers that — the same
+ * answer nestedOk has always given the identical type one container down.
+ * Kept here as the CONTROL for the row that closed. */
 const getOrGenPreKeys: IrType & { kind: "func" } = {
   kind: "func",
   params: [F64, { kind: "func", params: [F64], ret: { kind: "union", unionId: "u501" } }],
   ret: { kind: "promise", inner: { kind: "array", elem: { kind: "record", shapeId: "r500" } } },
 };
+
 
 describe("strandedFuncReason names the half the predicate declined on", () => {
   test("a promise-of-record-with-a-Map RETURN is blamed on the return", () => {
@@ -169,9 +196,22 @@ describe("strandedFuncReason names the half the predicate declined on", () => {
     expect(why).not.toContain("parameter");
   });
 
-  test("a generator PARAMETER whose return has a promise arm is blamed on that parameter, by index", () => {
-    expect(canBoxFuncIntoDyn(getOrGenPreKeys, getRecord, getUnion)).toBe(false);
-    expect(strandedFuncReason(getOrGenPreKeys, getRecord, getUnion)).toContain("its parameter 2");
+  test("a PARAMETER carrying a Map is blamed on that parameter, by index", () => {
+    expect(canBoxFuncIntoDyn(setCollectionStates, getRecord, getUnion)).toBe(false);
+    expect(strandedFuncReason(setCollectionStates, getRecord, getUnion)).toContain("its parameter 1");
+    expect(strandedFuncReason(setCollectionStates, getRecord, getUnion)).not.toContain("its return");
+  });
+
+  test("a generator PARAMETER whose return has a promise arm BOXES — exact unwrap is validation", () => {
+    // This row used to be `false` here, and the reason was the whole finding
+    // of block/dynfunc: canDynCheckTo's top-level func arm answered
+    // canAdaptDynFuncTo while its own nested walker answered true, so one IR
+    // type was checkable as a record field and uncheckable standing alone.
+    // Both emitters have always emitted the exact-signature unwrap for a
+    // NON-adaptable func target, and the frontend's `as` path has always
+    // admitted one. Two of zapo's five stranded boxes were this and nothing
+    // else.
+    expect(canBoxFuncIntoDyn(getOrGenPreKeys, getRecord, getUnion)).toBe(true);
   });
 
   test("the fallback is reached only when the predicate and the reason disagree", () => {
