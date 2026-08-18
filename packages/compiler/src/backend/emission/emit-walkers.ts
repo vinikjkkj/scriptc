@@ -2092,7 +2092,11 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     // message true of every call site that reaches it. In zapo this is free
     // — its five stranded fields have five distinct signatures, so the box
     // count is 5 either way (measured, block/rank123).
-    const ikey = `${key} ${field}`;
+    // NUL, spelled as an escape so it is visible in the source: a typeKey
+    // and a field name can each contain any character, so the separator must
+    // be one neither can hold.  (This line held a RAW 0x00 for two commits --
+    // tsc, both backends and both zapo builds were green with it.)
+    const ikey = `${key}\u0000${field}`;
     const existing = E.strandedDynFuncBoxes.get(ikey);
     if (existing) return existing;
     const name = `sc_dfs_${E.strandedDynFuncBoxes.size}`;

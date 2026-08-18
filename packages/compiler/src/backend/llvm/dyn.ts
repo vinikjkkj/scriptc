@@ -3071,7 +3071,7 @@ export class LlDyn {
     // Interned per (SIGNATURE, FIELD NAME) — the C twin's rule and its
     // reason (emit-walkers.ts): the field name is the only attribution this
     // site has, and it is worthless if two fields share one message.
-    const ikey = `${key} ${field}`;
+    const ikey = `${key}\u0000${field}`; // the C twin's separator, exactly
     const existing = this.strandedDynFuncBoxes.get(ikey);
     if (existing) return existing;
     const name = `sc_dfs_${this.strandedDynFuncBoxes.size}`;
