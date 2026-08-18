@@ -8167,6 +8167,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4633-map-and-set-shapes-through-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/4633-map-and-set-shapes-through-unknown.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
