@@ -7,27 +7,27 @@
 // a census read that type name and recorded the cause as "an interface
 // with a RegExp field". It is neither the interface nor the RegExp. Asked
 // through SCRIPTC_DYN_WHY, the refusal chain is four frames deep and ends
-// somewhere the message never mentions:
+// somewhere the message never mentions — and the LEAF depends on which
+// `fetch` declaration the lane sees, which is the correction below:
 //
-//   MEMBER   WaFetchLatestMobileVersionOptions . fetch : ((input: ...) => ...)
+//   MEMBER   VersionOptions . fetch : ((input: ...) => Promise<Response>)
 //     UNIONARM  (the fetch signature) | undefined . arm (input: ...) => ...
-//       FNPARAM   (input: string | Request | URL, ...) . input
-//         UNIONARM  string | Request | URL . arm Request
+//       FNPARAM   (input: string | URL, init?: RequestInit | undefined) . init
+//         UNIONARM  RequestInit | undefined . arm RequestInit
 //
-// The leaf is `Request`. `Response`, `RequestInit`, `AbortSignal` and
-// `Headers` are all handled as island ambients and `AbortSignal` has a
-// static representation of its own precisely because it is "overwhelmingly
-// an optional field on an options record that the program never touches";
-// `Request` is in none of those groups, so a signature that merely NAMES
-// it takes the whole options record — and every function whose parameter
-// is one — out of the static tier.
+// That is THIS lane, MEASURED: no tsconfig reaches tests/diagnostics, so
+// the program compiles against the shipped fallback .d.ts, whose `fetch`
+// is `(input: string | URL, init?: RequestInit)` — `Request` is not
+// declared at all here. Under zapo's real @types/node the first parameter
+// is `RequestInfo | URL` and the leaf is `Request` instead. Either way the
+// leaf is an island-ambient (or absent) TYPE, never the RegExp: `Response`,
+// `RequestInit`, `AbortSignal` and `Headers` are island ambients, and
+// `AbortSignal` alone has a static representation, "overwhelmingly an
+// optional field on an options record that the program never touches".
 //
-// This one KEEPS its SC2011, on both sides of the change that moved the
-// three object-literal sites off it, and that is the control: here the
-// static mapping really is null (the chain above is a real refusal), and
+// This one KEEPS its SC2011: here the static mapping really is null and
 // the dynamic mapping really does answer, so both halves of the message
-// are true. The fix narrows the branch to exactly the sites where they
-// are not. The SC2004 below it is the second trap the cause carries: the
+// are true. The SC2004 below it is the second trap the cause carries: the
 // parameter blocks the declaration, and every use inherits it.
 
 interface VersionOptions {
