@@ -26,18 +26,27 @@
 //      well as here (measured: zapo's `content.ts:183` moved from col 41 to
 //      col 52 and from the computed-key message to this one).
 //
-//      Layer 3 is still NOT free to take HERE, and the reason is now a
-//      measurement rather than a worry. The fence's four zapo rows split by
-//      ARM RELATION (SCRIPTC_UNIONSLOT_WHY=1), not by spelling:
-//      `fetcher.ts:92` is ARMS=identity — the slot's record arms ARE the
-//      source's — while `content.ts:183`, `incoming.ts:397` and
-//      `mex-notification.ts:192` are ARMS=disjoint. The identity-arm rule
-//      (lower-exprs' lowerIdentityArmUnionSpread) closes the first and only
-//      the first: at identity the arm to build is the arm the source already
-//      holds, so nothing is invented. `wrapA` here is disjoint — its slot
-//      arms make `viewOnce` REQUIRED where the source arms have it optional,
-//      so they are different interned shapes — and it keeps the fence, which
-//      is what this snapshot pins.
+//      Layer 3 is CLOSED NOW, and `wrapA` is GONE from this snapshot. Read
+//      the history, because this comment has said the opposite twice.
+//
+//      The fence's four zapo rows split by ARM RELATION
+//      (SCRIPTC_UNIONSLOT_WHY=1), not by spelling. `fetcher.ts:92` is
+//      ARMS=identity — the slot's record arms ARE the source's — while
+//      `content.ts:183`, `incoming.ts:397` and `mex-notification.ts:192`
+//      are ARMS=disjoint. But `disjoint` groups two different things, and
+//      the second fingerprint separates them: `content.ts:183` pairs
+//      3/3 BY FIELD NAME while the other two pair 0/8 and 0/7. Same names,
+//      different interned shapes, against slot arms that are records five
+//      fields wider than anything the source holds.
+//
+//      So the rule is pairing, not identity: pair the arms one-to-one by
+//      field-NAME set, totally and unambiguously, and rebuild the SLOT
+//      arm's shape per arm. `wrapA` here is exactly `content.ts:183`'s
+//      shape — its slot arms make `viewOnce` REQUIRED where the source arms
+//      have it optional, which is one differing field and it is the field
+//      the literal OVERRIDES — so it builds, and its absence from the
+//      snapshot is the pin. `incoming.ts:397` and `mex-notification.ts:192`
+//      keep their refusal: no pairing exists for them at all.
 //
 // `estado-fifth` §3.4 also predicted a "correlated store" behind the two
 // decliners — the union-typed media value going into a single-record slot.
