@@ -3160,9 +3160,19 @@ function lowerOptionalDefaultArg(
         const arrT = L.mapTypeOf(L.typeOf(call));
         if (arrT?.kind !== "array") L.badType(call, L.typeOf(call));
         const elem = arrT.elem;
-        const absent =
-          elem.kind === "union" ? L.wrappedUndefined(elem, loc) !== null : isRefCounted(elem);
-        if (!absent) {
+        // Undefined-armed unions keep the wrappedUndefined call: it INTERNS
+        // the unit instance the emitter's absentElemC then references. A
+        // union WITHOUT an undefined arm is still a refcounted container
+        // (isRefCounted says so explicitly — "the union CONTAINER is
+        // heap/refcounted regardless of which arm it holds"), so it takes
+        // the NULL absent value like every other ref element, which is the
+        // second rule this block's own comment states. The gate used to
+        // demand an undefined arm from unions specifically, which fenced
+        // a length-n array of RECORD-armed union slots — the pMap
+        // PromiseSettledResult idiom — with a hint about scalar slots
+        // reading 0/false/"" that was factually wrong about it.
+        const wrapped = elem.kind === "union" ? L.wrappedUndefined(elem, loc) : null;
+        if (wrapped === null && !isRefCounted(elem)) {
           L.noLowering(
             `mapper-less Array.from({ length: n }) with '${L.fmt(elem)}' elements`,
             call,
@@ -6648,10 +6658,30 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
           : null;
       const viewSrc = peeled ?? first;
       const srcIr = L.mapTypeOf(L.typeOf(viewSrc));
+      // A SYNTACTIC `new ArrayBuffer(n)` argument is not a VALUE — the
+      // erasure branch below builds the zero-filled array directly and the
+      // buffer never exists at all. It types as bytes<buf>, so the
+      // unpeeled arm below claimed it first and then lowered it as a
+      // receiver, which is precisely what fences ("'new ArrayBuffer' ...
+      // has no scriptc lowering yet"). That made u8 the ONLY view kind
+      // that could not do what that fence's own hint advertises: the same
+      // spelling over Uint32Array/Int32Array/Float32Array/DataView never
+      // enters this branch and erases correctly. Ordering only — one
+      // argument is the erasure branch's shape, so hand it over; the
+      // offset/length forms have no erasure to fall back to and keep
+      // today's behaviour exactly.
+      const freshBufferArg =
+        peeled === null &&
+        args.length === 1 &&
+        ts.isNewExpression(first) &&
+        ts.isIdentifier(first.expression) &&
+        (first.expression.text === "ArrayBuffer" || first.expression.text === "SharedArrayBuffer") &&
+        L.isStdlibSymbol(L.resolveValueSymbol(first.expression) ?? undefined);
       // A peeled `.buffer` takes ANY typed-array owner (its storage IS the
       // buffer). An unpeeled value has to BE an ArrayBuffer: a Uint8Array
       // argument is the COPY constructor below, not a view.
       if (
+        !freshBufferArg &&
         srcIr?.kind === "bytes" &&
         (peeled !== null ? L.isStdlibMember(first as ts.PropertyAccessExpression) : srcIr.elem === "buf")
       ) {

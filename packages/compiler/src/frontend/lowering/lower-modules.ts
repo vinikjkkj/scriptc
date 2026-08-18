@@ -1724,9 +1724,35 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
               ts.isIdentifier(decl.name) && nameNode === decl.name && decl.initializer !== undefined
                 ? islandRestSlotType(L, decl.initializer, L.mapTypeOf(L.typeOf(nameNode)))
                 : null;
+            // ...but NOT where the annotation is a record the class's
+            // STATIC side can serve. castAliasedClassRefOf answers for any
+            // const whose initializer is a bare class identifier and never
+            // looks at the annotation, so `const f: ShapeFactory = Shape`
+            // — a plain interface matched by the statics, which
+            // classStaticsProjection is built for and whose own doc
+            // comment names this exact spelling — took the classval slot
+            // and made that projection unreachable; `f.create()` then
+            // fenced on a classval receiver. A CONSTRUCT-signature
+            // interface maps to a FUNC, never a record, so the shape this
+            // arm exists for is untouched, and a class whose statics
+            // cannot serve the record keeps the classval slot too, because
+            // the projection declines and this reads null.
+            const castClassT =
+              castClass === null
+                ? null
+                : (() => {
+                    const want = L.mapTypeOf(L.typeOf(nameNode));
+                    if (
+                      want?.kind === "record" &&
+                      L.classStaticsProjection(castClass.def.name, want.shapeId, locOf(nameNode)) !== null
+                    ) {
+                      return null;
+                    }
+                    return { kind: "classval", className: castClass.def.name } as IrType;
+                  })();
             let type =
               handleT ??
-              (castClass ? ({ kind: "classval", className: castClass.def.name } as IrType) : null) ??
+              castClassT ??
               objFnValueT ??
               keyedReadT ??
               islandRestT ??

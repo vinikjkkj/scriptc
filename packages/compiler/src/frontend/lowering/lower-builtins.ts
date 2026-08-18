@@ -4100,6 +4100,24 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       // types the return `string`, so no static consumer can tell), and a
       // runtime handle inside the tree throws (Node would walk its own
       // enumerable props, which the handle does not model).
+      // An ADOPTED class instance in a record-typed slot. lowerVarDecl
+      // keeps the INSTANCE type for a const whose declared type maps to a
+      // record ("the interface is erasure over a nominal value"), so
+      // JSON.stringify arrived with an `object` and no shape to walk --
+      // while the SAME value passed to a record-typed parameter projects
+      // at the boundary and stringifies fine. Project it here too, with
+      // the width lift's own helper: stringify READS, so the copy is
+      // unobservable, and the fields it walks are exactly the ones the
+      // checker's record names. Gated on the projection plan existing, so
+      // it can only turn a fence into an answer -- an instance whose class
+      // cannot serve the shape still fences below, unchanged.
+      if (value.type.kind === "object") {
+        const want = L.mapTypeOf(L.typeOf(argNode));
+        if (want?.kind === "record" && L.objToRecordPlan(value.type.className, want.shapeId) !== null) {
+          const helper = L.objRecordWidthHelper(value.type.className, want.shapeId, loc);
+          if (helper !== null) value = { kind: "call", callee: helper, args: [value], type: want, loc };
+        }
+      }
       if (!L.jsonSafe(value.type) && value.type.kind !== "dyn") {
         // Bare undefined-armed unions get their own wording: Node's
         // stringify of bare undefined is not a string at all — per-type
@@ -8697,14 +8715,33 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
         );
       }
       const tmplNode = call.arguments[0]!;
-      const tmpl = L.lowerExpr(tmplNode);
       const rawT = arrayOf(STRING);
       let raw: IrExpr | null = null;
-      if (tmpl.type.kind === "record") {
-        const shape = L.shapes.get(tmpl.type.shapeId);
+      // The INLINE object literal — `String.raw({ raw: [...] }, ...subs)`,
+      // the exact spelling the comment above advertises and the hint below
+      // prints. Lower its `raw` initializer DIRECTLY at string[] instead of
+      // building a record first: the lib types the parameter
+      // `{ raw: readonly any[] | ArrayLike<string> }`, and that contextual
+      // type widens the literal's field to a UNION, which the exact-equality
+      // check below then refuses. A separately-declared `const obj = { raw:
+      // [...] }` keeps string[] and always worked, so the advertised form was
+      // the only one that did not — the fence fired on its own hint.
+      // Exactly one property, so no sibling initializer's side effects can be
+      // dropped by not lowering the object; anything else keeps the record
+      // path unchanged.
+      if (ts.isObjectLiteralExpression(tmplNode) && tmplNode.properties.length === 1) {
+        const only = tmplNode.properties[0]!;
+        if (ts.isPropertyAssignment(only) && !ts.isComputedPropertyName(only.name) && only.name.getText() === "raw") {
+          raw = L.lowerExprExpecting(only.initializer, rawT);
+          if (!typeEquals(raw.type, rawT)) raw = null;
+        }
+      }
+      const tmpl = raw === null ? L.lowerExpr(tmplNode) : null;
+      if (raw === null && tmpl!.type.kind === "record") {
+        const shape = L.shapes.get(tmpl!.type.shapeId);
         const rawField = shape?.fields.find((f) => f.name === "raw");
         if (rawField && typeEquals(rawField.type, rawT)) {
-          raw = { kind: "recordGet", obj: tmpl, shapeId: tmpl.type.shapeId, field: "raw", type: rawT, loc };
+          raw = { kind: "recordGet", obj: tmpl!, shapeId: tmpl!.type.shapeId, field: "raw", type: rawT, loc };
         }
       }
       if (raw === null) {
