@@ -864,6 +864,21 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       scr_throw_error(SCR_ERR_ERROR, ib_take(&out));
       return scr_str_new("", 0); /* the pending throw wins */
     }
+    case SCR_DYN_MAP: {
+      /* Node prints `Map(1) { 'a' => 1 }` / `Set(1) { 'a' }` — the
+       * ENTRIES, rendered by their own types. The box carries the
+       * interned typeKey, not a per-element renderer, so it cannot walk
+       * them; `Map(0) {}` would be a confident wrong count and a
+       * confident wrong body. Fence loudly, the OBJINST arm's reason
+       * exactly. (Contrast the ARRBUF arm below, which renders because an
+       * ArrayBuffer's contents ARE bytes this tier already models.) */
+      InspBuf out = {0};
+      ib_cstr(&out, "util.inspect of a dynamic ");
+      ib_cstr(&out, scr_dyn_map_cls(d));
+      ib_cstr(&out, " is not supported yet");
+      scr_throw_error(SCR_ERR_ERROR, ib_take(&out));
+      return scr_str_new("", 0); /* the pending throw wins */
+    }
     case SCR_DYN_HANDLE: {
       /* Node prints the class's full property dump (ServerResponse {
        * ... }) — internals we do not model. Fence loudly instead of a
