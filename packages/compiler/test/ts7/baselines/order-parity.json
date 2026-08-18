@@ -8203,6 +8203,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4661-string-conversions-reach-a-class-s-own-tostring.ts": {
+   "order": [
+    "<repo>/tests/corpus/4661-string-conversions-reach-a-class-s-own-tostring.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
@@ -10111,6 +10117,12 @@
   "<repo>/tests/diagnostics/stdlib.ts": {
    "order": [
     "<repo>/tests/diagnostics/stdlib.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/tostring-conversions-that-must-not-answer.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/tostring-conversions-that-must-not-answer.ts"
    ],
    "diags": []
   },
