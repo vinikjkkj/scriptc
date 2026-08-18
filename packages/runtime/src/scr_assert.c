@@ -509,12 +509,25 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
        * the only honest answer (documented with the handle stance). */
       return a->v.inst.o == b->v.inst.o;
     case SCR_DYN_MAP:
-      /* Node's deepStrictEqual over two Maps compares ENTRIES, which the
-       * box cannot walk (it carries the interned typeKey, not a
-       * per-element comparator). Identity is the only honest answer —
-       * the handle and instance stance, documented with them: two
-       * distinct maps with equal entries diverge from Node here. */
-      return a->v.map.m == b->v.map.m;
+      /* The SAME ScrMap is equal, and Node agrees without qualification.
+       * Two DIFFERENT maps are where this arm stops: Node compares
+       * ENTRIES, and the box carries the interned typeKey, not a
+       * per-element comparator, so it cannot walk them. A plain `false`
+       * would mint a fabricated AssertionError for values Node calls
+       * equal — the JSVAL arm's reasoning above, and the reason this is
+       * a FENCE and not the identity answer the HANDLE and OBJINST arms
+       * settle for.
+       *
+       * This arm is load-bearing rather than defensive. Admitting maps to
+       * canConvertToDyn removed a COMPILE-TIME refusal that used to stand
+       * here (`assert.deepStrictEqual of 'unknown' and 'Map<string,
+       * number>' values ... has no scriptc lowering yet`, SC2020, in
+       * tests/diagnostics/assert-fences.ts). Replacing a loud refusal
+       * with a quiet wrong boolean is the one trade this project does not
+       * make, so the loudness moves here rather than disappearing. */
+      if (a->v.map.m == b->v.map.m) return true;
+      scr_dyn_map_fence(a, "deepStrictEqual");
+      return false;
     case SCR_DYN_PROMISE:
       /* Node compares promises structurally (no own props → equal); the
        * honest arm here is identity — two distinct promises with equal
