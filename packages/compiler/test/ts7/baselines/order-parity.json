@@ -8155,6 +8155,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4631-readonly-map-in-a-record-through-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/4631-readonly-map-in-a-record-through-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4632-a-set-must-not-unwrap-into-a-map-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/4632-a-set-must-not-unwrap-into-a-map-slot.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
