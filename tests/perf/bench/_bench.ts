@@ -80,6 +80,13 @@ export function runScenario(
   batch: () => void,
   foldCeiling: number = 0
 ): void {
+  // BENCH_ONLY=<name> runs exactly one scenario. Attribution needs it:
+  // a per-function CPU profile of a seven-scenario process attributes
+  // the WHOLE process, and the question is usually about one axis. The
+  // skipped scenarios emit nothing, so a filtered run is visibly a
+  // filtered run rather than a run with missing rows.
+  const only = envStr("BENCH_ONLY", "")
+  if (only !== "" && only !== name) return
   const minMs = envInt("BENCH_MIN_MS", 2000)
   const maxBatches = envInt("BENCH_MAX_BATCHES", 1000000000)
 
