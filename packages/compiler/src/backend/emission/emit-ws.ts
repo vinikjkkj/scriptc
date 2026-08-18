@@ -434,7 +434,21 @@ const FENCE_MSG =
   "scriptc lowering yet -- globalThis.WebSocket takes (url, protocols)";
 
 /** The same refusal, narrowed to the one field that earned it: a bag whose
- * `dispatcher`/`agent` is undefined lowers, and only a live one refuses. */
+ * `dispatcher`/`agent` is undefined lowers, and only a live one refuses.
+ *
+ * REACH (block/all24, read off zapo's own control flow at
+ * src/transport/WaWebSocket.ts:525-575, not inferred from a run): the two
+ * fields are NOT symmetric, and only one of them is reachable HERE.
+ * Arriving at the init-bag construct requires `socketRuntime === 'node'`
+ * (the first conjunct of the `:554` guard).  But `:546` is
+ * `if (socketRuntime === 'node' && agent) { … return new nodeWsCtor(url,
+ * protocols, { headers, agent }) }` — the real `ws` package's THREE-argument
+ * form, which has already returned.  So there is no execution of that
+ * program in which `agent` is truthy and the `agent` test below runs:
+ * `agent` is dead at this site, `dispatcher` is live (an undici dispatcher
+ * with no agent passes :546, satisfies :554, reaches :565).  Both measured
+ * x0 across three paired runs because none configured a proxy.
+ * estado-todas24.md §3.10 and §4. */
 function initFieldMsg(field: string): string {
   return (
     `the 'ws' package's option-bag second argument to a WebSocket constructor carries ` +
