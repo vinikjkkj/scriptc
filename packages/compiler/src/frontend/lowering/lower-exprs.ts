@@ -6293,16 +6293,41 @@ function literalUnionArmOf(
  *  - "ambiguous"  two arms on one side carry the SAME field-name set, so
  *                 "the arm with these names" does not name one arm. Left
  *                 refused: picking either would be a coin toss the source
- *                 does not authorise. */
+ *                 does not authorise.
+ *
+ * CONTAINMENT is IDENTITY with a narrowed source, and it is the same fast
+ * path rather than a second rule. A source union whose every record arm IS
+ * an arm of the slot union - which is what a narrowing produces, and the
+ * only thing it produces - pairs each arm to ITSELF: the branch builds the
+ * shape the source holds and wraps it at the tag that shape occupies in the
+ * slot, so the arm of the result is the arm of the source and nothing is
+ * chosen. The slot arms the source cannot be are simply never built, which
+ * is correct precisely because the source cannot be them.
+ *
+ * It is strictly SAFER than the by-name pairing it precedes, not a weakening
+ * of it: no field-name set is consulted at all, so two slot arms that share
+ * one cannot make it ambiguous. zapo has that collision - WaSendVideoMessage
+ * and WaSendPtvMessage differ only in a string-literal discriminant, so they
+ * intern to ONE shape and one arm - and the `type` field is COPIED from the
+ * source like every other, so a ptv rebuilds as a ptv. The equal-length test
+ * below is therefore a precondition of the by-NAME path alone.
+ *
+ * `messages.ts:497` is exactly this shape: 5 source record shapes, 6 slot
+ * record shapes, the five identical. Before this it read `arms-not-paired`
+ * and took the fence. */
 function pairArmsByFieldName(
   L: Lowerer,
   srcIds: readonly string[],
   ctxIds: readonly string[],
 ): Map<string, string> | "not-total" | "ambiguous" {
+  // IDENTITY / CONTAINMENT, before anything else and refusable by nothing:
+  // every source shape is itself a slot arm, so pair each to itself.
+  const ctxSet = new Set(ctxIds);
+  if (srcIds.length > 0 && srcIds.every((id) => ctxSet.has(id))) {
+    return new Map(srcIds.map((id) => [id, id]));
+  }
+  // The by-NAME pairing is total only between equal-sized arm lists.
   if (srcIds.length !== ctxIds.length) return "not-total";
-  const sSorted = [...srcIds].sort();
-  const cSorted = [...ctxIds].sort();
-  if (sSorted.every((i, k) => i === cSorted[k])) return new Map(srcIds.map((id) => [id, id]));
   /** The pairing key. JSON of the SORTED field names — sorted because a
    * shape's field order is canonical but two shapes interned by different
    * routes need not present it identically, and JSON because a separator
