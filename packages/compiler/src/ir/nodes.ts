@@ -6751,7 +6751,41 @@ export function canDynCheckTo(
   // walker below): the emitted matcher has an interval test to answer a
   // class leaf with, which is exactly what the handle kinds lack.
   if (t.kind === "object" && canBoxClassIntoDyn(t.className)) return true;
-  if (t.kind === "func") return canAdaptDynFuncTo(t, getRecord, getUnion);
+  // A FUNCTION target, at the TOP level, answers exactly what the same
+  // type answers as a nested LEAF (`nestedOk`'s func case below): YES,
+  // unconditionally. The two used to disagree — the leaf said true with a
+  // comment explaining why, and this line said `canAdaptDynFuncTo`, so one
+  // IR type was checkable as a record field and uncheckable standing
+  // alone. Nothing in either emitter needed the stricter answer:
+  //
+  //   * dynMatchHelper's func case is the exact-signature strcmp, with no
+  //     adaptability condition at all (emit-walkers.ts:1022, llvm/dyn.ts:585);
+  //   * dynCheckHelper's func case emits the kind test, the exact unwrap,
+  //     and THEN branches on canAdaptDynFuncTo for the optional adapter —
+  //     its own comment says "NON-adaptable targets have no adapter to wrap
+  //     in: exact unwrap or the path-annotated TypeError"
+  //     (emit-walkers.ts:1640, llvm/dyn.ts:1088);
+  //   * and the frontend's `as` path has ALWAYS admitted every func target
+  //     for that reason (lower-exprs.ts:10697, "NON-adaptable signatures …
+  //     cast too, with EXACT-UNWRAP-ONLY semantics").
+  //
+  // So this was a gate narrower than the capability behind it, and the
+  // narrowness was not visible where it cost: it reached zapo through
+  // canBoxFuncIntoDyn's PARAMETER test, where a store method taking a
+  // `(id: number) => Rec | Promise<Rec>` generator could not be boxed
+  // callably — not because a dyn value cannot be validated into that
+  // generator (it can, by exact unwrap) but because it cannot be ADAPTED
+  // into one. Two of zapo's five stranded dyn-func boxes are that, and
+  // nothing else (estado-dynfunc.md; probes d1/d2/d1c).
+  //
+  // Semantics, stated so the widening is not mistaken for a loosening: a
+  // dyn function fills a func slot only if it was boxed FROM that slot's
+  // own type (same interned typeKey ⇔ same IR type ⇔ same ABI) or can be
+  // adapted; anything else throws the path-annotated TypeError. Admitting
+  // the target here adds no silent conversion — it replaces a compile-time
+  // refusal with the runtime answer the `as` spelling of the identical
+  // cast already gives.
+  if (t.kind === "func") return true;
   if (DYN_HANDLE_KINDS.has(t.kind)) return true;
   if (t.kind === "union") {
     const def = getUnion(t.unionId);
@@ -7509,6 +7543,51 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
  * unhandledRejection/warning process events). Also pulled by the
  * dynInvoke and dc gates (their TUs call into this one) — cc.ts. Same
  * walk shape as moduleUsesZlib. */
+/** Whether the dyn CONVERSION walk over `t` reaches a promise — the
+ * structural twin of canConvertToDyn / canDynCheckTo's recursion, kept
+ * beside the link switch that needs it (moduleUsesDynAsync). It follows
+ * exactly what the emitted walkers descend into: array elements, record
+ * fields and index values, union arms, and a function's params and
+ * return (a boxed function's thunk converts its RESULT and validates its
+ * ARGUMENTS, and a per-target adapter does the mirror). `seen` guards
+ * recursive shapes by id, the way the two predicates do. */
+function typeReachesPromise(
+  t: IrType,
+  getRecord: (shapeId: string) => IrRecordShape | undefined,
+  getUnion: (unionId: string) => IrUnionDef | undefined,
+  seen: Set<string>,
+): boolean {
+  switch (t.kind) {
+    case "promise":
+      return true;
+    case "array":
+      return typeReachesPromise(t.elem, getRecord, getUnion, seen);
+    case "func":
+      return (
+        t.params.some((p) => typeReachesPromise(p, getRecord, getUnion, seen)) ||
+        typeReachesPromise(t.ret, getRecord, getUnion, seen)
+      );
+    case "record": {
+      if (seen.has(t.shapeId)) return false;
+      seen.add(t.shapeId);
+      const shape = getRecord(t.shapeId);
+      if (!shape) return false;
+      return (
+        shape.fields.some((f) => typeReachesPromise(f.type, getRecord, getUnion, seen)) ||
+        (shape.indexValue !== undefined && typeReachesPromise(shape.indexValue, getRecord, getUnion, seen))
+      );
+    }
+    case "union": {
+      if (seen.has(t.unionId)) return false;
+      seen.add(t.unionId);
+      const def = getUnion(t.unionId);
+      return !!def && def.arms.some((a) => typeReachesPromise(a, getRecord, getUnion, seen));
+    }
+    default:
+      return false;
+  }
+}
+
 export function moduleUsesDynAsync(mod: IrModule): boolean {
   const fns = new Set([
     "async.awaitDyn", "timers.immediatePromise",
@@ -7518,6 +7597,10 @@ export function moduleUsesDynAsync(mod: IrModule): boolean {
     "als.new", "als.get", "als.run", "als.exitRun", "als.enterWith", "als.disable",
     "dc.chanBindStore", "dc.chanUnbindStore", "dc.chanRunStores",
   ]);
+  const recs = new Map((mod.records ?? []).map((r) => [r.id, r] as const));
+  const uns = new Map((mod.unions ?? []).map((u) => [u.id, u] as const));
+  const getRecord = (id: string): IrRecordShape | undefined => recs.get(id);
+  const getUnion = (id: string): IrUnionDef | undefined => uns.get(id);
   let found = false;
   const visit = (v: unknown): void => {
     if (found || v === null || typeof v !== "object") return;
@@ -7534,6 +7617,44 @@ export function moduleUsesDynAsync(mod: IrModule): boolean {
     // await lives in the gated TU) — promise<dyn> receivers' awaits and
     // the lifted then/catch helpers alike.
     if (node.kind === "awaitExpr" && node.type !== undefined && node.type.kind === "dyn") {
+      found = true;
+      return;
+    }
+    // A PROMISE crossing the static→dyn boundary. toDynHelper's promise arm
+    // emits `scr_dyn_new_promise_adapting` (emit-walkers.ts:1889,
+    // llvm/dyn.ts:1553) and that symbol lives in scr_async_dyn.c — but the
+    // gate above only ever looked at libCalls and dyn-typed awaits, so a
+    // program that merely CONVERTS a promise into 'unknown' emitted a call
+    // to a unit it never asked the linker for:
+    //
+    //     const p: Promise<number> = mk();
+    //     const u: unknown = p;          // lld-link: undefined symbol:
+    //                                    // scr_dyn_new_promise_adapting
+    //
+    // That is probe e1 in estado-dynfunc.md, and it fails at c0f60a68 with
+    // no compiler change at all — a pre-existing link-switch gap, not a
+    // regression. It is repaired here because relaxing the func arm of
+    // canDynCheckTo above makes it far easier to reach: any BOXED method
+    // returning a promise (zapo's `getOrGenPreKeys(): Promise<readonly
+    // PreKeyRecord[]>`) now emits the adapting constructor inside its call
+    // thunk, where before the whole method was a stranded box that emitted
+    // nothing.
+    //
+    // The rule mirrors the emitter rather than approximating it: only the
+    // two nodes that make the walkers run (dynFrom / dynCheck) are
+    // considered, and only a promise the CONVERSION WALK can actually
+    // reach — through record fields, array elements, union arms and a
+    // function's params/return, which is exactly the recursion
+    // canConvertToDyn / canDynCheckTo perform. A promise sitting in an
+    // unrelated local does not pull the unit in, so no program that did
+    // not already need scr_async_dyn.c grows by a byte.
+    // NB the type to read differs per node, and reading the wrong one is a
+    // silent no-op: a `dynFrom`'s own `.type` is its RESULT (always plain
+    // `dyn`), so the source shape is `value.type`; a `dynCheck`'s `.type` is
+    // its TARGET, which is the shape its adapter converts arguments into.
+    const conv = node as { kind?: unknown; type?: IrType; value?: { type?: IrType } };
+    const src = conv.kind === "dynFrom" ? conv.value?.type : conv.kind === "dynCheck" ? conv.type : undefined;
+    if (src !== undefined && typeReachesPromise(src, getRecord, getUnion, new Set())) {
       found = true;
       return;
     }
