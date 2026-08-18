@@ -6275,12 +6275,100 @@ function literalUnionArmOf(
   return recordArms.find((a) => a.shapeId === only) ?? null;
 }
 
-/** The IDENTITY-ARM union-slot spread — `{ ...src, ...(c ? { k: v } : {}) }`
- * where the SLOT's record arms ARE the source's record arms (the very same
- * interned shape ids), which is zapo's
- * `src/message/addons/link-preview/fetcher.ts:92`
- * (`WaLinkPreviewThumbnailInput` spread into `WaLinkPreviewThumbnailInput |
- * undefined`).
+/** Pair a source union's record arms to a slot union's record arms by
+ * identical field-NAME set, TOTALLY and UNAMBIGUOUSLY, or not at all.
+ *
+ * IDENTITY (the same interned ids on both sides) is a special case and it
+ * takes a fast path that cannot be refused: two arms of one union can share
+ * a field-name set at different types, and the by-name pairing would call
+ * that ambiguous where the identity relation has an obvious answer. So the
+ * generalisation can only ever ADD sites, never take one away, and that is
+ * checked here rather than argued.
+ *
+ * Returns the src→slot shape-id map, or why it could not be built.
+ *  - "not-total"  some arm on either side has no partner (`incoming.ts:397`
+ *                 at 0/8 and `mex-notification.ts:192` at 0/7 land here —
+ *                 their slot arms are records five fields wider than
+ *                 anything the source holds, and no pairing exists);
+ *  - "ambiguous"  two arms on one side carry the SAME field-name set, so
+ *                 "the arm with these names" does not name one arm. Left
+ *                 refused: picking either would be a coin toss the source
+ *                 does not authorise. */
+function pairArmsByFieldName(
+  L: Lowerer,
+  srcIds: readonly string[],
+  ctxIds: readonly string[],
+): Map<string, string> | "not-total" | "ambiguous" {
+  if (srcIds.length !== ctxIds.length) return "not-total";
+  const sSorted = [...srcIds].sort();
+  const cSorted = [...ctxIds].sort();
+  if (sSorted.every((i, k) => i === cSorted[k])) return new Map(srcIds.map((id) => [id, id]));
+  /** The pairing key. JSON of the SORTED field names — sorted because a
+   * shape's field order is canonical but two shapes interned by different
+   * routes need not present it identically, and JSON because a separator
+   * chosen by hand is how a raw NUL got into this tree once already. */
+  const key = (id: string): string | null => {
+    const s = L.shapes.get(id);
+    if (!s) return null;
+    return JSON.stringify([...s.fields.map((f) => f.name)].sort());
+  };
+  const byKey = (ids: readonly string[]): Map<string, string> | "ambiguous" | null => {
+    const m = new Map<string, string>();
+    for (const id of ids) {
+      const k = key(id);
+      if (k === null) return null;
+      if (m.has(k)) return "ambiguous";
+      m.set(k, id);
+    }
+    return m;
+  };
+  const sMap = byKey(srcIds);
+  const cMap = byKey(ctxIds);
+  if (sMap === null || cMap === null) return "not-total";
+  if (sMap === "ambiguous" || cMap === "ambiguous") return "ambiguous";
+  const out = new Map<string, string>();
+  for (const [k, sId] of sMap) {
+    const cId = cMap.get(k);
+    if (cId === undefined) return "not-total";
+    out.set(sId, cId);
+  }
+  return out.size === srcIds.length ? out : "not-total";
+}
+
+/** May a paired arm's field of type `from` be REBUILT at the slot arm's
+ * type `to`?
+ *
+ * Exactly two answers are admitted, and both are provably not a narrowing:
+ * the types are the same, or `from` is literally one ARM of the union `to`
+ * (the `T` → `T | undefined` / `T | null` widening an optional or nullable
+ * member introduces, which is the whole reason two shapes with the same
+ * field names intern differently in the first place). Everything else —
+ * including the REVERSE direction, a union source into a narrower slot —
+ * answers false, because rebuilding a value at a narrower type is the
+ * silent wrong answer this rule exists not to produce.
+ *
+ * Deliberately NOT `coerceInto`: that path can emit diagnostics of its own
+ * and can build a validated exit, and neither belongs inside a predicate
+ * whose job is to decide whether to decline BEFORE anything is lowered. */
+function armFieldFits(L: Lowerer, from: IrType, to: IrType): boolean {
+  if (typeEquals(from, to)) return true;
+  if (to.kind !== "union") return false;
+  return (L.unions.get(to.unionId)?.arms ?? []).some((a) => typeEquals(a, from));
+}
+
+/** The PAIRED-ARM union-slot spread — `{ ...src, ...(c ? { k: v } : {}) }`
+ * and `{ ...src, k: v }` where the SLOT's record arms pair ONE-TO-ONE with
+ * the source's by field-NAME set. Two sites in zapo:
+ *
+ *   src/message/addons/link-preview/fetcher.ts:92   the IDENTITY case (the
+ *       very same interned shape ids on both sides: `WaLinkPreviewThumbnail
+ *       Input` spread into `WaLinkPreviewThumbnailInput | undefined`);
+ *   src/message/encode/content.ts:183               the PAIRED case
+ *       (`{ ...media, viewOnce: true }`, three arms at 31/17/31 fields
+ *       pairing 3/3 by name onto three DIFFERENTLY INTERNED twins).
+ *
+ * Identity is the special case, kept as its own fast path so the
+ * generalisation can only add sites (see `pairArmsByFieldName`).
  *
  * The union-typed-slot fence below refuses this family because "the source's
  * arm decides which arm the literal builds, and a literal builds one shape".
@@ -6292,16 +6380,26 @@ function literalUnionArmOf(
  * copies of a problem the record-target path has always solved, chained on a
  * tag test the emitter already emits.
  *
- * The gate is arm IDENTITY and nothing weaker, and that is deliberate. It
- * admits `fetcher.ts:92` and NOTHING else in zapo:
- * `content.ts:183`, `incoming.ts:397` and `mex-notification.ts:192` are all
- * `ARMS=disjoint` (their slot arms are DIFFERENT interned shapes — for the
- * last two, records five fields wider than anything the source holds), so
- * they keep the fence. Anything looser — pairing arms merely by field NAME —
- * would also claim `content.ts:183`, which is a separate feature (a per-arm
- * width coercion) and a separate decision; `SCRIPTC_UNIONSLOT_WHY=1` reports
- * which relation any site has, and `estado-content3.md` §3.3 prices the
- * looser rules.
+ * The gate is TOTAL, UNAMBIGUOUS pairing by field-name set, and nothing
+ * weaker. It admits `fetcher.ts:92` and `content.ts:183` and NOTHING else in
+ * zapo: `incoming.ts:397` pairs 0/8 and `mex-notification.ts:192` pairs 0/7
+ * — every one of their slot arms is a record five fields wider than
+ * anything the source holds, so no pairing exists and the fence stands.
+ * `SCRIPTC_UNIONSLOT_WHY=1` reports the relation, the pairing count and the
+ * per-field type deltas at every site, closed or refused.
+ *
+ * WHY THE GATE MOVED, since the previous text said identity "and nothing
+ * weaker, and that is deliberate". The objection on record
+ * (`estado-content3.md` §3.3) was that the by-name rule "still claims
+ * `fetcher.ts:92`", a row graded must-not-close: `fetcher.ts:92` satisfies
+ * the STRICTER form of the same predicate, so no rule can admit the weak
+ * form and refuse the strong one. That objection is now spent, and not by
+ * being argued away — main CLOSED `fetcher.ts:92`, by the stricter
+ * predicate, on purpose, and this function is the thing that closed it. A
+ * rule cannot claim a row that is already closed by the rule it extends.
+ * What remains of the objection is the part that was always the real
+ * question: does the weaker predicate reach anything ELSE? Measured, and
+ * the answer is one site.
  *
  * Preconditions, all of them checked on the CHECKER's mapped types before
  * anything is lowered, so a decline costs nothing and leaves the fence's own
@@ -6312,12 +6410,19 @@ function literalUnionArmOf(
  *    properties, each name contributed exactly once;
  *  - every arm of the source union is a RECORD (a unit arm would mean the
  *    spread may copy nothing, and then the result's arm is NOT the source's);
- *  - the source's record arms and the slot's are the same shape ids at the
- *    same count;
- *  - every overridden name is declared by EVERY source arm (a name missing
- *    from one arm would be DROPPED there — divergence 36's stance for a
- *    plain spread, but here it would silently change which fields the result
- *    carries per arm, and this rule is not the place to decide that);
+ *  - the source's record arms pair one-to-one with the slot's by identical
+ *    field-NAME set, at the same count, with no two arms on either side
+ *    sharing a name set (`pairArmsByFieldName`);
+ *  - every field the SLOT arm declares and the literal does not override is
+ *    readable from the paired SOURCE arm at a type `armFieldFits` admits —
+ *    the same type, or one ARM of the slot field's union. A narrowing is
+ *    refused: rebuilding a value at a narrower type is precisely the silent
+ *    wrong answer this fence exists to prevent;
+ *  - every overridden name is declared by EVERY source arm AND by every
+ *    SLOT arm (a name missing from one source arm would be DROPPED there —
+ *    divergence 36's stance for a plain spread, but here it would silently
+ *    change which fields the result carries per arm; a name missing from a
+ *    slot arm would drop the OVERRIDE, which JS never does);
  *  - no arm carries accessor slots or an index signature (the field-copy
  *    desugar cannot model getter calls or runtime overflow keys);
  *  - every override's CONDITION is side-effect-free. Conditions are
@@ -6364,6 +6469,10 @@ function lowerIdentityArmUnionSpread(
   }
   const names = overrides.map((o) => o.name);
   if (new Set(names).size !== names.length) return no("duplicate-override-name");
+  /** The names an override supplies UNCONDITIONALLY. A conditional one
+   * falls back to the SOURCE read when its condition is false, so it is
+   * not exempt from the per-field fit the pairing rule requires. */
+  const plainNames = overrides.filter((o) => o.kind === "plain").map((o) => o.name);
 
   const srcNode = head.expression;
   const st = L.mapTypeOf(L.typeOf(srcNode));
@@ -6377,16 +6486,56 @@ function lowerIdentityArmUnionSpread(
   const ctxRecIds = cdef.arms.filter((a) => a.kind === "record").map((a) => (a as IrType & { kind: "record" }).shapeId);
   const sSorted = [...srcRecIds].sort();
   const cSorted = [...ctxRecIds].sort();
-  if (sSorted.length !== cSorted.length || !sSorted.every((i, k) => i === cSorted[k])) return no(`arms-not-identity:[${sSorted.join(",")}]vs[${cSorted.join(",")}]`);
+
+  const paired = pairArmsByFieldName(L, srcRecIds, ctxRecIds);
+  if (paired === "not-total") return no(`arms-not-paired:[${sSorted.join(",")}]vs[${cSorted.join(",")}]`);
+  if (paired === "ambiguous") return no(`arms-pair-ambiguously-by-name:[${sSorted.join(",")}]vs[${cSorted.join(",")}]`);
 
   const armShapes = srcRecIds.map((id) => L.shapes.get(id));
   if (armShapes.some((s) => s === undefined)) return no("arm-shape-missing");
-  for (const s of armShapes) {
+  const dstShapes = [...paired.values()].map((id) => L.shapes.get(id));
+  if (dstShapes.some((s) => s === undefined)) return no("dst-shape-missing");
+  for (const s of [...armShapes, ...dstShapes]) {
     if (!s || s.indexValue || s.tuple || shapeHasAccessorSlots(s)) return no("arm-shape-index-tuple-or-accessor");
   }
-  // Every override name declared by EVERY arm.
+  // Every override name declared by EVERY arm — on BOTH sides now. The
+  // source side is the old test (a name missing from one source arm would
+  // be dropped there); the DESTINATION side is new and is what keeps the
+  // generalisation honest: the shape the branch builds is the SLOT's arm,
+  // so a name the slot arm does not declare has nowhere to go and the
+  // override would silently vanish. Identity made the two tests the same
+  // test; pairing does not.
   for (const n of names) {
     if (!armShapes.every((s) => s!.fields.some((f) => f.name === n))) return no(`override-not-in-every-arm:${n}`);
+    if (!dstShapes.every((s) => s!.fields.some((f) => f.name === n))) return no(`override-not-in-every-slot-arm:${n}`);
+  }
+  // Per-field FEASIBILITY, before anything is lowered. A paired arm whose
+  // shape id differs from its partner's differs in at least one field's IR
+  // TYPE — the intern key is the (name, type) list, so identical names at
+  // different ids can mean nothing else — and the branch has to produce the
+  // SLOT arm's field type from the SOURCE arm's. `armFieldFit` is the only
+  // conversion admitted, and it is deliberately the narrowest one that is
+  // provably not a narrowing: the source type is literally one ARM of the
+  // destination union. Anything else declines here, before a hidden local
+  // exists, so the fence keeps its own message and the decline is
+  // measurable under the same dial.
+  for (const [sId, cId] of paired) {
+    if (sId === cId) continue;
+    const sFields = new Map((L.shapes.get(sId)?.fields ?? []).map((f) => [f.name, f.type]));
+    for (const f of L.shapes.get(cId)?.fields ?? []) {
+      // A PLAIN override supplies the field outright, so the source's own
+      // type never reaches the slot and no fit is required — which is the
+      // whole of `content.ts:183`: its one differing field IS the override.
+      // A CONDITIONAL override does not get that exemption: when its
+      // condition is false JS leaves the SOURCE's value standing, so that
+      // read has to fit the slot exactly like an un-overridden one.
+      if (plainNames.includes(f.name)) continue;
+      const sT = sFields.get(f.name);
+      if (sT === undefined) return no(`paired-arm-missing-field:${sId}->${cId}:${f.name}`);
+      if (!armFieldFits(L, sT, f.type)) {
+        return no(`field-not-widenable:${sId}->${cId}:${f.name}:${L.fmt(sT).slice(0, 40)}=>${L.fmt(f.type).slice(0, 40)}`);
+      }
+    }
   }
 
   // Committed from here on: the source lowers ONCE into a hidden local at
@@ -6423,7 +6572,26 @@ function lowerIdentityArmUnionSpread(
     if (a.kind === "record") loweredArms.push({ tag, shapeId: a.shapeId });
   });
   const lSorted = loweredArms.map((a) => a.shapeId).sort();
-  if (lSorted.length !== cSorted.length || !lSorted.every((i, k) => i === cSorted[k])) return no(`lowered-arms-not-identity:[${lSorted.join(",")}]vs[${cSorted.join(",")}]`);
+  // The LOWERED arms get their own pairing, from the ids the emitted reads
+  // actually carry — never the checker's, for the reason the paragraph
+  // above gives. Re-run every per-field test against THIS map: the two
+  // internings agree in practice, and a rule that assumes they must is a
+  // rule that mis-routes a tag the day they do not.
+  const lPaired = pairArmsByFieldName(L, lSorted, cSorted);
+  if (lPaired === "not-total") return no(`lowered-arms-not-paired:[${lSorted.join(",")}]vs[${cSorted.join(",")}]`);
+  if (lPaired === "ambiguous") return no(`lowered-arms-pair-ambiguously:[${lSorted.join(",")}]vs[${cSorted.join(",")}]`);
+  for (const [sId, cId] of lPaired) {
+    if (sId === cId) continue;
+    const sFields = new Map((L.shapes.get(sId)?.fields ?? []).map((f) => [f.name, f.type]));
+    const cShape = L.shapes.get(cId);
+    if (!cShape || cShape.indexValue || cShape.tuple || shapeHasAccessorSlots(cShape)) return no("lowered-dst-shape-index-tuple-or-accessor");
+    for (const f of cShape.fields) {
+      if (plainNames.includes(f.name)) continue; // see the CHECKER-side loop
+      const sT = sFields.get(f.name);
+      if (sT === undefined) return no(`lowered-paired-arm-missing-field:${sId}->${cId}:${f.name}`);
+      if (!armFieldFits(L, sT, f.type)) return no(`lowered-field-not-widenable:${sId}->${cId}:${f.name}`);
+    }
+  }
 
   const slot = L.declareHiddenLocal("%uspread", srcLowered.type);
   const srcRef = (): IrExpr => ({ kind: "varRef", localId: slot.id, type: srcLowered.type, loc });
@@ -6461,32 +6629,64 @@ function lowerIdentityArmUnionSpread(
     const srcTag = loweredArms[ai]!.tag;
     const shape = L.shapes.get(shapeId);
     if (!shape) throw new Error(`lowerer bug: identity-arm spread of unknown shape ${shapeId}`);
+    // The shape the branch BUILDS is the paired SLOT arm — the same shape
+    // under identity, a differently-interned twin under name pairing. The
+    // shape it READS from is always the source's.
+    const dstShapeId = lPaired.get(shapeId);
+    if (dstShapeId === undefined) throw new Error(`lowerer bug: paired-arm spread has no partner for ${shapeId}`);
+    const dstShape = L.shapes.get(dstShapeId);
+    if (!dstShape) throw new Error(`lowerer bug: paired-arm spread of unknown slot shape ${dstShapeId}`);
     const armType: IrType = { kind: "record", shapeId };
+    const dstType: IrType = { kind: "record", shapeId: dstShapeId };
     const narrowed = (): IrExpr => ({ kind: "unionNarrow", unionId: srcUnionId, tag: srcTag, value: srcRef(), type: armType, loc });
-    const fields = shape.fields.map((f) => {
-      const base: IrExpr = { kind: "recordGet", obj: narrowed(), shapeId, field: f.name, type: f.type, loc };
+    /** The source field at the SLOT field's type. `armFieldFits` already
+     * proved this is a same-type read or a widening into one of the slot
+     * type's own arms; the throw is a lowerer bug, never a user program. */
+    const widen = (e: IrExpr, to: IrType): IrExpr => {
+      if (typeEquals(e.type, to)) return e;
+      if (to.kind === "union") {
+        const tag = (L.unions.get(to.unionId)?.arms ?? []).findIndex((a) => typeEquals(a, e.type));
+        if (tag >= 0) return { kind: "unionWrap", unionId: to.unionId, tag, value: e, type: to, loc };
+      }
+      throw new Error(`lowerer bug: paired-arm spread cannot widen ${L.fmt(e.type)} into ${L.fmt(to)}`);
+    };
+    const fields = dstShape.fields.map((f) => {
+      // Every slot field has a source field of the same name: the pairing
+      // is by identical NAME SET, and every override name was required in
+      // every source arm as well. A miss is a lowerer bug, and a
+      // conditional override whose false branch had no source read would
+      // be exactly that bug arriving as a wrong VALUE rather than a throw.
+      const srcT = shape.fields.find((x) => x.name === f.name)?.type;
+      if (srcT === undefined) throw new Error(`lowerer bug: paired-arm spread has no source for field ${f.name}`);
       const ov = lowered.get(f.name);
-      if (!ov) return { name: f.name, value: base };
+      // LAZY, and that is the whole of `content.ts:183`. Its one differing
+      // field is `viewOnce`, read at `boolean | null | undefined` and stored
+      // at `boolean` — a NARROWING, and `widen` would (correctly) refuse it.
+      // The plain override means the read never happens, so building it
+      // eagerly would have refused the site this rule exists to build.
+      const base = (): IrExpr =>
+        widen({ kind: "recordGet", obj: narrowed(), shapeId, field: f.name, type: srcT, loc }, f.type);
+      if (!ov) return { name: f.name, value: base() };
       let v = L.coerceInto(ov.valueNode, ov.value, f.type);
       if (!typeEquals(v.type, f.type)) L.badType(ov.valueNode, L.typeOf(ov.valueNode));
       if (ov.cond === null) return { name: f.name, value: v };
       v = {
         kind: "ternary",
         cond: ov.cond,
-        then: ov.whenTrue ? v : base,
-        else_: ov.whenTrue ? base : v,
+        then: ov.whenTrue ? v : base(),
+        else_: ov.whenTrue ? base() : v,
         type: f.type,
         loc,
       };
       return { name: f.name, value: v };
     });
-    const ctxTag = cdef.arms.findIndex((a) => a.kind === "record" && a.shapeId === shapeId);
-    if (ctxTag < 0) throw new Error(`lowerer bug: identity-arm spread arm ${shapeId} has no slot tag`);
+    const ctxTag = cdef.arms.findIndex((a) => a.kind === "record" && a.shapeId === dstShapeId);
+    if (ctxTag < 0) throw new Error(`lowerer bug: paired-arm spread arm ${dstShapeId} has no slot tag`);
     return {
       kind: "unionWrap",
       unionId: ctxUnion.unionId,
       tag: ctxTag,
-      value: { kind: "recordLit", fields, type: armType, loc },
+      value: { kind: "recordLit", fields, type: dstType, loc },
       type: ctxUnion,
       loc,
     };
@@ -6511,9 +6711,11 @@ function lowerIdentityArmUnionSpread(
   }
   if (process.env["SCRIPTC_UNIONSLOT_WHY"] !== undefined) {
     console.error(
-      `UNIONSLOT ${loc.file}@${String(loc.start)} CLOSED-BY=identity-arm` +
+      `UNIONSLOT ${loc.file}@${String(loc.start)} ` +
+        `CLOSED-BY=${[...lPaired].every(([s, c]) => s === c) ? "identity-arm" : "paired-arm"}` +
         ` arms=${String(loweredArms.length)} srcUnion=${srcUnionId} slotUnion=${ctxUnion.unionId}` +
-        ` overrides=[${names.join(",")}]`,
+        ` overrides=[${names.join(",")}]` +
+        ` pairs=[${[...lPaired].map(([s, c]) => `${s}->${c}`).join(",")}]`,
     );
   }
   return {
@@ -6996,6 +7198,34 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
               .join(",");
           const ctxNameSets = new Set(ctxRecs.map(nameSet));
           const pairedByNames = srecs.filter((a) => ctxNameSets.has(nameSet(a))).length;
+          // `pairedByNames=n/n` says the arms CORRESPOND; it does not say
+          // the per-arm reshape is buildable. Two arms with identical field
+          // NAMES that interned as different shapes differ in at least one
+          // field's IR TYPE — by construction, since the intern key is the
+          // (name, type) list — and WHICH types differ decides whether the
+          // reshape is the per-field coercion that already exists or a
+          // conversion nothing here can do. So the pairs' field deltas go
+          // out too, one `field:srcType->ctxType` per differing field.
+          // Without this the decision "can a total-pairing rule ship?"
+          // rests on an inference from the shape ids, and shape ids do not
+          // say what changed.
+          const ctxByNames = new Map<string, IrType>();
+          for (const a of ctxRecs) if (!ctxByNames.has(nameSet(a))) ctxByNames.set(nameSet(a), a);
+          const deltas: string[] = [];
+          for (const a of srecs) {
+            const partner = ctxByNames.get(nameSet(a));
+            if (!partner) continue;
+            const sId = (a as IrType & { kind: "record" }).shapeId;
+            const cId = (partner as IrType & { kind: "record" }).shapeId;
+            if (sId === cId) continue;
+            const sFields = new Map((L.shapes.get(sId)?.fields ?? []).map((f) => [f.name, f.type]));
+            for (const f of L.shapes.get(cId)?.fields ?? []) {
+              const sT = sFields.get(f.name);
+              if (sT !== undefined && !typeEquals(sT, f.type)) {
+                deltas.push(`${sId}->${cId}:${f.name}:${L.fmt(sT).slice(0, 60)}=>${L.fmt(f.type).slice(0, 60)}`);
+              }
+            }
+          }
           const l = locOf(prop);
           console.error(
             `UNIONSLOT ${l.file}@${String(l.start)} ARMS=${rel}` +
@@ -7008,6 +7238,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
               ` extras=[${extras.join(",")}] extrasInEveryArm=${String(extrasInEveryArm)}` +
               ` condExtras=[${condExtras.join(",")}]` +
               ` condExtrasInEveryArm=${String(condExtras.every((n) => armFieldNames.every((s) => s.has(n))))}` +
+              ` fieldDeltas=${String(deltas.length)}[${deltas.join(" ")}]` +
               ` src='${name(L.typeOf(prop.expression))}' ctx='${name(tsType)}'`,
           );
         }

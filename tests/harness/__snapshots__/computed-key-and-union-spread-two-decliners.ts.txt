@@ -1,15 +1,8 @@
-computed-key-and-union-spread-two-decliners.ts:67:42 - error SC1090: object spread of 'Aud | Img | Vid' into the union-typed slot '{ ptt?: boolean | undefined; viewOnce: boolean; } | { url?: string | undefine...' (the source's arm decides which arm the literal builds, and a literal builds one shape — narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) is not supported yet
+computed-key-and-union-spread-two-decliners.ts:142:21 - error SC2003: union types must match exactly: expected '{ ptt: boolean | undefined; viewOnce: boolean | undefined } | undefined', got 'string | undefined' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
 
-  66 |     const media = m[field];
-  67 |     if (media) return { ...m, [field]: { ...media, viewOnce: true } };
-     |                                          ^~~~~~~~
-  68 |   }
-
-computed-key-and-union-spread-two-decliners.ts:133:21 - error SC2003: union types must match exactly: expected '{ ptt: boolean | undefined; viewOnce: boolean | undefined } | undefined', got 'string | undefined' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
-
-  132 | export function wrapD(m: Msg, field: string): Msg {
-  133 |   return { [field]: m.conversation } as Msg;
+  141 | export function wrapD(m: Msg, field: string): Msg {
+  142 |   return { [field]: m.conversation } as Msg;
       |                     ^~~~~~~~~~~~~~
-  134 | }
+  143 | }
 
   hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
