@@ -6294,6 +6294,11 @@ const inliningPredicates = new Set<ts.Symbol>();
       recv = L.lowerExpr(access.expression);
       const dispatched = classToStringDispatch(L, recv, loc);
       if (dispatched !== null) return dispatched;
+      // ... and where the instance HAS a toString this cannot call, the
+      // fold is a wrong answer, not a default. Decline, and lowerCall's
+      // stdlibMemberFence answers exactly what the OBJECT-receiver
+      // spelling of the same call already answers.
+      if (classToStringUncallable(L, recv.type)) return null;
     }
     // `(<A>{}).toString()` — assertion-wrapped literals and plain reads
     // have nothing to evaluate; pureObjectToStringReceiver widens
@@ -6401,6 +6406,33 @@ const inliningPredicates = new Set<ts.Symbol>();
     if (L.findMethodOn(info, "toString") !== null) return null;
     if (L.overrideBelow(info, "toString")) return null;
     return { kind: "strLit", value: "[object Object]", type: STRING, loc };
+  }
+
+/** A class instance that HAS a toString the dispatch cannot call: an
+   * abstract one with no concrete override, a non-string return, a
+   * required parameter, a generic one, or a toString declared only BELOW
+   * the receiver's static class (no declaration on the base chain, so
+   * there is no virtual slot to dispatch through -- measured: emitting the
+   * virtualCall anyway is SC9001 "no declaration on the base chain").
+   *
+   * The OBJECT-receiver spelling already refuses all of these: it returns
+   * null and lowerCall's stdlibMemberFence answers SC2020. The RECORD
+   * receiver folded "[object Object]" instead, which is a SILENT wrong
+   * answer over a toString that exists -- measured on Node v25.9.0,
+   * `class NoTs {}` / `class SubTs extends NoTs { toString() }` through a
+   * record-annotated binding prints "SubTs(1)" and this printed
+   * "[object Object]", and `toString(sep: string)` prints
+   * "Req[undefined]2" and this printed "[object Object]" too.
+   *
+   * A class with NO toString anywhere is NOT this: the constant is its
+   * Node answer and classInstanceToString returns it. */
+  export function classToStringUncallable(L: Lowerer, t: IrType): boolean {
+    if (t.kind !== "object") return false;
+    const info = L.classes.get(t.className);
+    if (!info || !info.decl) return false;
+    return L.findMethodOn(info, "toString") !== null ||
+      L.overrideBelow(info, "toString") ||
+      findGenericMethodOn(L, info, "toString") !== null;
   }
 
 /** Does this class instance answer `+` through its OWN valueOf? ToPrimitive
