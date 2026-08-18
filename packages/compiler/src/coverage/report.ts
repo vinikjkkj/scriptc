@@ -25,6 +25,11 @@ export interface CoverageInput {
    * statements): the program builds, but executing one throws — the
    * report lists them so nothing hides. */
   runtimeFences?: ScrDiagnostic[];
+  /** SC6xxx ADVICE: constructs that DID compile, reported because what
+   * they compiled to is not what the source says (a double assertion that
+   * dropped members). Never blockers — they are listed apart so the
+   * "fully static" verdict above them stays true. */
+  advisories?: ScrDiagnostic[];
   /** The unreached remainder: bodies nothing on the entry path reaches,
    * lowered in a throwaway analysis pass. Its blockers cannot fail a
    * build — the report shows them as a secondary, dimmed group. */
@@ -315,6 +320,24 @@ export function renderCoverageLines(input: CoverageInput, opts: { color?: boolea
     for (const b of grouped) {
       out.push(
         `    ${c(YELLOW, `×${b.count}`.padStart(4))}  ${b.what.padEnd(widestF)}  ${c(DIM, b.code)}`,
+      );
+    }
+    out.push("");
+  }
+
+  // SC6xxx advice — compiled constructs whose RESULT differs from what
+  // the source says. Not blockers, so they sit after the fences and
+  // before the verdict, grouped the same way.
+  const advice = input.advisories ?? [];
+  if (advice.length > 0) {
+    const grouped = groupBlockers(advice);
+    const widestA = alignWidth(grouped.map((b) => b.what.length));
+    out.push(
+      `  ${c(YELLOW, "advice")}                ${advice.length} site${advice.length === 1 ? "" : "s"} ${c(DIM, "(these compiled — what they compiled to is worth reading)")}`,
+    );
+    for (const b of grouped) {
+      out.push(
+        `    ${c(YELLOW, `×${b.count}`.padStart(4))}  ${b.what.padEnd(widestA)}  ${c(DIM, b.code)}`,
       );
     }
     out.push("");

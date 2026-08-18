@@ -291,6 +291,18 @@ async function main(): Promise<number> {
     if (result.llvmRefusal !== undefined) {
       process.stderr.write(`scriptc: backend c (llvm refused: ${result.llvmRefusal})\n`);
     }
+    // SC6xxx ADVICE: the build succeeded and these say something true
+    // about what it compiled to that the source does not show. On stderr,
+    // after the binary is real, and NEVER counted as an error — the exit
+    // code and the printed path are exactly what they were without them.
+    if (result.advisories !== undefined && result.advisories.length > 0) {
+      const color = process.stderr.isTTY ?? false;
+      process.stderr.write(
+        renderAll(result.advisories, result.sourceTexts ?? new Map(), { color }) + "\n",
+      );
+      const n = result.advisories.length;
+      process.stderr.write(`\n${n} advisor${n === 1 ? "y" : "ies"} (the build succeeded).\n`);
+    }
     if (!values["keep-c"]) rmSync(result.cPath, { force: true });
     return result.binaryPath;
   };

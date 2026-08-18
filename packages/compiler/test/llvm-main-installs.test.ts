@@ -76,20 +76,30 @@ function predicatesOf(gate: string, locals: Map<string, string>): Set<string> {
 }
 
 /* Installs gated on PROGRAM CONTENT rather than on a module predicate.
- * These are not optional-unit hooks: they are debug instrumentation that
- * only exists under an #ifdef, so "does the program contain any closure
- * site" is the right gate and there is no moduleX predicate to name. They
- * are excluded from the table by SYMBOL, never by relaxing the assertion,
- * so an unrecognized predicate-less gate still fails loudly — that
- * assertion is what catches a real hook whose gate lost its predicate.
+ * These are not optional-unit hooks — no cc.ts link decision rides them —
+ * so "does the program contain any closure site" is the right gate and
+ * there is no moduleX predicate to name. They are excluded from the table
+ * by SYMBOL, never by relaxing the assertion, so an unrecognized
+ * predicate-less gate still fails loudly — that assertion is what catches
+ * a real hook whose gate lost its predicate.
+ *
+ * Every member is pinned BY NAME in its own test below, because an
+ * exclusion nobody checks is exactly the blind spot this file exists to
+ * close.
  *
  * scr_closure_sites_install: the RC-audit per-site table (SCRIPTC_RC_SITES=1,
  * inside #ifdef SCR_RC_AUDIT), gated on `rcSiteRows.length > 0`. C-only
  * today; the LLVM backend builds no closure-site table at all. That
  * asymmetry is real but it is not the failure shape this file exists to
- * reject — a missing AUDIT table costs a diagnostic, not a poll — and it
- * is pinned explicitly in its own test below so it cannot drift unnoticed. */
-const AUDIT_ONLY_INSTALLS = new Set(["scr_closure_sites_install"]);
+ * reject — a missing AUDIT table costs a diagnostic, not a poll.
+ *
+ * scr_fn_names_install: the function-name table (ScrFnName), gated on
+ * `fnNameRows.length > 0`. NOT instrumentation and NOT one-sided — it is
+ * a program ANSWER (`[Function: name]` for every box a walker builds) and
+ * both mains emit it. It cannot be compared as a table row because its
+ * gate is a row COUNT rather than a predicate, so the both-sides property
+ * is asserted by name instead, on the npm-table precedent. */
+const CONTENT_GATED_INSTALLS = new Set(["scr_closure_sites_install", "scr_fn_names_install"]);
 
 /** install symbol → the module predicates its gate names. */
 function installTable(src: string): Map<string, Set<string>> {
@@ -101,7 +111,7 @@ function installTable(src: string): Map<string, Set<string>> {
   for (const row of src.matchAll(/\.\.\.\(([^?]*?)\?\s*\[([\s\S]*?)\]\s*:\s*\[\]\)/g)) {
     const installs = [...row[2]!.matchAll(/scr_[a-z0-9_]*_install/g)]
       .map((m) => m[0]!)
-      .filter((s) => !AUDIT_ONLY_INSTALLS.has(s));
+      .filter((s) => !CONTENT_GATED_INSTALLS.has(s));
     if (installs.length === 0) continue;
     const preds = predicatesOf(row[1]!, locals);
     expect(preds.size, `gate with no module predicate: ${row[1]!.trim()}`).toBeGreaterThan(0);
@@ -165,10 +175,10 @@ describe("the two mains install the same hooks on the same predicates", () => {
     }
   });
 
-  /* The one install the table above deliberately does not compare, pinned
-   * by hand so the exclusion can never quietly become a blind spot. If the
+  /* The installs the table above deliberately does not compare, pinned by
+   * hand so an exclusion can never quietly become a blind spot. If the
    * LLVM tier grows a closure-site table this fails, and the right response
-   * is to delete the exclusion and let the table compare the row properly. */
+   * is to delete that exclusion and let the table compare the row properly. */
   test("the RC-audit closure-site table is C-only, and nothing else is excluded", async () => {
     const c = await readFile(cEmitter, "utf8");
     const ll = await readFile(llvmEmitter, "utf8");
@@ -177,11 +187,30 @@ describe("the two mains install the same hooks on the same predicates", () => {
     // Not merely absent from main: the LLVM tier builds no such table.
     expect(ll).not.toContain("scr_closure_sites_install");
     expect(ll).not.toContain("ScrClosureSite");
-    // The exclusion list stays a list of ONE until someone justifies more:
-    // every excluded symbol must be a real install in the C main, so a
-    // typo'd or stale entry cannot silently widen the hole.
-    expect([...AUDIT_ONLY_INSTALLS]).toEqual(["scr_closure_sites_install"]);
-    for (const sym of AUDIT_ONLY_INSTALLS) expect(c).toContain(sym);
+    // The exclusion list grows only with a named justification and a
+    // by-name test of its own: every excluded symbol must be a real
+    // install in the C main, so a typo'd or stale entry cannot silently
+    // widen the hole.
+    expect([...CONTENT_GATED_INSTALLS]).toEqual([
+      "scr_closure_sites_install",
+      "scr_fn_names_install",
+    ]);
+    for (const sym of CONTENT_GATED_INSTALLS) expect(c).toContain(sym);
+  });
+
+  test("the function-name table is installed on BOTH sides", async () => {
+    // The row-count gate keeps this out of the compared table, so the
+    // both-sides property is asserted here — and it matters for the same
+    // reason every row in this file matters: a name table the LLVM main
+    // forgot to install is a tier that prints `[Function (anonymous)]`
+    // where the C tier prints node's answer, with nothing failing.
+    const c = await readFile(cEmitter, "utf8");
+    const ll = await readFile(llvmEmitter, "utf8");
+    expect(c).toContain("ScrFnName sc_fn_name_tbl[]");
+    expect(c).toContain("scr_fn_names_install(sc_fn_name_tbl");
+    expect(ll).toContain("%ScrFnName = type { ptr, ptr }");
+    expect(ll).toContain("@sc_fn_name_tbl = internal constant");
+    expect(ll).toContain("scr_fn_names_install(ptr @sc_fn_name_tbl");
   });
 
   test("the npm-table registration, which is not _install-shaped, is on BOTH sides", async () => {

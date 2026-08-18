@@ -14,6 +14,7 @@ interface SourceLookup {
 }
 
 const RED = "\x1b[31m";
+const YELLOW = "\x1b[33m";
 const CYAN = "\x1b[36m";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
@@ -26,6 +27,13 @@ export function renderDiagnostic(
 ): string {
   const c = (code: string, s: string) => (opts.color ? code + s + RESET : s);
   const out: string[] = [];
+  // ADVICE (SC6xxx) is not a refusal: the build succeeded and this says
+  // something true about what it compiled to. It reads through the same
+  // renderer — same span, same frame, same hint — with the one word and
+  // the one colour that decide how a reader files it.
+  const isAdvice = diag.severity === "advice";
+  const label = isAdvice ? c(YELLOW, "advice") : c(RED, "error");
+  const mark = isAdvice ? YELLOW : RED;
 
   let lineNum = 1;
   let colNum = 1;
@@ -58,13 +66,13 @@ export function renderDiagnostic(
     frame.push(
       c(DIM, `  ${" ".repeat(gutterWidth)} | `) +
         " ".repeat(colNum - 1) +
-        c(RED, "^" + "~".repeat(spanOnLine - 1)),
+        c(mark, "^" + "~".repeat(spanOnLine - 1)),
     );
     emitLine(lineNum + 1);
   }
 
   out.push(
-    `${c(BOLD, `${diag.loc.file}:${lineNum}:${colNum}`)} - ${c(RED, "error")} ${c(BOLD, diag.code)}: ${diag.message}`,
+    `${c(BOLD, `${diag.loc.file}:${lineNum}:${colNum}`)} - ${label} ${c(BOLD, diag.code)}: ${diag.message}`,
   );
   if (frame.length) {
     out.push("", ...frame);
