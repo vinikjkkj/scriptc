@@ -128,6 +128,26 @@ const preKeyShape: IrRecordShape = {
     { name: "pub", type: BYTES },
   ],
 };
+/** `setCollectionStates(updates: readonly WaAppStateCollectionStateUpdate[])`
+ * — zapo's `sc_dfs_4`, and the row that still declines on a PARAMETER. The
+ * array and the record are both fine; the same `ReadonlyMap` is the leaf,
+ * measured by deleting it (probe d5b boxes, d5 does not). */
+const updShape: IrRecordShape = {
+  id: "r146",
+  fields: [
+    { name: "collection", type: STRING },
+    { name: "hash", type: BYTES },
+    { name: "indexValueMap", type: { kind: "map", key: STRING, value: BYTES } },
+    { name: "version", type: F64 },
+  ],
+};
+
+const setCollectionStates: IrType & { kind: "func" } = {
+  kind: "func",
+  params: [{ kind: "array", elem: { kind: "record", shapeId: "r146" } }],
+  ret: { kind: "promise", inner: { kind: "void" } },
+};
+
 /** The generator's return, `PreKeyRecord | Promise<PreKeyRecord>` — the arm
  * that cannot be validated back OUT of a dynamic value. */
 const genRetUnion: IrUnionDef = {
@@ -167,25 +187,6 @@ const getOrGenPreKeys: IrType & { kind: "func" } = {
   ret: { kind: "promise", inner: { kind: "array", elem: { kind: "record", shapeId: "r500" } } },
 };
 
-/** `setCollectionStates(updates: readonly WaAppStateCollectionStateUpdate[])`
- * — zapo's `sc_dfs_4`, and the row that still declines on a PARAMETER. The
- * array and the record are both fine; the same `ReadonlyMap` is the leaf,
- * measured by deleting it (probe d5b boxes, d5 does not). */
-const updShape: IrRecordShape = {
-  id: "r146",
-  fields: [
-    { name: "collection", type: STRING },
-    { name: "hash", type: BYTES },
-    { name: "indexValueMap", type: { kind: "map", key: STRING, value: BYTES } },
-    { name: "version", type: F64 },
-  ],
-};
-
-const setCollectionStates: IrType & { kind: "func" } = {
-  kind: "func",
-  params: [{ kind: "array", elem: { kind: "record", shapeId: "r146" } }],
-  ret: { kind: "promise", inner: { kind: "void" } },
-};
 
 describe("strandedFuncReason names the half the predicate declined on", () => {
   test("a promise-of-record-with-a-Map RETURN is blamed on the return", () => {
