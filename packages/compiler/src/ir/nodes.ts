@@ -451,15 +451,25 @@ export const NULL_T: IrType = { kind: "nullT" };
  * was declared with: `function helper(){}` is named `helper` however far
  * from the declaration the value travels.
  *
- * A '%'-prefixed name with no jsName is compiler-synthesized (`%init_0`,
- * a promise continuation) and a dotted one is a member (`%Foo.bar`, an
- * accessor whose JS name carries a `get `/`set ` prefix this does not
- * model). Both decline rather than answer, because the whole point of
- * the table this feeds is that a wrong name is worse than none. */
+ * A declared function IMPORTED from another module carries the module
+ * qualifier (`%m0.libFn`); the qualifier is the compiler's and the tail
+ * is the program's, so the tail is the answer.
+ *
+ * Everything else declines, and the list of what "everything else" is
+ * matters more than what is accepted: a MEMBER is `%<class>.<member>`
+ * where the member half can be `get:x` / `set:x` / `static:x` /
+ * `constructor`, and an accessor's JS name really is `get x` with the
+ * space — answering `x` there would be a wrong answer, which is the one
+ * outcome this whole item exists to avoid. Compiler-synthesized bodies
+ * (`%init_0`, a promise continuation) have no JS name at all. Both fall
+ * outside the two accepted shapes by construction: a member's name has
+ * either two dots or a colon, and a synthetic one has neither the bare
+ * form nor the `%m<N>.` prefix. */
 export function irFunctionJsName(fn: IrFunction): string | null {
   if (fn.jsName !== undefined) return fn.jsName === "" ? null : fn.jsName;
-  if (fn.name.startsWith("%") || fn.name.includes(".")) return null;
-  return fn.name;
+  const qualified = /^%m\d+\.([A-Za-z_$][A-Za-z0-9_$]*)$/.exec(fn.name);
+  if (qualified) return qualified[1]!;
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(fn.name) ? fn.name : null;
 }
 
 export function isUnitType(t: IrType): boolean {
