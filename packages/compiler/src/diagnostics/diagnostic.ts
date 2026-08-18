@@ -162,6 +162,44 @@ export function assertionOverflowsMembersDiag(
   };
 }
 
+/** SC6001, the OTHER half — the destination the grant DECLINED, so the
+ * members really are dropped and the original divergence stands. One rule
+ * declines so far: an ARRAY-INDEX-like member cannot ride in the overflow,
+ * because JavaScript lists integer keys FIRST across the whole object and
+ * the overflow walk emits them LAST (see overflowShapeKeysDenied). Refusing
+ * the grant there is the only answer that is not a NEW wrong answer, and
+ * this message is the one that was true before the grant existed. */
+export function assertionDropsMembersDiag(
+  dropped: string[],
+  sourceType: string,
+  targetType: string,
+  loc: SrcLoc,
+): ScrDiagnostic {
+  const list = dropped.map((d) => `'${d}'`).join(", ");
+  const one = dropped.length === 1;
+  const brief = (t: string): string | null => (t.length <= TYPE_RENDER_BUDGET ? t : null);
+  const src = brief(sourceType);
+  const dst = brief(targetType);
+  return {
+    code: "SC6001",
+    severity: "advice",
+    message:
+      `this assertion DROPS ${one ? "the member" : "the members"} ${list}: ` +
+      `${src !== null ? `'${src}'` : "the value's type"} carries ${one ? "it" : "them"} and ` +
+      `the asserted type ${dst !== null ? `'${dst}'` : "it is asserted to"} does not name ` +
+      `${one ? "it" : "them"}`,
+    loc,
+    hint:
+      "scriptc records are closed — a record value holds exactly the members its type names, so " +
+      "'as unknown as T' reshapes rather than relabels. The unnamed members would normally ride in " +
+      "an overflow store, but at least one of these is an ARRAY-INDEX-like key, and JavaScript " +
+      "lists those first across the whole object while the overflow store can only append — so " +
+      "carrying them would answer Object.keys and JSON.stringify in the wrong ORDER. Name them on " +
+      "the asserted type (or keep the value at its original type) if anything downstream reads " +
+      "them back",
+  };
+}
+
 /* ── SC5xxx: native FFI ───────────────────────────────────────────────── */
 
 /** SC5001 — the outbound native-FFI manifest is malformed or unreadable. */

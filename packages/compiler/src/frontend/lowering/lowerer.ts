@@ -84,6 +84,7 @@ import { settleOrValueArms,
   isUnitOnlyTsType,
   mapType,
   overflowShapeKeys,
+  overflowShapeKeysDenied,
   ShapeRegistry,
   typeKey,
   type TypeMapperCtx,
@@ -505,6 +506,7 @@ export function lowerToIr(
   // Cleared here so one program's casts can never grant another's shapes
   // (a compiler process compiles many).
   overflowShapeKeys.clear();
+  overflowShapeKeysDenied.clear();
   const targetPlatform = options.targetPlatform ?? process.platform;
   const bestEffort = options.bestEffort ?? false;
   const startupCrash = options.startupCrash ?? null;

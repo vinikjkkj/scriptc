@@ -131,3 +131,31 @@ console.log(JSON.stringify(big));
 `);
   expect(r.advisories).toEqual([]);
 });
+
+/* ── the grant's own decline, which is a wrong answer if it is missing ─── */
+
+test("an ARRAY-INDEX-like member is NOT granted an overflow, and says so", () => {
+  // JavaScript lists integer-like own keys FIRST, across the whole object;
+  // the overflow store can only append. So carrying "0" in the overflow
+  // would answer
+  //
+  //     Object.keys(small)   node 0,a      granted a,0
+  //
+  // which trades one wrong answer for another. The grant declines the
+  // destination shape, the members really are dropped, and SC6001 reverts
+  // to the message that was true before the grant existed. Measured: the
+  // branch printed `a,0` for exactly this program before this rule.
+  const r = lower(`
+interface Small { a: string }
+interface Big { a: string; "0": string }
+const big: Big = { a: "x", "0": "z" };
+const small = big as unknown as Small;
+console.log(Object.keys(small).join(","));
+`);
+  expect(r.diags).toEqual([]);
+  expect(r.advisories.length).toBe(1);
+  expect(r.advisories[0]!.code).toBe("SC6001");
+  expect(r.advisories[0]!.message).toContain("DROPS");
+  expect(r.advisories[0]!.message).toContain("'0'");
+  expect(r.advisories[0]!.hint).toContain("ARRAY-INDEX-like");
+});
