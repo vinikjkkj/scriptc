@@ -129,11 +129,21 @@ function ambiguousWholeValue(): WholeA | WholeB {
 }
 console.log(ambiguousWholeValue());
 
-// B — EVERY candidate drops part of the value. This is zapo's `messages.ts:497`
-// in miniature: a merged record that width-lifts into several arms, each of
-// which omits the members belonging to the other kinds. The whole-value filter
-// selects ZERO arms, so the site keeps the fence it must keep — accepting it
-// would send a normalised payload as the wrong message kind.
+// B — EVERY candidate drops part of the value: a merged record that
+// width-lifts into several arms, each of which omits the members belonging to
+// the other kinds. The whole-value filter selects ZERO arms, so this keeps its
+// fence, and it must: accepting it would send a payload as the wrong kind.
+//
+// This used to be labelled "zapo's `messages.ts:497` in miniature". It is
+// not, and the difference is why that row stayed graded must-not-close for
+// three surveys. :497's literal is `{ ...content, media, mimetype }` and its
+// source is ONE arm — `shouldNormalizeVoiceNote` is a user type predicate
+// declared `content is WaSendMediaMessage & { type: 'audio' }` — so the arm is
+// known at compile time and the literal is now BUILT as that arm by
+// lowerObjectLiteral's paired-arm union spread (corpus 4651). It never reaches
+// requireExactShape any more. B below has no spread at all and cannot reach
+// that rule, so what it pins is the whole-value filter on its own, which is
+// the thing it actually tests.
 interface PartA {
   readonly a: string;
   readonly z?: number;
