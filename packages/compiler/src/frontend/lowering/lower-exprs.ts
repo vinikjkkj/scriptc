@@ -12,7 +12,7 @@ import { lowerAbortProperty } from "./lower-abort.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
-import { UNSUPPORTED, assertionOverflowsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
+import { UNSUPPORTED, assertionDropsMembersDiag, assertionOverflowsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, strCharsCall } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
@@ -26,7 +26,7 @@ import { fenceNamespaceConditionalValue, lowerNamespaceConditionalDecl } from ".
 import { findGenericMethodOn, lowerStaticFieldRead } from "./lower-classes.js";
 import { bindingNeverReassigned, classHasOwnValueOf, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js";
-import { isConstAssertionTypeNode, isGenericCallableMemberType, overflowShapeKey, overflowShapeKeys, underConstAssertion, unitOnlyUnion } from "../types.js";
+import { isArrayIndexKey, isConstAssertionTypeNode, isGenericCallableMemberType, overflowShapeKey, overflowShapeKeys, overflowShapeKeysDenied, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
 import { lowerStreamProperty, lowerStreamStateProperty, streamInstanceOfExpr, streamSidesOf } from "./lower-stream.js";
 import { lowerWebSocketGlobal } from "./lower-ws.js";
@@ -10864,7 +10864,17 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
     // Object.keys then answer what Node answers. Idempotent; the emit
     // pass re-registers what discovery already did.
     registerOverflowTargets(L, src.shapeId, dst.shapeId, new Set());
-    L.pushAdvice(assertionOverflowsMembersDiag(dropped, L.fmt(src), L.fmt(dst), locOf(expr)));
+    // Which STORY this site gets is decided by whether the destination
+    // actually carries the granted portion in THIS pass: granted, the
+    // members moved to an overflow store and every enumeration surface
+    // still answers Node's answer; denied (an array-index-like member the
+    // overflow cannot order), they are dropped exactly as before and the
+    // original advisory is the true one.
+    L.pushAdvice(
+      L.shapes.grantedOverflow(dst.shapeId)
+        ? assertionOverflowsMembersDiag(dropped, L.fmt(src), L.fmt(dst), locOf(expr))
+        : assertionDropsMembersDiag(dropped, L.fmt(src), L.fmt(dst), locOf(expr)),
+    );
   }
 
   /** The destination shapes a reshape from `fromId` into `toId` narrows — the
@@ -10884,7 +10894,15 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
     const to = L.shapes.get(toId);
     if (!from || !to || from.tuple || to.tuple || to.indexValue || to.fields.length === 0) return;
     const kept = new Set(to.fields.map((f) => f.name));
-    if (from.fields.some((f) => !kept.has(f.name))) overflowShapeKeys.add(overflowShapeKey(to.fields));
+    const moved = from.fields.map((f) => f.name).filter((n) => !kept.has(n));
+    if (moved.length > 0) {
+      // An ARRAY-INDEX-like member cannot ride in the overflow: JS lists
+      // those keys FIRST across the whole object and the overflow walk
+      // emits them LAST. Deny the shape key rather than answer in the
+      // wrong order (see overflowShapeKeysDenied).
+      if (moved.some((n) => isArrayIndexKey(n))) overflowShapeKeysDenied.add(overflowShapeKey(to.fields));
+      else overflowShapeKeys.add(overflowShapeKey(to.fields));
+    }
     for (const tf of to.fields) {
       const ff = from.fields.find((f) => f.name === tf.name);
       if (!ff || ff.type.kind !== "record" || tf.type.kind !== "record") continue;
@@ -14450,7 +14468,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
        * optional field's (undefined-armed) type to read off the narrowed
        * arm, `unit` is the throwing arm. Exactly one of the three is
        * live per entry. */
-      type InArmAnswer = { tag: number; has: boolean; slot: IrType | null; unit: "undefined" | "null" | null; prim: boolean; arm: IrType };
+      type InArmAnswer = { tag: number; has: boolean; slot: IrType | null; unit: "undefined" | "null" | null; prim: boolean; helper: string | null; arm: IrType };
       const answers: InArmAnswer[] = [];
       let armWise = arms.length > 0;
       let staticAnswers = arms.length > 0;
@@ -14469,7 +14487,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         // arm Node's own TypeError is that arm's honest answer and costs
         // no trust in the narrowing: the term stands on its own tag test.
         if (isUnitType(arm)) {
-          answers.push({ tag, has: false, slot: null, unit: arm.kind === "undefinedT" ? "undefined" : "null", prim: false, arm });
+          answers.push({ tag, has: false, slot: null, unit: arm.kind === "undefinedT" ? "undefined" : "null", prim: false, helper: null, arm });
           staticAnswers = false;
           continue;
         }
@@ -14488,19 +14506,38 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         // literal word, so the term reads the narrowed value at run time
         // and String()s it. That is why prim carries no text here.
         if (arm.kind === "string" || arm.kind === "f64" || arm.kind === "bool") {
-          answers.push({ tag, has: false, slot: null, unit: null, prim: true, arm });
+          answers.push({ tag, has: false, slot: null, unit: null, prim: true, helper: null, arm });
           staticAnswers = false;
           continue;
         }
         const shape = arm.kind === "record" ? L.shapes.get(arm.shapeId) : undefined;
-        if (!shape || shape.tuple || shape.indexValue) {
+        if (!shape || shape.tuple) {
           armWise = false;
           staticAnswers = false;
           break;
         }
+        // An INDEX-SIGNATURE arm has a per-arm answer after all, and it is
+        // the one the single-record path already gives: the interned
+        // presence helper, which walks the declared names first and then
+        // the overflow map's live keys. It used to break the whole
+        // classifier — the arm had "no per-arm answer" only in the sense
+        // that no STATIC one exists, and the runtime one was one call
+        // away. Applied to the TAG-CHECKED narrow, so the term claims
+        // nothing about a value carrying a different tag.
+        if (shape.indexValue) {
+          const armHelper = arm.kind === "record" ? recordHasKeyHelper(L, arm.shapeId, loc) : null;
+          if (armHelper === null) {
+            armWise = false;
+            staticAnswers = false;
+            break;
+          }
+          answers.push({ tag, has: false, slot: null, unit: null, prim: false, helper: armHelper, arm });
+          staticAnswers = false; // presence is per-value
+          continue;
+        }
         const f = shape.fields.find((x) => x.name === key);
         if (f && f.type.kind === "union" && L.armTag(f.type.unionId, UNDEFINED_T) >= 0) {
-          answers.push({ tag, has: false, slot: f.type, unit: null, prim: false, arm });
+          answers.push({ tag, has: false, slot: f.type, unit: null, prim: false, helper: null, arm });
           staticAnswers = false; // an optional slot: presence is per-value
           continue;
         }
@@ -14508,7 +14545,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         // true without invoking the getter) — either slot present makes
         // the name a member.
         const acc = shape.fields.some((x) => x.name === `%get:${key}` || x.name === `%set:${key}`);
-        answers.push({ tag, has: f !== undefined || acc, slot: null, unit: null, prim: false, arm });
+        answers.push({ tag, has: f !== undefined || acc, slot: null, unit: null, prim: false, helper: null, arm });
       }
       // SCRIPTC_IN_WHY=1 — the `in` census probe: for every UNION
       // receiver reaching the decision, the site, the key, whether every
@@ -14517,7 +14554,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // and the kind that stopped it is the next one in arm order.
       if (process.env.SCRIPTC_IN_WHY) {
         const line = ts.getLineAndCharacterOfPosition(expr.getSourceFile(), loc.start).line + 1;
-        const verdicts = answers.map((a) => (a.unit !== null ? `throw:${a.unit}` : a.prim ? `throw:${a.arm.kind}` : a.slot !== null ? "perValue" : a.has ? "yes" : "no"));
+        const verdicts = answers.map((a) => (a.unit !== null ? `throw:${a.unit}` : a.prim ? `throw:${a.arm.kind}` : a.helper !== null ? "helper" : a.slot !== null ? "perValue" : a.has ? "yes" : "no"));
         const stopper = answers.length < arms.length ? arms[answers.length]!.kind : "-";
         console.error(`INWHY ${loc.file}:${line} key='${key}' arms=${arms.length} taken=${answers.length} stopped-at=${stopper} static=${staticAnswers} armwise=${armWise} recv=${recv.kind} [${verdicts.join(",")}]`);
       }
@@ -14632,6 +14669,26 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
               });
               continue;
             }
+            if (a.helper !== null) {
+              // An index-signature arm: the presence helper, on the narrow.
+              if (a.arm.kind !== "record") throw new Error("lowerer bug: 'in' helper arm is not a record");
+              const narrowed: IrExpr = { kind: "unionNarrow", unionId, tag: a.tag, value: recv, type: a.arm, loc };
+              terms.push({
+                kind: "ternary",
+                cond: isTag(a.tag),
+                then: {
+                  kind: "call",
+                  callee: a.helper,
+                  args: [{ kind: "strLit", value: key, type: STRING, loc }, narrowed],
+                  type: BOOL,
+                  loc,
+                },
+                else_: falseLit(),
+                type: BOOL,
+                loc,
+              });
+              continue;
+            }
             if (a.slot !== null) {
               if (a.arm.kind !== "record" || a.slot.kind !== "union") throw new Error("lowerer bug: 'in' per-value arm is not a record with a union slot");
               const narrowed: IrExpr = { kind: "unionNarrow", unionId, tag: a.tag, value: recv, type: a.arm, loc };
@@ -14719,14 +14776,31 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     if (recvT?.kind !== "record") return null;
     const shape = L.shapes.get(recvT.shapeId);
     if (!shape?.indexValue || shape.tuple) return null;
+    const helper = recordHasKeyHelper(L, recvT.shapeId, loc);
+    if (helper === null) return null;
     const keyIr = L.lowerExprExpecting(expr.left, STRING);
     const recv = L.lowerExprExpecting(expr.right, recvT);
-    const hkey = `haskey:${recvT.shapeId}`;
+    return { kind: "call", callee: helper, args: [keyIr, recv], type: BOOL, loc };
+  }
+  /** The interned `%rec.haskey.<n>(k, r)` key-presence helper for ONE record
+   * shape carrying an index signature: a string-equality chain over the
+   * declared names (non-optional fields and accessor slots answer true,
+   * optional slots answer their per-value tag test) followed by a walk of
+   * the overflow map's live keys. The answer depends on the key AND the
+   * value, so the receiver is a parameter.
+   *
+   * Split out of lowerRuntimeKeyIn so the UNION arm can reach it: `'k' in u`
+   * over a union whose arms are hybrid shapes answers PER ARM, and the arm's
+   * answer is exactly this helper applied to the tag-checked narrow. */
+  function recordHasKeyHelper(L: Lowerer, shapeId: string, loc: SrcLoc): string | null {
+    const shape = L.shapes.get(shapeId);
+    if (!shape?.indexValue || shape.tuple) return null;
+    const hkey = `haskey:${shapeId}`;
     let helper = L.widthHelpers.get(hkey);
     if (!helper) {
       helper = `%rec.haskey.${L.widthHelpers.size}`;
       L.widthHelpers.set(hkey, helper);
-      const recT: IrType = { kind: "record", shapeId: recvT.shapeId };
+      const recT: IrType = { kind: "record", shapeId: shapeId };
       const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
       const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
       const k = ref("k.0", STRING);
@@ -14746,7 +14820,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
                 unionId: f.type.unionId,
                 tag: utag,
                 negated: true,
-                value: { kind: "recordGet", obj: r, shapeId: recvT.shapeId, field: f.name, type: f.type, loc },
+                value: { kind: "recordGet", obj: r, shapeId: shapeId, field: f.name, type: f.type, loc },
                 type: BOOL,
                 loc,
               }
@@ -14755,7 +14829,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       }
       const ksT = arrayOf(STRING);
       body.push(
-        { kind: "varDecl", localId: "ks.0", init: { kind: "recordOvfKeys", obj: r, shapeId: recvT.shapeId, type: ksT, loc }, loc },
+        { kind: "varDecl", localId: "ks.0", init: { kind: "recordOvfKeys", obj: r, shapeId: shapeId, type: ksT, loc }, loc },
         {
           kind: "for",
           init: { kind: "varDecl", localId: "i.0", init: num(0), loc },
@@ -14798,8 +14872,9 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         loc,
       });
     }
-    return { kind: "call", callee: helper, args: [keyIr, recv], type: BOOL, loc };
+    return helper;
   }
+
 
 /** A regex literal `/ab+c/gi` → regexLit (interned per (pattern, flags)
    * by the backend). The TS parser has already syntax-checked the literal;

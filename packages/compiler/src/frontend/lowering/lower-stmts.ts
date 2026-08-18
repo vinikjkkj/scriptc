@@ -5,7 +5,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators.js";
-import { BIGINT, type IrLibFn, BOOL, isRefCounted, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrJsOp, IrLocal, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { BIGINT, type IrLibFn, BOOL, isRefCounted, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrJsOp, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { recordKeyReadRow } from "./keyread-census.js";
@@ -8784,22 +8784,35 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
    * is one the checker narrowed away while the lowered union still carries
    * it, and giving it zero iterations costs no trust in the narrowing.
    *
+   * A HYBRID arm (declared fields beside an index signature) walks with
+   * objectIterOverIndexShape instead — the same call the single-record
+   * path makes for the same shape — so the per-arm list is still the arm's
+   * own and still selected by its tag.
+   *
    * Declines — leaving the fence exactly as it stands — for anything whose
-   * per-arm answer is not the record walk: tuples (fixed positions),
-   * index-signature arms (their walk is objectIterOverIndexShape's, and a
-   * PURE one additionally needs the per-visit live-presence guard, which is
-   * a property of the arm and not of the loop), accessor-carrying shapes
-   * (the single-record path fences on those too — Node visits the accessor
+   * per-arm answer is not one of those two walks: tuples (fixed
+   * positions), PURE index arms (their keys can disappear mid-walk, so
+   * they need the per-visit live-presence guard, which is a property of
+   * the arm and not of the loop), accessor-carrying shapes (the
+   * single-record path fences on those too — Node visits the accessor
    * names and the static walk cannot), arrays, classes and dyn. */
   function lowerForInUnion(L: Lowerer, stmt: ts.ForInStatement, labels: string[] | undefined): IrStmt | null {
     const loc = locOf(stmt);
     const receiver = L.lowerExpr(stmt.expression);
-    const walkable = (
-      t: IrType,
-    ): { declaredOrder?: string[]; fields: { name: string; type: IrType }[] } | null => {
+    // An arm is walkable when its keys have a per-arm answer. A FIXED
+    // shape's is recordKeysArrayCall's; a HYBRID one's (declared fields
+    // beside an index signature) is objectIterOverIndexShape's, which is
+    // exactly what the single-record path above already runs for the same
+    // shape — the union path declined it only because the classifier had
+    // one answer kind. A PURE index arm keeps the fence: its walk
+    // additionally needs the per-visit live-presence guard (its keys can
+    // DISAPPEAR mid-walk — `delete obj[k]` is lowered for it), and that
+    // guard is a property of the ARM while the loop has only one.
+    const walkable = (t: IrType): IrRecordShape | null => {
       if (t.kind !== "record") return null;
       const s = L.shapes.get(t.shapeId);
-      if (!s || s.tuple || s.indexValue || shapeHasAccessorSlots(s)) return null;
+      if (!s || s.tuple || shapeHasAccessorSlots(s)) return null;
+      if (s.indexValue && s.fields.length === 0) return null;
       return s;
     };
     // A union-typed SLOT whose value lowered to ONE arm (an object literal
@@ -8810,13 +8823,16 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     if (receiver.type.kind === "record") {
       const only = walkable(receiver.type);
       if (!only) return null;
-      return lowerForInOverKeys(L, stmt, recordKeysArrayCall(L, receiver, receiver.type, only, loc), labels);
+      const keys = only.indexValue
+        ? objectIterOverIndexShape(L, stmt.expression, "keys", receiver.type, only, receiver, { kind: "array", elem: STRING }, loc)
+        : recordKeysArrayCall(L, receiver, receiver.type, only, loc);
+      return lowerForInOverKeys(L, stmt, keys, labels);
     }
     if (receiver.type.kind !== "union") return null;
     const unionId = receiver.type.unionId;
     const arms = L.unions.get(unionId)?.arms ?? [];
     if (arms.length === 0) return null;
-    type ArmPlan = { tag: number; arm: IrType; shape: { declaredOrder?: string[]; fields: { name: string; type: IrType }[] } | null };
+    type ArmPlan = { tag: number; arm: IrType; shape: IrRecordShape | null };
     const plans: ArmPlan[] = [];
     for (const arm of arms) {
       const tag = L.armTag(unionId, arm);
@@ -8841,13 +8857,24 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       const armKeys =
         plan.shape === null || plan.arm.kind !== "record"
           ? emptyKeys()
-          : recordKeysArrayCall(
-              L,
-              { kind: "unionNarrow", unionId, tag: plan.tag, value: recvRef(), type: plan.arm, loc },
-              plan.arm,
-              plan.shape,
-              loc,
-            );
+          : plan.shape.indexValue
+            ? objectIterOverIndexShape(
+                L,
+                stmt.expression,
+                "keys",
+                plan.arm,
+                plan.shape,
+                { kind: "unionNarrow", unionId, tag: plan.tag, value: recvRef(), type: plan.arm, loc },
+                keysT,
+                loc,
+              )
+            : recordKeysArrayCall(
+                L,
+                { kind: "unionNarrow", unionId, tag: plan.tag, value: recvRef(), type: plan.arm, loc },
+                plan.arm,
+                plan.shape,
+                loc,
+              );
       keys = {
         kind: "ternary",
         cond: { kind: "unionIsTag", unionId, tag: plan.tag, negated: false, value: recvRef(), type: BOOL, loc },

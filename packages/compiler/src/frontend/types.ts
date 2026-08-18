@@ -39,6 +39,35 @@ export const ISLAND_AMBIENT_TYPES = ["Response", "RequestInit", "AbortSignal", "
  * pointer per value, never an answer. */
 export const overflowShapeKeys = new Set<string>();
 
+/** Shape keys the grant must NOT apply to, even though some cast asked for
+ * it. DENY WINS, and it is order-independent on purpose: the same shape key
+ * can be reached by two casts, one of which moves a member the overflow
+ * cannot carry in the right ORDER.
+ *
+ * The one rule so far, and it is a wrong answer if it is missing.
+ * JavaScript lists ARRAY-INDEX-like own keys FIRST, ahead of every string
+ * key, across the whole object. The overflow representation walks the
+ * declared fields and then the overflow map, so an integer-like key in the
+ * overflow would come out LAST:
+ *
+ *     interface Small { a: string }
+ *     interface Big { a: string; "0": string }
+ *     const small = { a: "x", "0": "z" } as Big as unknown as Small;
+ *     Object.keys(small)   node 0,a      granted (wrong) a,0
+ *
+ * objectIterOverIndexShape already fences a DECLARED integer-like name for
+ * exactly this reason; a runtime overflow key it cannot see. What it CAN
+ * see is the cast's dropped-member list, so the grant declines there and
+ * the cast keeps the old behaviour (the members drop, and SC6001 says so
+ * in the old words). */
+export const overflowShapeKeysDenied = new Set<string>();
+
+/** JS's array-index key test — the same one objectIterOverIndexShape
+ * applies to declared field names. */
+export function isArrayIndexKey(name: string): boolean {
+  return /^(0|[1-9][0-9]{0,9})$/.test(name) && Number(name) <= 4294967294;
+}
+
 /** The pass-stable structural key of a field list (see overflowShapeKeys). */
 export function overflowShapeKey(fields: readonly { name: string; type: IrType }[]): string {
   return fields
@@ -104,8 +133,10 @@ export class ShapeRegistry {
   private dialIndexValue(fields: { name: string; type: IrType }[], tuple: boolean, indexValue?: IrType): IrType | undefined {
     if (indexValue !== undefined || tuple) return indexValue;
     if (fields.length === 0) return indexValue;
+    const key = overflowShapeKey(fields);
+    if (overflowShapeKeysDenied.has(key)) return indexValue;
     if (process.env["SCRIPTC_OVERFLOW_ALL"]) return DYN;
-    return overflowShapeKeys.has(overflowShapeKey(fields)) ? DYN : indexValue;
+    return overflowShapeKeys.has(key) ? DYN : indexValue;
   }
 
   /** True when THIS shape's index-signature portion came from the grant
