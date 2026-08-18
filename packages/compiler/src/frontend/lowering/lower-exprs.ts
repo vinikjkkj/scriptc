@@ -10530,6 +10530,13 @@ export function ensureStringForPlus(L: Lowerer, e: IrExpr, node: ts.Node): IrExp
   // the object itself and falls through to toString, which is why only a
   // SOURCE-DECLARED one is asked about.
   if (classHasOwnValueOf(L, e.type)) L.badType(node, L.typeOf(node));
+  // A record's own valueOf SLOT is the same question one representation
+  // over: the DEFAULT hint would call it, so the `+` spelling keeps the
+  // fence there while String()/`${}` go on to the toString slot.
+  if (e.type.kind === "record") {
+    const shape = L.shapes.get(e.type.shapeId);
+    if (shape?.fields.some((f) => f.name === "valueOf")) L.badType(node, L.typeOf(node));
+  }
   return ensureString(L, e, node);
 }
 
@@ -10644,11 +10651,17 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
       // A plain data RECORD arm is decidable and it is the arm the union
       // form was missing: JS prints Object.prototype.toString's constant
       // for it, and the LONE-record rule at the bottom of this function
-      // already returns exactly that, under exactly this test — not a
-      // tuple (which prints its elements) and no `toString` FIELD (which
-      // would shadow the prototype's and have to be called). Applying the
-      // same test per arm keeps the two spellings answering alike:
-      // `${rec}` and `${num | rec}` after the arm dispatch.
+      // returns exactly that, under exactly this test — not a tuple
+      // (which prints its elements) and no `toString` FIELD (which shadows
+      // the prototype's and has to be CALLED).
+      //
+      // The two rules agree on the constant and no longer agree on the
+      // slot: the lone-record rule now CALLS a zero-argument
+      // string-returning `toString` field, and this one still declines the
+      // arm, because the per-union `sc_us_*` helper the arm dispatch runs
+      // through is emitted by both backends from the union def alone and
+      // has no call in it. `${rec}` answers and `${num | rec}` fences —
+      // honest either way, and the fence is the half still owed.
       //
       // Array, class and every other ref arm stay fenced.
       const recordArmStringable = (a: IrType): boolean => {
@@ -10713,13 +10726,37 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
     }
     if (e.type.kind === "record") {
       // `${obj}` / String(obj): a plain data record has no toString of its
-      // own (a func-typed `toString` FIELD would shadow the prototype's —
-      // JS would call it, so that shape keeps the fence), and a TUPLE
-      // prints its elements like an array (not lowered — fenced) — every
-      // other record is Object.prototype.toString's constant.
+      // own, and a TUPLE prints its elements like an array (not lowered —
+      // fenced) — every other record is Object.prototype.toString's
+      // constant.
+      //
+      // A func-typed `toString` FIELD shadows the prototype's and JS CALLS
+      // it, which is what `obj.toString()` already does one spelling away
+      // (an ordinary field call through the record's closure slot). This
+      // arm used to keep the fence and say so; calling the slot is the
+      // same operation, and it is also how a CLASS projected into such a
+      // shape answers, because the projection binds the class's toString
+      // into that slot as a %boundmeth closure.
+      //
+      // Only the zero-argument string-returning form: ToString calls it
+      // with no arguments, and a slot that needs one, or answers with
+      // something other than a string, has no such call.
       const shape = L.shapes.get(e.type.shapeId);
-      if (shape && !shape.tuple && !shape.fields.some((f) => f.name === "toString")) {
-        return { kind: "toString", operand: e, type: STRING, loc: e.loc };
+      if (shape && !shape.tuple) {
+        const slot = shape.fields.find((f) => f.name === "toString");
+        if (slot === undefined) {
+          return { kind: "toString", operand: e, type: STRING, loc: e.loc };
+        }
+        if (
+          slot.type.kind === "func" && slot.type.rest !== true &&
+          slot.type.params.length === 0 && slot.type.ret.kind === "string"
+        ) {
+          const read: IrExpr = {
+            kind: "recordGet", obj: e, shapeId: e.type.shapeId, field: "toString",
+            type: slot.type, loc: e.loc,
+          };
+          return { kind: "callValue", callee: read, args: [], type: STRING, loc: e.loc };
+        }
       }
     }
     if (e.type.kind !== "f64" && e.type.kind !== "bool") L.badType(node, L.typeOf(node));

@@ -117,3 +117,20 @@ class Both {
 const both = new Both()
 console.log("bothStr   " + String(both))
 console.log("bothTpl   " + `${both}`)
+
+// 19-20. a record type that DECLARES toString: JS calls the FIELD, which is
+//     what `x.toString()` already did through the record's closure slot and
+//     what the conversion refused. And it is the one place a MATERIALIZED
+//     class answers correctly -- a class instance passed into a
+//     RecTs-typed parameter is projected into that shape with its own
+//     toString bound into the slot as a %boundmeth closure, so the
+//     conversion reaches it. The rest of that story is npm fixture 4142's
+//     price list: a shape with no such field has nowhere to put one.
+type RecTs = { low: number; toString(): string }
+function viaSlot(x: RecTs): string { return `${x}` }
+class Slot {
+    low = 9
+    toString(): string { return "Slot(" + this.low + ")" }
+}
+console.log("slotTpl   " + viaSlot(new Slot()))
+console.log("slotStr   " + String(new Slot() as RecTs))
