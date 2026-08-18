@@ -375,6 +375,11 @@ export interface LowerResult {
   /** JS statements whose compile fences DEFERRED to runtime (runtimeFence
    * statements in the module) — off the build, on the coverage report. */
   runtimeFences: ScrDiagnostic[];
+  /** SC6xxx ADVICE — the program compiled and these say something true
+   * about what it compiled to. Never fatal: `module` is non-null with a
+   * non-empty list, and nothing here may ever move a row into
+   * `diagnostics`. */
+  advisories: ScrDiagnostic[];
   stats: LowerStats;
   /** --provenance-sources only: per-file statement attribution (the
    * coverage report aggregates it per provenance package). */
@@ -1654,6 +1659,13 @@ export class Lowerer {
    * see lowerStmts): off the build, preserved here so coverage reporting
    * can still name every deferred fence. */
   readonly runtimeFences: ScrDiagnostic[] = [];
+  /** ADVICE (the SC6xxx band) — the program compiled, and this says
+   * something true about what it compiled to. A SEPARATE list, not a
+   * severity filter over `diags`: every gate in this file that decides
+   * fatality, deferral or poison-capture reads `this.diags.length`, and
+   * a non-fatal member of that array would have to be excluded from each
+   * of them correctly, forever. Here it cannot reach any of them. */
+  readonly advisories: ScrDiagnostic[] = [];
   /** --provenance-sources: diagnostics of ELIDED pure-annotated dead
    * consts in fetched source modules (lowerStmts's elision rule) — off
    * the build entirely (the statement lowers to its poisoned bindings and
@@ -2405,6 +2417,7 @@ export class Lowerer {
         module: null,
         diagnostics: this.diags,
         runtimeFences: this.runtimeFences,
+        advisories: this.advisories,
         stats: this.stats,
         ...(this.statsByFile.size > 0 ? { statsByFile: this.statsByFile } : {}),
         ...(this.provenanceElided.length > 0 ? { provenanceElided: this.provenanceElided } : {}),
@@ -2510,6 +2523,7 @@ export class Lowerer {
       module,
       diagnostics: this.diags,
       runtimeFences: this.runtimeFences,
+      advisories: this.advisories,
       stats: this.stats,
       ...(this.statsByFile.size > 0 ? { statsByFile: this.statsByFile } : {}),
       ...(this.provenanceElided.length > 0 ? { provenanceElided: this.provenanceElided } : {}),
@@ -2818,6 +2832,22 @@ export class Lowerer {
       return;
     }
     this.diags.push(d);
+  }
+
+  /** An SC6xxx advisory. Never fatal, never deferred, never spliced into
+   * a runtime fence — it does not touch `diags`, so none of that
+   * machinery can see it. Deduped on code + span like pushDiag, because
+   * coverage lowers the unreached remainder in a second pass over the
+   * same nodes and a doubled advice line reads as two sites. */
+  pushAdvice(diag: ScrDiagnostic): void {
+    if (
+      this.advisories.some(
+        (p) => p.code === diag.code && p.loc.start === diag.loc.start && p.loc.end === diag.loc.end,
+      )
+    ) {
+      return;
+    }
+    this.advisories.push(diag);
   }
 
   unsupported(

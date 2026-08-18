@@ -158,7 +158,22 @@ export type CompileResult =
    * the code generator that ACTUALLY emitted the TU; `llvmRefusal` is
    * present iff the default lane fell back to C, carrying the tier
    * refusal's machine-readable kind tag ("npmEmbedding", "stmt:...", ...). */
-  | { ok: true; binaryPath: string; cPath: string; irPath?: string; backend: "c" | "llvm"; llvmRefusal?: string }
+  | {
+      ok: true;
+      binaryPath: string;
+      cPath: string;
+      irPath?: string;
+      backend: "c" | "llvm";
+      llvmRefusal?: string;
+      /** SC6xxx ADVICE the build produced (see ScrDiagnostic.severity):
+       * the program compiled, and these say something true about what it
+       * compiled to. Present only when non-empty, and never on the
+       * failure branch — an advisory cannot fail a build. `sourceTexts`
+       * rides along so the caller can render them with code frames, the
+       * same way it renders diagnostics on the failure branch. */
+      advisories?: ScrDiagnostic[];
+      sourceTexts?: Map<string, string>;
+    }
   | { ok: false; diagnostics: ScrDiagnostic[]; sourceTexts: Map<string, string> };
 
 /** The LLVM backend's tier refusal as a diagnostic. SC3xxx = backend
@@ -619,6 +634,7 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
         // which the report groups with these).
         diagnostics: [...preflight, ...lowered.diagnostics],
         ...(lowered.runtimeFences.length > 0 ? { runtimeFences: lowered.runtimeFences } : {}),
+        ...(lowered.advisories.length > 0 ? { advisories: lowered.advisories } : {}),
         ...(lowered.unreached ? { unreached: lowered.unreached } : {}),
         ...(lowered.npmBuiltins ? { npmBuiltins: lowered.npmBuiltins } : {}),
         ...(lowered.npmLazyTraps ? { npmLazyTraps: lowered.npmLazyTraps } : {}),
@@ -903,6 +919,7 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
     backend,
     ...(irPath !== undefined ? { irPath } : {}),
     ...(llvmRefusal !== undefined ? { llvmRefusal } : {}),
+    ...(lowered.advisories.length > 0 ? { advisories: lowered.advisories, sourceTexts } : {}),
   };
 }
 
