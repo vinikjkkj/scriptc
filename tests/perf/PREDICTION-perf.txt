@@ -1,0 +1,171 @@
+PREDICTION - block/perf
+worktree G:\scriptc-pf   branch block/perf   base 47b0bd04   lab G:\pf
+Written 2026-08-18, BEFORE any timing run, BEFORE my first build, and BEFORE
+reading one byte of the linked binary's section table.
+
+House convention followed: this lives in G:\pf\, NOT at the repo root. The
+tracked G:\scriptc\PREDICTION.txt belongs to block/spawn and is not touched.
+A copy is committed on my branch under tests/perf/ so the "written first"
+claim is checkable in git history.
+
+Nothing in tasks B-D is a compiler change, so every prediction below is
+about MEASUREMENT, not about output. P0 is the one whose failure would
+invalidate the whole block.
+
+================================================================
+P0. Compiler output does not move
+================================================================
+No file under packages/*/src is edited for B, C or D. Census both sides is
+expected IDENTICAL: refusals 15, ABORT.real 23 statements / 94 call sites,
+boilerplate 85, DYNCHECK 2254, parity 0, unknown 0. If anything moves, the
+finding is that my harness perturbed the compiler, and the harness is wrong.
+Task E touches LINK and CODEGEN FLAGS only, downstream of emission; it must
+not move the census either. If it does, a flag reached the frontend.
+
+================================================================
+P1. The seam does not exist and cannot be built by importing
+================================================================
+P1a: messaging.bench.ts and its 12 siblings CANNOT be compiled by scriptc,
+not after any amount of shimming, because node:inspector is the bench's own
+instrument and better-sqlite3 is a native addon. The port must be a REWRITE
+of the workload in the compilable subset, not a recompile. I predict I will
+find zero of the 13 bench files compilable and will say so.
+
+P1b: the honest port keeps _common.ts's ScenarioResult field names verbatim
+(name/opsCount/elapsedMs/throughputOpsPerSec/avgMsPerOp/cpuTimeMs/
+cpuPercent/rssAfterBytes/rssDeltaBytes/opsLabel) so results are diffable
+against the existing suite, and DROPS heapDeltaBytes on the exe side,
+because process.memoryUsage carries no lowering row (stated in
+packages/compiler/src/ir/nodes.ts:8905) and has no C analogue.
+
+P1c: peak RSS IS available on BOTH sides and IS comparable, because both
+read the same Windows counter:
+    packages/runtime/src/scr_lib.c scr_process_rusage case 2 reads
+        PeakWorkingSetSize via K32GetProcessMemoryInfo, divided by 1024
+    libuv's uv_getrusage does exactly the same for Node.
+process.resourceUsage().maxRSS is therefore the ONE memory number I report
+across runtimes. Retained JS heap will not be compared to anything.
+
+================================================================
+P2. Throughput: Node WINS the hot loop, the exe WINS startup
+================================================================
+P2a: on a compute-bound scenario (string building, map/array churn, closure
+calls), NODE IS FASTER than the compiled exe, by between 1.5x and 5x.
+Named sites I expect to carry the cost:
+    packages/runtime/src/scr_closure.c    retain/release pair per call
+    packages/runtime/src/scr_dyn_invoke.c the 2254 DYNCHECK sites dispatch
+    packages/runtime/src/scr_string.c     immutable concat reallocating
+    packages/runtime/src/scr_map.c        hashing per property read
+V8 JITs a hot monomorphic loop to machine code with inline caches; scriptc
+emits C that still pays a refcount pair and a tag test per operation.
+
+P2b: on STARTUP (spawn to first line of user code) the exe wins by 4x-15x.
+Node pays roughly 40-90 ms of V8 plus module init; the exe should be 3-20 ms
+despite a 28.9 MiB image, because Windows demand-pages it.
+
+P2c: peak RSS - the exe wins by 4x-10x. Node's floor on this box is about
+45-60 MiB; the exe's should be 6-15 MiB. The 28.9 MiB FILE size will NOT
+appear as 28.9 MiB resident. If it does, that is a finding: it would mean
+something touches every page (a relocation pass or a startup table).
+
+P2d: spread. The stanza harness showed zero spread over 13 runs, but that
+harness is not timed. A TIMED harness on a machine with two other agents and
+six Next.js dev servers WILL show spread. I predict median-relative spread
+(max-min)/median above 10% while the machine is busy and under 5% when
+quiet. If I see under 5% while busy, I distrust the clock, not the machine.
+
+================================================================
+P3. Per-function CPU: instrument one TU, do not sample the world
+================================================================
+P3a: -finstrument-functions over the WHOLE binary is unusable - I predict
+10x-100x slowdown and a trace in the GiB range for a 1000-op run, because
+every scr_* runtime call is instrumented too. The usable form exists for
+free here: the app is ONE emitted TU compiled separately from the runtime
+.c files, so the flag can be applied to the app TU alone.
+
+P3b: the Linux/perf route costs a full cross-build to x86_64-linux-gnu plus
+a WSL round trip, and I predict the cross-build FAILS or diverges on at
+least one runtime file - scr_lib.c's Windows arm is hand-rolled kernel32
+(K32GetProcessMemoryInfo, GetProcessTimes) where the Linux arm is
+getrusage/clock_gettime, so a Linux profile attributes to different
+functions than the shipped Windows binary. I therefore predict I will CHOOSE
+the Windows instrumentation route and state the Linux route's cost.
+
+P3c: the top self-time bucket for a messaging-shaped workload in the
+COMPILED binary will be refcounting plus dynamic dispatch, NOT crypto - the
+inverse of the V8 profile, where x25519/DH dominates. Crypto is the same C
+on both sides; everything around it is what the compiler changed.
+
+================================================================
+P4. Allocator: the sites are named, the bytes do not exist
+================================================================
+P4a: the runtime counts OBJECTS by kind and, under SCRIPTC_RC_SITES=1, names
+live closures by creation site - but tracks NO BYTES anywhere, and has no
+allocation chokepoint: scr_cyc_alloc covers ~16 object kinds while ~475 raw
+malloc/calloc/realloc calls sit in ~57 files. So "bytes per site" cannot be
+done by widening the existing per-site record; it needs a real interposer.
+I predict the right instrument is a LINKER-LEVEL malloc wrap
+(-Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free) recording size
+and __builtin_return_address(0), symbolised after the fact - zero source
+change, every one of the 475 sites covered.
+I predict lld's MinGW driver DOES accept --wrap on x86_64-windows-gnu. This
+is the single riskiest technical bet in the block; if it fails I fall back
+to a -include-injected macro over the runtime TUs, which costs a rebuild.
+
+P4b: the audit line quoted in my brief - 1015 live objects (2 strings, 104
+boxes, 233 closures, 669 dyn, 7 bytes) - is a FAILURE line: scr_console.c's
+scr_rc_audit_at_exit prints only when a count is nonzero and then _Exit(99).
+So those 1015 are LEAKED, not "live and fine". I predict the total ALLOCATION
+count over a full paired session is 3-5 orders of magnitude larger than the
+1015 that survive - over 1e6 - and that the top-10 allocating sites account
+for over 60% of the count. A flat long tail would be the surprise.
+
+P4c: both SCRIPTC_RC_AUDIT and SCRIPTC_RC_SITES are BUILD-time (cc.ts:534
+turns the first into -DSCR_RC_AUDIT; emitter.ts:70 makes the second emit
+sc_clo_site_tbl). So allocation profiling costs a SEPARATE ~25 min zapo
+build. I predict I get at most two full zapo builds done in this block and
+will therefore carry the per-scenario matrix on small compiled benches, not
+on zapo, and use zapo only for the whole-program numbers.
+
+P4d: the arming test - a planted allocation at a known site must show at
+exactly the planted count. If it does not, the table is sampling or
+coalescing and every other number in task D is void.
+
+================================================================
+P5. Binary size: strip is the big one, --gc-sections is not
+================================================================
+30 289 920 bytes / 28.9 MiB; hello-world floor ~646 KB.
+
+P5a: --strip removes at least 8 MiB (at least 27%). Nothing asks for -g, but
+zig cc keeps symbol and section names for x86_64-windows-gnu, and 28.9 MiB
+is too large for pure code when hello-world is 646 KB. If strip buys under
+1 MiB, the image really IS code plus data and dead code becomes the story.
+
+P5b: -Os buys 10%-25% of post-strip text and costs 0%-15% throughput. I
+predict the cost is nearer 0%, because the workload is dominated by refcount
+traffic and cache misses rather than by the unrolling -O2 does.
+
+P5c: -ffunction-sections -Wl,--gc-sections buys LESS THAN 10%, because
+scriptc's dyn layer reaches functions through registries and dispatch tables
+so the linker sees them address-taken. This is the prediction I most expect
+to be wrong; the precedent (a gated scr_url.c selected by POSITION rather
+than by NEED) says the wins are in SELECTION, not in --gc-sections.
+
+P5d: the size-class-armed guard still fails loudly on a planted extra page
+after any flag change I make, because the flags are link-time and the guard
+measures a compile-time class. If a flag change makes the guard PASS on a
+planted page, the guard was measuring the binary, not the class.
+
+================================================================
+P6. What I expect NOT to be able to run
+================================================================
+P6a: I will not get a quiet machine. Two other agents are live and six
+Next.js dev servers are up on 4123-4128. I predict at least one timing run
+has to be discarded and re-taken, and I will say so rather than publish it.
+P6b: ASan is out (undefined symbol __asan_init, verified on base). I will
+not spend time on it and will not report it as untried-but-promising.
+P6c: at 22-26 min per zapo build I predict I cannot afford the full
+cross-product of E (strip x -Os x --gc-sections) on zapo. I will do the
+cross-product on a mid-size compiled program and carry only the best
+candidate to zapo, and I will label which numbers are zapo's and which are
+the proxy's.
