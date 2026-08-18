@@ -83,6 +83,7 @@ import { settleOrValueArms,
   isConstAssertionTypeNode,
   isUnitOnlyTsType,
   mapType,
+  overflowShapeKeys,
   ShapeRegistry,
   typeKey,
   type TypeMapperCtx,
@@ -499,6 +500,11 @@ export function lowerToIr(
   options: LowerOptions = {},
 ): LowerResult {
   const dynamic = options.dynamic ?? false;
+  // The OVERFLOW GRANT's registry is per-compilation: the discovery pass
+  // fills it, the emit pass's ShapeRegistry consults it while interning.
+  // Cleared here so one program's casts can never grant another's shapes
+  // (a compiler process compiles many).
+  overflowShapeKeys.clear();
   const targetPlatform = options.targetPlatform ?? process.platform;
   const bestEffort = options.bestEffort ?? false;
   const startupCrash = options.startupCrash ?? null;
@@ -5878,9 +5884,25 @@ export class Lowerer {
             // read is the position with no other bridge, and widening the
             // whole relation would turn ordinary `unknown`-field fences
             // into copies nobody asked for.
+            // A REQUIRED target field takes the CHECKED extraction and
+            // nothing else. The rule above declines it because "a width
+            // plan never promises a bridge that can only throw" — but
+            // this bridge does not only throw: it succeeds for every
+            // value whose overflow HOLDS the key, which is exactly the
+            // value a reshape into an overflow-carrying shape produces,
+            // and it throws only where the alternative was
+            // strandedCoercionTrap's UNCONDITIONAL throw at the same
+            // flow. Strictly better, and never a silent wrong answer.
+            // Scoped by dynOutPlan's own domain, which is a DYN read type
+            // — i.e. an `unknown`-valued signature, the checked-dynamic
+            // boundary where the validated extraction is already the
+            // conversion this compiler uses (`as T` on a dyn, dynCheck in
+            // coerceToExpected, coercibleValue's dyn answer). A
+            // `Record<string, string>` source still declines: its read
+            // type is `string | undefined`, which dynOutPlan refuses.
             const lift = optionalFlavored
               ? (this.widthLiftPlan(readT, tf.type) ?? this.dynOutPlan(readT, tf.type))
-              : null;
+              : this.dynOutPlan(readT, tf.type);
             if (process.env.SCRIPTC_KEYREAD_WHY) {
               console.error(
                 `KEYREAD plan ${fromId}->${toId} field=${tf.name} read=${this.fmt(readT)} want=${this.fmt(tf.type)} opt=${optionalFlavored} lift=${lift?.how ?? "NONE"}`,
@@ -6022,7 +6044,7 @@ export class Lowerer {
             (tf.type.kind === "union" && this.armTag(tf.type.unionId, UNDEFINED_T) >= 0);
           return optionalFlavored
             ? `the expected field '${tf.name}' is not a declared field of the source, and a keyed read of its '[key: string]: ${this.fmt(from.indexValue)}' signature ('${this.fmt(readT)}' — the key may be absent) does not lift into '${this.fmt(tf.type)}'`
-            : `the expected field '${tf.name}' ('${this.fmt(tf.type)}') is required, and the source has only a '[key: string]: ${this.fmt(from.indexValue)}' signature — a runtime key that is simply absent has no value to supply it`;
+            : `the expected field '${tf.name}' ('${this.fmt(tf.type)}') is required, and a keyed read of the source's '[key: string]: ${this.fmt(from.indexValue)}' signature ('${this.fmt(readT)}') is not a value the checked extraction can turn into it`;
         }
         if (tf.type.kind === "dyn") continue;
         if (tf.type.kind !== "union" || this.armTag(tf.type.unionId, UNDEFINED_T) < 0) {

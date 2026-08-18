@@ -12,7 +12,7 @@ import { lowerAbortProperty } from "./lower-abort.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
-import { UNSUPPORTED, assertionDropsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
+import { UNSUPPORTED, assertionOverflowsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, strCharsCall } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
@@ -26,7 +26,7 @@ import { fenceNamespaceConditionalValue, lowerNamespaceConditionalDecl } from ".
 import { findGenericMethodOn, lowerStaticFieldRead } from "./lower-classes.js";
 import { bindingNeverReassigned, classHasOwnValueOf, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js";
-import { isConstAssertionTypeNode, isGenericCallableMemberType, underConstAssertion, unitOnlyUnion } from "../types.js";
+import { isConstAssertionTypeNode, isGenericCallableMemberType, overflowShapeKey, overflowShapeKeys, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
 import { lowerStreamProperty, lowerStreamStateProperty, streamInstanceOfExpr, streamSidesOf } from "./lower-stream.js";
 import { lowerWebSocketGlobal } from "./lower-ws.js";
@@ -10847,13 +10847,49 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
     const srcShape = L.shapes.get(src.shapeId);
     const dstShape = L.shapes.get(dst.shapeId);
     if (!srcShape || !dstShape) return;
-    // A destination that CAN hold undeclared keys drops nothing: the
-    // dynCheck captures them into the overflow map (IrRecordShape.indexValue).
-    if (dstShape.indexValue || srcShape.tuple || dstShape.tuple) return;
+    // A destination the PROGRAM declared with an index signature was
+    // never this rule's case: the dynCheck already captured undeclared
+    // keys into its overflow. A destination the GRANT gave one to IS this
+    // rule's case, and is what the emit pass sees for every site the
+    // discovery pass registered — the shapes it is looking at then carry
+    // the portion this very rule asked for.
+    if ((dstShape.indexValue && !L.shapes.grantedOverflow(dst.shapeId)) || srcShape.tuple || dstShape.tuple) return;
     const kept = new Set(dstShape.fields.map((f) => f.name));
     const dropped = srcShape.fields.map((f) => f.name).filter((n) => !kept.has(n));
     if (dropped.length === 0) return;
-    L.pushAdvice(assertionDropsMembersDiag(dropped, L.fmt(src), L.fmt(dst), locOf(expr)));
+    // NAME the destination — and every nested destination the reshape
+    // narrows on the way down — for the OVERFLOW GRANT: the pass that
+    // interns next gives those shapes a dyn overflow portion, the reshape
+    // captures the unnamed members into it, and JSON.stringify /
+    // Object.keys then answer what Node answers. Idempotent; the emit
+    // pass re-registers what discovery already did.
+    registerOverflowTargets(L, src.shapeId, dst.shapeId, new Set());
+    L.pushAdvice(assertionOverflowsMembersDiag(dropped, L.fmt(src), L.fmt(dst), locOf(expr)));
+  }
+
+  /** The destination shapes a reshape from `fromId` into `toId` narrows — the
+   * top-level one when it drops members, and recursively each same-named
+   * record FIELD pair that drops members of its own. zapo's driver drops
+   * `rawNode` at the top level and four more inside `key`, and only the
+   * outer one is visible to the advisory's member list, so the recursion
+   * is not a refinement: without it the inner key still arrives short.
+   *
+   * Registered as structural KEYS, never shape ids — the pass that
+   * consults them mints its own ids. See overflowShapeKeys. */
+  function registerOverflowTargets(L: Lowerer, fromId: string, toId: string, seen: Set<string>): void {
+    const pair = `${fromId}->${toId}`;
+    if (seen.has(pair)) return;
+    seen.add(pair);
+    const from = L.shapes.get(fromId);
+    const to = L.shapes.get(toId);
+    if (!from || !to || from.tuple || to.tuple || to.indexValue || to.fields.length === 0) return;
+    const kept = new Set(to.fields.map((f) => f.name));
+    if (from.fields.some((f) => !kept.has(f.name))) overflowShapeKeys.add(overflowShapeKey(to.fields));
+    for (const tf of to.fields) {
+      const ff = from.fields.find((f) => f.name === tf.name);
+      if (!ff || ff.type.kind !== "record" || tf.type.kind !== "record") continue;
+      registerOverflowTargets(L, ff.type.shapeId, tf.type.shapeId, seen);
+    }
   }
 
   export function lowerAsExpression(L: Lowerer, expr: ts.AsExpression | ts.TypeAssertion): IrExpr {
