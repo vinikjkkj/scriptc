@@ -8264,6 +8264,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4751-a-runtime-length-argument-pack-through-function-prototype-apply.js": {
+   "order": [
+    "<repo>/tests/corpus/4751-a-runtime-length-argument-pack-through-function-prototype-apply.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4752-a-union-slot-spread-under-a-plain-record-contributor.ts": {
+   "order": [
+    "<repo>/tests/corpus/4752-a-union-slot-spread-under-a-plain-record-contributor.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
