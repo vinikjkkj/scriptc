@@ -1,7 +1,6 @@
 // zapo's `src/client/events/appstate-mutation.ts:40` and `:49` — two of the
 // three "object spread involving index-signature shapes" refusals the real TU
-// carried, and the two that STAY refused after the spread-erased fold closed
-// the third (`src/retry/replay.ts:369`, corpus 4802).
+// carried, and the two that STAY refused.
 //
 //     return {
 //         schema: resolved.key,
@@ -10,22 +9,36 @@
 //         ...base                // a fixed `as const` shape
 //     } as WaAppStateMutationEvent
 //
-// TWO walls stand here, and neither is the fold's.
+// TWO walls were recorded here. ONE OF THEM IS GONE, and saying which is the
+// point of this file: the argument that keeps the refusal has to be the one
+// that is still true.
 //
-// 1. THE SLOT IS NOT UNIFORM. `base` publishes no index signature, and the
-//    literal's own members (`version: number`, `_raw`, the string-literal
-//    discriminants) do not fit the `string | boolean | null` the one
-//    index-signature source offers. A recovered store would claim a uniform
-//    value type the shape does not have, and every undeclared key read would
-//    answer at a type the value cannot produce.
+// GONE — "the target is a union of exact arms". A runtime-keyed bag asserted
+// into such a union used to compile to strandedCoercionTrap's UNCONDITIONAL
+// throw ("a '{ schema: string; [key: string]: string }' value is not
+// representable in the target union") one line after Node reads the field. It
+// no longer does: the arm is a run-time question and the checked dynamic
+// extraction answers it, which is what the same value routed through an
+// explicit `unknown` local always did. Corpus 4880 is that closure, byte-exact
+// on both backends.
 //
-// 2. THE TARGET IS A UNION OF EXACT ARMS. `WaAppStateMutationEvent` is a
-//    mapped union whose every arm declares NAMED fields (`chatJid: string`,
-//    `remote/id/fromMe/participant`), while `decodeIndexArgsFromSchema` writes
-//    `part.name` off a schema chosen at run time. Even a bag the compiler CAN
-//    build does not become such an arm: measured, the assertion throws
-//    "a '{ schema: string; [key: string]: string }' value is not representable
-//    in the target union" where Node prints the field.
+// STANDING — THE SLOT IS NOT UNIFORM. `base` publishes no index signature at
+// all, and the literal's own members (`version: number`, `_raw`) are no arm of
+// the `string | boolean | null` the one index-signature source offers. A
+// recovered store would claim a uniform value type the shape does not have.
+// (A member that IS an arm of the slot rides it now — that is what closes
+// `schema: string`, and corpus 4880 pins it — so this fence has narrowed to
+// exactly the members that do not fit and the sources that publish nothing.)
+//
+// STANDING BEHIND IT — THE ARMS ARE NOT TELLABLE APART. `WaAppStateMutationEvent`
+// pairs a `set` arm and a `remove` arm per schema key, and the remove arm's
+// fields are the set arm's minus a `Partial<DataForKey<K>>` — all optional, so
+// a remove value MATCHES the set arm as well. The only thing separating them
+// is the value of the `operation` string-literal discriminant, which the IR
+// erases to `string`. Measured through the spelling that has no fence: a
+// remove bag comes back tagged `set`, the fields read right, and the
+// `operation === 'remove'` narrowing throws. The extraction declines that
+// shape on purpose (dynCheckArmOrder's shadowing gate) rather than guess.
 //
 // Dropping the runtime keys instead is the silent answer, and it is the one
 // the compiler must not give: `{ ...wide }` into a narrower slot already
