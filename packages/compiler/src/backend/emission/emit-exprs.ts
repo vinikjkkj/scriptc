@@ -7400,7 +7400,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // rc == SIZE_MAX, and the frame's release is one too.
         return E.newTemp(
           e.type,
-          retainCallC(e.type, `(ScrClosure *)&${wsGlobalCtorFor(E, e.type)}`),
+          retainCallC(e.type, `(ScrClosure *)&${wsGlobalCtorFor(E, e.type, e.site)}`),
         );
       }
       case "promiseWithResolvers": {
