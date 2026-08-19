@@ -4591,12 +4591,47 @@ bool scr_num_is_safe_integer(double x) {
  * narrowing casts, no UB shifts of signed values).
  */
 
-static uint32_t scr_to_uint32(double d) {
+/* The general case: NaN, both infinities, and any |d| >= 2^32. Kept
+ * out of line so the fast path below stays a compare and a convert. */
+static uint32_t scr_to_uint32_slow(double d) {
   if (!isfinite(d)) return 0; /* NaN, +Infinity, -Infinity */
   double t = trunc(d);
   t = fmod(t, 4294967296.0); /* exact for doubles; result in (-2^32, 2^32) */
   if (t < 0) t += 4294967296.0;
   return (uint32_t)t;
+}
+
+/* ToUint32's HOT path, and the number that bought it: `x & y` on this
+ * backend is an out-of-line scr_bit_and, and scr_bit_and is two
+ * ToUint32s. The general form above is not two instructions -- trunc()
+ * and fmod() are LIBRARY CALLS on a baseline x86-64 target (no SSE4.1
+ * roundsd, no frem lowering), so a single `&` cost FOUR libm calls. A
+ * per-function cycle profile of the closure axis put scr_bit_and +
+ * scr_to_uint32 + scr_bits_as_int32 at 10.9% of the whole run on a loop
+ * whose only bitwise operator is an array index mask.
+ *
+ * For any d with |d| < 2^32 the whole of ToUint32 is ONE truncating
+ * conversion, and each step of the general form collapses:
+ *   trunc(d)              == (int64_t)d, exactly (|d| < 2^63)
+ *   fmod(t, 2^32)         == t, the identity in this range
+ *   (t < 0) ? t + 2^32    == the modulo-2^32 wrap that conversion of a
+ *                            negative integer to an unsigned type IS
+ * NaN and both infinities fail both comparisons and fall through to the
+ * slow path, which still returns 0 for them. The two boundary values
+ * +-2^32 are deliberately EXCLUDED from the fast path (the comparisons
+ * are strict) so the wrap is never at the edge of the int64 conversion.
+ *
+ * SCR_FAST_UINT32=0 restores the old body verbatim, which is how the A/B
+ * that priced this was run without editing the file between builds. */
+#ifndef SCR_FAST_UINT32
+#define SCR_FAST_UINT32 1
+#endif
+
+static uint32_t scr_to_uint32(double d) {
+#if SCR_FAST_UINT32
+  if (d > -4294967296.0 && d < 4294967296.0) return (uint32_t)(int64_t)d;
+#endif
+  return scr_to_uint32_slow(d);
 }
 
 /* The 32 bits as a SIGNED (Int32) JS number. */
