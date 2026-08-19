@@ -1,0 +1,102 @@
+# `tests/perf/dynpath` — pricing the dynamic path, and the twin that feeds it
+
+Six instruments and one two-arm lab. None of them is on a gate path; every
+one answers a single question and prints the number it read rather than a
+number it computed. `tests/perf/imagesize/attrib.mjs` supplies the PE
+section-table reader they share.
+
+## The question these were built for
+
+`estado-imagesize.md` attributed 51.6% of zapo's 29.06 MiB image to one
+module — `spec/proto/index.js`, 1,867,550 bytes of esbuild+terser-minified
+protobufjs, compiled entirely through the `ScrDyn` path because it reaches
+the lowering as the **implementation twin of a `.d.ts`**. The obvious next
+question is "why not use the `.d.ts`", and the obvious next number is the
+11.7x per-procedure ratio between a dyn procedure and a typed one. Both
+needed a measurement rather than an argument:
+
+* the two paths are not a choice — `provenanceDeclSiblings()` +
+  `declTwinOf()` compile **both** halves, because a `.d.ts` has no body;
+* and 11.7x compares populations that are not comparable (a generated
+  protobuf codec against a typed helper).
+
+## The lab
+
+`twin-lab.mjs <N> <outdir>` writes two package trees that differ in exactly
+one thing — how the module's own body is typed — and are driven by the SAME
+entry statements against the SAME declared surface:
+
+    A   spec/proto/index.js  (minified, generated)  + index.d.ts twin
+    B   spec/proto/index.ts  (the same logic, typed TypeScript)
+
+`twin-lab-jsdoc.mjs <N> <outdir>` adds the two arms that bound what the
+declaration's types could ever buy if the compiler applied them to the JS
+body:
+
+    P   the SAME JS as A, pretty-printed              — the INTERNAL CONTROL
+    C   P plus JSDoc carrying exactly the .d.ts types — the CEILING
+
+Both labs ride `SCRIPTC_PROVENANCE_MANIFEST` (provenance.ts's offline hook),
+which is the only build shape that produces the twin. Each lab also writes
+a Node oracle that runs the JS body directly, so every arm is checked
+against Node and not only against the other arms.
+
+`armtab.mjs` reads the arms at two sizes and prints the per-message-type
+SLOPE, which removes the runtime, the CRT and the entry exactly. Quote the
+slope; never the total.
+
+**P is the reason to trust the table.** A measurement that reformats a body
+and moves `.text` is measuring formatting. On the tree this was written for,
+A and P are `.text`-identical to the byte at both sizes.
+
+## The instruments
+
+    waproto-split.mjs   what is IN zapo's bundle: which bytes are vendored
+                        protobufjs (the .d.ts describes none of it) and which
+                        are generated message code (the .d.ts describes all
+                        of it), plus the declared-surface and body-member
+                        counts that have to agree.
+    tucount.mjs         one streaming pass over a 130 MB emitted TU: the
+                        retain/release/dyn-op shapes, with the interned-
+                        literal share of scr_str_retain.
+    litrel.mjs          the immortal-literal ownership ceiling, counted PER
+                        FUNCTION so sc_tN names cannot collide: how many
+                        ScrStr temps are bound to an interned literal, and
+                        how many scr_str_release STATEMENTS name one — the
+                        normal path and every unwind epilogue alike.
+    elide-lit.mjs       the same elision performed on emitted C rather than
+                        in the compiler, so the ceiling could be priced
+                        before the emitter change was written. It is kept
+                        because it is the CROSS-CHECK: on the probe arm it
+                        produces a file byte-identical (md5) to the one the
+                        emitter now emits, which is how the change's scope
+                        was confirmed to be exactly what was intended and
+                        nothing else.
+
+`litrel.mjs` counts SOURCE LINES. `estado-imagesize.md` §11.3 is the
+standing warning that source lines do not transfer to `.text` — clang
+tail-merges the epilogues. The `.text` ceiling is that count times the
+shipped share, and only the PDB can give the shipped share.
+
+## Recipe
+
+    node twin-lab.mjs        8 <lab>      # writes <lab>/A and <lab>/B
+    node twin-lab.mjs      120 <lab120>
+    node twin-lab-jsdoc.mjs  8 <mlab>     # writes <mlab>/P and <mlab>/C
+    node twin-lab-jsdoc.mjs 120 <mlab120>
+
+    # one arm: SCRIPTC_PROVENANCE_MANIFEST=<arm>/manifest.json, then
+    #   cd <arm>/case && scriptc build main.ts --backend c \
+    #     --provenance-sources --best-effort --keep-c -o <tag>.exe
+    # and run it against <lab>/oracle/run.mjs.
+
+    node armtab.mjs --lo 8 --hi 120 \
+      --A <lab>/A/case/a8,<lab120>/A/case/a120 \
+      --P <mlab>/P/case/p8,<mlab120>/P/case/p120 \
+      --C <mlab>/C/case/c8,<mlab120>/C/case/c120 \
+      --B <lab>/B/case/b8,<lab120>/B/case/b120
+
+    node waproto-split.mjs <index.js> <index.d.ts>
+    node tucount.mjs <program>.c
+    node litrel.mjs  <program>.c
+    node elide-lit.mjs <program>.c <out>.c
