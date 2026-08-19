@@ -338,6 +338,78 @@ export class CEmitter {
   usesBadTagHelper = false;
   usesStringifyUndefHelper = false;
 
+  /** SCRIPTC_DC_COUNT=1 — the RUNTIME execution counter for the DYNCHECK
+   * family, and the one instrument this tree did not have. `SCRIPTC_DC_WHERE`
+   * renames a path segment inside a message only a FAILING check prints, and
+   * `SCRIPTC_DC_CENSUS` is compile-time: between them they can say how many
+   * checks EXIST and which one FAILED, and neither can say how many ever RAN.
+   * On a healthy run that is 100% of the population.
+   *
+   * With the dial on, every emitted `scr_dyn_check_fail` guard is preceded by
+   * `SC_DC_HIT(k)` — one ordinal per emitted statement, so the ordinals are in
+   * exact 1:1 correspondence with the census's DYNCHECK count — and the
+   * failing arm carries `SC_DC_FAIL(k)`. A `/*DCSITE ...*\/` marker beside each
+   * one names the interned validator and the emitter shape, so the dump is
+   * attributable without a side file that could drift from the TU.
+   *
+   * OFF is the default and off emits NOTHING: dcSite() answers -1 and both
+   * emitters answer the empty string, so the TU is byte-identical. That is
+   * asserted, not assumed — a guard added with probeLower once interned an
+   * extra helper into zapo's TU and was caught only by a byte diff. */
+  readonly dcCount = process.env["SCRIPTC_DC_COUNT"] === "1";
+  dcSites = 0;
+  private dcOpen = -1;
+  /** The increment for a guard about to be EVALUATED, plus its marker; it
+   * ALLOCATES the ordinal, so it must be spelled before its dcFailC in the
+   * same template literal (JS evaluates literal holes left to right). The
+   * pairing is enforced rather than trusted: a second dcHitC before the
+   * matching dcFailC, or a dcFailC without one, throws while emitting. */
+  dcHitC(validator: string, shape: string): string {
+    if (!this.dcCount) return "";
+    if (this.dcOpen >= 0) throw new Error(`emitter bug: dc site ${this.dcOpen} has no dcFailC`);
+    const k = this.dcSites++;
+    this.dcOpen = k;
+    return `SC_DC_HIT(${k}); /*DCSITE k=${k} v=${validator} s=${shape}*/ `;
+  }
+  /** The increment for the arm that actually REFUSED, closing the site. */
+  dcFailC(): string {
+    if (!this.dcCount) return "";
+    if (this.dcOpen < 0) throw new Error("emitter bug: dcFailC without a dcHitC");
+    const k = this.dcOpen;
+    this.dcOpen = -1;
+    return `SC_DC_FAIL(${k}); `;
+  }
+  /** The counter table and its exit dump, spliced beside the shared trap
+   * helpers. Empty unless the dial is on AND the program emitted a check. */
+  dcCountDefs(): string[] {
+    if (!this.dcCount || this.dcSites === 0) return [];
+    const n = this.dcSites;
+    return [
+      `/* SCRIPTC_DC_COUNT=1: ${n} emitted dyn-check statements, one ordinal each. */`,
+      `static unsigned long sc_dc_hits[${n}];`,
+      `static unsigned long sc_dc_fails[${n}];`,
+      `#define SC_DC_HIT(k) (sc_dc_hits[k]++)`,
+      `#define SC_DC_FAIL(k) (sc_dc_fails[k]++)`,
+      `__attribute__((destructor)) static void sc_dc_count_dump(void) {`,
+      `  unsigned long th = 0, tf = 0;`,
+      `  size_t ran = 0, failed = 0;`,
+      `  for (size_t i = 0; i < ${n}; i++) {`,
+      `    th += sc_dc_hits[i]; tf += sc_dc_fails[i];`,
+      `    if (sc_dc_hits[i]) ran++;`,
+      `    if (sc_dc_fails[i]) failed++;`,
+      `  }`,
+      `  fprintf(stderr, "DCCOUNT-TOTAL sites=${n} executed=%zu evaluations=%lu failing-sites=%zu failures=%lu\\n",`,
+      `          ran, th, failed, tf);`,
+      `  for (size_t i = 0; i < ${n}; i++) {`,
+      `    if (sc_dc_hits[i] || sc_dc_fails[i]) {`,
+      `      fprintf(stderr, "DCCOUNT %zu %lu %lu\\n", i, sc_dc_hits[i], sc_dc_fails[i]);`,
+      `    }`,
+      `  }`,
+      `}`,
+      ``,
+    ];
+  }
+
   readonly walkerProtos: string[] = [];
   readonly walkerDefs: string[] = [];
   /** Island host-call adapters, interned per (arity, void-ness): the one
@@ -906,7 +978,7 @@ export class CEmitter {
       // loop — the profile-declared external symbols instead. Everything
       // above is unchanged (still all internal linkage).
       this.emitLibEntries(out, globals);
-      out.splice(trapHelperSlot, 0, ...this.sharedTrapDefs());
+      out.splice(trapHelperSlot, 0, ...this.dcCountDefs(), ...this.sharedTrapDefs());
       return out.join("\n");
     }
     const refGlobals = globals.filter((g) => isRefCounted(g.type));
@@ -1197,7 +1269,7 @@ export class CEmitter {
       `}`,
       ``,
     );
-    out.splice(trapHelperSlot, 0, ...this.sharedTrapDefs());
+    out.splice(trapHelperSlot, 0, ...this.dcCountDefs(), ...this.sharedTrapDefs());
     return out.join("\n");
   }
 

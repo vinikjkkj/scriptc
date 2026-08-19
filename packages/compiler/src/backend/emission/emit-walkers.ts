@@ -1472,15 +1472,15 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const d: string[] = [`${sig} { /* check ${key} */`];
     switch (t.kind) {
       case "f64":
-        d.push(`  if (d->kind != SCR_DYN_NUM) { scr_dyn_check_fail(path, ${want}, d); return 0; }`);
+        d.push(`  ${E.dcHitC(name, "prim.f64")}if (d->kind != SCR_DYN_NUM) { ${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d); return 0; }`);
         d.push(`  return d->v.num;`);
         break;
       case "bool":
-        d.push(`  if (d->kind != SCR_DYN_BOOL) { scr_dyn_check_fail(path, ${want}, d); return false; }`);
+        d.push(`  ${E.dcHitC(name, "prim.bool")}if (d->kind != SCR_DYN_BOOL) { ${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d); return false; }`);
         d.push(`  return d->v.b;`);
         break;
       case "string":
-        d.push(`  if (d->kind != SCR_DYN_STR) { scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
+        d.push(`  ${E.dcHitC(name, "prim.string")}if (d->kind != SCR_DYN_STR) { ${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
         d.push(`  return scr_str_retain(d->v.str);`);
         break;
       case "dyn":
@@ -1509,7 +1509,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         }
         // `u as Uint8Array`: kind check, then a fresh COPY out (the
         // boundary's aliasing stance in both directions).
-        d.push(`  if (d->kind != SCR_DYN_BYTES) { scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
+        d.push(`  ${E.dcHitC(name, "prim.bytes")}if (d->kind != SCR_DYN_BYTES) { ${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
         d.push(`  return scr_dyn_bytes_copy_out(d);`);
         break;
       }
@@ -1548,7 +1548,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // ScrError answers that very instance, so out-and-back crossings
         // compare reference-equal (the tracing suite's shape); alien
         // %error objects rebuild once and cache the pair.
-        d.push(`  if (d->kind != SCR_DYN_OBJ || !scr_dyn_obj_get(d, "%error", 6)) { scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
+        d.push(`  ${E.dcHitC(name, "class.Error")}if (d->kind != SCR_DYN_OBJ || !scr_dyn_obj_get(d, "%error", 6)) { ${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
         d.push(`  return scr_error_from_dyn(d);`);
         break;
       case "record": {
@@ -1562,8 +1562,8 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           const arityWant = cStringLiteral(
             Buffer.from(`array of length ${byIndex.length}`, "utf8"),
           );
-          d.push(`  if (d->kind != SCR_DYN_ARR) { scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
-          d.push(`  if (d->v.arr.len != ${byIndex.length}) { scr_dyn_check_fail(path, ${arityWant}, d); return NULL; }`);
+          d.push(`  ${E.dcHitC(name, "array.kind")}if (d->kind != SCR_DYN_ARR) { ${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
+          d.push(`  ${E.dcHitC(name, "tuple.arity")}if (d->v.arr.len != ${byIndex.length}) { ${E.dcFailC()}scr_dyn_check_fail(path, ${arityWant}, d); return NULL; }`);
           d.push(`  ${cDecl(t, "r")} = ${mangleRecordNew(t.shapeId)}();`);
           byIndex.forEach((f, i) => {
             d.push(`  {`);
@@ -1575,7 +1575,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`  return r;`);
           break;
         }
-        d.push(`  if (d->kind != SCR_DYN_OBJ) { scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
+        d.push(`  ${E.dcHitC(name, "record.kind")}if (d->kind != SCR_DYN_OBJ) { ${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
         d.push(`  ${cDecl(t, "r")} = ${mangleRecordNew(t.shapeId)}();`);
         // The HIDDEN per-instance toString slot. MATERIALIZING is what
         // loses a JS object's toString: `x as LongLike` is the identity in
@@ -1666,7 +1666,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(`      if (scr_exc_pending()) { ${rel("r")}; return NULL; }`);
             d.push(`    }`);
           } else {
-            d.push(`    if (!m) { scr_dyn_check_fail(&p, ${fieldWant}, NULL); ${rel("r")}; return NULL; }`);
+            d.push(`    ${E.dcHitC(name, "record.field")}if (!m) { ${E.dcFailC()}scr_dyn_check_fail(&p, ${fieldWant}, NULL); ${rel("r")}; return NULL; }`);
             d.push(`    r->${mangleField(f.name)} = ${E.dynCheckHelper(f.type)}(m, &p);`);
             if (drop) d.push(drop);
             if (dropAcc) d.push(dropAcc);
@@ -1712,7 +1712,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       case "array": {
         const elem = t.elem;
         const c = E.dynCheckHelper(elem);
-        d.push(`  if (d->kind != SCR_DYN_ARR) { scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
+        d.push(`  ${E.dcHitC(name, "array.kind")}if (d->kind != SCR_DYN_ARR) { ${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
         d.push(`  ScrArr *a = ${E.arrNewC(elem, "d->v.arr.len")};`);
         d.push(`  for (size_t i = 0; i < d->v.arr.len; i++) {`);
         d.push(`    ScrDynPath p = { path, NULL, i };`);
@@ -1786,7 +1786,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(`  }`);
           });
         }
-        d.push(`  scr_dyn_check_fail(path, ${want}, d);`);
+        d.push(`  ${E.dcHitC(name, "union.nomatch")}${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d);`);
         d.push(`  return NULL;`);
         break;
       }
@@ -1816,7 +1816,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // cast semantics — only a value boxed from the slot's own type
         // can honestly fill it).
         const sigLit = cStringLiteral(Buffer.from(key, "utf8"));
-        d.push(`  if (d->kind != SCR_DYN_FUNC) { scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
+        d.push(`  ${E.dcHitC(name, "func.kind")}if (d->kind != SCR_DYN_FUNC) { ${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
         d.push(`  if (strcmp(d->v.fn.sig, ${sigLit}) == 0) return scr_closure_retain(d->v.fn.clo);`);
         if (canAdaptDynFuncTo(t, (id) => E.recordsById.get(id), (id) => E.unionsById.get(id))) {
           const adapter = dynFuncAdapterHelper(E, t);
@@ -1829,7 +1829,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`    return a;`);
           d.push(`  }`);
         } else {
-          d.push(`  scr_dyn_check_fail(path, ${want}, d);`);
+          d.push(`  ${E.dcHitC(name, "func.noadapt")}${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d);`);
           d.push(`  return NULL;`);
         }
         break;
