@@ -10174,6 +10174,28 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       ) {
         argIr = probed.type;
       }
+      // The OTHER direction, and the one that used to reach the IR
+      // validator as an ICE: a cast can put a record TYPE on a value that
+      // is not a record. `c as unknown as Record<string, unknown>` over a
+      // class instance typechecks, argIr is the cast's record shape, and
+      // the key walk gets built for fields the argument does not have —
+      // the validator caught the mismatch a pass later ("expected record,
+      // got object") and the author read SC9001 "please report this" for
+      // a construct the compiler had simply declined. The LOWERED value
+      // decides: a non-record argument takes the same fence the
+      // un-laundered spelling already takes, at the same site, naming what
+      // the value actually is. (dyn and unit arguments returned above —
+      // they have real walks of their own.)
+      if (argIr?.kind === "record" && probed !== null && probed.type.kind !== "record") {
+        L.unsupported(
+          "SC1090",
+          call,
+          `Object.${member} over a '${L.fmt(probed.type)}' value a cast spells as a record `
+            + `(the walk would answer the CAST's declared fields, not the value's own keys — `
+            + `a class instance's own key set depends on runtime property creation the`
+            + ` struct model does not track)`,
+        );
+      }
     }
     if (argIr?.kind !== "record") return null; // Maps, classes, arrays → the SC2020 fence
     const shape = L.shapes.get(argIr.shapeId);
