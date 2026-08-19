@@ -5179,23 +5179,6 @@ function mapTrace(message: string): void {
  * Gated on the object being symbolic (no properties, no index infos, no
  * signatures): a RESOLVED `Record<"a", V>` still walks its real members, so
  * this never displaces an answer the checker was able to give. */
-/** The index signature tsc ERASED when it inferred an object literal's
- * type, or undefined when nothing was erased (the ordinary path).
- *
- * `{ jid, ...groupAttrs }` over `Record<string, string>` infers as
- * `{ jid: string }`: tsc keeps the named members and drops the source's
- * signature. The compiled record then has no overflow store, so a merge
- * into it can only DROP the source's runtime keys — the silent wrong
- * answer the spread desugar fences on today. Reading the signature back
- * off the literal's own spread sources restores the store, and with it
- * the ability to compile the right answer.
- *
- * ONLY for types inferred from object literals. A declared type means what
- * it says: the drop is divergence 68 there, the shape's identity is
- * published, and widening it would invent a store the author never wrote.
- *
- * Answers undefined — leaving today's mapping byte-for-byte unchanged —
- * whenever any condition fails, so this can never take away an answer. */
 /** What the recovery found: the store's value type, and whether the
  * literal's DECLARED members have to ride that store instead of taking
  * struct slots (`fold`) because a named property sits AFTER a spread and
@@ -5215,6 +5198,23 @@ function fitsWithinSlot(member: IrType, slot: IrType, ctx: TypeMapperCtx): boole
   return memberArms.every((a) => slotArms.some((b) => typeEquals(a, b)));
 }
 
+/** The index signature tsc ERASED when it inferred an object literal's
+ * type, or undefined when nothing was erased (the ordinary path).
+ *
+ * `{ jid, ...groupAttrs }` over `Record<string, string>` infers as
+ * `{ jid: string }`: tsc keeps the named members and drops the source's
+ * signature. The compiled record then has no overflow store, so a merge
+ * into it can only DROP the source's runtime keys — the silent wrong
+ * answer the spread desugar fences on today. Reading the signature back
+ * off the literal's own spread sources restores the store, and with it
+ * the ability to compile the right answer.
+ *
+ * ONLY for types inferred from object literals. A declared type means what
+ * it says: the drop is divergence 68 there, the shape's identity is
+ * published, and widening it would invent a store the author never wrote.
+ *
+ * Answers undefined — leaving today's mapping byte-for-byte unchanged —
+ * whenever any condition fails, so this can never take away an answer. */
 function spreadErasedIndexValue(
   widened: ts.Type,
   ctx: TypeMapperCtx,
