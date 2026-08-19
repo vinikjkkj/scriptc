@@ -108,3 +108,22 @@ function go5(t: Thumb | undefined, w: number): Thumb | undefined {
 }
 const t5 = go5({ url: "u", w: 1 }, 9);
 console.log("identity:" + (t5 === undefined ? "none" : `${t5.url}/${String(t5.w)}`));
+
+// --- a CONTRIBUTOR field that must WIDEN into the slot arm's type ----------
+// `armFieldFits` admits exactly one conversion beyond identity -- the source
+// type is literally one ARM of the destination union -- and a contributor's
+// fields are held to it for the same reason the source's are: rebuilding a
+// value at a NARROWER type is the silent wrong answer this rule exists not to
+// produce. The read has to be wrapped at the slot's tag, per arm.
+type W1 = { kind: "a"; p: number };
+type W2 = { kind: "b"; q: string };
+type WSrc = W1 | W2;
+type WLead = { r: string };
+type WOutA = { kind: "a"; p: number; r: string | null };
+type WOutB = { kind: "b"; q: string; r: string | null };
+function show6(x: WOutA | WOutB): void {
+  console.log(x.kind === "a" ? `a p=${String(x.p)} r=${String(x.r)}` : `b q=${x.q} r=${String(x.r)}`);
+}
+function go6(lead: WLead, src: WSrc): void { show6({ ...lead, ...src }); }
+go6({ r: "R" }, { kind: "a", p: 1 });
+go6({ r: "S" }, { kind: "b", q: "Q" });
