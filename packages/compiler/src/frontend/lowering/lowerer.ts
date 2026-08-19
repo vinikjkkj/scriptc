@@ -5307,12 +5307,16 @@ export class Lowerer {
     const memo = this.methodWrittenFields.get(className);
     if (memo) return memo;
     const out = new Set<string>();
-    this.methodWrittenFields.set(className, out); // cycle guard for a self-referential base chain
     for (let c: ClassInfo | null = this.classes.get(className) ?? null; c; c = c.base) {
       const decl = c.decl;
       if (!decl) continue;
       for (const m of decl.members) {
-        if (ts.isConstructorDeclaration(m) || ts.isPropertyDeclaration(m)) continue;
+        // The CONSTRUCTOR only. A property DECLARATION is walked, not
+        // skipped: `n = 0` holds no assignment to find, while
+        // `handler = (): void => { this.n++ }` holds one and is reachable
+        // through the projection exactly like a declared method. Skipping
+        // the whole member kind lost that for nothing.
+        if (ts.isConstructorDeclaration(m)) continue;
         const walk = (n: ts.Node): void => {
           const thisProp = (x: ts.Node): ts.PropertyAccessExpression | null =>
             ts.isPropertyAccessExpression(x) && x.expression.kind === ts.SyntaxKind.ThisKeyword ? x : null;
@@ -5341,6 +5345,7 @@ export class Lowerer {
         walk(m);
       }
     }
+    this.methodWrittenFields.set(className, out);
     return out;
   }
 
@@ -5350,10 +5355,26 @@ export class Lowerer {
    * an advisory rendered against it would point at nothing — so that case
    * falls back to the class declaration, which is the other end of the
    * same fact and is always a real span. */
-  noteMixedProjection(className: string, liftedNames: string[], methodCount: number, loc: SrcLoc): void {
-    if (methodCount === 0 || liftedNames.length === 0) return;
+  noteMixedProjection(className: string, lifted: { name: string; type: IrType }[], methodCount: number, loc: SrcLoc): void {
+    // The LIVE half is not only a method-named target field. An ARROW
+    // FUNCTION class field — `go = (): void => { this.n += 1 }` — is a data
+    // field on the class, so the plan has methods=0 and lifts it like any
+    // other; but the value lifted is the CLOSURE, and the closure's captured
+    // `this` is the instance. Calling it through the projection writes the
+    // object exactly as a method does, while the neighbouring data field
+    // still reads the copy. Same wrong value, third producer, and the rule
+    // was blind to it until the shape was written down and run:
+    //
+    //     class C { n = 0; go = (): void => { this.n += 1 } }
+    //     through(new C())      node 1      scriptc 0    (both backends)
+    //
+    // A lifted func field that captures nothing makes this advice
+    // over-eager rather than wrong, which is the right direction for advice.
+    const liveFuncs = lifted.filter((f) => f.type.kind === "func").length;
+    const data = lifted.filter((f) => f.type.kind !== "func").map((f) => f.name);
+    if (methodCount + liveFuncs === 0 || data.length === 0) return;
     const written = this.classMethodWrittenFields(className);
-    const stale = liftedNames.filter((n) => written.has(n));
+    const stale = data.filter((n) => written.has(n));
     if (stale.length === 0) return;
     const decl = this.classes.get(className)?.decl ?? null;
     const at = loc.file === "<width>" && decl !== null ? locOf(decl) : loc;
@@ -5512,7 +5533,7 @@ export class Lowerer {
     // advisory is decided from the same plan rather than from a second walk.
     this.noteMixedProjection(
       className,
-      plan.flatMap((p) => (p.how === "lift" ? [p.name] : [])),
+      plan.flatMap((p) => (p.how === "lift" ? [{ name: p.name, type: p.fieldT }] : [])),
       plan.filter((p) => p.how === "method").length,
       loc,
     );
@@ -7112,13 +7133,14 @@ export class Lowerer {
     // population taken from that dial alone was a lower bound. Same fields,
     // same spelling, so one parser reads both.
     {
-      const lifted = to.fields.filter((f) => { const l = plan.get(f.name)!; return !("method" in l) && !("absent" in l); }).map((f) => f.name);
+      const lifted = to.fields.filter((f) => { const l = plan.get(f.name)!; return !("method" in l) && !("absent" in l); });
       const meth = to.fields.filter((f) => "method" in plan.get(f.name)!).length;
       if (process.env["SCRIPTC_PROJ_CENSUS"] !== undefined) {
         const abs = to.fields.filter((f) => "absent" in plan.get(f.name)!).length;
-        console.error(`[projcensus] ${className} -> ${toId} methods=${meth} absent=${abs} lift=${lifted.length}${lifted.length > 0 ? ` [${lifted.join(",")}]` : ""}`);
+        const names = lifted.map((f) => f.name);
+        console.error(`[projcensus] ${className} -> ${toId} methods=${meth} absent=${abs} lift=${names.length}${names.length > 0 ? ` [${names.join(",")}]` : ""}`);
       }
-      this.noteMixedProjection(className, lifted, meth, loc);
+      this.noteMixedProjection(className, lifted.map((f) => ({ name: f.name, type: f.type })), meth, loc);
     }
     this.liftedFns.push({
       name,

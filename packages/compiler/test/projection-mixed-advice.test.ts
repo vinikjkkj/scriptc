@@ -99,6 +99,17 @@ console.log(through(new C()));
   }
 });
 
+test("an arrow-function FIELD that writes counts: it is reachable exactly like a method", () => {
+  const r = lower(`
+interface View { n: number; go(): void }
+class C { n = 0; go = (): void => { this.n += 1; }; }
+function through(v: View): number { v.go(); return v.n; }
+console.log(through(new C()));
+`);
+  expect(only6003(r).length).toBe(1);
+  expect(only6003(r)[0]!.message).toContain("'n'");
+});
+
 test("a base class's method counts: the projected closures call into the whole instance", () => {
   const r = lower(`
 interface View { n: number; go(): void }
