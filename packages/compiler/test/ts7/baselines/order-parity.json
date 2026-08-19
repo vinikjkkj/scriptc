@@ -8294,15 +8294,21 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4781-stream-read-throws.ts": {
+   "order": [
+    "<repo>/tests/corpus/4781-stream-read-throws.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/4791-sha256-across-every-block-and-pad-boundary.ts": {
    "order": [
     "<repo>/tests/corpus/4791-sha256-across-every-block-and-pad-boundary.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/4781-stream-read-throws.ts": {
+  "<repo>/tests/corpus/4860-string-pool-recycles-every-size-class-across-a-bulk-free.ts": {
    "order": [
-    "<repo>/tests/corpus/4781-stream-read-throws.ts"
+    "<repo>/tests/corpus/4860-string-pool-recycles-every-size-class-across-a-bulk-free.ts"
    ],
    "diags": []
   },
