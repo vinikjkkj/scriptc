@@ -1,3 +1,10 @@
+// @deferred-fences: 1
+// The one fence is `process.exitCode = 1` in main()'s rejection handler:
+// assignment to a stdlib MEMBER has no static lowering (SC1090), so the
+// statement carries a runtime fence. main() resolves in both lanes, so
+// the handler never runs and the differential oracle is unaffected --
+// this line is the bookkeeping the corpus sweep asks for, added when
+// the program did not carry it.
 // `Readable.from([...])` and the state a fresh one is in.
 //
 // The lowering seeds these streams from an array, and the runtime used to
