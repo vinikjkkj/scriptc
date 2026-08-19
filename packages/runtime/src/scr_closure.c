@@ -29,6 +29,41 @@ static void *scr_box_ptr(const ScrBox *b) {
   return p;
 }
 
+/* ---- the cycle-root buffer, and who may skip it --------------------
+ * A release that leaves rc > 0 buffers the object as a candidate cycle
+ * root. That push, and the pop scr_cyc_on_dead pays microseconds later
+ * when the same object dies, were 13.2% of the closure axis on a loop
+ * where NO collection pass ever runs: the buffer oscillates between 0
+ * and 2 entries for the whole program.
+ *
+ * The predicate that makes the push provably useless: an object whose
+ * trace visits NOTHING has no outgoing traced edge, so it cannot be a
+ * member of any cycle the collector can see, and markGray() from it
+ * reaches nothing. Buffering it as a root is pure cost.
+ *
+ * For a box the predicate is exact AND monotonic, which is what makes it
+ * safe to decide once per release rather than once per program:
+ * scr_box_trace visits a child only for SCR_BOX_FUNC and for an
+ * SCR_BOX_OBJ whose obj_trace the compiler supplied. `kind` is written
+ * exactly once, in scr_box_new; `obj_trace` exactly once, in
+ * scr_box_new_obj, before the box is reachable by any releaser. Neither
+ * can ever turn a non-tracing box into a tracing one, so a box that
+ * skips the buffer today can never need it tomorrow.
+ *
+ * For a closure it is exact but NOT monotonic: caps are fixed at
+ * creation but `props` is lazily allocated. That is still sound, and
+ * the reason is worth writing down. To close a ring THROUGH a closure
+ * you must store the closure somewhere reachable from its own props,
+ * and to make that ring garbage you must drop the external reference --
+ * which is a release, and by then props is non-NULL, so that release
+ * buffers it. The skipped releases are exactly the ones taken while the
+ * object had no outgoing edge at all.
+ *
+ * SCR_CYC_LEAF_SKIP=0 restores the unconditional buffering. */
+#ifndef SCR_CYC_LEAF_SKIP
+#define SCR_CYC_LEAF_SKIP 1
+#endif
+
 static void scr_box_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrBox *b = (ScrBox *)o;
   void *p = scr_box_ptr(b);
@@ -114,16 +149,31 @@ static void scr_box_release_payload(ScrBox *b, void *p) {
   }
 }
 
+/* True iff scr_box_trace can visit a child; see the note above it. */
+static inline bool scr_box_may_cycle(const ScrBox *b) {
+#if SCR_CYC_LEAF_SKIP
+  return b->kind == SCR_BOX_FUNC ||
+         (b->kind == SCR_BOX_OBJ && b->obj_trace != NULL);
+#else
+  (void)b;
+  return true;
+#endif
+}
+
 void scr_box_release(ScrBox *b) {
   if (!b || b->rc == SIZE_MAX) return; /* NULL: a switch jumped past the decl */
   if (--b->rc == 0) {
-    scr_cyc_on_dead(b);
+    /* The pop is as skippable as the push: a box the predicate keeps OUT
+     * of the candidate buffer can never be IN it, so on_dead's whole body
+     * would be a load of h->buffered and a return. Same predicate on both
+     * sides, so the two can never disagree. */
+    if (scr_box_may_cycle(b)) scr_cyc_on_dead(b);
     scr_box_release_payload(b, scr_box_ptr(b));
 #ifdef SCR_RC_AUDIT
     scr_live_boxes--;
 #endif
     scr_cyc_free(b);
-  } else {
+  } else if (scr_box_may_cycle(b)) {
     scr_cyc_on_release(b); /* possible cycle root; may collect — b is done */
   }
 }
@@ -352,10 +402,21 @@ ScrClosure *scr_closure_new(void *fn, size_t ncaps) {
   return c;
 }
 
+/* True iff scr_closure_trace can visit a child: a capture, or the
+ * lazily-allocated own-property table. See the note above scr_box_trace. */
+static inline bool scr_closure_may_cycle(const ScrClosure *c) {
+#if SCR_CYC_LEAF_SKIP
+  return c->ncaps != 0 || c->props != NULL;
+#else
+  (void)c;
+  return true;
+#endif
+}
+
 void scr_closure_release(ScrClosure *c) {
   if (!c || c->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
   if (--c->rc == 0) {
-    scr_cyc_on_dead(c);
+    if (scr_closure_may_cycle(c)) scr_cyc_on_dead(c); /* see scr_box_release */
     for (size_t i = 0; i < c->ncaps; i++) scr_box_release(c->caps[i]);
     scr_closure_drop_ctor(c);
     scr_box_release(c->props); /* NULL-tolerant */
@@ -364,7 +425,7 @@ void scr_closure_release(ScrClosure *c) {
     scr_clo_bump(c->fn, -1);
 #endif
     scr_cyc_free(c);
-  } else {
+  } else if (scr_closure_may_cycle(c)) {
     scr_cyc_on_release(c); /* possible cycle root; may collect — c is done */
   }
 }
