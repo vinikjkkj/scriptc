@@ -62,6 +62,38 @@ static ScrSidx *scr_sidx(const ScrStr *s) {
   return e;
 }
 
+/* Slack handed to a concat whose LEFT side is SHARED and whose result is
+ * short, so the next link of an `a + b + c` chain can append in place.
+ * 0 disables it, which is what the ablation control is built with.
+ *
+ * 8 was measured against 16 and 32, not chosen, and the choice is a TRADE
+ * rather than a free win. At identical fixed work on the messaging bench's
+ * SEND group (1,500,000 map sets on both sides, and scr_str_concat /
+ * scr_str_release / scr_map_set call counts BIT-IDENTICAL so nothing was
+ * skipped) the exact instrument counts, slack 16 against none:
+ *     scr_str_alloc   4,542,077 -> 3,041,069   (-1,501,008, -33.0%)
+ * exactly ONE allocation removed per inner iteration, plus the
+ * scr_sidx_purge and scr_str_take_spare that ride on it.
+ *
+ * Timing, isolated, 15 alternating runs, machine quiet, A/A control quoted:
+ *   SEND group   slack 8  1.115x wall  1.1036x CPU  peak RSS 1.1032x BETTER
+ *                slack 16 1.123x       1.1152x                1.1067x
+ *                A/A      1.033x       1.0290x                0.9998x
+ *   SEND 1:1     slack 8  0.977x wall  0.9792x CPU  peak RSS 0.9305x WORSE
+ *                slack 16 0.954x       0.9592x                0.9308x
+ *                A/A      0.983x       0.9792x                1.0000x
+ *
+ * So 8 buys SEND group's win at a CPU cost on SEND 1:1 that is IDENTICAL
+ * to the A/A control (0.9792 both), where 16 costs a further 4.1% there.
+ * The peak-RSS cost is the same for both and is real: the digest strings
+ * SEND 1:1 stores carry the slack, +7.5% on that scenario, against -10%
+ * on SEND group, whose stored key is no longer the 1.5x-grown copy.
+ * Whole-bench peak RSS moves 92,506 -> 90,890 KiB, i.e. down. 32 measured
+ * no better on either scenario and costs more capacity per string. */
+#ifndef SCR_STR_CHAIN_SLACK
+#define SCR_STR_CHAIN_SLACK 8
+#endif
+
 /* ── allocation ─────────────────────────────────────────────────────── */
 
 /* Blocks freed by scr_str_release come back here instead of going to the
@@ -200,6 +232,16 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
   } else if (newlen >= 512 && newlen <= (SIZE_MAX - sizeof(ScrStr) - 1) / 2) {
     newcap = newlen + (newlen >> 1);
   }
+#if SCR_STR_CHAIN_SLACK
+  /* A SHARED left side (an array element, a variable, an interned literal)
+     gets no slack from either arm above, so `a + b + c` with a shared `a`
+     allocates twice: the first concat returns cap == len, and the second
+     therefore cannot take the in-place arm even though its left side is a
+     sole-reference temp. A small constant slack on short results is what
+     lets it. The messaging profile's SEND group is exactly this shape
+     (`members[m] + "|" + seq`). Measured, not assumed - see the ablation. */
+  else if (newlen < 512) newcap = newlen + SCR_STR_CHAIN_SLACK;
+#endif
   ScrStr *s = scr_str_take_spare(newlen);
   if (!s) s = scr_str_alloc(newlen, newcap);
   memcpy(s->data, a->data, a->len);

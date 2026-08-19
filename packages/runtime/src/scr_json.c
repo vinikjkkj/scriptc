@@ -43,6 +43,66 @@ static void scr_json_oom(void) {
   scr_trap("scriptc: out of memory\n");
 }
 
+/* -- dyn-object KEY storage ------------------------------------------
+ * Every own key of a parsed JSON object is a small malloc'd
+ * NUL-terminated buffer hanging off ScrDynEntry.key. That is ONE RAW
+ * malloc AND ONE RAW free PER PROPERTY, and on the messaging workload it
+ * is the single most FREQUENT allocation the process makes: the alloc
+ * lane measured 3,906,000 calls at this site, 50.7% of every
+ * malloc/calloc/realloc in the binary, at a mean of 8.85 bytes each. It
+ * only became the leader because the size-class pool took two thirds off
+ * scr_string.c - this site never went through the pool at all.
+ *
+ * It fits the pool exactly. Every key is far under SCR_POOL_MAX, and its
+ * length is ALREADY STORED beside the pointer (ScrDynEntry.key_len), so
+ * give() can name the same class take() was handed without a strlen.
+ * Routing it through scr_string.c's scr_str_blocks would be wrong - a
+ * pool is only self-consistent if every block in it was sized by one
+ * rule - so this is its own pool, exactly like scr_string.c's and
+ * scr_cycle.c's.
+ *
+ * EVERY key allocation in this file MUST go through key_alloc and every
+ * key free through key_free. A key malloc'd with the UNROUNDED size and
+ * then handed to give() would be smaller than the class it lands in, and
+ * the next take() of that class would hand out a short block. The three
+ * allocation sites and the four free sites below are the complete set
+ * (grep for ScrDynEntry .key); scr_exp_tab's key is a different struct
+ * and is left on plain malloc/free.
+ *
+ * SCR_JSON_KEY_POOL=0 restores the raw malloc/free byte for byte, which
+ * is what the ablation control is built with. */
+#ifndef SCR_JSON_KEY_POOL
+#define SCR_JSON_KEY_POOL 1
+#endif
+
+#if SCR_JSON_KEY_POOL
+static ScrPool scr_json_key_blocks;
+#endif
+
+static char *scr_json_key_alloc(size_t key_len) {
+#if SCR_JSON_KEY_POOL
+  size_t want = key_len + 1;
+  char *k = (char *)scr_pool_take(&scr_json_key_blocks, want);
+  /* scr_pool_bytes, not want: a recycled block is a whole class wide and
+     the class is what give() will put it back into. */
+  if (!k) k = (char *)malloc(scr_pool_bytes(want));
+#else
+  char *k = (char *)malloc(key_len + 1);
+#endif
+  if (!k) scr_json_oom();
+  return k;
+}
+
+static void scr_json_key_free(char *key, size_t key_len) {
+#if SCR_JSON_KEY_POOL
+  if (!key) return;
+  if (scr_pool_give(&scr_json_key_blocks, key, key_len + 1)) return;
+#else
+  (void)key_len;
+#endif
+  free(key);
+}
+
 /* ── output buffer ─────────────────────────────────────────────────────
  * The buffer IS a growing ScrStr allocation (data points at its data[]),
  * so scr_jb_finish hands the bytes over without a copy. A size hint
@@ -453,7 +513,8 @@ static void scr_dyn_gcfree(void *o) {
     break;
   case SCR_DYN_OBJ:
     /* keys only — the values are traced */
-    for (size_t i = 0; i < d->v.obj.len; i++) free(d->v.obj.entries[i].key);
+    for (size_t i = 0; i < d->v.obj.len; i++)
+      scr_json_key_free(d->v.obj.entries[i].key, d->v.obj.entries[i].key_len);
     break;
   case SCR_DYN_HANDLE:
     scr_dyn_handle_release(d->v.handle.ptr, d->v.handle.tag);
@@ -519,7 +580,7 @@ void scr_dyn_release(ScrDyn *d) {
     break;
   case SCR_DYN_OBJ:
     for (size_t i = 0; i < d->v.obj.len; i++) {
-      free(d->v.obj.entries[i].key);
+      scr_json_key_free(d->v.obj.entries[i].key, d->v.obj.entries[i].key_len);
       scr_dyn_release(d->v.obj.entries[i].value);
     }
     /* The [[Prototype]] link and the NON-ENUMERABLE table are owned; the
@@ -1138,7 +1199,7 @@ static void scr_dyn_obj_put(ScrDyn *obj, char *key, size_t key_len, ScrDyn *valu
        * that they are nodes. */
       ScrDyn *old = e->value;
       e->value = value;
-      free(key);
+      scr_json_key_free(key, key_len);
       scr_dyn_release(old);
       return;
     }
@@ -2074,8 +2135,7 @@ static void scr_dyn_handle_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
 /* Public obj insertion: COPIES the key bytes (the internal put takes a
  * malloc'd buffer), owns the value, later duplicate keys win. */
 void scr_dyn_obj_set(ScrDyn *obj, const char *key, size_t key_len, ScrDyn *value) {
-  char *copy = malloc(key_len + 1);
-  if (!copy) scr_json_oom();
+  char *copy = scr_json_key_alloc(key_len);
   memcpy(copy, key, key_len);
   copy[key_len] = '\0';
   scr_dyn_obj_put(obj, copy, key_len, value);
@@ -3810,7 +3870,7 @@ static void scr_dyn_obj_unset(ScrDyn *obj, const char *key, size_t key_len) {
       /* unlink before release: the entry must be out of the table before
        * the value's release can trigger a collection */
       ScrDyn *old = e->value;
-      free(e->key);
+      scr_json_key_free(e->key, e->key_len);
       memmove(&obj->v.obj.entries[i], &obj->v.obj.entries[i + 1],
               (obj->v.obj.len - i - 1) * sizeof *obj->v.obj.entries);
       obj->v.obj.len--;
@@ -4981,8 +5041,7 @@ static ScrDyn *scr_json_object(ScrJsonP *p) {
         return NULL;
       }
       if (r > 0) {
-        key = malloc(span_len + 1);
-        if (!key) scr_json_oom();
+        key = scr_json_key_alloc(span_len);
         memcpy(key, span, span_len);
         key[span_len] = '\0';
         key_len = span_len;
@@ -4992,8 +5051,7 @@ static ScrDyn *scr_json_object(ScrJsonP *p) {
           scr_dyn_release(obj);
           return NULL;
         }
-        key = malloc(ks->len + 1);
-        if (!key) scr_json_oom();
+        key = scr_json_key_alloc(ks->len);
         memcpy(key, ks->data, ks->len + 1);
         key_len = ks->len;
         scr_str_release(ks);
