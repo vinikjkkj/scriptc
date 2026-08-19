@@ -3,7 +3,7 @@ import type { IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
 import { ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile } from "./program.js";
-import { accessorSlotProp, wsGlobalPlan } from "../ir/nodes.js";
+import { accessorSlotProp, armDiscrimLits, armLitsConflict, mergeArmLitSets, wsGlobalPlan } from "../ir/nodes.js";
 // typeKey moved to ir/nodes.ts (the backend needs it too, for per-type
 // helper interning); re-exported here so frontend call sites keep their
 // import path.
@@ -310,6 +310,11 @@ export class UnionRegistry {
   private readonly pendingRec = new Set<string>();
   /** Placeholders whose frame FAILED: unmappable, never `undefined`. */
   private readonly poisoned = new Set<string>();
+  /** Union ids whose per-arm literal table a later ts union ERASED by
+   * disagreeing with it. Remembered so a third site cannot put it back:
+   * two ts unions share one def, the constraint has to hold for BOTH,
+   * and interning order must not decide which one is believed. */
+  private readonly litsErased = new Set<string>();
 
   /** The union id a back-reference to an in-progress union resolves to:
    * reuses the type's persistent recursive id or mints a PLACEHOLDER
@@ -356,6 +361,7 @@ export class UnionRegistry {
     // again on a legitimate path has to be mapped on its own merits, not
     // refused because a discarded attempt once tripped over it.
     for (const id of dropped) this.poisoned.delete(id);
+    for (const id of dropped) this.litsErased.delete(id);
     this.unions.length = mark;
   }
 
@@ -401,7 +407,7 @@ export class UnionRegistry {
 
   /** Completes a recursive placeholder with its canonical arm list and
    * registers the structural key (first writer wins, like shapes). */
-  finalizeRecursive(t: ts.Type, arms: IrType[]): string {
+  finalizeRecursive(t: ts.Type, arms: IrType[], armLits?: Record<string, string[]>[]): string {
     const id = this.recIds.get(t);
     if (id === undefined) throw new Error("union registry bug: finalizeRecursive without a placeholder");
     if (this.pendingRec.has(id)) {
@@ -410,13 +416,66 @@ export class UnionRegistry {
       this.pendingRec.delete(id);
       const key = JSON.stringify(arms.map(typeKey));
       if (!this.byKey.has(key)) this.byKey.set(key, id);
+      this.foldArmLits(def, armLits);
     }
     return id;
   }
 
+  /** Folds one site's per-arm STRING-LITERAL observation into a def.
+   * The first site with a CONFLICTING table sets it; a later site
+   * INTERSECTS, because two ts unions with the same arm list share one
+   * def and a constraint has to hold for every value either of them
+   * admits. An intersection that no longer conflicts is dropped and the
+   * id remembered, so the erasure is permanent rather than a race.
+   *
+   * `undefined` is NO OBSERVATION and deliberately does not weaken. It
+   * is what a SYNTHETIC intern passes -- an arm list assembled out of IR
+   * types (a ternary join, stripUndefinedArm) by a caller that never saw
+   * a ts.Type and so knows nothing about literals either way. Every
+   * ts-level mapping passes an explicit table, so a union that genuinely
+   * has no discriminant erases through its OWN mapping, not through a
+   * join's silence. */
+  private foldArmLits(def: IrUnionDef, armLits?: Record<string, string[]>[]): void {
+    if (armLits === undefined) return;
+    if (this.litsErased.has(def.id)) {
+      if (
+        process.env["SCRIPTC_DISCRIM_WHY"] !== undefined &&
+        armLits.some((m) => Object.keys(m).length > 0)
+      ) {
+        console.error(
+          `DISCRIM REFUSED ${def.id}: an earlier ts union with the same arms is told apart by nothing`,
+        );
+      }
+      return;
+    }
+    if (armLits.length !== def.arms.length) return;
+    const next =
+      def.armLits === undefined
+        ? armLits
+        : def.armLits.map((m, i) => mergeArmLitSets(m, armLits[i] ?? {}));
+    if (armLitsConflict(next)) {
+      def.armLits = next;
+      return;
+    }
+    // NO CONFLICT is a verdict, not a shrug. This site's own arms are told
+    // apart by nothing, so its values can hold any string in any of these
+    // fields -- and they reach the very same def. Remembering that is what
+    // stops a LATER ts union with the same arms and a real discriminant
+    // from imposing constraints on them: the first pass would then read
+    // this site's value against literals it never had, and could prefer a
+    // narrower arm over the wider one the value actually is.
+    const had = def.armLits !== undefined;
+    delete def.armLits;
+    this.litsErased.add(def.id);
+    if (had && process.env["SCRIPTC_DISCRIM_WHY"] !== undefined) {
+      console.error(`DISCRIM ERASES ${def.id}: a later ts union with the same arms disagrees`);
+    }
+  }
+
   /** Interns a canonical (typeKey-sorted, deduplicated) arm list, returning
-   * its unionId. */
-  intern(arms: IrType[]): string {
+   * its unionId. `armLits` is the calling site's per-arm literal
+   * observation (foldArmLits); omit it when there is none to make. */
+  intern(arms: IrType[], armLits?: Record<string, string[]>[]): string {
     const key = JSON.stringify(arms.map(typeKey));
     let id = this.byKey.get(key);
     if (id === undefined) {
@@ -426,6 +485,7 @@ export class UnionRegistry {
       this.byId.set(id, def);
       this.unions.push(def);
     }
+    this.foldArmLits(this.byId.get(id)!, armLits);
     return id;
   }
 
@@ -3609,6 +3669,19 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         }
         return false;
       };
+      // WHAT THE ARMS PIN. `operation: 'set'` maps to the plain `string`
+      // slot like any other property, and this frame is the last place
+      // that still knows the literal -- so record it here, per PART, and
+      // hand the finished table to the registry with the arms.
+      //
+      // Buffered rather than computed inline: getPropertiesOfType is a
+      // checker round trip (this file's memo exists because those are the
+      // compiler's dominant cost), and a union with fewer than two record
+      // arms can carry no discriminant that separates anything. A part
+      // spliced in from a nested union contributes `null` -- the arms are
+      // already IR types there, so nothing is known about them either way,
+      // and 'nothing known' has to WEAKEN a sibling part's claim.
+      const armObs: { part: ts.Type | null; arm: IrType; lits?: Record<string, string[]> }[] = [];
       const byKey = new Map<string, IrType>();
       for (const part of widened.getTypes()) {
         // An UNINHABITED arm contributes no runtime value — `T | never ≡ T`
@@ -3678,11 +3751,19 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
                   ` . arm ${checker.typeToString(part).slice(0, 40)} -> ${inner.arms.length} arms`,
               );
             }
-            for (const innerArm of inner.arms) byKey.set(typeKey(innerArm), innerArm);
+            inner.arms.forEach((innerArm, j) => {
+              byKey.set(typeKey(innerArm), innerArm);
+              // The inner union already answered this question for its own
+              // arms; splicing them in must not throw that away, or a
+              // substituted arm would silently unconstrain everything it
+              // is spliced beside.
+              armObs.push({ part: null, arm: innerArm, lits: armDiscrimLits(inner, j) });
+            });
             continue;
           }
         }
         byKey.set(typeKey(mapped), mapped);
+        armObs.push({ part, arm: mapped });
       }
       const arms = [...byKey.values()];
       // Every arm elided as uninhabited: the union itself is `never`. It has
@@ -3849,6 +3930,55 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         return null;
       }
       arms.sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
+      // The per-arm literal table, aligned with the CANONICAL arm order
+      // (an arm's index there is its runtime tag). Two parts that mapped
+      // to the SAME arm intersect: the arm holds both their values, so
+      // only a literal they agree on constrains it.
+      const armLits = ((): Record<string, string[]>[] => {
+        if (armObs.filter((o) => o.arm.kind === "record").length < 2) return arms.map(() => ({}));
+        const litsOfPart = (part: ts.Type, arm: IrType): Record<string, string[]> => {
+          if (arm.kind !== "record") return {};
+          const shape = ctx.shapes.get(arm.shapeId);
+          if (shape === undefined) return {};
+          const pinned: Record<string, string[]> = {};
+          for (const p of checker.getPropertiesOfType(part)) {
+            // REQUIRED properties only -- an optional one is satisfied by
+            // omission, so it constrains no value of the arm.
+            if (p.flags & ts.SymbolFlags.Optional) continue;
+            const f = shape.fields.find((x) => x.name === p.name);
+            // Only a plain `string` SLOT can be tested: that is where the
+            // literal went, and it is what the emitted predicate reads.
+            if (f === undefined || f.type.kind !== "string") continue;
+            const pt = checker.getTypeOfSymbol(p);
+            // A NUL inside the literal has no C-string constant to be
+            // compared against (the LLVM lane interns a NUL-terminated
+            // one), and no source spells one on purpose. Not recorded
+            // rather than mis-compared.
+            if (pt.isStringLiteralType() && !pt.value.includes("\u0000")) pinned[p.name] = [pt.value];
+          }
+          return pinned;
+        };
+        const byArm = new Map<string, Record<string, string[]>>();
+        for (const o of armObs) {
+          if (o.arm.kind !== "record") continue;
+          const k = typeKey(o.arm);
+          // Two PARTS that mapped to the same arm: the arm holds the
+          // values of both, so the sets UNION. (Intersecting them was the
+          // fourth fence in front of zapo's appstate rows: several schema
+          // keys share one IR shape, and asking for a single agreed value
+          // left that arm pinning nothing at all.)
+          const seen = o.lits ?? (o.part === null ? {} : litsOfPart(o.part, o.arm));
+          const prev = byArm.get(k);
+          byArm.set(k, prev === undefined ? seen : mergeArmLitSets(prev, seen));
+        }
+        return arms.map((a) => byArm.get(typeKey(a)) ?? {});
+      })();
+      if (process.env["SCRIPTC_DISCRIM_WHY"] !== undefined && armLits.some((m) => Object.keys(m).length > 0)) {
+        console.error(
+          `DISCRIM ${checker.typeToString(widened).slice(0, 70)} -> ` +
+            armLits.map((m) => JSON.stringify(m)).join(" | ").slice(0, 600),
+        );
+      }
       if (unions.recursivePending(widened)) {
         // The knot closed through this union. A frame that resolved
         // through context-sensitive hooks (generic type parameters, mixin
@@ -3864,7 +3994,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
           // would strand a degenerate union in whatever already holds it;
           // inventing arms would strand a false one.
           if (arms.length >= 2) {
-            const id = unions.finalizeRecursive(widened, arms);
+            const id = unions.finalizeRecursive(widened, arms, armLits);
             const answer: IrType = { kind: "union", unionId: id };
             if (referencesPendingPlaceholder(answer, unions, ctx.shapes) !== null) return null;
             frameOk = true;
@@ -3873,10 +4003,10 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
           return null;
         }
         frameOk = true;
-        return { kind: "union", unionId: unions.finalizeRecursive(widened, arms) };
+        return { kind: "union", unionId: unions.finalizeRecursive(widened, arms, armLits) };
       }
       frameOk = true;
-      return { kind: "union", unionId: unions.intern(arms) };
+      return { kind: "union", unionId: unions.intern(arms, armLits) };
     } finally {
       unions.inProgress.delete(widened);
       // A frame that failed AFTER a back-reference minted its placeholder
@@ -5228,6 +5358,16 @@ function spreadErasedIndexValue(
   if (decls.length === 0 || !decls.every((d) => ts.isObjectLiteralExpression(d))) return undefined;
   let value: IrType | null = null;
   let sawSpread = false;
+  /** At least one spread source PUBLISHES a string/number signature —
+   * the whole reason to recover anything. Without one the literal is an
+   * ordinary spread the desugar handles, and the recovery must stay out
+   * of its way. */
+  let sawIndexSource = false;
+  /** The sources cannot agree on ONE narrow slot: a fixed-shape source
+   * beside a keyed one, two signatures with different value types, or a
+   * declared member that is no arm of either. The store then holds the
+   * checked-dynamic value type, which holds all of them. */
+  let widenToDyn = false;
   let fold = false;
   for (const decl of decls as ts.ObjectLiteralExpression[]) {
     // KEY ORDER decides whether the recovered store can answer at all.
@@ -5253,12 +5393,24 @@ function spreadErasedIndexValue(
     for (const prop of decl.properties) {
       if (!ts.isSpreadAssignment(prop)) continue;
       sawSpread = true;
-      // A spread source with NO signature erased nothing, but it also
-      // contributes keys this shape would now claim to store uniformly —
-      // and its own fields may not fit the slot. Refuse the whole
-      // recovery rather than claim a store one source cannot fill.
+      // A spread source with NO signature erased nothing of its own, but
+      // it contributes keys this shape would claim to store, and its
+      // fields may not fit the slot the keyed source offers. That used to
+      // refuse the whole recovery — which is what kept zapo's
+      // appstate-mutation rows refused after everything else answered:
+      // `{ schema, operation, ...indexArgs, ...base }` mixes a
+      // `Record<string, string|boolean|null>` with a fixed `as const`
+      // object carrying `version: number`. The honest answer is not
+      // "refuse" and not "claim a slot one source cannot fill": it is a
+      // store whose value type holds EVERY contributor, and the checked-
+      // dynamic one does. The source's own members are already merged
+      // into `widened`'s properties, so they are checked below with the
+      // literal's own.
       const srcInfos = checker.getIndexInfosOfType(checker.getTypeAtLocation(prop.expression));
-      if (srcInfos.length === 0) return undefined;
+      if (srcInfos.length === 0) {
+        widenToDyn = true;
+        continue;
+      }
       for (const info of srcInfos) {
         if (
           !(info.keyType.flags & ts.TypeFlags.String) &&
@@ -5268,12 +5420,15 @@ function spreadErasedIndexValue(
         }
         const iv = mapType(info.valueType, ctx);
         if (!iv || !isSupportedIndexValue(iv)) return undefined;
-        if (value !== null && !typeEquals(value, iv)) return undefined;
-        value = iv;
+        sawIndexSource = true;
+        // Two signatures that disagree have no common narrow slot; the
+        // widened one holds both.
+        if (value !== null && !typeEquals(value, iv)) widenToDyn = true;
+        else value = iv;
       }
     }
   }
-  if (!sawSpread || value === null) return undefined;
+  if (!sawSpread || !sawIndexSource || value === null) return undefined;
   // A DECLARED member that only fits the slot as a SUBSET forces the FOLD.
   //
   // The member loop below asks two different questions of the two shapes
@@ -5302,7 +5457,7 @@ function spreadErasedIndexValue(
   // recovery declined the literal outright, and the desugar fenced at the
   // spread. The fold's own guards (accessor, array-index-like name) are
   // enforced by that same loop, now that `fold` is decided before it runs.
-  if (!fold) {
+  if (!fold && !widenToDyn) {
     for (const p of checker.getPropertiesOfType(widened)) {
       const pt = mapType(checker.getTypeOfSymbol(p), ctx);
       if (!pt) return undefined;
@@ -5311,6 +5466,39 @@ function spreadErasedIndexValue(
         break;
       }
     }
+  }
+  // A DECLARED member that is no arm of the sources' slot widens too. It
+  // is the same question the loop above asks, with the third answer
+  // spelled out: exactly -> the hybrid keeps a struct slot; as a SUBSET
+  // -> only the fold can hold it; NOT AT ALL -> nothing the sources offer
+  // can, so widen. Before this the third answer was `return undefined`,
+  // and the literal refused at its spread.
+  if (!widenToDyn) {
+    for (const p of checker.getPropertiesOfType(widened)) {
+      const pt = mapType(checker.getTypeOfSymbol(p), ctx);
+      if (!pt) return undefined;
+      if (!typeEquals(pt, value) && !fitsWithinSlot(pt, value, ctx)) {
+        widenToDyn = true;
+        break;
+      }
+    }
+  }
+  if (widenToDyn) {
+    // The WIDENED store is a checked-dynamic one, and it FOLDS: a member
+    // whose home is the store has no struct slot to keep. Every
+    // contributor must be able to enter the tree — the same
+    // canConvertToDyn domain the dynFrom conversion uses everywhere else
+    // — or the recovery declines and the literal keeps the fence it has
+    // today.
+    const getRecord = (id: string): IrRecordShape | undefined => ctx.shapes.get(id);
+    const getUnion = (id: string): IrUnionDef | undefined => ctx.unions.get(id);
+    if (!canConvertToDyn(value, getRecord, getUnion)) return undefined;
+    for (const p of checker.getPropertiesOfType(widened)) {
+      const pt = mapType(checker.getTypeOfSymbol(p), ctx);
+      if (!pt || !canConvertToDyn(pt, getRecord, getUnion)) return undefined;
+    }
+    value = DYN;
+    fold = true;
   }
   // Every DECLARED member must fit the recovered slot. A member the
   // overflow could not hold would make the shape claim a uniform value
@@ -5334,7 +5522,16 @@ function spreadErasedIndexValue(
     // (fieldTarget's canonicalized()). The hybrid keeps exact
     // equality: there the member has a struct slot of its own, and the
     // merge helper stores declared names RAW.
-    if (!typeEquals(pt, value) && !(fold && fitsWithinSlot(pt, value, ctx))) return undefined;
+    // The WIDENED store admits every member the dynFrom conversion
+    // admits — checked just above, and re-stated here because this loop
+    // is the one gate the two shapes share.
+    if (
+      !typeEquals(pt, value) &&
+      !(fold && fitsWithinSlot(pt, value, ctx)) &&
+      !(fold && value.kind === "dyn" && canConvertToDyn(pt, (id) => ctx.shapes.get(id), (id) => ctx.unions.get(id)))
+    ) {
+      return undefined;
+    }
   }
   if (process.env["SCRIPTC_SPREADIX_WHY"] !== undefined) {
     console.error(`SPREADIX-RECOVER ${checker.typeToString(widened)} idx=${typeKey(value)} fold=${String(fold)}`);
