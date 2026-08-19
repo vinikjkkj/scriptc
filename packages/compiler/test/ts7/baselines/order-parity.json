@@ -8276,6 +8276,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4761-the-three-hot-path-shortcuts-and-the-boundaries-they-stop-at.ts": {
+   "order": [
+    "<repo>/tests/corpus/4761-the-three-hot-path-shortcuts-and-the-boundaries-they-stop-at.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/4771-entry-identity-through-a-method-chain.cjs": {
    "order": [
     "<repo>/tests/corpus/4771-entry-identity-through-a-method-chain.cjs"
@@ -8288,9 +8294,9 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/4761-the-three-hot-path-shortcuts-and-the-boundaries-they-stop-at.ts": {
+  "<repo>/tests/corpus/4791-sha256-across-every-block-and-pad-boundary.ts": {
    "order": [
-    "<repo>/tests/corpus/4761-the-three-hot-path-shortcuts-and-the-boundaries-they-stop-at.ts"
+    "<repo>/tests/corpus/4791-sha256-across-every-block-and-pad-boundary.ts"
    ],
    "diags": []
   },
