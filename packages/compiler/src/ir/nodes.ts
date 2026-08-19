@@ -5845,6 +5845,31 @@ export type IrExpr =
    * listed (they never live in the overflow map — the lowering prepends
    * them from the shape). Never throws. */
   | { kind: "recordOvfKeys"; obj: IrExpr; shapeId: string; type: IrType; loc: SrcLoc }
+  /** The same enumeration as SLOT INDICES: a fresh f64[] of the overflow
+   * map's LIVE entry slots, in exactly the JS own-key order recordOvfKeys
+   * lists (the runtime's scr_map_slots_js_order). It exists so a generated
+   * record walker can take the key and the value out of ONE entry
+   * (recordOvfSlotGet) instead of snapshotting the keys and reading each
+   * one BACK by key: the by-key read has a miss path, and on a shape whose
+   * value width cannot represent undefined that miss path is the "record
+   * has no key" trap. A walker that enumerates and then re-reads can never
+   * take it, but "can never" is an argument about the surrounding code; an
+   * entry read has no miss to answer at all, which is a property of the
+   * operation. `obj` must be a record whose shape carries an indexValue;
+   * the receiver is borrowed, the array is owned (+1). Never throws. */
+  | { kind: "recordOvfSlots"; obj: IrExpr; shapeId: string; type: IrType; loc: SrcLoc }
+  /** The key (`part: "key"`, always string) or the value (`part: "value"`,
+   * the shape's indexValue width) of ONE overflow entry, addressed by a
+   * slot index that came from recordOvfSlots on the SAME record. There is
+   * no lookup and therefore no miss: both parts read the entry the index
+   * names. `slot` is f64; receiver and slot are borrowed, a refcounted
+   * result is owned (+1). Never throws.
+   *
+   * The index is only meaningful while the map is unmodified — the same
+   * condition the key snapshot already needed to name the same entry, so
+   * this is not a new obligation. Every generated user is a walker that
+   * writes only to a FRESH record it is building. */
+  | { kind: "recordOvfSlotGet"; obj: IrExpr; shapeId: string; slot: IrExpr; part: "key" | "value"; type: IrType; loc: SrcLoc }
   /** Union construction: wrap an arm value into a fresh tagged box (the
    * frontend inserts these wherever a `B` flows into an `A | B` slot).
    * `tag` is the arm's index in the union's canonical arm list; `value` has

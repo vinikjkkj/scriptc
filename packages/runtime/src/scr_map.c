@@ -667,3 +667,48 @@ ScrArr *scr_map_keys_js_order(const ScrMap *m) {
   }
   return out;
 }
+
+/* The map's LIVE ENTRY SLOTS in the same JS own-key order
+ * scr_map_keys_js_order answers (canonical array indices ascending first,
+ * then the rest in insertion order) - an f64 array of indices the
+ * scr_map_iter_* accessors take. A compiler-generated record walker uses it
+ * to read a key AND its value out of ONE entry, instead of snapshotting the
+ * keys and looking each one back up: an entry read has no miss to answer,
+ * so such a walker never reaches the by-key helper's "record has no key"
+ * trap. Every index pushed is LIVE, so scr_map_iter_at cannot trap either.
+ * Borrows m; returns a +1 f64 array. */
+ScrArr *scr_map_slots_js_order(const ScrMap *m) {
+  size_t n = m->nentries;
+  ScrArr *out = scr_arr_new(SCR_ELEM_F64, m->nlive);
+  size_t nidx = 0;
+  struct { uint32_t v; size_t i; } *idx = NULL;
+  for (size_t i = 0; i < n; i++) {
+    if (!m->entries[i].live) continue;
+    ScrStr *k = (ScrStr *)scr_map_slot_to_ptr(m->entries[i].key);
+    uint32_t v;
+    if (!scr_map_key_array_index(k, &v)) continue;
+    if (nidx % 16 == 0) {
+      idx = realloc(idx, (nidx + 16) * sizeof *idx);
+      if (!idx) scr_map_oom();
+    }
+    size_t j = nidx++;
+    while (j > 0 && idx[j - 1].v > v) {
+      idx[j] = idx[j - 1];
+      j--;
+    }
+    idx[j].v = v;
+    idx[j].i = i;
+  }
+  for (size_t i = 0; i < nidx; i++) {
+    scr_arr_push_f64(out, (double)idx[i].i);
+  }
+  free(idx);
+  for (size_t i = 0; i < n; i++) {
+    if (!m->entries[i].live) continue;
+    ScrStr *k = (ScrStr *)scr_map_slot_to_ptr(m->entries[i].key);
+    uint32_t v;
+    if (scr_map_key_array_index(k, &v)) continue;
+    scr_arr_push_f64(out, (double)i);
+  }
+  return out;
+}

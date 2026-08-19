@@ -7994,15 +7994,27 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
         );
       }
 
-      // The overflow walk: a fresh key snapshot in JS own-key order, each
-      // value read back through the overflow-only keyed read (declared
-      // names never live in the overflow map).
-      const ksT = arrayOf(STRING);
-      const ksRef = ref("ks.0", ksT);
+      // The overflow walk: a fresh SLOT snapshot in JS own-key order, each
+      // key AND its value read out of the entry that slot names. The older
+      // spelling snapshotted the KEYS and read each value back by key,
+      // which routes through the shape's keyed-read helper - and on a value
+      // width with no undefined to answer, that helper's miss path is the
+      // "record has no key" trap. This walk could never take it (the key
+      // came from this very map and nothing here writes to it), but that is
+      // a property of the surrounding loop; an entry read has no miss to
+      // answer at all, which is a property of the operation.
+      const ksT = arrayOf(F64);
+      const ksRef = ref("sls.0", ksT);
+      const slotRef = ref("sl.0", F64);
       const kRef = ref("k.0", STRING);
-      const readValue: IrExpr | null = valueT
-        ? { kind: "recordKeyGet", obj: rRef, shapeId: argIr.shapeId, key: kRef, overflowOnly: true, type: valueT, loc }
-        : null;
+      const rawValue: IrExpr = { kind: "recordOvfSlotGet", obj: rRef, shapeId: argIr.shapeId, slot: slotRef, part: "value", type: iv, loc };
+      // ivSurfaces above admits exactly three shapes: identity, an
+      // arm-into-union wrap, and dyn-over-dyn (identity again).
+      const readValue: IrExpr | null = !valueT
+        ? null
+        : typeEquals(iv, valueT)
+          ? rawValue
+          : { kind: "unionWrap", unionId: (valueT as IrType & { kind: "union" }).unionId, tag: L.armTag((valueT as IrType & { kind: "union" }).unionId, iv), value: rawValue, type: valueT, loc };
       const loopPushed: IrExpr =
         member === "keys"
           ? kRef
@@ -8018,7 +8030,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
                 loc,
               };
       body.push(
-        { kind: "varDecl", localId: "ks.0", init: { kind: "recordOvfKeys", obj: rRef, shapeId: argIr.shapeId, type: ksT, loc }, loc },
+        { kind: "varDecl", localId: "sls.0", init: { kind: "recordOvfSlots", obj: rRef, shapeId: argIr.shapeId, type: ksT, loc }, loc },
         {
           kind: "for",
           init: { kind: "varDecl", localId: "i.0", init: num(0), loc },
@@ -8037,7 +8049,8 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
             loc,
           },
           body: [
-            { kind: "varDecl", localId: "k.0", init: { kind: "arrayGet", arr: ksRef, index: ref("i.0", F64), type: STRING, loc }, loc },
+            { kind: "varDecl", localId: "sl.0", init: { kind: "arrayGet", arr: ksRef, index: ref("i.0", F64), type: F64, loc }, loc },
+            { kind: "varDecl", localId: "k.0", init: { kind: "recordOvfSlotGet", obj: rRef, shapeId: argIr.shapeId, slot: slotRef, part: "key", type: STRING, loc }, loc },
             push(loopPushed),
           ],
           loc,
@@ -8052,8 +8065,9 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
         locals: [
           { id: "r.0", name: "r", type: argIr, mutable: true },
           { id: "out.0", name: "out", type: resultT, mutable: false },
-          { id: "ks.0", name: "ks", type: ksT, mutable: false },
+          { id: "sls.0", name: "sls", type: ksT, mutable: false },
           { id: "i.0", name: "i", type: F64, mutable: true },
+          { id: "sl.0", name: "sl", type: F64, mutable: false },
           { id: "k.0", name: "k", type: STRING, mutable: false },
         ],
         body,
@@ -8687,12 +8701,14 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       );
     }
     // The source overflow, in JS own-key order (only index-signature
-    // sources carry one).
-    const ksT = arrayOf(STRING);
+    // sources carry one) - by SLOT, so the key and its value come out of
+    // the same entry and the walk never asks the shape's keyed-read helper
+    // for a key it just enumerated (see recordOvfSlots).
+    const ksT = arrayOf(F64);
     if (fIv) {
       const ovfLift = slotLift(fIv)!;
       body.push(
-        { kind: "varDecl", localId: "ks.0", init: { kind: "recordOvfKeys", obj: sRef, shapeId: fromId, type: ksT, loc }, loc },
+        { kind: "varDecl", localId: "sls.0", init: { kind: "recordOvfSlots", obj: sRef, shapeId: fromId, type: ksT, loc }, loc },
         {
           kind: "for",
           init: { kind: "varDecl", localId: "i.0", init: num(0), loc },
@@ -8700,7 +8716,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
             kind: "bin",
             op: "<",
             left: ref("i.0", F64),
-            right: { kind: "arrIntrinsic", method: "length", receiver: ref("ks.0", ksT), args: [], type: F64, loc },
+            right: { kind: "arrIntrinsic", method: "length", receiver: ref("sls.0", ksT), args: [], type: F64, loc },
             type: BOOL,
             loc,
           },
@@ -8711,13 +8727,14 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
             loc,
           },
           body: [
-            { kind: "varDecl", localId: "k.0", init: { kind: "arrayGet", arr: ref("ks.0", ksT), index: ref("i.0", F64), type: STRING, loc }, loc },
+            { kind: "varDecl", localId: "sl.0", init: { kind: "arrayGet", arr: ref("sls.0", ksT), index: ref("i.0", F64), type: F64, loc }, loc },
+            { kind: "varDecl", localId: "k.0", init: { kind: "recordOvfSlotGet", obj: sRef, shapeId: fromId, slot: ref("sl.0", F64), part: "key", type: STRING, loc }, loc },
             {
               kind: "recordKeySet",
               obj: outRef,
               shapeId: toId,
               key: ref("k.0", STRING),
-              value: intoSlot({ kind: "recordKeyGet", obj: sRef, shapeId: fromId, key: ref("k.0", STRING), overflowOnly: true, type: fIv, loc }, ovfLift),
+              value: intoSlot({ kind: "recordOvfSlotGet", obj: sRef, shapeId: fromId, slot: ref("sl.0", F64), part: "value", type: fIv, loc }, ovfLift),
               loc,
             },
           ],
@@ -8735,8 +8752,9 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
         { id: "out.0", name: "out", type: toT, mutable: false },
         ...(fIv
           ? [
-              { id: "ks.0", name: "ks", type: ksT, mutable: false },
+              { id: "sls.0", name: "sls", type: ksT, mutable: false },
               { id: "i.0", name: "i", type: F64, mutable: true },
+              { id: "sl.0", name: "sl", type: F64, mutable: false },
               { id: "k.0", name: "k", type: STRING, mutable: false },
             ]
           : []),
@@ -8854,12 +8872,18 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
             : write,
         );
       }
-      const ksT = arrayOf(STRING);
+      // The source overflow by SLOT (recordOvfSlots): key and value come
+      // out of one entry, so no key is looked back up. Object.assign(x, x)
+      // is the one shape here whose target CAN be the enumerated record,
+      // and it stays safe: every key of the source is then already a key of
+      // the target, so each write takes scr_map_set's in-place branch and
+      // no append (the only thing that can renumber slots) happens.
+      const ksT = arrayOf(F64);
       const fromShape = L.shapes.get(plan.fromId)!;
       if (plan.ovfLift !== null && fromShape.indexValue) {
         const fIv = fromShape.indexValue;
         body.push(
-          { kind: "varDecl", localId: "ks.0", init: { kind: "recordOvfKeys", obj: sRef, shapeId: plan.fromId, type: ksT, loc }, loc },
+          { kind: "varDecl", localId: "sls.0", init: { kind: "recordOvfSlots", obj: sRef, shapeId: plan.fromId, type: ksT, loc }, loc },
           {
             kind: "for",
             init: { kind: "varDecl", localId: "i.0", init: num(0), loc },
@@ -8867,7 +8891,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
               kind: "bin",
               op: "<",
               left: ref("i.0", F64),
-              right: { kind: "arrIntrinsic", method: "length", receiver: ref("ks.0", ksT), args: [], type: F64, loc },
+              right: { kind: "arrIntrinsic", method: "length", receiver: ref("sls.0", ksT), args: [], type: F64, loc },
               type: BOOL,
               loc,
             },
@@ -8878,13 +8902,14 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
               loc,
             },
             body: [
-              { kind: "varDecl", localId: "k.0", init: { kind: "arrayGet", arr: ref("ks.0", ksT), index: ref("i.0", F64), type: STRING, loc }, loc },
+              { kind: "varDecl", localId: "sl.0", init: { kind: "arrayGet", arr: ref("sls.0", ksT), index: ref("i.0", F64), type: F64, loc }, loc },
+              { kind: "varDecl", localId: "k.0", init: { kind: "recordOvfSlotGet", obj: sRef, shapeId: plan.fromId, slot: ref("sl.0", F64), part: "key", type: STRING, loc }, loc },
               {
                 kind: "recordKeySet",
                 obj: tRef,
                 shapeId: targetIr.shapeId,
                 key: ref("k.0", STRING),
-                value: intoSlot({ kind: "recordKeyGet", obj: sRef, shapeId: plan.fromId, key: ref("k.0", STRING), overflowOnly: true, type: fIv, loc }, plan.ovfLift),
+                value: intoSlot({ kind: "recordOvfSlotGet", obj: sRef, shapeId: plan.fromId, slot: ref("sl.0", F64), part: "value", type: fIv, loc }, plan.ovfLift),
                 loc,
               },
             ],
@@ -8905,8 +8930,9 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
           { id: "s.0", name: "s", type: fromT, mutable: true },
           ...(plan.ovfLift !== null && fromShape.indexValue
             ? [
-                { id: "ks.0", name: "ks", type: ksT, mutable: false },
+                { id: "sls.0", name: "sls", type: ksT, mutable: false },
                 { id: "i.0", name: "i", type: F64, mutable: true },
+                { id: "sl.0", name: "sl", type: F64, mutable: false },
                 { id: "k.0", name: "k", type: STRING, mutable: false },
               ]
             : []),
@@ -9098,7 +9124,10 @@ function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & 
     const name = `%rec.merge.${L.widthHelpers.size}`;
     L.widthHelpers.set(key, name);
     const toT: IrType = { kind: "record", shapeId: toId };
-    const ksT = arrayOf(STRING);
+    // f64[]: the source overflow is walked by SLOT, not by key (see
+    // recordOvfSlots) - key and value come out of the same entry, so no
+    // key is ever looked back up in the map it was enumerated from.
+    const ksT = arrayOf(F64);
     const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
     const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
     const outRef = ref("out.0", toT);
@@ -9271,16 +9300,18 @@ function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & 
         );
       }
       // Then the source overflow, in JS own-key order.
-      const ks = `ks.${ci}`;
+      const ks = `sls.${ci}`;
       const iv = `i.${ci}`;
+      const sv = `sl.${ci}`;
       const kv = `k.${ci}`;
       locals.push(
-        { id: ks, name: `ks${n}`, type: ksT, mutable: false },
+        { id: ks, name: `sls${n}`, type: ksT, mutable: false },
         { id: iv, name: `i${n}`, type: F64, mutable: true },
+        { id: sv, name: `sl${n}`, type: F64, mutable: false },
         { id: kv, name: `k${n}`, type: STRING, mutable: false },
       );
       body.push(
-        { kind: "varDecl", localId: ks, init: { kind: "recordOvfKeys", obj: sRef, shapeId: plan.shapeId, type: ksT, loc }, loc },
+        { kind: "varDecl", localId: ks, init: { kind: "recordOvfSlots", obj: sRef, shapeId: plan.shapeId, type: ksT, loc }, loc },
         {
           kind: "for",
           init: { kind: "varDecl", localId: iv, init: num(0), loc },
@@ -9294,13 +9325,14 @@ function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & 
           },
           update: { kind: "assign", localId: iv, value: { kind: "bin", op: "+", left: ref(iv, F64), right: num(1), type: F64, loc }, loc },
           body: [
-            { kind: "varDecl", localId: kv, init: { kind: "arrayGet", arr: ref(ks, ksT), index: ref(iv, F64), type: STRING, loc }, loc },
+            { kind: "varDecl", localId: sv, init: { kind: "arrayGet", arr: ref(ks, ksT), index: ref(iv, F64), type: F64, loc }, loc },
+            { kind: "varDecl", localId: kv, init: { kind: "recordOvfSlotGet", obj: sRef, shapeId: plan.shapeId, slot: ref(sv, F64), part: "key", type: STRING, loc }, loc },
             {
               kind: "recordKeySet",
               obj: outRef,
               shapeId: toId,
               key: ref(kv, STRING),
-              value: intoSlot({ kind: "recordKeyGet", obj: sRef, shapeId: plan.shapeId, key: ref(kv, STRING), overflowOnly: true, type: fIv, loc }),
+              value: intoSlot({ kind: "recordOvfSlotGet", obj: sRef, shapeId: plan.shapeId, slot: ref(sv, F64), part: "value", type: fIv, loc }),
               ...(ovf ? { overflowOnly: true as const } : {}),
               loc,
             },
@@ -9474,28 +9506,32 @@ function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & 
     }
     if (shape.indexValue) {
       const iv = shape.indexValue;
-      const ksT = arrayOf(STRING);
+      // By SLOT (recordOvfSlots): the key and its value come out of one
+      // entry, so the walk never re-reads a key it just enumerated.
+      const ksT = arrayOf(F64);
       locals.push(
-        { id: "ks.0", name: "ks", type: ksT, mutable: false },
+        { id: "sls.0", name: "sls", type: ksT, mutable: false },
         { id: "i.0", name: "i", type: F64, mutable: true },
+        { id: "sl.0", name: "sl", type: F64, mutable: false },
         { id: "k.0", name: "k", type: STRING, mutable: false },
         { id: "raw.0", name: "raw", type: iv, mutable: false },
       );
-      const rawRead: IrExpr = { kind: "recordKeyGet", obj: sRef, shapeId, key: ref("k.0", STRING), overflowOnly: true, type: iv, loc };
+      const rawRead: IrExpr = { kind: "recordOvfSlotGet", obj: sRef, shapeId, slot: ref("sl.0", F64), part: "value", type: iv, loc };
       const utag = iv.kind === "union" ? L.armTag(iv.unionId, UNDEFINED_T) : -1;
       const innerBody: IrStmt[] = [
-        { kind: "varDecl", localId: "k.0", init: { kind: "arrayGet", arr: ref("ks.0", ksT), index: ref("i.0", F64), type: STRING, loc }, loc },
+        { kind: "varDecl", localId: "sl.0", init: { kind: "arrayGet", arr: ref("sls.0", ksT), index: ref("i.0", F64), type: F64, loc }, loc },
+        { kind: "varDecl", localId: "k.0", init: { kind: "recordOvfSlotGet", obj: sRef, shapeId, slot: ref("sl.0", F64), part: "key", type: STRING, loc }, loc },
         { kind: "varDecl", localId: "raw.0", init: rawRead, loc },
       ];
       const rawRef = ref("raw.0", iv);
       void utag;
       innerBody.push(writeFor(ref("k.0", STRING), rawRef, iv));
       body.push(
-        { kind: "varDecl", localId: "ks.0", init: { kind: "recordOvfKeys", obj: sRef, shapeId, type: ksT, loc }, loc },
+        { kind: "varDecl", localId: "sls.0", init: { kind: "recordOvfSlots", obj: sRef, shapeId, type: ksT, loc }, loc },
         {
           kind: "for",
           init: { kind: "varDecl", localId: "i.0", init: num(0), loc },
-          cond: { kind: "bin", op: "<", left: ref("i.0", F64), right: { kind: "arrIntrinsic", method: "length", receiver: ref("ks.0", ksT), args: [], type: F64, loc }, type: BOOL, loc },
+          cond: { kind: "bin", op: "<", left: ref("i.0", F64), right: { kind: "arrIntrinsic", method: "length", receiver: ref("sls.0", ksT), args: [], type: F64, loc }, type: BOOL, loc },
           update: { kind: "assign", localId: "i.0", value: { kind: "bin", op: "+", left: ref("i.0", F64), right: num(1), type: F64, loc }, loc },
           body: innerBody,
           loc,
