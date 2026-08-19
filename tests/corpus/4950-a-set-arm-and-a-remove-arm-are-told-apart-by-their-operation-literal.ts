@@ -150,3 +150,30 @@ function oddBag(): unknown {
 const odd = oddBag() as Ev;
 console.log('odd op=' + odd.operation + ' schema=' + odd.schema);
 if (odd.schema === 'Mute') console.log('odd chatJid=' + odd.chatJid);
+
+// NESTED, and validated in ONE dynCheck: the union sits as a record FIELD and
+// as an ARRAY element of a bigger checked-dynamic extraction. The whole-union
+// match predicate is the OR of its arm matchers with no literals in it — which
+// is what keeps "a matched arm's builder can no longer fail" true — and the
+// literals do their work inside the BUILD, where the arm is chosen.
+type OpSet = { readonly op: 'set'; readonly k: string; readonly v?: string };
+type OpRemove = { readonly op: 'remove'; readonly k: string };
+type Op = OpSet | OpRemove;
+type Envelope = { readonly at: number; readonly one: Op; readonly many: Op[] };
+function opBag(op: string, k: string): unknown {
+  const o: Record<string, unknown> = {};
+  o['op'] = op;
+  o['k'] = k;
+  return o;
+}
+function envelopeBag(): unknown {
+  const o: Record<string, unknown> = {};
+  o['at'] = 3;
+  o['one'] = opBag('remove', 'K0');
+  o['many'] = [opBag('remove', 'K1'), opBag('set', 'K2')];
+  return o;
+}
+const env = envelopeBag() as Envelope;
+console.log('env at=' + String(env.at) + ' one.op=' + env.one.op);
+console.log('env many ' + env.many.map((o) => o.op + ':' + o.k).join(','));
+if (env.one.op === 'remove') console.log('env one remove ' + env.one.k);
