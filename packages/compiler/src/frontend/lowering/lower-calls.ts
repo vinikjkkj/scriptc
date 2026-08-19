@@ -4167,6 +4167,17 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       if (name === "Boolean") return L.lowerCondition(argNode);
       const arg = L.lowerExpr(argNode);
       if (name === "String") return L.ensureString(arg, argNode);
+      // Number(x) at the READ's slot width, the twin of the rule
+      // ensureString has always had (numberConvAtDynWidth, lower-exprs).
+      // `Number(node.attrs.size)` on an absent key is NaN in Node and was
+      // an uncatchable ABORT here, while `String(node.attrs.size)` on the
+      // same read already printed `undefined`: one conversion had the rule
+      // and its sibling did not.  A declined rung leaves `arg` untouched
+      // and every arm below is what it was.
+      {
+        const atWidth = L.numberConvAtDynWidth(arg);
+        if (atWidth) return { kind: "libCall", fn: "dyn.toNumber", args: [atWidth], type: F64, loc };
+      }
       if (arg.type.kind === "f64") return arg;
       if (arg.type.kind === "bool") {
         return {
