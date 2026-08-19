@@ -8354,6 +8354,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4970-records-enumerated-where-every-construction-agrees-with-the-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/4970-records-enumerated-where-every-construction-agrees-with-the-shape.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
@@ -9224,6 +9230,12 @@
   "<repo>/tests/diagnostics/a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts": {
    "order": [
     "<repo>/tests/diagnostics/a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/a-record-enumerated-in-an-order-or-a-key-set-it-is-not-built-with.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/a-record-enumerated-in-an-order-or-a-key-set-it-is-not-built-with.ts"
    ],
    "diags": []
   },

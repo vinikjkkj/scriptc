@@ -4148,6 +4148,7 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
         return null;
       }
       const init = L.lowerExprExpecting(decl.initializer, g.type);
+      L.noteKeyRiskBinding(g.id, init);
       return { kind: "assign", localId: g.id, value: init, loc: locOf(decl) };
     }
 
@@ -4589,6 +4590,7 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // subtyping (`const p: {a: number} = wider;`) is rejected, not coerced.
     init = L.coerceInto(decl.initializer, init, type);
     const local = L.declareLocal(decl.name, decl.name.text, type, isLet);
+    L.noteKeyRiskBinding(local.id, init);
     if (classPin !== null) {
       L.ctx.classPins.set(local.id, classPin);
       if (process.env["SCRIPTC_CLASSPIN_WHY"] !== undefined) {
@@ -8693,6 +8695,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       const shape = L.shapes.get(recvT.shapeId);
       if (shape && !shape.tuple) {
         const receiver = L.lowerExpr(stmt.expression);
+        L.noteKeyEnumeration(receiver, loc, "for-in");
         if (receiver.type.kind !== "record") L.badType(stmt.expression, L.typeOf(stmt.expression));
         const rShape = L.shapes.get(receiver.type.shapeId);
         if (!rShape) throw new Error(`lowerer bug: unknown shape ${receiver.type.shapeId}`);

@@ -32,6 +32,7 @@ import {
   requiresDynamicTypeDiag,
   unionMismatchDiag,
   UNSUPPORTED,
+  keyOrderFromDynamicDiag,
   unsupportedDiag,
   unsupportedTypeDiag,
 } from "../../diagnostics/diagnostic.js";
@@ -2413,6 +2414,10 @@ export class Lowerer {
     functions.push(...this.liftedFns);
     functions.push(...this.implicitFns);
 
+    // The deferred key-enumeration decision - after the whole walk, so a
+    // construction anywhere in the program can reach a surface anywhere.
+    this.reportKeyEnumerationRisks();
+
     if (this.remainder) {
       // Deferred collection diagnostics nothing flushed — declarations no
       // reference ever made relevant. They belong to the unreached group
@@ -2856,6 +2861,159 @@ export class Lowerer {
       return;
     }
     this.advisories.push(diag);
+  }
+
+  /** KEY-ENUMERATION RISK - the record model's two silent wrong answers,
+   * made loud. A record is a monomorphic struct with no per-instance key
+   * list, so its own keys are its SHAPE's: `fields` for the set,
+   * `declaredOrder` for the order. That is Node-exact only while the value
+   * was BUILT that way, and three constructions are not:
+   *   "set"   a width copy - or a spread doing width subtyping in spread
+   *           clothing - into a narrower shape. JS's narrowed value is the
+   *           SAME object and keeps the dropped keys; the struct copy ends
+   *           them (docs/limitations, the width-copy stance).
+   *   "order" a literal spelled in an order the shape does not carry.
+   *           `declaredOrder` is the FIRST interned type's member order and
+   *           is metadata rather than identity, so one shape serves several
+   *           literal orders and keeps only the first.
+   *   "dyn"   a checked cast materialising the shape out of a dynamic
+   *           value, whose keys and their order are run-time facts.
+   * The risk rides the VALUE, never the shape: a shape is shared by every
+   * construction of its member set, so a shape-level test refuses the
+   * programs that build it correctly too - tests/corpus/1555 and 2023 are
+   * both such, and both keep compiling because of this. And only the
+   * ENUMERATION is refused: reading a narrowed record's declared fields is
+   * untouched, which is what tests/corpus/2026 has always relied on. */
+  readonly keyRiskLiterals = new Map<string, { why: "set" | "order" | "dyn"; detail: string }>();
+  readonly keyRiskHelpers = new Map<string, { why: "set" | "order" | "dyn"; detail: string }>();
+  readonly keyRiskValues = new Map<string, { why: "set" | "order" | "dyn"; detail: string }>();
+
+  /** Every place the program enumerates a record, decided in run().
+   * Deferred because a surface can be lowered before the construction that
+   * puts its value at risk (a literal inside a function declared further
+   * down, a width copy in a later module) - an eager test would miss
+   * exactly the programs that make the answer wrong. */
+  readonly keyEnumUses: { ref: string | null; risk: { why: "set" | "order" | "dyn"; detail: string } | null; loc: SrcLoc; surface: string }[] = [];
+
+  keyRiskLocKey(loc: SrcLoc): string {
+    return `${loc.file}@${loc.start}`;
+  }
+
+  /** Local ids are per-FRAME (`${name}.${count}` off FnCtx.localCounters),
+   * so two functions each declaring `narrow` both hold `narrow.0` and a
+   * Lowerer-wide map would let one frame's risk refuse the other frame's
+   * binding. Keys carry the frame. Globals (`%g.`-prefixed) are already
+   * program-unique AND cross frames, so they must NOT be scoped. */
+  private readonly keyRiskFrameIds = new WeakMap<object, number>();
+  private keyRiskFrameNext = 0;
+
+  keyRiskKey(localId: string): string {
+    if (localId.startsWith("%g.")) return localId;
+    const frame = this.ctx as unknown as object;
+    let id = this.keyRiskFrameIds.get(frame);
+    if (id === undefined) {
+      id = this.keyRiskFrameNext++;
+      this.keyRiskFrameIds.set(frame, id);
+    }
+    return `f${id}:${localId}`;
+  }
+
+  /** A record LITERAL the walk proved cannot enumerate Node-exactly. */
+  noteKeyRiskLiteral(loc: SrcLoc, why: "set" | "order" | "dyn", detail: string): void {
+    const k = this.keyRiskLocKey(loc);
+    if (!this.keyRiskLiterals.has(k)) this.keyRiskLiterals.set(k, { why, detail });
+  }
+
+  /** The risk of the VALUE an expression produces, or null when the walk
+   * cannot point at its construction (a parameter, a field read, a call
+   * result). Null means SAY NOTHING: a refusal has to name the site that
+   * makes the answer wrong, or it is refusing a program at random. */
+  exprKeyRisk(e: IrExpr): { why: "set" | "order" | "dyn"; detail: string } | null {
+    if (e.kind === "dynCheck") {
+      // A cast to a UNION materialises exactly ONE arm (widest first, first
+      // full match wins) and that arm alone, so every record arm carries the
+      // same run-time fact.
+      const shapeIds =
+        e.type.kind === "record"
+          ? [e.type.shapeId]
+          : e.type.kind === "union"
+            ? (this.unions.get(e.type.unionId)?.arms ?? []).flatMap((a) => (a.kind === "record" ? [a.shapeId] : []))
+            : [];
+      for (const id of shapeIds) {
+        const sh = this.shapes.get(id);
+        if (!sh || sh.tuple || sh.indexValue) continue;
+        // One data field has one order; it is the ORDER that needs two.
+        if (sh.fields.filter((f) => !f.name.startsWith("%")).length < 2) continue;
+        return {
+          why: "dyn",
+          detail: `a checked cast materialises ${id} out of a dynamic value, whose own keys and their order are a run-time fact no struct carries`,
+        };
+      }
+      return null;
+    }
+    if (e.kind === "call") return this.keyRiskHelpers.get(e.callee) ?? null;
+    if (e.kind === "recordLit") return this.keyRiskLiterals.get(this.keyRiskLocKey(e.loc)) ?? null;
+    if (e.kind === "varRef") return this.keyRiskValues.get(this.keyRiskKey(e.localId)) ?? null;
+    return null;
+  }
+
+  /** A binding takes its initializer's risk: `const n: Narrow = wide` is
+   * the whole of the drop in one line. */
+  noteKeyRiskBinding(localId: string, init: IrExpr | null): void {
+    if (!init) return;
+    const r = this.exprKeyRisk(init);
+    const k = this.keyRiskKey(localId);
+    if (r && !this.keyRiskValues.has(k)) this.keyRiskValues.set(k, r);
+  }
+
+  /** Note that this expression's own keys are enumerated. */
+  noteKeyEnumeration(value: IrExpr | null, loc: SrcLoc, surface: string): void {
+    if (!value) return;
+    if (value.kind === "varRef") {
+      this.keyEnumUses.push({ ref: this.keyRiskKey(value.localId), risk: null, loc, surface });
+      return;
+    }
+    const r = this.exprKeyRisk(value);
+    if (r) this.keyEnumUses.push({ ref: null, risk: r, loc, surface });
+  }
+
+  /** run()'s deferred decision: enumerating a value the walk proved wrong
+   * is REFUSED rather than answered wrongly. SCRIPTC_KEYRISK_WHY prints the
+   * whole join instead of only the matches, so a program that is CLEAR can
+   * be seen to be. */
+  reportKeyEnumerationRisks(): void {
+    const why = process.env["SCRIPTC_KEYRISK_WHY"] !== undefined;
+    for (const u of this.keyEnumUses) {
+      const risk = u.risk ?? (u.ref === null ? null : this.keyRiskValues.get(u.ref) ?? null);
+      if (why) {
+        console.error(
+          `[keyrisk] ${u.loc.file}@${u.loc.start} ${u.surface} ${u.ref ?? "-"} ` +
+            (risk ? `RISK-${risk.why} ${risk.detail}` : "ok"),
+        );
+      }
+      if (!risk) continue;
+      // The "dyn" half is ADVICE, not a refusal, and the reason is measured:
+      // refusing it refuses `JSON.parse(s) as T` followed by
+      // `JSON.stringify(t)` - seven of the first fifteen corpus programs
+      // compiled, all of them green against Node. A cast whose source order
+      // the compiler cannot see is POSSIBLY wrong; the other two halves are
+      // provably wrong, so they refuse.
+      if (risk.why === "dyn") {
+        this.pushAdvice(keyOrderFromDynamicDiag(u.surface, risk.detail, u.loc));
+        continue;
+      }
+      this.pushDiag(
+        unsupportedDiag(
+          "SC1090",
+          u.loc,
+          `${u.surface} over a record this program does not build the way its shape enumerates ` +
+            (risk.why === "set"
+              ? "(a width copy into the narrower shape ends the keys that shape does not name, and JS would keep them)"
+              : "(a record enumerates in its shape declared order, not per-object insertion order)"),
+          `${risk.detail} - read the fields you need instead of enumerating, or build the value the way the shape enumerates it`,
+        ),
+      );
+    }
   }
 
   unsupported(
@@ -6096,10 +6254,23 @@ export class Lowerer {
     // orphan one).
     const plan = this.recordWidthPlan(fromId, toId);
     if (!plan) return null;
+    // The DROP, recorded against the interned HELPER rather than the target
+    // shape: every call of this helper produces a value missing these keys,
+    // and no other construction of the shape does. JS's narrowed value is
+    // the SAME object and keeps them; the struct copy ends them.
+    const droppedByWidth = from.fields.filter(
+      (f) => !f.name.startsWith("%") && !to.fields.some((t) => t.name === f.name),
+    );
     const key = `rec:${fromId}:${toId}`;
     const existing = this.widthHelpers.get(key);
     if (existing) return existing;
     const name = `%rec.width.${this.widthHelpers.size}`;
+    if (droppedByWidth.length > 0) {
+      this.keyRiskHelpers.set(name, {
+        why: "set",
+        detail: `a width copy from ${fromId} into ${toId} ends ${droppedByWidth.map((f) => JSON.stringify(f.name)).join(", ")}`,
+      });
+    }
     // Interned BEFORE the body builds: a recursive nested-width field
     // (self-referential shapes) resolves to this helper itself.
     this.widthHelpers.set(key, name);
