@@ -1574,10 +1574,20 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           // getter's value, and an OPTIONAL one built the undefined arm
           // SILENTLY, which is the worse half. The probe sits on the miss
           // path alone, so a field the data read already answered runs no
-          // getter and nothing that works today changes; the MATCHER above
-          // is untouched, so it stays a SUBSET of what this builds and the
-          // union invariant ("the matched arm's builder can no longer
-          // fail") is not weakened -- a matched arm never reaches here.
+          // getter and nothing that works today changes.
+          //
+          // The MATCHER above is untouched, and for a REQUIRED field that
+          // keeps the union invariant exactly: the matcher demands the key
+          // present as DATA, so a matched arm never reaches this read. For
+          // an OPTIONAL one it does NOT: the matcher accepts a missing key,
+          // this read can then find an accessor whose value does not fit,
+          // and "the matched arm's builder can no longer fail" stops being
+          // true. Nothing reads the result -- the caller's pending check
+          // fires at once and a union whose ref arm is NULL releases
+          // harmlessly (every record release is null-guarded) -- and what
+          // the refusal replaces there is a FABRICATED undefined for a
+          // member that has a value. tests/harness/dyncheck.test.ts pins
+          // both halves of that trade.
           d.push(`    ScrDyn *acc = NULL;`);
           d.push(`    if (!m) {`);
           d.push(`      acc = scr_dyn_obj_accessor_get(d, ${keyLit}, ${keyLen});`);
