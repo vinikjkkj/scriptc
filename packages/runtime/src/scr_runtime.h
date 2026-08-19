@@ -3803,6 +3803,20 @@ ScrDyn *scr_dyn_obj_data_get(const ScrDyn *d, const char *key, size_t key_len);
  * function member is NOT bound -- it comes back as the pointer that
  * went in, which is the identity the func builder's fast path keeps. */
 ScrDyn *scr_dyn_obj_member_get(const ScrDyn *d, const char *key, size_t key_len);
+/* The ACCESSOR half of [[Get]], and ONLY that half: the record walkers'
+ * borrow-only read above cannot answer an accessor, so a required field
+ * provided by a getter read as ABSENT and the builder threw "got
+ * undefined" where Node answers the getter's value (and an OPTIONAL one
+ * built the undefined arm, silently). The builder calls this ONLY on the
+ * miss path, so a field the data read already answered never runs a
+ * getter and nothing that works today changes.
+ *
+ * Returns +1 on success. NULL with NO pending exception means the
+ * property is genuinely absent (there is no accessor for it anywhere on
+ * the chain); NULL with a pending exception means the getter threw, and
+ * the caller must unwind. A SET-only accessor reads as undefined, which
+ * is JS's own answer and not an absence. */
+ScrDyn *scr_dyn_obj_accessor_get(const ScrDyn *d, const char *key, size_t key_len);
 /* An OWN property a BORROW-only caller can have: the member table, then
  * the hidden table's DATA entries. The coercion protocols (toString /
  * valueOf / Symbol.toPrimitive / inspect's %s) ask through this and

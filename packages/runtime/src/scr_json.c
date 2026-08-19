@@ -3781,6 +3781,35 @@ ScrDyn *scr_dyn_obj_key_get(ScrDyn *recv, const char *key, size_t key_len) {
   return scr_dyn_retain(scr_dyn_undefined());
 }
 
+/* The ACCESSOR half of JS's [[Get]] on an OBJ receiver, and only that
+ * half.  scr_dyn_obj_data_get answers own/inherited DATA and stops there
+ * on purpose (it is borrow-only, and a getter needs +1 and an exception
+ * path); this is the other half, so the dynCheck record BUILDER -- which
+ * does hold both -- can ask for it on the MISS path and stop refusing a
+ * field JavaScript answers.  A required field provided by a getter read
+ * as absent and threw `expected string at $.a, got undefined` where Node
+ * answers the getter's value; an OPTIONAL one built the undefined arm,
+ * silently.
+ *
+ * +1 on success; NULL and NOTHING pending when the chain holds no
+ * accessor for the key (a genuine absence, which is what the caller then
+ * reports); NULL with the getter's exception pending when it threw.
+ * Deliberately NOT the whole [[Get]]: the DATA half already ran, and
+ * asking for it again would double an observable read. */
+ScrDyn *scr_dyn_obj_accessor_get(const ScrDyn *d, const char *key, size_t key_len) {
+  if (d == NULL || d->kind != SCR_DYN_OBJ) return NULL;
+  ScrDyn *found = NULL;
+  if (scr_dyn_obj_resolve(d, key, key_len, &found, NULL) != SCR_PROP_ACCESSOR) return NULL;
+  /* A set-only accessor READS as undefined in JS -- the absence of a
+   * getter is not an error, and it is not an absence of the property. */
+  ScrDyn *getter = scr_hid_getter(found);
+  if (getter->kind != SCR_DYN_FUNC) return scr_dyn_retain(scr_dyn_undefined());
+  scr_dyn_this_push_dyn(d);
+  ScrDyn *r = scr_dyn_call(getter, NULL, 0, "getter");
+  scr_dyn_this_pop();
+  return r; /* +1, or NULL with the getter's own exception pending */
+}
+
 /* `key in obj` over an OBJ receiver: own member, own hidden property,
  * then the chain — a non-enumerable property IS a property, so `in` sees
  * it even though Object.keys does not. Never throws (no getter runs). */

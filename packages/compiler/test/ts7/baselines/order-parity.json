@@ -8342,6 +8342,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4890-a-checked-cast-reads-a-field-a-getter-provides.ts": {
+   "order": [
+    "<repo>/tests/corpus/4890-a-checked-cast-reads-a-field-a-getter-provides.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/4900-a-websocket-init-bag-carrying-absent-proxy-fields.ts": {
    "order": [
     "<repo>/tests/corpus/4900-a-websocket-init-bag-carrying-absent-proxy-fields.ts"

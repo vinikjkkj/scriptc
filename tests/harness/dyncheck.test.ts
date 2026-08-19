@@ -1492,4 +1492,101 @@ console.log("recovered");
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toBe("TypeError true\nrecovered\n");
   });
+  /* A field an ACCESSOR provides. The materializing read is JS's [[Get]] MINUS
+   * accessors, so a getter-provided member read as ABSENT: a REQUIRED field
+   * threw where Node answers the getter's value, and an OPTIONAL one built the
+   * undefined arm SILENTLY. The AGREEING half is differential (corpus 4801);
+   * what lives here is the half Node cannot be asked about, because Node never
+   * checks an `as` at all. */
+  test("a getter answering the WRONG TYPE still fails, with the path", async () => {
+    const r = await compileAndRun(
+      "accessor-wrong-type",
+      `type Named = { name: string };
+const o = JSON.parse("{}");
+Object.defineProperty(o as object, "name", {
+  get(): number { return 7; },
+  enumerable: false,
+  configurable: true,
+});
+console.log("before");
+console.log((o as Named).name);
+`,
+    );
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toBe("before\n");
+    expect(r.stderr).toContain("Uncaught TypeError: expected string at $.name, got number");
+  });
+
+  test("a THROWING getter propagates its own error out of the cast", async () => {
+    // Node runs the getter at the READ; a materializing cast runs it at the
+    // CAST. Both throw the getter's own error and neither swallows it — the
+    // point of the pending check on the accessor read.
+    const r = await compileAndRun(
+      "accessor-throws",
+      `type Named = { name: string };
+const o = JSON.parse("{}");
+Object.defineProperty(o as object, "name", {
+  get(): string { throw new Error("getter said no"); },
+  enumerable: false,
+  configurable: true,
+});
+try {
+  console.log((o as Named).name);
+  console.log("unreachable");
+} catch (e) {
+  console.log("caught:", (e as Error).message);
+}
+console.log("recovered");
+`,
+    );
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("caught: getter said no\nrecovered\n");
+  });
+
+  test("a SET-only accessor reads as undefined, and undefined is not a string", async () => {
+    // JS answers `undefined` for a set-only accessor — an absent getter is not
+    // an error, and it is not an absence of the property either. The cast then
+    // fails for the ordinary reason, never for a made-up one.
+    const r = await compileAndRun(
+      "accessor-set-only",
+      `type Named = { name: string };
+const o = JSON.parse("{}");
+Object.defineProperty(o as object, "name", {
+  set(_v: string): void { /* no getter */ },
+  enumerable: false,
+  configurable: true,
+});
+console.log((o as Named).name);
+`,
+    );
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain("Uncaught TypeError: expected string at $.name, got undefined");
+  });
+
+  test("a UNION arm whose record needs an accessor still reports no-arm-matched", async () => {
+    // The MATCHER is deliberately unchanged: it returns bool and holds no
+    // exception path, so it cannot run a getter. It therefore stays a SUBSET
+    // of what the builder accepts, which is what keeps the union invariant
+    // ("the matched arm's builder can no longer fail") true. The visible
+    // consequence is that a union arm is not selected on an accessor-only
+    // field — a known, LOUD limitation, recorded here so it cannot regress
+    // into a silent one.
+    const r = await compileAndRun(
+      "accessor-union-arm",
+      `type Arm = { name: string };
+type U = Arm | number;
+const o = JSON.parse("{}");
+Object.defineProperty(o as object, "name", {
+  get(): string { return "g"; },
+  enumerable: false,
+  configurable: true,
+});
+const u = o as U;
+console.log(typeof u === "number" ? "number" : "record");
+`,
+    );
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain("Uncaught TypeError: expected");
+  });
+
 });
