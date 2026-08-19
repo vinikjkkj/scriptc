@@ -3956,6 +3956,41 @@ void scr_dyn_obj_drop_hidden(ScrDyn *recv, const char *key, size_t key_len) {
   scr_dyn_obj_unset(recv->v.obj.hidden, key, key_len);
 }
 
+/* Node spells the offending RECEIVER into the three V8 property-refusal
+ * texts below, and it spells it from the receiver's CONSTRUCTOR, not from
+ * a fixed word. Measured against v25.9.0, with
+ * `Object.defineProperty(x, "p", { value: 1 })` and then a write, a
+ * delete, or a write against a getter-only accessor:
+ *
+ *     {}                   Cannot delete property 'p' of #<Object>
+ *     new F()              Cannot delete property 'p' of #<F>
+ *     new Weird$Name()     Cannot delete property 'p' of #<Weird$Name>
+ *     class Klass          Cannot delete property 'p' of #<Klass>
+ *     Object.create(null)  Cannot delete property 'p' of [object Object]
+ *
+ * `cname` is exactly that constructor name -- the field util.inspect
+ * already prints as the `F { x: 1 }` prefix, so an object that inspects
+ * as `F { ... }` and refuses as `#<Object>` was disagreeing with itself
+ * about what it is. A null-prototype dictionary has NO constructor to
+ * name and V8 falls back to the ToString form; `null_proto` is that
+ * object exactly.
+ *
+ * One case stays as it stands, and cannot be reached: an object whose
+ * prototype was REPLACED after construction (Object.setPrototypeOf(o,
+ * null)) reads `[object Object]` in Node while this representation still
+ * remembers cname. setPrototypeOf has no lowering, so no compiled program
+ * can spell it. */
+static void scr_jb_put_recv_ctor(ScrJsonBuf *b, const ScrDyn *recv) {
+  if (recv->kind == SCR_DYN_OBJ && recv->null_proto) {
+    scr_jb_puts(b, "[object Object]");
+    return;
+  }
+  const char *cname = recv->kind == SCR_DYN_OBJ ? recv->v.obj.cname : NULL;
+  scr_jb_puts(b, "#<");
+  scr_jb_puts(b, cname != NULL ? cname : "Object");
+  scr_jb_puts(b, ">");
+}
+
 /* `delete recv[key]` over a dyn receiver — JS's [[Delete]], which is an
  * OWN-property operation and an ANSWER, not a void statement.
  *
@@ -4007,7 +4042,8 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
         scr_jb_init(&sb);
         scr_jb_puts(&sb, "Cannot delete property '");
         scr_jb_write(&sb, key->data, key->len);
-        scr_jb_puts(&sb, "' of #<Object>");
+        scr_jb_puts(&sb, "' of ");
+        scr_jb_put_recv_ctor(&sb, recv);
         scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&sb));
         return false;
       }
@@ -4209,7 +4245,9 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
           scr_jb_init(&sb);
           scr_jb_puts(&sb, "Cannot assign to read only property '");
           scr_jb_write(&sb, key->data, key->len);
-          scr_jb_puts(&sb, "' of object '#<Object>'");
+          scr_jb_puts(&sb, "' of object '");
+          scr_jb_put_recv_ctor(&sb, recv);
+          scr_jb_puts(&sb, "'");
           scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&sb));
           return;
         }
@@ -4229,7 +4267,9 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
           scr_jb_init(&sb);
           scr_jb_puts(&sb, "Cannot set property ");
           scr_jb_write(&sb, key->data, key->len);
-          scr_jb_puts(&sb, " of #<Object> which has only a getter");
+          scr_jb_puts(&sb, " of ");
+          scr_jb_put_recv_ctor(&sb, recv);
+          scr_jb_puts(&sb, " which has only a getter");
           scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&sb));
           return;
         }
