@@ -5270,17 +5270,6 @@ export class Lowerer {
     return { kind: "closure", fnName: name, captures: [], type: expected, loc };
   }
 
-  /** The record a THUNK-constructed instance projects into (the return
-   * side of classCtorThunk): method-named fields become closures bound to
-   * the instance — the classWitnessRecord stance, sound here because the
-   * thunk's instance is born inside it and never escapes nominally —
-   * data fields ride the width-lift copy (the established width stance:
-   * later mutations of the source field don't alias), and missing
-   * optional-flavored fields complete to their undefined arm. Interned
-   * per (class, shape). Null declines to the exact-shape fences: an
-   * accessor- or generic-method-satisfied field, an abstract/rest/
-   * inexact method signature, a builtin runtime layout, or a field that
-   * doesn't lift. */
   /** The fields a projection COPIES that a method of the projected class
    * WRITES — the condition that makes a mixed projection a lie about
    * itself, and the whole of SC6003's admission rule.
@@ -5381,6 +5370,21 @@ export class Lowerer {
     this.pushAdvice(projectionCopiesAMutatedFieldDiag(className, stale, at));
   }
 
+  /** The record a THUNK-constructed instance projects into (the return
+   * side of classCtorThunk): method-named fields become closures bound to
+   * the instance — the classWitnessRecord stance, sound here because the
+   * thunk's instance is born inside it and never escapes nominally —
+   * data fields ride the width-lift copy (the established width stance:
+   * later mutations of the source field don't alias), and missing
+   * optional-flavored fields complete to their undefined arm. Interned
+   * per (class, shape). Null declines to the exact-shape fences: an
+   * accessor- or generic-method-satisfied field, an abstract/rest/
+   * inexact method signature, a builtin runtime layout, or a field that
+   * doesn't lift.
+   *
+   * The two halves of that first sentence are the SC6003 divergence, and
+   * the "sound here" is about the THUNK's caller only — every other caller
+   * hands this an instance that does escape. noteMixedProjection above. */
   ctorWitnessProjection(className: string, target: IrType & { kind: "record" }, loc: SrcLoc): string | null {
     // SCRIPTC_PROJ_WHY: name the declining clause. The projection is
     // per-REQUESTED-FIELD and its declines are numerous; three separate
@@ -6663,11 +6667,23 @@ export class Lowerer {
    * `new Point(0,0)` flow into `{x: number; y: number}` slots). Every
    * target field must be a plain instance FIELD on the class (inherited
    * included) whose type lifts, or a missing optional-flavored field
-   * completing to its undefined arm — but never a field the class
-   * satisfies through a METHOD or accessor (bound method references have
-   * no lowering; the plan declines instead of projecting a lie). Builtin
-   * runtime layouts (the Error/EventEmitter/stream chains) decline: their
-   * fields aren't plain emitted storage. */
+   * completing to its undefined arm, or a field the class satisfies through
+   * a METHOD, which becomes a closure bound to the live instance
+   * (boundMethodPlan). An ACCESSOR-satisfied field and a generic method
+   * still decline. Builtin runtime layouts (the Error/EventEmitter/stream
+   * chains) decline: their fields aren't plain emitted storage.
+   *
+   * This paragraph used to say a method-satisfied field made the plan
+   * "decline instead of projecting a lie". It has not for a long time —
+   * boundMethodPlan is five lines below and projects one — and the sentence
+   * mattered, because the mix of a bound method and a copied data field IS
+   * the lie SC6003 now reports (noteMixedProjection). Corrected rather than
+   * deleted: the stance the sentence describes is the one somebody meant.
+   *
+   * Every decline here routes to ctorWitnessProjection (objRecordWidthHelper
+   * calls it on a null plan), which re-checks most of them and declines
+   * again — except the EventEmitter carve-out, which is deliberately more
+   * permissive. */
   objToRecordPlan(className: string, toId: string): Map<string, ObjFieldProj> | null {
     const info = this.classes.get(className);
     const to = this.shapes.get(toId);
