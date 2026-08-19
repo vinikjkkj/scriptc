@@ -3,7 +3,7 @@
  * emitter's frames (see the discipline comment in emitter core). */
 import type { CEmitter, Temp } from "./emitter.js";
 import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
-import { arrayOf, BOOL, BYTES_U8, bytesOf, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals } from "../../ir/nodes.js";
+import { arrayOf, BOOL, BYTES_U8, bytesOf, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
 import { boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { OVERFLOW_MEMBER, TOSTR_MEMBER } from "./emit-shapes.js";
@@ -7063,6 +7063,26 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const where = process.env["SCRIPTC_DC_WHERE"] === "1"
           ? `&(ScrDynPath){ NULL, ${cStringLiteral(Buffer.from(`${e.loc.file}@${String(e.loc.start)}`, "utf8"))}, 0 }`
           : "NULL";
+        // SCRIPTC_DC_CENSUS=1 — the COMPILE-TIME instrument for this family,
+        // and the twin SCRIPTC_DC_WHERE has no way to be. DC_WHERE renames a
+        // path segment in a message only a check that FIRES ever prints, so
+        // it can only be read from a run, and only for the sites that failed.
+        // This one names every emitted boundary crossing whether it fires or
+        // not: the interned helper (`sc_dc_<n>` — one per TARGET TYPE, so the
+        // statements the census counts are its arms, not these calls), the
+        // target typeKey, and the SOURCE position the crossing came from. It
+        // writes to stderr and touches no emitted byte.
+        if (process.env["SCRIPTC_DC_CENSUS"] !== undefined) {
+          // The position comes off the IR NODE, never off srcComment: that
+          // one names the emitter's CURRENT module, which during walker and
+          // helper emission is not the module the crossing came from. Reading
+          // it here attributed all 1 768 of zapo's crossings to the ENTRY
+          // file, which is the shape of a wrong answer that looks tidy.
+          const at = `${e.loc.file}@${String(e.loc.start)}`;
+          process.stderr.write(
+            `DCCENSUS ${helper} ${e.narrowBridge === true ? "narrowBridge" : "check"} ${at} :: ${typeKey(e.type)}\n`,
+          );
+        }
         return E.fallibleTemp(e.type, `${helper}(${dyn.name}, ${where})`);
       }
       case "yieldExpr": {

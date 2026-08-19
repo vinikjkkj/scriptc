@@ -921,14 +921,65 @@ export class LlDyn {
           const fieldWant = host.cstr(this.dynDesc(f.type));
           const utag = f.type.kind === "union" ? host.undefinedArmTag(f.type) : -1;
           const bind = this.mayHoldFunc(f.type);
-          const m = bind ? this.memberGetLit(B, "%d", f.name) : this.dataGetLit(B, "%d", f.name);
+          const m0 = bind ? this.memberGetLit(B, "%d", f.name) : this.dataGetLit(B, "%d", f.name);
+          // ... and, ONLY when that read missed, the ACCESSOR half of
+          // [[Get]] the borrow-only read cannot answer — emit-walkers.ts's
+          // row exactly, block for block. A field a getter provides read as
+          // ABSENT: a required one threw where Node answers, an OPTIONAL
+          // one built the undefined arm SILENTLY. The probe sits on the
+          // MISS path alone, so a field the data read answered runs no
+          // getter. Two entry allocas rather than a phi: the accessor call
+          // can bail mid-block, so the incoming edge of a phi would not be
+          // the block the call started in.
+          host.declare(`declare ptr @scr_dyn_obj_accessor_get(ptr, ptr, i64)`);
+          const mSlot = B.tmp();
+          const accSlot = B.tmp();
+          B.entryAllocas.push(`${mSlot} = alloca ptr`, `${accSlot} = alloca ptr`);
+          B.line(`store ptr ${m0}, ptr ${mSlot}`);
+          B.line(`store ptr null, ptr ${accSlot}`);
+          {
+            const hasD = B.tmp();
+            B.line(`${hasD} = icmp ne ptr ${m0}, null`);
+            const lAcc = B.newLabel("dca.a");
+            const lJoin = B.newLabel("dca.j");
+            B.condBr(hasD, lJoin, lAcc);
+            B.startBlock(lAcc);
+            const acc = B.tmp();
+            const klen = Buffer.byteLength(f.name, "utf8");
+            B.line(`${acc} = call ptr @scr_dyn_obj_accessor_get(ptr %d, ptr ${host.cstr(f.name)}, i64 ${klen}) ; .${f.name} accessor`);
+            this.pendingBail(B, "dca", releaseR, "ptr null");
+            B.line(`store ptr ${acc}, ptr ${mSlot}`);
+            B.line(`store ptr ${acc}, ptr ${accSlot}`);
+            B.br(lJoin);
+            B.startBlock(lJoin);
+          }
+          const m = B.tmp();
+          B.line(`${m} = load ptr, ptr ${mSlot}`);
           // +1 in the binding case: released after the field is built and
           // BEFORE the pending check, exactly as the C lane orders it (the
-          // absent arms never reach here — `m` is null there).
+          // absent arms never reach here — `m` is null there). In that case
+          // `m` IS the accessor result when the data read missed, so this
+          // one release covers both and dropAcc stays out of the way.
           const dropM = () => {
             if (!bind) return;
             host.declare(`declare void @scr_dyn_release(ptr)`);
             B.line(`call void @scr_dyn_release(ptr ${m})`);
+          };
+          /** The +1 the accessor read owes, in the NON-binding case. */
+          const dropAcc = () => {
+            if (bind) return;
+            host.declare(`declare void @scr_dyn_release(ptr)`);
+            const a = B.tmp();
+            B.line(`${a} = load ptr, ptr ${accSlot}`);
+            const nz = B.tmp();
+            B.line(`${nz} = icmp ne ptr ${a}, null`);
+            const lRel = B.newLabel("dca.r");
+            const lKeep = B.newLabel("dca.k");
+            B.condBr(nz, lRel, lKeep);
+            B.startBlock(lRel);
+            B.line(`call void @scr_dyn_release(ptr ${a})`);
+            B.br(lKeep);
+            B.startBlock(lKeep);
           };
           if (f.type.kind === "dyn") {
             // An `unknown` field: a present key passes through, a missing
@@ -939,6 +990,7 @@ export class LlDyn {
             const u = this.undef(B);
             B.line(`${sel} = select i1 ${has}, ptr ${m}, ptr ${u}`);
             storeInto(f.name, f.type, this.retainDyn(B, sel));
+            dropAcc();
           } else if (utag >= 0 && f.type.kind === "union") {
             const unit = host.unitInstanceRef(f.type.unionId, utag);
             const has = B.tmp();
@@ -956,6 +1008,7 @@ export class LlDyn {
             B.line(`${v} = call ptr @${this.dynCheckHelper(f.type)}(ptr ${m}, ptr ${pathSlot})`);
             storeInto(f.name, f.type, v);
             dropM();
+            dropAcc();
             this.pendingBail(B, "dcr", releaseR, "ptr null");
             B.br(lj);
             B.startBlock(lj);
@@ -976,6 +1029,7 @@ export class LlDyn {
             B.line(`${v} = call ${this.valTy(f.type)} @${this.dynCheckHelper(f.type)}(ptr ${m}, ptr ${pathSlot})`);
             storeInto(f.name, f.type, v);
             dropM();
+            dropAcc();
             this.pendingBail(B, "dcr", releaseR, "ptr null");
           }
         }
