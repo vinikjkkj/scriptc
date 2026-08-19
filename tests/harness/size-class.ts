@@ -201,11 +201,11 @@ const platform = process.platform;
 
 /** A default-built hello-world: no regex, no engine. */
 export const STATIC_CLASS_MAX =
-  platform === "linux" ? 397_632 : platform === "win32" ? 646_000 : 366_632;
+  platform === "linux" ? 397_632 : platform === "win32" ? 654_336 : 366_632;
 
 /** A program that uses regex: libregexp + libunicode, never the engine. */
 export const REGEX_CLASS_MAX =
-  platform === "linux" ? 552_680 : platform === "win32" ? 785_000 : 519_680;
+  platform === "linux" ? 552_680 : platform === "win32" ? 794_624 : 519_680;
 
 /* ── the ARMED half of the guard ───────────────────────────────────────
  *
@@ -435,11 +435,93 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * check and produce exactly the uninformative "less than 785000" message
  * the recorded pair was added to replace. Raising REGEX_CLASS_MAX is a
  * policy call this block deliberately did not make on its own. */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 644_608 : null;
+/* 2026-08-19 - SHA-256 on the x86 SHA extensions, with the scalar loop kept
+ * as the CPUID-chosen fallback. Both classes move, because scr_lib.c is
+ * always linked and every program therefore carries the vector arm whether
+ * or not it ever hashes a byte.
+ *
+ * FOUR ROWS, ONE RUN, and the base row is the reason the other three are
+ * readable. The precedent this file keeps is that a page of "growth" is
+ * often drift already spent before the branch existed (the toString slot:
+ * 1,536 stale in the anchor, 2,048 from main, 512 from the change), so the
+ * base worktree at 8495b1af was built with its own install, its own dist
+ * and its own caches, and weighed:
+ *
+ *   base 8495b1af             644,608 static   784,384 regex
+ *   SCR_SHA256_NI=0 (mine)    644,608          784,896      +0 /   +512
+ *   shipped (NI on)           646,144          786,432  +1,536 / +2,048
+ *
+ * BASE REPRODUCES BOTH RECORDED ANCHORS TO THE BYTE. There is no stale
+ * drift in this move: all of it is this branch's, and it splits in two.
+ *
+ * What the bytes bought, per change:
+ *   RESTRUCTURE  +0 static / +512 regex. scr_sha256_digest's inline block
+ *         loop became scr_sha256_blocks, the ONE place the scalar and
+ *         vector arms meet. It buys no speed; it exists so there is a
+ *         single dispatch site and so SCR_SHA256_NI=0 restores the old
+ *         path exactly. The static class does not notice it; the regex
+ *         class pays half a kilobyte of alignment for it.
+ *   SHA-NI  +1,536 on both. Read from the SHIPPED PDB, not the
+ *         instrumented one (which reports the same function at 3,763
+ *         bytes because -finstrument-functions un-inlines the intrinsics
+ *         into it -- I quoted that number first and it was wrong):
+ *              CTRL   scr_sha256_blocks   665 bytes  (the scalar
+ *                     compression is inlined INTO it; there is no
+ *                     scr_sha256_block symbol at -O2 on either side)
+ *              NI     scr_sha256_blocks   810
+ *                     scr_sha256_ni_blocks 1,025
+ *         = 1,170 bytes of new code, which PE file alignment rounds up to
+ *         the +1,536 the binary actually gains. scr_sha256_ni_probe and
+ *         scr_cpuid are inlined away entirely in the shipped build. Against it: 1.645x wall / 1.737x CPU on the
+ *         SEND 1:1 messaging scenario, 1.209x / 1.195x on RECV group,
+ *         1.118x / 1.146x on RECV 1:1, and 4.9-9.8x on the digest function
+ *         itself. Nothing on SEND group, which hashes once per 500 writes.
+ *
+ * The two deltas are NOT added to reach the shipped row: the shipped row
+ * is measured. +512 and +1,536 happen to sum to +2,048 on the regex class
+ * and NOT to the static one's +1,536, which is the alignment trap this
+ * file has recorded twice.
+ *
+ * WHY THE MAX CEILINGS MOVE, WHICH IS NOT A THING TO DO LIGHTLY.
+ * The RECORDED pair alone does NOT absorb this. Both old ceilings are
+ * REACHED, not approached: 646,144 > 646,000 and 786,432 > 785,000, and
+ * the suite printed `expected 646144 to be less than 646000` while both
+ * two-sided RECORDED checks stayed silent (1,536 and 2,048 are under one
+ * SIZE_DRIFT_PAGE). That is the exact inversion the previous block
+ * predicted at 616 bytes of headroom: the COARSE check firing first with
+ * the message the LOUD pair was added to replace.
+ *
+ * So the ceilings are not being loosened past a live signal; they are
+ * being put back above the loud check. The rule adopted here, and it is a
+ * rule rather than a nudge:
+ *
+ *     on win32, CLASS_MAX = CLASS_RECORDED + 2 x SIZE_DRIFT_PAGE
+ *     654,336 = 646,144 + 8,192      794,624 = 786,432 + 8,192
+ *
+ * so a drift of one page always trips the RECORDED pair -- which says
+ * GREW or SHRANK, by how much, and against what -- a full page before the
+ * ceiling can say anything at all. A ceiling that fires first is a gate
+ * that stops guarding, and that is what the old numbers had become.
+ *
+ * What MAX still protects, and why 646,000 stopped being the right number
+ * for it: the ceilings exist to keep the CLASSES apart -- a 2 KB dyn kind
+ * must not be able to hide a ~140 KB regex-library link or a ~620 KB
+ * engine link. 646,000 was a round number set when the static class
+ * weighed ~637 KB, i.e. roughly 8 KB of slack; twelve always-linked
+ * additions since have eaten it to 1,392 bytes, which is a QUARTER of one
+ * drift page, and at that width it stopped being a class bound and became
+ * a byte budget nobody voted for. 654,336 restores the original
+ * relationship and keeps the class property with two orders of magnitude
+ * to spare. The class DISTANCE itself is asserted separately and
+ * unconditionally in size-class-armed.test.ts (786,432 - 646,144 =
+ * 140,288, required to sit between 100,000 and 200,000), so nothing about
+ * this raise weakens the thing the ceilings are for.
+ */
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 646_144 : null;
 
 /** The regex program, same run, same tree. Deliberately NOT derived from
  * the static delta: this class moved +1,536 where that one moved +2,048. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 784_384 : null;
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 786_432 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown
