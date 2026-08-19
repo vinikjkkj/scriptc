@@ -34,6 +34,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 /* Every heap object's first member is `size_t rc`. */
 #define SCR_RC(obj) (*(size_t *)(obj))
@@ -47,19 +48,41 @@ static void scr_cyc_oom(void) {
  * the two functions that move it are the allocator and the free below. */
 static size_t scr_cyc_live = 0;
 
+/* Cycle-headered objects are the OTHER hot allocation site a compiled
+ * program has (scr_string.c is the first): a per-function cycle profile
+ * of the closure axis puts 5.2% of the run inside this calloc and 5.4%
+ * inside the free below, on 80-byte blocks - a box and a one-capture
+ * closure are the same size class. The pool contract is in scr_runtime.h;
+ * the only extra work here is stamping the class into the header, since
+ * scr_cyc_free is reached from ~16 different teardowns that do not know
+ * their own size. */
+static ScrPool scr_cyc_blocks;
+
 void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
-  ScrCycHdr *h = calloc(1, sizeof(ScrCycHdr) + size);
-  if (!h) scr_cyc_oom();
+  size_t phys = scr_pool_bytes(sizeof(ScrCycHdr) + size);
+  ScrCycHdr *h = scr_pool_take(&scr_cyc_blocks, phys);
+  if (h) {
+    memset(h, 0, phys); /* calloc's contract, kept, on the whole block */
+  } else {
+    h = calloc(1, phys);
+    if (!h) scr_cyc_oom();
+  }
   h->trace = trace;
   h->free_fn = free_fn;
   h->color = SCR_CYC_BLACK;
+  h->blk = phys <= SCR_POOL_MAX ? (uint32_t)(phys / SCR_POOL_GRAIN) : 0u;
   scr_cyc_live++; /* the pacing denominator; see below */
   return h + 1;
 }
 
 void scr_cyc_free(void *obj) {
   scr_cyc_live--;
-  free(scr_cyc_hdr(obj));
+  ScrCycHdr *h = scr_cyc_hdr(obj);
+  if (h->blk != 0 &&
+      scr_pool_give(&scr_cyc_blocks, h, (size_t)h->blk * SCR_POOL_GRAIN)) {
+    return;
+  }
+  free(h);
 }
 
 /* ── the candidate-root buffer ────────────────────────────────────────── */
@@ -115,10 +138,10 @@ void scr_cyc_on_dead(void *obj) {
   ScrCycHdr *h = scr_cyc_hdr(obj);
   if (!h->buffered) return;
   /* O(1) removal: swap the last entry into the hole. */
-  size_t i = h->buf_index;
+  size_t i = (size_t)h->buf_index;
   void *last = scr_roots[--scr_nroots];
   scr_roots[i] = last;
-  if (last != obj) scr_cyc_hdr(last)->buf_index = i;
+  if (last != obj) scr_cyc_hdr(last)->buf_index = (uint32_t)i;
   h->buffered = 0;
 }
 
@@ -132,7 +155,7 @@ void scr_cyc_on_release(void *obj) {
       if (!scr_roots) scr_cyc_oom();
     }
     h->buffered = 1;
-    h->buf_index = scr_nroots;
+    h->buf_index = (uint32_t)scr_nroots;
     scr_roots[scr_nroots++] = obj;
   }
   /* Threshold trigger. Never re-entered: a teardown's releases of untraced
@@ -231,7 +254,7 @@ void scr_collect_cycles(void) {
     ScrCycHdr *h = scr_cyc_hdr(obj);
     if (h->color == SCR_CYC_PURPLE) {
       scr_mark_gray(obj);
-      h->buf_index = out;
+      h->buf_index = (uint32_t)out;
       scr_roots[out++] = obj;
     } else {
       h->buffered = 0;

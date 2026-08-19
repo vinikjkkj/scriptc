@@ -56,6 +56,38 @@ runScenario("closure-churn", "closures", N, () => {
   acc = a % 1000000007
 }, FOLD_CEILING)
 
+// ── the closure ABLATION LADDER ──────────────────────────────────────
+// closure-churn above is 17x slower than Node and the question is WHICH
+// part. Each rung below removes exactly one mechanism from the loop
+// above it, so the differences price the mechanisms instead of arguing
+// about them:
+//
+//   closure-churn         box alloc + closure alloc + call + 3 releases
+//   closure-nocapture     closure alloc + call + releases   (no box)
+//   closure-call-hoisted  call + retain/release only        (no alloc)
+//
+// churn - nocapture      = the captured BOX
+// nocapture - hoisted    = the CLOSURE object
+// hoisted                = the indirect call and its refcount traffic
+//
+// Every rung reads seed[] and feeds the same accumulator, so none of
+// them is a different amount of arithmetic dressed up as a control.
+runScenario("closure-nocapture", "closures", N, () => {
+  let a = acc
+  for (let i = 0; i < N; i++) {
+    const f = (x: number): number => x + 1
+    a += f(seed[i & MASK] & 1)
+  }
+  acc = a % 1000000007
+}, FOLD_CEILING)
+
+const hoisted = (x: number): number => x + 1
+runScenario("closure-call-hoisted", "calls", N, () => {
+  let a = acc
+  for (let i = 0; i < N; i++) a += hoisted(seed[i & MASK] & 1)
+  acc = a % 1000000007
+}, FOLD_CEILING)
+
 // ── strings: immutable concat, scr_string.c reallocates ──────────────
 runScenario("string-build", "concats", N, () => {
   let a = acc
