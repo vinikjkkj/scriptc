@@ -570,6 +570,40 @@ function trapTraceRequested(): boolean {
  * build-cache key like any other flag, so an -Os binary and an -O2 binary
  * never share an entry. Only a -O<x> spelling is accepted, so this knob
  * cannot smuggle arbitrary argv in through the back door. */
+/* MEASURED on this toolchain, 2026-08-19 (block/imagesize), because the
+ * knob has fewer distinct outcomes than its spelling suggests and one of
+ * them is not free. One small program (8 live locals, 80 fallible calls),
+ * fresh build per arm, PE section table read from the file:
+ *
+ *   -O0                       2,687,488 bytes    PDB 4,345,856
+ *   -O1  -O2  -O3               713,728 bytes    PDB 2,854,912
+ *   -Os  -Oz                    435,712 bytes    PDB NONE
+ *
+ * -O1, -O2 and -O3 are BYTE-IDENTICAL in .text: 21 bytes differ across the
+ * whole file and all 21 are the PE TimeDateStamp (offset 128) and the
+ * build-id, both outside .text. -Os and -Oz differ by ZERO bytes. So this
+ * knob selects one of THREE builds, not six -- consistent with `zig cc`
+ * bucketing clang's -O levels into zig's build modes, and it means an -O3
+ * lane is not a lane anyone can measure.
+ *
+ * -Os/-Oz SUPPRESS THE PDB, exactly as -Wl,--strip-all does. That PDB is
+ * this toolchain's only symbolisation route (the PE carries nsyms=0) and
+ * both tests/perf/pdb-symbols.mjs and tests/perf/imagesize/ rest on it, so
+ * a size-optimised build is a build with no profile and no attribution.
+ * There is no spelling that keeps both.
+ *
+ * On zapo the whole knob is worth -7.25% of the image (30,476,800 ->
+ * 28,265,984) -- which is very nearly the whole of the -8.0% that -Os
+ * plus -ffunction-sections plus a strip was recorded as buying, so the
+ * section flags and the strip add almost nothing on top. And it is the
+ * wrong order of magnitude for the target: 93.33% of that image is the
+ * emitted TU and 61.72% of the TU's code is one minified vendored bundle
+ * compiled through the dyn path. See G:\zapo-work\estado-imagesize.md.
+ *
+ * Refused by zig's linker on x86_64-windows-gnu, with transcripts, beside
+ * the --wrap note below:  --icf=all, --icf=safe, --no-rosegment
+ * ("error: unsupported linker arg: --icf"). -Wl,-O2 is accepted and worth
+ * zero bytes. */
 function optLevelArg(): string {
   const v = process.env.SCRIPTC_OPT_LEVEL;
   if (v === undefined || v === "") return "-O2";
