@@ -8468,6 +8468,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5120-declared-optional-presence-is-per-instance.ts": {
+   "order": [
+    "<repo>/tests/corpus/5120-declared-optional-presence-is-per-instance.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/513-array-methods-rc-stress.ts": {
    "order": [
     "<repo>/tests/corpus/513-array-methods-rc-stress.ts"
