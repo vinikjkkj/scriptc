@@ -62,6 +62,25 @@ static ScrSidx *scr_sidx(const ScrStr *s) {
   return e;
 }
 
+/* Slack handed to a concat whose LEFT side is SHARED and whose result is
+ * short, so the next link of an `a + b + c` chain can append in place.
+ * 0 disables it, which is what the ablation control is built with.
+ *
+ * 16 was measured against 8 and 32, not chosen. At identical fixed work on
+ * the messaging bench's SEND group (1,500,000 map sets on both sides, and
+ * scr_str_concat / scr_str_release / scr_map_set call counts BIT-IDENTICAL
+ * so no work was skipped) the exact instrument counts:
+ *     scr_str_alloc   4,542,077 -> 3,041,069   (-1,501,008, -33.0%)
+ * i.e. exactly ONE allocation removed per inner iteration, plus the
+ * scr_sidx_purge and scr_str_take_spare that ride on it. 8 removes the
+ * same allocation for a shorter right-hand side; 32 measured no better and
+ * costs more capacity per string. The other three scenarios move by
+ * 1,008-5,008 allocations because their chains already reach the rc == 1
+ * arm above; nothing regresses. */
+#ifndef SCR_STR_CHAIN_SLACK
+#define SCR_STR_CHAIN_SLACK 16
+#endif
+
 /* ── allocation ─────────────────────────────────────────────────────── */
 
 /* Blocks freed by scr_str_release come back here instead of going to the
@@ -200,6 +219,16 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
   } else if (newlen >= 512 && newlen <= (SIZE_MAX - sizeof(ScrStr) - 1) / 2) {
     newcap = newlen + (newlen >> 1);
   }
+#if SCR_STR_CHAIN_SLACK
+  /* A SHARED left side (an array element, a variable, an interned literal)
+     gets no slack from either arm above, so `a + b + c` with a shared `a`
+     allocates twice: the first concat returns cap == len, and the second
+     therefore cannot take the in-place arm even though its left side is a
+     sole-reference temp. A small constant slack on short results is what
+     lets it. The messaging profile's SEND group is exactly this shape
+     (`members[m] + "|" + seq`). Measured, not assumed - see the ablation. */
+  else if (newlen < 512) newcap = newlen + SCR_STR_CHAIN_SLACK;
+#endif
   ScrStr *s = scr_str_take_spare(newlen);
   if (!s) s = scr_str_alloc(newlen, newcap);
   memcpy(s->data, a->data, a->len);
