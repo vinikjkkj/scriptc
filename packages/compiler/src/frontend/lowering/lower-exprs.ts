@@ -6416,6 +6416,23 @@ function armFieldFits(L: Lowerer, from: IrType, to: IrType): boolean {
   return (L.unions.get(to.unionId)?.arms ?? []).some((a) => typeEquals(a, from));
 }
 
+/** The type a CONTRIBUTOR leaves standing for `name` — read off the LAST
+ * contributor that declares it, which is the one JS's later-wins leaves in
+ * place among the contributors themselves. Undefined when no contributor
+ * declares the name at all, which is the caller's missing-field decline. */
+function leadFieldType(
+  L: Lowerer,
+  leadShapeIds: readonly string[],
+  leadOwner: ReadonlyMap<string, number>,
+  name: string,
+): IrType | undefined {
+  const i = leadOwner.get(name);
+  if (i === undefined) return undefined;
+  const id = leadShapeIds[i];
+  if (id === undefined) return undefined;
+  return L.shapes.get(id)?.fields.find((f) => f.name === name)?.type;
+}
+
 /** The PAIRED-ARM union-slot spread — `{ ...src, ...(c ? { k: v } : {}) }`
  * and `{ ...src, k: v }` where the SLOT's record arms pair ONE-TO-ONE with
  * the source's by field-NAME set. Two sites in zapo:
@@ -6441,10 +6458,24 @@ function armFieldFits(L: Lowerer, from: IrType, to: IrType): boolean {
  * tag test the emitter already emits.
  *
  * The gate is TOTAL, UNAMBIGUOUS pairing by field-name set, and nothing
- * weaker. It admits `fetcher.ts:92` and `content.ts:183` and NOTHING else in
- * zapo: `incoming.ts:397` pairs 0/8 and `mex-notification.ts:192` pairs 0/7
- * — every one of their slot arms is a record five fields wider than
- * anything the source holds, so no pairing exists and the fence stands.
+ * weaker.
+ *
+ * WHY THE CONTRIBUTOR RUN IS SOUND, and where it stops. The pairing key's
+ * SOURCE side is the name set the branch BUILDS — the source arm's names
+ * plus every name the literal supplies without reading it: the plain
+ * overrides, and now the contributors. Folding contributor names in is what
+ * makes `incoming.ts:397` pair at all (its slot arms are exactly five names
+ * wider than the source's, and those five are `WaIncomingBaseEvent`, which
+ * the literal already holds). The danger it introduces is PER-ARM
+ * PRECEDENCE: a name the contributor supplies AND one source arm declares
+ * comes from the SOURCE in that arm and from the CONTRIBUTOR in the others,
+ * so "which contributor owns this name" stops being an arm-independent
+ * fact. That configuration does not need a rule of its own — it collapses
+ * two source arms onto ONE pairing key, and `pairArmsByFieldName`'s
+ * ambiguity guard refuses it. Measured, not argued: a source
+ * `{k;n;t} | {k;t}` under a contributor `{k;n}` reads
+ * `arms-pair-ambiguously-by-name` while Node answers `n` from the source in
+ * one arm and from the contributor in the other.
  * `SCRIPTC_UNIONSLOT_WHY=1` reports the relation, the pairing count and the
  * per-field type deltas at every site, closed or refused.
  *
@@ -6465,9 +6496,21 @@ function armFieldFits(L: Lowerer, from: IrType, to: IrType): boolean {
  * anything is lowered, so a decline costs nothing and leaves the fence's own
  * message standing:
  *
- *  - the literal is one PLAIN spread FIRST, then only single-property
- *    conditional spreads `...(c ? { k: v } : {})` and plain named
- *    properties, each name contributed exactly once;
+ *  - the literal is a LEADING RUN of plain spreads, then only
+ *    single-property conditional spreads `...(c ? { k: v } : {})` and plain
+ *    named properties, each name contributed exactly once. The LAST spread
+ *    of the run is the SOURCE; the ones before it are plain-record
+ *    CONTRIBUTORS whose names the source's own fields override, because
+ *    the source is written after them and JS's spread is later-wins. A
+ *    contributor written AFTER the source is not admitted and cannot be:
+ *    it would override the arm's own fields, and then the source would
+ *    stop deciding the value of the names it declares, which is the
+ *    premise the whole rule rests on;
+ *  - every CONTRIBUTOR is a plain record (never a union: "which arm
+ *    supplies this name" would not be a compile-time fact) with no index
+ *    signature, tuple or accessor slot, and every field it leaves standing
+ *    reaches the slot field at a type `armFieldFits` admits — the same
+ *    test the source's own fields get, for the same reason;
  *  - every arm of the source union is a RECORD (a unit arm would mean the
  *    spread may copy nothing, and then the result's arm is NOT the source's);
  *  - the source's record arms pair one-to-one with the slot's by identical
@@ -6509,14 +6552,39 @@ function lowerPairedArmUnionSpread(
     return null;
   };
   const props = expr.properties;
-  const head = props[0];
-  if (!head || !ts.isSpreadAssignment(head)) return no("head-not-a-spread");
-  if (conditionalSpreadOf(head.expression) !== null) return no("head-is-conditional");
+  const first = props[0];
+  if (!first || !ts.isSpreadAssignment(first)) return no("head-not-a-spread");
+  if (conditionalSpreadOf(first.expression) !== null) return no("head-is-conditional");
+  // The LEADING RUN of plain (non-conditional) spreads. The LAST of them is
+  // the SOURCE — the spread whose arm decides which arm the result is — and
+  // the ones before it are plain-record CONTRIBUTORS merged underneath it.
+  //
+  // That split is not a choice, it is JS's later-wins read backwards: a
+  // contributor written AFTER the source would override the arm's own
+  // fields, and then the source would no longer decide the value of
+  // anything it declares, so the rule's whole premise ("the arm the source
+  // holds is the arm the result builds") would be false for those names.
+  // Taking the LAST spread as the source is therefore the only reading
+  // under which a contributor is a contributor; a union written earlier
+  // than the last spread declines below as a non-record contributor rather
+  // than being mis-modelled.
+  //
+  //   `{ ...normalized, errors }`        source, no contributor — the shape
+  //                                      this rule had before
+  //   `{ ...baseEvent, ...parsed }`      ONE contributor and a source —
+  //                                      incoming.ts:397
+  const run: ts.SpreadAssignment[] = [];
+  for (const p of props) {
+    if (!ts.isSpreadAssignment(p) || conditionalSpreadOf(p.expression) !== null) break;
+    run.push(p);
+  }
+  const head = run[run.length - 1]!;
+  const leadNodes = run.slice(0, -1);
   type Override =
     | { kind: "cond"; node: ts.SpreadAssignment; cs: { cond: ts.Expression; props: CondSpreadProp[]; whenTrue: boolean }; name: string }
     | { kind: "plain"; node: ts.PropertyAssignment | ts.ShorthandPropertyAssignment; name: string };
   const overrides: Override[] = [];
-  for (const p of props.slice(1)) {
+  for (const p of props.slice(run.length)) {
     if (ts.isSpreadAssignment(p)) {
       const cs = conditionalSpreadOf(p.expression);
       if (cs === null || cs === "unsupported" || cs.props.length !== 1) return no("later-spread-not-a-single-prop-conditional");
@@ -6533,6 +6601,40 @@ function lowerPairedArmUnionSpread(
    * falls back to the SOURCE read when its condition is false, so it is
    * not exempt from the per-field fit the pairing rule requires. */
   const plainNames = overrides.filter((o) => o.kind === "plain").map((o) => o.name);
+
+  /** The CONTRIBUTORS, in source order. Each must be a plain record whose
+   * shape the field-copy desugar can read: a union contributor would mean
+   * the merged shape is not a compile-time fact (which arm supplies the
+   * name?), and an index signature or accessor cannot be copied field by
+   * field any more than it can on the source side. */
+  const leadShapeIds: string[] = [];
+  for (const ln of leadNodes) {
+    const lt = L.mapTypeOf(L.typeOf(ln.expression));
+    if (lt?.kind !== "record") return no(`contributor-not-a-record:${lt?.kind ?? "none"}`);
+    const ls = L.shapes.get(lt.shapeId);
+    if (!ls) return no("contributor-shape-missing");
+    if (ls.indexValue || ls.tuple || shapeHasAccessorSlots(ls)) return no("contributor-shape-index-tuple-or-accessor");
+    leadShapeIds.push(lt.shapeId);
+  }
+  /** Which contributor OWNS a name — the LAST one that declares it, which
+   * is later-wins among the contributors themselves. The source still beats
+   * every one of them, because the source spread is written after them all;
+   * this map is consulted only for names the source arm does not declare. */
+  const leadOwner = new Map<string, number>();
+  leadShapeIds.forEach((id, i) => {
+    for (const f of L.shapes.get(id)!.fields) leadOwner.set(f.name, i);
+  });
+  const leadNames = [...leadOwner.keys()];
+  /** The pairing key's SOURCE side. A contributor name and a plain override
+   * name join it for the same reason and with the same effect — the branch
+   * BUILDS that name without reading it from the source arm — and the
+   * ambiguity guard inside pairArmsByFieldName is what keeps the join
+   * honest: two source arms that differ only by a name a contributor also
+   * supplies collapse onto ONE key and the pairing refuses. That is the
+   * configuration where per-arm precedence actually diverges (the name comes
+   * from the SOURCE in the arm that declares it and from the CONTRIBUTOR in
+   * the arm that does not), and it is refused rather than guessed. */
+  const extraNames = [...plainNames, ...leadNames];
 
   const srcNode = head.expression;
   const st = L.mapTypeOf(L.typeOf(srcNode));
@@ -6565,7 +6667,7 @@ function lowerPairedArmUnionSpread(
   const sSorted = [...srcRecIds].sort();
   const cSorted = [...ctxRecIds].sort();
 
-  const paired = pairArmsByFieldName(L, srcRecIds, ctxRecIds, plainNames);
+  const paired = pairArmsByFieldName(L, srcRecIds, ctxRecIds, extraNames);
   if (paired === "not-total") return no(`arms-not-paired:[${sSorted.join(",")}]vs[${cSorted.join(",")}]`);
   if (paired === "ambiguous") return no(`arms-pair-ambiguously-by-name:[${sSorted.join(",")}]vs[${cSorted.join(",")}]`);
 
@@ -6622,16 +6724,42 @@ function lowerPairedArmUnionSpread(
       // read has to fit the slot exactly like an un-overridden one.
       if (plainNames.includes(f.name)) continue;
       const sT = sFields.get(f.name);
-      if (sT === undefined) return no(`paired-arm-missing-field:${sId}->${cId}:${f.name}`);
+      // A name the SOURCE arm does not declare is the CONTRIBUTOR's, and
+      // its type has to reach the slot field exactly as a source read
+      // would: rebuilding a contributor's value at a narrower type is the
+      // same silent wrong answer, whichever spread it came from.
+      if (sT === undefined) {
+        const lT = leadFieldType(L, leadShapeIds, leadOwner, f.name);
+        if (lT === undefined) return no(`paired-arm-missing-field:${sId}->${cId}:${f.name}`);
+        if (!armFieldFits(L, lT, f.type)) {
+          return no(`contributor-field-not-widenable:${sId}->${cId}:${f.name}:${L.fmt(lT).slice(0, 40)}=>${L.fmt(f.type).slice(0, 40)}`);
+        }
+        continue;
+      }
       if (!armFieldFits(L, sT, f.type)) {
         return no(`field-not-widenable:${sId}->${cId}:${f.name}:${L.fmt(sT).slice(0, 40)}=>${L.fmt(f.type).slice(0, 40)}`);
       }
     }
   }
 
-  // Committed from here on: the source lowers ONCE into a hidden local at
-  // the position the spread occupies (it is the first property, so that IS
-  // its position), and every arm branch re-READS that local.
+  // Committed from here on: every contributor and then the source lower
+  // ONCE each, into hidden locals, IN SOURCE ORDER — which is the order JS
+  // evaluates a literal's spreads, and the order matters because a
+  // contributor expression may have effects. Every arm branch re-READS the
+  // locals; nothing is evaluated per arm.
+  const leadSlots: { shapeId: string; localId: string; type: IrType; init: IrExpr }[] = [];
+  for (let i = 0; i < leadNodes.length; i++) {
+    const lowered = L.lowerExpr(leadNodes[i]!.expression);
+    if (lowered.type.kind !== "record") return no(`lowered-contributor-not-a-record:${lowered.type.kind}`);
+    // The LOWERED shape must be the one the checker-side tests were built
+    // from. Two internings of the same declared type are a real possibility
+    // here (the source side carries its own note about the validator ICE
+    // that causes), and a contributor read at the other one would copy
+    // fields the fit loop never checked. Decline rather than reconcile.
+    if (lowered.type.shapeId !== leadShapeIds[i]) return no("lowered-contributor-shape-moved");
+    const hl = L.declareHiddenLocal("%uspread.c", lowered.type);
+    leadSlots.push({ shapeId: lowered.type.shapeId, localId: hl.id, type: lowered.type, init: lowered });
+  }
   const srcLowered = L.lowerExpr(srcNode);
   if (srcLowered.type.kind !== "union" && srcLowered.type.kind !== "record") {
     return no(`lowered-src-not-union-or-record:${srcLowered.type.kind}`);
@@ -6681,7 +6809,7 @@ function lowerPairedArmUnionSpread(
   // above gives. Re-run every per-field test against THIS map: the two
   // internings agree in practice, and a rule that assumes they must is a
   // rule that mis-routes a tag the day they do not.
-  const lPaired = pairArmsByFieldName(L, lSorted, cSorted, plainNames);
+  const lPaired = pairArmsByFieldName(L, lSorted, cSorted, extraNames);
   if (lPaired === "not-total") return no(`lowered-arms-not-paired:[${lSorted.join(",")}]vs[${cSorted.join(",")}]`);
   if (lPaired === "ambiguous") return no(`lowered-arms-pair-ambiguously:[${lSorted.join(",")}]vs[${cSorted.join(",")}]`);
   for (const [sId, cId] of lPaired) {
@@ -6692,7 +6820,12 @@ function lowerPairedArmUnionSpread(
     for (const f of cShape.fields) {
       if (plainNames.includes(f.name)) continue; // see the CHECKER-side loop
       const sT = sFields.get(f.name);
-      if (sT === undefined) return no(`lowered-paired-arm-missing-field:${sId}->${cId}:${f.name}`);
+      if (sT === undefined) {
+        const lT = leadFieldType(L, leadShapeIds, leadOwner, f.name);
+        if (lT === undefined) return no(`lowered-paired-arm-missing-field:${sId}->${cId}:${f.name}`);
+        if (!armFieldFits(L, lT, f.type)) return no(`lowered-contributor-field-not-widenable:${sId}->${cId}:${f.name}`);
+        continue;
+      }
       if (!armFieldFits(L, sT, f.type)) return no(`lowered-field-not-widenable:${sId}->${cId}:${f.name}`);
     }
   }
@@ -6772,8 +6905,18 @@ function lowerPairedArmUnionSpread(
       // of `{ ...normalized, errors }`.
       const needsSourceRead = ov === undefined || ov.cond !== null;
       const srcT = shape.fields.find((x) => x.name === f.name)?.type;
-      if (needsSourceRead && srcT === undefined) {
-        throw new Error(`lowerer bug: paired-arm spread has no source for field ${f.name}`);
+      /** The CONTRIBUTOR that owns this name, consulted only where the
+       * SOURCE arm does not declare it — the source spread is written after
+       * every contributor, so wherever both have the name JS leaves the
+       * source's value standing and this is never reached. */
+      const leadI = srcT === undefined ? leadOwner.get(f.name) : undefined;
+      const leadSlot = leadI === undefined ? undefined : leadSlots[leadI];
+      const leadT =
+        leadSlot === undefined
+          ? undefined
+          : L.shapes.get(leadSlot.shapeId)?.fields.find((x) => x.name === f.name)?.type;
+      if (needsSourceRead && srcT === undefined && leadT === undefined) {
+        throw new Error(`lowerer bug: paired-arm spread has no contributor for field ${f.name}`);
       }
       // LAZY, and that is the whole of `content.ts:183`. Its one differing
       // field is `viewOnce`, read at `boolean | null | undefined` and stored
@@ -6782,7 +6925,20 @@ function lowerPairedArmUnionSpread(
       // eagerly would have refused the site this rule exists to build.
       const base = (): IrExpr => {
         if (srcT === undefined) {
-          throw new Error(`lowerer bug: paired-arm spread read of unsourced field ${f.name}`);
+          if (leadSlot === undefined || leadT === undefined) {
+            throw new Error(`lowerer bug: paired-arm spread read of unsourced field ${f.name}`);
+          }
+          return widen(
+            {
+              kind: "recordGet",
+              obj: { kind: "varRef", localId: leadSlot.localId, type: leadSlot.type, loc },
+              shapeId: leadSlot.shapeId,
+              field: f.name,
+              type: leadT,
+              loc,
+            },
+            f.type,
+          );
         }
         return widen({ kind: "recordGet", obj: narrowed(), shapeId, field: f.name, type: srcT, loc }, f.type);
       };
@@ -6835,13 +6991,16 @@ function lowerPairedArmUnionSpread(
       `UNIONSLOT ${loc.file}@${String(loc.start)} ` +
         `CLOSED-BY=${[...lPaired].every(([s, c]) => s === c) ? "identity-arm" : "paired-arm"}` +
         ` arms=${String(loweredArms.length)} srcUnion=${srcUnionId} slotUnion=${ctxUnion.unionId}` +
-        ` overrides=[${names.join(",")}]` +
+        ` overrides=[${names.join(",")}] contributors=[${leadShapeIds.join(",")}]` +
         ` pairs=[${[...lPaired].map(([s, c]) => `${s}->${c}`).join(",")}]`,
     );
   }
   return {
     kind: "seqExpr",
-    stmts: [{ kind: "varDecl", localId: slot.id, init: srcLowered, loc }],
+    stmts: [
+      ...leadSlots.map((l): IrStmt => ({ kind: "varDecl", localId: l.localId, init: l.init, loc })),
+      { kind: "varDecl", localId: slot.id, init: srcLowered, loc },
+    ],
     result: chain,
     type: ctxUnion,
     loc,
