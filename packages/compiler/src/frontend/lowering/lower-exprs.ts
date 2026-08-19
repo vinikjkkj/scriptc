@@ -26,7 +26,7 @@ import { fenceNamespaceConditionalValue, lowerNamespaceConditionalDecl } from ".
 import { findGenericMethodOn, lowerStaticFieldRead } from "./lower-classes.js";
 import { bindingNeverReassigned, classHasOwnValueOf, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js";
-import { isArrayIndexKey, isConstAssertionTypeNode, isGenericCallableMemberType, overflowShapeKey, overflowShapeKeys, overflowShapeKeysDenied, underConstAssertion, unitOnlyUnion } from "../types.js";
+import { esOwnKeyOrder, isArrayIndexKey, isConstAssertionTypeNode, isGenericCallableMemberType, overflowShapeKey, overflowShapeKeys, overflowShapeKeysDenied, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
 import { lowerStreamProperty, lowerStreamStateProperty, streamInstanceOfExpr, streamSidesOf } from "./lower-stream.js";
 import { lowerWebSocketGlobal } from "./lower-ws.js";
@@ -7658,6 +7658,35 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     }
     const fieldTypes = new Map(shape.fields.map((f) => [f.name, f.type]));
 
+    // KEY-ORDER risk, the LITERAL half. `declaredOrder` is the first-interned
+    // type's member order and is metadata rather than identity, so a literal
+    // spelled any other way builds an object JS enumerates differently -
+    // including a literal that is in order for its OWN spelling but interned
+    // into a shape another type registered first. Recorded here and decided
+    // at the ENUMERATION: a literal nobody enumerates is wrong about nothing.
+    // Integer-like names go through esOwnKeyOrder because JS moves them to
+    // the front however they are spelled, and declaredOrder already ran it.
+    if (!shape.tuple && shape.declaredOrder) {
+      const spelledNames: string[] = [];
+      let simpleSpelling = true;
+      for (const p of expr.properties) {
+        if (!ts.isPropertyAssignment(p) && !ts.isShorthandPropertyAssignment(p)) { simpleSpelling = false; break; }
+        if (!p.name || ts.isComputedPropertyName(p.name) || ts.isPrivateIdentifier(p.name)) { simpleSpelling = false; break; }
+        spelledNames.push(propNameText(L, p.name));
+      }
+      if (simpleSpelling && spelledNames.length >= 2) {
+        const spelled = esOwnKeyOrder(spelledNames);
+        const want = shape.declaredOrder.filter((n) => spelled.includes(n));
+        if (want.length === spelled.length && want.some((n, i) => n !== spelled[i])) {
+          L.noteKeyRiskLiteral(
+            locOf(expr),
+            "order",
+            `this literal spells ${JSON.stringify(spelled.join(","))} where its shape enumerates ${JSON.stringify(want.join(","))}`,
+          );
+        }
+      }
+    }
+
     // A PURE index-signature target with spreads — `{ ...process.env }`,
     // `{ ...process.env, ...extraEnv }`, `{ ...env, PATH: p }` (the
     // spawn-env pattern): the field-by-field desugar below cannot
@@ -8317,7 +8346,10 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
             const targetType = fieldTypes.get(fieldName);
             // No slot on the target shape: the copy DROPS the field
             // (divergence 36's stance, same as the plain-record spread).
-            if (!targetType) continue;
+            if (!targetType) {
+              L.noteKeyRiskLiteral(locOf(expr), "set", `a union-arm spread into this literal ends ${JSON.stringify(fieldName)}`);
+              continue;
+            }
             if (conditionalNames.has(fieldName)) {
               L.unsupported(
                 "SC1090",
@@ -8449,6 +8481,14 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         }
         const srcShape = L.shapes.get(srcType.shapeId);
         if (!srcShape) throw new Error(`lowerer bug: spread of unknown shape ${srcType.shapeId}`);
+        // The spread INHERITS its source's key-enumeration risk: JS copies the
+        // source object in ITS own key order, so a source that does not
+        // enumerate the way its shape says makes this literal wrong the same
+        // way, whatever order the target shape carries.
+        if (srcLowered) {
+          const srcRisk = L.exprKeyRisk(srcLowered);
+          if (srcRisk) L.noteKeyRiskLiteral(locOf(expr), srcRisk.why, `${srcRisk.detail} (inherited through this spread)`);
+        }
         fenceAccessorSpreadSource(L, prop, srcShape);
         // Index-signature shapes carry runtime-keyed overflow entries the
         // field-by-field desugar cannot enumerate — fenced on either side.
@@ -8494,7 +8534,10 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           // is width subtyping in spread clothing, divergence 36's stance
           // (Node's object would keep the key); the read is pure, so
           // skipping evaluates nothing.
-          if (!targetType) continue;
+          if (!targetType) {
+            L.noteKeyRiskLiteral(locOf(expr), "set", `a spread of ${JSON.stringify(srcType.shapeId)} into this literal ends ${JSON.stringify(f.name)}`);
+            continue;
+          }
           const lift = typeEquals(f.type, targetType)
             ? null
             : L.widthLiftPlan(f.type, targetType);

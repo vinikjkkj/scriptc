@@ -152,10 +152,34 @@ const big: Big = { a: "x", "0": "z" };
 const small = big as unknown as Small;
 console.log(Object.keys(small).join(","));
 `);
-  expect(r.diags).toEqual([]);
+  // …and since block/silentwrong the ENUMERATION of the dropped value is
+  // itself refused (SC1090, key-enumeration risk). Both rows are the point:
+  // SC6001 still names the member at the CAST, and the `Object.keys` that
+  // would have printed `a` where Node prints `0,a` no longer prints anything.
+  // Reading `small.a` is untouched — only enumerating is refused.
   expect(r.advisories.length).toBe(1);
   expect(r.advisories[0]!.code).toBe("SC6001");
   expect(r.advisories[0]!.message).toContain("DROPS");
   expect(r.advisories[0]!.message).toContain("'0'");
   expect(r.advisories[0]!.hint).toContain("ARRAY-INDEX-like");
+  expect(r.diags.map((d) => d.code)).toEqual(["SC1090"]);
+  expect(r.diags[0]!.message).toContain("Object.keys over a record");
+  expect(r.diags[0]!.hint ?? "").toContain('ends "0"');
+});
+
+test("the same declined grant WITHOUT an enumeration keeps compiling", () => {
+  // The armed twin of the row above: the members are still dropped and
+  // SC6001 still says so, but nothing enumerates the value, so nothing is
+  // refused — the documented width stance is unchanged for readers.
+  const r = lower(`
+interface Small { a: string }
+interface Big { a: string; "0": string }
+const big: Big = { a: "x", "0": "z" };
+const small = big as unknown as Small;
+console.log(small.a);
+`);
+  expect(r.diags).toEqual([]);
+  expect(r.compiled).toBe(true);
+  expect(r.advisories.length).toBe(1);
+  expect(r.advisories[0]!.code).toBe("SC6001");
 });

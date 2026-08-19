@@ -8947,6 +8947,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     loc: SrcLoc,
   ): IrExpr {
     const resultT = arrayOf(STRING);
+    L.noteKeyEnumeration(receiver, loc, "Object.keys");
     const key = `obj.keys:${argIr.shapeId}:${typeKey(resultT)}`;
     let helper = L.arrHofHelpers.get(key);
     if (!helper) {
@@ -10266,6 +10267,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       valueT = tupleShape.fields.find((f) => f.name === "1")!.type;
     }
 
+    L.noteKeyEnumeration(receiver, loc, `Object.${member}`);
     const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
     const key = `obj.${member}:${argIr.shapeId}:${typeKey(resultT)}`;
     let helper = L.arrHofHelpers.get(key);
