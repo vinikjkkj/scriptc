@@ -94,12 +94,22 @@ function mutatedFieldsOf(sourceFiles, className) {
 }
 
 const rows = [];
+/* The compiler's OWN answer, which is broader than the census line's: the
+ * census reports methods= and lift= only, while SC6003 also counts a lifted
+ * FUNC field (an arrow-function class field) as the live half. Reading both
+ * in one pass keeps the two numbers comparable instead of guessing. */
+const sc6003 = [];
 const realErr = console.error;
 for (const f of files) {
   const lines = [];
   console.error = (...a) => { lines.push(a.join(" ")); };
-  try { analyze(f); } catch { /* a program the frontend refuses still counts its projections */ }
+  let adv = [];
+  try {
+    const res = analyze(f);
+    adv = (res.coverage.advisories ?? []).filter((d) => d.code === "SC6003");
+  } catch { /* a program the frontend refuses still counts its projections */ }
   console.error = realErr;
+  for (const d of adv) sc6003.push({ file: f, message: d.message });
   const census = new Map(); // "class->shape" -> {methods,absent,lift,lifted[]}
   for (const l of lines) {
     const m = /^\[projcensus\] (\S+) -> (\S+) methods=(\d+) absent=(\d+) lift=(\d+)(?: \[(.*)\])?$/.exec(l);
@@ -150,5 +160,7 @@ console.log(`programs with a STALE one         ${new Set(staleRows.map((r) => r.
 for (const r of mixed) {
   console.log(`  MIXED ${r.stale.length > 0 ? "STALE" : "     "} ${r.cls} -> ${r.shape} methods=${r.methods} lift=${r.lift} [${r.lifted.join(",")}]${r.stale.length ? ` stale=[${r.stale.join(",")}]` : ""}  ${r.file}`);
 }
+console.log(`\nSC6003 advisories the COMPILER emits  ${sc6003.length} in ${new Set(sc6003.map((s) => s.file)).size} programs`);
+for (const s of sc6003) console.log(`  ${s.message}  ${s.file}`);
 const json = process.argv.find((a) => a.startsWith("--json="))?.slice(7);
 if (json) writeFileSync(json, JSON.stringify(rows, null, 1));
