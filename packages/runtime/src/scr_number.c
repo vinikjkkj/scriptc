@@ -180,6 +180,72 @@ ScrStr *scr_num_to_str_radix(double x, double radix_d) {
   return out;
 }
 
+/* -- integer fast path for Number->string ----------------------------
+ * The messaging profile puts scr_f64_to_scrstr at 10.9% of the whole
+ * workload's cycles and 13.6% of SEND group's, and every one of those
+ * 1.18M calls in the profiled run formats an EXACT NON-NEGATIVE INTEGER
+ * (a sequence number, a unix timestamp) - the shape a JS program
+ * stringifies more than any other. The general path pays Ryu for it:
+ * d2d_small_int, then a div10 per trailing decimal zero to fold them
+ * into the exponent, then decimalLength17, then a div10 per digit, then
+ * a memcpy and a zero-padding loop to put the zeros back.
+ *
+ * WHY THE SHORTCUT IS EXACT, not merely close. ECMA-262 6.1.6.1.20 asks
+ * for the SHORTEST digit string that round-trips. For an integer
+ * 1 <= x < 2^53 every integer in the range is exactly representable and
+ * consecutive integers are distinct doubles, so no decimal literal with
+ * fewer significant digits can round to x - a shorter literal names some
+ * other integer (or a value that rounds to one), never x. The shortest
+ * round-tripping digit string for such an x is therefore its own exact
+ * decimal expansion, which is what this writes. Placement agrees too:
+ * x < 2^53 < 10^16 gives n <= 16 <= 21 and k <= n, so the general code
+ * would take its "integer: digits then n-k zeros" arm and produce the
+ * same bytes. NaN, +-Infinity, zero and the sign are all handled by the
+ * caller before this point, and a non-integer or an x >= 2^53 falls
+ * through to Ryu unchanged.
+ *
+ * SCR_F64_FAST_INT=0 removes it, which is what the ablation control is
+ * built with. */
+#ifndef SCR_F64_FAST_INT
+#define SCR_F64_FAST_INT 1
+#endif
+
+#if SCR_F64_FAST_INT
+static const char scr_dec2[201] =
+    "00010203040506070809"
+    "10111213141516171819"
+    "20212223242526272829"
+    "30313233343536373839"
+    "40414243444546474849"
+    "50515253545556575859"
+    "60616263646566676869"
+    "70717273747576777879"
+    "80818283848586878889"
+    "90919293949596979899";
+
+/* Decimal digits of u >= 1 into out, two at a time; returns the count.
+   u < 2^53 so at most 16 digits, and tmp[20] cannot overflow. */
+static int scr_u64_digits(char *out, uint64_t u) {
+  char tmp[20];
+  int n = 0;
+  while (u >= 100) {
+    uint32_t r = (uint32_t)(u % 100);
+    u /= 100;
+    tmp[n++] = scr_dec2[r * 2 + 1];
+    tmp[n++] = scr_dec2[r * 2];
+  }
+  if (u >= 10) {
+    uint32_t r = (uint32_t)u;
+    tmp[n++] = scr_dec2[r * 2 + 1];
+    tmp[n++] = scr_dec2[r * 2];
+  } else {
+    tmp[n++] = (char)('0' + (uint32_t)u);
+  }
+  for (int i = n - 1; i >= 0; i--) *out++ = tmp[i];
+  return n;
+}
+#endif
+
 size_t scr_f64_to_str(double x, char *buf) {
   if (isnan(x)) return (size_t)(stpcpy(buf, "NaN") - buf);
   if (x == 0) return (size_t)(stpcpy(buf, "0") - buf); /* covers -0 */
@@ -192,6 +258,18 @@ size_t scr_f64_to_str(double x, char *buf) {
     *out++ = '-';
     x = -x;
   }
+
+#if SCR_F64_FAST_INT
+  /* x is finite, strictly positive and sign-stripped here. */
+  if (x < 9007199254740992.0) { /* 2^53 */
+    uint64_t u = (uint64_t)x;
+    if ((double)u == x) {
+      out += scr_u64_digits(out, u);
+      *out = 0;
+      return (size_t)(out - buf);
+    }
+  }
+#endif
 
   char digits[18];
   int n;
