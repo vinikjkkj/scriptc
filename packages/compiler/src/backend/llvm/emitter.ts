@@ -5221,6 +5221,34 @@ class LlEmitter {
         B.line(`${t} = call ptr @scr_map_keys_js_order(ptr ${ovf})`);
         return this.own({ name: t, type: e.type });
       }
+      case "recordOvfSlots": {
+        // The same enumeration as LIVE ENTRY SLOTS - a fresh f64[] snapshot
+        // (+1); the record is borrowed.
+        const obj = this.emitExpr(e.obj);
+        const ovf = this.recordOvfPtr(obj.name, e.shapeId);
+        this.declare(`declare ptr @scr_map_slots_js_order(ptr)`);
+        const t = B.tmp();
+        B.line(`${t} = call ptr @scr_map_slots_js_order(ptr ${ovf})`);
+        return this.own({ name: t, type: e.type });
+      }
+      case "recordOvfSlotGet": {
+        // One entry, addressed by slot: no key lookup, so no miss path.
+        // The ref accessors retain (+1), exactly like scr_map_get_str_ref.
+        const obj = this.emitExpr(e.obj);
+        const slot = this.emitExpr(e.slot);
+        const ovf = this.recordOvfPtr(obj.name, e.shapeId);
+        const t = B.tmp();
+        if (e.part === "key") {
+          this.declare(`declare ptr @scr_map_iter_key_str(ptr, double)`);
+          B.line(`${t} = call ptr @scr_map_iter_key_str(ptr ${ovf}, double ${slot.name})`);
+          return this.own({ name: t, type: e.type });
+        }
+        const vAcc = e.type.kind === "f64" ? "f64" : e.type.kind === "bool" ? "bool" : "ref";
+        const retTy = vAcc === "f64" ? "double" : vAcc === "bool" ? "i1" : "ptr";
+        this.declare(`declare ${vAcc === "bool" ? "zeroext i1" : retTy} @scr_map_iter_val_${vAcc}(ptr, double)`);
+        B.line(`${t} = call ${retTy} @scr_map_iter_val_${vAcc}(ptr ${ovf}, double ${slot.name})`);
+        return vAcc === "ref" ? this.own({ name: t, type: e.type }) : { name: t, type: e.type };
+      }
       case "unionWrap": {
         // Construct a fresh immutable tagged box. Ownership of a refcounted
         // payload MOVES into the union; scalars ride the slot. Unit arms

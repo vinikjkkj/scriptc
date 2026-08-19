@@ -9401,7 +9401,10 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       const ref = (localId: string, t: IrType): IrExpr => ({ kind: "varRef", localId, type: t, loc });
       const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
       const outRef = ref("out.0", type);
-      const ksT = arrayOf(STRING);
+      // f64[]: each spread contributor's overflow is walked by SLOT
+      // (recordOvfSlots), so the key and its value come out of the SAME
+      // entry and no key is looked back up in the map it came from.
+      const ksT = arrayOf(F64);
       const locals: IrLocal[] = [{ id: "out.0", name: "out", type, mutable: false }];
       // One parameter per contributor, in literal order. An all-spread
       // literal keeps the historic `s<n>` names, so the C an existing
@@ -9478,8 +9481,9 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         const kRef = ref(`k${j}.0`, STRING);
         const vRef = ref(`v${j}.0`, s.iv);
         locals.push(
-          { id: `ks${j}.0`, name: `ks${j}`, type: ksT, mutable: false },
+          { id: `sls${j}.0`, name: `sls${j}`, type: ksT, mutable: false },
           { id: `i${j}.0`, name: `i${j}`, type: F64, mutable: true },
+          { id: `sl${j}.0`, name: `sl${j}`, type: F64, mutable: false },
           { id: `k${j}.0`, name: `k${j}`, type: STRING, mutable: false },
           { id: `v${j}.0`, name: `v${j}`, type: s.iv, mutable: false },
         );
@@ -9504,15 +9508,16 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           }];
         }, []);
         body.push(
-          { kind: "varDecl", localId: `ks${j}.0`, init: { kind: "recordOvfKeys", obj: sRef, shapeId: s.shapeId, type: ksT, loc }, loc },
+          { kind: "varDecl", localId: `sls${j}.0`, init: { kind: "recordOvfSlots", obj: sRef, shapeId: s.shapeId, type: ksT, loc }, loc },
           {
             kind: "for",
             init: { kind: "varDecl", localId: `i${j}.0`, init: num(0), loc },
-            cond: { kind: "bin", op: "<", left: ref(`i${j}.0`, F64), right: { kind: "arrIntrinsic", method: "length", receiver: ref(`ks${j}.0`, ksT), args: [], type: F64, loc }, type: BOOL, loc },
+            cond: { kind: "bin", op: "<", left: ref(`i${j}.0`, F64), right: { kind: "arrIntrinsic", method: "length", receiver: ref(`sls${j}.0`, ksT), args: [], type: F64, loc }, type: BOOL, loc },
             update: { kind: "assign", localId: `i${j}.0`, value: { kind: "bin", op: "+", left: ref(`i${j}.0`, F64), right: num(1), type: F64, loc }, loc },
             body: [
-              { kind: "varDecl", localId: `k${j}.0`, init: { kind: "arrayGet", arr: ref(`ks${j}.0`, ksT), index: ref(`i${j}.0`, F64), type: STRING, loc }, loc },
-              { kind: "varDecl", localId: `v${j}.0`, init: { kind: "recordKeyGet", obj: sRef, shapeId: s.shapeId, key: kRef, overflowOnly: true, type: s.iv, loc }, loc },
+              { kind: "varDecl", localId: `sl${j}.0`, init: { kind: "arrayGet", arr: ref(`sls${j}.0`, ksT), index: ref(`i${j}.0`, F64), type: F64, loc }, loc },
+              { kind: "varDecl", localId: `k${j}.0`, init: { kind: "recordOvfSlotGet", obj: sRef, shapeId: s.shapeId, slot: ref(`sl${j}.0`, F64), part: "key", type: STRING, loc }, loc },
+              { kind: "varDecl", localId: `v${j}.0`, init: { kind: "recordOvfSlotGet", obj: sRef, shapeId: s.shapeId, slot: ref(`sl${j}.0`, F64), part: "value", type: s.iv, loc }, loc },
               ...dispatch,
             ],
             loc,

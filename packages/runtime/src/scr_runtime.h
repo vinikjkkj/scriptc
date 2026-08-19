@@ -1339,6 +1339,14 @@ ScrMap *scr_set_new_ref_traced(void *(*elem_retain)(void *), void (*elem_release
  * order. Fresh ScrStr* array (+1); the map is borrowed. */
 ScrArr *scr_map_keys_js_order(const ScrMap *m);
 
+/* The same enumeration as SLOT INDICES (f64) rather than keys: each index
+ * addresses one LIVE entry through the scr_map_iter_* accessors, so a
+ * caller reads the key and the value out of the SAME entry and never looks
+ * a key back up. That is what makes a generated record walker's read
+ * non-failing by construction instead of unreachable by argument. Fresh
+ * f64 array (+1); the map is borrowed. */
+ScrArr *scr_map_slots_js_order(const ScrMap *m);
+
 #ifdef SCR_RC_AUDIT
 long scr_map_live_count(void);
 #endif
