@@ -1,0 +1,48 @@
+a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts:43:28 - error SC1090: Object.keys over a 'C' value a cast spells as a record (the walk would answer the CAST's declared fields, not the value's own keys — a class instance's own key set depends on runtime property creation the struct model does not track) is not supported yet
+
+  42 | const viaCast = c as unknown as Record<string, unknown>
+  43 | console.log(JSON.stringify(Object.keys(viaCast)))
+     |                            ^~~~~~~~~~~~~~~~~~~~
+  44 | 
+
+a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts:47:28 - error SC1090: Object.values over a 'C' value a cast spells as a record (the walk would answer the CAST's declared fields, not the value's own keys — a class instance's own key set depends on runtime property creation the struct model does not track) is not supported yet
+
+  46 | const viaShape = c as unknown as { x: number; y: string }
+  47 | console.log(JSON.stringify(Object.values(viaShape)))
+     |                            ^~~~~~~~~~~~~~~~~~~~~~~
+  48 | console.log(Object.entries(viaShape).length)
+
+a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts:48:13 - error SC1090: Object.entries over a 'C' value a cast spells as a record (the walk would answer the CAST's declared fields, not the value's own keys — a class instance's own key set depends on runtime property creation the struct model does not track) is not supported yet
+
+  47 | console.log(JSON.stringify(Object.values(viaShape)))
+  48 | console.log(Object.entries(viaShape).length)
+     |             ^~~~~~~~~~~~~~~~~~~~~~~~
+  49 | console.log(JSON.stringify(Object.getOwnPropertyNames(viaShape)))
+
+a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts:49:28 - error SC1090: Object.getOwnPropertyNames over a 'C' value a cast spells as a record (the walk would answer the CAST's declared fields, not the value's own keys — a class instance's own key set depends on runtime property creation the struct model does not track) is not supported yet
+
+  48 | console.log(Object.entries(viaShape).length)
+  49 | console.log(JSON.stringify(Object.getOwnPropertyNames(viaShape)))
+     |                            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  50 | 
+
+a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts:52:18 - error SC1090: object spread of a 'C' value a cast spells as a record (the copy would read the CAST's declared fields off a value that has no such storage) is not supported yet
+
+  51 | // The field-copy desugar: a spread reads recordGet off the same object.
+  52 | const spread = { ...viaShape }
+     |                  ^~~~~~~~~~~
+  53 | console.log(spread.x)
+
+a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts:57:28 - error SC1090: Object.keys over a 'C' value a cast spells as a record (the walk would answer the CAST's declared fields, not the value's own keys — a class instance's own key set depends on runtime property creation the struct model does not track) is not supported yet
+
+  56 | const viaInterface: I = c
+  57 | console.log(JSON.stringify(Object.keys(viaInterface)))
+     |                            ^~~~~~~~~~~~~~~~~~~~~~~~~
+  58 | 
+
+a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts:64:28 - error SC1090: Object.keys over a 'Error' value a cast spells as a record (the walk would answer the CAST's declared fields, not the value's own keys — a class instance's own key set depends on runtime property creation the struct model does not track) is not supported yet
+
+  63 | const err = new Error("boom")
+  64 | console.log(JSON.stringify(Object.keys(err as unknown as { message: string })))
+     |                            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  65 | 

@@ -8209,6 +8209,30 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           }
         }
         const srcType = srcLowered ? srcLowered.type : L.mapTypeOf(L.typeOf(srcNode));
+        // The same trust-the-checker hazard the union arm below already
+        // guards against, on the RECORD side, where nothing did: `srcType`
+        // is the CHECKER's view of an identifier source, and a cast can
+        // spell a record over a value that is not one (`c as unknown as
+        // { x: number }` over a class instance). The field-copy desugar then
+        // emits `recordGet` against an `object` receiver and the IR
+        // validator reports it a pass later as SC9001 "recordGet receiver:
+        // expected record, got object" — an internal-compiler-error for a
+        // construct the compiler had simply declined. The LOWERED value
+        // decides: a source that is neither a record nor a checked-dynamic
+        // value takes the ordinary spread fence, at the spread, naming what
+        // the value actually is.
+        if (srcType?.kind === "record") {
+          const probedRec = srcLowered ?? probeLower(L, srcNode);
+          if (probedRec !== null && probedRec.type.kind !== "record" && probedRec.type.kind !== "dyn") {
+            L.unsupported(
+              "SC1090",
+              prop,
+              `object spread of a '${L.fmt(probedRec.type)}' value a cast spells as a record `
+                + `(the copy would read the CAST's declared fields off a value that has no`
+                + ` such storage)`,
+            );
+          }
+        }
         // `...options.installConfig` — a spread of `Partial<X> | undefined`
         // (the optional-options merge idiom `{ ...DEFAULTS, ...overrides }`):
         // JS spreads nothing for the unit arm and copies present keys
