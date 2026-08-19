@@ -8294,15 +8294,27 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4781-stream-read-throws.ts": {
+   "order": [
+    "<repo>/tests/corpus/4781-stream-read-throws.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/4791-sha256-across-every-block-and-pad-boundary.ts": {
    "order": [
     "<repo>/tests/corpus/4791-sha256-across-every-block-and-pad-boundary.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/4781-stream-read-throws.ts": {
+  "<repo>/tests/corpus/4801-a-named-property-after-an-index-signature-spread.ts": {
    "order": [
-    "<repo>/tests/corpus/4781-stream-read-throws.ts"
+    "<repo>/tests/corpus/4801-a-named-property-after-an-index-signature-spread.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4802-the-retry-replay-rebuilds-a-binary-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/4802-the-retry-replay-rebuilds-a-binary-node.ts"
    ],
    "diags": []
   },
@@ -9731,6 +9743,12 @@
   "<repo>/tests/diagnostics/incoming-message-readable.ts": {
    "order": [
     "<repo>/tests/diagnostics/incoming-message-readable.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/index-signature-spread-beside-a-fixed-shape-source.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/index-signature-spread-beside-a-fixed-shape-source.ts"
    ],
    "diags": []
   },
