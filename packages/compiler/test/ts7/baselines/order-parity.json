@@ -8414,6 +8414,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5090-an-absent-key-bound-to-a-composite-const-answers-undefined.ts": {
+   "order": [
+    "<repo>/tests/corpus/5090-an-absent-key-bound-to-a-composite-const-answers-undefined.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5091-a-guard-looks-through-the-checker-driven-arm-bridge.ts": {
+   "order": [
+    "<repo>/tests/corpus/5091-a-guard-looks-through-the-checker-driven-arm-bridge.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/510-array-map-filter-foreach.ts": {
    "order": [
     "<repo>/tests/corpus/510-array-map-filter-foreach.ts"
