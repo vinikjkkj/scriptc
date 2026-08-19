@@ -964,6 +964,15 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (operand.kind === "dynCheck" && operand.value.type.kind === "dyn") {
         operand = operand.value;
       }
+      // The same unwrap for the checker-narrowed UNION read: the arm chain
+      // below answers every arm statically, undefined included, and answers
+      // it even where the flow type lied (the extraction would throw, or --
+      // worse -- the FOLD would print the arm's answer where Node prints
+      // "undefined"). typeof needs no extraction. (narrowBridgeUnion)
+      {
+        const armed = narrowBridgeUnion(operand);
+        if (armed) operand = armed;
+      }
       // An index-signature keyed read in typeof position is the PRESENCE
       // TEST idiom. zapo's WaBotCoordinator.ts:204 --
       // `typeof section.attrs.name === 'string' ? section.attrs.name : undefined`
@@ -2952,6 +2961,38 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     return e.value.type.kind === "dyn" ? e.value : null;
   }
 
+/** The UNION behind a checker-driven arm narrow bridge, or null -- the twin
+   * of `narrowBridgeDyn` one representation over.
+   *
+   * `narrowBridgeDyn` exists because a GUARD must look through a bridge:
+   * ToBoolean, `=== undefined` and `typeof` all have an answer for the very
+   * kinds the bridge's validation rejects, so asking the value underneath
+   * answers the author's own absent-value branch instead of throwing on the
+   * way to it. Every word of that is true of the ARM bridge too, and the
+   * twin was simply missing -- with the result that a `T | undefined` local
+   * tsc narrowed to `T` answered `s === undefined` with a folded FALSE
+   * where Node answers true (silently, at exit 0), `typeof s` with the
+   * arm's answer where Node answers "undefined", and `!s` with an
+   * uncaught TypeError where Node answers true.
+   *
+   * Only the bridge maybeNarrow builds is unwrapped, never a written `as`
+   * cast, and only when the value underneath is a UNION -- the same call
+   * shape carries the CLASS downcast bridge, whose operand is an instance
+   * with no tag to test. The operand still evaluates, so nothing effectful
+   * is dropped; what is dropped is a validation a TEST does not need.
+   *
+   * On an HONEST narrowing the two agree by construction: the tag really is
+   * the arm, so the tag test answers exactly what the fold folded to. What
+   * changes is only the dishonest case, which is the case Node answers.
+   *
+   * `SCRIPTC_ARMGUARD_OFF=1` ablates it, so one binary emits both sides. */
+  export function narrowBridgeUnion(e: IrExpr): IrExpr | null {
+    if (process.env["SCRIPTC_ARMGUARD_OFF"] === "1") return null;
+    const inner = narrowBridgeArm(e);
+    if (inner === null || inner.type.kind !== "union") return null;
+    return inner;
+  }
+
 /** Checker-driven union narrowing. tsc's control-flow analysis narrows a
    * union-typed reference at use sites (`if (r.kind === "ok") { ...r... }`
    * types `r` as the ok-arm inside the branch); the IR value is still the
@@ -3416,6 +3457,21 @@ function isArrayGuardProven(L: Lowerer, node: ts.Expression): boolean {
       const atWidth = unitTestAtDynWidth(L, other, unit.unit, negated, loc);
       if (atWidth) return atWidth;
     }
+    // ...and the ARM bridge's twin of that rung. `const s: string |
+    // undefined = ...; s === undefined` types `string === undefined`
+    // through the bridge, so the fold below called it statically FALSE --
+    // a SILENT wrong answer at exit 0 where Node answers true. The union
+    // underneath carries the very arm the comparison asks about, so test
+    // the tag instead of folding. (narrowBridgeUnion)
+    {
+      const armed = narrowBridgeUnion(other);
+      if (armed && armed.type.kind === "union") {
+        const tag = L.armTag(armed.type.unionId, unit.type);
+        if (tag >= 0) {
+          return { kind: "unionIsTag", unionId: armed.type.unionId, tag, negated, value: armed, type: BOOL, loc };
+        }
+      }
+    }
     // Non-union operand: it can never hold undefined/null at runtime (the
     // checker narrowed it to a concrete arm), so `=== unit` is false and
     // `!== unit` is true.
@@ -3557,6 +3613,35 @@ function isArrayGuardProven(L: Lowerer, node: ts.Expression): boolean {
     {
       const atWidth = unitTestAtDynWidth(L, other, "nullish", negated, loc);
       if (atWidth) return atWidth;
+    }
+    // ...and the ARM bridge's twin, for the same reason lowerUnitComparison
+    // has one: `x == null` on a `T | undefined` local tsc narrowed to `T`
+    // folded to a silent FALSE where Node answers true. The union
+    // underneath carries the unit arms the comparison asks about.
+    // (narrowBridgeUnion)
+    {
+      const armed = narrowBridgeUnion(other);
+      const adef = armed && armed.type.kind === "union" ? L.unions.get(armed.type.unionId) : undefined;
+      if (armed && armed.type.kind === "union" && adef) {
+        const ut = armed.type;
+        const tags = adef.arms.flatMap((a, i) => (isUnitType(a) ? [i] : []));
+        const isTag = (tag: number): IrExpr => ({
+          kind: "unionIsTag", unionId: ut.unionId, tag, negated, value: armed, type: BOOL, loc,
+        });
+        if (tags.length === 1) return isTag(tags[0]!);
+        // Both unit arms need the operand twice; only a pure re-emittable
+        // read composes, and anything else keeps the fold it had.
+        if (tags.length === 2 && pureReemittable(armed)) {
+          return {
+            kind: "logical",
+            op: negated ? "&&" : "||",
+            left: isTag(tags[0]!),
+            right: isTag(tags[1]!),
+            type: BOOL,
+            loc,
+          };
+        }
+      }
     }
     // A non-nullable operand (tsc allows the comparison as a guard):
     // `== null` is statically false, `!= null` statically true.
@@ -4747,6 +4832,22 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     {
       const atWidth = L.recordKeyReadAtSlotWidth(e, DYN) ?? narrowBridgeDyn(e);
       if (atWidth) return { kind: "dynTest", test: "truthy", value: atWidth, type: BOOL, loc: e.loc };
+    }
+    // The SAME sentence one representation over: a local holding a
+    // `T | undefined` that tsc narrowed to `T` wears the checker's ARM
+    // bridge, and ToBoolean has an answer for the undefined arm the
+    // bridge's validation rejects. `if (!backend)` -- the author's own
+    // absent-value branch -- threw the bridge's TypeError on the way to
+    // the branch that exists to handle it. (narrowBridgeUnion)
+    {
+      const armed = narrowBridgeUnion(e);
+      // requireTruthyUnion's condition, asked instead of asserted: a union
+      // with a dyn/caught arm has no static ToBoolean, and that union keeps
+      // the bridge and its own fence rather than gaining a new one here.
+      const def = armed && armed.type.kind === "union" ? L.unions.get(armed.type.unionId) : undefined;
+      if (armed && def && def.arms.every((a) => a.kind !== "dyn" && a.kind !== "caught")) {
+        return { kind: "toBool", operand: armed, type: BOOL, loc: e.loc };
+      }
     }
     if (e.type.kind === "bool") return e;
     if (e.type.kind === "f64" || e.type.kind === "string") {

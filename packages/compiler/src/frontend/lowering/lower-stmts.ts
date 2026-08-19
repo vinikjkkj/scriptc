@@ -3708,6 +3708,106 @@ function keyedReadLocalAtDynWidth(L: Lowerer, init: IrExpr, slot: IrType): IrExp
   return L.recordKeyReadAtSlotWidth(init, DYN);
 }
 
+/** THE SAME BINDING AT THE ONE WIDTH THE DYN RULE CANNOT TAKE -- a
+ * COMPOSITE, held in an undefined-ARMED union instead of a dyn.
+ *
+ * ```ts
+ * const backend = backends[provider]          // Record<string, WaStoreBackend>
+ * if (!backend) {
+ *     throw new Error(`unknown backend '${provider}' for ${domain}`)
+ * }
+ * ```
+ *
+ * zapo `store/createStore.ts:124` (`resolveStore`, generic, fifteen
+ * instantiations in the emitted TU). The AUTHOR WROTE THE GUARD. tsc types
+ * an index-signature read by the signature's VALUE type, so the read is
+ * spelled `WaStoreBackend`, the miss has nowhere to go, and the emitted
+ * helper's `scr_trap_fmt` fires ONE LINE BEFORE the catchable throw the
+ * program has for exactly this input. Node runs that line and takes the
+ * author's branch. Nothing was being protected: the abort pre-empted the
+ * program's own error handling.
+ *
+ * `keyedReadLocalAtDynWidth` cannot serve it and says why: a composite at
+ * dyn width is a `dynFrom` DEEP COPY (toDynHelper's record arm builds a
+ * fresh ScrDyn object field by field), which severs aliasing the binding
+ * has today. That argument is about the DYN representation only. A UNION
+ * WRAP RETAINS THE VERY VALUE THE MAP HOLDS -- `recordKeyReadAtUndefinedArm`
+ * says so in its own doc, and it is the rung this one offers.
+ *
+ * THE r03 SEGFAULT, WHICH IS WHY THIS RUNG DID NOT EXIST, IS RETIRED.
+ * The claim was that a declared `T | undefined` is narrowed by tsc at the
+ * declaration, "so every later use was compiled as a bare arm peek over a
+ * stored undefined". It was written on 2026-08-10 at 04:44; SIX HOURS
+ * LATER `733f4db9` made every checker-driven narrowing go through
+ * `checkedArmBridge` -> `narrowedArmHelper`, which emits an
+ * `if (unionIsTag) throw new TypeError(...)` before the payload peek. The
+ * claim was never revisited. Measured on both backends
+ * (tests/corpus/5090, probe rs-r03): a `string | undefined` and a
+ * `Record | undefined` local that tsc narrowed away while holding the
+ * undefined arm each answer a CATCHABLE TypeError, exit 0, no segfault.
+ * What was NOT retired was the claim's other half -- "`s === undefined`
+ * folds to a constant false" -- which was true, silent, and is fixed by
+ * `narrowBridgeUnion` in the same series; without that fix this rung
+ * would turn the author's guard into a folded lie, which is why the two
+ * belong together.
+ *
+ * The restrictions are the dyn rule's, one clause changed:
+ *
+ * - the width is exactly the one that rule REFUSES (`!isDynSafeReadWidth`),
+ *   so the two rungs partition the widths and can never both fire;
+ * - the slot must be the READ's own width, or that width plus an undefined
+ *   arm -- `keyedReadBindingSameWidth`, the dyn rule's own predicate, so
+ *   the two draw exactly the same line and cannot drift. The first is the
+ *   inferred binding (`const backend = backends[provider]`); the SECOND is
+ *   the author who wrote `WaStoreBackend | undefined` and had tsc narrow
+ *   it away at the declaration -- the shape the r03 claim was literally
+ *   about, which aborted at the read while the annotation beside it said
+ *   `undefined` in so many words. A DIFFERENT declared type (a wider
+ *   union, a supertype) is a conversion the author asked for and keeps its
+ *   own coercion;
+ * - the width must be one a union ARM can carry. A read that is already a
+ *   `dyn` (a `Record<string, unknown>` signature) answers a miss itself and
+ *   needs nothing; wrapping it would intern `dyn | undefined`, which is not
+ *   a union this IR has (corpus 3291 caught exactly that as an SC9001).
+ *   `jsval`, `void`, `caught`, a unit, and a UNION width are out for the
+ *   same reason -- a union arm of each is either meaningless or nested;
+ * - `recordKeyReadAtUndefinedArm`'s own gate decides the rest: an index
+ *   signature, an exact strip, and `recordKeyResultOk` over the shape.
+ *
+ * What the readers get is the bridge's contract, not a new one: a use that
+ * NEEDS the value takes the checked extraction and throws the catchable
+ * TypeError where Node throws its own ("Cannot read properties of
+ * undefined"); a use that only asks WHETHER it is there -- `!backend`,
+ * `backend === undefined`, `typeof backend`, `backend == null` -- answers,
+ * because narrowBridgeUnion makes the guards look through the bridge.
+ *
+ * `SCRIPTC_COMPARM_OFF=1` ablates it, so one binary emits both sides. */
+function armCarryableWidth(t: IrType): boolean {
+  return (
+    t.kind !== "dyn" &&
+    t.kind !== "jsval" &&
+    t.kind !== "void" &&
+    t.kind !== "caught" &&
+    t.kind !== "union" &&
+    !isUnitType(t)
+  );
+}
+
+function keyedReadLocalAtUndefinedArm(L: Lowerer, init: IrExpr, slot: IrType): IrExpr | null {
+  if (process.env["SCRIPTC_COMPARM_OFF"] === "1") return null;
+  if (init.kind !== "recordKeyGet") return null;
+  // Exactly the widths the dyn rung refuses -- the two partition, so a
+  // width can never take both and the ablations stay independent.
+  if (isDynSafeReadWidth(L, init.type)) return null;
+  if (!armCarryableWidth(init.type)) return null;
+  if (!keyedReadBindingSameWidth(L, slot, init.type)) return null;
+  // The author's own annotation when there is one, so the binding keeps the
+  // union it was written with; the synthesized arm when the binding was
+  // inferred from the read.
+  const armed = slot.kind === "union" ? slot : L.withUndefinedArm(init.type);
+  return L.recordKeyReadAtUndefinedArm(init, armed);
+}
+
 /** "The slot must be the READ's OWN width, or that width plus an
  * undefined arm" — the second of keyedReadLocalAtDynWidth's two
  * restrictions, lifted out so the short-circuit forms below draw exactly
@@ -4566,6 +4666,12 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
         keyedReadLocalShortCircuitAtDynWidth(L, init, type) ??
         keyedReadLocalShortCircuitAlreadyWidened(L, init, type);
       if (atWidth) { init = atWidth; type = DYN; }
+      else {
+        // The COMPOSITE width the dyn rungs refuse, held in an
+        // undefined-armed union instead (keyedReadLocalAtUndefinedArm).
+        const armed = keyedReadLocalAtUndefinedArm(L, init, type);
+        if (armed) { init = armed; type = armed.type; }
+      }
     }
     // A CONST whose slot is `classval:C` and whose initializer is a direct
     // class reference to C is CLASS-PINNED: the binding cannot be
