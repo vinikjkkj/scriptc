@@ -3,7 +3,7 @@ import type { IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
 import { ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile } from "./program.js";
-import { accessorSlotProp, armLitsConflict, wsGlobalPlan } from "../ir/nodes.js";
+import { accessorSlotProp, armDiscrimLits, armLitsConflict, mergeArmLitSets, wsGlobalPlan } from "../ir/nodes.js";
 // typeKey moved to ir/nodes.ts (the backend needs it too, for per-type
 // helper interning); re-exported here so frontend call sites keep their
 // import path.
@@ -407,7 +407,7 @@ export class UnionRegistry {
 
   /** Completes a recursive placeholder with its canonical arm list and
    * registers the structural key (first writer wins, like shapes). */
-  finalizeRecursive(t: ts.Type, arms: IrType[], armLits?: Record<string, string>[]): string {
+  finalizeRecursive(t: ts.Type, arms: IrType[], armLits?: Record<string, string[]>[]): string {
     const id = this.recIds.get(t);
     if (id === undefined) throw new Error("union registry bug: finalizeRecursive without a placeholder");
     if (this.pendingRec.has(id)) {
@@ -435,7 +435,7 @@ export class UnionRegistry {
    * ts-level mapping passes an explicit table, so a union that genuinely
    * has no discriminant erases through its OWN mapping, not through a
    * join's silence. */
-  private foldArmLits(def: IrUnionDef, armLits?: Record<string, string>[]): void {
+  private foldArmLits(def: IrUnionDef, armLits?: Record<string, string[]>[]): void {
     if (armLits === undefined) return;
     if (this.litsErased.has(def.id)) {
       if (
@@ -452,15 +452,7 @@ export class UnionRegistry {
     const next =
       def.armLits === undefined
         ? armLits
-        : def.armLits.map((m, i) => {
-            const n = armLits[i] ?? {};
-            const r: Record<string, string> = {};
-            for (const k of Object.keys(m)) {
-              const want = m[k];
-              if (want !== undefined && n[k] === want) r[k] = want;
-            }
-            return r;
-          });
+        : def.armLits.map((m, i) => mergeArmLitSets(m, armLits[i] ?? {}));
     if (armLitsConflict(next)) {
       def.armLits = next;
       return;
@@ -483,7 +475,7 @@ export class UnionRegistry {
   /** Interns a canonical (typeKey-sorted, deduplicated) arm list, returning
    * its unionId. `armLits` is the calling site's per-arm literal
    * observation (foldArmLits); omit it when there is none to make. */
-  intern(arms: IrType[], armLits?: Record<string, string>[]): string {
+  intern(arms: IrType[], armLits?: Record<string, string[]>[]): string {
     const key = JSON.stringify(arms.map(typeKey));
     let id = this.byKey.get(key);
     if (id === undefined) {
@@ -3689,7 +3681,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       // spliced in from a nested union contributes `null` -- the arms are
       // already IR types there, so nothing is known about them either way,
       // and 'nothing known' has to WEAKEN a sibling part's claim.
-      const armObs: { part: ts.Type | null; arm: IrType }[] = [];
+      const armObs: { part: ts.Type | null; arm: IrType; lits?: Record<string, string[]> }[] = [];
       const byKey = new Map<string, IrType>();
       for (const part of widened.getTypes()) {
         // An UNINHABITED arm contributes no runtime value — `T | never ≡ T`
@@ -3759,10 +3751,14 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
                   ` . arm ${checker.typeToString(part).slice(0, 40)} -> ${inner.arms.length} arms`,
               );
             }
-            for (const innerArm of inner.arms) {
+            inner.arms.forEach((innerArm, j) => {
               byKey.set(typeKey(innerArm), innerArm);
-              armObs.push({ part: null, arm: innerArm });
-            }
+              // The inner union already answered this question for its own
+              // arms; splicing them in must not throw that away, or a
+              // substituted arm would silently unconstrain everything it
+              // is spliced beside.
+              armObs.push({ part: null, arm: innerArm, lits: armDiscrimLits(inner, j) });
+            });
             continue;
           }
         }
@@ -3938,13 +3934,13 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       // (an arm's index there is its runtime tag). Two parts that mapped
       // to the SAME arm intersect: the arm holds both their values, so
       // only a literal they agree on constrains it.
-      const armLits = ((): Record<string, string>[] => {
+      const armLits = ((): Record<string, string[]>[] => {
         if (armObs.filter((o) => o.arm.kind === "record").length < 2) return arms.map(() => ({}));
-        const litsOfPart = (part: ts.Type, arm: IrType): Record<string, string> => {
+        const litsOfPart = (part: ts.Type, arm: IrType): Record<string, string[]> => {
           if (arm.kind !== "record") return {};
           const shape = ctx.shapes.get(arm.shapeId);
           if (shape === undefined) return {};
-          const pinned: Record<string, string> = {};
+          const pinned: Record<string, string[]> = {};
           for (const p of checker.getPropertiesOfType(part)) {
             // REQUIRED properties only -- an optional one is satisfied by
             // omission, so it constrains no value of the arm.
@@ -3958,33 +3954,29 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
             // compared against (the LLVM lane interns a NUL-terminated
             // one), and no source spells one on purpose. Not recorded
             // rather than mis-compared.
-            if (pt.isStringLiteralType() && !pt.value.includes("\u0000")) pinned[p.name] = pt.value;
+            if (pt.isStringLiteralType() && !pt.value.includes("\u0000")) pinned[p.name] = [pt.value];
           }
           return pinned;
         };
-        const byArm = new Map<string, Record<string, string>>();
+        const byArm = new Map<string, Record<string, string[]>>();
         for (const o of armObs) {
           if (o.arm.kind !== "record") continue;
           const k = typeKey(o.arm);
-          const seen = o.part === null ? {} : litsOfPart(o.part, o.arm);
+          // Two PARTS that mapped to the same arm: the arm holds the
+          // values of both, so the sets UNION. (Intersecting them was the
+          // fourth fence in front of zapo's appstate rows: several schema
+          // keys share one IR shape, and asking for a single agreed value
+          // left that arm pinning nothing at all.)
+          const seen = o.lits ?? (o.part === null ? {} : litsOfPart(o.part, o.arm));
           const prev = byArm.get(k);
-          if (prev === undefined) {
-            byArm.set(k, seen);
-            continue;
-          }
-          const merged: Record<string, string> = {};
-          for (const f of Object.keys(prev)) {
-            const want = prev[f];
-            if (want !== undefined && seen[f] === want) merged[f] = want;
-          }
-          byArm.set(k, merged);
+          byArm.set(k, prev === undefined ? seen : mergeArmLitSets(prev, seen));
         }
         return arms.map((a) => byArm.get(typeKey(a)) ?? {});
       })();
       if (process.env["SCRIPTC_DISCRIM_WHY"] !== undefined && armLits.some((m) => Object.keys(m).length > 0)) {
         console.error(
           `DISCRIM ${checker.typeToString(widened).slice(0, 70)} -> ` +
-            armLits.map((m) => JSON.stringify(m)).join(" | "),
+            armLits.map((m) => JSON.stringify(m)).join(" | ").slice(0, 600),
         );
       }
       if (unions.recursivePending(widened)) {

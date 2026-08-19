@@ -687,7 +687,7 @@ export class LlDyn {
    * builds nothing, and reads the same scr_dyn_obj_data_get walk the
    * match predicate uses. Interned by the (field, value) pairs, not by a
    * typeKey — the constraint belongs to an ARM, not to a type. */
-  dynLitHelper(lits: Record<string, string>): string {
+  dynLitHelper(lits: Record<string, string[]>): string {
     const names = Object.keys(lits).sort();
     const pairs = names.map((n) => [n, lits[n]]);
     const memoKey = `%dlit:${JSON.stringify(pairs)}`;
@@ -705,9 +705,8 @@ export class LlDyn {
     B.condBr(isObj, l0, fail);
     B.startBlock(l0);
     for (const n of names) {
-      const v = lits[n];
-      if (v === undefined) continue;
-      const vlen = Buffer.byteLength(v, "utf8");
+      const vs = lits[n];
+      if (vs === undefined || vs.length === 0) continue;
       const m = this.dataGetLit(B, "%d", n);
       const has = B.tmp();
       B.line(`${has} = icmp ne ptr ${m}, null`);
@@ -725,20 +724,29 @@ export class LlDyn {
       const len = B.tmp();
       B.line(`${lenp} = getelementptr inbounds i8, ptr ${s}, i64 8 ; ScrStr->len`);
       B.line(`${len} = load i64, ptr ${lenp}`);
-      const lenOk = B.tmp();
-      B.line(`${lenOk} = icmp eq i64 ${len}, ${vlen}`);
-      const lLen = B.newLabel("dl.l");
-      B.condBr(lenOk, lLen, fail);
-      B.startBlock(lLen);
       const datap = B.tmp();
       B.line(`${datap} = getelementptr inbounds i8, ptr ${s}, i64 24 ; ScrStr->data`);
-      const c = B.tmp();
-      const same = B.tmp();
-      B.line(`${c} = call i32 @memcmp(ptr ${datap}, ptr ${this.host.cstr(v)}, i64 ${vlen}) ; ${n}`);
-      B.line(`${same} = icmp eq i32 ${c}, 0`);
-      const lNext = B.newLabel("dl.n");
-      B.condBr(same, lNext, fail);
-      B.startBlock(lNext);
+      // SET membership: one length-and-memcmp per member of the arm's own
+      // value set, any hit continuing to the next field. The C twin's
+      // `||` chain, spelled as blocks.
+      const lField = B.newLabel("dl.n");
+      vs.forEach((v, vi) => {
+        const vlen = Buffer.byteLength(v, "utf8");
+        const lenOk = B.tmp();
+        B.line(`${lenOk} = icmp eq i64 ${len}, ${vlen}`);
+        const lCmp = B.newLabel("dl.c");
+        const lElse = B.newLabel("dl.e");
+        B.condBr(lenOk, lCmp, lElse);
+        B.startBlock(lCmp);
+        const c = B.tmp();
+        const same = B.tmp();
+        B.line(`${c} = call i32 @memcmp(ptr ${datap}, ptr ${this.host.cstr(v)}, i64 ${vlen}) ; ${n}`);
+        B.line(`${same} = icmp eq i32 ${c}, 0`);
+        B.condBr(same, lField, lElse);
+        B.startBlock(lElse);
+        if (vi === vs.length - 1) B.br(fail);
+      });
+      B.startBlock(lField);
     }
     B.terminate(`ret i1 true`);
     B.startBlock(fail);

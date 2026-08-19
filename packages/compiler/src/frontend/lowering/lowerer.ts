@@ -51,7 +51,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { arrayOf, BOOL, canAdaptDynFuncTo, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { armDiscrimLits, arrayOf, BOOL, canAdaptDynFuncTo, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -8176,8 +8176,15 @@ export class Lowerer {
           }
           if (steals) {
             if (process.env["SCRIPTC_RTKEYED_WHY"]) {
+              const pins = (i: number): string => {
+                const m = armDiscrimLits(def, i);
+                const ks = Object.keys(m).sort();
+                return ks.length === 0 ? "pins nothing" : ks.map((k) => `${k}=${JSON.stringify(m[k])}`).join(" ");
+              };
               console.error(
-                `RTKEYED DECLINES: arm ${String(ai)} shadows arm ${String(bi)} (its required fields are a subset)`,
+                `RTKEYED DECLINES: arm ${String(ai)} shadows arm ${String(bi)} (its required fields are a subset)` +
+                  ` | arm ${String(ai)} ${this.fmt(def.arms[ai]!).slice(0, 200)} [${pins(ai)}]` +
+                  ` | arm ${String(bi)} ${this.fmt(def.arms[bi]!).slice(0, 200)} [${pins(bi)}]`,
               );
             }
             return null;

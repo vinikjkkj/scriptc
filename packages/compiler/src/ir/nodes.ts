@@ -1358,12 +1358,20 @@ export interface IrUnionDef {
   arms: IrType[];
   /** Per-arm STRING-LITERAL DISCRIMINANTS, aligned one-for-one with
    * `arms`. `armLits[i]` maps a field name declared on arm i's record
-   * shape to the ONE string every value of that arm holds there --
+   * shape to the SET of strings values of that arm can hold there --
    * what the source wrote as `operation: 'set'`, and what mapping the
    * property to the plain `string` slot erased. Present only when at
-   * least two arms genuinely CONFLICT on a shared field (nothing
-   * weaker can change which arm a value matches), so the overwhelming
-   * majority of unions carry no entry at all.
+   * least two arms genuinely CONFLICT on a shared field (their sets are
+   * DISJOINT -- nothing weaker can change which arm a value matches), so
+   * the overwhelming majority of unions carry no entry at all.
+   *
+   * A SET rather than one string, because one string is not enough on
+   * the type this whole mechanism exists for. Several of zapo's schema
+   * keys share ONE IR shape (same index args, same data block), so the
+   * arm holds `schema` values from every one of them; asking for a
+   * single value left that arm pinning nothing and it went on stealing
+   * its neighbour's values. The arm holds any of ITS OWN and none of the
+   * others, which is exactly what a set says.
    *
    * A PREFERENCE, never a veto. It is read where a runtime value has
    * to be matched to an arm (dynCheck's arm chain) as a FIRST pass
@@ -1373,7 +1381,7 @@ export interface IrUnionDef {
    * That is also the answer to which selector wins when the
    * discriminant and the widest-first order disagree: within a pass
    * width decides, across the passes the discriminant does. */
-  armLits?: Record<string, string>[];
+  armLits?: Record<string, string[]>[];
 }
 
 export interface IrFunction {
@@ -6913,11 +6921,18 @@ export function dynCheckArmOrder(
   return out;
 }
 
+/** How many distinct strings one field's discriminant set may carry
+ * before the field is dropped as unconstrained. The emitted predicate is
+ * one length-and-memcmp per member, so the cap is about the TU, not about
+ * soundness: dropping a field only ever makes an arm easier to match.
+ * Sized well past zapo's schema table (about twenty keys). */
+export const DISCRIM_SET_MAX = 64;
+
 /** Arm `i`'s string-literal discriminants, empty when the union carries
  * none. The one reader of IrUnionDef.armLits every other rule goes
  * through, so a def built before the field existed answers `{}` rather
  * than undefined. */
-export function armDiscrimLits(def: IrUnionDef, i: number): Record<string, string> {
+export function armDiscrimLits(def: IrUnionDef, i: number): Record<string, string[]> {
   return def.armLits?.[i] ?? {};
 }
 
@@ -6929,36 +6944,61 @@ export function unionHasDiscrim(def: IrUnionDef): boolean {
 }
 
 /** True when arms `a` and `b` are told apart by a literal discriminant:
- * some field BOTH constrain, to DIFFERENT strings. One-sided knowledge
- * does NOT separate -- an arm that says nothing about `operation` can
- * still hold any value of it, so it steals its neighbour's values
- * exactly as before. */
+ * some field BOTH constrain, to DISJOINT sets. One-sided knowledge does
+ * NOT separate -- an arm that says nothing about `operation` can still
+ * hold any value of it, so it steals its neighbour's values exactly as
+ * before. */
 export function discrimSeparates(def: IrUnionDef, a: number, b: number): boolean {
   const la = armDiscrimLits(def, a);
   const lb = armDiscrimLits(def, b);
   for (const k of Object.keys(la)) {
-    const v = lb[k];
-    if (v !== undefined && v !== la[k]) return true;
+    const mine = la[k];
+    const theirs = lb[k];
+    if (mine === undefined || theirs === undefined) continue;
+    if (!mine.some((v) => theirs.includes(v))) return true;
   }
   return false;
 }
 
-/** True when a per-arm literal table is worth KEEPING: two arms that
- * conflict on a shared field. Anything weaker can never change which arm
- * a value matches, so the registry drops it rather than intern a table
- * that only grows the IR. */
-export function armLitsConflict(lits: readonly Record<string, string>[]): boolean {
+/** True when a per-arm literal table is worth KEEPING: two arms whose
+ * sets for a shared field are DISJOINT. Anything weaker can never change
+ * which arm a value matches, so the registry drops it rather than intern
+ * a table that only grows the IR. */
+export function armLitsConflict(lits: readonly Record<string, string[]>[]): boolean {
   for (let i = 0; i < lits.length; i++) {
     for (let j = i + 1; j < lits.length; j++) {
       const a = lits[i], b = lits[j];
       if (a === undefined || b === undefined) continue;
       for (const k of Object.keys(a)) {
-        const v = b[k];
-        if (v !== undefined && v !== a[k]) return true;
+        const mine = a[k];
+        const theirs = b[k];
+        if (mine === undefined || theirs === undefined) continue;
+        if (!mine.some((v) => theirs.includes(v))) return true;
       }
     }
   }
   return false;
+}
+
+/** The MERGE of two per-arm literal observations of the SAME arm: a field
+ * both sides constrain keeps the UNION of their sets (the arm holds
+ * values of either), and a field either side leaves open is dropped (an
+ * unconstrained field constrains nothing). Over the cap the field is
+ * dropped too. Monotone downward -- a field, once gone, never returns. */
+export function mergeArmLitSets(
+  a: Record<string, string[]>,
+  b: Record<string, string[]>,
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const k of Object.keys(a)) {
+    const mine = a[k];
+    const theirs = b[k];
+    if (mine === undefined || theirs === undefined) continue;
+    const set = [...new Set([...mine, ...theirs])].sort();
+    if (set.length > DISCRIM_SET_MAX) continue;
+    out[k] = set;
+  }
+  return out;
 }
 
 export function canDynCheckTo(
