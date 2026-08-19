@@ -9936,8 +9936,9 @@ export class Lowerer {
     id: string,
     receiver: IrExpr,
     body: IrExpr,
-    loc: SrcLoc,): IrExpr {
-    return finishOptionalChain(this, expr, id, receiver, body, loc);
+    loc: SrcLoc,
+    slotWidenedRecv = false,): IrExpr {
+    return finishOptionalChain(this, expr, id, receiver, body, loc, slotWidenedRecv);
   }
 
   /* ── functions ────────────────────────────────────────────────────── */

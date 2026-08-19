@@ -4044,6 +4044,77 @@ export function keyedReadGlobalIsDyn(L: Lowerer, decl: ts.VariableDeclaration): 
   );
 }
 
+/** The COMPOSITE twin of keyedReadGlobalIsDyn, and the reason it had to be
+ * written separately: a FILE-SCOPE declaration never reaches lowerVarDecl's
+ * local rung ladder at all. Its slot is fixed by collectGlobals before any
+ * body lowers, and the statement is just `assign` of
+ * `lowerExprExpecting(initializer, g.type)` — and coerceToExpected
+ * deliberately does not offer recordKeyReadAtUndefinedArm. So
+ *
+ *     function f() { const a: B | undefined = bs["nope"]; ... }  // undefined
+ *     const g: B | undefined = bs["nope"]                        // ABORTED
+ *
+ * diverged on nothing but the scope. The SCALAR case had no such hole only
+ * because keyedReadGlobalIsDyn exists as its own syntactic twin; the
+ * composite had none. This is that twin.
+ *
+ * It answers the ARMED slot type (`T | undefined`) rather than a boolean,
+ * because unlike the dyn case the slot is not a fixed width: the author's
+ * own annotation is kept when there is one, and an INFERRED binding
+ * (`const g = bs["nope"]`, which tsc types `B`) gets the synthesized arm —
+ * the same two cases keyedReadBindingSameWidth draws for the local.
+ *
+ * Everything else is keyedReadGlobalIsDyn's, clause for clause: an
+ * index-signature receiver, a key the signature and not a declared field
+ * answers, and no `?.` on the access itself. The WIDTH clause is the
+ * inverse of the dyn twin's, so the two partition and a declaration can
+ * never take both.
+ *
+ * `SCRIPTC_GLOBALARM_OFF=1` ablates this rung alone (and
+ * `SCRIPTC_COMPARM_OFF=1` ablates it with its function-scope twin), so one
+ * binary emits both sides. */
+export function keyedReadGlobalArmedType(L: Lowerer, decl: ts.VariableDeclaration): IrType | null {
+  if (process.env["SCRIPTC_COMPARM_OFF"] === "1") return null;
+  if (process.env["SCRIPTC_GLOBALARM_OFF"] === "1") return null;
+  if (!ts.isIdentifier(decl.name) || decl.initializer === undefined) return null;
+  let e: ts.Expression = decl.initializer;
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  let recv: ts.Expression;
+  let key: string | null;
+  if (ts.isPropertyAccessExpression(e) && e.questionDotToken === undefined && ts.isIdentifier(e.name)) {
+    recv = e.expression;
+    key = e.name.text;
+  } else if (ts.isElementAccessExpression(e) && e.questionDotToken === undefined) {
+    recv = e.expression;
+    key = ts.isStringLiteralLike(e.argumentExpression) ? e.argumentExpression.text : null;
+  } else {
+    return null;
+  }
+  const recvT = L.typeOf(recv);
+  const recvIr = L.mapTypeOf(recvT);
+  if (recvIr?.kind !== "record") return null;
+  if (L.shapes.get(recvIr.shapeId)?.indexValue === undefined) return null;
+  if (key !== null && L.checker.getPropertyOfType(recvT, key) !== undefined) return null;
+  const read = L.mapTypeOf(L.typeOf(e));
+  if (read === null) return null;
+  // Exactly the widths the dyn twin refuses, and only those a union arm
+  // can carry (armCarryableWidth's list — a `dyn | undefined` is not a
+  // union this IR has).
+  if (isDynSafeReadWidth(L, read)) return null;
+  if (!armCarryableWidth(read)) return null;
+  const slot = L.mapTypeOf(L.typeOf(decl.name));
+  if (slot === null) return null;
+  if (typeEquals(slot, read)) return L.withUndefinedArm(read);
+  if (
+    slot.kind === "union" &&
+    L.armTag(slot.unionId, UNDEFINED_T) >= 0 &&
+    typeEquals(L.stripUndefinedArm(slot), read)
+  ) {
+    return slot;
+  }
+  return null;
+}
+
 export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: boolean): IrStmt | null {
     // --provenance-sources: an elided pure-annotated dead const emits
     // nothing (collectGlobals registered no global by the same test —
@@ -4246,6 +4317,21 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
         const wrapped = g.type.kind === "dyn" ? dynUndefinedExpr(locOf(decl)) : L.unassignedSlotInit(g.type, locOf(decl));
         if (wrapped) return { kind: "assign", localId: g.id, value: wrapped, loc: locOf(decl) };
         return null;
+      }
+      // The COMPOSITE keyed read at FILE scope. lowerVarDecl's rung ladder
+      // below is unreachable from here, and coerceToExpected does not offer
+      // recordKeyReadAtUndefinedArm, so the read arrived at the slot as a
+      // bare `T` and its miss aborted. The initializer lowers UNEXPECTING
+      // (once — the rung needs the raw recordKeyGet, which an expectation
+      // has already converted away) and coerces itself if the rung
+      // declines; the gate above is syntactic, so no other declaration
+      // changes path.
+      if (keyedReadGlobalArmedType(L, decl) !== null) {
+        const raw = L.lowerExpr(decl.initializer);
+        const armed = keyedReadLocalAtUndefinedArm(L, raw, g.type);
+        const value = armed ?? L.coerceInto(decl.initializer, raw, g.type);
+        L.noteKeyRiskBinding(g.id, value);
+        return { kind: "assign", localId: g.id, value, loc: locOf(decl) };
       }
       const init = L.lowerExprExpecting(decl.initializer, g.type);
       L.noteKeyRiskBinding(g.id, init);
