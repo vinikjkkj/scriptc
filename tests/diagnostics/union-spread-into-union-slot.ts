@@ -65,8 +65,17 @@ function emit(e: Ev): string {
 
 const base: Base = { rawId: "R" };
 
-// The refusal, spread LAST into an argument slot (zapo's
-// `{ ...baseEvent, ...parsed }` at client/events/incoming.ts:397).
+// NO LONGER the fence, and its absence from this snapshot is the proof.
+// `{ ...baseEvent, ...parsed }` at client/events/incoming.ts:397 is a plain
+// record CONTRIBUTOR under the union spread, and the relation is exact by
+// construction rather than invented: `Parsed` is the slot's arms MINUS the
+// base event's names, so `ArmA` + `rawId` IS `EvA` and `ArmB` + `rawId` IS
+// `EvB`. The paired-arm rule folds a contributor's names into the source
+// side of its pairing key for the same reason it folds a plain override's
+// in -- the branch BUILDS those names without reading them from the source
+// arm -- and the source still wins every name it declares, because the
+// source spread is written after the contributor and JS's spread is
+// later-wins. Corpus 4752 runs the whole population byte-exact against Node.
 const p = parse(0);
 if (p !== null) {
   console.log(emit({ ...base, ...p }));
@@ -83,18 +92,13 @@ if (p !== null) {
 // and it belongs to the shape the branch BUILDS, not the one it reads.
 // Corpus 4711 runs the whole population byte-exact against Node.
 //
-// The two cases that remain in this snapshot are the other shape entirely:
-// `{ ...base, ...p }` is TWO plain spreads, and the second one is the union.
-// The names the first spread contributes are not overrides and this rule does
-// not model them, so `incoming.ts:397` keeps its fence.
 const q = parse(1);
 if (q !== null) {
   console.log(emit({ ...q, rawId: "R2" }));
 }
 
-// The refusal reached through a RETURN slot rather than an argument
-// (zapo's `thumbnail = { ...fetched, ... }` at
-// message/addons/link-preview/fetcher.ts:91 is the assignment form).
+// ALSO no longer the fence: the same contributor shape reached through a
+// RETURN slot rather than an argument.
 function build(n: number): Ev | null {
   const r = parse(n);
   return r === null ? null : { ...base, ...r };
@@ -114,3 +118,88 @@ function overrides(n: number): { readonly port: number } | undefined {
 }
 const o: Opts = { host: "h", port: 1, ...overrides(1) };
 console.log(o.port);
+
+// STILL the fence, case 1: a CONTRIBUTOR that is itself a UNION. "Which
+// contributor supplies this name" stops being a compile-time fact -- the two
+// arms of the contributor can declare different names at different types --
+// and the per-arm rebuild has no shape to copy from. Only a plain record
+// contributor is admitted.
+interface LeadNum {
+  readonly rawId: string;
+  readonly at: number;
+}
+
+interface LeadStr {
+  readonly rawId: string;
+  readonly at: string;
+}
+
+interface EvWA {
+  readonly kind: "a";
+  readonly lidJid: string;
+  readonly rawId: string;
+  readonly at: number | string;
+}
+
+interface EvWB {
+  readonly kind: "b";
+  readonly oldLidJid: string;
+  readonly rawId: string;
+  readonly at: number | string;
+}
+
+type EvW = EvWA | EvWB;
+
+function emitW(e: EvW): string {
+  return e.kind === "a" ? e.lidJid : e.oldLidJid;
+}
+
+function buildW(lead: LeadNum | LeadStr, n: number): string | null {
+  const r = parse(n);
+  return r === null ? null : emitW({ ...lead, ...r });
+}
+console.log(buildW({ rawId: "R", at: 1 }, 0));
+
+// STILL the fence, case 2, and this is the one the contributor rule is armed
+// against: PER-ARM PRECEDENCE. `n` is supplied by the contributor and also
+// declared by ONE source arm, so Node reads it from the SOURCE in that arm and
+// from the CONTRIBUTOR in the other -- "which contributor owns this name" is
+// no longer arm-independent. The configuration needs no rule of its own: the
+// two source arms collapse onto ONE pairing key once the contributor's names
+// join it, and the pairing refuses as AMBIGUOUS rather than picking an arm.
+interface PSrcA {
+  readonly k: string;
+  readonly n: number;
+  readonly t: number;
+}
+
+interface PSrcB {
+  readonly k: string;
+  readonly t: string;
+}
+
+interface POutA {
+  readonly k: string;
+  readonly n: number;
+  readonly t: number;
+}
+
+interface POutB {
+  readonly k: string;
+  readonly n: number;
+  readonly t: string;
+}
+
+interface PLead {
+  readonly k: string;
+  readonly n: number;
+}
+
+function emitP(x: POutA | POutB): string {
+  return x.k + String(x.n) + String(x.t);
+}
+
+function buildP(lead: PLead, s: PSrcA | PSrcB): string {
+  return emitP({ ...lead, ...s });
+}
+console.log(buildP({ k: "K", n: 1 }, { k: "K", n: 2, t: 3 }));

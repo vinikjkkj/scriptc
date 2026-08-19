@@ -5757,6 +5757,22 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
  * Reading the two together on a real build is what tells a by-NAME
  * refusal apart from a by-CAPABILITY one, which the diagnostic text
  * cannot. */
+/** WHY the runtime-length `fn.apply(thisArg, pack)` arm did or did not
+ * take, under SCRIPTC_APPLYPACK_WHY=1 — the union-slot instrument's
+ * discipline, one call site over. The gate has five independent reasons to
+ * decline and the fence text names none of them, so a reader who reaches
+ * the refusal cannot tell a non-dyn PARAMETER (the one divergence this arm
+ * must not import) from a receiver that never lowered at all. */
+function applyPackWhy(node: ts.Node, verdict: string): void {
+  if (process.env["SCRIPTC_APPLYPACK_WHY"] === undefined) return;
+  const sf = node.getSourceFile();
+  const lc = sf.getLineAndCharacterOfPosition(node.getStart());
+  process.stderr.write(
+    `APPLYPACK ${sf.fileName}:${lc.line + 1}:${lc.character + 1} ${verdict} :: ${node.getText().slice(0, 60).replace(/\s+/g, " ")}
+`,
+  );
+}
+
 function mcallWhy(arm: string, node: ts.Node, key: string, extra?: () => string): void {
   if (process.env["SCRIPTC_MCALL_WHY"] === undefined) return;
   const sf = node.getSourceFile();
@@ -11465,9 +11481,12 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
       // the call's extent, so the ES5 inheritance idiom
       // (`Parent.call(this, x)`) lands the parent's `this.f = x` writes on
       // the child instance, which is the whole point of spelling it.
-      // `apply` needs a STATICALLY KNOWN argument list (an array literal,
-      // or none) — a runtime-length pack would need a variadic call the
-      // compiled ABI does not have, and that arm keeps the fence.
+      // `apply` with a STATICALLY KNOWN argument list (an array literal,
+      // or none) is the direct call in the first arm below. A
+      // RUNTIME-LENGTH pack (`fn.apply(this, arguments)`, protobufjs's
+      // `r.apply(null, t)` where `t` was filled from `arguments`) has no
+      // static arity, so no direct call can be spelled for it — it takes
+      // the DYN dispatch instead, in the second arm.
       if (
         (name === "call" || name === "apply") &&
         isJsSourceFile(call.getSourceFile()) &&
@@ -11485,7 +11504,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
                   !call.arguments[1]!.elements.some((e) => ts.isSpreadElement(e))
                 ? (call.arguments[1] as ts.ArrayLiteralExpression).elements
                 : null;
-        if (argNodes !== null) {
+        {
           // SPECULATIVE lowering of the receiver: one with no compiled
           // function value (a stdlib member — `Object.prototype.toString`,
           // an un-lowered `Array.prototype.slice`) must leave NO
@@ -11509,6 +11528,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
           // and no variadic tail, so a short or long list keeps the fence
           // rather than silently mis-calling.
           if (
+            argNodes !== null &&
             fn !== null &&
             captured.length === 0 &&
             fn.type.kind === "func" &&
@@ -11525,6 +11545,96 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
               );
               return { kind: "callValue", callee: bound, args, type: fn.type.ret, loc: locOf(call) };
             }
+          }
+          // `fn.apply(thisArg, <runtime-length pack>)` over a compiled
+          // function value: the SAME answer the dyn spelling already
+          // gives one line away. `apply` is in DYN_DISPATCH_METHODS, so a
+          // receiver the checker types as `any` routes to
+          // scr_dyn_invoke's FUNC arm today and runs JS-exact; only a
+          // receiver the checker HAS call signatures for reached the
+          // fence below. Box the compiled function into the same dyn
+          // (dynFrom over a func — canBoxFuncIntoDyn) and emit the same
+          // dynInvoke: the runtime binds thisArg as the ambient receiver
+          // and calls with the pack's RUNTIME length, and the boxed
+          // thunk pads a missing argument with `undefined` and drops
+          // extras, which is JS's own arity rule.
+          //
+          // EVERY PARAMETER MUST BE `dyn`, and that gate is not caution:
+          // the thunk dynCHECKS each argument against the parameter's
+          // static type, so a `number` parameter reached by a SHORT pack
+          // throws where Node passes `undefined` and lets the body make
+          // NaN. That divergence already exists on the dyn-receiver path
+          // (it is one of the DYNCHECK statements, loud and catchable);
+          // an ungated arm here would IMPORT it into a path that today
+          // refuses, which is the one trade this project does not make.
+          // A dyn parameter has no check to fail, so the padded
+          // `undefined` arrives exactly as Node delivers it.
+          //
+          // A REST receiver is allowed and that is measured, not assumed:
+          // a JS function that reads `arguments` lowers with `params: []`
+          // and `rest: true`, so the all-dyn test is vacuous for it — and
+          // the identical function boxed through a dyn PARAMETER already
+          // runs byte-exact at pack lengths 0 and 4 (`arguments.length`
+          // and `arguments[0]` both answer Node's value). Only the ISLAND
+          // rest ABI stays out: its tail marshals through jsval, which is
+          // a different boundary from the one scr_dyn_invoke calls across.
+          const packWhy: string | null =
+            argNodes !== null || name !== "apply" || call.arguments.length !== 2
+              ? null
+              : fn === null || captured.length !== 0
+                ? "receiver-did-not-lower"
+                : fn.type.kind !== "func"
+                  ? `receiver-not-a-func:${fn.type.kind}`
+                  : fn.type.restAbi === "jsval"
+                    ? "receiver-has-an-island-rest-abi"
+                    : !fn.type.params.every((pt) => pt.kind === "dyn")
+                      ? `receiver-parameter-not-dyn:[${fn.type.params.map((pt) => pt.kind).join(",")}]`
+                      : !canBoxFuncIntoDyn(fn.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))
+                        ? "receiver-does-not-box"
+                        : "OK";
+          if (packWhy !== null && packWhy !== "OK") applyPackWhy(call, `NOT-CLOSED=${packWhy}`);
+          if (packWhy === "OK" && fn !== null && fn.type.kind === "func") {
+            // BOTH OPERANDS MUST REACH THE RUNTIME AS DYNS. The pack is
+            // the load-bearing one: scr_dyn_invoke reads its `arr` payload,
+            // so a value that arrived unconverted would be read as a
+            // non-array. The lowered TYPE is the authority and the
+            // checker's is not — the real site's pack is
+            // `new Array(arguments.length - 1)` filled by index, which
+            // mapTypeOf answers `null` for while the lowering produces a
+            // perfectly good dyn. Speculative, on probeLower's discipline:
+            // captured diagnostics are REPLAYED when the arm takes and
+            // DISCARDED when it does not, so a decline leaves the fence
+            // below as the only thing reported.
+            const loc = locOf(call);
+            const savedArgs = L.diagSink;
+            const capturedArgs: ScrDiagnostic[] = [];
+            L.diagSink = capturedArgs;
+            let thisArg: IrExpr | null = null;
+            let pack: IrExpr | null = null;
+            try {
+              thisArg = L.lowerExprExpecting(call.arguments[0]!, DYN);
+              pack = L.lowerExprExpecting(call.arguments[1]!, DYN);
+            } catch (e) {
+              if (!(e instanceof PoisonError)) {
+                L.diagSink = savedArgs;
+                throw e;
+              }
+            }
+            L.diagSink = savedArgs;
+            if (thisArg !== null && pack !== null && thisArg.type.kind === "dyn" && pack.type.kind === "dyn") {
+              for (const d of capturedArgs) L.pushDiag(d);
+              applyPackWhy(call, "CLOSED-BY=dyn-apply-pack");
+              return {
+                kind: "dynInvoke",
+                recv: { kind: "dynFrom", value: fn, type: DYN, loc },
+                method: "apply",
+                calleeName: access.getText(),
+                args: [thisArg, pack],
+                type: DYN,
+                loc,
+              };
+            }
+            applyPackWhy(call, "NOT-CLOSED=operands-do-not-reach-dyn");
           }
         }
       }
