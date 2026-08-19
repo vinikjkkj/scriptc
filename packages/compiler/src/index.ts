@@ -624,6 +624,20 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
       ...(ffi !== null ? { ffiImports: ffi.functions } : {}),
     });
     const provenance = provenanceSources();
+    // THE VERDICT IS A BUILD CLAIM, so it runs the check a build runs.
+    // Until this line the analysis stopped at lowering and compile()
+    // alone ran validateModule, which meant a program whose lowering
+    // succeeded and whose IR the validator rejects was reported "fully
+    // static" while `scriptc build` on the same file printed SC9001. The
+    // gap is structural, not one shape: NONE of validate.ts's 487 err()
+    // sites could reach a coverage report. `module` is non-null exactly
+    // when `diagnostics` is empty — i.e. exactly in the case that renders
+    // a green verdict — so this costs one IR walk on the programs whose
+    // verdict it can change, and nothing at all on the ones it cannot.
+    const ice =
+      lowered.module !== null
+        ? validateModule(lowered.module).map((v) => iceDiag(v.message, v.loc))
+        : [];
     return {
       coverage: {
         file: entryPath,
@@ -644,6 +658,7 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
         ...(provenance !== null ? { provenance } : {}),
         ...(lowered.statsByFile ? { statsByFile: lowered.statsByFile } : {}),
         ...(lowered.provenanceElided ? { provenanceElided: lowered.provenanceElided } : {}),
+        ...(ice.length > 0 ? { ice } : {}),
         preflightFailed: false,
       },
       sourceTexts: fe.sourceTexts(),

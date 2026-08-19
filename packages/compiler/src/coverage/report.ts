@@ -58,6 +58,15 @@ export interface CoverageInput {
   /** --provenance-sources: diagnostics of elided pure-annotated dead
    * consts (off the build; the provenance section names them). */
   provenanceElided?: ScrDiagnostic[];
+  /** IR-VALIDATION failures (SC9001) on the module this analysis lowered.
+   * The analysis used to stop at lowering, so a program whose lowering
+   * SUCCEEDED but whose module the validator rejects — every one of
+   * validate.ts's 487 err() sites — was reported "fully static" while
+   * `scriptc build` failed on it with an internal-compiler-error. A
+   * verdict a build contradicts is worse than no verdict, so these are
+   * carried here, rendered apart from blockers (they are compiler bugs,
+   * not constructs without a lowering) and they DO sink the verdict. */
+  ice?: ScrDiagnostic[];
   /** True when tsc preflight failed — no coverage can be computed. */
   preflightFailed: boolean;
 }
@@ -343,8 +352,27 @@ export function renderCoverageLines(input: CoverageInput, opts: { color?: boolea
     out.push("");
   }
 
+  // The ICEs go ABOVE the verdict and sink it. An internal compiler error
+  // is not a blocker (nothing in the source is unsupported) and it is not
+  // advice (the program does not build), so it gets its own heading — and
+  // the verdict below can no longer be green while one stands.
+  const ices = input.ice ?? [];
+  if (ices.length > 0) {
+    const grouped = groupBlockers(ices);
+    const widestI = alignWidth(grouped.map((b) => b.what.length));
+    out.push(
+      `  ${c(RED, "internal compiler error")}  ${ices.length} site${ices.length === 1 ? "" : "s"} ${c(DIM, "(lowering succeeded and the IR did not validate — `scriptc build` fails here; please report)")}`,
+    );
+    for (const b of grouped) {
+      out.push(
+        `    ${c(RED, `×${b.count}`.padStart(4))}  ${b.what.padEnd(widestI)}  ${c(DIM, b.code)}`,
+      );
+    }
+    out.push("");
+  }
+
   const unreachedDiags = un?.diagnostics ?? [];
-  if (failed === 0 && input.diagnostics.length === 0 && unreachedDiags.length === 0) {
+  if (failed === 0 && input.diagnostics.length === 0 && unreachedDiags.length === 0 && ices.length === 0) {
     out.push(
       island > 0
         ? `  ${c(GREEN, "builds with --dynamic")} — no remaining blockers (the island sites above run in the embedded engine).`

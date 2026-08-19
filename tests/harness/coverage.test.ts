@@ -58,6 +58,42 @@ test("unreached blockers report in their own group", async () => {
   );
 });
 
+test("an IR-validation failure sinks the verdict and reports as itself", () => {
+  // The rendering half of the same fix, pinned without depending on a
+  // program that still trips the validator — after the cast-launder fences
+  // the mutation sweep finds none, which is the point of the fences.
+  // An ICE is not a blocker (nothing in the source is unsupported) and not
+  // advice (the program does not build), so it renders under its own
+  // heading, ABOVE the verdict, and the verdict below it can no longer be
+  // green.
+  const base = {
+    file: "x.ts",
+    stats: { statementsTotal: 3, statementsFailed: 0, statementsIsland: 0, functionsSkipped: 0 },
+    diagnostics: [],
+    preflightFailed: false,
+  };
+  const green = renderCoverage(base);
+  expect(green).toContain("fully static");
+
+  const ice = renderCoverage({
+    ...base,
+    ice: [
+      {
+        code: "SC9001",
+        message:
+          "internal compiler error: in %init.0: call %obj.keys.0 arg 0: expected record, got object — please report this",
+        loc: { file: "x.ts", start: 0, end: 0 },
+      },
+    ],
+  });
+  expect(ice).not.toContain("fully static");
+  expect(ice).toContain("internal compiler error");
+  expect(ice).toContain("SC9001");
+  // Still an honest 100% on the STATEMENT line: every statement lowered.
+  // What failed is the module, and the report must not confuse the two.
+  expect(ice).toContain("compile statically    3");
+});
+
 test("fully static program reports 100%", () => {
   const out = report(join(repoRoot, "tests/corpus/400-fib.ts"));
   expect(out).toContain("(100%)");
@@ -199,6 +235,16 @@ test(`every corpus program is 100% static (corpus and coverage agree${shardSuffi
     const deferred = /^\/\/ @deferred-fences:\s*(\d+)\s*$/.exec(firstLine);
     const { coverage } = analyze(file, { dynamic: /^\/\/ @dynamic\s*$/.test(firstLine) });
     expect.soft(coverage.diagnostics, file).toEqual([]);
+    // …and the IR the analysis lowered must VALIDATE. Until analyze() ran
+    // validateModule, a program whose lowering succeeded and whose module
+    // the validator rejects was graded "fully static" here while `scriptc
+    // build` on the same file printed SC9001 — a green verdict a build
+    // contradicts, and this suite is a merge gate. The gap was structural,
+    // not one shape: none of validate.ts's 487 err() sites could reach a
+    // coverage report at all. Ten of a hundred mechanical laundering
+    // mutations (a cast spelling a record over a value that is not one)
+    // reached it, across four validator sites and three receiver kinds.
+    expect.soft(coverage.ice ?? [], file).toEqual([]);
     expect.soft(coverage.stats.statementsFailed, file).toBe(deferred ? Number(deferred[1]) : 0);
     if (++n % 10 === 0) await new Promise((r) => setImmediate(r));
   }

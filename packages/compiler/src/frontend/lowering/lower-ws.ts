@@ -72,16 +72,28 @@ export function lowerWebSocketGlobal(L: Lowerer, expr: ts.PropertyAccessExpressi
   if (!globalThisReceiver(L, expr.expression)) return why("receiver");
 
   const loc = locOf(expr);
+  // The site the emitted wrapper's DEFERRED refusals tag with. The two
+  // `ws` init-bag refusals (`agent`, `dispatcher`) are raised by the
+  // backend, from a wrapper interned per construct-signature type and
+  // reached only through a closure VALUE, so they have no diagnostic and no
+  // location of their own — and they were the two rows in zapo's TU that
+  // no bracket-keyed instrument could see. This is the one real source
+  // location on the path: where the program READ globalThis.WebSocket and
+  // got the constructor those refusals belong to. Rendered here because the
+  // backends have no source text to turn an offset into a line.
+  const site = `${loc.file}:${
+    ts.getLineAndCharacterOfPosition(expr.getSourceFile(), loc.start).line + 1
+  }`;
   const getRecord = (id: string) => L.shapes.get(id);
   const getUnion = (id: string) => L.unions.get(id);
   const mapped = L.mapTypeOf(L.typeOf(expr));
-  if (mapped === null) return castConstructorArm(L, expr, loc, why);
+  if (mapped === null) return castConstructorArm(L, expr, loc, site, why);
 
   // The bare construct signature: the program declared the property
   // non-optional, or narrowed it before this read.
   if (mapped.kind === "func") {
     if (wsGlobalPlan(mapped, getRecord, getUnion) === null) return why("shape");
-    return { kind: "wsCtor", type: mapped, loc };
+    return { kind: "wsCtor", type: mapped, site, loc };
   }
 
   // `WebSocket?: Ctor` — the optional spelling, which is what a program
@@ -109,7 +121,7 @@ export function lowerWebSocketGlobal(L: Lowerer, expr: ts.PropertyAccessExpressi
       kind: "unionWrap",
       unionId: mapped.unionId,
       tag,
-      value: { kind: "wsCtor", type: fnType, loc },
+      value: { kind: "wsCtor", type: fnType, site, loc },
       type: mapped,
       loc,
     };
@@ -144,6 +156,7 @@ function castConstructorArm(
   L: Lowerer,
   expr: ts.PropertyAccessExpression,
   loc: ReturnType<typeof locOf>,
+  site: string,
   why: (step: string) => null,
 ): IrExpr | null {
   const t = L.typeOf(expr);
@@ -164,7 +177,7 @@ function castConstructorArm(
     const m = L.mapTypeOf(part);
     if (m === null || m.kind !== "func") continue;
     if (wsGlobalPlan(m, (id) => L.shapes.get(id), (id) => L.unions.get(id)) === null) continue;
-    found.push({ kind: "wsCtor", type: m, loc });
+    found.push({ kind: "wsCtor", type: m, site, loc });
   }
   if (found.length !== 1) return why(found.length === 0 ? "unmapped" : "ambiguous");
   return found[0]!;

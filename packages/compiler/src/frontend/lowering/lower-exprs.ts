@@ -8508,6 +8508,28 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
             throw new PoisonError();
           }
           const obj = srcLowered ?? L.lowerExpr(srcNode);
+          // The same trust-the-checker hazard the union arm above already
+          // guards against, on the RECORD side, where nothing did: `srcType`
+          // is the CHECKER's view of the source, and a cast can spell a record
+          // over a value that is not one (`c as unknown as { x: number }` over
+          // a class instance, or the widening assignment `const c: I = new C()`
+          // that needs no cast at all). The copy below would emit `recordGet`
+          // against an `object` receiver and the IR validator reported it a
+          // pass later as SC9001 "recordGet receiver: expected record, got
+          // object" — an internal-compiler-error for a construct the compiler
+          // had simply declined. Read off the value ALREADY lowered here rather
+          // than a fresh probeLower: a probe at the top of this arm interns a
+          // union-narrow helper into every record spread in the program, which
+          // is a measurable 1 150 bytes on zapo's TU for nothing.
+          if (obj.type.kind !== "record" && obj.type.kind !== "dyn") {
+            L.unsupported(
+              "SC1090",
+              prop,
+              `object spread of a '${L.fmt(obj.type)}' value a cast spells as a record `
+                + `(the copy would read the CAST's declared fields off a value that has no`
+                + ` such storage)`,
+            );
+          }
           // A record-mapped CHECKER type whose VALUE lives in the checked-dynamic tree (a
           // JS file-scope object-literal global): read each field from
           // the checked-dynamic tree (dynKeyGet) and VALIDATE it into the source shape's
