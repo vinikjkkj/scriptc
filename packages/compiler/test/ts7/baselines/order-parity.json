@@ -8354,6 +8354,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4952-an-index-signature-spread-beside-a-fixed-shape-one-widens-the-recovered-store.ts": {
+   "order": [
+    "<repo>/tests/corpus/4952-an-index-signature-spread-beside-a-fixed-shape-one-widens-the-recovered-store.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/4953-two-ts-unions-with-the-same-arms-share-one-discriminant-verdict.ts": {
    "order": [
     "<repo>/tests/corpus/4953-two-ts-unions-with-the-same-arms-share-one-discriminant-verdict.ts"
@@ -9794,9 +9800,9 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/index-signature-spread-beside-a-fixed-shape-source.ts": {
+  "<repo>/tests/diagnostics/index-signature-spread-with-a-member-the-store-cannot-hold.ts": {
    "order": [
-    "<repo>/tests/diagnostics/index-signature-spread-beside-a-fixed-shape-source.ts"
+    "<repo>/tests/diagnostics/index-signature-spread-with-a-member-the-store-cannot-hold.ts"
    ],
    "diags": []
   },

@@ -1,0 +1,13 @@
+index-signature-spread-with-a-member-the-store-cannot-hold.ts:47:5 - error SC1090: object spread involving index-signature shapes (overflow keys are runtime state — copy the fields you need explicitly) are not supported yet
+
+  46 |     schema: "Mute",
+  47 |     ...indexArgs,
+     |     ^~~~~~~~~~~~
+  48 |     ...base,
+
+index-signature-spread-with-a-member-the-store-cannot-hold.ts:57:49 - error SC1090: object spread involving index-signature shapes (overflow keys are runtime state — copy the fields you need explicitly) are not supported yet
+
+  56 | if (indexArgs) {
+  57 |   const numbered = { 0: "zero", schema: "Mute", ...indexArgs, ...base };
+     |                                                 ^~~~~~~~~~~~
+  58 |   console.log(JSON.stringify(numbered));
