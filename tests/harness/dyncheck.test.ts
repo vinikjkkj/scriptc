@@ -1589,4 +1589,47 @@ console.log(typeof u === "number" ? "number" : "record");
     expect(r.stderr).toContain("Uncaught TypeError: expected");
   });
 
+  test("an OPTIONAL member an accessor provides with the WRONG type refuses instead of fabricating undefined", async () => {
+    // The third face of the accessor read, and the one that decides whether
+    // the miss-path probe was worth taking. A bare `{}` fits both arms of
+    // `{a?: string} | {b?: number}`, so the MATCHER (which cannot run a
+    // getter, and is unchanged) selects the first. The BUILDER then reads `a`
+    // through the accessor and finds a number.
+    //
+    //   Node   `built: 5`             — an `as` is erased; the getter answers.
+    //   base   `built: a-undefined`   — a SILENT WRONG VALUE: it fabricated
+    //                                   `undefined` for a member that is 5.
+    //   now    `threw: expected string | undefined at $.a, got number`
+    //
+    // A matched arm's builder CAN now fail, which the union comment says it
+    // cannot — but only here, only through an accessor, and the union is
+    // unwound before anything reads it: the caller's pending check fires
+    // immediately and a NULL arm releases harmlessly (the record release is
+    // null-guarded). Wrong answer traded for a refusal that names the reason,
+    // which is the direction this project takes.
+    const r = await compileAndRun(
+      "accessor-optional-union-arm",
+      `type A = { a?: string };
+type B = { b?: number };
+type U = A | B;
+const v = JSON.parse("{}");
+Object.defineProperty(v as object, "a", {
+  get(): number { return 5; },
+  enumerable: false,
+  configurable: true,
+});
+try {
+  const u = v as U;
+  const asA = u as A;
+  console.log("built:", asA.a === undefined ? "a-undefined" : String(asA.a));
+} catch (e) {
+  console.log("threw:", (e as Error).message);
+}
+console.log("survived");
+`,
+    );
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("threw: expected string | undefined at $.a, got number\nsurvived\n");
+  });
+
 });
