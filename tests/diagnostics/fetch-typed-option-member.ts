@@ -18,12 +18,12 @@
 // That is THIS lane, MEASURED: no tsconfig reaches tests/diagnostics, so
 // the program compiles against the shipped fallback .d.ts, whose `fetch`
 // is `(input: string | URL, init?: RequestInit)` — `Request` is not
-// declared at all here. Under zapo's real @types/node the first parameter
-// is `RequestInfo | URL` and the leaf is `Request` instead. Either way the
-// leaf is an island-ambient (or absent) TYPE, never the RegExp: `Response`,
-// `RequestInit`, `AbortSignal` and `Headers` are island ambients, and
-// `AbortSignal` alone has a static representation, "overwhelmingly an
-// optional field on an options record that the program never touches".
+// declared at all here. Under zapo's real @types/node it renders
+// `string | Request | URL` and the leaf is `Request` — and a ladder that
+// drops one arm at a time finds TWO MORE behind it, `RequestInit` (the
+// init parameter) then `Response` (the return): three types, each
+// reachable only once the one before it maps. `AbortSignal` is the one
+// web type here that already has a static representation; `Headers` none.
 //
 // This one KEEPS its SC2011: here the static mapping really is null and
 // the dynamic mapping really does answer, so both halves of the message
