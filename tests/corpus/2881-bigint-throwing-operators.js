@@ -1,4 +1,11 @@
-// @deferred-fences: 2
+// @deferred-fences: 0
+// RE-POINTED, not deleted. 97294cd2 measured TWO deferred fences here
+// (a `/` on an any-typed value, plus an SC1101 inside a BigInt catch
+// arm) and wrote `2` on this line. Both lowered afterwards, so the
+// assertion outlived its subject and coverage.test.ts read RED against
+// a number nothing produces any more. The directive stays at the
+// MEASURED value so a fence coming back still trips it, and so the
+// count that used to be here is on the record instead of vanishing.
 // Every BigInt operation that ECMA-262 says raises a RangeError, caught.
 //
 // `big.div`, `big.rem`, `big.pow` and `big.fromF64` all raise a CATCHABLE
