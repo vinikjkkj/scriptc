@@ -5274,6 +5274,44 @@ function spreadErasedIndexValue(
     }
   }
   if (!sawSpread || value === null) return undefined;
+  // A DECLARED member that only fits the slot as a SUBSET forces the FOLD.
+  //
+  // The member loop below asks two different questions of the two shapes
+  // this recovery can produce. The HYBRID keeps a struct slot per declared
+  // member, so a keyed read that COLLIDES with a declared name has to come
+  // back out of that slot at the signature's own type -- which is why the
+  // hybrid demands exact equality. The FOLD has no struct slots at all:
+  // every member rides the insertion-ordered store, and a member whose type
+  // is a SUBSET of the slot reads back through the same narrowing the
+  // header family already uses (fieldTarget's canonicalized()).
+  //
+  // Those are two answers to "can this member live here", and the
+  // arrangement of the literal was deciding which one got asked. A literal
+  // whose spreads all sit LAST took the hybrid question and was REFUSED for
+  // a member the fold would have taken without complaint -- zapo's
+  // appstate-mutation rows exactly: `{ schema, operation, ...indexArgs }`,
+  // where `schema: string` is one arm of the `string | boolean | null` slot
+  // `indexArgs` publishes and the literal is not the least bit ambiguous.
+  //
+  // So when a member only fits as a subset, take the shape that can hold
+  // it. The fold is order-correct for EVERY arrangement (its store is
+  // insertion-ordered, which is what a JS object's key list is); the hybrid
+  // is the narrower spelling that happens to be available when the spreads
+  // are last. Nothing that maps today can move: a member reaching this test
+  // fails `typeEquals` and so made the loop below `return undefined` -- the
+  // recovery declined the literal outright, and the desugar fenced at the
+  // spread. The fold's own guards (accessor, array-index-like name) are
+  // enforced by that same loop, now that `fold` is decided before it runs.
+  if (!fold) {
+    for (const p of checker.getPropertiesOfType(widened)) {
+      const pt = mapType(checker.getTypeOfSymbol(p), ctx);
+      if (!pt) return undefined;
+      if (!typeEquals(pt, value) && fitsWithinSlot(pt, value, ctx)) {
+        fold = true;
+        break;
+      }
+    }
+  }
   // Every DECLARED member must fit the recovered slot. A member the
   // overflow could not hold would make the shape claim a uniform value
   // type it does not have — and every undeclared key read would answer at
