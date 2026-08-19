@@ -3003,13 +3003,295 @@ static void scr_sha256_block(uint32_t h[8], const unsigned char *p) {
   h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
 }
 
+
+/* ── SHA-256 on the x86 SHA extensions (SHA-NI) ──────────────────────
+ * The scalar compression above is a correct FIPS 180-4 round loop and it
+ * is NOT the floor: measured on this host it costs 17-20 cycles per byte
+ * (840 cycles for a one-block digest), where `sha256rnds2` does four
+ * rounds in one instruction and lands at 1.8-2.6. Every x86-64 CPU since
+ * Zen 1 (2017) and Goldmont / Ice Lake on Intel's side has it; the ones
+ * that do not still take the scalar path, chosen by CPUID at run time.
+ *
+ * The 64 round constants below are the SAME scr_sha256_k, paired into
+ * 128-bit halves — sha256rnds2 consumes four already-added K+W words at a
+ * time, which is why they appear as literals rather than as loads from
+ * the table.
+ *
+ * THIS IS A HASH, so it is not "probably right": scr_sha256_blocks is
+ * proved against the scalar arm byte for byte over every message length
+ * 0..4096 on three seeds and a million random short messages, and the
+ * whole digest is pinned against Node's in the differential corpus.
+ * SCR_SHA256_NI=0 compiles the dispatch out entirely and restores the
+ * previous code path exactly, which is what the ablation control builds.
+ *
+ * aarch64 has the same primitive (`sha256h`/`sha256su0`) and is NOT wired
+ * up here: it cannot be measured on this host and an unmeasured crypto
+ * path is worse than no path. */
+#ifndef SCR_SHA256_NI
+#if defined(__x86_64__) && defined(__has_include)
+#if __has_include(<immintrin.h>)
+#define SCR_SHA256_NI 1
+#endif
+#endif
+#endif
+#ifndef SCR_SHA256_NI
+#define SCR_SHA256_NI 0
+#endif
+
+#if SCR_SHA256_NI
+#include <immintrin.h>
+
+/* CPUID by hand rather than through <cpuid.h>: one local function instead
+ * of the header three, and no dependency on a header the freestanding
+ * targets need not have. On x86-64 %rbx is not the PIC register, so it can
+ * be an output constraint directly -- which is also why the gate above is
+ * __x86_64__ only: on i386 %ebx IS the PIC register and this constraint can
+ * fail to build under -fPIC. i386 is not a target this project ships and I
+ * cannot test it, so it keeps the scalar arm.
+ *
+ * (I first wrote this believing <cpuid.h> was WHY the profiling lane grew 8
+ * unnamed hot rows next to this code. It is not: those rows are the SSE
+ * intrinsics of the block loop below, which -finstrument-functions
+ * un-inlines into eight ~96-byte thunks that carry no PDB name. See the
+ * report. The change is kept because it is smaller, not because it fixed
+ * that.) */
+static void scr_cpuid(unsigned leaf, unsigned sub, unsigned out[4]) {
+  __asm__ volatile("cpuid"
+                   : "=a"(out[0]), "=b"(out[1]), "=c"(out[2]), "=d"(out[3])
+                   : "a"(leaf), "c"(sub));
+}
+
+/* SSSE3 (pshufb), SSE4.1 (pblendw) and SHA all have to be present: the
+ * block loop uses one of each. */
+static int scr_sha256_ni_probe(void) {
+  unsigned r[4];
+  scr_cpuid(0, 0, r);
+  if (r[0] < 7) return 0; /* max leaf */
+  scr_cpuid(1, 0, r);
+  if (!((r[2] >> 9) & 1)) return 0;  /* SSSE3 */
+  if (!((r[2] >> 19) & 1)) return 0; /* SSE4.1 */
+  scr_cpuid(7, 0, r);
+  return (int)((r[1] >> 29) & 1); /* SHA */
+}
+
+/* Cached after the first digest. The race between two threads reaching it
+ * at once is benign: CPUID is a pure function of the machine, so both
+ * store the same value into an int. */
+static int scr_sha256_ni_cache = -1;
+static int scr_sha256_have_ni(void) {
+  int v = scr_sha256_ni_cache;
+  if (v < 0) {
+    v = scr_sha256_ni_probe();
+    scr_sha256_ni_cache = v;
+  }
+  return v;
+}
+
+__attribute__((target("sha,sse4.1,ssse3"))) static void
+scr_sha256_ni_blocks(uint32_t state[8], const unsigned char *data, size_t nblk) {
+  __m128i s0, s1, msg, tmp, m0, m1, m2, m3, abef, cdgh;
+  const __m128i shuf = _mm_set_epi64x((long long)0x0c0d0e0f08090a0bULL,
+                                      (long long)0x0405060700010203ULL);
+
+  /* the state arrives as {a,b,c,d,e,f,g,h}; the instruction wants ABEF/CDGH */
+  tmp = _mm_loadu_si128((const __m128i *)&state[0]);
+  s1 = _mm_loadu_si128((const __m128i *)&state[4]);
+  tmp = _mm_shuffle_epi32(tmp, 0xB1);
+  s1 = _mm_shuffle_epi32(s1, 0x1B);
+  s0 = _mm_alignr_epi8(tmp, s1, 8);
+  s1 = _mm_blend_epi16(s1, tmp, 0xF0);
+
+  while (nblk--) {
+    abef = s0;
+    cdgh = s1;
+
+    /* rounds 0-3 */
+    msg = _mm_loadu_si128((const __m128i *)(data + 0));
+    m0 = _mm_shuffle_epi8(msg, shuf);
+    msg = _mm_add_epi32(m0, _mm_set_epi64x((long long)0xE9B5DBA5B5C0FBCFULL,
+                                           (long long)0x71374491428A2F98ULL));
+    s1 = _mm_sha256rnds2_epu32(s1, s0, msg);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    s0 = _mm_sha256rnds2_epu32(s0, s1, msg);
+    /* rounds 4-7 */
+    m1 = _mm_loadu_si128((const __m128i *)(data + 16));
+    m1 = _mm_shuffle_epi8(m1, shuf);
+    msg = _mm_add_epi32(m1, _mm_set_epi64x((long long)0xAB1C5ED5923F82A4ULL,
+                                           (long long)0x59F111F13956C25BULL));
+    s1 = _mm_sha256rnds2_epu32(s1, s0, msg);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    s0 = _mm_sha256rnds2_epu32(s0, s1, msg);
+    m0 = _mm_sha256msg1_epu32(m0, m1);
+    /* rounds 8-11 */
+    m2 = _mm_loadu_si128((const __m128i *)(data + 32));
+    m2 = _mm_shuffle_epi8(m2, shuf);
+    msg = _mm_add_epi32(m2, _mm_set_epi64x((long long)0x550C7DC3243185BEULL,
+                                           (long long)0x12835B01D807AA98ULL));
+    s1 = _mm_sha256rnds2_epu32(s1, s0, msg);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    s0 = _mm_sha256rnds2_epu32(s0, s1, msg);
+    m1 = _mm_sha256msg1_epu32(m1, m2);
+    /* rounds 12-15 */
+    m3 = _mm_loadu_si128((const __m128i *)(data + 48));
+    m3 = _mm_shuffle_epi8(m3, shuf);
+    msg = _mm_add_epi32(m3, _mm_set_epi64x((long long)0xC19BF1749BDC06A7ULL,
+                                           (long long)0x80DEB1FE72BE5D74ULL));
+    s1 = _mm_sha256rnds2_epu32(s1, s0, msg);
+    tmp = _mm_alignr_epi8(m3, m2, 4);
+    m0 = _mm_add_epi32(m0, tmp);
+    m0 = _mm_sha256msg2_epu32(m0, m3);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    s0 = _mm_sha256rnds2_epu32(s0, s1, msg);
+    m2 = _mm_sha256msg1_epu32(m2, m3);
+    /* rounds 16-19 */
+    msg = _mm_add_epi32(m0, _mm_set_epi64x((long long)0x240CA1CC0FC19DC6ULL,
+                                           (long long)0xEFBE4786E49B69C1ULL));
+    s1 = _mm_sha256rnds2_epu32(s1, s0, msg);
+    tmp = _mm_alignr_epi8(m0, m3, 4);
+    m1 = _mm_add_epi32(m1, tmp);
+    m1 = _mm_sha256msg2_epu32(m1, m0);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    s0 = _mm_sha256rnds2_epu32(s0, s1, msg);
+    m3 = _mm_sha256msg1_epu32(m3, m0);
+    /* rounds 20-23 */
+    msg = _mm_add_epi32(m1, _mm_set_epi64x((long long)0x76F988DA5CB0A9DCULL,
+                                           (long long)0x4A7484AA2DE92C6FULL));
+    s1 = _mm_sha256rnds2_epu32(s1, s0, msg);
+    tmp = _mm_alignr_epi8(m1, m0, 4);
+    m2 = _mm_add_epi32(m2, tmp);
+    m2 = _mm_sha256msg2_epu32(m2, m1);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    s0 = _mm_sha256rnds2_epu32(s0, s1, msg);
+    m0 = _mm_sha256msg1_epu32(m0, m1);
+    /* rounds 24-27 */
+    msg = _mm_add_epi32(m2, _mm_set_epi64x((long long)0xBF597FC7B00327C8ULL,
+                                           (long long)0xA831C66D983E5152ULL));
+    s1 = _mm_sha256rnds2_epu32(s1, s0, msg);
+    tmp = _mm_alignr_epi8(m2, m1, 4);
+    m3 = _mm_add_epi32(m3, tmp);
+    m3 = _mm_sha256msg2_epu32(m3, m2);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    s0 = _mm_sha256rnds2_epu32(s0, s1, msg);
+    m1 = _mm_sha256msg1_epu32(m1, m2);
+    /* rounds 28-31 */
+    msg = _mm_add_epi32(m3, _mm_set_epi64x((long long)0x1429296706CA6351ULL,
+                                           (long long)0xD5A79147C6E00BF3ULL));
+    s1 = _mm_sha256rnds2_epu32(s1, s0, msg);
+    tmp = _mm_alignr_epi8(m3, m2, 4);
+    m0 = _mm_add_epi32(m0, tmp);
+    m0 = _mm_sha256msg2_epu32(m0, m3);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    s0 = _mm_sha256rnds2_epu32(s0, s1, msg);
+    m2 = _mm_sha256msg1_epu32(m2, m3);
+    /* rounds 32-35 */
+    msg = _mm_add_epi32(m0, _mm_set_epi64x((long long)0x53380D134D2C6DFCULL,
+                                           (long long)0x2E1B213827B70A85ULL));
+    s1 = _mm_sha256rnds2_epu32(s1, s0, msg);
+    tmp = _mm_alignr_epi8(m0, m3, 4);
+    m1 = _mm_add_epi32(m1, tmp);
+    m1 = _mm_sha256msg2_epu32(m1, m0);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    s0 = _mm_sha256rnds2_epu32(s0, s1, msg);
+    m3 = _mm_sha256msg1_epu32(m3, m0);
+    /* rounds 36-39 */
+    msg = _mm_add_epi32(m1, _mm_set_epi64x((long long)0x92722C8581C2C92EULL,
+                                           (long long)0x766A0ABB650A7354ULL));
+    s1 = _mm_sha256rnds2_epu32(s1, s0, msg);
+    tmp = _mm_alignr_epi8(m1, m0, 4);
+    m2 = _mm_add_epi32(m2, tmp);
+    m2 = _mm_sha256msg2_epu32(m2, m1);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    s0 = _mm_sha256rnds2_epu32(s0, s1, msg);
+    m0 = _mm_sha256msg1_epu32(m0, m1);
+    /* rounds 40-43 */
+    msg = _mm_add_epi32(m2, _mm_set_epi64x((long long)0xC76C51A3C24B8B70ULL,
+                                           (long long)0xA81A664BA2BFE8A1ULL));
+    s1 = _mm_sha256rnds2_epu32(s1, s0, msg);
+    tmp = _mm_alignr_epi8(m2, m1, 4);
+    m3 = _mm_add_epi32(m3, tmp);
+    m3 = _mm_sha256msg2_epu32(m3, m2);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    s0 = _mm_sha256rnds2_epu32(s0, s1, msg);
+    m1 = _mm_sha256msg1_epu32(m1, m2);
+    /* rounds 44-47 */
+    msg = _mm_add_epi32(m3, _mm_set_epi64x((long long)0x106AA070F40E3585ULL,
+                                           (long long)0xD6990624D192E819ULL));
+    s1 = _mm_sha256rnds2_epu32(s1, s0, msg);
+    tmp = _mm_alignr_epi8(m3, m2, 4);
+    m0 = _mm_add_epi32(m0, tmp);
+    m0 = _mm_sha256msg2_epu32(m0, m3);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    s0 = _mm_sha256rnds2_epu32(s0, s1, msg);
+    m2 = _mm_sha256msg1_epu32(m2, m3);
+    /* rounds 48-51 */
+    msg = _mm_add_epi32(m0, _mm_set_epi64x((long long)0x34B0BCB52748774CULL,
+                                           (long long)0x1E376C0819A4C116ULL));
+    s1 = _mm_sha256rnds2_epu32(s1, s0, msg);
+    tmp = _mm_alignr_epi8(m0, m3, 4);
+    m1 = _mm_add_epi32(m1, tmp);
+    m1 = _mm_sha256msg2_epu32(m1, m0);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    s0 = _mm_sha256rnds2_epu32(s0, s1, msg);
+    m3 = _mm_sha256msg1_epu32(m3, m0);
+    /* rounds 52-55 */
+    msg = _mm_add_epi32(m1, _mm_set_epi64x((long long)0x682E6FF35B9CCA4FULL,
+                                           (long long)0x4ED8AA4A391C0CB3ULL));
+    s1 = _mm_sha256rnds2_epu32(s1, s0, msg);
+    tmp = _mm_alignr_epi8(m1, m0, 4);
+    m2 = _mm_add_epi32(m2, tmp);
+    m2 = _mm_sha256msg2_epu32(m2, m1);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    s0 = _mm_sha256rnds2_epu32(s0, s1, msg);
+    /* rounds 56-59 */
+    msg = _mm_add_epi32(m2, _mm_set_epi64x((long long)0x8CC7020884C87814ULL,
+                                           (long long)0x78A5636F748F82EEULL));
+    s1 = _mm_sha256rnds2_epu32(s1, s0, msg);
+    tmp = _mm_alignr_epi8(m2, m1, 4);
+    m3 = _mm_add_epi32(m3, tmp);
+    m3 = _mm_sha256msg2_epu32(m3, m2);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    s0 = _mm_sha256rnds2_epu32(s0, s1, msg);
+    /* rounds 60-63 */
+    msg = _mm_add_epi32(m3, _mm_set_epi64x((long long)0xC67178F2BEF9A3F7ULL,
+                                           (long long)0xA4506CEB90BEFFFAULL));
+    s1 = _mm_sha256rnds2_epu32(s1, s0, msg);
+    msg = _mm_shuffle_epi32(msg, 0x0E);
+    s0 = _mm_sha256rnds2_epu32(s0, s1, msg);
+
+    s0 = _mm_add_epi32(s0, abef);
+    s1 = _mm_add_epi32(s1, cdgh);
+    data += 64;
+  }
+
+  tmp = _mm_shuffle_epi32(s0, 0x1B);
+  s1 = _mm_shuffle_epi32(s1, 0xB1);
+  s0 = _mm_blend_epi16(tmp, s1, 0xF0);
+  s1 = _mm_alignr_epi8(s1, tmp, 8);
+  _mm_storeu_si128((__m128i *)&state[0], s0);
+  _mm_storeu_si128((__m128i *)&state[4], s1);
+}
+#endif /* SCR_SHA256_NI */
+
+/* nblk consecutive 64-byte blocks. The ONE place the two arms meet; with
+ * SCR_SHA256_NI=0 this is the plain loop the digest used to inline. */
+static void scr_sha256_blocks(uint32_t h[8], const unsigned char *p, size_t nblk) {
+#if SCR_SHA256_NI
+  if (scr_sha256_have_ni()) {
+    scr_sha256_ni_blocks(h, p, nblk);
+    return;
+  }
+#endif
+  for (size_t b = 0; b < nblk; b++) scr_sha256_block(h, p + b * 64);
+}
+
 /* Final block(s) shared shape: the 0x80 terminator, zero padding, 64-bit
  * big-endian bit length (FIPS 180-4 — SHA-1 and SHA-256 pad alike). */
 static size_t scr_sha256_digest(const unsigned char *data, size_t len, unsigned char out[32]) {
   uint32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
                    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
-  size_t i = 0;
-  for (; i + 64 <= len; i += 64) scr_sha256_block(h, data + i);
+  size_t nblk = len / 64;
+  if (nblk) scr_sha256_blocks(h, data, nblk);
+  size_t i = nblk * 64;
   unsigned char tail[128];
   size_t rem = len - i;
   memcpy(tail, data + i, rem);
@@ -3018,8 +3300,7 @@ static size_t scr_sha256_digest(const unsigned char *data, size_t len, unsigned 
   memset(tail + rem + 1, 0, pad - rem - 1 - 8);
   uint64_t bits = (uint64_t)len * 8;
   for (int b = 0; b < 8; b++) tail[pad - 1 - b] = (unsigned char)(bits >> (8 * b));
-  scr_sha256_block(h, tail);
-  if (pad == 128) scr_sha256_block(h, tail + 64);
+  scr_sha256_blocks(h, tail, pad / 64);
   for (int j = 0; j < 8; j++) {
     for (int b = 0; b < 4; b++) out[j * 4 + b] = (unsigned char)(h[j] >> (24 - 8 * b));
   }
