@@ -655,6 +655,30 @@ static void scr_stream_end_readable(ScrStream *s) {
   scr_st_tick(s, SCR_ST_END, NULL, NULL);
 }
 
+/* A user `_read` that THREW. Node's Readable.prototype.read wraps the
+ * `this._read(...)` call in try/catch and hands what it threw to
+ * errorOrDestroy — the stream emits 'error' then 'close' and the process
+ * keeps running; the exception never escapes read(). scriptc let it
+ * escape, so a throwing _read crashed the process with the uncaught
+ * report while Node exited 0 (corpus 4781 pins the difference).
+ *
+ * ONLY an Error payload lands here: the stream's error slot is an
+ * ScrError (st->errored, scr_stream_error_or_destroy), so a thrown
+ * number/string/bool has no representation as a stream error and keeps
+ * propagating exactly as every payload did before. Node emits those
+ * unchanged; naming that gap is honest, inventing an Error around them
+ * would not be. */
+static void scr_stream_read_threw(ScrStream *s) {
+  if (!scr_exc_pending()) return;
+  ScrExcCell *cell = scr_exc_current_cell();
+  if (cell->kind != SCR_EXC_OBJ || cell->payload == NULL) return;
+  if (!scr_error_is(cell->payload)) return;
+  ScrError *e = scr_error_retain((ScrError *)cell->payload);
+  scr_exc_clear();
+  scr_stream_error_or_destroy(s, e);
+  scr_error_release(e);
+}
+
 /* The user _read call (reading guard + sync flag). Absent read cb means
  * ERR_METHOD_NOT_IMPLEMENTED, Node's contract. */
 static void scr_stream_call_read(ScrStream *s) {
@@ -698,6 +722,11 @@ static void scr_stream_call_read(ScrStream *s) {
   st->r.in_read_sync = true;
   st->r.read_inv(st->r.read_cb, s, (double)st->r.hwm);
   st->r.in_read_sync = false;
+  /* Node's read() catches what _read threw (see scr_stream_read_threw):
+   * the caller's `if (scr_exc_pending())` bail-outs then never fire for
+   * an Error, which is what lets read() continue exactly as Node's does
+   * after its catch. */
+  scr_stream_read_threw(s);
 }
 
 /* readableAddChunk. Borrows chunk (retains its own ref). Returns the
