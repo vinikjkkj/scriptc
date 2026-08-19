@@ -127,6 +127,21 @@ export function appendLines(dst: string[], src: readonly string[]): void {
 export interface Temp {
   name: string;
   type: IrType;
+  /** The value is an INTERNED STATIC — an immortal whose `rc` is SIZE_MAX
+   * for the whole run (the string-literal table, emitted by assemble()).
+   * `scr_str_retain` is `if (o && o->rc != SIZE_MAX) o->rc++` and
+   * `scr_str_release` is `if (!o || o->rc == SIZE_MAX) return`, so on such a
+   * value BOTH are exactly no-ops and the emitter may leave them out. The
+   * temp still JOINS its frame, so `moveTemp` and every other part of the
+   * ownership discipline see it exactly as before — only `releaseFrame`
+   * skips it, which is where the bytes were.
+   *
+   * It is the frame release that mattered, not the retain: the retain is
+   * `static inline` in the header (one predicated increment), while the
+   * release is a real call re-listed in EVERY unwind epilogue live at that
+   * point. On zapo that is 247,886 of 274,263 `scr_str_release` statements
+   * — 90.38% (tests/perf/dynpath/litrel.mjs). */
+  immortal?: boolean;
 }
 
 /** A scope entry: a refcounted local, either held directly or through a
@@ -1500,6 +1515,20 @@ export class CEmitter {
     return { name, type };
   }
 
+  /** newTemp for a value that IS an interned immortal static (see
+   * `Temp.immortal`): the initializer is the address itself rather than a
+   * retain of it, and the frame entry is marked so `releaseFrame` writes no
+   * release. Every other part of the discipline is unchanged — the temp is
+   * in its frame, `moveTemp` finds it, and a consumer that takes ownership
+   * of it and releases it later is releasing an immortal, which the runtime
+   * already treats as a no-op. */
+  newImmortalTemp(type: IrType, init: string): Temp {
+    const name = `sc_t${this.tempCounter++}`;
+    this.line(`${cDecl(type, name)} = ${init};`);
+    if (isRefCounted(type)) this.currentFrame().push({ name, type, immortal: true });
+    return { name, type };
+  }
+
   /** newTemp for a MAY-THROW runtime call: the result joins its frame
    * BEFORE the standard pending check, so an unwind releases the dummy
    * (NULL for refcounted kinds) harmlessly and the value is only read past
@@ -1556,6 +1585,12 @@ export class CEmitter {
 
   releaseFrame(frame: ScopeEntry[]): void {
     for (const t of frame) {
+      // An interned immortal: its release is a runtime no-op by
+      // construction (rc == SIZE_MAX), so writing one costs a call site and
+      // buys nothing. Skipped here rather than at the declaration so the
+      // temp stays in the frame for moveTemp and the rest of the ownership
+      // discipline.
+      if (t.immortal) continue;
       if (t.boxed) this.line(`scr_box_release(${t.name});`);
       else this.releaseValue(t.name, t.type);
     }

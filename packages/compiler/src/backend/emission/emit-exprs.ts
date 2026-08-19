@@ -54,6 +54,15 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         return E.newTemp(e.type, e.value ? "true" : "false");
       case "strLit": {
         const sym = E.internLiteral(e.value);
+        // The interned literal is an immortal static (rc == SIZE_MAX), so
+        // the +1 and every frame release of it are no-ops the emitter can
+        // leave out — newImmortalTemp, whose doc carries the argument. The
+        // guard is the type: a strLit whose IrType is not `string` is some
+        // wrapped spelling whose retain/release are NOT the string pair,
+        // and it keeps the ordinary owned-temp path.
+        if (e.type.kind === "string") {
+          return E.newImmortalTemp(e.type, `(ScrStr *)&${sym}`);
+        }
         return E.newTemp(e.type, retainCallC(e.type, `(ScrStr *)&${sym}`));
       }
       case "bigLit": {
