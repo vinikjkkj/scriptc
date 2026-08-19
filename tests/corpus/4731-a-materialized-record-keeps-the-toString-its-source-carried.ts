@@ -104,6 +104,32 @@ try {
   console.log("K caught " + (e as Error).message);
 }
 
+// M/N. a THROWING toString reached through the UNION spelling, which runs
+// through the per-union `sc_us_*` helper rather than the lone-record read.
+// Node stops at the FIRST call, so the second half of the expression never
+// runs and the counter reads 1 -- the row that says the emitted pending
+// check is really there on both backends. (The C tier answered "" and ran
+// on, calling the method a second time, until the check was added.)
+let hits = 0;
+const thrower = {
+  low: 1,
+  toString: () => {
+    hits += 1;
+    throw new Error("union-boom" + hits);
+  },
+};
+const ut: unknown = thrower;
+const rt = ut as Rec;
+function unionConv(x: number | Rec): string {
+  return String(x) + "|" + x.toString();
+}
+try {
+  console.log("M " + unionConv(rt));
+} catch (e) {
+  console.log("M caught " + (e as Error).message);
+}
+console.log("N " + hits);
+
 // L. the slot is invisible to JSON, to util.inspect and to declaredOrder
 // -- it is not a field, so nothing that walks `fields` can see it.
 //

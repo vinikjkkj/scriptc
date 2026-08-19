@@ -722,7 +722,20 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // The ARM value's ToString via the per-union interned helper
           // (unit arms are interned literals, string arms retain the
           // payload, f64/bool arms format). Box borrowed; result +1.
-          return E.newTemp(e.type, `${E.unionToStrHelper(v.type.unionId)}(${v.name})`);
+          const t = E.newTemp(e.type, `${E.unionToStrHelper(v.type.unionId)}(${v.name})`);
+          // A RECORD arm whose shape armed the hidden toString slot runs
+          // USER CODE inside that helper (scr_rec_tostr), so the result
+          // temp joins the frame BEFORE the check, exactly like the dyn
+          // arm below and exactly like the LLVM tier's union arm. Without
+          // it the throw is DELIVERED LATE: the helper answers "" and the
+          // rest of the expression runs, so a `String(x) + x.toString()`
+          // over a throwing toString calls it TWICE where Node calls it
+          // once and stops.
+          const def = E.unionsById.get(v.type.unionId);
+          if (def?.arms.some((a) => a.kind === "record" && E.recordsById.get(a.shapeId)?.tostr === true)) {
+            E.emitPendingCheck();
+          }
+          return t;
         }
         if (v.type.kind === "caught") {
           // String(e) over the exception snapshot. Box borrowed; result +1.
