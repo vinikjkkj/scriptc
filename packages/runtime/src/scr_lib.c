@@ -1193,8 +1193,38 @@ void scr_process_exit(double code) {
  * "the current Node.js process" means for a compiled program). */
 #ifdef _WIN32
 static double scr_uptime_t0_ms;
-static void scr_uptime_anchor_init(void) { scr_uptime_t0_ms = (double)GetTickCount64(); }
-static double scr_uptime_now_ms(void) { return (double)GetTickCount64(); }
+/* QueryPerformanceCounter, not GetTickCount64.
+ *
+ * GetTickCount64 advances in whole SCHEDULER TICKS. Measured on this
+ * host by spinning until the value changes, twenty times: the tick is
+ * 15.65 ms (min 15, max 16), against 0.00048 ms for Node's
+ * performance.now(). That is 32,600x coarser, and it is not merely a
+ * benchmarking nuisance - it is a Node-parity divergence in its own
+ * right: a compiled program could not observe ANY interval shorter than
+ * ~16 ms, so performance.now() differences came back as exactly 0 for
+ * work Node timed at 0.827 ms. Node's own clock is QPC, through libuv's
+ * uv_hrtime, so this is the parity answer and not a local invention.
+ *
+ * The frequency is fixed for the life of the system, so it is probed
+ * once and cached as ms-per-tick. Both API calls are checked and both
+ * fall back to the old clock rather than returning a wrong number: on a
+ * machine with no performance counter a coarse clock is still a clock.
+ * The ANCHOR is deliberately left as it was (lazy, on first use) - only
+ * the clock source changes here. */
+static double scr_qpc_ms_per_tick;
+static double scr_uptime_now_ms(void) {
+  if (scr_qpc_ms_per_tick == 0.0) {
+    LARGE_INTEGER freq;
+    if (!QueryPerformanceFrequency(&freq) || freq.QuadPart <= 0) {
+      return (double)GetTickCount64();
+    }
+    scr_qpc_ms_per_tick = 1000.0 / (double)freq.QuadPart;
+  }
+  LARGE_INTEGER now;
+  if (!QueryPerformanceCounter(&now)) return (double)GetTickCount64();
+  return (double)now.QuadPart * scr_qpc_ms_per_tick;
+}
+static void scr_uptime_anchor_init(void) { scr_uptime_t0_ms = scr_uptime_now_ms(); }
 #else
 #include <sys/resource.h>
 #include <sys/time.h>
