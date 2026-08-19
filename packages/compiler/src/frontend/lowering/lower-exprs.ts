@@ -16442,7 +16442,12 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           if (!nameSym) return false;
           const nameDecls = L.checker.declarationsOf(nameSym);
           if (!nameDecls.length) return false;
-          if (!nameDecls.every((d) => ts.isPropertySignature(d))) return false;
+          // ...or a member the SPREAD-ERASED FOLD dropped there: an
+          // object-literal property whose shape became a pure index record
+          // because a named property sat AFTER a spread (only the
+          // insertion-ordered store can spell JS key order there). The
+          // slot-fit test below is what makes either origin safe.
+          if (!nameDecls.every((d) => ts.isPropertySignature(d) || ts.isPropertyAssignment(d) || ts.isShorthandPropertyAssignment(d))) return false;
           const declared = L.mapTypeOf(L.typeOf(access));
           if (!declared) return false;
           const iv = shape.indexValue!;
