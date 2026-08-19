@@ -7,7 +7,7 @@
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
-import { canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
+import { canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { OVERFLOW_MEMBER, TOSTR_MEMBER } from "./emit-shapes.js";
@@ -1641,10 +1641,12 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       case "union": {
         const def = E.unionsById.get(t.unionId);
         if (!def) throw new Error(`emitter bug: dynCheck of unknown union ${t.unionId}`);
-        // Arms in CANONICAL order, first FULL match wins (discriminated
-        // unions disambiguate naturally: the arm whose declared fields all
-        // fit). The matched arm's builder can no longer fail.
-        def.arms.forEach((arm, i) => {
+        // Arms MOST SPECIFIC FIRST, first FULL match wins (dynCheckArmOrder:
+        // a record match ignores extra keys, so an arm whose field set is a
+        // SUBSET of another's would shadow it in canonical order). The
+        // matched arm's builder can no longer fail.
+        dynCheckArmOrder(def, (id) => E.recordsById.get(id)).forEach((i) => {
+          const arm = def.arms[i]!;
           const m = E.dynMatchHelper(arm);
           if (arm.kind === "undefinedT") {
             // Parsed JSON never matches here (no undefined in JSON text —
