@@ -1134,7 +1134,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
    * pinning `operation` to `set` share one predicate. The memo lives in
    * dynBuilders behind a '%'-prefixed key, which no typeKey can spell
    * (dynDestrCheckHelper below is the precedent). */
-  export function dynLitHelper(E: CEmitter, lits: Record<string, string>): string {
+  export function dynLitHelper(E: CEmitter, lits: Record<string, string[]>): string {
     const names = Object.keys(lits).sort();
     const pairs = names.map((n) => [n, lits[n]]);
     const memoKey = `%dlit:${JSON.stringify(pairs)}`;
@@ -1152,17 +1152,21 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`  const ScrDyn *m;`);
     d.push(`  if (d->kind != SCR_DYN_OBJ) return false;`);
     for (const n of names) {
-      const v = lits[n];
-      if (v === undefined) continue;
+      const vs = lits[n];
+      if (vs === undefined || vs.length === 0) continue;
       const keyLit = cStringLiteral(Buffer.from(n, "utf8"));
       const keyLen = Buffer.byteLength(n, "utf8");
-      const valLit = cStringLiteral(Buffer.from(v, "utf8"));
-      const valLen = Buffer.byteLength(v, "utf8");
       d.push(`  m = scr_dyn_obj_data_get(d, ${keyLit}, ${keyLen});`);
       d.push(`  if (!m || m->kind != SCR_DYN_STR) return false;`);
-      d.push(
-        `  if (m->v.str->len != ${valLen} || memcmp(m->v.str->data, ${valLit}, ${valLen}) != 0) return false;`,
-      );
+      // SET membership: the arm's own values, any one of which is a hit.
+      // Several schema keys share one IR shape, so a single value would
+      // have to be dropped where a set still separates.
+      const tests = vs.map((v) => {
+        const valLit = cStringLiteral(Buffer.from(v, "utf8"));
+        const valLen = Buffer.byteLength(v, "utf8");
+        return `(m->v.str->len == ${valLen} && memcmp(m->v.str->data, ${valLit}, ${valLen}) == 0)`;
+      });
+      d.push(`  if (!(${tests.join(` || `)})) return false;`);
     }
     d.push(`  return true;`);
     d.push(`}`, ``);

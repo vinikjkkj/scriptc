@@ -8366,6 +8366,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4954-several-source-arms-share-one-ir-shape-so-the-discriminant-is-a-set.ts": {
+   "order": [
+    "<repo>/tests/corpus/4954-several-source-arms-share-one-ir-shape-so-the-discriminant-is-a-set.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
