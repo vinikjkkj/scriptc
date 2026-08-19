@@ -58,11 +58,29 @@ static size_t scr_cyc_live = 0;
  * their own size. */
 static ScrPool scr_cyc_blocks;
 
+#ifndef SCR_CYC_ZERO_WHOLE
+#define SCR_CYC_ZERO_WHOLE 0
+#endif
+
 void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
   size_t phys = scr_pool_bytes(sizeof(ScrCycHdr) + size);
   ScrCycHdr *h = scr_pool_take(&scr_cyc_blocks, phys);
   if (h) {
-    memset(h, 0, phys); /* calloc's contract, kept, on the whole block */
+    /* calloc's contract, kept, but only where it is observable. Four of
+     * the header's six fields are assigned unconditionally below and the
+     * other two are assigned here, so zeroing the header as well as the
+     * payload wrote 32 of every 80 bytes twice. The OBJECT is what the
+     * callers read before writing (scr_box_new leaves `slot` at zero and
+     * scr_box_trace's "freshly-created boxes hold NULL" rule depends on
+     * it), so the payload zeroing is NOT optional and is kept exactly.
+     * SCR_CYC_ZERO_WHOLE=1 restores the old single memset. */
+#if SCR_CYC_ZERO_WHOLE
+    memset(h, 0, phys);
+#else
+    memset(h + 1, 0, phys - sizeof(ScrCycHdr));
+    h->buffered = 0;
+    h->buf_index = 0;
+#endif
   } else {
     h = calloc(1, phys);
     if (!h) scr_cyc_oom();
