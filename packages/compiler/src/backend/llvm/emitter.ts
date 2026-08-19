@@ -7648,7 +7648,7 @@ class LlEmitter {
       // no-op at rc == SIZE_MAX, and the frame's release is one too.
       case "wsCtor":
         return this.own({
-          name: this.retainValue(wsGlobalCtorFor(this, e.type), e.type),
+          name: this.retainValue(wsGlobalCtorFor(this, e.type, e.site), e.type),
           type: e.type,
         });
       case "promiseVoidWiden": {
