@@ -9963,7 +9963,32 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
               const argNode = sources[i]!;
               const spread = ts.isSpreadElement(argNode);
               const srcNode = spread ? argNode.expression : argNode;
-              const src = L.coerceToExpected(L.lowerExpr(srcNode), DYN);
+              // A CLASS INSTANCE source copies NOTHING here, and used to do it
+              // in SILENCE. The dyn box a class widens into (SCR_DYN_OBJINST)
+              // carries the class's identity — name, preorder interval, RC
+              // pair — and no field table, so the runtime's own-enumerable-key
+              // walk finds nothing to copy where Node copies every declared
+              // field. With a target that declares fewer fields the read-back
+              // dyn-check catches it ("expected number at $.x, got undefined"),
+              // but the `Object.assign(defaults, overrides)` idiom hands the
+              // walk a target that already holds a same-typed value for every
+              // name, and then the check passes and the program keeps the
+              // DEFAULTS: measured against Node v25.9.0, `Object.assign({ x: 0 },
+              // c)` for `const c: I = new C()` answered 0 where Node answers 1,
+              // on both backends. A silent wrong value is the one thing this
+              // compiler may not emit, so the source fences until the
+              // descriptor can enumerate.
+              const rawSrc = L.lowerExpr(srcNode);
+              if (rawSrc.type.kind === "object") {
+                L.unsupported(
+                  "SC1090",
+                  srcNode,
+                  `Object.assign from a class instance ('${L.fmt(rawSrc.type)}') `
+                    + `(the copy walks own enumerable keys and the class box carries no`
+                    + ` field table — assign the fields explicitly)`,
+                );
+              }
+              const src = L.coerceToExpected(rawSrc, DYN);
               if (src.type.kind !== "dyn") {
                 ok = false;
                 break;
