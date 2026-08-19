@@ -26,11 +26,22 @@
 // "[object Object]" in Node too, so the row that agrees says the pin is
 // about the reach and not about the constant.
 //
-// Closing this needs the record shape to carry a hidden toString slot,
-// filled at every materialization site (the dynCheck builder, the width
-// helpers, the two projection builders) in both backends -- a
-// representation change on the order of block/protoget's, and a block of
-// its own. Whoever takes it gets a red test here pointing at this note.
+// CLOSED, and by exactly that: the record shape now carries a hidden
+// per-instance toString slot -- one trailing struct member, not a field,
+// no key, invisible to every guard that scans `fields` and to every
+// key-order surface -- filled by the dynCheck builder from the SOURCE
+// object and by the two projection builders from the class's own method.
+// `proto`, `own`, `shadow`, `deep`, `param`, `field`, `elem` and `relet`
+// read Node's text now, on both backends. `none` did not move, which is
+// the point of having it here.
+//
+// ONE ROW IS STILL PRICED: `bare`. A null-prototype dictionary inherits
+// nothing, toString included, so Node throws and this answers the
+// constant -- and the cause is one level below this file, in
+// scr_dyn_to_string's OBJ arm, which folds the constant for any object
+// with no callable toString while scr_dyn_to_string_method throws for the
+// null-prototype one. One slot, two spellings; see the assertion in
+// npm-static.test.ts.
 import { makeProto, makeOwn, makeShadow, makeNone, makeDeep, makeBare } from "tostrreach"
 
 interface LongLike {

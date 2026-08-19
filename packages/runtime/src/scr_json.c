@@ -3053,6 +3053,57 @@ void scr_errdyn_put(ScrError *e, ScrDyn *d) {
  * JS's Array.prototype.toString), plain objects answer
  * "[object Object]", and undefined/null throw Node's TypeError. Borrows
  * both; +1 result. */
+/* caps[0] = the SOURCE object the record was materialized from.  Its
+ * ToString is scr_dyn_to_string's OBJ arm exactly -- the own-or-inherited
+ * `toString` protocol, the %error shadow, the constant -- so the record
+ * answers what the object it was copied from answers.
+ *
+ * The copy is what makes this necessary and also what bounds it: a record
+ * field written AFTER the materialization is not visible to the source
+ * object's toString, because there are two objects where JS has one.  That
+ * divergence is the materialization's, not this slot's, and it predates
+ * it; before the slot the answer was "[object Object]" whether or not
+ * anything had been written. */
+static ScrStr *scr_rec_tostr_dyn_fn(ScrClosure *clo) {
+  ScrDyn *d = scr_box_get_ref(clo->caps[0]); /* +1 */
+  ScrStr *s = scr_dyn_to_string(d, NULL);
+  scr_dyn_release(d);
+  return s;
+}
+
+ScrClosure *scr_dyn_tostr_closure(const ScrDyn *d) {
+  if (d == NULL || d->kind != SCR_DYN_OBJ) return NULL;
+  /* An own-or-inherited valueOf means the DEFAULT hint (`r + ""`) and the
+   * STRING hint (String(r)) disagree, and one slot cannot answer both --
+   * see the header.  Decline rather than answer one spelling wrong. */
+  if (scr_dyn_obj_own_data(d, "valueOf", 7) != NULL) return NULL;
+  if (scr_dyn_proto_get(d, "valueOf", 7) != NULL) return NULL;
+  ScrDyn *m = scr_dyn_obj_own_data(d, "toString", 8);
+  if (m == NULL) m = scr_dyn_proto_get(d, "toString", 8);
+  if (m == NULL || m->kind != SCR_DYN_FUNC) return NULL;
+  ScrClosure *clo = scr_closure_new((void *)scr_rec_tostr_dyn_fn, 1);
+  /* A TRACED capture.  The box holds a dyn, dyn values are collector nodes
+   * with headers of their own, and the object can reach the record holding
+   * this closure (its members are arbitrary) -- an untraced edge here is
+   * exactly the ring trial deletion calls externally referenced, which is
+   * how the dyn func adapter leaked before it took the same three-argument
+   * box. */
+  clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, scr_dyn_trace_v);
+  scr_box_set_ref(clo->caps[0], scr_dyn_retain((ScrDyn *)d));
+  return clo;
+}
+
+ScrStr *scr_rec_tostr(ScrClosure *slot) {
+  /* NULL = nothing carried a toString into this record, which is exactly
+   * when Object.prototype.toString's constant IS Node's answer. */
+  if (slot == NULL) return scr_str_new("[object Object]", 15);
+  ScrStr *s = ((ScrStr * (*)(ScrClosure *))slot->fn)(slot);
+  /* The call is user code; a throw leaves the exception pending and the
+   * emitted call site checks it.  Never hand back NULL -- every caller of
+   * a ToString treats the result as an owned string. */
+  return s != NULL ? s : scr_str_new("", 0);
+}
+
 ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
   switch (d->kind) {
   case SCR_DYN_BYTES:

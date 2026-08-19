@@ -25,7 +25,7 @@ import type { IrType } from "../../ir/nodes.js";
 import { canAdaptDynFuncTo, canBoxFuncIntoDyn, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
-import { arrNewCall, elemAccess, llFieldType, releaseSym, traceAdapter, traceArg, vAdapters } from "./shapes.js";
+import { arrNewCall, elemAccess, llFieldType, releaseSym, toStrSlotIndex, traceAdapter, traceArg, vAdapters } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 import type { WalkerHost } from "./walkers.js";
 
@@ -904,6 +904,19 @@ export class LlDyn {
         }
         requireKind(DK.OBJ, "dcr");
         B.line(`%r0 = call ptr @${mangleRecordNew(t.shapeId)}()`);
+        // The HIDDEN per-instance toString slot — emit-walkers.ts's row
+        // exactly. MATERIALIZING is what loses a JS object's toString, and
+        // scr_dyn_tostr_closure captures the SOURCE object, answering NULL
+        // unless it really carries a callable toString and no valueOf of
+        // its own.
+        if (shape.tostr) {
+          host.declare(`declare ptr @scr_dyn_tostr_closure(ptr)`);
+          const ts = B.tmp();
+          const tsp = B.tmp();
+          B.line(`${ts} = call ptr @scr_dyn_tostr_closure(ptr %d)`);
+          B.line(`${tsp} = getelementptr inbounds %${mangleRecordStruct(t.shapeId)}, ptr %r0, i64 0, i32 ${toStrSlotIndex(shape)}`);
+          B.line(`store ptr ${ts}, ptr ${tsp}`);
+        }
         for (const f of shape.fields) {
           const fieldWant = host.cstr(this.dynDesc(f.type));
           const utag = f.type.kind === "union" ? host.undefinedArmTag(f.type) : -1;

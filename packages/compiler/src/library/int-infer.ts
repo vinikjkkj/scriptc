@@ -1673,6 +1673,10 @@ class FnAnalyzer {
             this.emitRecordSlot(v, slot, f.value.loc);
           }
         }
+        // The hidden toString slot carries no number and names no field
+        // slot, but it IS a real expression, and both emitters store it
+        // LAST -- so it is evaluated last here too.
+        if (e.toStr) this.evalExpr(e.toStr, env);
         return { ...TOP };
       }
       case "recordGet": {

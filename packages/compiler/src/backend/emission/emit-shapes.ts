@@ -5,13 +5,23 @@
  * VtSlot) the emitter builds up front; emission ORDER is part of the C. */
 import type { CEmitter } from "./emitter.js";
 import type { IrFunction } from "../../ir/nodes.js";
-import { IrClassDef, IrType, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, isRefCounted, mapOf, STRING } from "../../ir/nodes.js";
+import { IrClassDef, IrType, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, funcOf, isRefCounted, mapOf, STRING } from "../../ir/nodes.js";
 import { mangleClassGcFree, mangleClassNew, mangleClassRelease, mangleClassReleaseDirect, mangleClassRetain, mangleClassStruct, mangleClassTrace, mangleCtorThunk, mangleField, mangleFunction, mangleRecordGcFree, mangleRecordNew, mangleRecordRelease, mangleRecordRetain, mangleRecordStruct, mangleRecordTrace, mangleVtAdapter, mangleVtInstance, mangleVtStruct } from "../mangle.js";
 import { arrayElemIsRef, boxKindC, cDecl, cType, elemKindC, mapValKindC, rcAdapters, releaseCallC, vAdapters } from "./emit-types.js";
 
 /** The overflow map's C member name on index-signature record structs.
  * User fields mangle to `sc_fld_*`, so no field can collide. */
 export const OVERFLOW_MEMBER = "sc_ovf";
+
+/** The HIDDEN per-instance toString slot's C member name on shapes that
+ * armed it (IrRecordShape.tostr) — a `ScrClosure *` holding a
+ * zero-argument string-returning closure, laid out AFTER the declared
+ * fields and after the overflow map so no existing member's offset moves.
+ * User fields mangle to `sc_fld_*` and the overflow map is `sc_ovf`, so
+ * nothing can collide. NULL on every fresh record (calloc / scr_cyc_alloc
+ * zero it), which is exactly "this record carries no toString" and is the
+ * case where Object.prototype.toString's constant IS Node's answer. */
+export const TOSTR_MEMBER = "sc_tostr";
 
 /** True when the class descends from a runtime stream class: its struct
  * embeds the FULL ScrStream prefix (registry, display name, state
@@ -82,6 +92,11 @@ export interface ClassMeta {
        * type. The struct carries a trailing `ScrMap *` member the shape's
        * new/release/trace treat as one more (map-typed) field. */
       indexValue?: IrType;
+      /** Records that armed the hidden toString slot: one more trailing
+       * `ScrClosure *` member, treated as one more (func-typed) field by
+       * new/release/trace. Class shapes never carry it (a class keeps its
+       * own methods; only MATERIALIZING into a record loses them). */
+      tostr?: true;
       comment: string;
       /** Class shapes only; hierarchy members get the vtable machinery. */
       meta: ClassMeta | null;
@@ -113,6 +128,7 @@ export interface ClassMeta {
         traced: E.tracedShapes.has(`record:${rec.id}`),
         fields: rec.fields,
         ...(rec.indexValue ? { indexValue: rec.indexValue } : {}),
+        ...(rec.tostr ? { tostr: true as const } : {}),
         comment: `record ${rec.id} { ${rec.fields.map((f) => f.name).join("; ")}${rec.indexValue ? "; [key: string]" : ""} }`,
         meta: null,
       })),
@@ -128,6 +144,12 @@ export interface ClassMeta {
       ...(s.indexValue
         ? [{ member: OVERFLOW_MEMBER, type: mapOf(STRING, s.indexValue), name: "[key: string] overflow" }]
         : []),
+      // The hidden toString slot is one more refcounted member: released
+      // with the record, TRACED as a closure edge (it captures the very
+      // instance the projection materialized, so a cycle really can pass
+      // through it — the collector's trace/teardown complement contract
+      // requires it on the trace side, not the teardown side).
+      ...(s.tostr ? [{ member: TOSTR_MEMBER, type: funcOf([], STRING), name: "<toString> slot" }] : []),
     ];
     // CLASS newFns start every undefined-armed union field at JS's
     // `undefined` — the interned immortal unit instance — instead of the
@@ -188,6 +210,9 @@ export interface ClassMeta {
       }
       if (s.indexValue) {
         out.push(`  ScrMap *${OVERFLOW_MEMBER}; /* [key: string] overflow (string-keyed) */`);
+      }
+      if (s.tostr) {
+        out.push(`  ScrClosure *${TOSTR_MEMBER}; /* hidden per-instance toString slot (NULL = the constant) */`);
       }
       out.push(`};`);
     }
