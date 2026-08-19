@@ -1543,7 +1543,7 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
         "other aliased targets are real mutation, and a function target (Object.assign(fn, { prop })) " +
         "is a function-with-properties value the model cannot represent: bind the property separately";
     } else if (container === "Object" && member === "defineProperty") {
-      hint = definePropertyHint(access);
+      hint = definePropertyHint(L, access);
     }
     L.noLowering(`${container}.${member}`, access, hint, sym);
   }
@@ -1565,7 +1565,7 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
    * one refuses, so a reader budgets the right work.
    *
    * Text only — the diagnostic code, the site and the count are unchanged. */
-  function definePropertyHint(access: ts.PropertyAccessExpression): string | undefined {
+  function definePropertyHint(L: Lowerer, access: ts.PropertyAccessExpression): string | undefined {
     const LOWERED_SHAPE =
       "what lowers is a hidden per-instance DATA slot: Object.defineProperty(<a bare " +
       "identifier typed as a program class>, <a module-level `const k = Symbol('...')`>, " +
@@ -1584,6 +1584,57 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
         "refuses at the receiver whatever the descriptor says; " + LOWERED_SHAPE
       );
     }
+    // A STATIC receiver is the same refusal one argument wider, and it has
+    // to be said BEFORE the descriptor is looked at or the hint blames the
+    // wrong argument. zapo's one surviving site is exactly this shape:
+    //
+    //     Object.defineProperty(client, exposeAs, {   // exposeAs: string
+    //       get: () => registry.instances.get(exposeAs),
+    //       enumerable: true, configurable: false })
+    //
+    // (src/client/plugins/install.ts:114). Its descriptor IS an accessor,
+    // so the branch below used to answer "the DESCRIPTOR is an accessor"
+    // and a reader would budget accessor work -- but the dyn accessor half
+    // already ships (2 925 of zapo's 2 927 defineProperty sites lower
+    // through it) and none of it can reach this call: a compiled class
+    // instance is a C struct with one field per DECLARED member and no key
+    // table, so a property named by a run-time string has nowhere to live.
+    // Same shape as the `.prototype` branch above, and the same lesson
+    // estado-accessor.md paid for once already.
+    const recvIr = L.mapTypeOf(L.typeOf(recv));
+    // An INDEX-SIGNATURE record is the one static receiver that DOES carry
+    // a run-time key table (the overflow map), so its wall is the
+    // descriptor, not the receiver: what it cannot carry is per-key
+    // ATTRIBUTES. Say so rather than sweeping it in below.
+    const overflowKeys =
+      recvIr?.kind === "record" && L.shapes.get(recvIr.shapeId)?.indexValue !== undefined;
+    if (recvIr != null && !overflowKeys && recvIr.kind !== "dyn" && recvIr.kind !== "func") {
+      const what =
+        recvIr.kind === "object"
+          ? `a compiled '${recvIr.className}' instance`
+          : recvIr.kind === "record"
+            ? "a record of a fixed shape"
+            : `a '${recvIr.kind}' value`;
+      return (
+        "the RECEIVER is " + what + ", whose property set is FIXED at compile time (a C struct, " +
+        "one field per declared member, no key table) \u2014 a property named by a string, and " +
+        "above all by a run-time string, has nowhere to live, so this refuses at the receiver " +
+        "whatever the descriptor says. The one property a define CAN install on a program class " +
+        "is the hidden symbol slot the whole-program pre-pass declared; " + LOWERED_SHAPE
+      );
+    }
+    if (overflowKeys) {
+      return (
+        "the RECEIVER is a record with an index signature, so a run-time key DOES have somewhere " +
+        "to live (the overflow map) \u2014 what it has nowhere to live is the descriptor's " +
+        "ATTRIBUTES: overflow entries carry no writable/enumerable/configurable bits and no " +
+        "accessor slot, and defineProperty defaults all three flags to FALSE, so nothing but the " +
+        "fully-open data descriptor could be honoured. Write the key: o[k] = v IS " +
+        "{ value: v, writable: true, enumerable: true, configurable: true } on a shape with no " +
+        "prototype chain and no attributes"
+      );
+    }
+
     const desc = call.arguments[2]!;
     const accessorKey = ts.isObjectLiteralExpression(desc) &&
       desc.properties.some((p) => {
