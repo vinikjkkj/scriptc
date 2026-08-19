@@ -1,0 +1,20 @@
+object-assign-from-a-class-instance.ts:39:37 - error SC1090: Object.assign from a class instance ('C') (the copy walks own enumerable keys and the class box carries no field table — assign the fields explicitly) is not supported yet
+
+  38 | const viaInterface: I = new C()
+  39 | console.log(Object.assign({ x: 0 }, viaInterface).x)
+     |                                     ^~~~~~~~~~~~
+  40 | 
+
+object-assign-from-a-class-instance.ts:43:37 - error SC1090: Object.assign from a class instance ('C') (the copy walks own enumerable keys and the class box carries no field table — assign the fields explicitly) is not supported yet
+
+  42 | const viaShape: { x: number } = new C()
+  43 | console.log(Object.assign({ x: 0 }, viaShape).x)
+     |                                     ^~~~~~~~
+  44 | 
+
+object-assign-from-a-class-instance.ts:48:46 - error SC1090: Object.assign from a class instance ('C') (the copy walks own enumerable keys and the class box carries no field table — assign the fields explicitly) is not supported yet
+
+  47 | const viaEmpty: I = new C()
+  48 | console.log(JSON.stringify(Object.assign({}, viaEmpty)))
+     |                                              ^~~~~~~~
+  49 | 
