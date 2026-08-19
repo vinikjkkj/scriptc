@@ -53,7 +53,10 @@
  *            never reaches `diagnostics`; it rides its own list and can
  *            never fail a build or defer to a fence. SC6001 — a double
  *            type assertion whose target shape drops members the source
- *            value carries.
+ *            value carries. SC6002 — a record materialised out of a
+ *            dynamic value, then enumerated. SC6003 — a class instance
+ *            projected into a shape that mixes methods with data, where a
+ *            method of the class writes one of the copied data fields.
  *   SC9xxx  internal compiler errors (still source-anchored)
  */
 import type { SrcLoc } from "../ir/nodes.js";
@@ -194,6 +197,69 @@ export function keyOrderFromDynamicDiag(surface: string, detail: string, loc: Sr
       "only when the dynamic source really carried exactly those keys in exactly that order — " +
       "read the fields you need instead of enumerating if the source order is not yours to " +
       "control",
+  };
+}
+
+/** SC6003 — a class instance projected into a record shape that mixes
+ * METHODS with DATA, where a method of that class WRITES one of the data
+ * fields. The projection is then half alias and half snapshot, through one
+ * reference:
+ *
+ *     interface View { n: number; bump(): void }
+ *     class C { n = 0; bump(): void { this.n++; } }
+ *     function through(v: View): string { v.bump(); return String(v.n); }
+ *     through(new C())        // Node: 1        scriptc: 0
+ *
+ * The method-named field is a closure bound to the LIVE instance (the
+ * witness-record stance — a call through it is a call on the object, which
+ * is what makes `2685`'s shared state right), and the data field rides the
+ * width-lift COPY taken at the projection (the documented width stance,
+ * limitations/page.mdx: "mutations through the narrower reference are
+ * invisible to the original"). Each half is defensible alone. Together they
+ * give one value two identities: the call reaches the object and the read
+ * does not.
+ *
+ * IT IS ADVICE AND NOT A REFUSAL, and the reason is measured rather than
+ * assumed. A record is a monomorphic struct: a data field is storage at a
+ * fixed offset, so making the read alias would need the target SHAPE to
+ * carry an accessor slot — and accessor-carrying shapes are deliberately
+ * neither JSON-safe nor dyn-convertible (accessorSlotProp), so arming an
+ * interface's shape because one class projects into it would fence
+ * JSON.stringify and Object.keys for every value of that interface. The
+ * other direction, refusing the projection, refuses mainstream TypeScript:
+ * "pass an object with state and methods behind an interface" is the
+ * pattern, and it costs two green corpus programs (3771, 3813) outright.
+ * So the compiler says what it is about to do, names the fields, and does
+ * it — the SC6002 stance for a construction that is possibly, not
+ * provably, observed.
+ *
+ * The condition is the one that makes the projection a lie about ITSELF: a
+ * non-constructor member of the class (or of a base) assigns to a copied
+ * field. Constructor writes run before the projection and are excluded. An
+ * outside write to the source (`c.n = 5` after the projection) is NOT this
+ * — that is the documented width stance and a record source diverges the
+ * same way. */
+export function projectionCopiesAMutatedFieldDiag(
+  className: string,
+  fields: string[],
+  loc: SrcLoc,
+): ScrDiagnostic {
+  const list = fields.map((f) => `'${f}'`).join(", ");
+  const one = fields.length === 1;
+  return {
+    code: "SC6003",
+    severity: "advice",
+    message:
+      `this projection of '${className}' COPIES ${one ? "the field" : "the fields"} ${list}, and a ` +
+      `method of '${className}' writes ${one ? "it" : "them"}`,
+    loc,
+    hint:
+      "the target shape names both methods and data, so the projected record binds the methods to " +
+      "the live instance while the data rides a copy taken here — a call through the projection " +
+      "reaches the object and a read of one of these fields does not, so the two disagree after " +
+      "the first such call (JavaScript has one object and one answer). Read the field through the " +
+      "instance's own type, or return the value the method computed, if the reads have to see the " +
+      "writes",
   };
 }
 

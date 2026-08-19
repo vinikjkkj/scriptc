@@ -8558,6 +8558,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5211-a-mixed-projection-is-half-alias-and-half-snapshot.ts": {
+   "order": [
+    "<repo>/tests/corpus/5211-a-mixed-projection-is-half-alias-and-half-snapshot.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/522-map-foreach.ts": {
    "order": [
     "<repo>/tests/corpus/522-map-foreach.ts"

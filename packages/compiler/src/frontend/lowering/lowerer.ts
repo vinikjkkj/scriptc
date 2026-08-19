@@ -33,6 +33,7 @@ import {
   unionMismatchDiag,
   UNSUPPORTED,
   keyOrderFromDynamicDiag,
+  projectionCopiesAMutatedFieldDiag,
   unsupportedDiag,
   unsupportedTypeDiag,
 } from "../../diagnostics/diagnostic.js";
@@ -1265,6 +1266,11 @@ export class Lowerer {
   /** Union re-tag helpers (%union.retag.N), interned per (from, to)
    * unionId pair — see unionRetagHelper. */
   readonly retagHelpers = new Map<string, string>();
+  /** Per class, the field names some non-constructor member ASSIGNS on
+   * `this` — SC6003's admission rule, memoized because the width planner
+   * probes the same class from several positions. See
+   * classMethodWrittenFields. */
+  readonly methodWrittenFields = new Map<string, Set<string>>();
   /** One id per distinct promise payload CONVERSION (from-type, to-type,
    * settle-or-value flavour) -- the second half of the runtime memo's
    * key. Separate from retagHelpers.size so the ids stay a dense little
@@ -5275,6 +5281,85 @@ export class Lowerer {
    * accessor- or generic-method-satisfied field, an abstract/rest/
    * inexact method signature, a builtin runtime layout, or a field that
    * doesn't lift. */
+  /** The fields a projection COPIES that a method of the projected class
+   * WRITES — the condition that makes a mixed projection a lie about
+   * itself, and the whole of SC6003's admission rule.
+   *
+   * Constructor bodies and field initializers are excluded on purpose: they
+   * run before the value exists to project, so a write there cannot make a
+   * copy stale. Everything else in the class body counts, and so does every
+   * base in the chain — a method a target shape does not name can still be
+   * reached from one that it does, and the projected closures call into the
+   * live instance, so the reachable set is "the class", not "the projected
+   * methods". Over-approximating that way can only produce advice nobody
+   * needed; under-approximating would produce silence somebody did.
+   *
+   * Deliberately syntactic and deliberately NOT transitive through
+   * ordinary functions: `push(): void { helper(this) }` where `helper`
+   * writes is not seen. That residue is stated rather than papered over —
+   * a call-graph walk here would have to be sound over the whole program
+   * to be worth more than this, and an unsound one would move the silence
+   * rather than remove it.
+   *
+   * The result is memoized per class: a shape is projected once but the
+   * planner probes the same class from several positions. */
+  classMethodWrittenFields(className: string): ReadonlySet<string> {
+    const memo = this.methodWrittenFields.get(className);
+    if (memo) return memo;
+    const out = new Set<string>();
+    this.methodWrittenFields.set(className, out); // cycle guard for a self-referential base chain
+    for (let c: ClassInfo | null = this.classes.get(className) ?? null; c; c = c.base) {
+      const decl = c.decl;
+      if (!decl) continue;
+      for (const m of decl.members) {
+        if (ts.isConstructorDeclaration(m) || ts.isPropertyDeclaration(m)) continue;
+        const walk = (n: ts.Node): void => {
+          const thisProp = (x: ts.Node): ts.PropertyAccessExpression | null =>
+            ts.isPropertyAccessExpression(x) && x.expression.kind === ts.SyntaxKind.ThisKeyword ? x : null;
+          if (ts.isBinaryExpression(n)) {
+            const t = thisProp(n.left);
+            const op = n.operatorToken.kind;
+            if (
+              t &&
+              (op === ts.SyntaxKind.EqualsToken ||
+                (op >= ts.SyntaxKind.FirstCompoundAssignment && op <= ts.SyntaxKind.LastCompoundAssignment))
+            ) {
+              out.add(t.name.text);
+            }
+          }
+          if (ts.isPostfixUnaryExpression(n) || ts.isPrefixUnaryExpression(n)) {
+            const t = thisProp(n.operand);
+            if (
+              t &&
+              (n.operator === ts.SyntaxKind.PlusPlusToken || n.operator === ts.SyntaxKind.MinusMinusToken)
+            ) {
+              out.add(t.name.text);
+            }
+          }
+          ts.forEachChild(n, walk);
+        };
+        walk(m);
+      }
+    }
+    return out;
+  }
+
+  /** SC6003's push, shared by the two builders that produce a mixed
+   * projection. `loc` is the coercion's when there is one; the width
+   * PLANNER probes with a synthetic `<width>` loc that names no file, and
+   * an advisory rendered against it would point at nothing — so that case
+   * falls back to the class declaration, which is the other end of the
+   * same fact and is always a real span. */
+  noteMixedProjection(className: string, liftedNames: string[], methodCount: number, loc: SrcLoc): void {
+    if (methodCount === 0 || liftedNames.length === 0) return;
+    const written = this.classMethodWrittenFields(className);
+    const stale = liftedNames.filter((n) => written.has(n));
+    if (stale.length === 0) return;
+    const decl = this.classes.get(className)?.decl ?? null;
+    const at = loc.file === "<width>" && decl !== null ? locOf(decl) : loc;
+    this.pushAdvice(projectionCopiesAMutatedFieldDiag(className, stale, at));
+  }
+
   ctorWitnessProjection(className: string, target: IrType & { kind: "record" }, loc: SrcLoc): string | null {
     // SCRIPTC_PROJ_WHY: name the declining clause. The projection is
     // per-REQUESTED-FIELD and its declines are numerous; three separate
@@ -5423,6 +5508,14 @@ export class Lowerer {
       const abs = plan.filter((p) => p.how === "absent").length;
       console.error(`[projcensus] ${className} -> ${target.shapeId} methods=${meth} absent=${abs} lift=${lifted.length}${lifted.length > 0 ? ` [${lifted.join(",")}]` : ""}`);
     }
+    // SC6003: the census's own two counts are the mixed condition, so the
+    // advisory is decided from the same plan rather than from a second walk.
+    this.noteMixedProjection(
+      className,
+      plan.flatMap((p) => (p.how === "lift" ? [p.name] : [])),
+      plan.filter((p) => p.how === "method").length,
+      loc,
+    );
     const builder = `%ctorwitness.${this.retagHelpers.size}`;
     this.retagHelpers.set(key, builder);
     const instT: IrType = { kind: "object", className };
@@ -7013,6 +7106,20 @@ export class Lowerer {
     // same way. Plain data-class projections keep the raw pointer.
     const hasMethodField = to.fields.some((f) => "method" in plan.get(f.name)!);
     const boxInstance = hasMethodField || toStr !== null;
+    // SCRIPTC_PROJ_CENSUS's missing half, and SC6003's second producer.
+    // ctorWitnessProjection prints one line per interned projection; THIS
+    // builder printed none, so every census of the mixed-projection
+    // population taken from that dial alone was a lower bound. Same fields,
+    // same spelling, so one parser reads both.
+    {
+      const lifted = to.fields.filter((f) => { const l = plan.get(f.name)!; return !("method" in l) && !("absent" in l); }).map((f) => f.name);
+      const meth = to.fields.filter((f) => "method" in plan.get(f.name)!).length;
+      if (process.env["SCRIPTC_PROJ_CENSUS"] !== undefined) {
+        const abs = to.fields.filter((f) => "absent" in plan.get(f.name)!).length;
+        console.error(`[projcensus] ${className} -> ${toId} methods=${meth} absent=${abs} lift=${lifted.length}${lifted.length > 0 ? ` [${lifted.join(",")}]` : ""}`);
+      }
+      this.noteMixedProjection(className, lifted, meth, loc);
+    }
     this.liftedFns.push({
       name,
       params: [{ localId: "o.0", name: "o", type: fromT }],
