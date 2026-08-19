@@ -35,7 +35,12 @@
 //        node scripts/structural-aborts.mjs --selftest
 import { readFileSync, writeFileSync } from "node:fs";
 
-const OOM = /^\s*if\s*\(!([A-Za-z_][A-Za-z0-9_]*)(?:->[A-Za-z0-9_]+)?\)\s*\{?\s*scr_trap\("scriptc: out of memory/;
+// Both spellings of every family: the historical INLINE `scr_trap("...")`
+// and the shared helper the C emitter plants today (`sc_oom()`,
+// `sc_bad_tag()`, `sc_stringify_undef()` — the shape the LLVM emitter has
+// always had).  One instrument has to read a base TU and a branch TU, or a
+// before/after comparison is two instruments and no comparison.
+const OOM = /^\s*if\s*\(!([A-Za-z_][A-Za-z0-9_]*)(?:->[A-Za-z0-9_]+)?\)\s*\{?\s*(?:scr_trap\("scriptc: out of memory|sc_oom\(\))/;
 // RAW allocators only.  `scr_cyc_alloc` and friends carry their own OOM
 // abort inside the runtime (scr_cycle.c: `h = calloc(1, phys); if (!h)
 // scr_cyc_oom();`), so an emitted call to one of them needs no guard in
@@ -44,9 +49,13 @@ const OOM = /^\s*if\s*\(!([A-Za-z_][A-Za-z0-9_]*)(?:->[A-Za-z0-9_]+)?\)\s*\{?\s*
 // program (my own wrong measurements, section 9).
 const ALLOC = /\b(calloc|malloc|realloc)\s*\(/;
 const SELF_GUARDED_ALLOC = /\b(scr_cyc_alloc|scr_alloc|scr_pool_take)\s*\(/;
-const TAGDEF = /^\s*default:\s*scr_trap\("scriptc: internal error: invalid union tag/;
-const STRINGIFY = /scr_trap\("scriptc: internal error: stringify reached an undefined arm/;
-const ANYTRAP = /\bscr_trap(_fmt)?\s*\(/;
+const TAGDEF = /^\s*default:\s*(?:scr_trap\("scriptc: internal error: invalid union tag|sc_bad_tag\(\))/;
+const STRINGIFY = /(?:scr_trap\("scriptc: internal error: stringify reached an undefined arm|\bsc_stringify_undef\(\))/;
+const ANYTRAP = /\b(?:scr_trap(?:_fmt)?|sc_oom|sc_bad_tag|sc_stringify_undef)\s*\(/;
+// The shared helpers’ OWN definition and body are not guard sites: their
+// three lines are the ONE trap statement each family now has, and counting
+// them as an unclassified trap would report an anomaly on every TU.
+const SHARED_TRAP_HOST = /^(?:sc_oom|sc_bad_tag|sc_stringify_undef)$/;
 
 export function analyse(raw) {
   const lines = raw.split("\n");
@@ -118,6 +127,7 @@ export function analyse(raw) {
       continue;
     }
     if (!ANYTRAP.test(l)) continue;
+    if (hostName[i] !== null && SHARED_TRAP_HOST.test(hostName[i])) continue;
 
     if (OOM.test(l)) {
       const v = OOM.exec(l)[1];
@@ -272,6 +282,41 @@ const FIXTURE = [
   "static void sc_novel(void) {",
   '  scr_trap("scriptc: brand new message nobody classified\\n");',
   "}",
+  // ---- the SHARED-HELPER spelling of every family, planted as its own twin.
+  // The definitions themselves must produce NO row and NO anomaly (they are
+  // the one trap statement per family, not a guard site); each call site must
+  // be classified exactly as its inline twin above.
+  "static _Noreturn void sc_oom(void) {",
+  '  scr_trap("scriptc: out of memory\\n");',
+  "}",
+  "static _Noreturn void sc_bad_tag(void) {",
+  '  scr_trap("scriptc: internal error: invalid union tag\\n");',
+  "}",
+  "static _Noreturn void sc_stringify_undef(void) {",
+  '  scr_trap("scriptc: internal error: stringify reached an undefined arm\\n");',
+  "}",
+  "static void sc_ok_2(void) {",
+  "  Shape *o = calloc(1, sizeof *o);",
+  "  if (!o) { sc_oom(); }",
+  "  o->rc = 1;",
+  "}",
+  "static bool sc_ut_78(ScrUnion *v) { /* ToBoolean u78 */",
+  "  switch (v->tag) {",
+  "  case 0: return false;",
+  "  case 1: return true;",
+  "  default: sc_bad_tag();",
+  "  }",
+  "}",
+  "static bool sc_u_gap2(ScrUnion *v) {",
+  "  switch (v->tag) {",
+  "  case 0: return false;",
+  "  case 3: return true;",
+  "  default: sc_bad_tag();",
+  "  }",
+  "}",
+  "static void sc_str_arm2(void) {",
+  "    sc_stringify_undef();",
+  "}",
   "static ScrUnion sc_unit_0 = { .rc = SIZE_MAX, .tag = 1 }; /* u77 unit arm */",
   "static ScrUnion sc_unit_1 = { .rc = SIZE_MAX, .tag = 9 }; /* u77 unit arm */",
   "static void sc_prod(void) {",
@@ -283,16 +328,23 @@ const FIXTURE = [
 if (process.argv.includes("--selftest")) {
   const a = analyse(FIXTURE);
   const need = [
-    ["OOM rows == 2", a.rows.filter((r) => r.family === "OOM").length === 2],
-    ["exactly one OOM guard backed by an alloc", a.rows.filter((r) => r.family === "OOM" && r.backedByAlloc).length === 1],
-    ["UNIONTAG rows == 3", a.rows.filter((r) => r.family === "UNIONTAG").length === 3],
-    ["two total union switches", a.rows.filter((r) => r.family === "UNIONTAG" && r.contiguous).length === 2],
-    ["STRINGIFY row seen", a.rows.filter((r) => r.family === "STRINGIFY").length === 1],
-    ["UNKNOWN row seen", a.rows.filter((r) => r.family === "UNKNOWN").length === 1],
+    ["OOM rows == 3 (2 inline + 1 shared-helper)", a.rows.filter((r) => r.family === "OOM").length === 3],
+    ["two OOM guards backed by an alloc", a.rows.filter((r) => r.family === "OOM" && r.backedByAlloc).length === 2],
+    ["UNIONTAG rows == 5 (3 inline + 2 shared-helper)", a.rows.filter((r) => r.family === "UNIONTAG").length === 5],
+    ["three total union switches", a.rows.filter((r) => r.family === "UNIONTAG" && r.contiguous).length === 3],
+    ["STRINGIFY rows == 2 (inline + shared-helper)", a.rows.filter((r) => r.family === "STRINGIFY").length === 2],
+    ["UNKNOWN row seen, and ONLY the one planted", a.rows.filter((r) => r.family === "UNKNOWN").length === 1],
     ["anomaly alloc-unguarded seen", a.anomalies.some((x) => x.kind === "alloc-unguarded")],
     ["anomaly oom-guard-no-alloc seen", a.anomalies.some((x) => x.kind === "oom-guard-no-alloc")],
-    ["anomaly uniontag-not-total seen", a.anomalies.some((x) => x.kind === "uniontag-not-total")],
+    ["anomaly uniontag-not-total seen, BOTH spellings", a.anomalies.filter((x) => x.kind === "uniontag-not-total").length === 2],
     ["anomaly unknown-trap seen", a.anomalies.some((x) => x.kind === "unknown-trap")],
+    ["the shared-helper CALL SITES are attributed to their own host",
+      a.rows.some((r) => r.family === "OOM" && r.host === "sc_ok_2") &&
+      a.rows.some((r) => r.family === "UNIONTAG" && r.host === "sc_ut_78") &&
+      a.rows.some((r) => r.family === "STRINGIFY" && r.host === "sc_str_arm2")],
+    ["the helper DEFINITIONS produce no row and no anomaly",
+      !a.rows.some((r) => r.host === "sc_oom" || r.host === "sc_bad_tag" || r.host === "sc_stringify_undef") &&
+      !a.anomalies.some((x) => x.host === "sc_oom" || x.host === "sc_bad_tag" || x.host === "sc_stringify_undef")],
     ["tag producer seen, max tag 3", a.tagProducers === 1 && a.maxTag === 3],
     ["unit instances parsed with their union", a.units.length === 2 && a.units[1].unionId === "u77" && a.units[1].tag === 9],
     ["self-guarding allocator not counted as an anomaly", a.selfGuardedAllocs === 1 && a.anomalies.filter((x) => x.kind === "alloc-unguarded").length === 1],
