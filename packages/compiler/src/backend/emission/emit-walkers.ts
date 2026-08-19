@@ -7,7 +7,7 @@
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
-import { canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
+import { armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { OVERFLOW_MEMBER, TOSTR_MEMBER } from "./emit-shapes.js";
@@ -1123,6 +1123,53 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
    * undefined singleton when `opt` is set (a `?.` step). Borrows d and k;
    * the result is +1. Interned once (the memo key can never collide with
    * a typeKey — no IR type spells "%"). */
+  /** The emitted STRING-LITERAL DISCRIMINANT predicate for one union
+   * arm: `static bool sc_dlit_<n>(const ScrDyn *d)` — does this dyn hold
+   * exactly the strings the arm pins? Never throws, builds nothing, and
+   * reads the SAME [[Get]]-minus-accessors walk the match predicate uses,
+   * so an inherited discriminant answers here too.
+   *
+   * Interned by the (field, value) pairs rather than by a typeKey: the
+   * constraint belongs to a union ARM, not to a type, and two unions
+   * pinning `operation` to `set` share one predicate. The memo lives in
+   * dynBuilders behind a '%'-prefixed key, which no typeKey can spell
+   * (dynDestrCheckHelper below is the precedent). */
+  export function dynLitHelper(E: CEmitter, lits: Record<string, string>): string {
+    const names = Object.keys(lits).sort();
+    const pairs = names.map((n) => [n, lits[n]]);
+    const memoKey = `%dlit:${JSON.stringify(pairs)}`;
+    const existing = E.dynBuilders.get(memoKey);
+    if (existing) return existing;
+    const name = `sc_dlit_${E.dynBuilders.size}`;
+    E.dynBuilders.set(memoKey, name);
+    const sig = `static bool ${name}(const ScrDyn *d)`;
+    // The pairs ride into a C BLOCK comment, so a literal spelling `*/`
+    // would end it early and the rest of the predicate would be code no
+    // one wrote. Neutralised here rather than trusted not to happen.
+    const note = JSON.stringify(pairs).split("*/").join("*\\/");
+    E.walkerProtos.push(`${sig}; /* pins ${note} */`);
+    const d: string[] = [`${sig} { /* pins ${note} */`];
+    d.push(`  const ScrDyn *m;`);
+    d.push(`  if (d->kind != SCR_DYN_OBJ) return false;`);
+    for (const n of names) {
+      const v = lits[n];
+      if (v === undefined) continue;
+      const keyLit = cStringLiteral(Buffer.from(n, "utf8"));
+      const keyLen = Buffer.byteLength(n, "utf8");
+      const valLit = cStringLiteral(Buffer.from(v, "utf8"));
+      const valLen = Buffer.byteLength(v, "utf8");
+      d.push(`  m = scr_dyn_obj_data_get(d, ${keyLit}, ${keyLen});`);
+      d.push(`  if (!m || m->kind != SCR_DYN_STR) return false;`);
+      d.push(
+        `  if (m->v.str->len != ${valLen} || memcmp(m->v.str->data, ${valLit}, ${valLen}) != 0) return false;`,
+      );
+    }
+    d.push(`  return true;`);
+    d.push(`}`, ``);
+    E.walkerDefs.push(...d);
+    return name;
+  }
+
   /** RequireObjectCoercible with V8's destructuring TypeError (the
    * dynDestrCheck node): nullish throws "Cannot destructure 'SPELL' as it
    * is undefined." (or "…null."), the property form "Cannot destructure
@@ -1645,41 +1692,62 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // a record match ignores extra keys, so an arm whose field set is a
         // SUBSET of another's would shadow it in canonical order). The
         // matched arm's builder can no longer fail.
-        dynCheckArmOrder(def, (id) => E.recordsById.get(id)).forEach((i) => {
-          const arm = def.arms[i]!;
-          const m = E.dynMatchHelper(arm);
-          if (arm.kind === "undefinedT") {
-            // Parsed JSON never matches here (no undefined in JSON text —
-            // a MISSING record key builds this arm in the record builder
-            // above), but the undefined dyn value can arrive from
-            // `unknown` index-signature overflows and builds the interned
-            // unit instance exactly like null.
-            d.push(`  if (${m}(d)) {`);
-            d.push(`    return ${E.unitInstanceRef(t.unionId, i)};`);
+        const order = dynCheckArmOrder(def, (id) => E.recordsById.get(id));
+        // TWO PASSES when the union carries STRING-LITERAL DISCRIMINANTS,
+        // one otherwise — a union without them emits exactly the chain it
+        // emitted before, byte for byte.
+        //
+        // Pass 1 walks the same widest-first order, but an arm that PINS a
+        // property to a literal has to match that literal too, so a
+        // `remove` value stops being taken by the structurally wider `set`
+        // arm whose fields it also fits. Pass 2 is the old chain verbatim:
+        // a value contradicting EVERY arm's literals still lands exactly
+        // where it landed before, so nothing that compiles today starts
+        // throwing on a value the asserted type never described.
+        //
+        // Which selector wins when the two disagree: inside a pass WIDTH
+        // decides, across the passes the DISCRIMINANT does.
+        const passes = unionHasDiscrim(def) ? [true, false] : [false];
+        for (const withLits of passes) {
+          order.forEach((i) => {
+            const arm = def.arms[i]!;
+            const m = E.dynMatchHelper(arm);
+            const lits = withLits ? armDiscrimLits(def, i) : {};
+            const test =
+              Object.keys(lits).length > 0 ? `${m}(d) && ${dynLitHelper(E, lits)}(d)` : `${m}(d)`;
+            if (arm.kind === "undefinedT") {
+              // Parsed JSON never matches here (no undefined in JSON text —
+              // a MISSING record key builds this arm in the record builder
+              // above), but the undefined dyn value can arrive from
+              // `unknown` index-signature overflows and builds the interned
+              // unit instance exactly like null.
+              d.push(`  if (${test}) {`);
+              d.push(`    return ${E.unitInstanceRef(t.unionId, i)};`);
+              d.push(`  }`);
+              return;
+            }
+            if (arm.kind === "nullT") {
+              // A matched unit arm builds nothing: the result is THE interned
+              // immortal instance (rc == SIZE_MAX — RC entry points and the
+              // collector both skip it, so no retain is owed).
+              d.push(`  if (${test}) {`);
+              d.push(`    return ${E.unitInstanceRef(t.unionId, i)};`);
+              d.push(`  }`);
+              return;
+            }
+            const c = E.dynCheckHelper(arm);
+            d.push(`  if (${test}) {`);
+            if (arm.kind === "f64") {
+              d.push(`    return scr_union_new_f64(${i}, ${c}(d, path));`);
+            } else if (arm.kind === "bool") {
+              d.push(`    return scr_union_new_bool(${i}, ${c}(d, path));`);
+            } else {
+              const rc = vAdapters(arm);
+              d.push(`    return scr_union_new_ref(${i}, ${c}(d, path), &${rc.retain}, &${rc.release}, ${E.traceArgC(arm)});`);
+            }
             d.push(`  }`);
-            return;
-          }
-          if (arm.kind === "nullT") {
-            // A matched unit arm builds nothing: the result is THE interned
-            // immortal instance (rc == SIZE_MAX — RC entry points and the
-            // collector both skip it, so no retain is owed).
-            d.push(`  if (${m}(d)) {`);
-            d.push(`    return ${E.unitInstanceRef(t.unionId, i)};`);
-            d.push(`  }`);
-            return;
-          }
-          const c = E.dynCheckHelper(arm);
-          d.push(`  if (${m}(d)) {`);
-          if (arm.kind === "f64") {
-            d.push(`    return scr_union_new_f64(${i}, ${c}(d, path));`);
-          } else if (arm.kind === "bool") {
-            d.push(`    return scr_union_new_bool(${i}, ${c}(d, path));`);
-          } else {
-            const rc = vAdapters(arm);
-            d.push(`    return scr_union_new_ref(${i}, ${c}(d, path), &${rc.retain}, &${rc.release}, ${E.traceArgC(arm)});`);
-          }
-          d.push(`  }`);
-        });
+          });
+        }
         d.push(`  scr_dyn_check_fail(path, ${want}, d);`);
         d.push(`  return NULL;`);
         break;

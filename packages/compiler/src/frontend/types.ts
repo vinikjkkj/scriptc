@@ -3,7 +3,7 @@ import type { IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
 import { ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile } from "./program.js";
-import { accessorSlotProp, wsGlobalPlan } from "../ir/nodes.js";
+import { accessorSlotProp, armLitsConflict, wsGlobalPlan } from "../ir/nodes.js";
 // typeKey moved to ir/nodes.ts (the backend needs it too, for per-type
 // helper interning); re-exported here so frontend call sites keep their
 // import path.
@@ -310,6 +310,11 @@ export class UnionRegistry {
   private readonly pendingRec = new Set<string>();
   /** Placeholders whose frame FAILED: unmappable, never `undefined`. */
   private readonly poisoned = new Set<string>();
+  /** Union ids whose per-arm literal table a later ts union ERASED by
+   * disagreeing with it. Remembered so a third site cannot put it back:
+   * two ts unions share one def, the constraint has to hold for BOTH,
+   * and interning order must not decide which one is believed. */
+  private readonly litsErased = new Set<string>();
 
   /** The union id a back-reference to an in-progress union resolves to:
    * reuses the type's persistent recursive id or mints a PLACEHOLDER
@@ -356,6 +361,7 @@ export class UnionRegistry {
     // again on a legitimate path has to be mapped on its own merits, not
     // refused because a discarded attempt once tripped over it.
     for (const id of dropped) this.poisoned.delete(id);
+    for (const id of dropped) this.litsErased.delete(id);
     this.unions.length = mark;
   }
 
@@ -401,7 +407,7 @@ export class UnionRegistry {
 
   /** Completes a recursive placeholder with its canonical arm list and
    * registers the structural key (first writer wins, like shapes). */
-  finalizeRecursive(t: ts.Type, arms: IrType[]): string {
+  finalizeRecursive(t: ts.Type, arms: IrType[], armLits?: Record<string, string>[]): string {
     const id = this.recIds.get(t);
     if (id === undefined) throw new Error("union registry bug: finalizeRecursive without a placeholder");
     if (this.pendingRec.has(id)) {
@@ -410,13 +416,74 @@ export class UnionRegistry {
       this.pendingRec.delete(id);
       const key = JSON.stringify(arms.map(typeKey));
       if (!this.byKey.has(key)) this.byKey.set(key, id);
+      this.foldArmLits(def, armLits);
     }
     return id;
   }
 
+  /** Folds one site's per-arm STRING-LITERAL observation into a def.
+   * The first site with a CONFLICTING table sets it; a later site
+   * INTERSECTS, because two ts unions with the same arm list share one
+   * def and a constraint has to hold for every value either of them
+   * admits. An intersection that no longer conflicts is dropped and the
+   * id remembered, so the erasure is permanent rather than a race.
+   *
+   * `undefined` is NO OBSERVATION and deliberately does not weaken. It
+   * is what a SYNTHETIC intern passes -- an arm list assembled out of IR
+   * types (a ternary join, stripUndefinedArm) by a caller that never saw
+   * a ts.Type and so knows nothing about literals either way. Every
+   * ts-level mapping passes an explicit table, so a union that genuinely
+   * has no discriminant erases through its OWN mapping, not through a
+   * join's silence. */
+  private foldArmLits(def: IrUnionDef, armLits?: Record<string, string>[]): void {
+    if (armLits === undefined) return;
+    if (this.litsErased.has(def.id)) {
+      if (
+        process.env["SCRIPTC_DISCRIM_WHY"] !== undefined &&
+        armLits.some((m) => Object.keys(m).length > 0)
+      ) {
+        console.error(
+          `DISCRIM REFUSED ${def.id}: an earlier ts union with the same arms is told apart by nothing`,
+        );
+      }
+      return;
+    }
+    if (armLits.length !== def.arms.length) return;
+    const next =
+      def.armLits === undefined
+        ? armLits
+        : def.armLits.map((m, i) => {
+            const n = armLits[i] ?? {};
+            const r: Record<string, string> = {};
+            for (const k of Object.keys(m)) {
+              const want = m[k];
+              if (want !== undefined && n[k] === want) r[k] = want;
+            }
+            return r;
+          });
+    if (armLitsConflict(next)) {
+      def.armLits = next;
+      return;
+    }
+    // NO CONFLICT is a verdict, not a shrug. This site's own arms are told
+    // apart by nothing, so its values can hold any string in any of these
+    // fields -- and they reach the very same def. Remembering that is what
+    // stops a LATER ts union with the same arms and a real discriminant
+    // from imposing constraints on them: the first pass would then read
+    // this site's value against literals it never had, and could prefer a
+    // narrower arm over the wider one the value actually is.
+    const had = def.armLits !== undefined;
+    delete def.armLits;
+    this.litsErased.add(def.id);
+    if (had && process.env["SCRIPTC_DISCRIM_WHY"] !== undefined) {
+      console.error(`DISCRIM ERASES ${def.id}: a later ts union with the same arms disagrees`);
+    }
+  }
+
   /** Interns a canonical (typeKey-sorted, deduplicated) arm list, returning
-   * its unionId. */
-  intern(arms: IrType[]): string {
+   * its unionId. `armLits` is the calling site's per-arm literal
+   * observation (foldArmLits); omit it when there is none to make. */
+  intern(arms: IrType[], armLits?: Record<string, string>[]): string {
     const key = JSON.stringify(arms.map(typeKey));
     let id = this.byKey.get(key);
     if (id === undefined) {
@@ -426,6 +493,7 @@ export class UnionRegistry {
       this.byId.set(id, def);
       this.unions.push(def);
     }
+    this.foldArmLits(this.byId.get(id)!, armLits);
     return id;
   }
 
@@ -3609,6 +3677,19 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         }
         return false;
       };
+      // WHAT THE ARMS PIN. `operation: 'set'` maps to the plain `string`
+      // slot like any other property, and this frame is the last place
+      // that still knows the literal -- so record it here, per PART, and
+      // hand the finished table to the registry with the arms.
+      //
+      // Buffered rather than computed inline: getPropertiesOfType is a
+      // checker round trip (this file's memo exists because those are the
+      // compiler's dominant cost), and a union with fewer than two record
+      // arms can carry no discriminant that separates anything. A part
+      // spliced in from a nested union contributes `null` -- the arms are
+      // already IR types there, so nothing is known about them either way,
+      // and 'nothing known' has to WEAKEN a sibling part's claim.
+      const armObs: { part: ts.Type | null; arm: IrType }[] = [];
       const byKey = new Map<string, IrType>();
       for (const part of widened.getTypes()) {
         // An UNINHABITED arm contributes no runtime value — `T | never ≡ T`
@@ -3678,11 +3759,15 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
                   ` . arm ${checker.typeToString(part).slice(0, 40)} -> ${inner.arms.length} arms`,
               );
             }
-            for (const innerArm of inner.arms) byKey.set(typeKey(innerArm), innerArm);
+            for (const innerArm of inner.arms) {
+              byKey.set(typeKey(innerArm), innerArm);
+              armObs.push({ part: null, arm: innerArm });
+            }
             continue;
           }
         }
         byKey.set(typeKey(mapped), mapped);
+        armObs.push({ part, arm: mapped });
       }
       const arms = [...byKey.values()];
       // Every arm elided as uninhabited: the union itself is `never`. It has
@@ -3849,6 +3934,59 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         return null;
       }
       arms.sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
+      // The per-arm literal table, aligned with the CANONICAL arm order
+      // (an arm's index there is its runtime tag). Two parts that mapped
+      // to the SAME arm intersect: the arm holds both their values, so
+      // only a literal they agree on constrains it.
+      const armLits = ((): Record<string, string>[] => {
+        if (armObs.filter((o) => o.arm.kind === "record").length < 2) return arms.map(() => ({}));
+        const litsOfPart = (part: ts.Type, arm: IrType): Record<string, string> => {
+          if (arm.kind !== "record") return {};
+          const shape = ctx.shapes.get(arm.shapeId);
+          if (shape === undefined) return {};
+          const pinned: Record<string, string> = {};
+          for (const p of checker.getPropertiesOfType(part)) {
+            // REQUIRED properties only -- an optional one is satisfied by
+            // omission, so it constrains no value of the arm.
+            if (p.flags & ts.SymbolFlags.Optional) continue;
+            const f = shape.fields.find((x) => x.name === p.name);
+            // Only a plain `string` SLOT can be tested: that is where the
+            // literal went, and it is what the emitted predicate reads.
+            if (f === undefined || f.type.kind !== "string") continue;
+            const pt = checker.getTypeOfSymbol(p);
+            // A NUL inside the literal has no C-string constant to be
+            // compared against (the LLVM lane interns a NUL-terminated
+            // one), and no source spells one on purpose. Not recorded
+            // rather than mis-compared.
+            if (pt.isStringLiteralType() && !pt.value.includes("\u0000")) pinned[p.name] = pt.value;
+          }
+          return pinned;
+        };
+        const byArm = new Map<string, Record<string, string>>();
+        for (const o of armObs) {
+          if (o.arm.kind !== "record") continue;
+          const k = typeKey(o.arm);
+          const seen = o.part === null ? {} : litsOfPart(o.part, o.arm);
+          const prev = byArm.get(k);
+          if (prev === undefined) {
+            byArm.set(k, seen);
+            continue;
+          }
+          const merged: Record<string, string> = {};
+          for (const f of Object.keys(prev)) {
+            const want = prev[f];
+            if (want !== undefined && seen[f] === want) merged[f] = want;
+          }
+          byArm.set(k, merged);
+        }
+        return arms.map((a) => byArm.get(typeKey(a)) ?? {});
+      })();
+      if (process.env["SCRIPTC_DISCRIM_WHY"] !== undefined && armLits.some((m) => Object.keys(m).length > 0)) {
+        console.error(
+          `DISCRIM ${checker.typeToString(widened).slice(0, 70)} -> ` +
+            armLits.map((m) => JSON.stringify(m)).join(" | "),
+        );
+      }
       if (unions.recursivePending(widened)) {
         // The knot closed through this union. A frame that resolved
         // through context-sensitive hooks (generic type parameters, mixin
@@ -3864,7 +4002,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
           // would strand a degenerate union in whatever already holds it;
           // inventing arms would strand a false one.
           if (arms.length >= 2) {
-            const id = unions.finalizeRecursive(widened, arms);
+            const id = unions.finalizeRecursive(widened, arms, armLits);
             const answer: IrType = { kind: "union", unionId: id };
             if (referencesPendingPlaceholder(answer, unions, ctx.shapes) !== null) return null;
             frameOk = true;
@@ -3873,10 +4011,10 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
           return null;
         }
         frameOk = true;
-        return { kind: "union", unionId: unions.finalizeRecursive(widened, arms) };
+        return { kind: "union", unionId: unions.finalizeRecursive(widened, arms, armLits) };
       }
       frameOk = true;
-      return { kind: "union", unionId: unions.intern(arms) };
+      return { kind: "union", unionId: unions.intern(arms, armLits) };
     } finally {
       unions.inProgress.delete(widened);
       // A frame that failed AFTER a back-reference minted its placeholder

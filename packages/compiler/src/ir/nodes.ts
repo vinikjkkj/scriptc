@@ -1356,6 +1356,24 @@ export interface IrUnionDef {
    * an arm's index here is its runtime tag. Never void/func/union; the
    * unit kinds (undefinedT/nullT) are payload-less arms. */
   arms: IrType[];
+  /** Per-arm STRING-LITERAL DISCRIMINANTS, aligned one-for-one with
+   * `arms`. `armLits[i]` maps a field name declared on arm i's record
+   * shape to the ONE string every value of that arm holds there --
+   * what the source wrote as `operation: 'set'`, and what mapping the
+   * property to the plain `string` slot erased. Present only when at
+   * least two arms genuinely CONFLICT on a shared field (nothing
+   * weaker can change which arm a value matches), so the overwhelming
+   * majority of unions carry no entry at all.
+   *
+   * A PREFERENCE, never a veto. It is read where a runtime value has
+   * to be matched to an arm (dynCheck's arm chain) as a FIRST pass
+   * that skips arms whose literals the value contradicts; a value
+   * contradicting every arm still falls through to the ordinary
+   * structural pass, so nothing that compiles today starts throwing.
+   * That is also the answer to which selector wins when the
+   * discriminant and the widest-first order disagree: within a pass
+   * width decides, across the passes the discriminant does. */
+  armLits?: Record<string, string>[];
 }
 
 export interface IrFunction {
@@ -6893,6 +6911,54 @@ export function dynCheckArmOrder(
     out[p] = sorted[k]!;
   });
   return out;
+}
+
+/** Arm `i`'s string-literal discriminants, empty when the union carries
+ * none. The one reader of IrUnionDef.armLits every other rule goes
+ * through, so a def built before the field existed answers `{}` rather
+ * than undefined. */
+export function armDiscrimLits(def: IrUnionDef, i: number): Record<string, string> {
+  return def.armLits?.[i] ?? {};
+}
+
+/** True when SOME arm carries a literal discriminant -- the condition
+ * both emitters gate their discriminant-preferring first arm pass on, so
+ * a union without one emits exactly the code it emitted before. */
+export function unionHasDiscrim(def: IrUnionDef): boolean {
+  return (def.armLits ?? []).some((m) => Object.keys(m).length > 0);
+}
+
+/** True when arms `a` and `b` are told apart by a literal discriminant:
+ * some field BOTH constrain, to DIFFERENT strings. One-sided knowledge
+ * does NOT separate -- an arm that says nothing about `operation` can
+ * still hold any value of it, so it steals its neighbour's values
+ * exactly as before. */
+export function discrimSeparates(def: IrUnionDef, a: number, b: number): boolean {
+  const la = armDiscrimLits(def, a);
+  const lb = armDiscrimLits(def, b);
+  for (const k of Object.keys(la)) {
+    const v = lb[k];
+    if (v !== undefined && v !== la[k]) return true;
+  }
+  return false;
+}
+
+/** True when a per-arm literal table is worth KEEPING: two arms that
+ * conflict on a shared field. Anything weaker can never change which arm
+ * a value matches, so the registry drops it rather than intern a table
+ * that only grows the IR. */
+export function armLitsConflict(lits: readonly Record<string, string>[]): boolean {
+  for (let i = 0; i < lits.length; i++) {
+    for (let j = i + 1; j < lits.length; j++) {
+      const a = lits[i], b = lits[j];
+      if (a === undefined || b === undefined) continue;
+      for (const k of Object.keys(a)) {
+        const v = b[k];
+        if (v !== undefined && v !== a[k]) return true;
+      }
+    }
+  }
+  return false;
 }
 
 export function canDynCheckTo(
