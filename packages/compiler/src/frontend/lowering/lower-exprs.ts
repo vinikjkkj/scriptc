@@ -10606,6 +10606,31 @@ function stringConvAtDynWidth(L: Lowerer, e: IrExpr): IrExpr | null {
   return L.recordKeyReadAtSlotWidth(e, DYN) ?? narrowBridgeDyn(e);
 }
 
+/** Is this union ARM a record the per-union `sc_us_*` ToString helper can
+ * answer for — and arm its hidden toString slot if so. Exported because
+ * BOTH spellings of the operation ask it: the conversion (`${u}`,
+ * String(u)) here, and the METHOD spelling (`u.toString()`) in
+ * lowerUnionToStringCall. They disagreed once — the conversion answered
+ * the constant and the method refused the program — and one predicate is
+ * what keeps them from disagreeing again.
+ *
+ * Not a tuple (a tuple prints its ELEMENTS, which the arm helper has no
+ * join in it for) and no declared `toString` FIELD (which shadows the
+ * prototype's and has to be called through the record's own closure slot,
+ * a read the arm helper cannot make from the tag alone). */
+export function recordArmStringable(L: Lowerer, a: IrType): boolean {
+  if (a.kind !== "record") return false;
+  const shape = L.shapes.get(a.shapeId);
+  if (shape === undefined || shape.tuple || shape.fields.some((f) => f.name === "toString")) return false;
+  // The arm's ToString runs through the per-union `sc_us_*` helper, whose
+  // record arm now branches on the shape's HIDDEN per-instance slot
+  // exactly as the lone-record rule does — so a MATERIALIZED record
+  // stringifies through the toString its source carried, on both
+  // spellings, instead of folding the constant over a method that exists.
+  L.markToStrSlot(a.shapeId);
+  return true;
+}
+
 export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
     {
       const atWidth = stringConvAtDynWidth(L, e);
@@ -10650,30 +10675,26 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
       const def = L.unions.get(e.type.unionId);
       // A plain data RECORD arm is decidable and it is the arm the union
       // form was missing: JS prints Object.prototype.toString's constant
-      // for it, and the LONE-record rule at the bottom of this function
-      // returns exactly that, under exactly this test — not a tuple
-      // (which prints its elements) and no `toString` FIELD (which shadows
-      // the prototype's and has to be CALLED).
+      // for a record that carries no toString, and the LONE-record rule at
+      // the bottom of this function answers exactly the same way, under
+      // exactly this test — not a tuple (which prints its elements) and no
+      // `toString` FIELD (which shadows the prototype's and has to be
+      // CALLED through the record's closure slot).
       //
-      // The two rules agree on the constant and no longer agree on the
-      // slot: the lone-record rule now CALLS a zero-argument
-      // string-returning `toString` field, and this one still declines the
-      // arm, because the per-union `sc_us_*` helper the arm dispatch runs
-      // through is emitted by both backends from the union def alone and
-      // has no call in it. `${rec}` answers and `${num | rec}` fences —
-      // honest either way, and the fence is the half still owed.
+      // The two rules now agree on the ANSWER and not merely on the
+      // constant. The half that was owed here — "the per-union `sc_us_*`
+      // helper both backends emit from the union def has no call in it" —
+      // is paid: its record arm reads the shape's HIDDEN per-instance
+      // toString slot, the same branch emit-exprs.ts's lone-record
+      // ToString takes, so a MATERIALIZED record stringifies through the
+      // toString its source carried on both spellings.
       //
       // Array, class and every other ref arm stay fenced.
-      const recordArmStringable = (a: IrType): boolean => {
-        if (a.kind !== "record") return false;
-        const shape = L.shapes.get(a.shapeId);
-        return shape !== undefined && !shape.tuple && !shape.fields.some((f) => f.name === "toString");
-      };
       const stringable = def?.arms.every(
         (a) =>
           a.kind === "undefinedT" || a.kind === "nullT" ||
           a.kind === "string" || a.kind === "f64" || a.kind === "bool" ||
-          recordArmStringable(a),
+          recordArmStringable(L, a),
       );
       if (stringable) {
         return { kind: "toString", operand: e, type: STRING, loc: e.loc };
@@ -10745,6 +10766,15 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
       if (shape && !shape.tuple) {
         const slot = shape.fields.find((f) => f.name === "toString");
         if (slot === undefined) {
+          // ... and where the shape declares none, the HIDDEN per-instance
+          // slot answers instead of the constant: a MATERIALIZED record
+          // (the dynCheck's copy of a JS object, a class→record
+          // projection) carries the toString its source had, and folding
+          // "[object Object]" over it is a silent wrong answer. Arming the
+          // shape is what makes the backends lay the member out; NULL —
+          // a plain literal, a toString-less class — still answers the
+          // constant, which is Node's answer for it.
+          L.markToStrSlot(e.type.shapeId);
           return { kind: "toString", operand: e, type: STRING, loc: e.loc };
         }
         if (

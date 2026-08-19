@@ -1666,6 +1666,9 @@ class FnAnalyzer {
       }
       case "recordLit": {
         const slotMap = this.cfg.records.get((e.type as { kind: "record"; shapeId: string }).shapeId);
+        // The hidden toString slot carries no number, but it is a real
+        // expression in evaluation order (a closure construction).
+        if (e.toStr) this.evalExpr(e.toStr, env);
         for (const f of e.fields) {
           const v = this.evalExpr(f.value, env);
           const slot = slotMap?.get(f.name);

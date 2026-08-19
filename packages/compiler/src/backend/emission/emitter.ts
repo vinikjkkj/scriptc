@@ -540,11 +540,22 @@ export class CEmitter {
       // of map type: the shape is cycle-capable when the overflow VALUE
       // type is (a record/object/union value in the map can point back at
       // the record embedding it) — cycleCapable's map rule answers that.
+      // A shape that ARMED the hidden toString slot carries one more
+      // member — a `() => string` closure — and a closure is
+      // unconditionally cycle-capable (it can capture the very record
+      // holding it: the class→record projection's closure captures the
+      // instance, and a self-referential class reaches the record back).
+      // So the slot joins the fixpoint exactly like <overflow> does; a
+      // shape whose only cycle-capable member is the slot would otherwise
+      // get no header and its trace would visit an edge on a node the
+      // collector does not know.
       ...(mod.records ?? []).map((r) => ({
         key: `record:${r.id}`,
-        fields: r.indexValue
-          ? [...r.fields, { name: "<overflow>", type: mapOf(STRING, r.indexValue) }]
-          : r.fields,
+        fields: [
+          ...r.fields,
+          ...(r.indexValue ? [{ name: "<overflow>", type: mapOf(STRING, r.indexValue) }] : []),
+          ...(r.tostr ? [{ name: "<toString>", type: funcOf([], STRING) }] : []),
+        ],
       })),
     ];
     for (const s of shapeDefs) this.tracedShapes.add(s.key);

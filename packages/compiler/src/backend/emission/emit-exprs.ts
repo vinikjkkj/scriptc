@@ -6,7 +6,7 @@ import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
 import { arrayOf, BOOL, BYTES_U8, bytesOf, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals } from "../../ir/nodes.js";
 import { boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct, mangleWrapper } from "../mangle.js";
-import { OVERFLOW_MEMBER } from "./emit-shapes.js";
+import { OVERFLOW_MEMBER, TOSTR_MEMBER } from "./emit-shapes.js";
 import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper } from "./emit-walkers.js";
 import { genResultThunkFor } from "./emit-async.js";
 import { wsGlobalCtorFor } from "./emit-ws.js";
@@ -749,10 +749,25 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           return t;
         }
         if (v.type.kind === "record") {
-          // String(record) / `${record}`: Object.prototype.toString's
-          // constant. The operand temp was emitted above (effects and RC
-          // ride the frame like any other statement temp); the result is
-          // the interned literal, retained like a strLit.
+          // String(record) / `${record}` / record.toString(): the shape's
+          // HIDDEN per-instance toString slot where it armed one, and
+          // Object.prototype.toString's constant otherwise. The operand
+          // temp was emitted above (effects and RC ride the frame like any
+          // other statement temp).
+          //
+          // The slot is NULL on every record nothing carried a toString
+          // into — a source literal, a toString-less class — and NULL is
+          // exactly when the constant IS Node's answer, so scr_rec_tostr
+          // answers the same interned text this used to fold. Where it is
+          // filled the call is USER CODE (a class's own toString, or the
+          // source object's through the dyn walker) and can throw, so the
+          // result temp joins the frame BEFORE the pending check, like the
+          // dyn arm above.
+          if (E.recordsById.get(v.type.shapeId)?.tostr === true) {
+            const t = E.newTemp(e.type, `scr_rec_tostr(${v.name}->${TOSTR_MEMBER})`);
+            E.emitPendingCheck();
+            return t;
+          }
           const sym = E.internLiteral("[object Object]");
           return E.newTemp(e.type, retainCallC(e.type, `(ScrStr *)&${sym}`));
         }
@@ -2045,6 +2060,21 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             }
             if (isRefCounted(v.type)) E.moveTemp(v);
             E.line(`${rec.name}->${mangleField(f.name)} = ${v.name};`);
+          } finally {
+            E.releaseFrame(E.frames.pop()!);
+          }
+        }
+        // The hidden per-instance toString slot, written LAST (it is not a
+        // field, has no key, and nothing observes its evaluation order —
+        // the only expression that ever lands here is a closure
+        // construction over the projection helper's own instance param).
+        // Ownership moves in like any refcounted field.
+        if (e.toStr) {
+          E.frames.push([]);
+          try {
+            const v = E.emitExpr(e.toStr);
+            E.moveTemp(v);
+            E.line(`${rec.name}->${TOSTR_MEMBER} = ${v.name};`);
           } finally {
             E.releaseFrame(E.frames.pop()!);
           }
