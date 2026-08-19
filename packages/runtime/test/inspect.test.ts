@@ -24,6 +24,13 @@ beforeAll(async () => {
     // the JSON module and its dependencies join the link (scr_closure.c:
     // releasing a dyn tree releases SCR_DYN_FUNC boxes' closures).
     join(testDir, "../src/scr_json.c"),
+    // scr_json.c s dyn release/retain reach the MAP kind (scr_dyn_release,
+    // scr_dyn_gcfree, scr_dyn_new_map_ref, scr_dyn_map_unbox), so scr_map.c
+    // belongs in this link exactly as it does in every other probe that
+    // links scr_json.c. Without it the whole FILE failed to build
+    // ("lld-link: error: undefined symbol: scr_map_release"), which reads as
+    // a skipped suite rather than a red one.
+    join(testDir, "../src/scr_map.c"),
     join(testDir, "../src/scr_closure.c"),
     join(testDir, "../src/scr_string.c"),
     join(testDir, "../src/scr_number.c"),
