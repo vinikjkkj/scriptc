@@ -6,7 +6,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { BOOL, BYTES_U8, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
-import { captureParticipationOfPattern, checkedJsNumber, droppableStatic, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexTextOf } from "./lower-exprs.js";
+import { captureParticipationOfPattern, checkedJsNumber, droppableStatic, entryFoldStringChain, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexTextOf } from "./lower-exprs.js";
 import { forOfVarTarget, lowerDestructuringAssign } from "./lower-stmts.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { DYN_DISPATCH_METHODS, islandPrimitiveExit } from "./lower-calls.js";
@@ -6348,7 +6348,20 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       // the entry-module fold lowers it to a compile-time STRING — the
       // suite harness's skip() shape. Everything else keeps the strict
       // string gate.
-      if (receiverIr?.kind !== "string" && !isRequireMainFilename(L, access.expression)) return null;
+      if (
+        receiverIr?.kind !== "string" &&
+        !isRequireMainFilename(L, access.expression) &&
+        !entryFoldStringChain(L, access.expression)
+      ) {
+        // `require.main?.filename.toLowerCase().endsWith(...)`: the SECOND
+        // method of the chain. Its receiver is the first method's call, and
+        // the checker propagates the chain's undefined arm onto it, so the
+        // strict gate above declines a value that IS a string. The link
+        // cannot short-circuit (require.main IS the entry module), and
+        // entryFoldStringChain proves the non-unit arm is `string` — never
+        // an array, whose method NAMES collide with these.
+        return null;
+      }
       if (!L.isStdlibMember(access)) return null;
     }
     // `s.split(sep, limit)` — the lib's second parameter. The spec's loop

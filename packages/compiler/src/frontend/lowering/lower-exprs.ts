@@ -4225,6 +4225,25 @@ function nullishTestedByParent(expr: ts.Expression): boolean {
     return !isNodeEsmFile(expr.getSourceFile());
   }
 
+  /** True when `expr` is a `string | undefined` value whose ONLY optional
+   * link is the entry-module fold — `require.main?.filename.toLowerCase()`
+   * and friends. The link cannot short-circuit in a compiled binary, so
+   * the value IS the tail's own string and a string-method receiver gate
+   * may accept it. Deliberately narrow: the checker type must be exactly
+   * `string` plus unit arms, so a `split()` result (`string[] | undefined`,
+   * whose `slice`/`indexOf`/`concat` names COLLIDE with the string
+   * intrinsics) can never come through here as a string. */
+  export function entryFoldStringChain(L: Lowerer, expr: ts.Expression): boolean {
+    const t = L.mapTypeOf(L.typeOf(expr));
+    if (t?.kind !== "union") return false;
+    const def = L.unions.get(t.unionId);
+    if (!def) return false;
+    const nonUnit = def.arms.filter((a) => !isUnitType(a));
+    if (nonUnit.length !== 1 || nonUnit[0]?.kind !== "string") return false;
+    const tail = chainTailDot(L, expr);
+    return tail !== null && isRequireMainFilename(L, tail);
+  }
+
   /** True when `expr` is the tail of an optional chain the STATIC chain
    * machinery should short-circuit whole: an unhandled deeper `?.` whose
    * guarded receiver lowers as a unit-armed union. Dyn ('unknown') and
@@ -4234,6 +4253,16 @@ function nullishTestedByParent(expr: ts.Expression): boolean {
   export function chainTailClaimed(L: Lowerer, expr: ts.Expression): boolean {
     const tail = chainTailDot(L, expr);
     if (!tail) return false;
+    // `require.main?.filename.startsWith(...)` — the entry-module fold.
+    // The checker types `require.main` `Module | undefined`, so the tail
+    // below reads as a guarded union and this predicate would claim the
+    // WHOLE tail for the chain machinery — which lowers the guard receiver
+    // `require.main` standalone and fences it (SC2020). In a compiled
+    // binary require.main IS the entry module: the link cannot
+    // short-circuit and the read folds to a compile-time string, which is
+    // exactly what lowerStringMethodCall's own require.main gate was
+    // written for. Declining here is what lets that gate be reached.
+    if (isRequireMainFilename(L, tail)) return false;
     const recvT = L.mapTypeOf(L.typeOf(tail.expression));
     if (recvT?.kind !== "union") return false;
     const def = L.unions.get(recvT.unionId);
@@ -4835,6 +4864,16 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     let kind = neverTaintedJsType(L, expr.expression, L.typeOf(expr.expression))
       ? undefined
       : L.mapTypeOf(L.typeOf(expr.expression))?.kind;
+    // `require.main?.filename.length` — a property TAIL on the entry-module
+    // fold. The checker types the receiver `string | undefined` (the
+    // optional link's short-circuit arm), but in a compiled binary
+    // require.main IS the entry module: the link cannot short-circuit and
+    // the receiver lowers to a compile-time STRING. Take the VALUE's kind,
+    // not the checker's — the same stance lowerStringMethodCall's own
+    // require.main gate already takes at the call site. Without it the
+    // union spelling reaches lowerUnionProperty, whose invariant is that a
+    // union-typed receiver lowers to a union.
+    if (isRequireMainFilename(L, expr.expression)) kind = "string";
     // A checker-`any[]` receiver (the readonly-array Array.isArray quirk)
     // whose VALUE lowers to a real static array (maybeNarrow's isArray
     // bridge): `.length` and friends ride the array path on the lowered
