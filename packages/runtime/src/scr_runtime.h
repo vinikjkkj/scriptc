@@ -264,6 +264,44 @@ enum { SCR_CYC_BLACK = 0, SCR_CYC_PURPLE = 1, SCR_CYC_GRAY = 2, SCR_CYC_WHITE = 
  * still takes 16% off CPU time. The depth was swept too, 8/16/32/64,
  * and moved peak RSS by 0.16%: the retention was never the term.
  *
+ * THE DEPTH IS THE RIGHT BOUND FOR THE REAL WORKLOAD AND THE WRONG ONE
+ * FOR THE BENCH, and both halves were measured rather than argued. The
+ * miss that reaches malloc in scr_str_alloc was handed to a block as the
+ * new allocation leader, 5.17M calls and "98.5% of all allocations". It
+ * is 98.5% of the mallocs a messaging run still makes, which is not the
+ * same claim: instrumented at the call, scr_str_alloc runs 22,462,180
+ * times and the pool answers 18,056,662 of them - 80.4% - so the site is
+ * the RESIDUE, not the allocator.
+ *
+ * On zapo, paired, a whole session (76 of 76 stanzas): 44,577 calls,
+ * 43,128 pool hits, 96.75%, and the depth cap rejects a give 58 times in
+ * 46,884 - 0.12%. There is nothing on the real workload for a wider
+ * bound to catch.
+ *
+ * On the messaging bench there is, and it is one shape: a `store.clear()`
+ * of 200,000 entries frees 200,000 blocks of one class at once, so the
+ * class saturates at the first 64 and rejects the rest, and the 200,000
+ * allocations that follow all miss. Swept at FIXED WORK (6,363,175
+ * scr_str_alloc calls +/- 2 across every arm), pool hit rate:
+ *     depth 64 (shipped)            52.21%
+ *     depth 1024                    52.52%
+ *     depth 8192                    80.35%
+ *     depth unbounded               96.45%
+ * Depth is the wrong knob because the burst is 200,000 wide. A BYTE
+ * budget over all classes is the right shape and its knee is exactly the
+ * burst: 4 MiB 61.84%, 6 MiB 68.89%, 8 MiB 75.94%, 12 MiB 90.04%,
+ * 16 MiB 96.45% - 200,000 * 64 B is 12.8 MiB. Unbounded costs no peak
+ * RSS on this bench (1.0000/1.0000/1.0031/1.0001 across the four
+ * scenarios, spread 0.02-1.0%) because the blocks it holds are blocks
+ * the process peaked at anyway; what it does not bound is the
+ * cross-class fragmentation a different phase would pay for.
+ *
+ * It is NOT shipped, and the reason is the zapo line above: a byte-budget
+ * field costs one add and one subtract on take and on give - the two
+ * hottest functions in the runtime - to buy 58 gives on the workload
+ * this compiler exists for. The knob is written down here so the next
+ * block does not re-derive the curve, not because 64 is magic.
+ *
  * DISABLED UNDER SCR_RC_AUDIT, exactly like scr_string.c's one-slot
  * spare block above it: the audit lane exists to prove every logical
  * free is a real free, and a pool that keeps blocks alive would hide
