@@ -72,8 +72,21 @@ if (p !== null) {
   console.log(emit({ ...base, ...p }));
 }
 
-// The refusal, spread FIRST with an explicit field after it (zapo's
-// `{ ...normalized, errors }` at client/events/mex-notification.ts:192).
+// NO LONGER the fence, and its absence from this snapshot is the proof.
+// Spread FIRST with an explicit field after it is zapo's
+// `{ ...normalized, errors }` at client/events/mex-notification.ts:192, and
+// the relation is exact rather than invented: the source union is the slot's
+// arms MINUS the name the literal supplies. `ArmA` + `rawId` IS `EvA`;
+// `ArmB` + `rawId` IS `EvB`. The paired-arm rule now folds a PLAIN override's
+// name into the source side of its pairing key — a plain override is written
+// into every branch unconditionally, so no source read is ever emitted for it
+// and it belongs to the shape the branch BUILDS, not the one it reads.
+// Corpus 4711 runs the whole population byte-exact against Node.
+//
+// The two cases that remain in this snapshot are the other shape entirely:
+// `{ ...base, ...p }` is TWO plain spreads, and the second one is the union.
+// The names the first spread contributes are not overrides and this rule does
+// not model them, so `incoming.ts:397` keeps its fence.
 const q = parse(1);
 if (q !== null) {
   console.log(emit({ ...q, rawId: "R2" }));
