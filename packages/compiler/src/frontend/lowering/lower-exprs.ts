@@ -10885,6 +10885,42 @@ function stringConvAtDynWidth(L: Lowerer, e: IrExpr): IrExpr | null {
   return L.recordKeyReadAtSlotWidth(e, DYN) ?? narrowBridgeDyn(e);
 }
 
+/** The same rule for `Number(x)`, which is the destination the string
+ * conversion's twin never got.
+ *
+ * `Number(node.attrs.size)` -- zapo `WaGroupCoordinator.ts:22715` and ten
+ * more sites, the single largest closable group in that program's abort
+ * population.  The checker types an index-signature read by the
+ * signature's VALUE type, so the read is spelled `string`; the key is
+ * absent on the wire; the helper's miss path is `scr_trap_fmt`, an
+ * uncatchable abort past every catch clause -- where Node's
+ * `Number(undefined)` is simply **NaN**.  Measured, not argued:
+ * `String(attrs.gone)` already prints `undefined` here (ensureString
+ * calls stringConvAtDynWidth above) while `Number(attrs.gone)` aborted.
+ * One conversion had the rule and its sibling did not.
+ *
+ * WHY A CONVERSION IS A KEEP-CASE, which is stringConvAtDynWidth's own
+ * argument: ToNumber is TOTAL over the kinds this width can produce, so
+ * the conversion never has to refuse the way a typed slot does.  The
+ * runtime's `scr_dyn_to_number` (scr_json.c:2224) answers NaN for
+ * undefined, 0 for null, the full ToNumber string grammar for a string,
+ * 1/0 for a boolean -- Node's ToNumber exactly.
+ *
+ * The width gate is `isDynSafeReadWidth`, the predicate the sibling
+ * binding rule already uses: the read's own width must be an immutable
+ * primitive or a union of scalars and units.  That is what keeps a
+ * REFERENCE kind out of the dyn, because for a reference
+ * `scr_dyn_to_number` runs ToPrimitive and can raise the dyn-boundary
+ * throw -- correct for JS, but not a trade this rung is making.  A width
+ * it declines keeps the loud trap, unchanged.
+ *
+ * SCRIPTC_NUMARM_OFF=1 ablates it, so one binary emits both sides. */
+export function numberConvAtDynWidth(L: Lowerer, e: IrExpr): IrExpr | null {
+  if (process.env["SCRIPTC_NUMARM_OFF"] === "1") return null;
+  if (!isDynSafeReadWidth(L, e.type)) return null;
+  return L.recordKeyReadAtSlotWidth(e, DYN);
+}
+
 /** Is this union ARM a record the per-union `sc_us_*` ToString helper can
  * answer for — and arm its hidden toString slot if so. Exported because
  * BOTH spellings of the operation ask it: the conversion (`${u}`,
