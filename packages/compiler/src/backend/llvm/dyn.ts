@@ -22,7 +22,7 @@
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrType } from "../../ir/nodes.js";
-import { canAdaptDynFuncTo, canBoxFuncIntoDyn, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
+import { canAdaptDynFuncTo, canBoxFuncIntoDyn, dynCheckArmOrder, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
 import { arrNewCall, elemAccess, llFieldType, releaseSym, toStrSlotIndex, traceAdapter, traceArg, vAdapters } from "./shapes.js";
@@ -1083,9 +1083,11 @@ export class LlDyn {
       case "union": {
         const def = host.unionsById.get(t.unionId);
         if (!def) throw new Error(`llvm emitter bug: dynCheck of unknown union ${t.unionId}`);
-        // Arms in CANONICAL order, first FULL match wins. The matched
-        // arm's builder can no longer fail.
-        def.arms.forEach((arm, i) => {
+        // Arms MOST SPECIFIC FIRST, first FULL match wins (dynCheckArmOrder --
+        // the C emitter takes the same order from the same helper). The
+        // matched arm's builder can no longer fail.
+        dynCheckArmOrder(def, (id) => host.recordsById.get(id)).forEach((i) => {
+          const arm = def.arms[i]!;
           const m = this.dynMatchHelper(arm);
           const hit = B.tmp();
           B.line(`${hit} = call zeroext i1 @${m}(ptr %d)`);
