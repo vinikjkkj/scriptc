@@ -378,6 +378,102 @@ static bool dyn_cb_check(ScrDyn *const *args, size_t argc) {
 
 static bool dyn_name_is(const char *m, const char *n) { return strcmp(m, n) == 0; }
 
+/* ── CreateListFromArrayLike (ECMA-262 7.3.18) ───────────────────
+ *
+ * `fn.apply(thisArg, pack)` takes any OBJECT as its pack, not just a real
+ * array. Node runs `fn.apply(null, new Uint8Array([1,2]))` and
+ * `fn.apply(null, {length:2, 0:100, 1:101})`; this runtime answered both
+ * with "CreateListFromArrayLike called on non-object", which is the
+ * message for a case that is NOT this one — the array-like packs ARE
+ * objects. estado-apply.md 7.2 declared the divergence, priced the fix at
+ * 50-70 lines of C and did not take it; this is that follow-up.
+ *
+ * The spec is three steps: reject a non-Object, ToLength(Get(o,
+ * "length")), then Get(o, ToString(i)) for i in 0..len-1. A PRIMITIVE
+ * pack keeps Node's own message (`fn.apply(null, "ab")` throws in Node
+ * too, with this text). An object kind this runtime holds no keyed read
+ * for keeps a LOUD fence naming what it could not do, rather than a
+ * silently empty pack — the honesty ladder at the top of this file.
+ *
+ * Answers a malloc'd array of +1 dyn values with *out_len set, or NULL.
+ * NULL means an EMPTY pack when no exception is pending and a throw when
+ * one is; both are what the caller already does with a zero-length list.
+ * `list` is borrowed. */
+#define SCR_APPLY_PACK_MAX 65535u
+
+static ScrDyn **dyn_list_from_array_like(ScrDyn *list, size_t *out_len) {
+  *out_len = 0;
+  /* JS's "is an Object": every reference kind, functions included (typeof
+   * answers "function" for those, which is why they are named here). */
+  if (!scr_dyn_typeof_is_object(list) && list->kind != SCR_DYN_FUNC) {
+    scr_throw_error_msg(SCR_ERR_TYPE, "CreateListFromArrayLike called on non-object",
+                        strlen("CreateListFromArrayLike called on non-object"));
+    return NULL;
+  }
+  double raw;
+  if (list->kind == SCR_DYN_BYTES) {
+    /* A typed array's `length` is its ELEMENT count, and the element read
+     * below goes through scr_bytes_get so every width answers its own
+     * value (a Uint8Array is not the only pack shape that reaches here). */
+    raw = scr_bytes_len(list->v.bytes);
+  } else if (list->kind == SCR_DYN_OBJ) {
+    ScrDyn *len = scr_dyn_obj_key_get(list, "length", 6);
+    if (len == NULL) return NULL; /* an accessor threw */
+    raw = scr_dyn_to_number(len);
+    scr_dyn_release(len);
+    if (scr_exc_pending()) return NULL;
+  } else {
+    /* ARR never reaches here (the caller's fast path owns it). Everything
+     * left IS an object in JS — a class instance, an island handle, a
+     * promise, an ArrayBuffer, a function — and reading `length` plus the
+     * index keys off one of those needs a keyed read this unit does not
+     * have. Loud, and it names the kind rather than claiming Node's
+     * non-object message. */
+    dyn_throw_unsupported("Function", "apply with an argument pack of this kind");
+    return NULL;
+  }
+  /* ToLength (7.1.20): NaN and every negative answer 0; a fraction
+   * truncates toward zero. */
+  double len = (raw != raw) ? 0.0 : trunc(raw);
+  if (len <= 0.0) return NULL; /* the empty pack; no exception pending */
+  if (len > (double)SCR_APPLY_PACK_MAX) {
+    /* V8 answers RangeError long before a length like this, and a pack
+     * this runtime cannot build must be loud rather than truncated. */
+    scr_throw_error_msg(SCR_ERR_RANGE, "Maximum call stack size exceeded",
+                        strlen("Maximum call stack size exceeded"));
+    return NULL;
+  }
+  size_t n = (size_t)len;
+  ScrDyn **items = (ScrDyn **)malloc(n * sizeof(ScrDyn *));
+  if (items == NULL) {
+    scr_throw_error_msg(SCR_ERR_ERROR, "out of memory building an argument pack",
+                        strlen("out of memory building an argument pack"));
+    return NULL;
+  }
+  for (size_t i = 0; i < n; i++) {
+    ScrDyn *v;
+    if (list->kind == SCR_DYN_BYTES) {
+      /* Past the end of a typed array every index reads undefined, which
+       * is what a `length` bigger than the payload means in JS too. */
+      v = i < list->v.bytes->len ? scr_dyn_new_num(scr_bytes_get(list->v.bytes, (double)i))
+                                 : scr_dyn_retain(scr_dyn_undefined());
+    } else {
+      char key[24];
+      int kl = snprintf(key, sizeof key, "%llu", (unsigned long long)i);
+      v = kl > 0 ? scr_dyn_obj_key_get(list, key, (size_t)kl) : NULL;
+    }
+    if (v == NULL) { /* an accessor threw mid-pack */
+      for (size_t j = 0; j < i; j++) scr_dyn_release(items[j]);
+      free(items);
+      return NULL;
+    }
+    items[i] = v;
+  }
+  *out_len = n;
+  return items;
+}
+
+
 /* Handle receivers: hand the whole call to the tag's ops (installed by
  * the owning unit at main() — a missing install is an internal error the
  * accessor reports). */
@@ -912,9 +1008,18 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
         return r;
       }
       if (list->kind != SCR_DYN_ARR) {
-        scr_throw_error_msg(SCR_ERR_TYPE, "CreateListFromArrayLike called on non-object",
-                            strlen("CreateListFromArrayLike called on non-object"));
-        return NULL;
+        /* An ARRAY-LIKE pack: CreateListFromArrayLike, not a kind test.
+         * The fast path below stays for a real array — its items are
+         * already a contiguous borrowed vector and no copy is owed. */
+        size_t packc = 0;
+        ScrDyn **pack = dyn_list_from_array_like(list, &packc);
+        if (pack == NULL && scr_exc_pending()) return NULL;
+        scr_dyn_this_push_dyn(thisv);
+        ScrDyn *r = scr_dyn_call(recv, pack, packc, what);
+        scr_dyn_this_pop();
+        for (size_t i = 0; i < packc; i++) scr_dyn_release(pack[i]);
+        free(pack);
+        return r;
       }
       scr_dyn_this_push_dyn(thisv);
       ScrDyn *r = scr_dyn_call(recv, list->v.arr.items, list->v.arr.len, what);
