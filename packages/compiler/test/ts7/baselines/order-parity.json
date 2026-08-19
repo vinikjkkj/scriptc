@@ -8372,6 +8372,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5000-interned-literal-ownership-across-every-consumer.ts": {
+   "order": [
+    "<repo>/tests/corpus/5000-interned-literal-ownership-across-every-consumer.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/501-array-push-pop.ts": {
    "order": [
     "<repo>/tests/corpus/501-array-push-pop.ts"
