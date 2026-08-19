@@ -1666,9 +1666,6 @@ class FnAnalyzer {
       }
       case "recordLit": {
         const slotMap = this.cfg.records.get((e.type as { kind: "record"; shapeId: string }).shapeId);
-        // The hidden toString slot carries no number, but it is a real
-        // expression in evaluation order (a closure construction).
-        if (e.toStr) this.evalExpr(e.toStr, env);
         for (const f of e.fields) {
           const v = this.evalExpr(f.value, env);
           const slot = slotMap?.get(f.name);
@@ -1676,6 +1673,10 @@ class FnAnalyzer {
             this.emitRecordSlot(v, slot, f.value.loc);
           }
         }
+        // The hidden toString slot carries no number and names no field
+        // slot, but it IS a real expression, and both emitters store it
+        // LAST -- so it is evaluated last here too.
+        if (e.toStr) this.evalExpr(e.toStr, env);
         return { ...TOP };
       }
       case "recordGet": {
