@@ -4142,6 +4142,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
             `(only number, string, boolean, records, arrays, unions of those, and 'unknown' stringify)`,
         );
       }
+      L.noteKeyEnumeration(value, loc, "JSON.stringify");
       const node: IrExpr = { kind: "jsonStringify", value, type: STRING, loc };
       if (indent !== "") {
         // The compile-time-resolved indent rides as an extra property (the
