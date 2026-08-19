@@ -428,8 +428,8 @@ function ctorWrapper(
 }
 
 /** The deferred refusal's text. It is the ONE refusal the backend raises
- * on its own, so it has no diagnostic and no source location — see the
- * note at the foot of this file. */
+ * on its own, so it has no diagnostic and no source location of its own
+ * — it borrows the interning read's, see the note above refuseC. */
 const FENCE_MSG =
   "the 'ws' package's option-bag second argument to a WebSocket constructor has no " +
   "scriptc lowering yet -- globalThis.WebSocket takes (url, protocols)";
@@ -449,7 +449,17 @@ const FENCE_MSG =
  * `agent` is dead at this site, `dispatcher` is live (an undici dispatcher
  * with no agent passes :546, satisfies :554, reaches :565).  Both measured
  * x0 across three paired runs because none configured a proxy.
- * estado-todas24.md §3.10 and §4. */
+ * estado-todas24.md §3.10 and §4.
+ *
+ * REACH, the other half, MEASURED (block/blindspots): the init-bag ARM
+ * itself is cold on a fresh zapo dial.  :554 needs `hasHeaders`, and
+ * WaComms.applyRoutingInfoToSocketConfig returns the config UNTOUCHED when
+ * there is no routing token, so withStickyRoutingCookie never runs and
+ * config.headers stays undefined.  A header-recording upgrade server saw
+ * 15 dials per lane and zero Cookie headers, from the Node client and the
+ * compiled binary alike (Node's global WebSocket DOES send bag headers —
+ * checked separately, so the header is a valid discriminator).  The arm
+ * warms only once the server has routed the session. */
 function initFieldMsg(field: string): string {
   return (
     `the 'ws' package's option-bag second argument to a WebSocket constructor carries ` +
@@ -457,12 +467,25 @@ function initFieldMsg(field: string): string {
   );
 }
 
-/* CENSUS: this refusal is emitted in the BACKEND, so it has no diagnostic and
- * no source location to tag with — it carries a code and no `[SCxxxx at
- * file:line]`, and no bracket-keyed census contains it.  Two of them sit in
- * zapo's WebSocket dial (the `agent` and `dispatcher` options) and fire on a
- * VALUE rather than on a construct, so they are dark until a user configures
- * a proxy.  `scripts/tu-census.mjs` counts them by host (`sc_wsw_N`).
+/* CENSUS: this refusal is emitted in the BACKEND, so it has no diagnostic
+ * and no source location OF ITS OWN, and for a long time that meant no
+ * `[SCxxxx at file:line]` — which made these two the only rows in zapo's
+ * whole translation unit that no bracket-keyed instrument could see (a
+ * grep, census.mjs, a reader; SCRIPTC_TRAP_TRACE always could, since it
+ * filters on SC-numericness and these are coded).  Only
+ * `scripts/tu-census.mjs`, which classifies by emitted host (`sc_wsw_N`),
+ * saw them.
+ *
+ * They tag now.  The LOWERING donates the site of the
+ * `globalThis.WebSocket` READ that interned this wrapper (`site`, threaded
+ * from the wsCtor node, pre-rendered as file:line because no source text
+ * reaches here).  It is not the `new` that will refuse — one wrapper
+ * serves every construct through the same closure value, so there is no
+ * per-construct code to anchor to — but it is the one real source
+ * location on the path.  wsRefusalText (ir/nodes.ts) is shared with the
+ * LLVM lane so the two cannot drift.  Both still fire on a VALUE rather
+ * than on a construct, so they stay dark until a program configures a
+ * proxy.
  */
 function refuseC(msg: string, site: string | undefined): string {
   const text = wsRefusalText(msg, site);
@@ -532,15 +555,21 @@ function cStr(s: string): string {
   return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
           // The only refusal the BACKEND raises on its own, and therefore
-          // the only one with neither a diagnostic nor a source location:
-          // it is untagged (no "[SCxxxx at file:line]"), so the zapo trap
-          // census cannot see it, and the SITE census has nothing to see
-          // even in principle -- this wrapper is interned PER CONSTRUCT
-          // SIGNATURE TYPE and shared by every `new` site, so there is no
-          // one location to name. SCRIPTC_TRAP_TRACE does observe it:
-          // scr_error.c filters on the SC-numeric code, not on the tag.
-          // Giving it a location needs one plumbed here; that is a design
-          // question, not a patch.
+          // the only one with neither a diagnostic nor a source location
+          // OF ITS OWN. It was untagged for that reason, which made the
+          // zapo trap census blind to it and left the SITE census nothing
+          // to see even in principle -- this wrapper is interned PER
+          // CONSTRUCT SIGNATURE TYPE and shared by every `new` site, so
+          // there is no one location to name. SCRIPTC_TRAP_TRACE always
+          // observed it: scr_error.c filters on the SC-numeric code, not
+          // on the tag.
+          //
+          // It IS tagged now, and the location was plumbed rather than
+          // designed around: the lowering hands down `site`, the file:line
+          // of the `globalThis.WebSocket` read that interned this wrapper
+          // (WaWebSocket.ts:68 in zapo -- resolveWebSocketConstructor).
+          // Approximate by construction, exact about what it names, and it
+          // took zapo's TU from 8 tagged / 2 untagged to 10 / 0.
           //
           // Since wsInitBagPlan it is no longer the shape zapo dials with:
           // zapo's bag is `{ protocols, headers, dispatcher, agent }` with
