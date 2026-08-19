@@ -35,7 +35,7 @@
  * these thunks build moves into the listener the same way.
  */
 import type { IrRecordShape, IrType, IrUnionDef, WsGlobalPlan } from "../../ir/nodes.js";
-import { isRefCounted, typeKey, wsGlobalPlan } from "../../ir/nodes.js";
+import { isRefCounted, typeKey, wsGlobalPlan, wsRefusalText } from "../../ir/nodes.js";
 import {
   mangleWsClose,
   mangleWsCtorClosure,
@@ -111,7 +111,7 @@ class Ir {
  * signature. The `.ll` expression at a use site is that `@sym` — the
  * global IS the ScrClosure, as it is for a declared function used as a
  * value (mangleFnClosure). */
-export function wsGlobalCtorFor(host: WsHost, t: IrType): string {
+export function wsGlobalCtorFor(host: WsHost, t: IrType, site?: string): string {
   const key = typeKey(t);
   const existing = host.wsCtors.get(key);
   if (existing !== undefined) return existing;
@@ -148,7 +148,7 @@ export function wsGlobalCtorFor(host: WsHost, t: IrType): string {
     ``,
     ...closeMethod(host, plan, names),
     ``,
-    ...ctorWrapper(host, plan, t, names),
+    ...ctorWrapper(host, plan, t, names, site),
     // The interned immortal closure: the VALUE of globalThis.WebSocket,
     // one per program. Field for field ScrClosure's — rc SIZE_MAX so
     // retain and release are both no-ops, no captures, no props.
@@ -640,6 +640,7 @@ function ctorWrapper(
   plan: WsGlobalPlan,
   t: IrType & { kind: "func" },
   names: WsNames,
+  site: string | undefined,
 ): string[] {
   host.declare(`declare ptr @scr_ws_global_new(ptr, ptr, ptr, ptr)`);
   host.declare(`declare void @scr_ws_global_set_user(ptr, ptr, ptr, ptr)`);
@@ -665,9 +666,10 @@ function ctorWrapper(
   B.line(`store ptr null, ptr %hdrsp`);
 
   const refuse = (msg: string): void => {
+    const text = wsRefusalText(msg, site);
     host.declare(`declare void @scr_throw_error_msg_code(i32, ptr, i64, ptr)`);
     B.line(
-      `call void @scr_throw_error_msg_code(i32 0, ptr ${host.cstr(msg)}, i64 ${msg.length}, ptr ${host.cstr("SC2020")})`,
+      `call void @scr_throw_error_msg_code(i32 0, ptr ${host.cstr(text)}, i64 ${text.length}, ptr ${host.cstr("SC2020")})`,
     );
   };
 

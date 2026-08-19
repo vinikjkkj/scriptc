@@ -5435,7 +5435,20 @@ export type IrExpr =
    * against the global one to decide whether it may pass headers).
    * Borrowed, never released. This node NEVER throws — the dial happens
    * when the closure is CALLED. */
-  | { kind: "wsCtor"; type: IrType; loc: SrcLoc }
+  | {
+      kind: "wsCtor";
+      type: IrType;
+      /** `file:line` of THIS read, pre-rendered by the lowering (the
+       * backends have no source text to resolve an offset with). The
+       * emitted ctor wrapper is interned per construct-signature TYPE and
+       * shared by every read, so the FIRST read to intern it donates the
+       * site its deferred refusals tag with — the two `ws` init-bag
+       * refusals (`agent`, `dispatcher`) are raised in the BACKEND, with no
+       * diagnostic and no location of their own, and were the only rows in
+       * zapo's TU that no bracket-keyed instrument could see. */
+      site?: string;
+      loc: SrcLoc;
+    }
   /** `new C(args)`: allocate (fields zeroed), then call `%C.constructor`
    * with the new object as arg 0 (retained — the ctor owns and releases its
    * `this` param like any callee). Result is owned (+1). */
@@ -8589,6 +8602,28 @@ function wsInitBagPlan(
   }
   if (protocols === null && headers === null) return null;
   return { shapeId: a.shapeId, tag, protocols, headers, refuseIfPresent };
+}
+
+/** The WS deferred refusal's text, TAGGED. Both backends build the same
+ * two messages and must build them byte for byte alike, so the tagging
+ * lives here rather than twice.
+ *
+ * WHY IT MATTERS: these are the only refusals a scriptc BACKEND raises on
+ * its own. They have no diagnostic and no source location, so until the
+ * lowering started donating the `globalThis.WebSocket` read's site they
+ * carried a code and no `[SCxxxx at file:line]` — which made them
+ * invisible to every bracket-keyed instrument this project owns. In zapo's
+ * TU they were BOTH of the untagged rows (`agent` and `dispatcher`), and
+ * only scripts/tu-census.mjs, which classifies by host, could see them.
+ *
+ * The site named is the READ that interned this wrapper, not the `new`
+ * that will refuse: one wrapper serves every construct through the same
+ * closure value, so there is no per-construct code to anchor to. It is the
+ * one real source location on the path, and it is in the function that
+ * builds the bag.
+ */
+export function wsRefusalText(msg: string, site: string | undefined): string {
+  return site === undefined ? msg : `${msg} [SC2020 at ${site}]`;
 }
 
 /** Structural proof that `t` is the WebSocket global's construct
