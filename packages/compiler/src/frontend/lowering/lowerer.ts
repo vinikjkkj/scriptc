@@ -51,7 +51,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { arrayOf, BOOL, canAdaptDynFuncTo, canDynCheckTo, funcOf, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { arrayOf, BOOL, canAdaptDynFuncTo, canDynCheckTo, dynCheckArmOrder, funcOf, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -4724,6 +4724,13 @@ export class Lowerer {
       // (divergence 38's stance: the catchable TypeError at the flow,
       // where Node lets the impossible value ride). AMBIGUOUS width
       // candidates stay compile fences: honest code lands there.
+      // A RUNTIME-KEYED record against a union of exact arms: the CHECKED
+      // DYNAMIC EXTRACTION, which is the conversion this compiler already
+      // performs for the same value one spelling over.
+      {
+        const checked = this.runtimeKeyedUnionExtraction(expr, expected, expr.loc);
+        if (checked) return checked;
+      }
       {
         const trap = this.strandedCoercionTrap(expr, expected, expr.loc);
         if (trap) return trap;
@@ -8015,6 +8022,127 @@ export class Lowerer {
       });
     }
     return { kind: "call", callee: name, args: [], type: expected, loc };
+  }
+
+  /** A record whose CONTENT is only known at RUN TIME -- an
+   * index-signature shape, the overflow store -- flowing into a union of
+   * exact arms, at the one position where the alternative is
+   * strandedCoercionTrap's UNCONDITIONAL throw.
+   *
+   * The static width family can never place such a value's keys: every
+   * arm's declared members may live in the store rather than in a
+   * declared slot, so recordWidthPlan declines each arm and the candidate
+   * list comes back EMPTY -- which is precisely the condition that sends
+   * the flow to the trap. But "which arm does this value have" is a
+   * RUN-TIME question, and this compiler already answers it: dynCheck
+   * picks the arm structurally, and coerceToExpected applies it
+   * automatically to any dyn flowing into a canDynCheckTo target. BOTH
+   * halves are rungs of this very function -- the `expected.kind ===
+   * "dyn"` dynFrom above and the `expr.type.kind === "dyn"` dynCheck
+   * below it -- and they never met, because a coercion is one step.
+   *
+   * So two spellings of ONE cast disagreed:
+   *
+   *     const ev = bag as unknown as Ev              // unconditional throw
+   *     const u: unknown = bag; const ev = u as Ev   // extracts, correctly
+   *
+   * tsc collapses the first spelling's `unknown`, so the same value
+   * reached the trap one way and the checked extraction the other. This
+   * makes them agree -- the stance the func-arm, promise-arm and
+   * tuple-into-array rungs already take wherever a binding and a literal
+   * spelling of one value disagreed.
+   *
+   * It cannot silently change a program that compiles: the position it
+   * fires at throws UNCONDITIONALLY today (the trap has no tag test --
+   * reaching the call site IS throwing). What it inherits is the
+   * extraction's own stance: a materialised arm carries the arm's
+   * members, so a store key NO arm declares is dropped -- the width
+   * family's copy stance (SEMANTICS.md 35/36), measured identical on the
+   * `const u: unknown` spelling on base.
+   *
+   * Gated to index-signature SOURCES on purpose. A fixed-shape record has
+   * no runtime keys, so the static family already saw everything it has,
+   * and a zero-candidate pair there is a genuine mismatch whose trap
+   * message is the better answer. Null for everything else. */
+  runtimeKeyedUnionExtraction(expr: IrExpr, expected: IrType & { kind: "union" }, loc: SrcLoc): IrExpr | null {
+    const src = expr.type;
+    if (src.kind !== "record") return null;
+    if (this.shapes.get(src.shapeId)?.indexValue === undefined) return null;
+    const def = this.unions.get(expected.unionId);
+    if (!def) return null;
+    // strandedCoercionTrap's OWN gate, spelled the same way. ONE candidate
+    // already lowered above (widthLiftPlan's liftWrap); SEVERAL keep their
+    // compile fence -- an honest ambiguity the checked extraction must not
+    // resolve behind the author's back.
+    const candidates = def.arms.filter((arm) => arm.kind === "record" && this.widthLiftPlan(src, arm) !== null);
+    if (candidates.length !== 0) return null;
+    if (!this.dynConvertible(src)) return null;
+    if (!canDynCheckTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id))) return null;
+    // ...and the arms must be TELLABLE APART by what a match predicate can
+    // see. dynCheck tries the record arms widest-first and takes the first
+    // one whose REQUIRED fields are all present with matching types
+    // (dynCheckArmOrder); an arm tried EARLIER whose required fields are a
+    // subset of a later arm's fields therefore takes that later arm's values
+    // too, and the extraction is a guess rather than an answer.
+    //
+    // zapo's `WaAppStateMutationEvent` is that shape and is the reason this
+    // gate exists: per schema key it has a `set` arm and a `remove` arm whose
+    // fields are the set arm's MINUS a `Partial<DataForKey<K>>` -- all
+    // optional, so a `remove` value matches the `set` arm as well, and the
+    // only thing that tells them apart is the VALUE of the `operation`
+    // string-literal discriminant, which the IR erases to `string`. Taking
+    // the extraction there would tag every remove event `set`: the fields
+    // read right and the NARROWING throws, which is a wrong answer wearing a
+    // fence's clothes. The unconditional trap is the honest answer until the
+    // IR can carry the discriminant.
+    //
+    // Only pairs the emitted ORDER actually exposes count, so this reads the
+    // same helper the emitters do: an arm can only steal from arms tried
+    // after it. A `dyn` member is untested by dynMatch and an
+    // undefined-armed one matches when absent, so neither is required.
+    {
+      const order = dynCheckArmOrder(def, (id) => this.shapes.get(id));
+      const fieldsOf = (i: number): { name: string; type: IrType }[] => {
+        const arm = def.arms[i]!;
+        return arm.kind === "record" ? (this.shapes.get(arm.shapeId)?.fields ?? []) : [];
+      };
+      const required = (f: { name: string; type: IrType }): boolean =>
+        f.type.kind !== "dyn" &&
+        !(f.type.kind === "union" && this.armTag(f.type.unionId, UNDEFINED_T) >= 0);
+      const admits = (want: IrType, have: IrType): boolean =>
+        typeEquals(want, have) || (want.kind === "union" && this.armTag(want.unionId, have) >= 0);
+      for (let a = 0; a < order.length; a++) {
+        const ai = order[a]!;
+        if (def.arms[ai]!.kind !== "record") continue;
+        const req = fieldsOf(ai).filter(required);
+        for (let b = a + 1; b < order.length; b++) {
+          const bi = order[b]!;
+          if (def.arms[bi]!.kind !== "record") continue;
+          const later = fieldsOf(bi);
+          const steals = req.every((f) => {
+            const g = later.find((x) => x.name === f.name);
+            return g !== undefined && admits(f.type, g.type);
+          });
+          if (steals) {
+            if (process.env["SCRIPTC_RTKEYED_WHY"]) {
+              console.error(
+                `RTKEYED DECLINES: arm ${String(ai)} shadows arm ${String(bi)} (its required fields are a subset)`,
+              );
+            }
+            return null;
+          }
+        }
+      }
+    }
+    if (process.env["SCRIPTC_RTKEYED_WHY"]) {
+      console.error(`RTKEYED ${this.fmt(src)} -> ${this.fmt(expected)}`);
+    }
+    return {
+      kind: "dynCheck",
+      value: { kind: "dynFrom", value: expr, type: DYN, loc },
+      type: expected,
+      loc,
+    };
   }
 
   /** The STRANDED-SOURCE trap: a checker-approved value flowing into a
