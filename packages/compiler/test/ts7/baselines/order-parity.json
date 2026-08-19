@@ -8240,6 +8240,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4731-a-materialized-record-keeps-the-toString-its-source-carried.ts": {
+   "order": [
+    "<repo>/tests/corpus/4731-a-materialized-record-keeps-the-toString-its-source-carried.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4732-a-projected-class-stringifies-through-its-own-toString.ts": {
+   "order": [
+    "<repo>/tests/corpus/4732-a-projected-class-stringifies-through-its-own-toString.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
