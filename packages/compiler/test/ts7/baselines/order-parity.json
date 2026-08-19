@@ -8324,6 +8324,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4900-a-websocket-init-bag-carrying-absent-proxy-fields.ts": {
+   "order": [
+    "<repo>/tests/corpus/4900-a-websocket-init-bag-carrying-absent-proxy-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4901-object-assign-sources-the-key-walk-can-see.ts": {
+   "order": [
+    "<repo>/tests/corpus/4901-object-assign-sources-the-key-walk-can-see.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
@@ -9188,6 +9200,12 @@
   "<repo>/tests/corpus/998-process-env.ts": {
    "order": [
     "<repo>/tests/corpus/998-process-env.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts"
    ],
    "diags": []
   },
@@ -10077,6 +10095,12 @@
   "<repo>/tests/diagnostics/nullish-retag-fences.ts": {
    "order": [
     "<repo>/tests/diagnostics/nullish-retag-fences.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/object-assign-from-a-class-instance.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/object-assign-from-a-class-instance.ts"
    ],
    "diags": []
   },
