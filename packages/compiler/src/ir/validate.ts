@@ -3299,6 +3299,41 @@ function validateFunction(
         }
         break;
       }
+      case "recordOvfSlots": {
+        checkExpr(e.obj);
+        const shape = records.get(e.shapeId);
+        if (!shape) {
+          err(`recordOvfSlots on undeclared shape "${e.shapeId}"`, e.loc);
+          break;
+        }
+        if (!shape.indexValue) err(`recordOvfSlots on ${e.shapeId}: no index signature`, e.loc);
+        expectType(e.obj, { kind: "record", shapeId: e.shapeId }, "recordOvfSlots receiver");
+        if (e.type.kind !== "array" || e.type.elem.kind !== "f64") {
+          err("recordOvfSlots must be f64[]", e.loc);
+        }
+        break;
+      }
+      case "recordOvfSlotGet": {
+        checkExpr(e.obj);
+        checkExpr(e.slot);
+        expectType(e.slot, F64, "recordOvfSlotGet slot");
+        const shape = records.get(e.shapeId);
+        if (!shape) {
+          err(`recordOvfSlotGet on undeclared shape "${e.shapeId}"`, e.loc);
+          break;
+        }
+        if (!shape.indexValue) {
+          err(`recordOvfSlotGet on ${e.shapeId}: no index signature`, e.loc);
+          break;
+        }
+        expectType(e.obj, { kind: "record", shapeId: e.shapeId }, "recordOvfSlotGet receiver");
+        if (e.part === "key") {
+          if (e.type.kind !== "string") err("recordOvfSlotGet key must be string", e.loc);
+        } else if (!typeEquals(e.type, shape.indexValue)) {
+          err(`recordOvfSlotGet value ${e.type.kind} != index value ${shape.indexValue.kind}`, e.loc);
+        }
+        break;
+      }
       case "dynFrom": {
         if (e.type.kind !== "dyn") err(`dynFrom must be dyn-typed, got ${e.type.kind}`, e.loc);
         // A bare unit literal is legal exactly here (like unionWrap): the

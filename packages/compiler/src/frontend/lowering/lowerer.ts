@@ -9062,10 +9062,13 @@ export class Lowerer {
     // runtime keys have no property-name literal).
     const iv = shape.indexValue;
     const f64: IrType = { kind: "f64" };
-    const ksT = arrayOf(STRING);
+    // By SLOT (recordOvfSlots): key and value come out of the same entry,
+    // so the lift never re-reads a key it just enumerated.
+    const ksT = arrayOf(f64);
     const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
     const num = (value: number): IrExpr => ({ kind: "numLit", value, type: f64, loc });
     const kRef = ref("k.0", STRING);
+    const slotRef = ref("sl.0", f64);
     this.liftedFns.push({
       name,
       params: [{ localId: "r.0", name: "r", type: recT }],
@@ -9073,13 +9076,14 @@ export class Lowerer {
       locals: [
         { id: "r.0", name: "r", type: recT, mutable: true },
         { id: "out.0", name: "out", type: JSVAL, mutable: false },
-        { id: "ks.0", name: "ks", type: ksT, mutable: false },
+        { id: "sls.0", name: "sls", type: ksT, mutable: false },
         { id: "i.0", name: "i", type: f64, mutable: true },
+        { id: "sl.0", name: "sl", type: f64, mutable: false },
         { id: "k.0", name: "k", type: STRING, mutable: false },
       ],
       body: [
         { kind: "varDecl", localId: "out.0", init: lit, loc },
-        { kind: "varDecl", localId: "ks.0", init: { kind: "recordOvfKeys", obj: r, shapeId, type: ksT, loc }, loc },
+        { kind: "varDecl", localId: "sls.0", init: { kind: "recordOvfSlots", obj: r, shapeId, type: ksT, loc }, loc },
         {
           kind: "for",
           init: { kind: "varDecl", localId: "i.0", init: num(0), loc },
@@ -9087,13 +9091,14 @@ export class Lowerer {
             kind: "bin",
             op: "<",
             left: ref("i.0", f64),
-            right: { kind: "arrIntrinsic", method: "length", receiver: ref("ks.0", ksT), args: [], type: f64, loc },
+            right: { kind: "arrIntrinsic", method: "length", receiver: ref("sls.0", ksT), args: [], type: f64, loc },
             type: BOOL,
             loc,
           },
           update: { kind: "assign", localId: "i.0", value: { kind: "bin", op: "+", left: ref("i.0", f64), right: num(1), type: f64, loc }, loc },
           body: [
-            { kind: "varDecl", localId: "k.0", init: { kind: "arrayGet", arr: ref("ks.0", ksT), index: ref("i.0", f64), type: STRING, loc }, loc },
+            { kind: "varDecl", localId: "sl.0", init: { kind: "arrayGet", arr: ref("sls.0", ksT), index: ref("i.0", f64), type: f64, loc }, loc },
+            { kind: "varDecl", localId: "k.0", init: { kind: "recordOvfSlotGet", obj: r, shapeId, slot: slotRef, part: "key", type: STRING, loc }, loc },
             {
               kind: "exprStmt",
               expr: {
@@ -9102,7 +9107,7 @@ export class Lowerer {
                 args: [
                   ref("out.0", JSVAL),
                   { kind: "jsMarshal", value: kRef, type: JSVAL, loc },
-                  this.jsvalLiftExpr({ kind: "recordKeyGet", obj: r, shapeId, key: kRef, overflowOnly: true, type: iv, loc }, loc),
+                  this.jsvalLiftExpr({ kind: "recordOvfSlotGet", obj: r, shapeId, slot: slotRef, part: "value", type: iv, loc }, loc),
                 ],
                 type: VOID,
                 loc,
@@ -9931,8 +9936,9 @@ export class Lowerer {
     id: string,
     receiver: IrExpr,
     body: IrExpr,
-    loc: SrcLoc,): IrExpr {
-    return finishOptionalChain(this, expr, id, receiver, body, loc);
+    loc: SrcLoc,
+    slotWidenedRecv = false,): IrExpr {
+    return finishOptionalChain(this, expr, id, receiver, body, loc, slotWidenedRecv);
   }
 
   /* ── functions ────────────────────────────────────────────────────── */
