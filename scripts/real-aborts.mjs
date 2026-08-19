@@ -34,7 +34,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
 const TRAP = /scr_trap_fmt\("scriptc: TypeError: record has no key '%\.\*s' \(typed '([^']*)'/;
-const HDR = /^static\s+(.+?)\s+(sc_rkg_\d+)\(([^)]*)\)\s*\{\s*\/\* r\[k\] on (\S+) as (\S+) \*\//;
+const HDR = /^static\s+(.+?)\s*\*?\s*(sc_rkg_\d+)\(([^)]*)\)\s*\{\s*\/\* r\[k\] on (\S+) as (.+?) \*\//;
 
 export function analyse(raw) {
   const lines = raw.split("\n");
@@ -125,8 +125,8 @@ export function analyse(raw) {
 }
 
 const FIXTURE = [
-  "static ScrStr * sc_rkg_0(sc_rs_r1 *r, ScrStr *k); /* r[k] on r1 as string */",
-  "static ScrStr * sc_rkg_0(sc_rs_r1 *r, ScrStr *k) { /* r[k] on r1 as string */",
+  "static ScrStr *sc_rkg_0(sc_rs_r1 *r, ScrStr *k); /* r[k] on r1 as string */",
+  "static ScrStr *sc_rkg_0(sc_rs_r1 *r, ScrStr *k) { /* r[k] on r1 as string */",
   "  if (scr_str_eq(k, (ScrStr *)&sc_s_1)) { /* from */",
   "    return scr_str_retain(r->sc_m_from);",
   "  }",
@@ -143,12 +143,20 @@ const FIXTURE = [
   "  }",
   '  scr_trap_fmt("scriptc: TypeError: record has no key \'%.*s\' (typed \'number\' - no undefined is representable)\\n", (int)k->len, k->data);',
   "}",
+  "static sc_rs_r9 *sc_rkg_2(sc_rs_r3 *r, ScrStr *k) { /* r[k] on r3 as record:r9 */",
+  "  sc_rs_r9 * hit = (sc_rs_r9 *)scr_map_get_str_ref(r->sc_ovf, k);",
+  "  if (hit) {",
+  "    return hit; /* get returned +1 */",
+  "  }",
+  '  scr_trap_fmt("scriptc: TypeError: record has no key \'%.*s\' (typed \'{ a: string }\' - no undefined is representable)\\n", (int)k->len, k->data);',
+  "}",
   "static void sc_f_parse(void) {",
   "  ScrStr * a = sc_rkg_0(n, k1);",
   "  ScrStr * b = sc_rkg_0(n, k2);",
   "}",
   "static void sc_f_other(void) {",
   "  double d = sc_rkg_1(m, k3);",
+  "  sc_rs_r9 * z = sc_rkg_2(q, k4);",
   "}",
   "static void sc_f_ptruser(void) {",
   "  f = &sc_rkg_0;",
@@ -161,7 +169,10 @@ if (process.argv.includes("--selftest")) {
   const h0 = a.helpers.find((h) => h.name === "sc_rkg_0");
   const h1 = a.helpers.find((h) => h.name === "sc_rkg_1");
   const need = [
-    ["two helpers found", a.helpers.length === 2],
+    ["three helpers found", a.helpers.length === 3],
+    ["a POINTER result type parses (no space before the name)", a.helpers.some((h) => h.name === "sc_rkg_0")],
+    ["a RECORD result type parses", a.helpers.find((h) => h.name === "sc_rkg_2")?.typeKey === "record:r9"],
+    ["a multi-word typed quote parses", a.helpers.find((h) => h.name === "sc_rkg_2")?.traps === true],
     ["both trap", a.helpers.every((h) => h.traps)],
     ["shape recovered", h0?.shapeId === "r1" && h1?.shapeId === "r2"],
     ["result type recovered", h0?.typeKey === "string" && h1?.typeKey === "f64"],
@@ -171,6 +182,7 @@ if (process.argv.includes("--selftest")) {
     ["call sites counted, prototype line excluded", h0?.ways === 2],
     ["caller host named", h0?.callers.get("sc_f_parse") === 2],
     ["second helper one caller", h1?.ways === 1 && h1.callers.get("sc_f_other") === 1],
+    ["record-result helper one caller", a.helpers.find((h) => h.name === "sc_rkg_2")?.ways === 1],
     ["function-pointer mention counted separately", h0?.ptr === 1],
     ["prototype mention counted", h0?.declMentions === 2],
   ];
