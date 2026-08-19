@@ -271,15 +271,85 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * alone (there is nothing to move: no bound tipped), for the reason every
  * calibration above gives. */
 
-/** The static hello-world, measured 2026-08-18 (x86_64-windows-gnu, zig cc
- * 0.16.0, -O2), after SCR_DYN_MAP. Base at fb578bc0 weighed 637,440 in the
- * same run; the +1,536 is the kind. */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 638_976 : null;
+/* 2026-08-19 — THE toString SLOT, AND 3,584 BYTES THAT ARE NOT IT.
+ *
+ * The regex RECORDED check went red on the merge of block/slot with "the
+ * regex program GREW by 4096 bytes" — exactly one page, on a program that
+ * contains no record and cannot reach a line of the feature. Resolved by
+ * four measurements in ONE worktree, same toolchain (x86_64-windows-gnu,
+ * zig cc, -O2), a fresh SCRIPTC_CACHE_DIR for each so nothing was served
+ * from cache:
+ *
+ *   fb578bc0  (the 2026-08-18 anchor)   638,976 static   778,240 regex
+ *   179f1bc4  (block/slot branch point) 640,000          779,776
+ *   b602a066  (main, 7 commits later)   642,048          781,824
+ *   4cc01e73  (main + block/slot)       642,048          782,336
+ *
+ * So the page breaks down, on the regex class:
+ *
+ *   +1,536  drift already present when block/slot branched
+ *   +2,048  main's own 7 commits after that — 7e0adfbe put a size-class
+ *           pool in front of malloc and 5d2d3dbb named per-function CPU
+ *           time, both always-linked runtime
+ *   +  512  block/slot
+ *   ------
+ *    4,096  the tolerance, reached with 3,584 bytes of it spent before the
+ *           feature compiled a line
+ *
+ * The fourth time this file records a bound reached mostly by drift — and
+ * the first time the anchor itself was already stale when the branch that
+ * tripped it was cut: 1,536 bytes of the page were gone on day one.
+ *
+ * WHAT THE SLOT ACTUALLY COSTS, unrounded. The hidden per-instance
+ * sc_tostr member is emitted only under IrRecordShape.tostr (emit-shapes.ts
+ * appends it as a conditional on s.tostr), so an UNARMED shape has no
+ * member and no bytes — verified on the emitted C of a record program that
+ * never stringifies: zero occurrences of sc_tostr, zero of scr_rec_tostr.
+ * What every binary pays is CODE, not layout: three functions in
+ * scr_json.c (scr_rec_tostr, scr_dyn_tostr_closure, scr_rec_tostr_dyn_fn).
+ * Weighed as an object file rather than inferred from the binary:
+ *
+ *   scr_json.o .text   107,061 -> 107,445   = +384 bytes
+ *
+ * 384 is the honest number. It shows up as +512 on the regex class and as
+ * +0 on the static one — the SAME bytes, rounded differently by PE's
+ * 512-byte file alignment depending on where the preceding content left
+ * the grain. Two classes moving by different amounts is the warning this
+ * file has given three times; this is the first entry where the cause is
+ * alignment rather than differing content, and the first where one of the
+ * two amounts is zero.
+ *
+ * NOT GATED, and the reason is measured rather than assumed. scr_json.c is
+ * always linked and cannot be gated the way scr_url.c was (the 2026-08-17
+ * entry: a hello-world fails to link on 16 undefined symbols without it),
+ * and in an unarmed binary the three functions are dead by PROGRAM
+ * reachability, which that same entry establishes --gc-sections cannot
+ * see. Recovering the 384 would take a new TU link-gated on "this module
+ * has an armed shape" — for 384 bytes, one forty-second of what the
+ * scr_url.c gate recovered. Recorded rather than gated, deliberately;
+ * whoever needs the 384 back now knows exactly where it is.
+ *
+ * The MAX ceilings are UNTOUCHED. Neither is reached — 642,048 against
+ * 646,000 and 782,336 against 785,000 — and this file's own rule is that
+ * raising a ceiling one has not reached only loosens the canary. What
+ * tripped is the two-sided RECORDED pair, and it tripped doing its job.
+ *
+ * Both figures below are re-anchored to 4cc01e73, the merge: to the tree
+ * that exists after block/slot lands, so the next reader's plus-or-minus
+ * 4,096 is measured from something true. On block/slot alone they read
+ * 2,048 low, inside tolerance. linux and darwin cannot be weighed from
+ * this box and keep the ceilings alone, as every calibration above says. */
 
-/** The regex program, measured in the same run on the same tree. Base
- * weighed 777,216; the +1,024 is the kind, and it is deliberately NOT the
- * static delta. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 778_240 : null;
+/** The static hello-world, measured 2026-08-19 on 4cc01e73 (main +
+ * block/slot; x86_64-windows-gnu, zig cc, -O2). main alone weighed 642,048
+ * in the same run: the toString slot's 384 bytes fell inside existing
+ * padding here and cost this class nothing. */
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 642_048 : null;
+
+/** The regex program, same run, same tree. main alone weighed 781,824; the
+ * +512 is the slot's 384 bytes rounded up by file alignment, and it is
+ * deliberately NOT derived from the static delta — which was zero. */
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 782_336 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown
