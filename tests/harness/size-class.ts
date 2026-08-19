@@ -398,16 +398,48 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * +512 is the slot's 384 bytes rounded up by file alignment, and it is
  * deliberately NOT derived from the static delta — which was zero. */
 /* superseded below — see the churn record. */
-/** The static hello-world, measured 2026-08-19 (x86_64-windows-gnu, zig cc
- * 0.16.0, -O2), after the ToUint32 fast path. Base at b602a066 weighed
- * 642,048 in the same run; +512 is this change and +3,072 was already
- * there against the previous anchor. */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 642_560 : null;
+/* superseded below - see the hot-path-shortcut record. */
 
-/** The regex program, measured in the same run on the same tree. Base
- * weighed 781,824; +1,024 is this change and +3,584 was already there.
- * Deliberately NOT derived from the static delta. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 782_848 : null;
+/* 2026-08-19 - three runtime hot-path shortcuts (the JSON object-key pool,
+ * the Number->string integer fast path, the shared-left concat slack). Both
+ * classes move, and both moves are BSS and code in always-linked TUs, so
+ * every program pays them. Measured A/B in ONE run on ONE tree, the only
+ * difference being the -D that compiles each change out, which is why the
+ * OFF row reproduces the previous anchor to the byte:
+ *
+ *   OFF    (== base 52dcbf36)   642,560 static   782,848 regex
+ *   KEY    only                 643,584          783,872     +1,024 / +1,024
+ *   NUM    only                 644,096          783,872     +1,536 / +1,024
+ *   SLACK  only                 642,560          782,848         +0 /     +0
+ *   ALL    (shipped)            644,608          784,384     +2,048 / +1,536
+ *
+ * What the bytes bought, per change:
+ *   KEY   a third ScrPool instance in scr_json.c's BSS (32 head pointers +
+ *         32 counts = 384 bytes) plus scr_json_key_alloc/_free, against
+ *         3,906,000 raw mallocs a messaging run no longer makes.
+ *   NUM   the 201-byte two-digit decimal table plus scr_u64_digits, against
+ *         1.38-1.53x on scr_f64_to_str for every integer a program prints.
+ *   SLACK nothing at all: it is two extra lines inside an existing
+ *         if/else chain and lands entirely inside padding.
+ *
+ * ALL is SMALLER than KEY+NUM summed (+2,048 against +2,560 on the static
+ * class) because 512 bytes fall inside section/file alignment once both are
+ * present. Deltas from separate trees do not add, which is the same trap
+ * two blocks hit on 2026-08-18; these five figures come from one run.
+ *
+ * HEADROOM WARNING for whoever moves these next. Against the coarse
+ * ceilings this leaves 646,000 - 644,608 = 1,392 bytes on the static class
+ * and 785,000 - 784,384 = 616 bytes on the regex class. The ceilings are
+ * deliberately coarse (they exist to catch a ~110 KB or ~620 KB class
+ * jump), so at 616 bytes the NEXT ordinary kilobyte will trip the coarse
+ * check and produce exactly the uninformative "less than 785000" message
+ * the recorded pair was added to replace. Raising REGEX_CLASS_MAX is a
+ * policy call this block deliberately did not make on its own. */
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 644_608 : null;
+
+/** The regex program, same run, same tree. Deliberately NOT derived from
+ * the static delta: this class moved +1,536 where that one moved +2,048. */
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 784_384 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown
