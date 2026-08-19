@@ -1109,6 +1109,17 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         throw new Error(`emitter bug: dynMatch of non-JSON type ${t.kind}`);
     }
     d.push(`}`, ``);
+    // SCRIPTC_KINDGATE_MATCH does NOT live here any more, and where it went
+    // is the whole point. Before `block/matcherbuild` merged the matcher
+    // into the builder, widening arm selection meant widening THIS function
+    // and widening the builder meant editing a different one, so the two
+    // halves of the trade were two edits in two places. On the merged shape
+    // the arm decision is dynWalkerBody's SOFT body, so the control is one
+    // boolean there (`soft ? E.kindgateMatch : E.kindgateWide`) and this
+    // generator is left exactly as it was. Only 3 matchers survive on the C
+    // lane at all -- the may-hold-a-function member decision, where the raw
+    // read and the bound value genuinely differ -- and widening those is not
+    // what "widen the matcher" means.
     E.walkerDefs.push(...d);
     return name;
   }
@@ -1452,6 +1463,95 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     return name;
   }
 
+  /** The record builder's WIDE LANE, shared by every record shape that has
+   * one, in two emitted functions and a per-shape key table.
+   *
+   * `as T` is ERASED in JS, so Node answers a DECLARED member from any
+   * receiver that has one: `["a","b","c"] as {length:number}` reads 3,
+   * `"abcd" as {length:number}` reads 4, `new Uint8Array([1,2,3])` reads 3.
+   * The builder's kind gate (`d->kind != SCR_DYN_OBJ`) refused all three
+   * before any member was looked at. Over a generated 108-case population
+   * (18 receiver kinds x 6 record targets) whose every expectation is
+   * Node's own answer, that gate alone accounted for 66 of 96 divergences.
+   *
+   * The lane PROJECTS the shape's declared keys off the receiver into a
+   * plain object and lets the ordinary OBJ body validate THAT, so the
+   * per-field types, the `$.k` paths and the refusal messages are the ones
+   * the OBJ lane already produces and nothing is written twice. The read is
+   * `sc_dyn_key_get` - the very entry point the JS lane's `d[k]` takes - so
+   * a widened cast cannot answer a member differently from a plain property
+   * read of the same value, on either backend.
+   *
+   * Three boundaries, each of which is a REFUSAL that stays:
+   *
+   * - the MATCHER (`dynMatchHelper`) is untouched. Union arms are chosen
+   *   there, so `{length:number} | string[]` still gives an array the
+   *   `string[]` tag. A builder is only ever reached at a direct cast site,
+   *   as a record field's child, as an array element's, or through an arm
+   *   its matcher already picked - so widening it is MONOTONE: it can turn
+   *   a refusal into an answer and it can change no union tag.
+   *
+   * - the kinds whose members this runtime cannot ANSWER stay refused:
+   *   OBJINST, MAP and BIG carry no member table, and `sc_dyn_key_get`
+   *   fences on all three rather than fabricate `undefined` for a property
+   *   Node reads fine. Routing them here would trade a catchable
+   *   `TypeError: expected object at $, got Holder` for a catchable
+   *   `Error: a property read on a dynamic Holder is not supported yet` -
+   *   a different loud, not a right answer.
+   *
+   * - null and undefined stay refused HERE rather than through the read,
+   *   because Node's message names the property the program reached for
+   *   first and a projection reaches for the shape's first declared field.
+   *   `expected object at $, got null` is the documented divergence; a
+   *   plausible-looking "Cannot read properties of null (reading 'a')" for
+   *   a program that never mentioned `a` would not be. */
+  export function recordWideHelper(E: CEmitter): string {
+    const memoKey = "%recWide";
+    const existing = E.dynBuilders.get(memoKey);
+    if (existing) return existing;
+    const name = "sc_dyn_rec_wide";
+    E.dynBuilders.set(memoKey, name);
+    const kg = dynKeyGetHelper(E);
+    const okSig = `static bool sc_dyn_rec_wideable(const ScrDyn *d)`;
+    const sig = `static ScrDyn *${name}(const ScrDyn *d, const char *const *keys, const unsigned *lens, size_t n)`;
+    E.walkerProtos.push(`${okSig}; /* record builder: a receiver whose members can be read */`);
+    E.walkerProtos.push(`${sig}; /* record builder: the non-OBJ receiver's declared members */`);
+    E.walkerDefs.push(
+      `${okSig} { /* record builder: a receiver whose members can be read */`,
+      `  switch (d->kind) {`,
+      `    case SCR_DYN_ARR: case SCR_DYN_STR: case SCR_DYN_BYTES:`,
+      `    case SCR_DYN_ARRBUF: case SCR_DYN_NUM: case SCR_DYN_BOOL:`,
+      `    case SCR_DYN_FUNC: return true;`,
+      `    default: return false;`,
+      `  }`,
+      `}`,
+      ``,
+      `${sig} { /* record builder: the non-OBJ receiver's declared members */`,
+      `  ScrDyn *o = scr_dyn_new_obj();`,
+      `  for (size_t i = 0; i < n; i++) {`,
+      `    ScrStr *k = scr_str_new(keys[i], lens[i]);`,
+      `    ScrDyn *v = ${kg}((ScrDyn *)d, k, false);`,
+      `    scr_str_release(k);`,
+      `    if (v == NULL) { scr_dyn_release(o); return NULL; } /* the read threw */`,
+      `    /* An UNDEFINED answer IS JS's absent-property read, and the OBJ`,
+      `     * body's own absent handling is exactly what should decide it: a`,
+      `     * required field takes the documented "got undefined" refusal, an`,
+      `     * optional-flavored one takes the undefined arm. So the key is`,
+      `     * simply not written, and no second stance is invented here. */`,
+      `    /* scr_dyn_obj_set OWNS the value it is handed (the static->dyn`,
+      `     * converters push +1 into it and never release), so the +1 the`,
+      `     * read answered moves in on the write path and is dropped by hand`,
+      `     * on the other. */`,
+      `    if (v->kind != SCR_DYN_UNDEF) scr_dyn_obj_set(o, keys[i], lens[i], v);`,
+      `    else scr_dyn_release(v);`,
+      `  }`,
+      `  return o;`,
+      `}`,
+      ``,
+    );
+    return name;
+  }
+
 /** The emitted checked builder for one dynCheck target type:
    * `static T sc_dc_<n>(const ScrDyn *d, const ScrDynPath *path)` —
    * validate the checked-dynamic tree against T and BUILD the typed value (+1), or throw a
@@ -1712,7 +1812,13 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       case "record": {
         const shape = E.recordsById.get(t.shapeId);
         if (!shape) throw new Error(`emitter bug: dynCheck of unknown shape ${t.shapeId}`);
-        const rel = (v: string) => releaseCallC(t, v);
+        // The wide lane owns a projection that every exit has to release;
+        // `rel` is the one spelling every early return already goes
+        // through, so the release rides it rather than being repeated at
+        // seven return sites and forgotten at the eighth. Empty until the
+        // lane is actually taken (a tuple shape returns above it).
+        let projRel = "";
+        const rel = (v: string) => `${releaseCallC(t, v)}${projRel}`;
         // Tuple targets: a JSON ARRAY of exactly the arity, validated and
         // extracted positionally with index paths ("$.pairs[3][1]").
         if (shape.tuple) {
@@ -1737,7 +1843,85 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`  return r;`);
           break;
         }
-        d.push(fail(`  `, "record.kind", `d->kind != SCR_DYN_OBJ`, `NULL`));
+        // The KIND GATE, and the WIDE LANE beside it (recordWideHelper
+        // above carries the whole argument). A receiver whose kind is not
+        // SCR_DYN_OBJ but whose members this runtime can read has its
+        // DECLARED keys projected into a plain object, and the body below
+        // validates that projection - so `["a","b","c"] as {length:number}`
+        // answers 3 the way Node does instead of refusing at the first
+        // statement.
+        //
+        // WHICH DISCIPLINE THE LANE IS EMITTED IN IS THE WHOLE CONTROL, and
+        // on this shape it is one boolean. Before the matcher and the
+        // builder became one walk, a union arm was picked by `sc_dm_` and
+        // built by `sc_dc_`, so editing the builder's gate COULD NOT reach
+        // arm selection: widening it was monotone by construction. Now both
+        // come out of this generator and `soft` is the only thing that
+        // separates them - so the same edit reaches the arm decision unless
+        // it says not to, and the SAFE edit is the one that has to be
+        // spelled out:
+        //
+        //   SCRIPTC_KINDGATE_WIDE   the HARD body only (!soft) - the
+        //                           builder. Cannot move a union tag,
+        //                           because the arm walker is untouched.
+        //   SCRIPTC_KINDGATE_MATCH  the SOFT body as well - the arm
+        //                           decision. This is what manufactures a
+        //                           silently wrong union tag, and it is a
+        //                           control, never a shipped default.
+        //
+        // Everything else about the gate is unchanged: the statement is
+        // still one `record.kind` site in the hard body and none in the
+        // soft one, the refusal is still the same catchable path-annotated
+        // TypeError, and a shape that cannot take the lane (a tuple, an
+        // index signature, a fieldless shape) still meets
+        // `d->kind != SCR_DYN_OBJ` alone.
+        const wide =
+          (soft ? E.kindgateMatch : E.kindgateWide) &&
+          !shape.indexValue &&
+          shape.fields.length > 0
+            ? E.recordWideHelper()
+            : null;
+        if (wide) {
+          const keysName = `sc_kgk_${t.shapeId}`;
+          const lensName = `sc_kgl_${t.shapeId}`;
+          if (!E.recWideTables.has(t.shapeId)) {
+            E.recWideTables.add(t.shapeId);
+            E.walkerProtos.push(
+              `static const char *const ${keysName}[] = { ${shape.fields
+                .map((f) => cStringLiteral(Buffer.from(f.name, "utf8")))
+                .join(", ")} };`,
+            );
+            E.walkerProtos.push(
+              `static const unsigned ${lensName}[] = { ${shape.fields
+                .map((f) => String(Buffer.byteLength(f.name, "utf8")))
+                .join(", ")} };`,
+            );
+          }
+          d.push(`  ScrDyn *sc_proj = NULL;`);
+          // The refusal rides `fail`, so the dial ordinal, the message and
+          // the hard/soft discipline all come from the shared helper and
+          // this lane cannot invent a second stance for any of them. The
+          // condition is the base condition AND "the kind cannot answer",
+          // so a shape with no wide lane emits the base statement verbatim.
+          d.push(
+            fail(
+              `  `,
+              "record.kind",
+              `d->kind != SCR_DYN_OBJ && !sc_dyn_rec_wideable(d)`,
+              `NULL`,
+            ),
+          );
+          d.push(`  if (d->kind != SCR_DYN_OBJ) {`);
+          d.push(`    sc_proj = ${wide}(d, ${keysName}, ${lensName}, ${shape.fields.length});`);
+          d.push(
+            `    if (sc_proj == NULL) { ${soft ? "*ok = false; " : ""}return NULL; } /* the read threw */`,
+          );
+          d.push(`    d = sc_proj;`);
+          d.push(`  }`);
+          projRel = "; if (sc_proj) scr_dyn_release(sc_proj)";
+        } else {
+          d.push(fail(`  `, "record.kind", `d->kind != SCR_DYN_OBJ`, `NULL`));
+        }
         d.push(`  ${cDecl(t, "r")} = ${mangleRecordNew(t.shapeId)}();`);
         // The HIDDEN per-instance toString slot. MATERIALIZING is what
         // loses a JS object's toString: `x as LongLike` is the identity in
@@ -1932,6 +2116,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`    scr_str_release(ek);`);
           d.push(`  }`);
         }
+        if (wide) d.push(`  if (sc_proj) scr_dyn_release(sc_proj);`);
         d.push(`  return r;`);
         break;
       }
