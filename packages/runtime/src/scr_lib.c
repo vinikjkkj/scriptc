@@ -3028,7 +3028,7 @@ static void scr_sha256_block(uint32_t h[8], const unsigned char *p) {
  * up here: it cannot be measured on this host and an unmeasured crypto
  * path is worse than no path. */
 #ifndef SCR_SHA256_NI
-#if (defined(__x86_64__) || defined(__i386__)) && defined(__has_include)
+#if defined(__x86_64__) && defined(__has_include)
 #if __has_include(<immintrin.h>)
 #define SCR_SHA256_NI 1
 #endif
@@ -3044,7 +3044,10 @@ static void scr_sha256_block(uint32_t h[8], const unsigned char *p) {
 /* CPUID by hand rather than through <cpuid.h>: one local function instead
  * of the header three, and no dependency on a header the freestanding
  * targets need not have. On x86-64 %rbx is not the PIC register, so it can
- * be an output constraint directly.
+ * be an output constraint directly -- which is also why the gate above is
+ * __x86_64__ only: on i386 %ebx IS the PIC register and this constraint can
+ * fail to build under -fPIC. i386 is not a target this project ships and I
+ * cannot test it, so it keeps the scalar arm.
  *
  * (I first wrote this believing <cpuid.h> was WHY the profiling lane grew 8
  * unnamed hot rows next to this code. It is not: those rows are the SSE
