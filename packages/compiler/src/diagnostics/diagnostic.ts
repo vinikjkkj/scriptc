@@ -162,6 +162,41 @@ export function assertionOverflowsMembersDiag(
   };
 }
 
+/** SC6002 — a record materialised out of a DYNAMIC value, then enumerated.
+ *
+ * The check is width-TOLERANT (undeclared keys are never examined) and the
+ * struct has no per-instance key list, so the value that comes out carries
+ * exactly the shape's members in `declaredOrder` — while JS's object carries
+ * the keys the source really had, in the order it really had them. Both the
+ * SET and the ORDER are run-time facts, and this is the one place the
+ * compiler can see that it is about to answer them from a static table.
+ *
+ * IT IS ADVICE AND NOT A REFUSAL, measured rather than assumed. Refusing
+ * would refuse the ordinary `JSON.parse(s) as T` followed by
+ * `JSON.stringify(t)` — seven of the first fifteen corpus programs
+ * compiled, every one of them the JSON family, and all of them GREEN
+ * against Node because their JSON text happens to be in the declared
+ * order. A cast whose source order the compiler cannot see is POSSIBLY
+ * wrong, never provably so; the two constructions that ARE provably wrong
+ * (a width copy that ends keys, a literal spelled another way) refuse
+ * instead. */
+export function keyOrderFromDynamicDiag(surface: string, detail: string, loc: SrcLoc): ScrDiagnostic {
+  return {
+    code: "SC6002",
+    severity: "advice",
+    message:
+      `${surface} answers this value's own keys from its SHAPE, and the value was built out of a dynamic one`,
+    loc,
+    hint:
+      detail +
+      ". A record is a monomorphic struct with no per-instance key list, so the enumeration " +
+      "reports the shape's members in their declared order. That is what JavaScript reports " +
+      "only when the dynamic source really carried exactly those keys in exactly that order — " +
+      "read the fields you need instead of enumerating if the source order is not yours to " +
+      "control",
+  };
+}
+
 /** SC6001, the OTHER half — the destination the grant DECLINED, so the
  * members really are dropped and the original divergence stands. One rule
  * declines so far: an ARRAY-INDEX-like member cannot ride in the overflow,

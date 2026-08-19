@@ -304,6 +304,7 @@ function inspectExpr(
       }
       return { kind: "call", callee: inspectHelper(L, t, loc), args: [value, recurse, depth], type: STRING, loc };
     default:
+      if (t.kind === "record") L.noteKeyEnumeration(value, loc, "console.log/util.inspect");
       return { kind: "call", callee: inspectHelper(L, t, loc), args: [value, recurse, depth], type: STRING, loc };
   }
 }
@@ -1268,6 +1269,7 @@ export function lowerFormatCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
         if (!L.jsonSafe(value.type)) {
           L.noLowering(`util.format %j of '${L.fmt(value.type)}' values`, node, "only JSON-safe static types lower");
         }
+        L.noteKeyEnumeration(value, loc, "util.format %j");
         return { kind: "jsonStringify", value, type: STRING, loc };
       }
       case 79: // %O — inspect at the defaults
