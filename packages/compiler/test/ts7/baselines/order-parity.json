@@ -8276,6 +8276,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4771-entry-identity-through-a-method-chain.cjs": {
+   "order": [
+    "<repo>/tests/corpus/4771-entry-identity-through-a-method-chain.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4772-an-array-like-argument-pack-through-apply.js": {
+   "order": [
+    "<repo>/tests/corpus/4772-an-array-like-argument-pack-through-apply.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
