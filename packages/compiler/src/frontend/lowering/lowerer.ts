@@ -83,6 +83,8 @@ import { settleOrValueArms,
   isConstAssertionTypeNode,
   isUnitOnlyTsType,
   mapType,
+  overflowShapeKeys,
+  overflowShapeKeysDenied,
   ShapeRegistry,
   typeKey,
   type TypeMapperCtx,
@@ -499,6 +501,12 @@ export function lowerToIr(
   options: LowerOptions = {},
 ): LowerResult {
   const dynamic = options.dynamic ?? false;
+  // The OVERFLOW GRANT's registry is per-compilation: the discovery pass
+  // fills it, the emit pass's ShapeRegistry consults it while interning.
+  // Cleared here so one program's casts can never grant another's shapes
+  // (a compiler process compiles many).
+  overflowShapeKeys.clear();
+  overflowShapeKeysDenied.clear();
   const targetPlatform = options.targetPlatform ?? process.platform;
   const bestEffort = options.bestEffort ?? false;
   const startupCrash = options.startupCrash ?? null;
@@ -5878,9 +5886,25 @@ export class Lowerer {
             // read is the position with no other bridge, and widening the
             // whole relation would turn ordinary `unknown`-field fences
             // into copies nobody asked for.
+            // A REQUIRED target field takes the CHECKED extraction and
+            // nothing else. The rule above declines it because "a width
+            // plan never promises a bridge that can only throw" — but
+            // this bridge does not only throw: it succeeds for every
+            // value whose overflow HOLDS the key, which is exactly the
+            // value a reshape into an overflow-carrying shape produces,
+            // and it throws only where the alternative was
+            // strandedCoercionTrap's UNCONDITIONAL throw at the same
+            // flow. Strictly better, and never a silent wrong answer.
+            // Scoped by dynOutPlan's own domain, which is a DYN read type
+            // — i.e. an `unknown`-valued signature, the checked-dynamic
+            // boundary where the validated extraction is already the
+            // conversion this compiler uses (`as T` on a dyn, dynCheck in
+            // coerceToExpected, coercibleValue's dyn answer). A
+            // `Record<string, string>` source still declines: its read
+            // type is `string | undefined`, which dynOutPlan refuses.
             const lift = optionalFlavored
               ? (this.widthLiftPlan(readT, tf.type) ?? this.dynOutPlan(readT, tf.type))
-              : null;
+              : this.dynOutPlan(readT, tf.type);
             if (process.env.SCRIPTC_KEYREAD_WHY) {
               console.error(
                 `KEYREAD plan ${fromId}->${toId} field=${tf.name} read=${this.fmt(readT)} want=${this.fmt(tf.type)} opt=${optionalFlavored} lift=${lift?.how ?? "NONE"}`,
@@ -5901,7 +5925,20 @@ export class Lowerer {
           plan.set(tf.name, { absent: true, utag });
           continue;
         }
-        const lift = this.widthLiftPlan(ff.type, tf.type);
+        // A DYN source field into a slot dynCheck can check is the
+        // VALIDATED EXTRACTION, exactly as coerceToExpected applies it to
+        // a dyn value flowing into that same slot at top level. Without
+        // this rung the two disagree: `f(u)` compiles and `f({ m: u })`
+        // does not, for the same `u` and the same slot — the "one
+        // predicate, so f(pt) and f({ sink: pt }) answer the same" rule
+        // this file already states for stream widening, applied to the
+        // dyn boundary. It is a checked lift, like `narrow` and like the
+        // keyed read above, and it is offered here for the same reason:
+        // the alternative at this position is strandedCoercionTrap's
+        // unconditional throw. zapo's driver is the site — its hand-written
+        // event type declares `message?: unknown` where the library's
+        // declares `message?: Proto.IMessage`.
+        const lift = this.widthLiftPlan(ff.type, tf.type) ?? this.dynOutPlan(ff.type, tf.type);
         if (!lift) return null;
         plan.set(tf.name, { src: ff.type, lift });
       }
@@ -6022,7 +6059,7 @@ export class Lowerer {
             (tf.type.kind === "union" && this.armTag(tf.type.unionId, UNDEFINED_T) >= 0);
           return optionalFlavored
             ? `the expected field '${tf.name}' is not a declared field of the source, and a keyed read of its '[key: string]: ${this.fmt(from.indexValue)}' signature ('${this.fmt(readT)}' — the key may be absent) does not lift into '${this.fmt(tf.type)}'`
-            : `the expected field '${tf.name}' ('${this.fmt(tf.type)}') is required, and the source has only a '[key: string]: ${this.fmt(from.indexValue)}' signature — a runtime key that is simply absent has no value to supply it`;
+            : `the expected field '${tf.name}' ('${this.fmt(tf.type)}') is required, and a keyed read of the source's '[key: string]: ${this.fmt(from.indexValue)}' signature ('${this.fmt(readT)}') is not a value the checked extraction can turn into it`;
         }
         if (tf.type.kind === "dyn") continue;
         if (tf.type.kind !== "union" || this.armTag(tf.type.unionId, UNDEFINED_T) < 0) {
@@ -6030,7 +6067,7 @@ export class Lowerer {
         }
         continue;
       }
-      if (this.widthLiftPlan(ff.type, tf.type) === null) {
+      if (this.widthLiftPlan(ff.type, tf.type) === null && this.dynOutPlan(ff.type, tf.type) === null) {
         return `field '${tf.name}': '${this.fmt(ff.type)}' does not lift into '${this.fmt(tf.type)}'`;
       }
     }
@@ -7938,6 +7975,20 @@ export class Lowerer {
       process.stderr.write(`STRAND value=${this.fmt(src)}
        arms=${arms}
 `);
+      // WHY each record arm declined, named field by field. The classifier
+      // already exists — describeRecordWidthBlocker is SC2002's residue
+      // story — and the trap simply never asked it. Without this the trap
+      // says "not representable" and the reader has a union of six arms
+      // and no idea which member of which arm refused. Trace only: it
+      // changes nothing about what coerces.
+      if (src.kind === "record") {
+        for (const arm of def.arms) {
+          if (arm.kind !== "record") continue;
+          const why = this.describeRecordWidthBlocker(src.shapeId, arm.shapeId);
+          process.stderr.write(`       arm ${arm.shapeId}: ${why ?? "(no pointed story)"}
+`);
+        }
+      }
     }
     const key = `strand:${expected.unionId}:${typeKey(src)}`;
     let name = this.retagHelpers.get(key);

@@ -1,31 +1,37 @@
-/* SC6001 — `x as unknown as T` drops the members `T` does not name, and
- * the compiler now says so.
+/* SC6001 — `x as unknown as T` and the members `T` does not name.
  *
- * WHAT IT IS FOR. TypeScript's double assertion is a RELABEL: the object
- * keeps every member and only the static type moves. scriptc's records are
- * closed — a monomorphic struct with exactly the members its shape
- * declares — so the same spelling is a RESHAPE, and the members `T` does
- * not name have nowhere to live. Twelve lines make it visible:
+ * WHAT THIS FILE USED TO PROVE, AND WHAT CHANGED. TypeScript's double
+ * assertion is a RELABEL: the object keeps every member and only the
+ * static type moves. scriptc's records are closed — a monomorphic struct
+ * with exactly the members its shape declares — so the same spelling is a
+ * RESHAPE, and the members `T` does not name used to have nowhere to live:
  *
  *     const big: Big = { a: "x", b: "y" };
  *     const small = big as unknown as Small;
  *     JSON.stringify(small)     node {"a":"x","b":"y"}   scriptc {"a":"x"}
  *     Object.keys(small)        node a,b                 scriptc a
  *
- * and before this rule that program produced ZERO diagnostics. The loss
- * then surfaced somewhere else entirely: a later widening back to a type
- * that names the dropped members finds them gone and traps at a site that
- * did nothing wrong. zapo's driver is exactly that shape — the cast is at
- * `:199` and the trap is four hundred lines later at `:324`.
+ * The OVERFLOW GRANT (frontend/types.ts, overflowShapeKeys) closes that: a
+ * shape a double assertion reshapes INTO is interned with a `dyn` overflow
+ * portion, the reshape captures the unnamed members into it, and both
+ * lines above now print Node's answer byte for byte. zapo's driver was the
+ * shape this cost — the cast at `:199`, the trap four hundred lines later
+ * at `:324` — and it is the program that proved the close.
  *
- * WHY ADVICE AND NOT A REFUSAL, which is the half worth pinning. A
- * refusal costs more than the loss it reports: every diagnostic in this
- * compiler is fatal, and under `--best-effort` a fatal one becomes a
- * runtime throw AT THE STATEMENT — so `messages.push(e as unknown as T)`
- * inside a message handler would stop pushing anything at all, and a
- * driver that lost one stanza would lose all of them. So SC6001 rides its
- * own list (`LowerResult.advisories`), never enters `diagnostics`, and
- * cannot make `module` null or be spliced into a fence.
+ * So the DIVERGENCE half of this file is now a CONVERGENCE assertion, and
+ * SC6001 says what is still true: the members left the STRUCT for a
+ * runtime overflow store, a widening back to a type that names one reads
+ * it through a CHECKED extraction, and every value of the destination
+ * shape carries the overflow pointer.
+ *
+ * WHY ADVICE AND NOT A REFUSAL, which is the half worth pinning. A refusal
+ * costs more than anything it reports: every diagnostic in this compiler
+ * is fatal, and under `--best-effort` a fatal one becomes a runtime throw
+ * AT THE STATEMENT — so `messages.push(e as unknown as T)` inside a message
+ * handler would stop pushing anything at all, and a driver that lost one
+ * stanza would lose all of them. So SC6001 rides its own list
+ * (`LowerResult.advisories`), never enters `diagnostics`, and cannot make
+ * `module` null or be spliced into a fence.
  *
  * Both halves are asserted here, and so is the armed half: the three
  * shapes that must produce NO row. An advisory that fired for every cast
@@ -64,7 +70,7 @@ interface Wide { a: string; b: string; c: string }
 const big: Big = { a: "x", b: "y" };
 `;
 
-test("the double assertion that drops a member is named, at the cast, by member", () => {
+test("the double assertion that moves a member out of the struct is named, at the cast, by member", () => {
   const r = lower(`${PRELUDE}
 const small = big as unknown as Small;
 console.log(JSON.stringify(small));
@@ -76,14 +82,14 @@ console.log(JSON.stringify(small));
   expect(a.code).toBe("SC6001");
   expect(a.severity).toBe("advice");
   expect(a.message).toContain("'b'");
-  expect(a.message).toContain("DROPS");
+  expect(a.message).toContain("OVERFLOW STORE");
   // The span is the CAST, not the statement and not the declaration: the
   // whole point is that the loss becomes findable where it happens.
   const text = `${PRELUDE}\nconst small = big as unknown as Small;\nconsole.log(JSON.stringify(small));\n`;
   expect(text.slice(a.loc.start, a.loc.end)).toBe("big as unknown as Small");
 });
 
-test("every dropped member is named, not just the first", () => {
+test("every moved member is named, not just the first", () => {
   const r = lower(`${PRELUDE}
 const wide: Wide = { a: "x", b: "y", c: "z" };
 const small = wide as unknown as Small;
@@ -96,7 +102,7 @@ console.log(JSON.stringify(small));
 
 /* ── the armed half: three shapes that must produce NO row ─────────────── */
 
-test("a double assertion that drops NOTHING is silent", () => {
+test("a double assertion that moves NOTHING is silent", () => {
   // Small → Big names every member the source carries (it names more).
   // Nothing is lost, so there is nothing to say.
   const r = lower(`${PRELUDE}
@@ -124,4 +130,32 @@ test("a program with no assertion at all is silent", () => {
 console.log(JSON.stringify(big));
 `);
   expect(r.advisories).toEqual([]);
+});
+
+/* ── the grant's own decline, which is a wrong answer if it is missing ─── */
+
+test("an ARRAY-INDEX-like member is NOT granted an overflow, and says so", () => {
+  // JavaScript lists integer-like own keys FIRST, across the whole object;
+  // the overflow store can only append. So carrying "0" in the overflow
+  // would answer
+  //
+  //     Object.keys(small)   node 0,a      granted a,0
+  //
+  // which trades one wrong answer for another. The grant declines the
+  // destination shape, the members really are dropped, and SC6001 reverts
+  // to the message that was true before the grant existed. Measured: the
+  // branch printed `a,0` for exactly this program before this rule.
+  const r = lower(`
+interface Small { a: string }
+interface Big { a: string; "0": string }
+const big: Big = { a: "x", "0": "z" };
+const small = big as unknown as Small;
+console.log(Object.keys(small).join(","));
+`);
+  expect(r.diags).toEqual([]);
+  expect(r.advisories.length).toBe(1);
+  expect(r.advisories[0]!.code).toBe("SC6001");
+  expect(r.advisories[0]!.message).toContain("DROPS");
+  expect(r.advisories[0]!.message).toContain("'0'");
+  expect(r.advisories[0]!.hint).toContain("ARRAY-INDEX-like");
 });
