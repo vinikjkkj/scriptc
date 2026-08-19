@@ -182,12 +182,20 @@ test("the licence keeps the receiver position compiling: no new refusal anywhere
    * fence by hand and requires it. */
   expect(lower(SOURCE, false).diags.map((d) => d.code)).toEqual([]);
 
+  /* The plant used to be `{ ...m, abKey: "x" }` over a two-arm union, and it
+   * stopped being a fence: the paired-arm union spread folds a PLAIN
+   * override's name into its pairing key, so source-arm + `abKey` IS the
+   * inferred slot arm and the literal builds it. What is still refused there
+   * is AMBIGUITY — two arms answering to ONE field-name set, where "the arm
+   * with these names" does not name an arm and picking either would write a
+   * string into the number arm with no diagnostic. */
   const planted = `
-interface Snap { readonly abKey: string | null }
-type Media = { readonly url: string } | { readonly url: string; readonly n: number }
-export function fence(m: Media): Snap {
-    const w = { ...m, abKey: "x" }
-    return { abKey: w.abKey }
+type AmbA = { readonly a: string; readonly k: boolean }
+type AmbB = { readonly a: number; readonly k: boolean }
+type AmbAOut = { readonly a: string | null; readonly k: boolean; readonly tag: string }
+type AmbBOut = { readonly a: number | null; readonly k: boolean; readonly tag: string }
+export function fence(m: AmbA | AmbB): AmbAOut | AmbBOut {
+    return { ...m, tag: "t" }
 }
 export function widened(v: string | null): string {
     return v as string

@@ -20,11 +20,15 @@
  * On zapo the four rows split ONE identity (`fetcher.ts:92`) against THREE
  * disjoint (`content.ts:183`, `incoming.ts:397`, `mex-notification.ts:192`),
  * and `ARMS=` alone is not enough to act on: `content.ts:183` pairs 3/3 BY
- * FIELD NAME while the other two pair 0/8 and 0/7, so the verdict groups a
- * site the compiler can build with two it cannot. The paired-arm rule CLOSES
- * the first two and refuses the last two, and the instrument has to report
- * enough to tell them apart — the relation, the pairing count, and the
- * per-field type deltas behind a pairing. This test pins all of it:
+ * FIELD NAME while the other two pair 0/8 and 0/7, so the verdict groups
+ * sites the compiler can build with one it cannot. The paired-arm rule now
+ * CLOSES three of the four — `mex-notification.ts:192` reads 0/7 only
+ * because its literal SUPPLIES the missing name, and a plain override
+ * belongs to the shape the branch builds — and refuses `incoming.ts:397`,
+ * whose second contributor is another SPREAD. The instrument has to report
+ * enough to tell them apart: the relation, the pairing count, the supplied
+ * names, and the per-field type deltas behind a pairing. This test pins all
+ * of it:
  *
  *   CLOSED-BY=identity-arm   the arms are the identity map and the literal's
  *                            own spelling lets the rule build it — no fence,
@@ -73,7 +77,7 @@ function unionslotRows(source: string, on: boolean): string[] {
   return captured.filter((l) => l.startsWith("UNIONSLOT "));
 }
 
-/* Six literals, one per outcome, and every expected value below is readable
+/* Seven literals, one per outcome, and every expected value below is readable
  * off these thirty lines rather than off the implementation.
  *
  *   armIdentityClosed  zapo's `fetcher.ts:92` shape — the slot's record arms
@@ -87,11 +91,23 @@ function unionslotRows(source: string, on: boolean): string[] {
  *                      one declines and the fence still reports `ARMS=identity`
  *                      — which is what keeps the relation report itself tested
  *                      now that the plain identity case no longer reaches it.
- *   armDisjoint        `mex-notification.ts:192`'s shape (`{ ...normalized,
+ *   armSuppliedName    `mex-notification.ts:192`'s shape (`{ ...normalized,
  *                      errors }`): `errors` is required on both `ImgE`/`VidE`
- *                      and absent from both `Img`/`Vid`, so no source arm can
- *                      share a field-name set with a slot arm and the pairing
- *                      must be 0/2. An arm would have to be INVENTED.
+ *                      and absent from both `Img`/`Vid`. This used to read
+ *                      `pairedByNames=0/2` and was graded "an arm would have
+ *                      to be INVENTED"; it is CLOSED now, and the reason the
+ *                      old reading was wrong is in the instrument's own
+ *                      `extras=[errors]` field. A PLAIN override is written
+ *                      into every branch unconditionally, so it belongs to
+ *                      the shape the branch BUILDS: source arm + `errors` IS
+ *                      the slot arm, and nothing is invented. The pairing
+ *                      folds the supplied names into the source side.
+ *   armTwoSpreads      `incoming.ts:397`'s shape (`{ ...baseEvent, ...parsed
+ *                      }`) — TWO plain spreads with the union one SECOND.
+ *                      This rule models a union spread FIRST and an override
+ *                      tail; the names a leading spread contributes are not
+ *                      overrides and it does not model them, so this is where
+ *                      the genuine `pairedByNames=0/2` reading now lives.
  *   armPairedWiden     `content.ts:183`'s RELATION with `content.ts:183`'s
  *                      difficulty removed and a harder one put in: the arms
  *                      pair 2/2 by name onto DIFFERENT interned shapes, and
@@ -124,6 +140,11 @@ interface VidW { readonly url: string; readonly n: number; readonly frames: numb
 interface ImgWOut { readonly url: string; readonly n: number | null; readonly k: string }
 interface VidWOut { readonly url: string; readonly n: number | null; readonly frames: number; readonly k: string }
 
+interface BaseF { readonly rawId: string; readonly at: number }
+interface ImgB { readonly url: string; readonly viewOnce?: boolean; readonly rawId: string; readonly at: number }
+interface VidB { readonly url: string; readonly seconds: number; readonly viewOnce?: boolean; readonly rawId: string; readonly at: number }
+type MediaB = ImgB | VidB
+
 interface AmbA { readonly a: string; readonly k: boolean }
 interface AmbB { readonly a: number; readonly k: boolean }
 interface AmbAOut { readonly a: string | null; readonly k: boolean }
@@ -135,8 +156,11 @@ export function armIdentityClosed(m: Media): Media {
 export function armIdentityLate(m: Media): Media {
     return { viewOnce: true, ...m }
 }
-export function armDisjoint(m: Media): MediaE {
+export function armSuppliedName(m: Media): MediaE {
     return { ...m, errors: 1 }
+}
+export function armTwoSpreads(b: BaseF, m: Media): MediaB {
+    return { ...b, ...m }
 }
 export function armPairedWiden(m: ImgW | VidW): ImgWOut | VidWOut {
     return { ...m, k: "done" }
@@ -147,7 +171,7 @@ export function armPairAmbiguous(m: AmbA | AmbB): AmbAOut | AmbBOut {
 export function singleArmSlot(m: Img): Img | null {
     return { ...m, viewOnce: true }
 }
-console.log(typeof armIdentityClosed, typeof armIdentityLate, typeof armDisjoint, typeof armPairedWiden, typeof armPairAmbiguous, typeof singleArmSlot)
+console.log(typeof armIdentityClosed, typeof armIdentityLate, typeof armSuppliedName, typeof armTwoSpreads, typeof armPairedWiden, typeof armPairAmbiguous, typeof singleArmSlot)
 `;
 
 test("the instrument names the ARM RELATION at each fence, and nothing where there is no fence", () => {
@@ -157,34 +181,46 @@ test("the instrument names the ARM RELATION at each fence, and nothing where the
   const distinct = [...new Set(rows)].sort();
   const why = `rows:\n${distinct.join("\n")}`;
 
-  /* THE RULE FIRED, EXACTLY ONCE, AND ON THE ONE LITERAL THAT QUALIFIES.
-   * `armIdentityClosed` is the only one of the four whose arms are the
-   * identity map AND whose spread is first, so it must be the only
-   * `CLOSED-BY` row — and it must not also appear as a fence. */
+  /* THE RULE FIRED ON EXACTLY THE THREE LITERALS THAT QUALIFY, and on no
+   * other. `armIdentityClosed` is the only one whose arms are the identity
+   * map AND whose spread is first, so it must be the only `identity-arm`
+   * row; `armPairedWiden` and `armSuppliedName` are the two `paired-arm`
+   * ones. None of the three may also appear as a fence. */
   const closed = distinct.filter((l) => l.includes(" CLOSED-BY="));
-  expect(closed.length, why).toBe(2);
+  expect(closed.length, why).toBe(3);
   const identityClosed = closed.filter((l) => l.includes("CLOSED-BY=identity-arm"));
   const pairedClosed = closed.filter((l) => l.includes("CLOSED-BY=paired-arm"));
   expect(identityClosed.length, why).toBe(1);
-  expect(pairedClosed.length, why).toBe(1);
+  expect(pairedClosed.length, why).toBe(2);
   expect(identityClosed[0]).toContain("arms=2");
   expect(identityClosed[0]).toContain("overrides=[viewOnce]");
   // The identity row's PAIRS are every arm with ITSELF — which is what makes
   // it the identity case rather than a pairing that happened to agree.
   expect(identityClosed[0]).toMatch(/pairs=\[(\w+)->\1,(\w+)->\2\]/);
-  // The paired row's are not: `n` widens from `number` to `number | null`,
-  // so the two sides interned apart and the rebuild has to MOVE the field.
-  expect(pairedClosed[0]).toContain("overrides=[k]");
-  expect(pairedClosed[0]).not.toMatch(/pairs=\[(\w+)->\1,(\w+)->\2\]/);
+  // Neither paired row's are: `armPairedWiden` widens `n` from `number` to
+  // `number | null`, and `armSuppliedName`'s slot arms carry a field its
+  // source arms do not. Both interned apart, and both rebuilds MOVE a shape.
+  const widenClosed = pairedClosed.filter((l) => l.includes("overrides=[k]"));
+  const suppliedClosed = pairedClosed.filter((l) => l.includes("overrides=[errors]"));
+  expect(widenClosed.length, why).toBe(1);
+  expect(suppliedClosed.length, why).toBe(1);
+  for (const l of pairedClosed) expect(l).not.toMatch(/pairs=\[(\w+)->\1,(\w+)->\2\]/);
+  // THE SUPPLIED-NAME ROW is the one this instrument's old reading got
+  // wrong: `errors` is on NEITHER source arm, and the rule still pairs 2/2
+  // because a plain override belongs to the shape the branch BUILDS.
+  expect(suppliedClosed[0]).toContain("arms=2");
 
   /* AND IT DECLINED FOR A NAMED REASON EVERYWHERE ELSE. `armIdentityLate`'s
-   * spread is not first; `armDisjoint`'s arms are not the identity map, and
-   * that reason carries BOTH shape lists so a reader can see which arms
-   * differed. `singleArmSlot` reaches neither. */
+   * spread is not first; `armTwoSpreads` puts the union spread SECOND, which
+   * this rule does not model; `armPairAmbiguous`'s arms answer to one name
+   * set. `singleArmSlot` reaches neither. */
   const declined = distinct.filter((l) => l.includes(" NOT-CLOSED="));
   expect(declined.length, why).toBe(3);
   expect(declined.some((l) => l.includes("NOT-CLOSED=head-not-a-spread")), why).toBe(true);
-  expect(declined.some((l) => /NOT-CLOSED=arms-not-paired:\[\w+,\w+\]vs\[\w+,\w+\]/.test(l)), why).toBe(true);
+  expect(
+    declined.some((l) => l.includes("NOT-CLOSED=later-spread-not-a-single-prop-conditional")),
+    why,
+  ).toBe(true);
   /* AMBIGUITY IS ITS OWN ANSWER, and it is the armed half of the pairing
    * rule. `AmbA`/`AmbB` carry the IDENTICAL field-name set `{a, k}` at
    * different types, so "the slot arm with these names" does not name one
@@ -197,18 +233,19 @@ test("the instrument names the ARM RELATION at each fence, and nothing where the
     why,
   ).toBe(true);
 
-  // THREE fences: the two CLOSED literals are gone from this population.
+  // THREE fences: the three CLOSED literals are gone from this population.
   const fences = distinct.filter((l) => l.includes(" ARMS="));
   expect(fences.length, why).toBe(3);
 
   const identity = fences.filter((l) => l.includes(" ARMS=identity "));
   const disjoint = fences.filter((l) => l.includes(" ARMS=disjoint "));
   expect(identity.length, why).toBe(1);
-  // The disjoint pair: `armDisjoint` (0/2 — no pairing exists) and
-  // `armPairAmbiguous` (2/2 by the COUNT, but a count is not a pairing —
-  // both arms answer to the same name set). That the two read the same on
-  // `ARMS=` and differently on `pairedByNames` is exactly why the
-  // fingerprints exist.
+  // The disjoint pair: `armTwoSpreads` (0/2 — no pairing exists, and the
+  // five names its LEADING spread contributes are not overrides so nothing
+  // folds them in) and `armPairAmbiguous` (2/2 by the COUNT, but a count is
+  // not a pairing — both arms answer to the same name set). That the two
+  // read the same on `ARMS=` and differently on `pairedByNames` is exactly
+  // why the fingerprints exist.
   expect(disjoint.length, why).toBe(2);
   const disjointUnpaired = disjoint.filter((l) => l.includes("pairedByNames=0/2"));
   const ambiguousFence = disjoint.filter((l) => l.includes("pairedByNames=2/2"));
@@ -220,10 +257,13 @@ test("the instrument names the ARM RELATION at each fence, and nothing where the
   expect(identity[0]).toContain("extras=[viewOnce] extrasInEveryArm=true");
   expect(identity[0]).toContain("srcArms=2/2");
   expect(identity[0]).toContain("ctxArms=2/2");
-  // The disjoint row's added name is NOT in the source arms: `errors` is what
-  // the target arms have and the source arms do not, which is exactly why no
-  // arm can be carried through.
-  expect(disjointUnpaired[0]).toContain("extras=[errors] extrasInEveryArm=false");
+  // The disjoint row has NO added name at all: `armTwoSpreads` has no
+  // override, so `extras` is empty and there is nothing the pairing could
+  // fold in. What its slot arms carry and its source arms do not comes from
+  // a SECOND contributor this rule does not model — which is the whole
+  // difference between it and `armSuppliedName`, now closed.
+  expect(disjointUnpaired[0]).toContain("extras=[] extrasInEveryArm=true");
+  expect(disjointUnpaired[0]).toContain("spreads=2");
 
   // Every row is keyed `file@offset`, the SCRIPTC_DC_WHERE spelling. The
   // fence's key is the SPREAD PROPERTY's offset (it is the decliner); the
@@ -243,8 +283,8 @@ test("the instrument names the ARM RELATION at each fence, and nothing where the
    * Here the two cases are known by construction and they must read
    * differently, which is what makes this an assertion and not a printout:
    *   identity — every arm pairs with itself, 2/2;
-   *   disjoint — `errors` is required on both slot arms and on NEITHER source
-   *              arm, so no field-name set matches and it is 0/2. A
+   *   disjoint — `armTwoSpreads`'s slot arms carry two names on NEITHER
+   *              source arm, so no field-name set matches and it is 0/2. A
    *              `pairedByNames` that always returned the arm count would pass
    *              the identity case and fail here. */
   expect(identity[0]).toContain("pairedByNames=2/2");
@@ -266,14 +306,14 @@ test("the instrument names the ARM RELATION at each fence, and nothing where the
     expect(l).toMatch(/srcShapes=\[\w+\/\d+,\w+\/\d+\] ctxShapes=\[\w+\/\d+,\w+\/\d+\]/);
   }
   // The identity row's two sides are the SAME shape ids; the disjoint row's are
-  // not, and its slot arms are one field WIDER (the required `errors`) — which
-  // is the difference `pairedByNames` exists to report.
+  // not, and its slot arms are TWO fields WIDER (the leading spread's `rawId`
+  // and `at`) — which is the difference `pairedByNames` exists to report.
   expect(identity[0]).toMatch(/srcShapes=\[(\w+\/\d+,\w+\/\d+)\] ctxShapes=\[\1\]/);
   for (const l of disjoint) {
     expect(l).not.toMatch(/srcShapes=\[(\w+\/\d+,\w+\/\d+)\] ctxShapes=\[\1\]/);
   }
   expect(identity[0]).toContain("ctx0='Media'");
-  expect(disjointUnpaired[0]).toContain("ctx0='MediaE'");
+  expect(disjointUnpaired[0]).toContain("ctx0='MediaB'");
 });
 
 test("the instrument is silent with the dial unset", () => {
