@@ -326,6 +326,18 @@ export class CEmitter {
   readonly dynClassDescs = new Map<string, string>();
   readonly recordKeyGetFns = new Map<string, string>();
   readonly recordKeySetFns = new Map<string, string>();
+  /** The shared abort helpers, mirroring the LLVM emitter's helperDefs
+   * (llvm/emitter.ts): ONE definition per trap message, called from every
+   * guard site, instead of the message open-coded at each site. The
+   * protection is unchanged — the helper is _Noreturn and its body is the
+   * byte-identical scr_trap call the site used to make — but the message
+   * text, and the address load that reaches it, stop scaling with the
+   * program. Set as a side effect of oomAbortC / badTagAbortC below; read
+   * by sharedTrapDefs at assembly time. */
+  usesOomHelper = false;
+  usesBadTagHelper = false;
+  usesStringifyUndefHelper = false;
+
   readonly walkerProtos: string[] = [];
   readonly walkerDefs: string[] = [];
   /** Island host-call adapters, interned per (arity, void-ness): the one
@@ -665,6 +677,55 @@ export class CEmitter {
     }
   }
 
+  /** The OOM abort, as a CALL to the shared helper. Every raw allocation
+   * the emitter plants guards its result with this on the very next
+   * statement; the guard is what stands between a NULL calloc and the
+   * `o->rc = 1` one line down, so it is never elided — only the message
+   * moves out of the site. */
+  oomAbortC(): string {
+    this.usesOomHelper = true;
+    return "sc_oom()";
+  }
+
+  /** The invalid-union-tag abort, as a CALL to the shared helper. Closes a
+   * `switch (v->tag)` whose case labels are exactly the union's arms; C
+   * needs the default for definite assignment and a corrupt tag must stay
+   * loud, so the arm stays — only the message moves out of it. */
+  badTagAbortC(): string {
+    this.usesBadTagHelper = true;
+    return "sc_bad_tag()";
+  }
+
+  /** The stringify-undefined-arm abort, as a CALL to the shared helper. */
+  stringifyUndefAbortC(): string {
+    this.usesStringifyUndefHelper = true;
+    return "sc_stringify_undef()";
+  }
+
+  /** The definitions for whichever shared abort helpers the TU referenced,
+   * spliced in just below the includes so every later definition can call
+   * them. Emitted only when referenced: an unused static would warn. */
+  sharedTrapDefs(): string[] {
+    const defs: string[] = [];
+    // Spelled over THREE lines, like every other emitted definition: the
+    // TU's line-oriented readers (tu-census.mjs, structural-aborts.mjs,
+    // tests/perf/imagesize/*) all take "a definition opens at column 0 and
+    // closes with `}` at column 0" as given, and a one-liner would hide the
+    // helper's body from every one of them.
+    const def = (name: string, msg: string): void => {
+      defs.push(`static _Noreturn void ${name}(void) {`, `  scr_trap(${msg});`, `}`);
+    };
+    if (this.usesOomHelper) def("sc_oom", '"scriptc: out of memory\\n"');
+    if (this.usesBadTagHelper) {
+      def("sc_bad_tag", '"scriptc: internal error: invalid union tag\\n"');
+    }
+    if (this.usesStringifyUndefHelper) {
+      def("sc_stringify_undef", '"scriptc: internal error: stringify reached an undefined arm\\n"');
+    }
+    if (defs.length > 0) defs.push("");
+    return defs;
+  }
+
   emit(): string {
     const body: string[] = [];
     // Function bodies are emitted first (into this.lines) so the literal
@@ -688,6 +749,11 @@ export class CEmitter {
       `#include <stdlib.h>`,
       ``,
     ];
+    // The shared abort helpers land HERE, below the includes and above
+    // every definition that calls them. Their flags are only known once the
+    // bodies, the struct defs and the walkers have all been emitted, so the
+    // lines are spliced into this slot just before the file is joined.
+    const trapHelperSlot = out.length;
     // Struct defs render into their own buffer BEFORE the unit-instance
     // table flushes: class newFns point undefined-armed union fields at
     // interned unit instances (fields start as JS's undefined, not NULL),
@@ -840,6 +906,7 @@ export class CEmitter {
       // loop — the profile-declared external symbols instead. Everything
       // above is unchanged (still all internal linkage).
       this.emitLibEntries(out, globals);
+      out.splice(trapHelperSlot, 0, ...this.sharedTrapDefs());
       return out.join("\n");
     }
     const refGlobals = globals.filter((g) => isRefCounted(g.type));
@@ -1130,6 +1197,7 @@ export class CEmitter {
       `}`,
       ``,
     );
+    out.splice(trapHelperSlot, 0, ...this.sharedTrapDefs());
     return out.join("\n");
   }
 
