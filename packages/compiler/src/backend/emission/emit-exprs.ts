@@ -7073,8 +7073,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // target typeKey, and the SOURCE position the crossing came from. It
         // writes to stderr and touches no emitted byte.
         if (process.env["SCRIPTC_DC_CENSUS"] !== undefined) {
-          const at = E.srcComment(e.loc).replace(/^ \/\* /, "").replace(/ \*\/$/, "")
-            || `${e.loc.file}@${String(e.loc.start)}`;
+          // The position comes off the IR NODE, never off srcComment: that
+          // one names the emitter's CURRENT module, which during walker and
+          // helper emission is not the module the crossing came from. Reading
+          // it here attributed all 1 768 of zapo's crossings to the ENTRY
+          // file, which is the shape of a wrong answer that looks tidy.
+          const at = `${e.loc.file}@${String(e.loc.start)}`;
           process.stderr.write(
             `DCCENSUS ${helper} ${e.narrowBridge === true ? "narrowBridge" : "check"} ${at} :: ${typeKey(e.type)}\n`,
           );
