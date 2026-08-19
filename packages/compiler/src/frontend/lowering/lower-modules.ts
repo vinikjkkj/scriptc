@@ -16,7 +16,7 @@ import { BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrLocal, IrRecordS
 import { ENTRY_NAME, PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, newFnCtx, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, isPromisifyCall } from "./lower-builtins.js";
 import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestSlotType, nullishGenericBindingUnitOf } from "./lower-calls.js";
-import { isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
+import { isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalArmedType, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
 import { diffieHellmanFnValueDeclType, objectStaticFnValueDeclType, stdlibGlobalAliasDecl } from "./surfaces.js";
 import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-namespaces.js";
@@ -1706,9 +1706,16 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // `const id = attrs.id` at file scope: the keyed-read binding
             // rule (keyedReadGlobalIsDyn), the same answer its
             // function-scope twin gets in lowerVarDecl.
+            // ... and the COMPOSITE twin beside it (keyedReadGlobalArmedType):
+            // a width the dyn rule refuses takes the undefined-armed union
+            // instead, which is what lets the file-scope declaration answer
+            // undefined the way its function-scope twin already does. The
+            // two predicates partition on width, so at most one fires.
             const keyedReadT =
-              ts.isIdentifier(decl.name) && nameNode === decl.name && keyedReadGlobalIsDyn(L, decl)
-                ? DYN
+              ts.isIdentifier(decl.name) && nameNode === decl.name
+                ? keyedReadGlobalIsDyn(L, decl)
+                  ? DYN
+                  : keyedReadGlobalArmedType(L, decl)
                 : null;
             // A JS function LITERAL whose rest parameter binds the ENGINE's
             // own arguments array (paramShape's islandRest, --dynamic only):
