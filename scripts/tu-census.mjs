@@ -295,6 +295,15 @@ const SHARED_HELPER = [
   /^sc_wsw_\d+$/,                  // WebSocket ctor wrapper     (emit-ws)
   /^sc_f__x25_fence_fn_\d+$/,      // fenceClosureProbe stub     (lower-exprs:5845)
   /^sc_f__x25_fn\d+_dyntrap$/,     // island export trap value   (lower-island:815)
+  // The three SHARED ABORT HELPERS the C emitter plants (emitter.ts
+  // sharedTrapDefs — the shape the LLVM emitter has always had in
+  // helperDefs).  Each is ONE trap statement standing for every guard site
+  // in the TU, which is exactly the stub correction: without this rule the
+  // census would read ABORT.structural as 2 ways-to-die and the 3,771
+  // places that can actually abort would vanish from the report.
+  /^sc_oom$/,                      // OOM guard                  (emitter.ts sharedTrapDefs)
+  /^sc_bad_tag$/,                  // union-tag default          (emitter.ts sharedTrapDefs)
+  /^sc_stringify_undef$/,          // stringify undefined arm    (emitter.ts sharedTrapDefs)
 ];
 const wanted = new Set();
 for (const r of rows) {
