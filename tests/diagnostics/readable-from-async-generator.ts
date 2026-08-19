@@ -14,9 +14,9 @@
 //   2. SC2020 at the `Readable.from` CALL — `lowerStreamStaticCall` has
 //      array / string / Buffer sources and nothing else.
 //
-// So closing (2) alone would not compile this program; it would reveal
-// (1) underneath. That is why the survey priced the row as "two features"
-// and why no reduction that stops at (2) has finished it.
+// So closing (2) alone would not compile this program; it reveals (1)
+// underneath — MEASURED on zapo, not inferred: with the fence lowering
+// its source, blockers go 7 sites -> 8 (SC2020 out, SC1071 + SC2004 in).
 //
 // The second fence used to print `'?'` for the source type — `L.fmt` has
 // no spelling for a type `mapType` refused, and `Readable.from` is the
