@@ -7614,6 +7614,14 @@ const inliningPredicates = new Set<ts.Symbol>();
           }
         } else {
           let value = L.lowerExpr(bodyExpr);
+          // The RETURN destination for recordKeyReadAtUndefinedArm. A concise
+          // arrow body IS a return completion, so it takes the same rung the
+          // `return <expr>` statement takes (Lowerer.keyedReadAtReturnSlot),
+          // shared rather than spelled twice -- spelling asyncReturnFlatten
+          // twice is exactly how the settle-or-value union came to be handled
+          // in the statement form and not here.  A declined rung leaves the
+          // value untouched.
+          value = L.keyedReadAtReturnSlot(value, bodyReturn, bodyExpr) ?? value;
           // An async concise body: the async machinery RESOLVES a returned
           // thenable into the function's own promise. That is exactly the
           // `return <expr>` statement's completion, so it is exactly the

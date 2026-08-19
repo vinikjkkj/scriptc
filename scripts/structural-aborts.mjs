@@ -70,6 +70,24 @@ export function analyse(raw) {
       if (l === "}") cur = null;
     }
   }
+  // The emitted definition header names the UNION the helper is for, in its
+  // own trailing comment: `/* ToBoolean u12 */`, `/* strict equality u6 */`,
+  // `/* to-dyn union:u45 */`, `/* ToString u1 */`.  The helper NUMBER is a
+  // per-family counter and says nothing about which union it serves - an
+  // earlier version of this pass grouped on it and reported 150 unions whose
+  // helpers "disagreed" on the arm count, every one of them two different
+  // unions that happened to share a helper index (my own wrong measurements).
+  const hostUnion = new Map();
+  {
+    const U = /\bu(?:nion:u)?(\d+)\b/;
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      if (l.length === 0 || l[0] === " " || l[0] === "\t" || !l.includes("/*")) continue;
+      const c = l.slice(l.indexOf("/*"));
+      const m = U.exec(c);
+      if (m && hostName[i] !== null && !hostUnion.has(hostName[i])) hostUnion.set(hostName[i], "u" + m[1]);
+    }
+  }
 
   const rows = [];
   const anomalies = [];
@@ -147,7 +165,7 @@ export function analyse(raw) {
       const k = labels.length;
       const contiguous = k > 0 && labels.every((x, n) => x === n);
       const dup = new Set(labels).size !== k;
-      rows.push({ family: "UNIONTAG", line: i + 1, host: hostName[i], cases: k, contiguous, dup, sw });
+      rows.push({ family: "UNIONTAG", line: i + 1, host: hostName[i], cases: k, contiguous, dup, sw, unionId: hostUnion.get(hostName[i]) ?? null });
       if (!contiguous || dup || sw === null) {
         anomalies.push({
           kind: "uniontag-not-total",
@@ -173,10 +191,25 @@ export function analyse(raw) {
     anomalies.push({ kind: "unknown-trap", line: i + 1, host: hostName[i], text: l.trim().slice(0, 160) });
   }
 
+  // The UNIT-ARM instances: `static ScrUnion sc_unit_7 = { .rc = SIZE_MAX,
+  // .tag = 1 }; /* u3 unit arm */`.  These are the one tag producer the
+  // emitted C attributes to a union by name, so they are the one family
+  // whose tag can be checked against that union's own arm count.
+  const units = [];
+  {
+    const UNIT = /^static (?:const )?ScrUnion (sc_unit_\d+) = \{[^}]*\.tag = (\d+)[^}]*\}; \/\* u(\d+) unit arm \*\/$/;
+    for (const l of lines) {
+      const m = UNIT.exec(l);
+      if (m) units.push({ sym: m[1], tag: Number(m[2]), unionId: 'u' + m[3] });
+    }
+  }
   const tags = [];
   const NEW = /\bscr_union_new_(?:f64|bool|ref)\s*\(\s*(\d+)\s*,/g;
   for (let m; (m = NEW.exec(raw)) !== null; ) tags.push(Number(m[1]));
   const maxTag = tags.length ? Math.max(...tags) : -1;
+  const NONLIT = /\bscr_union_new_(?:f64|bool|ref)\s*\(\s*(?![0-9])/g;
+  let nonLiteralTags = 0;
+  for (let m; (m = NONLIT.exec(raw)) !== null; ) nonLiteralTags++;
   const cases = rows.filter((r) => r.family === "UNIONTAG").map((r) => r.cases);
 
   return {
@@ -185,6 +218,9 @@ export function analyse(raw) {
     allocLines,
     allocGuarded,
     selfGuardedAllocs,
+    hostUnion: Object.fromEntries(hostUnion),
+    units,
+    nonLiteralTags,
     tagProducers: tags.length,
     maxTag,
     maxCases: cases.length ? Math.max(...cases) : 0,
@@ -209,6 +245,13 @@ const FIXTURE = [
   "  int q = 0;",
   '  if (!q) { scr_trap("scriptc: out of memory\\n"); }',
   "}",
+  "static bool sc_ut_77(ScrUnion *v) { /* ToBoolean u77 */",
+  "  switch (v->tag) {",
+  "  case 0: return false;",
+  "  case 1: return true;",
+  '  default: scr_trap("scriptc: internal error: invalid union tag\\n");',
+  "  }",
+  "}",
   "static bool sc_u_ok(ScrUnion *v) {",
   "  switch (v->tag) {",
   "  case 0: return false;",
@@ -229,6 +272,8 @@ const FIXTURE = [
   "static void sc_novel(void) {",
   '  scr_trap("scriptc: brand new message nobody classified\\n");',
   "}",
+  "static ScrUnion sc_unit_0 = { .rc = SIZE_MAX, .tag = 1 }; /* u77 unit arm */",
+  "static ScrUnion sc_unit_1 = { .rc = SIZE_MAX, .tag = 9 }; /* u77 unit arm */",
   "static void sc_prod(void) {",
   "  a = scr_union_new_ref(3, x, &r, &f, NULL);",
   "}",
@@ -240,8 +285,8 @@ if (process.argv.includes("--selftest")) {
   const need = [
     ["OOM rows == 2", a.rows.filter((r) => r.family === "OOM").length === 2],
     ["exactly one OOM guard backed by an alloc", a.rows.filter((r) => r.family === "OOM" && r.backedByAlloc).length === 1],
-    ["UNIONTAG rows == 2", a.rows.filter((r) => r.family === "UNIONTAG").length === 2],
-    ["exactly one total union switch", a.rows.filter((r) => r.family === "UNIONTAG" && r.contiguous).length === 1],
+    ["UNIONTAG rows == 3", a.rows.filter((r) => r.family === "UNIONTAG").length === 3],
+    ["two total union switches", a.rows.filter((r) => r.family === "UNIONTAG" && r.contiguous).length === 2],
     ["STRINGIFY row seen", a.rows.filter((r) => r.family === "STRINGIFY").length === 1],
     ["UNKNOWN row seen", a.rows.filter((r) => r.family === "UNKNOWN").length === 1],
     ["anomaly alloc-unguarded seen", a.anomalies.some((x) => x.kind === "alloc-unguarded")],
@@ -249,6 +294,7 @@ if (process.argv.includes("--selftest")) {
     ["anomaly uniontag-not-total seen", a.anomalies.some((x) => x.kind === "uniontag-not-total")],
     ["anomaly unknown-trap seen", a.anomalies.some((x) => x.kind === "unknown-trap")],
     ["tag producer seen, max tag 3", a.tagProducers === 1 && a.maxTag === 3],
+    ["unit instances parsed with their union", a.units.length === 2 && a.units[1].unionId === "u77" && a.units[1].tag === 9],
     ["self-guarding allocator not counted as an anomaly", a.selfGuardedAllocs === 1 && a.anomalies.filter((x) => x.kind === "alloc-unguarded").length === 1],
   ];
   let bad = 0;
@@ -308,20 +354,39 @@ out.push(`  largest enumerated arm index ${a.maxCases - 1}`);
 // mean one of them stopped short of the definition, which is the shape in
 // which a `default:` becomes reachable.
 const perUnion = new Map();
+let noUnionId = 0;
 for (const r of ut) {
-  const m = /^sc_[a-z]+_?(\d+)$/.exec(r.host ?? "");
-  if (!m) continue;
-  const key = (r.host ?? "").replace(/\d+$/, "") + "#" + m[1];
-  const u = m[1];
-  if (!perUnion.has(u)) perUnion.set(u, new Set());
-  perUnion.get(u).add(r.cases);
+  if (r.unionId === null || r.unionId === undefined) { noUnionId++; continue; }
+  if (!perUnion.has(r.unionId)) perUnion.set(r.unionId, new Set());
+  perUnion.get(r.unionId).add(r.cases);
 }
 const inconsistent = [...perUnion].filter(([, s]) => s.size > 1);
-out.push(`  union indices seen ${perUnion.size}   whose helpers DISAGREE on the arm count ${inconsistent.length}`);
+out.push(`  interned union helpers attributed to a union id ${ut.length - noUnionId}   distinct unions ${perUnion.size}   whose helpers DISAGREE on the arm count ${inconsistent.length}`);
+out.push(`  defaults with no union id in their header (inline per-EXPRESSION switches: unionDisc / unionKeyGet) ${noUnionId}`);
 for (const [u, s] of inconsistent.slice(0, 10)) out.push(`     union ${u}: arm counts ${[...s].join(",")}`);
 out.push("");
 out.push("=== TAG PRODUCERS ==============================================");
 out.push(`  scr_union_new_* with a literal tag: ${a.tagProducers}   largest literal tag ${a.maxTag}`);
+out.push(`  scr_union_new_* with a NON-literal tag: ${a.nonLiteralTags}   (a tag that is not a compile-time constant)`);
+// The largest literal tag and the largest enumerated arm index are NOT
+// comparable: they belong to different unions.  A union-to-superset RETAG
+// helper is emitted as an if-chain on `->tag ==` rather than a switch, so a
+// union with 131 arms can construct tag 130 while the largest union that
+// owns a switch has 85 arms.  An earlier version of this pass printed the
+// two side by side as if one bounded the other (my own wrong measurements).
+// The check that IS per-union is the unit instances, which name their union.
+const kOf = new Map();
+for (const r of ut) if (r.unionId) kOf.set(r.unionId, Math.max(kOf.get(r.unionId) ?? 0, r.cases));
+let uChecked = 0;
+const uBad = [];
+for (const u of a.units) {
+  const k = kOf.get(u.unionId);
+  if (k === undefined) continue;
+  uChecked++;
+  if (u.tag >= k) uBad.push(u);
+}
+out.push(`  unit-arm instances ${a.units.length}   checkable against their union's own arm count ${uChecked}   OUT OF RANGE ${uBad.length}`);
+for (const u of uBad.slice(0, 10)) out.push(`     ${u.sym} tag ${u.tag} on ${u.unionId} whose switches enumerate ${kOf.get(u.unionId)} arms`);
 out.push("");
 out.push("=== ANOMALIES ==================================================");
 if (a.anomalies.length === 0) out.push("  (none)");

@@ -9459,6 +9459,65 @@ export class Lowerer {
    * `return await p` — the awaitExpr parks the fiber and re-throws
    * rejections, which IS the flattening. Everything else flows into the
    * function's return slot through the usual coercion path. */
+  /** THE RETURN DESTINATION for recordKeyReadAtUndefinedArm, shared by the
+   * `return <expr>` statement and the CONCISE ARROW body (lower-calls) --
+   * two spellings of one completion, and spelling the rule twice is how the
+   * settle-or-value union came to be handled in one and not the other.
+   *
+   * `function participantOf(n: Node2): string | undefined { return
+   * n.attrs.participant }`. The checker types an index-signature read by the
+   * signature's VALUE type, so the read is spelled `string`; the key is
+   * absent on the wire; the helper's miss path is `scr_trap_fmt` -- a process
+   * ABORT with no `[SCxxxx]` tag, past every catch clause, where Node hands
+   * the CALLER `undefined` and the caller's own `=== undefined` answers it.
+   *
+   * WHY A RETURN SLOT IS A KEEP-CASE, which is the whole admission rule. It
+   * is lowerArgExpecting's parameter argument with the direction reversed.
+   * tsc narrows `string | undefined` away at a DECLARATION, an ASSIGNMENT
+   * and a PROPERTY WRITE -- the destinations the rung refuses, because their
+   * readers were compiled as "definitely the string arm" and a stored
+   * undefined is the r03 segfault. A DECLARED RETURN TYPE cannot be narrowed
+   * that way: control-flow analysis inside the body cannot change what the
+   * SIGNATURE says, and every caller was checked against the signature, so
+   * every caller already discriminates.
+   *
+   * Measured on tsc 5.9.3 rather than argued (lab/narrowq): `const a: string
+   * = viaReturn(n)` is TS2322 where `const c: string | undefined = attrs.k;
+   * const s: string = c` is accepted, and so are the assignment and
+   * property-write forms. The three tsc narrows are exactly the three this
+   * rung refuses.
+   *
+   * An INFERRED return type is not a counter-example, it is the gate:
+   * `function f() { return attrs.k }` infers `string`, which carries no
+   * undefined arm, so `expected` fails the first test and the rung declines
+   * -- the trap stays, honestly, because there is nowhere for the undefined
+   * to go. A slot WIDER than the read plus the undefined arm is a conversion
+   * the author asked for and keeps its own coercion
+   * (recordKeyReadAtUndefinedArm's own width gate).
+   *
+   * No syntactic guard is needed here, unlike lowerArgExpecting -- that one
+   * has to reproduce lowerExprExpecting's early rules because it lowers the
+   * node itself. This rung inspects a value its caller ALREADY lowered, so a
+   * declined rung hands the identical expression to the identical tail and
+   * the emitted C is byte-for-byte what it was.
+   *
+   * SCRIPTC_RETARM_OFF=1 ablates it, so one binary emits both sides of the
+   * A/B; SCRIPTC_RETARM_WHY names every site it fires or declines on. */
+  keyedReadAtReturnSlot(raw: IrExpr, expected: IrType, node: ts.Node): IrExpr | null {
+    if (process.env["SCRIPTC_RETARM_OFF"] === "1") return null;
+    if (expected.kind !== "union") return null;
+    if (this.armTag(expected.unionId, UNDEFINED_T) < 0) return null;
+    const armed = this.recordKeyReadAtUndefinedArm(raw, expected)
+      ?? this.keyedReadRefAtUndefinedArm(raw, expected);
+    if (process.env["SCRIPTC_RETARM_WHY"]) {
+      const l = locOf(node);
+      console.error(
+        `RETARM ${armed ? "FIRES" : "declines"} ${l.file}@${l.start} read=${this.fmt(raw.type)} want=${this.fmt(expected)} kind=${raw.kind}`,
+      );
+    }
+    return armed;
+  }
+
   /** The value of `return <expr>` against the context's declared return —
    * or NULL for a bare return: `return undefined`/`return null` in a
    * void-returning function (`{ bar() { return undefined } }`, inferred
@@ -9488,7 +9547,47 @@ export class Lowerer {
         return this.coerceInto(node, this.lowerArrayLiteral(x, expected), expected);
       }
     }
-    const e = this.lowerExpr(node);
+    // THE RETURN DESTINATION for recordKeyReadAtUndefinedArm.
+    //
+    // `function participantOf(n: Node2): string | undefined { return
+    // n.attrs.participant }`. The checker types an index-signature read by
+    // the signature's VALUE type, so the read is spelled `string`; the key
+    // is absent on the wire; the helper's miss path is `scr_trap_fmt` -- a
+    // process ABORT with no `[SCxxxx]` tag, past every catch clause, where
+    // Node hands the CALLER `undefined` and the caller's own `=== undefined`
+    // answers it. Measured, not argued: a generated destination population
+    // (block/aborts, lab/ret) aborts on the plain `return`, the concise
+    // arrow, the block arrow and the async return, and agrees with Node on
+    // every one of their HIT twins.
+    //
+    // WHY A RETURN SLOT IS A KEEP-CASE, which is the whole admission rule.
+    // It is lowerArgExpecting's parameter argument with the direction
+    // reversed. tsc narrows `string | undefined` away at a DECLARATION, an
+    // ASSIGNMENT and a PROPERTY WRITE -- the destinations the rung refuses,
+    // because their readers were compiled as "definitely the string arm"
+    // and a stored undefined is the r03 segfault. A DECLARED RETURN TYPE
+    // cannot be narrowed that way: control-flow analysis inside the body
+    // cannot change what the SIGNATURE says, and every caller was checked
+    // against the signature, so every caller already discriminates.
+    //
+    // An INFERRED return type is not a counter-example, it is the gate:
+    // `function f() { return attrs.k }` infers `string`, which carries no
+    // undefined arm, so `expected` fails the first test and the rung
+    // declines -- the trap stays, honestly, because there is nowhere for
+    // the undefined to go. A slot WIDER than the read plus the undefined
+    // arm is a conversion the author asked for and keeps its own coercion
+    // (recordKeyReadAtUndefinedArm's own width gate).
+    //
+    // No syntactic guard is needed here, unlike lowerArgExpecting -- that
+    // one has to reproduce lowerExprExpecting's early rules because it
+    // lowers the node itself. This rung inspects the value the call below
+    // ALREADY made, so a declined rung hands the identical expression to
+    // the identical tail and the emitted C is byte-for-byte what it was.
+    //
+    // SCRIPTC_RETARM_OFF=1 ablates it, so one binary emits both sides of
+    // the A/B; SCRIPTC_RETARM_WHY names every site it fires or declines on.
+    const raw = this.lowerExpr(node);
+    const e = this.keyedReadAtReturnSlot(raw, expected, node) ?? raw;
     if (expected.kind === "void" && e.kind === "unitLit") return null;
     return this.coerceInto(node, this.asyncReturnFlatten(e, expected, this.ctx.isAsync), expected);
   }
