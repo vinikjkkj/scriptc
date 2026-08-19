@@ -10,7 +10,7 @@ import { rcSitesRequested } from "./emitter.js";
 import { canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
-import { OVERFLOW_MEMBER } from "./emit-shapes.js";
+import { OVERFLOW_MEMBER, TOSTR_MEMBER } from "./emit-shapes.js";
 
 /** Can a record FIELD of this type end up holding a callable?
  *
@@ -294,11 +294,24 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
           break;
         }
         case "record": {
-          // A plain data record arm: Object.prototype.toString's constant,
-          // the same interned literal the LONE-record ToString emits (see
-          // emit-exprs.ts's `toString` case). The frontend admits an arm
-          // here only when the shape is not a tuple and carries no
-          // `toString` field, so the constant IS JS's answer.
+          // A plain data record arm: the shape's HIDDEN per-instance
+          // toString slot where it armed one, and Object.prototype
+          // .toString's constant otherwise — the SAME branch the
+          // LONE-record ToString takes (emit-exprs.ts's `toString` case),
+          // which is what makes `${rec}` and `${num | rec}` answer alike.
+          // The frontend admits an arm here only when the shape is not a
+          // tuple and declares no `toString` FIELD, so the slot (or the
+          // constant it defaults to) is the whole answer.
+          //
+          // This arm is why zapo's `Long.toString` was a refusal: the
+          // helper is emitted from the union DEF alone and had no call in
+          // it, so the METHOD spelling could not be admitted while the
+          // conversion spelling folded the constant. One slot moves both.
+          const shape = E.recordsById.get(arm.shapeId);
+          if (shape?.tostr === true) {
+            d.push(`  case ${i}: return scr_rec_tostr(((${mangleRecordStruct(arm.shapeId)} *)scr_union_peek(v))->${TOSTR_MEMBER});`);
+            break;
+          }
           const sym = E.internLiteral("[object Object]");
           d.push(`  case ${i}: return scr_str_retain((ScrStr *)&${sym});`);
           break;
@@ -1513,6 +1526,19 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         }
         d.push(`  if (d->kind != SCR_DYN_OBJ) { scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
         d.push(`  ${cDecl(t, "r")} = ${mangleRecordNew(t.shapeId)}();`);
+        // The HIDDEN per-instance toString slot. MATERIALIZING is what
+        // loses a JS object's toString: `x as LongLike` is the identity in
+        // JS, so String(x) still reaches the prototype method, while this
+        // builder copies the declared members into a struct and every
+        // later ToString folded Object.prototype's constant over a method
+        // that exists. scr_dyn_tostr_closure captures the SOURCE object
+        // and answers NULL unless it really carries a callable toString
+        // and no valueOf of its own (the one slot is read by `${r}`,
+        // String(r), r.toString() AND `r + ""`, and only a valueOf-free
+        // value gives those the same answer).
+        if (shape.tostr) {
+          d.push(`  r->${TOSTR_MEMBER} = scr_dyn_tostr_closure(d);`);
+        }
         for (const f of shape.fields) {
           const keyLit = cStringLiteral(Buffer.from(f.name, "utf8"));
           const keyLen = Buffer.byteLength(f.name, "utf8");
