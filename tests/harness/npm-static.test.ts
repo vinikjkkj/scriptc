@@ -1327,8 +1327,25 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
    * backends, 4 of them refused-to-compile and 3 silently wrong on
    * base). The ten materialization rows are UNMOVED by it, and that is
    * what keeps them useful: they are its no-move control too.
+   *
+   * AND NOW THE TEN MATERIALIZATION ROWS HAVE CLOSED, which is what this
+   * pin existed to be red about. The record shape carries a HIDDEN
+   * per-instance toString slot -- one trailing struct member, not a field,
+   * no key, invisible to Object.keys/JSON/util.inspect -- filled by the
+   * dynCheck builder from the SOURCE object and by the two projection
+   * builders from the class's own method, and NULL wherever nothing
+   * carried one, which is exactly where the constant IS Node's answer.
+   * `proto`, `own`, `shadow`, `deep`, `param`, `field`, `elem` and `relet`
+   * all read Node's text now, on both backends; `none` did not move and is
+   * still the control that says the pin was about the reach. Corpus 4731
+   * and 4732 are the positive cases -- 4731 fails on base as the SC2020
+   * REFUSAL of the union spelling (zapo's `Long.toString`), 4732 as eleven
+   * silent wrong answers.
+   *
+   * STILL PRICED, and it is ONE row: `bare`, the null-prototype
+   * dictionary. Its cause is stated at the assertion.
    */
-  test("4142: a materialized record loses the toString it was built from (price list)", async () => {
+  test("4142: a materialized record keeps the toString it was built from (one row still priced)", async () => {
     const entry = join(fixturesRoot, "npm/cases/4142-record-receiver-tostring-reach-on-purpose/main.ts");
     const { coverage } = analyze(entry, { npmStatic: ["tostrreach"] });
     expect(coverage.npmStatic).toEqual([{ package: "tostrreach", status: "static" }]);
@@ -1363,23 +1380,38 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // THE PRICE, pinned exactly. When this fails, the gap closed.
     expect(native).toBe(
       [
-        "proto  = [object Object]",
-        "own    = [object Object]",
-        "shadow = [object Object]",
+        // CLOSED: all eight of these read "[object Object]" before. The
+        // hidden per-instance toString slot carries the method across the
+        // materialization -- see the note above, and corpus 4731/4732.
+        "proto  = L:7",
+        "own    = O:8",
+        "shadow = own:9",
+        // the CONTROL, and it did not move: nothing carried a toString
+        // into this one, and "[object Object]" IS Node's answer for it.
         "none   = [object Object]",
-        "deep   = [object Object]",
+        "deep   = deep:11",
+        // STILL PRICED, and the only row left. A NULL-PROTOTYPE
+        // dictionary inherits nothing, toString included, so Node throws
+        // `z.toString is not a function` and this answers the constant.
+        // The cause is one level below this change and is the runtime's
+        // already: scr_dyn_to_string's OBJ arm folds the constant for any
+        // object with no callable toString, null-prototype or not, while
+        // scr_dyn_to_string_method throws for the null-prototype one --
+        // two spellings of one question, and the hidden slot is ONE value
+        // read by both.
         "bare   = [object Object]",
-        "param  = [object Object]",
-        "field  = [object Object]",
-        "elem   = [object Object]",
-        "relet  = [object Object]",
-        // CLOSED: was "[object Object]". See the note above and corpus 4182.
+        "param  = Own(1)",
+        "field  = Own(1)",
+        "elem   = Own(1)",
+        "relet  = Own(1)",
+        // CLOSED earlier: was "[object Object]". The note above and corpus 4182.
         "radix  = r0",
-        // CLOSED: was "[object Object]". See the note above and corpus 4241.
+        // CLOSED earlier: was "[object Object]". The note above and corpus 4241.
         "tuple  = a,1",
         "",
       ].join("\n"),
     );
+    // Still a divergence, and it is now exactly the `bare` row.
     expect(native).not.toBe(node);
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
