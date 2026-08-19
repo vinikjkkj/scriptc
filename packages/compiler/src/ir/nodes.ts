@@ -6836,6 +6836,65 @@ function canBoxBytesComposite(
  * direction's twin, so nothing crosses in and is stranded), and the
  * runtime HANDLE kinds (a tag-checked reference unwrap —
  * DYN_HANDLE_KINDS). */
+/** The order dynCheck must TRY a union's arms in: MOST SPECIFIC FIRST.
+ *
+ * Both emitters build a union's checked extraction as a chain of arm
+ * MATCH tests, first hit wins, and both used the arms' canonical
+ * (typeKey-sorted) order with the note "discriminated unions disambiguate
+ * naturally: the arm whose declared fields all fit". They do not. A record
+ * match is WIDTH-TOLERANT by construction -- dynMatch examines only the
+ * arm's declared fields and ignores every other key -- so an arm whose
+ * field-name set is a SUBSET of another arm's matches every value of the
+ * bigger arm too, and canonical order decided which one won by an accident
+ * of type-key spelling.
+ *
+ * Measured, on base, through the ordinary `as` spelling of a dyn:
+ *
+ *     type Mute = { schema: 'Mute'; chatJid: string }
+ *     type Pin  = { schema: 'Pin'; chatJid: string; pinned: boolean }
+ *     const ev = pinBag as (Mute | Pin); JSON.stringify(ev)
+ *
+ *   Node       {"schema":"Pin","chatJid":"5522@s.whatsapp.net","pinned":false}
+ *   compiled   {"schema":"Pin","chatJid":"5522@s.whatsapp.net"}
+ *
+ * exit 0 both ways -- a SILENT wrong answer, not a fence: the value was
+ * tagged Mute, so `pinned` had nowhere to live, and a later
+ * `ev.schema === 'Pin'` narrowing threw the stranded-arm TypeError instead
+ * of reading it.
+ *
+ * Ordering the record arms by DESCENDING declared-field count fixes exactly
+ * that: a strict superset has strictly more fields, so it is always tried
+ * before its subsets, and a value that genuinely lacks the bigger arm's
+ * fields still falls through to the smaller one. Ties keep canonical order,
+ * so the choice stays deterministic and both backends make it identically.
+ *
+ * Only the RECORD arms move, and only among their own positions: every
+ * other kind matches a disjoint dyn kind (a string arm can never take an
+ * object's match), so their order is unobservable, and leaving them pinned
+ * keeps the emitted chain byte-identical for every union whose record arms
+ * are already widest-first. This does NOT make an arbitrary overlap
+ * decidable -- two arms in no subset relation can still both match a value
+ * carrying the union of their fields, which is inherent to extracting a
+ * tagged representation from an untagged one -- it removes the case where
+ * one arm PROVABLY shadows another. */
+export function dynCheckArmOrder(
+  def: IrUnionDef,
+  getRecord: (shapeId: string) => IrRecordShape | undefined,
+): number[] {
+  const out = def.arms.map((_, i) => i);
+  const recPos = out.filter((i) => def.arms[i]!.kind === "record");
+  if (recPos.length < 2) return out;
+  const width = (i: number): number => {
+    const arm = def.arms[i]!;
+    return arm.kind === "record" ? (getRecord(arm.shapeId)?.fields.length ?? 0) : -1;
+  };
+  const sorted = [...recPos].sort((a, b) => width(b) - width(a) || a - b);
+  recPos.forEach((p, k) => {
+    out[p] = sorted[k]!;
+  });
+  return out;
+}
+
 export function canDynCheckTo(
   t: IrType,
   getRecord: (shapeId: string) => IrRecordShape | undefined,
