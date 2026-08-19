@@ -193,6 +193,78 @@ console.log("unreachable", c.port);
     expect(r.stderr).toContain("Uncaught TypeError: expected object at $, got array");
   });
 
+  /* The KIND GATE, and the distinction the test above does NOT draw.
+   *
+   * `[1,2,3] as {port:number}` is refused because the array HAS NO `port` — the
+   * check-and-extract stance, and Node would have read `undefined` and carried
+   * it. Nothing about that case depends on the value being an array.
+   *
+   * These cases are the other half, and they are a different claim: an array
+   * HAS a `length`, a string HAS a `length`, and in JS both are objects whose
+   * members read. `as` is erased, so Node answers 3 and 4. scriptc refuses at
+   * `d->kind != SCR_DYN_OBJ`, before any member is looked at — which is the
+   * FIRST statement of every record validator and the largest single bucket in
+   * zapo's DYNCHECK population (record.kind, 34.78% of it).
+   *
+   * Measured over a generated 70-case population (14 receiver kinds x 5 record
+   * targets, every expectation taken from running the same file under Node):
+   * 45 of the 70 diverge at this gate alone, 0 of them silently. The other
+   * divergences are the documented stance (6 required-member-absent, 5
+   * wrong-typed-member) and 9 agree, 5 both-threw. Nothing in the population
+   * answers a DIFFERENT VALUE and nothing accepts where Node throws.
+   *
+   * The gate is pinned rather than widened, and the reason is the union.
+   * Widening only the BUILDER is monotone and safe; widening the MATCHER is
+   * not, because `{length:number} | string[]` would then have an array fitting
+   * BOTH arms and the first one would win — turning a loud refusal into a
+   * silently wrong union tag, which is the trade this project does not make.
+   * These assertions exist so that a future widening has to come here and say
+   * which half it moved. */
+  test("the KIND GATE refuses receivers that HAVE the member: array", async () => {
+    const r = await compileAndRun(
+      "kind-gate-array",
+      `type HasLen = { length: number };
+const v: unknown[] = [["a", "b", "c"]];
+const u: unknown = v[v.length - 1];
+console.log("unreachable", (u as HasLen).length);
+`,
+    );
+    /* Node answers 3 here: an array's `length` is a real member. */
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain("Uncaught TypeError: expected object at $, got array");
+  });
+
+  test("the KIND GATE refuses receivers that HAVE the member: string", async () => {
+    const r = await compileAndRun(
+      "kind-gate-string",
+      `type HasLen = { length: number };
+const v: unknown[] = ["abcd"];
+const u: unknown = v[v.length - 1];
+console.log("unreachable", (u as HasLen).length);
+`,
+    );
+    /* Node answers 4. */
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain("Uncaught TypeError: expected object at $, got string");
+  });
+
+  test("the KIND GATE refuses a CLASS INSTANCE whose fields all read", async () => {
+    const r = await compileAndRun(
+      "kind-gate-objinst",
+      `class Holder { a: string = "field-a"; }
+type HasA = { a: string };
+const v: unknown[] = [new Holder()];
+const u: unknown = v[v.length - 1];
+console.log("unreachable", (u as HasA).a);
+`,
+    );
+    /* Node answers "field-a". The box is SCR_DYN_OBJINST, a different kind
+     * from SCR_DYN_OBJ, so the gate refuses before the field is read — and
+     * the class name is what the message reports, not "object". */
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain("Uncaught TypeError: expected object at $, got Holder");
+  });
+
   test("a failed check is CATCHABLE and execution recovers", async () => {
     const r = await compileAndRun(
       "catchable",

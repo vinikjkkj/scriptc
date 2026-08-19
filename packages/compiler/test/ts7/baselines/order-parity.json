@@ -8504,6 +8504,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5150-dyn-checks-that-exist-and-dyn-checks-that-run.ts": {
+   "order": [
+    "<repo>/tests/corpus/5150-dyn-checks-that-exist-and-dyn-checks-that-run.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/516-array-reduce.ts": {
    "order": [
     "<repo>/tests/corpus/516-array-reduce.ts"
