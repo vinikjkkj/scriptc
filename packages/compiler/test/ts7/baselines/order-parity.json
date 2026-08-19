@@ -8318,6 +8318,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4830-defineproperty-refusals-name-the-receiver.js": {
+   "order": [
+    "<repo>/tests/corpus/4830-defineproperty-refusals-name-the-receiver.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
@@ -9415,6 +9421,12 @@
      "hint": "use named exports: export function f() {} / import { f } from \"./m\""
     }
    ]
+  },
+  "<repo>/tests/diagnostics/defineproperty-which-argument-refuses.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/defineproperty-which-argument-refuses.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/diagnostics/delete-fences.ts": {
    "order": [
