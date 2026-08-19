@@ -9410,6 +9410,12 @@
     }
    ]
   },
+  "<repo>/tests/diagnostics/defineproperty-which-argument-refuses.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/defineproperty-which-argument-refuses.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/delete-fences.ts": {
    "order": [
     "<repo>/tests/diagnostics/delete-fences.ts"
