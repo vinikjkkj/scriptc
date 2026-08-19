@@ -1491,10 +1491,18 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
 
-  // 4062: ON PURPOSE. Both lines diverge from Node, both with zero
-  // fences and a "fully static" coverage report, and the second one is
-  // the wall zapo's SC2001 is still behind.
-  test("4062: a prototype ACCESSOR and a method-bearing union arm are still refused", async () => {
+  // 4062: ONE line diverged ON PURPOSE and now does not. The prototype
+  // ACCESSOR answers `1 42`, Node's own line, because the record BUILDER
+  // asks scr_dyn_obj_accessor_get on the MISS path -- the builder does
+  // hold the +1 and the exception path this comment said it did not, and
+  // the getter still runs ONCE because the MATCHER was left alone (an
+  // accessor-only field is never MATCHED, so a matched arm never reaches
+  // the new read). The other two lines are untouched and their causes are
+  // unrelated: the union arm is the exact-signature test, the round trip
+  // is record materialization writing every declared field as an own key.
+  // Both still diverge with zero fences and a "fully static" coverage
+  // report, and the second is the wall zapo's SC2001 is still behind.
+  test("4062: the prototype ACCESSOR now answers; the method-bearing union arm is still refused", async () => {
     const entry = join(fixturesRoot, "npm/cases/4062-prototype-get-still-refused-on-purpose/main.ts");
     const { coverage } = analyze(entry, { npmStatic: ["protolong"] });
     expect(coverage.npmStatic).toEqual([{ package: "protolong", status: "static" }]);
@@ -1517,14 +1525,17 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
       ].join("\n"),
     );
     expect(nodeRes.exitCode).toBe(0);
-    // Inverted on purpose, and the three lines have THREE causes: the
-    // accessor is out of the borrow-only walk's contract; the union arm
-    // is the exact-signature test on `func()=>dyn` vs `func()=>f64`; the
-    // round trip is record materialization writing every declared field
-    // as an own key, so `w` re-emerges owned.
+    // Two of the three lines are still inverted, and the three lines have
+    // THREE causes: the accessor was out of the borrow-only walk's
+    // contract and is now answered by the builder's miss-path read (this
+    // line AGREES with Node and is recorded as agreeing -- it fails on
+    // base at 7968e00d with `prototype-accessor THREW` on both backends);
+    // the union arm is the exact-signature test on `func()=>dyn` vs
+    // `func()=>f64`; the round trip is record materialization writing
+    // every declared field as an own key, so `w` re-emerges owned.
     expect(nativeRes.stdout.toString("utf8")).toBe(
       [
-        "prototype-accessor THREW",
+        "prototype-accessor 1 42",
         "union-arm-with-method THREW",
         'roundtrip-owns-the-inherited 9 3 {"z":9,"w":3}',
         "",
