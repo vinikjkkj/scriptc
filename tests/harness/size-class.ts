@@ -269,7 +269,56 @@ export const SIZE_DRIFT_PAGE = 4_096;
  *
  * linux and darwin cannot be weighed from this box. They keep the ceilings
  * alone (there is nothing to move: no bound tipped), for the reason every
- * calibration above gives. */
+ * calibration above gives.
+ *
+ * —— 2026-08-19, the ToUint32 fast path —————————————————————
+ *
+ * The regex band went RED and the static one did not, and the split of the
+ * bytes is worth having in full because MOST of the red was not the change
+ * that tripped it. Two worktrees at b602a066, same toolchain, same options:
+ *
+ *   base b602a066   642,048 static   781,824 regex
+ *   this change     642,560 static   782,848 regex
+ *                   +512             +1,024
+ *
+ * against the figures RECORDED on 2026-08-18, 638,976 and 778,240:
+ *
+ *   base is already +3,072 static and +3,584 regex above its own anchor.
+ *
+ * So the change contributes 1,024 of the 4,608 bytes the failure reports
+ * and the other 3,584 arrived between the 2026-08-18 recording and
+ * b602a066 without anyone re-recording — the drift page absorbed them
+ * silently, exactly as the 2026-08-17 note warns it does, until a 1 KB
+ * change tipped 0.875 of a page over 1.0. That is the whole reason the
+ * ±4,096 has to be measured from something true rather than from an
+ * anchor nobody has refreshed, and both numbers are written here so the
+ * next reader can tell the 1,024 that is a change from the 3,584 that is
+ * accumulated drift.
+ *
+ * WHAT THE 1,024 BOUGHT, attributed per-flag rather than argued (the three
+ * parts of the change are each behind a -D, so each was weighed alone):
+ *
+ *   SCR_FAST_UINT32   +0 static  +1,024 regex
+ *   SCR_CYC_LEAF_SKIP +0         +0
+ *   header memset     +0         +0
+ *   all three         +512       +1,024
+ *
+ * The ToUint32 fast path is the whole of it: a range compare and a
+ * truncating convert inlined at every use of scr_to_uint32 (the seven
+ * bitwise operators plus two charCodeAt paths), with the general form
+ * moved out of line into scr_to_uint32_slow. The regex class carries more
+ * of the runtime than the static one does, which is why it sees the 1,024
+ * and the static class only sees the 512 that the three together round up
+ * to at this linker's granularity — the same "these two classes do not
+ * move together" the note above records for the fourth time.
+ *
+ * Headroom after: 3,440 static and 2,152 regex below ceilings of 646,000
+ * and 785,000. Both still pass, so both MAX bounds are untouched, for the
+ * same reason every calibration above gives: raising a ceiling one has not
+ * reached only loosens the canary. The regex headroom is now the tighter
+ * of the two and is worth watching — it is half a page.
+ *
+ * linux and darwin still cannot be weighed from this box. */
 
 /* 2026-08-19 — THE toString SLOT, AND 3,584 BYTES THAT ARE NOT IT.
  *
@@ -344,12 +393,21 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * block/slot; x86_64-windows-gnu, zig cc, -O2). main alone weighed 642,048
  * in the same run: the toString slot's 384 bytes fell inside existing
  * padding here and cost this class nothing. */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 642_048 : null;
-
+/* superseded below — the merged tree is measured after both changes. */
 /** The regex program, same run, same tree. main alone weighed 781,824; the
  * +512 is the slot's 384 bytes rounded up by file alignment, and it is
  * deliberately NOT derived from the static delta — which was zero. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 782_336 : null;
+/* superseded below — see the churn record. */
+/** The static hello-world, measured 2026-08-19 (x86_64-windows-gnu, zig cc
+ * 0.16.0, -O2), after the ToUint32 fast path. Base at b602a066 weighed
+ * 642,048 in the same run; +512 is this change and +3,072 was already
+ * there against the previous anchor. */
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 642_560 : null;
+
+/** The regex program, measured in the same run on the same tree. Base
+ * weighed 781,824; +1,024 is this change and +3,584 was already there.
+ * Deliberately NOT derived from the static delta. */
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 782_848 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown
