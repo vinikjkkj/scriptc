@@ -9746,6 +9746,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/index-signature-spread-beside-a-fixed-shape-source.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/index-signature-spread-beside-a-fixed-shape-source.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/index-signature-values.ts": {
    "order": [
     "<repo>/tests/diagnostics/index-signature-values.ts"

@@ -1,0 +1,6 @@
+index-signature-spread-beside-a-fixed-shape-source.ts:43:5 - error SC1090: object spread involving index-signature shapes (overflow keys are runtime state — copy the fields you need explicitly) are not supported yet
+
+  42 |     operation: "remove",
+  43 |     ...indexArgs,
+     |     ^~~~~~~~~~~~
+  44 |     ...base,
