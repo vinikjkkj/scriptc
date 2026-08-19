@@ -8092,12 +8092,24 @@ export class Lowerer {
     if (this.shapes.get(src.shapeId)?.indexValue === undefined) return null;
     const def = this.unions.get(expected.unionId);
     if (!def) return null;
-    // strandedCoercionTrap's OWN gate, spelled the same way. ONE candidate
-    // already lowered above (widthLiftPlan's liftWrap); SEVERAL keep their
-    // compile fence -- an honest ambiguity the checked extraction must not
-    // resolve behind the author's back.
+    // strandedCoercionTrap's OWN gate, spelled the same way -- with the
+    // one difference the SOURCE makes. ONE candidate already lowered above
+    // (widthLiftPlan's liftWrap) and cannot reach here at all.
+    //
+    // SEVERAL is where the two part company. For a FIXED-shape source the
+    // trap is right to keep the fence: the arm is a STATIC fact and two
+    // plans mean the author wrote something genuinely ambiguous. For a
+    // RUNTIME-KEYED one it is not a fact at all -- every 'candidate' is a
+    // plan to read that arm's fields back out of the overflow store, so
+    // several candidates say only that several arms COULD be assembled
+    // from a bag whose keys are runtime state. Choosing one statically is
+    // the guess; testing the value is the answer, and the checked
+    // extraction is exactly that test. (A store with a checked-dynamic
+    // value slot makes this the common case rather than the exotic one:
+    // dynOutPlan admits every arm's every field, so EVERY arm becomes a
+    // candidate at once.)
     const candidates = def.arms.filter((arm) => arm.kind === "record" && this.widthLiftPlan(src, arm) !== null);
-    if (candidates.length !== 0) return null;
+    if (candidates.length === 1) return null;
     if (!this.dynConvertible(src)) return null;
     if (!canDynCheckTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id))) return null;
     // ...and the arms must be TELLABLE APART by what a match predicate can

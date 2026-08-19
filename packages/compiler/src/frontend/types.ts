@@ -5366,6 +5366,16 @@ function spreadErasedIndexValue(
   if (decls.length === 0 || !decls.every((d) => ts.isObjectLiteralExpression(d))) return undefined;
   let value: IrType | null = null;
   let sawSpread = false;
+  /** At least one spread source PUBLISHES a string/number signature —
+   * the whole reason to recover anything. Without one the literal is an
+   * ordinary spread the desugar handles, and the recovery must stay out
+   * of its way. */
+  let sawIndexSource = false;
+  /** The sources cannot agree on ONE narrow slot: a fixed-shape source
+   * beside a keyed one, two signatures with different value types, or a
+   * declared member that is no arm of either. The store then holds the
+   * checked-dynamic value type, which holds all of them. */
+  let widenToDyn = false;
   let fold = false;
   for (const decl of decls as ts.ObjectLiteralExpression[]) {
     // KEY ORDER decides whether the recovered store can answer at all.
@@ -5391,12 +5401,24 @@ function spreadErasedIndexValue(
     for (const prop of decl.properties) {
       if (!ts.isSpreadAssignment(prop)) continue;
       sawSpread = true;
-      // A spread source with NO signature erased nothing, but it also
-      // contributes keys this shape would now claim to store uniformly —
-      // and its own fields may not fit the slot. Refuse the whole
-      // recovery rather than claim a store one source cannot fill.
+      // A spread source with NO signature erased nothing of its own, but
+      // it contributes keys this shape would claim to store, and its
+      // fields may not fit the slot the keyed source offers. That used to
+      // refuse the whole recovery — which is what kept zapo's
+      // appstate-mutation rows refused after everything else answered:
+      // `{ schema, operation, ...indexArgs, ...base }` mixes a
+      // `Record<string, string|boolean|null>` with a fixed `as const`
+      // object carrying `version: number`. The honest answer is not
+      // "refuse" and not "claim a slot one source cannot fill": it is a
+      // store whose value type holds EVERY contributor, and the checked-
+      // dynamic one does. The source's own members are already merged
+      // into `widened`'s properties, so they are checked below with the
+      // literal's own.
       const srcInfos = checker.getIndexInfosOfType(checker.getTypeAtLocation(prop.expression));
-      if (srcInfos.length === 0) return undefined;
+      if (srcInfos.length === 0) {
+        widenToDyn = true;
+        continue;
+      }
       for (const info of srcInfos) {
         if (
           !(info.keyType.flags & ts.TypeFlags.String) &&
@@ -5406,12 +5428,15 @@ function spreadErasedIndexValue(
         }
         const iv = mapType(info.valueType, ctx);
         if (!iv || !isSupportedIndexValue(iv)) return undefined;
-        if (value !== null && !typeEquals(value, iv)) return undefined;
-        value = iv;
+        sawIndexSource = true;
+        // Two signatures that disagree have no common narrow slot; the
+        // widened one holds both.
+        if (value !== null && !typeEquals(value, iv)) widenToDyn = true;
+        else value = iv;
       }
     }
   }
-  if (!sawSpread || value === null) return undefined;
+  if (!sawSpread || !sawIndexSource || value === null) return undefined;
   // A DECLARED member that only fits the slot as a SUBSET forces the FOLD.
   //
   // The member loop below asks two different questions of the two shapes
@@ -5440,7 +5465,7 @@ function spreadErasedIndexValue(
   // recovery declined the literal outright, and the desugar fenced at the
   // spread. The fold's own guards (accessor, array-index-like name) are
   // enforced by that same loop, now that `fold` is decided before it runs.
-  if (!fold) {
+  if (!fold && !widenToDyn) {
     for (const p of checker.getPropertiesOfType(widened)) {
       const pt = mapType(checker.getTypeOfSymbol(p), ctx);
       if (!pt) return undefined;
@@ -5449,6 +5474,39 @@ function spreadErasedIndexValue(
         break;
       }
     }
+  }
+  // A DECLARED member that is no arm of the sources' slot widens too. It
+  // is the same question the loop above asks, with the third answer
+  // spelled out: exactly -> the hybrid keeps a struct slot; as a SUBSET
+  // -> only the fold can hold it; NOT AT ALL -> nothing the sources offer
+  // can, so widen. Before this the third answer was `return undefined`,
+  // and the literal refused at its spread.
+  if (!widenToDyn) {
+    for (const p of checker.getPropertiesOfType(widened)) {
+      const pt = mapType(checker.getTypeOfSymbol(p), ctx);
+      if (!pt) return undefined;
+      if (!typeEquals(pt, value) && !fitsWithinSlot(pt, value, ctx)) {
+        widenToDyn = true;
+        break;
+      }
+    }
+  }
+  if (widenToDyn) {
+    // The WIDENED store is a checked-dynamic one, and it FOLDS: a member
+    // whose home is the store has no struct slot to keep. Every
+    // contributor must be able to enter the tree — the same
+    // canConvertToDyn domain the dynFrom conversion uses everywhere else
+    // — or the recovery declines and the literal keeps the fence it has
+    // today.
+    const getRecord = (id: string): IrRecordShape | undefined => ctx.shapes.get(id);
+    const getUnion = (id: string): IrUnionDef | undefined => ctx.unions.get(id);
+    if (!canConvertToDyn(value, getRecord, getUnion)) return undefined;
+    for (const p of checker.getPropertiesOfType(widened)) {
+      const pt = mapType(checker.getTypeOfSymbol(p), ctx);
+      if (!pt || !canConvertToDyn(pt, getRecord, getUnion)) return undefined;
+    }
+    value = DYN;
+    fold = true;
   }
   // Every DECLARED member must fit the recovered slot. A member the
   // overflow could not hold would make the shape claim a uniform value
@@ -5472,7 +5530,16 @@ function spreadErasedIndexValue(
     // (fieldTarget's canonicalized()). The hybrid keeps exact
     // equality: there the member has a struct slot of its own, and the
     // merge helper stores declared names RAW.
-    if (!typeEquals(pt, value) && !(fold && fitsWithinSlot(pt, value, ctx))) return undefined;
+    // The WIDENED store admits every member the dynFrom conversion
+    // admits — checked just above, and re-stated here because this loop
+    // is the one gate the two shapes share.
+    if (
+      !typeEquals(pt, value) &&
+      !(fold && fitsWithinSlot(pt, value, ctx)) &&
+      !(fold && value.kind === "dyn" && canConvertToDyn(pt, (id) => ctx.shapes.get(id), (id) => ctx.unions.get(id)))
+    ) {
+      return undefined;
+    }
   }
   if (process.env["SCRIPTC_SPREADIX_WHY"] !== undefined) {
     console.error(`SPREADIX-RECOVER ${checker.typeToString(widened)} idx=${typeKey(value)} fold=${String(fold)}`);

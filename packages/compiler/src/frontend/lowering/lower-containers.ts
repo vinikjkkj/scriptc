@@ -9033,7 +9033,7 @@ function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & 
     // when its type enters the slot (identity, the dyn conversion, or a
     // width lift — the capture helper's matrix); accessor/reserved slots
     // decline (a spread would need the getter's computed value).
-    const srcPlans: { shapeId: string; wrapTag: number; retag: string | null; fields: Map<string, WidthLift | "dyn"> | null }[] = [];
+    const srcPlans: { shapeId: string; wrapTag: number; retag: string | null; toDyn: boolean; fields: Map<string, WidthLift | "dyn"> | null }[] = [];
     for (const c of contributors) {
       // A conditional spread needs SOME encoding of "absent" — the slot's
       // own undefined arm, the dyn tree's undefined, or the widened
@@ -9054,19 +9054,30 @@ function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & 
           if (lift === null) return null;
           fields.set(ff.name, lift);
         }
-        srcPlans.push({ shapeId: c.shapeId, wrapTag: -1, retag: null, fields });
+        srcPlans.push({ shapeId: c.shapeId, wrapTag: -1, retag: null, toDyn: false, fields });
         continue;
       }
       const fIv = from.indexValue;
       let wrapTag = -1;
       let retag: string | null = null;
+      let toDyn = false;
       if (!typeEquals(fIv, tIv)) {
-        if (tIv.kind !== "union") return null;
-        wrapTag = L.armTag(tIv.unionId, fIv);
-        if (wrapTag < 0) {
-          if (!(fIv.kind === "union" && L.unionRetagMappable(fIv.unionId, tIv.unionId))) return null;
-          retag = L.unionRetagHelper(fIv.unionId, tIv.unionId, loc);
-          if (retag === null) return null;
+        // A CHECKED-DYNAMIC target slot takes every source slot the
+        // dynFrom conversion takes, per copied value — the same one-step
+        // conversion an explicit property into a dyn slot already uses
+        // (intoIndexValueSlot). Without it a `Record<string, string>`
+        // could not spread into an `{ [k: string]: unknown }` store the
+        // recovery had to widen, which is zapo's appstate literal.
+        if (tIv.kind === "dyn" && (fIv.kind === "dyn" || L.dynConvertible(fIv))) {
+          toDyn = true;
+        } else {
+          if (tIv.kind !== "union") return null;
+          wrapTag = L.armTag(tIv.unionId, fIv);
+          if (wrapTag < 0) {
+            if (!(fIv.kind === "union" && L.unionRetagMappable(fIv.unionId, tIv.unionId))) return null;
+            retag = L.unionRetagHelper(fIv.unionId, tIv.unionId, loc);
+            if (retag === null) return null;
+          }
         }
       }
       for (const ff of from.fields) {
@@ -9075,7 +9086,7 @@ function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & 
         // shape outside that keeps the fence.
         if (!typeEquals(ff.type, fIv)) return null;
       }
-      srcPlans.push({ shapeId: c.shapeId, wrapTag, retag, fields: null });
+      srcPlans.push({ shapeId: c.shapeId, wrapTag, retag, toDyn, fields: null });
     }
     const key =
       `ixmerge:${toId}:` +
@@ -9231,11 +9242,15 @@ function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & 
       }
       const fIv = from.indexValue!;
       const intoSlot = (v: IrExpr): IrExpr =>
-        plan.retag !== null
-          ? { kind: "call", callee: plan.retag, args: [v], type: tIv, loc }
-          : plan.wrapTag < 0
+        plan.toDyn
+          ? v.type.kind === "dyn"
             ? v
-            : { kind: "unionWrap", unionId: (tIv as IrType & { kind: "union" }).unionId, tag: plan.wrapTag, value: v, type: tIv, loc };
+            : { kind: "dynFrom", value: v, type: DYN, loc }
+          : plan.retag !== null
+            ? { kind: "call", callee: plan.retag, args: [v], type: tIv, loc }
+            : plan.wrapTag < 0
+              ? v
+              : { kind: "unionWrap", unionId: (tIv as IrType & { kind: "union" }).unionId, tag: plan.wrapTag, value: v, type: tIv, loc };
       // Declared source fields first (literal keys; absent optionals skip).
       for (const ff of from.fields) {
         const raw: IrExpr = { kind: "recordGet", obj: sRef, shapeId: plan.shapeId, field: ff.name, type: ff.type, loc };
