@@ -1,13 +1,13 @@
-union-spread-into-union-slot.ts:72:31 - error SC1090: object spread of 'Parsed' into the union-typed slot 'Ev' (the source's arm decides which arm the literal builds, and a literal builds one shape — narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) is not supported yet
+union-spread-into-union-slot.ts:159:38 - error SC1090: object spread of 'LeadNum | LeadStr' into the union-typed slot 'EvW' (the source's arm decides which arm the literal builds, and a literal builds one shape — narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) is not supported yet
 
-  71 | if (p !== null) {
-  72 |   console.log(emit({ ...base, ...p }));
-     |                               ^~~~
-  73 | }
+  158 |   const r = parse(n);
+  159 |   return r === null ? null : emitW({ ...lead, ...r });
+      |                                      ^~~~~~~
+  160 | }
 
-union-spread-into-union-slot.ts:100:41 - error SC1090: object spread of 'Parsed' into the union-typed slot 'Ev | null' (the source's arm decides which arm the literal builds, and a literal builds one shape — narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) is not supported yet
+union-spread-into-union-slot.ts:203:27 - error SC1090: object spread of 'PSrcA | PSrcB' into the union-typed slot 'POutA | POutB' (the source's arm decides which arm the literal builds, and a literal builds one shape — narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) is not supported yet
 
-   99 |   const r = parse(n);
-  100 |   return r === null ? null : { ...base, ...r };
-      |                                         ^~~~
-  101 | }
+  202 | function buildP(lead: PLead, s: PSrcA | PSrcB): string {
+  203 |   return emitP({ ...lead, ...s });
+      |                           ^~~~
+  204 | }

@@ -22,13 +22,14 @@
  * and `ARMS=` alone is not enough to act on: `content.ts:183` pairs 3/3 BY
  * FIELD NAME while the other two pair 0/8 and 0/7, so the verdict groups
  * sites the compiler can build with one it cannot. The paired-arm rule now
- * CLOSES three of the four — `mex-notification.ts:192` reads 0/7 only
- * because its literal SUPPLIES the missing name, and a plain override
- * belongs to the shape the branch builds — and refuses `incoming.ts:397`,
- * whose second contributor is another SPREAD. The instrument has to report
- * enough to tell them apart: the relation, the pairing count, the supplied
- * names, and the per-field type deltas behind a pairing. This test pins all
- * of it:
+ * CLOSES all four — `mex-notification.ts:192` reads 0/7 only because its
+ * literal SUPPLIES the missing name, and `incoming.ts:397` reads 0/8 only
+ * because a leading plain-record CONTRIBUTOR supplies its eight. Both
+ * belong to the shape the branch builds rather than the one it reads, and
+ * folding them into the pairing key is the whole of both closures. The
+ * instrument has to report enough to tell every outcome apart: the
+ * relation, the pairing count, the supplied names, the contributors, and
+ * the per-field type deltas behind a pairing. This test pins all of it:
  *
  *   CLOSED-BY=identity-arm   the arms are the identity map and the literal's
  *                            own spelling lets the rule build it — no fence,
@@ -104,10 +105,28 @@ function unionslotRows(source: string, on: boolean): string[] {
  *                      folds the supplied names into the source side.
  *   armTwoSpreads      `incoming.ts:397`'s shape (`{ ...baseEvent, ...parsed
  *                      }`) — TWO plain spreads with the union one SECOND.
- *                      This rule models a union spread FIRST and an override
- *                      tail; the names a leading spread contributes are not
- *                      overrides and it does not model them, so this is where
- *                      the genuine `pairedByNames=0/2` reading now lives.
+ *                      CLOSED: the leading spread is a plain-record
+ *                      CONTRIBUTOR, its names join the source side of the
+ *                      pairing key exactly as a plain override's do, and the
+ *                      source still wins every name it declares because it is
+ *                      written after the contributor. It is the only closed
+ *                      row with an EMPTY `overrides` and a non-empty
+ *                      `contributors`, which is how this test tells it from
+ *                      the two override-driven ones.
+ *   armUnionContributor  a contributor that is itself a UNION. Refused by
+ *                      name (`contributor-not-a-record:union`), and this is
+ *                      where the genuine `pairedByNames=0/2` reading now
+ *                      lives — the fence's own count folds nothing in, so a
+ *                      two-spread decline still reads 0/2.
+ *   armContribPrecedence  the configuration the contributor rule is ARMED
+ *                      against: `n` is supplied by the contributor and also
+ *                      declared by ONE source arm, so Node reads it from the
+ *                      SOURCE there and from the CONTRIBUTOR in the other
+ *                      arm. Once the contributor's names join the key the two
+ *                      source arms collapse onto ONE key and the pairing
+ *                      refuses as AMBIGUOUS. Its fence reads
+ *                      `pairedByNames=1/2` — a third fingerprint on the same
+ *                      `ARMS=disjoint` verdict.
  *   armPairedWiden     `content.ts:183`'s RELATION with `content.ts:183`'s
  *                      difficulty removed and a harder one put in: the arms
  *                      pair 2/2 by name onto DIFFERENT interned shapes, and
@@ -150,6 +169,18 @@ interface AmbB { readonly a: number; readonly k: boolean }
 interface AmbAOut { readonly a: string | null; readonly k: boolean }
 interface AmbBOut { readonly a: number | null; readonly k: boolean }
 
+interface BaseU1 { readonly rawId: string; readonly at: number }
+interface BaseU2 { readonly rawId: string; readonly at: string }
+interface ImgU { readonly url: string; readonly viewOnce?: boolean; readonly rawId: string; readonly at: number | string }
+interface VidU { readonly url: string; readonly seconds: number; readonly viewOnce?: boolean; readonly rawId: string; readonly at: number | string }
+type MediaU = ImgU | VidU
+
+interface PrecA { readonly k: string; readonly n: number; readonly t: number }
+interface PrecB { readonly k: string; readonly t: string }
+interface PrecLead { readonly k: string; readonly n: number }
+interface PrecOutA { readonly k: string; readonly n: number; readonly t: number }
+interface PrecOutB { readonly k: string; readonly n: number; readonly t: string }
+
 export function armIdentityClosed(m: Media): Media {
     return { ...m, viewOnce: true }
 }
@@ -168,10 +199,16 @@ export function armPairedWiden(m: ImgW | VidW): ImgWOut | VidWOut {
 export function armPairAmbiguous(m: AmbA | AmbB): AmbAOut | AmbBOut {
     return { ...m, k: true }
 }
+export function armUnionContributor(b: BaseU1 | BaseU2, m: Media): MediaU {
+    return { ...b, ...m }
+}
+export function armContribPrecedence(lead: PrecLead, s: PrecA | PrecB): PrecOutA | PrecOutB {
+    return { ...lead, ...s }
+}
 export function singleArmSlot(m: Img): Img | null {
     return { ...m, viewOnce: true }
 }
-console.log(typeof armIdentityClosed, typeof armIdentityLate, typeof armSuppliedName, typeof armTwoSpreads, typeof armPairedWiden, typeof armPairAmbiguous, typeof singleArmSlot)
+console.log(typeof armIdentityClosed, typeof armIdentityLate, typeof armSuppliedName, typeof armTwoSpreads, typeof armPairedWiden, typeof armPairAmbiguous, typeof armUnionContributor, typeof armContribPrecedence, typeof singleArmSlot)
 `;
 
 test("the instrument names the ARM RELATION at each fence, and nothing where there is no fence", () => {
@@ -187,11 +224,11 @@ test("the instrument names the ARM RELATION at each fence, and nothing where the
    * row; `armPairedWiden` and `armSuppliedName` are the two `paired-arm`
    * ones. None of the three may also appear as a fence. */
   const closed = distinct.filter((l) => l.includes(" CLOSED-BY="));
-  expect(closed.length, why).toBe(3);
+  expect(closed.length, why).toBe(4);
   const identityClosed = closed.filter((l) => l.includes("CLOSED-BY=identity-arm"));
   const pairedClosed = closed.filter((l) => l.includes("CLOSED-BY=paired-arm"));
   expect(identityClosed.length, why).toBe(1);
-  expect(pairedClosed.length, why).toBe(2);
+  expect(pairedClosed.length, why).toBe(3);
   expect(identityClosed[0]).toContain("arms=2");
   expect(identityClosed[0]).toContain("overrides=[viewOnce]");
   // The identity row's PAIRS are every arm with ITSELF — which is what makes
@@ -204,6 +241,18 @@ test("the instrument names the ARM RELATION at each fence, and nothing where the
   const suppliedClosed = pairedClosed.filter((l) => l.includes("overrides=[errors]"));
   expect(widenClosed.length, why).toBe(1);
   expect(suppliedClosed.length, why).toBe(1);
+  /* THE CONTRIBUTOR ROW. `armTwoSpreads` has NO override at all -- every
+   * name its slot arms carry and its source arms do not comes from the
+   * LEADING spread -- so it is the one closed row whose `overrides` is empty
+   * and whose `contributors` is not. Exactly one contributor, named by shape
+   * id, is what separates it from the two override-driven rows above. */
+  const contribClosed = pairedClosed.filter((l) => /contributors=\[\w+\]/.test(l));
+  expect(contribClosed.length, why).toBe(1);
+  expect(contribClosed[0], why).toContain("overrides=[]");
+  expect(contribClosed[0], why).toContain("arms=2");
+  for (const l of [...identityClosed, ...widenClosed, ...suppliedClosed]) {
+    expect(l, why).toContain("contributors=[]");
+  }
   for (const l of pairedClosed) expect(l).not.toMatch(/pairs=\[(\w+)->\1,(\w+)->\2\]/);
   // THE SUPPLIED-NAME ROW is the one this instrument's old reading got
   // wrong: `errors` is on NEITHER source arm, and the rule still pairs 2/2
@@ -215,10 +264,14 @@ test("the instrument names the ARM RELATION at each fence, and nothing where the
    * this rule does not model; `armPairAmbiguous`'s arms answer to one name
    * set. `singleArmSlot` reaches neither. */
   const declined = distinct.filter((l) => l.includes(" NOT-CLOSED="));
-  expect(declined.length, why).toBe(3);
+  expect(declined.length, why).toBe(4);
   expect(declined.some((l) => l.includes("NOT-CLOSED=head-not-a-spread")), why).toBe(true);
+  /* A UNION CONTRIBUTOR is refused by its own named reason rather than by
+   * the pairing: "which contributor supplies this name" is not a
+   * compile-time fact when the contributor has arms, and the per-arm rebuild
+   * has no single shape to copy from. */
   expect(
-    declined.some((l) => l.includes("NOT-CLOSED=later-spread-not-a-single-prop-conditional")),
+    declined.some((l) => l.includes("NOT-CLOSED=contributor-not-a-record:union")),
     why,
   ).toBe(true);
   /* AMBIGUITY IS ITS OWN ANSWER, and it is the armed half of the pairing
@@ -233,35 +286,51 @@ test("the instrument names the ARM RELATION at each fence, and nothing where the
     why,
   ).toBe(true);
 
-  // THREE fences: the three CLOSED literals are gone from this population.
+  // FOUR fences: the four CLOSED literals are gone from this population.
   const fences = distinct.filter((l) => l.includes(" ARMS="));
-  expect(fences.length, why).toBe(3);
+  expect(fences.length, why).toBe(4);
 
   const identity = fences.filter((l) => l.includes(" ARMS=identity "));
   const disjoint = fences.filter((l) => l.includes(" ARMS=disjoint "));
   expect(identity.length, why).toBe(1);
-  // The disjoint pair: `armTwoSpreads` (0/2 — no pairing exists, and the
-  // five names its LEADING spread contributes are not overrides so nothing
-  // folds them in) and `armPairAmbiguous` (2/2 by the COUNT, but a count is
-  // not a pairing — both arms answer to the same name set). That the two
-  // read the same on `ARMS=` and differently on `pairedByNames` is exactly
-  // why the fingerprints exist.
-  expect(disjoint.length, why).toBe(2);
+  // The disjoint TRIO: `armUnionContributor` (0/2 — the fence's own count
+  // folds nothing in, so a two-spread decline still reads 0/2),
+  // `armPairAmbiguous` (2/2 by the COUNT, but a count is not a pairing —
+  // both arms answer to the same name set) and `armContribPrecedence` (1/2 —
+  // one source arm already carries the contributor's name and one does not).
+  // That the three read the same on `ARMS=` and differently on
+  // `pairedByNames` is exactly why the fingerprints exist.
+  expect(disjoint.length, why).toBe(3);
   const disjointUnpaired = disjoint.filter((l) => l.includes("pairedByNames=0/2"));
   const ambiguousFence = disjoint.filter((l) => l.includes("pairedByNames=2/2"));
+  const precedenceFence = disjoint.filter((l) => l.includes("pairedByNames=1/2"));
   expect(disjointUnpaired.length, why).toBe(1);
   expect(ambiguousFence.length, why).toBe(1);
+  /* THE PER-ARM PRECEDENCE ROW, and its reading is a THIRD fingerprint on
+   * the same `ARMS=disjoint` verdict: 1/2. One source arm already carries the
+   * contributor's name and one does not, so exactly one of the two has a
+   * name-mate on the slot side before any folding -- and once the
+   * contributor's names DO join the key both arms answer to it and the
+   * pairing refuses as ambiguous. A rule that folded contributor names in
+   * without the ambiguity guard would build this site and read `n` from the
+   * wrong contributor in one of its two arms, with no diagnostic. */
+  expect(precedenceFence.length, why).toBe(1);
+  expect(precedenceFence[0], why).toContain("spreads=2");
+  expect(
+    declined.filter((l) => l.includes("NOT-CLOSED=arms-pair-ambiguously-by-name")).length,
+    why,
+  ).toBe(2);
 
   // The identity row is the one whose added name every source arm declares —
   // the precondition a clone-and-carry lowering would be gated on.
   expect(identity[0]).toContain("extras=[viewOnce] extrasInEveryArm=true");
   expect(identity[0]).toContain("srcArms=2/2");
   expect(identity[0]).toContain("ctxArms=2/2");
-  // The disjoint row has NO added name at all: `armTwoSpreads` has no
-  // override, so `extras` is empty and there is nothing the pairing could
-  // fold in. What its slot arms carry and its source arms do not comes from
-  // a SECOND contributor this rule does not model — which is the whole
-  // difference between it and `armSuppliedName`, now closed.
+  // The disjoint row has NO added name at all: `armUnionContributor` has no
+  // override, so `extras` is empty. What its slot arms carry and its source
+  // arms do not comes from a CONTRIBUTOR — and the fence's own `extras`
+  // reports overrides only, which is why a closed contributor site and a
+  // refused one read identically here and differently on `contributors=`.
   expect(disjointUnpaired[0]).toContain("extras=[] extrasInEveryArm=true");
   expect(disjointUnpaired[0]).toContain("spreads=2");
 
@@ -283,10 +352,10 @@ test("the instrument names the ARM RELATION at each fence, and nothing where the
    * Here the two cases are known by construction and they must read
    * differently, which is what makes this an assertion and not a printout:
    *   identity — every arm pairs with itself, 2/2;
-   *   disjoint — `armTwoSpreads`'s slot arms carry two names on NEITHER
-   *              source arm, so no field-name set matches and it is 0/2. A
-   *              `pairedByNames` that always returned the arm count would pass
-   *              the identity case and fail here. */
+   *   disjoint — `armUnionContributor`'s slot arms carry two names on
+   *              NEITHER source arm, so no field-name set matches and it is
+   *              0/2. A `pairedByNames` that always returned the arm count
+   *              would pass the identity case and fail here. */
   expect(identity[0]).toContain("pairedByNames=2/2");
   expect(disjointUnpaired[0]).toContain("pairedByNames=0/2");
   /* THE FIELD DELTAS. `pairedByNames=n/n` says the arms CORRESPOND; it does
@@ -305,15 +374,16 @@ test("the instrument names the ARM RELATION at each fence, and nothing where the
   for (const l of fences) {
     expect(l).toMatch(/srcShapes=\[\w+\/\d+,\w+\/\d+\] ctxShapes=\[\w+\/\d+,\w+\/\d+\]/);
   }
-  // The identity row's two sides are the SAME shape ids; the disjoint row's are
-  // not, and its slot arms are TWO fields WIDER (the leading spread's `rawId`
-  // and `at`) — which is the difference `pairedByNames` exists to report.
+  // The identity row's two sides are the SAME shape ids; the disjoint rows'
+  // are not, and `armUnionContributor`'s slot arms are TWO fields WIDER (the
+  // contributor's `rawId` and `at`) — which is the difference
+  // `pairedByNames` exists to report.
   expect(identity[0]).toMatch(/srcShapes=\[(\w+\/\d+,\w+\/\d+)\] ctxShapes=\[\1\]/);
   for (const l of disjoint) {
     expect(l).not.toMatch(/srcShapes=\[(\w+\/\d+,\w+\/\d+)\] ctxShapes=\[\1\]/);
   }
   expect(identity[0]).toContain("ctx0='Media'");
-  expect(disjointUnpaired[0]).toContain("ctx0='MediaB'");
+  expect(disjointUnpaired[0]).toContain("ctx0='MediaU'");
 });
 
 test("the instrument is silent with the dial unset", () => {
