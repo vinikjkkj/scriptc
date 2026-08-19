@@ -1,14 +1,25 @@
-// ON PURPOSE: the two things the record walkers' [[Get]] still does not
-// answer. Neither is a fence, so `coverage` reports this program fully
-// static and no trap census can see either -- the same invisibility that
-// made 4031 dangerous. The pin exists so the next block gets the ORDER.
+// ON PURPOSE: the things the record walkers' [[Get]] still does not
+// answer. Neither remaining one is a fence, so `coverage` reports this
+// program fully static and no trap census can see either -- the same
+// invisibility that made 4031 dangerous. The pin exists so the next block
+// gets the ORDER.
 //
-// 1. A prototype ACCESSOR. The walkers' read is borrow-only by contract
-//    (`scr_dyn_obj_own_data` + `scr_dyn_proto_get`, the pair the coercion
-//    protocols already ask): a matcher returns bool and a builder runs
-//    before the record exists, so neither holds an exception path for a
-//    throwing getter -- and both would run it, so a cast would call the
-//    getter TWICE where JS calls it once. Node answers `1 42`.
+// 1. CLOSED. A prototype ACCESSOR. The walkers' read is borrow-only by
+//    contract (`scr_dyn_obj_own_data` + `scr_dyn_proto_get`, the pair the
+//    coercion protocols already ask) and this comment used to conclude
+//    that neither walker could answer an accessor. Half of that was
+//    wrong: the MATCHER returns bool and genuinely cannot, but the
+//    BUILDER runs inside a function that already propagates a pending
+//    exception after every field, so it holds the +1 and the exception
+//    path a getter needs. The builder now asks scr_dyn_obj_accessor_get
+//    on the MISS path alone, so a field the data read answered runs no
+//    getter, and the "TWICE" objection does not arise either: an
+//    accessor-only field is never MATCHED, so a matched arm never
+//    reaches the new read and the getter runs exactly once. Node answers
+//    `1 42` and so does this, on both backends. What is still open is
+//    the matcher: a UNION arm whose record needs an accessor is still
+//    not selected (loudly -- `no arm matched`), and closing that needs a
+//    presence test that does not run the getter.
 //
 // 2. A union arm whose record shape carries a METHOD whose VALUE is an
 //    untyped JS function. The matcher's func leaf is an EXACT signature
