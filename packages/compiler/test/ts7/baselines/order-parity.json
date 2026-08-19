@@ -8288,6 +8288,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4781-stream-read-throws.ts": {
+   "order": [
+    "<repo>/tests/corpus/4781-stream-read-throws.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/500-array-basics.ts": {
    "order": [
     "<repo>/tests/corpus/500-array-basics.ts"
