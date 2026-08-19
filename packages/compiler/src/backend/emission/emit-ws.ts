@@ -42,11 +42,11 @@ import {
 } from "../mangle.js";
 import { cDecl, cType, releaseCallC } from "./emit-types.js";
 import { OVERFLOW_MEMBER } from "./emit-shapes.js";
-import { IrType, WsGlobalPlan, typeKey, wsGlobalPlan } from "../../ir/nodes.js";
+import { IrType, WsGlobalPlan, typeKey, wsGlobalPlan, wsRefusalText } from "../../ir/nodes.js";
 
 /** The interned immortal closure symbol for one WebSocket construct
  * signature. The C expression at a use site is `(ScrClosure *)&<sym>`. */
-export function wsGlobalCtorFor(E: CEmitter, t: IrType): string {
+export function wsGlobalCtorFor(E: CEmitter, t: IrType, site?: string): string {
   const key = typeKey(t);
   const existing = E.wsCtors.get(key);
   if (existing !== undefined) return existing;
@@ -110,7 +110,7 @@ export function wsGlobalCtorFor(E: CEmitter, t: IrType): string {
     ``,
     ...closeMethod(plan, names.close, closeParams),
     ``,
-    ...ctorWrapper(E, plan, t, names, ctorParams),
+    ...ctorWrapper(E, plan, t, names, ctorParams, site),
     ``,
   );
   return sym;
@@ -332,6 +332,7 @@ function ctorWrapper(
   t: IrType & { kind: "func" },
   names: WsNames,
   params: string,
+  site: string | undefined,
 ): string[] {
   const lines = [`static ${cType(t.ret)}${names.wrap}(${params}) {`, `  (void)sc_env;`];
   for (let n = 2; n < t.params.length; n++) {
@@ -363,9 +364,9 @@ function ctorWrapper(
             `${ind}  scr_str_release(sc_sep); }`,
           ];
         case "init":
-          return initBagBody(plan, expr, ind);
+          return initBagBody(plan, expr, ind, site);
         default:
-          return [`${ind}${refuseC(FENCE_MSG)}`];
+          return [`${ind}${refuseC(FENCE_MSG, site)}`];
       }
     };
     const armLines = (kind: string, expr: string): string[] => [
@@ -463,22 +464,23 @@ function initFieldMsg(field: string): string {
  * VALUE rather than on a construct, so they are dark until a user configures
  * a proxy.  `scripts/tu-census.mjs` counts them by host (`sc_wsw_N`).
  */
-function refuseC(msg: string): string {
-  return `scr_throw_error_msg_code(SCR_ERR_ERROR, ${cStr(msg)}, ${msg.length}, "SC2020");`;
+function refuseC(msg: string, site: string | undefined): string {
+  const text = wsRefusalText(msg, site);
+  return `scr_throw_error_msg_code(SCR_ERR_ERROR, ${cStr(text)}, ${text.length}, "SC2020");`;
 }
 
 /** The init bag unfolded: refuse what cannot be honoured, then read the
  * bag's `protocols` and `headers` into the two locals the dial takes. */
-function initBagBody(plan: WsGlobalPlan, expr: string, ind: string): string[] {
+function initBagBody(plan: WsGlobalPlan, expr: string, ind: string, site: string | undefined): string[] {
   const ib = plan.initBag;
-  if (ib === undefined || ib === null) return [`${ind}${refuseC(FENCE_MSG)}`];
+  if (ib === undefined || ib === null) return [`${ind}${refuseC(FENCE_MSG, site)}`];
   const rec = mangleRecordStruct(ib.shapeId);
   const out = [`${ind}{ ${rec} *sc_ib = (${rec} *)${expr};`];
   const b = `${ind}  `;
   for (const r of ib.refuseIfPresent) {
     const slot = `sc_ib->${mangleField(r.name)}`;
     const present = r.kind === "dyn" ? `scr_dyn_truthy(${slot})` : `${slot}->tag != ${r.absentTag!}`;
-    out.push(`${b}if (${present}) { ${refuseC(initFieldMsg(r.name))} }`);
+    out.push(`${b}if (${present}) { ${refuseC(initFieldMsg(r.name), site)} }`);
   }
   if (ib.refuseIfPresent.length > 0) out.push(`${b}if (!scr_exc_pending()) {`);
   const c = ib.refuseIfPresent.length > 0 ? `${b}  ` : b;
