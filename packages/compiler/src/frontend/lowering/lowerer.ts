@@ -51,7 +51,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { arrayOf, BOOL, canAdaptDynFuncTo, canDynCheckTo, dynCheckArmOrder, funcOf, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { arrayOf, BOOL, canAdaptDynFuncTo, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -1504,6 +1504,15 @@ export class Lowerer {
    * IrModule.unions. An arm's index in the canonical list is its runtime
    * tag. */
   readonly unions = new UnionRegistry();
+  /** Every arm pair the runtime-keyed extraction admitted ONLY because a
+   * string-literal discriminant separates it (runtimeKeyedUnionExtraction).
+   * A union's literal table can still be ERASED after the fact -- a later
+   * ts union with the same arms and no discriminant intersects it away --
+   * and the extraction is already emitted by then, so the reliance is
+   * re-checked once every union is final. It has never fired; it exists
+   * because the alternative to firing is a mis-tagged value, which is
+   * exactly what this gate was built to prevent. */
+  readonly discrimRelied: { unionId: string; a: number; b: number }[] = [];
   /** Object literals that must build as DYN OBJECTS rather than at their
    * contextual type — the property-DESCRIPTOR map of
    * `Object.create(proto, descs)` and the descriptor objects inside it.
@@ -2511,6 +2520,19 @@ export class Lowerer {
     // reference are untouched — byte-stability holds.
     if (this.diags.length === 0) {
       this.sanitizeUnregisteredClassTypes([functions, this.globalsList, artifacts.classes, artifacts.records, artifacts.unions]);
+    }
+    // Every discriminant the extraction LEANED on, re-read now that no
+    // union can change again (see discrimRelied).
+    if (this.diags.length === 0) {
+      for (const r of this.discrimRelied) {
+        const def = this.unions.get(r.unionId);
+        if (def === undefined || !discrimSeparates(def, r.a, r.b)) {
+          throw new Error(
+            `compiler bug: union ${r.unionId} lost the literal discriminant separating arms ` +
+              `${String(r.a)} and ${String(r.b)} after a checked extraction was emitted against it`,
+          );
+        }
+      }
     }
     const module: IrModule | null =
       this.diags.length > 0
@@ -8123,6 +8145,23 @@ export class Lowerer {
             const g = later.find((x) => x.name === f.name);
             return g !== undefined && admits(f.type, g.type);
           });
+          // ...unless a STRING-LITERAL DISCRIMINANT tells the two apart.
+          // Shadowing is a statement about the arms' FIELD NAMES, and it
+          // stops being true the moment the emitted first pass can reject
+          // the earlier arm on a value: `operation: 'set'` beside
+          // `operation: 'remove'` is exactly that, and it is the whole of
+          // what zapo's WaAppStateMutationEvent needed. Both arms must
+          // pin the SAME field to DIFFERENT strings -- one-sided
+          // knowledge separates nothing (discrimSeparates).
+          if (steals && discrimSeparates(def, ai, bi)) {
+            this.discrimRelied.push({ unionId: def.id, a: ai, b: bi });
+            if (process.env["SCRIPTC_RTKEYED_WHY"]) {
+              console.error(
+                `RTKEYED KEEPS: arm ${String(ai)} would shadow arm ${String(bi)}, but a literal discriminant separates them`,
+              );
+            }
+            continue;
+          }
           if (steals) {
             if (process.env["SCRIPTC_RTKEYED_WHY"]) {
               console.error(
