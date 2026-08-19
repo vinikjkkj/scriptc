@@ -5179,6 +5179,25 @@ function mapTrace(message: string): void {
  * Gated on the object being symbolic (no properties, no index infos, no
  * signatures): a RESOLVED `Record<"a", V>` still walks its real members, so
  * this never displaces an answer the checker was able to give. */
+/** What the recovery found: the store's value type, and whether the
+ * literal's DECLARED members have to ride that store instead of taking
+ * struct slots (`fold`) because a named property sits AFTER a spread and
+ * only an insertion-ordered store can spell JS's key order there. */
+type SpreadErasedIndex = { value: IrType; fold: boolean };
+
+/** True when every arm of the MEMBER type is an arm of the index-signature
+ * slot: the test that lets a folded member ride the store. The value
+ * stored is a slot-typed union carrying the member's own arm, and the
+ * read narrows back exactly as a canonicalized header member does. */
+function fitsWithinSlot(member: IrType, slot: IrType, ctx: TypeMapperCtx): boolean {
+  if (slot.kind !== "union") return false;
+  const slotArms = ctx.unions.get(slot.unionId)?.arms;
+  if (!slotArms) return false;
+  const memberArms = member.kind === "union" ? ctx.unions.get(member.unionId)?.arms : [member];
+  if (!memberArms) return false;
+  return memberArms.every((a) => slotArms.some((b) => typeEquals(a, b)));
+}
+
 /** The index signature tsc ERASED when it inferred an object literal's
  * type, or undefined when nothing was erased (the ordinary path).
  *
@@ -5199,7 +5218,7 @@ function mapTrace(message: string): void {
 function spreadErasedIndexValue(
   widened: ts.Type,
   ctx: TypeMapperCtx,
-): IrType | undefined {
+): SpreadErasedIndex | undefined {
   const { checker } = ctx;
   const sym = widened.getSymbol();
   if (!sym) return undefined;
@@ -5209,6 +5228,7 @@ function spreadErasedIndexValue(
   if (decls.length === 0 || !decls.every((d) => ts.isObjectLiteralExpression(d))) return undefined;
   let value: IrType | null = null;
   let sawSpread = false;
+  let fold = false;
   for (const decl of decls as ts.ObjectLiteralExpression[]) {
     // KEY ORDER decides whether the recovered store can answer at all.
     // A hybrid record enumerates DECLARED fields (in declared order) and
@@ -5218,11 +5238,17 @@ function spreadErasedIndexValue(
     // jid-then-attrs both ways. `{ ...attrs, jid }` is not — JS says
     // `zeta,alpha,jid` and the struct can only say `jid,zeta,alpha`.
     // Recovering there would trade a LOUD fence for a silently reordered
-    // object (measured: s5 in the block's lab), so the shape keeps its
-    // fence and this answers undefined.
+    // object, so the recovery there does NOT keep the struct slots: it
+    // FOLDS every declared member into the store as well, and the shape
+    // becomes a PURE index-signature record. The store is insertion-
+    // ordered and overwrites in place, exactly like a JS object's own key
+    // list, so `{ ...attrs, id }` enumerates attrs's keys in their order
+    // with `id` at whichever position JS puts it — the one arrangement a
+    // declared-then-overflow struct can never spell. `fold` is what the
+    // caller checks; the hybrid (named-props-first) shape is unchanged.
     const firstSpread = decl.properties.findIndex((p) => ts.isSpreadAssignment(p));
     if (firstSpread >= 0 && !decl.properties.slice(firstSpread).every((p) => ts.isSpreadAssignment(p))) {
-      return undefined;
+      fold = true;
     }
     for (const prop of decl.properties) {
       if (!ts.isSpreadAssignment(prop)) continue;
@@ -5251,15 +5277,31 @@ function spreadErasedIndexValue(
   // Every DECLARED member must fit the recovered slot. A member the
   // overflow could not hold would make the shape claim a uniform value
   // type it does not have — and every undeclared key read would answer at
-  // a type the struct cannot produce.
+  // a type the struct cannot produce. The FOLDING shape needs it twice
+  // over: there the member's only home IS the store.
   for (const p of checker.getPropertiesOfType(widened)) {
+    if (fold) {
+      // An ACCESSOR member has no data slot to fold (its value is a call),
+      // and an ARRAY-INDEX-like name would have to enumerate FIRST across
+      // the whole object while the store can only place it where it was
+      // written — the same rule overflowShapeKeysDenied encodes.
+      if (p.flags & (ts.SymbolFlags.GetAccessor | ts.SymbolFlags.SetAccessor)) return undefined;
+      if (p.name.startsWith("%") || isArrayIndexKey(p.name)) return undefined;
+    }
     const pt = mapType(checker.getTypeOfSymbol(p), ctx);
-    if (!pt || !typeEquals(pt, value)) return undefined;
+    if (!pt) return undefined;
+    // The FOLDING shape stores the member IN the slot, so a member whose
+    // type is a SUBSET of a union slot rides it as an arm and reads back
+    // through the same narrowing the header family already uses
+    // (fieldTarget's canonicalized()). The hybrid keeps exact
+    // equality: there the member has a struct slot of its own, and the
+    // merge helper stores declared names RAW.
+    if (!typeEquals(pt, value) && !(fold && fitsWithinSlot(pt, value, ctx))) return undefined;
   }
   if (process.env["SCRIPTC_SPREADIX_WHY"] !== undefined) {
-    console.error(`SPREADIX-RECOVER ${checker.typeToString(widened)} idx=${typeKey(value)}`);
+    console.error(`SPREADIX-RECOVER ${checker.typeToString(widened)} idx=${typeKey(value)} fold=${String(fold)}`);
   }
-  return value;
+  return { value, fold };
 }
 
 function mapSymbolicMappedAlias(
@@ -5481,8 +5523,13 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
   // at the spread). Recovery only ever ADDS a store when every condition
   // holds — it can never turn a type that maps today into one that does
   // not.
+  let spreadErasedFold = false;
   if (indexValue === undefined) {
-    indexValue = spreadErasedIndexValue(widened, ctx);
+    const recovered = spreadErasedIndexValue(widened, ctx);
+    if (recovered !== undefined) {
+      indexValue = recovered.value;
+      spreadErasedFold = recovered.fold;
+    }
   }
   // The HEADER-FAMILY canonicalization: an index-signature shape whose
   // slot carries a `string[]` arm (alongside string/number/undefined —
@@ -5523,6 +5570,19 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
         return { kind: "record", shapeId: shapes.intern([], false, canonical, []) };
       }
     }
+  }
+  // THE FOLDING RECOVERY, applied. A named property AFTER a spread can
+  // only keep JS's key order if EVERY member rides the insertion-ordered
+  // store, so the shape is the PURE index-signature record over the
+  // recovered slot — no struct slots at all. `spreadErasedIndexValue` has
+  // already proved every declared member fits the slot, that none is
+  // an accessor, and that none is array-index-like, so nothing is lost by
+  // the fold and nothing enumerates out of order. Reached only where the
+  // recovery answered, which is only for object-literal-inferred types
+  // that actually spread an index-signature source — every one of which
+  // the spread desugar refuses today.
+  if (spreadErasedFold && indexValue !== undefined) {
+    return { kind: "record", shapeId: shapes.intern([], false, indexValue) };
   }
   // Provenance keeps LIB type worlds out — but a PURE string index
   // signature with no declared members is structurally Record<string, V>
