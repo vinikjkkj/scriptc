@@ -3219,6 +3219,20 @@ function validateFunction(
         if (e.fields.filter((f) => !f.overflow && !f.drop).length !== shape.fields.length) {
           err(`recordLit does not initialize every field of shape ${shape.id}`, e.loc);
         }
+        if (e.toStr) {
+          // The hidden per-instance toString slot: a zero-argument
+          // string-returning closure, and only on a shape that ARMED the
+          // slot (the backends size the struct from the flag, so a fill
+          // into an unarmed shape would be a store past the end).
+          checkExpr(e.toStr);
+          if (!shape.tostr) {
+            err(`recordLit fills the toString slot of shape ${shape.id}, which is not armed`, e.loc);
+          }
+          const st = e.toStr.type;
+          if (st.kind !== "func" || st.rest === true || st.params.length !== 0 || st.ret.kind !== "string") {
+            err(`recordLit toString slot must be a zero-argument string-returning closure, got ${st.kind}`, e.loc);
+          }
+        }
         break;
       }
       case "recordGet": {

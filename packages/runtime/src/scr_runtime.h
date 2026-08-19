@@ -4183,6 +4183,41 @@ ScrStr *scr_dyn_typeof(const ScrDyn *d);
  * enc — utf8 default; strings/numbers/booleans/arrays/objects answer
  * JS-exactly; undefined/null throw the catchable TypeError). Borrows; +1. */
 ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc);
+
+/* ── the record shape's HIDDEN per-instance toString slot ─────────────
+ *
+ * MATERIALIZING a JS object into a record struct loses its toString.
+ * `x as LongLike` is the identity in JS, so String(x) still reaches the
+ * prototype method; the emitted dynCheck builder and the class->record
+ * projections COPY the declared members into a struct, after which every
+ * ToString question answered Object.prototype's constant -- silently
+ * wrong for exactly the values (protobuf `Long`, a shipped package's
+ * class behind a checked cast) the boundary exists to admit.
+ *
+ * Shapes that armed the slot carry one trailing `ScrClosure *` member
+ * (zeroed at allocation) holding a zero-argument string-returning
+ * closure.  These two entry points are the fill and the read.
+ *
+ * scr_dyn_tostr_closure MINTS the fill for a dynCheck: a closure over the
+ * SOURCE object, answering NULL -- "no slot" -- unless the object really
+ * carries a callable own-or-inherited `toString` AND no `valueOf` of its
+ * own.  The valueOf condition is not fussiness: ONE slot is read by
+ * String(r), `${r}`, r.toString() AND `r + ""`, and the last of those is
+ * ToPrimitive's DEFAULT hint, which asks valueOf FIRST.  Where a value
+ * has no valueOf the two hints agree (Object.prototype.valueOf returns
+ * the object and falls through to toString) and one slot is exact; where
+ * it has one they differ -- measured on Node v25.9.0,
+ * `"" + {valueOf:()=>42, toString:()=>"TS"}` is "42" while String() of it
+ * is "TS" -- so the slot stays empty and both spellings keep the constant
+ * they answered before.  Borrows `d`; the closure owns its own +1.
+ *
+ * scr_rec_tostr READS one: NULL is Object.prototype.toString's constant,
+ * which is precisely Node's answer for a record nothing carried a
+ * toString into.  A filled slot is USER CODE and may throw; the emitted
+ * call site runs the pending check, and a thrown-through call answers the
+ * empty string so the caller never sees NULL.  Borrows; +1. */
+ScrClosure *scr_dyn_tostr_closure(const ScrDyn *d);
+ScrStr *scr_rec_tostr(ScrClosure *slot);
 /* The method-call spelling `d.toString(enc?)`: identical, except a
  * null-prototype dictionary throws "<what> is not a function" — its
  * prototype chain has no toString (Node's answer). */

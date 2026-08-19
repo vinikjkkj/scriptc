@@ -107,6 +107,7 @@ import {
   mapValKindNum,
   releaseSym,
   retainSym,
+  toStrSlotIndex,
   traceAdapter,
   traceArg,
   vAdapters,
@@ -3442,6 +3443,19 @@ class LlEmitter {
     return v;
   }
 
+  /** The HIDDEN per-instance toString slot's member pointer — the last
+   * member of an armed shape's struct (rc, fields, [overflow], slot), so
+   * no declared field's index moves. */
+  private recordToStrPtr(objName: string, shapeId: string): string {
+    const shape = this.recordShape(shapeId);
+    if (shape.tostr !== true) throw new Error(`llvm emitter bug: shape ${shapeId} has no toString slot`);
+    const p = this.B.tmp();
+    this.B.line(
+      `${p} = getelementptr inbounds %${mangleRecordStruct(shapeId)}, ptr ${objName}, i64 0, i32 ${toStrSlotIndex(shape)}`,
+    );
+    return p;
+  }
+
   /** Loads a record field (i8-stored bools trunc to i1). */
   private loadField(ptr: string, t: IrType): string {
     const B = this.B;
@@ -4887,11 +4901,26 @@ class LlEmitter {
                 break;
               }
               case "record": {
-                // A plain data record arm: Object.prototype.toString's
-                // constant, the same interned literal the LONE-record
-                // case below emits. The frontend admits an arm here only
-                // when the shape is not a tuple and carries no `toString`
-                // field, so the constant IS JS's answer.
+                // A plain data record arm: the shape's HIDDEN per-instance
+                // toString slot where it armed one, and Object.prototype
+                // .toString's constant otherwise — the SAME branch the
+                // LONE-record case below takes, which is what makes
+                // `${rec}` and `${num | rec}` answer alike. The frontend
+                // admits an arm here only when the shape is not a tuple
+                // and declares no `toString` FIELD.
+                const armShape = this.recordsById.get(arm.shapeId);
+                if (armShape?.tostr === true) {
+                  this.declare(`declare ptr @scr_rec_tostr(ptr)`);
+                  const p = this.unionPeek(v.name);
+                  const sp = B.tmp();
+                  const sv = B.tmp();
+                  const r = B.tmp();
+                  B.line(`${sp} = getelementptr inbounds %${mangleRecordStruct(arm.shapeId)}, ptr ${p}, i64 0, i32 ${toStrSlotIndex(armShape)}`);
+                  B.line(`${sv} = load ptr, ptr ${sp}`);
+                  B.line(`${r} = call ptr @scr_rec_tostr(ptr ${sv})`);
+                  B.line(`store ptr ${r}, ptr ${slot}`);
+                  break;
+                }
                 const sym = this.internLiteral("[object Object]");
                 B.line(`store ptr ${this.retainValue(sym, e.type)}, ptr ${slot}`);
                 break;
@@ -4904,11 +4933,32 @@ class LlEmitter {
           B.startBlock(join);
           const t = B.tmp();
           B.line(`${t} = load ptr, ptr ${slot}`);
-          return this.own({ name: t, type: e.type });
+          const uOut = this.own({ name: t, type: e.type });
+          // A filled toString slot on any record arm runs USER CODE, which
+          // can throw — the result joins the frame BEFORE the check, like
+          // the dyn arm below.
+          if (def.arms.some((a) => a.kind === "record" && this.recordsById.get(a.shapeId)?.tostr === true)) {
+            this.emitPendingCheck();
+          }
+          return uOut;
         }
         if (v.type.kind === "record") {
-          // String(record) / `${record}`: Object.prototype.toString's
-          // constant — the interned literal, retained like a strLit.
+          // String(record) / `${record}` / record.toString(): the shape's
+          // HIDDEN per-instance toString slot where it armed one, and
+          // Object.prototype.toString's constant otherwise. NULL in the
+          // slot answers the same interned text this used to fold, so a
+          // record nothing carried a toString into is unchanged.
+          const shape = this.recordsById.get(v.type.shapeId);
+          if (shape?.tostr === true) {
+            this.declare(`declare ptr @scr_rec_tostr(ptr)`);
+            const sv = B.tmp();
+            const r = B.tmp();
+            B.line(`${sv} = load ptr, ptr ${this.recordToStrPtr(v.name, v.type.shapeId)}`);
+            B.line(`${r} = call ptr @scr_rec_tostr(ptr ${sv})`);
+            const out = this.own({ name: r, type: e.type });
+            this.emitPendingCheck();
+            return out;
+          }
           const sym = this.internLiteral("[object Object]");
           return this.own({ name: this.retainValue(sym, e.type), type: e.type });
         }
@@ -5133,6 +5183,21 @@ class LlEmitter {
             if (isRefCounted(v.type)) this.moveTemp(v);
             const { ptr, type } = this.recordFieldPtr(rec, shapeId, f.name);
             this.storeField(ptr, type, v.name);
+          } finally {
+            this.releaseFrame(this.frames.pop()!);
+          }
+        }
+        // The hidden per-instance toString slot, written LAST (it is not a
+        // field and nothing observes its evaluation order — the only
+        // expression that reaches it is a closure construction over the
+        // projection helper's own instance param). Ownership moves in like
+        // any refcounted field. The C tier's row exactly.
+        if (e.toStr) {
+          this.frames.push([]);
+          try {
+            const v = this.emitExpr(e.toStr);
+            this.moveTemp(v);
+            B.line(`store ptr ${v.name}, ptr ${this.recordToStrPtr(rec, shapeId)}`);
           } finally {
             this.releaseFrame(this.frames.pop()!);
           }

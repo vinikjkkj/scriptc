@@ -1297,6 +1297,33 @@ export interface IrRecordShape {
    * fields carry that declaredOrder OMITS are internal '%'-fields (Dirent's
    * %dtype) — hidden from every key-order surface, JSON included. */
   declaredOrder?: string[];
+  /** The HIDDEN per-instance `toString` slot: not a field, not a key, not
+   * part of the interned identity — one trailing struct member
+   * (`ScrClosure *`, a `() => string`) both backends lay out after the
+   * declared fields and the overflow map, NULL on every fresh record.
+   *
+   * It exists because MATERIALIZING a record loses a JS object's
+   * `toString`. `x as LongLike` is the identity in JS, so `String(x)`
+   * still reaches the prototype method; scriptc's dynCheck and its
+   * class→record projections COPY the declared members into a struct,
+   * after which every ToString question answers Object.prototype's
+   * constant — silently wrong for exactly the values (protobuf `Long`, a
+   * shipped package's class behind a checked cast) the boundary exists to
+   * admit. A `%toString` FIELD cannot carry it: objToRecordPlan and eight
+   * more rules DECLINE any shape carrying a `%` field, so the projection
+   * that would fill the slot could never run. A shape-level FENCE cannot
+   * either: it refuses correct programs (a record literal and a
+   * toString-less class project into the same shape, and `[object Object]`
+   * is their right answer).
+   *
+   * So the slot is per-INSTANCE and invisible to every frontend guard and
+   * every key-order surface (Object.keys, JSON, util.inspect,
+   * declaredOrder — all of which iterate `fields`). NULL means "nothing
+   * carried a toString in here", which is precisely when the constant IS
+   * Node's answer. Set monotonically during lowering — by a ToString READ
+   * site over this shape, and by a projection whose class HAS a callable
+   * toString — and read by both backends to size the struct. */
+  tostr?: true;
 }
 
 /** Object-literal ACCESSOR properties (`{ get x() {...}, set x(v) {...} }`)
@@ -5498,7 +5525,13 @@ export type IrExpr =
    * may throw), but nothing is stored — the emitter releases the result
    * with the statement frame. Any value type is legal here, void included
    * (an awaited Promise<void>). */
-  | { kind: "recordLit"; fields: { name: string; value: IrExpr; overflow?: true; drop?: true }[]; type: IrType; loc: SrcLoc }
+  /** `toStr` fills the shape's HIDDEN per-instance toString slot
+   * (IrRecordShape.tostr): a `() => string` closure, written after every
+   * declared field, present ONLY on the class→record projection builders
+   * whose class has a callable toString. It is not a field, carries no
+   * key, and never appears on a source literal — a literal that names no
+   * toString genuinely has none, and NULL is Node's answer. */
+  | { kind: "recordLit"; fields: { name: string; value: IrExpr; overflow?: true; drop?: true }[]; toStr?: IrExpr; type: IrType; loc: SrcLoc }
   /** Record field read `r.f` — mirrors `fieldGet`: refcounted fields come
    * out retained (+1). */
   | { kind: "recordGet"; obj: IrExpr; shapeId: string; field: string; type: IrType; loc: SrcLoc }
