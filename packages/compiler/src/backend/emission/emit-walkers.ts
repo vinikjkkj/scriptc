@@ -1562,16 +1562,48 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`  {`);
           d.push(`    ScrDynPath p = { path, ${keyLit}, 0 };`);
           // The same [[Get]]-minus-accessors read the predicate above
-          // takes, and it has to be the same one: the union builder's
-          // invariant is "the matched arm's builder can no longer fail",
-          // which a matcher that sees the prototype and a builder that
-          // does not would break on the very next member.
+          // takes, and it has to be the same one for the DATA half: the
+          // union builder's invariant is "the matched arm's builder can no
+          // longer fail", which a matcher that sees the prototype and a
+          // builder that does not would break on the very next member.
           d.push(`    ${mDecl} = ${readFn}(d, ${keyLit}, ${keyLen});`);
+          // ... and, ONLY when that read missed, the ACCESSOR half of
+          // [[Get]] the borrow-only read above cannot answer. A field a
+          // getter provides read as ABSENT: a required one threw
+          // `expected string at $.a, got undefined` where Node answers the
+          // getter's value, and an OPTIONAL one built the undefined arm
+          // SILENTLY, which is the worse half. The probe sits on the miss
+          // path alone, so a field the data read already answered runs no
+          // getter and nothing that works today changes.
+          //
+          // The MATCHER above is untouched, and for a REQUIRED field that
+          // keeps the union invariant exactly: the matcher demands the key
+          // present as DATA, so a matched arm never reaches this read. For
+          // an OPTIONAL one it does NOT: the matcher accepts a missing key,
+          // this read can then find an accessor whose value does not fit,
+          // and "the matched arm's builder can no longer fail" stops being
+          // true. Nothing reads the result -- the caller's pending check
+          // fires at once and a union whose ref arm is NULL releases
+          // harmlessly (every record release is null-guarded) -- and what
+          // the refusal replaces there is a FABRICATED undefined for a
+          // member that has a value. tests/harness/dyncheck.test.ts pins
+          // both halves of that trade.
+          d.push(`    ScrDyn *acc = NULL;`);
+          d.push(`    if (!m) {`);
+          d.push(`      acc = scr_dyn_obj_accessor_get(d, ${keyLit}, ${keyLen});`);
+          d.push(`      if (scr_exc_pending()) { ${rel("r")}; return NULL; }`);
+          d.push(`      m = acc;`);
+          d.push(`    }`);
+          // The +1 the accessor read owes, released exactly where the
+          // binding read's own +1 is (and never twice: in the binding case
+          // `m` IS `acc`, so `drop` is the one release).
+          const dropAcc = bind ? null : `    if (acc) scr_dyn_release(acc);`;
           if (f.type.kind === "dyn") {
             // An `unknown` field: a present key passes through, a missing
             // one IS the undefined dyn value (JS's missing-property read).
             d.push(`    (void)p;`);
             d.push(`    r->${mangleField(f.name)} = scr_dyn_retain(m ? (ScrDyn *)m : scr_dyn_undefined());`);
+            if (dropAcc) d.push(dropAcc);
           } else if (utag >= 0 && f.type.kind === "union") {
             const unit = E.unitInstanceRef(f.type.unionId, utag);
             d.push(`    if (!m) {`);
@@ -1579,12 +1611,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(`    } else {`);
             d.push(`      r->${mangleField(f.name)} = ${E.dynCheckHelper(f.type)}(m, &p);`);
             if (drop) d.push(`  ${drop}`);
+            if (dropAcc) d.push(`  ${dropAcc}`);
             d.push(`      if (scr_exc_pending()) { ${rel("r")}; return NULL; }`);
             d.push(`    }`);
           } else {
             d.push(`    if (!m) { scr_dyn_check_fail(&p, ${fieldWant}, NULL); ${rel("r")}; return NULL; }`);
             d.push(`    r->${mangleField(f.name)} = ${E.dynCheckHelper(f.type)}(m, &p);`);
             if (drop) d.push(drop);
+            if (dropAcc) d.push(dropAcc);
             d.push(`    if (scr_exc_pending()) { ${rel("r")}; return NULL; }`);
           }
           d.push(`  }`);
