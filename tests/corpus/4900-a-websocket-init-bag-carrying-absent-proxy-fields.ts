@@ -1,7 +1,10 @@
 // The `ws`/undici INIT BAG carrying the two fields this compiler cannot
 // honour — `dispatcher` and `agent` — with both ABSENT. It is the shape
-// zapo's WaWebSocket.createRawSocket actually dials with, and the only
-// shape of it that lowers.
+// zapo's WaWebSocket.createRawSocket spells at its init-bag arm, and the
+// only shape of that arm which lowers. (Measured: a FRESH zapo dial does
+// not take that arm — no routing token means no headers means the plain
+// two-argument form — in the Node lane and the compiled lane alike. The
+// bag is compiled either way, and these guards are what the census counts.)
 //
 // The bag is lowered field by field (wsInitBagPlan): `protocols` and
 // `headers` become the dial's two arguments, and a field with no lowering
