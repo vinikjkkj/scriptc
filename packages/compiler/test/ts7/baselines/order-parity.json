@@ -8360,6 +8360,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/4950-a-set-arm-and-a-remove-arm-are-told-apart-by-their-operation-literal.ts": {
+   "order": [
+    "<repo>/tests/corpus/4950-a-set-arm-and-a-remove-arm-are-told-apart-by-their-operation-literal.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4951-a-literal-discriminant-outranks-the-widest-first-arm-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/4951-a-literal-discriminant-outranks-the-widest-first-arm-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4952-an-index-signature-spread-beside-a-fixed-shape-one-widens-the-recovered-store.ts": {
+   "order": [
+    "<repo>/tests/corpus/4952-an-index-signature-spread-beside-a-fixed-shape-one-widens-the-recovered-store.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4953-two-ts-unions-with-the-same-arms-share-one-discriminant-verdict.ts": {
+   "order": [
+    "<repo>/tests/corpus/4953-two-ts-unions-with-the-same-arms-share-one-discriminant-verdict.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/4954-several-source-arms-share-one-ir-shape-so-the-discriminant-is-a-set.ts": {
+   "order": [
+    "<repo>/tests/corpus/4954-several-source-arms-share-one-ir-shape-so-the-discriminant-is-a-set.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/4970-records-enumerated-where-every-construction-agrees-with-the-shape.ts": {
    "order": [
     "<repo>/tests/corpus/4970-records-enumerated-where-every-construction-agrees-with-the-shape.ts"
@@ -9830,9 +9860,9 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/index-signature-spread-beside-a-fixed-shape-source.ts": {
+  "<repo>/tests/diagnostics/index-signature-spread-with-a-member-the-store-cannot-hold.ts": {
    "order": [
-    "<repo>/tests/diagnostics/index-signature-spread-beside-a-fixed-shape-source.ts"
+    "<repo>/tests/diagnostics/index-signature-spread-with-a-member-the-store-cannot-hold.ts"
    ],
    "diags": []
   },

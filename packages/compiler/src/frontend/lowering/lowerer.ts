@@ -52,7 +52,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { arrayOf, BOOL, canAdaptDynFuncTo, canDynCheckTo, dynCheckArmOrder, funcOf, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { armDiscrimLits, arrayOf, BOOL, canAdaptDynFuncTo, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -1505,6 +1505,15 @@ export class Lowerer {
    * IrModule.unions. An arm's index in the canonical list is its runtime
    * tag. */
   readonly unions = new UnionRegistry();
+  /** Every arm pair the runtime-keyed extraction admitted ONLY because a
+   * string-literal discriminant separates it (runtimeKeyedUnionExtraction).
+   * A union's literal table can still be ERASED after the fact -- a later
+   * ts union with the same arms and no discriminant intersects it away --
+   * and the extraction is already emitted by then, so the reliance is
+   * re-checked once every union is final. It has never fired; it exists
+   * because the alternative to firing is a mis-tagged value, which is
+   * exactly what this gate was built to prevent. */
+  readonly discrimRelied: { unionId: string; a: number; b: number }[] = [];
   /** Object literals that must build as DYN OBJECTS rather than at their
    * contextual type — the property-DESCRIPTOR map of
    * `Object.create(proto, descs)` and the descriptor objects inside it.
@@ -2516,6 +2525,19 @@ export class Lowerer {
     // reference are untouched — byte-stability holds.
     if (this.diags.length === 0) {
       this.sanitizeUnregisteredClassTypes([functions, this.globalsList, artifacts.classes, artifacts.records, artifacts.unions]);
+    }
+    // Every discriminant the extraction LEANED on, re-read now that no
+    // union can change again (see discrimRelied).
+    if (this.diags.length === 0) {
+      for (const r of this.discrimRelied) {
+        const def = this.unions.get(r.unionId);
+        if (def === undefined || !discrimSeparates(def, r.a, r.b)) {
+          throw new Error(
+            `compiler bug: union ${r.unionId} lost the literal discriminant separating arms ` +
+              `${String(r.a)} and ${String(r.b)} after a checked extraction was emitted against it`,
+          );
+        }
+      }
     }
     const module: IrModule | null =
       this.diags.length > 0
@@ -8241,12 +8263,24 @@ export class Lowerer {
     if (this.shapes.get(src.shapeId)?.indexValue === undefined) return null;
     const def = this.unions.get(expected.unionId);
     if (!def) return null;
-    // strandedCoercionTrap's OWN gate, spelled the same way. ONE candidate
-    // already lowered above (widthLiftPlan's liftWrap); SEVERAL keep their
-    // compile fence -- an honest ambiguity the checked extraction must not
-    // resolve behind the author's back.
+    // strandedCoercionTrap's OWN gate, spelled the same way -- with the
+    // one difference the SOURCE makes. ONE candidate already lowered above
+    // (widthLiftPlan's liftWrap) and cannot reach here at all.
+    //
+    // SEVERAL is where the two part company. For a FIXED-shape source the
+    // trap is right to keep the fence: the arm is a STATIC fact and two
+    // plans mean the author wrote something genuinely ambiguous. For a
+    // RUNTIME-KEYED one it is not a fact at all -- every 'candidate' is a
+    // plan to read that arm's fields back out of the overflow store, so
+    // several candidates say only that several arms COULD be assembled
+    // from a bag whose keys are runtime state. Choosing one statically is
+    // the guess; testing the value is the answer, and the checked
+    // extraction is exactly that test. (A store with a checked-dynamic
+    // value slot makes this the common case rather than the exotic one:
+    // dynOutPlan admits every arm's every field, so EVERY arm becomes a
+    // candidate at once.)
     const candidates = def.arms.filter((arm) => arm.kind === "record" && this.widthLiftPlan(src, arm) !== null);
-    if (candidates.length !== 0) return null;
+    if (candidates.length === 1) return null;
     if (!this.dynConvertible(src)) return null;
     if (!canDynCheckTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id))) return null;
     // ...and the arms must be TELLABLE APART by what a match predicate can
@@ -8294,10 +8328,34 @@ export class Lowerer {
             const g = later.find((x) => x.name === f.name);
             return g !== undefined && admits(f.type, g.type);
           });
-          if (steals) {
+          // ...unless a STRING-LITERAL DISCRIMINANT tells the two apart.
+          // Shadowing is a statement about the arms' FIELD NAMES, and it
+          // stops being true the moment the emitted first pass can reject
+          // the earlier arm on a value: `operation: 'set'` beside
+          // `operation: 'remove'` is exactly that, and it is the whole of
+          // what zapo's WaAppStateMutationEvent needed. Both arms must
+          // pin the SAME field to DIFFERENT strings -- one-sided
+          // knowledge separates nothing (discrimSeparates).
+          if (steals && discrimSeparates(def, ai, bi)) {
+            this.discrimRelied.push({ unionId: def.id, a: ai, b: bi });
             if (process.env["SCRIPTC_RTKEYED_WHY"]) {
               console.error(
-                `RTKEYED DECLINES: arm ${String(ai)} shadows arm ${String(bi)} (its required fields are a subset)`,
+                `RTKEYED KEEPS: arm ${String(ai)} would shadow arm ${String(bi)}, but a literal discriminant separates them`,
+              );
+            }
+            continue;
+          }
+          if (steals) {
+            if (process.env["SCRIPTC_RTKEYED_WHY"]) {
+              const pins = (i: number): string => {
+                const m = armDiscrimLits(def, i);
+                const ks = Object.keys(m).sort();
+                return ks.length === 0 ? "pins nothing" : ks.map((k) => `${k}=${JSON.stringify(m[k])}`).join(" ");
+              };
+              console.error(
+                `RTKEYED DECLINES: arm ${String(ai)} shadows arm ${String(bi)} (its required fields are a subset)` +
+                  ` | arm ${String(ai)} ${this.fmt(def.arms[ai]!).slice(0, 200)} [${pins(ai)}]` +
+                  ` | arm ${String(bi)} ${this.fmt(def.arms[bi]!).slice(0, 200)} [${pins(bi)}]`,
               );
             }
             return null;

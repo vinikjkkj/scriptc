@@ -22,7 +22,7 @@
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrType } from "../../ir/nodes.js";
-import { canAdaptDynFuncTo, canBoxFuncIntoDyn, dynCheckArmOrder, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
+import { armDiscrimLits, canAdaptDynFuncTo, canBoxFuncIntoDyn, dynCheckArmOrder, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
 import { arrNewCall, elemAccess, llFieldType, releaseSym, toStrSlotIndex, traceAdapter, traceArg, vAdapters } from "./shapes.js";
@@ -681,6 +681,89 @@ export class LlDyn {
     return name;
   }
 
+  /** `sc_dlit_<n>(ptr d) -> i1` — the STRING-LITERAL DISCRIMINANT
+   * predicate for one union arm (emit-walkers.ts's dynLitHelper, ported):
+   * does this dyn hold exactly the strings the arm pins? Never throws,
+   * builds nothing, and reads the same scr_dyn_obj_data_get walk the
+   * match predicate uses. Interned by the (field, value) pairs, not by a
+   * typeKey — the constraint belongs to an ARM, not to a type. */
+  dynLitHelper(lits: Record<string, string[]>): string {
+    const names = Object.keys(lits).sort();
+    const pairs = names.map((n) => [n, lits[n]]);
+    const memoKey = `%dlit:${JSON.stringify(pairs)}`;
+    const existing = this.dynBuilders.get(memoKey);
+    if (existing) return existing;
+    const name = `sc_dlit_${this.dynBuilders.size}`;
+    this.dynBuilders.set(memoKey, name);
+    this.host.declare(`declare i32 @memcmp(ptr, ptr, i64)`);
+    const B = new BlockBuilder();
+    const fail = B.newLabel("dl.f");
+    const kd = this.kindOf(B, "%d");
+    const isObj = B.tmp();
+    B.line(`${isObj} = icmp eq i32 ${kd}, ${DK.OBJ}`);
+    const l0 = B.newLabel("dl.o");
+    B.condBr(isObj, l0, fail);
+    B.startBlock(l0);
+    for (const n of names) {
+      const vs = lits[n];
+      if (vs === undefined || vs.length === 0) continue;
+      const m = this.dataGetLit(B, "%d", n);
+      const has = B.tmp();
+      B.line(`${has} = icmp ne ptr ${m}, null`);
+      const lHas = B.newLabel("dl.h");
+      B.condBr(has, lHas, fail);
+      B.startBlock(lHas);
+      const mk = this.kindOf(B, m);
+      const isStr = B.tmp();
+      B.line(`${isStr} = icmp eq i32 ${mk}, ${DK.STR}`);
+      const lStr = B.newLabel("dl.s");
+      B.condBr(isStr, lStr, fail);
+      B.startBlock(lStr);
+      const s = this.payloadOf(B, m, "ptr");
+      const lenp = B.tmp();
+      const len = B.tmp();
+      B.line(`${lenp} = getelementptr inbounds i8, ptr ${s}, i64 8 ; ScrStr->len`);
+      B.line(`${len} = load i64, ptr ${lenp}`);
+      const datap = B.tmp();
+      B.line(`${datap} = getelementptr inbounds i8, ptr ${s}, i64 24 ; ScrStr->data`);
+      // SET membership: one length-and-memcmp per member of the arm's own
+      // value set, any hit continuing to the next field. The C twin's
+      // `||` chain, spelled as blocks.
+      const lField = B.newLabel("dl.n");
+      vs.forEach((v, vi) => {
+        const vlen = Buffer.byteLength(v, "utf8");
+        const lenOk = B.tmp();
+        B.line(`${lenOk} = icmp eq i64 ${len}, ${vlen}`);
+        const lCmp = B.newLabel("dl.c");
+        const lElse = B.newLabel("dl.e");
+        B.condBr(lenOk, lCmp, lElse);
+        B.startBlock(lCmp);
+        const c = B.tmp();
+        const same = B.tmp();
+        B.line(`${c} = call i32 @memcmp(ptr ${datap}, ptr ${this.host.cstr(v)}, i64 ${vlen}) ; ${n}`);
+        B.line(`${same} = icmp eq i32 ${c}, 0`);
+        B.condBr(same, lField, lElse);
+        B.startBlock(lElse);
+        if (vi === vs.length - 1) B.br(fail);
+      });
+      B.startBlock(lField);
+    }
+    B.terminate(`ret i1 true`);
+    B.startBlock(fail);
+    B.terminate(`ret i1 false`);
+    // A line comment ends at the newline, and JSON.stringify escapes
+    // every newline in a literal — but not a stray carriage return in
+    // the source spelling, so both are removed before the note is used.
+    const note = JSON.stringify(pairs).replace(/[\r\n]/g, " ");
+    this.defs.push(
+      `define internal zeroext i1 @${name}(ptr %d) ${FN_ATTRS} { ; pins ${note}`,
+      B.render(),
+      `}`,
+      ``,
+    );
+    return name;
+  }
+
   /* ── dynCheckHelper (emit-walkers.ts, ported) ──────────────────────── */
 
   /** `sc_dc_<n>(ptr d, ptr path) -> T` — validate the checked-dynamic tree against T and
@@ -1140,46 +1223,65 @@ export class LlDyn {
         // Arms MOST SPECIFIC FIRST, first FULL match wins (dynCheckArmOrder --
         // the C emitter takes the same order from the same helper). The
         // matched arm's builder can no longer fail.
-        dynCheckArmOrder(def, (id) => host.recordsById.get(id)).forEach((i) => {
-          const arm = def.arms[i]!;
-          const m = this.dynMatchHelper(arm);
-          const hit = B.tmp();
-          B.line(`${hit} = call zeroext i1 @${m}(ptr %d)`);
-          const lHit = B.newLabel("dcu.h");
-          const lNext = B.newLabel("dcu.n");
-          B.condBr(hit, lHit, lNext);
-          B.startBlock(lHit);
-          if (arm.kind === "undefinedT" || arm.kind === "nullT") {
-            // A matched unit arm builds nothing: THE interned immortal
-            // instance (rc == SIZE_MAX — no retain owed).
-            B.terminate(`ret ptr ${host.unitInstanceRef(t.unionId, i)}`);
-          } else if (arm.kind === "f64") {
-            host.declare(`declare ptr @scr_union_new_f64(i32, double)`);
-            const x = B.tmp();
-            const u = B.tmp();
-            B.line(`${x} = call double @${this.dynCheckHelper(arm)}(ptr %d, ptr %path)`);
-            B.line(`${u} = call ptr @scr_union_new_f64(i32 ${i}, double ${x})`);
-            B.terminate(`ret ptr ${u}`);
-          } else if (arm.kind === "bool") {
-            host.declare(`declare ptr @scr_union_new_bool(i32, i1 zeroext)`);
-            const x = B.tmp();
-            const u = B.tmp();
-            B.line(`${x} = call zeroext i1 @${this.dynCheckHelper(arm)}(ptr %d, ptr %path)`);
-            B.line(`${u} = call ptr @scr_union_new_bool(i32 ${i}, i1 ${x})`);
-            B.terminate(`ret ptr ${u}`);
-          } else {
-            const rc = vAdapters(host, arm);
-            host.declare(`declare ptr @scr_union_new_ref(i32, ptr, ptr, ptr, ptr)`);
-            const x = B.tmp();
-            const u = B.tmp();
-            B.line(`${x} = call ptr @${this.dynCheckHelper(arm)}(ptr %d, ptr %path)`);
-            B.line(
-              `${u} = call ptr @scr_union_new_ref(i32 ${i}, ptr ${x}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${traceArg(host, arm)})`,
-            );
-            B.terminate(`ret ptr ${u}`);
-          }
-          B.startBlock(lNext);
-        });
+        const order = dynCheckArmOrder(def, (id) => host.recordsById.get(id));
+        // TWO PASSES when the union carries STRING-LITERAL DISCRIMINANTS,
+        // one otherwise — the C emitter's shape, from the same helpers, so
+        // the two lanes cannot disagree about which arm a value takes.
+        // Pass 1 additionally requires each arm's pinned literals; pass 2 is
+        // the old chain verbatim, so a value contradicting every arm still
+        // lands where it landed before.
+        const passes = unionHasDiscrim(def) ? [true, false] : [false];
+        for (const withLits of passes) {
+          order.forEach((i) => {
+            const arm = def.arms[i]!;
+            const m = this.dynMatchHelper(arm);
+            const lits = withLits ? armDiscrimLits(def, i) : {};
+            const structural = B.tmp();
+            B.line(`${structural} = call zeroext i1 @${m}(ptr %d)`);
+            let hit = structural;
+            if (Object.keys(lits).length > 0) {
+              const lp = B.tmp();
+              B.line(`${lp} = call zeroext i1 @${this.dynLitHelper(lits)}(ptr %d)`);
+              const both = B.tmp();
+              B.line(`${both} = and i1 ${structural}, ${lp}`);
+              hit = both;
+            }
+            const lHit = B.newLabel("dcu.h");
+            const lNext = B.newLabel("dcu.n");
+            B.condBr(hit, lHit, lNext);
+            B.startBlock(lHit);
+            if (arm.kind === "undefinedT" || arm.kind === "nullT") {
+              // A matched unit arm builds nothing: THE interned immortal
+              // instance (rc == SIZE_MAX — no retain owed).
+              B.terminate(`ret ptr ${host.unitInstanceRef(t.unionId, i)}`);
+            } else if (arm.kind === "f64") {
+              host.declare(`declare ptr @scr_union_new_f64(i32, double)`);
+              const x = B.tmp();
+              const u = B.tmp();
+              B.line(`${x} = call double @${this.dynCheckHelper(arm)}(ptr %d, ptr %path)`);
+              B.line(`${u} = call ptr @scr_union_new_f64(i32 ${i}, double ${x})`);
+              B.terminate(`ret ptr ${u}`);
+            } else if (arm.kind === "bool") {
+              host.declare(`declare ptr @scr_union_new_bool(i32, i1 zeroext)`);
+              const x = B.tmp();
+              const u = B.tmp();
+              B.line(`${x} = call zeroext i1 @${this.dynCheckHelper(arm)}(ptr %d, ptr %path)`);
+              B.line(`${u} = call ptr @scr_union_new_bool(i32 ${i}, i1 ${x})`);
+              B.terminate(`ret ptr ${u}`);
+            } else {
+              const rc = vAdapters(host, arm);
+              host.declare(`declare ptr @scr_union_new_ref(i32, ptr, ptr, ptr, ptr)`);
+              const x = B.tmp();
+              const u = B.tmp();
+              B.line(`${x} = call ptr @${this.dynCheckHelper(arm)}(ptr %d, ptr %path)`);
+              B.line(
+                `${u} = call ptr @scr_union_new_ref(i32 ${i}, ptr ${x}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${traceArg(host, arm)})`,
+              );
+              B.terminate(`ret ptr ${u}`);
+            }
+            B.startBlock(lNext);
+          });
+        }
         B.line(`call void @scr_dyn_check_fail(ptr %path, ptr ${want}, ptr %d)`);
         B.terminate(`ret ptr null`);
         break;
