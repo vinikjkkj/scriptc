@@ -8552,6 +8552,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5210-widened-record-lists-the-keys-it-holds.ts": {
+   "order": [
+    "<repo>/tests/corpus/5210-widened-record-lists-the-keys-it-holds.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/522-map-foreach.ts": {
    "order": [
     "<repo>/tests/corpus/522-map-foreach.ts"

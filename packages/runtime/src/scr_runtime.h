@@ -4213,6 +4213,13 @@ ScrDyn *scr_dyn_iter_pack(const ScrDyn *src, const ScrStr *msg);
 double scr_dyn_arr_len(const ScrDyn *d);
 ScrDyn *scr_dyn_arr_at(const ScrDyn *d, double i);
 void scr_dyn_obj_set(ScrDyn *obj, const char *key, size_t key_len, ScrDyn *value);
+/* The PRESENCE-GATED store the record→dyn converters use for an
+ * undefined-armed field: identical to scr_dyn_obj_set except that an
+ * UNDEFINED value creates no key. An optional field a record does not hold
+ * is an ABSENT key in JS, and the record's per-instance union tag is where
+ * that fact lives — see the definition in scr_json.c for why this is not a
+ * rule about undefined values in general. MOVES the value. */
+void scr_dyn_obj_set_present(ScrDyn *obj, const char *key, size_t key_len, ScrDyn *value);
 /* The checked-dynamic keyed WRITE (`h.k = v` on a dyn receiver): OBJ sets
  * the member (JS: later writes win, insertion order); undefined/null and
  * non-object kinds throw Node's catchable TypeErrors (strict-mode
