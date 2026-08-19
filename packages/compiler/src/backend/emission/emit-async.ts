@@ -83,7 +83,7 @@ import { IrType, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/
           ? [`  if (${cache}) return scr_promise_retain(${cache});`]
           : []),
         `  ${pack} *sc_ap = malloc(sizeof *sc_ap);`,
-        `  if (!sc_ap) { scr_trap("scriptc: out of memory\\n"); }`,
+        `  if (!sc_ap) { ${E.oomAbortC()}; }`,
         ...(lifted ? [`  sc_ap->sc_env = scr_closure_retain(sc_env);`] : []),
         ...fn.params.map((p) => `  sc_ap->${pname(p)} = ${pname(p)};`),
         `  ScrPromise *sc_p = scr_async_spawn(&${mangleTrampoline(fn.name)}, sc_ap);`,
@@ -211,7 +211,7 @@ import { IrType, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/
         `}`,
         `static ScrGen *${mangleGenSpawn(fn.name)}(${spawnParams.join(", ") || "void"}) {`,
         `  ${pack} *sc_ap = malloc(sizeof *sc_ap);`,
-        `  if (!sc_ap) { scr_trap("scriptc: out of memory\\n"); }`,
+        `  if (!sc_ap) { ${E.oomAbortC()}; }`,
         ...(lifted ? [`  sc_ap->sc_env = scr_closure_retain(sc_env);`] : []),
         ...fn.params.map((p) => `  sc_ap->${pname(p)} = ${pname(p)};`),
         `  return scr_gen_new(&${mangleTrampoline(fn.name)}, sc_ap, &${mangleGenDrop(fn.name)});`,

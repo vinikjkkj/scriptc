@@ -8444,6 +8444,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5060-every-structural-guard-family-through-one-shared-helper.ts": {
+   "order": [
+    "<repo>/tests/corpus/5060-every-structural-guard-family-through-one-shared-helper.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/510-array-map-filter-foreach.ts": {
    "order": [
     "<repo>/tests/corpus/510-array-map-filter-foreach.ts"

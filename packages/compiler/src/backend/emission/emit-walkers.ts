@@ -185,7 +185,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
       }
     });
     d.push(
-      `  default: scr_trap("scriptc: internal error: invalid union tag\\n");`,
+      `  default: ${E.badTagAbortC()};`,
       `  }`,
       `}`,
       ``,
@@ -244,7 +244,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
       }
     });
     d.push(
-      `  default: scr_trap("scriptc: internal error: invalid union tag\\n");`,
+      `  default: ${E.badTagAbortC()};`,
       `  }`,
       `}`,
       ``,
@@ -321,7 +321,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
       }
     });
     d.push(
-      `  default: scr_trap("scriptc: internal error: invalid union tag\\n");`,
+      `  default: ${E.badTagAbortC()};`,
       `  }`,
       `}`,
       ``,
@@ -865,7 +865,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             // record writer drops the field while it holds this tag before
             // calling — so the tag can never arrive here.
             d.push(`  case ${i}: /* undefined arm: the field dropped at the record level */`);
-            d.push(`    scr_trap("scriptc: internal error: stringify reached an undefined arm\\n");`);
+            d.push(`    ${E.stringifyUndefAbortC()};`);
             return;
           }
           const w = E.jsonWriteHelper(arm);
@@ -878,7 +878,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(`  case ${i}: ${w}(b, (${cType(arm).trim()})scr_union_peek(v)); break;`);
           }
         });
-        d.push(`  default: scr_trap("scriptc: internal error: invalid union tag\\n");`);
+        d.push(`  default: ${E.badTagAbortC()};`);
         d.push(`  }`);
         break;
       }
@@ -2073,7 +2073,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(`  case ${i}: return ${E.toDynHelper(arm)}((${cType(arm).trim()})scr_union_peek(v));`);
           }
         });
-        d.push(`  default: scr_trap("scriptc: internal error: invalid union tag\\n");`);
+        d.push(`  default: ${E.badTagAbortC()};`);
         d.push(`  }`);
         break;
       }
