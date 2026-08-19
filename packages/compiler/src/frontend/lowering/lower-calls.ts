@@ -18,7 +18,7 @@ import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerBytesStaticFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerObjectIterOverIndexShape, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
 import { lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDiffieHellmanCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
-import { droppableStatic, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, templateRawTextOf } from "./lower-exprs.js";
+import { droppableStatic, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { EMITTER_API_MEMBERS, definePropSlotSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
@@ -6110,13 +6110,27 @@ const inliningPredicates = new Set<ts.Symbol>();
   }
 
 /** Radix-free `.toString()` on a UNION receiver whose every arm has one
-   * (string identity, JS-exact number/bool texts, and the Buffer arm's
-   * utf8 decode — Node's default encoding): the per-union ToString
-   * helper dispatches on the tag, so `chunk.toString()` over the ngrok
-   * `Buffer | string` listener param needs no narrowing. Unit-armed
-   * unions stay out — `(undefined).toString()` THROWS in JS, and
-   * claiming it here would silently print "undefined" instead. Null for
-   * other receivers/arms (the narrow-first fences stay). */
+   * (string identity, JS-exact number/bool texts, the Buffer arm's utf8
+   * decode — Node's default encoding — and a plain data RECORD arm): the
+   * per-union ToString helper dispatches on the tag, so
+   * `chunk.toString()` over the ngrok `Buffer | string` listener param
+   * needs no narrowing. Unit-armed unions stay out — `(undefined)
+   * .toString()` THROWS in JS, and claiming it here would silently print
+   * "undefined" instead. Null for other receivers/arms (the narrow-first
+   * fences stay).
+   *
+   * THE RECORD ARM is zapo's `Long` (`spec/proto/index.d.ts:45`,
+   * `number | { low; high; unsigned; toNumber() }`) — the receiver at
+   * `client/events/business.ts:47`, refused as SC2020 until the shape
+   * grew a hidden per-instance toString slot. The reason the arm could
+   * not be admitted before was measured and it was not the helper: the
+   * three UNFENCED spellings of the same operation on the same type
+   * (`String(x)`, `` `${x}` ``, `x + ''`) already answered
+   * "[object Object]", so admitting the arm would have made the fenced
+   * spelling agree with the WRONG one rather than add an answer. The slot
+   * moves all four together — recordArmStringable is the ONE predicate
+   * both spellings ask, and it arms the shape — so the arm is now an
+   * answer, not an agreement. */
   export function lowerUnionToStringCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(call, access)) return null;
@@ -6128,7 +6142,8 @@ const inliningPredicates = new Set<ts.Symbol>();
     const stringable = def?.arms.every(
       (a) =>
         a.kind === "string" || a.kind === "f64" || a.kind === "bool" ||
-        (a.kind === "bytes" && a.elem === "u8"),
+        (a.kind === "bytes" && a.elem === "u8") ||
+        recordArmStringable(L, a),
     );
     if (!stringable) return null;
     const operand = L.lowerExpr(access.expression);
@@ -6299,6 +6314,27 @@ const inliningPredicates = new Set<ts.Symbol>();
       // stdlibMemberFence answers exactly what the OBJECT-receiver
       // spelling of the same call already answers.
       if (classToStringUncallable(L, recv.type)) return null;
+      // A MATERIALIZED record — the dynCheck's struct copy of a JS
+      // object, a class→record projection — has no class pointer left for
+      // the dispatch above, and still carries the source's toString in
+      // the shape's HIDDEN per-instance slot. Arm the slot and emit the
+      // same ToString node `String(r)` emits, so the two spellings read
+      // one slot: NULL in it is still the constant, now decided at run
+      // time rather than folded. The receiver is already lowered, so it
+      // is evaluated exactly once and the interned identity helper below
+      // (which existed only to keep an effectful receiver's effects in
+      // place around a CONSTANT) is not needed on this path.
+      //
+      // TUPLES do not come here for their answer: they print their
+      // ELEMENTS, lowerArrayToStringCall answers the joinable ones one
+      // rule earlier, and a non-joinable tuple keeps the constant fold it
+      // has always had rather than acquiring a slot that has no join in
+      // it.
+      const shape = L.shapes.get(recv.type.kind === "record" ? recv.type.shapeId : "");
+      if (recv.type.kind === "record" && shape && !shape.tuple) {
+        L.markToStrSlot(recv.type.shapeId);
+        return { kind: "toString", operand: recv, type: STRING, loc };
+      }
     }
     // `(<A>{}).toString()` — assertion-wrapped literals and plain reads
     // have nothing to evaluate; pureObjectToStringReceiver widens

@@ -114,7 +114,7 @@ import { lowerComptime, comptimeBakeable, rejectComptimeCaptures, comptimeValueT
 import { lowerDeleteValue, lowerStmts, noteBlockedBindings, isBlockedBinding, lowerScopedBlock, predeclareForwardCapture, probeBindWhy, predeclareForwardFnDecl, predeclareForwardVar, rejectJumpCrossingFinally, lowerStmt, lowerVarStatement, lowerDestructuringDecl, lowerDestructuringAssignParts, lowerBindingPattern, lowerJsvalBindingPattern, checkBindingElement, bindPatternTarget, lowerVarDeclList, lowerVarDecl, lowerSwitch, lowerTry, lowerExprStatement, lowerForOf, lowerForStatement } from "./lower-stmts.js";
 import { recordKeyResultOk, narrowBridgeDyn, FieldTarget, lowerDynObjectLiteral, lowerExpr, maybeNarrow, lowerUnitComparison, lowerNullishCoalesce, lowerOptionalChain, finishOptionalChain, lowerCondition, ensureBool, requireTruthyUnion, eqComparableUnion, lowerIntrinsicProperty, lowerArrayLiteral, lowerObjectLiteral, lowerShorthandValue, rejectThisInObjectMethod, lowerElementAccess, lowerElementWrite, lowerRecordKeyRead, ensureString, lowerTemplate, lowerAsExpression, lowerPrefixUnary, lowerBinary, lowerCaughtTypeofTest, caughtRead, caughtLocalOf, caughtToString, lowerInstanceOf, lowerRegexLiteral, lowerFieldRead, lowerUnionProperty, fieldTarget, fieldGetExpr, fieldSetStmt, lowerFieldCompound, uniqueSymbolKeyOf, foldedStringKeyOf } from "./lower-exprs.js";
 import { assertExpandoAccounting, expandoCounters, type ExpandoBind, type ExpandoMember } from "./lower-expando.js";
-import { lowerRecordFieldCall, lowerObjectMethodCall } from "./lower-calls.js";
+import { lowerRecordFieldCall, lowerObjectMethodCall, classHasOwnValueOf, classToStringDispatch } from "./lower-calls.js";
 import { fenceCrossBlockNsRef, nsPathPrefix } from "./lower-namespaces.js";
 
 /** Entry function name. '%' cannot appear in a TS identifier, so a user
@@ -5323,12 +5323,18 @@ export class Lowerer {
               },
       });
     }
+    // The hidden toString slot, for the same reason objRecordWidthHelper
+    // carries it: this builder MATERIALIZES the instance into a struct,
+    // after which the class's own toString is unreachable and every
+    // ToString folds "[object Object]" over a method that exists.
+    const toStr = this.toStringSlotClosure(className, loc, "self.0");
+    if (toStr) this.markToStrSlot(target.shapeId);
     this.liftedFns.push({
       name: builder,
       params: [{ localId: "self.0", name: "self", type: instT }],
       returnType: target,
       locals: [{ id: "self.0", name: "self", type: instT, mutable: false, boxed: true }],
-      body: [{ kind: "return", value: { kind: "recordLit", fields, type: target, loc }, loc }],
+      body: [{ kind: "return", value: { kind: "recordLit", fields, ...(toStr ? { toStr } : {}), type: target, loc }, loc }],
       loc,
     });
     return builder;
@@ -6439,6 +6445,75 @@ export class Lowerer {
     return { method: { declarer, name, virtual, func: fieldType } };
   }
 
+  /** Arm this shape's HIDDEN per-instance toString slot (IrRecordShape
+   * .tostr): from here on both backends lay out one trailing
+   * `ScrClosure *` member on it, NULL on every fresh record, and every
+   * ToString over the shape reads it instead of folding the constant.
+   *
+   * Monotone and order-free on purpose. It is called from BOTH directions
+   * — a ToString read site over the shape, and a class→record projection
+   * whose class has a callable toString — and the two can be lowered in
+   * either order: the read sites are backend branches over a slot that is
+   * NULL unless a fill wrote it, and the fill sites emit the store from
+   * the recordLit node the backend sizes from the same flag. So neither
+   * has to run first, and a shape nobody reads and nobody fills never
+   * grows the member. */
+  markToStrSlot(shapeId: string): void {
+    const shape = this.shapes.get(shapeId);
+    // Tuples print their ELEMENTS (Array.prototype.toString), never the
+    // constant, so there is no slot answer for them; index-signature
+    // shapes carry the slot fine (the member sits after the overflow map).
+    if (!shape || shape.tuple) return;
+    shape.tostr = true;
+  }
+
+  /** The `() => string` closure that fills a projected record's hidden
+   * toString slot, or null when the class has no toString this compiler
+   * can call. Interned per class; captures the projection helper's own
+   * instance local, exactly like boundMethodClosure.
+   *
+   * The BODY is classToStringDispatch — the same dispatch `x.toString()`
+   * on the class-typed spelling already emits, virtual where an override
+   * can sit below, direct otherwise, omitted-optional arguments minted the
+   * way an ordinary omitted argument is. A class with NO toString anywhere
+   * answers null here and the slot stays NULL, which is right: the
+   * constant IS Node's answer for it. */
+  toStringSlotClosure(recvClass: string, loc: SrcLoc, captureLocalId = "o.0"): IrExpr | null {
+    const info = this.classes.get(recvClass);
+    if (!info || !info.decl) return null;
+    const recvT: IrType = { kind: "object", className: recvClass };
+    // ONE slot, and `+` reads it too (ensureStringForPlus routes records
+    // through ensureString), so the slot may only be filled where the
+    // STRING hint and the DEFAULT hint have the SAME answer. They do
+    // exactly when the value has no valueOf of its own: Object.prototype
+    // .valueOf returns the object and falls through to toString. A class
+    // that declares one is the case where they differ — measured on Node
+    // v25.9.0, `"" + {valueOf:()=>42, toString:()=>"TS"}` is "42" while
+    // String() of it is "TS" — so the slot stays empty there and both
+    // spellings keep the constant they answer today. A named remainder,
+    // not a regression: nothing that answers correctly now stops.
+    if (classHasOwnValueOf(this, recvT)) return null;
+    const probe = classToStringDispatch(this, { kind: "varRef", localId: "self.0", type: recvT, loc }, loc);
+    if (probe === null) return null;
+    const slotT = funcOf([], STRING);
+    const key = `tostrslot:${recvClass}`;
+    const existing = this.widthHelpers.get(key);
+    const name = existing ?? `%tostr.${this.widthHelpers.size}`;
+    if (!existing) {
+      this.widthHelpers.set(key, name);
+      this.liftedFns.push({
+        name,
+        params: [],
+        returnType: STRING,
+        captures: [{ localId: "self.0", name: "self", type: recvT }],
+        locals: [{ id: "self.0", name: "self", type: recvT, mutable: false, boxed: true }],
+        body: [{ kind: "return", value: probe, loc }],
+        loc,
+      });
+    }
+    return { kind: "closure", fnName: name, captures: [captureLocalId], type: slotT, loc };
+  }
+
   /** The BOUND-METHOD closure a projected method field becomes: a closure
    * over an interned `%boundmeth.<n>` that captures the instance and calls
    * the method with the slot's own arguments. Interned per (receiver,
@@ -6725,20 +6800,30 @@ export class Lowerer {
     const fromT: IrType = { kind: "object", className };
     const toT: IrType = { kind: "record", shapeId: toId };
     const o: IrExpr = { kind: "varRef", localId: "o.0", type: fromT, loc };
+    // MATERIALIZING loses the class's toString: the record that comes out
+    // is, to every later question, a plain record, for which
+    // "[object Object]" is Node's answer — and is a SILENT wrong answer
+    // for a class that has one. The hidden slot carries it across; the
+    // shape is armed here so both backends lay the member out.
+    const toStr = this.toStringSlotClosure(className, loc);
+    if (toStr) this.markToStrSlot(toId);
     // A method field binds the instance into a closure (boundMethodClosure
     // captures `o.0`); the capture retains it, so the instance param must
-    // be a boxed local. Plain data-class projections keep the raw pointer.
+    // be a boxed local — and the toString slot's closure captures it the
+    // same way. Plain data-class projections keep the raw pointer.
     const hasMethodField = to.fields.some((f) => "method" in plan.get(f.name)!);
+    const boxInstance = hasMethodField || toStr !== null;
     this.liftedFns.push({
       name,
       params: [{ localId: "o.0", name: "o", type: fromT }],
       returnType: toT,
-      locals: [{ id: "o.0", name: "o", type: fromT, mutable: true, ...(hasMethodField ? { boxed: true } : {}) }],
+      locals: [{ id: "o.0", name: "o", type: fromT, mutable: true, ...(boxInstance ? { boxed: true } : {}) }],
       body: [
         {
           kind: "return",
           value: {
             kind: "recordLit",
+            ...(toStr ? { toStr } : {}),
             fields: to.fields.map((f) => {
               const lift = plan.get(f.name)!;
               if ("method" in lift) {

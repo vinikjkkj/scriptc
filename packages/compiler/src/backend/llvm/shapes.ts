@@ -61,11 +61,18 @@ export function computeTraced(mod: IrModule): { shapes: Set<string>; unions: Set
         ? [...c.fields, { name: "<listeners>", type: funcOf([], VOID) }]
         : c.fields,
     })),
+    // A shape that armed the HIDDEN toString slot carries one more member
+    // — a `() => string` closure, unconditionally cycle-capable (the
+    // class→record projection's closure captures the very instance the
+    // record was made from) — so the slot joins the fixpoint exactly like
+    // <overflow>. emitter.ts's C twin carries the same row.
     ...(mod.records ?? []).map((r) => ({
       key: `record:${r.id}`,
-      fields: r.indexValue
-        ? [...r.fields, { name: "<overflow>", type: mapOf(STRING, r.indexValue) }]
-        : r.fields,
+      fields: [
+        ...r.fields,
+        ...(r.indexValue ? [{ name: "<overflow>", type: mapOf(STRING, r.indexValue) }] : []),
+        ...(r.tostr ? [{ name: "<toString>", type: funcOf([], STRING) }] : []),
+      ],
     })),
   ];
   for (const s of shapeDefs) tracedShapes.add(s.key);
@@ -491,7 +498,19 @@ function rcMembers(shape: IrRecordShape): { index: number; type: IrType; name: s
     ...(shape.indexValue
       ? [{ index: shape.fields.length + 1, type: mapOf(STRING, shape.indexValue), name: "[key: string] overflow" }]
       : []),
+    // The hidden toString slot, LAST so no declared field's index moves —
+    // released with the record and TRACED as a closure edge, the C
+    // backend's rcMembers row exactly.
+    ...(shape.tostr ? [{ index: toStrSlotIndex(shape), type: funcOf([], STRING), name: "<toString> slot" }] : []),
   ];
+}
+
+/** The hidden toString slot's field index in the emitted struct type: rc
+ * at 0, the declared fields, the overflow map on index-signature shapes,
+ * then the slot. Shared by every getelementptr that reaches it, so the
+ * layout is stated once. */
+export function toStrSlotIndex(shape: IrRecordShape): number {
+  return shape.fields.length + (shape.indexValue ? 1 : 0) + 1;
 }
 
 /** The immortal-skip + mark-live retain body shared by every shape. The
@@ -539,6 +558,7 @@ export function emitRecordShapes(host: ShapeHost, mod: IrModule): { typeDefs: st
     const struct = mangleRecordStruct(shape.id);
     const fieldTys = shape.fields.map((f) => llFieldType(f.type));
     if (shape.indexValue) fieldTys.push("ptr"); // the overflow ScrMap *
+    if (shape.tostr) fieldTys.push("ptr"); // the hidden toString slot (ScrClosure *)
     typeDefs.push(
       `%${struct} = type { i64${fieldTys.length ? ", " + fieldTys.join(", ") : ""} } ` +
         `; record ${shape.id} { ${shape.fields.map((f) => f.name).join("; ")}${shape.indexValue ? "; [key: string]" : ""} }`,

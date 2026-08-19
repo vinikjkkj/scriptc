@@ -188,6 +188,22 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
           // one flag read.
           const ot = (rec["operand"] as { type?: { kind?: string } } | undefined)?.type?.kind;
           if (ot === "dyn") f.throws = true;
+          // A RECORD whose shape armed the hidden toString slot runs the
+          // value's OWN toString too — a class's method, or the source
+          // object's through the dyn walker — and that is user code that
+          // can throw exactly as the dyn arm's can. The UNION spelling
+          // reaches the same slot through the per-union helper, so both
+          // operand kinds seed. Shape-level, not slot-level: the slot is
+          // NULL on plenty of instances of an armed shape, and a
+          // never-taken pending check costs one flag read.
+          if (ot === "record" || ot === "union") {
+            const t = (rec["operand"] as { type?: { kind?: string; shapeId?: string; unionId?: string } }).type!;
+            const armed = (id: string | undefined): boolean =>
+              (mod.records ?? []).some((r) => r.id === id && r.tostr === true);
+            if (ot === "record" ? armed(t.shapeId) : (mod.unions ?? []).some((u) => u.id === t.unionId && u.arms.some((a) => a.kind === "record" && armed(a.shapeId)))) {
+              f.throws = true;
+            }
+          }
           break;
         }
         case "jsOp":
