@@ -2986,6 +2986,21 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
    * changes is only the dishonest case, which is the case Node answers.
    *
    * `SCRIPTC_ARMGUARD_OFF=1` ablates it, so one binary emits both sides. */
+  /** A width a synthesized `T | undefined` chain result can carry - the
+   * same list armCarryableWidth draws for the binding rung (a `dyn` body
+   * already answered above; `jsval`, `void`, `caught`, a unit and a union
+   * would be meaningless or nested arms). */
+  function armCarryableChainWidth(t: IrType): boolean {
+    return (
+      t.kind !== "dyn" &&
+      t.kind !== "jsval" &&
+      t.kind !== "void" &&
+      t.kind !== "caught" &&
+      t.kind !== "union" &&
+      !isUnitType(t)
+    );
+  }
+
   export function narrowBridgeUnion(e: IrExpr): IrExpr | null {
     if (process.env["SCRIPTC_ARMGUARD_OFF"] === "1") return null;
     const inner = narrowBridgeArm(e);
@@ -4397,6 +4412,74 @@ function nullishTestedByParent(expr: ts.Expression): boolean {
     return !parts.some((p) => (p.flags & bad) !== 0);
   }
 
+  /** ...UNLESS the SLOT the receiver actually lives in can hold a nullish
+   * the checker's type does not mention. That is not a hypothetical: an
+   * index-signature keyed read is typed by the signature's VALUE type, so
+   * `const s = attrs["nope"]` is spelled `string` while the key may be
+   * absent, and the binding rules widen exactly that case — to `dyn`
+   * (keyedReadLocalAtDynWidth, shipped in bb35bc38) or to an
+   * undefined-armed union (keyedReadLocalAtUndefinedArm). The value that
+   * exists at run time is then undefined, and `x?.y` is the author asking
+   * for it.
+   *
+   * recvNeverNullish reads the CHECKER type, which says `string`, so `?.`
+   * folded to `.` and the read went on to throw the bridge's TypeError
+   * where Node answers undefined - measured on the SHIPPED dyn rule as
+   * well as the union one, so this is not the union rung's defect.
+   *
+   * The function's own comment says it deliberately does not lower the
+   * receiver first (the never-nullish arm discards that subtree, and
+   * building it interns dead shapes). This does not lower it either: a
+   * bare identifier's slot is already known, so peekLocal/globalOf answer
+   * from the binding tables without boxing, threading or predeclaring.
+   * Anything that is not a plain identifier answers false and keeps the
+   * behaviour it has.
+   *
+   * `SCRIPTC_OPTCHAIN_SLOT_OFF=1` ablates it. */
+  function recvSlotCanBeNullish(L: Lowerer, node: ts.Expression): boolean {
+    if (process.env["SCRIPTC_OPTCHAIN_SLOT_OFF"] === "1") return false;
+    let e: ts.Expression = node;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    if (!ts.isIdentifier(e)) return false;
+    const t = L.peekLocal(e)?.type ?? L.globalOf(e)?.type ?? null;
+    if (t === null) return false;
+    // dyn represents undefined directly; a union says so with an arm.
+    if (t.kind === "dyn") return true;
+    return t.kind === "union" && L.armTag(t.unionId, UNDEFINED_T) >= 0;
+  }
+
+  /** The receiver IS an index-signature keyed read (`bs["nope"]?.tag`),
+   * not a binding of one. Same lie, one construct earlier: the checker
+   * types the read by the signature's VALUE type, so recvNeverNullish
+   * folds `?.` to `.` and the miss aborts in the shape's keyed-read
+   * helper - one line before the short-circuit the author wrote. Asked
+   * SYNTACTICALLY, from the receiver node, because the fold happens before
+   * anything is lowered; whether the read can actually be held at
+   * `T | undefined` is then recordKeyReadAtUndefinedArm's own decision on
+   * the lowered value. */
+  function recvIsIndexKeyedRead(L: Lowerer, node: ts.Expression): boolean {
+    if (process.env["SCRIPTC_OPTCHAIN_SLOT_OFF"] === "1") return false;
+    let e: ts.Expression = node;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    let recv: ts.Expression;
+    let key: string | null;
+    if (ts.isPropertyAccessExpression(e) && e.questionDotToken === undefined && ts.isIdentifier(e.name)) {
+      recv = e.expression;
+      key = e.name.text;
+    } else if (ts.isElementAccessExpression(e) && e.questionDotToken === undefined) {
+      recv = e.expression;
+      key = ts.isStringLiteralLike(e.argumentExpression) ? e.argumentExpression.text : null;
+    } else {
+      return false;
+    }
+    const recvT = L.typeOf(recv);
+    const recvIr = L.mapTypeOf(recvT);
+    if (recvIr?.kind !== "record") return false;
+    if (L.shapes.get(recvIr.shapeId)?.indexValue === undefined) return false;
+    // A DECLARED field always answers; only the signature can miss.
+    return key === null || L.checker.getPropertyOfType(recvT, key) === undefined;
+  }
+
 export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.PropertyAccessExpression | ts.ElementAccessExpression,): IrExpr {
     const loc = locOf(expr);
     // The node CARRYING the ?. token and the receiver expression it guards.
@@ -4462,7 +4545,11 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     // getNonNullableType would be the identity, and a TAIL's intermediate
     // steps carry their plain types for the same reason (TypeScript adds
     // the `| undefined` only where the chain CAN short-circuit).
-    if (recvNeverNullish(L, recvNode)) {
+    if (
+      recvNeverNullish(L, recvNode) &&
+      !recvSlotCanBeNullish(L, recvNode) &&
+      !recvIsIndexKeyedRead(L, recvNode)
+    ) {
       L.chainHandled.add(dotNode);
       try {
         return L.lowerExpr(expr);
@@ -4470,7 +4557,41 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         L.chainHandled.delete(dotNode);
       }
     }
-    const receiver = L.lowerExpr(recvNode);
+    let receiver = L.lowerExpr(recvNode);
+    // A receiver whose SLOT is wider than its checker type arrives here
+    // BRIDGED: maybeNarrow validates the dyn into the checker's type
+    // (dynCheck) or extracts the checker's arm out of the union
+    // (checkedArmBridge), and each of those throws on the very value `?.`
+    // exists to skip. Look through the bridge, exactly as `!v`,
+    // `v === undefined` and `typeof v` already do (narrowBridgeDyn /
+    // narrowBridgeUnion) - the operand still evaluates, and what is
+    // dropped is a validation a SHORT-CIRCUIT does not need. Only for the
+    // receivers recvSlotCanBeNullish just proved widened; every other
+    // receiver keeps the bridge it has.
+    let slotWidenedRecv = recvSlotCanBeNullish(L, recvNode);
+    if (slotWidenedRecv) {
+      const under = narrowBridgeDyn(receiver) ?? narrowBridgeUnion(receiver);
+      if (under !== null) receiver = under;
+    }
+    // The receiver IS the index-signature keyed read (`bs["nope"]?.tag`,
+    // not a binding of it). Its checker type is the signature's VALUE
+    // type, so `?.` folded to `.` and the miss aborted in the shape's
+    // keyed-read helper - one line before the short-circuit the author
+    // wrote. This is the binding rung's own destination, one construct
+    // over: hold the read at `T | undefined` and let the chain's tag test
+    // answer. `SCRIPTC_OPTCHAIN_SLOT_OFF=1` ablates it with the rest.
+    if (
+      !slotWidenedRecv &&
+      process.env["SCRIPTC_OPTCHAIN_SLOT_OFF"] !== "1" &&
+      receiver.kind === "recordKeyGet" &&
+      armCarryableChainWidth(receiver.type)
+    ) {
+      const armed = L.recordKeyReadAtUndefinedArm(receiver, L.withUndefinedArm(receiver.type));
+      if (armed !== null) {
+        receiver = armed;
+        slotWidenedRecv = true;
+      }
+    }
     if (receiver.type.kind === "dyn") {
       // `pkg?.name` / `pkg?.scripts?.[k]` on a JSON.parse result: dyn
       // represents undefined directly, so the chain step IS the keyed
@@ -4655,7 +4776,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       const params = narrowed.params;
       const args = expr.arguments.map((a, i) => L.lowerExprExpecting(a, params[i]));
       const body: IrExpr = { kind: "callValue", callee: recvRef, args, type: narrowed.ret, loc };
-      return L.finishOptionalChain(expr, id, receiver, body, loc);
+      return L.finishOptionalChain(expr, id, receiver, body, loc, slotWidenedRecv);
     }
 
     // Member forms: re-dispatch the normal lowering with the receiver node
@@ -4702,7 +4823,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       L.chainHandled.delete(dotNode);
       for (const n of tailSteps) L.chainNarrowedType.delete(n);
     }
-    return L.finishOptionalChain(expr, id, receiver, body, loc);
+    return L.finishOptionalChain(expr, id, receiver, body, loc, slotWidenedRecv);
   }
 
 /** The optChain node around a lowered chain body: void bodies keep the
@@ -4713,7 +4834,14 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     id: string,
     receiver: IrExpr,
     body: IrExpr,
-    loc: SrcLoc,): IrExpr {
+    loc: SrcLoc,
+    /** The receiver's nullability is INVISIBLE to tsc: it lives in the
+     * binding's widened slot, not in the checker type (see
+     * recvSlotCanBeNullish). tsc therefore typed this whole chain without
+     * the `?.` arm, and the fence below - "the result has no undefined
+     * arm" - would refuse a chain whose short-circuit really can happen.
+     * The arm is synthesized from the BODY's own width instead. */
+    slotWidenedRecv = false,): IrExpr {
     if (body.type.kind === "void") {
       return { kind: "optChain", id, receiver, body, type: VOID, loc };
     }
@@ -4723,7 +4851,12 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     if (body.type.kind === "dyn") {
       return { kind: "optChain", id, receiver, body, type: DYN, loc };
     }
-    const type = L.irTypeOf(expr);
+    const declared = L.irTypeOf(expr);
+    const noArm = declared.kind !== "union" || L.armTag(declared.unionId, UNDEFINED_T) < 0;
+    const type =
+      noArm && slotWidenedRecv && typeEquals(declared, body.type) && armCarryableChainWidth(body.type)
+        ? L.withUndefinedArm(body.type)
+        : declared;
     if (type.kind !== "union" || L.armTag(type.unionId, UNDEFINED_T) < 0) {
       L.unsupported(
         "SC1090",
@@ -9401,7 +9534,10 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       const ref = (localId: string, t: IrType): IrExpr => ({ kind: "varRef", localId, type: t, loc });
       const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
       const outRef = ref("out.0", type);
-      const ksT = arrayOf(STRING);
+      // f64[]: each spread contributor's overflow is walked by SLOT
+      // (recordOvfSlots), so the key and its value come out of the SAME
+      // entry and no key is looked back up in the map it came from.
+      const ksT = arrayOf(F64);
       const locals: IrLocal[] = [{ id: "out.0", name: "out", type, mutable: false }];
       // One parameter per contributor, in literal order. An all-spread
       // literal keeps the historic `s<n>` names, so the C an existing
@@ -9478,8 +9614,9 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         const kRef = ref(`k${j}.0`, STRING);
         const vRef = ref(`v${j}.0`, s.iv);
         locals.push(
-          { id: `ks${j}.0`, name: `ks${j}`, type: ksT, mutable: false },
+          { id: `sls${j}.0`, name: `sls${j}`, type: ksT, mutable: false },
           { id: `i${j}.0`, name: `i${j}`, type: F64, mutable: true },
+          { id: `sl${j}.0`, name: `sl${j}`, type: F64, mutable: false },
           { id: `k${j}.0`, name: `k${j}`, type: STRING, mutable: false },
           { id: `v${j}.0`, name: `v${j}`, type: s.iv, mutable: false },
         );
@@ -9504,15 +9641,16 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           }];
         }, []);
         body.push(
-          { kind: "varDecl", localId: `ks${j}.0`, init: { kind: "recordOvfKeys", obj: sRef, shapeId: s.shapeId, type: ksT, loc }, loc },
+          { kind: "varDecl", localId: `sls${j}.0`, init: { kind: "recordOvfSlots", obj: sRef, shapeId: s.shapeId, type: ksT, loc }, loc },
           {
             kind: "for",
             init: { kind: "varDecl", localId: `i${j}.0`, init: num(0), loc },
-            cond: { kind: "bin", op: "<", left: ref(`i${j}.0`, F64), right: { kind: "arrIntrinsic", method: "length", receiver: ref(`ks${j}.0`, ksT), args: [], type: F64, loc }, type: BOOL, loc },
+            cond: { kind: "bin", op: "<", left: ref(`i${j}.0`, F64), right: { kind: "arrIntrinsic", method: "length", receiver: ref(`sls${j}.0`, ksT), args: [], type: F64, loc }, type: BOOL, loc },
             update: { kind: "assign", localId: `i${j}.0`, value: { kind: "bin", op: "+", left: ref(`i${j}.0`, F64), right: num(1), type: F64, loc }, loc },
             body: [
-              { kind: "varDecl", localId: `k${j}.0`, init: { kind: "arrayGet", arr: ref(`ks${j}.0`, ksT), index: ref(`i${j}.0`, F64), type: STRING, loc }, loc },
-              { kind: "varDecl", localId: `v${j}.0`, init: { kind: "recordKeyGet", obj: sRef, shapeId: s.shapeId, key: kRef, overflowOnly: true, type: s.iv, loc }, loc },
+              { kind: "varDecl", localId: `sl${j}.0`, init: { kind: "arrayGet", arr: ref(`sls${j}.0`, ksT), index: ref(`i${j}.0`, F64), type: F64, loc }, loc },
+              { kind: "varDecl", localId: `k${j}.0`, init: { kind: "recordOvfSlotGet", obj: sRef, shapeId: s.shapeId, slot: ref(`sl${j}.0`, F64), part: "key", type: STRING, loc }, loc },
+              { kind: "varDecl", localId: `v${j}.0`, init: { kind: "recordOvfSlotGet", obj: sRef, shapeId: s.shapeId, slot: ref(`sl${j}.0`, F64), part: "value", type: s.iv, loc }, loc },
               ...dispatch,
             ],
             loc,

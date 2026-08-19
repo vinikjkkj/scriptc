@@ -2118,6 +2118,25 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const obj = E.emitExpr(e.obj);
         return E.newTemp(e.type, `scr_map_keys_js_order(${obj.name}->${OVERFLOW_MEMBER})`);
       }
+      case "recordOvfSlots": {
+        // The same enumeration as LIVE ENTRY SLOTS - a fresh f64[] snapshot
+        // (+1); the record is borrowed.
+        const obj = E.emitExpr(e.obj);
+        return E.newTemp(e.type, `scr_map_slots_js_order(${obj.name}->${OVERFLOW_MEMBER})`);
+      }
+      case "recordOvfSlotGet": {
+        // One entry, addressed by slot: no key lookup, so no miss path. The
+        // ref accessors retain (+1), exactly like scr_map_get_str_ref.
+        const obj = E.emitExpr(e.obj);
+        const slot = E.emitExpr(e.slot);
+        const m = `${obj.name}->${OVERFLOW_MEMBER}`;
+        if (e.part === "key") {
+          return E.newTemp(e.type, `scr_map_iter_key_str(${m}, ${slot.name})`);
+        }
+        if (e.type.kind === "f64") return E.newTemp(e.type, `scr_map_iter_val_f64(${m}, ${slot.name})`);
+        if (e.type.kind === "bool") return E.newTemp(e.type, `scr_map_iter_val_bool(${m}, ${slot.name})`);
+        return E.newTemp(e.type, `(${cType(e.type).trim()})scr_map_iter_val_ref(${m}, ${slot.name})`);
+      }
       case "dynFrom": {
         // Static value → fresh dyn tree (+1) through the interned per-type
         // converter; the operand stays borrowed (frame-released as usual).

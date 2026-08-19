@@ -8528,6 +8528,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5180-a-generated-record-walker-reads-the-entry-not-the-key-it-enumerated.ts": {
+   "order": [
+    "<repo>/tests/corpus/5180-a-generated-record-walker-reads-the-entry-not-the-key-it-enumerated.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5181-optional-chaining-over-an-index-signature-read-short-circuits.ts": {
+   "order": [
+    "<repo>/tests/corpus/5181-optional-chaining-over-an-index-signature-read-short-circuits.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/519-array-from-length.ts": {
    "order": [
     "<repo>/tests/corpus/519-array-from-length.ts"
