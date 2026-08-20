@@ -10,6 +10,7 @@ import { rcSitesRequested } from "./emitter.js";
 import { armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, isUndefinedArmedUnion, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
+import { KINDGATE_WIDE_KINDS, kindgateWideLane } from "../kindgate.js";
 import { OVERFLOW_MEMBER, TOSTR_MEMBER } from "./emit-shapes.js";
 
 /** Can a record FIELD of this type end up holding a callable?
@@ -1516,12 +1517,23 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const sig = `static ScrDyn *${name}(const ScrDyn *d, const char *const *keys, const unsigned *lens, size_t n)`;
     E.walkerProtos.push(`${okSig}; /* record builder: a receiver whose members can be read */`);
     E.walkerProtos.push(`${sig}; /* record builder: the non-OBJ receiver's declared members */`);
+    // The admitted kinds come from backend/kindgate.ts, spelled here as
+    // enum names and on the LLVM lane as DK numbers: a kind admitted on
+    // one lane cannot be refused on the other, because there is only one
+    // list. Three to a row, which is the shape this text always had.
+    const kindRows: string[] = [];
+    for (let i = 0; i < KINDGATE_WIDE_KINDS.length; i += 3) {
+      kindRows.push(
+        `    ${KINDGATE_WIDE_KINDS.slice(i, i + 3)
+          .map((k) => `case SCR_DYN_${k}:`)
+          .join(" ")}`,
+      );
+    }
+    kindRows[kindRows.length - 1] += ` return true;`;
     E.walkerDefs.push(
       `${okSig} { /* record builder: a receiver whose members can be read */`,
       `  switch (d->kind) {`,
-      `    case SCR_DYN_ARR: case SCR_DYN_STR: case SCR_DYN_BYTES:`,
-      `    case SCR_DYN_ARRBUF: case SCR_DYN_NUM: case SCR_DYN_BOOL:`,
-      `    case SCR_DYN_FUNC: return true;`,
+      ...kindRows,
       `    default: return false;`,
       `  }`,
       `}`,
@@ -1875,12 +1887,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // TypeError, and a shape that cannot take the lane (a tuple, an
         // index signature, a fieldless shape) still meets
         // `d->kind != SCR_DYN_OBJ` alone.
-        const wide =
-          (soft ? E.kindgateMatch : E.kindgateWide) &&
-          !shape.indexValue &&
-          shape.fields.length > 0
-            ? E.recordWideHelper()
-            : null;
+        // The split itself is NOT spelled here any more: `kindgateWideLane`
+        // in backend/kindgate.ts is the one definition, and
+        // backend/llvm/dyn.ts asks the identical question at the identical
+        // point of its own record body. Restating `soft ? match : wide` in
+        // two files is exactly the drift this gate is a warning about.
+        const wide = kindgateWideLane(E.kindgateDials, soft, shape)
+          ? E.recordWideHelper()
+          : null;
         if (wide) {
           const keysName = `sc_kgk_${t.shapeId}`;
           const lensName = `sc_kgl_${t.shapeId}`;

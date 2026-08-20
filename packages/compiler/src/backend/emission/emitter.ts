@@ -34,6 +34,7 @@ import type {
   SrcLoc,
 } from "../../ir/nodes.js";
 import { funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID } from "../../ir/nodes.js";
+import { readKindgateDials } from "../kindgate.js";
 import {
   mangleAsyncSpawn,
   mangleGenSpawn,
@@ -370,12 +371,17 @@ export class CEmitter {
    * asserted, not assumed — a guard added with probeLower once interned an
    * extra helper into zapo's TU and was caught only by a byte diff. */
   readonly dcCount = process.env["SCRIPTC_DC_COUNT"] === "1";
-  /** SCRIPTC_KINDGATE_MATCH=1: the CONTROL that widens the record
-   * MATCHER as well as the builder. Off by default and off in every
-   * shipped build - it exists so the union-tag population can be run
-   * both ways and the wrong tags counted rather than asserted. See
-   * dynMatchHelper in emit-walkers.ts. */
-  readonly kindgateMatch = process.env["SCRIPTC_KINDGATE_MATCH"] === "1";
+  /** The kind-gate dials, read from ../kindgate.js — the ONE definition
+   * both backends take them from. `backend/llvm/dyn.ts` reads the same
+   * module and asks the same `kindgateWideLane`, so the hard/soft split
+   * cannot be spelled differently on the two lanes. */
+  readonly kindgateDials = readKindgateDials();
+  /** SCRIPTC_KINDGATE_MATCH=1: the CONTROL that widens the record gate in
+   * the SOFT (arm-walker) body as well as the hard one. Off by default
+   * and off in every shipped build - it exists so the union-tag
+   * population can be run both ways and the wrong tags counted rather
+   * than asserted. See dynWalkerBody in emit-walkers.ts. */
+  readonly kindgateMatch = this.kindgateDials.match;
   /** SCRIPTC_KINDGATE_WIDE=1: the record BUILDER reads a non-OBJ
    * receiver's declared members instead of refusing at the kind gate.
    * Off by default, and the measurement in estado-kindgate.md is why:
@@ -385,9 +391,7 @@ export class CEmitter {
    * 35-case surface population, against 9 loud refusals turned correct.
    * SCRIPTC_KINDGATE_MATCH implies it (the matcher control reuses the
    * same projector). Off, neither dial emits one byte. */
-  readonly kindgateWide =
-    process.env["SCRIPTC_KINDGATE_WIDE"] === "1" ||
-    process.env["SCRIPTC_KINDGATE_MATCH"] === "1";
+  readonly kindgateWide = this.kindgateDials.wide;
   dcSites = 0;
   private dcOpen = -1;
   /** The increment for a guard about to be EVALUATED, plus its marker; it
