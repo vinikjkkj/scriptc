@@ -8726,6 +8726,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5390-a-record-widened-into-an-object-slot-enumerates-as-node-does.ts": {
+   "order": [
+    "<repo>/tests/corpus/5390-a-record-widened-into-an-object-slot-enumerates-as-node-does.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5391-integer-like-keys-keep-their-slot-across-the-widening-boundary.ts": {
+   "order": [
+    "<repo>/tests/corpus/5391-integer-like-keys-keep-their-slot-across-the-widening-boundary.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/540-tuples-basics.ts": {
    "order": [
     "<repo>/tests/corpus/540-tuples-basics.ts"
@@ -10056,6 +10068,12 @@
   "<repo>/tests/diagnostics/json-shape/main.ts": {
    "order": [
     "<repo>/tests/diagnostics/json-shape/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/key-order-across-the-widening-boundary.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/key-order-across-the-widening-boundary.ts"
    ],
    "diags": []
   },

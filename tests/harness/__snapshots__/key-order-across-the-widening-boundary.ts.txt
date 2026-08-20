@@ -1,0 +1,71 @@
+key-order-across-the-widening-boundary.ts:39:25 - error SC1090: widening a record into an 'unknown'/'object' slot when this program does not build it the way its shape enumerates (the crossing materialises the key list in shape-declared order, and the dyn value's order is observable from there - Object.keys, for-in, JSON, console.log) are not supported yet
+
+  38 | // 1 — a local typed `object`.
+  39 | const asLocal: object = row;
+     |                         ^~~
+  40 | console.log(Object.keys(asLocal).join(","));
+
+  hint: this literal spells "tag,inner,middle" where its shape enumerates "inner,middle,tag" - build the value the way the shape enumerates it, or keep it at its own type instead of widening it
+
+key-order-across-the-widening-boundary.ts:46:22 - error SC1090: widening a record into an 'unknown'/'object' slot when this program does not build it the way its shape enumerates (the crossing materialises the key list in shape-declared order, and the dyn value's order is observable from there - Object.keys, for-in, JSON, console.log) are not supported yet
+
+  45 | }
+  46 | console.log(viaParam(row));
+     |                      ^~~
+  47 | 
+
+  hint: this literal spells "tag,inner,middle" where its shape enumerates "inner,middle,tag" - build the value the way the shape enumerates it, or keep it at its own type instead of widening it
+
+key-order-across-the-widening-boundary.ts:49:28 - error SC1090: widening a record into an 'unknown'/'object' slot when this program does not build it the way its shape enumerates (the crossing materialises the key list in shape-declared order, and the dyn value's order is observable from there - Object.keys, for-in, JSON, console.log) are not supported yet
+
+  48 | // 3 — an `unknown` slot, the other spelling of the same crossing.
+  49 | const asUnknown: unknown = row;
+     |                            ^~~
+  50 | console.log(typeof asUnknown);
+
+  hint: this literal spells "tag,inner,middle" where its shape enumerates "inner,middle,tag" - build the value the way the shape enumerates it, or keep it at its own type instead of widening it
+
+key-order-across-the-widening-boundary.ts:54:27 - error SC1090: widening a record into an 'unknown'/'object' slot when this program does not build it the way its shape enumerates (the crossing materialises the key list in shape-declared order, and the dyn value's order is observable from there - Object.keys, for-in, JSON, console.log) are not supported yet
+
+  53 | // recurses into the record elements, so the composite carries it too.
+  54 | const asArray: object[] = [row];
+     |                           ^~~~~
+  55 | console.log(Object.keys(asArray[0]!).join(","));
+
+  hint: this literal spells "tag,inner,middle" where its shape enumerates "inner,middle,tag" - build the value the way the shape enumerates it, or keep it at its own type instead of widening it
+
+key-order-across-the-widening-boundary.ts:58:37 - error SC1090: widening a record into an 'unknown'/'object' slot when this program does not build it the way its shape enumerates (the crossing materialises the key list in shape-declared order, and the dyn value's order is observable from there - Object.keys, for-in, JSON, console.log) are not supported yet
+
+  57 | // 5 — a record FIELD.
+  58 | const asField: { v: object } = { v: row };
+     |                                     ^~~
+  59 | console.log(Object.keys(asField.v).join(","));
+
+  hint: this literal spells "tag,inner,middle" where its shape enumerates "inner,middle,tag" - build the value the way the shape enumerates it, or keep it at its own type instead of widening it
+
+key-order-across-the-widening-boundary.ts:65:31 - error SC1090: widening a record into an 'unknown'/'object' slot when this program does not build it the way its shape enumerates (the crossing materialises the key list, and a width copy already ended the keys the narrower shape does not name) are not supported yet
+
+  64 | const narrow: Row = wide;
+  65 | const narrowWidened: object = narrow;
+     |                               ^~~~~~
+  66 | console.log(JSON.stringify(narrowWidened));
+
+  hint: a width copy from r2 into r0 ends "extra" - build the value the way the shape enumerates it, or keep it at its own type instead of widening it
+
+key-order-across-the-widening-boundary.ts:66:13 - error SC1090: JSON.stringify over a record this program does not build the way its shape enumerates (a width copy into the narrower shape ends the keys that shape does not name, and JS would keep them) are not supported yet
+
+  65 | const narrowWidened: object = narrow;
+  66 | console.log(JSON.stringify(narrowWidened));
+     |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  67 | 
+
+  hint: a width copy from r2 into r0 ends "extra" - read the fields you need instead of enumerating, or build the value the way the shape enumerates it
+
+key-order-across-the-widening-boundary.ts:70:13 - error SC1090: JSON.stringify over a record this program does not build the way its shape enumerates (a record enumerates in its shape declared order, not per-object insertion order) are not supported yet
+
+  69 | // the same way `row` is, and enumerating the copy is refused too.
+  70 | console.log(JSON.stringify({ ...row }));
+     |             ^~~~~~~~~~~~~~~~~~~~~~~~~~
+  71 | 
+
+  hint: this literal spells "tag,inner,middle" where its shape enumerates "inner,middle,tag" (inherited through this spread) - read the fields you need instead of enumerating, or build the value the way the shape enumerates it
