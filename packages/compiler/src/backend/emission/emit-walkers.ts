@@ -1967,6 +1967,32 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // an exception pending — and a union with no surviving arm still
         // ends at its own union.nomatch below, so no way to die was
         // removed.
+        //
+        // And the CHECKED form of a union is now that arm walker plus its
+        // refusal, not a second copy of the chain. It can be, for a reason
+        // that holds for unions and for nothing else: a union's refusal
+        // names the UNION at the union's OWN path — `expected number |
+        // string at $.items[2]` — and never the arm that got furthest, so
+        // the message a wrapper writes is the message the chain wrote,
+        // byte for byte. A record could not do this (its refusal names the
+        // MEMBER, at the member's path) and neither could an array (the
+        // element index), which is why only this branch delegates.
+        //
+        // Without the delegation a union reachable BOTH as an arm and
+        // directly emitted the whole chain twice, and on zapo that cost
+        // more C than the merge saved.
+        if (!soft) {
+          const a = E.dynArmHelper(t);
+          d.push(`  bool ok = true;`);
+          d.push(`  ${cDecl(t, "v")} = ${a}(d, path, &ok);`);
+          d.push(`  if (ok) return v;`);
+          d.push(`  if (scr_exc_pending()) return NULL;`);
+          d.push(
+            `  ${E.dcHitC(name, "union.nomatch")}${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d);`,
+          );
+          d.push(`  return NULL;`);
+          break;
+        }
         const order = dynCheckArmOrder(def, (id) => E.recordsById.get(id));
         // TWO PASSES when the union carries STRING-LITERAL DISCRIMINANTS,
         // one otherwise.
@@ -2021,19 +2047,16 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
                 `    if (aok) return scr_union_new_ref(${i}, av, &${rc.retain}, &${rc.release}, ${E.traceArgC(arm)});`,
               );
             }
-            d.push(`    if (scr_exc_pending()) { ${soft ? `*ok = false; ` : ``}return NULL; }`);
+            d.push(`    if (scr_exc_pending()) { *ok = false; return NULL; }`);
             d.push(`  }`);
           });
         }
-        if (soft) {
-          d.push(`  *ok = false;`);
-          d.push(`  return NULL;`);
-        } else {
-          d.push(
-            `  ${E.dcHitC(name, "union.nomatch")}${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d);`,
-          );
-          d.push(`  return NULL;`);
-        }
+        // No arm survived. The refusal belongs to the CHECKED form above,
+        // which is the only caller that has a message to write; here the
+        // union simply reports the miss and the caller tries its own next
+        // arm.
+        d.push(`  *ok = false;`);
+        d.push(`  return NULL;`);
         break;
       }
       case "func": {
