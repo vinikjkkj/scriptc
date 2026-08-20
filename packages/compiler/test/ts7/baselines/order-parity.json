@@ -8882,6 +8882,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5760-inspect-omits-the-optional-keys-the-record-does-not-hold.ts": {
+   "order": [
+    "<repo>/tests/corpus/5760-inspect-omits-the-optional-keys-the-record-does-not-hold.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
