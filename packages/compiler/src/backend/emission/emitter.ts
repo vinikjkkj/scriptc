@@ -49,7 +49,7 @@ import {
 } from "../mangle.js";
 import { cType, releaseCallC, cStringLiteral, cDecl } from "./emit-types.js";
 import { computeMayThrow } from "./may-throw.js";
-import { dynDesc, unionTruthyHelper, unionEqHelper, unionToStrHelper, unionJoinHelper, jsonWriteHelper, jsonIndentHelper, dynMatchHelper, dynCheckHelper, dynArmHelper, dynFuncBoxHelper, dynToStrHelper, caughtToDynHelper, toDynHelper, dynClassDesc, recordKeyGetHelper, recordKeySetHelper } from "./emit-walkers.js";
+import { dynDesc, unionTruthyHelper, unionEqHelper, unionToStrHelper, unionJoinHelper, jsonWriteHelper, jsonIndentHelper, dynMatchHelper, dynCheckHelper, dynArmHelper, dynFuncBoxHelper, dynToStrHelper, caughtToDynHelper, toDynHelper, dynClassDesc, recordKeyGetHelper, recordKeySetHelper, recordWideHelper } from "./emit-walkers.js";
 import { VtSlot, ClassMeta, emitStructDefs, vtEntriesFor, vtSlotParams, emitVtableDecls, emitVtableInstances, emitVtAdapterDefs, emitHierarchyClassHelpers, emitClassObjs, emitCtorThunkDefs, errorVtStampLines, emitterVtStampLines, streamVtStampLines, traceAdapterC, traceArgC, boxNewC, arrNewC } from "./emit-shapes.js";
 import { emitAsyncScaffolding, childDataThunkFor, childExitThunkFor, childExitThunkFor2, closeBindThunkFor, connectSockThunkFor, closeOverrideWrapFor, dgramMsgThunkFor, dnsLookupThunkFor, netLookupAnswerThunkFor, emitterInvokeThunkFor, streamCbThunkFor, streamDataThunkFor, promiseAdoptAdapterFor, raceAdapterFor, resolveThunkFor, sniAnswerThunkFor } from "./emit-async.js";
 import { emitNpmEmbedding, islandAdapter, islandTypedAdapter } from "./emit-island.js";
@@ -293,6 +293,12 @@ export class CEmitter {
    * apart is what lets a type reached ONLY through an arm never emit the
    * checked form at all. */
   readonly dynArmBuilders = new Map<string, string>();
+  /** Record shapes whose WIDE-LANE key table has already been emitted
+   * (the sc_kgk_ and sc_kgl_ pair -- a prefix of their own, so a shape
+   * table can never collide with dynClassDesc's sc_dcl_<n> descriptors).
+   * Interning is per shapeId, not per
+   * typeKey: two builders of the same shape share one table. */
+  readonly recWideTables = new Set<string>();
   /** Static→dyn converters (sc_td_*), per typeKey; dynamic-keyed record
    * read helpers (sc_rkg_*), per shapeId|result typeKey; dynamic-keyed
    * write helpers (sc_rks_*), per shapeId. */
@@ -364,6 +370,24 @@ export class CEmitter {
    * asserted, not assumed — a guard added with probeLower once interned an
    * extra helper into zapo's TU and was caught only by a byte diff. */
   readonly dcCount = process.env["SCRIPTC_DC_COUNT"] === "1";
+  /** SCRIPTC_KINDGATE_MATCH=1: the CONTROL that widens the record
+   * MATCHER as well as the builder. Off by default and off in every
+   * shipped build - it exists so the union-tag population can be run
+   * both ways and the wrong tags counted rather than asserted. See
+   * dynMatchHelper in emit-walkers.ts. */
+  readonly kindgateMatch = process.env["SCRIPTC_KINDGATE_MATCH"] === "1";
+  /** SCRIPTC_KINDGATE_WIDE=1: the record BUILDER reads a non-OBJ
+   * receiver's declared members instead of refusing at the kind gate.
+   * Off by default, and the measurement in estado-kindgate.md is why:
+   * a checked record cast MATERIALIZES, so a widened array answers its
+   * `length` right and then answers Array.isArray, typeof, String() and
+   * JSON.stringify wrong - 11 new SILENT divergences over a generated
+   * 35-case surface population, against 9 loud refusals turned correct.
+   * SCRIPTC_KINDGATE_MATCH implies it (the matcher control reuses the
+   * same projector). Off, neither dial emits one byte. */
+  readonly kindgateWide =
+    process.env["SCRIPTC_KINDGATE_WIDE"] === "1" ||
+    process.env["SCRIPTC_KINDGATE_MATCH"] === "1";
   dcSites = 0;
   private dcOpen = -1;
   /** The increment for a guard about to be EVALUATED, plus its marker; it
@@ -1586,6 +1610,10 @@ export class CEmitter {
 
   dynArmHelper(t: IrType): string {
     return dynArmHelper(this, t);
+  }
+
+  recordWideHelper(): string {
+    return recordWideHelper(this);
   }
 
   toDynHelper(t: IrType): string {
