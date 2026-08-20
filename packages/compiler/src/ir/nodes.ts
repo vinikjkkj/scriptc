@@ -6828,6 +6828,29 @@ export function canConvertToDyn(
   if (t.kind === "record") {
     const shape = getRecord(t.shapeId);
     if (!shape || shape.indexValue !== undefined) return false;
+    // ACCESSOR SLOTS never cross. `%get:x` / `%set:x` are reserved
+    // '%'-fields holding CLOSURES (accessorSlotProp), and the func-field
+    // rule above — written for a method BUNDLE — admitted them by
+    // accident: a `%get:` slot's type is `func`, so `every` waved it
+    // through and the converter wrote it as an ORDINARY DATA ENTRY keyed
+    // `%get:a`. The property name itself has no data slot, so after the
+    // crossing the value carries a key Node never had and lacks the one
+    // Node answers — silently, at every dyn surface: Object.keys/
+    // getOwnPropertyNames/for-in/spread/Object.assign list `%get:a`,
+    // JSON.stringify drops the member, `in` says false, util.inspect
+    // prints the marker, and a dyn record check reads the member as
+    // ABSENT (required threw `got undefined`, OPTIONAL built the
+    // undefined arm and said nothing). The docstring on accessorSlotProp
+    // already states the rule — "accessor-carrying shapes are never
+    // JSON-safe or dyn-convertible" — and this is the line that makes it
+    // true again. Not fixable at the converter: Node's own answer needs
+    // an ENUMERABLE accessor, which the dyn object model has no
+    // representation for (scr_dyn_obj_define_accessor installs the
+    // non-enumerable Object.defineProperty family), and materializing
+    // the getter's VALUE instead would trade these silent wrong answers
+    // for a different set — key order, util.inspect's `[Getter]`, and
+    // the getter's call count and timing.
+    if (shapeHasAccessorSlots(shape)) return false;
     if (visiting.has(t.shapeId)) return true;
     visiting.add(t.shapeId);
     try {
@@ -7203,6 +7226,19 @@ export function canDynCheckTo(
     if (x.kind === "record") {
       const shape = getRecord(x.shapeId);
       if (!shape || shape.tuple) return false;
+      // ACCESSOR SLOTS, refused for the SYMMETRY this file argues for
+      // three times above: canConvertToDyn refuses an accessor-carrying
+      // shape IN (its `%get:x`/`%set:x` closure slots have no dyn
+      // representation — the dyn object's accessor table is the
+      // NON-enumerable Object.defineProperty family), so admitting one
+      // OUT would validate a target no value can ever legitimately
+      // satisfy. The func-leaf rule above admits `%get:a` by accident,
+      // exactly as canConvertToDyn's did: the slot's type is `func`. The
+      // observable difference is where the failure lands — today every
+      // such cast reaches the walker and throws
+      // `expected function at $.%get:a, got undefined`, spelling a
+      // RESERVED internal marker into a user's TypeError path.
+      if (shapeHasAccessorSlots(shape)) return false;
       return (
         shape.fields.every((f) => nestedOk(f.type, deeper)) &&
         (shape.indexValue === undefined || nestedOk(shape.indexValue, deeper))
