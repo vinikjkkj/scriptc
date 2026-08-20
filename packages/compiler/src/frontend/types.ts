@@ -3,7 +3,7 @@ import type { IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
 import { ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile } from "./program.js";
-import { accessorSlotProp, armDiscrimLits, armLitsConflict, mergeArmLitSets, wsGlobalPlan } from "../ir/nodes.js";
+import { accessorSlotProp, armDiscrimLits, armLitsConflict, internalFieldNamesOf, mergeArmLitSets, wsGlobalPlan } from "../ir/nodes.js";
 // typeKey moved to ir/nodes.ts (the backend needs it too, for per-type
 // helper interning); re-exported here so frontend call sites keep their
 // import path.
@@ -151,10 +151,21 @@ export class ShapeRegistry {
 
   /** The interning key of a canonical field list — shared by intern and
    * finalizeRecursive so the two registration paths can never disagree. */
-  private keyOf(fields: { name: string; type: IrType }[], tuple: boolean, indexValue?: IrType): string {
+  private keyOf(
+    fields: { name: string; type: IrType }[],
+    tuple: boolean,
+    indexValue?: IrType,
+    declaredOrder?: string[],
+  ): string {
+    // The INTERNAL field set (the names declaredOrder omits) is part of
+    // the identity — internalFieldNamesOf carries the whole argument. The
+    // empty set contributes NOTHING to the key, so every shape that has no
+    // internal fields keeps the exact key it had before.
+    const internal = internalFieldNamesOf(fields.map((f) => f.name), declaredOrder, tuple);
     return (
       (tuple ? "tuple!" : "") +
       (indexValue ? `idx<${typeKey(indexValue)}>!` : "") +
+      (internal.length > 0 ? `int<${[...internal].sort().join(",")}>!` : "") +
       JSON.stringify(fields.map((f) => [f.name, typeKey(f.type)]))
     );
   }
@@ -235,7 +246,7 @@ export class ShapeRegistry {
       if (indexValue) shape.indexValue = indexValue;
       if (declaredOrder) shape.declaredOrder = declaredOrder;
       this.pendingRec.delete(id);
-      const key = this.keyOf(fields, false, indexValue);
+      const key = this.keyOf(fields, false, indexValue, declaredOrder);
       if (process.env["SCRIPTC_REC_TRACE"]) {
         const owner = this.byKey.get(key);
         process.stderr.write(
@@ -259,7 +270,7 @@ export class ShapeRegistry {
   intern(fields: { name: string; type: IrType }[], tuple = false, indexValue?: IrType, declaredOrder?: string[],): string {
     const declaredIndexValue = indexValue;
     indexValue = this.dialIndexValue(fields, tuple, indexValue);
-    const key = this.keyOf(fields, tuple, indexValue);
+    const key = this.keyOf(fields, tuple, indexValue, declaredOrder);
     let id = this.byKey.get(key);
     if (id !== undefined && indexValue !== declaredIndexValue) this.granted.add(id);
     if (id === undefined) {
@@ -2206,8 +2217,22 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // `.encoding` property reads it) and the f64 packing the pending
   // partial sequence (the %strdec helpers' state cell). Provenance-
   // checked like Stats; construction and the write/end methods are
-  // special-cased in lowerNew / lowerStringDecoderMethodCall, so the
-  // record shape never surfaces.
+  // special-cased in lowerNew / lowerStringDecoderMethodCall.
+  //
+  // The encoding field is named `encoding` and IS in declaredOrder,
+  // because that is Node's own answer: `Object.keys(new
+  // StringDecoder("utf8"))` is `["encoding"]` and `JSON.stringify` of one
+  // is `{"encoding":"utf8"}` (v25.9.0, measured). The field already held
+  // exactly that value under the private name `%enc`, so the visible key
+  // costs nothing and buys the whole enumeration surface; hiding both
+  // fields instead would have answered `[]` and `{}`, which is Node's
+  // answer for neither. `%pending` stays out of declaredOrder — it is
+  // Node's `Symbol(kNativeDecoder)`, an internal slot with no key — and
+  // travels through the dyn boundary in the slot table
+  // (internalSlotFields). Before that it was an ordinary member and a
+  // decoder crossing into `unknown` printed
+  // {"%enc":"utf8","%pending":8577538} — the packed partial-sequence
+  // bytes, on stdout, as a number.
   if (
     psym?.name === "StringDecoder" &&
     checker.declarationsOf(psym).some(
@@ -2218,10 +2243,15 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   ) {
     return {
       kind: "record",
-      shapeId: ctx.shapes.intern([
-        { name: "%enc", type: STRING },
-        { name: "%pending", type: F64 },
-      ]),
+      shapeId: ctx.shapes.intern(
+        [
+          { name: "%pending", type: F64 },
+          { name: "encoding", type: STRING },
+        ],
+        false,
+        undefined,
+        ["encoding"],
+      ),
     };
   }
   // Promise.withResolvers's return type — `{ promise, resolve, reject }`

@@ -22,7 +22,8 @@
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrType } from "../../ir/nodes.js";
-import { armDiscrimLits, canAdaptDynFuncTo, canBoxFuncIntoDyn, dynCheckArmOrder, isUndefinedArmedUnion, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
+import { armDiscrimLits, canAdaptDynFuncTo, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
+import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
 import { mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane, readKindgateDials } from "../kindgate.js";
 import { BlockBuilder } from "./blocks.js";
@@ -272,6 +273,19 @@ export class LlDyn {
     return t;
   }
 
+  /** scriptc's INTERNAL-SLOT read: the `slots` table and nothing else —
+   * no own-data walk, no prototype, no accessor probe, because a slot is
+   * not a property. Borrowed, NULL when the receiver carries none. Both
+   * lanes call the same runtime symbol, so neither can decide on its own
+   * where an internal cell lives. */
+  private slotGetLit(B: BlockBuilder, d: string, key: string): string {
+    this.host.declare(`declare ptr @scr_dyn_obj_slot_get(ptr, ptr, i64)`);
+    const t = B.tmp();
+    const len = Buffer.byteLength(key, "utf8");
+    B.line(`${t} = call ptr @scr_dyn_obj_slot_get(ptr ${d}, ptr ${this.host.cstr(key)}, i64 ${len}) ; slot ${key}`);
+    return t;
+  }
+
   /** The record BUILDER's read for a field that can hold a function:
    * the same walk, +1, an INHERITED callable bound to the receiver. */
   private memberGetLit(B: BlockBuilder, d: string, key: string): string {
@@ -508,8 +522,27 @@ export class LlDyn {
         B.condBr(isObj, l0, fail);
         B.startBlock(l0);
         // dyn ('unknown') fields match ANY value, present or missing.
+        const matchInternal = new Set(internalSlotFields(shape));
         for (const f of shape.fields) {
           if (f.type.kind === "dyn") continue;
+          // An INTERNAL SLOT is not a key, so the predicate asks the slot
+          // table — emit-walkers.ts's row exactly, and the same
+          // internalSlotFields answer, so the lanes cannot disagree about
+          // which values are of this shape.
+          if (matchInternal.has(f.name)) {
+            const ms = this.slotGetLit(B, "%d", f.name);
+            const hasS = B.tmp();
+            B.line(`${hasS} = icmp ne ptr ${ms}, null`);
+            const lS = B.newLabel("dm.s");
+            B.condBr(hasS, lS, fail);
+            B.startBlock(lS);
+            const okS = B.tmp();
+            B.line(`${okS} = call zeroext i1 @${this.dynMatchHelper(f.type)}(ptr ${ms})`);
+            const lSn = B.newLabel("dm.sn");
+            B.condBr(okS, lSn, fail);
+            B.startBlock(lSn);
+            continue;
+          }
           const m = this.dataGetLit(B, "%d", f.name);
           const has = B.tmp();
           B.line(`${has} = icmp ne ptr ${m}, null`);
@@ -1238,11 +1271,33 @@ export class LlDyn {
           B.line(`${tsp} = getelementptr inbounds %${mangleRecordStruct(t.shapeId)}, ptr %r0, i64 0, i32 ${toStrSlotIndex(shape)}`);
           B.line(`store ptr ${ts}, ptr ${tsp}`);
         }
+        const buildInternal = new Set(internalSlotFields(shape));
         for (const f of shape.fields) {
           const fieldWant = host.cstr(this.dynDesc(f.type));
           const utag = f.type.kind === "union" ? host.undefinedArmTag(f.type) : -1;
           const bind = this.mayHoldFunc(f.type);
           const klen = Buffer.byteLength(f.name, "utf8");
+          // An INTERNAL SLOT reads from the slot table and from nowhere
+          // else, and its refusal names the RECEIVER rather than the field
+          // — the field is not a key any program can see or supply. Same
+          // constant as the C lane (INTERNAL_SLOT_WANT_TEXT), same path
+          // (`%path`, not a field path), so the two texts are one text.
+          if (buildInternal.has(f.name)) {
+            const ms = this.slotGetLit(B, dRef, f.name);
+            const hasS = B.tmp();
+            B.line(`${hasS} = icmp ne ptr ${ms}, null`);
+            const lHaveS = B.newLabel("dcs.h");
+            const lMissS = B.newLabel("dcs.m");
+            B.condBr(hasS, lHaveS, lMissS);
+            B.startBlock(lMissS);
+            failRet(releaseR, host.cstr(INTERNAL_SLOT_WANT_TEXT), dRef, "%path");
+            B.startBlock(lHaveS);
+            const vS = B.tmp();
+            B.line(`${vS} = call ${this.valTy(f.type)} @${childC(f.type)}(ptr ${ms}, ptr %path${childArg})`);
+            storeInto(f.name, f.type, vS);
+            afterChild("dcs", releaseR, "ptr null");
+            continue;
+          }
           if (soft && f.type.kind !== "dyn") {
             // The ARM form's decision, and it is the MATCHER's, not the
             // builder's — dynArmHelper's comment says why the two differ
@@ -1991,14 +2046,15 @@ export class LlDyn {
         host.declare(`declare ptr @scr_dyn_new_obj()`);
         const d = B.tmp();
         B.line(`${d} = call ptr @scr_dyn_new_obj()`);
-        // Keys insert in DECLARED order (JS insertion order); internal
-        // '%'-fields follow so a record→dyn→record round trip keeps them.
+        // Keys insert in DECLARED order (JS insertion order); fields
+        // declaredOrder OMITS are INTERNAL SLOTS and never become keys —
+        // emit-walkers.ts carries the whole argument.
         const byName = new Map(shape.fields.map((f) => [f.name, f]));
         const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
-        const inOrder = new Set(order);
+        const internal = new Set(internalSlotFields(shape));
         const dynFields = [
           ...order.map((n) => byName.get(n)).filter((f) => f !== undefined),
-          ...shape.fields.filter((f) => !inOrder.has(f.name)),
+          ...shape.fields.filter((f) => internal.has(f.name)),
         ];
         for (const f of dynFields) {
           const klen = Buffer.byteLength(f.name, "utf8");
@@ -2019,7 +2075,10 @@ export class LlDyn {
           // field's key exists exactly when its run-time tag is not the
           // undefined arm, so the store is presence-gated. See
           // scr_dyn_obj_set_present in scr_json.c.
-          if (isUndefinedArmedUnion(f.type, (id: string) => this.host.unionsById.get(id))) {
+          if (internal.has(f.name)) {
+            host.declare(`declare void @scr_dyn_obj_set_slot(ptr, ptr, i64, ptr)`);
+            B.line(`call void @scr_dyn_obj_set_slot(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; slot ${f.name}`);
+          } else if (isUndefinedArmedUnion(f.type, (id: string) => this.host.unionsById.get(id))) {
             host.declare(`declare void @scr_dyn_obj_set_present(ptr, ptr, i64, ptr)`);
             B.line(`call void @scr_dyn_obj_set_present(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
           } else {

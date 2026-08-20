@@ -516,12 +516,59 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * unconditionally in size-class-armed.test.ts (786,432 - 646,144 =
  * 140,288, required to sit between 100,000 and 200,000), so nothing about
  * this raise weakens the thing the ceilings are for.
+ *
+ * RECALIBRATED 2026-08-20, same toolchain, after the dyn object grew an
+ * INTERNAL-SLOT table (`ScrDyn.v.obj.slots` and its two accessors in the
+ * always-linked dyn core — the table fs.Dirent's %dtype and
+ * StringDecoder's %pending now travel in instead of `entries`).
+ * A/B on two worktrees, both at `4d25bf63`, same hello-world:
+ *
+ *   main (4d25bf63)   649,728     <- 3,584 above the recorded 646,144
+ *   this change       650,752     <- +1,024 for the table
+ *
+ * so of the 4,096 bytes of tolerance the recorded figure carried, 3,584
+ * were spent by unrelated merges BEFORE this change compiled a line, and
+ * the table spent the remaining 512 and 512 more. That is the THIRD
+ * recalibration in a row reached mostly by drift, and the ratio is worth
+ * carrying forward again: the feature costs 1,024, the gap since the last
+ * calibration costs 3,584.
+ *
+ * The 1,024 splits exactly in half, measured by removing one half at a
+ * time on the same tree:
+ *
+ *   +512  the two accessors (scr_dyn_obj_set_slot / scr_dyn_obj_slot_get)
+ *         in scr_json.c. A hello-world calls neither, and they are still
+ *         in the binary: the win32 link line carries no
+ *         -ffunction-sections and no --gc-sections (cc.ts:382 says so),
+ *         so every line added to an always-linked TU costs every binary.
+ *   +512  the extra `ScrDyn.v.obj` member plus the three lines that clear
+ *         it on recycle, visit it in the trace, and release it.
+ *
+ * The regex class was measured SEPARATELY on the same two worktrees
+ * rather than moved by the static delta, which is this file's standing
+ * rule (the two classes have parted by 512 bytes before). This time they
+ * did not part:
+ *
+ *   main (4d25bf63)   790,016     <- 3,584 above the recorded 786,432
+ *   this change       791,040     <- +1,024, the same table
+ *
+ * The first draft of this note said REGEX_CLASS_RECORDED would stay put
+ * because the regex program was "still inside its own page". It was not:
+ * the same 4,608 had accumulated there too, and only measuring both said
+ * so.
+ *
+ * The class DISTANCE, which is the whole point of these bounds, comes out
+ * BYTE-IDENTICAL: 791,040 - 650,752 = 140,288, exactly the old pair's
+ * 786,432 - 646,144. Both classes moved by the same 4,608 because both
+ * pay the same always-linked bytes, which is the cleanest available
+ * statement that this change is a runtime-core cost and not a library
+ * link. size-class-armed.test.ts asserts that distance separately.
  */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 646_144 : null;
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 650_752 : null;
 
 /** The regex program, same run, same tree. Deliberately NOT derived from
  * the static delta: this class moved +1,536 where that one moved +2,048. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 786_432 : null;
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 791_040 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown

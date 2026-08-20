@@ -1349,6 +1349,65 @@ export function shapeHasAccessorSlots(shape: IrRecordShape): boolean {
   return shape.fields.some((f) => accessorSlotProp(f.name) !== null);
 }
 
+/** The shape's INTERNAL fields: the ones `declaredOrder` omits.
+ *
+ * `declaredOrder` is the per-SHAPE record of which members are the type's
+ * OWN KEYS. A lowering that hides state behind a builtin's surface —
+ * fs.Dirent's `%dtype`, StringDecoder's `%pending`, an object literal's
+ * `%get:`/`%set:` accessor slots — declares the field but leaves it OUT
+ * of that list, and every key-order surface reads the list rather than
+ * `fields` (JSON.stringify, Object.keys/values/entries, util.inspect).
+ *
+ * It is deliberately NOT a test on the SPELLING. `%` is a legal first
+ * character of a JavaScript property name, and a user's own
+ * `{ "%dtype": 7, name: "n" }` is Node-exact today on every surface
+ * precisely because ITS declaredOrder lists `%dtype`. Skipping fields
+ * whose name starts with `%` would break that program to fix this one;
+ * asking declaredOrder distinguishes the two, and it is the distinction
+ * that already exists.
+ *
+ * A shape with NO declaredOrder (a tuple; the CJS export-table literal;
+ * accessor-narrowed JS shapes) has no internal fields by definition — its
+ * whole field list IS its key order.
+ *
+ * Both backends and both directions of the dyn boundary call THIS
+ * function, and that is the point: the record-to-dyn converter and the
+ * dyn-to-record check must agree about which cells travel out of band, or
+ * a round trip silently loses its state. */
+export function internalSlotFields(shape: IrRecordShape): string[] {
+  return internalFieldNamesOf(shape.fields.map((f) => f.name), shape.declaredOrder, !!shape.tuple);
+}
+
+/** internalSlotFields over a field list that is not a shape yet — the
+ * form the SHAPE INTERNER needs, because the internal set is part of a
+ * shape's IDENTITY and has to be known before the shape exists.
+ *
+ * It is part of the identity for one measured reason. `declaredOrder` is
+ * first-seen METADATA: two structurally equal field lists share one
+ * shape and the FIRST one's order. fs.Dirent's row and a user's own
+ * `{ name: "z", parentPath: "p", "%dtype": 2 }` are structurally equal,
+ * so before this they shared a shape — and whichever the program mapped
+ * first decided, for BOTH, whether `%dtype` was a key. Measured on
+ * `4d25bf63`: with the literal first, `Object.keys` of a REAL Dirent
+ * answered ["name","parentPath","%dtype"] on the static surface too; with
+ * the Dirent first, the user's own key vanished from `JSON.stringify` of
+ * their own object. Two silently wrong programs, in opposite directions,
+ * from one shared cell.
+ *
+ * Keying on the internal SET separates them, and separates nothing else:
+ * a shape with no internal fields produces the empty set and the byte-
+ * identical key it produced before, so no existing program's shape
+ * numbering moves. */
+export function internalFieldNamesOf(
+  fieldNames: string[],
+  declaredOrder: string[] | undefined,
+  tuple: boolean,
+): string[] {
+  if (tuple || !declaredOrder) return [];
+  const inOrder = new Set(declaredOrder);
+  return fieldNames.filter((n) => !inOrder.has(n));
+}
+
 export interface IrUnionDef {
   /** Frontend-assigned union id (`u0`, `u1`, ...). */
   id: string;

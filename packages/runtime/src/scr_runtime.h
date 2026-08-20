@@ -3688,12 +3688,39 @@ struct ScrDyn {
      *          defineProperty defaults every flag to FALSE — and it is
      *          what `Object.create(proto, descs)` installs.)
      *
+     *   slots  scriptc's own INTERNAL-SLOT table (owned, NULL until a
+     *          record-to-dyn conversion puts something in it): an OBJ dyn
+     *          whose members are the values of the shape fields that
+     *          `declaredOrder` OMITS — the '%'-named cells a lowering
+     *          keeps behind a builtin's surface (fs.Dirent's %dtype,
+     *          StringDecoder's %pending).
+     *
+     *          It is a THIRD table because neither of the other two can
+     *          hold them. `entries` IS every enumeration surface at once
+     *          (Object.keys / values / entries / for-in / spread / assign
+     *          / JSON.stringify / structuredClone / util.inspect), and
+     *          `hidden` is still a PROPERTY table — [[Get]], [[Set]],
+     *          [[Delete]] and `in` all consult it by contract, so a slot
+     *          parked there would still answer `"%dtype" in u` and
+     *          `u["%dtype"]` where node answers false and undefined. A JS
+     *          engine keeps exactly this state under a private SYMBOL,
+     *          which no string key reaches; `slots` is that symbol table,
+     *          one member per internal field.
+     *
+     *          Nothing but the two record walkers names it: the round
+     *          trip record-to-dyn-to-record keeps its data, and a user
+     *          object that merely SPELLS "%dtype" as an ordinary key
+     *          carries no slot, so it is never mistaken for the builtin.
+     *          The leak OUT and the misread IN are one fact seen from two
+     *          sides, and one table settles both.
+     *
      * The freelist recycles OBJ nodes with their entries buffer intact
-     * (scr_dyn_alloc); all three are cleared on release so a recycled
-     * node never inherits a chain or a stale hidden table. */
+     * (scr_dyn_alloc); all four are cleared on release so a recycled
+     * node never inherits a chain, a stale hidden table or a stale slot
+     * table. */
     struct {
       size_t len; size_t cap; ScrDynEntry *entries;
-      ScrDyn *proto; const char *cname; ScrDyn *hidden;
+      ScrDyn *proto; const char *cname; ScrDyn *hidden; ScrDyn *slots;
     } obj; /* owned */
     /* SCR_DYN_FUNC: the boxed closure (owned) + its call descriptor. `sig`,
      * `name` and `src` are static compiler-emitted literals (never freed);
@@ -4060,6 +4087,18 @@ bool scr_dyn_obj_hidden_attrs(const ScrDyn *recv, const char *key, size_t key_le
                               bool *is_data, bool *writable, bool *configurable);
 /* …and drops one, for the redefinition back to an ENUMERABLE member. */
 void scr_dyn_obj_drop_hidden(ScrDyn *recv, const char *key, size_t key_len);
+
+/* scriptc's INTERNAL-SLOT pair — the `slots` member's whole API. It is
+ * deliberately tiny and deliberately NOT part of any property protocol:
+ * no [[Get]], no [[Set]], no `in`, no enumeration, no descriptor family,
+ * no prototype walk. A slot exists only because a record shape declares a
+ * field its declaredOrder omits, and only the two record walkers (the
+ * record-to-dyn converter and the dyn-to-record check) name it. Setting
+ * takes ownership of `v`, exactly like scr_dyn_obj_set; getting borrows.
+ * A non-OBJ receiver is a no-op / NULL, so a walker needs no kind test of
+ * its own. */
+void scr_dyn_obj_set_slot(ScrDyn *recv, const char *key, size_t key_len, ScrDyn *v);
+ScrDyn *scr_dyn_obj_slot_get(const ScrDyn *d, const char *key, size_t key_len);
 
 /* `new f(...args)` over a dyn FUNCTION value — the JS [[Construct]] the
  * pre-class constructor idiom needs. Allocates a fresh OBJ whose

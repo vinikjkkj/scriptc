@@ -445,9 +445,10 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
       d->v.arr.len = 0; /* cap/items preserved from the node's last life */
     } else if (kind == SCR_DYN_OBJ) {
       d->v.obj.len = 0; /* cap/entries preserved */
-      d->v.obj.proto = NULL; /* release already cleared all three; belt and braces */
+      d->v.obj.proto = NULL; /* release already cleared all four; belt and braces */
       d->v.obj.cname = NULL;
       d->v.obj.hidden = NULL;
+      d->v.obj.slots = NULL;
     } else {
       memset(&d->v, 0, sizeof d->v);
     }
@@ -482,6 +483,9 @@ static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
      * accessor descriptor collectible at all. Both are NULL-tolerant. */
     visit(d->v.obj.proto, ctx);
     visit(d->v.obj.hidden, ctx);
+    /* scriptc's internal-slot table: an ordinary OBJ dyn holding ordinary
+     * dyn values, so a cycle through one collects like any other. */
+    visit(d->v.obj.slots, ctx);
     break;
   case SCR_DYN_FUNC:
     visit(d->v.fn.clo, ctx);
@@ -593,6 +597,8 @@ void scr_dyn_release(ScrDyn *d) {
     d->v.obj.cname = NULL;
     scr_dyn_release(d->v.obj.hidden);
     d->v.obj.hidden = NULL;
+    scr_dyn_release(d->v.obj.slots);
+    d->v.obj.slots = NULL;
     break;
   case SCR_DYN_FUNC:
     scr_closure_release(d->v.fn.clo); /* sig/name are static literals */
@@ -4151,6 +4157,25 @@ bool scr_dyn_obj_hidden_sealed(const ScrDyn *recv, const char *key, size_t key_l
 void scr_dyn_obj_drop_hidden(ScrDyn *recv, const char *key, size_t key_len) {
   if (recv->kind != SCR_DYN_OBJ || recv->v.obj.hidden == NULL) return;
   scr_dyn_obj_unset(recv->v.obj.hidden, key, key_len);
+}
+
+/* scriptc's INTERNAL-SLOT table — contract in scr_runtime.h. Note what is
+ * NOT here: no accessor family, no prototype walk, no `in`/hasOwn/delete
+ * arm, and no reader anywhere else in this file. That absence IS the
+ * mechanism — a table nothing else consults cannot leak into an answer,
+ * and a key nothing else writes cannot be forged by spelling it. */
+void scr_dyn_obj_set_slot(ScrDyn *recv, const char *key, size_t key_len, ScrDyn *v) {
+  if (recv == NULL || recv->kind != SCR_DYN_OBJ) {
+    scr_dyn_release(v);
+    return;
+  }
+  if (recv->v.obj.slots == NULL) recv->v.obj.slots = scr_dyn_new_obj();
+  scr_dyn_obj_set(recv->v.obj.slots, key, key_len, v); /* ownership moves in */
+}
+
+ScrDyn *scr_dyn_obj_slot_get(const ScrDyn *d, const char *key, size_t key_len) {
+  if (d == NULL || d->kind != SCR_DYN_OBJ || d->v.obj.slots == NULL) return NULL;
+  return scr_dyn_obj_get(d->v.obj.slots, key, key_len);
 }
 
 /* Node spells the offending RECEIVER into the three V8 property-refusal

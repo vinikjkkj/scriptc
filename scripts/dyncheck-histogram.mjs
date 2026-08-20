@@ -95,12 +95,17 @@ const SHAPES = [
   { id: "prim.bool", why: "target bool — kind must be SCR_DYN_BOOL", re: /^\s*if \(d->kind != SCR_DYN_BOOL\) \{ scr_dyn_check_fail\(path, / },
   { id: "prim.string", why: "target string — kind must be SCR_DYN_STR", re: /^\s*if \(d->kind != SCR_DYN_STR\) \{ scr_dyn_check_fail\(path, / },
   { id: "prim.bytes", why: "target Uint8Array-family — kind must be SCR_DYN_BYTES", re: /^\s*if \(d->kind != SCR_DYN_BYTES\) \{ scr_dyn_check_fail\(path, / },
-  { id: "class.Error", why: 'target %Error — the "%error" marker must be present', re: /^\s*if \(d->kind != SCR_DYN_OBJ \|\| !scr_dyn_obj_get\(d, "%error", 6\)\) \{ scr_dyn_check_fail\(path, / },
+  // The marker is gone (4db47379): the emitted test is the encoding
+  // PREDICATE, which asks the [[Prototype]] chain instead of a key. This
+  // row still said "%error" and had matched nothing since — an instrument
+  // describing behaviour the code had stopped having.
+  { id: "class.Error", why: "target %Error — the receiver must carry the Error ENCODING (prototype chain, not a key)", re: /^\s*if \(!scr_dyn_is_error_encoding\(d\)\) \{ scr_dyn_check_fail\(path, / },
   { id: "func.kind", why: "target function — kind must be SCR_DYN_FUNC", re: /^\s*if \(d->kind != SCR_DYN_FUNC\) \{ scr_dyn_check_fail\(path, / },
   { id: "tuple.arity", why: "tuple target — array length must equal the arity", re: /^\s*if \(d->v\.arr\.len != \d+\) \{ scr_dyn_check_fail\(path, / },
   { id: "array.kind", why: "array/tuple target — kind must be SCR_DYN_ARR", re: /^\s*if \(d->kind != SCR_DYN_ARR\) \{ scr_dyn_check_fail\(path, / },
   { id: "record.kind", why: "record target — kind must be SCR_DYN_OBJ", re: /^\s*if \(d->kind != SCR_DYN_OBJ\) \{ scr_dyn_check_fail\(path, / },
   { id: "record.field", why: "record target — a REQUIRED declared key is absent", re: /^\s*if \(!m\) \{ scr_dyn_check_fail\(&p, / },
+  { id: "record.slot", why: "record target — the receiver carries no INTERNAL SLOT for a field declaredOrder omits", re: /^\s*if \(!ms\) \{ scr_dyn_check_fail\(path, / },
   { id: "union.nomatch", why: "union target — no arm matched", needs: "union", re: /^\s*scr_dyn_check_fail\(path, .*\);\s*$/ },
   { id: "func.noadapt", why: "function target with no adapter — only an exact signature unwraps", needs: "func", re: /^\s*scr_dyn_check_fail\(path, .*\);\s*$/ },
 ];
