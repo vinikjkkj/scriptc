@@ -3959,7 +3959,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       kind: "recordGet",
       obj: ref("d.0", recT),
       shapeId,
-      field: "%enc",
+      field: "encoding",
       type: STRING,
       loc,
     });
@@ -5745,12 +5745,14 @@ let digestInputValueDispatches = 0;
   export function lowerBuiltinExtraProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     if (expr.questionDotToken && !L.chainHandled.has(expr)) return null;
     // decoder.encoding on a StringDecoder-typed receiver: the record's
-    // hidden canonical-name field (construction folded the aliases —
-    // exactly what Node's normalized `.encoding` answers).
+    // canonical-name field (construction folded the aliases — exactly what
+    // Node's normalized `.encoding` answers). It is a VISIBLE key, and
+    // Node's own `Object.keys(decoder)` is `["encoding"]`, so the read and
+    // the enumeration answer the same one field.
     if (expr.name.text === "encoding" && isStringDecoderTyped(L, expr.expression) && L.isStdlibMember(expr)) {
       const receiver = L.lowerExpr(expr.expression);
       if (receiver.type.kind !== "record") L.badType(expr.expression, L.typeOf(expr.expression));
-      return { kind: "recordGet", obj: receiver, shapeId: receiver.type.shapeId, field: "%enc", type: STRING, loc: locOf(expr) };
+      return { kind: "recordGet", obj: receiver, shapeId: receiver.type.shapeId, field: "encoding", type: STRING, loc: locOf(expr) };
     }
     // codec.encoding on a TextEncoder/TextDecoder: the instance IS that
     // constant string (types.ts), so the read is the receiver itself.

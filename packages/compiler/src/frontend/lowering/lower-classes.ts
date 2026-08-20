@@ -5848,7 +5848,7 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         return {
           kind: "recordLit",
           fields: [
-            { name: "%enc", value: { kind: "strLit", value: encName, type: STRING, loc } },
+            { name: "encoding", value: { kind: "strLit", value: encName, type: STRING, loc } },
             { name: "%pending", value: { kind: "numLit", value: 0, type: F64, loc } },
           ],
           type: decT,
