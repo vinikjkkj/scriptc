@@ -151,7 +151,8 @@ describe("the record kind gate and its two control dials", () => {
     const { off } = await all();
     expect(off).not.toContain("sc_dyn_rec_wide");
     expect(off).not.toContain("sc_dyn_rec_wideable");
-    expect(off).not.toContain("sc_dck_");
+    expect(off).not.toContain("sc_kgk_");
+    expect(off).not.toContain("sc_kgl_");
     expect(off).not.toContain("SCRIPTC_KINDGATE_MATCH control");
   });
 

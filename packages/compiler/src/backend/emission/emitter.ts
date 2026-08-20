@@ -294,7 +294,9 @@ export class CEmitter {
    * checked form at all. */
   readonly dynArmBuilders = new Map<string, string>();
   /** Record shapes whose WIDE-LANE key table has already been emitted
-   * (the sc_dck_ and sc_dcl_ pair). Interning is per shapeId, not per
+   * (the sc_kgk_ and sc_kgl_ pair -- a prefix of their own, so a shape
+   * table can never collide with dynClassDesc's sc_dcl_<n> descriptors).
+   * Interning is per shapeId, not per
    * typeKey: two builders of the same shape share one table. */
   readonly recWideTables = new Set<string>();
   /** Static→dyn converters (sc_td_*), per typeKey; dynamic-keyed record
