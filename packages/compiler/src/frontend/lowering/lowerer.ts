@@ -53,7 +53,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { armDiscrimLits, arrayOf, BOOL, canAdaptDynFuncTo, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { armDiscrimLits, arrayOf, BOOL, canAdaptDynFuncTo, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -3954,6 +3954,40 @@ export class Lowerer {
     return walk(t, "T", new Set()) ?? "NESTED-OK";
   }
 
+  /** The first ACCESSOR-carrying record shape reachable from `t`, as a
+   * dotted path (`the shape`, `an element of the array`, ...), or null.
+   * Names the level a SC1101 refusal is really about — the outermost
+   * type in this compiler is routinely a several-thousand-character
+   * protobuf record, and naming it says nothing.
+   *
+   * Diagnostic path only. Bounded by `stack`, like dynConvertRefusal. */
+  firstAccessorShapePath(t: IrType, path = "the shape", stack: Set<IrType> = new Set()): string | null {
+    if (stack.has(t)) return null;
+    const deeper = new Set(stack).add(t);
+    if (t.kind === "array") return this.firstAccessorShapePath(t.elem, `${path}'s element`, deeper);
+    if (t.kind === "promise") return this.firstAccessorShapePath(t.inner, `${path}'s payload`, deeper);
+    if (t.kind === "record") {
+      const shape = this.shapes.get(t.shapeId);
+      if (!shape) return null;
+      if (shapeHasAccessorSlots(shape)) return path;
+      for (const f of shape.fields) {
+        const r = this.firstAccessorShapePath(f.type, `${path}'s '${f.name}'`, deeper);
+        if (r !== null) return r;
+      }
+      return null;
+    }
+    if (t.kind === "union") {
+      const def = this.unions.get(t.unionId);
+      if (!def) return null;
+      for (const a of def.arms) {
+        const r = this.firstAccessorShapePath(a, `${path}'s ${a.kind} arm`, deeper);
+        if (r !== null) return r;
+      }
+      return null;
+    }
+    return null;
+  }
+
   /** SCRIPTC_DYNCONV_WHY probe: the IN-direction twin of dynCheckRefusal —
    * EVERY leaf `canConvertToDyn` refuses, each as a dotted path. The
    * SC1101 fence names only the outermost type, and in this program that
@@ -3995,6 +4029,11 @@ export class Lowerer {
         const shape = this.shapes.get(x.shapeId);
         if (!shape) return leaf(`${path}:MISSING-SHAPE`);
         if (shape.indexValue !== undefined) return leaf(`${path}:INDEX-SIG`);
+        // Accessor slots, BEFORE the field walk: `%get:x`/`%set:x` are
+        // funcs, and the loop below skips funcs, so a shape refused for
+        // carrying accessors would otherwise report `record(opaque)` —
+        // the one answer that says nothing about which member to fix.
+        if (shapeHasAccessorSlots(shape)) return leaf(`${path}:ACCESSOR-SLOTS`);
         let any = false;
         // A FUNCTION field is skipped exactly as the record rule skips it,
         // so a carried method is never blamed for a refusal it did not
@@ -4068,6 +4107,23 @@ export class Lowerer {
           "SC1101",
           node,
           `passing '${this.fmt(actual)}' function values into 'unknown' slots (a parameter or result type has no dynamic representation — only JSON-safe data, Uint8Array, undefined-armed unions of those, 'unknown', and functions over the same set cross)`,
+        );
+      }
+      // An ACCESSOR-carrying shape: the crossing is refused in
+      // canConvertToDyn, and the reason is worth naming because the
+      // generic wording sends the reader looking for an unconvertible
+      // MEMBER when the problem is the property model. An object-literal
+      // getter is an ENUMERABLE accessor; the dyn object has no
+      // representation for one (its accessor table is the
+      // non-enumerable Object.defineProperty family), so a crossing
+      // value would carry the reserved `%get:`/`%set:` slot as an
+      // ordinary key and lack the property name entirely.
+      const accPath = this.firstAccessorShapePath(actual);
+      if (accPath !== null) {
+        this.unsupported(
+          "SC1101",
+          node,
+          `converting '${this.fmt(actual)}' values to 'unknown' (${accPath} carries get/set accessor properties — an object-literal getter is an enumerable accessor and the dynamic object model has no representation for one, so the crossing would list the reserved '%get:'/'%set:' slot as a key and drop the property Node answers; read the accessor into a const and pass that)`,
         );
       }
       this.unsupported("SC1101", node);

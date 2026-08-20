@@ -1,0 +1,40 @@
+an-accessor-carrying-shape-crossing-the-dynamic-boundary.ts:30:20 - error SC1101: converting '{ get a(): number }' values to 'unknown' (the shape carries get/set accessor properties — an object-literal getter is an enumerable accessor and the dynamic object model has no representation for one, so the crossing would list the reserved '%get:'/'%set:' slot as a key and drop the property Node answers; read the accessor into a const and pass that) is not supported yet
+
+  29 | };
+  30 | const u: unknown = withGetter;
+     |                    ^~~~~~~~~~
+  31 | console.log(typeof u);
+
+  hint: numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value does not alias the original, so a write through it is refused rather than lost), Uint8Array/Buffer (shared by reference — writes through the 'unknown' value DO reach the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet
+
+an-accessor-carrying-shape-crossing-the-dynamic-boundary.ts:35:21 - error SC1101: converting '{ inner: { get a(): number } }' values to 'unknown' (the shape's 'inner' carries get/set accessor properties — an object-literal getter is an enumerable accessor and the dynamic object model has no representation for one, so the crossing would list the reserved '%get:'/'%set:' slot as a key and drop the property Node answers; read the accessor into a const and pass that) is not supported yet
+
+  34 | const nested = { inner: { get a(): number { return 5; } } };
+  35 | const un: unknown = nested;
+     |                     ^~~~~~
+  36 | console.log(typeof un);
+
+  hint: numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value does not alias the original, so a write through it is refused rather than lost), Uint8Array/Buffer (shared by reference — writes through the 'unknown' value DO reach the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet
+
+an-accessor-carrying-shape-crossing-the-dynamic-boundary.ts:40:21 - error SC1101: converting '{ get a(): number }[]' values to 'unknown' (the shape's element carries get/set accessor properties — an object-literal getter is an enumerable accessor and the dynamic object model has no representation for one, so the crossing would list the reserved '%get:'/'%set:' slot as a key and drop the property Node answers; read the accessor into a const and pass that) is not supported yet
+
+  39 | const list = [{ get a(): number { return 5; } }];
+  40 | const ul: unknown = list;
+     |                     ^~~~
+  41 | console.log(typeof ul);
+
+  hint: numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value does not alias the original, so a write through it is refused rather than lost), Uint8Array/Buffer (shared by reference — writes through the 'unknown' value DO reach the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet
+
+an-accessor-carrying-shape-crossing-the-dynamic-boundary.ts:45:14 - error SC1090: a checked cast of 'unknown' to '{ get a(): number }' (a dynamic value can only be validated against JSON-representable types: number, string, boolean, records, arrays, and unions of those) is not supported yet
+
+  44 | const parsed: unknown = JSON.parse('{"a":5}');
+  45 | const back = parsed as { get a(): number };
+     |              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  46 | console.log(back.a);
+
+an-accessor-carrying-shape-crossing-the-dynamic-boundary.ts:50:15 - error SC1090: a checked cast of 'unknown' to '{ inner: { get a(): number } }' (a dynamic value can only be validated against JSON-representable types: number, string, boolean, records, arrays, and unions of those) is not supported yet
+
+  49 | const parsed2: unknown = JSON.parse('{"inner":{"a":5}}');
+  50 | const back2 = parsed2 as { inner: { get a(): number } };
+     |               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  51 | console.log(back2.inner.a);
