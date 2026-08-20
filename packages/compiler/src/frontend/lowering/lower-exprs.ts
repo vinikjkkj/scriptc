@@ -3535,8 +3535,318 @@ function instanceofGuardArm(L: Lowerer, rhs: ts.Expression, unionId: string): Ir
       return expr;
     }
     if (L.armTag(expr.type.unionId, narrowed) < 0) return expr;
+    // A member READ through the bridge - `t.length` on a local that a
+    // widened keyed read stored into. See memberRecvArmBridge.
+    {
+      const recv = memberRecvArmBridge(L, expr, narrowed, node);
+      if (recv) return recv;
+    }
     return checkedArmBridge(L, expr, narrowed, expr.loc);
   }
+
+/** LOCALS THAT EVER RECEIVE A WIDENED KEYED READ - the scope of every
+ * rung in this family, and the reason they are not program-wide.
+ *
+ * The bridge look-throughs below (`t.length`'s Node-shaped receiver
+ * throw, `t === 'lit'`, `switch (t)`) all cost something on a narrowing
+ * that was HONEST: a tag test that can never fire, or a union compare
+ * where a plain `strEq` against a static literal would do. Program-wide
+ * they would charge every `if (x !== undefined) { x.f }` in the program
+ * for a hazard only ONE population has - a local whose value came out of
+ * an index-signature read that tsc types by the signature's VALUE type,
+ * so the checker's `string` and the runtime's `undefined` disagree.
+ *
+ * That population is named exactly: a binding with an ASSIGNMENT whose
+ * right-hand side is a non-optional keyed access on a receiver carrying a
+ * string index signature. It is asked of the AST and the checker's types
+ * only - nothing is lowered, so nothing is interned, which is the whole
+ * reason it is not spelled as `would keyedReadAtAssignSlot fire`.
+ *
+ * Memoised per symbol. Deliberately an OVER-approximation in one
+ * direction: an assignment the widening rung then declines (a shape
+ * `recordKeyReadAtUndefinedArm` refuses) still marks the local, and the
+ * cost of that is a tag test that is dead rather than merely always
+ * false. It is never an under-approximation, which is the direction that
+ * would matter. */
+const WIDENED_KEYED_SYMS = new WeakMap<object, boolean>();
+
+function keyedAccessOverIndexSignature(L: Lowerer, e: ts.Expression): boolean {
+  if (!ts.isPropertyAccessExpression(e) && !ts.isElementAccessExpression(e)) return false;
+  if (e.questionDotToken !== undefined) return false;
+  try {
+    const rt = L.checker.getTypeAtLocation(e.expression);
+    return L.checker.getIndexInfosOfType(rt).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+export function localTakesWidenedKeyedRead(L: Lowerer, node: ts.Node): boolean {
+  if (!ts.isIdentifier(node)) return false;
+  const sym = L.checker.getSymbolAtLocation(node) as unknown as object | undefined;
+  if (!sym) return false;
+  const memo = WIDENED_KEYED_SYMS.get(sym);
+  if (memo !== undefined) return memo;
+  // Set BEFORE the walk: the walk resolves symbols, and a re-entrant
+  // question about this same binding must terminate rather than recurse.
+  WIDENED_KEYED_SYMS.set(sym, false);
+  const decl = L.checker.valueDeclarationOf(sym as unknown as ts.Symbol);
+  if (!decl) return false;
+  let scope: ts.Node = decl;
+  while (scope.parent && !ts.isSourceFile(scope) && !ts.isFunctionLike(scope) && !ts.isClassStaticBlockDeclaration(scope)) {
+    scope = scope.parent;
+  }
+  const text = node.text;
+  let found = false;
+  const walk = (n: ts.Node): void => {
+    if (found) return;
+    if (
+      ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isIdentifier(n.left) && n.left.text === text &&
+      (L.checker.getSymbolAtLocation(n.left) as unknown as object | undefined) === sym &&
+      keyedAccessOverIndexSignature(L, n.right)
+    ) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(n, walk);
+  };
+  walk(scope);
+  WIDENED_KEYED_SYMS.set(sym, found);
+  return found;
+}
+
+/** The unit arms of a union, as (tag, spelling) pairs. */
+export function unitArmsOf(L: Lowerer, unionId: string): { tag: number; unit: "undefined" | "null" }[] {
+  const def = L.unions.get(unionId);
+  if (!def) return [];
+  const out: { tag: number; unit: "undefined" | "null" }[] = [];
+  def.arms.forEach((a, i) => {
+    if (isUnitType(a)) out.push({ tag: i, unit: a.kind === "undefinedT" ? "undefined" : "null" });
+  });
+  return out;
+}
+
+/** The reference under parentheses and `as`/`!` wrappers. */
+function refUnderWrappers(e: ts.Expression): ts.Expression {
+  let x = e;
+  while (ts.isParenthesizedExpression(x) || ts.isNonNullExpression(x) || ts.isAsExpression(x) || ts.isTypeAssertion(x)) {
+    x = x.expression;
+  }
+  return x;
+}
+
+/** THE SAME COMPARISON WITHOUT A BRIDGE — a union-typed operand against a
+ * scalar LITERAL, which is `estado-encswitch.md` §8.4's own example:
+ *
+ *     a hand-written `if (u === "skmsg")` on a `string | undefined` local
+ *     ALREADY emits `scr_union_new_ref` + `scr_union_release` around a
+ *     `sc_ue_N` call today, with no switch anywhere
+ *
+ * — and it is zapo's own `encCount > 1 && firstEncType === 'skmsg'`, three
+ * statements below the read this whole block is about. That comparison is
+ * NOT bridged (the loop's back edge merges the undefined arm straight back
+ * in, so tsc leaves it union-typed) and so `literalEqArmBridge` never sees
+ * it; it goes to the general `unionEq` path, which wraps the literal into
+ * a fresh box per compare.
+ *
+ * The tag test proves the arm, so the box is unnecessary here for exactly
+ * the reason it is unnecessary in a case test:
+ *
+ *     unionIsTag(u, arm) && strEq(unionNarrow(u, arm), lit)
+ *
+ * SCALAR literals only — string, number, boolean. `unionEq`'s contract is
+ * about IDENTITY for reference arms (§8.4's own `m.set("k", p);
+ * m.get("k") === p` paragraph), and identity is not something a tag test
+ * plus a payload compare may approximate. For a scalar arm the payload
+ * compare IS the identity: `scr_str_eq` is the bytewise compare `sc_ue_N`
+ * performs on a string arm, and C `==` on a double is the one it performs
+ * on a number arm — NaN false, ±0 equal, JS-exact either way.
+ *
+ * The union operand is re-emitted (the tag test and the narrow), so it
+ * must be pureReemittable; the other operand is a literal, which has no
+ * effects, so hoisting the tag test above it is unobservable.
+ *
+ * `SCRIPTC_CASEEQ_OFF=1` restores the allocating form here too — it is one
+ * decision ("a union against a literal does not need a box") and it gets
+ * one dial. */
+function unionLiteralEq(
+  L: Lowerer,
+  left: IrExpr,
+  right: IrExpr,
+  negated: boolean,
+  loc: SrcLoc,
+): IrExpr | null {
+  if (process.env["SCRIPTC_CASEEQ_OFF"] === "1") return null;
+  const isLit = (e: IrExpr): boolean =>
+    (e.kind === "strLit" || e.kind === "numLit" || e.kind === "boolLit") &&
+    (e.type.kind === "string" || e.type.kind === "f64" || e.type.kind === "bool");
+  const u = left.type.kind === "union" && isLit(right) ? left
+    : right.type.kind === "union" && isLit(left) ? right
+    : null;
+  if (u === null || u.type.kind !== "union") return null;
+  const lit = u === left ? right : left;
+  if (!pureReemittable(u)) return null;
+  const tag = L.armTag(u.type.unionId, lit.type);
+  if (tag < 0) return null;
+  const payload: IrExpr = { kind: "unionNarrow", unionId: u.type.unionId, tag, value: u, type: lit.type, loc };
+  const eq: IrExpr = lit.type.kind === "string"
+    ? { kind: "strEq", negated, left: payload, right: lit, type: BOOL, loc }
+    : { kind: "bin", op: negated ? "!==" : "===", left: payload, right: lit, type: BOOL, loc };
+  if (process.env["SCRIPTC_CASEEQ_WHY"] !== undefined) {
+    console.error(`[caseeq] ${loc.file}:${String(loc.start)} ${L.fmt(u.type)} vs a ${lit.type.kind} literal, unboxed`);
+  }
+  return {
+    kind: "ternary",
+    cond: { kind: "unionIsTag", unionId: u.type.unionId, tag, negated: false, value: u, type: BOOL, loc },
+    then: eq,
+    else_: { kind: "boolLit", value: negated, type: BOOL, loc },
+    type: BOOL,
+    loc,
+  };
+}
+
+/** THE LITERAL-COMPARISON BRIDGE, and it does NOT allocate.
+ *
+ * `t === 'msg'` where `t` is a local a widened keyed read stored into:
+ * tsc narrowed the assignment to `string`, so both sides are strings as
+ * far as the checker is concerned and the compare lowers to `strEq` over
+ * the CHECKED bridge - which throws on a stored `undefined` where Node
+ * answers plain `false`. The comparison has an answer for the unit arm,
+ * exactly as `=== undefined` and `typeof` do, so it must look through the
+ * bridge like they do.
+ *
+ * WHY NOT `unionEq`. The union path below answers this shape by wrapping
+ * the literal into the union - `scr_union_new_ref` plus a release around
+ * every compare - which `estado-encswitch.md` 8.4 named as a pre-existing
+ * allocation the widened switch had just put four of on zapo's inbound
+ * path. The tag test PROVES the arm, so the payload comes out with a bare
+ * `unionNarrow` and the compare is the same `strEq` against the same
+ * static literal the un-widened program emitted:
+ *
+ *     unionIsTag(u, strArm) ? strEq(unionNarrow(u, strArm), lit) : false
+ *
+ * The false arm is the negation for `!==`, since a value carrying any
+ * other tag is never equal to the literal. No allocation, no helper, no
+ * new IR node - this is 8.4's 'named, not built' lowering, built.
+ *
+ * EVALUATION ORDER. The union operand is re-emitted (the tag test and the
+ * narrow), so it must be pureReemittable; the OTHER operand is restricted
+ * to a LITERAL, which has no effects, so hoisting the tag test above it
+ * is unobservable. A non-literal right operand keeps today's lowering.
+ *
+ * Scoped to localTakesWidenedKeyedRead: see there.
+ *
+ * `SCRIPTC_EQARM_OFF=1` ablates it. */
+function literalEqArmBridge(
+  L: Lowerer,
+  expr: ts.BinaryExpression,
+  left: IrExpr,
+  right: IrExpr,
+  negated: boolean,
+  loc: SrcLoc,
+): IrExpr | null {
+  if (process.env["SCRIPTC_EQARM_OFF"] === "1") return null;
+  const trial = (v: IrExpr, vNode: ts.Expression, lit: IrExpr, litNode: ts.Expression): IrExpr | null => {
+    const litRef = refUnderWrappers(litNode);
+    const isLit = ts.isStringLiteralLike(litRef) || ts.isNumericLiteral(litRef) ||
+      litRef.kind === ts.SyntaxKind.TrueKeyword || litRef.kind === ts.SyntaxKind.FalseKeyword;
+    if (!isLit) return null;
+    if (lit.type.kind !== "string" && lit.type.kind !== "f64" && lit.type.kind !== "bool") return null;
+    const armed = narrowBridgeUnion(v);
+    if (armed === null || armed.type.kind !== "union") return null;
+    if (!pureReemittable(armed)) return null;
+    if (unitArmsOf(L, armed.type.unionId).length === 0) return null;
+    if (!localTakesWidenedKeyedRead(L, refUnderWrappers(vNode))) return null;
+    const tag = L.armTag(armed.type.unionId, lit.type);
+    if (tag < 0) return null;
+    const payload: IrExpr = { kind: "unionNarrow", unionId: armed.type.unionId, tag, value: armed, type: lit.type, loc };
+    const eq: IrExpr = lit.type.kind === "string"
+      ? strEqExpr(negated, payload, lit, loc)
+      : { kind: "bin", op: negated ? "!==" : "===", left: payload, right: lit, type: BOOL, loc };
+    if (process.env["SCRIPTC_EQARM_WHY"] !== undefined) {
+      console.error(`[eqarm] ${loc.file}:${String(loc.start)} ${L.fmt(armed.type)} vs a ${lit.type.kind} literal`);
+    }
+    return {
+      kind: "ternary",
+      cond: { kind: "unionIsTag", unionId: armed.type.unionId, tag, negated: false, value: armed, type: BOOL, loc },
+      then: eq,
+      else_: { kind: "boolLit", value: negated, type: BOOL, loc },
+      type: BOOL,
+      loc,
+    };
+  };
+  return trial(left, expr.left, right, expr.right) ?? trial(right, expr.right, left, expr.left);
+}
+
+/** THE MEMBER-RECEIVER BRIDGE - Node's own TypeError, not the family's.
+ *
+ * `t.length` where `t` is a local a widened keyed read stored into: tsc
+ * narrowed the assignment to `string`, so the read bridges through
+ * narrowedArmHelper, and a stored `undefined` throws
+ *
+ *     undefined is not representable in the target union
+ *     (a value narrowed or asserted past it still held it)
+ *
+ * where Node throws
+ *
+ *     Cannot read properties of undefined (reading 'length')
+ *
+ * Both are catchable TypeErrors at the same point in the program's
+ * control flow - the difference is one string, and that string is what
+ * `e.message` prints, what a `catch` that matches on text sees, and what
+ * a byte comparison against the Node oracle reads. The receiver position
+ * is the ONE position where JS itself throws for the unit, so it is the
+ * one position where this compiler can be Node-exact rather than merely
+ * loud; every other consumer of a narrowed-past unit either has a test
+ * that answers (the `??`, `typeof`, `=== undefined` look-throughs) or
+ * would need the undefined to keep travelling, which a `string` slot
+ * cannot do.
+ *
+ * Emitted as a TAG TEST plus the ordinary bridge, so nothing new is
+ * interned and no helper is added to the TU: on the honest narrowing the
+ * test is a compare against a tag word that never matches. The receiver
+ * is re-emitted once per unit arm, so it must be pureReemittable - a
+ * receiver with effects keeps the family message.
+ *
+ * Scoped to localTakesWidenedKeyedRead: see there.
+ *
+ * `SCRIPTC_RECVARM_OFF=1` ablates it. */
+function memberRecvArmBridge(L: Lowerer, expr: IrExpr, narrowed: IrType, node: ts.Node): IrExpr | null {
+  if (process.env["SCRIPTC_RECVARM_OFF"] === "1") return null;
+  if (expr.type.kind !== "union") return null;
+  const p = node.parent;
+  if (!p) return null;
+  let prop: string | null = null;
+  if (ts.isPropertyAccessExpression(p) && p.expression === node && p.questionDotToken === undefined) {
+    prop = p.name.text;
+  } else if (ts.isElementAccessExpression(p) && p.expression === node && p.questionDotToken === undefined) {
+    const a = p.argumentExpression;
+    if (ts.isStringLiteralLike(a)) prop = a.text;
+    else if (ts.isNumericLiteral(a)) prop = String(Number(a.text));
+  }
+  if (prop === null) return null;
+  const units = unitArmsOf(L, expr.type.unionId);
+  if (units.length === 0) return null;
+  if (!pureReemittable(expr)) return null;
+  if (!localTakesWidenedKeyedRead(L, node)) return null;
+  const loc = expr.loc;
+  let out = checkedArmBridge(L, expr, narrowed, loc);
+  for (const u of units) {
+    out = {
+      kind: "ternary",
+      cond: { kind: "unionIsTag", unionId: expr.type.unionId, tag: u.tag, negated: false, value: expr, type: BOOL, loc },
+      then: nodeThrowExpr(1, "", `Cannot read properties of ${u.unit} (reading '${prop}')`, narrowed, loc),
+      else_: out,
+      type: narrowed,
+      loc,
+    };
+  }
+  if (process.env["SCRIPTC_RECVARM_WHY"] !== undefined) {
+    console.error(`[recvarm] ${loc.file}:${String(loc.start)} .${prop} on ${L.fmt(expr.type)}`);
+  }
+  return out;
+}
 
 /** The checker-driven union bridge's ONE extraction, tag-checked.
  *
@@ -4104,8 +4414,45 @@ function nullishTestedByParent(expr: ts.Expression): boolean {
    * trust-the-checker bet as lowerUnitComparison's static fold. Sub-union
    * results (several non-unit arms) and defaults that change the result
    * type are fenced with narrow-first hints. */
+/** The NULLISH test's arm bridge — `narrowBridgeUnion` for `??`, and the
+ * last of the four guard forms to get it.
+ *
+ * tsc narrows an assignment to the declared type filtered by the type
+ * assigned, so `v = attrs.v` makes the very next read of `v` spelled
+ * `string` — including `v ?? d`, whose whole point is the arm the narrow
+ * just removed. maybeNarrow then bridges that read with the CHECKED
+ * extraction, the non-nullish fold below drops the default, and a stored
+ * undefined throws the bridge's TypeError where Node evaluates
+ * `undefined ?? d` to `d`. The author wrote the default for exactly that
+ * value.
+ *
+ * The same sentence `if (!v)`, `typeof v` and `v === undefined` already
+ * say (narrowBridgeUnion, three call sites in this file): a bridge is
+ * what a test must look THROUGH, because the test has an answer for the
+ * arm the bridge's validation rejects. On a soundly narrowed value the
+ * runtime tag test is false by construction, so the answer is the fold's
+ * answer and nothing that compiles today moves.
+ *
+ * Restricted to a left whose union really carries a UNIT arm: the
+ * `nullish` node's whole job is a tag test against those arms, and a
+ * union without one has nothing for `??` to select on.
+ *
+ * `SCRIPTC_NULLARM_OFF=1` ablates it. */
+function nullishArmBridge(L: Lowerer, left: IrExpr): IrExpr | null {
+  if (process.env["SCRIPTC_NULLARM_OFF"] === "1") return null;
+  if (left.type.kind === "union") return null;
+  const armed = narrowBridgeUnion(left);
+  if (armed === null || armed.type.kind !== "union") return null;
+  const def = L.unions.get(armed.type.unionId);
+  if (!def || !def.arms.some(isUnitType)) return null;
+  if (process.env["SCRIPTC_NULLARM_WHY"] !== undefined) {
+    console.error(`[nullarm] ${armed.loc.file}:${String(armed.loc.start)} ?? looks through the bridge to ${L.fmt(armed.type)}`);
+  }
+  return armed;
+}
+
   export function lowerNullishCoalesce(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr {
-    const left = L.lowerExpr(expr.left);
+    let left = L.lowerExpr(expr.left);
     if (left.type.kind === "dyn") {
       // `a ?? b` on a CHECKED-DYNAMIC left: the deciding test is the
       // runtime kind (scr_dyn_is_nullish — UNDEF/NULL take the default;
@@ -4277,6 +4624,11 @@ function nullishTestedByParent(expr: ts.Expression): boolean {
             : { kind: "dynCheck", value: test, type: checkT, loc };
         }
       }
+    }
+    // The checker-narrowed left, un-bridged: see nullishArmBridge.
+    {
+      const armed = nullishArmBridge(L, left);
+      if (armed) left = armed;
     }
     if (left.type.kind !== "union") return left;
     const def = L.unions.get(left.type.unionId);
@@ -11340,6 +11692,11 @@ export function ensureStringForPlus(L: Lowerer, e: IrExpr, node: ts.Node): IrExp
     const atWidth = stringConvAtDynWidth(L, e);
     if (atWidth) return { kind: "toString", operand: atWidth, hint: "default", type: STRING, loc: e.loc };
   }
+  // ...and the ARM bridge's twin of that rung (stringConvArmBridge).
+  {
+    const armed = stringConvArmBridge(L, e, node);
+    if (armed) return { kind: "toString", operand: armed, hint: "default", type: STRING, loc: e.loc };
+  }
   // The DEFAULT hint asks valueOf FIRST. ensureString's class arm is the
   // STRING hint's answer, so a class that declares its own valueOf must
   // not reach it: `"" + {valueOf:()=>42, toString:()=>"TS"}` is "42" and
@@ -11419,6 +11776,49 @@ export function isDynSafeReadWidth(L: Lowerer, t: IrType): boolean {
  * refuse the way a typed slot does. `String(args[k])` and `` `${args[k]}` ``
  * printed `undefined` in Node and TRAPPED here, on the union-valued
  * signatures where the binding rule could not reach them either. */
+/** THE STRING-CONVERSION ARM BRIDGE - stringConvAtDynWidth's twin one
+ * representation over.
+ *
+ * `String(t)` and `'<' + t + '>'` where `t` is a local a widened keyed
+ * read stored into: tsc narrowed the assignment to `string`, the read
+ * bridges through the CHECKED extraction, and a stored `undefined` throws
+ * where Node prints the four letters `undefined`. ToString is TOTAL over
+ * this width - that is stringConvAtDynWidth's own argument, and the union
+ * arm of ensureString below already implements it: the per-union `sc_us_*`
+ * helper answers the known texts for the unit arms and passes a string arm
+ * through. So the conversion is a keep-case exactly as the dyn one is, and
+ * it costs no allocation: a call to the union's ToString helper replaces a
+ * call to the union's narrow helper.
+ *
+ * The width is restricted to SCALAR and UNIT arms. ensureString's union
+ * arm REFUSES a union with an object arm (SC1090, narrow first), so a
+ * wider look-through would trade a runtime throw for a compile-time
+ * refusal - which raises the census instead of lowering it, the trade this
+ * whole family exists not to make.
+ *
+ * Scoped to localTakesWidenedKeyedRead: see there.
+ *
+ * `SCRIPTC_STRARM_OFF=1` ablates it. */
+export function stringConvArmBridge(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr | null {
+  if (process.env["SCRIPTC_STRARM_OFF"] === "1") return null;
+  const armed = narrowBridgeUnion(e);
+  if (armed === null || armed.type.kind !== "union") return null;
+  const def = L.unions.get(armed.type.unionId);
+  if (!def || def.arms.length === 0) return null;
+  if (!def.arms.some(isUnitType)) return null;
+  const scalarOnly = def.arms.every(
+    (a) => a.kind === "undefinedT" || a.kind === "nullT" ||
+      a.kind === "string" || a.kind === "f64" || a.kind === "bool",
+  );
+  if (!scalarOnly) return null;
+  if (!ts.isExpression(node as ts.Expression) && !ts.isIdentifier(node)) return null;
+  if (!localTakesWidenedKeyedRead(L, refUnderWrappers(node as ts.Expression))) return null;
+  if (process.env["SCRIPTC_STRARM_WHY"] !== undefined) {
+    console.error(`[strarm] ${e.loc.file}:${String(e.loc.start)} ToString over ${L.fmt(armed.type)}`);
+  }
+  return armed;
+}
+
 function stringConvAtDynWidth(L: Lowerer, e: IrExpr): IrExpr | null {
   return L.recordKeyReadAtSlotWidth(e, DYN) ?? narrowBridgeDyn(e);
 }
@@ -11488,6 +11888,11 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
     {
       const atWidth = stringConvAtDynWidth(L, e);
       if (atWidth) return { kind: "toString", operand: atWidth, type: STRING, loc: e.loc };
+    }
+    // ...and the ARM bridge's twin of that rung (stringConvArmBridge).
+    {
+      const armed = stringConvArmBridge(L, e, node);
+      if (armed) return { kind: "toString", operand: armed, type: STRING, loc: e.loc };
     }
     if (e.type.kind === "string") return e;
     if (e.type.kind === "dyn") {
@@ -13506,6 +13911,12 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       case ts.SyntaxKind.ExclamationEqualsEqualsToken: {
         const negated = op === ts.SyntaxKind.ExclamationEqualsEqualsToken;
         if (bothNum) return { kind: "bin", op: negated ? "!==" : "===", left, right, type: BOOL, loc };
+        // `t === 'msg'` where `t` is a local a widened keyed read stored
+        // into: see literalEqArmBridge.
+        {
+          const eq = literalEqArmBridge(L, expr, left, right, negated, loc);
+          if (eq) return eq;
+        }
         if (bothStr) return strEqExpr(negated, left, right, loc);
         // bool === bool: a plain value compare (the config-drift checks'
         // `desired.lanMode !== actual.lanMode` shape).
@@ -13559,6 +13970,10 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             L.armTag(ut.unionId, plainT) >= 0 ||
             L.promiseArmFor(plainT, ut) !== null;
           if ((sameUnion || !bothUnion) && plainSideWraps && L.eqComparableUnion(ut.unionId)) {
+            // §8.4's unboxed form when the plain side is a scalar LITERAL;
+            // the allocating one below is what SCRIPTC_CASEEQ_OFF=1 keeps.
+            const cheap = unionLiteralEq(L, left, right, negated, loc);
+            if (cheap) return cheap;
             return {
               kind: "unionEq",
               unionId: ut.unionId,

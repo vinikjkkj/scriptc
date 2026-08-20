@@ -110,13 +110,19 @@ const TRAP = /scr_trap_fmt\("scriptc: TypeError: record has no key/g;
 /* Assignments into an undefined-armed slot whose later reads have LOST the
  * arm — tsc narrows an assignment to the declared type filtered by the type
  * assigned, so the very next read of `v` after `v = a.k` is already `string`,
- * `v === undefined` and `v ?? d` included. Every one of these DECLINES, and
- * the point of the byte comparison below is that a decline hands the
- * identical expression to the identical tail: `lowerExprExpecting`'s early
- * rules are all about Object.freeze, array literals and object literals, so
- * a property access falls through them to `coerceInto(lowerExpr(node))`,
- * which is exactly what the decline path builds. */
-const ASSIGN_DECLINERS = [
+ * `v === undefined` and `v ?? d` included.
+ *
+ * These three DECLINED when this file was written, on the stated ground that
+ * a narrowed read lowers to an UNCHECKED unionNarrow. It does not, and has
+ * not since `733f4db9` made every checker-driven narrowing go through
+ * `checkedArmBridge` -> `narrowedArmHelper` — an `if (unionIsTag) throw new
+ * TypeError` before the payload peek. `block/assignarm` retired the gate and
+ * gave each consumer the answer the unit arm has: `v ?? d` takes the default
+ * (nullarm), `v === undefined` answers the tag it always could, and `v.length`
+ * throws Node's own `Cannot read properties of undefined (reading 'length')`
+ * (recvarm). So all three WIDEN now, and the assertion is the other way
+ * round. */
+const ASSIGN_NARROWED = [
   `export function deref(a: Record<string, string>): number {`,
   `  let v: string | undefined;`,
   `  v = a.k;`,
@@ -237,16 +243,17 @@ describe("the enc-attribute rungs", () => {
     expect(fixed.tu).toBe(base.tu);
   }, 240_000);
 
-  test("an assignment the narrowed-read gate refuses emits the identical TU", async () => {
-    const fixed = await emit(ASSIGN_DECLINERS, {});
-    expect(fixed.diags).toEqual([]);
-    // Non-trivial: these reads DO abort, which is the whole point of a
-    // decline — the gate keeps the loud trap rather than storing an
-    // undefined behind an unchecked narrow.
-    expect(count(fixed.tu, TRAP)).toBeGreaterThan(0);
-
-    const base = await emit(ASSIGN_DECLINERS, { switchOff: true, assignOff: true, braceOff: true });
+  test("an assignment whose later reads were narrowed widens too", async () => {
+    // The baseline first, so the assertion below cannot be vacuous: with
+    // the assignment rung ablated all three shapes keep the aborting read.
+    const base = await emit(ASSIGN_NARROWED, { assignOff: true });
     expect(base.diags).toEqual([]);
-    expect(fixed.tu).toBe(base.tu);
+    expect(count(base.tu, TRAP)).toBeGreaterThan(0);
+
+    // And with it on the abort is gone from every one of them — the gate
+    // that used to decline them is retired (see ASSIGN_NARROWED above).
+    const fixed = await emit(ASSIGN_NARROWED, {});
+    expect(fixed.diags).toEqual([]);
+    expect(count(fixed.tu, TRAP)).toBe(0);
   }, 240_000);
 });
