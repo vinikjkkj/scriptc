@@ -4805,6 +4805,303 @@ function isNumericCaseTest(e: ts.Expression): boolean {
   );
 }
 
+/** The FIRST syntactic fence of lowerUnionSwitch, as a question anyone can
+ * ask: an unlabeled break at a clause's END exits the switch (the chain's
+ * own exit), but a break anywhere else — a conditional early break, or any
+ * LABELED break — would rebind to an enclosing loop once the switch is a
+ * chain of ifs. Walks each clause's statements without descending into
+ * nested breakable constructs or functions (their breaks are their own).
+ *
+ * Shared with the switch-discriminant rung below so the two can never
+ * drift: what lowerUnionSwitch REFUSES, the rung must DECLINE. */
+function unionSwitchStrayBreak(clauses: readonly ts.CaseOrDefaultClause[]): ts.Node | null {
+  for (const clause of clauses) {
+    const exit = clauseExitBreak(clause.statements);
+    const walk = (node: ts.Node): ts.Node | null => {
+      if (node === exit) return null;
+      if (ts.isBreakStatement(node)) return node;
+      if (
+        ts.isForStatement(node) || ts.isForOfStatement(node) || ts.isForInStatement(node) ||
+        ts.isWhileStatement(node) || ts.isDoStatement(node) || ts.isSwitchStatement(node) ||
+        ts.isFunctionLike(node)
+      ) {
+        return null;
+      }
+      return ts.forEachChild(node, walk) ?? null;
+    };
+    for (const st of clause.statements) {
+      const stray = walk(st);
+      if (stray) return stray;
+    }
+  }
+  return null;
+}
+
+/** THE CLAUSE'S OWN EXIT BREAK — the one `break` the desugar drops because
+ * the chain's if/else IS that exit.
+ *
+ * `case 'skmsg': break` puts it at the clause's top level, and that is the
+ * only spelling the desugar recognised. `case 'skmsg': { …; break }` puts
+ * it at the end of a BLOCK, and that is the spelling zapo's own
+ * `switch (child.attrs.type)` uses on every one of its four cases — braces
+ * are how a case body gets a lexical scope for its `const`s, which is why
+ * the braced form is the common one. The block is a scope, not a
+ * breakable construct: a `break` at its end still exits the switch and
+ * nothing else, so it is the same exit wearing braces. Recursive because
+ * nesting is legal (`{ { break } }`) and means the same thing.
+ *
+ * A break anywhere ELSE inside the clause is still the fence
+ * unionSwitchStrayBreak raises: desugared, it would rebind to an
+ * enclosing loop.
+ *
+ * `SCRIPTC_CASEBRACE_OFF=1` restores the pre-brace predicate (a top-level
+ * trailing break only), so one binary emits both sides of the A/B. */
+function clauseExitBreak(stmts: readonly ts.Statement[]): ts.BreakStatement | null {
+  const last = stmts[stmts.length - 1];
+  if (!last) return null;
+  if (ts.isBreakStatement(last)) return last.label ? null : last;
+  if (ts.isBlock(last) && process.env["SCRIPTC_CASEBRACE_OFF"] !== "1") return clauseExitBreak(last.statements);
+  return null;
+}
+
+/** Does this clause body EXIT, counting a trailing braced body as its own
+ * last statement? Same question `clauseExitBreak` asks, widened to the
+ * other three exits a case body can end in. */
+function clauseExits(stmts: readonly ts.Statement[]): boolean {
+  const last = stmts[stmts.length - 1];
+  if (!last) return false;
+  if (ts.isBlock(last)) return process.env["SCRIPTC_CASEBRACE_OFF"] === "1" ? false : clauseExits(last.statements);
+  return (
+    (ts.isBreakStatement(last) && !last.label) ||
+    ts.isReturnStatement(last) ||
+    ts.isThrowStatement(last) ||
+    ts.isContinueStatement(last)
+  );
+}
+
+/** The SECOND syntactic fence of lowerUnionSwitch, same deal: a non-final
+ * body that doesn't exit falls into the NEXT body in JS, and no if/else
+ * shape reproduces that. An EMPTY non-final default falls through too;
+ * empty non-final cases just group with the next clause. */
+function unionSwitchClauseFallsThrough(clauses: readonly ts.CaseOrDefaultClause[], i: number): boolean {
+  const clause = clauses[i]!;
+  const isDefault = ts.isDefaultClause(clause);
+  if (i >= clauses.length - 1) return false;
+  if (clause.statements.length === 0 && !isDefault) return false;
+  return !clauseExits(clause.statements);
+}
+
+/** Lowers a case body with its EXIT BREAK removed — the break the chain's
+ * own if/else replaces (clauseExitBreak). A break at the clause's top
+ * level just drops. A break at the end of a trailing BLOCK drops from
+ * INSIDE that block, which therefore has to be lowered here rather than
+ * by lowerStmt: the block keeps its own lexical scope (exactly what
+ * lowerScopedBlock does for an if/while body), so a `const` declared in a
+ * braced case body still cannot be seen by the next case — the shared
+ * clause-level scope the switch has is at the STATEMENT level, and braces
+ * are a scope in the desugar for the same reason they are one in JS. */
+function lowerClauseBodyWithoutExitBreak(L: Lowerer, stmts: readonly ts.Statement[]): IrStmt[] {
+  const last = stmts[stmts.length - 1];
+  if (last && ts.isBreakStatement(last) && !last.label) {
+    return L.lowerStmts(stmts.slice(0, -1));
+  }
+  if (last && ts.isBlock(last) && process.env["SCRIPTC_CASEBRACE_OFF"] !== "1" && clauseExitBreak([last]) !== null) {
+    const head = L.lowerStmts(stmts.slice(0, -1));
+    L.scopes.push(new Map());
+    try {
+      head.push({ kind: "block", body: lowerClauseBodyWithoutExitBreak(L, last.statements), loc: locOf(last) });
+    } finally {
+      L.scopes.pop();
+    }
+    return head;
+  }
+  return L.lowerStmts(stmts.slice());
+}
+
+/** THE SWITCH-DISCRIMINANT DESTINATION for recordKeyReadAtUndefinedArm.
+ *
+ * `switch (child.attrs.type)` — zapo `message/primitives/incoming.ts:541`,
+ * where `child` is an `<enc>` element of an INBOUND `<message>` stanza and
+ * `child.attrs` is `Record<string, string>`. The checker types an
+ * index-signature read by the signature's VALUE type, so the discriminant
+ * is spelled `string`; a stanza that omits `type=` therefore reaches a
+ * keyed read whose MISS path is `scr_trap_fmt` — a process ABORT with no
+ * `[SCxxxx]` tag, past every one of zapo's catch clauses. Node evaluates
+ * `switch (undefined)`, matches no case, and takes `default` — which zapo
+ * WROTE, `default: continue`, for exactly this input.
+ *
+ * WHY A SWITCH DISCRIMINANT IS A KEEP-CASE, which is this rung's whole
+ * admission rule. The destinations `recordKeyReadAtUndefinedArm` refuses
+ * are a DECLARATION, an ASSIGNMENT and a PROPERTY WRITE: tsc narrows the
+ * undefined arm away at each, so their later readers were compiled as
+ * "definitely the string arm" and a STORED undefined is unsound. A switch
+ * discriminant stores nothing and is read by nothing but the switch's own
+ * case tests: the value is consumed, here, by equality against the case
+ * literals and then discarded. Every one of those tests already
+ * discriminates — that is what a case test IS — and the arm that matches
+ * none of them is the arm `default` was written for.
+ *
+ * WHY ONLY STRING-LITERAL CASE TESTS. The widened value falls to
+ * `default` because `undefined` equals no case; a literal can never be
+ * `undefined`, so the fall is a fact about the program and not a bet
+ * about a runtime value. It is also the shape the defect wears — a tag
+ * dispatch over wire attributes.
+ *
+ * WHY THE PREFLIGHT. `lowerUnionSwitch` is the only lowering a
+ * union-typed discriminant has, and it REFUSES several clause shapes
+ * (early or labeled break, fall-through between bodies) that the
+ * primitive switch lowers happily. Widening without asking first would
+ * convert a working program into an SC1090 refusal — trading a runtime
+ * kill for a compile-time one, which RAISES the refusal census instead of
+ * lowering it. So every syntactic fence the desugar raises is asked HERE,
+ * through the very predicates the desugar uses, and a shape it would
+ * refuse keeps today's lowering unchanged.
+ *
+ * The read binds to a HIDDEN LOCAL because the desugar's chain re-reads
+ * the discriminant at every test and a `recordKeyGet` is not
+ * `pureReemittable`. That is not a workaround for the fence: JS evaluates
+ * a switch discriminant EXACTLY ONCE, so the binding IS the semantics,
+ * and it is the same shape `lowerTypeofArm` builds one file over for the
+ * same reason. The general fence stays exactly where it is.
+ *
+ * `SCRIPTC_SWITCHARM_OFF=1` ablates the rung, so one binary emits both
+ * sides; `SCRIPTC_SWITCHARM_WHY` names every site it takes. */
+function switchDiscAtUndefinedArm(L: Lowerer, stmt: ts.SwitchStatement, disc: IrExpr): IrExpr | null {
+  if (process.env["SCRIPTC_SWITCHARM_OFF"] === "1") return null;
+  const why = (verdict: string): null => {
+    if (process.env["SCRIPTC_SWITCHARM_WHY"] !== undefined) {
+      const l = locOf(stmt.expression);
+      console.error(`[switcharm] ${l.file}:${l.start} ${verdict}`);
+    }
+    return null;
+  };
+  if (disc.kind !== "recordKeyGet") {
+    return disc.kind === "recordGet" || disc.kind === "fieldGet" ? null : null;
+  }
+  const clauses = stmt.caseBlock.clauses;
+  for (const c of clauses) {
+    if (ts.isCaseClause(c) && !ts.isStringLiteralLike(c.expression)) return why("declined: a case test is not a string literal");
+  }
+  if (unionSwitchStrayBreak(clauses) !== null) return why("declined: early or labeled break");
+  for (let i = 0; i < clauses.length; i++) {
+    if (unionSwitchClauseFallsThrough(clauses, i)) return why("declined: fall-through between case bodies");
+  }
+  const armedT = L.withUndefinedArmOf(disc.type);
+  if (armedT === null || armedT.kind !== "union") return why("declined: no undefined-armed width");
+  const armed = L.recordKeyReadAtUndefinedArm(disc, armedT);
+  if (armed === null || armed.type.kind !== "union") return why("declined: recordKeyReadAtUndefinedArm");
+  if (!L.eqComparableUnion(armed.type.unionId)) return why("declined: union is not eq-comparable");
+  if (process.env["SCRIPTC_SWITCHARM_WHY"] !== undefined) {
+    const l = locOf(stmt.expression);
+    console.error(`[switcharm] ${l.file}:${l.start} widened to ${L.fmt(armed.type)}`);
+  }
+  return armed;
+}
+
+/** Does the checker still admit `undefined` at this occurrence? Asked of
+ * a REFERENCE, not a declaration — the question is what tsc's control-flow
+ * narrowing believes HERE, which is what the read at this spot was
+ * compiled against. */
+function occurrenceAdmitsUndefined(L: Lowerer, n: ts.Identifier): boolean {
+  let t: ts.Type;
+  try {
+    t = L.typeOf(n);
+  } catch {
+    return false;
+  }
+  const parts = t.isUnionType() ? t.getTypes() : [t];
+  return parts.some((p) => (p.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Void | ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0);
+}
+
+/** THE ASSIGNMENT DESTINATION for recordKeyReadAtUndefinedArm, and the one
+ * destination that has to EARN it.
+ *
+ * `firstEncType = child.attrs.type` — zapo
+ * `message/primitives/incoming.ts:538`, one line above the switch of
+ * `switchDiscAtUndefinedArm`, inside the same loop over the `<enc>`
+ * children of an inbound `<message>`. `firstEncType` is declared
+ * `let firstEncType: string | undefined` in so many words, and the read
+ * that feeds it is the same index-signature read: the key is absent on a
+ * stanza that omits `type=`, the miss path is `scr_trap_fmt`, and the
+ * process dies where Node stores `undefined` and the function's own
+ * `firstEncType === 'skmsg'` answers it three statements later.
+ *
+ * WHY THE RUNG REFUSES ASSIGNMENTS BY DEFAULT, in its own words: "tsc
+ * narrows `string | undefined` away at a DECLARATION, an ASSIGNMENT and a
+ * PROPERTY WRITE — the destinations the rung refuses, because their
+ * readers were compiled as 'definitely the string arm' and a stored
+ * undefined is the r03 segfault." That is exactly right and it is not a
+ * property of assignment as such: it is a property of the READS that
+ * follow one. `x = rec[k]` narrows `x` to `string` on the statements
+ * that follow in the same flow, and a read there lowers to an UNCHECKED
+ * `unionNarrow` — trust-the-checker — which a stored undefined turns
+ * into a silent wrong value, the worst outcome this compiler has.
+ *
+ * So the rung is offered here only when that hazard is ABSENT, and
+ * absence is checked rather than assumed: every reference to the assigned
+ * binding inside its enclosing function is asked what the checker's
+ * control-flow narrowing believes AT THAT OCCURRENCE, and a single read
+ * that has lost the undefined arm declines the whole assignment. Writes
+ * (the assignment targets, `++`) are not reads and do not count; the
+ * declaration name is not a read either. A binding whose every read still
+ * sees `string | undefined` has no unchecked narrow to feed, which is why
+ * zapo's own spelling qualifies: the assignment sits under
+ * `if (firstEncType === undefined)` inside a loop, so the flow type at
+ * both later reads is the declared union, back-edge and all.
+ *
+ * The gate is deliberately whole-function and deliberately conservative —
+ * one narrowed read anywhere, in any branch, and the abort stays. A trap
+ * is a bad outcome; a silent wrong value is a worse one.
+ *
+ * `SCRIPTC_ASSIGNARM_OFF=1` ablates it; `SCRIPTC_ASSIGNARM_WHY` names
+ * every site it fires or declines on. */
+function keyedReadAtAssignSlot(
+  L: Lowerer,
+  name: ts.Identifier,
+  raw: IrExpr,
+  expected: IrType,
+): IrExpr | null {
+  if (process.env["SCRIPTC_ASSIGNARM_OFF"] === "1") return null;
+  const why = (verdict: string, armed: IrExpr | null): IrExpr | null => {
+    if (process.env["SCRIPTC_ASSIGNARM_WHY"] !== undefined) {
+      const l = locOf(name);
+      console.error(`[assignarm] ${l.file}:${l.start} ${name.text} ${verdict}`);
+    }
+    return armed;
+  };
+  if (raw.kind !== "recordKeyGet") return null;
+  if (expected.kind !== "union") return null;
+  const symbol = L.checker.getSymbolAtLocation(name);
+  if (!symbol) return why("declines: unresolved binding", null);
+  let scope: ts.Node = name;
+  while (scope.parent && !ts.isSourceFile(scope) && !ts.isFunctionLike(scope) && !ts.isClassStaticBlockDeclaration(scope)) {
+    scope = scope.parent;
+  }
+  let narrowedRead: ts.Identifier | null = null;
+  const walk = (n: ts.Node): void => {
+    if (narrowedRead) return;
+    if (ts.isIdentifier(n) && n.text === name.text && !isWritePosition(n)) {
+      if (L.checker.getSymbolAtLocation(n) === symbol) {
+        const decl = n.parent !== undefined &&
+          ((ts.isVariableDeclaration(n.parent) && n.parent.name === n) ||
+            (ts.isParameter(n.parent) && n.parent.name === n) ||
+            (ts.isBindingElement(n.parent) && n.parent.name === n));
+        if (!decl && !occurrenceAdmitsUndefined(L, n)) {
+          narrowedRead = n;
+          return;
+        }
+      }
+    }
+    ts.forEachChild(n, walk);
+  };
+  walk(scope);
+  if (narrowedRead !== null) {
+    return why(`declines: a read at ${locOf(narrowedRead).start} lost the undefined arm`, null);
+  }
+  const armed = L.recordKeyReadAtUndefinedArm(raw, expected);
+  return why(armed ? `widened to ${L.fmt(expected)}` : "declines: recordKeyReadAtUndefinedArm", armed);
+}
+
 /** JS-exact switch (see docs/ir.md): one shared lexical scope for all case
    * bodies, lazy source-order test evaluation, fall-through. tsc has already
    * checked case-test comparability (TS2678) — the kind check below is the
@@ -4828,6 +5125,26 @@ function isNumericCaseTest(e: ts.Expression): boolean {
       stmt.caseBlock.clauses.every((c) => !ts.isCaseClause(c) || isNumericCaseTest(c.expression))
     ) {
       disc = { kind: "dynCheck", value: disc, type: F64, loc: disc.loc };
+    }
+    // THE SWITCH-DISCRIMINANT DESTINATION for recordKeyReadAtUndefinedArm
+    // (switchDiscAtUndefinedArm above): an index-signature keyed read used
+    // as a tag discriminant answers a MISS with `undefined` and falls to
+    // `default`, exactly as Node does, instead of aborting the process.
+    // Declines — including every clause shape the union desugar refuses —
+    // keep today's lowering, so nothing that compiles today stops.
+    if (labels === undefined || labels.length === 0) {
+      const armed = switchDiscAtUndefinedArm(L, stmt, disc);
+      if (armed) {
+        const tmp = L.declareHiddenLocal("%switchDisc", armed.type);
+        const bind: IrStmt = { kind: "varDecl", localId: tmp.id, init: armed, loc: disc.loc };
+        const chain = lowerUnionSwitch(L, stmt, {
+          kind: "varRef",
+          localId: tmp.id,
+          type: armed.type,
+          loc: disc.loc,
+        });
+        return { kind: "block", body: [bind, chain], loc: locOf(stmt) };
+      }
     }
     const dk = disc.type.kind;
     if (dk === "dyn") {
@@ -4900,40 +5217,16 @@ function isNumericCaseTest(e: ts.Expression): boolean {
     // rebind it to an enclosing loop. Walk each clause's statements without
     // descending into nested breakable constructs or functions (their
     // breaks are their own).
-    const findStrayBreak = (node: ts.Node): ts.Node | null => {
-      if (ts.isBreakStatement(node)) return node;
-      if (
-        ts.isForStatement(node) || ts.isForOfStatement(node) || ts.isForInStatement(node) ||
-        ts.isWhileStatement(node) || ts.isDoStatement(node) || ts.isSwitchStatement(node) ||
-        ts.isFunctionLike(node)
-      ) {
-        return null;
-      }
-      return ts.forEachChild(node, findStrayBreak) ?? null;
-    };
-    for (const clause of clauses) {
-      const last = clause.statements[clause.statements.length - 1];
-      for (const s of clause.statements) {
-        const stray = s === last && ts.isBreakStatement(s) && !s.label ? null : findStrayBreak(s);
-        if (stray) {
-          L.unsupported(
-            "SC1090",
-            stray,
-            "early 'break' inside a union-typed switch (only a trailing break exits the desugared chain — restructure with if/else)",
-          );
-        }
+    {
+      const stray = unionSwitchStrayBreak(clauses);
+      if (stray) {
+        L.unsupported(
+          "SC1090",
+          stray,
+          "early 'break' inside a union-typed switch (only a trailing break exits the desugared chain — restructure with if/else)",
+        );
       }
     }
-    const exits = (clause: ts.CaseOrDefaultClause): boolean => {
-      const last = clause.statements[clause.statements.length - 1];
-      return (
-        !!last &&
-        ((ts.isBreakStatement(last) && !last.label) ||
-          ts.isReturnStatement(last) ||
-          ts.isThrowStatement(last) ||
-          ts.isContinueStatement(last))
-      );
-    };
     // The whole case-body sequence is ONE lexical scope, like the real
     // switch lowering.
     L.scopes.push(new Map());
@@ -4987,7 +5280,7 @@ function isNumericCaseTest(e: ts.Expression): boolean {
         if (clause.statements.length === 0 && !isDefault && i < clauses.length - 1) {
           continue; // grouped with the next clause
         }
-        if (!exits(clause) && i < clauses.length - 1 && (clause.statements.length > 0 || isDefault)) {
+        if (unionSwitchClauseFallsThrough(clauses, i)) {
           // A non-final body that doesn't exit falls into the NEXT body in
           // JS — no if/else shape reproduces that (an EMPTY non-final
           // default falls through too; empty non-final cases just group).
@@ -4997,11 +5290,7 @@ function isNumericCaseTest(e: ts.Expression): boolean {
             "fall-through between case bodies in a union-typed switch (end each case with break/return/throw/continue)",
           );
         }
-        const last = clause.statements[clause.statements.length - 1];
-        const stmts = last && ts.isBreakStatement(last)
-          ? clause.statements.slice(0, -1)
-          : clause.statements.slice();
-        const body = L.lowerStmts(stmts);
+        const body = lowerClauseBodyWithoutExitBreak(L, clause.statements);
         groups.push({ tests: pendingTests, body, isDefault });
         pendingTests = [];
       }
@@ -6206,6 +6495,28 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         }
         const target = L.resolveWritable(expr.left);
         if (!target) L.rejectUnresolved(expr.left, `assignment to '${expr.left.text}' (not a writable local or module global)`);
+        // THE ASSIGNMENT DESTINATION for recordKeyReadAtUndefinedArm
+        // (keyedReadAtAssignSlot above): an index-signature read stored
+        // into a slot that DECLARES the undefined arm, and whose every
+        // read still sees that arm, answers a miss with undefined instead
+        // of aborting the process. A property access is not an object
+        // literal, an array literal or an arrow, so where the rung
+        // declines the tail below IS lowerExprExpecting's own and the
+        // emitted code is byte-for-byte what it was.
+        if (
+          target.type.kind === "union" &&
+          (ts.isPropertyAccessExpression(expr.right) || ts.isElementAccessExpression(expr.right)) &&
+          expr.right.questionDotToken === undefined
+        ) {
+          const raw = L.lowerExpr(expr.right);
+          const armed = keyedReadAtAssignSlot(L, expr.left, raw, target.type);
+          return {
+            kind: "assign",
+            localId: target.id,
+            value: armed ?? L.coerceInto(expr.right, raw, target.type),
+            loc: locOf(expr),
+          };
+        }
         const value = L.lowerExprExpecting(expr.right, target.type);
         return { kind: "assign", localId: target.id, value, loc: locOf(expr) };
       }
