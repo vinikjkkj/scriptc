@@ -2141,6 +2141,39 @@ void scr_dyn_obj_set(ScrDyn *obj, const char *key, size_t key_len, ScrDyn *value
   scr_dyn_obj_put(obj, copy, key_len, value);
 }
 
+/* The PRESENCE-GATED member store: the same set, except that an UNDEFINED
+ * value does not create a key at all. The compiler's record→dyn converters
+ * call this for a field whose static type carries an undefined arm, which
+ * is the only way a record can hold "this key is not there".
+ *
+ * A record struct has one slot per declared field and a per-instance tag
+ * saying which arm that slot holds, so the ABSENCE of an optional field is
+ * a run-time fact the value really carries. Setting the key anyway threw
+ * that fact away and answered the shape's declared field list instead:
+ * `Object.keys` of `{a: 1}` widened to `object` said "a,b,c" while the SAME
+ * value read as its own record said "a", and Object.values/entries walked
+ * into the boundary validator and aborted on the undefined. Skipping the
+ * store is the same rule the frontend's interned keys helper already writes
+ * for a record receiver (recordKeysArrayCall's tag test), applied at the
+ * one boundary that was answering it from the static table.
+ *
+ * It is NOT a rule about undefined values in general: a checked-dynamic
+ * object really can hold an undefined-valued key (`{a: undefined}` built
+ * dynamically lists "a" in JS, exactly as scr_dyn_obj_set leaves it). Only
+ * the static→dyn record converter routes here, because only there is
+ * "undefined" the representation of an absent key.
+ *
+ * MOVES the value like scr_dyn_obj_set — the skipped release is a no-op on
+ * the immortal undefined singleton, and is spelled out rather than assumed
+ * so a future non-immortal undefined cannot leak here. */
+void scr_dyn_obj_set_present(ScrDyn *obj, const char *key, size_t key_len, ScrDyn *value) {
+  if (value != NULL && value->kind == SCR_DYN_UNDEF) {
+    scr_dyn_release(value);
+    return;
+  }
+  scr_dyn_obj_set(obj, key, key_len, value);
+}
+
 /* ToBoolean over a dyn value (`v || dflt`, `if (v)` on a dyn operand):
  * bool by value; number falsy exactly for 0, -0, and NaN; string falsy
  * exactly when empty; obj/arr/bytes/func always true; undefined and null

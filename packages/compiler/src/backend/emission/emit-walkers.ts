@@ -7,7 +7,7 @@
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
-import { armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
+import { armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, isUndefinedArmedUnion, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { OVERFLOW_MEMBER, TOSTR_MEMBER } from "./emit-shapes.js";
@@ -1998,7 +1998,23 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             const fv = f.type.kind === "func"
               ? dynFuncFieldBoxC(E, f.type, `v->${mangleField(f.name)}`, f.name)
               : toDynExprC(E, f.type, `v->${mangleField(f.name)}`);
-            d.push(`  scr_dyn_obj_set(d, ${keyLit}, ${keyLen}, ${fv});`);
+            // An UNDEFINED-ARMED field's key exists exactly when its
+            // run-time tag is not the undefined arm — the same rule the
+            // frontend's interned keys helper writes for a record RECEIVER
+            // (recordKeysArrayCall's tag test). Setting it unconditionally
+            // answered the shape's declared field list instead of the
+            // value's own keys: `{a: 1}` widened to `object` listed
+            // "a,b,c", and Object.values/entries aborted in the boundary
+            // validator on the undefined it then had to walk. The
+            // presence-gated store is the whole fix, and it is spelled as a
+            // DIFFERENT function rather than a rule inside scr_dyn_obj_set
+            // because a checked-dynamic object really can hold an
+            // undefined-valued key.
+            d.push(
+              isUndefinedArmedUnion(f.type, (id) => E.unionsById.get(id))
+                ? `  scr_dyn_obj_set_present(d, ${keyLit}, ${keyLen}, ${fv});`
+                : `  scr_dyn_obj_set(d, ${keyLit}, ${keyLen}, ${fv});`,
+            );
           }
         }
         if (shape.indexValue) {

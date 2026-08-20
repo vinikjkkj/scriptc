@@ -64,14 +64,30 @@ console.log(msgOf(() => assert.notDeepStrictEqual(dobj, dobj2)));
 console.log(msgOf(() => assert.notDeepStrictEqual(JSON.parse("5"), 5)));
 console.log(msgOf(() => assert.notDeepStrictEqual(darr, [1, 2], "custom ndse")));
 
-// A record field holding undefined: the checked-dynamic tree's undefined value renders
-// and compares (key sets differ, exactly Node).
+// Key sets that differ across the record/dyn crossing: the record answers the
+// keys it HOLDS, so a declared field the value does not hold is not a key on
+// either side, and the difference the assertion reports is the parsed value's
+// extra member — exactly Node.
+//
+// NOT asserted, deliberately, and it used to be: the same shape built with
+// `b: undefined` written explicitly, against a parsed '{"a":1}'. Node makes
+// that a key-set difference ("- b: undefined"); scriptc answers "absent" for
+// an explicitly-written undefined, because `{b?: number}` and
+// `{b: number | undefined}` intern to the SAME record shape and a record
+// carries one union tag per field — no per-instance bit separates "written
+// undefined" from "never written". The stance is the one tests/corpus/3713
+// names. The pair below is the OTHER construction, and it was wrong before
+// the presence gate: the expected side reported a phantom `b: undefined` key
+// it does not hold.
 interface MaybeB {
   a: number;
-  b: number | undefined;
+  b?: number;
 }
-const plain: unknown = JSON.parse('{"a":1}');
-console.log(msgOf(() => assert.deepStrictEqual(plain, { a: 1, b: undefined } as MaybeB)));
+const plain: unknown = JSON.parse('{"a":1,"b":2}');
+console.log(msgOf(() => assert.deepStrictEqual(plain, { a: 1 } as MaybeB)));
+// The UNDEF value itself still renders and compares inside the checked-dynamic
+// tree — an array slot is the crossing that carries one after the gate.
+console.log(msgOf(() => assert.deepStrictEqual(JSON.parse("[1,null]"), [1, undefined])));
 
 // Bytes inside the checked-dynamic tree: brand-aware content comparison (both sides
 // crossed as unknown, so both carry the plain Uint8Array flavor).
