@@ -36,7 +36,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { isJsSourceFile } from "../program.js";
-import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { lowerPromisifiedDiffieHellmanValue } from "./lower-builtins.js";
@@ -565,64 +565,17 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       // Object.keys' declared order (SEMANTICS.md 36's stance).
       const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
       const byName = new Map(shape.fields.map((f) => [f.name, f.type] as const));
-      // PRESENCE. A field whose slot carries an undefined arm is a key of
-      // the value exactly when its tag is not that arm — the record's OWN
-      // key surfaces already decide it that way (recordKeysArrayCall's tag
-      // test IS Object.keys, `in` and Object.hasOwn) — and inspect read the
-      // static field list instead. So `{ a: 1 }` at `{ a: number; b?: T }`
-      // rendered `{ a: 1, b: undefined }` where Node renders `{ a: 1 }`, and
-      // the SAME binary's Object.keys answered `["a"]`: two answers for one
-      // value. The gate below is that same tag test, so the two surfaces
-      // cannot disagree again. (A field the source wrote `undefined` by hand
-      // shares the representation and therefore the answer — one slot, and
-      // the answer is the one the key surfaces already picked;
-      // estado-perinstance.md §4 is the census of that residue.)
-      const presenceGate = (fname: string, ft: IrType, negated: boolean): IrExpr | null => {
-        if (ft.kind !== "union") return null;
-        const utag = L.armTag(ft.unionId, UNDEFINED_T);
-        if (utag < 0) return null;
-        return {
-          kind: "unionIsTag",
-          unionId: ft.unionId,
-          tag: utag,
-          negated,
-          value: get(fname, ft),
-          type: BOOL,
-          loc,
-        };
-      };
-      const shown = order.filter((f) => byName.has(f));
-      const present = shown.map((f) => presenceGate(f, byName.get(f)!, true));
-      body = [];
-      if (present.length > 0 && present.every((c) => c !== null)) {
-        // EVERY key can be absent, so the value can be empty at run time,
-        // and Node answers `{}` for an empty object BEFORE the depth budget
-        // (measured: util.inspect({a:{b:{c:{}}}}) is `{ a: { b: { c: {} } } }`,
-        // not `[Object]`). The array and pure-index branches above already
-        // take that shape. De Morgan over the presence tests: every slot
-        // undefined means no keys — and insp.end over zero entries would
-        // render `{  }`, which is the other reason this cannot be skipped.
-        let allAbsent: IrExpr | null = null;
-        for (const f of shown) {
-          const isAbsent = presenceGate(f, byName.get(f)!, false)!;
-          allAbsent = allAbsent === null
-            ? isAbsent
-            : { kind: "logical", op: "&&", left: allAbsent, right: isAbsent, type: BOOL, loc };
-        }
-        if (allAbsent !== null) {
-          body.push({ kind: "if", cond: allAbsent, then: [ret(str("{}", loc))], else_: null, loc });
-        }
-      }
-      body.push(depthGate("[Object]"), ...begin());
-      shown.forEach((fname, i) => {
-        const ft = byName.get(fname)!;
-        const e = entry(
-          concatAll([str(`${inspectKey(fname)}: `, loc), child(ft, get(fname, ft))], loc),
-          boolLit(false, loc),
+      body = [depthGate("[Object]"), ...begin()];
+      for (const fname of order) {
+        const ft = byName.get(fname);
+        if (!ft) continue;
+        body.push(
+          entry(
+            concatAll([str(`${inspectKey(fname)}: `, loc), child(ft, get(fname, ft))], loc),
+            boolLit(false, loc),
+          ),
         );
-        const gate = present[i] ?? null;
-        body.push(gate === null ? e : { kind: "if", cond: gate, then: [e], else_: null, loc });
-      });
+      }
       body.push(ret(end(str("", loc), str("{", loc), str("}", loc), false, boolLit(false, loc))));
       break;
     }
