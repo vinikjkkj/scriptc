@@ -8708,6 +8708,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5360-an-instanceof-guard-narrows-the-union-the-checker-gave-up-on.ts": {
+   "order": [
+    "<repo>/tests/corpus/5360-an-instanceof-guard-narrows-the-union-the-checker-gave-up-on.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/537-map-iter-drains.ts": {
    "order": [
     "<repo>/tests/corpus/537-map-iter-drains.ts"
