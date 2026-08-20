@@ -1468,25 +1468,147 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     E.dynBuilders.set(key, name);
     const sig = `static ${cType(t)}${cType(t).endsWith("*") ? "" : " "}${name}(const ScrDyn *d, const ScrDynPath *path)`;
     E.walkerProtos.push(`${sig}; /* check ${key} */`);
-    const want = cStringLiteral(Buffer.from(E.dynDesc(t), "utf8"));
     const d: string[] = [`${sig} { /* check ${key} */`];
+    dynWalkerBody(E, t, name, d, false);
+    d.push(`}`, ``);
+    E.walkerDefs.push(...d);
+    return name;
+  }
+
+/** The emitted ARM walker for one union-arm type — the MERGE of the
+   * match predicate and the checked builder into ONE function:
+   * `static T sc_da_<n>(const ScrDyn *d, const ScrDynPath *path, bool *ok)`.
+   *
+   * It walks the value ONCE. A type mismatch sets `*ok = false` and
+   * returns the dummy (0/false/NULL) WITHOUT touching the exception cell,
+   * so the union builder simply tries the next arm; a success returns the
+   * built value (+1) with `*ok` untouched. `*ok` is true on entry, set by
+   * the caller.
+   *
+   * Why this exists at all. A union arm used to be spelled
+   * `if (sc_dm_T(d)) return union_new(i, sc_dc_T(d, path))` — a matcher
+   * that walked the whole subtree to DECIDE, then a builder that walked
+   * the identical subtree again to CONSTRUCT, with the builder's own
+   * refusals kept alive only by the invariant "the matched arm's builder
+   * can no longer fail". That invariant was maintained by two
+   * INDEPENDENTLY GENERATED functions, and this tree has already watched
+   * them diverge over the accessor read. One function that decides while
+   * it builds cannot disagree with itself: the invariant is not trusted
+   * here, it is gone.
+   *
+   * The decision this function makes is the MATCHER's, statement for
+   * statement, and NOT the builder's — deliberately, because the two are
+   * not the same rule and the difference decides which union ARM a value
+   * takes:
+   *   * a func arm tests the exact signature (the matcher's strcmp), NOT
+   *     the builder's exact-or-adapt: adapting here would let
+   *     `{a: () => number} | {a: () => string}` take arm 0 for a
+   *     string-returning value and wear the wrong tag in silence;
+   *   * a REQUIRED record member is the data read alone, with no accessor
+   *     probe: the matcher demands the key present as DATA, so an arm
+   *     whose member only a getter provides was never matched, and the
+   *     builder's accessor probe sat behind a condition that could not
+   *     hold;
+   *   * an OPTIONAL member keeps BOTH halves, because the matcher and the
+   *     builder genuinely differ there and today's answer is the
+   *     builder's: a present key is decided softly (the matcher tested
+   *     it), an accessor-provided one is built by the HARD builder and
+   *     still throws — the one documented place where a matched arm's
+   *     builder could fail;
+   *   * a member that may hold a FUNCTION keeps its matcher call, because
+   *     the builder reads it through scr_dyn_obj_member_get, which hands
+   *     an INHERITED method back BOUND (signature "()"), while the matcher
+   *     tests the raw member's own signature. The decision stays on the
+   *     raw read and the value still comes from the bound one.
+   *
+   * A hard failure reached through those two paths sets `*ok = false` as
+   * well and leaves the exception pending, so one test at the call site
+   * separates "try the next arm" from "propagate": `!ok` with nothing
+   * pending is a soft miss. */
+  export function dynArmHelper(E: CEmitter, t: IrType): string {
+    const key = typeKey(t);
+    const existing = E.dynArmBuilders.get(key);
+    if (existing) return existing;
+    const name = `sc_da_${E.dynArmBuilders.size}`;
+    E.dynArmBuilders.set(key, name);
+    const sig = `static ${cType(t)}${cType(t).endsWith("*") ? "" : " "}${name}(const ScrDyn *d, const ScrDynPath *path, bool *ok)`;
+    E.walkerProtos.push(`${sig}; /* arm ${key} */`);
+    const d: string[] = [`${sig} { /* arm ${key} */`];
+    dynWalkerBody(E, t, name, d, true);
+    d.push(`}`, ``);
+    E.walkerDefs.push(...d);
+    return name;
+  }
+
+/** The ONE body generator behind both walkers above. `soft` picks the
+   * failure discipline and nothing else, so the two can never drift: a
+   * hard body refuses with the path-annotated catchable TypeError
+   * (scr_dyn_check_fail — the statement the census counts as DYNCHECK), a
+   * soft one sets `*ok = false` and returns. Every recursive edge follows
+   * the mode it is in. */
+  function dynWalkerBody(
+    E: CEmitter,
+    t: IrType,
+    name: string,
+    d: string[],
+    soft: boolean,
+  ): void {
+    const key = typeKey(t);
+    const want = cStringLiteral(Buffer.from(E.dynDesc(t), "utf8"));
+    /* One refusal, in whichever discipline this body is emitted for. The
+     * dial's ordinal is ALLOCATED by dcHitC and closed by dcFailC, so the
+     * hard arm spells them in that order inside one template literal and
+     * the soft arm spells neither — a soft body plants no census
+     * statement because it plants no way to die. */
+    const fail = (
+      ind: string,
+      shape: string,
+      cond: string,
+      dummy: string,
+      rel = "",
+      wantX: string = want,
+      valX = "d",
+      pathX = "path",
+    ): string =>
+      soft
+        ? `${ind}if (${cond}) { *ok = false; ${rel}return ${dummy}; }`
+        : `${ind}${E.dcHitC(name, shape)}if (${cond}) { ${E.dcFailC()}scr_dyn_check_fail(${pathX}, ${wantX}, ${valX}); ${rel}return ${dummy}; }`;
+    /* A recursive edge, in this body's own mode. */
+    const childC = (ct: IrType): string => (soft ? E.dynArmHelper(ct) : E.dynCheckHelper(ct));
+    const childArg = soft ? ", ok" : "";
+    /* After a recursive edge: a soft child reports BOTH failure kinds
+     * through `*ok`, so one test covers the miss and the throw. */
+    const afterChild = (ind: string, rel: string, dummy: string): string =>
+      soft
+        ? `${ind}if (!*ok) { ${rel}return ${dummy}; }`
+        : `${ind}if (scr_exc_pending()) { ${rel}return ${dummy}; }`;
+    /* After a HARD edge inside a soft body (the optional-accessor and
+     * may-hold-func paths): the throw is real and propagates, and `*ok`
+     * carries it out so the caller needs one test, not two. */
+    const afterHard = (ind: string, rel: string, dummy: string): string =>
+      `${ind}if (scr_exc_pending()) { ${soft ? "*ok = false; " : ""}${rel}return ${dummy}; }`;
     switch (t.kind) {
       case "f64":
-        d.push(`  ${E.dcHitC(name, "prim.f64")}if (d->kind != SCR_DYN_NUM) { ${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d); return 0; }`);
+        if (soft) d.push(`  (void)path;`);
+        d.push(fail(`  `, "prim.f64", `d->kind != SCR_DYN_NUM`, `0`));
         d.push(`  return d->v.num;`);
         break;
       case "bool":
-        d.push(`  ${E.dcHitC(name, "prim.bool")}if (d->kind != SCR_DYN_BOOL) { ${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d); return false; }`);
+        if (soft) d.push(`  (void)path;`);
+        d.push(fail(`  `, "prim.bool", `d->kind != SCR_DYN_BOOL`, `false`));
         d.push(`  return d->v.b;`);
         break;
       case "string":
-        d.push(`  ${E.dcHitC(name, "prim.string")}if (d->kind != SCR_DYN_STR) { ${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
+        if (soft) d.push(`  (void)path;`);
+        d.push(fail(`  `, "prim.string", `d->kind != SCR_DYN_STR`, `NULL`));
         d.push(`  return scr_str_retain(d->v.str);`);
         break;
       case "dyn":
         // An `unknown` slot (a dyn record field): the checked-dynamic tree subtree passes
-        // through as-is — nothing to validate, nothing to build.
+        // through as-is — nothing to validate, nothing to build. The arm
+        // form matches every value, exactly as the predicate for `dyn` did.
         d.push(`  (void)path;`);
+        if (soft) d.push(`  (void)ok;`);
         d.push(`  return scr_dyn_retain((ScrDyn *)d);`);
         break;
       case "bigint":
@@ -1494,6 +1616,9 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // digits back, retained. Not a copy — the u8 arm below copies
         // because a typed array is mutable and the two sides must not
         // alias, and neither reason applies to an immutable value.
+        // The arm form pre-tests exactly the kind the unbox would have
+        // refused on, so the unbox behind it can no longer fail.
+        if (soft) d.push(`  if (d->kind != SCR_DYN_BIG) { *ok = false; return NULL; }`);
         d.push(`  return scr_dyn_big_unbox(d, path, ${want});`);
         break;
       case "bytes": {
@@ -1504,26 +1629,43 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           // opposite of the u8 arm below, and deliberately. A copy would
           // silently detach every view already taken over the buffer,
           // and an ArrayBuffer with no views is a value nobody wants.
+          if (soft) d.push(`  if (d->kind != ${bk.kind}) { *ok = false; return NULL; }`);
           d.push(`  return scr_dyn_arrbuf_unbox(d, path, ${want});`);
           break;
         }
         // `u as Uint8Array`: kind check, then a fresh COPY out (the
         // boundary's aliasing stance in both directions).
-        d.push(`  ${E.dcHitC(name, "prim.bytes")}if (d->kind != SCR_DYN_BYTES) { ${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
+        if (soft) d.push(`  (void)path;`);
+        d.push(
+          fail(
+            `  `,
+            "prim.bytes",
+            soft ? `d->kind != ${bk.kind}` : `d->kind != SCR_DYN_BYTES`,
+            `NULL`,
+          ),
+        );
         d.push(`  return scr_dyn_bytes_copy_out(d);`);
         break;
       }
       case "map":
-      case "set":
+      case "set": {
         // `u as Map<K, V>` / a map-typed record field validated out of a
         // dyn: kind test, typeKey strcmp, then a RETAINED unwrap (+1 —
         // the SAME ScrMap, no copy, so `unbox(box(m)) === m`, which is
         // the half of this kind that makes it worth having). A miss —
         // including a map of a DIFFERENT element type, which is the case
         // a kind-only test would get silently wrong — is the usual
-        // path-annotated catchable TypeError.
-        d.push(`  return scr_dyn_map_unbox(d, ${cStringLiteral(Buffer.from(key, "utf8"))}, path, ${want});`);
+        // path-annotated catchable TypeError; in the arm form the
+        // pre-test is the match predicate verbatim and the miss is soft.
+        const tkeyLit = cStringLiteral(Buffer.from(key, "utf8"));
+        if (soft) {
+          d.push(
+            `  if (d->kind != SCR_DYN_MAP || strcmp(d->v.map.tkey, ${tkeyLit}) != 0) { *ok = false; return NULL; }`,
+          );
+        }
+        d.push(`  return scr_dyn_map_unbox(d, ${tkeyLit}, path, ${want});`);
         break;
+      }
       case "object":
         // A CLASS TARGET, two representations apart. Everything but
         // %Error is the instance box's interval-checked unwrap;
@@ -1534,11 +1676,19 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           // pointer that comes back is the one that went in (+1), so
           // `unbox(box(x)) === x` — which is the half of this kind that
           // makes it worth having. A miss is the usual path-annotated
-          // TypeError.
+          // TypeError, and the arm form's pre-test is the SAME preorder
+          // interval the unwrap would have refused on.
           const meta = E.classMeta.get(t.className);
           if (!meta) throw new Error(`emitter bug: dynCheck of unknown class ${t.className}`);
           E.dynClassDesc(t.className);
-          d.push(`  return (${cType(t).trim()})scr_dyn_objinst_unbox(d, ${meta.pre}, ${meta.post}, path, ${want});`);
+          if (soft) {
+            d.push(
+              `  if (!scr_dyn_objinst_is(d, ${meta.pre}, ${meta.post})) { *ok = false; return NULL; }`,
+            );
+          }
+          d.push(
+            `  return (${cType(t).trim()})scr_dyn_objinst_unbox(d, ${meta.pre}, ${meta.post}, path, ${want});`,
+          );
           break;
         }
         // The %Error extraction (an instanceof-Error narrow on unknown):
@@ -1548,7 +1698,15 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // ScrError answers that very instance, so out-and-back crossings
         // compare reference-equal (the tracing suite's shape); alien
         // %error objects rebuild once and cache the pair.
-        d.push(`  ${E.dcHitC(name, "class.Error")}if (d->kind != SCR_DYN_OBJ || !scr_dyn_obj_get(d, "%error", 6)) { ${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
+        if (soft) d.push(`  (void)path;`);
+        d.push(
+          fail(
+            `  `,
+            "class.Error",
+            `d->kind != SCR_DYN_OBJ || !scr_dyn_obj_get(d, "%error", 6)`,
+            `NULL`,
+          ),
+        );
         d.push(`  return scr_error_from_dyn(d);`);
         break;
       case "record": {
@@ -1562,20 +1720,24 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           const arityWant = cStringLiteral(
             Buffer.from(`array of length ${byIndex.length}`, "utf8"),
           );
-          d.push(`  ${E.dcHitC(name, "array.kind")}if (d->kind != SCR_DYN_ARR) { ${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
-          d.push(`  ${E.dcHitC(name, "tuple.arity")}if (d->v.arr.len != ${byIndex.length}) { ${E.dcFailC()}scr_dyn_check_fail(path, ${arityWant}, d); return NULL; }`);
+          d.push(fail(`  `, "array.kind", `d->kind != SCR_DYN_ARR`, `NULL`));
+          d.push(
+            fail(`  `, "tuple.arity", `d->v.arr.len != ${byIndex.length}`, `NULL`, ``, arityWant),
+          );
           d.push(`  ${cDecl(t, "r")} = ${mangleRecordNew(t.shapeId)}();`);
           byIndex.forEach((f, i) => {
             d.push(`  {`);
             d.push(`    ScrDynPath p = { path, NULL, ${i} };`);
-            d.push(`    r->${mangleField(f.name)} = ${E.dynCheckHelper(f.type)}(d->v.arr.items[${i}], &p);`);
-            d.push(`    if (scr_exc_pending()) { ${rel("r")}; return NULL; }`);
+            d.push(
+              `    r->${mangleField(f.name)} = ${childC(f.type)}(d->v.arr.items[${i}], &p${childArg});`,
+            );
+            d.push(afterChild(`    `, `${rel("r")}; `, `NULL`));
             d.push(`  }`);
           });
           d.push(`  return r;`);
           break;
         }
-        d.push(`  ${E.dcHitC(name, "record.kind")}if (d->kind != SCR_DYN_OBJ) { ${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
+        d.push(fail(`  `, "record.kind", `d->kind != SCR_DYN_OBJ`, `NULL`));
         d.push(`  ${cDecl(t, "r")} = ${mangleRecordNew(t.shapeId)}();`);
         // The HIDDEN per-instance toString slot. MATERIALIZING is what
         // loses a JS object's toString: `x as LongLike` is the identity in
@@ -1612,11 +1774,84 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           const drop = bind ? `    scr_dyn_release(m);` : null;
           d.push(`  {`);
           d.push(`    ScrDynPath p = { path, ${keyLit}, 0 };`);
+          if (soft && f.type.kind !== "dyn") {
+            // The ARM form's decision, and it is the MATCHER's, not the
+            // builder's — dynArmHelper's own comment says why the two
+            // differ and why this half has to be the predicate's.
+            if (bind) {
+              // The value comes from the BINDING read below, which hands
+              // an inherited method back wrapped (signature "()"); the
+              // DECISION has to stay on the raw member, which is what the
+              // predicate tested. The one place a matcher call survives.
+              d.push(`    const ScrDyn *raw = scr_dyn_obj_data_get(d, ${keyLit}, ${keyLen});`);
+              if (utag >= 0) {
+                d.push(
+                  `    if (raw && !${E.dynMatchHelper(f.type)}(raw)) { *ok = false; ${rel("r")}; return NULL; }`,
+                );
+              } else {
+                d.push(
+                  `    if (!raw || !${E.dynMatchHelper(f.type)}(raw)) { *ok = false; ${rel("r")}; return NULL; }`,
+                );
+              }
+              d.push(`    ${mDecl} = ${readFn}(d, ${keyLit}, ${keyLen});`);
+              if (utag >= 0 && f.type.kind === "union") {
+                d.push(`    if (!m) {`);
+                d.push(`      m = scr_dyn_obj_accessor_get(d, ${keyLit}, ${keyLen});`);
+                d.push(afterHard(`      `, `${rel("r")}; `, `NULL`));
+                d.push(`    }`);
+                d.push(`    if (!m) {`);
+                d.push(
+                  `      r->${mangleField(f.name)} = ${E.unitInstanceRef(f.type.unionId, utag)}; /* absent key -> the undefined arm */`,
+                );
+                d.push(`    } else {`);
+                d.push(`      r->${mangleField(f.name)} = ${E.dynCheckHelper(f.type)}(m, &p);`);
+                if (drop) d.push(`  ${drop}`);
+                d.push(afterHard(`      `, `${rel("r")}; `, `NULL`));
+                d.push(`    }`);
+              } else {
+                d.push(`    if (!m) { *ok = false; ${rel("r")}; return NULL; }`);
+                d.push(`    r->${mangleField(f.name)} = ${E.dynCheckHelper(f.type)}(m, &p);`);
+                if (drop) d.push(drop);
+                d.push(afterHard(`    `, `${rel("r")}; `, `NULL`));
+              }
+            } else if (utag >= 0 && f.type.kind === "union") {
+              // Optional, and the two halves part company HERE: a key
+              // present as DATA is what the predicate tested, so it is
+              // decided softly; a key only an ACCESSOR provides is what
+              // the predicate never saw, so it keeps the builder's answer
+              // — including its throw.
+              d.push(`    ${mDecl} = ${readFn}(d, ${keyLit}, ${keyLen});`);
+              d.push(`    if (m) {`);
+              d.push(`      r->${mangleField(f.name)} = ${childC(f.type)}(m, &p${childArg});`);
+              d.push(afterChild(`      `, `${rel("r")}; `, `NULL`));
+              d.push(`    } else {`);
+              d.push(`      ScrDyn *acc = scr_dyn_obj_accessor_get(d, ${keyLit}, ${keyLen});`);
+              d.push(afterHard(`      `, `${rel("r")}; `, `NULL`));
+              d.push(`      if (acc) {`);
+              d.push(`        r->${mangleField(f.name)} = ${E.dynCheckHelper(f.type)}(acc, &p);`);
+              d.push(`        scr_dyn_release(acc);`);
+              d.push(afterHard(`        `, `${rel("r")}; `, `NULL`));
+              d.push(`      } else {`);
+              d.push(
+                `        r->${mangleField(f.name)} = ${E.unitInstanceRef(f.type.unionId, utag)}; /* absent key -> the undefined arm */`,
+              );
+              d.push(`      }`);
+              d.push(`    }`);
+            } else {
+              // Required, and no accessor probe: the predicate demands the
+              // key present as DATA, so an arm whose member only a getter
+              // provides never matched and the probe sat behind a
+              // condition that could not hold.
+              d.push(`    ${mDecl} = ${readFn}(d, ${keyLit}, ${keyLen});`);
+              d.push(`    if (!m) { *ok = false; ${rel("r")}; return NULL; }`);
+              d.push(`    r->${mangleField(f.name)} = ${childC(f.type)}(m, &p${childArg});`);
+              d.push(afterChild(`    `, `${rel("r")}; `, `NULL`));
+            }
+            d.push(`  }`);
+            continue;
+          }
           // The same [[Get]]-minus-accessors read the predicate above
-          // takes, and it has to be the same one for the DATA half: the
-          // union builder's invariant is "the matched arm's builder can no
-          // longer fail", which a matcher that sees the prototype and a
-          // builder that does not would break on the very next member.
+          // takes, and it has to be the same one for the DATA half.
           d.push(`    ${mDecl} = ${readFn}(d, ${keyLit}, ${keyLen});`);
           // ... and, ONLY when that read missed, the ACCESSOR half of
           // [[Get]] the borrow-only read above cannot answer. A field a
@@ -1626,23 +1861,10 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           // SILENTLY, which is the worse half. The probe sits on the miss
           // path alone, so a field the data read already answered runs no
           // getter and nothing that works today changes.
-          //
-          // The MATCHER above is untouched, and for a REQUIRED field that
-          // keeps the union invariant exactly: the matcher demands the key
-          // present as DATA, so a matched arm never reaches this read. For
-          // an OPTIONAL one it does NOT: the matcher accepts a missing key,
-          // this read can then find an accessor whose value does not fit,
-          // and "the matched arm's builder can no longer fail" stops being
-          // true. Nothing reads the result -- the caller's pending check
-          // fires at once and a union whose ref arm is NULL releases
-          // harmlessly (every record release is null-guarded) -- and what
-          // the refusal replaces there is a FABRICATED undefined for a
-          // member that has a value. tests/harness/dyncheck.test.ts pins
-          // both halves of that trade.
           d.push(`    ScrDyn *acc = NULL;`);
           d.push(`    if (!m) {`);
           d.push(`      acc = scr_dyn_obj_accessor_get(d, ${keyLit}, ${keyLen});`);
-          d.push(`      if (scr_exc_pending()) { ${rel("r")}; return NULL; }`);
+          d.push(afterHard(`      `, `${rel("r")}; `, `NULL`));
           d.push(`      m = acc;`);
           d.push(`    }`);
           // The +1 the accessor read owes, released exactly where the
@@ -1653,7 +1875,9 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             // An `unknown` field: a present key passes through, a missing
             // one IS the undefined dyn value (JS's missing-property read).
             d.push(`    (void)p;`);
-            d.push(`    r->${mangleField(f.name)} = scr_dyn_retain(m ? (ScrDyn *)m : scr_dyn_undefined());`);
+            d.push(
+              `    r->${mangleField(f.name)} = scr_dyn_retain(m ? (ScrDyn *)m : scr_dyn_undefined());`,
+            );
             if (dropAcc) d.push(dropAcc);
           } else if (utag >= 0 && f.type.kind === "union") {
             const unit = E.unitInstanceRef(f.type.unionId, utag);
@@ -1666,7 +1890,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(`      if (scr_exc_pending()) { ${rel("r")}; return NULL; }`);
             d.push(`    }`);
           } else {
-            d.push(`    ${E.dcHitC(name, "record.field")}if (!m) { ${E.dcFailC()}scr_dyn_check_fail(&p, ${fieldWant}, NULL); ${rel("r")}; return NULL; }`);
+            d.push(fail(`    `, "record.field", `!m`, `NULL`, `${rel("r")}; `, fieldWant, `NULL`, `&p`));
             d.push(`    r->${mangleField(f.name)} = ${E.dynCheckHelper(f.type)}(m, &p);`);
             if (drop) d.push(drop);
             if (dropAcc) d.push(dropAcc);
@@ -1694,12 +1918,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(`    ${cDecl(iv, "ev")} = scr_dyn_retain(e->value);`);
           } else {
             d.push(`    ScrDynPath p = { path, e->key, 0 };`);
-            d.push(`    ${cDecl(iv, "ev")} = ${E.dynCheckHelper(iv)}(e->value, &p);`);
-            d.push(`    if (scr_exc_pending()) { ${rel("r")}; return NULL; }`);
+            d.push(`    ${cDecl(iv, "ev")} = ${childC(iv)}(e->value, &p${childArg});`);
+            d.push(afterChild(`    `, `${rel("r")}; `, `NULL`));
           }
           d.push(`    ScrStr *ek = scr_str_new(e->key, e->key_len);`);
           if (iv.kind === "f64" || iv.kind === "bool") {
-            d.push(`    scr_map_set_str_${iv.kind === "f64" ? "f64" : "bool"}(r->${OVERFLOW_MEMBER}, ek, ev);`);
+            d.push(
+              `    scr_map_set_str_${iv.kind === "f64" ? "f64" : "bool"}(r->${OVERFLOW_MEMBER}, ek, ev);`,
+            );
           } else {
             d.push(`    scr_map_set_str_ref(r->${OVERFLOW_MEMBER}, ek, ev);`);
           }
@@ -1711,13 +1937,13 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       }
       case "array": {
         const elem = t.elem;
-        const c = E.dynCheckHelper(elem);
-        d.push(`  ${E.dcHitC(name, "array.kind")}if (d->kind != SCR_DYN_ARR) { ${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
+        const c = childC(elem);
+        d.push(fail(`  `, "array.kind", `d->kind != SCR_DYN_ARR`, `NULL`));
         d.push(`  ScrArr *a = ${E.arrNewC(elem, "d->v.arr.len")};`);
         d.push(`  for (size_t i = 0; i < d->v.arr.len; i++) {`);
         d.push(`    ScrDynPath p = { path, NULL, i };`);
-        d.push(`    ${cDecl(elem, "e")} = ${c}(d->v.arr.items[i], &p);`);
-        d.push(`    if (scr_exc_pending()) { scr_arr_release(a); return NULL; }`);
+        d.push(`    ${cDecl(elem, "e")} = ${c}(d->v.arr.items[i], &p${childArg});`);
+        d.push(afterChild(`    `, `scr_arr_release(a); `, `NULL`));
         d.push(`    scr_arr_push_${elemAccess(elem)}(a, e);`);
         d.push(`  }`);
         d.push(`  return a;`);
@@ -1728,12 +1954,48 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         if (!def) throw new Error(`emitter bug: dynCheck of unknown union ${t.unionId}`);
         // Arms MOST SPECIFIC FIRST, first FULL match wins (dynCheckArmOrder:
         // a record match ignores extra keys, so an arm whose field set is a
-        // SUBSET of another's would shadow it in canonical order). The
-        // matched arm's builder can no longer fail.
+        // SUBSET of another's would shadow it in canonical order).
+        //
+        // An arm used to be spelled `if (sc_dm_T(d)) return union_new(i,
+        // sc_dc_T(d, path))` — one walk to decide, a second to build, and
+        // the builder's own refusals kept alive by an invariant that two
+        // independently generated functions had to maintain between them.
+        // It is ONE walk now: the arm walker decides while it builds and
+        // reports a miss through `aok`, so the next arm is tried with no
+        // second opinion to disagree with and nothing to keep in lockstep.
+        // A THROW inside a matched arm still propagates — `aok` false with
+        // an exception pending — and a union with no surviving arm still
+        // ends at its own union.nomatch below, so no way to die was
+        // removed.
+        //
+        // And the CHECKED form of a union is now that arm walker plus its
+        // refusal, not a second copy of the chain. It can be, for a reason
+        // that holds for unions and for nothing else: a union's refusal
+        // names the UNION at the union's OWN path — `expected number |
+        // string at $.items[2]` — and never the arm that got furthest, so
+        // the message a wrapper writes is the message the chain wrote,
+        // byte for byte. A record could not do this (its refusal names the
+        // MEMBER, at the member's path) and neither could an array (the
+        // element index), which is why only this branch delegates.
+        //
+        // Without the delegation a union reachable BOTH as an arm and
+        // directly emitted the whole chain twice, and on zapo that cost
+        // more C than the merge saved.
+        if (!soft) {
+          const a = E.dynArmHelper(t);
+          d.push(`  bool ok = true;`);
+          d.push(`  ${cDecl(t, "v")} = ${a}(d, path, &ok);`);
+          d.push(`  if (ok) return v;`);
+          d.push(`  if (scr_exc_pending()) return NULL;`);
+          d.push(
+            `  ${E.dcHitC(name, "union.nomatch")}${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d);`,
+          );
+          d.push(`  return NULL;`);
+          break;
+        }
         const order = dynCheckArmOrder(def, (id) => E.recordsById.get(id));
         // TWO PASSES when the union carries STRING-LITERAL DISCRIMINANTS,
-        // one otherwise — a union without them emits exactly the chain it
-        // emitted before, byte for byte.
+        // one otherwise.
         //
         // Pass 1 walks the same widest-first order, but an arm that PINS a
         // property to a literal has to match that literal too, so a
@@ -1744,49 +2006,56 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // throwing on a value the asserted type never described.
         //
         // Which selector wins when the two disagree: inside a pass WIDTH
-        // decides, across the passes the DISCRIMINANT does.
+        // decides, across the passes the DISCRIMINANT does. The literal
+        // predicate is tested BEFORE the arm is walked rather than after,
+        // which is the same answer and strictly less work: an arm whose
+        // discriminant contradicts the value is no longer walked at all.
         const passes = unionHasDiscrim(def) ? [true, false] : [false];
         for (const withLits of passes) {
           order.forEach((i) => {
             const arm = def.arms[i]!;
-            const m = E.dynMatchHelper(arm);
             const lits = withLits ? armDiscrimLits(def, i) : {};
-            const test =
-              Object.keys(lits).length > 0 ? `${m}(d) && ${dynLitHelper(E, lits)}(d)` : `${m}(d)`;
-            if (arm.kind === "undefinedT") {
-              // Parsed JSON never matches here (no undefined in JSON text —
-              // a MISSING record key builds this arm in the record builder
-              // above), but the undefined dyn value can arrive from
-              // `unknown` index-signature overflows and builds the interned
-              // unit instance exactly like null.
-              d.push(`  if (${test}) {`);
-              d.push(`    return ${E.unitInstanceRef(t.unionId, i)};`);
-              d.push(`  }`);
-              return;
-            }
-            if (arm.kind === "nullT") {
+            const litTest = Object.keys(lits).length > 0 ? `${dynLitHelper(E, lits)}(d)` : null;
+            if (arm.kind === "undefinedT" || arm.kind === "nullT") {
               // A matched unit arm builds nothing: the result is THE interned
               // immortal instance (rc == SIZE_MAX — RC entry points and the
-              // collector both skip it, so no retain is owed).
+              // collector both skip it, so no retain is owed). The kind test
+              // is inline because the whole of the predicate for these two
+              // arms WAS that kind test. Parsed JSON never matches the
+              // undefined one (no undefined in JSON text — a MISSING record
+              // key builds it in the record builder above), but the
+              // undefined dyn value can arrive from `unknown`
+              // index-signature overflows.
+              const k = arm.kind === "nullT" ? "SCR_DYN_NULL" : "SCR_DYN_UNDEF";
+              const test = litTest ? `d->kind == ${k} && ${litTest}` : `d->kind == ${k}`;
               d.push(`  if (${test}) {`);
               d.push(`    return ${E.unitInstanceRef(t.unionId, i)};`);
               d.push(`  }`);
               return;
             }
-            const c = E.dynCheckHelper(arm);
-            d.push(`  if (${test}) {`);
+            const a = E.dynArmHelper(arm);
+            d.push(litTest ? `  if (${litTest}) {` : `  {`);
+            d.push(`    bool aok = true;`);
+            d.push(`    ${cDecl(arm, "av")} = ${a}(d, path, &aok);`);
             if (arm.kind === "f64") {
-              d.push(`    return scr_union_new_f64(${i}, ${c}(d, path));`);
+              d.push(`    if (aok) return scr_union_new_f64(${i}, av);`);
             } else if (arm.kind === "bool") {
-              d.push(`    return scr_union_new_bool(${i}, ${c}(d, path));`);
+              d.push(`    if (aok) return scr_union_new_bool(${i}, av);`);
             } else {
               const rc = vAdapters(arm);
-              d.push(`    return scr_union_new_ref(${i}, ${c}(d, path), &${rc.retain}, &${rc.release}, ${E.traceArgC(arm)});`);
+              d.push(
+                `    if (aok) return scr_union_new_ref(${i}, av, &${rc.retain}, &${rc.release}, ${E.traceArgC(arm)});`,
+              );
             }
+            d.push(`    if (scr_exc_pending()) { *ok = false; return NULL; }`);
             d.push(`  }`);
           });
         }
-        d.push(`  ${E.dcHitC(name, "union.nomatch")}${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d);`);
+        // No arm survived. The refusal belongs to the CHECKED form above,
+        // which is the only caller that has a message to write; here the
+        // union simply reports the miss and the caller tries its own next
+        // arm.
+        d.push(`  *ok = false;`);
         d.push(`  return NULL;`);
         break;
       }
@@ -1816,7 +2085,22 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // cast semantics — only a value boxed from the slot's own type
         // can honestly fill it).
         const sigLit = cStringLiteral(Buffer.from(key, "utf8"));
-        d.push(`  ${E.dcHitC(name, "func.kind")}if (d->kind != SCR_DYN_FUNC) { ${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
+        if (soft) {
+          // The ARM form is the PREDICATE's rule and stops at the exact
+          // signature: the adapter below would make every function fit
+          // every function arm, so `{a: () => number} | {a: () => string}`
+          // would take arm 0 for a string-returning value and only throw
+          // later, inside the adapter, with the union already wearing the
+          // wrong tag. Behind a match the adapter branch was unreachable
+          // anyway — the predicate had already demanded this strcmp.
+          d.push(`  (void)path;`);
+          d.push(
+            `  if (d->kind != SCR_DYN_FUNC || strcmp(d->v.fn.sig, ${sigLit}) != 0) { *ok = false; return NULL; }`,
+          );
+          d.push(`  return scr_closure_retain(d->v.fn.clo);`);
+          break;
+        }
+        d.push(fail(`  `, "func.kind", `d->kind != SCR_DYN_FUNC`, `NULL`));
         d.push(`  if (strcmp(d->v.fn.sig, ${sigLit}) == 0) return scr_closure_retain(d->v.fn.clo);`);
         if (canAdaptDynFuncTo(t, (id) => E.recordsById.get(id), (id) => E.unionsById.get(id))) {
           const adapter = dynFuncAdapterHelper(E, t);
@@ -1829,7 +2113,9 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`    return a;`);
           d.push(`  }`);
         } else {
-          d.push(`  ${E.dcHitC(name, "func.noadapt")}${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d);`);
+          d.push(
+            `  ${E.dcHitC(name, "func.noadapt")}${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d);`,
+          );
           d.push(`  return NULL;`);
         }
         break;
@@ -1837,18 +2123,18 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       default: {
         // Runtime HANDLE targets: a tag-checked reference unwrap (+1 —
         // identity, no copy; the runtime throws the path-annotated
-        // TypeError on any other kind or tag).
+        // TypeError on any other kind or tag). No union arm can be one:
+        // the match predicate refused these kinds outright, so the arm
+        // form refuses them in exactly the same place and with the same
+        // shape of message.
         const h = DYN_HANDLE_KINDS.get(t.kind);
-        if (h) {
+        if (h && !soft) {
           d.push(`  return (${cType(t).trim()})scr_dyn_handle_unbox(d, ${h.tag}, path, ${want});`);
           break;
         }
-        throw new Error(`emitter bug: dynCheck of non-JSON type ${t.kind}`);
+        throw new Error(`emitter bug: ${soft ? "dynArm" : "dynCheck"} of non-JSON type ${t.kind}`);
       }
     }
-    d.push(`}`, ``);
-    E.walkerDefs.push(...d);
-    return name;
   }
 
 /** The emitted static→dyn converter for one type:

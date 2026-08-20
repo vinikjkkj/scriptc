@@ -49,7 +49,7 @@ import {
 } from "../mangle.js";
 import { cType, releaseCallC, cStringLiteral, cDecl } from "./emit-types.js";
 import { computeMayThrow } from "./may-throw.js";
-import { dynDesc, unionTruthyHelper, unionEqHelper, unionToStrHelper, unionJoinHelper, jsonWriteHelper, jsonIndentHelper, dynMatchHelper, dynCheckHelper, dynFuncBoxHelper, dynToStrHelper, caughtToDynHelper, toDynHelper, dynClassDesc, recordKeyGetHelper, recordKeySetHelper } from "./emit-walkers.js";
+import { dynDesc, unionTruthyHelper, unionEqHelper, unionToStrHelper, unionJoinHelper, jsonWriteHelper, jsonIndentHelper, dynMatchHelper, dynCheckHelper, dynArmHelper, dynFuncBoxHelper, dynToStrHelper, caughtToDynHelper, toDynHelper, dynClassDesc, recordKeyGetHelper, recordKeySetHelper } from "./emit-walkers.js";
 import { VtSlot, ClassMeta, emitStructDefs, vtEntriesFor, vtSlotParams, emitVtableDecls, emitVtableInstances, emitVtAdapterDefs, emitHierarchyClassHelpers, emitClassObjs, emitCtorThunkDefs, errorVtStampLines, emitterVtStampLines, streamVtStampLines, traceAdapterC, traceArgC, boxNewC, arrNewC } from "./emit-shapes.js";
 import { emitAsyncScaffolding, childDataThunkFor, childExitThunkFor, childExitThunkFor2, closeBindThunkFor, connectSockThunkFor, closeOverrideWrapFor, dgramMsgThunkFor, dnsLookupThunkFor, netLookupAnswerThunkFor, emitterInvokeThunkFor, streamCbThunkFor, streamDataThunkFor, promiseAdoptAdapterFor, raceAdapterFor, resolveThunkFor, sniAnswerThunkFor } from "./emit-async.js";
 import { emitNpmEmbedding, islandAdapter, islandTypedAdapter } from "./emit-island.js";
@@ -286,6 +286,13 @@ export class CEmitter {
   readonly unionJoinFns = new Map<string, string>();
   readonly dynMatchers = new Map<string, string>();
   readonly dynBuilders = new Map<string, string>();
+  /** The MERGED union-arm walkers (sc_da_*), per typeKey — one function
+   * that decides an arm and builds it, so no matcher has to be kept in
+   * lockstep with a builder. Its own map: the arm form and the checked
+   * form of one type are two functions with two names, and interning them
+   * apart is what lets a type reached ONLY through an arm never emit the
+   * checked form at all. */
+  readonly dynArmBuilders = new Map<string, string>();
   /** Static→dyn converters (sc_td_*), per typeKey; dynamic-keyed record
    * read helpers (sc_rkg_*), per shapeId|result typeKey; dynamic-keyed
    * write helpers (sc_rks_*), per shapeId. */
@@ -1575,6 +1582,10 @@ export class CEmitter {
 
   dynCheckHelper(t: IrType): string {
     return dynCheckHelper(this, t);
+  }
+
+  dynArmHelper(t: IrType): string {
+    return dynArmHelper(this, t);
   }
 
   toDynHelper(t: IrType): string {
