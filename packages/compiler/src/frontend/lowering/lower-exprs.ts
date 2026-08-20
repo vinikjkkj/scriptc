@@ -8785,6 +8785,16 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
             throw new PoisonError();
           }
           const obj = srcLowered ?? L.lowerExpr(srcNode);
+          // The INHERITANCE above, for the source spelling it could not
+          // reach: `srcLowered` is deliberately null for a bare IDENTIFIER
+          // (the desugar re-reads the source per field), and `{ ...w }` over
+          // a risky `w` is the commonest spelling there is. Read off the
+          // value lowered HERE, never a probe - for the 1 150-byte reason
+          // the comment above gives.
+          if (!srcLowered) {
+            const idRisk = L.exprKeyRisk(obj);
+            if (idRisk) L.noteKeyRiskLiteral(locOf(expr), idRisk.why, `${idRisk.detail} (inherited through this spread)`);
+          }
           // The same trust-the-checker hazard the union arm above already
           // guards against, on the RECORD side, where nothing did: `srcType`
           // is the CHECKER's view of the source, and a cast can spell a record
