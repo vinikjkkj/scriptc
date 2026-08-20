@@ -167,12 +167,22 @@ export function assertionOverflowsMembersDiag(
 
 /** SC6002 — a record materialised out of a DYNAMIC value, then enumerated.
  *
- * The check is width-TOLERANT (undeclared keys are never examined) and the
- * struct has no per-instance key list, so the value that comes out carries
- * exactly the shape's members in `declaredOrder` — while JS's object carries
- * the keys the source really had, in the order it really had them. Both the
- * SET and the ORDER are run-time facts, and this is the one place the
- * compiler can see that it is about to answer them from a static table.
+ * The check is width-TOLERANT (undeclared keys are never examined), so the
+ * value that comes out carries exactly the shape's members — while JS's
+ * object carries the keys the source really had, in the order it really had
+ * them. Both the SET and the ORDER are run-time facts, and this is the one
+ * place the compiler can see that it is about to answer them from a static
+ * table.
+ *
+ * THE SET IS NOW CARRIED, THE ORDER IS NOT. IrRecordShape.ownmask gives a
+ * record materialised at a crossing a hidden per-instance own-key mask,
+ * written from the source object's own enumerable members, so
+ * Object.keys/hasOwn/JSON/the record→dyn walker report the keys the value
+ * really had. What no struct carries is their ORDER: a record enumerates in
+ * its shape's declaredOrder, and JS enumerates in the source object's
+ * insertion order. This advice is that residue — it is right whenever the
+ * dynamic source's keys happened to arrive in declaration order, which is
+ * most JSON, and it cannot be checked at compile time.
  *
  * IT IS ADVICE AND NOT A REFUSAL, measured rather than assumed. Refusing
  * would refuse the ordinary `JSON.parse(s) as T` followed by
@@ -188,15 +198,16 @@ export function keyOrderFromDynamicDiag(surface: string, detail: string, loc: Sr
     code: "SC6002",
     severity: "advice",
     message:
-      `${surface} answers this value's own keys from its SHAPE, and the value was built out of a dynamic one`,
+      `${surface} answers this value's own keys in its SHAPE's declared ORDER, and the value was built out of a dynamic one`,
     loc,
     hint:
       detail +
-      ". A record is a monomorphic struct with no per-instance key list, so the enumeration " +
-      "reports the shape's members in their declared order. That is what JavaScript reports " +
-      "only when the dynamic source really carried exactly those keys in exactly that order — " +
-      "read the fields you need instead of enumerating if the source order is not yours to " +
-      "control",
+      ". The SET of own keys is carried per instance now — a record built at a crossing " +
+      "records which members the dynamic source really had — but their ORDER is the shape's " +
+      "declared order, because a record is a monomorphic struct and the order is not stored " +
+      "anywhere. That is what JavaScript reports only when the dynamic source really carried " +
+      "its keys in that order — read the fields you need instead of enumerating if the source " +
+      "order is not yours to control",
   };
 }
 
