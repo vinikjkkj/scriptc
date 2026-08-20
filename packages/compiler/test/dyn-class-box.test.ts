@@ -346,12 +346,17 @@ describe("an %Error leaf crosses nested, which is the shape the emit trampoline 
     expect(cm![2]).not.toContain("scr_dyn_objinst_is");
     expect(cm![2]).toContain("*ok = false");
     // LLVM: same question, same answer, in its own spelling — and that lane
-    // still carries the matcher/builder PAIR, so this half is the shape the
-    // C lane had before the merge.
-    const lm = /define internal zeroext i1 @sc_dm_\d+\(ptr %d\) #\d+ \{ ; matches object:%Error\n([\s\S]*?)\n\}/.exec(ll);
-    expect(lm, "no LLVM matcher for object:%Error — this test has gone blind").not.toBeNull();
+    // now carries the SAME merged walker, so this half asks the arm walker
+    // too. Before the LLVM twin landed it read the sc_dm_ matcher, which is
+    // the shape the C lane had before ITS merge; the pin is unchanged.
+    const lm =
+      /define internal ptr @sc_da_\d+\(ptr %d, ptr %path, ptr %ok\) #\d+ \{ ; arm object:%Error\n([\s\S]*?)\n\}/.exec(
+        ll,
+      );
+    expect(lm, "no LLVM arm walker for object:%Error — this test has gone blind").not.toBeNull();
     expect(lm![1]).toContain("@scr_dyn_obj_get");
     expect(lm![1]).not.toContain("scr_dyn_objinst_is");
+    expect(lm![1]).toContain("store i1 false, ptr %ok");
     // And the C lane's CHECKED builder asks the identical question, in the
     // identical spelling, so a direct `u as Error` cannot disagree with an
     // arm about what an %Error is.
