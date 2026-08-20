@@ -8690,6 +8690,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5330-a-union-arm-that-is-itself-a-union-reports-a-miss-not-a-throw.ts": {
+   "order": [
+    "<repo>/tests/corpus/5330-a-union-arm-that-is-itself-a-union-reports-a-miss-not-a-throw.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5331-a-union-arm-with-an-optional-function-member-decides-on-the-raw-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/5331-a-union-arm-with-an-optional-function-member-decides-on-the-raw-read.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5332-array-tuple-and-index-signature-arms-each-turn-back-and-release.ts": {
+   "order": [
+    "<repo>/tests/corpus/5332-array-tuple-and-index-signature-arms-each-turn-back-and-release.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5333-a-union-arm-whose-optional-member-only-a-getter-provides.ts": {
+   "order": [
+    "<repo>/tests/corpus/5333-a-union-arm-whose-optional-member-only-a-getter-provides.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/534-record-width-subtyping.ts": {
    "order": [
     "<repo>/tests/corpus/534-record-width-subtyping.ts"
