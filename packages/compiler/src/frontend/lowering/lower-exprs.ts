@@ -3636,6 +3636,76 @@ function refUnderWrappers(e: ts.Expression): ts.Expression {
   return x;
 }
 
+/** THE SAME COMPARISON WITHOUT A BRIDGE — a union-typed operand against a
+ * scalar LITERAL, which is `estado-encswitch.md` §8.4's own example:
+ *
+ *     a hand-written `if (u === "skmsg")` on a `string | undefined` local
+ *     ALREADY emits `scr_union_new_ref` + `scr_union_release` around a
+ *     `sc_ue_N` call today, with no switch anywhere
+ *
+ * — and it is zapo's own `encCount > 1 && firstEncType === 'skmsg'`, three
+ * statements below the read this whole block is about. That comparison is
+ * NOT bridged (the loop's back edge merges the undefined arm straight back
+ * in, so tsc leaves it union-typed) and so `literalEqArmBridge` never sees
+ * it; it goes to the general `unionEq` path, which wraps the literal into
+ * a fresh box per compare.
+ *
+ * The tag test proves the arm, so the box is unnecessary here for exactly
+ * the reason it is unnecessary in a case test:
+ *
+ *     unionIsTag(u, arm) && strEq(unionNarrow(u, arm), lit)
+ *
+ * SCALAR literals only — string, number, boolean. `unionEq`'s contract is
+ * about IDENTITY for reference arms (§8.4's own `m.set("k", p);
+ * m.get("k") === p` paragraph), and identity is not something a tag test
+ * plus a payload compare may approximate. For a scalar arm the payload
+ * compare IS the identity: `scr_str_eq` is the bytewise compare `sc_ue_N`
+ * performs on a string arm, and C `==` on a double is the one it performs
+ * on a number arm — NaN false, ±0 equal, JS-exact either way.
+ *
+ * The union operand is re-emitted (the tag test and the narrow), so it
+ * must be pureReemittable; the other operand is a literal, which has no
+ * effects, so hoisting the tag test above it is unobservable.
+ *
+ * `SCRIPTC_CASEEQ_OFF=1` restores the allocating form here too — it is one
+ * decision ("a union against a literal does not need a box") and it gets
+ * one dial. */
+function unionLiteralEq(
+  L: Lowerer,
+  left: IrExpr,
+  right: IrExpr,
+  negated: boolean,
+  loc: SrcLoc,
+): IrExpr | null {
+  if (process.env["SCRIPTC_CASEEQ_OFF"] === "1") return null;
+  const isLit = (e: IrExpr): boolean =>
+    (e.kind === "strLit" || e.kind === "numLit" || e.kind === "boolLit") &&
+    (e.type.kind === "string" || e.type.kind === "f64" || e.type.kind === "bool");
+  const u = left.type.kind === "union" && isLit(right) ? left
+    : right.type.kind === "union" && isLit(left) ? right
+    : null;
+  if (u === null || u.type.kind !== "union") return null;
+  const lit = u === left ? right : left;
+  if (!pureReemittable(u)) return null;
+  const tag = L.armTag(u.type.unionId, lit.type);
+  if (tag < 0) return null;
+  const payload: IrExpr = { kind: "unionNarrow", unionId: u.type.unionId, tag, value: u, type: lit.type, loc };
+  const eq: IrExpr = lit.type.kind === "string"
+    ? { kind: "strEq", negated, left: payload, right: lit, type: BOOL, loc }
+    : { kind: "bin", op: negated ? "!==" : "===", left: payload, right: lit, type: BOOL, loc };
+  if (process.env["SCRIPTC_CASEEQ_WHY"] !== undefined) {
+    console.error(`[caseeq] ${loc.file}:${String(loc.start)} ${L.fmt(u.type)} vs a ${lit.type.kind} literal, unboxed`);
+  }
+  return {
+    kind: "ternary",
+    cond: { kind: "unionIsTag", unionId: u.type.unionId, tag, negated: false, value: u, type: BOOL, loc },
+    then: eq,
+    else_: { kind: "boolLit", value: negated, type: BOOL, loc },
+    type: BOOL,
+    loc,
+  };
+}
+
 /** THE LITERAL-COMPARISON BRIDGE, and it does NOT allocate.
  *
  * `t === 'msg'` where `t` is a local a widened keyed read stored into:
@@ -13900,6 +13970,10 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             L.armTag(ut.unionId, plainT) >= 0 ||
             L.promiseArmFor(plainT, ut) !== null;
           if ((sameUnion || !bothUnion) && plainSideWraps && L.eqComparableUnion(ut.unionId)) {
+            // §8.4's unboxed form when the plain side is a scalar LITERAL;
+            // the allocating one below is what SCRIPTC_CASEEQ_OFF=1 keeps.
+            const cheap = unionLiteralEq(L, left, right, negated, loc);
+            if (cheap) return cheap;
             return {
               kind: "unionEq",
               unionId: ut.unionId,

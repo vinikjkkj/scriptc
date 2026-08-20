@@ -236,19 +236,29 @@ describe("the narrowed-read consumer rungs", () => {
   }, 240_000);
 
   test("the literal comparison does NOT allocate — §8.4's lowering, built", async () => {
-    // The hand-written spelling is the allocating one, and this change does
-    // not touch it: `unionEq` wraps the literal into the union, which is a
-    // fresh box per compare.
-    const hand = await emit(HAND_EQ, []);
+    // §8.4 names the HAND-WRITTEN spelling as the allocating one: `u ===
+    // "msg"` on a `string | undefined` parameter, no switch anywhere, emits
+    // `scr_union_new_ref` + a release around a `sc_ue_N` call. That is the
+    // baseline, and `SCRIPTC_CASEEQ_OFF=1` is what it looks like.
+    const hand = await emit(HAND_EQ, ["SCRIPTC_CASEEQ_OFF"]);
     expect(hand.diags).toEqual([]);
     expect(count(hand.tu, UNION_EQ)).toBeGreaterThan(0);
+    expect(count(hand.tu, UNION_NEW)).toBeGreaterThan(0);
 
-    // The widened local's compare interns no such helper: the tag test
-    // proves the arm and the payload comes out with a bare unionNarrow.
+    // With the dial on, the same source interns no such helper: the tag test
+    // proves the arm and the payload comes out with a bare unionNarrow, so
+    // the compare is `scr_str_eq` against the static literal.
+    const handCheap = await emit(HAND_EQ, []);
+    expect(handCheap.diags).toEqual([]);
+    expect(count(handCheap.tu, UNION_EQ)).toBe(0);
+    expect(count(handCheap.tu, UNION_NEW)).toBeLessThan(count(hand.tu, UNION_NEW));
+
+    // ...and so does the BRIDGED spelling this block's own rung serves —
+    // a widened local whose read tsc narrowed to `string`.
     const mine = await emit(P_EQ, []);
     expect(mine.diags).toEqual([]);
     expect(count(mine.tu, UNION_EQ)).toBe(0);
-  }, 240_000);
+  }, 300_000);
 
   test("the union switch's own case tests stopped allocating too", async () => {
     // §8.4's four allocations on zapo's inbound `<enc>` path are the union
