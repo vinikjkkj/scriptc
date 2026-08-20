@@ -54,4 +54,16 @@ if (typeof __dirname !== "undefined") {
 console.log("process =", typeof process, "Buffer =", typeof Buffer)
 console.log("Math =", typeof Math, "setTimeout =", typeof setTimeout)
 
+// The rule reads the SPELLING, so the peels and the shadows have to hold.
+{
+    // a local binding shadowing the name is not the module global
+    const require = 5
+    console.log("shadow-const", typeof require)
+}
+function shadowParam(__dirname: string): string { return typeof __dirname }
+console.log("shadow-param", shadowParam("x"))
+console.log("paren", typeof (require))
+console.log("cast", typeof (require as unknown))
+console.log("nonnull", typeof require!)
+
 export {}
