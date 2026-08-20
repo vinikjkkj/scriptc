@@ -3180,6 +3180,115 @@ function isArrayGuardProven(L: Lowerer, node: ts.Expression): boolean {
   return false;
 }
 
+/** The `<ref> instanceof <Ctor>` tests a CONDITION proves when it is known
+ * to hold the given truth value — the instanceof twin of
+ * `isArrayGuardArgOf`, and it has to read `!` because the idiom the union
+ * arms are written for is the early-out one:
+ *
+ *     if (!(child.content instanceof Uint8Array) || child.content.byteLength !== 32)
+ *
+ * The right operand of an `||` is evaluated only when the left is FALSE,
+ * and a false `!(x instanceof U)` is a true `x instanceof U`. Reading the
+ * short-circuit chains costs nothing extra and is the same identity: every
+ * conjunct of an `&&` known true is true, every disjunct of an `||` known
+ * false is false. */
+function instanceofGuardsOf(cond: ts.Expression, truth: boolean, out: ts.BinaryExpression[]): void {
+  let c = cond;
+  while (ts.isParenthesizedExpression(c)) c = c.expression;
+  if (ts.isPrefixUnaryExpression(c) && c.operator === ts.SyntaxKind.ExclamationToken) {
+    instanceofGuardsOf(c.operand, !truth, out);
+    return;
+  }
+  if (!ts.isBinaryExpression(c)) return;
+  const op = c.operatorToken.kind;
+  if (op === ts.SyntaxKind.AmpersandAmpersandToken && truth) {
+    instanceofGuardsOf(c.left, true, out);
+    instanceofGuardsOf(c.right, true, out);
+    return;
+  }
+  if (op === ts.SyntaxKind.BarBarToken && !truth) {
+    instanceofGuardsOf(c.left, false, out);
+    instanceofGuardsOf(c.right, false, out);
+    return;
+  }
+  if (op === ts.SyntaxKind.InstanceOfKeyword && truth) out.push(c);
+}
+
+/** The constructor expressions a read is PROVEN against by an enclosing
+ * `instanceof` guard over the very same reference — the instanceof twin of
+ * `isArrayGuardProven`, with the same four restrictions (the checker must
+ * have given up entirely, the region must be a guarded one, nested
+ * functions stay out, a region that writes the reference's root declines)
+ * and the same tag-checked bridge behind it.
+ *
+ * Both guarded polarities are read, because a `!`-guard and its `||` are
+ * one idiom: `if (C) A else B` proves C in A and !C in B, `C ? A : B` the
+ * same, `A && B` proves A inside B, `A || B` proves !A inside B. */
+function instanceofGuardTargets(L: Lowerer, node: ts.Expression): ts.Expression[] {
+  const out: ts.Expression[] = [];
+  let child: ts.Node = node;
+  for (let p: ts.Node | undefined = node.parent; p !== undefined; child = p, p = p.parent) {
+    if (ts.isFunctionLike(p)) break;
+    const cands: ts.BinaryExpression[] = [];
+    let region: ts.Node | null = null;
+    if (ts.isIfStatement(p) && child === p.thenStatement) {
+      instanceofGuardsOf(p.expression, true, cands);
+      region = p.thenStatement;
+    } else if (ts.isIfStatement(p) && p.elseStatement !== undefined && child === p.elseStatement) {
+      instanceofGuardsOf(p.expression, false, cands);
+      region = p.elseStatement;
+    } else if (ts.isConditionalExpression(p) && child === p.whenTrue) {
+      instanceofGuardsOf(p.condition, true, cands);
+      region = p.whenTrue;
+    } else if (ts.isConditionalExpression(p) && child === p.whenFalse) {
+      instanceofGuardsOf(p.condition, false, cands);
+      region = p.whenFalse;
+    } else if (ts.isBinaryExpression(p) && child === p.right) {
+      if (p.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
+        instanceofGuardsOf(p.left, true, cands);
+        region = p.right;
+      } else if (p.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+        instanceofGuardsOf(p.left, false, cands);
+        region = p.right;
+      }
+    }
+    if (region === null) continue;
+    for (const g of cands) {
+      if (isArrayNarrowSameRef(L, node, g.left) && !narrowRefWrittenIn(L, region, g.left)) out.push(g.right);
+    }
+  }
+  return out;
+}
+
+/** The union ARM an `instanceof <Ctor>` guard selects, or null.
+ *
+ * Deliberately the SAME arms `lowerInstanceOf` already answers over a union
+ * with — a bytes flavor and a regex — because those are the tests it turns
+ * into a `unionIsTag` at exactly this shape. That is the whole finding: the
+ * compiler tests the tag, enters the branch, and then had no rule to read
+ * through the arm it just proved. An ambiguous match (two arms of the same
+ * flavor cannot exist, but the check is cheap) declines. */
+function instanceofGuardArm(L: Lowerer, rhs: ts.Expression, unionId: string): IrType | null {
+  const def = L.unions.get(unionId);
+  if (!def || !ts.isIdentifier(rhs)) return null;
+  const sym = L.resolveValueSymbol(rhs);
+  const want =
+    sym && L.isStdlibSymbol(sym)
+      ? sym.name === "ArrayBuffer"
+        ? ("buf" as const)
+        : own(BYTES_CTORS, sym.name)
+      : undefined;
+  if (want !== undefined) {
+    const hits = def.arms.filter((a) => a.kind === "bytes" && a.elem === want);
+    return hits.length === 1 ? hits[0]! : null;
+  }
+  if (L.isStdlibGlobal(rhs, "RegExp")) {
+    const hits = def.arms.filter((a) => a.kind === "regex");
+    return hits.length === 1 ? hits[0]! : null;
+  }
+  return null;
+}
+
   export function maybeNarrow(L: Lowerer, expr: IrExpr, node: ts.Node): IrExpr {
     // A dyn read tsc narrowed to a SCALAR (a typeof test proved the kind):
     // bridge with a VALIDATED extraction — dynCheck, the checked-cast
@@ -3309,6 +3418,45 @@ function isArrayGuardProven(L: Lowerer, node: ts.Expression): boolean {
           const arm = def!.arms[arrayTags[0]!]!;
           return checkedArmBridge(L, expr, arm, expr.loc);
         }
+      }
+    }
+    // The INSTANCEOF twin of the isArray rule above, and the same finding
+    // one operator over: the compiler ALREADY reads this guard. `x
+    // instanceof Uint8Array` over a union lowers to `sc_t->tag == N` — the
+    // arm test, built by lowerInstanceOf out of the very same union def —
+    // so the branch is entered having PROVEN the arm, and the read inside
+    // it then answered "reading 'byteLength' from a value of type 'any'"
+    // because maybeNarrow had no rule that takes the proof from the source
+    // instead of from tsc. tsc has nothing to give here: it declines to
+    // narrow a property access whose ROOT is `any` (`child.content` after
+    // `Array.isArray` over a `readonly T[]` member), so the read arrives
+    // bare `any` while the VALUE is the real union all along.
+    //
+    // zapo's `parsePollVotes` (newsletter.ts:230) is that shape exactly,
+    // in the `!(x instanceof Uint8Array) || x.byteLength !== 32` spelling.
+    //
+    // The bridge is checkedArmBridge, like every other narrowing here: a
+    // proof the runtime cannot confirm throws the catchable TypeError
+    // rather than reading one arm's payload through another arm's struct.
+    if ((L.typeOf(node).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0 && ts.isExpression(node)) {
+      // SCRIPTC_INSTGUARD_WHY: one row per read this rule LOOKS at, with the
+      // guards it found and the arm it picked -- so "the rule fires nowhere"
+      // and "the rule fires and answers nothing" are different observations
+      // in the same run.
+      const why = process.env["SCRIPTC_INSTGUARD_WHY"] !== undefined;
+      const targets = instanceofGuardTargets(L, node);
+      if (why) {
+        process.stderr.write(
+          `[instguard] ${node.getText().slice(0, 48)} union=${expr.type.unionId} guards=${targets.length}` +
+            ` arms=${(L.unions.get(expr.type.unionId)?.arms ?? []).map((x) => x.kind).join("/")}
+`,
+        );
+      }
+      for (const rhs of targets) {
+        const arm = instanceofGuardArm(L, rhs, expr.type.unionId);
+        if (why) process.stderr.write(`[instguard]   guard ${rhs.getText().slice(0, 24)} -> ${arm === null ? "no arm" : arm.kind}
+`);
+        if (arm !== null) return checkedArmBridge(L, expr, arm, expr.loc);
       }
     }
     // A checker type narrowed to a UNIT arm (the `=== undefined` branch)
@@ -5154,6 +5302,37 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         return { kind: "numLit", value: shape.fields.length, type: F64, loc: locOf(expr) };
       }
     }
+    // The INSTANCEOF twin of the isArray probe above -- the SECOND seat of
+    // that rule, and the one without which the first buys nothing.
+    //
+    // maybeNarrow can hand back a real `bytes` (or `regex`) for a read the
+    // checker typed bare `any`, because the source's `instanceof` guard
+    // proved the arm. Every gate below this line is keyed on the CHECKER
+    // instead: `kind` is mapTypeOf(checker type), which is dyn/nothing for
+    // `any`, and `isStdlibMember` needs a property SYMBOL, which an `any`
+    // receiver does not have. So the bridge was built, returned, and then
+    // dropped one dispatch later into the very SC1090 it was meant to close
+    // -- the fix graded complete on a diagnostic-only probe and changed
+    // nothing in a compiled binary.
+    //
+    // Provenance comes from the lowered VALUE's type instead, which is the
+    // same stance the tuple-length fold above already takes. The probe is
+    // gated on an instanceof guard over the same reference EXISTING, a pure
+    // AST walk, so no read that lowers today pays a re-lowering and no
+    // helper is interned for a receiver this rule cannot claim.
+    let anyRecvNarrowed = false;
+    if (
+      kind !== "bytes" &&
+      kind !== "regex" &&
+      (L.typeOf(expr.expression).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0 &&
+      instanceofGuardTargets(L, expr.expression).length > 0
+    ) {
+      const probe = L.lowerExpr(expr.expression);
+      if (probe.type.kind === "bytes" || probe.type.kind === "regex") {
+        kind = probe.type.kind;
+        anyRecvNarrowed = true;
+      }
+    }
     if (kind !== "string" && kind !== "array" && kind !== "map" && kind !== "set" && kind !== "f64" && kind !== "regex" && kind !== "url" && kind !== "searchParams" && kind !== "stats" && kind !== "fileHandle" && kind !== "spawnRes" && kind !== "child" && kind !== "bytes" && kind !== "symbol") {
       return null;
     }
@@ -5169,7 +5348,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       kind === "array" &&
       expr.name.text === "length" &&
       everyArmIsTuple(L, L.checker.getBaseTypeOfLiteralType(L.typeOf(expr.expression)));
-    if (kind === "child" ? !isChildSurfaceMember(L, expr) : !tupleLengthOnArray && !L.isStdlibMember(expr)) return null;
+    if (kind === "child" ? !isChildSurfaceMember(L, expr) : !tupleLengthOnArray && !anyRecvNarrowed && !L.isStdlibMember(expr)) return null;
     const name = expr.name.text;
     if (kind === "child") {
       const loc = locOf(expr);
