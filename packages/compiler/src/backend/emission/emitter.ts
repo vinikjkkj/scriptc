@@ -445,6 +445,81 @@ export class CEmitter {
     ];
   }
 
+  /** SCRIPTC_RKG_COUNT=1 - the RUNTIME execution counter for the keyed-read
+   * ABORT family (ABORT.real), and the twin of SCRIPTC_DC_COUNT for the one
+   * population that had no runtime instrument at all.
+   *
+   * `scripts/real-aborts.mjs` says how many call sites of an ABORTING
+   * `sc_rkg_` helper a TU CONTAINS and which source function hosts each.
+   * Nothing could say which of them a run ever REACHES - and unlike the
+   * DYNCHECK family the miss path here is a process abort, so "it never
+   * fired" is true of every site on every healthy run and tells you nothing.
+   * The question that decides what matters is the other one: which sites are
+   * on a path the program actually walks, and how often.
+   *
+   * With the dial on, every emitted CALL of a helper whose miss path traps is
+   * preceded by `SC_RK_HIT(k)` - one ordinal per emitted CALL SITE, which is
+   * `real-aborts.mjs`'s unit and not the statement unit that read 24 on both
+   * sides of a fix - and a `/*RKSITE ...*\/` marker names the helper, the
+   * shape and the result width so the dump is attributable from the TU alone,
+   * with no side file that could drift.
+   *
+   * A helper that can answer `undefined` (a dyn result, an undefined-armed
+   * union) is NOT counted: it cannot abort, so its call sites are not in this
+   * population and counting them would inflate the denominator.
+   *
+   * OFF is the default and off emits NOTHING - asserted as byte equality of
+   * the whole TU in `rkg-count-dial.test.ts`, because a probe is not free. */
+  readonly rkCount = process.env["SCRIPTC_RKG_COUNT"] === "1";
+  rkSites = 0;
+  /** The `sc_rkg_` helpers whose MISS path is `scr_trap_fmt` - filled by
+   * recordKeyGetHelper as it emits each one, so a call site can ask whether
+   * the helper it just interned is in the aborting population. */
+  readonly recordKeyGetAborts = new Set<string>();
+  /** The increment for one emitted call of an ABORTING keyed-read helper.
+   * Empty string unless the dial is on and the helper can trap, so the
+   * ordinary emitter path is unchanged text. */
+  rkHitC(helper: string, shapeId: string, width: string): string {
+    if (!this.rkCount || !this.recordKeyGetAborts.has(helper)) return "";
+    const k = this.rkSites++;
+    return `SC_RK_HIT(${k}); /*RKSITE k=${k} h=${helper} s=${shapeId} t=${width}*/ `;
+  }
+  /** The counter table and its exit dump, spliced beside the shared trap
+   * helpers. Empty unless the dial is on AND the program emitted a site.
+   * NOTE: a destructor, so `process.exit()` (which takes `_Exit`) skips it,
+   * exactly as it skips the RC audit and the DCCOUNT dump. */
+  rkCountDefs(): string[] {
+    if (!this.rkCount || this.rkSites === 0) return [];
+    const n = this.rkSites;
+    return [
+      `/* SCRIPTC_RKG_COUNT=1: ${n} emitted ABORTABLE keyed-read call sites, one ordinal each. */`,
+      `static unsigned long sc_rk_hits[${n}];`,
+      // FIRST-HIT PRINT, and the reason it is not only a table.
+      // `process.exit()` takes `_Exit`, which skips atexit AND the
+      // destructor below - zapo's own entry ends in `process.exit(0)`, so
+      // the dump never printed and the reachability question went
+      // unanswered on the run that mattered. One line per site the first
+      // time it executes is immune to that: it is already on stderr when
+      // the process dies, however it dies.
+      `#define SC_RK_HIT(k) ((sc_rk_hits[k]++ == 0) ? (void)fprintf(stderr, "RKFIRST %zu\\n", (size_t)(k)) : (void)0)`,
+      `__attribute__((destructor)) static void sc_rk_count_dump(void) {`,
+      `  unsigned long th = 0;`,
+      `  size_t ran = 0;`,
+      `  for (size_t i = 0; i < ${n}; i++) {`,
+      `    th += sc_rk_hits[i];`,
+      `    if (sc_rk_hits[i]) ran++;`,
+      `  }`,
+      `  fprintf(stderr, "RKCOUNT-TOTAL sites=${n} executed=%zu evaluations=%lu\\n", ran, th);`,
+      `  for (size_t i = 0; i < ${n}; i++) {`,
+      `    if (sc_rk_hits[i]) {`,
+      `      fprintf(stderr, "RKCOUNT %zu %lu\\n", i, sc_rk_hits[i]);`,
+      `    }`,
+      `  }`,
+      `}`,
+      ``,
+    ];
+  }
+
   readonly walkerProtos: string[] = [];
   readonly walkerDefs: string[] = [];
   /** Island host-call adapters, interned per (arity, void-ness): the one
@@ -1013,7 +1088,7 @@ export class CEmitter {
       // loop — the profile-declared external symbols instead. Everything
       // above is unchanged (still all internal linkage).
       this.emitLibEntries(out, globals);
-      out.splice(trapHelperSlot, 0, ...this.dcCountDefs(), ...this.sharedTrapDefs());
+      out.splice(trapHelperSlot, 0, ...this.dcCountDefs(), ...this.rkCountDefs(), ...this.sharedTrapDefs());
       return out.join("\n");
     }
     const refGlobals = globals.filter((g) => isRefCounted(g.type));
@@ -1304,7 +1379,7 @@ export class CEmitter {
       `}`,
       ``,
     );
-    out.splice(trapHelperSlot, 0, ...this.dcCountDefs(), ...this.sharedTrapDefs());
+    out.splice(trapHelperSlot, 0, ...this.dcCountDefs(), ...this.rkCountDefs(), ...this.sharedTrapDefs());
     return out.join("\n");
   }
 
