@@ -8912,6 +8912,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5730-a-local-narrowed-past-its-undefined-arm-still-answers-every-guard.ts": {
+   "order": [
+    "<repo>/tests/corpus/5730-a-local-narrowed-past-its-undefined-arm-still-answers-every-guard.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5731-a-member-read-on-a-widened-local-throws-nodes-own-typeerror.ts": {
+   "order": [
+    "<repo>/tests/corpus/5731-a-member-read-on-a-widened-local-throws-nodes-own-typeerror.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5732-a-switch-on-a-widened-local-declines-the-shapes-the-desugar-refuses.ts": {
+   "order": [
+    "<repo>/tests/corpus/5732-a-switch-on-a-widened-local-declines-the-shapes-the-desugar-refuses.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
