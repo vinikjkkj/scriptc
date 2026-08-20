@@ -8762,6 +8762,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5420-optional-record-keys-that-are-not-written-are-not-there.ts": {
+   "order": [
+    "<repo>/tests/corpus/5420-optional-record-keys-that-are-not-written-are-not-there.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
