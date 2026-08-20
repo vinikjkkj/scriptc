@@ -8958,6 +8958,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5794-a-users-own-percent-key-arms-the-own-key-mask-like-any-other-key.ts": {
+   "order": [
+    "<repo>/tests/corpus/5794-a-users-own-percent-key-arms-the-own-key-mask-like-any-other-key.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
