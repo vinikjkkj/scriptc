@@ -1363,6 +1363,73 @@ export interface IrRecordShape {
    * module actually contains — the same construction SC6002 advises about,
    * which until now printed a note and shipped the wrong value. */
   ownmask?: true;
+  /** How Node RENDERS a value of this shape, for the shapes the frontend
+   * interns from a BUILTIN whose rendering is not a plain object's. Every
+   * member is part of the interned identity, on internalFieldNamesOf's
+   * argument: a user literal structurally equal to a builtin's row must
+   * not inherit the builtin's rendering, and an ABSENT `builtin`
+   * contributes nothing to the key, so no existing shape's numbering
+   * moves. See IrBuiltinRendering. */
+  builtin?: IrBuiltinRendering;
+}
+
+/** How Node renders one interned builtin shape (IrRecordShape.builtin).
+ *
+ *   ctorName    the constructor name util.inspect prefixes: Node prints
+ *               `Dirent { name: 'a.txt', ... }`. It feeds
+ *               ScrDyn.v.obj.cname, the field `new F()` already sets and
+ *               scr_insp_dyn already prints -- the record-to-dyn
+ *               converter simply never set it.
+ *   nullProto   the value was built with Object.create(null), so Node
+ *               prefixes `[Object: null prototype]` (os.userInfo()'s
+ *               result). Feeds ScrDyn.null_proto, which already exists
+ *               for Object.create(null) and which deepStrictEqual and
+ *               ToPrimitive already read.
+ *   slotSymbols for an INTERNAL field (one declaredOrder omits), the
+ *               description of the SYMBOL Node keeps the same cell under:
+ *               fs.Dirent's `%dtype` is Node's `Symbol(type)`, so the map
+ *               is `{ "%dtype": "type" }`. It is also the STORAGE KEY in
+ *               the dyn slot table (slotStorageKey), which is what lets
+ *               the runtime render it without knowing any shape: a slot
+ *               key that does NOT begin with '%' is a Node symbol
+ *               description and util.inspect prints
+ *               `Symbol(<key>): <value>`; one that does is the compiler's
+ *               own and is printed nowhere.
+ *
+ * StringDecoder's `%pending` is deliberately ABSENT from slotSymbols even
+ * though Node keeps that cell under `Symbol(kNativeDecoder)`: Node's
+ * value there is a SEVEN-BYTE native state buffer (the buffered bytes,
+ * the missing count, the buffered count, the encoding id) and this tier
+ * holds a packed f64, so naming the symbol would have printed the packed
+ * number on stdout -- the exact leak the reserved-key change removed.
+ * Absent means "not rendered", which leaves the decoder's rendering
+ * wrong about a cell rather than wrong with a fabricated value. */
+export interface IrBuiltinRendering {
+  ctorName?: string;
+  nullProto?: true;
+  slotSymbols?: Readonly<Record<string, string>>;
+}
+
+/** The CANONICAL spelling of a builtin rendering, for the interner's key.
+ * Empty answers "" and therefore contributes nothing -- the rule the
+ * internal field SET follows, for the same reason: every shape without
+ * one keeps the exact key it had. */
+export function builtinRenderingKey(b: IrBuiltinRendering | undefined): string {
+  if (!b) return "";
+  const syms = Object.entries(b.slotSymbols ?? {}).sort(([a], [c]) => (a < c ? -1 : 1));
+  if (!b.ctorName && !b.nullProto && syms.length === 0) return "";
+  return JSON.stringify([b.ctorName ?? "", b.nullProto === true, syms]);
+}
+
+/** Where an INTERNAL field's cell lives in the dyn SLOT table: the Node
+ * symbol description when the shape names one, else the field name.
+ *
+ * ONE definition, called by both backends in BOTH directions -- a
+ * converter and a check that disagreed here would be a round trip that
+ * silently loses its state, which is exactly why internalSlotFields is
+ * one function too. */
+export function slotStorageKey(shape: IrRecordShape, field: string): string {
+  return shape.builtin?.slotSymbols?.[field] ?? field;
 }
 
 /** The byte width of a shape's hidden own-key mask: one VALIDITY byte plus

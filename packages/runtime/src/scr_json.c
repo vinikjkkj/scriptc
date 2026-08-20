@@ -811,8 +811,23 @@ bool scr_dyn_proto_chain_is_fn_pub(const ScrDyn *d) {
   /* From `d` ITSELF, not from its [[Prototype]]: an escaped prototype
    * object whose function is gone is exactly the receiver this fence
    * exists for, and starting one link up answered it a silent
-   * `undefined`. Only a minted prototype and an INSTANCE of one carry a
-   * `cname`, so no plain literal reaches the fence through this. */
+   * `undefined`. A `cname` is carried by a minted prototype, by an
+   * INSTANCE of one, and (since scr_dyn_obj_set_ctor_name) by a
+   * CONVERTED BUILTIN RECORD such as fs.Dirent's rows. The third is new,
+   * and what it does to this fence was MEASURED rather than reasoned
+   * about: no TypeScript spelling found reaches the fence with one.
+   * A keyed read on an `unknown` receiver has to name a type first, and
+   * both `u as Record<string, unknown>` and `u as { [k: string]: unknown }`
+   * dynCheck the value INTO a fresh record, after which no cname is left
+   * to see -- `typeof o["constructor"]` answers `undefined` and
+   * `"constructor" in o` answers `false` on this side exactly as before
+   * (four spellings, v25.9.0 answers `function` and `true` to both).
+   *
+   * So the sentence this replaces -- "only a minted prototype and an
+   * INSTANCE of one carry a `cname`, so no plain literal reaches the
+   * fence through this" -- stopped being true of the FIRST clause while
+   * staying true of the conclusion. A plain object literal still carries
+   * no cname either way. */
   const ScrDyn *p = d;
   for (size_t steps = 0; p != NULL && steps <= SCR_PROTO_MAX_DEPTH; steps++) {
     if (p->kind != SCR_DYN_OBJ) return false;
@@ -4176,6 +4191,26 @@ void scr_dyn_obj_set_slot(ScrDyn *recv, const char *key, size_t key_len, ScrDyn 
 ScrDyn *scr_dyn_obj_slot_get(const ScrDyn *d, const char *key, size_t key_len) {
   if (d == NULL || d->kind != SCR_DYN_OBJ || d->v.obj.slots == NULL) return NULL;
   return scr_dyn_obj_get(d->v.obj.slots, key, key_len);
+}
+
+/* The CONSTRUCTOR NAME a converted BUILTIN record shows under. `name` is
+ * a static literal the emitter spells (no ownership, like the one a
+ * minted prototype carries), so this is a pointer store and nothing
+ * else.
+ *
+ * It is the same field `new F()` fills, deliberately: util.inspect
+ * already prints it as the `F { ... }` prefix and the property-refusal
+ * texts already spell it as `#<F>`, which is what Node does for a Dirent
+ * too. Those two are the whole of what it changes, MEASURED rather than
+ * assumed: `Object.defineProperty` has no lowering, so the `#<F>` texts
+ * are unreachable from a compiled program at all, and the third reader
+ * (scr_dyn_proto_chain_is_fn_pub, behind the `constructor` read) is not
+ * reachable with one either -- every keyed read on an `unknown` receiver
+ * dynChecks into a fresh record first, and the name does not survive
+ * that. The comment on that predicate carries the four spellings. */
+void scr_dyn_obj_set_ctor_name(ScrDyn *d, const char *name) {
+  if (d == NULL || d->kind != SCR_DYN_OBJ) return;
+  d->v.obj.cname = name;
 }
 
 /* Node spells the offending RECEIVER into the three V8 property-refusal
