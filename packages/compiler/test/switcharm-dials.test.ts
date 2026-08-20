@@ -107,6 +107,37 @@ const DECLINERS = [
  * sweep it never took. */
 const TRAP = /scr_trap_fmt\("scriptc: TypeError: record has no key/g;
 
+/* Assignments into an undefined-armed slot whose later reads have LOST the
+ * arm — tsc narrows an assignment to the declared type filtered by the type
+ * assigned, so the very next read of `v` after `v = a.k` is already `string`,
+ * `v === undefined` and `v ?? d` included. Every one of these DECLINES, and
+ * the point of the byte comparison below is that a decline hands the
+ * identical expression to the identical tail: `lowerExprExpecting`'s early
+ * rules are all about Object.freeze, array literals and object literals, so
+ * a property access falls through them to `coerceInto(lowerExpr(node))`,
+ * which is exactly what the decline path builds. */
+const ASSIGN_DECLINERS = [
+  `export function deref(a: Record<string, string>): number {`,
+  `  let v: string | undefined;`,
+  `  v = a.k;`,
+  `  return v.length;`,
+  `}`,
+  `export function tested(a: Record<string, string>): string {`,
+  `  let v: string | undefined;`,
+  `  v = a.k;`,
+  `  if (v === undefined) return "(none)";`,
+  `  return v;`,
+  `}`,
+  `export function defaulted(a: Record<string, string>): string {`,
+  `  let v: string | undefined;`,
+  `  v = a["k"];`,
+  `  return v ?? "d";`,
+  `}`,
+  `console.log(deref({ k: "x" }), tested({ k: "y" }), defaulted({ k: "z" }));`,
+  `export {};`,
+  ``,
+].join("\n");
+
 interface Dials {
   switchOff?: boolean;
   assignOff?: boolean;
@@ -118,7 +149,7 @@ async function emit(program: string, d: Dials): Promise<{ tu: string; diags: str
   dir ??= await mkdtemp(join(tmpdir(), "scriptc-switcharm-"));
   const tag = `${d.switchOff === true ? "s" : "n"}${d.assignOff === true ? "a" : "n"}${
     d.braceOff === true ? "b" : "n"
-  }${program === ENC ? "e" : "d"}`;
+  }${program === ENC ? "e" : program === DECLINERS ? "d" : "a"}`;
   const src = join(dir, `main-${tag}.ts`);
   await writeFile(src, program, "utf8");
   const saved: [string, string | undefined][] = [
@@ -202,6 +233,19 @@ describe("the enc-attribute rungs", () => {
     // ablated the TU is byte-for-byte the same, which is the only way to say
     // "declined" about a lowering rather than "happened to still compile".
     const base = await emit(DECLINERS, { switchOff: true, assignOff: true, braceOff: true });
+    expect(base.diags).toEqual([]);
+    expect(fixed.tu).toBe(base.tu);
+  }, 240_000);
+
+  test("an assignment the narrowed-read gate refuses emits the identical TU", async () => {
+    const fixed = await emit(ASSIGN_DECLINERS, {});
+    expect(fixed.diags).toEqual([]);
+    // Non-trivial: these reads DO abort, which is the whole point of a
+    // decline — the gate keeps the loud trap rather than storing an
+    // undefined behind an unchecked narrow.
+    expect(count(fixed.tu, TRAP)).toBeGreaterThan(0);
+
+    const base = await emit(ASSIGN_DECLINERS, { switchOff: true, assignOff: true, braceOff: true });
     expect(base.diags).toEqual([]);
     expect(fixed.tu).toBe(base.tu);
   }, 240_000);
