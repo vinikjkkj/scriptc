@@ -6,7 +6,7 @@ import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
 import { arrayOf, BOOL, BYTES_U8, bytesOf, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
 import { boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct, mangleWrapper } from "../mangle.js";
-import { OVERFLOW_MEMBER, TOSTR_MEMBER } from "./emit-shapes.js";
+import { OVERFLOW_MEMBER, TOSTR_MEMBER, ownPresentCondC } from "./emit-shapes.js";
 import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper } from "./emit-walkers.js";
 import { genResultThunkFor } from "./emit-async.js";
 import { wsGlobalCtorFor } from "./emit-ws.js";
@@ -2027,6 +2027,19 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             : mangleField(e.field);
         const field = `${obj.name}->${member}`;
         return E.newTemp(e.type, isRefCounted(e.type) ? retainCallC(e.type, field) : field);
+      }
+      case "recordKeyPresent": {
+        // The own-key question, one spelling (ownPresentCondC). On an
+        // unarmed shape it is the undefined-arm tag test every own-key
+        // surface has always emitted, so the C is unchanged byte for byte;
+        // on an armed one the instance's mask answers when it carries one.
+        const obj = E.emitExpr(e.obj);
+        const shape = E.recordsById.get(e.shapeId);
+        if (!shape) throw new Error(`emitter bug: recordKeyPresent of unknown shape ${e.shapeId}`);
+        const f = shape.fields.find((x) => x.name === e.field);
+        if (!f) throw new Error(`emitter bug: recordKeyPresent of unknown field ${e.shapeId}.${e.field}`);
+        const cond = ownPresentCondC(shape, e.field, obj.name, E.undefinedArmTag(f.type), false);
+        return E.newTemp(e.type, cond ?? "true");
       }
       case "recordLit": {
         // Allocate (fields zeroed), then write each field IN SOURCE ORDER —

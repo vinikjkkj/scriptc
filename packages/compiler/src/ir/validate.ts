@@ -3249,6 +3249,18 @@ function validateFunction(
         }
         break;
       }
+      case "recordKeyPresent": {
+        checkExpr(e.obj);
+        const shape = records.get(e.shapeId);
+        const field = shape?.fields.find((f) => f.name === e.field);
+        if (!shape) err(`recordKeyPresent on undeclared shape "${e.shapeId}"`, e.loc);
+        else if (!field) err(`shape ${e.shapeId} has no field "${e.field}"`, e.loc);
+        else {
+          expectType(e.obj, { kind: "record", shapeId: e.shapeId }, "recordKeyPresent receiver");
+          if (e.type.kind !== "bool") err(`recordKeyPresent must be bool, got ${e.type.kind}`, e.loc);
+        }
+        break;
+      }
       case "recordKeyGet": {
         checkExpr(e.obj);
         checkExpr(e.key);

@@ -21,13 +21,14 @@
  *               FUNC=8 HANDLE=9.
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
-import type { IrType } from "../../ir/nodes.js";
+import type { IrRecordShape, IrType } from "../../ir/nodes.js";
 import { armDiscrimLits, canAdaptDynFuncTo, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
+import { ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
 import { mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane, readKindgateDials } from "../kindgate.js";
 import { BlockBuilder } from "./blocks.js";
-import { arrNewCall, elemAccess, llFieldType, releaseSym, toStrSlotIndex, traceAdapter, traceArg, vAdapters } from "./shapes.js";
+import { arrNewCall, elemAccess, llFieldType, ownMaskSlotIndex, releaseSym, toStrSlotIndex, traceAdapter, traceArg, vAdapters } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 import type { WalkerHost } from "./walkers.js";
 
@@ -284,6 +285,46 @@ export class LlDyn {
     const len = Buffer.byteLength(key, "utf8");
     B.line(`${t} = call ptr @scr_dyn_obj_slot_get(ptr ${d}, ptr ${this.host.cstr(key)}, i64 ${len}) ; slot ${key}`);
     return t;
+  }
+
+  /** Stamp field `key`'s bit in the record's hidden own-key mask when the
+   * SOURCE object carries it as an own, enumerable member — the .ll twin
+   * of emit-walkers.ts's `if (scr_dyn_obj_get(...)) r->sc_own[b] |= bit;`.
+   * scr_dyn_obj_get is the member table alone: the prototype chain is what
+   * the mask exists to exclude, and the hidden table's non-enumerable own
+   * properties are not Object.keys answers either.
+   *
+   * There is NO '%'-spelling test here, and there used to be. An INTERNAL
+   * SLOT leaves the builder's loop before this call (internalSlotFields),
+   * so a field that reaches this line is a KEY however it is spelled —
+   * including a user's own "%dtype", whose bit the record-to-dyn walker
+   * reads. The builder and the walker have to ask internalSlotFields the
+   * SAME question: a key the builder skips and the walker masks is demoted
+   * to the prototype on every crossing, silently. */
+  private stampOwnBit(B: BlockBuilder, shape: IrRecordShape, key: string, d: string, r: string): void {
+    const bit = maskKeyBit(shape, key);
+    if (!bit) return;
+    this.host.declare(`declare ptr @scr_dyn_obj_get(ptr, ptr, i64)`);
+    const len = Buffer.byteLength(key, "utf8");
+    const g = B.tmp();
+    B.line(`${g} = call ptr @scr_dyn_obj_get(ptr ${d}, ptr ${this.host.cstr(key)}, i64 ${len}) ; own .${key}`);
+    const has = B.tmp();
+    B.line(`${has} = icmp ne ptr ${g}, null`);
+    const lSet = B.newLabel("own.s");
+    const lEnd = B.newLabel("own.e");
+    B.condBr(has, lSet, lEnd);
+    B.startBlock(lSet);
+    const mp = B.tmp();
+    B.line(
+      `${mp} = getelementptr inbounds %${mangleRecordStruct(shape.id)}, ptr ${r}, i64 0, i32 ${ownMaskSlotIndex(shape)}, i64 ${bit.byte}`,
+    );
+    const mv = B.tmp();
+    B.line(`${mv} = load i8, ptr ${mp}`);
+    const mo = B.tmp();
+    B.line(`${mo} = or i8 ${mv}, ${bit.bit}`);
+    B.line(`store i8 ${mo}, ptr ${mp}`);
+    B.br(lEnd);
+    B.startBlock(lEnd);
   }
 
   /** The record BUILDER's read for a field that can hold a function:
@@ -1258,6 +1299,17 @@ export class LlDyn {
           requireKind(DK.OBJ, "dcr");
         }
         B.line(`%r0 = call ptr @${mangleRecordNew(t.shapeId)}()`);
+        // The HIDDEN per-instance OWN-KEY MASK's validity byte —
+        // emit-walkers.ts's row. This builder is the one point that holds
+        // both the member's VALUE (read through [[Get]], prototype chain
+        // included) and whether the source object carried the key itself.
+        if (shape.ownmask) {
+          const vp = B.tmp();
+          B.line(
+            `${vp} = getelementptr inbounds %${mangleRecordStruct(t.shapeId)}, ptr %r0, i64 0, i32 ${ownMaskSlotIndex(shape)}, i64 0`,
+          );
+          B.line(`store i8 1, ptr ${vp} ; own-mask written`);
+        }
         // The HIDDEN per-instance toString slot — emit-walkers.ts's row
         // exactly. MATERIALIZING is what loses a JS object's toString, and
         // scr_dyn_tostr_closure captures the SOURCE object, answering NULL
@@ -1298,6 +1350,10 @@ export class LlDyn {
             afterChild("dcs", releaseR, "ptr null");
             continue;
           }
+          // The own-key stamp goes HERE, below the internal-slot arm: a
+          // field that reaches this line is a KEY, and the record-to-dyn
+          // walker masks exactly the same set.
+          this.stampOwnBit(B, shape, f.name, dRef, "%r0");
           if (soft && f.type.kind !== "dyn") {
             // The ARM form's decision, and it is the MATCHER's, not the
             // builder's — dynArmHelper's comment says why the two differ
@@ -2046,6 +2102,15 @@ export class LlDyn {
         host.declare(`declare ptr @scr_dyn_new_obj()`);
         const d = B.tmp();
         B.line(`${d} = call ptr @scr_dyn_new_obj()`);
+        // The INHERITED half of an armed shape's members, built lazily and
+        // linked as the fresh object's [[Prototype]] at the end. An alloca
+        // rather than a register because the block structure below has
+        // several predecessors reaching the link.
+        const protoSlot = B.slot();
+        if (shape.ownmask) {
+          B.entryAllocas.push(`${protoSlot} = alloca ptr`);
+          B.line(`store ptr null, ptr ${protoSlot}`);
+        }
         // Keys insert in DECLARED order (JS insertion order); fields
         // declaredOrder OMITS are INTERNAL SLOTS and never become keys —
         // emit-walkers.ts carries the whole argument.
@@ -2075,14 +2140,107 @@ export class LlDyn {
           // field's key exists exactly when its run-time tag is not the
           // undefined arm, so the store is presence-gated. See
           // scr_dyn_obj_set_present in scr_json.c.
+          // An INTERNAL SLOT is not a key and takes neither rule.
           if (internal.has(f.name)) {
             host.declare(`declare void @scr_dyn_obj_set_slot(ptr, ptr, i64, ptr)`);
             B.line(`call void @scr_dyn_obj_set_slot(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; slot ${f.name}`);
-          } else if (isUndefinedArmedUnion(f.type, (id: string) => this.host.unionsById.get(id))) {
-            host.declare(`declare void @scr_dyn_obj_set_present(ptr, ptr, i64, ptr)`);
-            B.line(`call void @scr_dyn_obj_set_present(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
+            continue;
+          }
+          // No '%'-spelling test: internalSlotFields above is the whole
+          // exemption, and it is the STRICTER one — a user's own "%dtype"
+          // IS in its shape's declaredOrder, so it is an ordinary key and
+          // takes the mask like any other. emit-walkers.ts's row.
+          const maskBitF = maskKeyBit(shape, f.name);
+          const setPresent = (): void => {
+            if (isUndefinedArmedUnion(f.type, (id: string) => this.host.unionsById.get(id))) {
+              host.declare(`declare void @scr_dyn_obj_set_present(ptr, ptr, i64, ptr)`);
+              B.line(`call void @scr_dyn_obj_set_present(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
+            } else {
+              B.line(`call void @scr_dyn_obj_set(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
+            }
+          };
+          if (maskBitF === null) {
+            setPresent();
           } else {
+            // The crossing MATERIALISES the key list, so it is the last
+            // place the source object's own keys can still be told from
+            // the shape's declared field list — emit-walkers.ts's row. An
+            // instance a dynCheck builder wrote answers from its mask;
+            // every other one falls through to the undefined-arm rule.
+            host.declare(`declare void @scr_dyn_release(ptr)`);
+            const bit = maskBitF;
+            const vp = B.tmp();
+            B.line(
+              `${vp} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${ownMaskSlotIndex(shape)}, i64 0`,
+            );
+            const v0 = B.tmp();
+            B.line(`${v0} = load i8, ptr ${vp}`);
+            const valid = B.tmp();
+            B.line(`${valid} = icmp ne i8 ${v0}, 0`);
+            const lM = B.newLabel("tdm.m");
+            const lB = B.newLabel("tdm.b");
+            const lE = B.newLabel("tdm.e");
+            B.condBr(valid, lM, lB);
+            B.startBlock(lM);
+            const bp = B.tmp();
+            B.line(
+              `${bp} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${ownMaskSlotIndex(shape)}, i64 ${bit.byte}`,
+            );
+            const bv = B.tmp();
+            B.line(`${bv} = load i8, ptr ${bp}`);
+            const an = B.tmp();
+            B.line(`${an} = and i8 ${bv}, ${bit.bit}`);
+            const own = B.tmp();
+            B.line(`${own} = icmp ne i8 ${an}, 0`);
+            const lS = B.newLabel("tdm.s");
+            const lD = B.newLabel("tdm.d");
+            B.condBr(own, lS, lD);
+            B.startBlock(lS);
             B.line(`call void @scr_dyn_obj_set(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
+            B.br(lE);
+            B.startBlock(lD);
+            // AN INHERITED MEMBER IS DEMOTED, NOT DELETED — emit-walkers.ts
+            // carries the whole argument. Dropping it made Object.keys
+            // right and broke every READ on the far side (zapo's app-state
+            // sync lost its keys); JS keeps it reachable through the
+            // prototype chain, so the conversion rebuilds that chain.
+            {
+              host.declare(`declare ptr @scr_dyn_new_obj()`);
+              const pv = B.tmp();
+              B.line(`${pv} = load ptr, ptr ${protoSlot}`);
+              const kd = this.kindOf(B, conv);
+              const isUndef = B.tmp();
+              B.line(`${isUndef} = icmp eq i32 ${kd}, ${DK.UNDEF}`);
+              const lDrop = B.newLabel("tdp.x");
+              const lKeep = B.newLabel("tdp.k");
+              const lHave = B.newLabel("tdp.h");
+              const lMake = B.newLabel("tdp.m");
+              const lPut = B.newLabel("tdp.p");
+              B.condBr(isUndef, lDrop, lKeep);
+              B.startBlock(lDrop);
+              B.line(`call void @scr_dyn_release(ptr ${conv}) ; absent on the source object entirely`);
+              B.br(lE);
+              B.startBlock(lKeep);
+              const hasP = B.tmp();
+              B.line(`${hasP} = icmp ne ptr ${pv}, null`);
+              B.condBr(hasP, lHave, lMake);
+              B.startBlock(lMake);
+              const np = B.tmp();
+              B.line(`${np} = call ptr @scr_dyn_new_obj() ; inherited members`);
+              B.line(`store ptr ${np}, ptr ${protoSlot}`);
+              B.br(lPut);
+              B.startBlock(lHave);
+              B.br(lPut);
+              B.startBlock(lPut);
+              const pp = B.tmp();
+              B.line(`${pp} = load ptr, ptr ${protoSlot}`);
+              B.line(`call void @scr_dyn_obj_set(ptr ${pp}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; inherited .${f.name}`);
+              B.br(lE);
+            }
+            B.startBlock(lB);
+            setPresent();
+            B.br(lE);
+            B.startBlock(lE);
           }
         }
         if (shape.indexValue) {
@@ -2163,6 +2321,25 @@ export class LlDyn {
           B.br(lc);
           B.startBlock(le);
           B.line(`call void @scr_arr_release(ptr ${ks})`);
+        }
+        // The [[Prototype]] link, once, after every member has been placed
+        // (emit-walkers.ts's row): set_proto RETAINS, so the builder's own
+        // +1 is released here and the chain is owned by `d` alone.
+        if (shape.ownmask) {
+          host.declare(`declare void @scr_dyn_obj_set_proto(ptr, ptr)`);
+          host.declare(`declare void @scr_dyn_release(ptr)`);
+          const pv = B.tmp();
+          B.line(`${pv} = load ptr, ptr ${protoSlot}`);
+          const hasP = B.tmp();
+          B.line(`${hasP} = icmp ne ptr ${pv}, null`);
+          const lLink = B.newLabel("tdl.y");
+          const lSkip = B.newLabel("tdl.n");
+          B.condBr(hasP, lLink, lSkip);
+          B.startBlock(lLink);
+          B.line(`call void @scr_dyn_obj_set_proto(ptr ${d}, ptr ${pv}) ; the members the source only INHERITED`);
+          B.line(`call void @scr_dyn_release(ptr ${pv})`);
+          B.br(lSkip);
+          B.startBlock(lSkip);
         }
         if (cyclicRec) B.line(`call void @scr_dyn_from_leave()`);
         B.terminate(`ret ptr ${d}`);
