@@ -2110,6 +2110,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const obj = E.emitExpr(e.obj);
         const key = E.emitExpr(e.key);
         const helper = E.recordKeyGetHelper(e.shapeId, e.type, e.overflowOnly === true);
+        // SCRIPTC_RKG_COUNT: one ordinal per emitted call of an ABORTING
+        // keyed-read helper.  Empty text with the dial off.
+        const rkHit = E.rkHitC(helper, e.shapeId, typeKey(e.type));
+        if (rkHit !== "") E.line(rkHit.trimEnd());
         return E.newTemp(e.type, `${helper}(${obj.name}, ${key.name})`);
       }
       case "recordOvfKeys": {
@@ -2479,7 +2483,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // key): the per-(shape, join type) keyed-read helper — a literal
           // key naming no declared field touches only the overflow map.
           const helper = E.recordKeyGetHelper(arm.shapeId, e.type, literal !== null && !!shape.indexValue);
-          E.line(`case ${i}: ${name} = ${helper}((${cType(arm).trim()})scr_union_peek(${u.name}), ${k.name}); break;`);
+          // SCRIPTC_RKG_COUNT: the union-arm call site, in the same ordinal
+          // space as the direct one.  Empty text with the dial off.
+          const rkHit = E.rkHitC(helper, arm.shapeId, typeKey(e.type));
+          E.line(`case ${i}: ${rkHit}${name} = ${helper}((${cType(arm).trim()})scr_union_peek(${u.name}), ${k.name}); break;`);
         });
         E.line(`default: ${E.badTagAbortC()};`);
         E.indent--;

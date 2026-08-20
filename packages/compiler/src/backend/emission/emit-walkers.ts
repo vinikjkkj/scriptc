@@ -3085,6 +3085,11 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       // claimed T without noUncheckedIndexedAccess) — trap like an array
       // OOB read instead of corrupting a typed slot (SEMANTICS.md).
       d.push(`  scr_trap_fmt("scriptc: TypeError: record has no key '%.*s' (typed '${E.dynDesc(t)}' — no undefined is representable)\\n", (int)k->len, k->data);`);
+      // This helper is in the ABORT.real population: its miss path is the
+      // untagged process abort.  Recorded so a CALL SITE can ask, and so
+      // SCRIPTC_RKG_COUNT counts the sites that can really die and not the
+      // ones that answer undefined.
+      E.recordKeyGetAborts.add(name);
     }
     d.push(`}`, ``);
     E.walkerDefs.push(...d);
