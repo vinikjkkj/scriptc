@@ -1412,6 +1412,34 @@ console.log("unreachable", s === null ? "n" : "y");
     expect(r.stderr).toContain("Uncaught TypeError: expected number | null | object at $, got object");
   });
 
+  test("a WRONG-SIGNATURE function is refused by a function arm, not adapted into it", async () => {
+    // The union arm walker decides while it builds, and for a FUNCTION arm
+    // the rule it applies has to be the match predicate's exact-signature
+    // strcmp and NOT the checked builder's exact-or-adapt. The builder's
+    // permissive half is right where it stands -- `u as Fn` is a cast, and
+    // adapting is what makes a foreign signature usable -- but as an ARM
+    // SELECTOR it would put every callable on the first function arm and
+    // hand the union the wrong tag, with the adapter quietly converting a
+    // return type nobody asked to convert.
+    //
+    // This cannot be a differential corpus program: Node has no arms and
+    // answers 4 for the call below, so all three behaviours (Node's
+    // answer, the refusal, and the adaptation) differ from each other.
+    // The refusal is the honest one and this pins it.
+    const r = await compileAndRun(
+      "func-arm-signature-decides",
+      `type Fn = (x: number) => string;
+const wrong: unknown = (x: number) => x * 2;
+const w = wrong as Fn | null;
+console.log("took", w === null ? "null" : w(2));
+`,
+    );
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toContain("Uncaught TypeError: expected");
+    expect(r.stderr).toContain("at $, got function");
+  });
+
   test("a '.filter' whose INFERRED predicate delegates to a lying guard throws instead of re-tagging", async () => {
     // `.filter` over a union-element array re-tags every survivor to the
     // narrowed arm. For a WRITTEN `v is T` that re-tag was already checked;

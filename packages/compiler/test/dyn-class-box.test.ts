@@ -330,18 +330,31 @@ describe("an %Error leaf crosses nested, which is the shape the emit trampoline 
 
   test("both backends match an %Error by the MARKER, not by a class interval", async () => {
     const { c, ll } = await compileErrorLeaf();
-    // C: the matcher's own comment names the type it matches.
-    const cm = /static bool (sc_dm_\d+)\(const ScrDyn \*d\) \{ \/\* matches object:%Error \*\/\n([^\n]*)\n\}/.exec(c);
-    expect(cm, "no C matcher for object:%Error — this test has gone blind").not.toBeNull();
+    // C: the union ARM WALKER is where this question is asked now. The C
+    // lane merged the match predicate into the checked builder — one
+    // function that decides while it builds — so there is no separate
+    // sc_dm_ for an arm to consult, and the assertion moved onto the
+    // walker that replaced it. What is pinned is unchanged: the MARKER,
+    // never a class interval, and a miss that is SOFT (the union tries the
+    // next arm) rather than a refusal.
+    const cm =
+      /(sc_da_\d+)\(const ScrDyn \*d, const ScrDynPath \*path, bool \*ok\) \{ \/\* arm object:%Error \*\/\n([\s\S]*?)\n\}/.exec(
+        c,
+      );
+    expect(cm, "no C arm walker for object:%Error — this test has gone blind").not.toBeNull();
     expect(cm![2]).toContain(`scr_dyn_obj_get(d, "%error", 6)`);
     expect(cm![2]).not.toContain("scr_dyn_objinst_is");
-    // LLVM: same question, same answer, in its own spelling.
+    expect(cm![2]).toContain("*ok = false");
+    // LLVM: same question, same answer, in its own spelling — and that lane
+    // still carries the matcher/builder PAIR, so this half is the shape the
+    // C lane had before the merge.
     const lm = /define internal zeroext i1 @sc_dm_\d+\(ptr %d\) #\d+ \{ ; matches object:%Error\n([\s\S]*?)\n\}/.exec(ll);
     expect(lm, "no LLVM matcher for object:%Error — this test has gone blind").not.toBeNull();
     expect(lm![1]).toContain("@scr_dyn_obj_get");
     expect(lm![1]).not.toContain("scr_dyn_objinst_is");
-    // And the CHECK builder asks the identical question, so nothing can be
-    // matched here and then fail to build there.
+    // And the C lane's CHECKED builder asks the identical question, in the
+    // identical spelling, so a direct `u as Error` cannot disagree with an
+    // arm about what an %Error is.
     expect(c).toContain(`if (d->kind != SCR_DYN_OBJ || !scr_dyn_obj_get(d, "%error", 6))`);
   });
 });
