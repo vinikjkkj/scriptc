@@ -3453,8 +3453,7 @@ function instanceofGuardArm(L: Lowerer, rhs: ts.Expression, unionId: string): Ir
         const arms = (L.unions.get((expr.type as { unionId: string }).unionId)?.arms ?? []).map((x) => x.kind).join("/");
         process.stderr.write(
           `INSTGUARD ${sf.fileName}:${lc.line + 1}:${lc.character + 1} ${verdict} arms=${arms}` +
-            ` :: ${node.getText().slice(0, 60).replace(/s+/g, " ")}
-`,
+            ` :: ${node.getText().slice(0, 60).replace(/\s+/g, " ")}\n`,
         );
       };
       if (targets.length === 0) {
