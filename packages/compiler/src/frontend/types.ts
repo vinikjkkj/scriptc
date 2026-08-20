@@ -3195,9 +3195,18 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // hidden %dtype field carries the entry kind (libuv's UV_DIRENT
   // encoding) that the isFile/isDirectory/isSymbolicLink call lowerings
   // read (lowerDirentMethodCall — the StringDecoder pattern, so the
-  // %-field never surfaces through the lowered Dirent surface itself;
-  // JSON.stringify of a Dirent would show it — the documented
-  // internal-shape edge). @types/node declares Dirent<Name> generic over
+  // %-field never surfaces through the lowered Dirent surface itself).
+  //
+  // The line that stood here said "JSON.stringify of a Dirent would show
+  // it — the documented internal-shape edge", and it was prose the code
+  // had drifted from in both directions. The STATIC JSON writer reads
+  // declaredOrder and never showed it; what DID show it was every surface
+  // on the other side of the dyn boundary, which the note did not mention
+  // and which nobody was looking at because the note read like the state
+  // of affairs. Both sides answer Node exactly now: the field is an
+  // INTERNAL SLOT (internalSlotFields), it travels in ScrDyn's slot table
+  // rather than its member table, and node keeps the same cell under
+  // Symbol(type). @types/node declares Dirent<Name> generic over
   // the name's encoding — only the string instantiation maps (the
   // encoding:'buffer' readdir form has no lowering); the shipped fallback
   // declares it concrete (an interface; @types/node uses a class — both
