@@ -8762,6 +8762,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5450-typeof-the-cjs-module-globals-in-an-es-module.ts": {
+   "order": [
+    "<repo>/tests/corpus/5450-typeof-the-cjs-module-globals-in-an-es-module.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5451-typeof-the-cjs-module-globals-in-a-commonjs-module.cjs": {
+   "order": [
+    "<repo>/tests/corpus/5451-typeof-the-cjs-module-globals-in-a-commonjs-module.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
