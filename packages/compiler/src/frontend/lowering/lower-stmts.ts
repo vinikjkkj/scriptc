@@ -5246,6 +5246,61 @@ function switchDiscAtBridgedLocal(L: Lowerer, stmt: ts.SwitchStatement, disc: Ir
    *   the chain's final else reproduces that as long as its body exits or
    *   is last).
    * Case bodies share ONE lexical scope, exactly like the real switch. */
+/** THE NON-ALLOCATING CASE TEST — `estado-encswitch.md` §8.4, built.
+ *
+ * §8.4 records that `unionEq` against a literal ALLOCATES: the plain side
+ * wraps into the union, so every `disc === "lit"` emits
+ * `scr_union_new_ref(...)` plus a `scr_union_release(...)` around the
+ * `sc_ue_N` call. It also records that this is not the widened switch's
+ * fault — a hand-written `u === "skmsg"` on a `string | undefined` local
+ * emits the same three lines today — but that the widened switch now puts
+ * FOUR of them on zapo's inbound `<enc>` path, where the un-widened
+ * program had four `scr_str_eq` against static literals. It named the
+ * cheaper lowering and left it unbuilt:
+ *
+ *     unionIsTag(disc, arm) && strEq(unionNarrow(disc, arm), lit)
+ *
+ * The tag test PROVES the arm, which is exactly the condition a bare
+ * `unionNarrow` is documented to require ("inside a switch on `->tag` the
+ * compiler wrote, after a `unionIsTag` it wrote"), so the payload comes
+ * out without a box and the compare is the same `scr_str_eq` against the
+ * same static literal the primitive switch emitted. `&&` short-circuits,
+ * so a value carrying another tag never reaches the narrow.
+ *
+ * The discriminant is re-emitted twice more, which `lowerUnionSwitch` has
+ * already asserted is safe (`pureReemittable(disc)` is a refusal above —
+ * the chain re-reads it at EVERY test as it is).
+ *
+ * Scalar literal tests only. A unit literal already takes
+ * `lowerUnitComparison` one line down; anything else is a value whose
+ * identity `unionEq` compares, and identity is what §8.4's own
+ * `m.get("k") === p` paragraph says must not be approximated.
+ *
+ * `SCRIPTC_CASEEQ_OFF=1` restores the allocating form, so one binary
+ * emits both sides. */
+function unionCaseLiteralTest(L: Lowerer, disc: IrExpr, test: IrExpr, loc: SrcLoc): IrExpr | null {
+  if (process.env["SCRIPTC_CASEEQ_OFF"] === "1") return null;
+  if (disc.type.kind !== "union") return null;
+  if (test.kind !== "strLit" && test.kind !== "numLit" && test.kind !== "boolLit") return null;
+  const t = test.type;
+  if (t.kind !== "string" && t.kind !== "f64" && t.kind !== "bool") return null;
+  const tag = L.armTag(disc.type.unionId, t);
+  if (tag < 0) return null;
+  if (!pureReemittable(disc)) return null;
+  const payload: IrExpr = { kind: "unionNarrow", unionId: disc.type.unionId, tag, value: disc, type: t, loc };
+  const eq: IrExpr = t.kind === "string"
+    ? { kind: "strEq", negated: false, left: payload, right: test, type: BOOL, loc }
+    : { kind: "bin", op: "===", left: payload, right: test, type: BOOL, loc };
+  return {
+    kind: "logical",
+    op: "&&",
+    left: { kind: "unionIsTag", unionId: disc.type.unionId, tag, negated: false, value: disc, type: BOOL, loc },
+    right: eq,
+    type: BOOL,
+    loc,
+  };
+}
+
   export function lowerUnionSwitch(L: Lowerer, stmt: ts.SwitchStatement, disc: IrExpr): IrStmt {
     const loc = locOf(stmt);
     if (disc.type.kind !== "union") throw new Error("lowerer bug: non-union disc");
@@ -5310,7 +5365,10 @@ function switchDiscAtBridgedLocal(L: Lowerer, stmt: ts.SwitchStatement, disc: Ir
               ? L.lowerUnitComparison(disc, test, false, locOf(clause.expression))
               : null;
           pendingTests.push(
-            unitTest ?? {
+            unitTest ??
+            // §8.4's non-allocating form; the allocating one below is
+            // what `SCRIPTC_CASEEQ_OFF=1` restores.
+            unionCaseLiteralTest(L, disc, test, locOf(clause.expression)) ?? {
               kind: "unionEq",
               unionId: unionType.unionId,
               negated: false,
