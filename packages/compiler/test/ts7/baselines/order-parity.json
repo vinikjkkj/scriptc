@@ -8930,6 +8930,34 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5790-a-prototype-default-is-not-an-own-key-after-a-checked-cast/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/5790-a-prototype-default-is-not-an-own-key-after-a-checked-cast/msg.js",
+    "<repo>/tests/corpus/5790-a-prototype-default-is-not-an-own-key-after-a-checked-cast/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5791-an-own-undefined-key-survives-the-crossing-and-a-write-creates-one/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/5791-an-own-undefined-key-survives-the-crossing-and-a-write-creates-one/src.js",
+    "<repo>/tests/corpus/5791-an-own-undefined-key-survives-the-crossing-and-a-write-creates-one/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5792-a-required-member-the-source-only-inherited-is-not-an-own-key/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/5792-a-required-member-the-source-only-inherited-is-not-an-own-key/long.js",
+    "<repo>/tests/corpus/5792-a-required-member-the-source-only-inherited-is-not-an-own-key/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5793-an-inherited-member-survives-a-crossing-into-an-unknown-slot/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/5793-an-inherited-member-survives-a-crossing-into-an-unknown-slot/msg.js",
+    "<repo>/tests/corpus/5793-an-inherited-member-survives-a-crossing-into-an-unknown-slot/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
