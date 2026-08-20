@@ -77,6 +77,11 @@ const SHAPES = new Set([
   "tuple.arity",
   "record.kind",
   "record.field",
+  // A record field declaredOrder OMITS is an INTERNAL SLOT (fs.Dirent's
+  // %dtype, StringDecoder's %pending): it is not a key, so its refusal is
+  // its own census row rather than a record.field with a private name in
+  // the path.
+  "record.slot",
   "union.nomatch",
   "func.kind",
   "func.noadapt",
