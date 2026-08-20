@@ -368,6 +368,20 @@ if (!file) {
   process.exit(2);
 }
 const raw = readFileSync(file, "latin1");
+// ------------------------------------------------------------ 0. the lane
+// The release default is the LLVM lane (index.ts emits the .ll first and
+// falls back to C only on an LlvmUnsupportedError tier refusal), so a C-only
+// reader can be aimed at an .ll by accident.  Say so, loudly, instead of
+// running the C tables over IR and exiting through this tool's own failure
+// path with a pile of unclassified rows -- that reads exactly like a
+// compiler regression and is really a wrong-lane instrument.
+if ((raw.match(/^(?:declare|define) /gm) ?? []).length > 0 && (raw.match(/^#include /gm) ?? []).length === 0) {
+  console.error(`structural-aborts: ${file} is an LLVM translation unit (the default lane's .ll), and this reader is C-only.`);
+  console.error("  It requires `if (!X) { scr_trap(...) }` with the allocation on the PREVIOUS line, and a `default:`\n  switch arm with contiguous case labels.  The .ll calls ONE shared @sc_oom / @sc_bad_tag and the\n  allocation and the switch are several instructions away, so the anatomy this pass checks is not\n  present in the IR in that form.");
+  console.error("  scripts/tu-census.mjs reads BOTH lanes; use it for the category counts.");
+  process.exit(4);
+}
+
 const a = analyse(raw);
 const byFam = new Map();
 for (const r of a.rows) byFam.set(r.family, (byFam.get(r.family) ?? 0) + 1);

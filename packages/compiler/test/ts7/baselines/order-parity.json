@@ -8810,6 +8810,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5510-a-census-population-on-untaken-paths.js": {
+   "order": [
+    "<repo>/tests/corpus/5510-a-census-population-on-untaken-paths.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
