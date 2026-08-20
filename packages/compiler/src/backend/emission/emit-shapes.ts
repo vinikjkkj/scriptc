@@ -4,8 +4,8 @@
  * constructors. Everything here is driven by the class graph (ClassMeta,
  * VtSlot) the emitter builds up front; emission ORDER is part of the C. */
 import type { CEmitter } from "./emitter.js";
-import type { IrFunction } from "../../ir/nodes.js";
-import { IrClassDef, IrType, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, funcOf, isRefCounted, mapOf, STRING } from "../../ir/nodes.js";
+import type { IrFunction, OwnMaskShape } from "../../ir/nodes.js";
+import { IrClassDef, IrType, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, funcOf, isRefCounted, mapOf, ownMaskBytes, ownMaskKeyBit, STRING } from "../../ir/nodes.js";
 import { mangleClassGcFree, mangleClassNew, mangleClassRelease, mangleClassReleaseDirect, mangleClassRetain, mangleClassStruct, mangleClassTrace, mangleCtorThunk, mangleField, mangleFunction, mangleRecordGcFree, mangleRecordNew, mangleRecordRelease, mangleRecordRetain, mangleRecordStruct, mangleRecordTrace, mangleVtAdapter, mangleVtInstance, mangleVtStruct } from "../mangle.js";
 import { arrayElemIsRef, boxKindC, cDecl, cType, elemKindC, mapValKindC, rcAdapters, releaseCallC, vAdapters } from "./emit-types.js";
 
@@ -22,6 +22,57 @@ export const OVERFLOW_MEMBER = "sc_ovf";
  * zero it), which is exactly "this record carries no toString" and is the
  * case where Object.prototype.toString's constant IS Node's answer. */
 export const TOSTR_MEMBER = "sc_tostr";
+
+/** The HIDDEN per-instance OWN-KEY mask's C member name on shapes that
+ * armed it (IrRecordShape.ownmask) — `1 + ceil(nfields/8)` bytes laid out
+ * LAST, after the declared fields, the overflow map and the toString slot,
+ * so no existing member's offset moves. Byte 0 is the VALIDITY flag and
+ * field `i` owns bit `1 << (i & 7)` of byte `1 + (i >> 3)`.
+ *
+ * calloc / scr_cyc_alloc zero it, so a fresh record reads "no mask", which
+ * is exactly right for every record NOT materialised out of a dynamic
+ * value: its own keys really are its shape's, answered by the undefined-arm
+ * rule every surface already uses. A dynCheck builder stamps byte 0 and the
+ * own bits it observed through scr_dyn_obj_own_data, and from there the
+ * enumeration surfaces answer the SOURCE object's own keys instead of the
+ * struct's declared field list. It is not refcounted and not traced (plain
+ * bytes), so it appears in neither rcMembers nor the trace body. */
+export const OWNMASK_MEMBER = "sc_own";
+
+/** The C condition under which field `fieldName` of `shape` is one of the
+ * receiver's OWN keys — the single question Object.keys, JSON.stringify,
+ * the record→dyn walker and Object.hasOwn all ask, spelled once so they
+ * cannot drift apart. `utag` is the field's undefined-arm tag, or -1.
+ * Null means "unconditionally present" (nothing to emit).
+ *
+ * On an UNARMED shape this is exactly today's rule — the undefined arm is
+ * the presence signal — so a shape no dynCheck materialises emits the same
+ * bytes it always has. On an ARMED shape the mask's VALIDITY byte chooses:
+ * an instance a crossing wrote answers from the bits it observed on the
+ * source object, and every other instance (a literal, a width copy, a
+ * fresh record) falls through to the same undefined-arm rule. */
+export function ownPresentCondC(
+  shape: OwnMaskShape,
+  fieldName: string,
+  recv: string,
+  utag: number,
+  dropUndefined: boolean,
+): string | null {
+  const armTest = utag >= 0 ? `${recv}->${mangleField(fieldName)}->tag != ${utag}` : null;
+  // INTERNAL SLOTS take no bit — ownMaskKeyBit carries the whole argument,
+  // and it is the one question the builder, this condition, the write side
+  // and the record→dyn walker all ask.
+  const bit = ownMaskKeyBit(shape, fieldName);
+  if (!bit) return armTest;
+  const m = `${recv}->${OWNMASK_MEMBER}`;
+  const ownTest = `(${m}[0] ? ((${m}[${bit.byte}] & ${bit.bit}) != 0) : (${armTest ?? "true"}))`;
+  if (!dropUndefined) return ownTest;
+  // JSON.stringify drops an undefined-VALUED property even when it is the
+  // object's own — `JSON.stringify({a: undefined})` is `{}` — so the two
+  // tests are a conjunction here and the mask alone is not enough.
+  const ownOnly = `(${m}[0] ? ((${m}[${bit.byte}] & ${bit.bit}) != 0) : true)`;
+  return armTest === null ? ownOnly : `((${armTest}) && ${ownOnly})`;
+}
 
 /** True when the class descends from a runtime stream class: its struct
  * embeds the FULL ScrStream prefix (registry, display name, state
@@ -97,6 +148,10 @@ export interface ClassMeta {
        * new/release/trace. Class shapes never carry it (a class keeps its
        * own methods; only MATERIALIZING into a record loses them). */
       tostr?: true;
+      /** Records that armed the hidden own-key mask: one more trailing
+       * plain-byte member (`ownMaskBytes`), carried by neither the RC
+       * members nor the trace. */
+      ownmask?: true;
       comment: string;
       /** Class shapes only; hierarchy members get the vtable machinery. */
       meta: ClassMeta | null;
@@ -129,6 +184,7 @@ export interface ClassMeta {
         fields: rec.fields,
         ...(rec.indexValue ? { indexValue: rec.indexValue } : {}),
         ...(rec.tostr ? { tostr: true as const } : {}),
+        ...(rec.ownmask ? { ownmask: true as const } : {}),
         comment: `record ${rec.id} { ${rec.fields.map((f) => f.name).join("; ")}${rec.indexValue ? "; [key: string]" : ""} }`,
         meta: null,
       })),
@@ -213,6 +269,11 @@ export interface ClassMeta {
       }
       if (s.tostr) {
         out.push(`  ScrClosure *${TOSTR_MEMBER}; /* hidden per-instance toString slot (NULL = the constant) */`);
+      }
+      if (s.ownmask) {
+        out.push(
+          `  uint8_t ${OWNMASK_MEMBER}[${ownMaskBytes(s)}]; /* hidden per-instance own-key mask ([0] = valid) */`,
+        );
       }
       out.push(`};`);
     }

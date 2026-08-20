@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals } from "../emission/emit-stmts.js";
 import { mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
@@ -107,6 +107,8 @@ import {
   mapValKindNum,
   releaseSym,
   retainSym,
+  emitOwnPresentLl,
+  ownMaskSlotIndex,
   toStrSlotIndex,
   traceAdapter,
   traceArg,
@@ -3939,6 +3941,23 @@ class LlEmitter {
         } else {
           this.storeField(ptr, type, v.name);
         }
+        // A WRITE creates an own property — JS's [[Set]], and the reason a
+        // crossing's mask can only ever gain bits (emit-stmts.ts's twin).
+        if (s.kind === "recordSet") {
+          const shape = this.recordsById.get(s.shapeId);
+          const bit = shape ? ownMaskKeyBit(shape, s.field) : null;
+          if (bit && shape) {
+            const mp = B.tmp();
+            B.line(
+              `${mp} = getelementptr inbounds %${mangleRecordStruct(shape.id)}, ptr ${obj.name}, i64 0, i32 ${ownMaskSlotIndex(shape)}, i64 ${bit.byte} ; a write is an own key`,
+            );
+            const mv = B.tmp();
+            B.line(`${mv} = load i8, ptr ${mp}`);
+            const mo = B.tmp();
+            B.line(`${mo} = or i8 ${mv}, ${bit.bit}`);
+            B.line(`store i8 ${mo}, ptr ${mp}`);
+          }
+        }
         break;
       }
       case "recordKeyDelete": {
@@ -5246,6 +5265,19 @@ class LlEmitter {
         const v = this.loadField(ptr, type);
         if (isRefCounted(e.type)) return this.own({ name: this.retainValue(v, e.type), type: e.type });
         return { name: v, type: e.type };
+      }
+      case "recordKeyPresent": {
+        // The own-key question, one spelling (emitOwnPresentLl). Unarmed
+        // shapes emit exactly the undefined-arm tag test this node
+        // replaced; armed ones let the instance's mask answer.
+        const obj = this.emitExpr(e.obj);
+        const shape = this.recordsById.get(e.shapeId);
+        if (!shape) throw new Error(`llvm emitter bug: recordKeyPresent of unknown shape ${e.shapeId}`);
+        const f = shape.fields.find((x) => x.name === e.field);
+        if (!f) throw new Error(`llvm emitter bug: recordKeyPresent of unknown field ${e.shapeId}.${e.field}`);
+        const r = emitOwnPresentLl(B, shape, e.field, obj.name, this.undefinedArmTag(f.type), false);
+        if (r === null) return { name: "true", type: e.type };
+        return { name: r, type: e.type };
       }
       case "recordOvfKeys": {
         // The overflow map's live keys in JS own-key order — a fresh

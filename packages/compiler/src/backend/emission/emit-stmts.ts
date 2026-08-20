@@ -5,9 +5,9 @@
 import type { CEmitter, ScopeEntry } from "./emitter.js";
 import type { IrFunction } from "../../ir/nodes.js";
 import { mangleField, mangleGlobal, mangleLocal, mangleRawParam } from "../mangle.js";
-import { BOOL, CAUGHT, IrExpr, IrStmt, RUNTIME_ERROR_CLASSES, isRefCounted } from "../../ir/nodes.js";
+import { BOOL, CAUGHT, IrExpr, IrStmt, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
 import { boxAccess, cDecl, cStringLiteral, elemAccess, vAdapters } from "./emit-types.js";
-import { OVERFLOW_MEMBER } from "./emit-shapes.js";
+import { OVERFLOW_MEMBER, OWNMASK_MEMBER } from "./emit-shapes.js";
 
 
 
@@ -496,6 +496,21 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
           E.releaseValue(old, v.type);
         } else {
           E.line(`${field} = ${v.name};${E.srcComment(s.loc)}`);
+        }
+        // A WRITE creates an own property — JS's [[Set]], and the reason a
+        // crossing's mask can only ever gain bits. Without this, a member
+        // the source object merely inherited and the program then ASSIGNED
+        // would keep answering "not my key" to Object.keys. Ignored on
+        // instances whose mask was never written (byte 0 is zero), so a
+        // record built any other way is unaffected.
+        if (s.kind === "recordSet") {
+          const shape = E.recordsById.get(s.shapeId);
+          const bit = shape ? ownMaskKeyBit(shape, s.field) : null;
+          if (bit) {
+            E.line(
+              `${obj.name}->${OWNMASK_MEMBER}[${bit.byte}] |= ${bit.bit}; /* a write is an own key */`,
+            );
+          }
         }
         break;
       }

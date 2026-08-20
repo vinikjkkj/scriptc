@@ -53,7 +53,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { armDiscrimLits, arrayOf, BOOL, canAdaptDynFuncTo, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { armDiscrimLits, arrayOf, BOOL, internalSlotFields, canAdaptDynFuncTo, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -2545,6 +2545,10 @@ export class Lowerer {
         }
       }
     }
+    // Every shape a dynCheck MATERIALISES arms its hidden own-key mask —
+    // after the whole walk, so the answer does not depend on whether the
+    // cast was lowered before or after the surface that enumerates it.
+    if (this.diags.length === 0) this.armOwnMasks(functions, artifacts.records);
     const module: IrModule | null =
       this.diags.length > 0
         ? null
@@ -2571,6 +2575,161 @@ export class Lowerer {
       ...(this.npmBuiltins ? { npmBuiltins: this.npmBuiltins } : {}),
       ...(this.npmLazyTraps ? { npmLazyTraps: this.npmLazyTraps } : {}),
     };
+  }
+
+  /** Every presence guard an own-key SURFACE wrote while lowering, with
+   * the closure that re-spells it once arming is known.
+   *
+   * Object.keys, Object.values/entries and Object.hasOwn all guard a
+   * record's members on the undefined arm — the key exists exactly when
+   * the arm is not undefined — and that rule is right for every record
+   * this program BUILDS and wrong for every record it MATERIALISES out of
+   * a dynamic value. Which of the two a shape is cannot be known at the
+   * surface (armOwnMasks decides after the whole walk, so the answer does
+   * not depend on declaration order), so the surface registers its guard
+   * here and armOwnMasks installs `recordKeyPresent` in place of the tag
+   * test for the shapes that armed. A shape that did not arm keeps the
+   * exact node it had: same IR, same emitted code, same bytes. */
+  readonly ownKeyGuards: {
+    shapeId: string;
+    field: string;
+    obj: IrExpr;
+    loc: SrcLoc;
+    install: (present: IrExpr) => void;
+  }[] = [];
+
+  /** Register one own-key presence guard (see ownKeyGuards). */
+  noteOwnKeyGuard(
+    shapeId: string,
+    field: string,
+    obj: IrExpr,
+    loc: SrcLoc,
+    install: (present: IrExpr) => void,
+  ): void {
+    this.ownKeyGuards.push({ shapeId, field, obj, loc, install });
+  }
+
+  /** Arm the hidden OWN-KEY MASK (IrRecordShape.ownmask) on every record
+   * shape this module MATERIALISES out of a dynamic value.
+   *
+   * The compiler already knew this set: it is exactly what SC6002's `dyn`
+   * risk is computed from (exprKeyRisk's dynCheck arm), and until now the
+   * only thing done with the knowledge was to PRINT it — an advice at the
+   * enumeration site while the wrong key list shipped underneath it. The
+   * shape is the thing that has to change, so the walk collects shapes
+   * rather than sites.
+   *
+   * AFTER lowering, over the finished function list, for three reasons:
+   *
+   *   - order-independence. Arming at the dynCheck lowering would make the
+   *     answer depend on whether the cast was lowered before or after the
+   *     enumeration that reads it, which is a property of the source file's
+   *     declaration order and of nothing else.
+   *   - completeness. dynCheck nodes are built in a dozen lowerings
+   *     (casts, dyn arms, keyed reads, npm boundaries); one walk over the
+   *     IR sees all of them and cannot miss a new one.
+   *   - additivity. A shape reached by NO dynCheck keeps its exact
+   *     layout, so every program that does not cross this boundary emits
+   *     the byte-identical C it emitted before.
+   *
+   * EVERY non-tuple shape with a visible field arms, not only the ones
+   * carrying an optional (undefined-armed) member. The first cut of this
+   * gate asked for a presence-bearing field, on the reasoning that a
+   * REQUIRED member always exists so a mask could not change its answer —
+   * and that is false, measured on the shape this board cares about most:
+   *
+   *     interface Long { low: number; high: number; unsigned: boolean }
+   *     L.prototype.high = 0; L.prototype.unsigned = false;   // protobufjs
+   *     Object.keys(mk(7) as Long)   Node: low     scriptc: high+low+unsigned
+   *
+   * A required member the source object merely INHERITED is not one of its
+   * own keys, and the cast still succeeds because the [[Get]] finds it.
+   * TUPLES are never armed (positional arity, no key set), and neither is
+   * a shape whose only members are INTERNAL SLOTS (internalSlotFields —
+   * the fields declaredOrder omits, not the fields spelled with a '%'). A
+   * union target
+   * arms every record arm: a checked cast to a union materialises exactly
+   * one arm, and any of them may be it. */
+  armOwnMasks(functions: IrFunction[], records: IrRecordShape[]): void {
+    const byId = new Map(records.map((r) => [r.id, r]));
+    const armed = new Set<string>();
+    const maskable = (shape: IrRecordShape): boolean =>
+      shape.tuple !== true &&
+      shape.fields.length > internalSlotFields(shape).length;
+    // Everything the BUILDER recurses into, because everything it recurses
+    // into is materialised by the same builder out of the same dynamic
+    // tree. A record's FIELDS are the arm that matters most and the one
+    // the first cut missed: zapo's top-level message keys came out right
+    // and `message.protocolMessage` still listed all 108 of its own,
+    // because the nested shape was reached only as a field type and never
+    // armed. `seenT` keeps a self-referential shape from recursing
+    // forever; the depth bound is a second belt.
+    const seenT = new Set<string>();
+    const armType = (t: IrType, depth: number): void => {
+      if (depth > 64) return;
+      if (t.kind === "record") {
+        const sh = byId.get(t.shapeId);
+        if (!sh) return;
+        if (seenT.has(sh.id)) return;
+        seenT.add(sh.id);
+        if (maskable(sh)) armed.add(sh.id);
+        for (const f of sh.fields) armType(f.type, depth + 1);
+        if (sh.indexValue) armType(sh.indexValue, depth + 1);
+        return;
+      }
+      if (t.kind === "union") {
+        for (const a of this.unions.get(t.unionId)?.arms ?? []) armType(a, depth + 1);
+        return;
+      }
+      // A dynCheck to `T[]` builds every ELEMENT through the same record
+      // builder, so an array (or a nested array) of records arms them too.
+      if (t.kind === "array") armType(t.elem, depth + 1);
+    };
+    const seen = new Set<object>();
+    const walk = (n: unknown): void => {
+      if (n === null || typeof n !== "object") return;
+      if (seen.has(n)) return;
+      seen.add(n);
+      if (Array.isArray(n)) {
+        for (const x of n) walk(x);
+        return;
+      }
+      const o = n as Record<string, unknown>;
+      if (o["kind"] === "dynCheck") {
+        const t = o["type"];
+        if (t !== null && typeof t === "object") armType(t as IrType, 0);
+      }
+      for (const v of Object.values(o)) walk(v);
+    };
+    walk(functions);
+    walk(this.globalsList);
+    if (process.env["SCRIPTC_OWNMASK_WHY"] !== undefined) {
+      for (const r of records) {
+        console.error(
+          `[ownmask] ${r.id} fields=${r.fields.length} maskable=${maskable(r) ? "Y" : "n"} armed=${armed.has(r.id) ? "Y" : "n"}`,
+        );
+      }
+    }
+    for (const r of records) if (armed.has(r.id)) r.ownmask = true;
+    // Re-spell every registered presence guard over an ARMED shape: the
+    // undefined-arm tag test becomes the own-key question, which is the
+    // same test on an instance no crossing wrote and the SOURCE object's
+    // own-key set on one a crossing did.
+    for (const g of this.ownKeyGuards) {
+      if (!armed.has(g.shapeId)) continue;
+      // An INTERNAL SLOT is not a key, so its guard keeps the tag test —
+      // ownMaskKeyBit's rule, asked here in the frontend's spelling.
+      const gShape = byId.get(g.shapeId);
+      if (gShape && internalSlotFields(gShape).includes(g.field)) continue;
+      g.install({
+        kind: "recordKeyPresent",
+        obj: g.obj,
+        shapeId: g.shapeId,
+        field: g.field,
+        type: BOOL,
+        loc: g.loc,
+      });
+    }
   }
 
   /** The unregistered-class type sweep (run()'s last step before the
@@ -2974,7 +3133,7 @@ export class Lowerer {
         if (sh.fields.filter((f) => !f.name.startsWith("%")).length < 2) continue;
         return {
           why: "dyn",
-          detail: `a checked cast materialises ${id} out of a dynamic value, whose own keys and their order are a run-time fact no struct carries`,
+          detail: `a checked cast materialises ${id} out of a dynamic value, whose key ORDER is a run-time fact no struct carries`,
         };
       }
       return null;

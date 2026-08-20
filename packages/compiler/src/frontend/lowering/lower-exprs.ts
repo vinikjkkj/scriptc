@@ -9477,8 +9477,55 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
               `spread of '${f.name}' over an earlier contributor whose evaluation is observable (the desugar keeps one entry per name — give '${f.name}' one contributor, or move the spread first)`,
             );
           }
+          const slot = at >= 0 ? at : fields.length;
           if (at >= 0) fields[at] = { name: f.name, value };
           else fields.push({ name: f.name, value });
+          // Object.keys's row, in the copy: a SOURCE record materialised
+          // out of a dynamic value contributes only the members that were
+          // the source object's OWN keys — a prototype-carried default is
+          // not one, and JS's spread does not copy it. The entry becomes
+          // `present ? <the copied value> : undefined`, and the undefined
+          // arm is what every key surface then reads as absent.
+          //
+          // Installed after the whole walk (armOwnMasks), and only for a
+          // shape that armed, so an ordinary record spread emits the
+          // identical IR it always has. The value is re-checked at install
+          // time because a LATER contributor for the same name may have
+          // replaced this entry in the meantime.
+          // ... and only over a source the ternary may READ TWICE. The
+          // desugar already re-reads the source once per field; the
+          // own-key test adds a second read of the same expression, which
+          // is free for a name and a lie for anything that computes. The
+          // purity discipline is this file's own (`in`, the statically
+          // decided folds): a plain read, or nothing.
+          const pureSrc =
+            obj.kind === "varRef" || obj.kind === "recordGet" || obj.kind === "fieldGet";
+          if (pureSrc && obj.type.kind === "record" && targetType.kind === "union") {
+            const tUndef = L.armTag(targetType.unionId, UNDEFINED_T);
+            const tUnion = targetType;
+            if (tUndef >= 0) {
+              const mine = value;
+              L.noteOwnKeyGuard(srcType.shapeId, f.name, obj, locOf(prop), (present) => {
+                const entry = fields[slot];
+                if (!entry || entry.name !== f.name || entry.value !== mine) return;
+                entry.value = {
+                  kind: "ternary",
+                  cond: present,
+                  then: mine,
+                  else_: {
+                    kind: "unionWrap",
+                    unionId: tUnion.unionId,
+                    tag: tUndef,
+                    value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: locOf(prop) },
+                    type: tUnion,
+                    loc: locOf(prop),
+                  },
+                  type: tUnion,
+                  loc: locOf(prop),
+                };
+              });
+            }
+          }
         }
         continue;
       }

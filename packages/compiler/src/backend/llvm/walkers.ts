@@ -16,7 +16,7 @@ import type { IrRecordShape, IrType, IrUnionDef } from "../../ir/nodes.js";
 import { isRefCounted, typeKey } from "../../ir/nodes.js";
 import { mangleRecordStruct } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
-import { llFieldType, releaseSym, traceAdapter, type ShapeHost } from "./shapes.js";
+import { emitOwnPresentLl, llFieldType, releaseSym, traceAdapter, type ShapeHost } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 
 /** What the walkers need from the emitter beyond the shape tables: union
@@ -258,8 +258,12 @@ export class LlWalkers {
     }
     const byName = new Map(shape.fields.map((f) => [f.name, f]));
     const emitFields = order.map((n) => byName.get(n)).filter((f) => f !== undefined);
+    // An ARMED shape is droppable by construction: any member can turn out
+    // not to have been the source object's own key (emit-walkers.ts's row).
     const droppable =
-      emitFields.some((f) => this.host.undefinedArmTag(f.type) >= 0) || !!shape.indexValue;
+      emitFields.some((f) => this.host.undefinedArmTag(f.type) >= 0) ||
+      !!shape.indexValue ||
+      shape.ownmask === true;
     this.putc(B, "%b", "123"); // '{'
     if (!droppable) {
       emitFields.forEach((f, i) => {
@@ -288,14 +292,16 @@ export class LlWalkers {
         const utag = this.host.undefinedArmTag(f.type);
         const v = this.loadField(B, "%v", shapeId, fieldIndex.get(f.name)!, f.type);
         let skip: string | null = null;
-        if (utag >= 0) {
-          // Undefined-valued field: dropped, like Node.
-          const tag = this.unionTag(B, v);
-          const isu = B.tmp();
-          B.line(`${isu} = icmp eq i32 ${tag}, ${utag}`);
+        // Not an OWN key of the value: dropped, like Node. On an unarmed
+        // shape this is the undefined-arm test alone, unchanged; on an
+        // armed one it is `own AND not undefined` (JSON drops an
+        // undefined-VALUED own property too — `JSON.stringify({a:
+        // undefined})` is `{}`).
+        const present = emitOwnPresentLl(B, shape, f.name, "%v", utag, true);
+        if (present !== null) {
           const lw = B.newLabel("jwf.w");
           skip = B.newLabel("jwf.s");
-          B.condBr(isu, skip, lw);
+          B.condBr(present, lw, skip);
           B.startBlock(lw);
         }
         comma();
