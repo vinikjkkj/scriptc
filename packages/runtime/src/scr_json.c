@@ -502,8 +502,8 @@ void scr_dyn_trace_v(void *o, ScrTraceVisit visit, void *ctx) {
 
 /* Teardown for the collector: releases exactly the complement of the trace
  * — never an array element, an object member value, a proto link, the
- * hidden table or a FUNC's closure, all of which the collector has already
- * accounted for. Buffers and malloc'd keys are this function's, because
+ * hidden table, the INTERNAL-SLOT table or a FUNC's closure, all of which
+ * the collector has already accounted for. Buffers and malloc'd keys are this function's, because
  * they are not references at all. */
 static void scr_dyn_gcfree(void *o) {
   ScrDyn *d = (ScrDyn *)o;
