@@ -391,6 +391,60 @@ const FUNCTION_VALUED_GLOBALS: ReadonlySet<string> = new Set([
   "Buffer",
 ]);
 
+/** The five CommonJS module globals. Node defines these as MODULE-SCOPE
+ * bindings of a CommonJS module — never in an ES module (where a read is
+ * a ReferenceError), and never as properties of `globalThis` in either
+ * module kind. The standard library declares them ambiently all the same
+ * (`declare var require: NodeRequire`), so a shape-only reading of the
+ * declaration — which is all stdlibGlobalTypeOfAnswer has — answers
+ * "function"/"object"/"string" for every one of them everywhere, and a
+ * vendored bundle's `typeof require === "function"` sniff then takes the
+ * CommonJS branch inside an ES module, at exit 0, with no diagnostic.
+ * Measured against Node v25.9.0, both spellings, both module kinds. */
+const CJS_MODULE_GLOBALS: ReadonlySet<string> = new Set([
+  "require",
+  "module",
+  "exports",
+  "__dirname",
+  "__filename",
+]);
+
+/** Node's `typeof` answer for one of the CommonJS module globals, or null
+ * when this operand is not one of them (the ordinary declaration-shaped
+ * fold takes over).
+ *
+ * Two facts, both measured rather than reasoned from the declaration:
+ *   - `typeof globalThis.require` is "undefined" in a CommonJS module too
+ *     — the binding is module-scoped, so it is not a property of the
+ *     global object in EITHER module kind;
+ *   - the bare spelling answers "undefined" in an ES module, and keeps
+ *     its declaration-shaped answer in a CommonJS one.
+ *
+ * A LOCAL ALIAS (`const require = globalThis.require`, registered in
+ * stdlibGlobalAliases) is deliberately left alone: its value is whatever
+ * the right-hand side produced, which is not the module global, and the
+ * existing fold's answer for it is not this rule's to change. */
+function cjsModuleGlobalTypeOfAnswer(L: Lowerer, operand: ts.Expression): string | null {
+  let peeled = operand;
+  for (;;) {
+    if (ts.isParenthesizedExpression(peeled)) peeled = peeled.expression;
+    else if (ts.isAsExpression(peeled) || ts.isSatisfiesExpression(peeled) || ts.isNonNullExpression(peeled)) {
+      peeled = peeled.expression;
+    } else break;
+  }
+  if (ts.isPropertyAccessExpression(peeled)) {
+    const g = stdlibGlobalNameOf(L, peeled);
+    // `globalThis.require` / `global.__dirname`: never a property of the
+    // global object, in either module kind.
+    return g !== null && CJS_MODULE_GLOBALS.has(g) ? "undefined" : null;
+  }
+  if (!ts.isIdentifier(peeled) || !CJS_MODULE_GLOBALS.has(peeled.text)) return null;
+  if (!L.isStdlibGlobal(peeled, peeled.text)) return null;
+  const sym = L.checker.getSymbolAtLocation(peeled);
+  if (sym !== undefined && L.stdlibGlobalAliases.has(sym)) return null;
+  return isNodeEsmFile(peeled.getSourceFile()) ? "undefined" : null;
+}
+
 export function stdlibGlobalTypeOfAnswer(L: Lowerer, canonical: string, t: ts.Type): string | null {
   if (
     FUNCTION_VALUED_GLOBALS.has(canonical) ||
@@ -917,6 +971,13 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // two stay in step. Shadowing locals have non-stdlib symbols and keep
       // the ordinary path.
       {
+        // The CommonJS module globals first: their answer depends on the
+        // MODULE KIND and on the spelling, neither of which the declared
+        // type carries. In an ES module Node defines none of them, and
+        // none of them is ever a property of globalThis — so the ambient
+        // declaration's shape is the wrong fact to read there.
+        const cjs = cjsModuleGlobalTypeOfAnswer(L, expr.expression);
+        if (cjs !== null) return { kind: "strLit", value: cjs, type: STRING, loc };
         const g = stdlibGlobalNameOf(L, expr.expression);
         if (g !== null) {
           const answer = stdlibGlobalTypeOfAnswer(L, g, L.typeOf(expr.expression));
