@@ -8600,6 +8600,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5240-websocket-close-releases-its-socket.ts": {
+   "order": [
+    "<repo>/tests/corpus/5240-websocket-close-releases-its-socket.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5241-websocket-close-held-open-still-drains.ts": {
+   "order": [
+    "<repo>/tests/corpus/5241-websocket-close-held-open-still-drains.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5242-websocket-server-initiated-close-flushes.ts": {
+   "order": [
+    "<repo>/tests/corpus/5242-websocket-server-initiated-close-flushes.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/525-map-rc-stress.ts": {
    "order": [
     "<repo>/tests/corpus/525-map-rc-stress.ts"

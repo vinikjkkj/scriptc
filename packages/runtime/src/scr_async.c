@@ -1913,6 +1913,42 @@ void scr_loop_set_stream(bool (*pending)(void), void (*dispatch)(void)) {
  * microtask checkpoints between macrotasks). */
 bool scr_loop_has_ready(void) { return scr_ready_len > 0; }
 
+#ifdef SCR_LOOP_WHY
+/* The registry of unit describers (see scr_runtime.h). Eight is more slots
+ * than there are units with a pending predicate. */
+#define SCR_LOOP_WHY_SLOTS 8
+static const char *scr_why_names[SCR_LOOP_WHY_SLOTS];
+static size_t (*scr_why_fns[SCR_LOOP_WHY_SLOTS])(char *buf, size_t cap);
+static size_t scr_why_n = 0;
+void scr_loop_why_register(const char *name, size_t (*describe)(char *buf, size_t cap)) {
+  if (scr_why_n >= SCR_LOOP_WHY_SLOTS) return;
+  scr_why_names[scr_why_n] = name;
+  scr_why_fns[scr_why_n] = describe;
+  scr_why_n++;
+}
+/* One line every SCR_LOOP_WHY_MS while the loop is alive and idle. The
+ * first report is immediate so a program that hangs at once still says so. */
+#define SCR_LOOP_WHY_MS 2000.0
+static double scr_why_last = -1e18;
+static void scr_loop_why_report(bool kids, bool io, bool events, bool net, bool dgram, bool watch) {
+  double now = scr_now_ms();
+  if (now - scr_why_last < SCR_LOOP_WHY_MS) return;
+  scr_why_last = now;
+  fprintf(stderr, "[LOOPWHY] timers=%zu immediates=%zu kids=%d io=%d events=%d net=%d dgram=%d watch=%d",
+          scr_reffed_timers, scr_reffed_immediates, kids ? 1 : 0, io ? 1 : 0,
+          events ? 1 : 0, net ? 1 : 0, dgram ? 1 : 0, watch ? 1 : 0);
+  for (size_t i = 0; i < scr_why_n; i++) {
+    char buf[512];
+    size_t n = scr_why_fns[i](buf, sizeof buf - 1);
+    if (n >= sizeof buf) n = sizeof buf - 1;
+    buf[n] = 0;
+    fprintf(stderr, " | %s: %s", scr_why_names[i], buf);
+  }
+  fputc('\n', stderr);
+  fflush(stderr);
+}
+#endif
+
 bool scr_loop_run(ScrPromise *top_level) {
   /* The FIRST checkpoint after the synchronous main body runs promise
    * jobs BEFORE the first tick drain: Node's main-module evaluation is
@@ -2070,6 +2106,9 @@ bool scr_loop_run(ScrPromise *top_level) {
      * while the loop runs (kids drives the sweeps and sleeps above) but
      * only reffed ones keep the process alive. */
     if (scr_reffed_timers == 0 && scr_reffed_immediates == 0 && !scr_children_reffed_pending() && !io && !events && !net && !dgram && !watch) break;
+#ifdef SCR_LOOP_WHY
+    scr_loop_why_report(kids, io, events, net, dgram, watch);
+#endif
     /* Sleep to the earliest deadline, then run every due timer (each may
      * enqueue microtasks, which the next iteration drains first). Who
      * sleeps depends on what is pending:

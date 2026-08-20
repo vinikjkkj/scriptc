@@ -109,6 +109,31 @@ static void wsc_on_close(void *u, uint16_t code, const uint8_t *reason, size_t r
   ScrWsClient *c = u;
   c->ready = SCR_WS_CLOSED;
   if (c->cb.on_close) c->cb.on_close(c->user, code, reason, rlen);
+  /* THE CONNECTION IS OVER, SO THE TCP SOCKET IS OURS TO GIVE BACK.
+   *
+   * Node closes it here (undici ends the socket the moment the closing
+   * handshake completes), and until this line scriptc did not: the
+   * transport merely stopped READING. That is invisible while the
+   * program still holds the WebSocket object -- the native reader is
+   * still attached, so the peer's FIN arrives, scr_net_sock_eof runs and
+   * the fd closes on its own. It is fatal the moment the object becomes
+   * unreachable at the close event (zapo's transport nulls its field
+   * there): the record is freed, scr_net_sock_clear_native_reader leaves
+   * the socket with NO consumer, consumer-driven read arming disarms the
+   * read -- and the FIN that would have closed the fd is never observed.
+   * The fd sits in CLOSE_WAIT, the socket never leaves scr_net_socks,
+   * scr_net_pending() answers true forever and a program whose main()
+   * RETURNED never comes back. Measured on zapo: the two sockets the
+   * transport raced, both in CLOSE_WAIT, on a run whose main() had
+   * returned and whose driver reported the socket closed wasClean.
+   *
+   * destroy_SOON, not destroy: our own close frame may still be in the
+   * write buffer at this instant (a server-initiated close is answered
+   * from inside this very callback), and an immediate close would
+   * truncate it. destroy_soon flushes, sends the FIN, and tears down as
+   * soon as the buffer drains -- socket.end() followed by destroy, which
+   * is what the peer sees from Node. */
+  if (c->sock != NULL) scr_net_sock_destroy_soon(c->sock);
 }
 
 static void wsc_on_error(void *u, const char *msg) {

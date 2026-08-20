@@ -5523,6 +5523,18 @@ double scr_now_ms(void); /* the loop's monotonic clock, in ms */
  * Returns true when a default/listener-crashing unhandled rejection
  * already selected and reported exit status 1. */
 bool scr_loop_run(ScrPromise *top_level);
+/* SCR_LOOP_WHY (a build define, reached through SCRIPTC_PROF_CFLAGS):
+ * names what is keeping the loop alive. A program whose main() RETURNS but
+ * whose process never comes back has a live handle nobody can see, and
+ * every driver that ends in process.exit() hides it, because _Exit skips
+ * the RC audit and every atexit. With the define on, the loop prints one
+ * throttled line naming every liveness predicate that is TRUE, plus what
+ * each registered unit says about its own registry. Units register a
+ * describe callback that writes at most cap bytes and returns the length.
+ * WITHOUT the define not one byte of this exists - the RC-audit contract. */
+#ifdef SCR_LOOP_WHY
+void scr_loop_why_register(const char *name, size_t (*describe)(char *buf, size_t cap));
+#endif
 /* External I/O hook, polled at loop quiescence like the child registry:
  * `pending` keeps the loop alive; `poll` makes progress and may SLEEP up
  * to max_wait_ms (on real fds — socket readiness wakes it early), so the
