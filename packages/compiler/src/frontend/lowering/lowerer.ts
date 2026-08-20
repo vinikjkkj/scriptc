@@ -2921,7 +2921,7 @@ export class Lowerer {
    * puts its value at risk (a literal inside a function declared further
    * down, a width copy in a later module) - an eager test would miss
    * exactly the programs that make the answer wrong. */
-  readonly keyEnumUses: { ref: string | null; risk: { why: "set" | "order" | "dyn"; detail: string } | null; loc: SrcLoc; surface: string }[] = [];
+  readonly keyEnumUses: { ref: string | null; risk: { why: "set" | "order" | "dyn"; detail: string } | null; loc: SrcLoc; surface: string; crossing?: boolean }[] = [];
 
   keyRiskLocKey(loc: SrcLoc): string {
     return `${loc.file}@${loc.start}`;
@@ -2980,7 +2980,31 @@ export class Lowerer {
       return null;
     }
     if (e.kind === "call") return this.keyRiskHelpers.get(e.callee) ?? null;
-    if (e.kind === "recordLit") return this.keyRiskLiterals.get(this.keyRiskLocKey(e.loc)) ?? null;
+    if (e.kind === "recordLit") {
+      const own = this.keyRiskLiterals.get(this.keyRiskLocKey(e.loc));
+      if (own) return own;
+      // A risky record NESTED in a literal is the same wrong value one
+      // level in: `{ v: w }` crossing to dyn materialises w's key list too.
+      for (const f of e.fields) {
+        const r = this.exprKeyRisk(f.value);
+        if (r) return r;
+      }
+      return null;
+    }
+    if (e.kind === "arrayLit" || e.kind === "dynArrLit") {
+      for (const el of e.elems) {
+        const r = this.exprKeyRisk(el);
+        if (r) return r;
+      }
+      return null;
+    }
+    if (e.kind === "dynFrom") return this.exprKeyRisk(e.value);
+    // An element read out of an array whose OWN construction the walk can
+    // point at (`const a = [w]; f(a[0])`): the array carries its elements'
+    // risk, so the read carries it too. A read out of a PARAMETER or a
+    // field stays null - that is the "name the site or say nothing" rule,
+    // and it is why the widened half was silent to begin with.
+    if (e.kind === "arrayGet") return this.exprKeyRisk(e.arr);
     if (e.kind === "varRef") return this.keyRiskValues.get(this.keyRiskKey(e.localId)) ?? null;
     return null;
   }
@@ -3005,6 +3029,49 @@ export class Lowerer {
     if (r) this.keyEnumUses.push({ ref: null, risk: r, loc, surface });
   }
 
+  /** THE CROSSING IS AN ENUMERATION. A record widening into an
+   * 'unknown'/'object' slot does not stay a struct: the static->dyn
+   * conversion (toDynHelper) walks the shape and INSERTS each key into a
+   * fresh dyn object, in `declaredOrder`, right there. So the key list -
+   * set and order both - is materialised at the crossing, and from that
+   * point every read of the dyn value observes it: Object.keys, for-in,
+   * getOwnPropertyNames, entries/values, JSON, Object.assign, spread, and
+   * console.log's own printer. The value's own reads are no longer
+   * findable by the walk (that is what widening means), so the last place
+   * this can be said at all is HERE.
+   *
+   * Measured, not assumed: on a generated population of 480 cells the
+   * SC1090 that refuses `Object.keys(w)` written directly stops at this
+   * boundary, and eight widened boundaries x seven surfaces answered a
+   * wrong order at exit 0 in silence, on both backends.
+   *
+   * Skipped inside a PROBE (diagSink redirected): a speculative lowering
+   * whose path is then not taken would otherwise refuse a program for a
+   * crossing it never performs. The cost is the other direction - a
+   * crossing only ever lowered speculatively goes unreported - and that
+   * is the safe direction for a refusal. */
+  noteKeyCrossingToDyn(value: IrExpr): void {
+    // SCRIPTC_KEYCROSS_WHY prints EVERY static->dyn crossing this hook
+    // sees, probe-skipped ones included, so a crossing the hook never
+    // reaches can be told apart from one it reaches and clears.
+    if (process.env["SCRIPTC_KEYCROSS_WHY"] !== undefined) {
+      console.error(`[keycross] ${value.loc.file}@${value.loc.start} kind=${value.kind} type=${value.type.kind} probe=${this.diagSink ? "Y" : "n"}`);
+    }
+    if (this.diagSink) return;
+    // COMPOSITE, not top-level. `const a: object[] = [w]` lowers the array
+    // as ONE value and crosses it whole - the to-dyn walker recurses into
+    // the record elements and materialises each one's key list there. The
+    // first population run missed all 28 of those cells because this test
+    // was `value.type.kind === "record"`; exprKeyRisk walks the literal
+    // instead, so a risky record nested in an array or a record is seen.
+    if (value.kind === "varRef") {
+      this.keyEnumUses.push({ ref: this.keyRiskKey(value.localId), risk: null, loc: value.loc, surface: "", crossing: true });
+      return;
+    }
+    const r = this.exprKeyRisk(value);
+    if (r) this.keyEnumUses.push({ ref: null, risk: r, loc: value.loc, surface: "", crossing: true });
+  }
+
   /** run()'s deferred decision: enumerating a value the walk proved wrong
    * is REFUSED rather than answered wrongly. SCRIPTC_KEYRISK_WHY prints the
    * whole join instead of only the matches, so a program that is CLEAR can
@@ -3015,11 +3082,32 @@ export class Lowerer {
       const risk = u.risk ?? (u.ref === null ? null : this.keyRiskValues.get(u.ref) ?? null);
       if (why) {
         console.error(
-          `[keyrisk] ${u.loc.file}@${u.loc.start} ${u.surface} ${u.ref ?? "-"} ` +
+          `[keyrisk] ${u.loc.file}@${u.loc.start} ${u.crossing ? "CROSSING" : u.surface} ${u.ref ?? "-"} ` +
             (risk ? `RISK-${risk.why} ${risk.detail}` : "ok"),
         );
       }
       if (!risk) continue;
+      if (u.crossing) {
+        // The same split as an enumeration: a cast whose source order the
+        // compiler cannot see is POSSIBLY wrong and advises; the other two
+        // halves are provably wrong at the construction site and refuse.
+        if (risk.why === "dyn") {
+          this.pushAdvice(keyOrderFromDynamicDiag("widening into an 'unknown'/'object' slot", risk.detail, u.loc));
+          continue;
+        }
+        this.pushDiag(
+          unsupportedDiag(
+            "SC1090",
+            u.loc,
+            `widening a record into an 'unknown'/'object' slot when this program does not build it the way its shape enumerates ` +
+              (risk.why === "set"
+                ? "(the crossing materialises the key list, and a width copy already ended the keys the narrower shape does not name)"
+                : "(the crossing materialises the key list in shape-declared order, and the dyn value's order is observable from there - Object.keys, for-in, JSON, console.log)"),
+            `${risk.detail} - build the value the way the shape enumerates it, or keep it at its own type instead of widening it`,
+          ),
+        );
+        continue;
+      }
       // The "dyn" half is ADVICE, not a refusal, and the reason is measured:
       // refusing it refuses `JSON.parse(s) as T` followed by
       // `JSON.stringify(t)` - seven of the first fifteen corpus programs
@@ -4533,6 +4621,7 @@ export class Lowerer {
         return { kind: "dynFrom", value: expr, type: DYN, loc: expr.loc };
       }
       if (expr.kind === "unitLit" || this.dynConvertible(expr.type)) {
+        this.noteKeyCrossingToDyn(expr);
         return { kind: "dynFrom", value: expr, type: DYN, loc: expr.loc };
       }
       // An error-HIERARCHY object (builtin subclass or user `extends
