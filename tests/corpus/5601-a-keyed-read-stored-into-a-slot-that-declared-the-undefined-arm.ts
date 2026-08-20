@@ -22,15 +22,22 @@
 //
 // WHY THIS DESTINATION HAD TO EARN IT. recordKeyReadAtUndefinedArm refuses
 // declarations, assignments and property writes on purpose, and the reason
-// is exact: tsc narrows `string | undefined` away AFTER an assignment, so
-// a read on the statements that follow lowers to an UNCHECKED unionNarrow
-// and a stored undefined becomes a silent wrong value — worse than the
-// abort it replaced. That hazard is a property of the READS, not of
-// assignment, so it is now checked instead of assumed: every reference to
-// the assigned binding inside its enclosing function is asked what the
-// checker believes AT THAT OCCURRENCE, and one read that has lost the
-// undefined arm declines the whole assignment. Deliberately conservative —
-// one narrowed read anywhere, in any branch, and the loud abort stays.
+// it gave was exact and STALE: that tsc narrows `string | undefined` away
+// AFTER an assignment, so a read on the statements that follow lowers to
+// an UNCHECKED unionNarrow and a stored undefined becomes a silent wrong
+// value. It does not, and has not since `733f4db9` made every
+// checker-driven narrowing go through `checkedArmBridge` ->
+// `narrowedArmHelper`, which emits `if (unionIsTag) throw new TypeError`
+// BEFORE the payload peek.
+//
+// When this fixture was written the rung carried an OCCURRENCE GATE on
+// that ground: every reference to the assigned binding was asked what the
+// checker believed AT THAT OCCURRENCE, and one read that had lost the
+// undefined arm declined the whole assignment. `block/assignarm` retired
+// the gate and gave each consumer the answer its unit arm has —
+// `tests/corpus/5730` is that fixture and names the five rungs. The
+// controls below are kept exactly as they were: their rows all supply the
+// key, so their ANSWERS do not move. What moved is the reason.
 //
 // Every `r0*` miss row below ABORTS the process on base.
 //
@@ -66,12 +73,13 @@ console.log("r03", firstEnc([
 ]))
 
 // -------------------------------------------------------- CONTROLS
-// WHAT THE GATE COSTS, stated as programs rather than as a claim: tsc
+// WHAT THE GATE COST, stated as programs rather than as a claim (it is
+// retired now; 5730 runs every shape below on an ABSENT key): tsc
 // narrows an assignment to the declared type filtered by the type of the
 // value assigned, so the very NEXT read of `v` after `v = attrs.v` is
 // already spelled `string` — even when that read is `v === undefined` or
 // `v ?? d`, whose whole point is the arm the narrow just removed. Every
-// shape below therefore DECLINES, and a miss in any of them still aborts.
+// shape below therefore DECLINED, and a miss in any of them aborted.
 // The rung fires only where the checker itself still admits `undefined` at
 // every read, which is what zapo's own spelling gives it: the store sits
 // under `if (firstEncType === undefined)` inside a loop, so the back edge
