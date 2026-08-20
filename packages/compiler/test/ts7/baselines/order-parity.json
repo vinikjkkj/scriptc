@@ -8828,6 +8828,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5630-a-write-through-a-value-taken-out-of-a-container.ts": {
+   "order": [
+    "<repo>/tests/corpus/5630-a-write-through-a-value-taken-out-of-a-container.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
