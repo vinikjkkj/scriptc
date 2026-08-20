@@ -403,6 +403,12 @@ if (isLl) {
   const CODED_LL = /call void @scr_throw_error_msg_code\(i32 -?\d+, ptr ([^,)]+), i64 (\d+), ptr ([^,)]+)\)/g;
   const UNCODED_LL = /call void @scr_throw_error_msg\(i32 -?\d+, ptr ([^,)]+), i64 (\d+)\)/g;
   const TRAP_LL = /call void @scr_trap\(ptr ([^,)]+)\)/g;
+  // The C lane has a FORMATTED trap (scr_trap_fmt, the per-type keyed-read
+  // template) and the LLVM lane has never emitted one.  If it ever does, this
+  // reader would drop the whole family in silence, so say so instead.
+  if (lines.some((l) => !l.startsWith("declare ") && !l.startsWith("define ") && l.includes("@scr_trap_fmt("))) {
+    fail("this .ll calls @scr_trap_fmt, a family the LLVM reader does not classify (the C lane spells the keyed-read abort that way; the LLVM lane used to have one shared @sc_bad_key)");
+  }
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (l.length === 0 || l.startsWith("declare ") || l.startsWith("define ")) continue;

@@ -438,6 +438,19 @@ describe("the census cannot report a failure it did not understand as zero", () 
     expect(runCensus(mutant).rc, "an unresolvable message pointer passed as a classified row").not.toBe(0);
   });
 
+  test("a FAMILY the .ll reader does not know is not silence", () => {
+    // scr_trap_fmt is the C lane's formatted trap (the per-result-type
+    // keyed-read template) and the LLVM lane has never emitted one. If it ever
+    // grows one, the reader would drop the whole family without a word, so it
+    // checks for the symbol rather than trusting that it stays absent.
+    const src = readFileSync(TU.get("a4-abort:llvm")!, "latin1");
+    const mutant = join(LAB, "mutant-trapfmt.ll");
+    const site = "  call void @scr_trap(ptr @sc_oom_msg)";
+    expect(src, "no trap call to plant beside").toContain(site);
+    writeFileSync(mutant, src.replace(site, `  call void @scr_trap_fmt(ptr @sc_oom_msg)\n${site}`), "latin1");
+    expect(runCensus(mutant).rc, "an unhandled trap family passed as zero").not.toBe(0);
+  });
+
   test("an EMPTY .ll is not clean", () => {
     const empty = join(LAB, "empty.ll");
     writeFileSync(empty, "", "latin1");
