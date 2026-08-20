@@ -8810,6 +8810,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5570-a-lookup-table-read-whose-key-came-off-the-wire.ts": {
+   "order": [
+    "<repo>/tests/corpus/5570-a-lookup-table-read-whose-key-came-off-the-wire.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
