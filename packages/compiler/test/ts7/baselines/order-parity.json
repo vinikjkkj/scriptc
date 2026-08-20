@@ -8810,6 +8810,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5540-an-accessor-crosses-the-dynamic-boundary-only-once-it-has-been-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/5540-an-accessor-crosses-the-dynamic-boundary-only-once-it-has-been-read.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
@@ -9458,6 +9464,12 @@
   "<repo>/tests/diagnostics/accessors.ts": {
    "order": [
     "<repo>/tests/diagnostics/accessors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/an-accessor-carrying-shape-crossing-the-dynamic-boundary.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/an-accessor-carrying-shape-crossing-the-dynamic-boundary.ts"
    ],
    "diags": []
   },
