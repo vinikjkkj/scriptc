@@ -8828,6 +8828,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5600-an-enc-stanza-with-no-type-attribute-takes-the-default-arm.ts": {
+   "order": [
+    "<repo>/tests/corpus/5600-an-enc-stanza-with-no-type-attribute-takes-the-default-arm.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5601-a-keyed-read-stored-into-a-slot-that-declared-the-undefined-arm.ts": {
+   "order": [
+    "<repo>/tests/corpus/5601-a-keyed-read-stored-into-a-slot-that-declared-the-undefined-arm.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5602-an-async-enc-switch-whose-braced-cases-await.ts": {
+   "order": [
+    "<repo>/tests/corpus/5602-an-async-enc-switch-whose-braced-cases-await.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/5630-a-write-through-a-value-taken-out-of-a-container.ts": {
    "order": [
     "<repo>/tests/corpus/5630-a-write-through-a-value-taken-out-of-a-container.ts"
