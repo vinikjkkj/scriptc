@@ -493,7 +493,7 @@ const taggedDistinct = new Set(rows.filter((r) => r.cat === "REFUSAL.tagged").ma
 // lanes, and the reason this census prints both numbers.
 const bracketUnit = isLl ? taggedDistinct : taggedRows;
 if (bracketUnit !== oldTraps) {
-  fail(`bracket occurrences (${oldTraps}) != ${isLl ? `DISTINCT tagged messages (${taggedDistinct})` : `tagged coded throws (${taggedRows})`} - a [SCxxxx at ...] lives outside a fence throw, or a throw carries two`);
+  fail(`bracket occurrences (${oldTraps}) != ${isLl ? `DISTINCT tagged messages (${taggedDistinct})` : `tagged coded throws (${taggedRows})`} — a [SCxxxx at ...] lives outside a fence throw, or a throw carries two`);
 }
 
 // ------------------------------------------------------- 5. the call-site unit
