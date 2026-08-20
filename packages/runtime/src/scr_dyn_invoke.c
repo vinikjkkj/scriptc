@@ -106,10 +106,11 @@ static void dyn_str_buf(ScrJsonBuf *b, const ScrDyn *d, bool protocol) {
     if (protocol) {
       /* The whole ToString protocol, through the ONE runtime table:
        * an own or inherited callable `toString` first, the checked-
-       * dynamic tree's "%error" encoding (Error.prototype.toString)
+       * dynamic tree's error encoding (Error.prototype.toString,
+       * reached through its [[Prototype]] link like JS reaches it)
        * second, "[object Object]" last. Delegating rather than
        * repeating is why this copy cannot drift from scr_dyn_to_string
-       * — and the "%error" case that used to sit here, AHEAD of the
+       * — and the error case that used to sit here, AHEAD of the
        * protocol, was precisely such a drift. */
       ScrStr *s = scr_dyn_to_string(d, NULL);
       for (size_t i = 0; i < s->len; i++) scr_jb_putc(b, s->data[i]);
@@ -118,10 +119,9 @@ static void dyn_str_buf(ScrJsonBuf *b, const ScrDyn *d, bool protocol) {
     }
     /* Diagnostic: the constants, in the order the protocol would have
      * reached them had it been allowed to run. */
-    const ScrDyn *marker = scr_dyn_obj_get(d, "%error", 6);
-    if (marker) {
-      const ScrDyn *en = scr_dyn_obj_get(d, "name", 4);
-      const ScrDyn *em = scr_dyn_obj_get(d, "message", 7);
+    if (scr_dyn_is_error_encoding(d)) {
+      const ScrDyn *en = scr_dyn_err_read(d, "name", 4);
+      const ScrDyn *em = scr_dyn_err_read(d, "message", 7);
       const ScrStr *ens = (en && en->kind == SCR_DYN_STR) ? en->v.str : NULL;
       const ScrStr *ems = (em && em->kind == SCR_DYN_STR) ? em->v.str : NULL;
       if (ens) for (size_t i = 0; i < ens->len; i++) scr_jb_putc(b, ens->data[i]);

@@ -639,27 +639,20 @@ export class LlDyn {
       }
       case "object": {
         // %Error keeps the checked-dynamic tree's ERROR ENCODING, so it
-        // gets the reserved "%error" marker test rather than an interval —
-        // EXACTLY the test the dynCheck builder above performs, so match
-        // and check ask the same question and no arm matched here can fail
-        // to build. The C walker's arm. (Before the nested %Error leaf was
-        // admitted, classInterval("%Error") was unreachable and untested;
-        // a predicate that admits the leaf without this arm trades a fence
+        // gets scr_dyn_is_error_encoding rather than an interval — EXACTLY
+        // the test the dynCheck builder above performs, so match and check
+        // ask the same question and no arm matched here can fail to build.
+        // The C walker's arm, and now literally the same runtime call
+        // rather than the same open-coded key lookup written twice per
+        // lane. (Before the nested %Error leaf was admitted,
+        // classInterval("%Error") was unreachable and untested; a
+        // predicate that admits the leaf without this arm trades a fence
         // for an emitter crash.)
         if (t.className === "%Error") {
-          const fail = B.newLabel("dm.f");
-          const kd = this.kindOf(B, "%d");
-          const isObj = B.tmp();
-          B.line(`${isObj} = icmp eq i32 ${kd}, ${DK.OBJ}`);
-          const l0 = B.newLabel("dm.eo");
-          B.condBr(isObj, l0, fail);
-          B.startBlock(l0);
-          const marker = this.objGetLit(B, "%d", "%error");
+          this.host.declare(`declare zeroext i1 @scr_dyn_is_error_encoding(ptr)`);
           const has = B.tmp();
-          B.line(`${has} = icmp ne ptr ${marker}, null`);
+          B.line(`${has} = call zeroext i1 @scr_dyn_is_error_encoding(ptr %d)`);
           B.terminate(`ret i1 ${has}`);
-          B.startBlock(fail);
-          B.terminate(`ret i1 false`);
           break;
         }
         // "Is this dyn an instance of C?" — the same preorder-interval
@@ -1054,16 +1047,10 @@ export class LlDyn {
           B.terminate(`ret ptr ${r}`);
           break;
         }
-        const kd = this.kindOf(B, "%d");
-        const isObj = B.tmp();
-        B.line(`${isObj} = icmp eq i32 ${kd}, ${DK.OBJ}`);
-        const lObj = B.newLabel("dce.o");
-        const lFail = B.newLabel("dce.f");
-        B.condBr(isObj, lObj, lFail);
-        B.startBlock(lObj);
-        const marker = this.objGetLit(B, "%d", "%error");
+        host.declare(`declare zeroext i1 @scr_dyn_is_error_encoding(ptr)`);
         const hasMarker = B.tmp();
-        B.line(`${hasMarker} = icmp ne ptr ${marker}, null`);
+        B.line(`${hasMarker} = call zeroext i1 @scr_dyn_is_error_encoding(ptr %d)`);
+        const lFail = B.newLabel("dce.f");
         const lGo = B.newLabel("dce.g");
         B.condBr(hasMarker, lGo, lFail);
         B.startBlock(lFail);

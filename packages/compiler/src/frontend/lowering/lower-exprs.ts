@@ -14766,13 +14766,13 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     }
     const left = L.lowerExpr(expr.left);
     // `u instanceof Error` on an `unknown` value: the checked-dynamic tree's error encoding
-    // (the shape caughtToDyn builds for Error payloads — the reserved
-    // "%error" marker) answers the test, so a caught Error passed through
-    // an unknown slot narrows like Node (`error instanceof Error ?
-    // error.message : String(error)` — the LAN-monitor handler). ROOT
-    // only: the marker cannot honestly answer subclass prototype chains
-    // (name strings are user-writable), so `u instanceof TypeError` keeps
-    // the fence. Reads past the narrow bridge through maybeNarrow's
+    // (the shape caughtToDyn builds for Error payloads — a [[Prototype]]
+    // link to %Error.prototype%) answers the test, so a caught Error
+    // passed through an unknown slot narrows like Node (`error instanceof
+    // Error ? error.message : String(error)` — the LAN-monitor handler).
+    // ROOT only: the chain reaches the ERROR root, and the per-kind
+    // prototypes above it are not spellable, so `u instanceof TypeError`
+    // keeps its own route (dyn.errInstanceof, through the identity cache). Reads past the narrow bridge through maybeNarrow's
     // validated %Error extraction. SEMANTICS.md 67.
     if (left.type.kind === "dyn" && target.def.name === "%Error") {
       return { kind: "dynTest", test: "error", value: left, type: BOOL, loc };
@@ -14781,7 +14781,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     // dyn value: the from_error cache holds the checked-dynamic tree↔error identity edge,
     // so the runtime resolves the encoding back to its error and asks the
     // vtable's stamped interval — exact for every error that crossed the
-    // boundary (a hand-built {%error} literal answers false: subclass
+    // boundary (a hand-built error-shaped literal answers false: subclass
     // identity is unknowable there). User subclasses keep the fence.
     if (left.type.kind === "dyn" && RUNTIME_ERROR_CLASSES.has(target.def.name)) {
       const rec = RUNTIME_ERROR_CLASSES.get(target.def.name)!;
