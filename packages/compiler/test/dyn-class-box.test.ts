@@ -328,38 +328,57 @@ describe("an %Error leaf crosses nested, which is the shape the emit trampoline 
     expect(typeKey(err) < typeKey({ kind: "record", shapeId: "" })).toBe(true);
   });
 
-  test("both backends match an %Error by the MARKER, not by a class interval", async () => {
+  test("both backends match an %Error by the ENCODING PREDICATE, not by a class interval", async () => {
     const { c, ll } = await compileErrorLeaf();
     // C: the union ARM WALKER is where this question is asked now. The C
     // lane merged the match predicate into the checked builder — one
     // function that decides while it builds — so there is no separate
     // sc_dm_ for an arm to consult, and the assertion moved onto the
-    // walker that replaced it. What is pinned is unchanged: the MARKER,
-    // never a class interval, and a miss that is SOFT (the union tries the
-    // next arm) rather than a refusal.
+    // walker that replaced it. What is pinned is unchanged in substance:
+    // the ERROR ENCODING, never a class interval, and a miss that is SOFT
+    // (the union tries the next arm) rather than a refusal.
+    //
+    // The SPELLING changed, and that is the point of the rename in this
+    // test's title. It used to be `scr_dyn_obj_get(d, "%error", 6)` — a
+    // lookup of a compiler-reserved KEY, open-coded here, in the checked
+    // builder, and twice more in the LLVM lane. A key cannot answer the
+    // question in either direction: "%" is legal in a JS property name, so
+    // a user's own "%error" key passed the test, and the marker it looked
+    // for was an own ENUMERABLE property of every error the program could
+    // enumerate (Object.keys answered ["%error","name","message"] where
+    // Node answers []). One runtime predicate over the [[Prototype]] chain
+    // replaced all four copies, which is also why the two lanes below can
+    // be checked for the SAME symbol rather than for two spellings.
     const cm =
       /(sc_da_\d+)\(const ScrDyn \*d, const ScrDynPath \*path, bool \*ok\) \{ \/\* arm object:%Error \*\/\n([\s\S]*?)\n\}/.exec(
         c,
       );
     expect(cm, "no C arm walker for object:%Error — this test has gone blind").not.toBeNull();
-    expect(cm![2]).toContain(`scr_dyn_obj_get(d, "%error", 6)`);
+    expect(cm![2]).toContain(`scr_dyn_is_error_encoding(d)`);
+    expect(cm![2]).not.toContain(`"%error"`);
     expect(cm![2]).not.toContain("scr_dyn_objinst_is");
     expect(cm![2]).toContain("*ok = false");
-    // LLVM: same question, same answer, in its own spelling — and that lane
-    // now carries the SAME merged walker, so this half asks the arm walker
-    // too. Before the LLVM twin landed it read the sc_dm_ matcher, which is
-    // the shape the C lane had before ITS merge; the pin is unchanged.
+    // LLVM: same question, same answer, and now the same runtime call — and
+    // that lane carries the SAME merged walker, so this half asks the arm
+    // walker too. Before the LLVM twin landed it read the sc_dm_ matcher,
+    // which is the shape the C lane had before ITS merge; the pin is
+    // unchanged.
     const lm =
       /define internal ptr @sc_da_\d+\(ptr %d, ptr %path, ptr %ok\) #\d+ \{ ; arm object:%Error\n([\s\S]*?)\n\}/.exec(
         ll,
       );
     expect(lm, "no LLVM arm walker for object:%Error — this test has gone blind").not.toBeNull();
-    expect(lm![1]).toContain("@scr_dyn_obj_get");
+    expect(lm![1]).toContain("@scr_dyn_is_error_encoding");
     expect(lm![1]).not.toContain("scr_dyn_objinst_is");
     expect(lm![1]).toContain("store i1 false, ptr %ok");
     // And the C lane's CHECKED builder asks the identical question, in the
     // identical spelling, so a direct `u as Error` cannot disagree with an
     // arm about what an %Error is.
-    expect(c).toContain(`if (d->kind != SCR_DYN_OBJ || !scr_dyn_obj_get(d, "%error", 6))`);
+    expect(c).toContain(`if (!scr_dyn_is_error_encoding(d))`);
+    // Neither lane may reach for the reserved key ANYWHERE in an emitted
+    // unit: the emitted copies are what drifted from the runtime before,
+    // and one grep is what keeps a fifth copy from being added.
+    expect(c).not.toContain(`"%error"`);
+    expect(ll).not.toContain(`%error`);
   });
 });

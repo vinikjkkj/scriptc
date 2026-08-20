@@ -2856,21 +2856,85 @@ static void scr_errdyn_teardown(void) {
   scr_errdyn_n = scr_errdyn_cap = 0;
 }
 
+/* The per-KIND prototype (%TypeError.prototype% and friends) — declared
+ * here because the error encoding below is built before the singletons
+ * are defined. */
+static ScrDyn *scr_dyn_error_kind_prototype(int kind);
+
+/* Install one own NON-ENUMERABLE data property, taking the caller's +1 on
+ * the value (define_hidden_data borrows, and every caller here has a fresh
+ * node to hand over). */
+static void scr_err_hide(ScrDyn *d, const char *key, size_t key_len, ScrDyn *v) {
+  scr_dyn_obj_define_hidden_data(d, key, key_len, v, true, true);
+  scr_dyn_release(v);
+}
+
 ScrDyn *scr_dyn_from_error(const ScrError *e) {
   for (size_t i = 0; i < scr_errdyn_n; i++) {
     if (scr_errdyn_cache[i].err == e) return scr_dyn_retain(scr_errdyn_cache[i].dyn);
   }
+  /* NODE'S SHAPE, built out of machinery that was already here and that
+   * this encoding did not use: the %Error.prototype% chain, and the
+   * `hidden` table of own NON-ENUMERABLE properties.
+   *
+   * What it replaces is three ENUMERABLE members — a reserved "%error"
+   * marker plus `name` and `message` — sitting in `entries`, which is the
+   * one table Object.keys / getOwnPropertyNames / for-in / spread /
+   * Object.assign / Object.entries / JSON.stringify / structuredClone and
+   * the index-signature capture all read. `Object.keys(caught)` answered
+   * ["%error","name","message"] where Node answers [], `JSON.stringify`
+   * answered the marker, `"%error" in e` answered true, and the capture
+   * threw `expected string at $.%error, got boolean`. One encoding, ten
+   * wrong surfaces, all of them the same fact: a COMPILER-RESERVED key
+   * was an own enumerable property of a value the program can enumerate.
+   *
+   * Node's own shape is the fix, member for member:
+   *   [[Prototype]]  %<Kind>.prototype% -> %Error.prototype%
+   *   message        own, NON-ENUMERABLE (Node: own, non-enumerable)
+   *   name           on the PROTOTYPE unless it was ASSIGNED (below)
+   *   code           own ENUMERABLE — Node's system errors set it by
+   *                  assignment, so Object.keys(fsErr) DOES list it
+   *   stack          absent; compiled binaries carry no stack, which is
+   *                  the documented divergence Object.getOwnPropertyNames
+   *                  already fences on (scr_dyn_own_names_fence)
+   * and there is no marker at all: `instanceof Error`, the dynCheck and
+   * every other consumer ask scr_dyn_is_error_encoding, which reads the
+   * [[Prototype]] chain. That is also what makes a USER'S OWN "%error"
+   * key an ordinary property again — it used to be read as the compiler's
+   * marker, so `JSON.parse('{"%error":true}') instanceof Error` answered
+   * true and `String(...)` answered "Error: ...". */
   ScrDyn *d = scr_dyn_new_obj();
-  scr_dyn_obj_set(d, "%error", 6, scr_dyn_new_bool(true)); /* the checked-dynamic tree's error marker */
-  scr_dyn_obj_set(d, "name", 4, scr_dyn_new_str(e->name));
-  scr_dyn_obj_set(d, "message", 7, scr_dyn_new_str(e->message));
+  const int kind = scr_error_kind_of(e);
+  ScrDyn *proto = scr_dyn_error_kind_prototype(kind); /* +1 */
+  scr_dyn_obj_set_proto(d, proto);
+  scr_dyn_release(proto);
+  scr_err_hide(d, "message", 7, scr_dyn_new_str(e->message));
+  /* `name`, and WHERE it goes is the whole question. The kind's own name
+   * ("TypeError") is TypeError.prototype.name in Node — non-enumerable,
+   * inherited, invisible to Object.keys — and the per-kind prototype above
+   * already carries it. Anything ELSE was assigned (`e.name = "Custom"`),
+   * and an assignment in JS makes an own ENUMERABLE property that
+   * Object.keys DOES list. DOMException is the one exception: its name is
+   * a prototype GETTER in Node however far it is from the default, so
+   * `Object.keys(new DOMException(m, "NotFoundError"))` is still []. */
+  {
+    const char *canon = scr_error_kind_name(kind < 0 ? SCR_ERR_ERROR : kind);
+    const size_t cl = strlen(canon);
+    const bool assigned = e->name->len != cl || memcmp(e->name->data, canon, cl) != 0;
+    if (assigned) {
+      if (kind == SCR_ERR_DOMEX) scr_err_hide(d, "name", 4, scr_dyn_new_str(e->name));
+      else scr_dyn_obj_set(d, "name", 4, scr_dyn_new_str(e->name));
+    }
+  }
   if (e->code) scr_dyn_obj_set(d, "code", 4, scr_dyn_new_str(e->code));
   /* DOMException: `code` is the WebIDL legacy NUMBER (never the errno
-   * string slot), and the options form's cause crosses as itself. */
+   * string slot), and the options form's cause crosses as itself. Both are
+   * NON-ENUMERABLE in Node — `code` is a prototype getter and `cause` is
+   * what `new Error(m, { cause })` installs — so Object.keys is []. */
   if (e->vt == &scr_error_vts[SCR_ERR_DOMEX]) {
-    scr_dyn_obj_set(d, "code", 4, scr_dyn_new_num(scr_domex_code(( ScrError *)e)));
+    scr_err_hide(d, "code", 4, scr_dyn_new_num(scr_domex_code((ScrError *)e)));
     if (scr_domex_has_cause((ScrError *)e)) {
-      scr_dyn_obj_set(d, "cause", 5, scr_domex_cause((ScrError *)e));
+      scr_err_hide(d, "cause", 5, scr_domex_cause((ScrError *)e));
     }
   }
   if (scr_errdyn_n == scr_errdyn_cap) {
@@ -2895,16 +2959,32 @@ ScrDyn *scr_dyn_from_error(const ScrError *e) {
  * of scr_dyn_from_error, riding the same identity cache — a dyn error
  * that came from a runtime ScrError answers THAT instance (+1), so an
  * error crossing out and back compares reference-equal (the tracing
- * suite's shape); an alien %error object rebuilds a runtime error from
- * its name/message/code (the vtable kind resolves from the name so a
+ * suite's shape); an alien error-shaped object rebuilds a runtime error
+ * from its name/message/code (the vtable kind resolves from the name so a
  * later `instanceof TypeError` still answers) and ENTERS the cache, so
  * its next boxing answers the same dyn node. The dyn node is borrowed. */
+/* One own-or-inherited DATA read over an error-encoded dyn object, BORROW
+ * only (NULL when absent). The full [[Get]] would be +1 and could throw a
+ * getter's exception; every caller here is a diagnostic or a rebuild that
+ * holds no exception path, which is the same trade scr_dyn_obj_own_data
+ * and scr_dyn_proto_get already document. */
+const ScrDyn *scr_dyn_err_read(const ScrDyn *d, const char *key, size_t key_len) {
+  if (d == NULL || d->kind != SCR_DYN_OBJ) return NULL;
+  const ScrDyn *v = scr_dyn_obj_own_data(d, key, key_len);
+  return v != NULL ? v : scr_dyn_proto_get(d, key, key_len);
+}
+
 ScrError *scr_error_from_dyn(const ScrDyn *d) {
   ScrError *hit = scr_errdyn_err_of(d);
   if (hit) return hit;
-  const ScrDyn *en = scr_dyn_obj_get(d, "name", 4);
-  const ScrDyn *em = scr_dyn_obj_get(d, "message", 7);
-  const ScrDyn *ec = scr_dyn_obj_get(d, "code", 4);
+  /* name/message/code live wherever the encoding put them: an ASSIGNED
+   * name is an own enumerable member, the kind's name is on the
+   * prototype, and `message` is an own hidden one. own_data covers the
+   * first two tables and proto_get the chain — both borrow-only, which
+   * is what this function's contract can pay for. */
+  const ScrDyn *en = scr_dyn_err_read(d, "name", 4);
+  const ScrDyn *em = scr_dyn_err_read(d, "message", 7);
+  const ScrDyn *ec = scr_dyn_err_read(d, "code", 4);
   int k = SCR_ERR_ERROR;
   if (en && en->kind == SCR_DYN_STR) {
     const ScrStr *n = en->v.str;
@@ -2978,6 +3058,58 @@ static ScrDyn *scr_error_proto;
 static void scr_error_proto_teardown(void) {
   scr_dyn_release(scr_error_proto);
   scr_error_proto = NULL;
+}
+
+/* %TypeError.prototype% / %RangeError.prototype% / %SyntaxError.prototype%
+ * - one object per kind, each carrying its own NON-ENUMERABLE `name` and
+ * linked to %Error.prototype%. They exist for one reason: in Node the
+ * constructor's name is a property of the CONSTRUCTOR'S prototype, so
+ * `Object.hasOwn(new TypeError("x"), "name")` is FALSE and `e.name` is
+ * still "TypeError". Hanging the name on the instance would answer the
+ * second question right and the first one wrong.
+ *
+ * The other three kinds need none. SCR_ERR_ERROR's name IS
+ * %Error.prototype%'s; DOMException's DEFAULT name is "Error" too (WebIDL)
+ * and its resolved name is per-INSTANCE, so it rides an own hidden
+ * property; and a compiled `extends Error` subclass (kind -1) has no
+ * builtin name at all.
+ *
+ * Refcounts follow %Error.prototype%'s: one process reference each,
+ * dropped by an atexit registered ONCE, and each holds a reference to the
+ * base through its [[Prototype]] link - a tree, no cycle. The base is
+ * created first (this function asks for it), so its teardown is registered
+ * first and runs LAST. */
+static ScrDyn *scr_error_kind_proto[5];
+static bool scr_error_kind_proto_registered;
+
+static void scr_error_kind_proto_teardown(void) {
+  for (int i = 0; i < 5; i++) {
+    scr_dyn_release(scr_error_kind_proto[i]);
+    scr_error_kind_proto[i] = NULL;
+  }
+  scr_error_kind_proto_registered = false;
+}
+
+static ScrDyn *scr_dyn_error_kind_prototype(int kind) {
+  if (kind < SCR_ERR_TYPE || kind > SCR_ERR_SYNTAX) return scr_dyn_error_prototype();
+  if (scr_error_kind_proto[kind] == NULL) {
+    ScrDyn *p = scr_dyn_new_obj(); /* +1, the process's */
+    ScrDyn *base = scr_dyn_error_prototype(); /* +1 */
+    scr_dyn_obj_set_proto(p, base);
+    scr_dyn_release(base);
+    const char *nm = scr_error_kind_name(kind);
+    ScrStr *ns = scr_str_new(nm, strlen(nm));
+    ScrDyn *n = scr_dyn_new_str(ns); /* retains ns */
+    scr_str_release(ns);
+    scr_dyn_obj_define_hidden_data(p, "name", 4, n, true, true);
+    scr_dyn_release(n);
+    scr_error_kind_proto[kind] = p;
+    if (!scr_error_kind_proto_registered) {
+      scr_error_kind_proto_registered = true;
+      scr_atexit(scr_error_kind_proto_teardown);
+    }
+  }
+  return scr_dyn_retain(scr_error_kind_proto[kind]);
 }
 
 /* `Error.prototype.toString()` — ES's Error.prototype.toString, whole:
@@ -3079,27 +3211,41 @@ bool scr_dyn_error_proto_in_chain(const ScrDyn *d) {
   return false;
 }
 
+/* Is this dyn value the runtime's ERROR ENCODING? The one question every
+ * consumer used to open-code as `scr_dyn_obj_get(d, "%error", 6) != NULL`
+ * — in three runtime units and in emitted C and emitted LLVM from both
+ * backends.
+ *
+ * A reserved KEY could never answer it, and that is the defect rather
+ * than a detail of it: "%" is a legal first character of a JavaScript
+ * property name, so `JSON.parse('{"%error":true,"name":"Error"}')`
+ * satisfied the test and became an Error — `instanceof Error` true,
+ * `String(...)` "Error: ...", both silently wrong — while the marker
+ * itself was an own enumerable property of every real error the program
+ * could enumerate. The two halves are one fact seen from two sides.
+ *
+ * The [[Prototype]] chain answers it and cannot be spelled by accident:
+ * %Error.prototype% is a process SINGLETON compared by IDENTITY, so a
+ * hand-built `{ name: "Error" }` never reaches it however it is spelled.
+ * The walk starts at the PROTOTYPE, so %Error.prototype% itself answers
+ * false — Node's answer, since it is an ordinary object. */
+bool scr_dyn_is_error_encoding(const ScrDyn *d) {
+  return d != NULL && d->kind == SCR_DYN_OBJ &&
+         scr_dyn_error_proto_in_chain(d->v.obj.proto);
+}
+
 /* `v instanceof Error` over a checked-dynamic value — the ONE predicate
  * both backends call, so the C and LLVM lanes cannot answer differently
  * (the split estado-protochain.md §2e found the hard way).
  *
- * Three ways to be an Error here, and none is redundant:
- *   - the OWN "%error" marker: the encoding scr_dyn_from_error builds
- *     when a runtime ScrError crosses into the checked-dynamic tree;
- *   - %Error.prototype% on the [[Prototype]] chain: what a custom error
- *     type built by `Object.create(Error.prototype, …)` is, and the ONLY
- *     way `new CustomError(…) instanceof Error` can answer Node's true;
- *   - the engine's own answer for an island-held value.
- *
- * %Error.prototype% ITSELF answers false, exactly like Node's (it is an
- * ordinary object, not an Error instance) — which is why the chain walk
- * starts at the PROTOTYPE rather than at the value. */
+ * Two ways to be an Error here:
+ *   - the encoding above, which is %Error.prototype% on the [[Prototype]]
+ *     chain — the same thing a custom error type built by
+ *     `Object.create(Error.prototype, …)` is, so scr_dyn_from_error's
+ *     product and a user's custom error answer through ONE test;
+ *   - the engine's own answer for an island-held value. */
 bool scr_dyn_instanceof_error(const ScrDyn *d) {
-  if (d == NULL) return false;
-  if (d->kind == SCR_DYN_OBJ) {
-    if (scr_dyn_obj_get((ScrDyn *)d, "%error", 6) != NULL) return true;
-    if (scr_dyn_error_proto_in_chain(d->v.obj.proto)) return true;
-  }
+  if (scr_dyn_is_error_encoding(d)) return true;
   return scr_dyn_isl_is_error(d);
 }
 
@@ -3148,7 +3294,8 @@ void scr_errdyn_put(ScrError *e, ScrDyn *d) {
  * both; +1 result. */
 /* caps[0] = the SOURCE object the record was materialized from.  Its
  * ToString is scr_dyn_to_string's OBJ arm exactly -- the own-or-inherited
- * `toString` protocol, the %error shadow, the constant -- so the record
+ * `toString` protocol (Error.prototype's included, reached through the
+ * encoding's chain), the constant -- so the record
  * answers what the object it was copied from answers.
  *
  * The copy is what makes this necessary and also what bounds it: a record
@@ -3243,27 +3390,15 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
       }
       scr_dyn_release(r);
     }
-    /* No callable toString: Error.prototype.toString still shadows
-     * Object.prototype's, and the checked-dynamic tree spells a caught
-     * error as the reserved "%error" marker plus name/message. The
-     * emitted sc_ds walker and scr_dyn_display_buf BOTH render that form
-     * and this copy did not, so one caught error answered
-     * "TypeError: kaboom" through String(e) and "[object Object]"
-     * through e.toString() — the same value, two answers, decided by the
-     * spelling that reached it. Ordered AFTER the protocol above so a
-     * value carrying its own toString still wins, exactly as in JS. */
-    if (scr_dyn_obj_get(d, "%error", 6)) {
-      const ScrDyn *en = scr_dyn_obj_get(d, "name", 4);
-      const ScrDyn *em = scr_dyn_obj_get(d, "message", 7);
-      const ScrStr *ens = (en && en->kind == SCR_DYN_STR) ? en->v.str : NULL;
-      const ScrStr *ems = (em && em->kind == SCR_DYN_STR) ? em->v.str : NULL;
-      ScrJsonBuf eb;
-      scr_jb_init(&eb);
-      if (ens) for (size_t i = 0; i < ens->len; i++) scr_jb_putc(&eb, ens->data[i]);
-      if (ens && ens->len && ems && ems->len) scr_jb_puts(&eb, ": ");
-      if (ems) for (size_t i = 0; i < ems->len; i++) scr_jb_putc(&eb, ems->data[i]);
-      return scr_jb_finish(&eb);
-    }
+    /* No callable toString and no error encoding: "[object Object]".
+     *
+     * The special case that used to stand here — a reserved "%error"
+     * marker whose presence meant "render name: message" — is GONE, and
+     * the reason is that the protocol above now finds Error.prototype's
+     * OWN toString through the encoding's [[Prototype]] link, which is
+     * how JS reaches it too. A hand-built object carrying a "%error" key
+     * therefore renders "[object Object]" again, which is Node's answer;
+     * it used to render "Error: <its own name field>". */
     return scr_str_new("[object Object]", 15);
   }
   case SCR_DYN_HANDLE:

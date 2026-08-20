@@ -2608,12 +2608,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
                 : e.test === "error"
                   ? // `u instanceof Error`: the ONE runtime predicate, which
                     // both backends call so the two keyed lanes cannot
-                    // answer differently. Three ways to be an Error — the
-                    // reserved own "%error" marker (built by caughtToDyn
-                    // for Error payloads), a [[Prototype]] chain reaching
-                    // %Error.prototype% (a custom error type built by
-                    // Object.create(Error.prototype, …)), and a real engine
-                    // Error held by reference. Never throws.
+                    // answer differently. Two ways to be an Error — a
+                    // [[Prototype]] chain reaching %Error.prototype%, which
+                    // caughtToDyn's encoding and a custom error type built
+                    // by Object.create(Error.prototype, …) BOTH are, and a
+                    // real engine Error held by reference. Never throws.
                     `scr_dyn_instanceof_error(${d.name})`
                   : e.test === "array"
                     ? // Array.isArray: the checked-dynamic tree's array kind, or the engine's
@@ -6733,7 +6732,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_assert_iferror_bool(${arg(0)})`);
           case "assert.ifErrorDyn":
             // The checked-dynamic argument (test/common's mustSucceed):
-            // units pass quietly, %error-marked objects throw with the
+            // units pass quietly, error-encoded objects throw with the
             // error's message, everything else with the inspection.
             return finish(`scr_assert_iferror_dyn(${arg(0)})`);
           case "assert.refEqBytes":
