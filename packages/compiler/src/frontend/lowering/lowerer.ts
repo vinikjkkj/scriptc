@@ -4268,10 +4268,62 @@ export class Lowerer {
     // A read that can ALREADY answer a miss keeps its width.
     if (expr.type.kind === "union" && this.armTag(expr.type.unionId, UNDEFINED_T) >= 0) return null;
     const shape = this.shapes.get(expr.shapeId);
-    if (!shape?.indexValue) return null;
-    const effective = expr.overflowOnly === true ? { ...shape, fields: [] } : shape;
+    if (!this.keyedReadShapeOk(shape)) return null;
+    const effective = expr.overflowOnly === true ? { ...shape!, fields: [] } : shape!;
     if (!recordKeyResultOk(this, effective, DYN)) return null;
     return { ...expr, type: DYN };
+  }
+
+  /** THE SHAPE GATE FOR BOTH RUNGS, and why it is not `shape.indexValue`.
+   *
+   * Both rungs used to ask for an INDEX SIGNATURE, because both were written
+   * for `Record<string, T>`. The emitted helper's miss path does not care:
+   * `recordKeyGetHelper` compares the declared fields, consults the overflow
+   * map when there is one, and then TRAPS - on a signature-free shape it
+   * traps straight after the last comparison. So a signature-free record read
+   * with a RUNTIME key has the very same miss path, and it is a whole zapo
+   * idiom of its own - the lookup TABLE:
+   *
+   * ```ts
+   * const uploadPath = MEDIA_UPLOAD_PATHS[uploadType as keyof typeof MEDIA_UPLOAD_PATHS]
+   * if (!uploadPath) {
+   *     throw new Error(`unknown media upload type: ${String(uploadType)}`)
+   * }
+   * ```
+   *
+   * (`client/messaging/messages.ts:725`) and, with the key read OFF THE WIRE,
+   *
+   * ```ts
+   * const result = RETRY_PAYLOAD_ENC_TYPE_REVERSE[value as keyof typeof RETRY_PAYLOAD_ENC_TYPE_REVERSE]
+   * if (!result) {
+   *     throw new Error(`invalid retry encrypted encType code: ${value}`)
+   * }
+   * ```
+   *
+   * (`retry/codec.ts:80`; `value` is `readUint8(raw, offset, 'encType')` on a
+   * retry replay payload). THE AUTHOR WROTE THE GUARD. `as keyof typeof T` is
+   * an ASSERTION and not a proof - it is written exactly where membership is
+   * in doubt - so tsc's keyof check proves nothing there, and Node runs the
+   * author's line while scriptc aborted the process one line before it. That
+   * is the same sentence `keyedReadLocalAtUndefinedArm` already says about
+   * `resolveStore`, one shape over.
+   *
+   * Nothing else moves. Where the key IS proven (`RETRY_STATE_RANK[left]`
+   * with `left` a literal union naming every declared field) the read cannot
+   * miss, so the widened width answers the value it always did; and both
+   * rungs are only ever OFFERED at destinations whose readers were compiled
+   * against an undefined arm, which this does not change. A TUPLE keeps the
+   * array OOB policy, and a fieldless signature-free shape has nothing to
+   * surface.
+   *
+   * `SCRIPTC_TABLEARM_OFF=1` ablates the relaxation alone, so one binary can
+   * emit both sides. */
+  keyedReadShapeOk(shape: IrRecordShape | undefined): boolean {
+    if (shape === undefined) return false;
+    if (shape.indexValue !== undefined) return true;
+    if (process.env["SCRIPTC_TABLEARM_OFF"] === "1") return false;
+    if (shape.tuple === true) return false;
+    return shape.fields.length > 0;
   }
 
   /** The same read at an UNDEFINED-ARMED UNION destination. The helper's
@@ -4308,8 +4360,8 @@ export class Lowerer {
     if (expr.type.kind === "union" && this.armTag(expr.type.unionId, UNDEFINED_T) >= 0) return null;
     if (!typeEquals(this.stripUndefinedArm(expected), expr.type)) return null;
     const shape = this.shapes.get(expr.shapeId);
-    if (!shape?.indexValue) return null;
-    const effective = expr.overflowOnly === true ? { ...shape, fields: [] } : shape;
+    if (!this.keyedReadShapeOk(shape)) return null;
+    const effective = expr.overflowOnly === true ? { ...shape!, fields: [] } : shape!;
     if (!recordKeyResultOk(this, effective, expected)) return null;
     return { ...expr, type: expected };
   }
