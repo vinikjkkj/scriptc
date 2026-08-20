@@ -32,7 +32,7 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 import { loadProgram } from "../src/frontend/program.js";
 import { lowerToIr } from "../src/frontend/lowering/lowerer.js";
-import { ownMaskBit, ownMaskBytes, type IrFunction, type IrModule } from "../src/ir/nodes.js";
+import { ownMaskBit, ownMaskBytes, ownMaskKeyBit, type IrFunction, type IrModule } from "../src/ir/nodes.js";
 import { ownPresentCondC } from "../src/backend/emission/emit-shapes.js";
 import { emitOwnPresentLl } from "../src/backend/llvm/shapes.js";
 import { BlockBuilder } from "../src/backend/llvm/blocks.js";
@@ -204,26 +204,54 @@ console.log(show(parsed));
   expect(nodesOfKind(keys!.body, "recordKeyPresent").length).toBe(3);
 });
 
-/* -- '%'-fields are never masked --------------------------------------- */
+/* -- an INTERNAL SLOT is never masked; a '%'-SPELLED key is ------------- */
 
-test("an internal '%'-field is exempt from the mask on BOTH backends", () => {
-  // declaredOrder omits them, every key surface hides them, and the
-  // record→dyn walker carries them across on purpose so a
-  // record→dyn→record round trip keeps their data (Dirent's %dtype).
+test("an internal slot is exempt from the mask on BOTH backends", () => {
+  // declaredOrder omits an internal slot, every key surface hides it, and
+  // the record→dyn walker sends it to ScrDyn's slot table so a
+  // record→dyn→record round trip keeps its data (Dirent's %dtype).
   // Masking one would DELETE it on every crossing of a record a dynCheck
-  // built, because the builder never sets their bits either — found by
+  // built, because the builder never stamps its bit either — found by
   // reading the diff, not by a failing test, which is why it has one now.
   const shape = {
     id: "r0",
     ownmask: true as const,
+    declaredOrder: ["a"],
     fields: [{ name: "a" }, { name: "%dtype" }],
   };
-  const cCond = ownPresentCondC(shape, "%dtype", "v", -1, false);
-  expect(cCond).toBeNull();
+  expect(ownPresentCondC(shape, "%dtype", "v", -1, false)).toBeNull();
   expect(ownPresentCondC(shape, "a", "v", -1, false)).not.toBeNull();
   const B = new BlockBuilder();
   expect(emitOwnPresentLl(B as never, shape as never, "%dtype", "%v", -1, false)).toBeNull();
   expect(emitOwnPresentLl(B as never, shape as never, "a", "%v", -1, false)).not.toBeNull();
+});
+
+test("a user's own '%'-spelled KEY is masked like any other key", () => {
+  // The version of the test above that this replaces asked
+  // f.name.startsWith("%"), and it passed. It was wrong, and the merge
+  // with the internal-slot work is what showed it: '%' is a legal first
+  // character of a JavaScript property name, so a user's own
+  // { "%dtype": 7, name: "n" } IS in its shape's declaredOrder and IS an
+  // ordinary key. Exempting it by SPELLING left the builder never
+  // stamping its bit while the record→dyn walker masked the key anyway —
+  // which demotes it to the prototype on every crossing, silently, and
+  // only in the one namespace nobody would think to look at.
+  //
+  // internalFieldNamesOf is the distinction that already existed, and it
+  // is a per-SHAPE fact rather than a per-NAME one.
+  const own = {
+    id: "r1",
+    ownmask: true as const,
+    declaredOrder: ["%dtype", "name"],
+    fields: [{ name: "%dtype" }, { name: "name" }],
+  };
+  expect(ownPresentCondC(own, "%dtype", "v", -1, false)).not.toBeNull();
+  const B = new BlockBuilder();
+  expect(emitOwnPresentLl(B as never, own as never, "%dtype", "%v", -1, false)).not.toBeNull();
+  // The two shapes differ only in declaredOrder, and that is the whole
+  // difference — ownMaskKeyBit answers opposite ways for the same name.
+  expect(ownMaskKeyBit(own, "%dtype")).not.toBeNull();
+  expect(ownMaskKeyBit({ ...own, declaredOrder: ["name"] }, "%dtype")).toBeNull();
 });
 
 /* -- the layout, stated once ------------------------------------------- */
