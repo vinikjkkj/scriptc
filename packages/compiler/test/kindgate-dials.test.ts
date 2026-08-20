@@ -47,6 +47,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
 import { compile } from "../src/index.js";
+import { KINDGATE_WIDE_KINDS } from "../src/backend/kindgate.js";
 
 /* A record target with two declared fields, a second shape sharing one of
  * them, a TUPLE, an INDEX-SIGNATURE shape and a UNION carrying a record arm
@@ -284,5 +285,261 @@ describe("the record kind gate and its two control dials", () => {
     expect(wide).not.toBe(off);
     expect(match).not.toBe(off);
     expect(match).not.toBe(wide);
+  });
+});
+
+/* ─────────────────────────────────────────────────────────────────────
+ * THE LLVM TWIN.
+ *
+ * Everything above is the C lane. The dials were born there, while the
+ * LLVM lane still carried the matcher/builder PAIR and had no `soft`
+ * parameter to hang a hard/soft split on. It has one now — `88f8646e`
+ * merged the two walks on that lane too — so the split exists on both,
+ * and the whole point of `backend/kindgate.ts` is that it is written
+ * down ONCE.
+ *
+ * The last test in this block is the one that matters most for keeping
+ * that true: it does not check either lane against a remembered number,
+ * it checks the two lanes AGAINST EACH OTHER. Widen one and not the
+ * other and it goes red naming the side that moved.
+ * ───────────────────────────────────────────────────────────────────── */
+
+/** The .ll for the same program, in the same dial setting. */
+async function emitLl(d: Dials): Promise<string> {
+  dir ??= await mkdtemp(join(tmpdir(), "scriptc-kindgate-"));
+  const tag = `ll-${d.wide === true ? "w" : "n"}${d.match === true ? "m" : "n"}`;
+  const src = join(dir, `main-${tag}.ts`);
+  await writeFile(src, PROGRAM, "utf8");
+  const hadW = process.env["SCRIPTC_KINDGATE_WIDE"];
+  const hadM = process.env["SCRIPTC_KINDGATE_MATCH"];
+  if (d.wide === true) process.env["SCRIPTC_KINDGATE_WIDE"] = "1";
+  else delete process.env["SCRIPTC_KINDGATE_WIDE"];
+  if (d.match === true) process.env["SCRIPTC_KINDGATE_MATCH"] = "1";
+  else delete process.env["SCRIPTC_KINDGATE_MATCH"];
+  try {
+    const res = await compile(src, {
+      outPath: join(dir, `program-${tag}`),
+      outDir: dir,
+      backend: "llvm",
+    });
+    if (!res.ok) {
+      throw new Error(`the dial program left the LLVM tier: ${res.diagnostics[0]?.message ?? "?"}`);
+    }
+    return await readFile(res.cPath, "utf8");
+  } finally {
+    if (hadW === undefined) delete process.env["SCRIPTC_KINDGATE_WIDE"];
+    else process.env["SCRIPTC_KINDGATE_WIDE"] = hadW;
+    if (hadM === undefined) delete process.env["SCRIPTC_KINDGATE_MATCH"];
+    else process.env["SCRIPTC_KINDGATE_MATCH"] = hadM;
+  }
+}
+
+let cachedLl: Promise<{ off: string; wide: string; match: string }> | undefined;
+function allLl(): Promise<{ off: string; wide: string; match: string }> {
+  return (cachedLl ??= (async () => ({
+    off: await emitLl({}),
+    wide: await emitLl({ wide: true }),
+    match: await emitLl({ match: true }),
+  }))());
+}
+
+/** One emitted LLVM walker definition, split off by its own header
+ * comment's ROLE and TYPE KEY — never by ordinal, because `sc_dc_` and
+ * `sc_da_` are interned in independent maps and `sc_dc_0` is a hard body
+ * for one type while `sc_da_0` is an arm body for another. */
+interface LlBody {
+  name: string;
+  role: string;
+  key: string;
+  body: string;
+}
+
+const LL_HEADER =
+  /^define\s+(?:internal\s+)?[^@\n]*@(sc_d[cam]_\d+)\([^\n]*\)\s*#\d+\s*\{\s*;\s*(check|arm|match)\s+(.*)$/;
+
+function llBodies(tu: string): LlBody[] {
+  const out: LlBody[] = [];
+  let cur: { name: string; role: string; key: string; lines: string[] } | null = null;
+  for (const raw of tu.split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    const h = LL_HEADER.exec(line);
+    if (h !== null) {
+      cur = { name: h[1]!, role: h[2]!, key: h[3]!, lines: [] };
+      continue;
+    }
+    if (cur === null) continue;
+    if (line === "}") {
+      out.push({ name: cur.name, role: cur.role, key: cur.key, body: cur.lines.join("\n") });
+      cur = null;
+      continue;
+    }
+    cur.lines.push(line);
+  }
+  return out;
+}
+
+/** The C lane's HARD bodies, the twin of armBodiesContaining above.
+ * `static <T> sc_dc_<n>(const ScrDyn *d, const ScrDynPath *path) {` at
+ * column 0, up to the next `\n}` at column 0. */
+function hardBodiesContaining(tu: string, needle: string): number {
+  const header = /^static [^\n]*?\bsc_dc_\d+\(const ScrDyn \*d, const ScrDynPath \*path\) \{/gm;
+  let n = 0;
+  let m: RegExpExecArray | null;
+  while ((m = header.exec(tu)) !== null) {
+    const end = tu.indexOf("\n}\n", m.index);
+    const body = tu.slice(m.index, end < 0 ? tu.length : end);
+    if (body.includes(needle)) n++;
+  }
+  return n;
+}
+
+const LL_FAIL = /\bcall void @scr_dyn_check_fail\(/g;
+/** A call of the wide lane's kind predicate, in an emitted body. */
+const LL_WIDEABLE = "call zeroext i1 @sc_dyn_rec_wideable(ptr %d)";
+
+describe("the kind-gate dials on the LLVM lane, and the two lanes against each other", () => {
+  test("the LLVM lane plants record walkers of BOTH disciplines -- nothing below is vacuous", async () => {
+    const { off } = await allLl();
+    const bodies = llBodies(off);
+    expect(bodies.length).toBeGreaterThanOrEqual(5);
+    expect(bodies.filter((b) => b.role === "check" && b.key.startsWith("record:")).length)
+      .toBeGreaterThanOrEqual(3);
+    expect(bodies.filter((b) => b.role === "arm" && b.key.startsWith("record:")).length)
+      .toBeGreaterThanOrEqual(1);
+    expect((off.match(LL_FAIL) ?? []).length).toBeGreaterThanOrEqual(8);
+    /* and the parser separates DEFINITIONS from mentions: the file names
+     * sc_da_ more often than it defines one. */
+    expect((off.match(/sc_da_\d+/g) ?? []).length).toBeGreaterThan(
+      bodies.filter((b) => b.role === "arm").length,
+    );
+  });
+
+  test("BOTH DIALS OFF: the LLVM lane emits none of the symbols either", async () => {
+    const { off } = await allLl();
+    expect(off).not.toContain("sc_dyn_rec_wide");
+    expect(off).not.toContain("sc_dyn_rec_wideable");
+    expect(off).not.toContain("@sc_kgk_");
+    expect(off).not.toContain("@sc_kgl_");
+  });
+
+  test("WIDE keeps the kind-gate STATEMENT on the LLVM lane: no check is deleted", async () => {
+    const { off, wide, match } = await allLl();
+    const n = (off.match(LL_FAIL) ?? []).length;
+    expect((wide.match(LL_FAIL) ?? []).length).toBe(n);
+    expect((match.match(LL_FAIL) ?? []).length).toBe(n);
+    expect(wide).toContain("define internal ptr @sc_dyn_rec_wide(");
+    expect(wide).toContain("define internal zeroext i1 @sc_dyn_rec_wideable(");
+    expect(wide.length).toBeGreaterThan(off.length);
+  });
+
+  test("WIDE reads members through the SAME [[Get]] the JS lane's d[k] takes", async () => {
+    const { wide } = await allLl();
+    const proj = wide.slice(wide.indexOf("define internal ptr @sc_dyn_rec_wide("));
+    const body = proj.slice(0, proj.indexOf("\n}\n"));
+    expect(body).toContain("@sc_dyn_key_get(ptr %d,");
+    /* the bool crossing the call is spelled zeroext, not inherited: on
+     * this ABI a bool whose high bits are undefined reads TRUE from
+     * garbage, and `opt` true would fake Node's nullish answer. */
+    expect(body).toContain("i1 zeroext false)");
+  });
+
+  test("WIDE leaves TUPLE and INDEX-SIGNATURE shapes on the narrow gate (LLVM)", async () => {
+    const { wide, match } = await allLl();
+    for (const [tag, tu] of [["wide", wide], ["match", match]] as const) {
+      for (const b of llBodies(tu)) {
+        if (!b.key.startsWith("record:")) continue;
+        const isTuple = /\bdct\.[a-z]+\d+/.test(b.body);
+        const isIdx = /\bdcv\.[a-z]+\d+/.test(b.body);
+        if (!isTuple && !isIdx) continue;
+        expect(b.body, `${tag}: ${b.name} (${b.key}) took the wide lane and must not`)
+          .not.toContain("@sc_dyn_rec_wideable(");
+      }
+    }
+  });
+
+  test("WIDE does NOT reach the LLVM ARM walker -- arm selection is untouched", async () => {
+    const { wide } = await allLl();
+    const bodies = llBodies(wide);
+    expect(bodies.filter((b) => b.role === "arm" && b.body.includes(LL_WIDEABLE)).length).toBe(0);
+    expect(bodies.filter((b) => b.role === "check" && b.body.includes(LL_WIDEABLE)).length)
+      .toBeGreaterThanOrEqual(1);
+  });
+
+  test("MATCH is the CONTROL on the LLVM lane too: it DOES reach the arm walker", async () => {
+    const { wide, match } = await allLl();
+    const bodies = llBodies(match);
+    expect(bodies.filter((b) => b.role === "arm" && b.body.includes(LL_WIDEABLE)).length)
+      .toBeGreaterThanOrEqual(1);
+    /* and the soft body's refusal is still `*ok = false`, never a throw:
+     * a widened arm reports a MISS, it does not invent a way to die. */
+    const armWide = bodies.find((b) => b.role === "arm" && b.body.includes(LL_WIDEABLE))!;
+    expect(armWide.body).toContain("store i1 false, ptr %ok");
+    expect(armWide.body).not.toContain("@scr_dyn_check_fail(");
+    /* MATCH implies WIDE: the hard lanes are all still there. */
+    expect(match).toContain("define internal ptr @sc_dyn_rec_wide(");
+    expect(match.length).toBeGreaterThan(wide.length);
+  });
+
+  test("the three LLVM lanes are three DIFFERENT files -- the dials are not no-ops", async () => {
+    const { off, wide, match } = await allLl();
+    expect(wide).not.toBe(off);
+    expect(match).not.toBe(off);
+    expect(match).not.toBe(wide);
+  });
+
+  test("both lanes admit exactly the kinds backend/kindgate.ts lists, and the same ones", async () => {
+    /* The kind list is shared source, not two copies that happen to
+     * agree: the C lane spells the enum names and the LLVM lane spells
+     * the numbers with the name in a trailing comment. If someone adds a
+     * kind to one spelling only, this fails. */
+    const { wide: cWide } = await all();
+    const { wide: llWide } = await allLl();
+    const cPred = cWide.slice(cWide.indexOf("static bool sc_dyn_rec_wideable(const ScrDyn *d) {"));
+    const cBody = cPred.slice(0, cPred.indexOf("\n}\n"));
+    const cKinds = [...cBody.matchAll(/case SCR_DYN_(\w+):/g)].map((m) => m[1]!);
+    const llPred = llWide.slice(llWide.indexOf("define internal zeroext i1 @sc_dyn_rec_wideable("));
+    const llBody = llPred.slice(0, llPred.indexOf("\n}\n"));
+    const llKinds = [...llBody.matchAll(/icmp eq i32 \S+, \d+ ; SCR_DYN_(\w+)/g)].map((m) => m[1]!);
+    expect(cKinds).toEqual([...KINDGATE_WIDE_KINDS]);
+    expect(llKinds).toEqual([...KINDGATE_WIDE_KINDS]);
+  });
+
+  /* THE DRIFT TEST.
+   *
+   * Not a remembered number on either side: the two lanes counted the
+   * same way and compared to each other. Widening one lane's gate and
+   * not the other's — which is exactly what happened when the dials
+   * shipped C-only and what this block was opened to repair — makes this
+   * go red and names the side that moved. It is cheaper than a block per
+   * drift, which is the whole recommendation. */
+  test("THE DRIFT TEST: the C lane and the LLVM lane widen the SAME bodies", async () => {
+    const c = await all();
+    const ll = await allLl();
+    for (const dialTag of ["off", "wide", "match"] as const) {
+      const cTu = c[dialTag];
+      const llTu = ll[dialTag];
+      const llB = llBodies(llTu);
+      const got = {
+        cHard: hardBodiesContaining(cTu, "sc_dyn_rec_wideable(d)"),
+        cArm: armBodiesContaining(cTu, "sc_dyn_rec_wideable(d)"),
+        llHard: llB.filter((b) => b.role === "check" && b.body.includes(LL_WIDEABLE)).length,
+        llArm: llB.filter((b) => b.role === "arm" && b.body.includes(LL_WIDEABLE)).length,
+      };
+      expect(
+        { hard: got.llHard, arm: got.llArm },
+        `dial ${dialTag}: C widens ${got.cHard} hard / ${got.cArm} arm bodies, LLVM widens ${got.llHard} / ${got.llArm} -- one lane moved without the other`,
+      ).toEqual({ hard: got.cHard, arm: got.cArm });
+      /* and the split itself, so a run in which BOTH lanes widened
+       * nothing cannot pass this test by symmetry alone. */
+      if (dialTag === "off") expect(got.cHard + got.cArm).toBe(0);
+      if (dialTag === "wide") {
+        expect(got.cHard).toBeGreaterThanOrEqual(1);
+        expect(got.cArm).toBe(0);
+      }
+      if (dialTag === "match") {
+        expect(got.cHard).toBeGreaterThanOrEqual(1);
+        expect(got.cArm).toBeGreaterThanOrEqual(1);
+      }
+    }
   });
 });
