@@ -46,13 +46,23 @@
 // does not equal the sum of its categories each exit non-zero too.  The
 // instrument is built so that "I did not understand this" cannot read as zero.
 //
-// usage: node scripts/tu-census.mjs <tu.c> [--sites <out>] [--json <out>] [--quiet]
+// THE LANE: this census reads BOTH program TUs the compiler can emit.  The
+// release default is the LLVM lane (index.ts initialises `backend = "c"` and
+// then `if (opts.backend !== "c")` emits the .ll first, falling back to C only
+// on an LlvmUnsupportedError tier refusal), so a reader that understands only
+// C is blind to whatever the shipping artefact was actually emitted from.  An
+// .ll fed to the C reader used to exit through *** CENSUS FAILED *** with 97
+// unclassified rows, which reads exactly like a compiler regression and is
+// really a wrong-lane instrument.  The lane is decided by CONTENT and checked
+// against the extension.
+//
+// usage: node scripts/tu-census.mjs <tu.c|tu.ll> [--sites <out>] [--json <out>] [--quiet]
 import { readFileSync, writeFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
 const file = args[0];
 if (!file || file.startsWith("-")) {
-  console.error("usage: node scripts/tu-census.mjs <tu.c> [--sites <out>] [--json <out>] [--quiet]");
+  console.error("usage: node scripts/tu-census.mjs <tu.c|tu.ll> [--sites <out>] [--json <out>] [--quiet]");
   process.exit(2);
 }
 const optOf = (flag) => {
@@ -70,6 +80,73 @@ const quiet = args.includes("--quiet");
 const raw = readFileSync(file, "latin1");
 const lines = raw.split("\n");
 
+// ---------------------------------------------------------------- 0. lane
+// A C TU has #include lines at column 0 and no `define`/`declare` there; an
+// LLVM TU is the exact opposite.  Both sides are counted so "neither" and
+// "both" stay distinguishable from each other, and the extension must agree:
+// naming a file .c and feeding it IR is the accident this whole change exists
+// to make impossible.
+const N_LL = (raw.match(/^(?:declare|define) /gm) ?? []).length;
+const N_C = (raw.match(/^#include /gm) ?? []).length;
+const extLl = /\.ll$/i.test(file);
+let lane;
+if (N_LL > 0 && N_C === 0) lane = "llvm";
+else if (N_C > 0 && N_LL === 0) lane = "c";
+else if (raw.length === 0) lane = extLl ? "llvm" : "c";  // an EMPTY input must still reach the zero-denominator check below
+else {
+  console.error(`tu-census: cannot tell the lane of ${file} (${N_LL} llvm markers, ${N_C} C markers)`);
+  process.exit(4);
+}
+if (raw.length > 0 && (extLl || /\.c$/i.test(file)) && lane !== (extLl ? "llvm" : "c")) {
+  console.error(`tu-census: ${file} is named .${extLl ? "ll" : "c"} but its CONTENT is the ${lane} lane`);
+  process.exit(4);
+}
+const isLl = lane === "llvm";
+
+// The .ll interns every message in a module-level byte array and the failing
+// call carries a POINTER to it; the C TU carries the literal inside the call
+// itself.  So the reader resolves `ptr @sym` through this table, and a pointer
+// it cannot resolve becomes UNKNOWN rather than an empty message.  The LLVM
+// emitter's llStrBytes() escapes every non-printable byte as a two-digit UPPER
+// hex \HH (never octal), so decoding to latin1 reproduces the RAW UTF-8 BYTES
+// -- the same spelling the scr_trap templates carry in the C TU, which is why
+// the em-dash patterns below match on both lanes with no third alternative.
+const llDecode = (t) => {
+  let o = "";
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (c === "\\" && i + 2 < t.length) {
+      const h = t.slice(i + 1, i + 3);
+      if (/^[0-9A-Fa-f]{2}$/.test(h)) { o += String.fromCharCode(parseInt(h, 16)); i += 2; continue; }
+    }
+    o += c;
+  }
+  let e = o.length;
+  while (e > 0 && o.charCodeAt(e - 1) === 0) e--;   // the NUL terminator llStrBytes appends
+  return o.slice(0, e);
+};
+const llStr = new Map();
+if (isLl) {
+  for (const l of lines) {
+    if (l.length === 0 || l[0] !== "@") continue;
+    const eq = l.indexOf(" = ");
+    if (eq < 0) continue;
+    const c = l.indexOf(' c"', eq);
+    if (c < 0) continue;
+    const end = l.lastIndexOf('"');
+    if (end < c + 3) continue;
+    llStr.set(l.slice(1, eq), llDecode(l.slice(c + 3, end)));
+  }
+}
+// Resolve one `ptr @sym` operand.  null means "this census could not read it",
+// which every caller turns into UNKNOWN -- the silent-failure direction.
+const llMsg = (operand) => {
+  const o = operand.trim();
+  if (o.length < 2 || o[0] !== "@") return null;
+  const v = llStr.get(o.slice(1));
+  return v === undefined ? null : v;
+};
+
 let exitCode = 0;
 const problems = [];
 const fail = (why) => { problems.push(why); exitCode = 3; };
@@ -80,7 +157,44 @@ const fail = (why) => { problems.push(why); exitCode = 3; };
 const hostName = new Array(lines.length).fill(null);
 const hostBodyLines = new Map();   // name -> body line count
 const hostFirstLine = new Map();
-{
+if (isLl) {
+  // An LLVM definition opens with `define ... @name(` at column 0 and closes
+  // with `}` at column 0, exactly like the C emitter's.  The name is read by
+  // scanning the identifier after the FIRST @ on the header line: the classes
+  // here are disjoint from the `(` that follows, so the match is linear and
+  // cannot backtrack INSIDE the identifier -- the failure that made one
+  // block's instrument score zero on a TU it had read with its own eyes.
+  let cur = null, start = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (cur === null) {
+      if (!l.startsWith("define ")) continue;
+      const at = l.indexOf("@");
+      if (at < 0) continue;
+      let name;
+      if (l[at + 1] === '"') {
+        const q = l.indexOf('"', at + 2);
+        if (q < 0) continue;
+        name = l.slice(at + 2, q);
+      } else {
+        let k = at + 1;
+        while (k < l.length) {
+          const c = l.charCodeAt(k);
+          if ((c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95 || c === 46 || c === 36) k++;
+          else break;
+        }
+        name = l.slice(at + 1, k);
+      }
+      if (name.length === 0) continue;
+      cur = name; start = i;
+      if (!hostFirstLine.has(cur)) hostFirstLine.set(cur, i);
+      hostName[i] = cur;
+      continue;
+    }
+    hostName[i] = cur;
+    if (l === "}") { hostBodyLines.set(cur, i - start + 1); cur = null; }
+  }
+} else {
   const DEF = /^(?:static\s)?[A-Za-z_][^;=]*?\b([A-Za-z_][A-Za-z0-9_]*)\s*\([^;]*$/;
   let cur = null, start = 0;
   for (let i = 0; i < lines.length; i++) {
@@ -146,6 +260,12 @@ const ABORT_STRUCTURAL = [
   { re: /^scriptc: internal error: stringify reached an undefined arm/, what: "stringify undefined arm" },
 ];
 const ABORT_REAL = [
+  // The LLVM lane's spelling.  Its keyed-read miss is ONE shared `sc_bad_key`
+  // helper carrying a fixed message; the C lane emits a per-result-type
+  // `sc_rkg_N` whose scr_trap_fmt template interpolates the runtime key AND
+  // names the typed slot, which is why the C column can break ABORT.real down
+  // by value type and this one cannot.  Same abort, one message instead of N.
+  { re: /^scriptc: TypeError: record has no key \(typed slot /, what: "keyed read, absent key (LLVM: one shared sc_bad_key, no per-type message)" },
   { re: /^scriptc: TypeError: record has no key '%\.\*s' \(typed '([^']*)'/, what: "keyed read, absent key" },
 ];
 
@@ -168,11 +288,49 @@ const UNCODED = /scr_throw_error_msg\(\s*([A-Z_]+)\s*,\s*(?:"((?:[^"\\]|\\.)*)"|
 const TRAP = /\bscr_trap(_fmt)?\s*\(\s*"((?:[^"\\]|\\.)*)"/g;
 const TAGRE = /\[SC(\d{4}) at ([^\]]+)\]/g;
 
+// The classification decisions, factored out of the C scan so the LLVM scan
+// reaches the SAME tables through the SAME code.  Two readers each carrying
+// their own copy of a table is exactly how the two lanes would drift apart
+// again, silently, and the whole point of this instrument is that they
+// cannot.  `hostAt` is the enclosing definition's line index (HOST_ATTRIB
+// attributes a bracketless coded throw by the emitter-mangled host name).
+const classifyCoded = (msg, code, hostAt) => {
+  TAGRE.lastIndex = 0;
+  const tag = TAGRE.exec(msg);
+  if (tag) return { cat: "REFUSAL.tagged", site: `SC${tag[1]} at ${tag[2]}` };
+  if (code === "SC9002" && SC9002_MSG.test(msg)) return { cat: "BOILERPLATE", site: "lower-calls.ts:1028 SC9002" };
+  const p = PARITY_CODED.find((x) => x.re.test(msg));
+  if (p) return { cat: "PARITY", site: p.site };
+  const u = UNTAGGED_REFUSAL_SITES.find((x) => x.re.test(msg));
+  if (u) return { cat: "REFUSAL.untagged", site: u.site };
+  const h = HOST_ATTRIB.find((x) => x.re.test(hostName[hostAt] ?? ""));
+  if (h) return { cat: "REFUSAL.untagged", site: h.site };
+  // A coded throw with an SC code and a diagnostic message that is neither the
+  // SC9002 guard nor a known parity throw IS a refusal.  Counting it as one is
+  // the conservative direction; what is lost is only the emitter attribution,
+  // which is reported separately so it cannot pass as attributed.
+  return { cat: "REFUSAL.untagged", site: "UNATTRIBUTED" };
+};
+const classifyUncoded = (msg) => {
+  const u = UNCODED_REFUSAL.find((x) => x.re.test(msg));
+  if (u) return { cat: "REFUSAL.uncoded", site: u.site };
+  const p = UNCODED_PARITY.find((x) => x.re.test(msg));
+  if (p) return { cat: "PARITY", site: p.site };
+  return { cat: "UNKNOWN", site: "?" };
+};
+const classifyTrap = (msg) => {
+  const r = ABORT_REAL.find((x) => x.re.test(msg));
+  if (r) return { cat: "ABORT.real", site: r.what, valueType: (r.re.exec(msg) ?? [])[1] ?? null };
+  const t = ABORT_STRUCTURAL.find((x) => x.re.test(msg));
+  if (t) return { cat: "ABORT.structural", site: t.what, valueType: null };
+  return { cat: "UNKNOWN", site: "?", valueType: null };
+};
+
 const rows = [];        // one per emitted failure statement
 const bump = (map, k, n = 1) => map.set(k, (map.get(k) ?? 0) + n);
 
 let nCodedCalls = 0, nUncodedCalls = 0, nTrapCalls = 0;
-for (let i = 0; i < lines.length; i++) {
+for (let i = 0; !isLl && i < lines.length; i++) {
   const l = lines[i];
 
   if (l.includes("scr_throw_error_msg_code(")) {
@@ -181,27 +339,7 @@ for (let i = 0; i < lines.length; i++) {
     while ((m = CODED.exec(l)) !== null) {
       seen++; nCodedCalls++;
       const msg = m[2], code = m[4];
-      TAGRE.lastIndex = 0;
-      const tag = TAGRE.exec(msg);
-      let cat, site;
-      if (tag) { cat = "REFUSAL.tagged"; site = `SC${tag[1]} at ${tag[2]}`; }
-      else if (code === "SC9002" && SC9002_MSG.test(msg)) { cat = "BOILERPLATE"; site = "lower-calls.ts:1028 SC9002"; }
-      else {
-        const p = PARITY_CODED.find((x) => x.re.test(msg));
-        const u = UNTAGGED_REFUSAL_SITES.find((x) => x.re.test(msg));
-        const h = HOST_ATTRIB.find((x) => x.re.test(hostName[i] ?? ""));
-        if (p) { cat = "PARITY"; site = p.site; }
-        else if (u) { cat = "REFUSAL.untagged"; site = u.site; }
-        else if (h) { cat = "REFUSAL.untagged"; site = h.site; }
-        else {
-          // A coded throw with an SC code and a diagnostic message that is
-          // neither the SC9002 guard nor a known parity throw IS a refusal.
-          // Counting it as one is the conservative direction; what is lost is
-          // only the emitter attribution, which is reported separately so it
-          // cannot pass as attributed.
-          cat = "REFUSAL.untagged"; site = "UNATTRIBUTED";
-        }
-      }
+      const { cat, site } = classifyCoded(msg, code, i);
       rows.push({ line: i + 1, family: "coded", cat, code, site, msg, host: hostName[i] });
     }
     if (seen === 0) {
@@ -223,10 +361,8 @@ for (let i = 0; i < lines.length; i++) {
         const q = /"((?:[^"\\]|\\.)*)"/.exec(prev);
         msg = q ? q[1] : `<symbol ${m[3]}>`;
       }
-      const u = UNCODED_REFUSAL.find((x) => x.re.test(msg));
-      const p = UNCODED_PARITY.find((x) => x.re.test(msg));
-      const cat = u ? "REFUSAL.uncoded" : p ? "PARITY" : "UNKNOWN";
-      rows.push({ line: i + 1, family: "uncoded", cat, code: "-", site: (u ?? p)?.site ?? "?", msg, host: hostName[i] });
+      const { cat, site } = classifyUncoded(msg);
+      rows.push({ line: i + 1, family: "uncoded", cat, code: "-", site, msg, host: hostName[i] });
     }
     if (seen === 0) {
       rows.push({ line: i + 1, family: "uncoded", cat: "UNKNOWN", code: "-", site: "unparsed", msg: l.trim().slice(0, 200), host: hostName[i] });
@@ -240,11 +376,8 @@ for (let i = 0; i < lines.length; i++) {
     while ((m = TRAP.exec(l)) !== null) {
       seen++; nTrapCalls++;
       const msg = m[2].replace(/\\n$/, "");
-      const r = ABORT_REAL.find((x) => x.re.test(msg));
-      const s = ABORT_STRUCTURAL.find((x) => x.re.test(msg));
-      const cat = r ? "ABORT.real" : s ? "ABORT.structural" : "UNKNOWN";
-      const t = r ? (ABORT_REAL[0].re.exec(msg) ?? [])[1] : null;
-      rows.push({ line: i + 1, family: "trap", cat, code: m[1] ? "trap_fmt" : "trap", site: (r ?? s)?.what ?? "?", msg, host: hostName[i], valueType: t });
+      const { cat, site, valueType } = classifyTrap(msg);
+      rows.push({ line: i + 1, family: "trap", cat, code: m[1] ? "trap_fmt" : "trap", site, msg, host: hostName[i], valueType });
     }
     if (seen === 0 && /\bscr_trap(_fmt)?\s*\(/.test(l)) {
       rows.push({ line: i + 1, family: "trap", cat: "UNKNOWN", code: "trap", site: "unparsed", msg: l.trim().slice(0, 200), host: hostName[i] });
@@ -253,6 +386,88 @@ for (let i = 0; i < lines.length; i++) {
   }
 }
 
+
+// -------------------------------------------------- 3b. the scan, LLVM lane
+// The .ll spells the same three families as CALLS whose message rides a
+// POINTER into the module's byte-array table:
+//   call void @scr_throw_error_msg_code(i32 K, ptr @msg, i64 N, ptr @code)
+//   call void @scr_throw_error_msg(i32 K, ptr @msg, i64 N)
+//   call void @scr_trap(ptr @msg)                (never scr_trap_fmt: the LLVM
+//                                                 lane has no formatted trap)
+// `declare`/`define` lines are skipped by NAME, not by indentation: the
+// prototype `declare void @scr_throw_error_msg_code(...)` contains the marker
+// verbatim and would otherwise be counted as a call in every single TU.
+// An operand this reader cannot resolve to a table entry becomes UNKNOWN and
+// the process exits 3 -- an unreadable message must never read as zero.
+if (isLl) {
+  const CODED_LL = /call void @scr_throw_error_msg_code\(i32 -?\d+, ptr ([^,)]+), i64 (\d+), ptr ([^,)]+)\)/g;
+  const UNCODED_LL = /call void @scr_throw_error_msg\(i32 -?\d+, ptr ([^,)]+), i64 (\d+)\)/g;
+  const TRAP_LL = /call void @scr_trap\(ptr ([^,)]+)\)/g;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (l.length === 0 || l.startsWith("declare ") || l.startsWith("define ")) continue;
+
+    if (l.includes("@scr_throw_error_msg_code(")) {
+      let m, seen = 0;
+      CODED_LL.lastIndex = 0;
+      while ((m = CODED_LL.exec(l)) !== null) {
+        seen++; nCodedCalls++;
+        const msg = llMsg(m[1]), code = llMsg(m[3]);
+        if (msg === null || code === null) {
+          rows.push({ line: i + 1, family: "coded", cat: "UNKNOWN", code: code ?? "?", site: "operand not in the module string table", msg: l.trim().slice(0, 200), host: hostName[i] });
+          continue;
+        }
+        const { cat, site } = classifyCoded(msg, code, i);
+        rows.push({ line: i + 1, family: "coded", cat, code, site, msg, host: hostName[i] });
+      }
+      if (seen === 0) {
+        rows.push({ line: i + 1, family: "coded", cat: "UNKNOWN", code: "?", site: "unparsed", msg: l.trim().slice(0, 200), host: hostName[i] });
+        nCodedCalls++;
+      }
+    }
+
+    if (l.includes("@scr_throw_error_msg(")) {
+      let m, seen = 0;
+      UNCODED_LL.lastIndex = 0;
+      while ((m = UNCODED_LL.exec(l)) !== null) {
+        seen++; nUncodedCalls++;
+        const msg = llMsg(m[1]);
+        if (msg === null) {
+          rows.push({ line: i + 1, family: "uncoded", cat: "UNKNOWN", code: "-", site: "operand not in the module string table", msg: l.trim().slice(0, 200), host: hostName[i] });
+          continue;
+        }
+        const { cat, site } = classifyUncoded(msg);
+        rows.push({ line: i + 1, family: "uncoded", cat, code: "-", site, msg, host: hostName[i] });
+      }
+      if (seen === 0) {
+        rows.push({ line: i + 1, family: "uncoded", cat: "UNKNOWN", code: "-", site: "unparsed", msg: l.trim().slice(0, 200), host: hostName[i] });
+        nUncodedCalls++;
+      }
+    }
+
+    if (l.includes("@scr_trap(")) {
+      let m, seen = 0;
+      TRAP_LL.lastIndex = 0;
+      while ((m = TRAP_LL.exec(l)) !== null) {
+        seen++; nTrapCalls++;
+        const raw0 = llMsg(m[1]);
+        if (raw0 === null) {
+          rows.push({ line: i + 1, family: "trap", cat: "UNKNOWN", code: "trap", site: "operand not in the module string table", msg: l.trim().slice(0, 200), host: hostName[i] });
+          continue;
+        }
+        // the C reader strips the template's trailing newline; the IR's message
+        // global carries the same byte, so strip it the same way
+        const msg = raw0.replace(/\n$/, "");
+        const { cat, site, valueType } = classifyTrap(msg);
+        rows.push({ line: i + 1, family: "trap", cat, code: "trap", site, msg, host: hostName[i], valueType });
+      }
+      if (seen === 0) {
+        rows.push({ line: i + 1, family: "trap", cat: "UNKNOWN", code: "trap", site: "unparsed", msg: l.trim().slice(0, 200), host: hostName[i] });
+        nTrapCalls++;
+      }
+    }
+  }
+}
 // ------------------------------------------- 4. the OLD instruments, verbatim
 // census.mjs: TRAPS = every bracket occurrence anywhere in the file.
 const oldSites = new Map();
@@ -269,8 +484,16 @@ const oldProse = (raw.match(/has no compiled implementation/g) ?? []).length;
 // CONTROL: every bracket must live inside a coded throw.  census.mjs's
 // numerator is only clean if nothing else in 127 MB spells `[SCxxxx at ...]`.
 const taggedRows = rows.filter((r) => r.cat === "REFUSAL.tagged").length;
-if (taggedRows !== oldTraps) {
-  fail(`bracket occurrences (${oldTraps}) != tagged coded throws (${taggedRows}) — a [SCxxxx at ...] lives outside a fence throw, or a throw carries two`);
+const taggedDistinct = new Set(rows.filter((r) => r.cat === "REFUSAL.tagged").map((r) => r.msg)).size;
+// The C emitter writes the message into every throw; the LLVM emitter writes
+// it ONCE into the module string table and points at it, so census.mjs's
+// numerator counts DISTINCT messages on the .ll and STATEMENTS on the .c.
+// That is not a defect of either lane and it is not a difference in the
+// program -- it is the reason the old instrument cannot be compared across
+// lanes, and the reason this census prints both numbers.
+const bracketUnit = isLl ? taggedDistinct : taggedRows;
+if (bracketUnit !== oldTraps) {
+  fail(`bracket occurrences (${oldTraps}) != ${isLl ? `DISTINCT tagged messages (${taggedDistinct})` : `tagged coded throws (${taggedRows})`} - a [SCxxxx at ...] lives outside a fence throw, or a throw carries two`);
 }
 
 // ------------------------------------------------------- 5. the call-site unit
@@ -304,6 +527,13 @@ const SHARED_HELPER = [
   /^sc_oom$/,                      // OOM guard                  (emitter.ts sharedTrapDefs)
   /^sc_bad_tag$/,                  // union-tag default          (emitter.ts sharedTrapDefs)
   /^sc_stringify_undef$/,          // stringify undefined arm    (emitter.ts sharedTrapDefs)
+  // The LLVM lane's keyed-read abort: llvm/emitter.ts helperDefs() emits ONE
+  // `sc_bad_key` for the whole module where the C emitter emits one `sc_rkg_N`
+  // per result type.  Without this rule the .ll column would read ABORT.real as
+  // 1 way-to-die against the C column's hundreds, and the two lanes would look
+  // like they disagree about the program when they only disagree about how many
+  // helpers they spell it with.
+  /^sc_bad_key$/,                  // keyed read, absent key     (llvm/emitter.ts helperDefs)
 ];
 const wanted = new Set();
 for (const r of rows) {
@@ -330,7 +560,27 @@ for (const r of rows) {
   const c = r.stub ? closureOf(r.host) : null;
   if (c !== null && raw.includes(c + " ")) closureSeen.add(r.host);
 }
-if (wanted.size > 0) {
+if (wanted.size > 0 && isLl) {
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    const isDeclLine = l.startsWith("declare ") || l.startsWith("define ");
+    let at = l.indexOf("@");
+    while (at >= 0) {
+      let k = at + 1;
+      while (k < l.length) {
+        const c = l.charCodeAt(k);
+        if ((c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95 || c === 46 || c === 36) k++;
+        else break;
+      }
+      const nm = l.slice(at + 1, k);
+      if (wanted.has(nm)) {
+        if (l.charCodeAt(k) === 40) { bump(total, nm); if (isDeclLine) bump(decl, nm); }
+        else bump(ptr, nm);
+      }
+      at = l.indexOf("@", k > at ? k : at + 1);
+    }
+  }
+} else if (wanted.size > 0) {
   const CALL = /(^|[^A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
@@ -383,19 +633,40 @@ if (nUnknown > 0) fail(`${nUnknown} failure statement(s) with a message this cen
 
 // context populations (not compiler failures; printed so the report cannot be
 // read as "these are all the throws in the program")
+// One counter for both lanes: on the C TU the whole file is the population
+// (the runtime prototypes come in through #include and are not IN the TU);
+// on the .ll the `declare`/`define` header lines are skipped, because a
+// prototype mentions the symbol exactly the way a call does.
+const ctxCount = (re) => {
+  if (!isLl) return (raw.match(re) ?? []).length;
+  let k = 0;
+  for (const l of lines) {
+    if (l.length === 0 || l.startsWith("declare ") || l.startsWith("define ")) continue;
+    re.lastIndex = 0;
+    while (re.exec(l) !== null) k++;
+  }
+  return k;
+};
 const ctx = {
-  USERTHROW: (raw.match(/\bscr_throw_(obj|str|ref)\s*\(/g) ?? []).length,
-  rethrow: (raw.match(/\bscr_rethrow\s*\(/g) ?? []).length,
-  DYNCHECK: (raw.match(/\bscr_dyn_check_fail\s*\(/g) ?? []).length,
-  PARITY_named: (raw.match(/\bscr_throw_error_named\s*\(/g) ?? []).length,
-  PARITY_nodecoded: (raw.match(/\bscr_throw_node_coded\s*\(/g) ?? []).length,
-  PARITY_error: (raw.match(/\bscr_throw_error\s*\(/g) ?? []).length,
+  USERTHROW: ctxCount(/\bscr_throw_(obj|str|ref)\s*\(/g),
+  rethrow: ctxCount(/\bscr_rethrow\s*\(/g),
+  DYNCHECK: ctxCount(/\bscr_dyn_check_fail\s*\(/g),
+  PARITY_named: ctxCount(/\bscr_throw_error_named\s*\(/g),
+  PARITY_nodecoded: ctxCount(/\bscr_throw_node_coded\s*\(/g),
+  PARITY_error: ctxCount(/\bscr_throw_error\s*\(/g),
 };
 
 // ---------------------------------------------------------------- 7. output
 const out = [];
 const say = (s) => out.push(s);
 say(`FILE   ${file}   ${raw.length} bytes   ${lines.length} lines`);
+say(`LANE   ${lane}   (the code generator that ACTUALLY emitted this TU, read off its own content)`);
+if (isLl) {
+  say(`       .ll notes: messages are INTERNED in the module string table, so census.mjs's`);
+  say(`       TRAPS counts DISTINCT tagged messages (${taggedDistinct}) where the .c counts statements;`);
+  say(`       the keyed-read abort is ONE shared sc_bad_key helper, so ABORT.real has no`);
+  say(`       per-value-type breakdown and its ways-to-die is the helper's call-site count.`);
+}
 say("");
 say("=== THE OLD INSTRUMENTS, REPRODUCED ============================");
 say(`census.mjs   TRAPS ${oldTraps}   SITES ${oldSites.size}   PROSE ${oldProse}`);
@@ -456,7 +727,7 @@ say("=== ACCOUNTING =================================================");
 say(`  coded throws ${nCodedCalls} = tagged ${byCat.get("REFUSAL.tagged") ?? 0} + untagged ${byCat.get("REFUSAL.untagged") ?? 0} + SC9002 ${byCat.get("BOILERPLATE") ?? 0} + parity ${rows.filter((r) => r.family === "coded" && r.cat === "PARITY").length} + unknown ${rows.filter((r) => r.family === "coded" && r.cat === "UNKNOWN").length}`);
 say(`  uncoded throws ${nUncodedCalls} = refusal ${byCat.get("REFUSAL.uncoded") ?? 0} + parity ${rows.filter((r) => r.family === "uncoded" && r.cat === "PARITY").length} + unknown ${rows.filter((r) => r.family === "uncoded" && r.cat === "UNKNOWN").length}`);
 say(`  traps ${nTrapCalls} = real ${byCat.get("ABORT.real") ?? 0} + structural ${byCat.get("ABORT.structural") ?? 0} + unknown ${rows.filter((r) => r.family === "trap" && r.cat === "UNKNOWN").length}`);
-say(`  bracket occurrences ${oldTraps} == tagged coded throws ${taggedRows}`);
+say(`  bracket occurrences ${oldTraps} == ${isLl ? `DISTINCT tagged messages ${taggedDistinct} (statements ${taggedRows})` : `tagged coded throws ${taggedRows}`}`);
 if (problems.length) {
   say("");
   say("*** CENSUS FAILED ***");
@@ -475,7 +746,7 @@ if (sitesOut) {
 }
 if (jsonOut) {
   writeFileSync(jsonOut, JSON.stringify({
-    file, bytes: raw.length,
+    file, lane, bytes: raw.length,
     old: { traps: oldTraps, sites: oldSites.size, prose: oldProse },
     statements, byCat: Object.fromEntries(byCat), waysByCat: Object.fromEntries(waysByCat),
     ctx, rows: rows.map((r) => ({ line: r.line, cat: r.cat, code: r.code, site: r.site, host: r.host, ways: r.ways, msg: r.msg.slice(0, 200) })),
