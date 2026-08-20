@@ -22,7 +22,7 @@
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrType } from "../../ir/nodes.js";
-import { armDiscrimLits, canAdaptDynFuncTo, canBoxFuncIntoDyn, dynCheckArmOrder, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
+import { armDiscrimLits, canAdaptDynFuncTo, canBoxFuncIntoDyn, dynCheckArmOrder, isUndefinedArmedUnion, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
 import { arrNewCall, elemAccess, llFieldType, releaseSym, toStrSlotIndex, traceAdapter, traceArg, vAdapters } from "./shapes.js";
@@ -1553,7 +1553,16 @@ export class LlDyn {
           } else {
             B.line(`${conv} = call ptr @${this.toDynHelper(f.type)}(${this.valTy(f.type)} ${fv})`);
           }
-          B.line(`call void @scr_dyn_obj_set(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
+          // The C emitter's rule, same reasoning: an undefined-armed
+          // field's key exists exactly when its run-time tag is not the
+          // undefined arm, so the store is presence-gated. See
+          // scr_dyn_obj_set_present in scr_json.c.
+          if (isUndefinedArmedUnion(f.type, (id: string) => this.host.unionsById.get(id))) {
+            host.declare(`declare void @scr_dyn_obj_set_present(ptr, ptr, i64, ptr)`);
+            B.line(`call void @scr_dyn_obj_set_present(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
+          } else {
+            B.line(`call void @scr_dyn_obj_set(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
+          }
         }
         if (shape.indexValue) {
           const iv = shape.indexValue;

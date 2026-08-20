@@ -22,10 +22,24 @@ console.log("T11", stringify({ a: "x" }, "☃", "🌍"));
 console.log("T12", encode({ x: [1, 2] }));
 
 // Declared shapes with union-valued fields serialize by the value each
-// field HOLDS (an explicitly-undefined optional field keeps its key with
-// the empty value, exactly Node).
-const o: { u?: string; s: string; n: number | null } = { u: undefined, s: "v", n: null };
+// field HOLDS: a field the value does NOT hold is not a key at all, and a
+// null-valued one is a key with the empty value — exactly Node.
+//
+// NOT asserted, deliberately, and it used to be: `u: undefined` written into
+// the same shape. Node keeps the key ("u=&s=v&n="); scriptc answers "absent"
+// for it, because `{u?: string}` and `{u: string | undefined}` intern to the
+// SAME record shape and a record carries one union tag per field — there is
+// no per-instance bit distinguishing "written undefined" from "never
+// written", so the two constructions have one representation and the
+// converter must answer them the same way. It answers "absent", which is the
+// documented stance tests/corpus/3713 names and which the record's own
+// Object.keys has always given. The line below is the OTHER construction, the
+// common one, and it was WRONG before the presence gate: an omitted `u`
+// serialized as "u=&s=v&n=" here too.
+const o: { u?: string; s: string; n: number | null } = { s: "v", n: null };
 console.log("T13", stringify(o));
+const o2: { u?: string; s: string; n: number | null } = { u: "q", s: "v", n: null };
+console.log("T13b", stringify(o2));
 
 // Index-signature records (the runtime-keyed build).
 const r: Record<string, string | string[]> = {};

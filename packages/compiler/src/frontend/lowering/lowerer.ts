@@ -33,6 +33,7 @@ import {
   unionMismatchDiag,
   UNSUPPORTED,
   keyOrderFromDynamicDiag,
+  projectionCopiesAMutatedFieldDiag,
   unsupportedDiag,
   unsupportedTypeDiag,
 } from "../../diagnostics/diagnostic.js";
@@ -1265,6 +1266,11 @@ export class Lowerer {
   /** Union re-tag helpers (%union.retag.N), interned per (from, to)
    * unionId pair — see unionRetagHelper. */
   readonly retagHelpers = new Map<string, string>();
+  /** Per class, the field names some non-constructor member ASSIGNS on
+   * `this` — SC6003's admission rule, memoized because the width planner
+   * probes the same class from several positions. See
+   * classMethodWrittenFields. */
+  readonly methodWrittenFields = new Map<string, Set<string>>();
   /** One id per distinct promise payload CONVERSION (from-type, to-type,
    * settle-or-value flavour) -- the second half of the runtime memo's
    * key. Separate from retagHelpers.size so the ids stay a dense little
@@ -5264,6 +5270,106 @@ export class Lowerer {
     return { kind: "closure", fnName: name, captures: [], type: expected, loc };
   }
 
+  /** The fields a projection COPIES that a method of the projected class
+   * WRITES — the condition that makes a mixed projection a lie about
+   * itself, and the whole of SC6003's admission rule.
+   *
+   * Constructor bodies and field initializers are excluded on purpose: they
+   * run before the value exists to project, so a write there cannot make a
+   * copy stale. Everything else in the class body counts, and so does every
+   * base in the chain — a method a target shape does not name can still be
+   * reached from one that it does, and the projected closures call into the
+   * live instance, so the reachable set is "the class", not "the projected
+   * methods". Over-approximating that way can only produce advice nobody
+   * needed; under-approximating would produce silence somebody did.
+   *
+   * Deliberately syntactic and deliberately NOT transitive through
+   * ordinary functions: `push(): void { helper(this) }` where `helper`
+   * writes is not seen. That residue is stated rather than papered over —
+   * a call-graph walk here would have to be sound over the whole program
+   * to be worth more than this, and an unsound one would move the silence
+   * rather than remove it.
+   *
+   * The result is memoized per class: a shape is projected once but the
+   * planner probes the same class from several positions. */
+  classMethodWrittenFields(className: string): ReadonlySet<string> {
+    const memo = this.methodWrittenFields.get(className);
+    if (memo) return memo;
+    const out = new Set<string>();
+    for (let c: ClassInfo | null = this.classes.get(className) ?? null; c; c = c.base) {
+      const decl = c.decl;
+      if (!decl) continue;
+      for (const m of decl.members) {
+        // The CONSTRUCTOR only. A property DECLARATION is walked, not
+        // skipped: `n = 0` holds no assignment to find, while
+        // `handler = (): void => { this.n++ }` holds one and is reachable
+        // through the projection exactly like a declared method. Skipping
+        // the whole member kind lost that for nothing.
+        if (ts.isConstructorDeclaration(m)) continue;
+        const walk = (n: ts.Node): void => {
+          const thisProp = (x: ts.Node): ts.PropertyAccessExpression | null =>
+            ts.isPropertyAccessExpression(x) && x.expression.kind === ts.SyntaxKind.ThisKeyword ? x : null;
+          if (ts.isBinaryExpression(n)) {
+            const t = thisProp(n.left);
+            const op = n.operatorToken.kind;
+            if (
+              t &&
+              (op === ts.SyntaxKind.EqualsToken ||
+                (op >= ts.SyntaxKind.FirstCompoundAssignment && op <= ts.SyntaxKind.LastCompoundAssignment))
+            ) {
+              out.add(t.name.text);
+            }
+          }
+          if (ts.isPostfixUnaryExpression(n) || ts.isPrefixUnaryExpression(n)) {
+            const t = thisProp(n.operand);
+            if (
+              t &&
+              (n.operator === ts.SyntaxKind.PlusPlusToken || n.operator === ts.SyntaxKind.MinusMinusToken)
+            ) {
+              out.add(t.name.text);
+            }
+          }
+          ts.forEachChild(n, walk);
+        };
+        walk(m);
+      }
+    }
+    this.methodWrittenFields.set(className, out);
+    return out;
+  }
+
+  /** SC6003's push, shared by the two builders that produce a mixed
+   * projection. `loc` is the coercion's when there is one; the width
+   * PLANNER probes with a synthetic `<width>` loc that names no file, and
+   * an advisory rendered against it would point at nothing — so that case
+   * falls back to the class declaration, which is the other end of the
+   * same fact and is always a real span. */
+  noteMixedProjection(className: string, lifted: { name: string; type: IrType }[], methodCount: number, loc: SrcLoc): void {
+    // The LIVE half is not only a method-named target field. An ARROW
+    // FUNCTION class field — `go = (): void => { this.n += 1 }` — is a data
+    // field on the class, so the plan has methods=0 and lifts it like any
+    // other; but the value lifted is the CLOSURE, and the closure's captured
+    // `this` is the instance. Calling it through the projection writes the
+    // object exactly as a method does, while the neighbouring data field
+    // still reads the copy. Same wrong value, third producer, and the rule
+    // was blind to it until the shape was written down and run:
+    //
+    //     class C { n = 0; go = (): void => { this.n += 1 } }
+    //     through(new C())      node 1      scriptc 0    (both backends)
+    //
+    // A lifted func field that captures nothing makes this advice
+    // over-eager rather than wrong, which is the right direction for advice.
+    const liveFuncs = lifted.filter((f) => f.type.kind === "func").length;
+    const data = lifted.filter((f) => f.type.kind !== "func").map((f) => f.name);
+    if (methodCount + liveFuncs === 0 || data.length === 0) return;
+    const written = this.classMethodWrittenFields(className);
+    const stale = data.filter((n) => written.has(n));
+    if (stale.length === 0) return;
+    const decl = this.classes.get(className)?.decl ?? null;
+    const at = loc.file === "<width>" && decl !== null ? locOf(decl) : loc;
+    this.pushAdvice(projectionCopiesAMutatedFieldDiag(className, stale, at));
+  }
+
   /** The record a THUNK-constructed instance projects into (the return
    * side of classCtorThunk): method-named fields become closures bound to
    * the instance — the classWitnessRecord stance, sound here because the
@@ -5274,7 +5380,11 @@ export class Lowerer {
    * per (class, shape). Null declines to the exact-shape fences: an
    * accessor- or generic-method-satisfied field, an abstract/rest/
    * inexact method signature, a builtin runtime layout, or a field that
-   * doesn't lift. */
+   * doesn't lift.
+   *
+   * The two halves of that first sentence are the SC6003 divergence, and
+   * the "sound here" is about the THUNK's caller only — every other caller
+   * hands this an instance that does escape. noteMixedProjection above. */
   ctorWitnessProjection(className: string, target: IrType & { kind: "record" }, loc: SrcLoc): string | null {
     // SCRIPTC_PROJ_WHY: name the declining clause. The projection is
     // per-REQUESTED-FIELD and its declines are numerous; three separate
@@ -5423,6 +5533,14 @@ export class Lowerer {
       const abs = plan.filter((p) => p.how === "absent").length;
       console.error(`[projcensus] ${className} -> ${target.shapeId} methods=${meth} absent=${abs} lift=${lifted.length}${lifted.length > 0 ? ` [${lifted.join(",")}]` : ""}`);
     }
+    // SC6003: the census's own two counts are the mixed condition, so the
+    // advisory is decided from the same plan rather than from a second walk.
+    this.noteMixedProjection(
+      className,
+      plan.flatMap((p) => (p.how === "lift" ? [{ name: p.name, type: p.fieldT }] : [])),
+      plan.filter((p) => p.how === "method").length,
+      loc,
+    );
     const builder = `%ctorwitness.${this.retagHelpers.size}`;
     this.retagHelpers.set(key, builder);
     const instT: IrType = { kind: "object", className };
@@ -6549,11 +6667,23 @@ export class Lowerer {
    * `new Point(0,0)` flow into `{x: number; y: number}` slots). Every
    * target field must be a plain instance FIELD on the class (inherited
    * included) whose type lifts, or a missing optional-flavored field
-   * completing to its undefined arm — but never a field the class
-   * satisfies through a METHOD or accessor (bound method references have
-   * no lowering; the plan declines instead of projecting a lie). Builtin
-   * runtime layouts (the Error/EventEmitter/stream chains) decline: their
-   * fields aren't plain emitted storage. */
+   * completing to its undefined arm, or a field the class satisfies through
+   * a METHOD, which becomes a closure bound to the live instance
+   * (boundMethodPlan). An ACCESSOR-satisfied field and a generic method
+   * still decline. Builtin runtime layouts (the Error/EventEmitter/stream
+   * chains) decline: their fields aren't plain emitted storage.
+   *
+   * This paragraph used to say a method-satisfied field made the plan
+   * "decline instead of projecting a lie". It has not for a long time —
+   * boundMethodPlan is five lines below and projects one — and the sentence
+   * mattered, because the mix of a bound method and a copied data field IS
+   * the lie SC6003 now reports (noteMixedProjection). Corrected rather than
+   * deleted: the stance the sentence describes is the one somebody meant.
+   *
+   * Every decline here routes to ctorWitnessProjection (objRecordWidthHelper
+   * calls it on a null plan), which re-checks most of them and declines
+   * again — except the EventEmitter carve-out, which is deliberately more
+   * permissive. */
   objToRecordPlan(className: string, toId: string): Map<string, ObjFieldProj> | null {
     const info = this.classes.get(className);
     const to = this.shapes.get(toId);
@@ -7013,6 +7143,21 @@ export class Lowerer {
     // same way. Plain data-class projections keep the raw pointer.
     const hasMethodField = to.fields.some((f) => "method" in plan.get(f.name)!);
     const boxInstance = hasMethodField || toStr !== null;
+    // SCRIPTC_PROJ_CENSUS's missing half, and SC6003's second producer.
+    // ctorWitnessProjection prints one line per interned projection; THIS
+    // builder printed none, so every census of the mixed-projection
+    // population taken from that dial alone was a lower bound. Same fields,
+    // same spelling, so one parser reads both.
+    {
+      const lifted = to.fields.filter((f) => { const l = plan.get(f.name)!; return !("method" in l) && !("absent" in l); });
+      const meth = to.fields.filter((f) => "method" in plan.get(f.name)!).length;
+      if (process.env["SCRIPTC_PROJ_CENSUS"] !== undefined) {
+        const abs = to.fields.filter((f) => "absent" in plan.get(f.name)!).length;
+        const names = lifted.map((f) => f.name);
+        console.error(`[projcensus] ${className} -> ${toId} methods=${meth} absent=${abs} lift=${names.length}${names.length > 0 ? ` [${names.join(",")}]` : ""}`);
+      }
+      this.noteMixedProjection(className, lifted.map((f) => ({ name: f.name, type: f.type })), meth, loc);
+    }
     this.liftedFns.push({
       name,
       params: [{ localId: "o.0", name: "o", type: fromT }],
