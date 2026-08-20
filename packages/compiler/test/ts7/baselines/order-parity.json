@@ -8636,6 +8636,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5270-a-union-arm-is-chosen-by-its-matcher-so-a-wider-builder-cannot-move-a-tag.ts": {
+   "order": [
+    "<repo>/tests/corpus/5270-a-union-arm-is-chosen-by-its-matcher-so-a-wider-builder-cannot-move-a-tag.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/528-set-seeded.ts": {
    "order": [
     "<repo>/tests/corpus/528-set-seeded.ts"

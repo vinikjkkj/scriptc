@@ -70,6 +70,55 @@ async function compileAndRun(name: string, source: string, ext: "ts" | "cjs" = "
   }
 }
 
+/** The same, with SCRIPTC_KINDGATE_WIDE=1 -- the dial that makes the record
+ * BUILDER read a non-OBJ receiver's declared members instead of refusing at
+ * the kind gate. It is OFF in every shipped build; it is compiled here so
+ * that the PRICE of turning it on is executable rather than remembered, which
+ * is the difference between a refusal that was measured and one that was
+ * argued. The dial rides the cache key, so these binaries never collide with
+ * the undialed ones above.
+ */
+async function compileAndRunWide(name: string, source: string): Promise<RunResult> {
+  const key = createHash("sha256")
+    .update(source)
+    .update(sanitize ? "san" : "plain")
+    .update("kindgate-wide")
+    .digest("hex")
+    .slice(0, 16);
+  const outDir = join(cacheDir, `dyncheck-${key}`);
+  mkdirSync(outDir, { recursive: true });
+  const file = join(outDir, `${name}.ts`);
+  writeFileSync(file, source);
+  const had = process.env["SCRIPTC_KINDGATE_WIDE"];
+  process.env["SCRIPTC_KINDGATE_WIDE"] = "1";
+  let result;
+  try {
+    result = await compile(file, {
+      outPath: join(outDir, exeName(name)),
+      outDir,
+      sanitize,
+      backend: "c",
+    });
+  } finally {
+    if (had === undefined) delete process.env["SCRIPTC_KINDGATE_WIDE"];
+    else process.env["SCRIPTC_KINDGATE_WIDE"] = had;
+  }
+  if (!result.ok) {
+    throw new Error(
+      "dyncheck program failed to compile:\n" +
+        result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"),
+    );
+  }
+  try {
+    const { stdout, stderr } = await execFileAsync(result.binaryPath, [], { encoding: "utf8" });
+    return { stdout, stderr, exitCode: 0 };
+  } catch (err) {
+    const e = err as { code?: unknown; stdout?: string; stderr?: string };
+    if (typeof e.code !== "number") throw err;
+    return { stdout: e.stdout ?? "", stderr: e.stderr ?? "", exitCode: e.code };
+  }
+}
+
 describe(`dynamic-boundary checks (scriptc-only${sanitize ? ", sanitized" : ""})`, () => {
   test("wrong-typed field throws with the path", async () => {
     const r = await compileAndRun(
@@ -195,31 +244,55 @@ console.log("unreachable", c.port);
 
   /* The KIND GATE, and the distinction the test above does NOT draw.
    *
-   * `[1,2,3] as {port:number}` is refused because the array HAS NO `port` — the
+   * `[1,2,3] as {port:number}` is refused because the array HAS NO `port` -- the
    * check-and-extract stance, and Node would have read `undefined` and carried
    * it. Nothing about that case depends on the value being an array.
    *
    * These cases are the other half, and they are a different claim: an array
    * HAS a `length`, a string HAS a `length`, and in JS both are objects whose
    * members read. `as` is erased, so Node answers 3 and 4. scriptc refuses at
-   * `d->kind != SCR_DYN_OBJ`, before any member is looked at — which is the
-   * FIRST statement of every record validator and the largest single bucket in
-   * zapo's DYNCHECK population (record.kind, 34.78% of it).
+   * `d->kind != SCR_DYN_OBJ`, before any member is looked at -- which is the
+   * FIRST statement of every record validator and one of the two largest
+   * buckets in zapo's DYNCHECK population (record.kind, 869 of 3 024).
    *
-   * Measured over a generated 70-case population (14 receiver kinds x 5 record
-   * targets, every expectation taken from running the same file under Node):
-   * 45 of the 70 diverge at this gate alone, 0 of them silently. The other
-   * divergences are the documented stance (6 required-member-absent, 5
-   * wrong-typed-member) and 9 agree, 5 both-threw. Nothing in the population
-   * answers a DIFFERENT VALUE and nothing accepts where Node throws.
+   * Measured on a REGENERATED population -- 18 receiver kinds x 6 record
+   * targets = 108 cases, every expectation taken from running the same file
+   * under Node v25.9.0: 96 diverge, 66 of them at this gate alone, and NOT ONE
+   * of the 96 is silent. The rest are the documented stance (40
+   * required-member-absent), the index-signature value check (4), 12 agree and
+   * 12 both-threw on a nullish receiver.
    *
-   * The gate is pinned rather than widened, and the reason is the union.
-   * Widening only the BUILDER is monotone and safe; widening the MATCHER is
-   * not, because `{length:number} | string[]` would then have an array fitting
-   * BOTH arms and the first one would win — turning a loud refusal into a
-   * silently wrong union tag, which is the trade this project does not make.
-   * These assertions exist so that a future widening has to come here and say
-   * which half it moved. */
+   * The gate stays, and the reason is NOT the one this comment used to give.
+   *
+   *  - The union hazard is real and is now MEASURED rather than argued.
+   *    Widening the MATCHER (SCRIPTC_KINDGATE_MATCH=1, the control dial in
+   *    emit-walkers.ts) moves 26 of a generated 66-case union population and
+   *    makes 4 of them SILENTLY wrong -- `"abcd"` coming back tagged as the
+   *    record arm of `{length:number} | string`. tests/corpus/5270 is the
+   *    differential guard for two of those four.
+   *
+   *  - But the union is NOT what stops the fix, because the two questions are
+   *    already answered by two different emitted functions: `sc_dm_` picks the
+   *    arm, `sc_dc_` builds it, and every union arm builder is reached only
+   *    through its own matcher. Widening the BUILDER alone changes 0 of those
+   *    66 answers. Measured both ways, base and branch.
+   *
+   *  - What stops it is MATERIALIZATION. `as T` is the identity in JS; a
+   *    checked record cast in scriptc COPIES the declared members into a C
+   *    struct and drops the receiver. For an object receiver that copy loses
+   *    only the undeclared keys -- the one divergence the width-tolerance test
+   *    below already pins. For an array or a string it loses the KIND. With
+   *    the builder widened (SCRIPTC_KINDGATE_WIDE=1), over a generated 35-case
+   *    surface population: 25 loud refusals become 9 correct answers and 11 NEW
+   *    SILENT ones -- Array.isArray false where Node says true, `typeof`
+   *    "object" where Node says "string", String() "[object Object]" where Node
+   *    says "a,b,c", JSON.stringify `{"length":3}` where Node says
+   *    `["a","b","c"]`. Nine right answers for eleven silent wrong ones is the
+   *    trade this project does not make, so the refusal stays loud.
+   *
+   * The three assertions below are the loud refusal. packages/compiler/test/
+   * kindgate-dials.test.ts holds both dials, so a future widening has to come
+   * here, say which half it moved, and bring the surface population with it. */
   test("the KIND GATE refuses receivers that HAVE the member: array", async () => {
     const r = await compileAndRun(
       "kind-gate-array",
@@ -263,6 +336,169 @@ console.log("unreachable", (u as HasA).a);
      * the class name is what the message reports, not "object". */
     expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain("Uncaught TypeError: expected object at $, got Holder");
+  });
+
+  /* The kind gate over the rest of the population's receiver kinds. Each of
+   * these is a value whose declared member Node answers, and each is refused
+   * at the same first statement -- so the gate's reach is pinned by kind and
+   * not by the three examples above. */
+  test("the KIND GATE refuses a Uint8Array whose `length` reads", async () => {
+    const r = await compileAndRun(
+      "kind-gate-bytes",
+      `type HasLen = { length: number };
+const v: unknown[] = [new Uint8Array([1, 2, 3])];
+const u: unknown = v[v.length - 1];
+console.log("unreachable", (u as HasLen).length);
+`,
+    );
+    /* Node answers 3. */
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain("Uncaught TypeError: expected object at $, got Uint8Array");
+  });
+
+  test("the KIND GATE refuses a Map, and that one is NOT a wrong check", async () => {
+    /* Node answers `undefined` for `m.a` and so would a widened builder --
+     * but only because sc_dyn_key_get FENCES on a MAP box rather than
+     * fabricating undefined for the `size`/`get`/`has` members Node really
+     * answers. A Map is the kind where refusing IS the right answer, and the
+     * message that would replace it (`a property read on a dynamic Map is not
+     * supported yet`) is a different loud, not a right answer. */
+    const r = await compileAndRun(
+      "kind-gate-map",
+      `type HasA = { a: string };
+const v: unknown[] = [new Map<string, string>([["a", "va"]])];
+const u: unknown = v[v.length - 1];
+console.log("unreachable", (u as HasA).a);
+`,
+    );
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain("Uncaught TypeError: expected object at $, got Map");
+  });
+
+  test("the KIND GATE refuses a NUMBER, where Node reads undefined", async () => {
+    const r = await compileAndRun(
+      "kind-gate-number",
+      `type HasA = { a: string };
+const v: unknown[] = [42];
+const u: unknown = v[v.length - 1];
+console.log("unreachable", (u as HasA).a);
+`,
+    );
+    /* Node answers undefined and carries it; scriptc's documented stance for
+     * a REQUIRED member that is absent is the refusal -- so on a widened
+     * builder this case still refuses, only with `expected string at $.a, got
+     * undefined` instead. Two spellings of the same loud. */
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain("Uncaught TypeError: expected object at $, got number");
+  });
+
+  /* WHAT THE WIDENING WOULD COST, compiled and run rather than described.
+   *
+   * These three run the SAME programs through SCRIPTC_KINDGATE_WIDE=1. The
+   * first shows the widening working: `["a","b","c"] as {length:number}`
+   * answers 3, which is Node's answer and which the shipped compiler refuses.
+   * The second and third are why it is off: the very same value then answers
+   * four other questions wrong, and answers them QUIETLY.
+   *
+   * If a later change makes the materialized record keep the receiver's kind
+   * -- a record representation that is a VIEW rather than a copy -- these two
+   * are the tests that will start failing, and that is the signal to turn the
+   * dial on for good. */
+  test("WIDE: the builder really does answer the member Node answers", async () => {
+    const r = await compileAndRunWide(
+      "kind-gate-wide-member",
+      `type HasLen = { length: number };
+const v: unknown[] = [["a", "b", "c"]];
+const u: unknown = v[v.length - 1];
+console.log((u as HasLen).length);
+`,
+    );
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("3\n");
+  });
+
+  test("WIDE: and then answers Array.isArray, typeof and String() wrong, silently", async () => {
+    const r = await compileAndRunWide(
+      "kind-gate-wide-surfaces",
+      `type HasLen = { length: number };
+function hide(v: unknown): unknown {
+  const box: unknown[] = [v];
+  return box[box.length - 1];
+}
+const arr = hide(["a", "b", "c"]) as HasLen;
+const back: unknown = arr;
+console.log(String(Array.isArray(back)), JSON.stringify(back), String(back));
+const s = hide("abcd") as HasLen;
+const sback: unknown = s;
+console.log(typeof sback, JSON.stringify(sback), String(sback));
+`,
+    );
+    /* Node, for the same six reads:
+     *   true ["a","b","c"] a,b,c
+     *   string "abcd" abcd
+     * Every one of these six is a SILENT divergence the shipped compiler does
+     * not have, because it refuses the cast loudly instead. */
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe('false {"length":3} [object Object]\nobject {"length":4} [object Object]\n');
+  });
+
+  test("WIDE: the kinds that carry no member table keep refusing", async () => {
+    /* A class instance and a Map are not widened even with the dial on: the
+     * boxes carry no member table, sc_dyn_key_get fences on both, and
+     * answering `undefined` for a property Node reads fine would be the
+     * silent wrong answer the fence exists to prevent. Outcome 2, and it does
+     * not move with the dial. */
+    const r = await compileAndRunWide(
+      "kind-gate-wide-objinst",
+      `class Holder { a: string = "field-a"; }
+type HasA = { a: string };
+const v: unknown[] = [new Holder()];
+const u: unknown = v[v.length - 1];
+console.log("unreachable", (u as HasA).a);
+`,
+    );
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain("Uncaught TypeError: expected object at $, got Holder");
+  });
+
+  /* WHAT THE MERGE CHANGED ABOUT THE GATE'S REACH, pinned because it is not
+   * obvious and it cuts against this block's own dial.
+   *
+   * After `block/matcherbuild`, a type reachable ONLY through a union arm gets
+   * no hard walker at all -- it is emitted as `sc_da_` and nothing else. An
+   * OPTIONAL record-typed member is exactly that shape: `{a?: {length:number}}`
+   * makes the member a union (`{length:number} | undefined`), so the record is
+   * reached through that union's arm chain even at a DIRECT cast site, and the
+   * refusal it produces is the union's `union.nomatch`, not the record's
+   * `record.kind`.
+   *
+   * The consequence for SCRIPTC_KINDGATE_WIDE is real: the dial widens hard
+   * bodies, this record has none, and so the dial cannot reach this case at
+   * all -- with it ON, the answer below is unchanged. The same phenomenon that
+   * `record.kind` names is still there and is still loud; it moved census row.
+   * Only SCRIPTC_KINDGATE_MATCH reaches it, and that is the dial that
+   * manufactures wrong tags. */
+  test("an OPTIONAL record member is ARM-ONLY, so the kind gate answers as union.nomatch", async () => {
+    const src = `type LenBox = { length: number };
+type Holder = { a?: LenBox };
+function hide(v: unknown): unknown {
+  const box: unknown[] = [v];
+  return box[box.length - 1];
+}
+const o = JSON.parse('{"a":["x","y"]}');
+console.log("unreachable", ((hide(o) as Holder).a as LenBox).length);
+`;
+    /* Node answers 2: an array has a length and `as` is erased. */
+    const r = await compileAndRun("arm-only-optional", src);
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain("Uncaught TypeError: expected object | undefined at $.a, got array");
+
+    /* and the WIDE dial does not move it, because there is no hard record
+     * walker for it to widen. This is the assertion that would break if a
+     * later change gave arm-only types a hard body again. */
+    const w = await compileAndRunWide("arm-only-optional-wide", src);
+    expect(w.exitCode).toBe(1);
+    expect(w.stderr).toContain("Uncaught TypeError: expected object | undefined at $.a, got array");
   });
 
   test("a failed check is CATCHABLE and execution recovers", async () => {
