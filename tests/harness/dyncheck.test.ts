@@ -461,6 +461,46 @@ console.log("unreachable", (u as HasA).a);
     expect(r.stderr).toContain("Uncaught TypeError: expected object at $, got Holder");
   });
 
+  /* WHAT THE MERGE CHANGED ABOUT THE GATE'S REACH, pinned because it is not
+   * obvious and it cuts against this block's own dial.
+   *
+   * After `block/matcherbuild`, a type reachable ONLY through a union arm gets
+   * no hard walker at all -- it is emitted as `sc_da_` and nothing else. An
+   * OPTIONAL record-typed member is exactly that shape: `{a?: {length:number}}`
+   * makes the member a union (`{length:number} | undefined`), so the record is
+   * reached through that union's arm chain even at a DIRECT cast site, and the
+   * refusal it produces is the union's `union.nomatch`, not the record's
+   * `record.kind`.
+   *
+   * The consequence for SCRIPTC_KINDGATE_WIDE is real: the dial widens hard
+   * bodies, this record has none, and so the dial cannot reach this case at
+   * all -- with it ON, the answer below is unchanged. The same phenomenon that
+   * `record.kind` names is still there and is still loud; it moved census row.
+   * Only SCRIPTC_KINDGATE_MATCH reaches it, and that is the dial that
+   * manufactures wrong tags. */
+  test("an OPTIONAL record member is ARM-ONLY, so the kind gate answers as union.nomatch", async () => {
+    const src = `type LenBox = { length: number };
+type Holder = { a?: LenBox };
+function hide(v: unknown): unknown {
+  const box: unknown[] = [v];
+  return box[box.length - 1];
+}
+const o = JSON.parse('{"a":["x","y"]}');
+console.log("unreachable", ((hide(o) as Holder).a as LenBox).length);
+`;
+    /* Node answers 2: an array has a length and `as` is erased. */
+    const r = await compileAndRun("arm-only-optional", src);
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain("Uncaught TypeError: expected object | undefined at $.a, got array");
+
+    /* and the WIDE dial does not move it, because there is no hard record
+     * walker for it to widen. This is the assertion that would break if a
+     * later change gave arm-only types a hard body again. */
+    const w = await compileAndRunWide("arm-only-optional-wide", src);
+    expect(w.exitCode).toBe(1);
+    expect(w.stderr).toContain("Uncaught TypeError: expected object | undefined at $.a, got array");
+  });
+
   test("a failed check is CATCHABLE and execution recovers", async () => {
     const r = await compileAndRun(
       "catchable",
