@@ -36,6 +36,20 @@ const quiet = args.includes("--quiet");
 const raw = readFileSync(file, "latin1");
 const lines = raw.split("\n");
 
+// ------------------------------------------------------------ 0. the lane
+// The release default is the LLVM lane (index.ts emits the .ll first and
+// falls back to C only on an LlvmUnsupportedError tier refusal), so a C-only
+// reader can be aimed at an .ll by accident.  Say so, loudly, instead of
+// running the C tables over IR and exiting through this tool's own failure
+// path with a pile of unclassified rows -- that reads exactly like a
+// compiler regression and is really a wrong-lane instrument.
+if ((raw.match(/^(?:declare|define) /gm) ?? []).length > 0 && (raw.match(/^#include /gm) ?? []).length === 0) {
+  console.error(`dyncheck-histogram: ${file} is an LLVM translation unit (the default lane's .ll), and this reader is C-only.`);
+  console.error("  Its shape table keys on the C statement text (`if (d->kind != SCR_DYN_NUM) { scr_dyn_check_fail(`);\n  on the .ll that decision is an icmp/br pair and the shape rides the failing edge's BLOCK LABEL\n  (dc.f / dcu.f / dcr.a / dcr.f / dcf.f / dcf.w / dca.f / dce.f).  A port is a NEW table on that axis,\n  not a translation of this one.  The .ll does intern the same sc_dc_<n> helpers with the same\n  `; check <key>` header comment, so the helper/call-site half of this report would carry over.");
+  console.error("  scripts/tu-census.mjs reads BOTH lanes; use it for the category counts.");
+  process.exit(4);
+}
+
 let exitCode = 0;
 const problems = [];
 const fail = (why) => { problems.push(why); exitCode = 3; };

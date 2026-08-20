@@ -201,6 +201,20 @@ if (!file) {
   process.exit(2);
 }
 const raw = readFileSync(file, "latin1");
+// ------------------------------------------------------------ 0. the lane
+// The release default is the LLVM lane (index.ts emits the .ll first and
+// falls back to C only on an LlvmUnsupportedError tier refusal), so a C-only
+// reader can be aimed at an .ll by accident.  Say so, loudly, instead of
+// running the C tables over IR and exiting through this tool's own failure
+// path with a pile of unclassified rows -- that reads exactly like a
+// compiler regression and is really a wrong-lane instrument.
+if ((raw.match(/^(?:declare|define) /gm) ?? []).length > 0 && (raw.match(/^#include /gm) ?? []).length === 0) {
+  console.error(`real-aborts: ${file} is an LLVM translation unit (the default lane's .ll), and this reader is C-only.`);
+  console.error("  It reads the per-result-type `sc_rkg_<n>` keyed-read helpers and their `/* r[k] on <shape> */`\n  header comments.  The LLVM emitter has no per-type keyed-read helper at all: llvm/emitter.ts\n  helperDefs() emits ONE @sc_bad_key for the whole module, carrying a fixed message that names no\n  shape and no result type.  The 'why' this pass exists to answer is not IN the .ll.");
+  console.error("  scripts/tu-census.mjs reads BOTH lanes; use it for the category counts.");
+  process.exit(4);
+}
+
 const a = analyse(raw);
 const abort = a.helpers.filter((h) => h.traps);
 const safe = a.helpers.filter((h) => !h.traps);
