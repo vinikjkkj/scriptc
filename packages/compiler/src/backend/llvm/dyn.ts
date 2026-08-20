@@ -1591,7 +1591,12 @@ export class LlDyn {
             const a = this.dynArmHelper(arm);
             B.line(`store i1 true, ptr ${armOk}`);
             const av = B.tmp();
-            B.line(`${av} = call ${this.valTy(arm)} @${a}(ptr %d, ptr %path, ptr ${armOk})`);
+            // `zeroext` at the call site, matching the callee's own return
+            // attribute and the spelling the matcher/builder pair used
+            // here: an i1 arm value that loses it is a missed guarantee
+            // about the upper bits, not a difference this ABI shows.
+            const avTy = this.valTy(arm) === "i1" ? "zeroext i1" : this.valTy(arm);
+            B.line(`${av} = call ${avTy} @${a}(ptr %d, ptr %path, ptr ${armOk})`);
             const aok = B.tmp();
             B.line(`${aok} = load i1, ptr ${armOk}`);
             const lTook = B.newLabel("dau.k");
