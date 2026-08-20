@@ -108,6 +108,10 @@ const IDX_MAX_DIV10 = "1844674407370955160";
 export class LlDyn {
   private readonly dynMatchers = new Map<string, string>();
   private readonly dynBuilders = new Map<string, string>();
+  /** The MERGED walkers (sc_da_), interned in their own map: a soft body
+   * and a hard body for the same type are two functions, and one ordinal
+   * space each keeps `sc_da_0` and `sc_dc_0` from meaning each other. */
+  private readonly dynArmBuilders = new Map<string, string>();
   private readonly toDynFns = new Map<string, string>();
   private readonly dynFuncThunks = new Map<string, string>();
   private readonly dynFuncBoxes = new Map<string, string>();
@@ -775,12 +779,83 @@ export class LlDyn {
     if (existing) return existing;
     const name = `sc_dc_${this.dynBuilders.size}`;
     this.dynBuilders.set(key, name);
+    const B = new BlockBuilder();
+    this.dynWalkerBody(t, name, B, false);
+    const retTy = this.valTy(t);
+    this.defs.push(
+      `define internal ${retTy === "i1" ? "zeroext i1" : retTy} @${name}(ptr %d, ptr %path) ${FN_ATTRS} { ; check ${key}`,
+      B.render(),
+      `}`,
+      ``,
+    );
+    return name;
+  }
+
+  /** The emitted ARM walker for one union-arm type — the MERGE of the
+   * match predicate and the checked builder into ONE function:
+   * `sc_da_<n>(ptr d, ptr path, ptr ok) -> T`, with `ok` a `ptr` to the
+   * caller's `i1` flag. The C lane's dynArmHelper, ported; its comment
+   * carries the full argument and this one only records the differences
+   * a reader of the IR needs.
+   *
+   * It walks the value ONCE. A type mismatch stores `false` through `ok`
+   * and returns the dummy WITHOUT touching the exception cell, so the
+   * union simply tries the next arm; a success returns the built value
+   * (+1) with `ok` untouched (the caller stores `true` before the call).
+   * A HARD failure reached through the two paths that still have one
+   * stores `false` as well and leaves the exception pending, so ONE test
+   * at the call site separates "next arm" from "propagate".
+   *
+   * The decision it makes is the MATCHER's, statement for statement, and
+   * not the builder's — a func arm keeps the exact-signature strcmp, a
+   * REQUIRED record member is the data read alone, an OPTIONAL member
+   * keeps both halves including the accessor's throw, and a member that
+   * may hold a FUNCTION keeps its matcher call because
+   * scr_dyn_obj_member_get hands an inherited method back BOUND. */
+  dynArmHelper(t: IrType): string {
+    const key = typeKey(t);
+    const existing = this.dynArmBuilders.get(key);
+    if (existing) return existing;
+    const name = `sc_da_${this.dynArmBuilders.size}`;
+    this.dynArmBuilders.set(key, name);
+    const B = new BlockBuilder();
+    this.dynWalkerBody(t, name, B, true);
+    const retTy = this.valTy(t);
+    this.defs.push(
+      `define internal ${retTy === "i1" ? "zeroext i1" : retTy} @${name}(ptr %d, ptr %path, ptr %ok) ${FN_ATTRS} { ; arm ${key}`,
+      B.render(),
+      `}`,
+      ``,
+    );
+    return name;
+  }
+
+  /** The ONE body generator behind both walkers above. `soft` picks the
+   * failure discipline and nothing else, so the hard form and the arm
+   * form cannot drift from each other the way the matcher and the builder
+   * could: a hard body refuses with the path-annotated catchable
+   * TypeError (scr_dyn_check_fail), a soft one stores `false` through
+   * `%ok` and returns. Every recursive edge follows the mode it is in. */
+  private dynWalkerBody(t: IrType, name: string, B: BlockBuilder, soft: boolean): void {
+    const key = typeKey(t);
     const host = this.host;
     const retTy = this.valTy(t);
     const dummy = retTy === "double" ? `double ${f64Lit(0)}` : retTy === "i1" ? "i1 false" : "ptr null";
     host.declare(`declare void @scr_dyn_check_fail(ptr, ptr, ptr)`);
     const want = host.cstr(this.dynDesc(t));
-    const B = new BlockBuilder();
+    /** `*ok = false` — the soft body's whole failure vocabulary. */
+    const notOk = (): void => {
+      B.line(`store i1 false, ptr %ok`);
+    };
+    /** One refusal, in whichever discipline this body is emitted for. A
+     * soft body plants no scr_dyn_check_fail because it plants no way to
+     * die: it reports a miss and the caller tries its next arm. */
+    const failRet = (cleanup?: () => void, wantX: string = want, valX = "%d", pathX = "%path"): void => {
+      if (soft) notOk();
+      else B.line(`call void @scr_dyn_check_fail(ptr ${pathX}, ptr ${wantX}, ptr ${valX})`);
+      if (cleanup) cleanup();
+      B.terminate(`ret ${dummy}`);
+    };
     /** kind test with the standard fail path (got = %d). */
     const requireKind = (k: number, hint: string): void => {
       const kd = this.kindOf(B, "%d");
@@ -790,9 +865,66 @@ export class LlDyn {
       const lf = B.newLabel(`${hint}.f`);
       B.condBr(ok, lo, lf);
       B.startBlock(lf);
-      B.line(`call void @scr_dyn_check_fail(ptr %path, ptr ${want}, ptr %d)`);
-      B.terminate(`ret ${dummy}`);
+      failRet();
       B.startBlock(lo);
+    };
+    /** A recursive edge, in this body's own mode. */
+    const childC = (ct: IrType): string => (soft ? this.dynArmHelper(ct) : this.dynCheckHelper(ct));
+    const childArg = soft ? ", ptr %ok" : "";
+    /** After a recursive edge: a soft child reports BOTH failure kinds
+     * through `*ok`, so one test covers the miss and the throw. */
+    const afterChild = (hint: string, cleanup: () => void, dummyR: string): void => {
+      if (!soft) {
+        this.pendingBail(B, hint, cleanup, dummyR);
+        return;
+      }
+      const o = B.tmp();
+      B.line(`${o} = load i1, ptr %ok`);
+      const lk = B.newLabel(`${hint}.k`);
+      const lu = B.newLabel(`${hint}.u`);
+      B.condBr(o, lk, lu);
+      B.startBlock(lu);
+      cleanup();
+      B.terminate(`ret ${dummyR}`);
+      B.startBlock(lk);
+    };
+    /** After a HARD edge inside a soft body (the optional-accessor and
+     * may-hold-func paths): the throw is real and propagates, and `*ok`
+     * carries it out so the caller needs one test, not two. */
+    const afterHard = (hint: string, cleanup: () => void, dummyR: string): void => {
+      host.declare(`declare zeroext i1 @scr_exc_pending()`);
+      const p = B.tmp();
+      B.line(`${p} = call zeroext i1 @scr_exc_pending()`);
+      const lu = B.newLabel(`${hint}.u`);
+      const lk = B.newLabel(`${hint}.k`);
+      B.condBr(p, lu, lk);
+      B.startBlock(lu);
+      if (soft) notOk();
+      cleanup();
+      B.terminate(`ret ${dummyR}`);
+      B.startBlock(lk);
+    };
+    /** The SOFT form's pre-test in front of a leaf whose refusal lives
+     * inside a runtime unbox (bigint, ArrayBuffer, Map/Set, a class
+     * interval): the match predicate's own test, verbatim, so the unbox
+     * behind it can no longer fail. A no-op in the hard form, where the
+     * unbox's own throw is the refusal. */
+    const softPre = (hint: string, cond: () => string): void => {
+      if (!soft) return;
+      const c = cond();
+      const lk = B.newLabel(`${hint}.k`);
+      const lf = B.newLabel(`${hint}.f`);
+      B.condBr(c, lk, lf);
+      B.startBlock(lf);
+      notOk();
+      B.terminate(`ret ${dummy}`);
+      B.startBlock(lk);
+    };
+    const kindEq = (k: number): string => {
+      const kd = this.kindOf(B, "%d");
+      const r = B.tmp();
+      B.line(`${r} = icmp eq i32 ${kd}, ${k}`);
+      return r;
     };
     switch (t.kind) {
       case "f64": {
@@ -827,6 +959,7 @@ export class LlDyn {
         // the kind check and the throw, so there is no requireKind here —
         // the ARRBUF arm's shape, and the C twin's note has the reason a
         // bigint shares rather than copies.
+        softPre("dab", () => kindEq(DK.BIG));
         host.declare(`declare ptr @scr_dyn_big_unbox(ptr, ptr, ptr)`);
         const r = B.tmp();
         B.line(`${r} = call ptr @scr_dyn_big_unbox(ptr %d, ptr %path, ptr ${want})`);
@@ -838,7 +971,16 @@ export class LlDyn {
         // `u as Map<K,V>`: the SAME ScrMap back, retained, after the
         // typeKey strcmp. The runtime does the kind check, the key check
         // and the throw, so there is no requireKind here — the ARRBUF and
-        // bigint arms' shape, and the C twin carries the reasoning.
+        // bigint arms' shape, and the C twin carries the reasoning. In
+        // the arm form the pre-test is the match predicate verbatim (a
+        // kind test alone cannot tell a Map<string,number> from a
+        // Set<string>, so the typeKey strcmp is part of it).
+        softPre("dam", () => {
+          host.declare(`declare zeroext i1 @scr_dyn_map_is(ptr, ptr)`);
+          const r = B.tmp();
+          B.line(`${r} = call zeroext i1 @scr_dyn_map_is(ptr %d, ptr ${host.cstr(key)})`);
+          return r;
+        });
         host.declare(`declare ptr @scr_dyn_map_unbox(ptr, ptr, ptr, ptr)`);
         const r = B.tmp();
         B.line(`${r} = call ptr @scr_dyn_map_unbox(ptr %d, ptr ${host.cstr(key)}, ptr %path, ptr ${want})`);
@@ -852,6 +994,7 @@ export class LlDyn {
           // `u as ArrayBuffer`: the SAME payload back, retained. The
           // runtime does the kind check and the throw, so there is no
           // requireKind here — see the C twin.
+          softPre("daa", () => kindEq(DK[bk.dk]));
           host.declare(`declare ptr @scr_dyn_arrbuf_unbox(ptr, ptr, ptr)`);
           const r = B.tmp();
           B.line(`${r} = call ptr @scr_dyn_arrbuf_unbox(ptr %d, ptr %path, ptr ${want})`);
@@ -881,6 +1024,14 @@ export class LlDyn {
           host.declare(`declare ptr @scr_dyn_objinst_unbox(ptr, i64, i64, ptr, ptr)`);
           host.dynClassDesc(t.className); // interned even when only narrowed to
           const iv = host.classInterval(t.className);
+          // The arm form's pre-test is the SAME preorder interval the
+          // unwrap would have refused on — the match predicate verbatim.
+          softPre("dao", () => {
+            host.declare(`declare zeroext i1 @scr_dyn_objinst_is(ptr, i64, i64)`);
+            const q = B.tmp();
+            B.line(`${q} = call zeroext i1 @scr_dyn_objinst_is(ptr %d, i64 ${iv.pre}, i64 ${iv.post})`);
+            return q;
+          });
           const r = B.tmp();
           B.line(
             `${r} = call ptr @scr_dyn_objinst_unbox(ptr %d, i64 ${iv.pre}, i64 ${iv.post}, ` +
@@ -902,8 +1053,7 @@ export class LlDyn {
         const lGo = B.newLabel("dce.g");
         B.condBr(hasMarker, lGo, lFail);
         B.startBlock(lFail);
-        B.line(`call void @scr_dyn_check_fail(ptr %path, ptr ${want}, ptr %d)`);
-        B.terminate(`ret ptr null`);
+        failRet();
         B.startBlock(lGo);
         host.declare(`declare ptr @scr_error_from_dyn(ptr)`);
         const e = B.tmp();
@@ -969,8 +1119,7 @@ export class LlDyn {
           const lAr = B.newLabel("dct.a");
           B.condBr(lenOk, lGo, lAr);
           B.startBlock(lAr);
-          B.line(`call void @scr_dyn_check_fail(ptr %path, ptr ${arityWant}, ptr %d)`);
-          B.terminate(`ret ptr null`);
+          failRet(undefined, arityWant);
           B.startBlock(lGo);
           B.line(`%r0 = call ptr @${mangleRecordNew(t.shapeId)}()`);
           const items = this.itemsOf(B, "%d");
@@ -978,9 +1127,9 @@ export class LlDyn {
             setPath(null, `${i}`);
             const e = this.itemAt(B, items, `${i}`);
             const v = B.tmp();
-            B.line(`${v} = call ${this.valTy(f.type)} @${this.dynCheckHelper(f.type)}(ptr ${e}, ptr ${pathSlot})`);
+            B.line(`${v} = call ${this.valTy(f.type)} @${childC(f.type)}(ptr ${e}, ptr ${pathSlot}${childArg})`);
             storeInto(f.name, f.type, v);
-            this.pendingBail(B, "dct", releaseR, "ptr null");
+            afterChild("dct", releaseR, "ptr null");
           });
           B.terminate(`ret ptr %r0`);
           break;
@@ -1004,6 +1153,131 @@ export class LlDyn {
           const fieldWant = host.cstr(this.dynDesc(f.type));
           const utag = f.type.kind === "union" ? host.undefinedArmTag(f.type) : -1;
           const bind = this.mayHoldFunc(f.type);
+          const klen = Buffer.byteLength(f.name, "utf8");
+          if (soft && f.type.kind !== "dyn") {
+            // The ARM form's decision, and it is the MATCHER's, not the
+            // builder's — dynArmHelper's comment says why the two differ
+            // and why this half has to be the predicate's. Ported from
+            // emit-walkers.ts row for row.
+            const softMiss = (): void => {
+              notOk();
+              releaseR();
+              B.terminate(`ret ptr null`);
+            };
+            let mm: string;
+            if (bind) {
+              // The value comes from the BINDING read below, which hands
+              // an inherited method back wrapped (signature "()"); the
+              // DECISION has to stay on the raw member, which is what the
+              // predicate tested. The one place a matcher call survives.
+              const raw = this.dataGetLit(B, "%d", f.name);
+              const hasRaw = B.tmp();
+              B.line(`${hasRaw} = icmp ne ptr ${raw}, null`);
+              const lChk = B.newLabel("dar.c");
+              const lMiss = B.newLabel("dar.m");
+              const lPass = B.newLabel("dar.p");
+              B.condBr(hasRaw, lChk, utag >= 0 ? lPass : lMiss);
+              B.startBlock(lChk);
+              const okm = B.tmp();
+              B.line(`${okm} = call zeroext i1 @${this.dynMatchHelper(f.type)}(ptr ${raw})`);
+              B.condBr(okm, lPass, lMiss);
+              B.startBlock(lMiss);
+              softMiss();
+              B.startBlock(lPass);
+              mm = this.memberGetLit(B, "%d", f.name);
+            } else {
+              mm = this.dataGetLit(B, "%d", f.name);
+            }
+            const dropBind = (): void => {
+              if (!bind) return;
+              host.declare(`declare void @scr_dyn_release(ptr)`);
+              B.line(`call void @scr_dyn_release(ptr ${mm})`);
+            };
+            if (utag >= 0 && f.type.kind === "union") {
+              // Optional, and the two halves part company HERE: a key
+              // present as DATA is what the predicate tested, so it is
+              // decided softly; a key only an ACCESSOR provides is what
+              // the predicate never saw, so it keeps the builder's answer
+              // — including its throw.
+              const unit = host.unitInstanceRef(f.type.unionId, utag);
+              const hasM = B.tmp();
+              B.line(`${hasM} = icmp ne ptr ${mm}, null`);
+              const lPres = B.newLabel("dao.p");
+              const lAcc = B.newLabel("dao.a");
+              const lEnd = B.newLabel("dao.e");
+              B.condBr(hasM, lPres, lAcc);
+              B.startBlock(lPres);
+              setPath(f.name, "0");
+              {
+                const v = B.tmp();
+                // A BOUND member keeps the hard builder (the value is the
+                // wrapper, and the decision above was made on the raw
+                // read); a plain data member takes the soft edge.
+                if (bind) {
+                  B.line(`${v} = call ptr @${this.dynCheckHelper(f.type)}(ptr ${mm}, ptr ${pathSlot})`);
+                  storeInto(f.name, f.type, v);
+                  dropBind();
+                  afterHard("dao", releaseR, "ptr null");
+                } else {
+                  B.line(`${v} = call ptr @${childC(f.type)}(ptr ${mm}, ptr ${pathSlot}${childArg})`);
+                  storeInto(f.name, f.type, v);
+                  afterChild("dao", releaseR, "ptr null");
+                }
+              }
+              B.br(lEnd);
+              B.startBlock(lAcc);
+              host.declare(`declare ptr @scr_dyn_obj_accessor_get(ptr, ptr, i64)`);
+              const acc = B.tmp();
+              B.line(`${acc} = call ptr @scr_dyn_obj_accessor_get(ptr %d, ptr ${host.cstr(f.name)}, i64 ${klen}) ; .${f.name} accessor`);
+              afterHard("dao", releaseR, "ptr null");
+              const hasAcc = B.tmp();
+              B.line(`${hasAcc} = icmp ne ptr ${acc}, null`);
+              const lGot = B.newLabel("dao.g");
+              const lNone = B.newLabel("dao.n");
+              B.condBr(hasAcc, lGot, lNone);
+              B.startBlock(lGot);
+              setPath(f.name, "0");
+              {
+                const v = B.tmp();
+                B.line(`${v} = call ptr @${this.dynCheckHelper(f.type)}(ptr ${acc}, ptr ${pathSlot})`);
+                storeInto(f.name, f.type, v);
+                host.declare(`declare void @scr_dyn_release(ptr)`);
+                B.line(`call void @scr_dyn_release(ptr ${acc})`);
+                afterHard("dao", releaseR, "ptr null");
+              }
+              B.br(lEnd);
+              B.startBlock(lNone);
+              storeInto(f.name, f.type, unit); // absent key -> the undefined arm
+              B.br(lEnd);
+              B.startBlock(lEnd);
+              continue;
+            }
+            // Required, and no accessor probe: the predicate demands the
+            // key present as DATA, so an arm whose member only a getter
+            // provides never matched and the probe sat behind a condition
+            // that could not hold.
+            const hasM = B.tmp();
+            B.line(`${hasM} = icmp ne ptr ${mm}, null`);
+            const lHave = B.newLabel("dar.h");
+            const lGone = B.newLabel("dar.g");
+            B.condBr(hasM, lHave, lGone);
+            B.startBlock(lGone);
+            softMiss();
+            B.startBlock(lHave);
+            setPath(f.name, "0");
+            const v = B.tmp();
+            if (bind) {
+              B.line(`${v} = call ${this.valTy(f.type)} @${this.dynCheckHelper(f.type)}(ptr ${mm}, ptr ${pathSlot})`);
+              storeInto(f.name, f.type, v);
+              dropBind();
+              afterHard("dar", releaseR, "ptr null");
+            } else {
+              B.line(`${v} = call ${this.valTy(f.type)} @${childC(f.type)}(ptr ${mm}, ptr ${pathSlot}${childArg})`);
+              storeInto(f.name, f.type, v);
+              afterChild("dar", releaseR, "ptr null");
+            }
+            continue;
+          }
           const m0 = bind ? this.memberGetLit(B, "%d", f.name) : this.dataGetLit(B, "%d", f.name);
           // ... and, ONLY when that read missed, the ACCESSOR half of
           // [[Get]] the borrow-only read cannot answer — emit-walkers.ts's
@@ -1028,9 +1302,8 @@ export class LlDyn {
             B.condBr(hasD, lJoin, lAcc);
             B.startBlock(lAcc);
             const acc = B.tmp();
-            const klen = Buffer.byteLength(f.name, "utf8");
             B.line(`${acc} = call ptr @scr_dyn_obj_accessor_get(ptr %d, ptr ${host.cstr(f.name)}, i64 ${klen}) ; .${f.name} accessor`);
-            this.pendingBail(B, "dca", releaseR, "ptr null");
+            afterHard("dca", releaseR, "ptr null");
             B.line(`store ptr ${acc}, ptr ${mSlot}`);
             B.line(`store ptr ${acc}, ptr ${accSlot}`);
             B.br(lJoin);
@@ -1092,7 +1365,7 @@ export class LlDyn {
             storeInto(f.name, f.type, v);
             dropM();
             dropAcc();
-            this.pendingBail(B, "dcr", releaseR, "ptr null");
+            afterHard("dcr", releaseR, "ptr null");
             B.br(lj);
             B.startBlock(lj);
           } else {
@@ -1103,9 +1376,7 @@ export class LlDyn {
             B.condBr(has, lp, la);
             B.startBlock(la);
             setPath(f.name, "0");
-            B.line(`call void @scr_dyn_check_fail(ptr ${pathSlot}, ptr ${fieldWant}, ptr null)`);
-            releaseR();
-            B.terminate(`ret ptr null`);
+            failRet(releaseR, fieldWant, "null", pathSlot);
             B.startBlock(lp);
             setPath(f.name, "0");
             const v = B.tmp();
@@ -1113,7 +1384,7 @@ export class LlDyn {
             storeInto(f.name, f.type, v);
             dropM();
             dropAcc();
-            this.pendingBail(B, "dcr", releaseR, "ptr null");
+            afterHard("dcr", releaseR, "ptr null");
           }
         }
         // Index-signature shapes CAPTURE undeclared keys into the
@@ -1158,8 +1429,8 @@ export class LlDyn {
             } else {
               setPathKeyPtr(ent.key);
               ev = B.tmp();
-              B.line(`${ev} = call ${this.valTy(iv)} @${this.dynCheckHelper(iv)}(ptr ${ent.value}, ptr ${pathSlot})`);
-              this.pendingBail(B, "dcv", releaseR, "ptr null");
+              B.line(`${ev} = call ${this.valTy(iv)} @${childC(iv)}(ptr ${ent.value}, ptr ${pathSlot}${childArg})`);
+              afterChild("dcv", releaseR, "ptr null");
             }
             const ek = B.tmp();
             B.line(`${ek} = call ptr @scr_str_new(ptr ${ent.key}, i64 ${ent.keyLen})`);
@@ -1181,7 +1452,7 @@ export class LlDyn {
       }
       case "array": {
         const elem = t.elem;
-        const c = this.dynCheckHelper(elem);
+        const c = childC(elem);
         requireKind(DK.ARR, "dca");
         const n = this.lenOf(B, "%d");
         const a = B.tmp();
@@ -1206,8 +1477,8 @@ export class LlDyn {
           B.line(`store i64 ${i}, ptr ${ip}`);
           const e = this.itemAt(B, items, i);
           const v = B.tmp();
-          B.line(`${v} = call ${this.valTy(elem)} @${c}(ptr ${e}, ptr ${pathSlot})`);
-          this.pendingBail(B, "dca", () => {
+          B.line(`${v} = call ${this.valTy(elem)} @${c}(ptr ${e}, ptr ${pathSlot}${childArg})`);
+          afterChild("dca", () => {
             host.declare(`declare void @scr_arr_release(ptr)`);
             B.line(`call void @scr_arr_release(ptr ${a})`);
           }, "ptr null");
@@ -1220,9 +1491,53 @@ export class LlDyn {
       case "union": {
         const def = host.unionsById.get(t.unionId);
         if (!def) throw new Error(`llvm emitter bug: dynCheck of unknown union ${t.unionId}`);
-        // Arms MOST SPECIFIC FIRST, first FULL match wins (dynCheckArmOrder --
-        // the C emitter takes the same order from the same helper). The
-        // matched arm's builder can no longer fail.
+        // An arm used to be spelled `if (sc_dm_T(d)) return union_new(i,
+        // sc_dc_T(d, path))` — one walk to DECIDE, a second to BUILD, and
+        // the builder's own refusals kept alive by an invariant that two
+        // INDEPENDENTLY GENERATED functions had to maintain between them.
+        // It is ONE walk now: the arm walker decides while it builds and
+        // reports a miss through `aok`, so the next arm is tried with no
+        // second opinion to disagree with. The C lane's union arm, ported;
+        // dynArmHelper's comment carries the argument.
+        //
+        // And the CHECKED form of a union is that arm walker plus its
+        // refusal, not a second copy of the chain — legitimate for unions
+        // and for nothing else, because a union's refusal names the UNION
+        // at the union's OWN path (`expected number | string at $.items[2]`)
+        // and never the arm that got furthest, so the message the wrapper
+        // writes is the message the chain wrote, byte for byte. A record
+        // could not do this (its refusal names the MEMBER, at the member's
+        // path) and neither could an array (the element index).
+        if (!soft) {
+          const a = this.dynArmHelper(t);
+          const okSlot = "%dcuok";
+          B.entryAllocas.push(`${okSlot} = alloca i1`);
+          B.line(`store i1 true, ptr ${okSlot}`);
+          const v = B.tmp();
+          B.line(`${v} = call ptr @${a}(ptr %d, ptr %path, ptr ${okSlot})`);
+          const o = B.tmp();
+          B.line(`${o} = load i1, ptr ${okSlot}`);
+          const lY = B.newLabel("dcu.y");
+          const lM = B.newLabel("dcu.m");
+          B.condBr(o, lY, lM);
+          B.startBlock(lY);
+          B.terminate(`ret ptr ${v}`);
+          B.startBlock(lM);
+          host.declare(`declare zeroext i1 @scr_exc_pending()`);
+          const pe = B.tmp();
+          B.line(`${pe} = call zeroext i1 @scr_exc_pending()`);
+          const lP = B.newLabel("dcu.p");
+          const lF = B.newLabel("dcu.f");
+          B.condBr(pe, lP, lF);
+          B.startBlock(lP);
+          B.terminate(`ret ptr null`);
+          B.startBlock(lF);
+          B.line(`call void @scr_dyn_check_fail(ptr %path, ptr ${want}, ptr %d)`);
+          B.terminate(`ret ptr null`);
+          break;
+        }
+        // Arms MOST SPECIFIC FIRST, first FULL match wins (dynCheckArmOrder —
+        // the C emitter takes the same order from the same helper).
         const order = dynCheckArmOrder(def, (id) => host.recordsById.get(id));
         // TWO PASSES when the union carries STRING-LITERAL DISCRIMINANTS,
         // one otherwise — the C emitter's shape, from the same helpers, so
@@ -1230,59 +1545,97 @@ export class LlDyn {
         // Pass 1 additionally requires each arm's pinned literals; pass 2 is
         // the old chain verbatim, so a value contradicting every arm still
         // lands where it landed before.
+        const armOk = "%aok";
+        B.entryAllocas.push(`${armOk} = alloca i1`);
         const passes = unionHasDiscrim(def) ? [true, false] : [false];
         for (const withLits of passes) {
           order.forEach((i) => {
             const arm = def.arms[i]!;
-            const m = this.dynMatchHelper(arm);
             const lits = withLits ? armDiscrimLits(def, i) : {};
-            const structural = B.tmp();
-            B.line(`${structural} = call zeroext i1 @${m}(ptr %d)`);
-            let hit = structural;
-            if (Object.keys(lits).length > 0) {
-              const lp = B.tmp();
-              B.line(`${lp} = call zeroext i1 @${this.dynLitHelper(lits)}(ptr %d)`);
-              const both = B.tmp();
-              B.line(`${both} = and i1 ${structural}, ${lp}`);
-              hit = both;
-            }
-            const lHit = B.newLabel("dcu.h");
-            const lNext = B.newLabel("dcu.n");
-            B.condBr(hit, lHit, lNext);
-            B.startBlock(lHit);
+            const litFn = Object.keys(lits).length > 0 ? this.dynLitHelper(lits) : null;
             if (arm.kind === "undefinedT" || arm.kind === "nullT") {
               // A matched unit arm builds nothing: THE interned immortal
-              // instance (rc == SIZE_MAX — no retain owed).
+              // instance (rc == SIZE_MAX — no retain owed). The kind test
+              // is inline because the whole of the predicate for these two
+              // arms WAS that kind test.
+              const k = arm.kind === "nullT" ? DK.NULL : DK.UNDEF;
+              let hit = kindEq(k);
+              if (litFn) {
+                const lp = B.tmp();
+                B.line(`${lp} = call zeroext i1 @${litFn}(ptr %d)`);
+                const both = B.tmp();
+                B.line(`${both} = and i1 ${hit}, ${lp}`);
+                hit = both;
+              }
+              const lHit = B.newLabel("dau.h");
+              const lNext = B.newLabel("dau.n");
+              B.condBr(hit, lHit, lNext);
+              B.startBlock(lHit);
               B.terminate(`ret ptr ${host.unitInstanceRef(t.unionId, i)}`);
-            } else if (arm.kind === "f64") {
+              B.startBlock(lNext);
+              return;
+            }
+            // The literal predicate is tested BEFORE the arm is walked
+            // rather than after, which is the same answer and strictly
+            // less work: an arm whose discriminant contradicts the value
+            // is no longer walked at all.
+            let lAfter: string | null = null;
+            if (litFn) {
+              const lp = B.tmp();
+              B.line(`${lp} = call zeroext i1 @${litFn}(ptr %d)`);
+              const lTry = B.newLabel("dau.t");
+              lAfter = B.newLabel("dau.s");
+              B.condBr(lp, lTry, lAfter);
+              B.startBlock(lTry);
+            }
+            const a = this.dynArmHelper(arm);
+            B.line(`store i1 true, ptr ${armOk}`);
+            const av = B.tmp();
+            B.line(`${av} = call ${this.valTy(arm)} @${a}(ptr %d, ptr %path, ptr ${armOk})`);
+            const aok = B.tmp();
+            B.line(`${aok} = load i1, ptr ${armOk}`);
+            const lTook = B.newLabel("dau.k");
+            const lMiss = B.newLabel("dau.m");
+            B.condBr(aok, lTook, lMiss);
+            B.startBlock(lTook);
+            if (arm.kind === "f64") {
               host.declare(`declare ptr @scr_union_new_f64(i32, double)`);
-              const x = B.tmp();
               const u = B.tmp();
-              B.line(`${x} = call double @${this.dynCheckHelper(arm)}(ptr %d, ptr %path)`);
-              B.line(`${u} = call ptr @scr_union_new_f64(i32 ${i}, double ${x})`);
+              B.line(`${u} = call ptr @scr_union_new_f64(i32 ${i}, double ${av})`);
               B.terminate(`ret ptr ${u}`);
             } else if (arm.kind === "bool") {
               host.declare(`declare ptr @scr_union_new_bool(i32, i1 zeroext)`);
-              const x = B.tmp();
               const u = B.tmp();
-              B.line(`${x} = call zeroext i1 @${this.dynCheckHelper(arm)}(ptr %d, ptr %path)`);
-              B.line(`${u} = call ptr @scr_union_new_bool(i32 ${i}, i1 ${x})`);
+              B.line(`${u} = call ptr @scr_union_new_bool(i32 ${i}, i1 ${av})`);
               B.terminate(`ret ptr ${u}`);
             } else {
               const rc = vAdapters(host, arm);
               host.declare(`declare ptr @scr_union_new_ref(i32, ptr, ptr, ptr, ptr)`);
-              const x = B.tmp();
               const u = B.tmp();
-              B.line(`${x} = call ptr @${this.dynCheckHelper(arm)}(ptr %d, ptr %path)`);
               B.line(
-                `${u} = call ptr @scr_union_new_ref(i32 ${i}, ptr ${x}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${traceArg(host, arm)})`,
+                `${u} = call ptr @scr_union_new_ref(i32 ${i}, ptr ${av}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${traceArg(host, arm)})`,
               );
               B.terminate(`ret ptr ${u}`);
             }
-            B.startBlock(lNext);
+            B.startBlock(lMiss);
+            // A THROW inside a matched arm still propagates: `aok` false
+            // with an exception pending is not a miss.
+            host.declare(`declare zeroext i1 @scr_exc_pending()`);
+            const pe = B.tmp();
+            B.line(`${pe} = call zeroext i1 @scr_exc_pending()`);
+            const lProp = B.newLabel("dau.p");
+            const lGo = lAfter ?? B.newLabel("dau.n");
+            B.condBr(pe, lProp, lGo);
+            B.startBlock(lProp);
+            notOk();
+            B.terminate(`ret ptr null`);
+            B.startBlock(lGo);
           });
         }
-        B.line(`call void @scr_dyn_check_fail(ptr %path, ptr ${want}, ptr %d)`);
+        // No arm survived. The refusal belongs to the CHECKED form above,
+        // which is the only caller that has a message to write; here the
+        // union reports the miss and the caller tries its own next arm.
+        notOk();
         B.terminate(`ret ptr null`);
         break;
       }
@@ -1317,6 +1670,18 @@ export class LlDyn {
         B.line(`${r} = call ptr @scr_closure_retain_v(ptr ${clo})`);
         B.terminate(`ret ptr ${r}`);
         B.startBlock(lWrap);
+        if (soft) {
+          // The ARM form is the PREDICATE's rule and stops at the exact
+          // signature: the adapter below would make every function fit
+          // every function arm, so `{a: () => number} | {a: () => string}`
+          // would take arm 0 for a string-returning value and only throw
+          // later, inside the adapter, with the union already wearing the
+          // wrong tag. Behind a match the adapter branch was unreachable
+          // anyway -- the predicate had already demanded this strcmp.
+          notOk();
+          B.terminate(`ret ptr null`);
+          break;
+        }
         if (!canAdaptDynFuncTo(t, (id: string) => host.recordsById.get(id), (id: string) => host.unionsById.get(id))) {
           B.line(`call void @scr_dyn_check_fail(ptr %path, ptr ${want}, ptr %d)`);
           B.terminate(`ret ptr null`);
@@ -1367,25 +1732,20 @@ export class LlDyn {
       default: {
         // Runtime HANDLE targets: a tag-checked reference unwrap (+1 —
         // identity, no copy; the runtime throws the path-annotated
-        // TypeError on any other kind or tag).
+        // TypeError on any other kind or tag). No union arm can be one:
+        // the match predicate refused these kinds outright, so the arm
+        // form refuses them in exactly the same place.
         const h = DYN_HANDLE_KINDS.get(t.kind);
-        if (h) {
+        if (h && !soft) {
           host.declare(`declare ptr @scr_dyn_handle_unbox(ptr, i32, ptr, ptr)`);
           const r = B.tmp();
           B.line(`${r} = call ptr @scr_dyn_handle_unbox(ptr %d, i32 ${dynHandleTagNum(t.kind)}, ptr %path, ptr ${want})`);
           B.terminate(`ret ptr ${r}`);
           break;
         }
-        throw new LlvmUnsupportedError(`type:${t.kind}`);
+        throw new LlvmUnsupportedError(`${soft ? "dynArm" : "type"}:${t.kind}`);
       }
     }
-    this.defs.push(
-      `define internal ${retTy === "i1" ? "zeroext i1" : retTy} @${name}(ptr %d, ptr %path) ${FN_ATTRS} { ; check ${key}`,
-      B.render(),
-      `}`,
-      ``,
-    );
-    return name;
   }
 
   /* ── toDynHelper (emit-walkers.ts, ported) ─────────────────────────── */
