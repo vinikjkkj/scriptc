@@ -28,7 +28,7 @@
 //
 // Every expected value below is Node's, taken by running this file.
 
-import { inspect } from "node:util";
+import { format, inspect } from "node:util";
 
 interface Poll {
   readonly a: number;
@@ -129,3 +129,20 @@ interface Plain {
 const plain: Plain = { n: 1, s: "" };
 console.log("7a", plain);
 console.log("7b", Object.keys(plain).join("|"));
+
+// 8. Every surface that shares the interned helper. util.format's %s / %o /
+//    %O (not %o: it renders with showHidden, and a record carrying an array
+//    has no lowering for that), console.log's rest arguments, a record inside
+//    a Map or a Set, and a
+//    union arm all route through the same per-type walker, so the presence
+//    gate has to hold for all of them at once.
+console.log("8a", format("%s", mk(1)));
+console.log("8c", format("%O", mk(1)));
+console.log("8d", format("%j", mk(1)));
+console.log("8e", "x", mk(1), "y");
+const byKey = new Map<string, Poll>([["k", mk(1)]]);
+console.log("8f", byKey);
+const inSet = new Set<Poll>([mk(1)]);
+console.log("8g", inSet);
+const arm: Poll | string = mk(1);
+console.log("8h", arm);
