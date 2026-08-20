@@ -3140,12 +3140,37 @@ static void scr_net_cleanup_atexit(void) {
   }
 }
 
+#ifdef SCR_LOOP_WHY
+/* What the net unit is holding, for the loop's SCR_LOOP_WHY line: a socket
+ * only leaves the registry at its 'close' settle (emit_close && fd < 0), so
+ * a socket whose fd is already -1 and whose close never got queued is
+ * exactly the shape that keeps the loop alive with nothing left to do. */
+static size_t scr_net_why(char *buf, size_t cap) {
+  size_t socks = 0, srvs = 0, open_fd = 0, closed_no_emit = 0, connecting = 0;
+  for (ScrNetSocket *s = scr_net_socks; s; s = s->next) {
+    socks++;
+    if (s->fd >= 0) open_fd++;
+    if (s->connecting) connecting++;
+    if (s->fd < 0 && !s->emit_close && !s->close_emitted) closed_no_emit++;
+  }
+  for (ScrNetServer *s = scr_net_servers; s; s = s->next) srvs++;
+  int n = snprintf(buf, cap, "socks=%zu(openfd=%zu connecting=%zu closed-no-emit=%zu) servers=%zu proto=%d",
+                   socks, open_fd, connecting, closed_no_emit, srvs,
+                   scr_net_proto_pending() ? 1 : 0);
+  if (n < 0) return 0;
+  return (size_t)n < cap ? (size_t)n : cap;
+}
+#endif
+
 void scr_net_install(void) {
   static bool installed = false;
   if (installed) return;
   installed = true;
   atexit(scr_net_cleanup_atexit);
   scr_loop_set_net(&scr_net_pending, &scr_net_dispatch, &scr_net_pollfd);
+#ifdef SCR_LOOP_WHY
+  scr_loop_why_register("net", &scr_net_why);
+#endif
 }
 
 /* ── checked-dynamic handle dispatch (SCR_DYNH_NET_SOCKET ops) ─────────
