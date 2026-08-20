@@ -4975,9 +4975,10 @@ function switchDiscAtUndefinedArm(L: Lowerer, stmt: ts.SwitchStatement, disc: Ir
     }
     return null;
   };
-  if (disc.kind !== "recordKeyGet") {
-    return disc.kind === "recordGet" || disc.kind === "fieldGet" ? null : null;
-  }
+  // Only the ABORTABLE read. A plain field, a varRef, a call: not this
+  // rung's business, and silent about it (the WHY dial would otherwise
+  // name every switch in the program).
+  if (disc.kind !== "recordKeyGet") return null;
   const clauses = stmt.caseBlock.clauses;
   for (const c of clauses) {
     if (ts.isCaseClause(c) && !ts.isStringLiteralLike(c.expression)) return why("declined: a case test is not a string literal");
