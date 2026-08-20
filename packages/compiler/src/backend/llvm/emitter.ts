@@ -1177,6 +1177,12 @@ class LlEmitter {
    * emitter's dynClassDescs, ported. Emitted as internal constants beside
    * the other interned globals; see dynClassDesc. */
   private readonly dynClassDescSyms = new Map<string, { sym: string; body: string }>();
+  /** The kind-gate WIDE lane's per-shape key tables, by shape id. Empty
+   * unless a dial is on. */
+  private readonly recWideTables = new Map<
+    string,
+    { keys: string; lens: string; keyBody: string; lenBody: string }
+  >();
   /** Type-directed walker functions (JSON serializers, the indent
    * rewriter, union ToString/join) — interned per typeKey/unionId, defs
    * flushed with the shape helpers. */
@@ -1853,6 +1859,13 @@ class LlEmitter {
       out.push(`@${d.sym} = internal constant ${d.body} ; dyn box: class ${className}`);
     }
     if (this.dynClassDescSyms.size > 0) out.push(``);
+    // The kind-gate WIDE lane's key tables. Empty with the dials off,
+    // which is every shipped build.
+    for (const [shapeId, w] of this.recWideTables) {
+      out.push(`@${w.keys} = internal constant ${w.keyBody} ; kind-gate wide keys: ${shapeId}`);
+      out.push(`@${w.lens} = internal constant ${w.lenBody} ; kind-gate wide key lengths: ${shapeId}`);
+    }
+    if (this.recWideTables.size > 0) out.push(``);
     // The function-name table (ScrFnName). Sorted so the .ll is a
     // function of the program and not of emission order.
     const fnNameRows = [...this.fnNames].filter(([sym]) => sym.length > 0).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
@@ -2831,6 +2844,29 @@ class LlEmitter {
       `i8 ${meta.hierarchy ? 1 : 0}, ptr ${rc.retain}, ptr ${rc.release} }`;
     this.dynClassDescSyms.set(className, { sym, body });
     return `@${sym}`;
+  }
+
+  /** The WIDE lane's two-array key table for one record shape — the C
+   * emitter's `sc_kgk_<id>` / `sc_kgl_<id>` pair, as module constants.
+   * Interned by shape id, so a shape reached from a hard body and from an
+   * arm body shares one table. Only a kind-gate dial ON asks for one:
+   * with both off the map is empty and not one global is emitted, which
+   * is what the byte-identity proof rests on. */
+  recWideTable(shapeId: string, fields: readonly { name: string }[]): { keys: string; lens: string } {
+    const existing = this.recWideTables.get(shapeId);
+    if (existing) return { keys: `@${existing.keys}`, lens: `@${existing.lens}` };
+    const keys = `sc_kgk_${shapeId}`;
+    const lens = `sc_kgl_${shapeId}`;
+    // Built HERE, at the interning moment, so the key cstrs land in the
+    // pool while it is still open — dynClassDesc's own lesson.
+    const keyBody =
+      `[${fields.length} x ptr] [` + fields.map((f) => `ptr ${this.cstr(f.name)}`).join(", ") + `]`;
+    const lenBody =
+      `[${fields.length} x i32] [` +
+      fields.map((f) => `i32 ${Buffer.byteLength(f.name, "utf8")}`).join(", ") +
+      `]`;
+    this.recWideTables.set(shapeId, { keys, lens, keyBody, lenBody });
+    return { keys: `@${keys}`, lens: `@${lens}` };
   }
 
   classInterval(className: string): { pre: number; post: number } {
