@@ -775,6 +775,28 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       return out;
     }
     case SCR_DYN_OBJ: {
+      /* An ERROR that crossed the boundary renders like one that did not.
+       *
+       * This arm used to see the encoding as an ordinary object and print
+       * its members, so `console.log(e)` in a catch block answered
+       * `{ '%error': true, name: 'Error', message: 'boom' }` - the
+       * compiler's own reserved key, on stdout, in the single most common
+       * place a program looks at an error. The static side of the same
+       * value printed `[Error: boom]` (scr_insp_error, the stackless
+       * rendering Node itself uses for an error with no stack), so ONE
+       * error had TWO renderings decided by whether it had crossed: put a
+       * caught error in a record's `unknown` field and console.log the
+       * record, and both spellings appeared in one line of output.
+       *
+       * scr_error_from_dyn rides the process identity cache, so an error
+       * that came from a runtime ScrError renders THAT instance and
+       * nothing is rebuilt on the common path. */
+      if (scr_dyn_is_error_encoding(d)) {
+        ScrError *e = scr_error_from_dyn(d); /* +1, identity-cached */
+        ScrStr *s = scr_insp_error(e, recurse, depth);
+        scr_error_release(e);
+        return s;
+      }
       /* Object.create(null)'s dictionary: Node prefixes the rendering
        * with "[Object: null prototype]" (formatValue's constructor-less
        * base), the empty form included, and the beyond-depth answer IS

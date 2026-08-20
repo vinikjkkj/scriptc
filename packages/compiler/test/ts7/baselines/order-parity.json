@@ -8834,6 +8834,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5660-a-caught-error-lists-no-compiler-reserved-keys.ts": {
+   "order": [
+    "<repo>/tests/corpus/5660-a-caught-error-lists-no-compiler-reserved-keys.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5661-a-users-own-percent-error-key-is-not-the-compilers-marker.ts": {
+   "order": [
+    "<repo>/tests/corpus/5661-a-users-own-percent-error-key-is-not-the-compilers-marker.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5662-an-index-signature-capture-over-an-error-is-empty.ts": {
+   "order": [
+    "<repo>/tests/corpus/5662-an-index-signature-capture-over-an-error-is-empty.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5663-an-error-renders-the-same-through-a-typed-and-an-unknown-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/5663-an-error-renders-the-same-through-a-typed-and-an-unknown-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5664-two-dyn-errors-compare-by-name-and-message.ts": {
+   "order": [
+    "<repo>/tests/corpus/5664-two-dyn-errors-compare-by-name-and-message.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"

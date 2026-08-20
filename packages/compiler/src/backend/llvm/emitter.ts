@@ -7552,10 +7552,10 @@ class LlEmitter {
           // `u instanceof Error`: the ONE runtime predicate, shared with
           // the C lane so the two keyed walkers cannot answer differently
           // (the split estado-protochain.md §2e found the hard way). It
-          // covers the reserved own "%error" marker, a [[Prototype]] chain
-          // reaching %Error.prototype% (what a custom error type built by
-          // Object.create(Error.prototype, …) is), and a real engine Error
-          // held by reference. Borrowed; never throws.
+          // covers a [[Prototype]] chain reaching %Error.prototype% — what
+          // caughtToDyn's encoding and a custom error type built by
+          // Object.create(Error.prototype, …) both are — and a real engine
+          // Error held by reference. Borrowed; never throws.
           this.declare(`declare zeroext i1 @scr_dyn_instanceof_error(ptr)`);
           test = B.tmp();
           B.line(`${test} = call zeroext i1 @scr_dyn_instanceof_error(ptr ${d.name})`);
