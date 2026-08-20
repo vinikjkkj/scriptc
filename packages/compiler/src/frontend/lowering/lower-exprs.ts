@@ -3439,23 +3439,30 @@ function instanceofGuardArm(L: Lowerer, rhs: ts.Expression, unionId: string): Ir
     // proof the runtime cannot confirm throws the catchable TypeError
     // rather than reading one arm's payload through another arm's struct.
     if ((L.typeOf(node).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0 && ts.isExpression(node)) {
-      // SCRIPTC_INSTGUARD_WHY: one row per read this rule LOOKS at, with the
-      // guards it found and the arm it picked -- so "the rule fires nowhere"
-      // and "the rule fires and answers nothing" are different observations
-      // in the same run.
+      // SCRIPTC_INSTGUARD_WHY: one row per read this rule LOOKS at -- so
+      // "the rule fires nowhere", "the rule fires and answers nothing" and
+      // "the rule answers" are three different observations in the same run.
+      // A rule that silently declined would leave the log looking exactly as
+      // it did before the rule existed, which is the failure mode this
+      // project has caught in an instrument twice.
       const why = process.env["SCRIPTC_INSTGUARD_WHY"] !== undefined;
       const targets = instanceofGuardTargets(L, node);
-      if (why) {
+      const row = (verdict: string): void => {
+        const sf = node.getSourceFile();
+        const lc = sf.getLineAndCharacterOfPosition(node.getStart());
+        const arms = (L.unions.get((expr.type as { unionId: string }).unionId)?.arms ?? []).map((x) => x.kind).join("/");
         process.stderr.write(
-          `[instguard] ${node.getText().slice(0, 48)} union=${expr.type.unionId} guards=${targets.length}` +
-            ` arms=${(L.unions.get(expr.type.unionId)?.arms ?? []).map((x) => x.kind).join("/")}
+          `INSTGUARD ${sf.fileName}:${lc.line + 1}:${lc.character + 1} ${verdict} arms=${arms}` +
+            ` :: ${node.getText().slice(0, 60).replace(/s+/g, " ")}
 `,
         );
+      };
+      if (targets.length === 0) {
+        if (why) row("NO-GUARD");
       }
       for (const rhs of targets) {
         const arm = instanceofGuardArm(L, rhs, expr.type.unionId);
-        if (why) process.stderr.write(`[instguard]   guard ${rhs.getText().slice(0, 24)} -> ${arm === null ? "no arm" : arm.kind}
-`);
+        if (why) row(`${arm === null ? "NO-ARM" : `NARROWED=${arm.kind}`} ctor=${rhs.getText().slice(0, 24)}`);
         if (arm !== null) return checkedArmBridge(L, expr, arm, expr.loc);
       }
     }
