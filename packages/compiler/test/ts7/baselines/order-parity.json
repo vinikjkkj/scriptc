@@ -8624,6 +8624,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5300-union-arm-picked-by-signature-not-by-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/5300-union-arm-picked-by-signature-not-by-shape.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5301-a-union-arm-rejected-deep-hands-the-value-to-the-next-arm.ts": {
+   "order": [
+    "<repo>/tests/corpus/5301-a-union-arm-rejected-deep-hands-the-value-to-the-next-arm.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5302-discriminated-arms-decide-before-the-walk.ts": {
+   "order": [
+    "<repo>/tests/corpus/5302-discriminated-arms-decide-before-the-walk.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/531-record-array-hofs.ts": {
    "order": [
     "<repo>/tests/corpus/531-record-array-hofs.ts"
