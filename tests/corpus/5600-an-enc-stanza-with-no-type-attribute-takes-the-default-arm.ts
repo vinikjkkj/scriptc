@@ -222,4 +222,46 @@ console.log("r14", codeName("ok"), codeName("gone"))
 // Present keys everywhere, so a widening that lost the HIT is caught too.
 console.log("r15", encKind([{ tag: "enc", attrs: { type: "msmsg" } }]).join(" "), tagOf({ type: "b" }))
 
+// ------------------------------------------------------ SCOPES
+// A braced case body is a SCOPE, exactly as in the real switch: the same
+// `const` name in two bodies must not collide once both are if/else arms.
+function twoConsts(a: Record<string, string>): string {
+  let shared = "-"
+  switch (a.type) {
+    case "one": {
+      const v = "1"
+      shared = v
+      break
+    }
+    case "two": {
+      const v = "2"
+      shared = v + shared
+      break
+    }
+    default:
+      shared = "d"
+  }
+  return shared
+}
+console.log("r16", twoConsts({ type: "one" }), twoConsts({ type: "two" }), twoConsts({ type: "zzz" }), twoConsts({}))
+
+// And the switch's ONE shared clause-level scope is still one scope: a bare
+// `let` in an unbraced clause is visible in the next clause.
+function sharedScope(a: Record<string, string>): string {
+  let out = ""
+  switch (a.type) {
+    case "a":
+      let x = "A"
+      out += x
+      break
+    case "b":
+      out += "B"
+      break
+    default:
+      out += "?"
+  }
+  return out
+}
+console.log("r17", sharedScope({ type: "a" }), sharedScope({ type: "b" }), sharedScope({}))
+
 console.log("r99 still running")
