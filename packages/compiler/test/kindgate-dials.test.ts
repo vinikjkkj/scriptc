@@ -87,6 +87,25 @@ const FAIL = /\bscr_dyn_check_fail\s*\(/g;
 const GATE =
   /if \(d->kind != SCR_DYN_OBJ\) \{ scr_dyn_check_fail\(path, "[^"]*", d\); return NULL; \}/g;
 
+/** How many ARM-walker BODIES contain `needle`.
+ *
+ * Reading the whole file for `sc_da_` would count prototypes and call sites,
+ * which is how an instrument reports a clean sweep it never took. This walks
+ * definition headers only -- `static <T> sc_da_<n>(const ScrDyn *d, const
+ * ScrDynPath *path, bool *ok) {` at column 0 -- and takes each body up to the
+ * next `\n}` at column 0, which is how emit-walkers.ts closes every one. */
+function armBodiesContaining(tu: string, needle: string): number {
+  const header = /^static [^\n]*?\bsc_da_\d+\(const ScrDyn \*d, const ScrDynPath \*path, bool \*ok\) \{/gm;
+  let n = 0;
+  let m: RegExpExecArray | null;
+  while ((m = header.exec(tu)) !== null) {
+    const end = tu.indexOf("\n}\n", m.index);
+    const body = tu.slice(m.index, end < 0 ? tu.length : end);
+    if (body.includes(needle)) n++;
+  }
+  return n;
+}
+
 interface Dials {
   wide?: boolean;
   match?: boolean;
@@ -158,9 +177,21 @@ describe("the record kind gate and its two control dials", () => {
 
   test("WIDE keeps the kind-gate STATEMENT: the census counts what it counted", async () => {
     const { off, wide } = await all();
-    /* The point that decides whether this dial could ever ship: widening is
+    /* The point that decides whether either dial could ever ship: widening is
      * not a deletion. Every scr_dyn_check_fail the census counts is still
-     * there -- the refusal moved behind a second test, it did not go away. */
+     * there -- the refusal moved behind a second test, it did not go away.
+     *
+     * ANCHOR, with its attribution. This program plants 11 of them on
+     * `f0bc798d`; it planted 11 on `66faa36b` too, because `matcherbuild`'s
+     * merge removes the statements of validators reached ONLY through a union
+     * arm and this program reaches every one of its targets directly as well.
+     * The number that DID move with that merge is zapo's: DYNCHECK 3 024 ->
+     * 1 355 (estado-matcherbuild.md section 6), and the widening leaves THAT
+     * unchanged too -- measured at 1 355 on both sides of the dial in
+     * estado-kindgate.md. The absolute is pinned here so that a future change
+     * which deletes checks and a future change which merely renumbers them
+     * cannot both slip through the relative test above. */
+    expect((off.match(FAIL) ?? []).length).toBe(11);
     expect((wide.match(FAIL) ?? []).length).toBe((off.match(FAIL) ?? []).length);
     expect(wide).toContain("sc_dyn_rec_wideable(d)");
     expect(wide).toContain("static ScrDyn *sc_dyn_rec_wide(");
@@ -187,13 +218,64 @@ describe("the record kind gate and its two control dials", () => {
     expect((wide.match(GATE) ?? []).length).toBeGreaterThanOrEqual(1);
   });
 
-  test("MATCH is the CONTROL: it widens the matcher and implies WIDE", async () => {
-    const { off, match } = await all();
-    /* The matcher gains an OBJ-lane body and a wrapper; the builder's own wide
-     * lane comes with it, because the wrapper reuses the projector. */
-    expect(match).toContain("SCRIPTC_KINDGATE_MATCH control");
-    expect(match).toContain("sc_dyn_rec_wide(");
-    expect(match).toMatch(/static bool sc_dm_\d+_obj\(const ScrDyn \*d\)/);
+  /* THE ASSERTION THIS FILE EXISTS FOR, since `block/matcherbuild` merged the
+   * matcher into the builder.
+   *
+   * On the old shape the two questions were two emitted functions -- `sc_dm_`
+   * decided a union arm, `sc_dc_` built it -- so editing the builder's kind
+   * gate could not reach arm selection at all; widening it was monotone by
+   * construction and that was the premise of estado-kindgate.md.
+   *
+   * On the merged shape BOTH come out of one body generator and the only thing
+   * separating them is its `soft` parameter. The premise still holds, but it
+   * is now a boolean instead of a boundary, and the DEFAULT of a careless edit
+   * has inverted: touching the gate reaches the arm walker unless it says not
+   * to. These two tests are what hold that line. If they ever both pass with
+   * the same emitted text, the separation is gone and the union-tag argument
+   * in estado-kindgate.md is void. */
+  test("the ARM-BODY scanner is not vacuous: it finds arm walkers to look inside", async () => {
+    /* The two tests below are each other's control -- if the scanner counted
+     * nothing at all, the WIDE assertion would pass for the wrong reason and
+     * the MATCH one would fail. This makes that explicit rather than lucky:
+     * the program emits arm walkers, and the scanner sees them. */
+    const { off, wide, match } = await all();
+    for (const [tag, tu] of [["off", off], ["wide", wide], ["match", match]] as const) {
+      expect(
+        armBodiesContaining(tu, "const ScrDyn *d"),
+        `${tag}: the scanner found no sc_da_ bodies at all`,
+      ).toBeGreaterThanOrEqual(3);
+    }
+    /* and it separates bodies from prototypes and call sites: the file
+     * mentions sc_da_ far more often than it defines one. */
+    expect((off.match(/sc_da_\d+/g) ?? []).length).toBeGreaterThan(
+      armBodiesContaining(off, "const ScrDyn *d"),
+    );
+  });
+
+  test("WIDE does NOT reach the ARM walker -- arm selection is untouched", async () => {
+    const { wide } = await all();
+    /* Every wide lane in the WIDE build sits in a HARD body (sc_dc_ / the
+     * entry walker), never in a soft one. Read the bodies rather than the
+     * file: `sc_da_` is also the name of a prototype and of call sites. */
+    expect(armBodiesContaining(wide, "sc_dyn_rec_wideable(d)")).toBe(0);
+    expect((wide.match(/sc_dyn_rec_wideable\(d\)/g) ?? []).length).toBeGreaterThanOrEqual(1);
+    /* and the soft refusal spelling never appears beside the gate */
+    expect(wide).not.toMatch(/sc_dyn_rec_wideable\(d\)\) \{ \*ok = false;/);
+  });
+
+  test("MATCH is the CONTROL: it DOES reach the arm walker, and implies WIDE", async () => {
+    const { off, wide, match } = await all();
+    /* This is the change that manufactures a silently wrong union tag: with it
+     * on, `"abcd"` fits the `{length:number}` arm of `{length:number} | string`
+     * and the union wears the record tag. Measured at 4 silent tags over a
+     * generated 66-case union population, on this exact shape.
+     * tests/corpus/5270 is the differential guard for two of them. */
+    expect(armBodiesContaining(match, "sc_dyn_rec_wideable(d)")).toBeGreaterThanOrEqual(1);
+    expect(match).toMatch(/sc_dyn_rec_wideable\(d\)\) \{ \*ok = false;/);
+    /* it implies WIDE: the hard lanes are all still there */
+    expect(match).toContain("static ScrDyn *sc_dyn_rec_wide(");
+    expect(match.length).toBeGreaterThan(wide.length);
+    /* and it still deletes no census statement */
     expect((match.match(FAIL) ?? []).length).toBe((off.match(FAIL) ?? []).length);
   });
 
