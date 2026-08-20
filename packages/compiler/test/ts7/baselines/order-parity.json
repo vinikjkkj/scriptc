@@ -8882,6 +8882,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5700-a-dirent-through-unknown-lists-no-internal-key.ts": {
+   "order": [
+    "<repo>/tests/corpus/5700-a-dirent-through-unknown-lists-no-internal-key.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5701-a-stringdecoder-through-unknown-answers-encoding.ts": {
+   "order": [
+    "<repo>/tests/corpus/5701-a-stringdecoder-through-unknown-answers-encoding.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5702-a-users-own-percent-key-is-not-the-compilers-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/5702-a-users-own-percent-key-is-not-the-compilers-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5703-an-internal-slot-survives-a-record-dyn-record-round-trip.ts": {
+   "order": [
+    "<repo>/tests/corpus/5703-an-internal-slot-survives-a-record-dyn-record-round-trip.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5704-a-fabricated-dirent-is-refused-rather-than-believed.ts": {
+   "order": [
+    "<repo>/tests/corpus/5704-a-fabricated-dirent-is-refused-rather-than-believed.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
