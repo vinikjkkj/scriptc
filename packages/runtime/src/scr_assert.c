@@ -602,6 +602,27 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
        * two different constructors never compare equal. Identity on the
        * prototype object is exactly that test (one object per closure). */
       if (a->v.obj.proto != b->v.obj.proto) return false;
+      /* scriptc's INTERNAL SLOTS stand in for exactly the own SYMBOL
+       * properties a builtin keeps its state under (fs.Dirent's
+       * Symbol(type), StringDecoder's Symbol(kNativeDecoder)), and node's
+       * deepStrictEqual compares own enumerable symbol keys: two Dirent
+       * rows with the same name and a different entry KIND are NOT equal
+       * (v25.9.0, measured). The slots left `entries` in the same change
+       * that made Object.keys right, so this arm had to move with them —
+       * without it a file and a directory of the same name compare EQUAL,
+       * which is the %error branch above, one namespace over, and the
+       * same silent PASS on an assertion that must fail. */
+      {
+        const ScrDyn *sa = a->v.obj.slots, *sb = b->v.obj.slots;
+        size_t na = sa != NULL ? sa->v.obj.len : 0;
+        size_t nb = sb != NULL ? sb->v.obj.len : 0;
+        if (na != nb) return false;
+        for (size_t i = 0; i < na; i++) {
+          const ScrDynEntry *ent = &sa->v.obj.entries[i];
+          ScrDyn *bv = scr_dyn_obj_get(sb, ent->key, ent->key_len);
+          if (!bv || !scr_assert_dyn_deep_eq(ent->value, bv)) return false;
+        }
+      }
       if (a->v.obj.len != b->v.obj.len) return false;
       for (size_t i = 0; i < a->v.obj.len; i++) {
         const ScrDynEntry *ent = &a->v.obj.entries[i];

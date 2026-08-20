@@ -7,11 +7,28 @@
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
-import { armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, isUndefinedArmedUnion, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
+import { armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane } from "../kindgate.js";
 import { OVERFLOW_MEMBER, TOSTR_MEMBER } from "./emit-shapes.js";
+
+/** The refusal text a dyn-to-record check uses when the receiver carries
+ * no INTERNAL SLOT for a field declaredOrder omits (internalSlotFields).
+ *
+ * It names the RECEIVER rather than the field on purpose. The field is
+ * not a key: no program can see it, list it, or supply it, so "expected
+ * number at $.%dtype" both leaked the reserved spelling into a
+ * user-facing message and told the reader to add a key that would not
+ * have helped. Node's answer to the same program is a TypeError as well
+ * ("back.isFile is not a function"), so the two lanes agree in KIND;
+ * the texts differ, which is the documented uncaught-report divergence.
+ *
+ * Both backends spell this one constant — llvm/dyn.ts imports it — so a
+ * lane cannot invent its own wording. */
+export const INTERNAL_SLOT_WANT_TEXT =
+  "a value this runtime built (its internal state is missing)";
+const INTERNAL_SLOT_WANT = cStringLiteral(Buffer.from(INTERNAL_SLOT_WANT_TEXT, "utf8"));
 
 /** Can a record FIELD of this type end up holding a callable?
  *
@@ -975,10 +992,19 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // dyn ('unknown') fields match ANY value, present or missing (a
         // missing key builds the undefined dyn value) — no test to emit.
         if (shape.fields.some((f) => f.type.kind !== "dyn")) d.push(`  const ScrDyn *m;`);
+        const matchInternal = new Set(internalSlotFields(shape));
         for (const f of shape.fields) {
           if (f.type.kind === "dyn") continue;
           const keyLit = cStringLiteral(Buffer.from(f.name, "utf8"));
           const keyLen = Buffer.byteLength(f.name, "utf8");
+          // An INTERNAL SLOT is not a key, so the predicate asks the slot
+          // table — the same question the builder asks, so the two cannot
+          // disagree about which values are of this shape.
+          if (matchInternal.has(f.name)) {
+            d.push(`  m = scr_dyn_obj_slot_get(d, ${keyLit}, ${keyLen}); /* internal slot */`);
+            d.push(`  if (!m || !${E.dynMatchHelper(f.type)}(m)) return false;`);
+            continue;
+          }
           // JS's [[Get]] minus accessors: own data, else the prototype
           // chain. An own-only read made every INHERITED member invisible
           // to the predicate, so a class instance never matched a record
@@ -1962,10 +1988,29 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         if (shape.tostr) {
           d.push(`  r->${TOSTR_MEMBER} = scr_dyn_tostr_closure(d);`);
         }
+        const buildInternal = new Set(internalSlotFields(shape));
         for (const f of shape.fields) {
           const keyLit = cStringLiteral(Buffer.from(f.name, "utf8"));
           const keyLen = Buffer.byteLength(f.name, "utf8");
           const fieldWant = cStringLiteral(Buffer.from(E.dynDesc(f.type), "utf8"));
+          // An INTERNAL SLOT reads from the slot table and from nowhere
+          // else: no own-data walk, no prototype, no accessor probe. The
+          // failure names the RECEIVER, not the field, because the field
+          // is not a key any program can see or supply — a receiver
+          // carrying no slot is simply not a value this runtime built,
+          // however it is spelled. Node's own answer for the same program
+          // is a TypeError too ("back.isFile is not a function"), so the
+          // two agree in kind; the texts differ, which is the documented
+          // uncaught-report divergence.
+          if (buildInternal.has(f.name)) {
+            d.push(`  {`);
+            d.push(`    const ScrDyn *ms = scr_dyn_obj_slot_get(d, ${keyLit}, ${keyLen});`);
+            d.push(fail(`    `, "record.slot", `!ms`, `NULL`, `${rel("r")}; `, INTERNAL_SLOT_WANT, `d`, `path`));
+            d.push(`    r->${mangleField(f.name)} = ${childC(f.type)}(ms, path${childArg});`);
+            d.push(afterChild(`    `, `${rel("r")}; `, `NULL`));
+            d.push(`  }`);
+            continue;
+          }
           // Width tolerance: only declared fields are looked up — extra JSON
           // keys are simply never examined (check-and-extract, not shape
           // equality). A missing field fails as "got undefined" — except
@@ -2474,16 +2519,28 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // Keys insert in DECLARED order — the dyn object's insertion order
         // is observable (Object.keys/for-in over checked-dynamic values,
         // dyn JSON), so it must be JS's (SEMANTICS.md 36's stance, same as
-        // the JSON writer above). Internal '%'-fields declaredOrder omits
-        // still enter the checked-dynamic tree (after the visible keys) so a
-        // record→dyn→record round trip keeps their data.
+        // the JSON writer above).
+        //
+        // Fields declaredOrder OMITS are INTERNAL SLOTS and go to
+        // scr_dyn_obj_set_slot, not into the member table. They used to be
+        // appended to `entries` after the visible keys, deliberately, "so a
+        // record→dyn→record round trip keeps their data" — a real
+        // requirement met in the one place that could not hold it, because
+        // `entries` IS Object.keys, for-in, spread, Object.assign,
+        // Object.entries, JSON.stringify, structuredClone and
+        // util.inspect at once. Measured: a Dirent through `unknown`
+        // listed "%dtype" on thirteen surfaces and printed
+        // {"name":…,"parentPath":…,"%dtype":1}. The slot table keeps the
+        // round trip and answers none of them — and, in the other
+        // direction, a user object that merely SPELLS "%dtype" carries no
+        // slot, so it is no longer mistaken for a Dirent.
         {
           const byName = new Map(shape.fields.map((f) => [f.name, f]));
           const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
-          const inOrder = new Set(order);
+          const internal = new Set(internalSlotFields(shape));
           const dynFields = [
             ...order.map((n) => byName.get(n)).filter((f) => f !== undefined),
-            ...shape.fields.filter((f) => !inOrder.has(f.name)),
+            ...shape.fields.filter((f) => internal.has(f.name)),
           ];
           for (const f of dynFields) {
             const keyLit = cStringLiteral(Buffer.from(f.name, "utf8"));
@@ -2508,9 +2565,11 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             // because a checked-dynamic object really can hold an
             // undefined-valued key.
             d.push(
-              isUndefinedArmedUnion(f.type, (id) => E.unionsById.get(id))
-                ? `  scr_dyn_obj_set_present(d, ${keyLit}, ${keyLen}, ${fv});`
-                : `  scr_dyn_obj_set(d, ${keyLit}, ${keyLen}, ${fv});`,
+              internal.has(f.name)
+                ? `  scr_dyn_obj_set_slot(d, ${keyLit}, ${keyLen}, ${fv}); /* internal slot: no key */`
+                : isUndefinedArmedUnion(f.type, (id) => E.unionsById.get(id))
+                  ? `  scr_dyn_obj_set_present(d, ${keyLit}, ${keyLen}, ${fv});`
+                  : `  scr_dyn_obj_set(d, ${keyLit}, ${keyLen}, ${fv});`,
             );
           }
         }
