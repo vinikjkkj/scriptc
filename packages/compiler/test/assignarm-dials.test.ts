@@ -130,6 +130,8 @@ const count = (tu: string, re: RegExp): number => (tu.match(re) ?? []).length;
 const TRAP = /scr_trap_fmt\("scriptc: TypeError: record has no key/g;
 /* The interned per-union strict-equality helper — the allocating compare. */
 const UNION_EQ = /\bsc_ue_\d+\(/g;
+/* The allocation itself — one fresh tagged box. */
+const UNION_NEW = /scr_union_new_ref\(/g;
 /* Node's own receiver message, spelled by the recvarm rung. */
 const NODE_RECV = /Cannot read properties of undefined \(reading 'length'\)/g;
 
@@ -140,6 +142,7 @@ const DIALS = [
   "SCRIPTC_SWLOCAL_OFF",
   "SCRIPTC_STRARM_OFF",
   "SCRIPTC_RECVARM_OFF",
+  "SCRIPTC_CASEEQ_OFF",
 ] as const;
 
 let dir: string | undefined;
@@ -177,7 +180,10 @@ async function emit(program: string, off: readonly string[]): Promise<{ tu: stri
   }
 }
 
-const ALL_OFF = DIALS.filter((d) => d !== "SCRIPTC_ASSIGNARM_OFF");
+/* The five CONSUMER dials. The widening itself (ASSIGNARM) and the union
+ * desugar's own case-test lowering (CASEEQ) are separate concerns and get
+ * their own tests. */
+const ALL_OFF = DIALS.filter((d) => d !== "SCRIPTC_ASSIGNARM_OFF" && d !== "SCRIPTC_CASEEQ_OFF");
 
 describe("the narrowed-read consumer rungs", () => {
   test("the widening removes the aborting keyed read from every consumer shape", async () => {
@@ -242,6 +248,24 @@ describe("the narrowed-read consumer rungs", () => {
     const mine = await emit(P_EQ, []);
     expect(mine.diags).toEqual([]);
     expect(count(mine.tu, UNION_EQ)).toBe(0);
+  }, 240_000);
+
+  test("the union switch's own case tests stopped allocating too", async () => {
+    // §8.4's four allocations on zapo's inbound `<enc>` path are the union
+    // DESUGAR's, not this family's: `lowerUnionSwitch` compares with
+    // `unionEq`, which wraps the case literal into the union — a fresh box
+    // per test. `SCRIPTC_CASEEQ_OFF=1` restores that; the default emits the
+    // tag test plus a plain `strEq` against the static literal.
+    const alloc = await emit(P_SW, ["SCRIPTC_CASEEQ_OFF"]);
+    expect(alloc.diags).toEqual([]);
+    expect(count(alloc.tu, UNION_EQ)).toBeGreaterThan(0);
+    expect(count(alloc.tu, UNION_NEW)).toBeGreaterThan(0);
+
+    const cheap = await emit(P_SW, []);
+    expect(cheap.diags).toEqual([]);
+    expect(count(cheap.tu, UNION_EQ)).toBe(0);
+    // Strictly fewer boxes built, on the same program, for the same answer.
+    expect(count(cheap.tu, UNION_NEW)).toBeLessThan(count(alloc.tu, UNION_NEW));
   }, 240_000);
 
   test("the clause shapes the desugar refuses DECLINE — byte-identically", async () => {
