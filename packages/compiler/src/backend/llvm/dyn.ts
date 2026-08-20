@@ -24,6 +24,7 @@
 import type { IrType } from "../../ir/nodes.js";
 import { armDiscrimLits, canAdaptDynFuncTo, canBoxFuncIntoDyn, dynCheckArmOrder, isUndefinedArmedUnion, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { mangleRecordNew, mangleRecordStruct } from "../mangle.js";
+import { KINDGATE_WIDE_KINDS, kindgateWideLane, readKindgateDials } from "../kindgate.js";
 import { BlockBuilder } from "./blocks.js";
 import { arrNewCall, elemAccess, llFieldType, releaseSym, toStrSlotIndex, traceAdapter, traceArg, vAdapters } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
@@ -85,6 +86,14 @@ export const DK = {
  * unit instances (undefined-armed dynCheck targets build them). */
 export interface DynHost extends WalkerHost {
   unitInstanceRef(unionId: string, tag: number): string;
+  /** The two-array key table one record shape's WIDE lane projects
+   * through — `@sc_kgk_<shapeId>` (the NUL-terminated key bytes) and
+   * `@sc_kgl_<shapeId>` (their lengths), interned once per shape. The C
+   * lane's own `sc_kgk_`/`sc_kgl_` pair, same prefix on purpose: a shape
+   * table can never collide with `dynClassDesc`'s `sc_dcl_<n>`, on either
+   * lane. Only reached with a kind-gate dial ON; off, nothing asks for
+   * one and no global is emitted. */
+  recWideTable(shapeId: string, fields: readonly { name: string }[]): { keys: string; lens: string };
   /** `@`-ref of the interned SCR_DYN_OBJINST descriptor for a class. */
   dynClassDesc(className: string): string;
   /** The class's preorder interval and hierarchy membership — the same
@@ -120,6 +129,11 @@ export class LlDyn {
   private readonly promiseDynAdapters = new Map<string, string>();
   private dynToStrFn: string | null = null;
   private caughtToDynFn: string | null = null;
+  /** The kind-gate dials, from backend/kindgate.ts — the SAME module the
+   * C emitter reads. Read once, at construction, exactly as CEmitter
+   * reads them, so a dial flipped mid-compile cannot make the two lanes
+   * answer differently. */
+  private readonly kindgateDials = readKindgateDials();
   /** Emitted function definitions, in interning order. */
   readonly defs: string[] = [];
 
@@ -1066,8 +1080,21 @@ export class LlDyn {
         if (!shape) throw new Error(`llvm emitter bug: dynCheck of unknown shape ${t.shapeId}`);
         const struct = mangleRecordStruct(t.shapeId);
         const fieldIndex = new Map(shape.fields.map((f, i) => [f.name, i + 1]));
+        // The wide lane owns a PROJECTION that every exit has to release.
+        // `releaseR` is the one spelling every early return already goes
+        // through, so the release rides it rather than being repeated at
+        // nine return sites and forgotten at the tenth — the C twin's
+        // `projRel`, and the same reasoning. Null until the lane is
+        // actually taken (a tuple shape returns above it), and the slot
+        // holds NULL on the OBJ path, which scr_dyn_release tolerates.
+        let projSlot: string | null = null;
         const releaseR = (): void => {
           B.line(`call void ${releaseSym(host, t)}(ptr %r0)`);
+          if (projSlot !== null) {
+            const p = B.tmp();
+            B.line(`${p} = load ptr, ptr ${projSlot}`);
+            B.line(`call void @scr_dyn_release(ptr ${p}) ; the wide lane's projection`);
+          }
         };
         // One shared path node, restored per use (lives only during the
         // nested call).
@@ -1134,7 +1161,82 @@ export class LlDyn {
           B.terminate(`ret ptr %r0`);
           break;
         }
-        requireKind(DK.OBJ, "dcr");
+        // The KIND GATE, and the WIDE LANE beside it — emit-walkers.ts's
+        // record row, in IR, asking backend/kindgate.ts the identical
+        // question at the identical point.
+        //
+        // WHICH DISCIPLINE THE LANE IS EMITTED IN IS THE WHOLE CONTROL,
+        // and on this shape it is one boolean. Before the matcher and the
+        // builder became one walk — on THIS lane as of `88f8646e`, on the
+        // C lane a merge earlier — a union arm was picked by `sc_dm_` and
+        // built by `sc_dc_`, so editing the builder's gate COULD NOT
+        // reach arm selection. Now both come out of this generator and
+        // `soft` is the only thing that separates them, so the same edit
+        // reaches the arm decision unless it says not to. It says not to
+        // in ONE place, `kindgateWideLane`, for both backends.
+        //
+        // Everything else about the gate is unchanged: still one
+        // `record.kind` refusal in the hard body and none in the soft one,
+        // still the same catchable path-annotated TypeError naming the
+        // ORIGINAL receiver (the projection is not what failed), and a
+        // shape that cannot take the lane meets the bare kind test.
+        let dRef = "%d";
+        if (kindgateWideLane(this.kindgateDials, soft, shape)) {
+          const proj = this.recordWideHelper();
+          const tbl = host.recWideTable(t.shapeId, shape.fields);
+          host.declare(`declare void @scr_dyn_release(ptr)`);
+          projSlot = "%dckgp";
+          const dSlot = "%dckgd";
+          B.entryAllocas.push(`${projSlot} = alloca ptr`);
+          B.entryAllocas.push(`${dSlot} = alloca ptr`);
+          B.line(`store ptr null, ptr ${projSlot}`);
+          B.line(`store ptr %d, ptr ${dSlot}`);
+          const kd = this.kindOf(B, "%d");
+          const isObj = B.tmp();
+          const canWide = B.tmp();
+          const gateOk = B.tmp();
+          B.line(`${isObj} = icmp eq i32 ${kd}, ${DK.OBJ}`);
+          B.line(`${canWide} = call zeroext i1 @sc_dyn_rec_wideable(ptr %d)`);
+          B.line(`${gateOk} = or i1 ${isObj}, ${canWide}`);
+          const lk = B.newLabel("dcr.k");
+          const lf = B.newLabel("dcr.f");
+          B.condBr(gateOk, lk, lf);
+          B.startBlock(lf);
+          failRet();
+          B.startBlock(lk);
+          const lObj = B.newLabel("dcr.wo");
+          const lWide = B.newLabel("dcr.ww");
+          const lJoin = B.newLabel("dcr.wj");
+          B.condBr(isObj, lObj, lWide);
+          B.startBlock(lWide);
+          const p = B.tmp();
+          const pNull = B.tmp();
+          B.line(
+            `${p} = call ptr @${proj}(ptr %d, ptr ${tbl.keys}, ptr ${tbl.lens}, i64 ${shape.fields.length})`,
+          );
+          B.line(`${pNull} = icmp eq ptr ${p}, null`);
+          const lThrew = B.newLabel("dcr.wt");
+          const lOk = B.newLabel("dcr.wk");
+          B.condBr(pNull, lThrew, lOk);
+          B.startBlock(lThrew);
+          // The read threw: the exception is already pending, so this is
+          // a propagation, not a refusal — a soft body still has to say
+          // so through `*ok`, which is what afterHard does elsewhere.
+          if (soft) notOk();
+          B.terminate(`ret ptr null`);
+          B.startBlock(lOk);
+          B.line(`store ptr ${p}, ptr ${projSlot}`);
+          B.line(`store ptr ${p}, ptr ${dSlot}`);
+          B.br(lJoin);
+          B.startBlock(lObj);
+          B.br(lJoin);
+          B.startBlock(lJoin);
+          const dw = B.tmp();
+          B.line(`${dw} = load ptr, ptr ${dSlot}`);
+          dRef = dw;
+        } else {
+          requireKind(DK.OBJ, "dcr");
+        }
         B.line(`%r0 = call ptr @${mangleRecordNew(t.shapeId)}()`);
         // The HIDDEN per-instance toString slot — emit-walkers.ts's row
         // exactly. MATERIALIZING is what loses a JS object's toString, and
@@ -1145,7 +1247,7 @@ export class LlDyn {
           host.declare(`declare ptr @scr_dyn_tostr_closure(ptr)`);
           const ts = B.tmp();
           const tsp = B.tmp();
-          B.line(`${ts} = call ptr @scr_dyn_tostr_closure(ptr %d)`);
+          B.line(`${ts} = call ptr @scr_dyn_tostr_closure(ptr ${dRef})`);
           B.line(`${tsp} = getelementptr inbounds %${mangleRecordStruct(t.shapeId)}, ptr %r0, i64 0, i32 ${toStrSlotIndex(shape)}`);
           B.line(`store ptr ${ts}, ptr ${tsp}`);
         }
@@ -1170,7 +1272,7 @@ export class LlDyn {
               // an inherited method back wrapped (signature "()"); the
               // DECISION has to stay on the raw member, which is what the
               // predicate tested. The one place a matcher call survives.
-              const raw = this.dataGetLit(B, "%d", f.name);
+              const raw = this.dataGetLit(B, dRef, f.name);
               const hasRaw = B.tmp();
               B.line(`${hasRaw} = icmp ne ptr ${raw}, null`);
               const lChk = B.newLabel("dar.c");
@@ -1184,9 +1286,9 @@ export class LlDyn {
               B.startBlock(lMiss);
               softMiss();
               B.startBlock(lPass);
-              mm = this.memberGetLit(B, "%d", f.name);
+              mm = this.memberGetLit(B, dRef, f.name);
             } else {
-              mm = this.dataGetLit(B, "%d", f.name);
+              mm = this.dataGetLit(B, dRef, f.name);
             }
             const dropBind = (): void => {
               if (!bind) return;
@@ -1228,7 +1330,7 @@ export class LlDyn {
               B.startBlock(lAcc);
               host.declare(`declare ptr @scr_dyn_obj_accessor_get(ptr, ptr, i64)`);
               const acc = B.tmp();
-              B.line(`${acc} = call ptr @scr_dyn_obj_accessor_get(ptr %d, ptr ${host.cstr(f.name)}, i64 ${klen}) ; .${f.name} accessor`);
+              B.line(`${acc} = call ptr @scr_dyn_obj_accessor_get(ptr ${dRef}, ptr ${host.cstr(f.name)}, i64 ${klen}) ; .${f.name} accessor`);
               afterHard("dao", releaseR, "ptr null");
               const hasAcc = B.tmp();
               B.line(`${hasAcc} = icmp ne ptr ${acc}, null`);
@@ -1278,7 +1380,7 @@ export class LlDyn {
             }
             continue;
           }
-          const m0 = bind ? this.memberGetLit(B, "%d", f.name) : this.dataGetLit(B, "%d", f.name);
+          const m0 = bind ? this.memberGetLit(B, dRef, f.name) : this.dataGetLit(B, dRef, f.name);
           // ... and, ONLY when that read missed, the ACCESSOR half of
           // [[Get]] the borrow-only read cannot answer — emit-walkers.ts's
           // row exactly, block for block. A field a getter provides read as
@@ -1302,7 +1404,7 @@ export class LlDyn {
             B.condBr(hasD, lJoin, lAcc);
             B.startBlock(lAcc);
             const acc = B.tmp();
-            B.line(`${acc} = call ptr @scr_dyn_obj_accessor_get(ptr %d, ptr ${host.cstr(f.name)}, i64 ${klen}) ; .${f.name} accessor`);
+            B.line(`${acc} = call ptr @scr_dyn_obj_accessor_get(ptr ${dRef}, ptr ${host.cstr(f.name)}, i64 ${klen}) ; .${f.name} accessor`);
             afterHard("dca", releaseR, "ptr null");
             B.line(`store ptr ${acc}, ptr ${mSlot}`);
             B.line(`store ptr ${acc}, ptr ${accSlot}`);
@@ -1398,8 +1500,8 @@ export class LlDyn {
           const ovf = B.tmp();
           B.line(`${ovfp} = getelementptr inbounds %${struct}, ptr %r0, i64 0, i32 ${shape.fields.length + 1}`);
           B.line(`${ovf} = load ptr, ptr ${ovfp} ; overflow map`);
-          const n = this.lenOf(B, "%d");
-          const entries = this.itemsOf(B, "%d");
+          const n = this.lenOf(B, dRef);
+          const entries = this.itemsOf(B, dRef);
           this.i64Loop(B, "dcv", n, (i, brNext) => {
             const ent = this.entryAt(B, entries, i);
             for (const f of shape.fields) {
@@ -1446,6 +1548,14 @@ export class LlDyn {
             }
             B.line(`call void @scr_str_release(ptr ${ek})`);
           });
+        }
+        if (projSlot !== null) {
+          // The SUCCESS exit — the only one `releaseR` does not cover,
+          // because it does not release `%r0`. The C twin's
+          // `if (sc_proj) scr_dyn_release(sc_proj);` before `return r;`.
+          const p = B.tmp();
+          B.line(`${p} = load ptr, ptr ${projSlot}`);
+          B.line(`call void @scr_dyn_release(ptr ${p}) ; the wide lane's projection`);
         }
         B.terminate(`ret ptr %r0`);
         break;
@@ -2687,6 +2797,124 @@ export class LlDyn {
       `}`,
       ``,
     );
+    return name;
+  }
+
+  /* ── the record WIDE lane (recordWideHelper, ported) ───────────────── */
+
+  /** `sc_dyn_rec_wideable(ptr d) -> i1` and
+   * `sc_dyn_rec_wide(ptr d, ptr keys, ptr lens, i64 n) -> ptr` — the
+   * emit-walkers.ts pair, in IR. The whole argument for what they admit
+   * and what they refuse lives beside the C twin (`recordWideHelper`) and
+   * in backend/kindgate.ts; this is the same two functions, called from
+   * the same point of the same body generator, gated by the same
+   * `kindgateWideLane`.
+   *
+   * The projection: for each declared key, `sc_dyn_key_get(d, k, false)`
+   * — the very entry point the JS lane's `d[k]` takes — written into a
+   * plain object the ordinary OBJ body below then validates. A NULL read
+   * is the getter's exception (or the `constructor` fence) and rides out
+   * as a NULL projection; an UNDEFINED answer IS JS's absent-property
+   * read, so the key is simply not written and the OBJ body's own absent
+   * handling decides it.
+   *
+   * Ownership, and it is the one thing this lane has already got wrong
+   * once on the C side: `scr_dyn_obj_set` OWNS the value it is handed, so
+   * the +1 the read answered MOVES IN on the write path and is dropped by
+   * hand on the other. Releasing as well freed the projection's members
+   * under it. */
+  recordWideHelper(): string {
+    const memoKey = "%recWide";
+    const existing = this.dynBuilders.get(memoKey);
+    if (existing) return existing;
+    const name = "sc_dyn_rec_wide";
+    this.dynBuilders.set(memoKey, name);
+    const host = this.host;
+    const kg = this.dynKeyGetHelper();
+    host.declare(`declare ptr @scr_dyn_new_obj()`);
+    host.declare(`declare void @scr_dyn_obj_set(ptr, ptr, i64, ptr)`);
+    host.declare(`declare ptr @scr_str_new(ptr, i64)`);
+    host.declare(`declare void @scr_str_release(ptr)`);
+    host.declare(`declare void @scr_dyn_release(ptr)`);
+    // sc_dyn_rec_wideable — the shared kind predicate. The admitted kinds
+    // come from KINDGATE_WIDE_KINDS, so this list and the C switch's are
+    // the same list.
+    {
+      const B = new BlockBuilder();
+      const kd = this.kindOf(B, "%d");
+      let acc: string | null = null;
+      for (const k of KINDGATE_WIDE_KINDS) {
+        const one = B.tmp();
+        B.line(`${one} = icmp eq i32 ${kd}, ${DK[k]} ; SCR_DYN_${k}`);
+        if (acc === null) {
+          acc = one;
+        } else {
+          const o = B.tmp();
+          B.line(`${o} = or i1 ${acc}, ${one}`);
+          acc = o;
+        }
+      }
+      B.terminate(`ret i1 ${acc!}`);
+      this.defs.push(
+        `define internal zeroext i1 @sc_dyn_rec_wideable(ptr %d) ${FN_ATTRS} { ; record builder: a receiver whose members can be read`,
+        B.render(),
+        `}`,
+        ``,
+      );
+    }
+    // sc_dyn_rec_wide — the projection itself.
+    {
+      const B = new BlockBuilder();
+      const o = B.tmp();
+      B.line(`${o} = call ptr @scr_dyn_new_obj()`);
+      this.i64Loop(B, "kgw", "%n", (i, brNext) => {
+        const kp = B.tmp();
+        const kdata = B.tmp();
+        const lp = B.tmp();
+        const l32 = B.tmp();
+        const klen = B.tmp();
+        B.line(`${kp} = getelementptr inbounds ptr, ptr %keys, i64 ${i}`);
+        B.line(`${kdata} = load ptr, ptr ${kp}`);
+        B.line(`${lp} = getelementptr inbounds i32, ptr %lens, i64 ${i}`);
+        B.line(`${l32} = load i32, ptr ${lp}`);
+        B.line(`${klen} = zext i32 ${l32} to i64`);
+        const k = B.tmp();
+        const v = B.tmp();
+        B.line(`${k} = call ptr @scr_str_new(ptr ${kdata}, i64 ${klen})`);
+        // `false` crosses this call as an i1 and the callee's parameter is
+        // `zeroext`: spelled, not inherited, because a bool whose high
+        // bits are undefined reads true from garbage on this ABI.
+        B.line(`${v} = call ptr @${kg}(ptr %d, ptr ${k}, i1 zeroext false)`);
+        B.line(`call void @scr_str_release(ptr ${k})`);
+        const threw = B.tmp();
+        B.line(`${threw} = icmp eq ptr ${v}, null`);
+        const lT = B.newLabel("kgw.t");
+        const lL = B.newLabel("kgw.l");
+        B.condBr(threw, lT, lL);
+        B.startBlock(lT);
+        B.line(`call void @scr_dyn_release(ptr ${o})`);
+        B.terminate(`ret ptr null ; the read threw`);
+        B.startBlock(lL);
+        const vk = this.kindOf(B, v);
+        const isU = B.tmp();
+        B.line(`${isU} = icmp eq i32 ${vk}, ${DK.UNDEF}`);
+        const lD = B.newLabel("kgw.d");
+        const lS = B.newLabel("kgw.s");
+        B.condBr(isU, lD, lS);
+        B.startBlock(lD);
+        B.line(`call void @scr_dyn_release(ptr ${v}) ; absent -> the OBJ body decides`);
+        brNext();
+        B.startBlock(lS);
+        B.line(`call void @scr_dyn_obj_set(ptr ${o}, ptr ${kdata}, i64 ${klen}, ptr ${v}) ; takes ownership`);
+      });
+      B.terminate(`ret ptr ${o}`);
+      this.defs.push(
+        `define internal ptr @${name}(ptr %d, ptr %keys, ptr %lens, i64 %n) ${FN_ATTRS} { ; record builder: the non-OBJ receiver's declared members`,
+        B.render(),
+        `}`,
+        ``,
+      );
+    }
     return name;
   }
 

@@ -8804,6 +8804,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5480-the-record-kind-gate-answers-alike-through-both-walkers.ts": {
+   "order": [
+    "<repo>/tests/corpus/5480-the-record-kind-gate-answers-alike-through-both-walkers.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
