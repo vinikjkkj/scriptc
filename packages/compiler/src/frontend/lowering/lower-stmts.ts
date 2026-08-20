@@ -25,6 +25,7 @@ import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
 import { ctorObjectGlobalValue, isDynSafeReadWidth, isImmutablePrimitiveWidth } from "./lower-exprs.js";
+import { localTakesWidenedKeyedRead, narrowBridgeUnion, unitArmsOf } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
@@ -4999,20 +5000,6 @@ function switchDiscAtUndefinedArm(L: Lowerer, stmt: ts.SwitchStatement, disc: Ir
   return armed;
 }
 
-/** Does the checker still admit `undefined` at this occurrence? Asked of
- * a REFERENCE, not a declaration — the question is what tsc's control-flow
- * narrowing believes HERE, which is what the read at this spot was
- * compiled against. */
-function occurrenceAdmitsUndefined(L: Lowerer, n: ts.Identifier): boolean {
-  let t: ts.Type;
-  try {
-    t = L.typeOf(n);
-  } catch {
-    return false;
-  }
-  const parts = t.isUnionType() ? t.getTypes() : [t];
-  return parts.some((p) => (p.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Void | ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0);
-}
 
 /** THE ASSIGNMENT DESTINATION for recordKeyReadAtUndefinedArm, and the one
  * destination that has to EARN it.
@@ -5038,21 +5025,37 @@ function occurrenceAdmitsUndefined(L: Lowerer, n: ts.Identifier): boolean {
  * `unionNarrow` — trust-the-checker — which a stored undefined turns
  * into a silent wrong value, the worst outcome this compiler has.
  *
- * So the rung is offered here only when that hazard is ABSENT, and
- * absence is checked rather than assumed: every reference to the assigned
- * binding inside its enclosing function is asked what the checker's
- * control-flow narrowing believes AT THAT OCCURRENCE, and a single read
- * that has lost the undefined arm declines the whole assignment. Writes
- * (the assignment targets, `++`) are not reads and do not count; the
- * declaration name is not a read either. A binding whose every read still
- * sees `string | undefined` has no unchecked narrow to feed, which is why
- * zapo's own spelling qualifies: the assignment sits under
- * `if (firstEncType === undefined)` inside a loop, so the flow type at
- * both later reads is the declared union, back-edge and all.
+ * THE UNCHECKED NARROW IS THE PART THAT IS NO LONGER TRUE, and the
+ * occurrence gate that rested on it is gone. `733f4db9` made every
+ * checker-driven union narrowing go through `checkedArmBridge` ->
+ * `narrowedArmHelper`, which emits `if (unionIsTag) throw new TypeError`
+ * BEFORE the payload peek — so a stored `undefined` behind a narrowed read
+ * is not a silent wrong value and has not been one for months. The gate
+ * was written against the older stance and was never revisited; measured
+ * on 38 spellings generated from the Node oracle (`G:\\asx\\sweep-*`), it
+ * declined 37 programs that ABORT the process — 0xC0000409, past every
+ * catch clause — and admitted none of them.
  *
- * The gate is deliberately whole-function and deliberately conservative —
- * one narrowed read anywhere, in any branch, and the abort stays. A trap
- * is a bad outcome; a silent wrong value is a worse one.
+ * WHAT THE READERS GET INSTEAD is the DECLARATION rung's contract, word
+ * for word: a use that only asks WHETHER there is a value answers (the
+ * `=== undefined` / `typeof` / `!v` / `??` / `=== 'lit'` / `switch`
+ * look-throughs, each in its own rung), a MEMBER read throws Node's own
+ * `Cannot read properties of undefined (reading 'k')`, a string
+ * conversion prints `undefined`, and a use that needs the value to keep
+ * travelling into a slot that cannot say undefined takes the checked
+ * extraction and throws the catchable TypeError. `const t = attrs.type`
+ * has behaved exactly that way since before this rung existed; the gate
+ * made the same program in the `let`-plus-assignment spelling die
+ * instead.
+ *
+ * Of those 38 spellings: 28 are byte-exact against Node with the rung on
+ * and 0 are with it off; 9 trade an uncatchable ABORT for a CATCHABLE
+ * TypeError at the point Node would have carried the undefined onward
+ * (`sink(t)`, `return t`, `a.push(t)`, `{ v: t }`, `Number(t)`,
+ * `m[t]`, `t < 'n'`, `JSON.stringify(t)`, `let u: string|undefined = t`);
+ * 1 (`t['length']`) is an SC1090 refusal on BOTH sides, pre-existing. Not
+ * one row moves from a right answer to a wrong one, and every row's
+ * key-PRESENT answer is identical on both sides.
  *
  * `SCRIPTC_ASSIGNARM_OFF=1` ablates it; `SCRIPTC_ASSIGNARM_WHY` names
  * every site it fires or declines on. */
@@ -5072,35 +5075,73 @@ function keyedReadAtAssignSlot(
   };
   if (raw.kind !== "recordKeyGet") return null;
   if (expected.kind !== "union") return null;
-  const symbol = L.checker.getSymbolAtLocation(name);
-  if (!symbol) return why("declines: unresolved binding", null);
-  let scope: ts.Node = name;
-  while (scope.parent && !ts.isSourceFile(scope) && !ts.isFunctionLike(scope) && !ts.isClassStaticBlockDeclaration(scope)) {
-    scope = scope.parent;
-  }
-  let narrowedRead: ts.Identifier | null = null;
-  const walk = (n: ts.Node): void => {
-    if (narrowedRead) return;
-    if (ts.isIdentifier(n) && n.text === name.text && !isWritePosition(n)) {
-      if (L.checker.getSymbolAtLocation(n) === symbol) {
-        const decl = n.parent !== undefined &&
-          ((ts.isVariableDeclaration(n.parent) && n.parent.name === n) ||
-            (ts.isParameter(n.parent) && n.parent.name === n) ||
-            (ts.isBindingElement(n.parent) && n.parent.name === n));
-        if (!decl && !occurrenceAdmitsUndefined(L, n)) {
-          narrowedRead = n;
-          return;
-        }
-      }
-    }
-    ts.forEachChild(n, walk);
-  };
-  walk(scope);
-  if (narrowedRead !== null) {
-    return why(`declines: a read at ${locOf(narrowedRead).start} lost the undefined arm`, null);
-  }
   const armed = L.recordKeyReadAtUndefinedArm(raw, expected);
   return why(armed ? `widened to ${L.fmt(expected)}` : "declines: recordKeyReadAtUndefinedArm", armed);
+}
+
+/** THE SWITCH DISCRIMINANT one binding later - `switchDiscAtUndefinedArm`
+ * for a LOCAL that a widened keyed read stored into.
+ *
+ *     let t: string | undefined
+ *     t = child.attrs.type
+ *     switch (t) { case 'skmsg': ... default: ... }
+ *
+ * is the same dispatch as `switch (child.attrs.type)` with a name given to
+ * the value, and tsc narrows the assignment to `string`, so the
+ * discriminant reaches lowerSwitch as the CHECKED bridge over the widened
+ * union - a `string`-typed call. The primitive switch then compares a
+ * value the bridge throws on before any case test runs, where Node
+ * evaluates `switch (undefined)`, matches no case and takes `default`.
+ *
+ * Every word of switchDiscAtUndefinedArm's admission rule applies
+ * unchanged: a discriminant stores nothing and is read by nothing but the
+ * switch's own case tests, each of which already discriminates, and the
+ * arm matching none of them is the arm `default` was written for. The
+ * string-literal restriction is the same fact about the program.
+ *
+ * The PREFLIGHT is the same one, through the same predicates, for the same
+ * reason: `lowerUnionSwitch` refuses clause shapes the primitive switch
+ * lowers happily, and widening without asking would turn a working program
+ * into an SC1090 refusal - a compile-time kill traded for a runtime one,
+ * which raises the census instead of lowering it.
+ *
+ * No hidden local: the bridged value is a plain `varRef`, which IS
+ * pureReemittable, so the desugar's chain re-reads it exactly as JS reads
+ * a variable at each test. (The read happens once in JS too; a variable
+ * read has no effects, so the two are the same program.)
+ *
+ * Scoped to localTakesWidenedKeyedRead: see lower-exprs.ts.
+ *
+ * `SCRIPTC_SWLOCAL_OFF=1` ablates it; `SCRIPTC_SWLOCAL_WHY` names every
+ * site it takes or declines. */
+function switchDiscAtBridgedLocal(L: Lowerer, stmt: ts.SwitchStatement, disc: IrExpr): IrExpr | null {
+  if (process.env["SCRIPTC_SWLOCAL_OFF"] === "1") return null;
+  const armed = narrowBridgeUnion(disc);
+  if (armed === null || armed.type.kind !== "union") return null;
+  if (unitArmsOf(L, armed.type.unionId).length === 0) return null;
+  if (!localTakesWidenedKeyedRead(L, stmt.expression)) return null;
+  const why = (verdict: string): null => {
+    if (process.env["SCRIPTC_SWLOCAL_WHY"] !== undefined) {
+      const l = locOf(stmt.expression);
+      console.error(`[swlocal] ${l.file}:${l.start} ${verdict}`);
+    }
+    return null;
+  };
+  const clauses = stmt.caseBlock.clauses;
+  for (const c of clauses) {
+    if (ts.isCaseClause(c) && !ts.isStringLiteralLike(c.expression)) return why("declined: a case test is not a string literal");
+  }
+  if (unionSwitchStrayBreak(clauses) !== null) return why("declined: early or labeled break");
+  for (let i = 0; i < clauses.length; i++) {
+    if (unionSwitchClauseFallsThrough(clauses, i)) return why("declined: fall-through between case bodies");
+  }
+  if (!L.eqComparableUnion(armed.type.unionId)) return why("declined: union is not eq-comparable");
+  if (!pureReemittable(armed)) return why("declined: discriminant is not pure-reemittable");
+  if (process.env["SCRIPTC_SWLOCAL_WHY"] !== undefined) {
+    const l = locOf(stmt.expression);
+    console.error(`[swlocal] ${l.file}:${l.start} widened to ${L.fmt(armed.type)}`);
+  }
+  return armed;
 }
 
 /** JS-exact switch (see docs/ir.md): one shared lexical scope for all case
@@ -5146,6 +5187,10 @@ function keyedReadAtAssignSlot(
         });
         return { kind: "block", body: [bind, chain], loc: locOf(stmt) };
       }
+      // ...and the same dispatch one binding later, through the checker's
+      // arm bridge (switchDiscAtBridgedLocal above).
+      const local = switchDiscAtBridgedLocal(L, stmt, disc);
+      if (local) return lowerUnionSwitch(L, stmt, local);
     }
     const dk = disc.type.kind;
     if (dk === "dyn") {
