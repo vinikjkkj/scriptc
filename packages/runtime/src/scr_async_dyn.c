@@ -541,8 +541,7 @@ void scr_process_emit_warning(ScrDyn *args) {
   ScrDyn *const *items = args->kind == SCR_DYN_ARR ? args->v.arr.items : NULL;
   ScrDyn *warning = argc >= 1 ? items[0] : NULL;
   /* An Error-encoded warning: type/code arguments are ignored (Node). */
-  if (warning != NULL && warning->kind == SCR_DYN_OBJ &&
-      scr_dyn_obj_get(warning, "%error", 6) != NULL) {
+  if (scr_dyn_is_error_encoding(warning)) {
     scr_warning_dispatch(warning);
     return;
   }
@@ -561,7 +560,7 @@ void scr_process_emit_warning(ScrDyn *args) {
       i++;
     } else if (a->kind == SCR_DYN_FUNC) {
       i = argc; /* ctor: consumed, stack-trace trimming only — ignored */
-    } else if (a->kind == SCR_DYN_OBJ && scr_dyn_obj_get(a, "%error", 6) == NULL) {
+    } else if (a->kind == SCR_DYN_OBJ && !scr_dyn_is_error_encoding(a)) {
       const ScrDyn *t = scr_dyn_obj_get(a, "type", 4);
       const ScrDyn *c = scr_dyn_obj_get(a, "code", 4);
       const ScrDyn *d = scr_dyn_obj_get(a, "detail", 6);
@@ -605,7 +604,7 @@ void scr_process_emit_warning(ScrDyn *args) {
 
 /* A caught-exception snapshot as a dyn value — identity-preserving for
  * dyn payloads (a dyn-thrown value is retained, not copied), the
- * identity-cached %error encoding above for Error-family objects,
+ * identity-cached error encoding above for Error-family objects,
  * scalars by value, the type-erased empty object for the rest
  * (SEMANTICS.md 67). Shared by the dc trace choreography, the checked-dynamic tree
  * promise reactions, and the unhandled-rejection dispatch. Borrows the

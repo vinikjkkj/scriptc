@@ -28,6 +28,27 @@ static const char *const scr_error_names[5] = {
      * vtable, never the name. */
     "Error"};
 
+/* The kind's BUILTIN name — this table, published. The dyn boundary needs
+ * it to tell an error whose `name` is still its constructor's (a prototype
+ * property in Node, which `Object.keys` does NOT list) from one whose name
+ * was ASSIGNED (`e.name = "Custom"` — an own ENUMERABLE property, which it
+ * DOES). Reading the table is the only way to ask that question, and
+ * copying its four literals into a second unit is how the two answers
+ * drift apart. NULL for a kind out of range (a compiled `extends Error`
+ * subclass carries its own vtable). */
+const char *scr_error_kind_name(int kind) {
+  return kind >= 0 && kind < 5 ? scr_error_names[kind] : NULL;
+}
+
+/* Which of the five builtin kinds is this error, by VTABLE identity? -1
+ * for a compiled subclass, whose vtable is its own. */
+int scr_error_kind_of(const ScrError *e) {
+  for (int i = 0; i < 5; i++) {
+    if (e->vt == &scr_error_vts[i]) return i;
+  }
+  return -1;
+}
+
 void scr_error_trace(void *e, ScrTraceVisit visit, void *ctx) {
   /* name/message are strings — never collector-headered; nothing to visit. */
   (void)e;

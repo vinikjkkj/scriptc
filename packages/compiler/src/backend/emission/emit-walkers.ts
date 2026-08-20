@@ -423,14 +423,14 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
       `    /* Object.prototype.toString UNLESS the object's own members or`,
       `     * its PROTOTYPE CHAIN carry a callable toString — \`K.prototype`,
       `     * .toString = fn\` is where JS programs put one — and, failing`,
-      `     * that, the checked-dynamic tree's error encoding (caughtToDyn:`,
-      `     * the reserved "%error" marker plus name/message), which is`,
-      `     * Error.prototype.toString and therefore ALSO only a fallback.`,
+      `     * that, the checked-dynamic tree's error encoding, whose chain`,
+      `     * reaches %Error.prototype% — so the "failing that" is really`,
+      `     * Error.prototype.toString found the way JS finds it.`,
       `     * All three live in scr_dyn_to_string in that order, so this arm`,
       `     * DELEGATES rather than repeating any of them: this walker is a`,
       `     * per-program COPY of the runtime's ToString table and a copy`,
       `     * that answers a value differently from the original is one`,
-      `     * value with two answers. The "%error" pre-check that used to`,
+      `     * value with two answers. The error pre-check that used to`,
       `     * sit HERE, ahead of the protocol, was exactly that`,
       `     * disagreement — a caught error carrying its own toString`,
       `     * answered the encoded form through String(e) and the toString`,
@@ -552,9 +552,11 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
    * binding flowing into an `unknown` slot — the typed→unknown deep-copy
    * stance over the exception snapshot's runtime kind. Scalar payloads
    * convert exactly; an Error-family OBJ payload becomes the checked-dynamic tree's error
-   * encoding — the reserved "%error" marker plus name/message (and code
-   * when stamped), so `instanceof Error`, the %Error extraction, and
-   * String() answer like Node; every other payload (REF — records, arrays,
+   * encoding — Node's own shape: a [[Prototype]] link to %Error.prototype%
+   * plus NON-ENUMERABLE `message` (and `name` only when it was assigned,
+   * `code` enumerable like Node's system errors), so `instanceof Error`,
+   * the %Error extraction, String() AND every enumeration surface answer
+   * like Node; every other payload (REF — records, arrays,
    * closures, unions — and non-Error hierarchy objects, type-erased at
    * runtime) becomes an EMPTY dyn object (SEMANTICS.md 67). Borrows the
    * snapshot; the result is a fresh tree (+1). Never throws. */
@@ -1083,17 +1085,25 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // standalone class has no subclasses and matches only itself.
         //
         // %Error keeps the checked-dynamic tree's ERROR ENCODING, so it
-        // gets its own arm rather than an interval: the reserved "%error"
-        // marker caughtToDyn stamps, which is EXACTLY the test
-        // dynCheckHelper's %Error branch performs. Match and check ask the
-        // same question, so no union arm can be matched here and then fail
-        // to build below — the property the union builder relies on.
+        // gets its own arm rather than an interval: scr_dyn_is_error_encoding,
+        // which is EXACTLY the test dynCheckHelper's %Error branch performs.
+        // Match and check ask the same question, so no union arm can be
+        // matched here and then fail to build below — the property the
+        // union builder relies on.
         // Before the nested %Error leaf was admitted this line threw
         // "dynMatch of unknown class %Error", because classMeta has no
         // entry for it; a leaf admitted by the predicate and unemittable
         // here would have traded a fence for an emitter crash.
+        //
+        // The test used to be spelled INLINE, as a lookup of the reserved
+        // key "%error" — here, in the dynCheck branch below, and twice
+        // more in the LLVM lane. Four copies of a question whose answer
+        // was wrong in both directions (a user's own "%error" key passed
+        // it; the marker it looked for was an own ENUMERABLE property of
+        // every error the program could enumerate) is why it is now one
+        // runtime call that the C and LLVM lanes both emit.
         if (t.className === "%Error") {
-          d.push(`  return d->kind == SCR_DYN_OBJ && scr_dyn_obj_get(d, "%error", 6) != NULL;`);
+          d.push(`  return scr_dyn_is_error_encoding(d);`);
           break;
         }
         const meta = E.classMeta.get(t.className);
@@ -1804,18 +1814,20 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           break;
         }
         // The %Error extraction (an instanceof-Error narrow on unknown):
-        // validate the checked-dynamic tree's error encoding — the reserved "%error" marker
-        // caughtToDyn builds — and extract through the runtime's IDENTITY
-        // CACHE (scr_error_from_dyn): a dyn error that came from a runtime
-        // ScrError answers that very instance, so out-and-back crossings
-        // compare reference-equal (the tracing suite's shape); alien
-        // %error objects rebuild once and cache the pair.
+        // validate the checked-dynamic tree's error encoding — its
+        // [[Prototype]] link to %Error.prototype%, which is what
+        // scr_dyn_is_error_encoding reads — and extract through the
+        // runtime's IDENTITY CACHE (scr_error_from_dyn): a dyn error that
+        // came from a runtime ScrError answers that very instance, so
+        // out-and-back crossings compare reference-equal (the tracing
+        // suite's shape); alien error objects rebuild once and cache the
+        // pair.
         if (soft) d.push(`  (void)path;`);
         d.push(
           fail(
             `  `,
             "class.Error",
-            `d->kind != SCR_DYN_OBJ || !scr_dyn_obj_get(d, "%error", 6)`,
+            `!scr_dyn_is_error_encoding(d)`,
             `NULL`,
           ),
         );

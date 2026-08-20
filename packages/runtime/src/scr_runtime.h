@@ -620,6 +620,14 @@ void scr_error_set_traced(void);
 /* Allocate + initialize (name = the kind's builtin name, message retained
  * from the borrowed argument; NULL means ""). Returns +1. */
 ScrError *scr_error_new(int kind, ScrStr *message);
+/* The kind's BUILTIN name ("Error", "TypeError", ...), and which kind an
+ * error IS by vtable identity (-1 for a compiled `extends Error`
+ * subclass). The dyn boundary asks both to decide whether `name` is a
+ * PROTOTYPE property (Node keeps the constructor's own name off
+ * Object.keys) or an ASSIGNED own enumerable one. Borrowed literal;
+ * NULL out of range. */
+const char *scr_error_kind_name(int kind);
+int scr_error_kind_of(const ScrError *e);
 /* Initialize the error prefix of an already-allocated (zeroed) object —
  * the super(message) call of a compiled `extends Error` constructor. Both
  * arguments are borrowed. */
@@ -3913,12 +3921,29 @@ ScrDyn *scr_dyn_error_prototype(void);
 bool scr_dyn_error_proto_in_chain(const ScrDyn *d);
 /* `v instanceof Error` over a checked-dynamic value — the ONE predicate
  * BOTH backends emit a call to, so the C and LLVM keyed lanes cannot
- * answer differently. True for the own "%error" marker
- * (scr_dyn_from_error's encoding of a runtime ScrError), for a value
- * whose PROTOTYPE chain reaches %Error.prototype% (a custom error type
- * built by Object.create(Error.prototype, ...)), and for an island-held
- * engine Error. %Error.prototype% itself answers false, like Node's. */
+ * answer differently. True for anything whose PROTOTYPE chain reaches
+ * %Error.prototype% - scr_dyn_from_error's encoding of a runtime
+ * ScrError AND a custom error type built by
+ * Object.create(Error.prototype, ...), which are now one test rather
+ * than two - and for an island-held engine Error. %Error.prototype%
+ * itself answers false, like Node's. */
 bool scr_dyn_instanceof_error(const ScrDyn *d);
+/* Is this dyn value the runtime's ERROR ENCODING (scr_dyn_from_error's
+ * product, or any object whose [[Prototype]] chain reaches
+ * %Error.prototype%)? THE test - every consumer asks through this, in the
+ * runtime and in the C and LLVM the two backends emit, so no two of them
+ * can disagree about what an error is. It replaced a reserved "%error"
+ * KEY, which could not answer the question at all: "%" is a legal first
+ * character of a property name, so a user's own "%error" key was read as
+ * the marker while the marker was an own ENUMERABLE property of every
+ * error Object.keys could reach. */
+bool scr_dyn_is_error_encoding(const ScrDyn *d);
+/* One own-or-inherited DATA read over that encoding (`name`, `message`,
+ * `code`), BORROW only, NULL when absent - own enumerable member, own
+ * hidden property, then the [[Prototype]] chain. The diagnostic and
+ * rebuild paths use it because they hold no exception path for a
+ * getter. */
+const ScrDyn *scr_dyn_err_read(const ScrDyn *d, const char *key, size_t key_len);
 /* Throws the `Error.prototype.constructor` fence (the keyed read calls
  * it before the function-prototype one — the receiver reaches both when
  * a function's prototype was replaced by an Object.create of it, and

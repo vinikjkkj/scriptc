@@ -57,15 +57,17 @@ void scr_dyn_listener_fire_data(ScrClosure *cb, ScrBytes *chunk) {
 void scr_dyn_listener_fire_err(ScrClosure *cb, ScrStr *msg) {
   ScrDyn *fn = scr_dyn_listener_peek(cb);
   /* The checked-dynamic tree's error encoding (caughtToDyn's shape) — what a dyn 'error'
-   * listener body can instanceof-test and read .message from. */
-  ScrDyn *arg = scr_dyn_new_obj();
-  scr_dyn_obj_set(arg, "%error", 6, scr_dyn_new_bool(true));
-  {
-    ScrStr *name = scr_str_new("Error", 5);
-    scr_dyn_obj_set(arg, "name", 4, scr_dyn_new_str(name));
-    scr_str_release(name);
-  }
-  scr_dyn_obj_set(arg, "message", 7, scr_dyn_new_str(msg));
+   * listener body can instanceof-test and read .message from.
+   *
+   * Built by MAKING an error and boxing it, rather than by open-coding the
+   * encoding's members here. Open-coding them is what let this copy fall
+   * behind: it stamped a reserved "%error" key plus enumerable name and
+   * message, which is what the boxing did too - and the day the boxing
+   * became Node's shape (a prototype link plus non-enumerable members),
+   * this listener would have kept handing out the old one. */
+  ScrError *err = scr_error_new(SCR_ERR_ERROR, msg);
+  ScrDyn *arg = scr_dyn_from_error(err);
+  scr_error_release(err);
   ScrDyn *args[1] = { arg };
   ScrDyn *r = scr_dyn_call(fn, args, 1, "listener");
   scr_dyn_release(r);

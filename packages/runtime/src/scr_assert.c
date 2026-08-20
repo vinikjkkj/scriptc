@@ -473,6 +473,27 @@ static bool scr_assert_dyn_same_value(const ScrDyn *a, const ScrDyn *b) {
  * reference identity for functions (boxed closure). Plain recursion:
  * JSON-origin dyn values are trees; a keyed-write cycle (h.self = h) has no
  * memo here where Node carries one (documented divergence). */
+static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b);
+
+/* `name` and `message` of two error-encoded dyn objects, compared as
+ * STRINGS - Node's isDeepStrictEqual error branch. Absent on either side
+ * reads as absent on both (the encoding omits a name that is the kind's
+ * own, and both sides then inherit the same one from the same singleton
+ * prototype, so the reads agree anyway). */
+static bool scr_assert_err_key_eq(const ScrDyn *a, const ScrDyn *b,
+                                  const char *key, size_t key_len) {
+  const ScrDyn *av = scr_dyn_err_read(a, key, key_len);
+  const ScrDyn *bv = scr_dyn_err_read(b, key, key_len);
+  if (av == NULL || bv == NULL) return av == bv;
+  return scr_assert_dyn_deep_eq(av, bv);
+}
+
+static bool scr_assert_err_pair_eq(const ScrDyn *a, const ScrDyn *b) {
+  if (!scr_dyn_is_error_encoding(b)) return false;
+  return scr_assert_err_key_eq(a, b, "name", 4) &&
+         scr_assert_err_key_eq(a, b, "message", 7);
+}
+
 static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
   if (a == b) return true;
   if (a->kind != b->kind) {
@@ -564,6 +585,18 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
     }
     case SCR_DYN_OBJ: {
       if (a->null_proto != b->null_proto) return false; /* the prototype gate */
+      /* Node's deepStrictEqual has an ERROR branch: two errors compare
+       * their `name` and `message` ON TOP of the own-enumerable walk
+       * (util.isDeepStrictEqual). Those two are exactly the properties
+       * the encoding keeps OFF `entries` - Node keeps them off
+       * Object.keys for the same reason - so the entry walk below cannot
+       * see them, and without this
+       * `deepStrictEqual(new Error("a"), new Error("b"))` would compare
+       * EQUAL: same prototype, both entry tables empty. A silent PASS on
+       * an assertion that must fail is the worst answer this file can
+       * give, and it is the one the encoding change would have produced
+       * had this arm not moved with it. */
+      if (scr_dyn_is_error_encoding(a) && !scr_assert_err_pair_eq(a, b)) return false;
       /* Node compares [[Prototype]]s: `deepStrictEqual(new A(1), {a:1})`
        * throws even though the own members match, and two instances of
        * two different constructors never compare equal. Identity on the
@@ -1243,19 +1276,24 @@ void scr_assert_eq_dyn(ScrDyn *a, ScrDyn *b, bool negated, bool deep,
 }
 
 /* Node's expectsError over an error-INSTANCE expected (assert.throws/
- * rejects second argument): every key of the expected dyn error (the
- * %error marker skipped; name/message/code is the encoding's surface)
- * must deep-strict-equal the caught value's — extra ACTUAL keys are fine
+ * rejects second argument): every key of the expected dyn error must
+ * deep-strict-equal the caught value's — extra ACTUAL keys are fine
  * (Node walks the expected's keys only). A mismatch fails through the
  * deep-equal report (a mismatched key implies the full comparison
  * differs, so the diff is honest); a non-object pair falls back to the
- * full deep comparison outright. */
+ * full deep comparison outright.
+ *
+ * `name` and `message` are asked for BY NAME rather than found in the
+ * entry walk, for the same reason Node's own expectsError names them: an
+ * error keeps them off its enumerable keys, so a walk of the expected's
+ * own keys sees neither, and `assert.throws(fn, new TypeError("a"))`
+ * would accept a RangeError("b"). */
 void scr_assert_expects_err_dyn(ScrDyn *actual, ScrDyn *expected, ScrStr *msg, bool has_msg) {
   if (actual->kind == SCR_DYN_OBJ && expected->kind == SCR_DYN_OBJ) {
     bool ok = true;
+    if (scr_dyn_is_error_encoding(expected)) ok = scr_assert_err_pair_eq(expected, actual);
     for (size_t i = 0; i < expected->v.obj.len && ok; i++) {
       const ScrDynEntry *e = &expected->v.obj.entries[i];
-      if (e->key_len == 6 && memcmp(e->key, "%error", 6) == 0) continue;
       ScrDyn *av = scr_dyn_obj_get(actual, e->key, e->key_len);
       if (av == NULL || !scr_assert_dyn_deep_eq(av, e->value)) ok = false;
     }
@@ -1571,15 +1609,15 @@ void scr_assert_iferror_bool(bool v) {
 }
 
 /* The checked-dynamic argument (test/common's mustSucceed wrapper): the
- * dyn kind dispatches — units pass quietly, %error-marked objects (the
+ * dyn kind dispatches — units pass quietly, error-encoded objects (the
  * caughtToDyn encoding) throw with the error's message (its name when
  * the message is empty, Node's rule), everything else throws with the
  * value's inspection. */
 void scr_assert_iferror_dyn(const ScrDyn *v) {
   if (v->kind == SCR_DYN_UNDEF || v->kind == SCR_DYN_NULL) return;
-  if (v->kind == SCR_DYN_OBJ && scr_dyn_obj_get(v, "%error", 6) != NULL) {
-    const ScrDyn *msg = scr_dyn_obj_get(v, "message", 7);
-    const ScrDyn *name = scr_dyn_obj_get(v, "name", 4);
+  if (scr_dyn_is_error_encoding(v)) {
+    const ScrDyn *msg = scr_dyn_err_read(v, "message", 7);
+    const ScrDyn *name = scr_dyn_err_read(v, "name", 4);
     const ScrDyn *d = msg != NULL && msg->kind == SCR_DYN_STR && msg->v.str->len > 0 ? msg : name;
     if (d != NULL && d->kind == SCR_DYN_STR) {
       scr_assert_iferror_fail(d->v.str->data, d->v.str->len);
