@@ -5,7 +5,7 @@
  * VtSlot) the emitter builds up front; emission ORDER is part of the C. */
 import type { CEmitter } from "./emitter.js";
 import type { IrBuiltinRendering, IrFunction, OwnMaskShape } from "../../ir/nodes.js";
-import { IrClassDef, IrType, OWNMASK_SRC_NULL_PROTO, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, funcOf, isRefCounted, mapOf, nullProtoRule, ownMaskBytes, ownMaskKeyBit, STRING } from "../../ir/nodes.js";
+import { DYN, IrClassDef, IrType, OWNMASK_SRC_NULL_PROTO, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, funcOf, isRefCounted, mapOf, nullProtoRule, ownMaskBytes, ownMaskKeyBit, STRING } from "../../ir/nodes.js";
 import { mangleClassGcFree, mangleClassNew, mangleClassRelease, mangleClassReleaseDirect, mangleClassRetain, mangleClassStruct, mangleClassTrace, mangleCtorThunk, mangleField, mangleFunction, mangleRecordGcFree, mangleRecordNew, mangleRecordRelease, mangleRecordRetain, mangleRecordStruct, mangleRecordTrace, mangleVtAdapter, mangleVtInstance, mangleVtStruct } from "../mangle.js";
 import { arrayElemIsRef, boxKindC, cDecl, cType, elemKindC, mapValKindC, rcAdapters, releaseCallC, vAdapters } from "./emit-types.js";
 
@@ -38,6 +38,10 @@ export const TOSTR_MEMBER = "sc_tostr";
  * struct's declared field list. It is not refcounted and not traced (plain
  * bytes), so it appears in neither rcMembers nor the trace body. */
 export const OWNMASK_MEMBER = "sc_own";
+/** The hidden per-instance SOURCE [[Prototype]] slot's C member name
+ * (IrRecordShape.srcproto). LAST in the struct, so no existing member's
+ * offset moves. */
+export const SRCPROTO_MEMBER = "sc_srcproto";
 
 /** The C condition under which field `fieldName` of `shape` is one of the
  * receiver's OWN keys — the single question Object.keys, JSON.stringify,
@@ -168,6 +172,10 @@ export interface ClassMeta {
        * plain-byte member (`ownMaskBytes`), carried by neither the RC
        * members nor the trace. */
       ownmask?: true;
+      /** Records that armed the hidden SOURCE [[Prototype]] slot: one more
+       * trailing `ScrDyn *` member, treated as one more (dyn-typed) field
+       * by new/release/trace. */
+      srcproto?: true;
       comment: string;
       /** Class shapes only; hierarchy members get the vtable machinery. */
       meta: ClassMeta | null;
@@ -201,6 +209,7 @@ export interface ClassMeta {
         ...(rec.indexValue ? { indexValue: rec.indexValue } : {}),
         ...(rec.tostr ? { tostr: true as const } : {}),
         ...(rec.ownmask ? { ownmask: true as const } : {}),
+        ...(rec.srcproto ? { srcproto: true as const } : {}),
         comment: `record ${rec.id} { ${rec.fields.map((f) => f.name).join("; ")}${rec.indexValue ? "; [key: string]" : ""} }`,
         meta: null,
       })),
@@ -222,6 +231,12 @@ export interface ClassMeta {
       // through it — the collector's trace/teardown complement contract
       // requires it on the trace side, not the teardown side).
       ...(s.tostr ? [{ member: TOSTR_MEMBER, type: funcOf([], STRING), name: "<toString> slot" }] : []),
+      // The hidden SOURCE [[Prototype]] slot is one more refcounted member,
+      // and a dyn one: released with the record and TRACED, because a dyn
+      // graph really can point back at the shape holding it (the
+      // cycle-capability fixpoint's dyn rule says so, and this slot joins
+      // that fixpoint the way <overflow> and <toString> do).
+      ...(s.srcproto ? [{ member: SRCPROTO_MEMBER, type: DYN, name: "<source prototype> slot" }] : []),
     ];
     // CLASS newFns start every undefined-armed union field at JS's
     // `undefined` — the interned immortal unit instance — instead of the
@@ -289,6 +304,11 @@ export interface ClassMeta {
       if (s.ownmask) {
         out.push(
           `  uint8_t ${OWNMASK_MEMBER}[${ownMaskBytes(s)}]; /* hidden per-instance own-key mask ([0] = valid) */`,
+        );
+      }
+      if (s.srcproto) {
+        out.push(
+          `  ScrDyn *${SRCPROTO_MEMBER}; /* hidden per-instance source [[Prototype]] (NULL = no crossing / no chain) */`,
         );
       }
       out.push(`};`);

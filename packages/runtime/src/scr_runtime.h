@@ -4227,6 +4227,15 @@ ScrDyn *scr_dyn_new_obj_null_proto(void);
 ScrDyn *scr_dyn_new_obj_flavor(int null_proto);
 /* ...and the dyn->record builder's probe for the same fact. */
 int scr_dyn_is_null_proto(const ScrDyn *d);
+/* The source object's [[Prototype]] (+1, NULL when it has none) — what a
+ * record materialised at a crossing carries in IrRecordShape.srcproto. */
+ScrDyn *scr_dyn_obj_proto_ref(const ScrDyn *d);
+/* [[Get]] / `in` along a saved [[Prototype]] chain, keyed by a ScrStr:
+ * the record's miss path once its own keys have answered nothing. */
+ScrDyn *scr_dyn_proto_get_str(const ScrDyn *proto, const ScrStr *k);
+int scr_dyn_proto_has_str(const ScrDyn *proto, const ScrStr *k);
+/* ...and keyed by a compiler-emitted literal, for the record->dyn walker. */
+int scr_dyn_proto_has(const ScrDyn *proto, const char *k, size_t n);
 /* Wraps a fresh COPY of the u8 payload. The CLONING constructor — used
  * where JS itself makes a new buffer (structuredClone). Borrows b. */
 ScrDyn *scr_dyn_new_bytes_copy(const ScrBytes *b);

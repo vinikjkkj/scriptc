@@ -650,7 +650,13 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       // A ctorName prefix needs no such revision: the two shapes that carry
       // one both hold an INTERNAL SLOT, so a fabricated instance is refused
       // at the slot check rather than rendered (corpus 5825).
-      if (shape.builtin?.nullProto && !shape.builtin.ctorName) {
+      // Registered for EVERY shape that could ever answer yes, not only
+      // the ones a builtin claims: a crossing out of an
+      // `Object.create(null)` source is a null-prototype INSTANCE of an
+      // ordinary shape, and its `claim` is simply false. A shape with a
+      // ctorName is exempt (see below), and a shape no crossing arms is
+      // never revised, so nothing here changes an unarmed program's IR.
+      if (!shape.builtin?.ctorName) {
         const perInstance = (node: StrLit, whenNull: string, plain: string): void => {
           const tern: IrExpr = {
             kind: "ternary",

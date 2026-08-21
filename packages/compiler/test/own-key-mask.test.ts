@@ -32,9 +32,9 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 import { loadProgram } from "../src/frontend/program.js";
 import { lowerToIr } from "../src/frontend/lowering/lowerer.js";
-import { nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskBit, ownMaskBytes, ownMaskKeyBit, type IrFunction, type IrModule } from "../src/ir/nodes.js";
+import { nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskBit, ownMaskBytes, ownMaskKeyBit, STRING, type IrFunction, type IrModule } from "../src/ir/nodes.js";
 import { nullProtoCondC, ownPresentCondC } from "../src/backend/emission/emit-shapes.js";
-import { emitOwnPresentLl } from "../src/backend/llvm/shapes.js";
+import { emitOwnPresentLl, ownMaskSlotIndex, srcProtoSlotIndex } from "../src/backend/llvm/shapes.js";
 import { BlockBuilder } from "../src/backend/llvm/blocks.js";
 
 function lower(source: string): IrModule {
@@ -320,4 +320,63 @@ test("an ARMED shape asks the INSTANCE, and keeps the claim for one no crossing 
   const noClaim = { fields: [{ name: "uid" }], ownmask: true as const };
   expect(nullProtoRule(noClaim)).toEqual({ kind: "instance", claim: false });
   expect(nullProtoCondC(noClaim, "v").endsWith(": false)")).toBe(true);
+});
+
+/* -- the SOURCE [[Prototype]] slot: same arming, one more question ----- */
+
+test("the source-prototype slot arms exactly with the mask, and never without it", () => {
+  // One arming, because it is the mask that MAKES the slot necessary: the
+  // mask lets the record→dyn walker demote an inherited member instead of
+  // writing it as an own key, and a demotion with nowhere to demote INTO
+  // had to synthesise a fresh prototype per crossing (which is what broke
+  // deepStrictEqual's [[Prototype]] identity — corpus 5881).
+  const crossed = lower(`${SHAPE}
+const m = JSON.parse('{"a":1}') as M;
+console.log(Object.keys(m).join("|"));
+`);
+  const armed = (crossed.records ?? []).filter((r) => r.ownmask === true);
+  expect(armed.length).toBe(1);
+  for (const r of armed) expect(r.srcproto).toBe(true);
+
+  const plain = lower(`${SHAPE}
+const m: M = { a: 1 };
+console.log(Object.keys(m).join("|"), JSON.stringify(m));
+`);
+  expect((plain.records ?? []).length).toBeGreaterThan(0);
+  for (const r of plain.records ?? []) expect(r.srcproto).toBeUndefined();
+});
+
+test("an index-signature shape arms with NO declared field at all", () => {
+  // `Record<string, unknown>` has none, and it is the shape both remaining
+  // defects were measured through: the zapo driver's `normalize()` takes an
+  // `unknown` parameter and casts it back to exactly this. It takes no
+  // field BITS — there are no fields — but byte 0 still carries the
+  // crossing's own facts and the shape still carries the source's chain,
+  // which is what makes `rec[k]` and `k in rec` answer what JS answers for
+  // a member the source only inherited (corpus 5882).
+  const mod = lower(`const v: unknown = JSON.parse('{"a":1}');
+const rec = v as Record<string, unknown>;
+console.log(String(rec["a"]), String("a" in rec));
+`);
+  const armed = (mod.records ?? []).filter((r) => r.ownmask === true);
+  expect(armed.length).toBeGreaterThan(0);
+  const pure = armed.filter((r) => r.indexValue !== undefined && r.fields.length === 0);
+  expect(pure.length).toBe(1);
+  expect(pure[0]!.srcproto).toBe(true);
+  // ...and it really is one VALIDITY byte and no field bits.
+  expect(ownMaskBytes(pure[0]!)).toBe(1);
+});
+
+test("the two hidden slots keep their own struct positions, and neither moves the other", () => {
+  // The layout is stated once per backend and the two must agree, so the
+  // index arithmetic is pinned here rather than discovered by a segfault.
+  const base = { id: "r0", fields: [{ name: "a", type: STRING }, { name: "b", type: STRING }] };
+  expect(ownMaskSlotIndex(base as never)).toBe(3);
+  expect(srcProtoSlotIndex(base as never)).toBe(3);
+  const masked = { ...base, ownmask: true as const };
+  expect(ownMaskSlotIndex(masked as never)).toBe(3);
+  expect(srcProtoSlotIndex(masked as never)).toBe(4);
+  const full = { ...base, ownmask: true as const, tostr: true as const, indexValue: STRING };
+  expect(ownMaskSlotIndex(full as never)).toBe(5);
+  expect(srcProtoSlotIndex(full as never)).toBe(6);
 });
