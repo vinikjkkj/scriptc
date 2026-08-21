@@ -10,15 +10,23 @@
 // invented from a static type, on a value that never had that prototype.
 //
 // The gate is the own-key mask's ARMING: a module that materialises this
-// shape out of a dynamic value arms it, and an armed shape stops claiming
-// the prefix for every instance of it, because nothing on the shape tells
-// the two kinds apart. That is why the FIRST line below is the plain form
-// too -- it is a real os.userInfo() result and Node does prefix it. The
-// divergence is stated rather than hidden: this file exists to pin that the
-// compiler stops INVENTING one, not that it gets both right.
+// shape out of a dynamic value arms it, and an armed shape asks the
+// INSTANCE rather than claiming the prefix for all of them.
 //
-// 5821 is the other half: a module with no crossing keeps the prefix, and
-// its deepStrictEqual prototype gate fires exactly as Node's does.
+// It used to RETRACT the claim for the whole armed shape instead, and this
+// comment used to state that as a divergence -- os.userInfo()'s own result
+// printed plain here where Node prefixes it. That is no longer true, and
+// the reason to close it was not the rendering: the record->dyn walker took
+// the same decision, ScrDyn.null_proto went unset with it, and
+// deepStrictEqual gates on that field before it walks any entry, so
+// `deepStrictEqual(os.userInfo(), { ...the same five members })` PASSED
+// where Node throws. 5880 is that program; byte 0 of the own-key mask now
+// carries the source object's own [[Prototype]]-is-null fact and both
+// surfaces read it.
+//
+// 5821 is the third of the set: a module with no crossing keeps the prefix
+// as a compile-time constant, and its deepStrictEqual prototype gate fires
+// exactly as Node's does.
 //
 // Nothing machine-dependent reaches stdout: only the shape of the
 // rendering, never a uid or a home directory.
@@ -35,14 +43,11 @@ console.log(util.inspect(crossed));
 console.log(JSON.stringify(crossed));
 console.log(JSON.stringify(Object.keys(crossed as unknown as Record<string, unknown>)));
 
-// The runtime-built one is REFERENCED but its rendering is NOT compared,
-// and that is the divergence stated rather than hidden: because this module
-// also crosses into the shape, the shape is armed and stops claiming the
-// prefix for every instance, so `util.inspect(real)` prints the plain form
-// where Node prints `[Object: null prototype] { ... }`. That line is base's
-// answer too, it is wrong on both sides, and 5821 is the module where the
-// prefix survives because nothing crosses. What this file pins is the other
-// direction: the compiler must not INVENT the prefix for the crossed value.
+// The runtime-built one is REFERENCED but its rendering is not compared
+// HERE -- 5880 compares it, in a module shaped exactly like this one, and
+// that is the divergence this file used to state and no longer has. What
+// this file pins is its own direction: the compiler must not INVENT the
+// prefix for the crossed value.
 console.log(typeof real.username, typeof real.uid);
 console.log(String(util.inspect(crossed).startsWith("[Object: null prototype]")));
 

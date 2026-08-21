@@ -8,11 +8,11 @@
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
 import { bytesAliasOnExtract } from "../../ir/nodes.js";
-import { armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
+import { armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane } from "../kindgate.js";
-import { OVERFLOW_MEMBER, OWNMASK_MEMBER, TOSTR_MEMBER, ownPresentCondC } from "./emit-shapes.js";
+import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 
 /** The refusal text a dyn-to-record check uses when the receiver carries
  * no INTERNAL SLOT for a field declaredOrder omits (internalSlotFields).
@@ -2009,7 +2009,28 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // was written; the bits say which members were OWN, and the
         // enumeration surfaces read them instead of the declared field
         // list.
-        if (shape.ownmask) d.push(`  r->${OWNMASK_MEMBER}[0] = 1;`);
+        //
+        // Byte 0 also carries the SOURCE object's own [[Prototype]]-is-null
+        // fact (OWNMASK_SRC_NULL_PROTO), and it belongs here for the same
+        // reason the bits do: this is the last point that still holds it.
+        // A record shape is STRUCTURAL, so `Object.create(null)`-ness
+        // cannot live on the shape — os.userInfo() builds a null-prototype
+        // object and `JSON.parse(s) as os.UserInfo` does not, and they
+        // share the shape.
+        if (shape.ownmask) {
+          d.push(
+            `  r->${OWNMASK_MEMBER}[0] = scr_dyn_is_null_proto(d) ? ${OWNMASK_VALID | OWNMASK_SRC_NULL_PROTO} : ${OWNMASK_VALID};`,
+          );
+        }
+        // ...and the source object's own [[Prototype]] LINK, which is the
+        // one thing a monomorphic struct has nowhere to keep and which the
+        // mask made observable: a member the source only INHERITED is no
+        // longer written as an own key, so unless the chain travels with
+        // the record it stops existing at the crossing. IrRecordShape's
+        // srcproto comment carries the whole argument.
+        if (shape.srcproto) {
+          d.push(`  r->${SRCPROTO_MEMBER} = scr_dyn_obj_proto_ref(d); /* the SOURCE's [[Prototype]] */`);
+        }
         // The HIDDEN per-instance toString slot. MATERIALIZING is what
         // loses a JS object's toString: `x as LongLike` is the identity in
         // JS, so String(x) still reaches the prototype method, while this
@@ -2586,24 +2607,31 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // null_proto is Object.create(null)'s flag, and `cname` is the
         // name `new F()` copies onto its instances and scr_insp_dyn
         // already prints as the `F { ... }` prefix.
-        // ...and NOT for a shape the module ARMED. The prefix is a claim
-        // about how the runtime builds one builtin, a record shape is
-        // structural, and an armed shape is one this module also
-        // MATERIALISES out of a dynamic value — whose source had an
-        // ordinary prototype, and whose inherited members the arm below is
-        // about to link BEHIND this very object. Claiming both would leave
-        // null_proto set on an object that has a [[Prototype]]:
-        // scr_dyn_obj_set_proto does not clear the flag, util.inspect would
-        // print `[Object: null prototype]` over a live chain, and
-        // deepStrictEqual would compare the two fields in that order and
-        // answer about neither. Same rule as the static renderer's
-        // (Lowerer.nullProtoRenderings), asked here where arming is already
-        // decided rather than installed after the fact.
-        d.push(
-          shape.builtin?.nullProto && !shape.ownmask
-            ? `  ScrDyn *d = scr_dyn_new_obj_null_proto();`
-            : `  ScrDyn *d = scr_dyn_new_obj();`,
-        );
+        // ...and on an ARMED shape the claim is asked of the INSTANCE
+        // (nullProtoRule / nullProtoCondC), not folded away for the whole
+        // shape. It used to be folded away, and that was a silent PASS:
+        // a module that also MATERIALISES this shape out of a dynamic
+        // value armed it, the whole shape stopped claiming a null
+        // prototype, and `deepStrictEqual(os.userInfo(), {…the same five
+        // members…})` compared EQUAL where Node throws — because
+        // scr_assert.c's own-object arm gates on ScrDyn.null_proto first.
+        // Mask byte 0 carries the source object's answer
+        // (OWNMASK_SRC_NULL_PROTO), so both kinds of instance are right:
+        // a runtime-built one keeps the claim, a crossed one answers about
+        // its own source. Nothing here can leave null_proto set behind a
+        // live [[Prototype]] either — a crossed instance whose source had
+        // a chain reports false, and scr_dyn_obj_set_proto now retracts
+        // the flag as well, so the two fields cannot disagree.
+        {
+          const rule = nullProtoRule(shape);
+          d.push(
+            rule.kind === "const"
+              ? rule.value
+                ? `  ScrDyn *d = scr_dyn_new_obj_null_proto();`
+                : `  ScrDyn *d = scr_dyn_new_obj();`
+              : `  ScrDyn *d = scr_dyn_new_obj_flavor(${nullProtoCondC(shape, "v")});`,
+          );
+        }
         if (shape.builtin?.ctorName) {
           d.push(`  scr_dyn_obj_set_ctor_name(d, ${cStringLiteral(Buffer.from(shape.builtin.ctorName, "utf8"))});`);
         }
@@ -2733,8 +2761,28 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
               d.push(`      if (${m}[${bit.byte}] & ${bit.bit}) {`);
               d.push(`        scr_dyn_obj_set(d, ${keyLit}, ${keyLen}, sc_fv);`);
               d.push(`      } else if (sc_fv != NULL && sc_fv->kind != SCR_DYN_UNDEF) {`);
-              d.push(`        if (sc_proto == NULL) sc_proto = scr_dyn_new_obj(); /* inherited members */`);
-              d.push(`        scr_dyn_obj_set(sc_proto, ${keyLit}, ${keyLen}, sc_fv);`);
+              if (shape.srcproto) {
+                // The SOURCE's own chain still answers this member, so
+                // linking it below is the whole demotion and there is
+                // nothing to synthesise. That is what keeps [[Prototype]]
+                // IDENTITY: two crossed values of one shape share one
+                // prototype object, which is what deepStrictEqual compares
+                // and what Node answers.
+                d.push(`        if (scr_dyn_proto_has(v->${SRCPROTO_MEMBER}, ${keyLit}, ${keyLen})) {`);
+                d.push(`          scr_dyn_release(sc_fv); /* the source's own chain carries it */`);
+                d.push(`        } else {`);
+                // A member the source carried as a NON-ENUMERABLE own
+                // property is on neither table: not an own key, and not on
+                // the chain either. Dropping it would lose a value, so it
+                // is demoted the old way and the source's chain is linked
+                // BEHIND the synthesised object.
+                d.push(`          if (sc_proto == NULL) sc_proto = scr_dyn_new_obj(); /* not on the source's chain */`);
+                d.push(`          scr_dyn_obj_set(sc_proto, ${keyLit}, ${keyLen}, sc_fv);`);
+                d.push(`        }`);
+              } else {
+                d.push(`        if (sc_proto == NULL) sc_proto = scr_dyn_new_obj(); /* inherited members */`);
+                d.push(`        scr_dyn_obj_set(sc_proto, ${keyLit}, ${keyLen}, sc_fv);`);
+              }
               d.push(`      } else {`);
               d.push(`        scr_dyn_release(sc_fv); /* absent on the source object entirely */`);
               d.push(`      }`);
@@ -2776,8 +2824,21 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // released here and the chain is owned by `d` alone.
         if (shape.ownmask) {
           d.push(`  if (sc_proto != NULL) {`);
+          if (shape.srcproto) {
+            // The SOURCE's chain goes BEHIND the synthesised object, so a
+            // member that was on neither the member table nor the chain
+            // (a non-enumerable own property) is still reachable AND every
+            // inherited one still resolves to the one object it came from.
+            d.push(`    if (v->${SRCPROTO_MEMBER} != NULL) scr_dyn_obj_set_proto(sc_proto, v->${SRCPROTO_MEMBER});`);
+          }
           d.push(`    scr_dyn_obj_set_proto(d, sc_proto); /* the members the source only INHERITED */`);
           d.push(`    scr_dyn_release(sc_proto);`);
+          if (shape.srcproto) {
+            // ...and with nothing synthesised the chain IS the source's,
+            // one object, which is what restores [[Prototype]] identity.
+            d.push(`  } else if (v->${SRCPROTO_MEMBER} != NULL) {`);
+            d.push(`    scr_dyn_obj_set_proto(d, v->${SRCPROTO_MEMBER}); /* the SOURCE's own chain, one object */`);
+          }
           d.push(`  }`);
         }
         if (cyclicRec) d.push(`  scr_dyn_from_leave();`);
@@ -3327,7 +3388,20 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         d.push(`  }`);
       }
     }
-    // The miss path.
+    // The miss path — and before it, the SOURCE object's [[Prototype]]
+    // chain, because `r[k]` is JS's [[Get]] and [[Get]] does not stop at
+    // the own keys. A record materialised at a crossing carries that chain
+    // (IrRecordShape.srcproto); every other record's slot is NULL and this
+    // costs one predictable branch. Only the dyn RESULT takes it: a typed
+    // result would have to re-check the prototype's value against the
+    // index signature, and the shapes this defect was measured through are
+    // all `Record<string, unknown>`.
+    if (shape.srcproto && t.kind === "dyn") {
+      d.push(`  {`);
+      d.push(`    ScrDyn *pm = scr_dyn_proto_get_str(r->${SRCPROTO_MEMBER}, k);`);
+      d.push(`    if (pm != NULL) return pm; /* inherited: [[Get]] walks the chain */`);
+      d.push(`  }`);
+    }
     if (t.kind === "dyn") {
       d.push(`  return scr_dyn_retain(scr_dyn_undefined());`);
     } else if (t.kind === "union" && E.undefinedArmTag(t) >= 0) {

@@ -3261,6 +3261,28 @@ function validateFunction(
         }
         break;
       }
+      case "recordNullProto": {
+        checkExpr(e.obj);
+        const shape = records.get(e.shapeId);
+        if (!shape) err(`recordNullProto on undeclared shape "${e.shapeId}"`, e.loc);
+        else {
+          expectType(e.obj, { kind: "record", shapeId: e.shapeId }, "recordNullProto receiver");
+          if (e.type.kind !== "bool") err(`recordNullProto must be bool, got ${e.type.kind}`, e.loc);
+        }
+        break;
+      }
+      case "recordProtoHasKey": {
+        checkExpr(e.obj);
+        checkExpr(e.key);
+        const shape = records.get(e.shapeId);
+        if (!shape) err(`recordProtoHasKey on undeclared shape "${e.shapeId}"`, e.loc);
+        else {
+          expectType(e.obj, { kind: "record", shapeId: e.shapeId }, "recordProtoHasKey receiver");
+          expectType(e.key, STRING, "recordProtoHasKey key");
+          if (e.type.kind !== "bool") err(`recordProtoHasKey must be bool, got ${e.type.kind}`, e.loc);
+        }
+        break;
+      }
       case "recordKeyGet": {
         checkExpr(e.obj);
         checkExpr(e.key);

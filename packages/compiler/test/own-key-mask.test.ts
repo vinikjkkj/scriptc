@@ -32,9 +32,9 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 import { loadProgram } from "../src/frontend/program.js";
 import { lowerToIr } from "../src/frontend/lowering/lowerer.js";
-import { ownMaskBit, ownMaskBytes, ownMaskKeyBit, type IrFunction, type IrModule } from "../src/ir/nodes.js";
-import { ownPresentCondC } from "../src/backend/emission/emit-shapes.js";
-import { emitOwnPresentLl } from "../src/backend/llvm/shapes.js";
+import { nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskBit, ownMaskBytes, ownMaskKeyBit, STRING, type IrFunction, type IrModule } from "../src/ir/nodes.js";
+import { nullProtoCondC, ownPresentCondC } from "../src/backend/emission/emit-shapes.js";
+import { emitOwnPresentLl, ownMaskSlotIndex, srcProtoSlotIndex } from "../src/backend/llvm/shapes.js";
 import { BlockBuilder } from "../src/backend/llvm/blocks.js";
 
 function lower(source: string): IrModule {
@@ -273,4 +273,110 @@ test("the mask is one validity byte plus one bit per field, and the bits do not 
   }
   // Byte 0 is the validity flag and no field may claim it.
   for (const f of shape.fields) expect(ownMaskBit(shape, f.name)!.byte).toBeGreaterThan(0);
+});
+
+/* -- byte 0 carries the CROSSING's own facts, not any one field's ------ */
+
+test("byte 0's second bit is the source object's [[Prototype]]-is-null fact, and no field may claim it", () => {
+  // The two bits of byte 0 are disjoint from every field bit by
+  // construction (field bits start at byte 1, pinned above), so the only
+  // thing to state here is that the two constants really are the low two
+  // bits of ONE byte and that the arming they gate is the same arming.
+  expect(OWNMASK_VALID).toBe(1);
+  expect(OWNMASK_SRC_NULL_PROTO).toBe(2);
+  expect(OWNMASK_VALID & OWNMASK_SRC_NULL_PROTO).toBe(0);
+});
+
+test("a shape no crossing armed folds its null-prototype claim at compile time", () => {
+  // The claim is a per-SHAPE constant when nothing can contradict it, so a
+  // module with no crossing emits exactly the literal it always emitted.
+  const plain = { fields: [{ name: "uid" }] };
+  expect(nullProtoRule(plain)).toEqual({ kind: "const", value: false });
+  expect(nullProtoRule({ ...plain, builtin: { nullProto: true as const } }))
+    .toEqual({ kind: "const", value: true });
+  expect(nullProtoCondC(plain, "v")).toBe("false");
+  expect(nullProtoCondC({ ...plain, builtin: { nullProto: true as const } }, "v")).toBe("true");
+});
+
+test("an ARMED shape asks the INSTANCE, and keeps the claim for one no crossing wrote", () => {
+  // This is the whole repair. Retracting the claim for the entire armed
+  // shape made os.userInfo()'s own result print plain AND — through the
+  // record→dyn walker's twin of this decision, which ScrDyn.null_proto
+  // feeds and deepStrictEqual gates on — made
+  // `deepStrictEqual(os.userInfo(), {…the same five members…})` compare
+  // EQUAL where Node throws. Corpus 5880 is the program.
+  const armed = { fields: [{ name: "uid" }], ownmask: true as const, builtin: { nullProto: true as const } };
+  expect(nullProtoRule(armed)).toEqual({ kind: "instance", claim: true });
+  const cond = nullProtoCondC(armed, "v");
+  // an instance NO crossing wrote falls back to the shape's own claim...
+  expect(cond).toContain("sc_own[0] ?");
+  expect(cond.endsWith(": true)")).toBe(true);
+  // ...and one a crossing DID write answers from the bit the builder
+  // stamped off the source object.
+  expect(cond).toContain(`& ${OWNMASK_SRC_NULL_PROTO}`);
+  // A shape with no builtin claim at all still asks, because a crossing
+  // out of an Object.create(null) source is a null-prototype instance of
+  // an ordinary shape.
+  const noClaim = { fields: [{ name: "uid" }], ownmask: true as const };
+  expect(nullProtoRule(noClaim)).toEqual({ kind: "instance", claim: false });
+  expect(nullProtoCondC(noClaim, "v").endsWith(": false)")).toBe(true);
+});
+
+/* -- the SOURCE [[Prototype]] slot: same arming, one more question ----- */
+
+test("the source-prototype slot arms exactly with the mask, and never without it", () => {
+  // One arming, because it is the mask that MAKES the slot necessary: the
+  // mask lets the record→dyn walker demote an inherited member instead of
+  // writing it as an own key, and a demotion with nowhere to demote INTO
+  // had to synthesise a fresh prototype per crossing (which is what broke
+  // deepStrictEqual's [[Prototype]] identity — corpus 5881).
+  const crossed = lower(`${SHAPE}
+const m = JSON.parse('{"a":1}') as M;
+console.log(Object.keys(m).join("|"));
+`);
+  const armed = (crossed.records ?? []).filter((r) => r.ownmask === true);
+  expect(armed.length).toBe(1);
+  for (const r of armed) expect(r.srcproto).toBe(true);
+
+  const plain = lower(`${SHAPE}
+const m: M = { a: 1 };
+console.log(Object.keys(m).join("|"), JSON.stringify(m));
+`);
+  expect((plain.records ?? []).length).toBeGreaterThan(0);
+  for (const r of plain.records ?? []) expect(r.srcproto).toBeUndefined();
+});
+
+test("an index-signature shape arms with NO declared field at all", () => {
+  // `Record<string, unknown>` has none, and it is the shape both remaining
+  // defects were measured through: the zapo driver's `normalize()` takes an
+  // `unknown` parameter and casts it back to exactly this. It takes no
+  // field BITS — there are no fields — but byte 0 still carries the
+  // crossing's own facts and the shape still carries the source's chain,
+  // which is what makes `rec[k]` and `k in rec` answer what JS answers for
+  // a member the source only inherited (corpus 5882).
+  const mod = lower(`const v: unknown = JSON.parse('{"a":1}');
+const rec = v as Record<string, unknown>;
+console.log(String(rec["a"]), String("a" in rec));
+`);
+  const armed = (mod.records ?? []).filter((r) => r.ownmask === true);
+  expect(armed.length).toBeGreaterThan(0);
+  const pure = armed.filter((r) => r.indexValue !== undefined && r.fields.length === 0);
+  expect(pure.length).toBe(1);
+  expect(pure[0]!.srcproto).toBe(true);
+  // ...and it really is one VALIDITY byte and no field bits.
+  expect(ownMaskBytes(pure[0]!)).toBe(1);
+});
+
+test("the two hidden slots keep their own struct positions, and neither moves the other", () => {
+  // The layout is stated once per backend and the two must agree, so the
+  // index arithmetic is pinned here rather than discovered by a segfault.
+  const base = { id: "r0", fields: [{ name: "a", type: STRING }, { name: "b", type: STRING }] };
+  expect(ownMaskSlotIndex(base as never)).toBe(3);
+  expect(srcProtoSlotIndex(base as never)).toBe(3);
+  const masked = { ...base, ownmask: true as const };
+  expect(ownMaskSlotIndex(masked as never)).toBe(3);
+  expect(srcProtoSlotIndex(masked as never)).toBe(4);
+  const full = { ...base, ownmask: true as const, tostr: true as const, indexValue: STRING };
+  expect(ownMaskSlotIndex(full as never)).toBe(5);
+  expect(srcProtoSlotIndex(full as never)).toBe(6);
 });
