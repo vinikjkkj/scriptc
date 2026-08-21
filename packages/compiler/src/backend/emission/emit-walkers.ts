@@ -2577,8 +2577,21 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // null_proto is Object.create(null)'s flag, and `cname` is the
         // name `new F()` copies onto its instances and scr_insp_dyn
         // already prints as the `F { ... }` prefix.
+        // ...and NOT for a shape the module ARMED. The prefix is a claim
+        // about how the runtime builds one builtin, a record shape is
+        // structural, and an armed shape is one this module also
+        // MATERIALISES out of a dynamic value — whose source had an
+        // ordinary prototype, and whose inherited members the arm below is
+        // about to link BEHIND this very object. Claiming both would leave
+        // null_proto set on an object that has a [[Prototype]]:
+        // scr_dyn_obj_set_proto does not clear the flag, util.inspect would
+        // print `[Object: null prototype]` over a live chain, and
+        // deepStrictEqual would compare the two fields in that order and
+        // answer about neither. Same rule as the static renderer's
+        // (Lowerer.nullProtoRenderings), asked here where arming is already
+        // decided rather than installed after the fact.
         d.push(
-          shape.builtin?.nullProto
+          shape.builtin?.nullProto && !shape.ownmask
             ? `  ScrDyn *d = scr_dyn_new_obj_null_proto();`
             : `  ScrDyn *d = scr_dyn_new_obj();`,
         );

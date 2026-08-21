@@ -2103,8 +2103,9 @@ export class LlDyn {
         // Node renders it, and both halves already existed in the dyn
         // encoding (ScrDyn.null_proto, ScrDyn.v.obj.cname).
         const d = B.tmp();
-        // emit-walkers.ts carries the whole argument for both halves.
-        if (shape.builtin?.nullProto) {
+        // emit-walkers.ts carries the whole argument for both halves,
+        // including why an ARMED shape stops claiming a null prototype.
+        if (shape.builtin?.nullProto && !shape.ownmask) {
           host.declare(`declare ptr @scr_dyn_new_obj_null_proto()`);
           B.line(`${d} = call ptr @scr_dyn_new_obj_null_proto()`);
         } else {
