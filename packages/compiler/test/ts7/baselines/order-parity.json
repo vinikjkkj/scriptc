@@ -9012,6 +9012,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5910-prototype-ctor-backlink-cycle.js": {
+   "order": [
+    "<repo>/tests/corpus/5910-prototype-ctor-backlink-cycle.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
