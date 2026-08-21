@@ -22,6 +22,7 @@
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrRecordShape, IrType } from "../../ir/nodes.js";
+import { bytesAliasOnExtract } from "../../ir/nodes.js";
 import { armDiscrimLits, canAdaptDynFuncTo, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
@@ -1082,11 +1083,14 @@ export class LlDyn {
           B.terminate(`ret ptr ${r}`);
           break;
         }
-        // `u as Uint8Array`: kind check, then a fresh COPY out.
+        // `u as Uint8Array` / `u as Buffer`: kind check, then the SAME
+        // payload back, retained. The C twin, verbatim, including the
+        // dial: see bytesAliasOnExtract and the ARRBUF arm above.
         requireKind(DK.BYTES, "dc");
-        host.declare(`declare ptr @scr_dyn_bytes_copy_out(ptr)`);
+        const ub = bytesAliasOnExtract() ? "scr_dyn_bytes_unbox" : "scr_dyn_bytes_copy_out";
+        host.declare(`declare ptr @${ub}(ptr)`);
         const r = B.tmp();
-        B.line(`${r} = call ptr @scr_dyn_bytes_copy_out(ptr %d)`);
+        B.line(`${r} = call ptr @${ub}(ptr %d)`);
         B.terminate(`ret ptr ${r}`);
         break;
       }
