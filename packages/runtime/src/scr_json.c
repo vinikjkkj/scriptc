@@ -1384,6 +1384,25 @@ ScrBytes *scr_dyn_bytes_copy_out(const ScrDyn *d) {
   return scr_bytes_copy(d->v.bytes); /* extraction copies too (+1) */
 }
 
+ScrBytes *scr_dyn_bytes_unbox(const ScrDyn *d) {
+  /* `u as Uint8Array` / `u as Buffer`: the SAME payload back, retained.
+   * This is scr_dyn_arrbuf_unbox's rule asked of the VIEW kind, and the
+   * two arms had drifted apart: the static->dyn direction has always
+   * aliased (scr_dyn_new_bytes_ref, "one refcounted payload, two views of
+   * it"), so copying on the way OUT made the round trip lose the object.
+   * `(u as Buffer) === b` answered false where Node answers true, and a
+   * write through the recovered value landed on a copy nobody could read
+   * while SC1101's hint and scr_dyn_static_copy_refuse's text both
+   * promise, unqualified, that "a Uint8Array or Buffer crosses by
+   * REFERENCE and its writes do land". They do now.
+   *
+   * A copy also flattened a VIEW: a subarray/DataView payload keeps its
+   * window and its `backing` link, and scr_bytes_copy produced a
+   * standalone buffer instead, which is the same silent detach the
+   * ArrayBuffer arm above refuses by name. */
+  return scr_bytes_retain(d->v.bytes);
+}
+
 /* ── the data-chunk encoding window (setEncoding) ─────────────────────
  * Node's readable setEncoding turns 'data' payloads into strings. The
  * delivery ABI carries bytes; the FIRING site (which owns the handle and
@@ -5508,6 +5527,23 @@ bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b) {
      * is the JS value. Two boxes of one instance compare ===-equal, and
      * `unbox(box(x)) == x` holds by the same pointer. */
     return a->v.inst.o == b->v.inst.o;
+  case SCR_DYN_BYTES:
+    /* And the typed-array VIEW: the ScrBytes payload is the JS value and
+     * the box is a boundary artifact, exactly as for the ArrayBuffer
+     * below. This arm was missing and the kind fell through to the
+     * pointer tail, so one Buffer boxed twice compared FALSE against
+     * itself: `xs.indexOf(b)` over an `unknown[]` holding `b` answered
+     * -1 where Node answers 0, because the array element and the
+     * searched-for argument are two boxes of one payload.
+     *
+     * Payload identity is sound here in a way it is not for REGEX above:
+     * ScrBytes are never interned. scr_bytes_alloc mallocs a fresh
+     * header per construction, so two distinct Buffers hold two
+     * pointers however equal their contents, and a VIEW carries its own
+     * header (with a `backing` link) rather than its parent's -- which
+     * is what makes `whole !== whole.subarray(0, n)` still answer the
+     * way Node does. */
+    return a->v.bytes == b->v.bytes;
   case SCR_DYN_ARRBUF:
     /* And the ARRAYBUFFER: the payload is the JS value, so two boxes of
      * one buffer compare ===-equal — the same stance the shared

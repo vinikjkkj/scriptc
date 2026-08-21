@@ -4249,9 +4249,16 @@ void scr_dyn_static_copy_refuse(const char *what);
  * whose Node value is a Buffer regardless (stream 'data' chunks). The two
  * constructors above already carry a stamped flavor across on their own. */
 ScrDyn *scr_dyn_new_buffer_copy(const ScrBytes *b);
-/* A fresh u8 COPY of a SCR_DYN_BYTES payload (+1) — the dynCheck
- * extraction (`u as Uint8Array`). */
+/* A fresh u8 COPY of a SCR_DYN_BYTES payload (+1). Kept for the stream
+ * and TLS chunk paths, which want a DETACHED payload; the dynCheck
+ * extraction is scr_dyn_bytes_unbox below. */
 ScrBytes *scr_dyn_bytes_copy_out(const ScrDyn *d);
+/* The SAME SCR_DYN_BYTES payload back, retained (+1): the dynCheck
+ * extraction (`u as Uint8Array` / `u as Buffer`). scr_dyn_arrbuf_unbox's
+ * rule asked of the view kind. The inbound direction already aliases,
+ * so returning a copy here is what made the round trip lose the object
+ * and drop a write through the recovered value. */
+ScrBytes *scr_dyn_bytes_unbox(const ScrDyn *d);
 
 /* ── ArrayBuffer in the checked-dynamic tree (SCR_DYN_ARRBUF) ──────────
  * The static→dyn BOUNDARY constructor: wraps the SAME ScrBytes payload,
