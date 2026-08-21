@@ -5527,6 +5527,23 @@ bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b) {
      * is the JS value. Two boxes of one instance compare ===-equal, and
      * `unbox(box(x)) == x` holds by the same pointer. */
     return a->v.inst.o == b->v.inst.o;
+  case SCR_DYN_BYTES:
+    /* And the typed-array VIEW: the ScrBytes payload is the JS value and
+     * the box is a boundary artifact, exactly as for the ArrayBuffer
+     * below. This arm was missing and the kind fell through to the
+     * pointer tail, so one Buffer boxed twice compared FALSE against
+     * itself: `xs.indexOf(b)` over an `unknown[]` holding `b` answered
+     * -1 where Node answers 0, because the array element and the
+     * searched-for argument are two boxes of one payload.
+     *
+     * Payload identity is sound here in a way it is not for REGEX above:
+     * ScrBytes are never interned. scr_bytes_alloc mallocs a fresh
+     * header per construction, so two distinct Buffers hold two
+     * pointers however equal their contents, and a VIEW carries its own
+     * header (with a `backing` link) rather than its parent's -- which
+     * is what makes `whole !== whole.subarray(0, n)` still answer the
+     * way Node does. */
+    return a->v.bytes == b->v.bytes;
   case SCR_DYN_ARRBUF:
     /* And the ARRAYBUFFER: the payload is the JS value, so two boxes of
      * one buffer compare ===-equal — the same stance the shared
