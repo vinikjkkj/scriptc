@@ -109,6 +109,7 @@ import {
   retainSym,
   emitOwnPresentLl,
   ownMaskSlotIndex,
+  srcProtoSlotIndex,
   toStrSlotIndex,
   traceAdapter,
   traceArg,
@@ -5302,6 +5303,27 @@ class LlEmitter {
         B.line(`${srcNp} = icmp ne i8 ${srcAnd}, 0`);
         const out = B.tmp();
         B.line(`${out} = select i1 ${valid}, i1 ${srcNp}, i1 ${rule.claim ? "true" : "false"}`);
+        return { name: out, type: e.type };
+      }
+      case "recordProtoHasKey": {
+        // `in`'s last question, the C lane's row. A shape that armed
+        // nothing has no slot and this folds to a literal.
+        const shape = this.recordsById.get(e.shapeId);
+        if (!shape) throw new Error(`llvm emitter bug: recordProtoHasKey of unknown shape ${e.shapeId}`);
+        if (!shape.srcproto) return { name: "false", type: e.type };
+        const obj = this.emitExpr(e.obj);
+        const key = this.emitExpr(e.key);
+        this.declare(`declare i32 @scr_dyn_proto_has_str(ptr, ptr)`);
+        const sp = B.tmp();
+        B.line(
+          `${sp} = getelementptr inbounds %${mangleRecordStruct(e.shapeId)}, ptr ${obj.name}, i64 0, i32 ${srcProtoSlotIndex(shape)} ; <source prototype>`,
+        );
+        const pv = B.tmp();
+        B.line(`${pv} = load ptr, ptr ${sp}`);
+        const hit = B.tmp();
+        B.line(`${hit} = call i32 @scr_dyn_proto_has_str(ptr ${pv}, ptr ${key.name})`);
+        const out = B.tmp();
+        B.line(`${out} = icmp ne i32 ${hit}, 0`);
         return { name: out, type: e.type };
       }
       case "recordOvfKeys": {
@@ -11236,6 +11258,30 @@ class LlEmitter {
           this.releaseValue(raw, iv);
           B.line(`store ptr ${r}, ptr ${slot}`);
         }
+        B.br(join);
+        B.startBlock(ln);
+      }
+      // Before the miss, the SOURCE object's [[Prototype]] chain — `r[k]`
+      // is JS's [[Get]] and [[Get]] does not stop at the own keys
+      // (emit-walkers.ts's row). A record built anywhere but a crossing
+      // has a NULL slot and this costs one predictable branch.
+      if (shape.srcproto) {
+        this.declare(`declare ptr @scr_dyn_proto_get_str(ptr, ptr)`);
+        const sp = B.tmp();
+        B.line(
+          `${sp} = getelementptr inbounds %${mangleRecordStruct(shapeId)}, ptr ${objName}, i64 0, i32 ${srcProtoSlotIndex(shape)} ; <source prototype>`,
+        );
+        const spv = B.tmp();
+        B.line(`${spv} = load ptr, ptr ${sp}`);
+        const pm = B.tmp();
+        B.line(`${pm} = call ptr @scr_dyn_proto_get_str(ptr ${spv}, ptr ${keyName})`);
+        const pmNull = B.tmp();
+        B.line(`${pmNull} = icmp eq ptr ${pm}, null`);
+        const lh = B.newLabel("rkg.p");
+        const ln = B.newLabel("rkg.q");
+        B.condBr(pmNull, ln, lh);
+        B.startBlock(lh);
+        B.line(`store ptr ${pm}, ptr ${slot} ; inherited: [[Get]] walks the chain (+1)`);
         B.br(join);
         B.startBlock(ln);
       }

@@ -1351,6 +1351,44 @@ int scr_dyn_is_null_proto(const ScrDyn *d) {
   return d != NULL && d->kind == SCR_DYN_OBJ && d->null_proto ? 1 : 0;
 }
 
+/* The source object's [[Prototype]], retained (+1), or NULL — the
+ * dyn->record builder's probe for IrRecordShape.srcproto. A record is a
+ * monomorphic struct with nowhere to hold a chain, which is exactly why a
+ * member the source only INHERITED could not be told from an own one on
+ * the far side of a crossing; this is the one pointer that fixes it, and
+ * it is the SAME object the source carried, so `new A(1)` and `new A(2)`
+ * crossed into one shape still share one prototype and deepStrictEqual
+ * still answers about their constructors. */
+ScrDyn *scr_dyn_obj_proto_ref(const ScrDyn *d) {
+  if (d == NULL || d->kind != SCR_DYN_OBJ || d->v.obj.proto == NULL) return NULL;
+  return scr_dyn_retain(d->v.obj.proto);
+}
+
+/* [[Get]] along a saved [[Prototype]] chain, keyed by a ScrStr — the
+ * record's miss path. Borrowed in, +1 out (NULL = the chain does not carry
+ * the key). Both backends call it rather than reaching into ScrStr: the
+ * LLVM lane pins three ScrDyn offsets and no ScrStr ones. */
+ScrDyn *scr_dyn_proto_get_str(const ScrDyn *proto, const ScrStr *k) {
+  if (proto == NULL || k == NULL) return NULL;
+  ScrDyn *m = (ScrDyn *)scr_dyn_obj_data_get(proto, k->data, k->len);
+  return m != NULL ? scr_dyn_retain(m) : NULL;
+}
+
+/* ...and the `in` half of the same question. */
+int scr_dyn_proto_has_str(const ScrDyn *proto, const ScrStr *k) {
+  if (proto == NULL || k == NULL) return 0;
+  return scr_dyn_obj_data_get(proto, k->data, k->len) != NULL ? 1 : 0;
+}
+
+/* The same question keyed by a compiler-emitted literal: the record->dyn
+ * walker asking whether the SOURCE's own chain still answers a member,
+ * which is when there is nothing to demote and the chain can simply be
+ * LINKED (one object, so [[Prototype]] identity survives the crossing). */
+int scr_dyn_proto_has(const ScrDyn *proto, const char *k, size_t n) {
+  if (proto == NULL) return 0;
+  return scr_dyn_obj_data_get(proto, k, n) != NULL ? 1 : 0;
+}
+
 /* Buffer-ness is ONE fact with two homes: the PAYLOAD carries it
  * (ScrBytes.flavor, stamped by whichever constructor made the value) and
  * the dyn node re-asks it (ScrDyn.buffer, which every toString/coercion

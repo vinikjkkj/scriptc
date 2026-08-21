@@ -28,7 +28,7 @@ import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
 import { mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane, readKindgateDials } from "../kindgate.js";
 import { BlockBuilder } from "./blocks.js";
-import { arrNewCall, elemAccess, llFieldType, ownMaskSlotIndex, releaseSym, toStrSlotIndex, traceAdapter, traceArg, vAdapters } from "./shapes.js";
+import { arrNewCall, elemAccess, llFieldType, ownMaskSlotIndex, releaseSym, srcProtoSlotIndex, toStrSlotIndex, traceAdapter, traceArg, vAdapters } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 import type { WalkerHost } from "./walkers.js";
 
@@ -1320,6 +1320,18 @@ export class LlDyn {
           B.line(`${npv} = select i1 ${npb}, i8 ${OWNMASK_VALID | OWNMASK_SRC_NULL_PROTO}, i8 ${OWNMASK_VALID}`);
           B.line(`store i8 ${npv}, ptr ${vp} ; own-mask written`);
         }
+        // ...and the source object's own [[Prototype]] LINK — the C lane's
+        // row. IrRecordShape.srcproto carries the whole argument.
+        if (shape.srcproto) {
+          host.declare(`declare ptr @scr_dyn_obj_proto_ref(ptr)`);
+          const pr = B.tmp();
+          B.line(`${pr} = call ptr @scr_dyn_obj_proto_ref(ptr ${dRef})`);
+          const prp = B.tmp();
+          B.line(
+            `${prp} = getelementptr inbounds %${mangleRecordStruct(t.shapeId)}, ptr %r0, i64 0, i32 ${srcProtoSlotIndex(shape)}`,
+          );
+          B.line(`store ptr ${pr}, ptr ${prp} ; the SOURCE's [[Prototype]]`);
+        }
         // The HIDDEN per-instance toString slot — emit-walkers.ts's row
         // exactly. MATERIALIZING is what loses a JS object's toString, and
         // scr_dyn_tostr_closure captures the SOURCE object, answering NULL
@@ -2269,6 +2281,30 @@ export class LlDyn {
               B.line(`call void @scr_dyn_release(ptr ${conv}) ; absent on the source object entirely`);
               B.br(lE);
               B.startBlock(lKeep);
+              if (shape.srcproto) {
+                // The SOURCE's own chain still answers this member, so
+                // linking it at the tail IS the demotion and there is
+                // nothing to synthesise — which is what keeps [[Prototype]]
+                // identity across the crossing (emit-walkers.ts's row).
+                host.declare(`declare i32 @scr_dyn_proto_has(ptr, ptr, i64)`);
+                const sp = B.tmp();
+                B.line(
+                  `${sp} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${srcProtoSlotIndex(shape)}`,
+                );
+                const spv = B.tmp();
+                B.line(`${spv} = load ptr, ptr ${sp}`);
+                const hs = B.tmp();
+                B.line(`${hs} = call i32 @scr_dyn_proto_has(ptr ${spv}, ptr ${host.cstr(f.name)}, i64 ${klen})`);
+                const hsb = B.tmp();
+                B.line(`${hsb} = icmp ne i32 ${hs}, 0`);
+                const lChain = B.newLabel("tdp.c");
+                const lSynth = B.newLabel("tdp.s");
+                B.condBr(hsb, lChain, lSynth);
+                B.startBlock(lChain);
+                B.line(`call void @scr_dyn_release(ptr ${conv}) ; the source's own chain carries it`);
+                B.br(lE);
+                B.startBlock(lSynth);
+              }
               const hasP = B.tmp();
               B.line(`${hasP} = icmp ne ptr ${pv}, null`);
               B.condBr(hasP, lHave, lMake);
@@ -2382,12 +2418,34 @@ export class LlDyn {
           B.line(`${hasP} = icmp ne ptr ${pv}, null`);
           const lLink = B.newLabel("tdl.y");
           const lSkip = B.newLabel("tdl.n");
+          const lJoin = B.newLabel("tdl.j");
           B.condBr(hasP, lLink, lSkip);
           B.startBlock(lLink);
+          if (shape.srcproto) {
+            // The SOURCE's chain goes BEHIND the synthesised object, so a
+            // member on neither table is still reachable and every
+            // inherited one still resolves to the object it came from.
+            const sp = B.tmp();
+            B.line(`${sp} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${srcProtoSlotIndex(shape)}`);
+            const spv = B.tmp();
+            B.line(`${spv} = load ptr, ptr ${sp}`);
+            B.line(`call void @scr_dyn_obj_set_proto(ptr ${pv}, ptr ${spv}) ; NULL is a no-op`);
+          }
           B.line(`call void @scr_dyn_obj_set_proto(ptr ${d}, ptr ${pv}) ; the members the source only INHERITED`);
           B.line(`call void @scr_dyn_release(ptr ${pv})`);
-          B.br(lSkip);
+          B.br(lJoin);
           B.startBlock(lSkip);
+          if (shape.srcproto) {
+            // ...and with nothing synthesised the chain IS the source's,
+            // one object, which restores [[Prototype]] identity.
+            const sp2 = B.tmp();
+            B.line(`${sp2} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${srcProtoSlotIndex(shape)}`);
+            const spv2 = B.tmp();
+            B.line(`${spv2} = load ptr, ptr ${sp2}`);
+            B.line(`call void @scr_dyn_obj_set_proto(ptr ${d}, ptr ${spv2}) ; the SOURCE's own chain, one object`);
+          }
+          B.br(lJoin);
+          B.startBlock(lJoin);
         }
         if (cyclicRec) B.line(`call void @scr_dyn_from_leave()`);
         B.terminate(`ret ptr ${d}`);

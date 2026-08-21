@@ -9018,6 +9018,20 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5881-two-crossed-values-of-one-shape-share-one-prototype/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/5881-two-crossed-values-of-one-shape-share-one-prototype/msg.js",
+    "<repo>/tests/corpus/5881-two-crossed-values-of-one-shape-share-one-prototype/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5882-an-inherited-member-survives-a-record-view/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/5882-an-inherited-member-survives-a-record-view/msg.js",
+    "<repo>/tests/corpus/5882-an-inherited-member-survives-a-record-view/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"

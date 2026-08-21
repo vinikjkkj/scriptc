@@ -16587,7 +16587,20 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           ],
           loc,
         },
-        ret({ kind: "boolLit", value: false, type: BOOL, loc }),
+        // ...and last, the SOURCE object's [[Prototype]] chain, because
+        // `in` is "own OR inherited" and a record materialised at a
+        // crossing carries that chain (IrRecordShape.srcproto). A record
+        // built any other way has a NULL slot and this answers false, so
+        // the helper's shape is unchanged for every program that does not
+        // cross the boundary.
+        ret({
+          kind: "recordProtoHasKey",
+          obj: r,
+          shapeId: shapeId,
+          key: k,
+          type: BOOL,
+          loc,
+        }),
       );
       L.liftedFns.push({
         name: helper,

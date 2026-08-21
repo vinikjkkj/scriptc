@@ -2688,9 +2688,17 @@ export class Lowerer {
   armOwnMasks(functions: IrFunction[], records: IrRecordShape[]): void {
     const byId = new Map(records.map((r) => [r.id, r]));
     const armed = new Set<string>();
+    // An INDEX-SIGNATURE shape arms even with no declared field at all,
+    // and `Record<string, unknown>` — which has none — is the shape both
+    // remaining defects were measured through. It takes no field BITS
+    // (there are no fields to mask), but byte 0 still carries the two
+    // facts about the crossing itself (the source's [[Prototype]]-is-null
+    // flag), and the shape still carries the source's prototype, which is
+    // what makes a read of an inherited member through such a VIEW answer
+    // what JS answers.
     const maskable = (shape: IrRecordShape): boolean =>
       shape.tuple !== true &&
-      shape.fields.length > internalSlotFields(shape).length;
+      (shape.indexValue !== undefined || shape.fields.length > internalSlotFields(shape).length);
     // Everything the BUILDER recurses into, because everything it recurses
     // into is materialised by the same builder out of the same dynamic
     // tree. A record's FIELDS are the arm that matters most and the one
@@ -2745,7 +2753,17 @@ export class Lowerer {
         );
       }
     }
-    for (const r of records) if (armed.has(r.id)) r.ownmask = true;
+    for (const r of records) {
+      if (!armed.has(r.id)) continue;
+      r.ownmask = true;
+      // The hidden SOURCE [[Prototype]] slot arms with the mask and for the
+      // same reason: it is the mask that lets the record→dyn walker demote
+      // an inherited member instead of writing it as an own key, and a
+      // demotion with nowhere to demote INTO had to synthesise a fresh
+      // prototype per crossing. One arming, one question, one place a
+      // crossing's facts live.
+      r.srcproto = true;
+    }
     // Re-spell every registered presence guard over an ARMED shape: the
     // undefined-arm tag test becomes the own-key question, which is the
     // same test on an instance no crossing wrote and the SOURCE object's
