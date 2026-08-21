@@ -245,35 +245,59 @@ static void scr_closure_trace(void *o, ScrTraceVisit visit, void *ctx) {
    * two accessors each and a capturing static leak 80 closures; the same 20
    * with a NON-capturing static property are clean.
    *
-   * implicit_proto is deliberately NOT traced. The constructor registry
-   * (scr_json.c) keys on the prototype's ADDRESS and holds a borrowed
-   * closure pointer, and its safety argument is precisely that the closure
-   * owns the prototype so the key cannot be freed or recycled while the
-   * entry lives. Tracing that edge would let the collector free the
-   * prototype before the closure's teardown erases the entry. It is also
-   * not needed: breaking the props ring frees the constructor, and the
-   * constructor's teardown drops implicit_proto -- and with it the
-   * accessor table -- by ordinary refcount. */
+   * The MINTED PROTOTYPE. The sentence that stood here -- "implicit_proto
+   * is deliberately NOT traced ... it is also not needed: breaking the
+   * props ring frees the constructor" -- was measured false by the
+   * whole-corpus RC-audit lane, and the second half is why the first half
+   * did not merely leave a ring uncollected: it left a WRONG COUNT.
+   *
+   * The prototype object is reachable TWICE from this closure -- once
+   * through props (the table's own `prototype` member, written by
+   * scr_dyn_fn_prototype) and once through this field. With this edge
+   * untraced, markGray trial-deleted one of the two and not the other, so
+   * the prototype came out of trial deletion with rc >= 1; scan() reads
+   * rc > 0 as "externally referenced" and scanBlack()s the whole subgraph
+   * back to black. So the props ring was not merely left uncollected --
+   * it was made UNCOLLECTABLE: every ring that passes through a function's
+   * own prototype object survived, of which `N.prototype.constructor = N`
+   * -- util.inherits' back-link, and the oldest idiom in JavaScript -- is
+   * the smallest. It leaked its closure, its props box and three dyn
+   * values on every run, and tests/corpus/2762-prototype-chain.js had been
+   * failing the RC-audit lane on that one member since the day the
+   * prototype object landed.
+   *
+   * The registry's safety argument (scr_json.c) survives the change. It
+   * keys on the prototype's ADDRESS and holds a BORROWED closure pointer;
+   * what it needs is that the entry be erased before either end can be
+   * reused, and scr_closure_gcfree below still erases it -- by address,
+   * without ever dereferencing the key -- so the order the collector tears
+   * the white set down in cannot matter. What gcfree must NOT do any more
+   * is RELEASE the prototype: this is a traced child now, markGray has
+   * already accounted the edge, and releasing it too is exactly the double
+   * free scr_runtime.h's trace/teardown contract forbids. */
   visit(c->props, ctx);
+  visit(c->implicit_proto, ctx);
 }
 
 /* NULL until the dyn unit mints its first implicit prototype object; see
  * scr_runtime.h. */
-void (*scr_closure_ctor_unlink)(ScrClosure *c) = NULL;
+void (*scr_closure_ctor_unlink)(ScrClosure *c, bool release) = NULL;
 
 /* The one teardown step both paths below share: drop the minted implicit
  * prototype (and its `constructor` registry entry) BEFORE `props` goes,
  * so the registry never holds a borrowed pointer to a closure that is
  * already being freed. */
-static void scr_closure_drop_ctor(ScrClosure *c) {
-  if (c->implicit_proto != NULL) scr_closure_ctor_unlink(c);
+static void scr_closure_drop_ctor(ScrClosure *c, bool release) {
+  if (c->implicit_proto != NULL) scr_closure_ctor_unlink(c, release);
 }
 
 static void scr_closure_gcfree(void *o) {
-  /* Caps and the own-property table are all boxes and all traced, so the
-   * complement this teardown owes is just the minted prototype — dropped
-   * through the ctor hook, which erases the registry entry first. */
-  scr_closure_drop_ctor((ScrClosure *)o);
+  /* Caps, the own-property table AND the minted prototype are all traced,
+   * so the reference complement this teardown owes is NOTHING. The ctor
+   * hook still runs — with release=false — because the `constructor`
+   * registry entry keyed by that prototype is not a counted reference and
+   * nothing else erases it. */
+  scr_closure_drop_ctor((ScrClosure *)o, false);
 #ifdef SCR_RC_AUDIT
   scr_live_closures--;
   scr_clo_bump(((ScrClosure *)o)->fn, -1);
@@ -402,11 +426,16 @@ ScrClosure *scr_closure_new(void *fn, size_t ncaps) {
   return c;
 }
 
-/* True iff scr_closure_trace can visit a child: a capture, or the
- * lazily-allocated own-property table. See the note above scr_box_trace. */
+/* True iff scr_closure_trace can visit a child: a capture, the
+ * lazily-allocated own-property table, or the minted implicit prototype.
+ * See the note above scr_box_trace. The third disjunct is not redundant
+ * with the second even though minting writes the props table too: a
+ * closure whose props box has since been released still owns its
+ * prototype, and a closure that is never buffered as a candidate is one
+ * whose ring is never collected. */
 static inline bool scr_closure_may_cycle(const ScrClosure *c) {
 #if SCR_CYC_LEAF_SKIP
-  return c->ncaps != 0 || c->props != NULL;
+  return c->ncaps != 0 || c->props != NULL || c->implicit_proto != NULL;
 #else
   (void)c;
   return true;
@@ -418,7 +447,7 @@ void scr_closure_release(ScrClosure *c) {
   if (--c->rc == 0) {
     if (scr_closure_may_cycle(c)) scr_cyc_on_dead(c); /* see scr_box_release */
     for (size_t i = 0; i < c->ncaps; i++) scr_box_release(c->caps[i]);
-    scr_closure_drop_ctor(c);
+    scr_closure_drop_ctor(c, true);
     scr_box_release(c->props); /* NULL-tolerant */
 #ifdef SCR_RC_AUDIT
     scr_live_closures--;
@@ -439,7 +468,7 @@ void scr_closure_release(ScrClosure *c) {
  * matching edit in three backends' exit code. */
 void scr_closure_static_teardown(ScrClosure *c) {
   if (c == NULL) return;
-  scr_closure_drop_ctor(c);
+  scr_closure_drop_ctor(c, true);
   scr_box_release(c->props);
   c->props = NULL;
 }

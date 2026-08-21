@@ -842,10 +842,18 @@ bool scr_dyn_proto_chain_is_fn_pub(const ScrDyn *d) {
  * Node's `F.prototype.constructor` is F. Storing that as a PROPERTY here
  * is what cannot be done: the prototype object would hold a FUNC box
  * holding the closure holding the property table holding the prototype
- * object — a cycle refcounting cannot break and the collector cannot see
- * (ScrDyn carries no trace header, so the dyn→closure edge is an
- * external root by construction). Two agents refused it on exactly that
- * ground and both were right.
+ * object — a cycle refcounting could not break and, when this was
+ * written, the collector could not see either (ScrDyn carried no trace
+ * header then, so the dyn→closure edge was an external root by
+ * construction). Two agents refused it on exactly that ground and both
+ * were right AT THE TIME. Neither half of that parenthesis is true any
+ * more: ScrDyn is a cycle node and scr_dyn_trace visits a FUNC node's
+ * closure, so the ring IS collectable today — which is what makes a
+ * program that writes the back-link EXPLICITLY (the shadowing own member
+ * two paragraphs down) stop leaking. The table stays regardless:
+ * computing the answer beats storing a ring even when the ring can be
+ * collected, and it is what lets `constructor` read back on a prototype
+ * nobody assigned one to.
  *
  * What the read actually needs is smaller than a stored property: the
  * IDENTITY of the closure, plus the five STATIC literals a FUNC box is
@@ -977,11 +985,16 @@ static void scr_ctor_erase(const ScrDyn *p) {
  * entry, then drop the prototype object the closure owned. Installed as
  * scr_closure_ctor_unlink the first time a prototype is minted, and
  * reached only for a closure that has one. */
-static void scr_dyn_ctor_unlink(ScrClosure *c) {
+static void scr_dyn_ctor_unlink(ScrClosure *c, bool release) {
   ScrDyn *proto = (ScrDyn *)c->implicit_proto;
   c->implicit_proto = NULL;
+  /* By ADDRESS only — never dereferenced — which is what makes this
+   * correct on the collector's path, where `proto` may already have been
+   * freed earlier in the same white-set teardown loop. */
   scr_ctor_erase(proto);
-  scr_dyn_release(proto);
+  /* The trace/teardown complement: false from the collector's free_fn,
+   * which must not release a traced child. */
+  if (release) scr_dyn_release(proto);
 }
 
 /* The FUNCTION value `d`'s chain names as its `constructor`, or NULL when
