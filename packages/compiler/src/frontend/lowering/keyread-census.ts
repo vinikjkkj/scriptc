@@ -285,10 +285,18 @@ export function emitFinalKeyReadWidths(mod: unknown, path: string): void {
   const m = mod as {
     unions?: { arms: { kind: string }[] }[];
   } & Record<string, unknown>;
+  // Keyed by the def's OWN id, never by its ARRAY INDEX. The two agree
+  // when a union is minted (`u${this.unions.length}`, frontend/types.ts)
+  // and they do NOT agree in the FINAL module: on zapo the fifteen
+  // `createStore.ts:124` rows came out FINAL_BARE while the emitted TU
+  // shows `sc_rkg_27` answering `sc_unit_1500` on a miss - a NON-aborting
+  // helper. The 56 rows this pass reported were 41 real ones plus that
+  // one mislabelled site fifteen times over, and every reader of this
+  // file has had to subtract it by hand and say so.
   const unionArmed = new Map<string, boolean>();
-  const defs = (m.unions ?? []) as { arms?: { kind: string }[] }[];
+  const defs = (m.unions ?? []) as { id?: string; arms?: { kind: string }[] }[];
   defs.forEach((d, i) => {
-    unionArmed.set("u" + String(i), (d.arms ?? []).some((a) => a.kind === "undefinedT"));
+    unionArmed.set(d.id ?? "u" + String(i), (d.arms ?? []).some((a) => a.kind === "undefinedT"));
   });
   const out: string[] = [];
   const seen = new Set<unknown>();
