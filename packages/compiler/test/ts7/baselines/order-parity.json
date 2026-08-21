@@ -9012,6 +9012,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5851-bytes-cross-the-dyn-boundary-by-reference-both-ways.ts": {
+   "order": [
+    "<repo>/tests/corpus/5851-bytes-cross-the-dyn-boundary-by-reference-both-ways.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"

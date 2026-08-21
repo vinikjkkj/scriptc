@@ -109,9 +109,20 @@ const ANSWERING_TABLES: { fn: string; why: string; exempt: string[] }[] = [
   {
     fn: "bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b)",
     why: "the default compares POINTERS, so a missing value kind answers false for equal values",
-    // Arrays, objects and typed arrays ARE compared by node identity —
-    // the default is their correct answer, not an omission.
-    exempt: ["SCR_DYN_ARR", "SCR_DYN_OBJ", "SCR_DYN_BYTES"],
+    // Arrays and objects ARE compared by node identity — the default is
+    // their correct answer, not an omission: their two representations
+    // are physically different memory, so a dyn ARR/OBJ is a copy and a
+    // copy is a different JS object however it is compared.
+    //
+    // SCR_DYN_BYTES used to be listed here and the claim was FALSE. A
+    // ScrBytes payload is shared by reference across the boundary, so
+    // one Buffer boxed twice is two ScrDyn nodes over ONE JS value and
+    // the pointer default answered false for a value that IS itself:
+    // `xs.indexOf(b)` over an `unknown[]` holding `b` answered -1 where
+    // Node answers 0. Its ArrayBuffer sibling had carried the payload
+    // arm all along, with the same argument. This tripwire is what
+    // caught the exemption, so the exemption is what moved.
+    exempt: ["SCR_DYN_ARR", "SCR_DYN_OBJ"],
   },
   {
     fn: "static const char *scr_dyn_kind_name(const ScrDyn *d)",
