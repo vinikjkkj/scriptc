@@ -1324,6 +1324,100 @@ export interface IrRecordShape {
    * site over this shape, and by a projection whose class HAS a callable
    * toString — and read by both backends to size the struct. */
   tostr?: true;
+  /** The HIDDEN per-instance OWN-KEY mask: not a field, not a key, not
+   * part of the interned identity — one trailing byte array
+   * (`1 + ceil(fields.length / 8)` bytes) both backends lay out after the
+   * declared fields, the overflow map and the toString slot, ZERO on every
+   * fresh record.
+   *
+   * It exists because MATERIALIZING a record out of a DYNAMIC value loses
+   * the source object's OWN-key set. `x as IMsg` is the identity in JS, so
+   * `Object.keys(x)` still answers the keys the object really carries;
+   * scriptc's dynCheck builder READS every declared member, and a read is
+   * JS's [[Get]] — own data, else the PROTOTYPE chain. A prototype-carried
+   * default (`Msg.prototype.albumMessage = null`, which is exactly what
+   * `pbjs --target static-module` emits, and the shape every JS class has)
+   * therefore lands in the struct slot as a value, and every own-key
+   * surface downstream reads the slot and answers "present". Measured on
+   * zapo: `Object.keys(message)` answered ~200 keys where Node answers one,
+   * and 1,790 of the 1,794 payload leaf differences per paired run were
+   * this.
+   *
+   * The slot alone cannot carry it. `{a?: T}` and `{a: T | undefined}`
+   * intern to ONE shape (per-instance-keys.test.ts), so the undefined arm
+   * is the only presence signal a record has, and it is a signal about the
+   * VALUE. Writing the undefined arm for a prototype-inherited member fixes
+   * every enumeration and BREAKS every read (`t.albumMessage` answers
+   * `undefined` where JS answers `null`) — one silent wrong value traded
+   * for another. The mask separates the two facts: the slot keeps the
+   * VALUE JS reads, the mask carries the OWN-NESS JS enumerates.
+   *
+   * BYTE 0 IS THE VALIDITY FLAG, and it is what keeps this additive: 0
+   * means "no crossing wrote this instance", which is every record built
+   * any other way, and every surface then falls back to the undefined-arm
+   * rule it uses today. Only an instance a dynCheck builder materialised
+   * carries a 1 there. Field `i` (its index in `fields`) owns bit
+   * `1 << (i & 7)` of byte `1 + (i >> 3)`.
+   *
+   * Armed by armOwnMasks() after lowering, from the dynCheck targets the
+   * module actually contains — the same construction SC6002 advises about,
+   * which until now printed a note and shipped the wrong value. */
+  ownmask?: true;
+}
+
+/** The byte width of a shape's hidden own-key mask: one VALIDITY byte plus
+ * one bit per declared field. Stated once so both backends lay out the same
+ * struct; `fields` is the canonical (name-sorted) list, so the bit index is
+ * a field's position in it and never moves. */
+export function ownMaskBytes(shape: { fields: { name: string }[] }): number {
+  return 1 + ((shape.fields.length + 7) >> 3);
+}
+
+/** Field `name`'s bit in a shape's own-key mask: which BYTE of the mask
+ * holds it and which bit of that byte. Null when the shape does not carry
+ * the field (nothing to mask). Byte 0 is the validity flag, so field bits
+ * start at byte 1. */
+export function ownMaskBit(
+  shape: { fields: { name: string }[] },
+  name: string,
+): { byte: number; bit: number } | null {
+  const i = shape.fields.findIndex((f) => f.name === name);
+  if (i < 0) return null;
+  return { byte: 1 + (i >> 3), bit: 1 << (i & 7) };
+}
+
+/** The shape fields ownMaskKeyBit needs, so both the structural callers
+ * (emit-shapes, llvm/shapes) and IrRecordShape itself fit. */
+export type OwnMaskShape = {
+  ownmask?: true;
+  tuple?: true;
+  declaredOrder?: string[];
+  fields: { name: string }[];
+};
+
+/** Field `name`'s bit in a shape's own-key mask, or null when the field
+ * takes no bit at all — the ONE question every mask site asks, so the
+ * builder that STAMPS a bit and the walker that READS it cannot drift.
+ *
+ * Null for three reasons, and the third is the one that bites: the shape
+ * did not arm; the shape does not carry the field; or the field is an
+ * INTERNAL SLOT (internalFieldNamesOf — declaredOrder omits it), which is
+ * not a JS key on any surface and travels in ScrDyn's slot table instead
+ * of its member table.
+ *
+ * The test is deliberately NOT on the '%' SPELLING, and it was, on the
+ * branch that introduced the mask. '%' is a legal first character of a
+ * JavaScript property name, so a user's own `{ "%dtype": 7, name: "n" }`
+ * IS in its shape's declaredOrder and IS an ordinary key that has to take
+ * a bit like any other. A field one site skips and another masks is worse
+ * than either rule alone: the builder never stamps it, the record→dyn
+ * walker finds the bit clear, and the key is DEMOTED to the prototype on
+ * every crossing — silently, and only for that one namespace. */
+export function ownMaskKeyBit(shape: OwnMaskShape, name: string): { byte: number; bit: number } | null {
+  if (shape.ownmask !== true) return null;
+  const internal = internalFieldNamesOf(shape.fields.map((f) => f.name), shape.declaredOrder, shape.tuple === true);
+  if (internal.includes(name)) return null;
+  return ownMaskBit(shape, name);
 }
 
 /** Object-literal ACCESSOR properties (`{ get x() {...}, set x(v) {...} }`)
@@ -5633,6 +5727,25 @@ export type IrExpr =
   /** Record field read `r.f` — mirrors `fieldGet`: refcounted fields come
    * out retained (+1). */
   | { kind: "recordGet"; obj: IrExpr; shapeId: string; field: string; type: IrType; loc: SrcLoc }
+  /** Is `field` one of `obj`'s OWN keys? — the single question every
+   * own-key surface asks (Object.keys/values/entries, Object.hasOwn, the
+   * JSON writer, the record→dyn walker), spelled ONCE so they cannot drift
+   * apart from each other.
+   *
+   * On a shape that did NOT arm the hidden own-key mask this is exactly
+   * the undefined-arm tag test those surfaces have always emitted — the
+   * key exists precisely when the arm is not undefined — and the emitted
+   * code is byte-identical to the `unionIsTag` it replaced. On an ARMED
+   * shape (IrRecordShape.ownmask) the instance's mask decides when it
+   * carries one, and falls back to the same tag test when it does not, so
+   * the answer is the SOURCE object's own-key set for a record a dynCheck
+   * materialised and the shape's declared list for every other record.
+   *
+   * The frontend cannot know which it will be — arming is decided after
+   * the whole walk (armOwnMasks), so that the answer does not depend on
+   * declaration order — which is exactly why this is a node and not two
+   * spellings chosen at lowering time. */
+  | { kind: "recordKeyPresent"; obj: IrExpr; shapeId: string; field: string; type: IrType; loc: SrcLoc }
   /** Dynamic-keyed record read `r[k]` (string key, evaluated at runtime).
    * Declared fields are tried FIRST (an emitted string-switch — field
    * access exactness is preserved: a declared name always answers from the

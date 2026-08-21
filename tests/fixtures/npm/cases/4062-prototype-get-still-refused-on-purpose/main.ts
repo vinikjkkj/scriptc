@@ -39,16 +39,28 @@
 //    passes there. 4061's `union-arm-method-typed-number` is that case
 //    with one operator as the only difference.
 //
-// 3. The record -> dyn ROUND TRIP does not preserve own-ness. A checked
-//    cast MATERIALIZES a record struct, and converting that back to a dyn
-//    writes every declared field as an OWN enumerable key -- so an
-//    inherited member re-emerges as an own one and JSON.stringify,
-//    Object.keys and for-in all see it. That is a pre-existing property
-//    of record materialization (JS has no materialization step at all:
-//    `x as T` is the identity), and reading the prototype is what first
-//    makes it REACHABLE, which is why it is named here rather than left
-//    for the next reader to find. On base the same program dies one line
-//    earlier with `expected number at $.w, got undefined`.
+// 3. CLOSED. The record -> dyn ROUND TRIP did not preserve own-ness. A
+//    checked cast MATERIALIZES a record struct, and converting that back
+//    to a dyn wrote every declared field as an OWN enumerable key -- so an
+//    inherited member re-emerged as an own one and JSON.stringify,
+//    Object.keys and for-in all saw it. It is closed by a hidden
+//    per-instance OWN-KEY MASK (IrRecordShape.ownmask): the dynCheck
+//    builder is the one point that holds both halves of JS's answer, so it
+//    records which members the source object carried ITSELF, and the
+//    record -> dyn conversion writes those as keys and DEMOTES the rest to
+//    a prototype object linked behind the result. Both halves show on this
+//    line: `w` still READS 3, because JS answers the prototype's value for
+//    an inherited member, and JSON.stringify no longer lists it, because
+//    JS does not list it either. On base the same program prints
+//    `{"z":9,"w":3}`, and one revision earlier it died a line sooner with
+//    `expected number at $.w, got undefined`.
+//
+//    What the mask does NOT reach is a value that crosses a SECOND time
+//    into an index-signature record (`v as Record<string, unknown>`): that
+//    capture copies own entries into an overflow map and a record has
+//    nowhere to hold a prototype, so a read of an INHERITED member through
+//    such a view answers undefined. Closing it needs the record to carry
+//    the source dyn the way it carries the toString slot.
 import { makeGetter, make, makeData } from "protolong"
 
 interface GetterLike { low: number; hi: number }

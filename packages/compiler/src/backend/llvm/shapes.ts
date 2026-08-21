@@ -11,7 +11,7 @@
  * Anything outside the tier refuses loudly (LlvmUnsupportedError naming
  * the type kind) — the tables never guess. */
 import type { IrModule, IrRecordShape, IrType } from "../../ir/nodes.js";
-import { funcOf, isRefCounted, mapOf, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, VOID } from "../../ir/nodes.js";
+import { funcOf, isRefCounted, mapOf, ownMaskBytes, ownMaskKeyBit, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, VOID } from "../../ir/nodes.js";
 import {
   mangleClassRelease,
   mangleClassTrace,
@@ -24,6 +24,7 @@ import {
 } from "../mangle.js";
 import { arrayElemIsRef, mapKeyAccess as mapKeyAccessC, rcAdapters } from "../emission/emit-types.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
+import type { BlockBuilder } from "./blocks.js";
 
 /** What the tables need from the emitter: the extern-declaration ledger
  * and the module-wide cycle/shape indexes. */
@@ -513,6 +514,91 @@ export function toStrSlotIndex(shape: IrRecordShape): number {
   return shape.fields.length + (shape.indexValue ? 1 : 0) + 1;
 }
 
+/** Emit the OWN-KEY question for `shape.fieldName` on the record in
+ * register `recv`, returning an i1 register — the .ll twin of
+ * ownPresentCondC, spelled with the same short-circuit so the two backends
+ * evaluate the same loads on the same paths.
+ *
+ * Null means "unconditionally present": an unarmed shape whose field is
+ * not undefined-armed has nothing to test, exactly as today.
+ *
+ * `dropUndefined` is the JSON.stringify rule — an undefined-VALUED own
+ * property is still dropped from JSON output (`JSON.stringify({a:
+ * undefined})` is `{}`), so there the two tests are a conjunction; every
+ * other own-key surface (Object.keys, hasOwn, the record→dyn walker) asks
+ * for own-ness alone, because `Object.keys({a: undefined})` is `["a"]`. */
+export function emitOwnPresentLl(
+  B: BlockBuilder,
+  shape: IrRecordShape,
+  fieldName: string,
+  recv: string,
+  utag: number,
+  dropUndefined: boolean,
+): string | null {
+  const struct = mangleRecordStruct(shape.id);
+  const fieldIdx = shape.fields.findIndex((f) => f.name === fieldName);
+  const armTest = (): string => {
+    const p = B.tmp();
+    B.line(`${p} = getelementptr inbounds %${struct}, ptr ${recv}, i64 0, i32 ${fieldIdx + 1} ; .${fieldName}`);
+    const u = B.tmp();
+    B.line(`${u} = load ptr, ptr ${p}`);
+    const tp = B.tmp();
+    B.line(`${tp} = getelementptr inbounds %ScrUnion, ptr ${u}, i64 0, i32 1`);
+    const tg = B.tmp();
+    B.line(`${tg} = load i32, ptr ${tp}`);
+    const r = B.tmp();
+    B.line(`${r} = icmp ne i32 ${tg}, ${utag}`);
+    return r;
+  };
+  // INTERNAL SLOTS take no bit (ownPresentCondC's row, one function).
+  const bit = ownMaskKeyBit(shape, fieldName);
+  if (!bit || fieldIdx < 0) return utag >= 0 ? armTest() : null;
+  const mi = ownMaskSlotIndex(shape);
+  const vp = B.tmp();
+  B.line(`${vp} = getelementptr inbounds %${struct}, ptr ${recv}, i64 0, i32 ${mi}, i64 0 ; ${fieldName} own-mask valid`);
+  const v0 = B.tmp();
+  B.line(`${v0} = load i8, ptr ${vp}`);
+  const valid = B.tmp();
+  B.line(`${valid} = icmp ne i8 ${v0}, 0`);
+  const lOwn = B.newLabel("own.m");
+  const lArm = B.newLabel("own.a");
+  const lJoin = B.newLabel("own.j");
+  B.condBr(valid, lOwn, lArm);
+  B.startBlock(lOwn);
+  const bp = B.tmp();
+  B.line(`${bp} = getelementptr inbounds %${struct}, ptr ${recv}, i64 0, i32 ${mi}, i64 ${bit.byte}`);
+  const bv = B.tmp();
+  B.line(`${bv} = load i8, ptr ${bp}`);
+  const msk = B.tmp();
+  B.line(`${msk} = and i8 ${bv}, ${bit.bit}`);
+  const own = B.tmp();
+  B.line(`${own} = icmp ne i8 ${msk}, 0`);
+  B.br(lJoin);
+  B.startBlock(lArm);
+  const fall = utag >= 0 ? armTest() : "true";
+  B.br(lJoin);
+  B.startBlock(lJoin);
+  const phi = B.tmp();
+  B.line(`${phi} = phi i1 [ ${own}, %${lOwn} ], [ ${fall}, %${lArm} ]`);
+  if (!dropUndefined || utag < 0) return phi;
+  // JSON's conjunction: own AND not the undefined arm. The arm test is
+  // re-read here because the mask branch above did not take it.
+  const arm2 = armTest();
+  const both = B.tmp();
+  B.line(`${both} = and i1 ${phi}, ${arm2}`);
+  return both;
+}
+
+/** The hidden own-key mask's field index in the emitted struct type: rc at
+ * 0, the declared fields, the overflow map, the toString slot, then the
+ * mask — LAST, so no existing member's index moves. It is a `[K x i8]`
+ * array (ownMaskBytes), not a pointer: plain bytes, never refcounted,
+ * never traced. Shared by every getelementptr that reaches it, so the
+ * layout is stated once and the C twin (OWNMASK_MEMBER) matches it. */
+export function ownMaskSlotIndex(shape: IrRecordShape): number {
+  return shape.fields.length + (shape.indexValue ? 1 : 0) + (shape.tostr ? 1 : 0) + 1;
+}
+
 /** The immortal-skip + mark-live retain body shared by every shape. The
  * cycle header sits 32 bytes before the object; `color` is at header+16,
  * so mark-live is one i32 store at obj-16 (scr_cyc_mark_live inlined —
@@ -556,9 +642,10 @@ export function emitRecordShapes(host: ShapeHost, mod: IrModule): { typeDefs: st
 
   for (const shape of records) {
     const struct = mangleRecordStruct(shape.id);
-    const fieldTys = shape.fields.map((f) => llFieldType(f.type));
+    const fieldTys: string[] = shape.fields.map((f) => llFieldType(f.type));
     if (shape.indexValue) fieldTys.push("ptr"); // the overflow ScrMap *
     if (shape.tostr) fieldTys.push("ptr"); // the hidden toString slot (ScrClosure *)
+    if (shape.ownmask) fieldTys.push(`[${ownMaskBytes(shape)} x i8]`); // the hidden own-key mask
     typeDefs.push(
       `%${struct} = type { i64${fieldTys.length ? ", " + fieldTys.join(", ") : ""} } ` +
         `; record ${shape.id} { ${shape.fields.map((f) => f.name).join("; ")}${shape.indexValue ? "; [key: string]" : ""} }`,
