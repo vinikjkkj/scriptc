@@ -6912,6 +6912,22 @@ export const DYN_BYTES_KINDS: ReadonlyMap<IrBytesElem, { kind: string; dk: "BYTE
     ["buf", { kind: "SCR_DYN_ARRBUF", dk: "ARRBUF", cls: "ArrayBuffer" }],
   ]);
 
+/** The dyn->static extraction of a `bytes` value: `true` (the default)
+ * returns the SAME payload retained, `false` returns a fresh copy.
+ *
+ * ONE definition, read by both backends, because a lane that copied while
+ * the other aliased would be a differential failure with no diagnostic:
+ * the two answers differ only in whether a later write is visible.
+ *
+ * `SCRIPTC_BYTESALIAS_OFF=1` is the REMOVAL CONTROL. It restores the
+ * pre-change lowering exactly (scr_dyn_bytes_copy_out), so the fixtures
+ * that fail on base can be shown to fail with the dial off on this branch
+ * too, which is what separates "the change did it" from "something else in
+ * the tree did it". */
+export function bytesAliasOnExtract(): boolean {
+  return !["1", "true"].includes(process.env["SCRIPTC_BYTESALIAS_OFF"] ?? "");
+}
+
 /** Whether a `bytes` type crosses the boundary at all — the one spelling
  * of the element test, so a new element kind is admitted in one place
  * rather than in the five predicates and two emitters that used to write

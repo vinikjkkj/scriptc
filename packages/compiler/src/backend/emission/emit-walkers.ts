@@ -7,6 +7,7 @@
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
+import { bytesAliasOnExtract } from "../../ir/nodes.js";
 import { armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
@@ -1794,8 +1795,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`  return scr_dyn_arrbuf_unbox(d, path, ${want});`);
           break;
         }
-        // `u as Uint8Array`: kind check, then a fresh COPY out (the
-        // boundary's aliasing stance in both directions).
+        // `u as Uint8Array` / `u as Buffer`: kind check, then the SAME
+        // payload back, retained. The ARRBUF arm above states the reason
+        // and this arm used to contradict it: the inbound direction has
+        // always aliased (scr_dyn_new_bytes_ref), so a copy here made the
+        // round trip lose the object. `(u as Buffer) === b` answered
+        // false against Node's true, a write through the recovered value
+        // landed on a copy, and a subarray came back detached from its
+        // backing buffer.
         if (soft) d.push(`  (void)path;`);
         d.push(
           fail(
@@ -1805,7 +1812,9 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             `NULL`,
           ),
         );
-        d.push(`  return scr_dyn_bytes_copy_out(d);`);
+        d.push(
+          `  return ${bytesAliasOnExtract() ? "scr_dyn_bytes_unbox" : "scr_dyn_bytes_copy_out"}(d);`,
+        );
         break;
       }
       case "map":
