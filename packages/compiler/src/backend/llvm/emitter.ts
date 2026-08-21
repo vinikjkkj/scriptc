@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals } from "../emission/emit-stmts.js";
 import { mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
@@ -5278,6 +5278,31 @@ class LlEmitter {
         const r = emitOwnPresentLl(B, shape, e.field, obj.name, this.undefinedArmTag(f.type), false);
         if (r === null) return { name: "true", type: e.type };
         return { name: r, type: e.type };
+      }
+      case "recordNullProto": {
+        // The null-prototype question, one spelling (nullProtoRule). An
+        // unarmed shape folds to its own claim and emits a literal.
+        const shape = this.recordsById.get(e.shapeId);
+        if (!shape) throw new Error(`llvm emitter bug: recordNullProto of unknown shape ${e.shapeId}`);
+        const rule = nullProtoRule(shape);
+        if (rule.kind === "const") return { name: rule.value ? "true" : "false", type: e.type };
+        const obj = this.emitExpr(e.obj);
+        const mi = ownMaskSlotIndex(shape);
+        const vp = B.tmp();
+        B.line(
+          `${vp} = getelementptr inbounds %${mangleRecordStruct(e.shapeId)}, ptr ${obj.name}, i64 0, i32 ${mi}, i64 0 ; own-mask byte 0`,
+        );
+        const v0 = B.tmp();
+        B.line(`${v0} = load i8, ptr ${vp}`);
+        const valid = B.tmp();
+        B.line(`${valid} = icmp ne i8 ${v0}, 0`);
+        const srcAnd = B.tmp();
+        B.line(`${srcAnd} = and i8 ${v0}, ${OWNMASK_SRC_NULL_PROTO}`);
+        const srcNp = B.tmp();
+        B.line(`${srcNp} = icmp ne i8 ${srcAnd}, 0`);
+        const out = B.tmp();
+        B.line(`${out} = select i1 ${valid}, i1 ${srcNp}, i1 ${rule.claim ? "true" : "false"}`);
+        return { name: out, type: e.type };
       }
       case "recordOvfKeys": {
         // The overflow map's live keys in JS own-key order — a fresh

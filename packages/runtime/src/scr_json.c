@@ -1040,6 +1040,14 @@ void scr_dyn_obj_set_proto(ScrDyn *obj, ScrDyn *proto) {
   if (obj->kind != SCR_DYN_OBJ) return;
   ScrDyn *prev = obj->v.obj.proto;
   obj->v.obj.proto = proto ? scr_dyn_retain(proto) : NULL;
+  /* An object with a LINK does not have a null [[Prototype]], and the two
+   * fields are read by different surfaces: util.inspect prints the prefix
+   * off null_proto while [[Get]] walks the link, and deepStrictEqual
+   * compares BOTH. Leaving the flag set behind a live chain would answer
+   * about neither, so installing a chain retracts it here rather than at
+   * every call site. Clearing on a NULL proto would be wrong the other
+   * way: Object.setPrototypeOf(o, null) is exactly the null case. */
+  obj->null_proto = proto ? false : obj->null_proto;
   scr_dyn_release(prev);
 }
 
@@ -1320,6 +1328,27 @@ ScrDyn *scr_dyn_new_obj_null_proto(void) {
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_OBJ);
   d->null_proto = true;
   return d;
+}
+
+/* The two above, chosen at RUN TIME. A record shape is STRUCTURAL, so
+ * whether one of its instances has a null [[Prototype]] is a fact about
+ * the INSTANCE and not about the shape: os.userInfo() builds one with
+ * Object.create(null) and a value materialised out of a dynamic one
+ * carries whatever its source carried. The record->dyn walker asks the
+ * instance (the own-key mask's byte 0) and calls this; a shape no
+ * crossing arms folds the flag to a constant at compile time and this
+ * costs nothing. */
+ScrDyn *scr_dyn_new_obj_flavor(int null_proto) {
+  return null_proto ? scr_dyn_new_obj_null_proto() : scr_dyn_new_obj();
+}
+
+/* Is this value a null-prototype OBJECT? The dyn->record builder's probe:
+ * the fact is per-INSTANCE, so it has to be read off the source value and
+ * carried, and both backends ask it through this rather than off a byte
+ * offset into ScrDyn (the LLVM lane's dyn plumbing is offset-literal, and
+ * a flag's offset is not one of the three it already pins). */
+int scr_dyn_is_null_proto(const ScrDyn *d) {
+  return d != NULL && d->kind == SCR_DYN_OBJ && d->null_proto ? 1 : 0;
 }
 
 /* Buffer-ness is ONE fact with two homes: the PAYLOAD carries it

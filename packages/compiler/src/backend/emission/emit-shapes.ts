@@ -4,8 +4,8 @@
  * constructors. Everything here is driven by the class graph (ClassMeta,
  * VtSlot) the emitter builds up front; emission ORDER is part of the C. */
 import type { CEmitter } from "./emitter.js";
-import type { IrFunction, OwnMaskShape } from "../../ir/nodes.js";
-import { IrClassDef, IrType, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, funcOf, isRefCounted, mapOf, ownMaskBytes, ownMaskKeyBit, STRING } from "../../ir/nodes.js";
+import type { IrBuiltinRendering, IrFunction, OwnMaskShape } from "../../ir/nodes.js";
+import { IrClassDef, IrType, OWNMASK_SRC_NULL_PROTO, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, funcOf, isRefCounted, mapOf, nullProtoRule, ownMaskBytes, ownMaskKeyBit, STRING } from "../../ir/nodes.js";
 import { mangleClassGcFree, mangleClassNew, mangleClassRelease, mangleClassReleaseDirect, mangleClassRetain, mangleClassStruct, mangleClassTrace, mangleCtorThunk, mangleField, mangleFunction, mangleRecordGcFree, mangleRecordNew, mangleRecordRelease, mangleRecordRetain, mangleRecordStruct, mangleRecordTrace, mangleVtAdapter, mangleVtInstance, mangleVtStruct } from "../mangle.js";
 import { arrayElemIsRef, boxKindC, cDecl, cType, elemKindC, mapValKindC, rcAdapters, releaseCallC, vAdapters } from "./emit-types.js";
 
@@ -72,6 +72,22 @@ export function ownPresentCondC(
   // tests are a conjunction here and the mask alone is not enough.
   const ownOnly = `(${m}[0] ? ((${m}[${bit.byte}] & ${bit.bit}) != 0) : true)`;
   return armTest === null ? ownOnly : `((${armTest}) && ${ownOnly})`;
+}
+
+/** The C expression for "is this record instance a NULL-PROTOTYPE object?"
+ * — nullProtoRule's row, in C. A shape no crossing armed folds to the
+ * literal `true`/`false` and costs nothing; an armed shape asks the
+ * instance's mask byte 0, falling back to the shape's own claim for an
+ * instance no crossing wrote (a runtime-built os.userInfo(), which really
+ * IS null-prototype). */
+export function nullProtoCondC(
+  shape: OwnMaskShape & { builtin?: IrBuiltinRendering },
+  recv: string,
+): string {
+  const rule = nullProtoRule(shape);
+  if (rule.kind === "const") return rule.value ? "true" : "false";
+  const m = `${recv}->${OWNMASK_MEMBER}`;
+  return `(${m}[0] ? ((${m}[0] & ${OWNMASK_SRC_NULL_PROTO}) != 0) : ${rule.claim ? "true" : "false"})`;
 }
 
 /** True when the class descends from a runtime stream class: its struct

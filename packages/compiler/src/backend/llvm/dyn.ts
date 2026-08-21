@@ -23,7 +23,7 @@
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrRecordShape, IrType } from "../../ir/nodes.js";
 import { armDiscrimLits, canAdaptDynFuncTo, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
-import { ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
+import { nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
 import { mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane, readKindgateDials } from "../kindgate.js";
@@ -1308,7 +1308,17 @@ export class LlDyn {
           B.line(
             `${vp} = getelementptr inbounds %${mangleRecordStruct(t.shapeId)}, ptr %r0, i64 0, i32 ${ownMaskSlotIndex(shape)}, i64 0`,
           );
-          B.line(`store i8 1, ptr ${vp} ; own-mask written`);
+          // Byte 0 also carries the SOURCE object's own
+          // [[Prototype]]-is-null fact — the C lane's row. A record shape
+          // is structural and this is the last point that still holds it.
+          host.declare(`declare i32 @scr_dyn_is_null_proto(ptr)`);
+          const np = B.tmp();
+          B.line(`${np} = call i32 @scr_dyn_is_null_proto(ptr ${dRef})`);
+          const npb = B.tmp();
+          B.line(`${npb} = icmp ne i32 ${np}, 0`);
+          const npv = B.tmp();
+          B.line(`${npv} = select i1 ${npb}, i8 ${OWNMASK_VALID | OWNMASK_SRC_NULL_PROTO}, i8 ${OWNMASK_VALID}`);
+          B.line(`store i8 ${npv}, ptr ${vp} ; own-mask written`);
         }
         // The HIDDEN per-instance toString slot — emit-walkers.ts's row
         // exactly. MATERIALIZING is what loses a JS object's toString, and
@@ -2104,13 +2114,36 @@ export class LlDyn {
         // encoding (ScrDyn.null_proto, ScrDyn.v.obj.cname).
         const d = B.tmp();
         // emit-walkers.ts carries the whole argument for both halves,
-        // including why an ARMED shape stops claiming a null prototype.
-        if (shape.builtin?.nullProto && !shape.ownmask) {
-          host.declare(`declare ptr @scr_dyn_new_obj_null_proto()`);
-          B.line(`${d} = call ptr @scr_dyn_new_obj_null_proto()`);
+        // including why an ARMED shape asks the INSTANCE rather than
+        // folding the claim away for the whole shape (which was a silent
+        // PASS on deepStrictEqual).
+        const npRule = nullProtoRule(shape);
+        if (npRule.kind === "const") {
+          if (npRule.value) {
+            host.declare(`declare ptr @scr_dyn_new_obj_null_proto()`);
+            B.line(`${d} = call ptr @scr_dyn_new_obj_null_proto()`);
+          } else {
+            host.declare(`declare ptr @scr_dyn_new_obj()`);
+            B.line(`${d} = call ptr @scr_dyn_new_obj()`);
+          }
         } else {
-          host.declare(`declare ptr @scr_dyn_new_obj()`);
-          B.line(`${d} = call ptr @scr_dyn_new_obj()`);
+          host.declare(`declare ptr @scr_dyn_new_obj_flavor(i32)`);
+          const mi = ownMaskSlotIndex(shape);
+          const vp = B.tmp();
+          B.line(`${vp} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${mi}, i64 0 ; own-mask byte 0`);
+          const v0 = B.tmp();
+          B.line(`${v0} = load i8, ptr ${vp}`);
+          const valid = B.tmp();
+          B.line(`${valid} = icmp ne i8 ${v0}, 0`);
+          const srcAnd = B.tmp();
+          B.line(`${srcAnd} = and i8 ${v0}, ${OWNMASK_SRC_NULL_PROTO}`);
+          const srcNp = B.tmp();
+          B.line(`${srcNp} = icmp ne i8 ${srcAnd}, 0`);
+          const chosen = B.tmp();
+          B.line(`${chosen} = select i1 ${valid}, i1 ${srcNp}, i1 ${npRule.claim ? "true" : "false"}`);
+          const flag = B.tmp();
+          B.line(`${flag} = zext i1 ${chosen} to i32`);
+          B.line(`${d} = call ptr @scr_dyn_new_obj_flavor(i32 ${flag})`);
         }
         if (shape.builtin?.ctorName) {
           host.declare(`declare void @scr_dyn_obj_set_ctor_name(ptr, ptr)`);

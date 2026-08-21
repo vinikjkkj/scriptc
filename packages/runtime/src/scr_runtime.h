@@ -4222,6 +4222,11 @@ ScrDyn *scr_dyn_new_obj(void);
 /* Object.create(null): the fresh null-prototype dictionary (see the
  * null_proto flavor flag above). */
 ScrDyn *scr_dyn_new_obj_null_proto(void);
+/* The two above chosen at RUN TIME — the record->dyn walker's constructor
+ * for a shape whose null-prototype-ness is a per-INSTANCE fact. */
+ScrDyn *scr_dyn_new_obj_flavor(int null_proto);
+/* ...and the dyn->record builder's probe for the same fact. */
+int scr_dyn_is_null_proto(const ScrDyn *d);
 /* Wraps a fresh COPY of the u8 payload. The CLONING constructor — used
  * where JS itself makes a new buffer (structuredClone). Borrows b. */
 ScrDyn *scr_dyn_new_bytes_copy(const ScrBytes *b);
