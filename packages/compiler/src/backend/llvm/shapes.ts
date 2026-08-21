@@ -73,6 +73,14 @@ export function computeTraced(mod: IrModule): { shapes: Set<string>; unions: Set
         ...r.fields,
         ...(r.indexValue ? [{ name: "<overflow>", type: mapOf(STRING, r.indexValue) }] : []),
         ...(r.tostr ? [{ name: "<toString>", type: funcOf([], STRING) }] : []),
+        // ...and the hidden SOURCE [[Prototype]] slot, a dyn member whose
+        // graph can point back at the shape holding it. This lane keeps its
+        // OWN copy of the fixpoint, and the row missing HERE is not a
+        // cosmetic drift: the slot was released but the record stayed
+        // calloc'd and untraced, so a ring through it was invisible on one
+        // backend and collected on the other. emitter.ts's C twin is the
+        // same list.
+        ...(r.srcproto ? [{ name: "<srcproto>", type: DYN }] : []),
       ],
     })),
   ];
