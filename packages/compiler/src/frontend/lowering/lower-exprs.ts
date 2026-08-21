@@ -2521,18 +2521,19 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
               abortCapable: !armedRead,
             });
           }
-          return L.maybeNarrow(
-            {
-              kind: "recordKeyGet",
-              obj: recvLowered,
-              shapeId: recvLowered.type.shapeId,
-              key: { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr.name) },
-              overflowOnly: true,
-              type: recvShape.indexValue,
-              loc,
-            },
-            expr,
-          );
+          const hybridRead: IrExpr = {
+            kind: "recordKeyGet",
+            obj: recvLowered,
+            shapeId: recvLowered.type.shapeId,
+            key: { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr.name) },
+            overflowOnly: true,
+            type: recvShape.indexValue,
+            loc,
+          };
+          // THE GUARDED KEYED READ (guardedKeyReadAtDynWidth).
+          const hybridGuarded = guardedKeyReadAtDynWidth(L, expr, hybridRead, recvShape.indexValue);
+          if (hybridGuarded !== null) return hybridGuarded;
+          return L.maybeNarrow(hybridRead, expr);
         }
       }
       // An ABSTRACT property through an abstract-typed receiver: the
@@ -3239,6 +3240,390 @@ function isArrayGuardProven(L: Lowerer, node: ts.Expression): boolean {
     }
   }
   return false;
+}
+
+/** THE ABSENT LITERALS a presence test compares against: `undefined`, the
+ * `void 0` spelling of it, and `null` (a loose `!= null` proves both). */
+function isAbsentLiteral(e: ts.Expression): boolean {
+  let x = e;
+  while (ts.isParenthesizedExpression(x)) x = x.expression;
+  if (x.kind === ts.SyntaxKind.NullKeyword) return true;
+  if (ts.isIdentifier(x) && x.text === "undefined") return true;
+  if (ts.isVoidExpression(x)) return true;
+  return false;
+}
+
+/** A keyed ACCESS in either spelling: `attrs.id` and `attrs['id']` are the
+ * SAME read (the two lower through different seats, but the key is the
+ * same string and the receiver the same reference). A `?.` access
+ * short-circuits and is a different evaluation, so it declines. The key
+ * comes back as a NODE, because a computed key can be proven by identity
+ * (`o[k]` guarded by `o[k]`) as well as by text. */
+function keyAccessOf(e: ts.Expression): { recv: ts.Expression; key: ts.Expression; lit: string | null } | null {
+  let x = e;
+  while (ts.isParenthesizedExpression(x) || ts.isNonNullExpression(x)) x = x.expression;
+  if (ts.isPropertyAccessExpression(x) && x.questionDotToken === undefined) {
+    return { recv: x.expression, key: x.name, lit: x.name.text };
+  }
+  if (ts.isElementAccessExpression(x) && x.questionDotToken === undefined) {
+    return {
+      recv: x.expression,
+      key: x.argumentExpression,
+      lit: recordKeyLiteralText(x.argumentExpression),
+    };
+  }
+  return null;
+}
+
+/** Two keyed accesses name the SAME key: the same literal text, or the
+ * same resolved binding for a computed key. An unresolvable identifier
+ * declines (resolveValueSymbol answers null, and `null === null` would
+ * make two unrelated keys compare equal — the trap isArrayNarrowSameRef
+ * documents a few functions up). */
+function keyPresenceSameKey(
+  L: Lowerer,
+  a: { key: ts.Expression; lit: string | null },
+  b: { key: ts.Expression; lit: string | null },
+): boolean {
+  if (a.lit !== null || b.lit !== null) return a.lit !== null && a.lit === b.lit;
+  if (!ts.isIdentifier(a.key) || !ts.isIdentifier(b.key)) return false;
+  const sa = L.resolveValueSymbol(a.key);
+  return sa !== null && sa === L.resolveValueSymbol(b.key);
+}
+
+/** A `delete` ANYWHERE in the guarded region. `narrowRefWrittenIn` reads
+ * assignments and ++/--; `delete node.attrs.id` removes the key without
+ * being either, and it is the one statement that can falsify a presence
+ * proof from inside the region it guards. Nested functions are NOT skipped
+ * here: a closure that deletes may run before the read. */
+function keyPresenceRegionDeletes(region: ts.Node): boolean {
+  let hit = false;
+  const walk = (n: ts.Node): void => {
+    if (hit) return;
+    if (ts.isDeleteExpression(n)) { hit = true; return; }
+    n.forEachChild(walk);
+  };
+  walk(region);
+  return hit;
+}
+
+/** An operand whose CHECKER type cannot be `undefined` — so `x === <it>`,
+ * once known true, proves `x` is not undefined and therefore that the key
+ * is there. `node.attrs.type === WA_MESSAGE_TYPES.RECEIPT_TYPE_RETRY` is
+ * that shape, and the right-hand side is a const member read, not a
+ * literal, which is why this asks the checker instead of the syntax.
+ * `any`/`unknown` decline: they can hold undefined and the checker is not
+ * claiming otherwise. */
+function keyPresenceDefiniteOperand(L: Lowerer, e: ts.Expression): boolean {
+  const t = L.typeOf(e);
+  const NO =
+    ts.TypeFlags.Undefined |
+    ts.TypeFlags.Null |
+    ts.TypeFlags.Any |
+    ts.TypeFlags.Unknown |
+    ts.TypeFlags.Void |
+    ts.TypeFlags.Never;
+  const parts = t.isUnionType() ? t.getTypes() : [t];
+  return parts.length > 0 && parts.every((p) => (p.flags & NO) === 0);
+}
+
+/** THE KEY-PRESENCE TESTS a CONDITION proves when it is known to hold the
+ * given truth value — the keyed-read twin of `instanceofGuardsOf`, and the
+ * same short-circuit identity: every conjunct of a true `&&` is true,
+ * every disjunct of a false `||` is false, and `!` flips the polarity.
+ *
+ * The spellings zapo actually writes for "this attribute is there", each
+ * one measured off the 41 remaining ABORT.real sites and not guessed:
+ *
+ *     if (node.attrs.id)                          truthiness   (×20)
+ *     if (node.attrs.participant !== undefined)   !== undefined
+ *     if (node.attrs.last != null)                != null
+ *     typeof section.attrs.name === 'string' ? …  typeof, EITHER operator
+ *     a.type === RETRY || a.type === REKEY ? …    equality against a
+ *                                                 definitely-present value
+ *
+ * A truthiness test proves MORE than presence (a present empty string is
+ * falsy too) and that is fine: this rule only ever asks "can the key be
+ * missing", and every one of these answers no.
+ *
+ * A TRUE `||` proves only what BOTH disjuncts prove — `A || B` says one of
+ * them held, so a fact carried by only one of them is not established.
+ * `retry/parse.ts:77-80` is exactly that shape and it is the reason this
+ * arm exists rather than declining. The same identity runs the other way
+ * for a FALSE `&&`. */
+function keyPresenceTestsOf(L: Lowerer, cond: ts.Expression, truth: boolean, out: ts.Expression[]): void {
+  let c = cond;
+  while (ts.isParenthesizedExpression(c)) c = c.expression;
+  if (ts.isPrefixUnaryExpression(c) && c.operator === ts.SyntaxKind.ExclamationToken) {
+    keyPresenceTestsOf(L, c.operand, !truth, out);
+    return;
+  }
+  if (ts.isBinaryExpression(c)) {
+    const op = c.operatorToken.kind;
+    if (op === ts.SyntaxKind.AmpersandAmpersandToken && truth) {
+      keyPresenceTestsOf(L, c.left, true, out);
+      keyPresenceTestsOf(L, c.right, true, out);
+      return;
+    }
+    if (op === ts.SyntaxKind.BarBarToken && !truth) {
+      keyPresenceTestsOf(L, c.left, false, out);
+      keyPresenceTestsOf(L, c.right, false, out);
+      return;
+    }
+    // The two INTERSECTING arms: a true `||`, and a false `&&`. Only a
+    // fact BOTH sides carry survives, matched by the same key and the same
+    // reference the read match uses.
+    const intersecting =
+      (op === ts.SyntaxKind.BarBarToken && truth) ||
+      (op === ts.SyntaxKind.AmpersandAmpersandToken && !truth);
+    if (intersecting) {
+      const lft: ts.Expression[] = [];
+      const rgt: ts.Expression[] = [];
+      keyPresenceTestsOf(L, c.left, truth, lft);
+      keyPresenceTestsOf(L, c.right, truth, rgt);
+      for (const a of lft) {
+        const ka = keyAccessOf(a);
+        if (ka === null) continue;
+        for (const b of rgt) {
+          const kb = keyAccessOf(b);
+          if (kb === null) continue;
+          if (keyPresenceSameKey(L, ka, kb) && isArrayNarrowSameRef(L, ka.recv, kb.recv)) {
+            out.push(a);
+            break;
+          }
+        }
+      }
+      return;
+    }
+    const isNeq =
+      op === ts.SyntaxKind.ExclamationEqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsToken;
+    const isEq =
+      op === ts.SyntaxKind.EqualsEqualsEqualsToken || op === ts.SyntaxKind.EqualsEqualsToken;
+    if (!isEq && !isNeq) return;
+    const sides: readonly (readonly [ts.Expression, ts.Expression])[] = [
+      [c.left, c.right],
+      [c.right, c.left],
+    ];
+    // `typeof <access> <op> '<kind>'`: all four operator/polarity pairs ask
+    // ONE question — does the test EXCLUDE the string 'undefined'? A
+    // missing key reads `undefined`, and that is the only typeof it has.
+    for (const [a, b] of sides) {
+      let x = a;
+      while (ts.isParenthesizedExpression(x)) x = x.expression;
+      if (!ts.isTypeOfExpression(x) || !ts.isStringLiteralLike(b)) continue;
+      const provenEq = isEq === truth;
+      if (provenEq !== (b.text === "undefined")) out.push(x.expression);
+    }
+    // `<access> !== undefined`, `<access> != null`, and the `!`-flipped
+    // `=== undefined` / `== null` forms.
+    if ((isNeq && truth) || (isEq && !truth)) {
+      for (const [a, b] of sides) {
+        let x = a;
+        while (ts.isParenthesizedExpression(x)) x = x.expression;
+        if (ts.isTypeOfExpression(x)) continue;
+        if (isAbsentLiteral(b)) out.push(x);
+      }
+    }
+    // `<access> === <something that cannot be undefined>`.
+    if (isEq === truth) {
+      for (const [a, b] of sides) {
+        let x = a;
+        while (ts.isParenthesizedExpression(x)) x = x.expression;
+        if (ts.isTypeOfExpression(x)) continue;
+        if (isAbsentLiteral(b)) continue;
+        if (!keyPresenceDefiniteOperand(L, b)) continue;
+        out.push(x);
+      }
+    }
+    return;
+  }
+  if (truth) out.push(c);
+}
+
+/** True when a DOMINATING guard in this same function proved the key of
+ * this keyed read PRESENT — the keyed-read twin of `isArrayGuardProven`,
+ * with the same restrictions (only a guarded region, both polarities read
+ * through `!`/`||`, nested functions stay out, and a region that writes
+ * the receiver's root — or deletes anything — declines).
+ *
+ * The shape is zapo's most common statement, twenty-six times over:
+ *
+ *     if (input.node.attrs.id) {
+ *         attrs.id = input.node.attrs.id      // <- this read
+ *     }
+ *
+ * The GUARD already reads at dyn width (ensureBool routes it through
+ * recordKeyReadAtSlotWidth and answers false on a miss); the guarded read
+ * is a FRESH recordKeyGet at the checker's bare `string`, one token later,
+ * and it is that one that carries the untagged abort. */
+function keyPresenceProven(L: Lowerer, node: ts.Expression): boolean {
+  const self = keyAccessOf(node);
+  if (self === null) return false;
+  let child: ts.Node = node;
+  for (let p: ts.Node | undefined = node.parent; p !== undefined; child = p, p = p.parent) {
+    if (ts.isFunctionLike(p)) return false;
+    const cands: ts.Expression[] = [];
+    let region: ts.Node | null = null;
+    if (ts.isIfStatement(p) && child === p.thenStatement) {
+      keyPresenceTestsOf(L, p.expression, true, cands);
+      region = p.thenStatement;
+    } else if (ts.isIfStatement(p) && p.elseStatement !== undefined && child === p.elseStatement) {
+      keyPresenceTestsOf(L, p.expression, false, cands);
+      region = p.elseStatement;
+    } else if (ts.isConditionalExpression(p) && child === p.whenTrue) {
+      keyPresenceTestsOf(L, p.condition, true, cands);
+      region = p.whenTrue;
+    } else if (ts.isConditionalExpression(p) && child === p.whenFalse) {
+      keyPresenceTestsOf(L, p.condition, false, cands);
+      region = p.whenFalse;
+    } else if (ts.isBinaryExpression(p) && child === p.right) {
+      if (p.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
+        keyPresenceTestsOf(L, p.left, true, cands);
+        region = p.right;
+      } else if (p.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+        keyPresenceTestsOf(L, p.left, false, cands);
+        region = p.right;
+      }
+    }
+    if (region === null) continue;
+    for (const g of cands) {
+      const a = keyAccessOf(g);
+      if (a === null) continue;
+      if (!keyPresenceSameKey(L, a, self)) continue;
+      if (!isArrayNarrowSameRef(L, self.recv, a.recv)) continue;
+      if (narrowRefWrittenIn(L, region, a.recv)) continue;
+      // A COMPUTED key is a binding too: `if (o[k]) { k = other; o[k] }`
+      // proves nothing about the second read.
+      if (a.lit === null && narrowRefWrittenIn(L, region, a.key)) continue;
+      if (keyPresenceRegionDeletes(region)) continue;
+      return true;
+    }
+  }
+  return false;
+}
+
+/** `for (const k in headers) … headers[k] …` — the key came out of the
+ * receiver's OWN enumeration, so the read cannot miss either. This is the
+ * source-level twin of the generated-walker family `block/walkers` moved
+ * off the failing path by enumerating BY SLOT and taking key and value out
+ * of the same entry; here the PROGRAM does the lookup, so that fix does not
+ * reach it and this proof does.
+ *
+ * The restrictions are the guard rule's, one for one: the key must BE the
+ * for-in binding (resolved by symbol, never by text), the receiver must be
+ * the same reference the loop enumerates, the body must not write either of
+ * them or delete anything, and nested functions stay out. */
+function keyFromOwnEnumeration(L: Lowerer, node: ts.Expression): boolean {
+  const self = keyAccessOf(node);
+  if (self === null || self.lit !== null || !ts.isIdentifier(self.key)) return false;
+  const keySym = L.resolveValueSymbol(self.key);
+  if (keySym === null) return false;
+  for (let p: ts.Node | undefined = node.parent; p !== undefined; p = p.parent) {
+    if (ts.isFunctionLike(p)) return false;
+    if (!ts.isForInStatement(p)) continue;
+    const init = p.initializer;
+    let bound: ts.Identifier | null = null;
+    if (
+      ts.isVariableDeclarationList(init) &&
+      init.declarations.length === 1 &&
+      ts.isIdentifier(init.declarations[0]!.name)
+    ) {
+      bound = init.declarations[0]!.name;
+    } else if (ts.isIdentifier(init)) {
+      bound = init;
+    }
+    if (bound === null) continue;
+    if (L.resolveValueSymbol(bound) !== keySym) continue;
+    if (!isArrayNarrowSameRef(L, self.recv, p.expression)) continue;
+    if (narrowRefWrittenIn(L, p.statement, p.expression)) continue;
+    if (narrowRefWrittenIn(L, p.statement, bound)) continue;
+    if (keyPresenceRegionDeletes(p.statement)) continue;
+    return true;
+  }
+  return false;
+}
+
+/** THE GUARDED KEYED READ — what a dominating presence guard buys, and why
+ * it is a WIDENING and not a deleted trap.
+ *
+ * `recordKeyGetHelper`'s miss path is `scr_trap_fmt` whenever the result
+ * width cannot spell `undefined`, and that helper is INTERNED per (shape,
+ * width) and shared with every other read of the same shape — including
+ * the ones that really can miss. Deleting the trap there trades a loud
+ * failure for a wild pointer on those, and `__builtin_unreachable` is the
+ * same trade with a nicer name. So the trap stays, and what moves is the
+ * CALL SITE: a read whose key a dominating guard already proved present
+ * lowers at DYN width, where the same helper's miss path answers
+ * `undefined` instead of aborting, and `maybeNarrow` bridges back to the
+ * checker's own scalar through the ordinary validated `dynCheck`.
+ *
+ * The proof therefore does not have to be airtight, and that is the point
+ * of doing it this way. On a HIT — every execution the guard admits — the
+ * value is the one the bare read always answered. On a miss the bridge
+ * throws the CATCHABLE `expected string at $, got undefined`, where the
+ * bare read aborted the process past every catch clause. There is no third
+ * outcome: a wrong proof cannot produce a wrong VALUE, only a catchable
+ * throw where there used to be an uncatchable one.
+ *
+ * Deliberately narrow:
+ *   * only a width that cannot already say `undefined` has anything to
+ *     gain (a dyn or undefined-armed read keeps what it has);
+ *   * only the scalars `maybeNarrow` bridges back out of the dyn tree
+ *     (string, f64, bool, bigint) — a record or a func result would leave
+ *     the value at dyn width in a typed slot, so it keeps today's read;
+ *   * the shape gate is `keyedReadShapeOk`, the one both widening rungs
+ *     already share, and the dyn result must surface every declared field
+ *     (`recordKeyResultOk`), the same condition `recordKeyReadAtSlotWidth`
+ *     checks;
+ *   * the bridged type must come out EXACTLY the width the read declared,
+ *     or nothing moves.
+ *
+ * `SCRIPTC_GUARDKEY_OFF=1` ablates the rule alone, so one binary emits both
+ * sides. `SCRIPTC_GUARDKEY_WHY` names every read the rule LOOKS at with its
+ * verdict, so "the rule fires nowhere" and "the rule fires and answers
+ * nothing" are two different observations in the same run. */
+export function guardedKeyReadAtDynWidth(
+  L: Lowerer,
+  node: ts.Node,
+  read: IrExpr,
+  declared: IrType,
+): IrExpr | null {
+  if (read.kind !== "recordKeyGet") return null;
+  if (!ts.isExpression(node)) return null;
+  // The blame node must BE this read. Three seats build a `recordKeyGet`
+  // and they pass different nodes; a blame that names some other access
+  // would have this rule prove a guard about a key the read never had.
+  const acc = keyAccessOf(node);
+  if (acc === null) return null;
+  if (read.key.kind === "strLit" ? acc.lit !== read.key.value : acc.lit !== null) return null;
+  const why = process.env["SCRIPTC_GUARDKEY_WHY"] !== undefined;
+  const row = (verdict: string): void => {
+    if (!why) return;
+    const sf = node.getSourceFile();
+    const lc = sf.getLineAndCharacterOfPosition(node.getStart());
+    process.stderr.write(
+      `GUARDKEY ${sf.fileName}:${lc.line + 1}:${lc.character + 1} ${verdict} want=${typeKey(declared)}` +
+        ` :: ${node.getText().slice(0, 60).replace(/\s+/g, " ")}\n`,
+    );
+  };
+  if (process.env["SCRIPTC_GUARDKEY_OFF"] === "1") { row("OFF"); return null; }
+  if (declared.kind === "dyn") return null;
+  if (declared.kind === "union" && L.armTag(declared.unionId, UNDEFINED_T) >= 0) return null;
+  if (
+    declared.kind !== "string" &&
+    declared.kind !== "f64" &&
+    declared.kind !== "bool" &&
+    declared.kind !== "bigint"
+  ) { row(`NO-BRIDGE ${declared.kind}`); return null; }
+  const shape = L.shapes.get(read.shapeId);
+  if (!L.keyedReadShapeOk(shape)) { row("NO-SHAPE"); return null; }
+  const effective = read.overflowOnly === true ? { ...shape!, fields: [] } : shape!;
+  if (!recordKeyResultOk(L, effective, DYN)) { row("NO-DYN-RESULT"); return null; }
+  if (!keyPresenceProven(L, node) && !keyFromOwnEnumeration(L, node)) { row("NO-GUARD"); return null; }
+  const wide = L.maybeNarrow({ ...read, type: DYN }, node);
+  if (!typeEquals(wide.type, declared)) { row(`NO-NARROW ${wide.type.kind}`); return null; }
+  row("WIDENED");
+  return wide;
 }
 
 /** The `<ref> instanceof <Ctor>` tests a CONDITION proves when it is known
@@ -11176,10 +11561,13 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
         abortCapable: !!shape.indexValue && !armedRead,
       });
     }
-    return L.maybeNarrow(
-      { kind: "recordKeyGet", obj, shapeId, key, ...(overflowOnly ? { overflowOnly: true as const } : {}), type: declared, loc },
-      expr,
-    );
+    const read: IrExpr = { kind: "recordKeyGet", obj, shapeId, key, ...(overflowOnly ? { overflowOnly: true as const } : {}), type: declared, loc };
+    // THE GUARDED KEYED READ: a dominating presence guard on this very
+    // receiver and key moves the read off the aborting width and onto the
+    // dyn one, whose miss answers undefined (guardedKeyReadAtDynWidth).
+    const guarded = guardedKeyReadAtDynWidth(L, expr, read, declared);
+    if (guarded !== null) return guarded;
+    return L.maybeNarrow(read, expr);
   }
 
   /** The compile-time string spelling of a record key literal: a string
@@ -17741,7 +18129,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           abortCapable: !armedRead,
         });
       }
-      return {
+      const ovfRead: IrExpr = {
         kind: "recordKeyGet",
         obj: target.obj,
         shapeId: target.shapeId,
@@ -17750,6 +18138,10 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         type: t,
         loc,
       };
+      // THE GUARDED KEYED READ (guardedKeyReadAtDynWidth). The bridged
+      // value comes back at exactly `t`, so a caller that wraps this read
+      // in maybeNarrow of its own sees the width it always saw.
+      return guardedKeyReadAtDynWidth(L, blame, ovfRead, t) ?? ovfRead;
     }
     if (target.container === "class") {
       const read: IrExpr = { kind: "fieldGet", obj: target.obj, className: target.className, field: target.field, type: target.fieldType, loc };
