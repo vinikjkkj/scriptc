@@ -8994,6 +8994,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         // Undefined-armed fields: the push is guarded by a tag test (the
         // key exists exactly when the arm is not undefined).
         const utag = f.type.kind === "union" ? L.armTag(f.type.unionId, UNDEFINED_T) : -1;
+        const at = body.length;
         body.push(
           utag >= 0 && f.type.kind === "union"
             ? {
@@ -9013,6 +9014,12 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
               }
             : pushStmt,
         );
+        // A shape MATERIALISED out of a dynamic value answers its own keys
+        // from the crossing's mask instead — installed after the whole
+        // walk, so an unarmed shape keeps the tag test above verbatim.
+        L.noteOwnKeyGuard(argIr.shapeId, f.name, ref, loc, (present) => {
+          body[at] = { kind: "if", cond: present, then: [pushStmt], else_: null, loc };
+        });
       }
       body.push({ kind: "return", value: outRef, loc });
       L.arrHofHelpers.set(key, helper);
@@ -9166,12 +9173,20 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
               loc,
             }
           : { kind: "boolLit", value: true, type: BOOL, loc };
+      const ret: IrStmt & { kind: "return" } = { kind: "return", value: answer, loc };
       body.push({
         kind: "if",
         cond: { kind: "strEq", negated: false, left: kRef, right: { kind: "strLit", value: f.name, type: STRING, loc }, type: BOOL, loc },
-        then: [{ kind: "return", value: answer, loc }],
+        then: [ret],
         else_: null,
         loc,
+      });
+      // A shape MATERIALISED out of a dynamic value answers hasOwn from
+      // the crossing's mask — the same question Object.keys asks, so the
+      // two still share the guard (Object.keys lists a key exactly when
+      // hasOwn says it is own).
+      L.noteOwnKeyGuard(shapeId, f.name, rRef, loc, (present) => {
+        ret.value = present;
       });
     }
     body.push({ kind: "return", value: { kind: "boolLit", value: false, type: BOOL, loc }, loc });
@@ -9213,6 +9228,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       const get: IrExpr = { kind: "recordGet", obj: sRef, shapeId: srcShapeId, field: f.name, type: f.type, loc };
       const set: IrStmt = { kind: "recordSet", obj: tRef, shapeId: targetShapeId, field: f.name, value: get, loc };
       const utag = f.type.kind === "union" ? L.armTag(f.type.unionId, UNDEFINED_T) : -1;
+      const at = body.length;
       body.push(
         utag >= 0 && f.type.kind === "union"
           ? {
@@ -9224,6 +9240,14 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
             }
           : set,
       );
+      // Object.keys's row: a SOURCE shape materialised out of a dynamic
+      // value copies only the members that were the source object's own
+      // keys, so the target's key list is the one JS's Object.assign
+      // produces. Skipping leaves the target's slot as it was — which for
+      // a fresh `{}` target is the undefined arm, i.e. absent.
+      L.noteOwnKeyGuard(srcShapeId, f.name, sRef, loc, (present) => {
+        body[at] = { kind: "if", cond: present, then: [set], else_: null, loc };
+      });
     }
     body.push({ kind: "return", value: tRef, loc });
     L.liftedFns.push({
@@ -10385,6 +10409,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
           expr: { kind: "arrIntrinsic", method: "push", receiver: outRef, args: [pushed], type: F64, loc },
           loc,
         };
+        const at = body.length;
         body.push(
           guardUndefTag !== null && f.type.kind === "union"
             ? {
@@ -10396,6 +10421,33 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
               }
             : pushStmt,
         );
+        // Object.keys's row: an ARMED shape answers from the crossing's
+        // mask, so values/entries stay in step with the key list.
+        //
+        // A CONJUNCTION here, not a replacement, and the reason is the
+        // pushed VALUE rather than the key: an undefined-armed field is
+        // pushed NARROWED to its non-undefined arm, so admitting a key the
+        // mask calls own while the slot still holds the undefined arm
+        // (`{a: undefined}` crossing in) would narrow an undefined arm and
+        // read the wrong payload. The tag test stays outermost and the own
+        // test nests inside it — which loses exactly the `{a: undefined}`
+        // case that values/entries already lose today, and gains every
+        // inherited-member case.
+        const guardTag = guardUndefTag;
+        const guardType = f.type;
+        L.noteOwnKeyGuard(argIr.shapeId, f.name, ref, loc, (present) => {
+          const inner: IrStmt = { kind: "if", cond: present, then: [pushStmt], else_: null, loc };
+          body[at] =
+            guardTag !== null && guardType.kind === "union"
+              ? {
+                  kind: "if",
+                  cond: { kind: "unionIsTag", unionId: guardType.unionId, tag: guardTag, negated: true, value: raw, type: BOOL, loc },
+                  then: [inner],
+                  else_: null,
+                  loc,
+                }
+              : inner;
+        });
       }
       body.push({ kind: "return", value: outRef, loc });
       L.arrHofHelpers.set(key, helper);

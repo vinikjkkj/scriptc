@@ -7,11 +7,11 @@
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
-import { armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
+import { armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, ownMaskKeyBit, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane } from "../kindgate.js";
-import { OVERFLOW_MEMBER, TOSTR_MEMBER } from "./emit-shapes.js";
+import { OVERFLOW_MEMBER, OWNMASK_MEMBER, TOSTR_MEMBER, ownPresentCondC } from "./emit-shapes.js";
 
 /** The refusal text a dyn-to-record check uses when the receiver carries
  * no INTERNAL SLOT for a field declaredOrder omits (internalSlotFields).
@@ -755,8 +755,12 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // flag); all-required shapes keep the static prefix labels. An
         // overflow portion forces the dynamic path too (entry count is
         // runtime state).
+        // An ARMED shape is droppable by construction: any member can turn
+        // out not to have been the source object's own key.
         const droppable =
-          emitFields.some((f) => E.undefinedArmTag(f.type) >= 0) || !!shape.indexValue;
+          emitFields.some((f) => E.undefinedArmTag(f.type) >= 0) ||
+          !!shape.indexValue ||
+          shape.ownmask === true;
         d.push(`  scr_jb_putc(b, '{');`);
         if (!droppable) {
           emitFields.forEach((f, i) => {
@@ -772,16 +776,20 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           for (const f of emitFields) {
             const label = cStringLiteral(Buffer.from(`"${f.name}":`, "utf8"));
             const utag = E.undefinedArmTag(f.type);
-            const pad = utag >= 0 ? "    " : "  ";
-            if (utag >= 0) {
-              d.push(`  if (v->${mangleField(f.name)}->tag != ${utag}) { /* undefined-valued field: dropped, like Node */`);
+            // The own-key question, one spelling: an undefined-valued
+            // field drops like Node, and on a shape a crossing wrote, so
+            // does a member the source object only INHERITED.
+            const cond = ownPresentCondC(shape, f.name, "v", utag, true);
+            const pad = cond !== null ? "    " : "  ";
+            if (cond !== null) {
+              d.push(`  if (${cond}) { /* not an own key of the value: dropped, like Node */`);
             }
             d.push(`${pad}if (!first) scr_jb_putc(b, ',');`);
             d.push(`${pad}first = false;`);
             d.push(`${pad}scr_jb_puts(b, ${label});`);
             if (edgeable(f.type)) d.push(`${pad}scr_jb_edge_prop(b, ${cStringLiteral(Buffer.from(f.name, "utf8"))});`);
             d.push(`${pad}${E.jsonWriteHelper(f.type)}(b, v->${mangleField(f.name)});`);
-            if (utag >= 0) d.push(`  }`);
+            if (cond !== null) d.push(`  }`);
           }
           // Overflow entries follow the declared fields, themselves in JS
           // OWN-KEY order — integer-like keys ascending first, then the
@@ -1975,6 +1983,19 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(fail(`  `, "record.kind", `d->kind != SCR_DYN_OBJ`, `NULL`));
         }
         d.push(`  ${cDecl(t, "r")} = ${mangleRecordNew(t.shapeId)}();`);
+        // The HIDDEN per-instance OWN-KEY MASK. This builder is the ONE
+        // point that still holds both halves of JS's answer: the member's
+        // VALUE (read through [[Get]], so a prototype-carried default is
+        // seen — which is what makes protobufjs's Long and every JS class
+        // match a record arm at all) and whether the source object carried
+        // the key ITSELF. The struct slot can hold one of them, and the
+        // undefined arm — a record's only presence signal — is a fact about
+        // the VALUE, so writing "absent" there for an inherited member
+        // would fix Object.keys and break the read. Byte 0 says the mask
+        // was written; the bits say which members were OWN, and the
+        // enumeration surfaces read them instead of the declared field
+        // list.
+        if (shape.ownmask) d.push(`  r->${OWNMASK_MEMBER}[0] = 1;`);
         // The HIDDEN per-instance toString slot. MATERIALIZING is what
         // loses a JS object's toString: `x as LongLike` is the identity in
         // JS, so String(x) still reaches the prototype method, while this
@@ -2029,6 +2050,33 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           const drop = bind ? `    scr_dyn_release(m);` : null;
           d.push(`  {`);
           d.push(`    ScrDynPath p = { path, ${keyLit}, 0 };`);
+          // The OWN half of the read the field itself takes through
+          // [[Get]], asked of the same receiver and stopping before the
+          // prototype chain.
+          //
+          // No '%'-spelling test, and there used to be one. An INTERNAL
+          // SLOT left this loop above (buildInternal / internalSlotFields),
+          // so a field reaching this line is a KEY however it is spelled —
+          // a user's own "%dtype" included, and the record-to-dyn walker
+          // masks that key too. The two have to ask internalSlotFields the
+          // SAME question: a key the builder never stamps and the walker
+          // does mask is DEMOTED to the prototype on every crossing.
+          const maskBit = ownMaskKeyBit(shape, f.name);
+          const setOwnC = maskBit
+            ? `r->${OWNMASK_MEMBER}[${maskBit.byte}] |= ${maskBit.bit};`
+            : null;
+          if (setOwnC) {
+            // scr_dyn_obj_get, NOT scr_dyn_obj_data_get and not
+            // scr_dyn_obj_own_data: the member table alone is the OWN and
+            // ENUMERABLE set — the prototype chain is what this whole slot
+            // exists to exclude, and the `hidden` table holds the
+            // NON-enumerable own properties, which Object.keys does not
+            // list either. It is also, exactly, the table
+            // Object.keys/JSON/assign iterate when the value stays
+            // checked-dynamic, so the record's key list and the dyn
+            // value's cannot disagree.
+            d.push(`    if (scr_dyn_obj_get(d, ${keyLit}, ${keyLen})) ${setOwnC}`);
+          }
           if (soft && f.type.kind !== "dyn") {
             // The ARM form's decision, and it is the MATCHER's, not the
             // builder's — dynArmHelper's own comment says why the two
@@ -2516,6 +2564,12 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           break;
         }
         d.push(`  ScrDyn *d = scr_dyn_new_obj();`);
+        // The INHERITED half of an armed shape's members, built lazily and
+        // linked as the fresh object's [[Prototype]] at the end (see the
+        // per-field arm below). NULL whenever the value carried no
+        // inherited member, which is every record built anywhere but a
+        // crossing — those emit nothing extra at all.
+        if (shape.ownmask) d.push(`  ScrDyn *sc_proto = NULL;`);
         // Keys insert in DECLARED order — the dyn object's insertion order
         // is observable (Object.keys/for-in over checked-dynamic values,
         // dyn JSON), so it must be JS's (SEMANTICS.md 36's stance, same as
@@ -2564,13 +2618,77 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             // DIFFERENT function rather than a rule inside scr_dyn_obj_set
             // because a checked-dynamic object really can hold an
             // undefined-valued key.
-            d.push(
-              internal.has(f.name)
-                ? `  scr_dyn_obj_set_slot(d, ${keyLit}, ${keyLen}, ${fv}); /* internal slot: no key */`
-                : isUndefinedArmedUnion(f.type, (id) => E.unionsById.get(id))
+            // Fields declaredOrder OMITS are INTERNAL SLOTS and leave before
+            // any of this: not JS keys at all, so they take neither the
+            // undefined-arm rule nor the own-key mask, and
+            // scr_dyn_obj_set_slot keeps the record-to-dyn-to-record round
+            // trip (Dirent's %dtype) without putting them in the member
+            // table.
+            //
+            // THIS TEST USED TO READ f.name.startsWith("%") ON THIS BRANCH,
+            // and internalSlotFields is not the same test spelled another
+            // way — it is the STRICTER one, and the difference is a real
+            // program. A user's own { "%dtype": 7, name: "n" } IS in its
+            // shape's declaredOrder, so it is an ordinary key and has to
+            // take the mask like any other; the spelling test exempted it,
+            // which would have written it unconditionally and re-listed an
+            // INHERITED "%dtype" as own after a crossing — this block's own
+            // defect, surviving in the one namespace nobody would look at.
+            if (internal.has(f.name)) {
+              d.push(`  scr_dyn_obj_set_slot(d, ${keyLit}, ${keyLen}, ${fv}); /* internal slot: no key */`);
+              continue;
+            }
+            const setBase = isUndefinedArmedUnion(f.type, (id) => E.unionsById.get(id))
+              ? `scr_dyn_obj_set_present(d, ${keyLit}, ${keyLen}, sc_fv);`
+              : `scr_dyn_obj_set(d, ${keyLit}, ${keyLen}, sc_fv);`;
+            const bit = ownMaskKeyBit(shape, f.name);
+            if (!bit) {
+              d.push(
+                isUndefinedArmedUnion(f.type, (id) => E.unionsById.get(id))
                   ? `  scr_dyn_obj_set_present(d, ${keyLit}, ${keyLen}, ${fv});`
                   : `  scr_dyn_obj_set(d, ${keyLit}, ${keyLen}, ${fv});`,
-            );
+              );
+            } else {
+              // The crossing MATERIALISES the key list, so it is the last
+              // place the source object's own keys can still be told from
+              // the shape's declared field list. An instance a dynCheck
+              // builder wrote carries the answer in its mask; every other
+              // instance falls through to the undefined-arm rule, which is
+              // the line above, unchanged.
+              //
+              // AND AN INHERITED MEMBER IS NOT DELETED, IT IS DEMOTED. The
+              // first cut dropped it, which made Object.keys right and
+              // broke every READ on the far side: zapo's own app-state sync
+              // lost its keys and a receipt read threw "expected object |
+              // undefined at $, got object", because a member the source
+              // carried on its prototype simply stopped existing once the
+              // value crossed. JS does not lose it — "x as T" is the
+              // identity and [[Get]] still walks the chain — so the
+              // conversion rebuilds that chain: own members become KEYS of
+              // the fresh object, inherited ones become members of a
+              // PROTOTYPE object linked behind it (scr_dyn_obj_set_proto,
+              // one of the runtime's five set_proto call sites and the only
+              // one a crossing reaches). Object.keys, JSON, hasOwn and
+              // assign iterate the own entries and see exactly the own set;
+              // [[Get]], "in" and the next dynCheck walk the chain and find
+              // the value, which is what JavaScript answers.
+              const m = `v->${OWNMASK_MEMBER}`;
+              d.push(`  {`);
+              d.push(`    ScrDyn *sc_fv = ${fv};`);
+              d.push(`    if (${m}[0]) {`);
+              d.push(`      if (${m}[${bit.byte}] & ${bit.bit}) {`);
+              d.push(`        scr_dyn_obj_set(d, ${keyLit}, ${keyLen}, sc_fv);`);
+              d.push(`      } else if (sc_fv != NULL && sc_fv->kind != SCR_DYN_UNDEF) {`);
+              d.push(`        if (sc_proto == NULL) sc_proto = scr_dyn_new_obj(); /* inherited members */`);
+              d.push(`        scr_dyn_obj_set(sc_proto, ${keyLit}, ${keyLen}, sc_fv);`);
+              d.push(`      } else {`);
+              d.push(`        scr_dyn_release(sc_fv); /* absent on the source object entirely */`);
+              d.push(`      }`);
+              d.push(`    } else {`);
+              d.push(`      ${setBase}`);
+              d.push(`    }`);
+              d.push(`  }`);
+            }
           }
         }
         if (shape.indexValue) {
@@ -2597,6 +2715,15 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`      scr_str_release(k);`);
           d.push(`    }`);
           d.push(`    scr_arr_release(ks);`);
+          d.push(`  }`);
+        }
+        // The [[Prototype]] link, once, after every member has been placed:
+        // scr_dyn_obj_set_proto RETAINS, so the builder's own +1 is
+        // released here and the chain is owned by `d` alone.
+        if (shape.ownmask) {
+          d.push(`  if (sc_proto != NULL) {`);
+          d.push(`    scr_dyn_obj_set_proto(d, sc_proto); /* the members the source only INHERITED */`);
+          d.push(`    scr_dyn_release(sc_proto);`);
           d.push(`  }`);
         }
         if (cyclicRec) d.push(`  scr_dyn_from_leave();`);

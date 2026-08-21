@@ -1502,7 +1502,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
   // is record materialization writing every declared field as an own key.
   // Both still diverge with zero fences and a "fully static" coverage
   // report, and the second is the wall zapo's SC2001 is still behind.
-  test("4062: the prototype ACCESSOR now answers; the method-bearing union arm is still refused", async () => {
+  test("4062: the prototype ACCESSOR and the record->dyn ROUND TRIP now answer; the method-bearing union arm is still refused", async () => {
     const entry = join(fixturesRoot, "npm/cases/4062-prototype-get-still-refused-on-purpose/main.ts");
     const { coverage } = analyze(entry, { npmStatic: ["protolong"] });
     expect(coverage.npmStatic).toEqual([{ package: "protolong", status: "static" }]);
@@ -1525,19 +1525,26 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
       ].join("\n"),
     );
     expect(nodeRes.exitCode).toBe(0);
-    // Two of the three lines are still inverted, and the three lines have
+    // ONE of the three lines is still inverted, and the three lines have
     // THREE causes: the accessor was out of the borrow-only walk's
     // contract and is now answered by the builder's miss-path read (this
     // line AGREES with Node and is recorded as agreeing -- it fails on
     // base at 7968e00d with `prototype-accessor THREW` on both backends);
     // the union arm is the exact-signature test on `func()=>dyn` vs
-    // `func()=>f64`; the round trip is record materialization writing
-    // every declared field as an own key, so `w` re-emerges owned.
+    // `func()=>f64`, and is the one still inverted; the ROUND TRIP now
+    // agrees too, and the test's own name has outlived it -- a record
+    // materialised out of a dynamic value carries a hidden per-instance
+    // own-key mask (IrRecordShape.ownmask), so converting it back to a dyn
+    // writes the SOURCE object's own keys and demotes the inherited ones
+    // to a prototype object. Both halves show on this line: `w` still
+    // READS 3, because JS answers the prototype's value for an inherited
+    // member, and JSON.stringify no longer lists it, because JS does not
+    // list it either. It fails on base with `{"z":9,"w":3}`.
     expect(nativeRes.stdout.toString("utf8")).toBe(
       [
         "prototype-accessor 1 42",
         "union-arm-with-method THREW",
-        'roundtrip-owns-the-inherited 9 3 {"z":9,"w":3}',
+        'roundtrip-owns-the-inherited 9 3 {"z":9}',
         "",
       ].join("\n"),
     );
