@@ -1432,9 +1432,13 @@ typedef struct ScrClosure {
    * return's box) yields distinct boxes sharing one closure, and JS has
    * ONE function object — property writes must be visible through every
    * box. A ScrBox so this unit stays dyn-free (the payload's release
-   * rides the box, like every capture). Untraced by the cycle collector
-   * (like the dyn→closure edge): a cycle through it is merely never
-   * collected. */
+   * rides the box, like every capture). TRACED by the cycle collector
+   * — scr_closure_trace visits it, because the commonest ring in real
+   * JavaScript runs through it (`Foo.create = () => new Foo()`). The
+   * sentence that stood here until the RC-audit lane was read — "untraced
+   * by the cycle collector (like the dyn→closure edge): a cycle through
+   * it is merely never collected" — had drifted from the code on BOTH
+   * halves: scr_dyn_trace visits a FUNC node's closure too. */
   ScrBox *props;
   /* The IMPLICIT prototype object this function value minted, OWNED (+1)
    * and opaque here (an OBJ ScrDyn — this unit stays dyn-free). NULL until
@@ -1447,7 +1451,17 @@ typedef struct ScrClosure {
    * the key the `constructor` registry is indexed by, so it must stay
    * addressable and un-recycled for exactly as long as this closure can
    * still be named. Dropped by scr_closure_ctor_unlink at teardown, which
-   * is what keeps the registry's borrowed closure pointer from dangling. */
+   * is what keeps the registry's borrowed closure pointer from dangling.
+   *
+   * TRACED, since the RC-audit lane was read. The prototype is reachable
+   * TWICE — from the props table's `prototype` member, which is traced,
+   * and from here — so while this edge was untraced it left one
+   * un-decremented +1 on the prototype through every trial deletion,
+   * scan() read that as "externally referenced" and re-blackened the whole
+   * subgraph, and every ring through a function's OWN prototype object
+   * survived collection. `N.prototype.constructor = N` is that ring.
+   * The teardown complement moves with the edge: the COLLECTOR's path
+   * erases the registry entry WITHOUT releasing the prototype. */
   void *implicit_proto;
   ScrBox *caps[];
 } ScrClosure;
@@ -1457,13 +1471,22 @@ typedef struct ScrClosure {
  * BOTH closure teardown paths — the refcount one and the cycle
  * collector's — before `props` is released, and only when
  * `implicit_proto` is non-NULL, so a closure that never had one pays a
- * single pointer test. It erases the closure's `constructor` registry
- * entry and releases the prototype object.
+ * single pointer test. It always erases the closure's `constructor`
+ * registry entry; it releases the prototype object only when `release`
+ * is true.
+ *
+ * `release` is false on exactly one path: the CYCLE COLLECTOR's free_fn,
+ * which must not release a TRACED child — markGray already accounted
+ * that edge, and releasing it again is the double free the trace/teardown
+ * contract above exists to forbid. The ERASE still runs there, and is
+ * still correct: it compares the key by ADDRESS and never dereferences
+ * it, so it does not care whether the collector already freed the
+ * prototype earlier in the same white-set teardown loop.
  *
  * A function pointer rather than a direct call because this unit is
  * deliberately dyn-free (the ScrBox `props` story above), the same shape
  * the island ops use to keep the always-linked core off the gated unit. */
-extern void (*scr_closure_ctor_unlink)(ScrClosure *c);
+extern void (*scr_closure_ctor_unlink)(ScrClosure *c, bool release);
 
 /* Exit teardown for an INTERNED (immortal, rc == SIZE_MAX) function-value
  * closure: an emitted static literal that neither release path can reach,
