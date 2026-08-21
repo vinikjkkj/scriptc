@@ -34,10 +34,11 @@
  *   node tests/perf/exe-matrix.mjs --build --runs 5 --json out.json
  */
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
+import { mkdirSync, writeFileSync, existsSync, readdirSync, statSync, rmSync } from 'node:fs'
 import { cpus, loadavg, totalmem, freemem, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { requireToolchain, toolchainLine } from './toolchain.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const BENCH_DIR = path.join(HERE, 'bench')
@@ -113,7 +114,9 @@ function exePath(bench) {
 function build(bench, extraArgs = []) {
   mkdirSync(OUTDIR, { recursive: true })
   const out = exePath(bench)
+  try { rmSync(out, { force: true }) } catch { /* nothing to remove */ }
   const t = process.hrtime.bigint()
+  const wallStart = Date.now()
   const res = spawnSync(
     process.execPath,
     [CLI, 'build', bench + '.bench.ts', '--backend', 'c', ...extraArgs, '-o', out],
@@ -125,7 +128,15 @@ function build(bench, extraArgs = []) {
     process.stderr.write(res.stderr ?? '')
     throw new Error(`build failed for ${bench} (exit ${res.status})`)
   }
-  return { out, buildMs: ms }
+  // A build that failed is not a build that was fast, and a stale exe from
+  // a previous session is the one artefact that reads as a spectacular win.
+  if (!existsSync(out)) throw new Error(`build for ${bench} reported success but wrote no ${out}`)
+  const st = statSync(out)
+  if (st.size === 0) throw new Error(`build for ${bench} wrote a ZERO-BYTE ${out}`)
+  if (st.mtimeMs < wallStart - 2000) {
+    throw new Error(`build for ${bench} left a STALE artefact: ${out} predates the build that claims to have written it`)
+  }
+  return { out, buildMs: ms, bytes: st.size }
 }
 
 // -- run one process, parse the SCBENCH protocol -----------------------
@@ -184,10 +195,14 @@ const METRICS = ['throughputOpsPerSec', 'elapsedMs', 'cpuTimeMs', 'cpuPercent', 
 
 async function main() {
   const started = Date.now()
+  // Which compiler built the exe lane is part of every number below; see
+  // toolchain.mjs for why it is recorded rather than assumed.
+  const tc = requireToolchain()
   const before = machineState('before')
   console.log('cross-runtime bench matrix - exe vs Node, per scenario')
   console.log(`benches: ${BENCHES.join(', ')}   lanes: ${LANES.join(', ')}`)
   console.log(`${WARMUP} warmup + ${RUNS} measured runs per (bench, lane); BENCH_MIN_MS=${MINMS}`)
+  console.log(toolchainLine(tc))
   console.log(`machine before: cpu ${before.cpuLoadPercent}%  procs ${before.processCount}  node ${before.nodeProcesses}  zig ${before.zigProcesses}  free ${before.freeMemMiB} MiB`)
   console.log('')
 
@@ -205,6 +220,7 @@ async function main() {
   const result = {
     schema: 'scriptc-perf-matrix/1',
     startedAt: new Date().toISOString(),
+    toolchain: tc,
     machine: { before },
     config: { benches: BENCHES, lanes: LANES, runs: RUNS, warmup: WARMUP, minMs: MINMS },
     builds,
