@@ -1477,8 +1477,14 @@ typedef struct ScrClosure {
  *
  * `release` is false on exactly one path: the CYCLE COLLECTOR's free_fn,
  * which must not release a TRACED child — markGray already accounted
- * that edge, and releasing it again is the double free the trace/teardown
- * contract above exists to forbid. The ERASE still runs there, and is
+ * that edge, so the release belongs to the collector. (MEASURED, because
+ * the obvious claim is stronger than the evidence: a control build that
+ * releases anyway is clean under ASan+LSan on gcc 15.2.1 and exits 0. It
+ * is benign for an ugly reason — the prototype's rc is already 0 there,
+ * so `--rc` wraps to SIZE_MAX, which is this tree's IMMORTAL sentinel, and
+ * the release returns without freeing while the white-set loop frees the
+ * node anyway. Landing on that sentinel by unsigned underflow is not a
+ * contract.) The ERASE still runs there, and is
  * still correct: it compares the key by ADDRESS and never dereferences
  * it, so it does not care whether the collector already freed the
  * prototype earlier in the same white-set teardown loop.

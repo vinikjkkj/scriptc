@@ -272,9 +272,18 @@ static void scr_closure_trace(void *o, ScrTraceVisit visit, void *ctx) {
    * reused, and scr_closure_gcfree below still erases it -- by address,
    * without ever dereferencing the key -- so the order the collector tears
    * the white set down in cannot matter. What gcfree must NOT do any more
-   * is RELEASE the prototype: this is a traced child now, markGray has
-   * already accounted the edge, and releasing it too is exactly the double
-   * free scr_runtime.h's trace/teardown contract forbids. */
+   * is RELEASE the prototype: this is a traced child now, and markGray has
+   * already accounted the edge, so the release belongs to the collector.
+   *
+   * MEASURED, because the obvious claim here is stronger than the evidence:
+   * a control build that DOES release from this path is clean under
+   * ASan+LSan on gcc 15.2.1 and exits 0. It is benign for an ugly reason --
+   * the prototype's rc is already 0 when this runs, so `--rc` wraps to
+   * SIZE_MAX, which is this tree's IMMORTAL sentinel, and the release
+   * returns without freeing while the white-set loop frees the node anyway.
+   * Landing on the immortal sentinel by unsigned underflow is not a
+   * contract. `false` is what scr_runtime.h's trace/teardown rule requires
+   * and what every other free_fn in the tree already does. */
   visit(c->props, ctx);
   visit(c->implicit_proto, ctx);
 }
