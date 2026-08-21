@@ -1384,6 +1384,25 @@ ScrBytes *scr_dyn_bytes_copy_out(const ScrDyn *d) {
   return scr_bytes_copy(d->v.bytes); /* extraction copies too (+1) */
 }
 
+ScrBytes *scr_dyn_bytes_unbox(const ScrDyn *d) {
+  /* `u as Uint8Array` / `u as Buffer`: the SAME payload back, retained.
+   * This is scr_dyn_arrbuf_unbox's rule asked of the VIEW kind, and the
+   * two arms had drifted apart: the static->dyn direction has always
+   * aliased (scr_dyn_new_bytes_ref, "one refcounted payload, two views of
+   * it"), so copying on the way OUT made the round trip lose the object.
+   * `(u as Buffer) === b` answered false where Node answers true, and a
+   * write through the recovered value landed on a copy nobody could read
+   * while SC1101's hint and scr_dyn_static_copy_refuse's text both
+   * promise, unqualified, that "a Uint8Array or Buffer crosses by
+   * REFERENCE and its writes do land". They do now.
+   *
+   * A copy also flattened a VIEW: a subarray/DataView payload keeps its
+   * window and its `backing` link, and scr_bytes_copy produced a
+   * standalone buffer instead, which is the same silent detach the
+   * ArrayBuffer arm above refuses by name. */
+  return scr_bytes_retain(d->v.bytes);
+}
+
 /* ── the data-chunk encoding window (setEncoding) ─────────────────────
  * Node's readable setEncoding turns 'data' payloads into strings. The
  * delivery ABI carries bytes; the FIRING site (which owns the handle and
