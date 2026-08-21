@@ -2599,7 +2599,8 @@ export class Lowerer {
   }[] = [];
 
   /** Inspect helpers that baked an `[Object: null prototype]` prefix from
-   * IrRecordShape.builtin.nullProto, so armOwnMasks() can take it back.
+   * IrRecordShape.builtin.nullProto, so armOwnMasks() can REVISE it into
+   * the per-instance question.
    *
    * The prefix is a claim about how the RUNTIME builds one builtin
    * (os.userInfo() is Object.create(null)), and a record shape is
@@ -2611,16 +2612,25 @@ export class Lowerer {
    * Whether a module contains such a crossing is exactly what ARMING
    * answers, and arming is decided after the whole walk — so, like the
    * own-key guards below, the answer is installed rather than asked. A
-   * shape the module armed stops claiming the prefix for every instance
-   * of it, because nothing on the shape can tell its two kinds of
-   * instance apart: that is base's answer for the runtime-built value and
-   * the CORRECT one for the crossed value, and it is never a rendering
-   * Node would not print. A module with no crossing keeps the prefix. */
-  readonly nullProtoRenderings: { shapeId: string; strip: () => void }[] = [];
+   * module with no crossing keeps the literal prefix and byte-identical
+   * IR; a shape the module armed asks the INSTANCE instead
+   * (recordNullProto — the own-key mask's byte 0 carries the source
+   * object's own [[Prototype]]-is-null fact), so the runtime-built value
+   * keeps Node's prefix and the materialised one prints plain.
+   *
+   * It used to STRIP the prefix for the whole armed shape. That was
+   * base's answer for the runtime-built value rather than Node's, and it
+   * did not stay a rendering question: the record→dyn walker took the
+   * same decision, so ScrDyn.null_proto went unset, and scr_assert.c's
+   * object arm gates on it — `deepStrictEqual(os.userInfo(), {…the same
+   * five members…})` compared EQUAL where Node throws. A silent PASS on
+   * an assertion that must fail is the one trade this project does not
+   * make. */
+  readonly nullProtoRenderings: { shapeId: string; revise: () => void }[] = [];
 
   /** Register one such helper (see nullProtoRenderings). */
-  noteNullProtoRendering(shapeId: string, strip: () => void): void {
-    this.nullProtoRenderings.push({ shapeId, strip });
+  noteNullProtoRendering(shapeId: string, revise: () => void): void {
+    this.nullProtoRenderings.push({ shapeId, revise });
   }
 
   /** Register one own-key presence guard (see ownKeyGuards). */
@@ -2678,9 +2688,17 @@ export class Lowerer {
   armOwnMasks(functions: IrFunction[], records: IrRecordShape[]): void {
     const byId = new Map(records.map((r) => [r.id, r]));
     const armed = new Set<string>();
+    // An INDEX-SIGNATURE shape arms even with no declared field at all,
+    // and `Record<string, unknown>` — which has none — is the shape both
+    // remaining defects were measured through. It takes no field BITS
+    // (there are no fields to mask), but byte 0 still carries the two
+    // facts about the crossing itself (the source's [[Prototype]]-is-null
+    // flag), and the shape still carries the source's prototype, which is
+    // what makes a read of an inherited member through such a VIEW answer
+    // what JS answers.
     const maskable = (shape: IrRecordShape): boolean =>
       shape.tuple !== true &&
-      shape.fields.length > internalSlotFields(shape).length;
+      (shape.indexValue !== undefined || shape.fields.length > internalSlotFields(shape).length);
     // Everything the BUILDER recurses into, because everything it recurses
     // into is materialised by the same builder out of the same dynamic
     // tree. A record's FIELDS are the arm that matters most and the one
@@ -2735,14 +2753,24 @@ export class Lowerer {
         );
       }
     }
-    for (const r of records) if (armed.has(r.id)) r.ownmask = true;
+    for (const r of records) {
+      if (!armed.has(r.id)) continue;
+      r.ownmask = true;
+      // The hidden SOURCE [[Prototype]] slot arms with the mask and for the
+      // same reason: it is the mask that lets the record→dyn walker demote
+      // an inherited member instead of writing it as an own key, and a
+      // demotion with nowhere to demote INTO had to synthesise a fresh
+      // prototype per crossing. One arming, one question, one place a
+      // crossing's facts live.
+      r.srcproto = true;
+    }
     // Re-spell every registered presence guard over an ARMED shape: the
     // undefined-arm tag test becomes the own-key question, which is the
     // same test on an instance no crossing wrote and the SOURCE object's
     // own-key set on one a crossing did.
-    // ...and the inspect prefixes that cannot survive a crossing into
-    // their own shape (see nullProtoRenderings).
-    for (const n of this.nullProtoRenderings) if (armed.has(n.shapeId)) n.strip();
+    // ...and the inspect prefixes that cannot be a per-SHAPE constant in a
+    // module that crosses into their own shape (see nullProtoRenderings).
+    for (const n of this.nullProtoRenderings) if (armed.has(n.shapeId)) n.revise();
     for (const g of this.ownKeyGuards) {
       if (!armed.has(g.shapeId)) continue;
       // An INTERNAL SLOT is not a key, so its guard keeps the tag test —

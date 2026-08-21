@@ -1370,6 +1370,53 @@ export interface IrRecordShape {
    * not inherit the builtin's rendering, and an ABSENT `builtin`
    * contributes nothing to the key, so no existing shape's numbering
    * moves. See IrBuiltinRendering. */
+  /** The HIDDEN per-instance SOURCE [[Prototype]]: not a field, not a key,
+   * not part of the interned identity — one trailing `ScrDyn *` member
+   * (refcounted and traced) both backends lay out LAST, NULL on every
+   * fresh record. Written at the dyn→record builder from the source
+   * object's own [[Prototype]] link, and read by exactly three places: the
+   * record→dyn walker, the dynamic-keyed READ's miss path, and `in`.
+   *
+   * It exists because a record is a MONOMORPHIC STRUCT with slots for the
+   * members its type names and nowhere at all to hold a chain — and the
+   * own-key mask, which fixed WHICH members a crossed value enumerates,
+   * made that gap observable. The mask lets the record→dyn walker DEMOTE
+   * an inherited member instead of writing it as an own key, and before
+   * this the walker had to SYNTHESISE a prototype object to demote it
+   * into. Two consequences, both measured, both regressions the mask's own
+   * report named:
+   *
+   *   A read of an inherited member through a `Record<string, unknown>`
+   *   VIEW of an already-crossed value answered `undefined`, and `in`
+   *   answered false, where JS answers the prototype's value and true. The
+   *   index-signature capture copies the source's OWN entries into the
+   *   overflow map, so the chain simply ended at that second crossing.
+   *   (10 cells of an 80-cell population, MATCH→WRONG.)
+   *
+   *   `deepStrictEqual` compares [[Prototype]]s by IDENTITY — that is what
+   *   makes `deepStrictEqual(new A(1), {a: 1})` throw — and a FRESH
+   *   prototype per crossing made two crossed values of one shape compare
+   *   NOT-EQUAL where Node and a record with no mask both say EQUAL.
+   *
+   * Carrying the SOURCE's own prototype settles both, and settles the
+   * second one honestly: there is exactly one such object per source
+   * prototype, so identity is restored rather than approximated by a
+   * structural compare (which would turn a loud failure into a silent
+   * PASS for two constructors whose prototypes happen to hold equal
+   * values — the trade scr_assert.c's slots arm exists to prevent).
+   *
+   * It is the SOURCE'S PROTOTYPE and not the source OBJECT. The object
+   * would keep a whole dynamic graph alive per crossed record; the
+   * prototype is one shared object per constructor, it is what every
+   * question here actually asks, and it is what JS itself keeps: `x as T`
+   * is the identity, so the value's [[Prototype]] never changed.
+   *
+   * A synthesised prototype has NOT disappeared: a member the source
+   * carried as a non-enumerable OWN property is on neither the member
+   * table nor the chain, so the walker still demotes THOSE into a fresh
+   * object — and links the source's prototype behind it, so nothing is
+   * lost and the common case (no such member) keeps one shared object. */
+  srcproto?: true;
   builtin?: IrBuiltinRendering;
 }
 
@@ -1485,6 +1532,44 @@ export function ownMaskKeyBit(shape: OwnMaskShape, name: string): { byte: number
   const internal = internalFieldNamesOf(shape.fields.map((f) => f.name), shape.declaredOrder, shape.tuple === true);
   if (internal.includes(name)) return null;
   return ownMaskBit(shape, name);
+}
+
+/** Byte 0 of the hidden own-key mask is a small BITSET about the crossing
+ * itself, not about any one field.
+ *
+ *   bit 0  VALIDITY — a dynCheck builder wrote this instance. Zero on
+ *          every record built any other way, which is what makes the mask
+ *          additive (ownMaskBit's row).
+ *   bit 1  the SOURCE object's [[Prototype]] was NULL (Object.create(null),
+ *          which is how os.userInfo() builds its result). Only meaningful
+ *          when bit 0 is set. */
+export const OWNMASK_VALID = 1;
+export const OWNMASK_SRC_NULL_PROTO = 2;
+
+/** Whether one record INSTANCE is a null-prototype object — the single
+ * question the record→dyn walker and util.inspect's static renderer both
+ * ask, spelled once so one object cannot get two spellings inside one
+ * process.
+ *
+ * It is a fact about the INSTANCE and a record shape is STRUCTURAL, which
+ * is the whole difficulty. `IrRecordShape.builtin.nullProto` is a claim
+ * about how the RUNTIME builds one builtin (os.userInfo() is
+ * Object.create(null)); a value MATERIALISED out of a dynamic one shares
+ * the shape and carries whatever ITS source carried. Before this, an
+ * armed shape simply gave the claim up for every instance of it — which
+ * left `util.inspect(os.userInfo())` printing the plain form AND, worse,
+ * `deepStrictEqual(os.userInfo(), {…the same five members…})` answering
+ * EQUAL where Node throws: a silent PASS on an assertion that must fail.
+ *
+ * `const` is every shape no crossing armed: the claim folds at compile
+ * time and nothing is emitted. `instance` is an armed shape: mask byte 0
+ * decides, and `claim` is what an instance NO crossing wrote still
+ * answers. */
+export function nullProtoRule(
+  shape: OwnMaskShape & { builtin?: IrBuiltinRendering },
+): { kind: "const"; value: boolean } | { kind: "instance"; claim: boolean } {
+  const claim = shape.builtin?.nullProto === true;
+  return shape.ownmask === true ? { kind: "instance", claim } : { kind: "const", value: claim };
 }
 
 /** Object-literal ACCESSOR properties (`{ get x() {...}, set x(v) {...} }`)
@@ -5813,6 +5898,24 @@ export type IrExpr =
    * declaration order — which is exactly why this is a node and not two
    * spellings chosen at lowering time. */
   | { kind: "recordKeyPresent"; obj: IrExpr; shapeId: string; field: string; type: IrType; loc: SrcLoc }
+  /** Is `obj` a NULL-PROTOTYPE object? — nullProtoRule's question, as a
+   * node, for the same reason recordKeyPresent is one: the answer depends
+   * on ARMING, and arming is decided after the whole walk.
+   *
+   * On a shape no crossing armed it folds to the shape's own claim
+   * (`IrRecordShape.builtin.nullProto`) at emission and nothing is
+   * emitted. On an armed shape the instance's own-key mask decides, so
+   * `util.inspect(os.userInfo())` keeps Node's `[Object: null prototype]`
+   * prefix in a module that ALSO materialises os.UserInfo out of a
+   * dynamic value, while the materialised one prints plain. */
+  | { kind: "recordNullProto"; obj: IrExpr; shapeId: string; type: IrType; loc: SrcLoc }
+  /** Does `obj`'s SOURCE [[Prototype]] chain carry `key`? — the `in`
+   * operator's last question, after the declared names and the overflow
+   * map have both answered no. False for any record that did not come out
+   * of a crossing (IrRecordShape.srcproto absent, or the slot NULL), which
+   * is every record built any other way, so this is additive exactly like
+   * the mask. */
+  | { kind: "recordProtoHasKey"; obj: IrExpr; shapeId: string; key: IrExpr; type: IrType; loc: SrcLoc }
   /** Dynamic-keyed record read `r[k]` (string key, evaluated at runtime).
    * Declared fields are tried FIRST (an emitted string-switch — field
    * access exactness is preserved: a declared name always answers from the

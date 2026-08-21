@@ -11,7 +11,7 @@
  * Anything outside the tier refuses loudly (LlvmUnsupportedError naming
  * the type kind) — the tables never guess. */
 import type { IrModule, IrRecordShape, IrType } from "../../ir/nodes.js";
-import { funcOf, isRefCounted, mapOf, ownMaskBytes, ownMaskKeyBit, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, VOID } from "../../ir/nodes.js";
+import { DYN, funcOf, isRefCounted, mapOf, ownMaskBytes, ownMaskKeyBit, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, VOID } from "../../ir/nodes.js";
 import {
   mangleClassRelease,
   mangleClassTrace,
@@ -73,6 +73,14 @@ export function computeTraced(mod: IrModule): { shapes: Set<string>; unions: Set
         ...r.fields,
         ...(r.indexValue ? [{ name: "<overflow>", type: mapOf(STRING, r.indexValue) }] : []),
         ...(r.tostr ? [{ name: "<toString>", type: funcOf([], STRING) }] : []),
+        // ...and the hidden SOURCE [[Prototype]] slot, a dyn member whose
+        // graph can point back at the shape holding it. This lane keeps its
+        // OWN copy of the fixpoint, and the row missing HERE is not a
+        // cosmetic drift: the slot was released but the record stayed
+        // calloc'd and untraced, so a ring through it was invisible on one
+        // backend and collected on the other. emitter.ts's C twin is the
+        // same list.
+        ...(r.srcproto ? [{ name: "<srcproto>", type: DYN }] : []),
       ],
     })),
   ];
@@ -503,6 +511,9 @@ function rcMembers(shape: IrRecordShape): { index: number; type: IrType; name: s
     // released with the record and TRACED as a closure edge, the C
     // backend's rcMembers row exactly.
     ...(shape.tostr ? [{ index: toStrSlotIndex(shape), type: funcOf([], STRING), name: "<toString> slot" }] : []),
+    // The hidden SOURCE [[Prototype]] slot, LAST — released with the record
+    // and TRACED as a dyn edge, the C backend's rcMembers row exactly.
+    ...(shape.srcproto ? [{ index: srcProtoSlotIndex(shape), type: DYN, name: "<source prototype> slot" }] : []),
   ];
 }
 
@@ -599,6 +610,13 @@ export function ownMaskSlotIndex(shape: IrRecordShape): number {
   return shape.fields.length + (shape.indexValue ? 1 : 0) + (shape.tostr ? 1 : 0) + 1;
 }
 
+/** The hidden SOURCE [[Prototype]] slot's field index: after the mask, so
+ * no existing member's index moves. The C twin is SRCPROTO_MEMBER, laid
+ * out in the same position. */
+export function srcProtoSlotIndex(shape: IrRecordShape): number {
+  return ownMaskSlotIndex(shape) + (shape.ownmask ? 1 : 0);
+}
+
 /** The immortal-skip + mark-live retain body shared by every shape. The
  * cycle header sits 32 bytes before the object; `color` is at header+16,
  * so mark-live is one i32 store at obj-16 (scr_cyc_mark_live inlined —
@@ -646,6 +664,7 @@ export function emitRecordShapes(host: ShapeHost, mod: IrModule): { typeDefs: st
     if (shape.indexValue) fieldTys.push("ptr"); // the overflow ScrMap *
     if (shape.tostr) fieldTys.push("ptr"); // the hidden toString slot (ScrClosure *)
     if (shape.ownmask) fieldTys.push(`[${ownMaskBytes(shape)} x i8]`); // the hidden own-key mask
+    if (shape.srcproto) fieldTys.push("ptr"); // the hidden source [[Prototype]] (ScrDyn *)
     typeDefs.push(
       `%${struct} = type { i64${fieldTys.length ? ", " + fieldTys.join(", ") : ""} } ` +
         `; record ${shape.id} { ${shape.fields.map((f) => f.name).join("; ")}${shape.indexValue ? "; [key: string]" : ""} }`,
