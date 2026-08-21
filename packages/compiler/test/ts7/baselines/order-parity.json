@@ -8964,6 +8964,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5820-a-dirent-renders-with-its-constructor-and-its-symbol.ts": {
+   "order": [
+    "<repo>/tests/corpus/5820-a-dirent-renders-with-its-constructor-and-its-symbol.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5821-a-userinfo-record-renders-as-the-null-prototype-object-it-is.ts": {
+   "order": [
+    "<repo>/tests/corpus/5821-a-userinfo-record-renders-as-the-null-prototype-object-it-is.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5822-a-decoder-renders-under-its-constructor-name.ts": {
+   "order": [
+    "<repo>/tests/corpus/5822-a-decoder-renders-under-its-constructor-name.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5823-a-users-twin-of-a-builtin-row-keeps-its-own-rendering.ts": {
+   "order": [
+    "<repo>/tests/corpus/5823-a-users-twin-of-a-builtin-row-keeps-its-own-rendering.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5824-a-real-dirent-first-then-its-users-twin.ts": {
+   "order": [
+    "<repo>/tests/corpus/5824-a-real-dirent-first-then-its-users-twin.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5825-a-rendered-slot-is-still-out-of-band-for-everything-else.ts": {
+   "order": [
+    "<repo>/tests/corpus/5825-a-rendered-slot-is-still-out-of-band-for-everything-else.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/5850-a-guarded-keyed-read-cannot-miss.ts": {
    "order": [
     "<repo>/tests/corpus/5850-a-guarded-keyed-read-cannot-miss.ts"
