@@ -2598,6 +2598,31 @@ export class Lowerer {
     install: (present: IrExpr) => void;
   }[] = [];
 
+  /** Inspect helpers that baked an `[Object: null prototype]` prefix from
+   * IrRecordShape.builtin.nullProto, so armOwnMasks() can take it back.
+   *
+   * The prefix is a claim about how the RUNTIME builds one builtin
+   * (os.userInfo() is Object.create(null)), and a record shape is
+   * STRUCTURAL: a value materialised out of a dynamic one shares the
+   * shape and does not share the prototype. Measured — `JSON.parse(s) as
+   * os.UserInfo` rendered `[Object: null prototype] { ... }` where Node
+   * prints a plain object, which is a value this tier invented.
+   *
+   * Whether a module contains such a crossing is exactly what ARMING
+   * answers, and arming is decided after the whole walk — so, like the
+   * own-key guards below, the answer is installed rather than asked. A
+   * shape the module armed stops claiming the prefix for every instance
+   * of it, because nothing on the shape can tell its two kinds of
+   * instance apart: that is base's answer for the runtime-built value and
+   * the CORRECT one for the crossed value, and it is never a rendering
+   * Node would not print. A module with no crossing keeps the prefix. */
+  readonly nullProtoRenderings: { shapeId: string; strip: () => void }[] = [];
+
+  /** Register one such helper (see nullProtoRenderings). */
+  noteNullProtoRendering(shapeId: string, strip: () => void): void {
+    this.nullProtoRenderings.push({ shapeId, strip });
+  }
+
   /** Register one own-key presence guard (see ownKeyGuards). */
   noteOwnKeyGuard(
     shapeId: string,
@@ -2715,6 +2740,9 @@ export class Lowerer {
     // undefined-arm tag test becomes the own-key question, which is the
     // same test on an instance no crossing wrote and the SOURCE object's
     // own-key set on one a crossing did.
+    // ...and the inspect prefixes that cannot survive a crossing into
+    // their own shape (see nullProtoRenderings).
+    for (const n of this.nullProtoRenderings) if (armed.has(n.shapeId)) n.strip();
     for (const g of this.ownKeyGuards) {
       if (!armed.has(g.shapeId)) continue;
       // An INTERNAL SLOT is not a key, so its guard keeps the tag test —

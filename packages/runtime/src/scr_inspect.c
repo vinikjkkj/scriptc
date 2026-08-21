@@ -732,6 +732,59 @@ ScrStr *scr_insp_key(ScrStr *k) {
   return ib_take(&b);
 }
 
+
+/* ── internal slots, which Node keeps under own SYMBOLS ───────────────
+ *
+ * `ScrDyn.v.obj.slots` is the table the record-to-dyn converter puts a
+ * shape's INTERNAL fields in (scr_runtime.h). No property protocol
+ * consults it, and that is deliberate; util.inspect is the one surface
+ * where Node SHOWS the same cells, because Node keeps them under own
+ * enumerable-to-inspect SYMBOL keys and formatValue lists those after
+ * the string keys:
+ *
+ *   Dirent { name: 'a.txt', parentPath: 'kd', Symbol(type): 1 }
+ *
+ * A slot key that BEGINS WITH '%' is the compiler's own cell rather than
+ * a Node symbol, and renders nowhere. StringDecoder's `%pending` is the
+ * one: Node's value under Symbol(kNativeDecoder) is a seven-byte native
+ * state buffer, this tier holds a packed f64, and printing the f64 there
+ * would be the compiler's own number on stdout. The rule lives on the
+ * KEY because this walk knows no shapes -- the frontend chooses the
+ * spelling (ir/nodes.ts, slotStorageKey), and the two halves are one
+ * rule stated twice on purpose. */
+static size_t insp_slot_count(const ScrDyn *d) {
+  const ScrDyn *s = d->v.obj.slots;
+  if (s == NULL || s->kind != SCR_DYN_OBJ) return 0;
+  size_t n = 0;
+  for (size_t i = 0; i < s->v.obj.len; i++) {
+    const ScrDynEntry *e = &s->v.obj.entries[i];
+    if (e->key_len > 0 && e->key[0] != '%') n++;
+  }
+  return n;
+}
+
+/* Appends one `Symbol(<desc>): <value>` entry per renderable slot to the
+ * frame scr_insp_begin opened. Insertion order, which is the converter's
+ * field order and therefore Node's. */
+static void insp_emit_slots(const ScrDyn *d, double recurse, double depth) {
+  const ScrDyn *s = d->v.obj.slots;
+  if (s == NULL || s->kind != SCR_DYN_OBJ) return;
+  for (size_t i = 0; i < s->v.obj.len; i++) {
+    const ScrDynEntry *e = &s->v.obj.entries[i];
+    if (e->key_len == 0 || e->key[0] == '%') continue;
+    ScrStr *val = scr_insp_dyn(e->value, recurse + 1, depth);
+    InspBuf eb = {0};
+    ib_cstr(&eb, "Symbol(");
+    ib_bytes(&eb, e->key, e->key_len);
+    ib_cstr(&eb, "): ");
+    ib_bytes(&eb, val->data, val->len);
+    scr_str_release(val);
+    ScrStr *entry = ib_take(&eb);
+    scr_insp_entry(entry, false);
+    scr_str_release(entry);
+  }
+}
+
 /* The full inspect over a dyn tree — the one runtime type whose SHAPE
  * lives in the value, so the traversal lives here instead of a
  * synthesized helper. Same engine, same defaults. dyn-boxed bytes render
@@ -807,7 +860,20 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
        * The name is the static literal the FUNC box carries, copied at
        * construction; a plain literal has none and renders unchanged. */
       const char *cn = d->v.obj.cname;
-      if (d->v.obj.len == 0) {
+      /* Node lists own enumerable SYMBOL keys after the string keys, and
+       * an INTERNAL SLOT is exactly what this tier keeps where Node keeps
+       * a symbol: `Dirent { name: 'a.txt', parentPath: 'kd',
+       * Symbol(type): 1 }`, measured against v25.9.0.
+       *
+       * A slot whose key begins with '%' is the COMPILER's own cell, not
+       * a Node symbol, and renders nowhere -- StringDecoder's `%pending`
+       * is the packed partial sequence, and printing it under
+       * Symbol(kNativeDecoder) would put the compiler's number on stdout
+       * where Node puts a seven-byte native state buffer. The rule is on
+       * the KEY rather than on a shape because this walk knows no shapes;
+       * slotStorageKey (ir/nodes.ts) is the other half of it. */
+      const size_t nsym = insp_slot_count(d);
+      if (d->v.obj.len == 0 && nsym == 0) {
         if (cn != NULL && cn[0]) {
           InspBuf nb = {0};
           ib_cstr(&nb, cn);
@@ -849,6 +915,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         scr_str_release(entry);
       }
       free(ord);
+      insp_emit_slots(d, recurse, depth);
       ScrStr *base = cn != NULL && cn[0] ? scr_str_new(cn, strlen(cn))
                      : d->null_proto     ? scr_str_new("[Object: null prototype]", 24)
                                          : scr_str_new("", 0);

@@ -22,7 +22,7 @@
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrRecordShape, IrType } from "../../ir/nodes.js";
-import { armDiscrimLits, canAdaptDynFuncTo, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
+import { armDiscrimLits, canAdaptDynFuncTo, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
 import { mangleRecordNew, mangleRecordStruct } from "../mangle.js";
@@ -571,7 +571,7 @@ export class LlDyn {
           // internalSlotFields answer, so the lanes cannot disagree about
           // which values are of this shape.
           if (matchInternal.has(f.name)) {
-            const ms = this.slotGetLit(B, "%d", f.name);
+            const ms = this.slotGetLit(B, "%d", slotStorageKey(shape, f.name));
             const hasS = B.tmp();
             B.line(`${hasS} = icmp ne ptr ${ms}, null`);
             const lS = B.newLabel("dm.s");
@@ -1335,7 +1335,7 @@ export class LlDyn {
           // constant as the C lane (INTERNAL_SLOT_WANT_TEXT), same path
           // (`%path`, not a field path), so the two texts are one text.
           if (buildInternal.has(f.name)) {
-            const ms = this.slotGetLit(B, dRef, f.name);
+            const ms = this.slotGetLit(B, dRef, slotStorageKey(shape, f.name));
             const hasS = B.tmp();
             B.line(`${hasS} = icmp ne ptr ${ms}, null`);
             const lHaveS = B.newLabel("dcs.h");
@@ -2099,9 +2099,23 @@ export class LlDyn {
           B.terminate(`ret ptr ${d}`);
           break;
         }
-        host.declare(`declare ptr @scr_dyn_new_obj()`);
+        // The C lane's row: a shape interned from a BUILTIN carries how
+        // Node renders it, and both halves already existed in the dyn
+        // encoding (ScrDyn.null_proto, ScrDyn.v.obj.cname).
         const d = B.tmp();
-        B.line(`${d} = call ptr @scr_dyn_new_obj()`);
+        // emit-walkers.ts carries the whole argument for both halves,
+        // including why an ARMED shape stops claiming a null prototype.
+        if (shape.builtin?.nullProto && !shape.ownmask) {
+          host.declare(`declare ptr @scr_dyn_new_obj_null_proto()`);
+          B.line(`${d} = call ptr @scr_dyn_new_obj_null_proto()`);
+        } else {
+          host.declare(`declare ptr @scr_dyn_new_obj()`);
+          B.line(`${d} = call ptr @scr_dyn_new_obj()`);
+        }
+        if (shape.builtin?.ctorName) {
+          host.declare(`declare void @scr_dyn_obj_set_ctor_name(ptr, ptr)`);
+          B.line(`call void @scr_dyn_obj_set_ctor_name(ptr ${d}, ptr ${host.cstr(shape.builtin.ctorName)})`);
+        }
         // The INHERITED half of an armed shape's members, built lazily and
         // linked as the fresh object's [[Prototype]] at the end. An alloca
         // rather than a register because the block structure below has
@@ -2142,12 +2156,13 @@ export class LlDyn {
           // scr_dyn_obj_set_present in scr_json.c.
           // An INTERNAL SLOT is not a key and takes neither rule.
           if (internal.has(f.name)) {
+            const sk = slotStorageKey(shape, f.name);
             host.declare(`declare void @scr_dyn_obj_set_slot(ptr, ptr, i64, ptr)`);
-            B.line(`call void @scr_dyn_obj_set_slot(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; slot ${f.name}`);
+            B.line(`call void @scr_dyn_obj_set_slot(ptr ${d}, ptr ${host.cstr(sk)}, i64 ${Buffer.byteLength(sk, "utf8")}, ptr ${conv}) ; slot ${sk}`);
             continue;
           }
           // No '%'-spelling test: internalSlotFields above is the whole
-          // exemption, and it is the STRICTER one — a user's own "%dtype"
+          // exemption, and it is the STRICTER one - a user's own "%dtype"
           // IS in its shape's declaredOrder, so it is an ordinary key and
           // takes the mask like any other. emit-walkers.ts's row.
           const maskBitF = maskKeyBit(shape, f.name);
