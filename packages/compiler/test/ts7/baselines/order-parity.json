@@ -9012,6 +9012,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5880-a-null-prototype-is-a-fact-about-the-instance.ts": {
+   "order": [
+    "<repo>/tests/corpus/5880-a-null-prototype-is-a-fact-about-the-instance.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"

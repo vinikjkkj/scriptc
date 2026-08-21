@@ -1487,6 +1487,44 @@ export function ownMaskKeyBit(shape: OwnMaskShape, name: string): { byte: number
   return ownMaskBit(shape, name);
 }
 
+/** Byte 0 of the hidden own-key mask is a small BITSET about the crossing
+ * itself, not about any one field.
+ *
+ *   bit 0  VALIDITY — a dynCheck builder wrote this instance. Zero on
+ *          every record built any other way, which is what makes the mask
+ *          additive (ownMaskBit's row).
+ *   bit 1  the SOURCE object's [[Prototype]] was NULL (Object.create(null),
+ *          which is how os.userInfo() builds its result). Only meaningful
+ *          when bit 0 is set. */
+export const OWNMASK_VALID = 1;
+export const OWNMASK_SRC_NULL_PROTO = 2;
+
+/** Whether one record INSTANCE is a null-prototype object — the single
+ * question the record→dyn walker and util.inspect's static renderer both
+ * ask, spelled once so one object cannot get two spellings inside one
+ * process.
+ *
+ * It is a fact about the INSTANCE and a record shape is STRUCTURAL, which
+ * is the whole difficulty. `IrRecordShape.builtin.nullProto` is a claim
+ * about how the RUNTIME builds one builtin (os.userInfo() is
+ * Object.create(null)); a value MATERIALISED out of a dynamic one shares
+ * the shape and carries whatever ITS source carried. Before this, an
+ * armed shape simply gave the claim up for every instance of it — which
+ * left `util.inspect(os.userInfo())` printing the plain form AND, worse,
+ * `deepStrictEqual(os.userInfo(), {…the same five members…})` answering
+ * EQUAL where Node throws: a silent PASS on an assertion that must fail.
+ *
+ * `const` is every shape no crossing armed: the claim folds at compile
+ * time and nothing is emitted. `instance` is an armed shape: mask byte 0
+ * decides, and `claim` is what an instance NO crossing wrote still
+ * answers. */
+export function nullProtoRule(
+  shape: OwnMaskShape & { builtin?: IrBuiltinRendering },
+): { kind: "const"; value: boolean } | { kind: "instance"; claim: boolean } {
+  const claim = shape.builtin?.nullProto === true;
+  return shape.ownmask === true ? { kind: "instance", claim } : { kind: "const", value: claim };
+}
+
 /** Object-literal ACCESSOR properties (`{ get x() {...}, set x(v) {...} }`)
  * live on the shape as reserved '%'-fields holding closures: `%get:x` a
  * `() => T` invoked once per property READ (side effects and all — JS's
@@ -5813,6 +5851,17 @@ export type IrExpr =
    * declaration order — which is exactly why this is a node and not two
    * spellings chosen at lowering time. */
   | { kind: "recordKeyPresent"; obj: IrExpr; shapeId: string; field: string; type: IrType; loc: SrcLoc }
+  /** Is `obj` a NULL-PROTOTYPE object? — nullProtoRule's question, as a
+   * node, for the same reason recordKeyPresent is one: the answer depends
+   * on ARMING, and arming is decided after the whole walk.
+   *
+   * On a shape no crossing armed it folds to the shape's own claim
+   * (`IrRecordShape.builtin.nullProto`) at emission and nothing is
+   * emitted. On an armed shape the instance's own-key mask decides, so
+   * `util.inspect(os.userInfo())` keeps Node's `[Object: null prototype]`
+   * prefix in a module that ALSO materialises os.UserInfo out of a
+   * dynamic value, while the materialised one prints plain. */
+  | { kind: "recordNullProto"; obj: IrExpr; shapeId: string; type: IrType; loc: SrcLoc }
   /** Dynamic-keyed record read `r[k]` (string key, evaluated at runtime).
    * Declared fields are tried FIRST (an emitted string-switch — field
    * access exactness is preserved: a declared name always answers from the

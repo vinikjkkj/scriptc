@@ -44,7 +44,10 @@ import { lowerPromisifiedDiffieHellmanValue } from "./lower-builtins.js";
 /* ── IR construction shorthand ───────────────────────────────────────── */
 
 /** The string-literal node's own type, so a lowering that has to REVISE a
- * literal it already emitted can hold one without narrowing IrExpr. */
+ * literal it already emitted can hold one without narrowing IrExpr. The
+ * revision may replace the node's KIND outright — the record arm's
+ * null-prototype prefix becomes a per-instance ternary — so a holder of
+ * one must not read `.value` back after registering a revision. */
 type StrLit = { kind: "strLit"; value: string; type: IrType; loc: SrcLoc };
 const strNode = (value: string, loc: SrcLoc): StrLit => ({ kind: "strLit", value, type: STRING, loc });
 const str = (value: string, loc: SrcLoc): IrExpr => ({ kind: "strLit", value, type: STRING, loc });
@@ -628,17 +631,46 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       const openBrace = strNode(`${bpre}{`, loc);
       body.push(ret(end(str("", loc), openBrace, str("}", loc), false, boolLit(false, loc))));
       // A null-prototype prefix is a claim about the RUNTIME's own builder,
-      // and a shape is structural, so it cannot survive a module that also
-      // MATERIALISES this shape out of a dynamic value. Arming answers
-      // that, and it is decided after the whole walk, so the retraction is
-      // registered rather than asked (Lowerer.nullProtoRenderings). A
-      // ctorName prefix needs no such retraction: the two shapes that carry
+      // and a shape is structural, so it cannot be a per-SHAPE constant in
+      // a module that also MATERIALISES this shape out of a dynamic value.
+      // Arming answers whether there is such a crossing, and it is decided
+      // after the whole walk, so the revision is registered rather than
+      // asked (Lowerer.nullProtoRenderings) — a module with no crossing
+      // keeps byte-identical IR and the literal it always had.
+      //
+      // The revision used to STRIP the prefix for the whole shape, which
+      // made the runtime-built value print plain where Node prefixes it
+      // and — through the record→dyn walker's twin of this decision — made
+      // `deepStrictEqual(os.userInfo(), {…the same members…})` compare
+      // EQUAL where Node throws. It now asks the INSTANCE (recordNullProto,
+      // whose answer is the source object's own [[Prototype]] for a value a
+      // crossing wrote and the shape's claim for every other one), so both
+      // kinds of instance render as Node renders them.
+      //
+      // A ctorName prefix needs no such revision: the two shapes that carry
       // one both hold an INTERNAL SLOT, so a fabricated instance is refused
       // at the slot check rather than rendered (corpus 5825).
       if (shape.builtin?.nullProto && !shape.builtin.ctorName) {
+        const perInstance = (node: StrLit, whenNull: string, plain: string): void => {
+          const tern: IrExpr = {
+            kind: "ternary",
+            cond: { kind: "recordNullProto", obj: v(), shapeId: t.shapeId, type: BOOL, loc },
+            then: str(whenNull, loc),
+            else_: str(plain, loc),
+            type: STRING,
+            loc,
+          };
+          // In PLACE: the literal is already embedded in an emitted
+          // statement (depthGate holds one, insp.end's arg list the
+          // other), and the registration exists precisely because there is
+          // no handle to the container. StrLit's own comment names this.
+          const holder = node as unknown as Record<string, unknown>;
+          for (const k of Object.keys(holder)) delete holder[k];
+          Object.assign(holder, tern);
+        };
         L.noteNullProtoRendering(t.shapeId, () => {
-          openBrace.value = "{";
-          depthLit.value = "[Object]";
+          perInstance(openBrace, "[Object: null prototype] {", "{");
+          perInstance(depthLit, "[Object: null prototype]", "[Object]");
         });
       }
       break;

@@ -32,8 +32,8 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 import { loadProgram } from "../src/frontend/program.js";
 import { lowerToIr } from "../src/frontend/lowering/lowerer.js";
-import { ownMaskBit, ownMaskBytes, ownMaskKeyBit, type IrFunction, type IrModule } from "../src/ir/nodes.js";
-import { ownPresentCondC } from "../src/backend/emission/emit-shapes.js";
+import { nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskBit, ownMaskBytes, ownMaskKeyBit, type IrFunction, type IrModule } from "../src/ir/nodes.js";
+import { nullProtoCondC, ownPresentCondC } from "../src/backend/emission/emit-shapes.js";
 import { emitOwnPresentLl } from "../src/backend/llvm/shapes.js";
 import { BlockBuilder } from "../src/backend/llvm/blocks.js";
 
@@ -273,4 +273,51 @@ test("the mask is one validity byte plus one bit per field, and the bits do not 
   }
   // Byte 0 is the validity flag and no field may claim it.
   for (const f of shape.fields) expect(ownMaskBit(shape, f.name)!.byte).toBeGreaterThan(0);
+});
+
+/* -- byte 0 carries the CROSSING's own facts, not any one field's ------ */
+
+test("byte 0's second bit is the source object's [[Prototype]]-is-null fact, and no field may claim it", () => {
+  // The two bits of byte 0 are disjoint from every field bit by
+  // construction (field bits start at byte 1, pinned above), so the only
+  // thing to state here is that the two constants really are the low two
+  // bits of ONE byte and that the arming they gate is the same arming.
+  expect(OWNMASK_VALID).toBe(1);
+  expect(OWNMASK_SRC_NULL_PROTO).toBe(2);
+  expect(OWNMASK_VALID & OWNMASK_SRC_NULL_PROTO).toBe(0);
+});
+
+test("a shape no crossing armed folds its null-prototype claim at compile time", () => {
+  // The claim is a per-SHAPE constant when nothing can contradict it, so a
+  // module with no crossing emits exactly the literal it always emitted.
+  const plain = { fields: [{ name: "uid" }] };
+  expect(nullProtoRule(plain)).toEqual({ kind: "const", value: false });
+  expect(nullProtoRule({ ...plain, builtin: { nullProto: true as const } }))
+    .toEqual({ kind: "const", value: true });
+  expect(nullProtoCondC(plain, "v")).toBe("false");
+  expect(nullProtoCondC({ ...plain, builtin: { nullProto: true as const } }, "v")).toBe("true");
+});
+
+test("an ARMED shape asks the INSTANCE, and keeps the claim for one no crossing wrote", () => {
+  // This is the whole repair. Retracting the claim for the entire armed
+  // shape made os.userInfo()'s own result print plain AND — through the
+  // record→dyn walker's twin of this decision, which ScrDyn.null_proto
+  // feeds and deepStrictEqual gates on — made
+  // `deepStrictEqual(os.userInfo(), {…the same five members…})` compare
+  // EQUAL where Node throws. Corpus 5880 is the program.
+  const armed = { fields: [{ name: "uid" }], ownmask: true as const, builtin: { nullProto: true as const } };
+  expect(nullProtoRule(armed)).toEqual({ kind: "instance", claim: true });
+  const cond = nullProtoCondC(armed, "v");
+  // an instance NO crossing wrote falls back to the shape's own claim...
+  expect(cond).toContain("sc_own[0] ?");
+  expect(cond.endsWith(": true)")).toBe(true);
+  // ...and one a crossing DID write answers from the bit the builder
+  // stamped off the source object.
+  expect(cond).toContain(`& ${OWNMASK_SRC_NULL_PROTO}`);
+  // A shape with no builtin claim at all still asks, because a crossing
+  // out of an Object.create(null) source is a null-prototype instance of
+  // an ordinary shape.
+  const noClaim = { fields: [{ name: "uid" }], ownmask: true as const };
+  expect(nullProtoRule(noClaim)).toEqual({ kind: "instance", claim: false });
+  expect(nullProtoCondC(noClaim, "v").endsWith(": false)")).toBe(true);
 });

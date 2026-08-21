@@ -7,11 +7,11 @@
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
-import { armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
+import { armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane } from "../kindgate.js";
-import { OVERFLOW_MEMBER, OWNMASK_MEMBER, TOSTR_MEMBER, ownPresentCondC } from "./emit-shapes.js";
+import { OVERFLOW_MEMBER, OWNMASK_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 
 /** The refusal text a dyn-to-record check uses when the receiver carries
  * no INTERNAL SLOT for a field declaredOrder omits (internalSlotFields).
@@ -2000,7 +2000,19 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // was written; the bits say which members were OWN, and the
         // enumeration surfaces read them instead of the declared field
         // list.
-        if (shape.ownmask) d.push(`  r->${OWNMASK_MEMBER}[0] = 1;`);
+        //
+        // Byte 0 also carries the SOURCE object's own [[Prototype]]-is-null
+        // fact (OWNMASK_SRC_NULL_PROTO), and it belongs here for the same
+        // reason the bits do: this is the last point that still holds it.
+        // A record shape is STRUCTURAL, so `Object.create(null)`-ness
+        // cannot live on the shape — os.userInfo() builds a null-prototype
+        // object and `JSON.parse(s) as os.UserInfo` does not, and they
+        // share the shape.
+        if (shape.ownmask) {
+          d.push(
+            `  r->${OWNMASK_MEMBER}[0] = scr_dyn_is_null_proto(d) ? ${OWNMASK_VALID | OWNMASK_SRC_NULL_PROTO} : ${OWNMASK_VALID};`,
+          );
+        }
         // The HIDDEN per-instance toString slot. MATERIALIZING is what
         // loses a JS object's toString: `x as LongLike` is the identity in
         // JS, so String(x) still reaches the prototype method, while this
@@ -2577,24 +2589,31 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // null_proto is Object.create(null)'s flag, and `cname` is the
         // name `new F()` copies onto its instances and scr_insp_dyn
         // already prints as the `F { ... }` prefix.
-        // ...and NOT for a shape the module ARMED. The prefix is a claim
-        // about how the runtime builds one builtin, a record shape is
-        // structural, and an armed shape is one this module also
-        // MATERIALISES out of a dynamic value — whose source had an
-        // ordinary prototype, and whose inherited members the arm below is
-        // about to link BEHIND this very object. Claiming both would leave
-        // null_proto set on an object that has a [[Prototype]]:
-        // scr_dyn_obj_set_proto does not clear the flag, util.inspect would
-        // print `[Object: null prototype]` over a live chain, and
-        // deepStrictEqual would compare the two fields in that order and
-        // answer about neither. Same rule as the static renderer's
-        // (Lowerer.nullProtoRenderings), asked here where arming is already
-        // decided rather than installed after the fact.
-        d.push(
-          shape.builtin?.nullProto && !shape.ownmask
-            ? `  ScrDyn *d = scr_dyn_new_obj_null_proto();`
-            : `  ScrDyn *d = scr_dyn_new_obj();`,
-        );
+        // ...and on an ARMED shape the claim is asked of the INSTANCE
+        // (nullProtoRule / nullProtoCondC), not folded away for the whole
+        // shape. It used to be folded away, and that was a silent PASS:
+        // a module that also MATERIALISES this shape out of a dynamic
+        // value armed it, the whole shape stopped claiming a null
+        // prototype, and `deepStrictEqual(os.userInfo(), {…the same five
+        // members…})` compared EQUAL where Node throws — because
+        // scr_assert.c's own-object arm gates on ScrDyn.null_proto first.
+        // Mask byte 0 carries the source object's answer
+        // (OWNMASK_SRC_NULL_PROTO), so both kinds of instance are right:
+        // a runtime-built one keeps the claim, a crossed one answers about
+        // its own source. Nothing here can leave null_proto set behind a
+        // live [[Prototype]] either — a crossed instance whose source had
+        // a chain reports false, and scr_dyn_obj_set_proto now retracts
+        // the flag as well, so the two fields cannot disagree.
+        {
+          const rule = nullProtoRule(shape);
+          d.push(
+            rule.kind === "const"
+              ? rule.value
+                ? `  ScrDyn *d = scr_dyn_new_obj_null_proto();`
+                : `  ScrDyn *d = scr_dyn_new_obj();`
+              : `  ScrDyn *d = scr_dyn_new_obj_flavor(${nullProtoCondC(shape, "v")});`,
+          );
+        }
         if (shape.builtin?.ctorName) {
           d.push(`  scr_dyn_obj_set_ctor_name(d, ${cStringLiteral(Buffer.from(shape.builtin.ctorName, "utf8"))});`);
         }
