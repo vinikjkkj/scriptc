@@ -9000,6 +9000,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5826-a-null-prototype-prefix-does-not-survive-a-crossing.ts": {
+   "order": [
+    "<repo>/tests/corpus/5826-a-null-prototype-prefix-does-not-survive-a-crossing.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/5850-a-guarded-keyed-read-cannot-miss.ts": {
    "order": [
     "<repo>/tests/corpus/5850-a-guarded-keyed-read-cannot-miss.ts"
