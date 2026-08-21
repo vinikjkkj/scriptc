@@ -36,13 +36,17 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { isJsSourceFile } from "../program.js";
-import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, internalSlotFields, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { lowerPromisifiedDiffieHellmanValue } from "./lower-builtins.js";
 
 /* ── IR construction shorthand ───────────────────────────────────────── */
 
+/** The string-literal node's own type, so a lowering that has to REVISE a
+ * literal it already emitted can hold one without narrowing IrExpr. */
+type StrLit = { kind: "strLit"; value: string; type: IrType; loc: SrcLoc };
+const strNode = (value: string, loc: SrcLoc): StrLit => ({ kind: "strLit", value, type: STRING, loc });
 const str = (value: string, loc: SrcLoc): IrExpr => ({ kind: "strLit", value, type: STRING, loc });
 const num = (value: number, loc: SrcLoc): IrExpr => ({ kind: "numLit", value, type: F64, loc });
 const boolLit = (value: boolean, loc: SrcLoc): IrExpr => ({ kind: "boolLit", value, type: BOOL, loc });
@@ -411,11 +415,15 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
     if (!onCycle) return reduced;
     return { kind: "libCall", fn: "insp.refWrap", args: [v(), reduced], type: STRING, loc };
   };
-  /** if (r > d) return "<placeholder>"; */
-  const depthGate = (placeholder: string): IrStmt => ({
+  /** if (r > d) return "<placeholder>";
+   *
+   * Takes a NODE as well as a string so a caller that may have to REVISE
+   * its placeholder later can keep a reference to it (the record arm's
+   * null-prototype prefix — Lowerer.nullProtoRenderings). */
+  const depthGate = (placeholder: string | StrLit): IrStmt => ({
     kind: "if",
     cond: { kind: "bin", op: ">", left: r(), right: d(), type: BOOL, loc },
-    then: [ret(str(placeholder, loc))],
+    then: [ret(typeof placeholder === "string" ? str(placeholder, loc) : placeholder)],
     else_: null,
     loc,
   });
@@ -558,14 +566,45 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
         ];
         break;
       }
+      // How Node RENDERS this shape, when the frontend interned it from a
+      // builtin (IrRecordShape.builtin). It is the STATIC twin of the dyn
+      // walk's cname/null_proto arms — the same value reaches BOTH
+      // (`console.log(dirent)` comes here, `console.log(dirent as unknown)`
+      // goes there), and one rendered with the prefix while the other did
+      // not would be one object with two spellings inside one process.
+      const bpre = shape.builtin?.ctorName
+        ? `${shape.builtin.ctorName} `
+        : shape.builtin?.nullProto
+          ? "[Object: null prototype] "
+          : "";
+      // Past the depth budget Node says `[Dirent]` where a plain object
+      // says `[Object]`, and `[Object: null prototype]` bare.
+      const bdepth = shape.builtin?.ctorName
+        ? `[${shape.builtin.ctorName}]`
+        : shape.builtin?.nullProto
+          ? "[Object: null prototype]"
+          : "[Object]";
+      // The shape's INTERNAL fields (the ones declaredOrder omits) that
+      // Node keeps under an own SYMBOL: `Symbol(type): 1` for fs.Dirent,
+      // listed AFTER every string key ([[OwnPropertyKeys]]'s order, the
+      // same rule the class arm below follows for its symbol fields).
+      // A slot the shape does NOT name a symbol for renders nowhere —
+      // StringDecoder's %pending is the compiler's packed f64 where Node
+      // holds a seven-byte native state buffer, and printing the f64
+      // under Node's symbol name would be a fabricated value.
+      const slotSyms = shape.builtin?.slotSymbols ?? {};
+      const internalSyms = internalSlotFields(shape)
+        .filter((n) => slotSyms[n] !== undefined)
+        .map((n) => [n, slotSyms[n]!] as const);
       if (shape.fields.length === 0) {
-        body = [ret(str("{}", loc))];
+        body = [ret(str(`${bpre}{}`, loc))];
         break;
       }
       // Object.keys' declared order (SEMANTICS.md 36's stance).
       const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
       const byName = new Map(shape.fields.map((f) => [f.name, f.type] as const));
-      body = [depthGate("[Object]"), ...begin()];
+      const depthLit = strNode(bdepth, loc);
+      body = [depthGate(depthLit), ...begin()];
       for (const fname of order) {
         const ft = byName.get(fname);
         if (!ft) continue;
@@ -576,7 +615,32 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
           ),
         );
       }
-      body.push(ret(end(str("", loc), str("{", loc), str("}", loc), false, boolLit(false, loc))));
+      for (const [fname, desc] of internalSyms) {
+        const ft = byName.get(fname);
+        if (!ft) continue;
+        body.push(
+          entry(
+            concatAll([str(`Symbol(${desc}): `, loc), child(ft, get(fname, ft))], loc),
+            boolLit(false, loc),
+          ),
+        );
+      }
+      const openBrace = strNode(`${bpre}{`, loc);
+      body.push(ret(end(str("", loc), openBrace, str("}", loc), false, boolLit(false, loc))));
+      // A null-prototype prefix is a claim about the RUNTIME's own builder,
+      // and a shape is structural, so it cannot survive a module that also
+      // MATERIALISES this shape out of a dynamic value. Arming answers
+      // that, and it is decided after the whole walk, so the retraction is
+      // registered rather than asked (Lowerer.nullProtoRenderings). A
+      // ctorName prefix needs no such retraction: the two shapes that carry
+      // one both hold an INTERNAL SLOT, so a fabricated instance is refused
+      // at the slot check rather than rendered (corpus 5825).
+      if (shape.builtin?.nullProto && !shape.builtin.ctorName) {
+        L.noteNullProtoRendering(t.shapeId, () => {
+          openBrace.value = "{";
+          depthLit.value = "[Object]";
+        });
+      }
       break;
     }
     case "map":

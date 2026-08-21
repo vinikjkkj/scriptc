@@ -1,9 +1,9 @@
 import * as ts from "./ts7/adapter.js";
-import type { IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
+import type { IrBuiltinRendering, IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
 import { ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile } from "./program.js";
-import { accessorSlotProp, armDiscrimLits, armLitsConflict, internalFieldNamesOf, mergeArmLitSets, wsGlobalPlan } from "../ir/nodes.js";
+import { accessorSlotProp, armDiscrimLits, armLitsConflict, builtinRenderingKey, internalFieldNamesOf, mergeArmLitSets, wsGlobalPlan } from "../ir/nodes.js";
 // typeKey moved to ir/nodes.ts (the backend needs it too, for per-type
 // helper interning); re-exported here so frontend call sites keep their
 // import path.
@@ -156,16 +156,25 @@ export class ShapeRegistry {
     tuple: boolean,
     indexValue?: IrType,
     declaredOrder?: string[],
+    builtin?: IrBuiltinRendering,
   ): string {
     // The INTERNAL field set (the names declaredOrder omits) is part of
     // the identity — internalFieldNamesOf carries the whole argument. The
     // empty set contributes NOTHING to the key, so every shape that has no
     // internal fields keeps the exact key it had before.
     const internal = internalFieldNamesOf(fields.map((f) => f.name), declaredOrder, tuple);
+    // The builtin RENDERING joins the identity for the same reason the
+    // internal set did: a user literal structurally equal to fs.Dirent's
+    // row shares the field list, and whichever was interned first would
+    // otherwise decide, for BOTH, whether util.inspect prints a `Dirent`
+    // prefix and a `Symbol(type)` line. An absent rendering spells "" and
+    // contributes nothing, so no existing shape's key moves.
+    const render = builtinRenderingKey(builtin);
     return (
       (tuple ? "tuple!" : "") +
       (indexValue ? `idx<${typeKey(indexValue)}>!` : "") +
       (internal.length > 0 ? `int<${[...internal].sort().join(",")}>!` : "") +
+      (render ? `bi<${render}>!` : "") +
       JSON.stringify(fields.map((f) => [f.name, typeKey(f.type)]))
     );
   }
@@ -267,10 +276,10 @@ export class ShapeRegistry {
    * value type (`indexValue`) is part of the identity too: the same
    * declared fields with and without an overflow portion — or with
    * differently-typed ones — are different structs. */
-  intern(fields: { name: string; type: IrType }[], tuple = false, indexValue?: IrType, declaredOrder?: string[],): string {
+  intern(fields: { name: string; type: IrType }[], tuple = false, indexValue?: IrType, declaredOrder?: string[], builtin?: IrBuiltinRendering): string {
     const declaredIndexValue = indexValue;
     indexValue = this.dialIndexValue(fields, tuple, indexValue);
-    const key = this.keyOf(fields, tuple, indexValue, declaredOrder);
+    const key = this.keyOf(fields, tuple, indexValue, declaredOrder, builtin);
     let id = this.byKey.get(key);
     if (id !== undefined && indexValue !== declaredIndexValue) this.granted.add(id);
     if (id === undefined) {
@@ -284,6 +293,8 @@ export class ShapeRegistry {
         // IrRecordShape doc): a later structurally-equal type keeps the
         // first one's order.
         ...(declaredOrder ? { declaredOrder } : {}),
+        // ...and the builtin rendering, which IS identity (keyOf).
+        ...(builtinRenderingKey(builtin) ? { builtin: builtin! } : {}),
       };
       this.byKey.set(key, id);
       this.byId.set(id, shape);
@@ -2251,6 +2262,14 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         false,
         undefined,
         ["encoding"],
+        // Node prints `StringDecoder { encoding: 'utf8',
+        // Symbol(kNativeDecoder): <Buffer 00 00 00 00 00 00 01> }`. The
+        // PREFIX is exact; the symbol is deliberately NOT named here
+        // (IrBuiltinRendering) -- Node's value under it is the seven-byte
+        // native decoder state and this tier holds a packed f64, so the
+        // rendering stays short of Node's by that one line rather than
+        // printing the compiler's own number in its place.
+        { ctorName: "StringDecoder" },
       ),
     };
   }
@@ -3236,6 +3255,12 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         false,
         undefined,
         ["name", "parentPath"],
+        // Node v25.9.0, measured: `Dirent { name: 'a.txt', parentPath:
+        // 'kd', Symbol(type): 1 }`. The prefix is the constructor name and
+        // the trailing line is THIS cell -- Node keeps the same libuv
+        // entry kind under Symbol(type), which is why the slot travels
+        // under that description rather than under its field name.
+        { ctorName: "Dirent", slotSymbols: { "%dtype": "type" } },
       ),
     };
   }
@@ -3270,6 +3295,12 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         false,
         undefined,
         ["uid", "gid", "username", "homedir", "shell"],
+        // node_os.cc builds the result with Object.create(null), so Node
+        // renders it `[Object: null prototype] { uid: ..., ... }` and
+        // deepStrictEqual against a plain literal FAILS on the prototype.
+        // Both already exist here behind ScrDyn.null_proto; the record
+        // converter simply never raised it.
+        { nullProto: true },
       ),
     };
   }

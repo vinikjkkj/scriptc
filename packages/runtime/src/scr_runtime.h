@@ -4099,6 +4099,10 @@ void scr_dyn_obj_drop_hidden(ScrDyn *recv, const char *key, size_t key_len);
  * its own. */
 void scr_dyn_obj_set_slot(ScrDyn *recv, const char *key, size_t key_len, ScrDyn *v);
 ScrDyn *scr_dyn_obj_slot_get(const ScrDyn *d, const char *key, size_t key_len);
+/* ...and the CONSTRUCTOR NAME a converted builtin record shows under
+ * (IrRecordShape.builtin.ctorName). `name` is a static literal; no
+ * ownership is taken. */
+void scr_dyn_obj_set_ctor_name(ScrDyn *d, const char *name);
 
 /* `new f(...args)` over a dyn FUNCTION value — the JS [[Construct]] the
  * pre-class constructor idiom needs. Allocates a fresh OBJ whose

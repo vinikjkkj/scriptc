@@ -7,7 +7,7 @@
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
-import { armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, ownMaskKeyBit, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
+import { armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane } from "../kindgate.js";
@@ -1009,7 +1009,12 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           // table — the same question the builder asks, so the two cannot
           // disagree about which values are of this shape.
           if (matchInternal.has(f.name)) {
-            d.push(`  m = scr_dyn_obj_slot_get(d, ${keyLit}, ${keyLen}); /* internal slot */`);
+            // ...under its STORAGE key, which is the Node symbol
+            // description when the shape names one (slotStorageKey).
+            const sk = slotStorageKey(shape, f.name);
+            const slotLit = cStringLiteral(Buffer.from(sk, "utf8"));
+            const slotLen = Buffer.byteLength(sk, "utf8");
+            d.push(`  m = scr_dyn_obj_slot_get(d, ${slotLit}, ${slotLen}); /* internal slot */`);
             d.push(`  if (!m || !${E.dynMatchHelper(f.type)}(m)) return false;`);
             continue;
           }
@@ -2024,8 +2029,11 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           // two agree in kind; the texts differ, which is the documented
           // uncaught-report divergence.
           if (buildInternal.has(f.name)) {
+            const sk = slotStorageKey(shape, f.name);
+            const slotLit = cStringLiteral(Buffer.from(sk, "utf8"));
+            const slotLen = Buffer.byteLength(sk, "utf8");
             d.push(`  {`);
-            d.push(`    const ScrDyn *ms = scr_dyn_obj_slot_get(d, ${keyLit}, ${keyLen});`);
+            d.push(`    const ScrDyn *ms = scr_dyn_obj_slot_get(d, ${slotLit}, ${slotLen});`);
             d.push(fail(`    `, "record.slot", `!ms`, `NULL`, `${rel("r")}; `, INTERNAL_SLOT_WANT, `d`, `path`));
             d.push(`    r->${mangleField(f.name)} = ${childC(f.type)}(ms, path${childArg});`);
             d.push(afterChild(`    `, `${rel("r")}; `, `NULL`));
@@ -2563,12 +2571,38 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`  return d;`);
           break;
         }
-        d.push(`  ScrDyn *d = scr_dyn_new_obj();`);
+        // A shape the frontend interned from a BUILTIN carries how Node
+        // RENDERS it (IrRecordShape.builtin). Both halves already existed
+        // in the dyn encoding and neither was ever set from a record:
+        // null_proto is Object.create(null)'s flag, and `cname` is the
+        // name `new F()` copies onto its instances and scr_insp_dyn
+        // already prints as the `F { ... }` prefix.
+        // ...and NOT for a shape the module ARMED. The prefix is a claim
+        // about how the runtime builds one builtin, a record shape is
+        // structural, and an armed shape is one this module also
+        // MATERIALISES out of a dynamic value — whose source had an
+        // ordinary prototype, and whose inherited members the arm below is
+        // about to link BEHIND this very object. Claiming both would leave
+        // null_proto set on an object that has a [[Prototype]]:
+        // scr_dyn_obj_set_proto does not clear the flag, util.inspect would
+        // print `[Object: null prototype]` over a live chain, and
+        // deepStrictEqual would compare the two fields in that order and
+        // answer about neither. Same rule as the static renderer's
+        // (Lowerer.nullProtoRenderings), asked here where arming is already
+        // decided rather than installed after the fact.
+        d.push(
+          shape.builtin?.nullProto && !shape.ownmask
+            ? `  ScrDyn *d = scr_dyn_new_obj_null_proto();`
+            : `  ScrDyn *d = scr_dyn_new_obj();`,
+        );
+        if (shape.builtin?.ctorName) {
+          d.push(`  scr_dyn_obj_set_ctor_name(d, ${cStringLiteral(Buffer.from(shape.builtin.ctorName, "utf8"))});`);
+        }
         // The INHERITED half of an armed shape's members, built lazily and
         // linked as the fresh object's [[Prototype]] at the end (see the
         // per-field arm below). NULL whenever the value carried no
         // inherited member, which is every record built anywhere but a
-        // crossing — those emit nothing extra at all.
+        // crossing - those emit nothing extra at all.
         if (shape.ownmask) d.push(`  ScrDyn *sc_proto = NULL;`);
         // Keys insert in DECLARED order — the dyn object's insertion order
         // is observable (Object.keys/for-in over checked-dynamic values,
@@ -2627,15 +2661,26 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             //
             // THIS TEST USED TO READ f.name.startsWith("%") ON THIS BRANCH,
             // and internalSlotFields is not the same test spelled another
-            // way — it is the STRICTER one, and the difference is a real
+            // way - it is the STRICTER one, and the difference is a real
             // program. A user's own { "%dtype": 7, name: "n" } IS in its
             // shape's declaredOrder, so it is an ordinary key and has to
             // take the mask like any other; the spelling test exempted it,
             // which would have written it unconditionally and re-listed an
-            // INHERITED "%dtype" as own after a crossing — this block's own
+            // INHERITED "%dtype" as own after a crossing - this block's own
             // defect, surviving in the one namespace nobody would look at.
+            //
+            // The slot travels under its STORAGE key, which is the Node
+            // symbol description when the shape names one (slotStorageKey,
+            // ir/nodes.ts) and the field name otherwise. That is a question
+            // about WHERE the cell lives, and the exemption above is still
+            // internalSlotFields and nothing else: the two questions look
+            // alike and are not, which is the defect the merge above
+            // describes, one namespace over.
             if (internal.has(f.name)) {
-              d.push(`  scr_dyn_obj_set_slot(d, ${keyLit}, ${keyLen}, ${fv}); /* internal slot: no key */`);
+              const sk = slotStorageKey(shape, f.name);
+              const slotLit = cStringLiteral(Buffer.from(sk, "utf8"));
+              const slotLen = Buffer.byteLength(sk, "utf8");
+              d.push(`  scr_dyn_obj_set_slot(d, ${slotLit}, ${slotLen}, ${fv}); /* internal slot: no key */`);
               continue;
             }
             const setBase = isUndefinedArmedUnion(f.type, (id) => E.unionsById.get(id))
