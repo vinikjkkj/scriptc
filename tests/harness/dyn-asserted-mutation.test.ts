@@ -36,6 +36,7 @@
  */
 import { execFile } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
@@ -43,8 +44,15 @@ import { compile } from "@scriptc/compiler";
 import { exeName } from "./exe.js";
 
 const execFileAsync = promisify(execFile);
-const repoRoot = join(import.meta.dirname, "../..");
-const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests/dyn-asserted-mutation");
+/* Deliberately NOT under node_modules. This harness runs the cell text on
+ * Node itself to obtain the oracle, and Node refuses to strip types from any
+ * file inside a node_modules directory
+ * (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING). The first version of this
+ * file kept its cells in node_modules/.cache and all 30 rows failed on the
+ * ORACLE leg, saying nothing whatever about the compiler -- which is exactly
+ * what the "oracle first" assertion below exists to make loud, instead of
+ * letting a broken oracle and a broken binary compare equal and pass. */
+const cellRoot = join(tmpdir(), "scriptc-dyn-asserted-mutation");
 
 interface Run { out: string; code: number; err: string }
 
@@ -62,7 +70,7 @@ async function run(cmd: string, args: string[]): Promise<Run> {
 /** Compile `src` on `backend` and run it; also run the SAME text on Node, so
  * the oracle is never a literal typed into this file. */
 async function bothWays(name: string, backend: "c" | "llvm", src: string): Promise<{ node: Run; exe: Run }> {
-  const outDir = join(cacheDir, `${name}-${backend}`);
+  const outDir = join(cellRoot, `${name}-${backend}`);
   mkdirSync(outDir, { recursive: true });
   const file = join(outDir, "cell.ts");
   writeFileSync(file, src, "utf8");
