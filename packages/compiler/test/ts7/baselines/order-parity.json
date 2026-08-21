@@ -8852,6 +8852,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5631-a-mutation-through-an-asserted-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/5631-a-mutation-through-an-asserted-unknown.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/5660-a-caught-error-lists-no-compiler-reserved-keys.ts": {
    "order": [
     "<repo>/tests/corpus/5660-a-caught-error-lists-no-compiler-reserved-keys.ts"

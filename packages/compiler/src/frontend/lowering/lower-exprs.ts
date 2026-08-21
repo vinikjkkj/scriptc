@@ -11688,6 +11688,88 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     return Number.isInteger(n) && n >= 0 ? n : null;
   }
 
+/** The receiver of a MUTATION spelled as an ASSERTION over a checked-dynamic
+ * value: `(u as Record<string, unknown>)["k"] = v`, `(u as number[])[0] = 9`,
+ * `(u as {n: number}).n = 2`, `delete (u as Record<string, unknown>)["k"]`,
+ * `(u as number[]).push(x)`.  Answers the LOWERED dyn operand, or null when
+ * the receiver is not that shape.
+ *
+ * WHY the assertion has to be seen through instead of lowered.  `as` is the
+ * IDENTITY in JS — `(u as T).k = v` writes the very object `u` names, and
+ * Node has no second object to write.  scriptc keeps a composite in two
+ * physically different representations (a monomorphic C struct / packed
+ * ScrArr, and a ScrDyn key-value table), so the dyn->static recovery the
+ * assertion lowers to CANNOT alias: `sc_dc_N` / `sc_da_N` build a FRESH
+ * value with `sc_rnew_rN`.  The store then lands on that fresh value and the
+ * write is lost in SILENCE — no trap, no diagnostic, and the object the
+ * program still names is unchanged.  That is the exact answer this project
+ * calls worse than a refusal.
+ *
+ * Keeping the receiver DYN routes the store to the mutating dyn entry points
+ * instead, and those are already right in both directions:
+ *   - a dyn that IS the object (a JSON.parse result, a protobuf decode)
+ *     is mutated in place, which is what Node does;
+ *   - a dyn that is a marked COPY of a static original the program still
+ *     names (`scr_dyn_mark_static_copy`, the static->dyn half of the same
+ *     boundary) refuses LOUDLY through `scr_dyn_static_copy_refuse`.
+ * Both answers are correct; the recovery's answer was correct in neither.
+ *
+ * `(u as unknown[]).push(x)` has always taken this path — the asserted type
+ * is ITSELF dynamic, so no recovery happens and the receiver stays a ScrDyn.
+ * It was the only one of the eight mutating surfaces that did.  Every other
+ * spelling of the same assertion recovered a static value first, and the
+ * loud fence never saw the store.
+ *
+ * Deliberately SYNTACTIC and one level deep.  A recovery bound to a name
+ * first (`const r = u as T; r.k = v`) or crossed through a call
+ * (`f(u as T)` writing inside `f`) is the same defect and is NOT closed
+ * here: both need the recovered value itself to carry its origin, which is
+ * a representation change rather than a lowering one.  estado-fence.md
+ * carries the measured remainder. */
+export function dynAssertionReceiver(L: Lowerer, node: ts.Expression): IrExpr | null {
+  let e: ts.Expression = node;
+  // Parens and `!` are transparent; `as`/`<T>` is what we are looking for.
+  // A DOUBLE assertion (`u as unknown as T`) peels to the same operand, and
+  // the OUTERMOST one is the one whose target type decides the recovery.
+  let outer: ts.AsExpression | ts.TypeAssertion | null = null;
+  for (;;) {
+    if (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e)) { e = e.expression; continue; }
+    if (ts.isAsExpression(e) || ts.isTypeAssertion(e)) { outer ??= e; e = e.expression; continue; }
+    break;
+  }
+  if (outer === null) return null;
+  // The OPERAND's own type has to already be checked-dynamic.  Asking the
+  // checker (not the lowering) keeps this free on every other receiver: a
+  // static operand answers here and nothing is lowered twice.
+  if (L.mapTypeOf(L.typeOf(e))?.kind !== "dyn") return null;
+  // ...and the ASSERTED type has to be one whose recovery COPIES.  Only the
+  // record and the array have two physically different representations;
+  // every other composite crosses the boundary BY REFERENCE and its
+  // recovery already aliases, so rerouting those would replace a write that
+  // LANDS with a refusal:
+  //
+  //   - a class instance boxes as SCR_DYN_OBJINST (a retained pointer), and
+  //     `(u as K).n = 5` writes the caller's instance today.  Routed to
+  //     dyn.keySet it would meet `scr_dyn_objinst_fence` instead — the box
+  //     has no member table — and a working program would start refusing.
+  //     Measured: MATCH before, loud refusal after, which is how this gate
+  //     came to exist.
+  //   - Uint8Array/Buffer share one refcounted ScrBytes payload
+  //     (scr_dyn_new_bytes_ref), and Map/Set box by reference too.
+  //
+  // This is `dynCopyIsObservable`'s own test — "array or record, nothing
+  // else" — asked from the other side of the same boundary, which is what
+  // it should be: the two directions must agree about which kinds copy.
+  // A target that maps to dyn (`unknown[]`, the collapsed unions) is
+  // admitted as well: it never recovered in the first place, so routing it
+  // here changes nothing and keeps the one row of the family that was
+  // always right on the same path as the rest.
+  const targetT = L.mapTypeOf(L.checker.getTypeFromTypeNode(outer.type));
+  if (targetT?.kind !== "record" && targetT?.kind !== "array" && targetT?.kind !== "dyn") return null;
+  const lowered = L.lowerExpr(e);
+  return lowered.type.kind === "dyn" ? lowered : null;
+}
+
 /** `a[i] = v` in statement position → arraySet (element writes, like local
    * assignment, produce no value in our subset). */
   export function lowerElementWrite(L: Lowerer, expr: ts.BinaryExpression): IrStmt {
@@ -11729,6 +11811,35 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
         target,
         "symbol-keyed property writes outside class fields keyed by a module-level `const k = Symbol('desc')` (static shapes have no symbol-keyed storage)",
       );
+    }
+    // A keyed WRITE whose receiver is an assertion over a checked-dynamic
+    // value — `(u as Record<string, unknown>)["k"] = v`, `(u as number[])[0]
+    // = 9`.  The assertion is the identity in JS; recovering a static
+    // composite first would put the store on a FRESH struct and lose it in
+    // silence.  dynAssertionReceiver's comment carries the argument; the
+    // body below is the `receiverIr?.kind === "dyn"` arm's, reached with the
+    // operand instead of the recovery.
+    {
+      const dynRecv = dynAssertionReceiver(L, target.expression);
+      if (dynRecv !== null) {
+        const loc = locOf(expr);
+        let key = L.lowerExpr(target.argumentExpression);
+        if (key.type.kind === "f64" || key.type.kind === "bool" || key.type.kind === "dyn") {
+          key = { kind: "toString", operand: key, type: STRING, loc: key.loc };
+        }
+        if (key.type.kind !== "string") {
+          L.unsupported("SC1090", target.argumentExpression, "indexing with non-string or non-number keys");
+        }
+        const value = L.coerceToExpected(L.lowerExpr(expr.right), DYN);
+        if (value.type.kind !== "dyn") {
+          L.unsupported(
+            "SC1101",
+            expr.right,
+            `storing '${L.fmt(value.type)}' values through an asserted 'unknown' receiver (the value cannot convert into the checked-dynamic tree)`,
+          );
+        }
+        return { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.keySet", args: [dynRecv, key, value], type: VOID, loc }, loc };
+      }
     }
     let receiverIr = L.mapTypeOf(L.typeOf(target.expression));
     // Dispatch follows the RUNTIME world here too. A receiver the checker

@@ -10,8 +10,25 @@ import { captureParticipationOfPattern, checkedJsNumber, droppableStatic, entryF
 import { forOfVarTarget, lowerDestructuringAssign } from "./lower-stmts.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { DYN_DISPATCH_METHODS, islandPrimitiveExit } from "./lower-calls.js";
+import { dynAssertionReceiver } from "./lower-exprs.js";
 import { typeKey } from "../types.js";
 import { dynUndefinedExpr, own, WidthLift } from "./lowerer.js";
+
+/** The nine in-place Array.prototype methods — `scr_dyn_invoke.c`'s own
+ * static-copy list, verbatim.
+ *
+ * Seven of them are also in DYN_DISPATCH_METHODS and run on the dyn array.
+ * `fill` and `copyWithin` are NOT: `dyn_arr_proto_unimpl` names them, so
+ * they throw "not supported" before the static-copy guard that also names
+ * them can ever fire (two of that guard's nine arms are unreachable —
+ * estado-fence.md records it). They are listed here anyway, deliberately:
+ * routing them turns a SILENT lost write into that loud refusal, and a
+ * refusal is the answer this project prefers to a wrong value. Delisting
+ * them would restore the silence, not the capability. */
+const DYN_IN_PLACE_ARRAY_METHODS = new Set<string>([
+  "push", "pop", "shift", "unshift", "splice", "sort", "reverse",
+  "fill", "copyWithin",
+]);
 
 /** Lower an expression whose checker type is statically `undefined`/`void`.
  * Optional builtin arguments use this before their ordinary expected-type
@@ -97,6 +114,44 @@ function lowerOptionalDefaultArg(
     if (L.chainBlocked(access, call)) return null;
     const name = access.name.text;
     if (!ARRAY_METHODS.has(name) && name !== "sort" && name !== "shift" && name !== "splice") return null;
+    // An IN-PLACE array method whose receiver is an ASSERTION over a
+    // checked-dynamic value — `(u as number[]).push(x)`, `.sort()`,
+    // `.splice(i, n)`.  Recovering `number[]` first builds a FRESH ScrArr
+    // (`sc_da_N`), mutates THAT, and drops the mutation in silence; the
+    // asserted receiver is the identity in JS, so Node mutates the array the
+    // program still names.  Routed to the same dynInvoke the dyn-VALUED
+    // receiver below takes, which mutates the real array and keeps
+    // `scr_dyn_static_copy_refuse`'s loud arm for a marked copy.
+    // dynAssertionReceiver's comment carries the whole argument.
+    //
+    // `(u as unknown[]).push(x)` already arrived here — the asserted type is
+    // itself dynamic, so nothing was recovered.  That row was the only one
+    // of the mutating surfaces that was ever right, and this is the rest of
+    // them joining it.
+    //
+    // The READ-ONLY methods are deliberately NOT listed: `map`, `slice`,
+    // `join` and the rest read a copy, which is exact, and recovering gives
+    // them a statically typed element and a statically typed result. The
+    // list is `scr_dyn_invoke.c`'s own in-place set; see the set's own
+    // comment for why `fill` and `copyWithin` are on it even though the dyn
+    // tier refuses them.
+    if (DYN_IN_PLACE_ARRAY_METHODS.has(name) && !call.questionDotToken && !access.questionDotToken) {
+      const dynRecv = dynAssertionReceiver(L, access.expression);
+      if (dynRecv !== null) {
+        if (call.arguments.some((a) => ts.isSpreadElement(a))) {
+          L.unsupported("SC1090", call, "spread arguments in calls through 'unknown' values");
+        }
+        return {
+          kind: "dynInvoke",
+          recv: dynRecv,
+          method: name,
+          calleeName: access.getText(),
+          args: call.arguments.map((a) => L.lowerExprExpecting(a, DYN)),
+          type: DYN,
+          loc: locOf(call),
+        };
+      }
+    }
     let receiverIr = L.mapTypeOf(L.typeOf(access.expression));
     // A checker-`any[]` receiver (the readonly-array Array.isArray quirk)
     // whose VALUE lowers to a real static array (maybeNarrow's isArray
