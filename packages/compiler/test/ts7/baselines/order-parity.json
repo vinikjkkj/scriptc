@@ -8964,6 +8964,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5850-a-guarded-keyed-read-cannot-miss.ts": {
+   "order": [
+    "<repo>/tests/corpus/5850-a-guarded-keyed-read-cannot-miss.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
