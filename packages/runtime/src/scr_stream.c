@@ -174,6 +174,12 @@ struct ScrStreamState {
      *                  scr_stream_destroy_done once the generator settles */
     ScrGen *agen;
     bool agen_reading, agen_closing;
+    /* Did the LAST push answer true (Node's from() loop would have gone
+     * round again)? It decides one thing only, and see the close sink for
+     * why it has to: whether a `.return()` the generator answered
+     * done:false gets the extra `.next()` that runs the rest of its
+     * `finally`. */
+    bool agen_more;
     ScrError *agen_close_err;
     /* The parked for-await next() promise (at most one — the loop awaits
      * each chunk before asking again). next_dyn picks the resolution
@@ -1298,8 +1304,9 @@ static void scr_stream_agen_sink(void *ctx, ScrGen *g, bool failed) {
     }
     if (st->destroyed || st->r.ended) {
       scr_stream_entry_release(st, entry);
-    } else if (scr_stream_agen_push(s, entry) && !scr_exc_pending()) {
-      scr_stream_agen_read(s);
+    } else {
+      st->r.agen_more = scr_stream_agen_push(s, entry);
+      if (st->r.agen_more && !scr_exc_pending()) scr_stream_agen_read(s);
     }
   }
   scr_stream_agen_request_done(s);
@@ -1343,6 +1350,29 @@ static void scr_stream_agen_close(ScrStream *s, ScrError *err) {
 static void scr_stream_agen_close_sink(void *ctx, ScrGen *g, bool failed) {
   ScrStream *s = (ScrStream *)ctx;
   ScrStreamState *st = s->st;
+  if (!failed && !scr_gen_done(g) && st->r.agen_more) {
+    /* The close answered done:false, which means the generator YIELDED
+     * OUT OF ITS `finally` and is still suspended there. Node runs the
+     * rest of that finally, and not by design: its from() pump had
+     * already gone round the loop past the push that destroyed the
+     * stream, so an `iterator.return()` is followed by exactly one more
+     * `iterator.next()` -- measured against v25.9.0 with a hand-written
+     * async iterator that logs each call, which answers
+     * `next#1, return(), next#2`. Reproduced here under the same
+     * condition (that push answered true) and bounded the same way: one
+     * extra pull, because Node's next push lands on a destroyed stream,
+     * answers false, and ends its loop.
+     *
+     * It also keeps the RC audit meaningful for this shape: a generator
+     * abandoned mid-finally leaves a fiber that never resumes, and the
+     * audit returns without auditing when one exists. */
+    st->r.agen_more = false;
+    scr_gen_out_drop(g);
+    scr_stream_agen_request(s);
+    scr_agen_next_native(g, &scr_stream_agen_close_sink, s);
+    scr_stream_agen_request_done(s); /* the close request's own reference */
+    return;
+  }
   scr_gen_out_drop(g);
   ScrError *err = st->r.agen_close_err;
   st->r.agen_close_err = NULL;

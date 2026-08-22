@@ -9128,6 +9128,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5943-readable-from-async-generator-pipe.ts": {
+   "order": [
+    "<repo>/tests/corpus/5943-readable-from-async-generator-pipe.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5944-readable-from-async-generator-close-edges.ts": {
+   "order": [
+    "<repo>/tests/corpus/5944-readable-from-async-generator-close-edges.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
