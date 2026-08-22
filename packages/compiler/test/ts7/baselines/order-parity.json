@@ -9110,6 +9110,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5940-readable-from-async-generator.ts": {
+   "order": [
+    "<repo>/tests/corpus/5940-readable-from-async-generator.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5941-readable-from-async-generator-backpressure.ts": {
+   "order": [
+    "<repo>/tests/corpus/5941-readable-from-async-generator-backpressure.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5942-readable-from-async-generator-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/5942-readable-from-async-generator-errors.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
