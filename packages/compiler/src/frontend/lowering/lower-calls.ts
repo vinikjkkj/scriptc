@@ -18,7 +18,7 @@ import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerBytesStaticFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerObjectIterOverIndexShape, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
 import { lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDiffieHellmanCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
-import { droppableStatic, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
+import { droppableStatic, dynAssertionReceiver, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { EMITTER_API_MEMBERS, definePropSlotSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
@@ -9886,6 +9886,31 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     // `Object.assign(fn, { props })` whose RESULT type maps to the hybrid
     // (function-with-properties) record: the chalk-shape CONSTRUCTOR.
     if (member === "assign") {
+      // `Object.assign(u as Record<string, unknown>, src)` — an asserted
+      // checked-dynamic TARGET.  Object.assign's whole contract is that it
+      // MUTATES the target and returns it; recovering a static record first
+      // mutates a fresh struct and returns that, so the object the program
+      // still names never sees the source's keys and nothing says so.
+      // Claimed before every static shape path below — the index-signature
+      // walk in particular matches `Record<string, unknown>` exactly and
+      // would take this call.  dynAssertionReceiver's comment carries the
+      // argument; `dyn.assign` copies the members in place and keeps
+      // `scr_dyn_static_copy_refuse`'s loud arm for a marked copy.
+      if (call.arguments.length === 2 && !call.arguments.some((a) => ts.isSpreadElement(a))) {
+        const tAsserted = dynAssertionReceiver(L, call.arguments[0]!);
+        if (tAsserted !== null) {
+          const loc = locOf(call);
+          const source = L.coerceToExpected(L.lowerExpr(call.arguments[1]!), DYN);
+          if (source.type.kind !== "dyn") {
+            L.unsupported(
+              "SC1101",
+              call.arguments[1]!,
+              `merging '${L.fmt(source.type)}' values into an asserted 'unknown' target (the source cannot convert into the checked-dynamic tree)`,
+            );
+          }
+          return { kind: "libCall", fn: "dyn.assign", args: [tAsserted, source], type: DYN, loc };
+        }
+      }
       const hybrid = lowerObjectAssignHybrid(L, call);
       if (hybrid) return hybrid;
       // `Object.assign({}, lit)` — an EMPTY fresh-literal target and one

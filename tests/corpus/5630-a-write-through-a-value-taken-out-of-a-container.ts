@@ -21,12 +21,24 @@
 //     const v = (message as unknown as Record<string, unknown>)[key]
 //     ;(v as Carrier).contextInfo = { stanzaId: "X" }
 //
-// — diverges: Node writes the caller's submessage, scriptc writes a struct
-// `sc_dc_N` freshly allocated out of the dyn and the store is lost in
-// silence. That is how `contextInfo` disappears from a quoted reply on zapo's
-// wire. It is not in this file because this file is byte-compared against
-// Node and that row does not match; it is pinned instead, with its count and
-// its named site, in `tests/harness/payload-alias-accounting.test.ts`.
+// — used to diverge: Node wrote the caller's submessage, scriptc wrote a
+// struct `sc_dc_N` freshly allocated out of the dyn and the store was lost in
+// silence. It stayed out of this file because this file is byte-compared
+// against Node and that row did not match.
+//
+// It matches now. A mutation whose receiver is SYNTACTICALLY an assertion
+// over a checked-dynamic value keeps the receiver dyn instead of recovering
+// a static composite first, so the store reaches the object the program
+// still names. That row and the other nine surfaces of its family live in
+// `tests/corpus/5631-a-mutation-through-an-asserted-unknown.ts`.
+//
+// What is still not here is the same defect reached through a NAME
+// (`const r = u as T; r.k = v`) or across a CALL — including zapo's own
+// two-function spelling, where `pickContextInfoTarget` returns the recovery
+// and `applyContextInfo` writes it. No syntactic rule can see those; they
+// need the recovered value itself to carry its origin. Their count and their
+// named site stay pinned in
+// `tests/harness/payload-alias-accounting.test.ts`.
 
 interface Ctx {
   stanzaId?: string

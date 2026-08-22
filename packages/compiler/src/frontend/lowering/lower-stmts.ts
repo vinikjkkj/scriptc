@@ -24,7 +24,7 @@ import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment } fr
 import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
-import { ctorObjectGlobalValue, isDynSafeReadWidth, isImmutablePrimitiveWidth } from "./lower-exprs.js";
+import { ctorObjectGlobalValue, dynAssertionReceiver, isDynSafeReadWidth, isImmutablePrimitiveWidth } from "./lower-exprs.js";
 import { localTakesWidenedKeyedRead, narrowBridgeUnion, unitArmsOf } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -5609,7 +5609,14 @@ function unionCaseLiteralTest(L: Lowerer, disc: IrExpr, test: IrExpr, loc: SrcLo
         result: yes,
       };
     }
-    const obj = L.lowerExpr(target.expression);
+    // `delete (u as Record<string, unknown>)["k"]` — the DELETE twin of the
+    // asserted-receiver write.  Lowering the assertion would recover a fresh
+    // struct and delete the key out of THAT, leaving the object the program
+    // still names untouched and saying nothing; seeing through the assertion
+    // hands the dyn arm below the object itself.  dynAssertionReceiver's
+    // comment carries the argument.
+    const asserted = dynAssertionReceiver(L, target.expression);
+    const obj = asserted ?? L.lowerExpr(target.expression);
     // A CHECKED-DYNAMIC receiver (`delete this[names[i]]` — pbjs's oneOf
     // setter clearing its siblings; `this` inside a plain JS function
     // expression is untyped): JS's [[Delete]] over the real object, which
@@ -6245,6 +6252,31 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         }
         if (ts.isElementAccessExpression(expr.left)) return L.lowerElementWrite(expr);
         if (ts.isPropertyAccessExpression(expr.left)) {
+          // `(u as {n: number}).n = v` — the DOTTED twin of the keyed write
+          // in lowerElementWrite.  Same argument, same routing:
+          // dynAssertionReceiver's comment carries it.  Claimed before every
+          // receiver-shape path below, because those paths are exactly the
+          // recovery that loses the store.
+          if (!expr.left.questionDotToken) {
+            const dynRecv = dynAssertionReceiver(L, expr.left.expression);
+            if (dynRecv !== null) {
+              const loc = locOf(expr);
+              const key: IrExpr = { kind: "strLit", value: expr.left.name.text, type: STRING, loc };
+              const value = L.coerceToExpected(L.lowerExpr(expr.right), DYN);
+              if (value.type.kind !== "dyn") {
+                L.unsupported(
+                  "SC1101",
+                  expr.right,
+                  `storing '${L.fmt(value.type)}' values through an asserted 'unknown' receiver (the value cannot convert into the checked-dynamic tree)`,
+                );
+              }
+              return {
+                kind: "exprStmt",
+                expr: { kind: "libCall", fn: "dyn.keySet", args: [dynRecv, key, value], type: VOID, loc },
+                loc,
+              };
+            }
+          }
           // `a.length = 0` — the in-place array CLEAR idiom. A general
           // length write is two operations in one spelling: shrinking
           // truncates (dropped elements release), growing appends HOLES,
