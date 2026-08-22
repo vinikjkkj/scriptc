@@ -1062,6 +1062,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "readable.nextChunk": { argTypes: [null], result: VOID },
   "readable.nextChunkDyn": { argTypes: [null], result: VOID },
   "readable.fromArr": { argTypes: [null, BOOL], result: VOID },
+  "readable.fromAgen": { argTypes: [null, BOOL], result: VOID },
   "readable.resume": { argTypes: [null], result: VOID },
   "readable.isPaused": { argTypes: [null], result: BOOL },
   "readable.pipe": { argTypes: [null, null, BOOL], result: VOID },
@@ -4740,6 +4741,21 @@ function validateFunction(
             // No receiver: the seed array leads; the result is the class.
             if (e.args[0]?.type.kind !== "array" || !isStreamObject(e.type)) {
               err(`libCall readable.fromArr must take an array and return a stream class`, e.loc);
+            }
+            break;
+          }
+          if (e.fn === "readable.fromAgen") {
+            // No receiver either: the SOURCE generator leads. The yield
+            // type is checked here and not only in the lowering, because
+            // the runtime pump takes the generator's OUT slot as a
+            // reference and hands it straight to the readable buffer — a
+            // f64 or bool yield would be read as a pointer.
+            const g = e.args[0]?.type;
+            if (g?.kind !== "asyncGenerator" || !isStreamObject(e.type)) {
+              err(`libCall readable.fromAgen must take an async generator and return a stream class`, e.loc);
+            } else if (!(g.yieldT.kind === "string" ||
+                         (g.yieldT.kind === "bytes" && g.yieldT.elem === "u8"))) {
+              err(`libCall readable.fromAgen source yields ${typeKey(g.yieldT)}, not string or bytes<u8>`, e.loc);
             }
             break;
           }

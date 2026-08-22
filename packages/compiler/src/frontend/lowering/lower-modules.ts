@@ -688,6 +688,18 @@ export function collectJsonRequires(L: Lowerer, parts: FileParts[]): void {
         shapeIds.add(rec["shapeId"]);
         pendingShapes.push(rec["shapeId"]);
       }
+      // An async generator's IteratorResult shape is named by a DIFFERENT
+      // key (`resultShapeId` on fn.generator), so the shapeId scan above
+      // walks straight past it. Every resume node carries the record in
+      // its own type, which hid this for as long as a for-await was the
+      // only consumer — but both backends build the SETTLE THUNK from the
+      // function signature alone, and a generator reached only through
+      // `Readable.from` has no resume node anywhere in the module. The
+      // thunk then named a shape the artifacts had dropped.
+      if (typeof rec["resultShapeId"] === "string" && !shapeIds.has(rec["resultShapeId"])) {
+        shapeIds.add(rec["resultShapeId"]);
+        pendingShapes.push(rec["resultShapeId"]);
+      }
       if (typeof rec["unionId"] === "string" && !unionIds.has(rec["unionId"])) {
         unionIds.add(rec["unionId"]);
         pendingUnions.push(rec["unionId"]);

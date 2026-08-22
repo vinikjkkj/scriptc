@@ -1,10 +1,12 @@
 /* The tagged refusals zapo still carries, pinned as SHAPES.
  *
  * WHY THIS FILE EXISTS: `scripts/tu-census.mjs` over zapo's translation
- * unit reports `REFUSAL.tagged 7 statements / 7 ways to die` at SIX source
+ * unit reported `REFUSAL.tagged 7 statements / 7 ways to die` at SIX source
  * sites, and that population is the whole distance between the compiler's
  * standing objective ("no [SCxxxx] throws left in the emitted C") and where
- * it stands. It has been re-measured by a dozen blocks and enumerated in
+ * it stands. One of the six has since closed (`Readable.from` over an async
+ * generator) and moved to the CLOSED list below, which asserts the opposite
+ * direction with the same instrument. It has been re-measured by a dozen blocks and enumerated in
  * prose, but NOTHING IN THE REPOSITORY PINNED IT: no test compiled any of
  * those shapes, so a widening that turned one of them into a silently WRONG
  * answer -- the failure mode this project ranks above every other, because a
@@ -89,23 +91,6 @@ const PLANTS: readonly {
     ].join("\n"),
   },
   {
-    name: "readable-from-an-async-generator",
-    ext: "ts",
-    zapoSite: "src/media/sticker/sticker-pack.ts:140 -- Readable.from(zipChunks(entries))",
-    accept: [{ code: "SC2020", fragment: "Readable.from over a 'AsyncGenerator" }],
-    src: [
-      "import { Readable } from 'node:stream'",
-      "async function* zipChunks(): AsyncGenerator<Uint8Array> {",
-      "  yield new Uint8Array([1, 2, 3])",
-      "}",
-      "export function make(): Readable {",
-      "  return Readable.from(zipChunks())",
-      "}",
-      "console.log(typeof make)",
-      "",
-    ].join("\n"),
-  },
-  {
     name: "an-options-record-carrying-typeof-fetch",
     ext: "ts",
     zapoSite: "src/transport/wa-version-fetcher.ts:211 -- WaFetchLatestMobileVersionOptions = {}",
@@ -162,6 +147,42 @@ const PLANTS: readonly {
   },
 ];
 
+/** Rows that HAVE closed. A closed refusal does not just leave this file —
+ * it changes sides. The plant stays, compiled by the same instrument on
+ * both lanes, and now has to carry ZERO tagged refusals: that is what
+ * distinguishes "the bridge landed" from "the refusal moved somewhere else
+ * in the same program", and it is the only reading that keeps the file's
+ * two-sided contract intact as the population shrinks.
+ *
+ * It does NOT assert the answer is right — the census reads emitted C, not
+ * behaviour. Correctness is the corpus's job, and each row names the
+ * programs that carry it. */
+const CLOSED: readonly {
+  name: string;
+  ext: "ts" | "js" | "cjs";
+  zapoSite: string;
+  provedBy: string;
+  src: string;
+}[] = [
+  {
+    name: "readable-from-an-async-generator",
+    ext: "ts",
+    zapoSite: "src/media/sticker/sticker-pack.ts:140 -- Readable.from(zipChunks(entries))",
+    provedBy: "tests/corpus/5940, 5941 and 5942 (order, back-pressure, close, errors — Node is the oracle)",
+    src: [
+      "import { Readable } from 'node:stream'",
+      "async function* zipChunks(): AsyncGenerator<Uint8Array> {",
+      "  yield new Uint8Array([1, 2, 3])",
+      "}",
+      "export function make(): Readable {",
+      "  return Readable.from(zipChunks())",
+      "}",
+      "console.log(typeof make)",
+      "",
+    ].join("\n"),
+  },
+];
+
 /** The negative control. A refusal count is only meaningful next to a
  * program the same instrument reads as zero. */
 const CLEAN = "function add(a: number, b: number): number { return a + b }\nconsole.log(add(1, 2))\n";
@@ -186,6 +207,7 @@ beforeAll(async () => {
   const lab = await mkdtemp(join(tmpdir(), "scriptc-refusal-shapes-"));
   const all = [
     ...PLANTS.map((p) => ({ name: p.name, ext: p.ext, src: p.src })),
+    ...CLOSED.map((p) => ({ name: p.name, ext: p.ext, src: p.src })),
     { name: "clean-control", ext: "ts" as const, src: CLEAN },
   ];
   for (const p of all) {
@@ -223,6 +245,20 @@ describe("zapo's tagged refusals, as shapes", () => {
       for (const c of ["REFUSAL.tagged", "REFUSAL.untagged", "REFUSAL.uncoded"]) {
         expect(d!.byCat[c] ?? 0, `clean-control:${backend} reports ${c}`).toBe(0);
       }
+    }
+  });
+
+  test.for(CLOSED.map((p) => [p.name, p] as const))("%s (CLOSED)", ([, p]) => {
+    for (const backend of LANES) {
+      const d = CEN.get(`${p.name}:${backend}`);
+      expect(d, `${p.name}:${backend}: the census produced no JSON`).not.toBeNull();
+      expect(d!.lane, `${p.name}:${backend}: wrong lane`).toBe(backend);
+      const tagged = d!.rows.filter((r) => r.cat === "REFUSAL.tagged");
+      expect(
+        tagged.map((r) => `${r.code} ${r.msg.slice(0, 90)}`),
+        `${p.name}:${backend} refuses again -- zapo's ${p.zapoSite} closed and must stay closed. ` +
+          `Behaviour is pinned by ${p.provedBy}`,
+      ).toEqual([]);
     }
   });
 

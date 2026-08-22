@@ -4706,10 +4706,20 @@ export type IrLibFn =
    * (empty Buffer / dyn undefined), or a rejection with the stream's
    * error. The Dyn twin boxes chunks by runtime tag (the JS lane).
    * readable.fromArr is Readable.from(array): a fully-seeded object-
-   * entry stream (one whole chunk per element; strings per the flag). */
+   * entry stream (one whole chunk per element; strings per the flag).
+   * readable.fromAgen is Readable.from(asyncGenerator): the same
+   * object-entry stream, PULLING one entry per _read from the generator
+   * instead of holding a parked array — Node's from() wrapper, including
+   * its back-pressure (the loop stops when push() answers false) and its
+   * _destroy (the generator is closed, so its finallys run). The second
+   * argument says the yield type is string rather than bytes; the
+   * frontend admits no other yield type, because the runtime pump reads
+   * the generator's OUT slot directly and both of those are reference
+   * kinds it can hand to the readable buffer unchanged. */
   | "readable.nextChunk"
   | "readable.nextChunkDyn"
   | "readable.fromArr"
+  | "readable.fromAgen"
   | "readable.isPaused"
   | "readable.pipe"
   | "readable.unpipe"

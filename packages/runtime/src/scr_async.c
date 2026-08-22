@@ -457,6 +457,15 @@ struct ScrFiber {
    * an UNCAUGHT exception, like Node's queueMicrotask, never a
    * rejection). Owned; NULL on real fibers. */
   ScrClosure *micro_cb;
+  /* The runtime's OWN stackless envelope, on the same queue: a raw hook
+   * plus one owned argument. The native async-generator sink rides it —
+   * a settlement that must reach the main stack a microtask turn later
+   * has no ScrDyn to box, and boxing one would put a cycle-collected
+   * closure on a path the collector never needs to see. Owned: the
+   * envelope releases `micro_arg` through `micro_arg_release`. */
+  void (*micro_raw)(void *);
+  void *micro_arg;
+  void (*micro_arg_release)(void *);
 #ifdef SCR_ASAN_FIBERS
   void *fake_stack;
 #endif
@@ -1752,6 +1761,18 @@ void scr_queue_microtask(ScrClosure *cb) {
   scr_ready_push(f);
 }
 
+/* The runtime-internal twin: `fn(arg)` on the next microtask turn, with
+ * `arg`'s reference moving in (released after fn returns). */
+static void scr_queue_microtask_raw(void (*fn)(void *), void *arg,
+                                    void (*arg_release)(void *)) {
+  ScrFiber *f = calloc(1, sizeof *f);
+  if (!f) scr_oom();
+  f->micro_raw = fn;
+  f->micro_arg = arg;
+  f->micro_arg_release = arg_release;
+  scr_ready_push(f);
+}
+
 /* The checked-dynamic argument form (JS files — common.mustCall wrappers
  * and the suite's invalid-input probes): a non-function throws Node's
  * ERR_INVALID_ARG_TYPE synchronously; a function value is called with
@@ -1802,6 +1823,18 @@ void scr_loop_set_events(bool (*pending)(void), bool (*watching)(void),
 /* ── the event loop ───────────────────────────────────────────────────── */
 
 static void scr_resume_fiber(ScrFiber *f) {
+  /* The runtime's raw envelope (scr_queue_microtask_raw). Same contract as
+   * the queueMicrotask one below: the main stack, no context switch, and a
+   * throw stays pending for the drain site's uncaught report. */
+  if (f->micro_raw != NULL) {
+    void (*fn)(void *) = f->micro_raw;
+    void *arg = f->micro_arg;
+    void (*rel)(void *) = f->micro_arg_release;
+    free(f);
+    fn(arg);
+    if (rel != NULL) rel(arg);
+    return;
+  }
   /* A queueMicrotask envelope: run the closure on the main stack, no
    * context switch. A throw leaves the exception cell pending — every
    * drain site returns to main's uncaught report, Node's queueMicrotask
@@ -2668,7 +2701,40 @@ struct ScrGen {
    * entry point is then unreachable by construction. */
   void (*settle)(ScrGen *, ScrPromise *);
   ScrPromise *pending;
+  /* ── the NATIVE consumer (scr_agen_*_native; see scr_runtime.h) ─────
+   * `sink` is non-NULL exactly while a native request is in flight, and
+   * IS that request — there is no promise. `sink_ctx` is BORROWED and
+   * deliberately untraced (a counted edge from here into a cycle-
+   * collected consumer would hide that consumer's ring from trial
+   * deletion); a consumer being torn down clears both through
+   * scr_agen_sink_detach. `fail` parks a body exception between the
+   * fiber's death and the sink's microtask turn. */
+  ScrAgenSink sink;
+  void *sink_ctx;
+  ScrExcCell fail;
 };
+
+/* Moves a cell's contents (payload ownership included) into another. */
+static void scr_exc_cell_move(ScrExcCell *dst, ScrExcCell *src) {
+  dst->kind = src->kind;
+  dst->f64 = src->f64;
+  dst->b = src->b;
+  dst->payload = src->payload;
+  dst->retain_fn = src->retain_fn;
+  dst->release_fn = src->release_fn;
+  dst->trace_fn = src->trace_fn;
+  src->kind = SCR_EXC_NONE;
+  src->payload = NULL;
+  src->trace_fn = NULL;
+}
+
+/* Drops a parked cell's payload (a settlement nobody is left to receive). */
+static void scr_exc_cell_drop(ScrExcCell *c) {
+  if (c->payload != NULL && c->release_fn != NULL) c->release_fn(c->payload);
+  c->kind = SCR_EXC_NONE;
+  c->payload = NULL;
+  c->trace_fn = NULL;
+}
 
 ScrGen *scr_gen_new(void (*entry)(ScrFiber *, void *), void *argpack,
                      void (*drop_args)(void *)) {
@@ -2724,6 +2790,7 @@ void scr_gen_release(ScrGen *g) {
   scr_gen_slot_reset(&g->out);
   scr_gen_slot_reset(&g->in);
   scr_gen_slot_reset(&g->ret);
+  scr_exc_cell_drop(&g->fail); /* a native settlement nobody received */
   if (g->fiber != NULL) {
     if (g->state == SCR_GEN_UNSTARTED) {
       /* Never ran: nothing on the stack owns anything — clean teardown.
@@ -2913,7 +2980,27 @@ static bool scr_gen_is_async(ScrGen *g) { return g->settle != NULL; }
  * the record the settle thunk builds is the { value, done: true } JS
  * answers. An escaping exception rejects instead — moved out of the
  * fiber's cell exactly like an async function body's. */
+/* Queues the in-flight NATIVE request's delivery for the next microtask
+ * turn. Defined with the other native entry points below; declared here
+ * because both settle paths reach it. */
+static void scr_agen_sink_schedule(ScrGen *g);
+
 static void scr_agen_finish_gen(ScrGen *g, ScrExcCell *cell) {
+  if (g->sink != NULL) {
+    /* A NATIVE consumer: OUT already holds the completion value and the
+     * sink reads `done` off the state, so nothing is built here. The
+     * exception (if any) parks until the sink's turn — it must not stay
+     * in the dying fiber's cell, which is about to be destroyed.
+     *
+     * No await hop, deliberately: JS's AsyncGeneratorCompleteStep resolves
+     * the request WITHOUT awaiting on the completion path (only a `yield`
+     * awaits its operand), so a completion reaches the consumer one turn
+     * sooner than a yield does. */
+    g->state = SCR_GEN_DONE;
+    if (cell->kind != SCR_EXC_NONE) scr_exc_cell_move(&g->fail, cell);
+    scr_agen_sink_schedule(g);
+    return;
+  }
   ScrPromise *p = g->pending;
   g->pending = NULL;
   /* done must read true BEFORE the thunk runs: it answers the record's
@@ -2999,6 +3086,124 @@ static ScrPromise *scr_agen_settled_done(ScrGen *g) {
   return p;
 }
 
+/* ── the native consumer ───────────────────────────────────────────────
+ * The same three resume modes, answering a callback instead of a promise.
+ * The contract is in scr_runtime.h; what lives here is the ownership.
+ */
+
+/* Runs one settled native request on the main stack. The sink slot is
+ * cleared FIRST so the sink may arm the next request from inside it (the
+ * stream pump's read loop does exactly that). */
+static void scr_agen_sink_deliver(void *arg) {
+  ScrGen *g = (ScrGen *)arg;
+  ScrAgenSink sink = g->sink;
+  void *ctx = g->sink_ctx;
+  g->sink = NULL;
+  g->sink_ctx = NULL;
+  if (sink == NULL) {
+    /* The consumer detached while this request was in flight: the value
+     * (or the failure) has nowhere to go. Dropping it is the whole point
+     * of detaching — the alternative is a dangling ctx. */
+    scr_gen_slot_reset(&g->out);
+    scr_exc_cell_drop(&g->fail);
+  } else if (g->fail.kind != SCR_EXC_NONE) {
+    scr_exc_cell_move(scr_exc_current_cell(), &g->fail);
+    sink(ctx, g, true);
+  } else {
+    sink(ctx, g, false);
+  }
+  /* the +1 the request took in scr_agen_native_arm */
+  scr_gen_release(g);
+}
+
+static void scr_agen_sink_schedule(ScrGen *g) {
+  scr_queue_microtask_raw(&scr_agen_sink_deliver, g, NULL);
+}
+
+/* Arms a native request. Aborts on an overlap for the same reason
+ * scr_agen_arm does — there is no request queue, in either direction. */
+static void scr_agen_native_arm(ScrGen *g, ScrAgenSink sink, void *ctx) {
+  if (g->sink != NULL || g->pending != NULL) {
+    fputs("scriptc: internal error: overlapping async generator requests\n", stderr);
+    abort();
+  }
+  g->sink = sink;
+  g->sink_ctx = ctx;
+  /* The request owns a reference for its whole flight, so a consumer may
+   * drop the handle while the body is parked on an await: without this the
+   * ScrGen could reach zero mid-await, and the loop would then resume a
+   * fiber whose back-pointer had just been cleared. */
+  scr_gen_retain(g);
+}
+
+void scr_agen_next_native(ScrGen *g, ScrAgenSink sink, void *ctx) {
+  scr_agen_native_arm(g, sink, ctx);
+  if (g->state == SCR_GEN_DONE) {
+    /* { value: undefined, done: true }, one turn out — the same shape the
+     * settled-promise path answers, minus the record. */
+    scr_gen_slot_reset(&g->out);
+    scr_agen_sink_schedule(g);
+    return;
+  }
+  scr_agen_switch_in(g);
+}
+
+void scr_agen_return_native(ScrGen *g, ScrAgenSink sink, void *ctx) {
+  scr_agen_native_arm(g, sink, ctx);
+  switch (g->state) {
+  case SCR_GEN_DONE:
+    scr_gen_ret_to_out(g);
+    scr_agen_sink_schedule(g);
+    return;
+  case SCR_GEN_UNSTARTED:
+    /* The body never runs; the packed arguments drop through the emitted
+     * helper, exactly as in scr_agen_return. */
+    if (g->drop_args != NULL) g->drop_args(g->fiber->argpack);
+    else free(g->fiber->argpack);
+    scr_fiber_destroy(g->fiber);
+    g->fiber = NULL;
+    scr_fibers_live--;
+    g->state = SCR_GEN_DONE;
+    scr_gen_ret_to_out(g);
+    scr_agen_sink_schedule(g);
+    return;
+  default:
+    if (g->fiber->exc.kind == SCR_EXC_NONE) g->fiber->exc.kind = SCR_EXC_GENRET;
+    scr_agen_switch_in(g);
+    return;
+  }
+}
+
+void scr_agen_throw_native(ScrGen *g, ScrAgenSink sink, void *ctx) {
+  ScrExcCell *mine = scr_exc_current_cell();
+  scr_agen_native_arm(g, sink, ctx);
+  if (g->state == SCR_GEN_DONE || g->state == SCR_GEN_UNSTARTED) {
+    /* The body never sees it and the REQUEST fails with the payload —
+     * exactly what scr_agen_throw does, minus the promise. */
+    if (g->state == SCR_GEN_UNSTARTED) {
+      if (g->drop_args != NULL) g->drop_args(g->fiber->argpack);
+      else free(g->fiber->argpack);
+      scr_fiber_destroy(g->fiber);
+      g->fiber = NULL;
+      scr_fibers_live--;
+      g->state = SCR_GEN_DONE;
+    }
+    scr_exc_cell_move(&g->fail, mine);
+    scr_agen_sink_schedule(g);
+    return;
+  }
+  scr_exc_cell_move(&g->fiber->exc, mine);
+  scr_agen_switch_in(g);
+}
+
+void scr_agen_sink_detach(ScrGen *g) {
+  if (g == NULL) return;
+  g->sink = NULL;
+  g->sink_ctx = NULL;
+}
+
+void scr_gen_out_drop(ScrGen *g) { scr_gen_slot_reset(&g->out); }
+
 ScrPromise *scr_agen_next(ScrGen *g) {
   if (g->state == SCR_GEN_DONE) return scr_agen_settled_done(g);
   ScrPromise *p = scr_agen_arm(g);
@@ -3082,6 +3287,16 @@ ScrPromise *scr_agen_throw(ScrGen *g) {
 static void scr_agen_yield_settle(void) {
   ScrGen *g = scr_gen_self();
   scr_await_hop();
+  if (g->sink != NULL) {
+    /* A NATIVE consumer: the value stays in OUT and the envelope hands it
+     * over on the NEXT microtask turn, on the main stack. Calling the sink
+     * from here would run it on this fiber's stack, inside the yield —
+     * and a stream sink pulls again, which would re-enter the very
+     * generator that is suspended one frame below. */
+    scr_agen_sink_schedule(g);
+    scr_gen_yield_switch();
+    return;
+  }
   ScrPromise *p = g->pending;
   g->pending = NULL;
   if (p != NULL) {

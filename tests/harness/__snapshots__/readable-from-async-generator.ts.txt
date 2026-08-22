@@ -1,17 +1,17 @@
-readable-from-async-generator.ts:39:24 - error SC2020: 'Readable.from over a 'AsyncGenerator<Uint8Array, void, unknown>' source' is part of the standard library types but has no scriptc lowering yet
+readable-from-async-generator.ts:34:24 - error SC2020: 'Readable.from over a 'Generator<Uint8Array, void, unknown>' source' is part of the standard library types but has no scriptc lowering yet
 
-  38 | export function make(): Readable {
-  39 |   return Readable.from(chunks());
-     |                        ^~~~~~~~
-  40 | }
-
-  hint: string[] / Buffer[] arrays (and a single string or Buffer) are the supported sources — generators and async iterables have no lowering yet
-
-readable-from-async-generator.ts:56:24 - error SC2020: 'Readable.from over a 'Generator<Uint8Array, void, unknown>' source' is part of the standard library types but has no scriptc lowering yet
-
-  55 | export function makeSync(): Readable {
-  56 |   return Readable.from(syncChunks());
+  33 | export function makeSync(): Readable {
+  34 |   return Readable.from(syncChunks());
      |                        ^~~~~~~~~~~~
-  57 | }
+  35 | }
 
-  hint: string[] / Buffer[] arrays (and a single string or Buffer) are the supported sources — generators and async iterables have no lowering yet
+  hint: string[] / Buffer[] arrays, a single string or Buffer, and an async generator yielding those are the supported sources — a synchronous generator and the async-iteration protocol have no lowering yet
+
+readable-from-async-generator.ts:50:24 - error SC2020: 'Readable.from over an async generator yielding 'number'' is part of the standard library types but has no scriptc lowering yet
+
+  49 | export function makeNumbers(): Readable {
+  50 |   return Readable.from(numbers());
+     |                        ^~~~~~~~~
+  51 | }
+
+  hint: the lowered source yields strings or Uint8Array/Buffer chunks — the stream buffer holds no other entry shape

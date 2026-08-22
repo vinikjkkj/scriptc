@@ -162,6 +162,25 @@ struct ScrStreamState {
     void **pend;
     size_t pend_n, pend_i;
     bool from_open;
+    /* Readable.from over an ASYNC GENERATOR. Same objectMode delivery as
+     * the parked array above, but the entries do not exist yet: each
+     * _read resumes the generator and the answer arrives a microtask
+     * later. `agen` is OWNED (+1 on the handle). The generator's own
+     * back-pointer to this stream is BORROWED and untraced — see
+     * scr_agen_sink_detach, which the teardown below calls.
+     *   agen_reading  a pull is in flight (Node's from() `reading` flag)
+     *   agen_closing  destroy() is waiting on the generator's close
+     *   agen_close_err the error destroy() carried (owned), replayed to
+     *                  scr_stream_destroy_done once the generator settles */
+    ScrGen *agen;
+    bool agen_reading, agen_closing;
+    /* Did the LAST push answer true (Node's from() loop would have gone
+     * round again)? It decides one thing only, and see the close sink for
+     * why it has to: whether a `.return()` the generator answered
+     * done:false gets the extra `.next()` that runs the rest of its
+     * `finally`. */
+    bool agen_more;
+    ScrError *agen_close_err;
     /* The parked for-await next() promise (at most one — the loop awaits
      * each chunk before asking again). next_dyn picks the resolution
      * shape: a dyn boxed by tag (the JS lane), or bytes. */
@@ -288,6 +307,15 @@ static void scr_stream_state_drop(ScrStreamState *st, bool gc) {
    * the buffered entries above and released the same way. */
   for (size_t i = st->r.pend_i; i < st->r.pend_n; i++) scr_stream_entry_release(st, st->r.pend[i]);
   free(st->r.pend);
+  if (st->r.agen) {
+    /* The sink's ctx is THIS stream: clear it before the memory goes, so a
+     * request still in flight settles into nothing instead of a dangling
+     * pointer. The request holds its own reference to the handle, so this
+     * release cannot free a generator whose fiber is still parked. */
+    scr_agen_sink_detach(st->r.agen);
+    scr_gen_release(st->r.agen);
+  }
+  if (st->r.agen_close_err) scr_error_release(st->r.agen_close_err);
   if (st->r.enc) scr_str_release(st->r.enc);
   if (st->r.push_enc) scr_str_release(st->r.push_enc);
   if (!gc && st->r.next_waiter) scr_promise_release(st->r.next_waiter);
@@ -484,6 +512,8 @@ static void scr_stream_do_destroy(ScrStream *s, ScrError *err /*borrowed*/);
 static void scr_stream_notify_finished(ScrStream *s);
 static void *scr_stream_read_n(ScrStream *s, double size);
 static void scr_stream_settle_next(ScrStream *s);
+static void scr_stream_agen_read(ScrStream *s);
+static void scr_stream_agen_close(ScrStream *s, ScrError *err /*borrowed*/);
 static ScrStream *scr_stream_alloc(const ScrVt *vt, const char *cls, bool has_r, bool has_w,
                                     double rhwm, double whwm, bool auto_destroy,
                                     bool emit_close, bool allow_half_open);
@@ -683,6 +713,16 @@ static void scr_stream_read_threw(ScrStream *s) {
  * ERR_METHOD_NOT_IMPLEMENTED, Node's contract. */
 static void scr_stream_call_read(ScrStream *s) {
   ScrStreamState *st = s->st;
+  if (st->r.read_cb == NULL && st->r.agen != NULL) {
+    /* Readable.from(asyncGenerator): one pull per _read, and only while
+     * none is in flight — Node's from() guards with the same `reading`
+     * flag. The answer arrives through scr_stream_agen_sink, which is
+     * where the push (and the decision to pull again) lives. */
+    st->r.in_read_sync = true;
+    scr_stream_agen_read(s);
+    st->r.in_read_sync = false;
+    return;
+  }
   if (st->r.read_cb == NULL && st->r.object_entries) {
     /* Readable.from: the parked source IS the generator — one entry per
      * _read, then EOF, which is what Node's from() wrapper does. The
@@ -1135,6 +1175,233 @@ ScrPromise *scr_stream_next_chunk(ScrStream *s) {
 
 ScrPromise *scr_stream_next_chunk_dyn(ScrStream *s) {
   return scr_stream_next_chunk_impl(s, true);
+}
+
+/* ── Readable.from over an ASYNC GENERATOR ──────────────────────
+ *
+ * Node's from() wraps the source in a pull loop (lib/internal/streams/
+ * from.js): `_read` starts it if it is not already running, each pass
+ * awaits one `iterator.next()`, and the loop CONTINUES only while
+ * `readable.push(value)` answers true. With objectMode + highWaterMark 1
+ * that answer is false as soon as one entry sits in the buffer, so a
+ * paused consumer stops the generator after exactly one chunk -- the
+ * back-pressure this bridge exists to preserve. Draining the generator
+ * into push() instead would buffer the whole source, and a sticker pack
+ * is the whole point of the call site.
+ *
+ * The three events a byte comparison cannot see, and where each lives:
+ *   ORDER          every settlement lands one microtask turn out
+ *                  (scr_agen_next_native's contract), so a chunk is never
+ *                  delivered earlier than JS delivers it;
+ *   BACK-PRESSURE  scr_stream_agen_push answers Node's push() predicate
+ *                  and the sink pulls again only on true;
+ *   ERRORS         a rejection mid-stream reaches the consumer AT the
+ *                  chunk it replaced, through destroy(err) -- not at the
+ *                  end, and not as a silently short stream.
+ */
+
+/* One entry from the generator into the readable buffer. This is
+ * scr_stream_add_chunk's tail: the entry is already in its final form (no
+ * decode), and the direct-emit fast path DOES apply -- unlike the parked
+ * array branch, this push is the async case that path is for (Node pushes
+ * from a promise continuation, with state.sync false). Answers Node's
+ * push() return: false means stop pulling. Moves entry. */
+static bool scr_stream_agen_push(ScrStream *s, void *entry /*moves*/) {
+  ScrStreamState *st = s->st;
+  st->r.reading = false;
+  if (st->r.flowing == 1 && st->r.length == 0 && !st->r.in_read_sync &&
+      (scr_emitter_has((ScrEmitter *)s, "data") || st->pipes.n > 0)) {
+    if (st->r.emitted_readable) st->r.emitted_readable = false;
+    scr_stream_emit_data(s, entry);
+    scr_stream_entry_release(st, entry);
+    if (scr_exc_pending()) return false;
+  } else {
+    scr_stream_rbuf_push(st, entry, false);
+    if (st->r.need_readable) scr_stream_emit_readable_nt(s);
+  }
+  scr_stream_maybe_read_more(s);
+  scr_stream_settle_next(s); /* a parked for-await consumes it */
+  return !st->r.ended && (st->r.length < st->r.hwm || st->r.length == 0);
+}
+
+static void scr_stream_agen_sink(void *ctx, ScrGen *g, bool failed);
+static void scr_stream_agen_close_sink(void *ctx, ScrGen *g, bool failed);
+
+/* An in-flight request is a ROOT on the stream, and holds a reference for
+ * exactly that reason. In Node the pump is a promise chain that CLOSES
+ * OVER the readable, so a `Readable.from(gen())` whose last user-visible
+ * reference has gone still finishes: the pending job holds it. Without
+ * this the stream was freed the moment its local went out of scope, the
+ * settlement arrived with a detached sink, and the source stalled with
+ * one chunk delivered — silently, exit 0.
+ *
+ * The reference is deliberately NOT a traced edge from the generator.
+ * A counted edge the collector cannot walk, INTO a cycle-collected
+ * object, is what makes a ring through that object read as externally
+ * referenced; here that reading is the true one, because a pending job is
+ * exactly an external root, and it lasts only until the request settles. */
+static void scr_stream_agen_request(ScrStream *s) {
+  scr_stream_retain(s);
+}
+
+static void scr_stream_agen_request_done(ScrStream *s) {
+  scr_stream_release(s);
+}
+
+/* Node's from(): `_read` starts the loop unless one is already running. */
+static void scr_stream_agen_read(ScrStream *s) {
+  ScrStreamState *st = s->st;
+  if (st->r.agen_reading || st->r.agen_closing) return;
+  if (st->destroyed || st->r.ended || st->errored) return;
+  st->r.agen_reading = true;
+  scr_stream_agen_request(s);
+  scr_agen_next_native(st->r.agen, &scr_stream_agen_sink, s);
+}
+
+/* Node's catch arm: `readable.destroy(err)`. Only an ERROR payload has a
+ * representation in the stream's error slot, exactly as in
+ * scr_stream_read_threw -- a thrown number/string keeps propagating and
+ * surfaces as this microtask's uncaught report. That is the loud answer;
+ * inventing an Error around it would be the quiet one. */
+static void scr_stream_agen_failed(ScrStream *s) {
+  if (!scr_exc_pending()) return;
+  ScrExcCell *cell = scr_exc_current_cell();
+  if (cell->kind != SCR_EXC_OBJ || cell->payload == NULL) return;
+  if (!scr_error_is(cell->payload)) return;
+  ScrError *e = scr_error_retain((ScrError *)cell->payload);
+  scr_exc_clear();
+  scr_stream_error_or_destroy(s, e);
+  scr_error_release(e);
+}
+
+/* One settled pull, on the main stack. */
+static void scr_stream_agen_sink(void *ctx, ScrGen *g, bool failed) {
+  ScrStream *s = (ScrStream *)ctx;
+  ScrStreamState *st = s->st;
+  st->r.agen_reading = false;
+  if (st->r.agen_closing) {
+    /* destroy() arrived while this pull was in flight and parked itself
+     * behind it (the runtime keeps no request queue). Whatever came back
+     * is discarded -- the consumer is gone -- and the close goes out now. */
+    if (failed) scr_exc_clear();
+    scr_gen_out_drop(g);
+    scr_stream_agen_close(s, st->r.agen_close_err);
+  } else if (failed) {
+    scr_gen_out_drop(g);
+    scr_stream_agen_failed(s);
+  } else if (scr_gen_done(g)) {
+    /* the generator's RETURN value, which Node's from() discards */
+    scr_gen_out_drop(g);
+    scr_stream_push_null(s);
+  } else {
+    /* The frontend builds this bridge only for a generator whose yield
+     * type is bytes or string, both reference kinds, so OUT is always a
+     * REF here and NULL would mean the two sides disagree on the shape. */
+    void *entry = scr_gen_take_out_ref(g);
+    if (entry == NULL) {
+      fputs("scriptc: internal error: Readable.from generator yielded no value\n", stderr);
+      abort();
+    }
+    if (st->destroyed || st->r.ended) {
+      scr_stream_entry_release(st, entry);
+    } else {
+      st->r.agen_more = scr_stream_agen_push(s, entry);
+      if (st->r.agen_more && !scr_exc_pending()) scr_stream_agen_read(s);
+    }
+  }
+  scr_stream_agen_request_done(s);
+}
+
+/* destroy()'s close step. Node's from()._destroy awaits close(error): with
+ * an error it calls `iterator.throw(error)` -- the generator's own
+ * catch/finally sees it at the suspension point -- and otherwise
+ * `iterator.return()`. Either way 'error'/'close' wait for the answer,
+ * which is why destroy_done is called from the close sink and not here.
+ * Borrows err. */
+static void scr_stream_agen_close(ScrStream *s, ScrError *err) {
+  ScrStreamState *st = s->st;
+  st->r.agen_closing = false;
+  if (st->r.agen_close_err != NULL && st->r.agen_close_err == err) {
+    /* the parked copy IS the argument: its reference moves on */
+    st->r.agen_close_err = NULL;
+  } else if (err != NULL) {
+    err = scr_error_retain(err);
+  }
+  ScrGen *g = st->r.agen;
+  if (scr_gen_done(g)) {
+    scr_stream_destroy_done(s, err); /* moves */
+    return;
+  }
+  scr_stream_agen_request(s);
+  if (err != NULL) {
+    st->r.agen_close_err = err; /* replayed by the close sink */
+    /* the injected payload: pending in the cell, scr_agen_throw's contract */
+    scr_throw_obj(scr_error_retain(err), &scr_error_retain_v, &scr_error_release_v,
+                  scr_error_trace_arg());
+    scr_agen_throw_native(g, &scr_stream_agen_close_sink, s);
+    return;
+  }
+  scr_agen_return_native(g, &scr_stream_agen_close_sink, s);
+}
+
+/* The close request settled: the generator has run its finallys (or
+ * rethrown). Node hands `e || error` to the destroy callback -- a
+ * generator that rethrows what it was given lands the SAME error. */
+static void scr_stream_agen_close_sink(void *ctx, ScrGen *g, bool failed) {
+  ScrStream *s = (ScrStream *)ctx;
+  ScrStreamState *st = s->st;
+  if (!failed && !scr_gen_done(g) && st->r.agen_more) {
+    /* The close answered done:false, which means the generator YIELDED
+     * OUT OF ITS `finally` and is still suspended there. Node runs the
+     * rest of that finally, and not by design: its from() pump had
+     * already gone round the loop past the push that destroyed the
+     * stream, so an `iterator.return()` is followed by exactly one more
+     * `iterator.next()` -- measured against v25.9.0 with a hand-written
+     * async iterator that logs each call, which answers
+     * `next#1, return(), next#2`. Reproduced here under the same
+     * condition (that push answered true) and bounded the same way: one
+     * extra pull, because Node's next push lands on a destroyed stream,
+     * answers false, and ends its loop.
+     *
+     * It also keeps the RC audit meaningful for this shape: a generator
+     * abandoned mid-finally leaves a fiber that never resumes, and the
+     * audit returns without auditing when one exists. */
+    st->r.agen_more = false;
+    scr_gen_out_drop(g);
+    scr_stream_agen_request(s);
+    scr_agen_next_native(g, &scr_stream_agen_close_sink, s);
+    scr_stream_agen_request_done(s); /* the close request's own reference */
+    return;
+  }
+  scr_gen_out_drop(g);
+  ScrError *err = st->r.agen_close_err;
+  st->r.agen_close_err = NULL;
+  if (failed) {
+    ScrExcCell *cell = scr_exc_current_cell();
+    if (cell->kind == SCR_EXC_OBJ && cell->payload != NULL && scr_error_is(cell->payload)) {
+      if (err) scr_error_release(err);
+      err = scr_error_retain((ScrError *)cell->payload);
+      scr_exc_clear();
+    }
+    /* a non-Error rejection out of the close keeps propagating
+     * (scr_stream_agen_failed's stance) and the destroy error still speaks */
+  }
+  scr_stream_destroy_done(s, err); /* moves */
+  scr_stream_agen_request_done(s);
+}
+
+/* +1 stream pulling one entry at a time from `g` (borrowed). objectMode
+ * accounting with hwm 1, like the array form; `strings` says the yielded
+ * entries are ScrStr rather than ScrBytes. */
+ScrStream *scr_stream_from_agen(ScrGen *g, bool strings) {
+  ScrStream *s = scr_stream_alloc(&scr_readable_vt, "Readable", true, false,
+                                   1, -1, true, true, true);
+  ScrStreamState *st = s->st;
+  st->r.object_entries = true;
+  st->r.encoded = strings;
+  if (strings) st->r.enc = scr_str_new("utf8", 4);
+  st->r.agen = scr_gen_retain(g);
+  return s;
 }
 
 /* ── Readable.from (array-seeded object-entry streams) ────────────────── */
@@ -2913,6 +3180,20 @@ static void scr_stream_do_destroy(ScrStream *s, ScrError *err /*borrowed*/) {
   st->destroyed = true;
   if (err && !st->errored) st->errored = scr_error_retain(err);
   scr_stream_settle_next(s); /* a parked for-await rejects/finishes */
+  if (st->r.agen != NULL && !scr_gen_done(st->r.agen)) {
+    /* Node's from() gives the stream its own _destroy: 'error'/'close'
+     * wait for the source generator to close, so a destroy() mid-stream
+     * runs the generator's finally BEFORE the consumer sees 'close'. */
+    if (st->r.agen_reading) {
+      /* a pull is still in flight and there is no request queue: park the
+       * close behind it (scr_stream_agen_sink issues it) */
+      st->r.agen_closing = true;
+      if (err && !st->r.agen_close_err) st->r.agen_close_err = scr_error_retain(err);
+      return;
+    }
+    scr_stream_agen_close(s, err);
+    return;
+  }
   if (st->destroy_cb) {
     st->destroy_calling = true;
     st->destroy_inv(st->destroy_cb, s, err);
