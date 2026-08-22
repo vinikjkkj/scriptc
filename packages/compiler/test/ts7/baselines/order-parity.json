@@ -9140,6 +9140,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5945-for-await-over-a-stream-closes-it.ts": {
+   "order": [
+    "<repo>/tests/corpus/5945-for-await-over-a-stream-closes-it.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
