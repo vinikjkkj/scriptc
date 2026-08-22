@@ -17,14 +17,16 @@ import { dynUndefinedExpr, own, WidthLift } from "./lowerer.js";
 /** The nine in-place Array.prototype methods — `scr_dyn_invoke.c`'s own
  * static-copy list, verbatim.
  *
- * Seven of them are also in DYN_DISPATCH_METHODS and run on the dyn array.
- * `fill` and `copyWithin` are NOT: `dyn_arr_proto_unimpl` names them, so
- * they throw "not supported" before the static-copy guard that also names
- * them can ever fire (two of that guard's nine arms are unreachable —
- * estado-fence.md records it). They are listed here anyway, deliberately:
- * routing them turns a SILENT lost write into that loud refusal, and a
- * refusal is the answer this project prefers to a wrong value. Delisting
- * them would restore the silence, not the capability. */
+ * ALL NINE now run on the dyn array. `fill` and `copyWithin` used to be the
+ * exception: `dyn_arr_proto_unimpl` named them, so they threw "not
+ * supported" before the static-copy guard that also names them could ever
+ * fire, and two of that guard's nine arms were unreachable — estado-fence.md
+ * §3.2 recorded the dead arms and left the routing in place, because a loud
+ * refusal beats a write that vanishes. estado-pinned.md implemented the two
+ * methods on the ARR arm instead, moved their names out of
+ * `dyn_arr_proto_unimpl` and into its `impl` list, and the guard's last two
+ * arms became live: `tests/harness/dyn-asserted-mutation.test.ts` now covers
+ * both the answering half and the refusing half of each. */
 const DYN_IN_PLACE_ARRAY_METHODS = new Set<string>([
   "push", "pop", "shift", "unshift", "splice", "sort", "reverse",
   "fill", "copyWithin",
