@@ -316,7 +316,10 @@ export class ShapeRegistry {
     if (id === undefined) throw new Error("shape registry bug: finalizeRecursive without a placeholder");
     const declaredIndexValue = indexValue;
     indexValue = this.dialIndexValue(fields, false, indexValue);
-    if (indexValue !== declaredIndexValue) this.granted.add(id);
+    if (indexValue !== declaredIndexValue && !this.granted.has(id)) {
+      this.recordUndo(id, () => this.granted.delete(id));
+      this.granted.add(id);
+    }
     if (this.pendingRec.has(id)) {
       const shape = this.byId.get(id)!;
       // A placeholder minted BEFORE an open speculative attempt is not the
@@ -329,7 +332,6 @@ export class ShapeRegistry {
         delete shape.indexValue;
         delete shape.declaredOrder;
         this.pendingRec.add(id);
-        this.granted.delete(id);
       });
       shape.fields = fields;
       if (indexValue) shape.indexValue = indexValue;
@@ -343,7 +345,14 @@ export class ShapeRegistry {
 `,
         );
       }
-      if (!this.byKey.has(key)) this.byKey.set(key, id);
+      // The KEY claim goes with the finalization: undoing one without the
+      // other would leave a structural key pointing at a placeholder that is
+      // pending again, and the next intern of that field list would answer
+      // with an empty shape.
+      if (!this.byKey.has(key)) {
+        this.byKey.set(key, id);
+        this.recordUndo(id, () => this.byKey.delete(key));
+      }
     }
     return id;
   }
@@ -556,7 +565,12 @@ export class UnionRegistry {
       def.arms.push(...arms);
       this.pendingRec.delete(id);
       const key = JSON.stringify(arms.map(typeKey));
-      if (!this.byKey.has(key)) this.byKey.set(key, id);
+      // See ShapeRegistry.finalizeRecursive: the key claim is part of the
+      // finalization, not separate from it.
+      if (!this.byKey.has(key)) {
+        this.byKey.set(key, id);
+        this.recordUndo(id, () => this.byKey.delete(key));
+      }
       this.foldArmLits(def, armLits);
     }
     return id;
@@ -3748,17 +3762,27 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       const auditBefore = specAuditOn
         ? { s: ctx.shapes.auditState(), u: ctx.unions.auditState(), log: specAuditLog.length }
         : null;
-      const erased = constraintErasedCtx(sig, ctx);
-      if (!erased) {
-        if (auditBefore) specAuditReport("CONSTRAINT", ctx.unions, ctx.shapes, sMark, uMark, auditBefore);
-        ctx.unions.rollback(uMark);
-        ctx.shapes.rollback(sMark);
-        return null;
+      // The mark is closed EXACTLY ONCE, including on a throw. It has to be
+      // a `finally`: mapType runs inside this attempt and a PoisonError out
+      // of it is CAUGHT and the compile CONTINUES (lowerer.ts's generic
+      // instance and emit-override loops), so an attempt left open would
+      // sit on the registries' LIFO stack and be popped by somebody else's
+      // rollback, undoing a range that was never speculative.
+      let erased: TypeMapperCtx | null = null;
+      try {
+        erased = constraintErasedCtx(sig, ctx);
+      } finally {
+        if (erased === null) {
+          if (auditBefore) specAuditReport("CONSTRAINT", ctx.unions, ctx.shapes, sMark, uMark, auditBefore);
+          ctx.unions.rollback(uMark);
+          ctx.shapes.rollback(sMark);
+        } else {
+          // The constraints mapped, so what the attempt interned stands.
+          ctx.unions.commit();
+          ctx.shapes.commit();
+        }
       }
-      // Every mark is closed exactly once: the constraints mapped, so what
-      // the attempt interned stands.
-      ctx.unions.commit();
-      ctx.shapes.commit();
+      if (erased === null) return null;
       ctx = erased;
     }
     // A SYNTHESIZED rest param (tsc's JS inference for a function body
