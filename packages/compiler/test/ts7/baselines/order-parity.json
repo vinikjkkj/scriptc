@@ -9044,6 +9044,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5911-prototype-ctor-backlink-is-non-enumerable.js": {
+   "order": [
+    "<repo>/tests/corpus/5911-prototype-ctor-backlink-is-non-enumerable.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
