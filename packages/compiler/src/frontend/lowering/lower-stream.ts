@@ -1270,7 +1270,7 @@ export function lowerStreamStaticCall(L: Lowerer, call: ts.CallExpression,
   L.noLowering(
     `Readable.from over a '${srcT ? L.fmt(srcT) : L.checker.typeToString(L.typeOf(args[0]!))}' source`,
     args[0]!,
-    "string[] / Buffer[] arrays (and a single string or Buffer) are the supported sources — generators and async iterables have no lowering yet",
+    "string[] / Buffer[] arrays, a single string or Buffer, and an async generator yielding those are the supported sources — a synchronous generator and the async-iteration protocol have no lowering yet",
   );
 }
 
