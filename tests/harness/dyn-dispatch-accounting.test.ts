@@ -67,11 +67,14 @@ const NOT_ROUTED: ReadonlyMap<string, string> = new Map([
   // from the encoding-aware path.
   ["toString", "claimed by the dedicated dyn.toString / dyn.toStringRange lowerings"],
   ["flatMap", "claimed by lowerDynArrayFlatMapCall before the dispatch set"],
-  // Mentioned ONLY by the static-copy guard and listed in
-  // dyn_arr_proto_unimpl: the compile-time fence is the better answer and
-  // this is what keeps it.
-  ["fill", "no implementation — the ARR arm's unimplemented list keeps the compile-time fence"],
-  ["copyWithin", "no implementation — same"],
+  // `fill` and `copyWithin` USED to sit here, classified "no
+  // implementation — the ARR arm's unimplemented list keeps the
+  // compile-time fence". They are implemented and routed now, so they are
+  // gone from this list rather than left with a reason that stopped being
+  // true: that pair was the exact shape this map exists to prevent —
+  // mentioned only by the static-copy guard, listed in
+  // dyn_arr_proto_unimpl, and therefore two guard arms that could never
+  // fire (estado-fence.md §3.2, closed in estado-pinned.md).
   // Function.prototype.bind over a dyn callee has no representation yet;
   // the FUNC arm names it only to refuse loudly if it is ever reached
   // through `f.bind.call(...)`.

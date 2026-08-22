@@ -5888,6 +5888,19 @@ export const DYN_DISPATCH_METHODS = new Set<string>([
   // place (dyn_object_proto_method).
   "valueOf",
   "push", "pop", "shift", "unshift", "slice", "splice", "at",
+  // fill and copyWithin joined the routed set when the ARR arm started
+  // ANSWERING them. They were the two names that sat in
+  // `dyn_arr_proto_unimpl` while the static-copy guard also named them, so
+  // two of that guard's nine arms were unreachable (estado-fence.md §3.2)
+  // and `<dyn>.fill(0)` was an SC1090 compile fence for a capability that
+  // did not exist. It exists now, so the fence would be the other failure
+  // mode this board keeps finding — a refusal in front of a working
+  // implementation. Routing can only move cells TRAP -> MATCH here: the
+  // dotted spelling refused at COMPILE time before, so no program that
+  // compiles today changes answer. On a non-ARR dyn the name meets the
+  // same loud ladder every other routed in-place name meets
+  // (scr_dyn_bytes_proto_name lists both for BYTES).
+  "fill", "copyWithin",
   "indexOf", "lastIndexOf", "includes", "join", "concat", "reverse", "sort",
   "forEach", "map", "filter", "some", "every", "find", "findIndex",
   // The native-handle receiver surface (SCR_DYN_HANDLE — req/res/socket

@@ -6142,11 +6142,35 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         // JAVASCRIPT `new Map()` whose arguments never resolved past
         // Map<any, any> (no annotation, no contextual type, no seed): the
         // WeakMap stance below — the VALUE lowers as an opaque dyn object
-        // (identity and truthiness are real), and every reached METHOD use
-        // meets its own per-site fence at runtime. The formatter's
-        // config-cache shape: module init constructs the caches
-        // unconditionally; the format path never touches them. TypeScript
-        // keeps the compile fence.
+        // (identity and truthiness are real). The formatter's config-cache
+        // shape: module init constructs the caches unconditionally; the
+        // format path never touches them. TypeScript keeps the compile
+        // fence.
+        //
+        // THIS COMMENT USED TO SAY "and every reached METHOD use meets its
+        // own per-site fence at runtime", AND THAT IS NOT WHAT HAPPENS.
+        // The value is a plain SCR_DYN_OBJ with no member table entry for
+        // `set`, so `m.set("a", 1)` answers V8's own
+        // `TypeError: m.set is not a function` — the mis-answer for a
+        // method Node HAS, which is exactly what `scr_dyn_bytes_proto_name`
+        // exists to prevent one kind over ("these fence loudly instead of
+        // mis-answering Node's is-not-a-function for a method Node HAS")
+        // and what the SCR_DYN_MAP read arm calls "the OBJINST arm's silent
+        // wrong answer, one kind over". Node answers `1 1` for
+        // `const m = new Map(); m.set("a",1); console.log(m.get("a"), m.size)`;
+        // both backends exit 1 on that line. estado-ctorattr.md §4.2 (p34)
+        // recorded the symptom without diagnosing it; estado-pinned.md
+        // diagnoses it here and prices the close.
+        //
+        // WHY IT IS NOT CLOSED HERE. Boxing the value as a real
+        // SCR_DYN_MAP needs an ScrMap whose keys are dynamic values
+        // compared by SameValueZero across kinds, and ScrMapKeyKind is
+        // {F64, STR, REF} — REF is pointer identity, which answers `false`
+        // for two equal numbers. Fencing the METHOD USE at compile time is
+        // the other candidate and is WORSE: this escape hatch exists for a
+        // program that constructs the map and never touches it, and a
+        // compile fence on a branch never taken would turn a working
+        // program into a refusal (MATCH -> TRAP).
         if (
           isJsSourceFile(expr.getSourceFile()) &&
           (expr.arguments?.length ?? 0) === 0 &&

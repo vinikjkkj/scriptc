@@ -114,6 +114,31 @@ console.log(JSON.stringify(d));`],
   ["array-splice", `const d: unknown = JSON.parse('[1,2,3]');
 (d as number[]).splice(1, 1);
 console.log(JSON.stringify(d));`],
+  // fill and copyWithin were the two rows this file used to pin as LOUD:
+  // `dyn_arr_proto_unimpl` claimed both names, so they threw "not
+  // supported" before the static-copy guard that ALSO named them could
+  // fire, and two of that guard's nine arms were unreachable. The dyn ARR
+  // arm answers them now (estado-pinned.md), so they are ordinary LANDS
+  // rows — and the two guard arms below are live coverage instead of dead
+  // text. Both answer the RECEIVER, not a copy, which is why each row
+  // prints the method's own result as well as the dyn read back.
+  ["array-fill", `const d: unknown = JSON.parse('[1,2,3]');
+(d as number[]).fill(0);
+console.log(JSON.stringify(d));`],
+  ["array-fill-ranged", `const d: unknown = JSON.parse('[1,2,3,4,5]');
+console.log(JSON.stringify((d as number[]).fill(9, 1, 3)));
+console.log(JSON.stringify(d));`],
+  ["array-fill-negative", `const d: unknown = JSON.parse('["a","b","c","d"]');
+console.log(JSON.stringify((d as string[]).fill("z", -2)));
+console.log(JSON.stringify(d));`],
+  ["array-copywithin", `const d: unknown = JSON.parse('[1,2,3,4,5]');
+console.log(JSON.stringify((d as number[]).copyWithin(0, 3)));
+console.log(JSON.stringify(d));`],
+  ["array-copywithin-overlap", `const d: unknown = JSON.parse('[1,2,3,4,5]');
+console.log(JSON.stringify((d as number[]).copyWithin(1, 0, 3)));
+console.log(JSON.stringify(d));`],
+  ["array-copywithin-noop", `const d: unknown = JSON.parse('[1,2,3]');
+console.log(JSON.stringify((d as number[]).fill(7, 10)), JSON.stringify((d as number[]).copyWithin(0, 9)));`],
   ["delete-key", `const d: unknown = JSON.parse('{"k":1,"j":2}');
 delete (d as Record<string, unknown>)["k"];
 console.log(JSON.stringify(d));`],
@@ -151,27 +176,38 @@ describe.each(["c", "llvm"] as const)("a mutation through an asserted 'unknown' 
 });
 
 describe.each(["c", "llvm"] as const)("the surfaces that stay LOUD rather than silent (%s backend)", (backend) => {
-  /* `fill` and `copyWithin` are named by `scr_dyn_invoke.c`'s static-copy
-   * guard AND by `dyn_arr_proto_unimpl`, and the second one wins: they throw
-   * "not supported" before the guard that also names them can fire, so two
-   * of that guard's nine arms are unreachable. They are routed here anyway,
-   * deliberately — the choice is between a loud refusal and a write that
-   * vanishes, and this project prefers the refusal. If the dyn tier ever
-   * implements them, this test flips to a LANDS row rather than being
-   * deleted. */
-  test("(u as number[]).fill(0) refuses loudly instead of losing the write", { timeout: 240_000 }, async () => {
-    const src = `const d: unknown = JSON.parse('[1,2,3]');
-(d as number[]).fill(0);
-console.log(JSON.stringify(d));`;
-    const { node, exe } = await bothWays("array-fill", backend, src);
-    expect(node.code).toBe(0);
-    expect(node.out.trim()).toBe("[0,0,0]");
-    // Loud: a non-zero exit carrying a refusal, NOT a zero exit printing the
-    // unmutated array (which is what this row did before).
-    expect(exe.code).not.toBe(0);
-    expect(exe.out).not.toContain("[1,2,3]");
-    expect(exe.err).toMatch(/not supported/);
-  });
+  /* THE TWO ARMS THAT USED TO BE UNREACHABLE. `scr_dyn_invoke.c`'s
+   * static-copy guard names nine in-place array methods; `fill` and
+   * `copyWithin` were also named by `dyn_arr_proto_unimpl`, which is
+   * consulted first, so those two arms of the guard could never fire —
+   * capability present and unreachable, the failure mode this board keeps
+   * finding. estado-fence.md §3.2 recorded them as dead text and left the
+   * lowering routing them anyway, so the answer was a "not supported"
+   * refusal rather than a lost write.
+   *
+   * Both methods are implemented on the dyn ARR arm now, so the names left
+   * `dyn_arr_proto_unimpl` for the `impl` list beside `push`/`sort`/the
+   * rest. The LANDS rows above cover the answering half. THESE two cover
+   * the arms: a marked static copy must still refuse, BY NAME, and until
+   * this commit neither of these two lines could reach the guard at all.
+   * If either stops refusing, an in-place write is landing on a copy of an
+   * object the program still names — the silence this whole file exists
+   * to prevent. */
+  test.for([["fill", "(d as number[]).fill(0)"], ["copyWithin", "(d as number[]).copyWithin(0, 1)"]] as const)(
+    "a marked static copy refuses %s by name (the arm that could not fire)",
+    { timeout: 240_000 },
+    async ([name, call]) => {
+      const src = `const o = [1, 2, 3];
+const u: unknown = o;
+${call.replace("d as", "u as")};
+console.log(JSON.stringify(o));`;
+      const { node, exe } = await bothWays(`marked-copy-${name}`, backend, src);
+      expect(node.code, `Node failed to run the cell:\n${node.err}`).toBe(0);
+      expect(exe.code).not.toBe(0);
+      expect(exe.err).toContain(`calling '${name}'`);
+      expect(exe.err).toMatch(/crossed into an 'unknown' \(dynamic\) slot/);
+    },
+  );
 
   /* The static->dyn half of the same boundary, reached through the SAME
    * lowering. `o` is a static record the program still names, so the
@@ -217,32 +253,254 @@ console.log(JSON.stringify(d));`;
   /* A DIFFERENT family, found by walking into it while measuring this one,
    * and pinned here because nothing else covers it.
    *
-   * Recovering an INTERSECTION of an index signature and a declared field
-   * emits the declared field FIRST and the index-signature keys after it,
-   * whatever order the source object carries them in. Node's
-   * OrdinaryOwnPropertyKeys is insertion order for non-index string keys, so
-   * `{"k":1,"j":2}` recovered as `Record<string, unknown> & { j: number }`
-   * must still enumerate `k,j`; both backends answer `j,k`. Silent: the
-   * process exits 0 and every key is present, only the order is wrong — and
-   * key order is observable through JSON.stringify, Object.keys, for-in and
-   * util.inspect alike (tests/corpus/2765 is the rule).
+   * A record shape that carries BOTH an index signature AND at least one
+   * declared member emits the declared members FIRST and the
+   * index-signature keys after them, whatever order the source object
+   * carries them in. Node's OrdinaryOwnPropertyKeys is insertion order for
+   * non-index string keys, so `{"k":1,"j":2}` recovered as
+   * `Record<string, unknown> & { j: number }` must still enumerate `k,j`;
+   * both backends answer `j,k`. Silent: the process exits 0 and every key
+   * is present, only the order is wrong — and key order is observable
+   * through JSON.stringify, Object.keys, for-in and util.inspect alike
+   * (tests/corpus/2765 is the rule).
+   *
+   * ESTADO-FENCE.MD §3.1 NAMED THIS FAMILY "AN INTERSECTION RECOVERY", AND
+   * THAT IS THE WRONG NAME — the second row below is the plain INTERFACE
+   * spelling `{ j: number; [k: string]: unknown }`, no intersection
+   * anywhere, and it is wrong identically. What makes the family is the
+   * index signature plus one declared member. The third row is the
+   * CONTROL that bounds it: with NO declared member the overflow map keeps
+   * the source's own order and the recovery is EXACT, which is why the
+   * fix cannot be "stop emitting declared fields first" applied blindly.
    *
    * It is NOT caused by the assertion reroute and needs no assertion
-   * receiver to reach — there is no mutation in the cell at all. It is
-   * reported in estado-fence.md; this test asserts the current WRONG answer
-   * so that closing it announces itself. */
-  test("an intersection recovery reorders keys (both backends) — a separate open defect", { timeout: 480_000 }, async () => {
-    const src = `const d: unknown = JSON.parse('{"k":1,"j":2}');
+   * receiver to reach — there is no mutation in any of the cells. Since
+   * this commit the compiler at least SAYS so: SC6002's risk walk used to
+   * skip every index-signature shape and now advises on exactly the ones
+   * with a declared member. The wrong bytes are still the wrong bytes;
+   * closing them needs a record to carry a per-instance key ORDER, priced
+   * in estado-pinned.md. These tests assert the current WRONG answer so
+   * that closing it announces itself. */
+  test.for([
+    ["intersection-key-order", `const d: unknown = JSON.parse('{"k":1,"j":2}');
 const back = d as Record<string, unknown> & { j: number };
-console.log(JSON.stringify(back), Object.keys(back).join(","));`;
+console.log(JSON.stringify(back), Object.keys(back).join(","));`, '{"k":1,"j":2} k,j', '{"j":2,"k":1} j,k'],
+    ["interface-index-key-order", `interface WithIx { j: number; [k: string]: unknown }
+const d: unknown = JSON.parse('{"k":1,"j":2}');
+const back = d as WithIx;
+console.log(JSON.stringify(back), Object.keys(back).join(","));`, '{"k":1,"j":2} k,j', '{"j":2,"k":1} j,k'],
+  ] as const)("%s reorders keys (both backends) — a separate open defect", { timeout: 480_000 }, async ([name, src, want, wrong]) => {
     for (const backend of ["c", "llvm"] as const) {
-      const { node, exe } = await bothWays("intersection-key-order", backend, src);
-      expect(node.out.trim()).toBe('{"k":1,"j":2} k,j');
+      const { node, exe } = await bothWays(name, backend, src);
+      expect(node.out.trim()).toBe(want);
       expect(exe.code, `${backend}: ${exe.err}`).toBe(0);
       expect(
         exe.out.trim(),
-        `${backend}: if this now matches Node the defect is CLOSED — delete this test`,
-      ).toBe('{"j":2,"k":1} j,k');
+        `${backend}: if this now matches Node the defect is CLOSED — move this row into the control below`,
+      ).toBe(wrong);
+    }
+  });
+
+  /* THE CONTROL, and it is not pinned — it MATCHES. An index signature with
+   * NO declared member recovers in the source's own order on both backends,
+   * because the overflow map is a real per-instance table that keeps
+   * insertion order. It is here so that a future fix for the two rows above
+   * cannot quietly break the half that was always right. */
+  test("an index signature with NO declared member keeps the source order", { timeout: 480_000 }, async () => {
+    const src = `const d: unknown = JSON.parse('{"k":1,"j":2,"a":3}');
+const back = d as Record<string, unknown>;
+console.log(JSON.stringify(back), Object.keys(back).join(","));`;
+    for (const backend of ["c", "llvm"] as const) {
+      const { node, exe } = await bothWays("index-only-key-order", backend, src);
+      expect(node.out.trim()).toBe('{"k":1,"j":2,"a":3} k,j,a');
+      expect(exe.code, `${backend}: ${exe.err}`).toBe(0);
+      expect(exe.out).toBe(node.out);
+    }
+  });
+});
+
+/* THE STATIC HALF OF THE SAME SENTENCE, and there is no `unknown` anywhere
+ * in any of these programs.
+ *
+ * `as` is the IDENTITY in JS. A record is a monomorphic C struct, so an
+ * assertion BETWEEN TWO STATIC SHAPES materialised a value of the target
+ * shape (`sc_f_%rec_width_N` building a fresh `sc_rnew_rB`) and the store
+ * landed on that temporary: exit 0, no diagnostic, and the object the
+ * program still names unchanged. estado-fence.md §3.3 found it while
+ * closing the dynamic half, called it a THIRD silent wrong answer, and left
+ * it open — its point being that the family is larger than "the dynamic
+ * boundary": it is ANY shape-crossing assertion.
+ *
+ * `staticAssertionReceiver` closes it for the case that cannot invent an
+ * answer: the field being written must already exist on the OPERAND's own
+ * shape at an identical lowered type. The last two tests pin what that
+ * deliberately leaves open. */
+describe.each(["c", "llvm"] as const)("a write through a STATIC assertion reaches the object (%s backend)", (backend) => {
+  const STATIC_LANDS: Array<[string, string]> = [
+    ["st-widen", `interface A { n: number }
+interface B { n: number; m?: number }
+const a: A = { n: 1 };
+(a as B).n = 7;
+console.log(JSON.stringify(a));`],
+    ["st-narrow", `interface A { n: number; m: number }
+interface B { n: number }
+const a: A = { n: 1, m: 2 };
+(a as B).n = 7;
+console.log(JSON.stringify(a));`],
+    ["st-string-field", `interface A { s: string }
+interface B { s: string; m?: number }
+const a: A = { s: "x" };
+(a as B).s = "y";
+console.log(JSON.stringify(a));`],
+    ["st-nested-record", `interface Inner { v: number }
+interface A { i: Inner }
+interface B { i: Inner; m?: number }
+const a: A = { i: { v: 1 } };
+(a as B).i = { v: 9 };
+console.log(JSON.stringify(a));`],
+    ["st-double-assertion", `interface A { n: number }
+interface B { n: number; m?: number }
+const a: A = { n: 1 };
+((a as unknown) as B).n = 7;
+console.log(JSON.stringify(a));`],
+    ["st-through-param", `interface A { n: number }
+interface B { n: number; m?: number }
+function f(x: A): void { (x as B).n = 7; }
+const a: A = { n: 1 };
+f(a);
+console.log(JSON.stringify(a));`],
+    ["st-optional-source", `interface A { n?: number }
+interface B { n?: number; m?: number }
+const a: A = { n: 1 };
+(a as B).n = 7;
+console.log(JSON.stringify(a));`],
+    ["st-destructuring-assign", `interface A { n: number }
+interface B { n: number; m?: number }
+const a: A = { n: 1 };
+[(a as B).n] = [7];
+console.log(JSON.stringify(a));`],
+    // The BRACKET spelling of the same write — a separate lowering path
+    // (lowerElementWrite's literal-key arm), and it was silently wrong too.
+    ["st-element-access", `interface A { n: number }
+interface B { n: number; m?: number }
+const a: A = { n: 1 };
+(a as B)["n"] = 7;
+console.log(JSON.stringify(a));`],
+    ["st-array-element", `interface A { n: number }
+interface B { n: number; m?: number }
+const xs: A[] = [{ n: 1 }];
+(xs[0] as B).n = 7;
+console.log(JSON.stringify(xs));`],
+    ["st-call-result", `interface A { n: number }
+interface B { n: number; m?: number }
+function mk(): A { return { n: 1 }; }
+const a = mk();
+(a as B).n = 3;
+console.log(JSON.stringify(a));`],
+    // THE RECEIVER RUNS EXACTLY ONCE. The rule answers the operand NODE and
+    // not a lowered value, precisely so that the receiver is lowered once
+    // whether the rule fires or not. Answering a lowered value and then
+    // declining on it — which is how `dynAssertionReceiver` is written — has
+    // the caller lower the receiver a second time, and this cell would count
+    // 2 where Node counts 1.
+    ["st-receiver-runs-once", `interface A { n: number }
+interface B { n: number; m?: number }
+let calls = 0;
+function mk(): A { calls = calls + 1; return { n: 1 }; }
+const box: { a: A } = { a: { n: 0 } };
+function pick(): { a: A } { calls = calls + 1; return box; }
+(mk() as B).n = 7;
+console.log("after dot on a call result:", calls);
+(pick().a as B).n = 9;
+console.log("after dot through a call:", calls, JSON.stringify(box));
+(pick().a as B)["n"] = 11;
+console.log("after bracket through a call:", calls, JSON.stringify(box));`],
+    // The rows that were ALREADY right and a careless widening breaks.
+    ["st-same-shape", `interface A { n: number }
+const a: A = { n: 1 };
+(a as A).n = 7;
+console.log(JSON.stringify(a));`],
+    ["st-read-only", `interface A { n: number }
+interface B { n: number; m?: number }
+const a: A = { n: 5 };
+console.log((a as B).n, JSON.stringify(a));`],
+    ["st-class-receiver", `class C { n = 1 }
+interface I { n: number }
+const c = new C();
+(c as I).n = 7;
+console.log(c.n);`],
+  ];
+  test.for(STATIC_LANDS)("%s", { timeout: 240_000 }, async ([name, src]) => {
+    const { node, exe } = await bothWays(name, backend, src);
+    expect(node.code, `Node failed to run the cell:\n${node.err}`).toBe(0);
+    expect(node.out.trim().length).toBeGreaterThan(0);
+    expect(exe.code, `compiled program failed:\n${exe.err}`).toBe(0);
+    expect(exe.out).toBe(node.out);
+  });
+});
+
+describe("what the STATIC half deliberately leaves open", () => {
+  /* Pinned, not fixed, and for the same reason as the dynamic sibling
+   * above: the store target is a NAME, so no syntactic rule can see the
+   * assertion that produced it. */
+  test("a static recovery bound to a name first still loses the write (both backends)", { timeout: 480_000 }, async () => {
+    const src = `interface A { n: number }
+interface B { n: number; m?: number }
+const a: A = { n: 1 };
+const b = a as B;
+b.n = 7;
+console.log(JSON.stringify(a));`;
+    for (const backend of ["c", "llvm"] as const) {
+      const { node, exe } = await bothWays("st-name-bound", backend, src);
+      expect(node.out.trim()).toBe('{"n":7}');
+      expect(exe.code, `${backend}: ${exe.err}`).toBe(0);
+      expect(
+        exe.out.trim(),
+        `${backend}: if this now prints {"n":7} the remainder is CLOSED — move the row into STATIC_LANDS`,
+      ).toBe('{"n":1}');
+    }
+  });
+
+  /* A field the ASSERTED type adds and the operand's shape has no slot for.
+   * Node grows the object; a monomorphic struct cannot, and the rule
+   * declines rather than trade a lost write for a refusal on a program that
+   * compiles today. Whoever closes this has to decide which of the two it
+   * is — that decision is the reason this row is pinned rather than
+   * quietly widened. */
+  test("a write to a field only the ASSERTED type declares is still lost (both backends)", { timeout: 480_000 }, async () => {
+    const src = `interface A { n: number }
+interface B { n: number; m?: number }
+const a: A = { n: 1 };
+(a as B).m = 5;
+console.log(JSON.stringify(a));`;
+    for (const backend of ["c", "llvm"] as const) {
+      const { node, exe } = await bothWays("st-target-only-field", backend, src);
+      expect(node.out.trim()).toBe('{"n":1,"m":5}');
+      expect(exe.code, `${backend}: ${exe.err}`).toBe(0);
+      expect(
+        exe.out.trim(),
+        `${backend}: if this changed, say in the report whether it LANDS or REFUSES — both are answers, silence is not`,
+      ).toBe('{"n":1}');
+    }
+  });
+
+  /* The DOCUMENTED width-copy stance, and NOT an assertion: `const b: B = a`
+   * is a coercion, which copies, and limitations/page.mdx says mutations
+   * through the narrower reference are invisible to the original. It is
+   * here as the boundary of the fix — if this ever starts aliasing, the
+   * assertion rule has leaked into ordinary assignment. */
+  test("an ordinary width-copy binding still copies (both backends)", { timeout: 480_000 }, async () => {
+    const src = `interface A { n: number }
+interface B { n: number; m?: number }
+const a: A = { n: 1 };
+const b: B = a;
+b.n = 9;
+console.log(JSON.stringify(a), JSON.stringify(b));`;
+    for (const backend of ["c", "llvm"] as const) {
+      const { node, exe } = await bothWays("st-width-copy", backend, src);
+      expect(node.out.trim()).toBe('{"n":9} {"n":9}');
+      expect(exe.code, `${backend}: ${exe.err}`).toBe(0);
+      expect(exe.out.trim(), `${backend}: the documented width-copy stance`).toBe('{"n":1} {"n":9}');
     }
   });
 });

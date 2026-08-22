@@ -11770,6 +11770,73 @@ export function dynAssertionReceiver(L: Lowerer, node: ts.Expression): IrExpr | 
   return lowered.type.kind === "dyn" ? lowered : null;
 }
 
+/** The receiver of a WRITE spelled as an ASSERTION between two STATIC record
+ * shapes: `(a as B).n = 7` where `a: A` and both `A` and `B` declare `n`.
+ * Answers the LOWERED OPERAND — the record the program still names — or null
+ * when the receiver is not that shape.
+ *
+ * `dynAssertionReceiver`'s sibling, and the half its comment says is a
+ * different family: THERE IS NO `unknown` ANYWHERE IN THIS PROGRAM.
+ *
+ *     interface A { n: number }
+ *     interface B { n: number; m?: number }
+ *     const a: A = { n: 1 };
+ *     (a as B).n = 7;
+ *     console.log(JSON.stringify(a));   // Node {"n":7}
+ *
+ * `as` is the IDENTITY in JS, so Node has no second object to write. A
+ * record is a monomorphic C struct, so an assertion between two shapes
+ * materialises a value of the TARGET shape — `sc_f_%rec_width_N` builds a
+ * fresh `sc_rnew_rB` and copies the fields across. The store then landed on
+ * that temporary and the write was lost in SILENCE: exit 0, no diagnostic,
+ * and the object the program still names unchanged. estado-fence.md §3.3
+ * recorded it as a THIRD silent wrong answer and left it open, saying the
+ * family is larger than "the dynamic boundary" — it is *any* shape-crossing
+ * assertion. Both backends answered `{"n":1}`.
+ *
+ * The rule is the narrow one that cannot invent an answer: the field being
+ * written must ALREADY EXIST on the operand's own shape, with an identical
+ * lowered type. Then writing it through the operand is exactly what Node
+ * does, and no coercion changes. When the asserted type adds the field
+ * (`(a as B).m = 5`, `m` on B only), the source struct has no slot for it
+ * and this declines — that row keeps today's behaviour rather than trading a
+ * lost write for a refusal on a program that compiles now.
+ *
+ * WRITE ONLY. A read through the same assertion answers the same value
+ * whichever record it comes out of, so peeling there would be an allocation
+ * saving dressed as a correctness fix, on a far wider surface. `fieldTarget`
+ * takes `forWrite` for exactly this reason. */
+export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: string): ts.Expression | null {
+  let e: ts.Expression = node;
+  // Parens and `!` are transparent; `as`/`<T>` is what we are looking for.
+  // A DOUBLE assertion peels to the same operand.
+  let sawAssertion = false;
+  for (;;) {
+    if (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e)) { e = e.expression; continue; }
+    if (ts.isAsExpression(e) || ts.isTypeAssertion(e)) { sawAssertion = true; e = e.expression; continue; }
+    break;
+  }
+  if (!sawAssertion) return null;
+  // The OPERAND has to be a static record. A checked-dynamic operand is
+  // dynAssertionReceiver's subject; a class instance, a Map and the bytes
+  // family all cross BY REFERENCE and their writes already land.
+  const operandT = L.mapTypeOf(L.typeOf(e));
+  if (operandT?.kind !== "record") return null;
+  const assertedT = L.mapTypeOf(L.typeOf(node));
+  if (assertedT?.kind !== "record") return null;
+  if (operandT.shapeId === assertedT.shapeId) return null; // no copy to see through
+  const srcField = L.shapes.get(operandT.shapeId)?.fields.find((f) => f.name === field)?.type;
+  const dstField = L.shapes.get(assertedT.shapeId)?.fields.find((f) => f.name === field)?.type;
+  if (!srcField || !dstField) return null;
+  if (typeKey(srcField) !== typeKey(dstField)) return null;
+  // A NODE, not a lowered value, and that is not a style choice: the
+  // receiver must be lowered exactly ONCE. Answering `L.lowerExpr(e)` and
+  // then declining on the lowered type — which is how `dynAssertionReceiver`
+  // is written — makes the caller lower the receiver a second time, and
+  // `(mk() as B).n = 7` would run `mk()` twice where Node runs it once.
+  return e;
+}
+
 /** `a[i] = v` in statement position → arraySet (element writes, like local
    * assignment, produce no value in our subset). */
   export function lowerElementWrite(L: Lowerer, expr: ts.BinaryExpression): IrStmt {
@@ -12029,9 +12096,16 @@ export function dynAssertionReceiver(L: Lowerer, node: ts.Expression): IrExpr | 
         if (litKey !== null) {
           const field = shape.fields.find((f) => f.name === litKey);
           if (field) {
-            const obj = L.lowerExpr(target.expression);
+            // The BRACKET spelling of `(a as B).n = 7`, and the same
+            // silence: staticAssertionOperand's comment carries the
+            // argument. The store goes to the shape the OPERAND has, not
+            // the checker's asserted one — the two differ by construction
+            // here, which is the whole point. Lowered ONCE either way.
+            const opNode = staticAssertionOperand(L, target.expression, litKey);
+            const obj = L.lowerExpr(opNode ?? target.expression);
+            const shapeId = opNode !== null && obj.type.kind === "record" ? obj.type.shapeId : receiverIr.shapeId;
             const value = L.lowerExprExpecting(expr.right, field.type);
-            return { kind: "recordSet", obj, shapeId: receiverIr.shapeId, field: litKey, value, loc: locOf(expr) };
+            return { kind: "recordSet", obj, shapeId, field: litKey, value, loc: locOf(expr) };
           }
         }
         if (!shape.indexValue) {
@@ -13161,7 +13235,7 @@ export function lowerPrefixUnary(L: Lowerer, expr: ts.PrefixUnaryExpression): Ir
         !expr.operand.questionDotToken
       ) {
         const target = ts.isPropertyAccessExpression(expr.operand)
-          ? L.fieldTarget(expr.operand)
+          ? L.fieldTarget(expr.operand, true)
           : symbolFieldTarget(L, expr.operand);
         if (
           target?.container === "class" &&
@@ -13585,7 +13659,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         // value would be a second question. Checked-dynamic receivers are
         // the branch above.
         if (ts.isPropertyAccessExpression(expr.left) && !expr.left.questionDotToken) {
-          const ft = L.fieldTarget(expr.left);
+          const ft = L.fieldTarget(expr.left, true);
           if (
             ft !== null &&
             (ft.container === "class" || ft.container === "record" || ft.container === "recordOvf") &&
@@ -17877,7 +17951,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * known class instance OR a record, and the member is a field or (class
    * receivers) a declared accessor property. Returns the pieces of a
    * fieldSet/recordSet/accessor-call (minus value/kind) or null. */
-  export function fieldTarget(L: Lowerer, access: ts.PropertyAccessExpression): FieldTarget | null {
+  export function fieldTarget(L: Lowerer, access: ts.PropertyAccessExpression, forWrite = false): FieldTarget | null {
     if (L.chainBlocked(access)) return null;
     const receiverIr = L.mapTypeOf(L.typeOf(access.expression));
     if (receiverIr?.kind === "object") {
@@ -17914,7 +17988,13 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       const shape = L.shapes.get(receiverIr.shapeId);
       const fieldType = shape?.fields.find((f) => f.name === access.name.text)?.type;
       if (fieldType) {
-        const obj = L.lowerExpr(access.expression);
+        // `(a as B).n = 7` between two STATIC record shapes: the assertion
+        // materialises a value of B and the store used to land on that
+        // temporary, silently. staticAssertionOperand's comment carries
+        // the argument; when it answers, the shapeId-mismatch arm below
+        // builds the recordSet against the shape the program still names.
+        const recvNode = forWrite ? staticAssertionOperand(L, access.expression, access.name.text) : null;
+        const obj = L.lowerExpr(recvNode ?? access.expression);
         // A checker-record receiver whose VALUE stayed dyn (the erased
         // all-unknown-fields cast — `(err as { code?: unknown }).code`):
         // decline, and the dyn keyed-read fallback answers.
@@ -18775,7 +18855,7 @@ export function compoundCombine(
       }
     }
     const targetOf = (): FieldTarget | null =>
-      ts.isPropertyAccessExpression(access) ? L.fieldTarget(access) : symbolFieldTarget(L, access);
+      ts.isPropertyAccessExpression(access) ? L.fieldTarget(access, true) : symbolFieldTarget(L, access);
     const target = targetOf();
     if (!target) L.unsupported("SC1090", access, "compound assignment to unsupported field targets");
     // Through an accessor target this desugars to get, op, set — with the
