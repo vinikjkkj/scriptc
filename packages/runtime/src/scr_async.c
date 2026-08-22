@@ -2712,6 +2712,15 @@ ScrGen *scr_gen_retain(ScrGen *g) {
 
 void scr_gen_release(ScrGen *g) {
   if (!g || --g->rc != 0) return;
+  /* g->pending is NOT released here, and that is an INVARIANT rather than
+   * an omission: an async generator's only consumer is the compiler's own
+   * for-await desugar, which awaits each request promise before it can do
+   * anything else -- so the handle cannot reach a refcount of zero while a
+   * request is in flight, and pending is always NULL by here. The frontend
+   * refusal on the direct .next()/.return()/.throw() surface is what holds
+   * that invariant up (tests/harness/async-generator-boundary.test.ts pins
+   * it). Opening that surface means building the request QUEUE first, and
+   * the queue's teardown belongs here. */
   scr_gen_slot_reset(&g->out);
   scr_gen_slot_reset(&g->in);
   scr_gen_slot_reset(&g->ret);
