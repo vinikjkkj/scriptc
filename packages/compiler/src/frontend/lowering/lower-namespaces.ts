@@ -570,6 +570,51 @@ export function ambientUndefinedFnSymbolOf(L: Lowerer, ident: ts.Identifier): ts
   return sawFn ? sym : null;
 }
 
+/** The symbol behind `ident` when it names a top-level ambient
+ * `declare class` NOTHING defines. Node erases the declaration entirely,
+ * so a reference to it — the callee of a `new` above all — throws the
+ * catchable ReferenceError "<name> is not defined" at the use site: the
+ * same stance `declare const` (ambientUndefVarRootOf) and
+ * `declare function` (ambientUndefinedFnSymbolOf) already take, for the
+ * same reason.
+ *
+ * WHY IT EXISTS: without it the ambient class COLLECTED like a program
+ * class, and the emitter minted `sc_new_<name>` over a calloc'd struct.
+ * `declare class Ext { constructor(x: number); readonly y: number }`
+ * followed by `new Ext(7)` therefore handed back a zero-initialized
+ * instance whose `y` read answered `0`, where Node throws — a SILENT
+ * wrong answer, with the constructor argument dropped as "surplus" on
+ * top of it. The `declare const Ext: { new (x: number): ... }` spelling
+ * of the identical declaration already emitted Node's ReferenceError
+ * byte-exactly, so the two spellings disagreed with each other.
+ *
+ * The predicate is deliberately narrow — its rationale only covers
+ * declarations that provably have no runtime behind them:
+ *   - stdlib/@types symbols keep their own chokepoints,
+ *   - anything in a .d.ts keeps its own fences (lib/@types),
+ *   - a class merged with an implementation (a function body, an
+ *     initialized variable) is not ambient-undefined,
+ *   - a class declared INSIDE a `declare module`/`declare global` block
+ *     is left alone: a module augmentation names a real package whose
+ *     import resolves at run time, and the npm chokepoint above
+ *     lowerNew already owns that case.
+ * Only a `declare class` whose parent is the SOURCE FILE qualifies. */
+export function ambientUndefinedClassSymbolOf(L: Lowerer, ident: ts.Identifier): ts.Symbol | null {
+  const sym = L.resolveValueSymbol(ident);
+  if (!sym || !(sym.flags & ts.SymbolFlags.Class)) return null;
+  if (L.isStdlibSymbol(sym)) return null;
+  let sawClass = false;
+  for (const d of L.checker.declarationsOf(sym)) {
+    if (ts.isInterfaceDeclaration(d) || ts.isTypeAliasDeclaration(d)) continue; // type-world merge partners
+    if (!ts.isClassDeclaration(d)) return null;
+    if (d.parent === undefined || !ts.isSourceFile(d.parent)) return null;
+    if (d.getSourceFile().isDeclarationFile) return null; // lib/@types keep their own fences
+    if (!(ts.getCombinedModifierFlags(d) & ts.ModifierFlags.Ambient)) return null;
+    sawClass = true;
+  }
+  return sawClass ? sym : null;
+}
+
 /** Node's ReferenceError at an ambient namespace access — the undefRead
  * libCall the ambient `declare const` path already uses, typed by the use
  * site (it always throws; the typed dummy is abandoned by the unwind). */
