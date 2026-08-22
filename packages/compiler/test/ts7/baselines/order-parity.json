@@ -8858,6 +8858,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5632-a-mutation-through-an-asserted-static-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/5632-a-mutation-through-an-asserted-static-shape.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5633-fill-and-copywithin-through-an-untyped-array.js": {
+   "order": [
+    "<repo>/tests/corpus/5633-fill-and-copywithin-through-an-untyped-array.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/5660-a-caught-error-lists-no-compiler-reserved-keys.ts": {
    "order": [
     "<repo>/tests/corpus/5660-a-caught-error-lists-no-compiler-reserved-keys.ts"

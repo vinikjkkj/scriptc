@@ -3184,9 +3184,37 @@ export class Lowerer {
             : [];
       for (const id of shapeIds) {
         const sh = this.shapes.get(id);
-        if (!sh || sh.tuple || sh.indexValue) continue;
+        if (!sh || sh.tuple) continue;
+        const declared = sh.fields.filter((f) => !f.name.startsWith("%")).length;
+        // AN INDEX-SIGNATURE SHAPE USED TO BE SKIPPED OUTRIGHT, and that
+        // was right for only half of them. Its undeclared keys live in a
+        // per-instance overflow map that keeps the order the dynamic source
+        // really had, so a shape with NO declared field recovers EXACTLY —
+        // measured, `d as Record<string, unknown>` over `{"k":1,"j":2,"a":3}`
+        // answers `k,j,a` on both backends. Add ONE declared field and it
+        // does not: every emitted enumeration puts the declared slots first
+        // and the overflow keys after, whatever order the source carried,
+        // so `d as Record<string, unknown> & { j: number }` over
+        // `{"k":1,"j":2}` answers `j,k` where Node answers `k,j`. The same
+        // is true of the plain interface spelling
+        // (`{ j: number; [k: string]: unknown }`) — the family is "an index
+        // signature AND at least one declared member", not "an
+        // intersection", which is what estado-fence.md §3.1 named it.
+        // Silent at exit 0 on both backends, and this advice is the only
+        // thing the compiler can say about it until a record carries a
+        // per-instance key ORDER (priced in estado-pinned.md).
+        if (sh.indexValue) {
+          if (declared === 0) continue;
+          return {
+            why: "dyn",
+            detail:
+              `a checked cast materialises ${id} out of a dynamic value, and its declared ` +
+              `member${declared > 1 ? "s enumerate" : " enumerates"} BEFORE the index-signature keys ` +
+              `whatever order the dynamic source carried them in`,
+          };
+        }
         // One data field has one order; it is the ORDER that needs two.
-        if (sh.fields.filter((f) => !f.name.startsWith("%")).length < 2) continue;
+        if (declared < 2) continue;
         return {
           why: "dyn",
           detail: `a checked cast materialises ${id} out of a dynamic value, whose key ORDER is a run-time fact no struct carries`,
@@ -12224,8 +12252,8 @@ export class Lowerer {
     return lowerBufferStaticCall(this, call, access);
   }
 
-  fieldTarget(access: ts.PropertyAccessExpression): FieldTarget | null {
-    return fieldTarget(this, access);
+  fieldTarget(access: ts.PropertyAccessExpression, forWrite = false): FieldTarget | null {
+    return fieldTarget(this, access, forWrite);
   }
 
   uniqueSymbolKeyOf(key: ts.Expression): { sym: ts.Symbol; fieldName: string } | null {

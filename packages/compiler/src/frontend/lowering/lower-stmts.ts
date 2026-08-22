@@ -6531,7 +6531,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
             const viaStream = lowerStreamUnderscoreAssign(L, expr);
             if (viaStream) return viaStream;
           }
-          const target = L.fieldTarget(expr.left);
+          const target = L.fieldTarget(expr.left, true);
           if (target) {
             const value = L.lowerExprExpecting(expr.right, target.fieldType);
             return L.fieldSetStmt(target, value, locOf(expr), expr.left);
@@ -7705,7 +7705,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       return;
     }
     if (ts.isPropertyAccessExpression(t) && !t.questionDotToken) {
-      const ft = L.fieldTarget(t);
+      const ft = L.fieldTarget(t, true);
       if (ft) {
         // The receiver temps FIRST: JS evaluates the target reference
         // before reading the element's value, so a side-effecting

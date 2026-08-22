@@ -30,9 +30,14 @@
 // no static original exists and no `scr_dyn_mark_static_copy` is involved.
 // The marked-copy direction must REFUSE instead of landing, and a refusal
 // cannot live in a byte-compared corpus file; it is pinned in
-// tests/harness/dyn-asserted-mutation.test.ts along with `fill`, which the
-// dyn tier does not implement and therefore now refuses loudly rather than
-// losing the write.
+// tests/harness/dyn-asserted-mutation.test.ts.
+//
+// `fill` and `copyWithin` used to be excluded from this file for a second
+// reason: `dyn_arr_proto_unimpl` claimed both names, so they threw "not
+// supported" before the static-copy guard that also names them could fire,
+// and two of that guard's nine arms were unreachable. The dyn ARR arm
+// answers them now, so rows r20-r24 below are ordinary byte-compared rows
+// and the two guard arms have their own coverage in the harness file.
 
 interface Ctx {
   stanzaId?: string
@@ -161,5 +166,40 @@ const o6: unknown = JSON.parse('{"k":1}')
 const inner: Ctx = { stanzaId: "Z" }
 ;(o6 as Record<string, unknown>)["ctx"] = inner
 console.log("r19", JSON.stringify(o6))
+
+// ------------------------------------- fill and copyWithin, in place
+// Both answer THE RECEIVER, not a copy, so each row prints the method's own
+// result as well as the dyn read back through its name. Negative, absent and
+// out-of-range indices are the arms most likely to drift from the static
+// tier's own copyWithin table (packages/runtime/test/test_array.c).
+const fa1: unknown = JSON.parse("[1,2,3]")
+;(fa1 as number[]).fill(0)
+console.log("r20", JSON.stringify(fa1))
+
+const fa2: unknown = JSON.parse("[1,2,3,4,5]")
+console.log("r21", JSON.stringify((fa2 as number[]).fill(9, 1, 3)), JSON.stringify(fa2))
+
+const fa3: unknown = JSON.parse('["a","b","c","d"]')
+console.log("r22", JSON.stringify((fa3 as string[]).fill("z", -2)), JSON.stringify(fa3))
+
+const fa4: unknown = JSON.parse("[1,2,3,4,5]")
+console.log("r23", JSON.stringify((fa4 as number[]).copyWithin(0, 3)), JSON.stringify(fa4))
+
+const fa5: unknown = JSON.parse("[1,2,3,4,5]")
+console.log("r24", JSON.stringify((fa5 as number[]).copyWithin(1, 0, 3)), JSON.stringify(fa5))
+
+// the no-op arms: a target past the end, a start past the end, an empty run
+const fa6: unknown = JSON.parse("[1,2,3]")
+console.log(
+  "r25",
+  JSON.stringify((fa6 as number[]).fill(7, 10)),
+  JSON.stringify((fa6 as number[]).copyWithin(0, 9)),
+  JSON.stringify((fa6 as number[]).copyWithin(0, 2, 1)),
+)
+
+// a negative target clamps to 0, and the source run is retained before any
+// store so an OVERLAPPING copy cannot free a slot it has still to read
+const fa7: unknown = JSON.parse('[{"v":1},{"v":2},{"v":3},{"v":4}]')
+console.log("r26", JSON.stringify((fa7 as Array<{ v: number }>).copyWithin(-100, 1)))
 
 console.log("r99 still running")
