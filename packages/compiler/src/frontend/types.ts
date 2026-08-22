@@ -840,6 +840,8 @@ function formatIrTypeInner(t: IrType, shapes: ShapeRegistry, unions: UnionRegist
       return `Promise<${formatIrType(t.inner, shapes, unions, seen)}>`;
     case "generator":
       return `Generator<${formatIrType(t.yieldT, shapes, unions, seen)}, ${formatIrType(t.retT, shapes, unions, seen)}, ${formatIrType(t.nextT, shapes, unions, seen)}>`;
+    case "asyncGenerator":
+      return `AsyncGenerator<${formatIrType(t.yieldT, shapes, unions, seen)}, ${formatIrType(t.retT, shapes, unions, seen)}, ${formatIrType(t.nextT, shapes, unions, seen)}>`;
     default: {
       const _exhaustive: never = t;
       void _exhaustive;
@@ -3394,6 +3396,27 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // `.next()` could never answer — mapped generators always resume.
     if (!genResultRecord(channels.yieldT, channels.retT, ctx.shapes, unions)) return null;
     return { kind: "generator", ...channels };
+  }
+
+  // AsyncGenerator<T, TReturn, TNext> — what an `async function*` call
+  // answers. Channel normalization is IDENTICAL to the synchronous kind
+  // (the same genChannels, so the two can never disagree about what a
+  // channel means); only the kind differs, and it differs because
+  // `.next()` answers a promise over the shared IteratorResult record
+  // rather than the record itself.
+  //
+  // AsyncIterableIterator is NOT admitted here even though the lib types
+  // AsyncGenerator as extending it: an AsyncIterableIterator-typed value
+  // need not be a generator object at all (any object with the protocol
+  // methods satisfies it), and there is no lowering for a user-supplied
+  // async iterator. Mapping it would hand such a value a ScrGen handle it
+  // does not have. It keeps its refusal.
+  if (isStdlibInterface("AsyncGenerator")) {
+    const args = checker.getTypeArguments(widened as ts.TypeReference);
+    const channels = genChannels(args[0], args[1], args[2], ctx);
+    if (!channels) return null;
+    if (!genResultRecord(channels.yieldT, channels.retT, ctx.shapes, unions)) return null;
+    return { kind: "asyncGenerator", ...channels };
   }
   // IteratorResult<T, TReturn> — the checker's type of `g.next()` (an
   // alias for IteratorYieldResult<T> | IteratorReturnResult<TReturn>):

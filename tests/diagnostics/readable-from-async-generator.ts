@@ -1,30 +1,35 @@
 // `Readable.from` over an ASYNC GENERATOR — zapo's
-// `src/media/sticker/sticker-pack.ts:140`, row 15 of the 24-row refusal
-// survey, reduced to six lines.
+// `src/media/sticker/sticker-pack.ts:140`, reduced to six lines.
 //
-// The row is TWO fences and only ONE of them is rendered here, which is
-// the whole point of the pin:
+// The row used to be TWO fences stacked at one call site:
 //
-//   1. SC1071 `async generators (async function*)` fires in
-//      `collectSignatureInner` on the DECLARATION. It does NOT appear
-//      below: the call site refused first, so `chunks`'s body is never
-//      lowered and the fence lands in coverage's "in unreached code"
-//      bucket (zapo's own coverage report puts it there too). Closing
-//      fence 2 makes fence 1 blocking.
+//   1. SC1071 `async generators (async function*)` in
+//      `collectSignatureInner`, on the DECLARATION.
 //   2. SC2020 at the `Readable.from` CALL — `lowerStreamStaticCall` has
 //      array / string / Buffer sources and nothing else.
 //
-// So closing (2) alone would not compile this program; it reveals (1)
-// underneath — MEASURED on zapo, not inferred: with the fence lowering
-// its source, blockers go 7 sites -> 8 (SC2020 out, SC1071 + SC2004 in).
+// Fence 1 is CLOSED: a declaration-scope `async function*` now lowers onto
+// the scr_agen_* fiber protocol and `for await` drives it. So `chunks`'s
+// body compiles, its type maps, and what remains at this call site is
+// fence 2 alone — the stream bridge, which is a separate feature: nothing
+// in the runtime turns an async iterator into a pull-based Readable with
+// Node's backpressure and objectMode semantics.
 //
-// The second fence used to print `'?'` for the source type — `L.fmt` has
-// no spelling for a type `mapType` refused, and `Readable.from` is the
-// one fence that reaches it with a null. Five censuses of zapo carried an
-// anonymous `Readable.from over a '?' source` because of it. The checker
-// always has a name; the snapshot below is what naming it looks like, and
-// that rename is the whole of the compiler change that added this file.
+// That closure is why the rendered name below changed. While the type was
+// unmapped the message fell back to the checker's spelling
+// (`AsyncGenerator<Uint8Array<ArrayBufferLike>, any, any>`); now that
+// `mapType` answers it, `L.fmt` renders the compiler's own NORMALIZED
+// channels — `AsyncGenerator<Uint8Array, void, unknown>`, a defaulted
+// TReturn being "no modeled return value" (void) and a defaulted TNext
+// riding dyn. The sync control below has always printed that way, so the
+// two lines now agree on one convention instead of two.
+//
+// The pin remains valuable in the same shape it always had: it is the one
+// place a widening of `Readable.from` would show up, and if this file ever
+// compiles clean, the bridge landed and this program belongs in
+// tests/corpus with Node as its oracle.
 import { Readable } from "node:stream";
+
 
 async function* chunks(): AsyncGenerator<Uint8Array> {
   yield new Uint8Array([1, 2, 3]);
@@ -36,12 +41,13 @@ export function make(): Readable {
 
 console.log(typeof make);
 
-// The SYNC generator is the control: it clears fence 1 entirely
-// (generators lower on fibers, and `.next()` / `for-of` over one
-// compiles), and reaches fence 2 with a source type `mapType` also
-// refuses — so the same call site reports the same code with a DIFFERENT
-// name. The two names are what tell the reader which of the two missing
-// features is missing at which site.
+// The SYNC generator is the control, and now it is a control in the
+// strict sense: both sources map, both reach fence 2, and both render
+// through `L.fmt`. The two lines differ ONLY in the kind name
+// (Generator vs AsyncGenerator), which is what shows that the remaining
+// refusal is about the STREAM BRIDGE and not about either generator
+// flavour. Before async generators lowered, this line was the only one of
+// the pair whose name came from the compiler rather than the checker.
 function* syncChunks(): Generator<Uint8Array> {
   yield new Uint8Array([4, 5]);
 }

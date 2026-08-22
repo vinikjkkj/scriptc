@@ -1292,10 +1292,14 @@ export interface IrValidationError {
  * TReturn channel, so call sites see the generator type. The one place
  * the body/call-site split is spelled out in the validator. */
 function callSiteReturnType(fn: IrFunction): IrType {
-  if (fn.async) return { kind: "promise", inner: fn.returnType };
+  // ORDER MATTERS: an async generator sets BOTH flags, and its call sites
+  // receive the generator object, not a promise. Testing async first would
+  // hand them Promise<TReturn>.
   if (fn.generator !== undefined) {
-    return { kind: "generator", yieldT: fn.generator.yieldT, retT: fn.returnType, nextT: fn.generator.nextT };
+    const kind = fn.async ? ("asyncGenerator" as const) : ("generator" as const);
+    return { kind, yieldT: fn.generator.yieldT, retT: fn.returnType, nextT: fn.generator.nextT };
   }
+  if (fn.async) return { kind: "promise", inner: fn.returnType };
   return fn.returnType;
 }
 
@@ -1323,9 +1327,13 @@ export function validateModule(mod: IrModule): IrValidationError[] {
     if (functionsByName.has(fn.name)) {
       errors.push({ message: `duplicate function "${fn.name}"`, loc: fn.loc });
     }
-    if (fn.async && fn.generator !== undefined) {
-      errors.push({ message: `function "${fn.name}" is both async and a generator (async generators are fenced)`, loc: fn.loc });
-    }
+    // async + generator IS the async-generator discriminator; it used to
+    // be an error here because the pair had no lowering. What must still
+    // never happen is an async-generator function whose yields are not
+    // marked async (or the reverse): the two would disagree about which
+    // runtime yield helper to emit, and the disagreement is silent.
+    // (The yieldExpr walk that enforces the flag pairing lives in
+    // checkExpr, where the per-function expression walk already runs.)
     functionsByName.set(fn.name, fn);
   }
   const ffiByName = new Map<string, NonNullable<IrModule["ffiImports"]>[number]>();
@@ -1572,7 +1580,7 @@ export function validateModule(mod: IrModule): IrValidationError[] {
       // closure pointer identity per tag is the narrowing); a set arm is
       // valid exactly when every other arm is a unit (the defaulted-Set-
       // param ABI); func/set-beside-data stays out.
-      if (arm.kind === "void" || arm.kind === "union" || arm.kind === "dyn" || arm.kind === "jsval" || arm.kind === "generator") {
+      if (arm.kind === "void" || arm.kind === "union" || arm.kind === "dyn" || arm.kind === "jsval" || arm.kind === "generator" || arm.kind === "asyncGenerator") {
         errors.push({ message: `union ${u.id}: arm ${i} is ${arm.kind}`, loc: noLoc });
       }
       if (
@@ -1622,6 +1630,7 @@ export function validateModule(mod: IrModule): IrValidationError[] {
       case "promise":
         return namesUndeclared(t.inner, seen);
       case "generator":
+      case "asyncGenerator":
         return (
           namesUndeclared(t.yieldT, seen) ??
           namesUndeclared(t.retT, seen) ??
@@ -4948,6 +4957,17 @@ function validateFunction(
           err("yield outside a generator function", e.loc);
           break;
         }
+        // The nodes async flag and the functions must agree exactly. They
+        // select DIFFERENT runtime yield helpers (scr_agen_yield_* takes a
+        // microtask hop and settles a promise; scr_gen_yield_* does
+        // neither), so a mismatch is a silently wrong program, not a
+        // crash — which is why it is checked rather than assumed.
+        if ((e.async === true) !== (fn.async === true)) {
+          err(
+            `yieldExpr async=${e.async === true} inside a function whose async=${fn.async === true}`,
+            e.loc,
+          );
+        }
         if (e.value === null) {
           err("yieldExpr with no operand (the frontend fills undefined)", e.loc);
           break;
@@ -5010,6 +5030,60 @@ function validateFunction(
         const vdef = valueF.type.kind === "union" ? unions.get(valueF.type.unionId) : undefined;
         if (!vdef || !vdef.arms.some((a) => a.kind === "undefinedT")) {
           err(`genResume value slot ${typeKey(valueF.type)} is neither dyn nor an undefined-armed union`, e.loc);
+        }
+        break;
+      }
+
+      case "agenResume": {
+        checkExpr(e.gen);
+        if (e.gen.type.kind !== "asyncGenerator") {
+          err(`agenResume on ${e.gen.type.kind}`, e.loc);
+          break;
+        }
+        const genT = e.gen.type;
+        if (e.arg !== null) checkExpr(e.arg);
+        if (e.mode === "next") {
+          if (e.arg === null) {
+            if (genT.nextT.kind !== "undefinedT" && genT.nextT.kind !== "dyn") {
+              err(`valueless next() on a ${typeKey(genT.nextT)} next-channel`, e.loc);
+            }
+          } else if (!typeEquals(e.arg.type, genT.nextT)) {
+            err(`next argument ${typeKey(e.arg.type)} != next channel ${typeKey(genT.nextT)}`, e.loc);
+          }
+        } else if (e.mode === "return") {
+          if (e.arg !== null && !typeEquals(e.arg.type, genT.retT)) {
+            err(`return argument ${typeKey(e.arg.type)} != return channel ${typeKey(genT.retT)}`, e.loc);
+          }
+        } else {
+          if (e.arg === null) {
+            err("agenResume throw with no payload", e.loc);
+          } else if (e.arg.type.kind === "void" || e.arg.type.kind === "dyn" || e.arg.type.kind === "caught") {
+            err(`agenResume throw of a ${e.arg.type.kind} value`, e.loc);
+          }
+        }
+        // The result is a PROMISE over the same IteratorResult record the
+        // synchronous lane builds — the one structural difference between
+        // the two resume nodes, and the reason they are separate kinds.
+        if (e.type.kind !== "promise") {
+          err(`agenResume result is ${e.type.kind}, not a promise`, e.loc);
+          break;
+        }
+        const inner = e.type.inner;
+        if (inner.kind !== "record") {
+          err(`agenResume promise inner is ${inner.kind}, not a record`, e.loc);
+          break;
+        }
+        const arec = records.get(inner.shapeId);
+        const adoneF = arec?.fields.find((f) => f.name === "done");
+        const avalueF = arec?.fields.find((f) => f.name === "value");
+        if (!arec || arec.fields.length !== 2 || adoneF?.type.kind !== "bool" || avalueF === undefined) {
+          err(`agenResume result record ${inner.shapeId} is not { done: bool, value: V }`, e.loc);
+          break;
+        }
+        if (avalueF.type.kind === "dyn") break;
+        const avdef = avalueF.type.kind === "union" ? unions.get(avalueF.type.unionId) : undefined;
+        if (!avdef || !avdef.arms.some((a) => a.kind === "undefinedT")) {
+          err(`agenResume value slot ${typeKey(avalueF.type)} is neither dyn nor an undefined-armed union`, e.loc);
         }
         break;
       }

@@ -77,7 +77,7 @@ import type {
 import { irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals } from "../emission/emit-stmts.js";
-import { mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
+import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
 import {
   buildClassGraph,
@@ -2479,6 +2479,9 @@ class LlEmitter {
     const out: string[] = [];
     for (const fn of this.mod.functions) {
       if (fn.async !== true) continue;
+      // An async GENERATOR sets both flags and is not an async function:
+      // emitGenScaffolding owns it (and refuses it).
+      if (fn.generator !== undefined) continue;
       const pack = mangleArgPack(fn.name);
       const lifted = fn.captures !== undefined;
       const fieldTys = [...(lifted ? ["ptr"] : []), ...fn.params.map((p) => this.llType(p.type))];
@@ -2654,6 +2657,7 @@ class LlEmitter {
     const out: string[] = [];
     for (const fn of this.mod.functions) {
       if (fn.generator === undefined) continue;
+      const isAsyncGen = fn.async === true;
       const pack = mangleArgPack(fn.name);
       const lifted = fn.captures !== undefined;
       const fieldTys = [...(lifted ? ["ptr"] : []), ...fn.params.map((p) => this.llType(p.type))];
@@ -2783,8 +2787,25 @@ class LlEmitter {
           `  store ${ty} ${src}, ptr %sp${i}`,
         );
       });
+      if (isAsyncGen) {
+        // An ASYNC generator carries its emitted SETTLE thunk into the
+        // handle: the runtime calls it at every yield and at completion to
+        // fulfill the in-flight request promise. Same lazy allocation —
+        // nothing runs until the first resume.
+        const settle = this.agenSettleThunkFor(
+          { kind: "asyncGenerator", yieldT: fn.generator.yieldT, retT: fn.returnType, nextT: fn.generator.nextT },
+          { kind: "record", shapeId: fn.generator.resultShapeId! },
+        );
+        this.declare(`declare ptr @scr_agen_new(ptr, ptr, ptr, ptr)`);
+        sp.push(
+          `  %gg = call ptr @scr_agen_new(ptr @${mangleTrampoline(fn.name)}, ptr %ap, ptr @${mangleGenDrop(fn.name)}, ptr @${settle})`,
+        );
+      } else {
+        sp.push(
+          `  %gg = call ptr @scr_gen_new(ptr @${mangleTrampoline(fn.name)}, ptr %ap, ptr @${mangleGenDrop(fn.name)})`,
+        );
+      }
       sp.push(
-        `  %gg = call ptr @scr_gen_new(ptr @${mangleTrampoline(fn.name)}, ptr %ap, ptr @${mangleGenDrop(fn.name)})`,
         `  ret ptr %gg`,
         `}`,
         ``,
@@ -3226,6 +3247,9 @@ class LlEmitter {
       case "child":
       case "childStream":
       case "generator":
+      // The same ScrGen pointer as the synchronous flavour, and a JS
+      // object either way.
+      case "asyncGenerator":
       case "fsWatcher": {
         // JS objects are ALWAYS truthy; the honest constant reads as a
         // pointer test, exactly the C emitter's `!= NULL`.
@@ -3701,8 +3725,13 @@ class LlEmitter {
    * fiber and returns the generator object) — CEmitter.callTargetC. */
   private callTarget(fnName: string): string {
     const fn = this.fnByName.get(fnName);
-    if (fn?.async === true) return mangleAsyncSpawn(fnName);
+    // ORDER MATTERS: an async GENERATOR sets BOTH flags and enters through
+    // the LAZY gen-spawn wrapper, never the eager async one -- nothing may
+    // run before the first resume. Testing async first emitted a call to an
+    // @sc_as_* wrapper emitGenScaffolding never defines, which the LLVM
+    // assembler reports as an undefined value rather than a wrong lowering.
     if (fn?.generator !== undefined) return mangleGenSpawn(fnName);
+    if (fn?.async === true) return mangleAsyncSpawn(fnName);
     return mangleFunction(fnName);
   }
 
@@ -6658,19 +6687,36 @@ class LlEmitter {
         // The result is the .next(v) argument, moved out of the IN slot.
         const gen = this.currentGenerator;
         if (!gen) throw new Error("llvm emitter bug: yieldExpr outside a generator body");
+        // The ASYNC form additionally takes JS's AsyncGeneratorYield
+        // microtask hop and SETTLES the in-flight request promise before
+        // suspending. Selected from the NODE, exactly as the C lane does,
+        // and never from the enclosing function: neither helper can then
+        // be emitted by forgetting to consult something.
+        //
+        // The six names are spelled IN FULL rather than built from a
+        // `scr_agen_yield` / `scr_gen_yield` prefix. llvm-runtime-abi's
+        // scanner reads this file as TEXT and checks every scr_* name the
+        // backend can emit against scr_runtime.h; a name assembled at
+        // runtime reaches it as a prefix that declares nothing, and the
+        // guard then reports a phantom missing prototype instead of
+        // checking the real ones. A symbol the backend emits has to be
+        // READABLE here.
+        const Y = e.async === true
+          ? { f64: "scr_agen_yield_f64", bool: "scr_agen_yield_bool", ref: "scr_agen_yield_ref" }
+          : { f64: "scr_gen_yield_f64", bool: "scr_gen_yield_bool", ref: "scr_gen_yield_ref" };
         if (e.value === null) throw new Error("llvm emitter bug: yieldExpr with no operand (frontend fills undefined)");
         const v = this.emitExpr(e.value);
         const yt = e.value.type;
         if (yt.kind === "f64") {
-          this.declare(`declare void @scr_gen_yield_f64(double)`);
-          B.line(`call void @scr_gen_yield_f64(double ${v.name})`);
+          this.declare(`declare void @${Y.f64}(double)`);
+          B.line(`call void @${Y.f64}(double ${v.name})`);
         } else if (yt.kind === "bool") {
-          this.declare(`declare void @scr_gen_yield_bool(i1 zeroext)`);
-          B.line(`call void @scr_gen_yield_bool(i1 ${v.name})`);
+          this.declare(`declare void @${Y.bool}(i1 zeroext)`);
+          B.line(`call void @${Y.bool}(i1 ${v.name})`);
         } else {
           this.moveTemp(v); // the OUT slot takes ownership
-          this.declare(`declare void @scr_gen_yield_ref(ptr, ptr)`);
-          B.line(`call void @scr_gen_yield_ref(ptr ${v.name}, ptr ${vAdapters(this, yt).release})`);
+          this.declare(`declare void @${Y.ref}(ptr, ptr)`);
+          B.line(`call void @${Y.ref}(ptr ${v.name}, ptr ${vAdapters(this, yt).release})`);
         }
         this.emitPendingCheck();
         if (e.type.kind === "void") {
@@ -7846,6 +7892,95 @@ class LlEmitter {
         this.moveTemp(v);
         return this.own({ name: v.name, type: e.type });
       }
+      case "agenResume": {
+        // One consumer resume of an ASYNC generator. The argument parking
+        // is byte-for-byte the synchronous protocol above (the same IN/RET
+        // slots and the same caller-cell throw), because the two flavours
+        // share one ScrGen. What differs is the answer: a PROMISE, settled
+        // by the body when it reaches its next yield or completes -- which
+        // is why there is no pending check here. An async generator
+        // reports a body failure by REJECTING that promise, so the throw
+        // surfaces at the awaitExpr wrapped around this node, not here.
+        const genT = e.gen.type;
+        if (genT.kind !== "asyncGenerator") throw new Error("llvm emitter bug: agenResume on a non-async-generator");
+        if (e.type.kind !== "promise") throw new Error("llvm emitter bug: agenResume result is not a promise");
+        const g = this.emitExpr(e.gen); // borrowed for the calls below
+        const sendArg = (store: (aName: string, t: IrType) => void): void => {
+          const a = this.emitExpr(e.arg!);
+          if (isRefCounted(e.arg!.type)) this.moveTemp(a); // the slot takes ownership
+          store(a.name, e.arg!.type);
+        };
+        let entry: string;
+        if (e.mode === "next") {
+          if (e.arg === null) {
+            if (genT.nextT.kind === "dyn") {
+              // Valueless resume on a dyn channel: JS's undefined -- the
+              // dyn singleton rides the IN slot (+1 moves in).
+              this.declare(`declare ptr @scr_dyn_undefined()`);
+              this.declare(`declare ptr @scr_dyn_retain_v(ptr)`);
+              this.declare(`declare void @scr_dyn_release_v(ptr)`);
+              this.declare(`declare void @scr_gen_in_ref(ptr, ptr, ptr)`);
+              const u = B.tmp();
+              const r = B.tmp();
+              B.line(`${u} = call ptr @scr_dyn_undefined()`);
+              B.line(`${r} = call ptr @scr_dyn_retain_v(ptr ${u})`);
+              B.line(`call void @scr_gen_in_ref(ptr ${g.name}, ptr ${r}, ptr @scr_dyn_release_v)`);
+            } else {
+              this.declare(`declare void @scr_gen_in_none(ptr)`);
+              B.line(`call void @scr_gen_in_none(ptr ${g.name})`);
+            }
+          } else {
+            sendArg((name, t) => {
+              if (t.kind === "f64") {
+                this.declare(`declare void @scr_gen_in_f64(ptr, double)`);
+                B.line(`call void @scr_gen_in_f64(ptr ${g.name}, double ${name})`);
+              } else if (t.kind === "bool") {
+                this.declare(`declare void @scr_gen_in_bool(ptr, i1 zeroext)`);
+                B.line(`call void @scr_gen_in_bool(ptr ${g.name}, i1 ${name})`);
+              } else {
+                this.declare(`declare void @scr_gen_in_ref(ptr, ptr, ptr)`);
+                B.line(`call void @scr_gen_in_ref(ptr ${g.name}, ptr ${name}, ptr ${vAdapters(this, t).release})`);
+              }
+            });
+          }
+          this.declare(`declare ptr @scr_agen_next(ptr)`);
+          entry = "scr_agen_next";
+        } else if (e.mode === "return") {
+          if (e.arg === null) {
+            this.declare(`declare void @scr_gen_ret_none(ptr)`);
+            B.line(`call void @scr_gen_ret_none(ptr ${g.name})`);
+          } else {
+            sendArg((name, t) => {
+              if (t.kind === "f64") {
+                this.declare(`declare void @scr_gen_ret_f64(ptr, double)`);
+                B.line(`call void @scr_gen_ret_f64(ptr ${g.name}, double ${name})`);
+              } else if (t.kind === "bool") {
+                this.declare(`declare void @scr_gen_ret_bool(ptr, i1 zeroext)`);
+                B.line(`call void @scr_gen_ret_bool(ptr ${g.name}, i1 ${name})`);
+              } else {
+                this.declare(`declare void @scr_gen_ret_ref(ptr, ptr, ptr)`);
+                B.line(`call void @scr_gen_ret_ref(ptr ${g.name}, ptr ${name}, ptr ${vAdapters(this, t).release})`);
+              }
+            });
+          }
+          this.declare(`declare ptr @scr_agen_return(ptr)`);
+          entry = "scr_agen_return";
+        } else {
+          // .throw(e): park the payload in the CALLER's cell (the throw
+          // statement's exact kind dispatch); scr_agen_throw moves it into
+          // the fiber, or -- on a generator that never started or already
+          // finished -- into the REJECTION of the promise it answers.
+          if (e.arg === null) throw new Error("llvm emitter bug: agenResume throw with no payload");
+          const a = this.emitExpr(e.arg);
+          if (isRefCounted(e.arg.type)) this.moveTemp(a); // the cell takes ownership
+          this.emitThrowValue({ name: a.name, type: e.arg.type });
+          this.declare(`declare ptr @scr_agen_throw(ptr)`);
+          entry = "scr_agen_throw";
+        }
+        const t = B.tmp();
+        B.line(`${t} = call ptr @${entry}(ptr ${g.name})`);
+        return this.own({ name: t, type: e.type });
+      }
       default: {
         // Exhaustive: phase 6 claimed the last IR expression kinds.
         const _exhaustive: never = e;
@@ -8941,13 +9076,45 @@ class LlEmitter {
     return sym;
   }
 
+
+  /** The ASYNC generator's SETTLE thunk: `void (ptr %g, ptr %p)`, handed to
+   * scr_agen_new and called by the runtime at every yield and at
+   * completion. Like the C lane's, it is a WRAPPER over genResultThunkFor
+   * rather than a second copy of it — the record shape, the undefined arm
+   * and the arm-wise retagging are the same question for both flavours, and
+   * a second implementation is a second thing to drift out of step with the
+   * first (and with the other backend). Only the destination differs:
+   * fulfill a promise instead of returning the record. */
+  private agenSettleThunkFor(
+    genT: IrType & { kind: "asyncGenerator" },
+    recT: IrType & { kind: "record" },
+  ): string {
+    const key = `agres:${typeKey(genT)}`;
+    const cached = this.resolveThunks.get(key);
+    if (cached) return cached;
+    const inner = this.genResultThunkFor(genT, recT);
+    const sym = mangleAgenSettleThunk(this.resolveThunks.size);
+    this.resolveThunks.set(key, sym);
+    this.declare(`declare void @scr_promise_fulfill_ref(ptr, ptr, ptr, ptr, ptr)`);
+    const v = vAdapters(this, recT);
+    this.resolveThunkDefs.push(
+      `define internal void @${sym}(ptr %g, ptr %p) ${FN_ATTRS} { ; async generator settle`,
+      `entry:`,
+      `  %r = call ptr @${inner}(ptr %g)`,
+      `  call void @scr_promise_fulfill_ref(ptr %p, ptr %r, ptr ${v.retain}, ptr ${v.release}, ptr ${traceArg(this, recT)})`,
+      `  ret void`,
+      `}`,
+      ``,
+    );
+    return sym;
+  }
   /** Interned generator-resume result builder — emit-async.ts's
    * genResultThunkFor: reads the post-resume state of a generator into a
    * fresh IteratorResult record `{ done, value }`. While suspended, the
    * yielded value moves out of the OUT slot into its arm of V (retagging
    * arm-wise into a superset V); once done, a present completion value
    * wraps the same way and an empty OUT is JS's undefined. */
-  private genResultThunkFor(genT: IrType & { kind: "generator" }, recT: IrType & { kind: "record" }): string {
+  private genResultThunkFor(genT: IrType & { kind: "generator" | "asyncGenerator" }, recT: IrType & { kind: "record" }): string {
     const key = `gr:${typeKey(genT)}`;
     let sym = this.resolveThunks.get(key);
     if (sym) return sym;

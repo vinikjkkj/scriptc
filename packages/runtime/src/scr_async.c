@@ -1248,12 +1248,28 @@ static void scr_promise_reject_from_cell(ScrPromise *p, ScrExcCell *cell) {
   cell->trace_fn = NULL;
 }
 
+static void scr_agen_finish_gen(ScrGen *g, ScrExcCell *cell);
+/* Marks a generator handle DONE after its fiber finished on a LOOP resume
+ * (async generators only — a sync generator's fiber is only ever resumed
+ * from a consumer's stack). Defined with the generator section below,
+ * where struct ScrGen is complete. */
+static void scr_gen_fiber_completed(ScrGen *g);
+/* True for a generator handle created by scr_agen_new (its settle thunk is
+ * set) — the one bit that tells the two generator flavours apart on the
+ * shared completion path. */
+static bool scr_gen_is_async(ScrGen *g);
 static void scr_fiber_finish(ScrFiber *self) {
   if (self->gen != NULL) {
     /* Generator completion: the emitted trampoline already stored the
      * completion value (or consumed the GENRET sentinel); a real body
      * exception stays pending in this fiber's cell — the consumer-side
-     * resume moves it into the resumer's cell. No promise to settle. */
+     * resume moves it into the resumer's cell. No promise to settle.
+     *
+     * An ASYNC generator differs on exactly that last clause: its consumer
+     * holds a promise, not a stack frame, so the completion (or the
+     * escaping exception) has to settle `pending` HERE — the resumer may
+     * be the event loop, which has no call site to propagate into. */
+    if (scr_gen_is_async(self->gen)) scr_agen_finish_gen(self->gen, &self->exc);
     self->done = true;
     return;
   }
@@ -1803,8 +1819,20 @@ static void scr_resume_fiber(ScrFiber *f) {
   (void)scr_win_self();
 #endif
   f->return_to = &scr_loop_ctx;
+  ScrGen *g = f->gen; /* read BEFORE the switch: the finish path clears it */
   scr_switch(&scr_loop_ctx, &f->ctx, f);
   if (f->done) {
+    if (g != NULL) {
+      /* An ASYNC generator body that ran to completion on a LOOP resume
+       * (it had parked on an await). The ScrGen owns the fiber, so the
+       * async teardown below would free a fiber the handle still points
+       * at; hand the handle its own teardown instead. scr_fiber_finish
+       * already settled the pending promise. */
+      scr_gen_fiber_completed(g);
+      scr_fiber_destroy(f);
+      scr_fibers_live--;
+      return;
+    }
     scr_promise_release(f->promise);
     scr_fiber_destroy(f);
     scr_fibers_live--;
@@ -2631,6 +2659,15 @@ struct ScrGen {
   /* The never-started teardown: drops the packed (already-retained)
    * arguments the spawn wrapper built. Emitted per generator function. */
   void (*drop_args)(void *);
+  /* ── async generators only (scr_agen_new sets settle non-NULL) ──────
+   * `settle` is the emitted per-generator-type result builder: it reads
+   * OUT + scr_gen_done(g) and FULFILLS p with the IteratorResult record.
+   * `pending` is the in-flight .next()/.return()/.throw() promise (+1) —
+   * the body's yield (or the completion epilogue) settles it. A NULL
+   * settle means an ordinary synchronous generator, and every scr_agen_*
+   * entry point is then unreachable by construction. */
+  void (*settle)(ScrGen *, ScrPromise *);
+  ScrPromise *pending;
 };
 
 ScrGen *scr_gen_new(void (*entry)(ScrFiber *, void *), void *argpack,
@@ -2675,6 +2712,15 @@ ScrGen *scr_gen_retain(ScrGen *g) {
 
 void scr_gen_release(ScrGen *g) {
   if (!g || --g->rc != 0) return;
+  /* g->pending is NOT released here, and that is an INVARIANT rather than
+   * an omission: an async generator's only consumer is the compiler's own
+   * for-await desugar, which awaits each request promise before it can do
+   * anything else -- so the handle cannot reach a refcount of zero while a
+   * request is in flight, and pending is always NULL by here. The frontend
+   * refusal on the direct .next()/.return()/.throw() surface is what holds
+   * that invariant up (tests/harness/async-generator-boundary.test.ts pins
+   * it). Opening that surface means building the request QUEUE first, and
+   * the queue's teardown belongs here. */
   scr_gen_slot_reset(&g->out);
   scr_gen_slot_reset(&g->in);
   scr_gen_slot_reset(&g->ret);
@@ -2813,6 +2859,251 @@ void scr_gen_ret_to_out(ScrGen *g) {
   g->ret.kind = SCR_EXC_NONE;
   g->ret.payload = NULL;
   g->ret.release_fn = NULL;
+}
+
+/* ── async generators (async function*) ───────────────────────────────
+ * Contract in scr_runtime.h. An async generator is the SAME ScrGen handle
+ * over the SAME suspended fiber as a synchronous one — the whole
+ * difference is who the consumer is and what a resume answers:
+ *
+ *   sync   .next()  -> switch in, run to the yield, return the record.
+ *   async  .next()  -> switch in and return a PROMISE; the body settles it
+ *                      when it reaches a yield (or completes), which may
+ *                      be several event-loop turns later because the body
+ *                      is allowed to await in between.
+ *
+ * The body awaiting is the entire reason this is not a thin wrapper.
+ * scr_await_park switches to fiber->return_to, which during a resume is
+ * the CONSUMER's stack — so the consumer comes back out of the switch
+ * with the fiber neither yielded nor done, and must simply hand back the
+ * still-pending promise. The fiber is on the promise's waiter list by
+ * then, so the loop owns the rest of its life: it resumes it (return_to
+ * becomes the loop), the body reaches its yield, settles the pending
+ * promise from THERE, and parks again.
+ *
+ * The settle step is an EMITTED thunk (g->settle) because the
+ * IteratorResult record is a typed C struct, one shape per channel pair —
+ * the runtime cannot build it. It is the same thunk shape the synchronous
+ * lane already interns, with a promise to fulfill instead of a value to
+ * return.
+ *
+ * SEQUENTIAL CONSUMERS ONLY. JS async generators keep a QUEUE of pending
+ * requests, so two .next() calls without an await in between are legal and
+ * answer in order. Nothing here implements that queue: the frontend
+ * refuses a direct .next()/.return()/.throw() on an async generator, so
+ * the only consumers that reach these entry points are the compiler's own
+ * for-await and Readable.from desugars, both strictly one at a time. If a
+ * direct-call surface is ever opened, the queue has to be built FIRST — a
+ * second request arriving while one is in flight would otherwise
+ * overwrite `pending` and drop a settlement on the floor. The abort in
+ * scr_agen_arm turns that mistake into a loud failure rather than a lost
+ * promise.
+ */
+
+static void scr_gen_fiber_completed(ScrGen *g) {
+  g->state = SCR_GEN_DONE;
+  g->fiber = NULL;
+}
+
+static bool scr_gen_is_async(ScrGen *g) { return g->settle != NULL; }
+
+/* The completion epilogue, called from scr_fiber_finish while still ON the
+ * dying fiber. The emitted trampoline has already stored the completion
+ * value in OUT (or promoted a parked .return through the GENRET path), so
+ * the record the settle thunk builds is the { value, done: true } JS
+ * answers. An escaping exception rejects instead — moved out of the
+ * fiber's cell exactly like an async function body's. */
+static void scr_agen_finish_gen(ScrGen *g, ScrExcCell *cell) {
+  ScrPromise *p = g->pending;
+  g->pending = NULL;
+  /* done must read true BEFORE the thunk runs: it answers the record's
+   * done field from this very flag. The handle's own teardown (in the
+   * resumer) sets it again, harmlessly. */
+  g->state = SCR_GEN_DONE;
+  if (p == NULL) {
+    /* No request in flight — the body ran to completion off a resume that
+     * had already been answered. The value has nowhere to go; drop it
+     * rather than leak it. */
+    scr_gen_slot_reset(&g->out);
+    return;
+  }
+  if (cell->kind != SCR_EXC_NONE) {
+    scr_promise_reject_from_cell(p, cell);
+    scr_promise_settle_wake(p);
+  } else {
+    g->settle(g, p); /* fulfills */
+  }
+  scr_promise_release(p);
+}
+
+ScrGen *scr_agen_new(void (*entry)(ScrFiber *, void *), void *argpack,
+                     void (*drop_args)(void *),
+                     void (*settle)(ScrGen *, ScrPromise *)) {
+  ScrGen *g = scr_gen_new(entry, argpack, drop_args);
+  g->settle = settle;
+  return g;
+}
+
+/* The consumer->fiber hop for an async generator. Unlike the synchronous
+ * scr_gen_switch_in this never moves an exception into the resumer: an
+ * async generator reports failure through its promise, never by throwing
+ * at the .next() call site. */
+static void scr_agen_switch_in(ScrGen *g) {
+  ScrFiber *f = g->fiber;
+  scr_gen_retain(g);
+  g->state = SCR_GEN_RUNNING;
+#ifdef _WIN32
+  ScrCtx here = scr_win_self();
+#else
+  ucontext_t here;
+#endif
+  f->return_to = &here;
+  ScrFiber *me = scr_current;
+  scr_switch(&here, &f->ctx, f);
+  scr_current = me;
+  scr_exc_swap_cell(me != NULL ? &me->exc : NULL);
+  if (f->done) {
+    /* Completed synchronously inside this resume; scr_fiber_finish already
+     * settled the promise. */
+    scr_gen_fiber_completed(g);
+    scr_fiber_destroy(f);
+    scr_fibers_live--;
+  } else {
+    /* Either parked at a yield (promise already settled) or parked on an
+     * await (promise still pending, fiber owned by the loop). Both read as
+     * SUSPENDED to a later resume, and a later resume cannot happen before
+     * the promise settles because the consumer awaits it. */
+    g->state = SCR_GEN_SUSPENDED;
+  }
+  scr_gen_release(g);
+}
+
+/* Arms a fresh request promise. Aborts rather than overwrite one already
+ * in flight — see the SEQUENTIAL CONSUMERS note above. */
+static ScrPromise *scr_agen_arm(ScrGen *g) {
+  if (g->pending != NULL) {
+    fputs("scriptc: internal error: overlapping async generator requests\n", stderr);
+    abort();
+  }
+  ScrPromise *p = scr_promise_new();
+  g->pending = scr_promise_retain(p);
+  return p;
+}
+
+/* A request against an already-DONE generator: { value: undefined, done:
+ * true }, built by the same thunk (OUT is NONE, done reads true) so the
+ * record shape can never disagree with the live path's. */
+static ScrPromise *scr_agen_settled_done(ScrGen *g) {
+  ScrPromise *p = scr_promise_new();
+  g->settle(g, p);
+  return p;
+}
+
+ScrPromise *scr_agen_next(ScrGen *g) {
+  if (g->state == SCR_GEN_DONE) return scr_agen_settled_done(g);
+  ScrPromise *p = scr_agen_arm(g);
+  scr_agen_switch_in(g);
+  return p;
+}
+
+ScrPromise *scr_agen_return(ScrGen *g) {
+  switch (g->state) {
+  case SCR_GEN_DONE:
+    scr_gen_ret_to_out(g);
+    return scr_agen_settled_done(g);
+  case SCR_GEN_UNSTARTED: {
+    /* The body never runs: tear the fiber down cleanly (drop the packed
+     * arguments) and complete with the parked value. */
+    if (g->drop_args != NULL) g->drop_args(g->fiber->argpack);
+    else free(g->fiber->argpack);
+    scr_fiber_destroy(g->fiber);
+    g->fiber = NULL;
+    scr_fibers_live--;
+    g->state = SCR_GEN_DONE;
+    scr_gen_ret_to_out(g);
+    return scr_agen_settled_done(g);
+  }
+  default: {
+    ScrPromise *p = scr_agen_arm(g);
+    if (g->fiber->exc.kind == SCR_EXC_NONE) g->fiber->exc.kind = SCR_EXC_GENRET;
+    scr_agen_switch_in(g);
+    return p;
+  }
+  }
+}
+
+ScrPromise *scr_agen_throw(ScrGen *g) {
+  ScrExcCell *mine = scr_exc_current_cell();
+  switch (g->state) {
+  case SCR_GEN_DONE:
+  case SCR_GEN_UNSTARTED: {
+    /* The body never sees it; the generator becomes done and the REQUEST
+     * rejects with the payload (an async generator never throws at the
+     * call site — Node answers a rejected promise). */
+    if (g->state == SCR_GEN_UNSTARTED) {
+      if (g->drop_args != NULL) g->drop_args(g->fiber->argpack);
+      else free(g->fiber->argpack);
+      scr_fiber_destroy(g->fiber);
+      g->fiber = NULL;
+      scr_fibers_live--;
+      g->state = SCR_GEN_DONE;
+    }
+    ScrPromise *p = scr_promise_new();
+    scr_promise_reject_from_cell(p, mine);
+    scr_promise_settle_wake(p);
+    return p;
+  }
+  default: {
+    ScrPromise *p = scr_agen_arm(g);
+    ScrExcCell *dst = &g->fiber->exc;
+    dst->kind = mine->kind;
+    dst->f64 = mine->f64;
+    dst->b = mine->b;
+    dst->payload = mine->payload;
+    dst->retain_fn = mine->retain_fn;
+    dst->release_fn = mine->release_fn;
+    dst->trace_fn = mine->trace_fn;
+    mine->kind = SCR_EXC_NONE;
+    mine->payload = NULL;
+    mine->trace_fn = NULL;
+    scr_agen_switch_in(g);
+    return p;
+  }
+  }
+}
+
+/* yield, body side. JS's AsyncGeneratorYield awaits its operand before
+ * answering the request, which is one microtask turn even for a plain
+ * value — that hop is why awaiting g.next() costs exactly one turn more
+ * than awaiting a plain async call (measured against Node v25.9.0, not
+ * assumed). Taking it here, BEFORE settling, is also what lets the
+ * consumer's own await park first, so the settlement always wakes a
+ * waiter rather than racing one. */
+static void scr_agen_yield_settle(void) {
+  ScrGen *g = scr_gen_self();
+  scr_await_hop();
+  ScrPromise *p = g->pending;
+  g->pending = NULL;
+  if (p != NULL) {
+    g->settle(g, p); /* { value: OUT, done: false } — state is not DONE */
+    scr_promise_release(p);
+  } else {
+    scr_gen_slot_reset(&g->out);
+  }
+  scr_gen_yield_switch();
+}
+
+void scr_agen_yield_f64(double v) {
+  scr_gen_slot_f64(&scr_gen_self()->out, v);
+  scr_agen_yield_settle();
+}
+void scr_agen_yield_bool(bool v) {
+  scr_gen_slot_bool(&scr_gen_self()->out, v);
+  scr_agen_yield_settle();
+}
+void scr_agen_yield_ref(void *v, void (*release)(void *)) {
+  scr_gen_slot_ref(&scr_gen_self()->out, v, release);
+  scr_agen_yield_settle();
 }
 
 /* The consumer→fiber hop shared by every resume mode: switches in, and on

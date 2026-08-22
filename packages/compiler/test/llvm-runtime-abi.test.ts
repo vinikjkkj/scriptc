@@ -526,6 +526,12 @@ describe("LLVM backend declares match scr_runtime.h prototypes", () => {
     union: { kind: "union", unionId: "u0" },
     promise: { kind: "promise", inner: STRING },
     generator: { kind: "generator", yieldT: STRING, retT: STRING, nextT: STRING },
+    // Same ScrGen handle and the same RC entry points as the synchronous
+    // flavour: only the RESUME protocol differs (a promise over the
+    // IteratorResult record instead of the record). It gets its own row
+    // because it is its own IrType kind, and this table is what forces a
+    // new kind to be looked at here at all.
+    asyncGenerator: { kind: "asyncGenerator", yieldT: STRING, retT: STRING, nextT: STRING },
     dyn: { kind: "dyn" },
     jsval: { kind: "jsval" },
     caught: { kind: "caught" },

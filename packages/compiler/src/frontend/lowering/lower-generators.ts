@@ -14,10 +14,14 @@ import { genResultRecord } from "../types.js";
 import { forOfVarTarget } from "./lower-stmts.js";
 
 type GenType = IrType & { kind: "generator" };
+/** Either generator flavour, for the helpers that only read the three
+ * CHANNELS (the result record and the per-element extraction are the same
+ * question for both — what differs is only how a resume is delivered). */
+type AnyGenType = IrType & { kind: "generator" | "asyncGenerator" };
 
 /** The interned IteratorResult record of a generator type (never null for
  * a MAPPED generator — mapType required it to intern). */
-function resultRecordOf(L: Lowerer, genT: GenType): IrType & { kind: "record" } {
+function resultRecordOf(L: Lowerer, genT: AnyGenType): IrType & { kind: "record" } {
   const rec = genResultRecord(genT.yieldT, genT.retT, L.shapes, L.unions);
   if (!rec) throw new Error("lowerer bug: mapped generator without a result record");
   return rec;
@@ -59,6 +63,7 @@ export function lowerYield(L: Lowerer, expr: ts.YieldExpression): IrExpr {
       "the value of 'yield*' (statement-position delegation compiles: 'yield* inner();' — bind the delegate's return value through its .next() protocol instead)",
     );
   }
+
   let value: IrExpr;
   if (expr.expression) {
     value = L.lowerExprExpecting(expr.expression, gen.yieldT);
@@ -77,7 +82,11 @@ export function lowerYield(L: Lowerer, expr: ts.YieldExpression): IrExpr {
   // the expression is void (statement position; the checker types reads of
   // it undefined, whose uses fence downstream).
   const type = gen.nextT.kind === "undefinedT" ? VOID : gen.nextT;
-  return { kind: "yieldExpr", value, type, loc };
+  // An ASYNC generator body carries the flag on the node: the emitters
+  // pick the yield helper from it, so neither backend can fall back to
+  // the synchronous one by forgetting to consult the enclosing function.
+  const isAsyncGen = L.ctx.isAsync === true;
+  return { kind: "yieldExpr", value, ...(isAsyncGen ? { async: true as const } : {}), type, loc };
 }
 
 /** `g.next(v)` / `g.return(v)` / `g.throw(e)` on a generator-typed
@@ -169,7 +178,7 @@ export function lowerGenMethodCall(
  * own done test). Null when no extraction exists. */
 function extractYieldValue(
   L: Lowerer,
-  genT: GenType,
+  genT: AnyGenType,
   valueT: IrType,
   read: IrExpr,
   loc: SrcLoc,
@@ -304,40 +313,56 @@ export function lowerForOfGenerator(
         ? [{ kind: "assign", localId: varTarget.id, value: L.coerceInto(decl.name, xRef, varTarget.type), loc } satisfies IrStmt]
         : []),
     ];
-    const body = L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels);
+    // tryFinally outermost, loop inside — see the note on the for-await
+    // twin: an unlabeled jump binds to the loop and never sees the
+    // finally; a labeled one refuses instead of miscompiling.
+    const wrap = !hasEscapingLabeledJump(stmt.statement);
+    const body = wrap
+      ? L.inCtl("tryFinally", () => L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels))
+      : L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels);
+    // IteratorClose: EVERY abrupt completion closes the generator, so the
+    // finallys run; the .return() result record is dropped. It used to sit
+    // after the loop, which covered `break` and exhaustion but not a
+    // `return` or a `throw` from the loop body — those left the generator
+    // suspended and its finally blocks unrun, and a dropped suspended
+    // generator is deliberately ABANDONED by scr_gen_release (Node's GC
+    // does not run finallys either), so the cleanup was lost silently.
+    // Node runs it: see tests/corpus/5933-async-generators-abandon.ts.
+    const close: IrStmt = {
+      kind: "if",
+      cond: {
+        kind: "unary",
+        op: "!",
+        operand: { kind: "varRef", localId: done.id, type: BOOL, loc },
+        type: BOOL,
+        loc,
+      },
+      then: [
+        {
+          kind: "exprStmt",
+          expr: { kind: "genResume", mode: "return", gen: gRef(), arg: null, type: recT, loc },
+          loc,
+        },
+      ],
+      else_: null,
+      loc,
+    };
+    const loop: IrStmt = {
+      kind: "while",
+      cond: { kind: "boolLit", value: true, type: BOOL, loc },
+      body: [...head, ...body],
+      ...(labels && { labels }),
+      loc,
+    };
     return {
       kind: "block",
       body: [
         { kind: "varDecl", localId: g.id, init: iterable, loc },
         { kind: "varDecl", localId: done.id, init: { kind: "boolLit", value: false, type: BOOL, loc }, loc },
-        {
-          kind: "while",
-          cond: { kind: "boolLit", value: true, type: BOOL, loc },
-          body: [...head, ...body],
-          ...(labels && { labels }),
-          loc,
-        },
-        // IteratorClose: an early exit (break) closes the generator —
-        // finallys run; the .return() result record is dropped.
-        {
-          kind: "if",
-          cond: {
-            kind: "unary",
-            op: "!",
-            operand: { kind: "varRef", localId: done.id, type: BOOL, loc },
-            type: BOOL,
-            loc,
-          },
-          then: [
-            {
-              kind: "exprStmt",
-              expr: { kind: "genResume", mode: "return", gen: gRef(), arg: null, type: recT, loc },
-              loc,
-            },
-          ],
-          else_: null,
-          loc,
-        },
+        wrap
+          ? { kind: "tryCatch", tryBody: [loop], catchBody: null, catchLocalId: null, finallyBody: [close], loc }
+          : loop,
+        ...(wrap ? [] : [close]),
       ],
       loc,
     };
@@ -346,6 +371,230 @@ export function lowerForOfGenerator(
   }
 }
 
+
+
+/** Does this loop body contain a `break lbl` / `continue lbl` whose label is
+ * NOT declared inside the body — i.e. a jump that leaves the loop?
+ *
+ * It decides which IteratorClose shape the two generator for-loops below
+ * emit, and it exists because the correct shape cannot serve this one case.
+ * Closing on EVERY abrupt completion means wrapping the loop in a
+ * try/finally, and `break`/`continue` crossing a finally is rejected
+ * outright (only `return` has the backend's pending-action plumbing). An
+ * unlabeled jump binds to the loop itself and never sees the finally, so
+ * the wrap is free for it; an ESCAPING LABELED jump would newly refuse
+ * programs that compile today — tests/corpus/2019-generators-loops.ts is
+ * exactly that shape, `continue outer` / `break outer` from inside a nested
+ * for-of over a generator.
+ *
+ * So a body carrying one keeps the LEGACY shape: the close sits after the
+ * loop and an escaping labeled jump skips it. That is a real divergence
+ * from JS, which closes the inner iterator there too — but it is the
+ * divergence this compiler already had, unchanged and now confined to one
+ * spelling instead of applying to `return` and `throw` as well. Refusing
+ * the shape instead would trade a rarely-observable divergence (it needs
+ * the generator to have a `finally`) for a certain build failure.
+ *
+ * Function boundaries stop the walk: neither labels nor jumps cross one. */
+function hasEscapingLabeledJump(body: ts.Statement): boolean {
+  let found = false;
+  const walk = (n: ts.Node, bound: readonly string[]): void => {
+    if (found) return;
+    if (
+      ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) ||
+      ts.isArrowFunction(n) || ts.isMethodDeclaration(n) ||
+      ts.isClassDeclaration(n) || ts.isClassExpression(n)
+    ) {
+      return;
+    }
+    let scope = bound;
+    if (ts.isLabeledStatement(n)) scope = [...bound, n.label.text];
+    if ((ts.isBreakStatement(n) || ts.isContinueStatement(n)) && n.label !== undefined) {
+      if (!scope.includes(n.label.text)) {
+        found = true;
+        return;
+      }
+    }
+    n.forEachChild((c) => walk(c, scope));
+  };
+  walk(body, []);
+  return found;
+}
+
+/** `for await (const x of asyncGen())` — the desugared drive. Structurally
+ * the synchronous lowerForOfGenerator above with one change per resume:
+ * every `agenResume` answers a `promise<IteratorResult>` and is consumed
+ * through an `awaitExpr`, so the loop parks the consuming fiber wherever
+ * the synchronous form would have blocked on a stack switch.
+ *
+ *   { const %aof = <iterable>; let %adone = false;
+ *     while (true) {
+ *       const %ares = await %aof.next();      // agenResume + awaitExpr
+ *       if (%ares.done) { %adone = true; break; }
+ *       const x = <extract %ares.value>;
+ *       <body>
+ *     }
+ *     if (!%adone) await %aof.return();       // IteratorClose
+ *   }
+ *
+ * The IteratorClose is awaited too — the body's finally blocks are allowed
+ * to await, so discarding the promise would let the loop continue past a
+ * cleanup that had not finished. Both divergences the synchronous form
+ * carries apply unchanged: a consumer `return`/`throw` abandoning the loop
+ * does not close, and the close's own result record is dropped. */
+export function lowerForAwaitAsyncGenerator(
+  L: Lowerer,
+  stmt: ts.ForOfStatement,
+  iterable: IrExpr & { type: IrType & { kind: "asyncGenerator" } },
+  labels?: string[],
+): IrStmt {
+  if (!L.ctx.isAsync) {
+    L.unsupported("SC1090", stmt, "top-level 'for await' (await outside async functions)");
+  }
+  if (!ts.isVariableDeclarationList(stmt.initializer)) {
+    L.unsupported(
+      "SC1090",
+      stmt.initializer,
+      "for-await over a pre-declared variable (declare the loop variable in the loop: for await (const x of ...))",
+    );
+  }
+  const list = stmt.initializer;
+  if ((list.flags & ts.NodeFlags.Using) !== 0) {
+    L.unsupported("SC1090", list, "'using' declarations (dispose-at-scope-exit semantics)");
+  }
+  const isConst = (list.flags & ts.NodeFlags.Const) !== 0;
+  const isLet = (list.flags & ts.NodeFlags.Let) !== 0;
+  // `for await (var x of ...)`: the binding is per-await machinery here as
+  // it is in the stream desugar; a hoisted shared slot has no user.
+  if (!isConst && !isLet) L.unsupported("SC1030", list, "'var' loop bindings in 'for await' (use const)");
+  const decl = list.declarations[0]!;
+  if (!ts.isIdentifier(decl.name)) L.unsupported("SC1031", decl.name);
+  const genT = iterable.type;
+  if (genT.yieldT.kind === "void") {
+    L.unsupported(
+      "SC1090",
+      stmt.expression,
+      "for-await over an async generator that never yields (its element type is never)",
+    );
+  }
+  if (genT.nextT.kind !== "undefinedT" && genT.nextT.kind !== "dyn") {
+    L.unsupported(
+      "SC1090",
+      stmt.expression,
+      `for-await over an async generator whose yields expect .next(value) ('${L.fmt(genT.nextT)}')`,
+    );
+  }
+  const loc = locOf(stmt);
+  const recT = resultRecordOf(L, genT);
+  const promiseT: IrType = { kind: "promise", inner: recT };
+  const shape = L.shapes.get(recT.shapeId)!;
+  const valueT = shape.fields.find((f) => f.name === "value")!.type;
+  L.scopes.push(new Map());
+  try {
+    const g = L.declareHiddenLocal("%aof", genT);
+    const done = L.declareHiddenLocal("%adone", BOOL);
+    done.mutable = true;
+    const r = L.declareHiddenLocal("%ares", recT);
+    const gRef = (): IrExpr => ({ kind: "varRef", localId: g.id, type: genT, loc });
+    const rRef = (): IrExpr => ({ kind: "varRef", localId: r.id, type: recT, loc });
+    const valueRead: IrExpr = { kind: "recordGet", obj: rRef(), shapeId: recT.shapeId, field: "value", type: valueT, loc };
+    const extracted = extractYieldValue(L, genT, valueT, valueRead, loc);
+    if (!extracted) {
+      L.unsupported(
+        "SC1090",
+        stmt.expression,
+        `for-await over an async generator yielding '${L.fmt(genT.yieldT)}' (no per-element extraction exists)`,
+      );
+    }
+    const x = L.declareLocal(decl.name, decl.name.text, genT.yieldT, isLet);
+    const head: IrStmt[] = [
+      {
+        kind: "varDecl",
+        localId: r.id,
+        init: {
+          kind: "awaitExpr",
+          value: { kind: "agenResume", mode: "next", gen: gRef(), arg: null, type: promiseT, loc },
+          type: recT,
+          loc,
+        },
+        loc,
+      },
+      {
+        kind: "if",
+        cond: { kind: "recordGet", obj: rRef(), shapeId: recT.shapeId, field: "done", type: BOOL, loc },
+        then: [
+          { kind: "assign", localId: done.id, value: { kind: "boolLit", value: true, type: BOOL, loc }, loc },
+          { kind: "break", loc },
+        ],
+        else_: null,
+        loc,
+      },
+      { kind: "varDecl", localId: x.id, init: extracted, loc },
+    ];
+    // The body lowers inside BOTH markers, tryFinally outermost: an
+    // unlabeled break/continue binds to the loop marker and never sees the
+    // finally, while a LABELED jump to an enclosing construct walks past
+    // the loop, reaches the tryFinally and refuses (SC1090) instead of
+    // compiling a jump the emitter has no pending-action path for.
+    const wrap = !hasEscapingLabeledJump(stmt.statement);
+    const body = wrap
+      ? L.inCtl("tryFinally", () => L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels))
+      : L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels);
+    const close: IrStmt = {
+      kind: "if",
+      cond: {
+        kind: "unary",
+        op: "!",
+        operand: { kind: "varRef", localId: done.id, type: BOOL, loc },
+        type: BOOL,
+        loc,
+      },
+      then: [
+        {
+          kind: "exprStmt",
+          expr: {
+            kind: "awaitExpr",
+            value: { kind: "agenResume", mode: "return", gen: gRef(), arg: null, type: promiseT, loc },
+            type: recT,
+            loc,
+          },
+          loc,
+        },
+      ],
+      else_: null,
+      loc,
+    };
+    const loop: IrStmt = {
+      kind: "while",
+      cond: { kind: "boolLit", value: true, type: BOOL, loc },
+      body: [...head, ...body],
+      ...(labels && { labels }),
+      loc,
+    };
+    return {
+      kind: "block",
+      body: [
+        { kind: "varDecl", localId: g.id, init: iterable, loc },
+        { kind: "varDecl", localId: done.id, init: { kind: "boolLit", value: false, type: BOOL, loc }, loc },
+        // IteratorClose is the loop's FINALLY, not a statement after it:
+        // JS closes the iterator on EVERY abrupt completion, so a `return`
+        // or a `throw` from the body has to run the generator's cleanup
+        // exactly as `break` does. Sitting after the loop it ran on break
+        // and on exhaustion only, and a consumer that returned mid-stream
+        // silently skipped the generator's finally blocks. See
+        // hasEscapingLabeledJump for the one body shape that keeps the old
+        // placement, and why.
+        wrap
+          ? { kind: "tryCatch", tryBody: [loop], catchBody: null, catchLocalId: null, finallyBody: [close], loc }
+          : loop,
+        ...(wrap ? [] : [close]),
+      ],
+      loc,
+    };
+  } finally {
+    L.scopes.pop();
+  }
+}
 /** Statement-position `yield* e;` — the forwarding loop:
  *
  *   { const %dele = <e>; let %dr = %dele.next();
@@ -361,6 +610,14 @@ export function lowerYieldStarStatement(L: Lowerer, expr: ts.Expression): IrStmt
   if (!ts.isYieldExpression(expr) || expr.asteriskToken === undefined) return null;
   const gen = L.ctx.generator;
   if (!gen) L.unsupported("SC1071", expr);
+  // Delegation from an ASYNC generator has no lowering: the forwarding
+  // loop below drives the delegate through the SYNCHRONOUS genResume
+  // protocol, and an async delegate answers promises. Refusing here keeps
+  // the boundary loud rather than compiling a loop that reads a promise
+  // as an IteratorResult.
+  if (L.ctx.isAsync === true) {
+    L.unsupported("SC1071", expr, "'yield*' inside an async generator (delegation has no async lowering)");
+  }
   if (!expr.expression) L.unsupported("SC1071", expr, "'yield*' with no operand");
   const loc = locOf(expr);
   const delegate = L.lowerExpr(expr.expression);

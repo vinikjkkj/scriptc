@@ -52,7 +52,7 @@ import { cType, releaseCallC, cStringLiteral, cDecl } from "./emit-types.js";
 import { computeMayThrow } from "./may-throw.js";
 import { dynDesc, unionTruthyHelper, unionEqHelper, unionToStrHelper, unionJoinHelper, jsonWriteHelper, jsonIndentHelper, dynMatchHelper, dynCheckHelper, dynArmHelper, dynFuncBoxHelper, dynToStrHelper, caughtToDynHelper, toDynHelper, dynClassDesc, recordKeyGetHelper, recordKeySetHelper, recordWideHelper } from "./emit-walkers.js";
 import { VtSlot, ClassMeta, emitStructDefs, vtEntriesFor, vtSlotParams, emitVtableDecls, emitVtableInstances, emitVtAdapterDefs, emitHierarchyClassHelpers, emitClassObjs, emitCtorThunkDefs, errorVtStampLines, emitterVtStampLines, streamVtStampLines, traceAdapterC, traceArgC, boxNewC, arrNewC } from "./emit-shapes.js";
-import { emitAsyncScaffolding, childDataThunkFor, childExitThunkFor, childExitThunkFor2, closeBindThunkFor, connectSockThunkFor, closeOverrideWrapFor, dgramMsgThunkFor, dnsLookupThunkFor, netLookupAnswerThunkFor, emitterInvokeThunkFor, streamCbThunkFor, streamDataThunkFor, promiseAdoptAdapterFor, raceAdapterFor, resolveThunkFor, sniAnswerThunkFor } from "./emit-async.js";
+import { agenSettleThunkFor, emitAsyncScaffolding, childDataThunkFor, childExitThunkFor, childExitThunkFor2, closeBindThunkFor, connectSockThunkFor, closeOverrideWrapFor, dgramMsgThunkFor, dnsLookupThunkFor, netLookupAnswerThunkFor, emitterInvokeThunkFor, streamCbThunkFor, streamDataThunkFor, promiseAdoptAdapterFor, raceAdapterFor, resolveThunkFor, sniAnswerThunkFor } from "./emit-async.js";
 import { emitNpmEmbedding, islandAdapter, islandTypedAdapter } from "./emit-island.js";
 import { emitFunction, emitBlock, emitStmts, emitStmt, emitTryCatch, emitSwitch, mergeBrace, emitBranchInto, emitCondition } from "./emit-stmts.js";
 import fs from "node:fs";
@@ -950,6 +950,21 @@ export class CEmitter {
     // time and be DEFINED earlier in the file than the newFn bodies.
     const structDefs: string[] = [];
     this.emitStructDefs(structDefs);
+    // ASYNC GENERATOR settle thunks are interned HERE, ahead of the
+    // unit-instance flush below, not where the spawn wrappers name them
+    // (emitAsyncScaffolding, much further down). Building one interns the
+    // IteratorResult record's undefined arm as a unit instance, and this
+    // table is already written out by then — a thunk built late would
+    // reference an sc_unit_* that no line defines. Interning is
+    // idempotent, so the scaffolding's own call just reads the cache.
+    for (const fn of this.mod.functions) {
+      if (fn.generator === undefined || fn.async !== true) continue;
+      agenSettleThunkFor(
+        this,
+        { kind: "asyncGenerator", yieldT: fn.generator.yieldT, retT: fn.returnType, nextT: fn.generator.nextT },
+        { kind: "record", shapeId: fn.generator.resultShapeId! },
+      );
+    }
     for (const [text, sym] of this.literals) {
       const bytes = Buffer.from(text, "utf8");
       out.push(
@@ -1915,8 +1930,10 @@ export class CEmitter {
    * fiber and returns the generator object). */
   callTargetC(fnName: string): string {
     const fn = this.fnByName.get(fnName);
-    if (fn?.async === true) return mangleAsyncSpawn(fnName);
+    // ORDER MATTERS: an async GENERATOR sets both flags and enters
+    // through the lazy gen-spawn wrapper, never the eager async one.
     if (fn?.generator !== undefined) return mangleGenSpawn(fnName);
+    if (fn?.async === true) return mangleAsyncSpawn(fnName);
     return mangleFunction(fnName);
   }
 
@@ -2165,6 +2182,7 @@ export class CEmitter {
       case "record":
       case "promise":
       case "generator":
+      case "asyncGenerator":
         // JS objects are ALWAYS truthy ([] and {} included). These are
         // non-NULL pointers, so the honest constant reads as a pointer
         // test (no unused-value warnings, operand still evaluated).
