@@ -51,6 +51,43 @@ function sThrow(): void {
   }
 }
 
+// The LABELED-JUMP carve-out, exercised on both flavours. A `break lbl` /
+// `continue lbl` that leaves the loop cannot cross the IteratorClose
+// finally (the backend has pending-action plumbing for `return` only), so
+// these bodies keep the legacy close placement -- see
+// hasEscapingLabeledJump in lower-generators.ts. The generators here have
+// NO `finally`, which is precisely the condition under which the legacy
+// placement is unobservable, and that is what this section pins: the shape
+// still COMPILES and still matches Node.
+async function* aplain(): AsyncGenerator<number, void, void> {
+  yield 1;
+  yield 2;
+  yield 3;
+}
+
+function* splain(): Generator<number, void, void> {
+  yield 1;
+  yield 2;
+  yield 3;
+}
+
+async function labeled(): Promise<void> {
+  outer: for (const x of [10, 20, 30]) {
+    for await (const v of aplain()) {
+      if (v === 2 && x === 20) continue outer;
+      if (x === 30) break outer;
+      console.log("lab", x, v);
+    }
+  }
+  souter: for (const x of [10, 20, 30]) {
+    for (const v of splain()) {
+      if (v === 2 && x === 20) continue souter;
+      if (x === 30) break souter;
+      console.log("slab", x, v);
+    }
+  }
+}
+
 async function main(): Promise<void> {
   console.log(await aRet());
   try {
@@ -64,6 +101,7 @@ async function main(): Promise<void> {
   } catch (e) {
     console.log("caught", (e as Error).message);
   }
+  await labeled();
 }
 
 main();

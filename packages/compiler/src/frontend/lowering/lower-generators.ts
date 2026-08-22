@@ -316,7 +316,10 @@ export function lowerForOfGenerator(
     // tryFinally outermost, loop inside — see the note on the for-await
     // twin: an unlabeled jump binds to the loop and never sees the
     // finally; a labeled one refuses instead of miscompiling.
-    const body = L.inCtl("tryFinally", () => L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels));
+    const wrap = !hasEscapingLabeledJump(stmt.statement);
+    const body = wrap
+      ? L.inCtl("tryFinally", () => L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels))
+      : L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels);
     // IteratorClose: EVERY abrupt completion closes the generator, so the
     // finallys run; the .return() result record is dropped. It used to sit
     // after the loop, which covered `break` and exhaustion but not a
@@ -344,27 +347,22 @@ export function lowerForOfGenerator(
       else_: null,
       loc,
     };
+    const loop: IrStmt = {
+      kind: "while",
+      cond: { kind: "boolLit", value: true, type: BOOL, loc },
+      body: [...head, ...body],
+      ...(labels && { labels }),
+      loc,
+    };
     return {
       kind: "block",
       body: [
         { kind: "varDecl", localId: g.id, init: iterable, loc },
         { kind: "varDecl", localId: done.id, init: { kind: "boolLit", value: false, type: BOOL, loc }, loc },
-        {
-          kind: "tryCatch",
-          tryBody: [
-            {
-              kind: "while",
-              cond: { kind: "boolLit", value: true, type: BOOL, loc },
-              body: [...head, ...body],
-              ...(labels && { labels }),
-              loc,
-            },
-          ],
-          catchBody: null,
-          catchLocalId: null,
-          finallyBody: [close],
-          loc,
-        },
+        wrap
+          ? { kind: "tryCatch", tryBody: [loop], catchBody: null, catchLocalId: null, finallyBody: [close], loc }
+          : loop,
+        ...(wrap ? [] : [close]),
       ],
       loc,
     };
@@ -374,6 +372,54 @@ export function lowerForOfGenerator(
 }
 
 
+
+/** Does this loop body contain a `break lbl` / `continue lbl` whose label is
+ * NOT declared inside the body — i.e. a jump that leaves the loop?
+ *
+ * It decides which IteratorClose shape the two generator for-loops below
+ * emit, and it exists because the correct shape cannot serve this one case.
+ * Closing on EVERY abrupt completion means wrapping the loop in a
+ * try/finally, and `break`/`continue` crossing a finally is rejected
+ * outright (only `return` has the backend's pending-action plumbing). An
+ * unlabeled jump binds to the loop itself and never sees the finally, so
+ * the wrap is free for it; an ESCAPING LABELED jump would newly refuse
+ * programs that compile today — tests/corpus/2019-generators-loops.ts is
+ * exactly that shape, `continue outer` / `break outer` from inside a nested
+ * for-of over a generator.
+ *
+ * So a body carrying one keeps the LEGACY shape: the close sits after the
+ * loop and an escaping labeled jump skips it. That is a real divergence
+ * from JS, which closes the inner iterator there too — but it is the
+ * divergence this compiler already had, unchanged and now confined to one
+ * spelling instead of applying to `return` and `throw` as well. Refusing
+ * the shape instead would trade a rarely-observable divergence (it needs
+ * the generator to have a `finally`) for a certain build failure.
+ *
+ * Function boundaries stop the walk: neither labels nor jumps cross one. */
+function hasEscapingLabeledJump(body: ts.Statement): boolean {
+  let found = false;
+  const walk = (n: ts.Node, bound: readonly string[]): void => {
+    if (found) return;
+    if (
+      ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) ||
+      ts.isArrowFunction(n) || ts.isMethodDeclaration(n) ||
+      ts.isClassDeclaration(n) || ts.isClassExpression(n)
+    ) {
+      return;
+    }
+    let scope = bound;
+    if (ts.isLabeledStatement(n)) scope = [...bound, n.label.text];
+    if ((ts.isBreakStatement(n) || ts.isContinueStatement(n)) && n.label !== undefined) {
+      if (!scope.includes(n.label.text)) {
+        found = true;
+        return;
+      }
+    }
+    n.forEachChild((c) => walk(c, scope));
+  };
+  walk(body, []);
+  return found;
+}
 
 /** `for await (const x of asyncGen())` — the desugared drive. Structurally
  * the synchronous lowerForOfGenerator above with one change per resume:
@@ -490,7 +536,10 @@ export function lowerForAwaitAsyncGenerator(
     // finally, while a LABELED jump to an enclosing construct walks past
     // the loop, reaches the tryFinally and refuses (SC1090) instead of
     // compiling a jump the emitter has no pending-action path for.
-    const body = L.inCtl("tryFinally", () => L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels));
+    const wrap = !hasEscapingLabeledJump(stmt.statement);
+    const body = wrap
+      ? L.inCtl("tryFinally", () => L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels))
+      : L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels);
     const close: IrStmt = {
       kind: "if",
       cond: {
@@ -515,6 +564,13 @@ export function lowerForAwaitAsyncGenerator(
       else_: null,
       loc,
     };
+    const loop: IrStmt = {
+      kind: "while",
+      cond: { kind: "boolLit", value: true, type: BOOL, loc },
+      body: [...head, ...body],
+      ...(labels && { labels }),
+      loc,
+    };
     return {
       kind: "block",
       body: [
@@ -525,23 +581,13 @@ export function lowerForAwaitAsyncGenerator(
         // or a `throw` from the body has to run the generator's cleanup
         // exactly as `break` does. Sitting after the loop it ran on break
         // and on exhaustion only, and a consumer that returned mid-stream
-        // silently skipped the generator's finally blocks.
-        {
-          kind: "tryCatch",
-          tryBody: [
-            {
-              kind: "while",
-              cond: { kind: "boolLit", value: true, type: BOOL, loc },
-              body: [...head, ...body],
-              ...(labels && { labels }),
-              loc,
-            },
-          ],
-          catchBody: null,
-          catchLocalId: null,
-          finallyBody: [close],
-          loc,
-        },
+        // silently skipped the generator's finally blocks. See
+        // hasEscapingLabeledJump for the one body shape that keeps the old
+        // placement, and why.
+        wrap
+          ? { kind: "tryCatch", tryBody: [loop], catchBody: null, catchLocalId: null, finallyBody: [close], loc }
+          : loop,
+        ...(wrap ? [] : [close]),
       ],
       loc,
     };
