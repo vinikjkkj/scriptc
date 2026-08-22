@@ -10025,7 +10025,38 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       };
       const p = L.declareHiddenLocal("%streamNext", promiseT);
       const chunk = L.declareLocal(decl.name, decl.name.text, chunkT, isLet);
-      const body = L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement));
+      // IteratorClose. Node's Readable[Symbol.asyncIterator] runs its whole
+      // loop inside a try/finally that DESTROYS the stream on the way out
+      // (destroyOnReturn defaults on), so a `break` — or a `return`/`throw`
+      // from the body — closes it. scriptc left the stream open: `s.destroyed`
+      // read false after a break where Node reads true, and once a source can
+      // hold user code (Readable.from over an async generator) that silence
+      // costs the source's `finally` blocks as well. Exhaustion needs no
+      // special case: the stream has already autoDestroyed by then and Node's
+      // own destroy is the same no-op there.
+      //
+      // tryFinally outermost, loop inside — the generator for-of's shape and
+      // for the same reason: an unlabeled break/continue binds to the loop and
+      // never crosses the finally, while a labeled jump OUT of the body would,
+      // and break/continue across a finally is rejected outright. A body
+      // carrying one keeps the close after the loop, so it still runs on a
+      // plain break and is skipped only by the escaping jump — the divergence
+      // this compiler already had.
+      const wrapClose = !hasEscapingLabeledJumpOut(stmt.statement);
+      const body = wrapClose
+        ? L.inCtl("tryFinally", () => L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement)))
+        : L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement));
+      const close: IrStmt = {
+        kind: "exprStmt",
+        expr: {
+          kind: "libCall",
+          fn: "stream.destroy",
+          args: [{ kind: "varRef", localId: recvLocal.id, type: recvT, loc }],
+          type: recvT,
+          loc,
+        },
+        loc,
+      };
       const chunkRef: IrExpr = { kind: "varRef", localId: chunk.id, type: chunkT, loc };
       const eofCond: IrExpr = dynLane
         ? { kind: "dynTest", test: "undefined", value: chunkRef, type: BOOL, loc }
@@ -10063,16 +10094,20 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         },
         { kind: "if", cond: eofCond, then: [{ kind: "break", loc }], else_: null, loc },
       ];
+      const loop: IrStmt = {
+        kind: "while",
+        cond: { kind: "boolLit", value: true, type: BOOL, loc },
+        body: [...head, ...body],
+        loc,
+      };
       return {
         kind: "block",
         body: [
           recvDecl,
-          {
-            kind: "while",
-            cond: { kind: "boolLit", value: true, type: BOOL, loc },
-            body: [...head, ...body],
-            loc,
-          },
+          wrapClose
+            ? { kind: "tryCatch", tryBody: [loop], catchBody: null, catchLocalId: null, finallyBody: [close], loc }
+            : loop,
+          ...(wrapClose ? [] : [close]),
         ],
         loc,
       };
@@ -10080,6 +10115,38 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       L.scopes.pop();
     }
   }
+
+/** `break lbl` / `continue lbl` in this body whose label is declared
+ * OUTSIDE it — the one jump shape that would cross an IteratorClose
+ * finally. The generator for-of twin explains the trade in full
+ * (lower-generators.ts's hasEscapingLabeledJump); this is that predicate,
+ * spelled here so the stream desugar does not import the generator
+ * module for it. Function and class boundaries stop the walk: neither
+ * labels nor jumps cross one. */
+function hasEscapingLabeledJumpOut(body: ts.Statement): boolean {
+  let found = false;
+  const walk = (n: ts.Node, bound: readonly string[]): void => {
+    if (found) return;
+    if (
+      ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) ||
+      ts.isArrowFunction(n) || ts.isMethodDeclaration(n) ||
+      ts.isClassDeclaration(n) || ts.isClassExpression(n)
+    ) {
+      return;
+    }
+    let scope = bound;
+    if (ts.isLabeledStatement(n)) scope = [...bound, n.label.text];
+    if ((ts.isBreakStatement(n) || ts.isContinueStatement(n)) && n.label !== undefined) {
+      if (!scope.includes(n.label.text)) {
+        found = true;
+        return;
+      }
+    }
+    n.forEachChild((c) => walk(c, scope));
+  };
+  walk(body, []);
+  return found;
+}
 
 export function lowerForStatement(L: Lowerer, stmt: ts.ForStatement): IrStmt {
     const labels = L.takeLabels();
