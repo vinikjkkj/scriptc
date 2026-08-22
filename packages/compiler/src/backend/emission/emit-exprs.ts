@@ -6581,6 +6581,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "readable.fromArr":
             E.usesTimers = true;
             return finish(`(${cType(e.type).trim()})scr_stream_from_arr(${arg(0)}, ${arg(1)})`);
+          case "readable.fromAgen":
+            // The generator is borrowed (the stream takes its own ref);
+            // the pump is the runtime's native async-generator consumer.
+            E.usesTimers = true;
+            return finish(`(${cType(e.type).trim()})scr_stream_from_agen(${arg(0)}, ${arg(1)})`);
           case "readable.resume":
             E.usesTimers = true;
             return finish(`(${cType(e.type).trim()})scr_stream_resume((ScrStream *)${arg(0)})`);
