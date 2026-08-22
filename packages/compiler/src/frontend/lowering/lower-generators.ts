@@ -313,38 +313,56 @@ export function lowerForOfGenerator(
         ? [{ kind: "assign", localId: varTarget.id, value: L.coerceInto(decl.name, xRef, varTarget.type), loc } satisfies IrStmt]
         : []),
     ];
-    const body = L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels);
+    // tryFinally outermost, loop inside — see the note on the for-await
+    // twin: an unlabeled jump binds to the loop and never sees the
+    // finally; a labeled one refuses instead of miscompiling.
+    const body = L.inCtl("tryFinally", () => L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels));
+    // IteratorClose: EVERY abrupt completion closes the generator, so the
+    // finallys run; the .return() result record is dropped. It used to sit
+    // after the loop, which covered `break` and exhaustion but not a
+    // `return` or a `throw` from the loop body — those left the generator
+    // suspended and its finally blocks unrun, and a dropped suspended
+    // generator is deliberately ABANDONED by scr_gen_release (Node's GC
+    // does not run finallys either), so the cleanup was lost silently.
+    // Node runs it: see tests/corpus/5933-async-generators-abandon.ts.
+    const close: IrStmt = {
+      kind: "if",
+      cond: {
+        kind: "unary",
+        op: "!",
+        operand: { kind: "varRef", localId: done.id, type: BOOL, loc },
+        type: BOOL,
+        loc,
+      },
+      then: [
+        {
+          kind: "exprStmt",
+          expr: { kind: "genResume", mode: "return", gen: gRef(), arg: null, type: recT, loc },
+          loc,
+        },
+      ],
+      else_: null,
+      loc,
+    };
     return {
       kind: "block",
       body: [
         { kind: "varDecl", localId: g.id, init: iterable, loc },
         { kind: "varDecl", localId: done.id, init: { kind: "boolLit", value: false, type: BOOL, loc }, loc },
         {
-          kind: "while",
-          cond: { kind: "boolLit", value: true, type: BOOL, loc },
-          body: [...head, ...body],
-          ...(labels && { labels }),
-          loc,
-        },
-        // IteratorClose: an early exit (break) closes the generator —
-        // finallys run; the .return() result record is dropped.
-        {
-          kind: "if",
-          cond: {
-            kind: "unary",
-            op: "!",
-            operand: { kind: "varRef", localId: done.id, type: BOOL, loc },
-            type: BOOL,
-            loc,
-          },
-          then: [
+          kind: "tryCatch",
+          tryBody: [
             {
-              kind: "exprStmt",
-              expr: { kind: "genResume", mode: "return", gen: gRef(), arg: null, type: recT, loc },
+              kind: "while",
+              cond: { kind: "boolLit", value: true, type: BOOL, loc },
+              body: [...head, ...body],
+              ...(labels && { labels }),
               loc,
             },
           ],
-          else_: null,
+          catchBody: null,
+          catchLocalId: null,
+          finallyBody: [close],
           loc,
         },
       ],
@@ -467,41 +485,61 @@ export function lowerForAwaitAsyncGenerator(
       },
       { kind: "varDecl", localId: x.id, init: extracted, loc },
     ];
-    const body = L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement));
+    // The body lowers inside BOTH markers, tryFinally outermost: an
+    // unlabeled break/continue binds to the loop marker and never sees the
+    // finally, while a LABELED jump to an enclosing construct walks past
+    // the loop, reaches the tryFinally and refuses (SC1090) instead of
+    // compiling a jump the emitter has no pending-action path for.
+    const body = L.inCtl("tryFinally", () => L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels));
+    const close: IrStmt = {
+      kind: "if",
+      cond: {
+        kind: "unary",
+        op: "!",
+        operand: { kind: "varRef", localId: done.id, type: BOOL, loc },
+        type: BOOL,
+        loc,
+      },
+      then: [
+        {
+          kind: "exprStmt",
+          expr: {
+            kind: "awaitExpr",
+            value: { kind: "agenResume", mode: "return", gen: gRef(), arg: null, type: promiseT, loc },
+            type: recT,
+            loc,
+          },
+          loc,
+        },
+      ],
+      else_: null,
+      loc,
+    };
     return {
       kind: "block",
       body: [
         { kind: "varDecl", localId: g.id, init: iterable, loc },
         { kind: "varDecl", localId: done.id, init: { kind: "boolLit", value: false, type: BOOL, loc }, loc },
+        // IteratorClose is the loop's FINALLY, not a statement after it:
+        // JS closes the iterator on EVERY abrupt completion, so a `return`
+        // or a `throw` from the body has to run the generator's cleanup
+        // exactly as `break` does. Sitting after the loop it ran on break
+        // and on exhaustion only, and a consumer that returned mid-stream
+        // silently skipped the generator's finally blocks.
         {
-          kind: "while",
-          cond: { kind: "boolLit", value: true, type: BOOL, loc },
-          body: [...head, ...body],
-          ...(labels && { labels }),
-          loc,
-        },
-        {
-          kind: "if",
-          cond: {
-            kind: "unary",
-            op: "!",
-            operand: { kind: "varRef", localId: done.id, type: BOOL, loc },
-            type: BOOL,
-            loc,
-          },
-          then: [
+          kind: "tryCatch",
+          tryBody: [
             {
-              kind: "exprStmt",
-              expr: {
-                kind: "awaitExpr",
-                value: { kind: "agenResume", mode: "return", gen: gRef(), arg: null, type: promiseT, loc },
-                type: recT,
-                loc,
-              },
+              kind: "while",
+              cond: { kind: "boolLit", value: true, type: BOOL, loc },
+              body: [...head, ...body],
+              ...(labels && { labels }),
               loc,
             },
           ],
-          else_: null,
+          catchBody: null,
+          catchLocalId: null,
+          finallyBody: [close],
           loc,
         },
       ],
