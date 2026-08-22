@@ -715,8 +715,14 @@ static bool dyn_num_proto_unimpl(const char *m) {
 }
 
 static bool dyn_arr_proto_unimpl(const char *m) {
+  /* `fill` and `copyWithin` moved OUT of this list and into the ARR arm's
+   * `impl` list when the ARR arm started answering them -- the same move
+   * `toString` made, and for the same reason: a name that is IMPLEMENTED
+   * must not sit in a list called *_unimpl. Keeping them here made two of
+   * the static-copy guard's nine arms unreachable, because this predicate
+   * throws "not supported" before that guard can fire. */
   static const char *names[] = { "reduce", "reduceRight", "flat",
-    "fill", "copyWithin", "keys", "values", "entries", "toReversed", "toSorted", "toSpliced",
+    "keys", "values", "entries", "toReversed", "toSorted", "toSpliced",
     "with", "toLocaleString", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
   return false;
@@ -805,7 +811,8 @@ static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
        * dyn_kind_knows true would have made `typeof a[k]` answer
        * `undefined` while `a[k]()` answered "1,2,3" -- the very split this
        * predicate exists to prevent, reintroduced by a tidy-up. */
-      static const char *const impl[] = { "at", "concat", "every", "filter",
+      static const char *const impl[] = { "at", "concat", "copyWithin", "every",
+        "fill", "filter",
         "find", "findIndex", "flatMap", "forEach", "includes", "indexOf",
         "join", "lastIndexOf", "map", "pop", "push", "reverse", "shift",
         "slice", "some", "sort", "splice", "toString", "unshift", NULL };
@@ -1246,6 +1253,64 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       memmove(recv->v.arr.items + argc, recv->v.arr.items, len * sizeof(ScrDyn *));
       for (size_t i = 0; i < argc; i++) recv->v.arr.items[i] = args[i];
       return scr_dyn_new_num((double)recv->v.arr.len);
+    }
+    /* fill and copyWithin: the two in-place names the static-copy guard
+     * above has always listed and could never reach, because
+     * dyn_arr_proto_unimpl claimed them first and threw "not supported"
+     * before the guard ran (estado-fence.md §3.2 found the two dead arms;
+     * estado-pinned.md closes them by implementing the methods instead of
+     * deleting the arms). Both answer THIS array, not a copy — JS returns
+     * the receiver — so a chained `a.fill(0).length` keeps working. */
+    if (dyn_name_is(method, "fill")) {
+      ScrDyn *value = argc > 0 ? args[0] : scr_dyn_undefined();
+      double startD = dyn_index_arg(args, argc, 1, 0, what);
+      if (scr_exc_pending()) return NULL;
+      double endD = dyn_index_arg(args, argc, 2, (double)len, what);
+      if (scr_exc_pending()) return NULL;
+      size_t start = dyn_rel_index(startD, len);
+      size_t end = dyn_rel_index(endD, len);
+      for (size_t i = start; i < end; i++) {
+        /* Retain BEFORE releasing: `a.fill(a[0])` names a slot that the
+         * release could otherwise free out from under the store. */
+        ScrDyn *fresh = scr_dyn_retain(value);
+        ScrDyn *old = recv->v.arr.items[i];
+        recv->v.arr.items[i] = fresh;
+        scr_dyn_release(old);
+      }
+      return scr_dyn_retain(recv);
+    }
+    if (dyn_name_is(method, "copyWithin")) {
+      double targetD = dyn_index_arg(args, argc, 0, 0, what);
+      if (scr_exc_pending()) return NULL;
+      double startD = dyn_index_arg(args, argc, 1, 0, what);
+      if (scr_exc_pending()) return NULL;
+      double endD = dyn_index_arg(args, argc, 2, (double)len, what);
+      if (scr_exc_pending()) return NULL;
+      size_t to = dyn_rel_index(targetD, len);
+      size_t from = dyn_rel_index(startD, len);
+      size_t last = dyn_rel_index(endD, len);
+      size_t count = last > from ? last - from : 0;
+      if (count > len - to) count = len - to;
+      if (count > 0 && to != from) {
+        /* The ranges may OVERLAP, so the whole source run is retained
+         * before any store: a release that dropped the last reference to a
+         * slot still to be read would free it mid-copy. memmove alone is
+         * not enough — these are refcounted pointers, not bytes. */
+        ScrDyn **src = (ScrDyn **)malloc(count * sizeof(ScrDyn *));
+        if (src == NULL) {
+          scr_throw_error_msg(SCR_ERR_ERROR, "out of memory in copyWithin",
+                              strlen("out of memory in copyWithin"));
+          return NULL;
+        }
+        for (size_t i = 0; i < count; i++) src[i] = scr_dyn_retain(recv->v.arr.items[from + i]);
+        for (size_t i = 0; i < count; i++) {
+          ScrDyn *old = recv->v.arr.items[to + i];
+          recv->v.arr.items[to + i] = src[i];
+          scr_dyn_release(old);
+        }
+        free(src);
+      }
+      return scr_dyn_retain(recv);
     }
     if (dyn_name_is(method, "slice")) {
       double startD = dyn_index_arg(args, argc, 0, 0, what);
