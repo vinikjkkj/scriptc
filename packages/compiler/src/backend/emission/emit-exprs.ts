@@ -6133,6 +6133,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // throw only for a receiver carrying non-enumerable own
             // properties (may-throw seed set).
             return finish(`scr_dyn_own_names_fence(${arg(0)})`);
+          case "dyn.ownNamesCtor":
+            // …and its other half: prepend the minted prototype's own
+            // `constructor` to the list the keys walk produced. Void,
+            // both borrowed, never throws.
+            return finish(`scr_dyn_own_names_ctor(${arg(0)}, ${arg(1)})`);
           case "dyn.hasOwn":
             // Object.hasOwn over a dyn receiver (throws on nullish, like
             // Node's ToObject).
