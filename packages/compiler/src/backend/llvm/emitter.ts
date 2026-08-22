@@ -3247,6 +3247,9 @@ class LlEmitter {
       case "child":
       case "childStream":
       case "generator":
+      // The same ScrGen pointer as the synchronous flavour, and a JS
+      // object either way.
+      case "asyncGenerator":
       case "fsWatcher": {
         // JS objects are ALWAYS truthy; the honest constant reads as a
         // pointer test, exactly the C emitter's `!= NULL`.
@@ -3722,8 +3725,13 @@ class LlEmitter {
    * fiber and returns the generator object) — CEmitter.callTargetC. */
   private callTarget(fnName: string): string {
     const fn = this.fnByName.get(fnName);
-    if (fn?.async === true) return mangleAsyncSpawn(fnName);
+    // ORDER MATTERS: an async GENERATOR sets BOTH flags and enters through
+    // the LAZY gen-spawn wrapper, never the eager async one -- nothing may
+    // run before the first resume. Testing async first emitted a call to an
+    // @sc_as_* wrapper emitGenScaffolding never defines, which the LLVM
+    // assembler reports as an undefined value rather than a wrong lowering.
     if (fn?.generator !== undefined) return mangleGenSpawn(fnName);
+    if (fn?.async === true) return mangleAsyncSpawn(fnName);
     return mangleFunction(fnName);
   }
 
@@ -6679,24 +6687,25 @@ class LlEmitter {
         // The result is the .next(v) argument, moved out of the IN slot.
         const gen = this.currentGenerator;
         if (!gen) throw new Error("llvm emitter bug: yieldExpr outside a generator body");
-        // An ASYNC yield needs the settle-and-hop helper, which this lane
-        // does not emit. Refuse rather than fall through to the
-        // synchronous one: the program would park a request promise that
-        // nothing ever settles.
-        if (e.async === true) throw new LlvmUnsupportedError("yieldExpr:async", e.loc);
+        // The ASYNC form additionally takes JS's AsyncGeneratorYield
+        // microtask hop and SETTLES the in-flight request promise before
+        // suspending. Selected from the NODE, exactly as the C lane does,
+        // and never from the enclosing function: neither helper can then
+        // be emitted by forgetting to consult something.
+        const yfn = e.async === true ? "scr_agen_yield" : "scr_gen_yield";
         if (e.value === null) throw new Error("llvm emitter bug: yieldExpr with no operand (frontend fills undefined)");
         const v = this.emitExpr(e.value);
         const yt = e.value.type;
         if (yt.kind === "f64") {
-          this.declare(`declare void @scr_gen_yield_f64(double)`);
-          B.line(`call void @scr_gen_yield_f64(double ${v.name})`);
+          this.declare(`declare void @${yfn}_f64(double)`);
+          B.line(`call void @${yfn}_f64(double ${v.name})`);
         } else if (yt.kind === "bool") {
-          this.declare(`declare void @scr_gen_yield_bool(i1 zeroext)`);
-          B.line(`call void @scr_gen_yield_bool(i1 ${v.name})`);
+          this.declare(`declare void @${yfn}_bool(i1 zeroext)`);
+          B.line(`call void @${yfn}_bool(i1 ${v.name})`);
         } else {
           this.moveTemp(v); // the OUT slot takes ownership
-          this.declare(`declare void @scr_gen_yield_ref(ptr, ptr)`);
-          B.line(`call void @scr_gen_yield_ref(ptr ${v.name}, ptr ${vAdapters(this, yt).release})`);
+          this.declare(`declare void @${yfn}_ref(ptr, ptr)`);
+          B.line(`call void @${yfn}_ref(ptr ${v.name}, ptr ${vAdapters(this, yt).release})`);
         }
         this.emitPendingCheck();
         if (e.type.kind === "void") {
@@ -7872,13 +7881,95 @@ class LlEmitter {
         this.moveTemp(v);
         return this.own({ name: v.name, type: e.type });
       }
-      case "agenResume":
-        // Async generators have no LLVM lowering yet. This is a REFUSAL,
-        // not a fallthrough: the default lane re-emits the whole module
-        // through the C backend (which does lower them) and an explicit
-        // --backend llvm fails with SC3001 naming this kind. What must
-        // never happen is emitting the synchronous resume here.
-        throw new LlvmUnsupportedError("agenResume", e.loc);
+      case "agenResume": {
+        // One consumer resume of an ASYNC generator. The argument parking
+        // is byte-for-byte the synchronous protocol above (the same IN/RET
+        // slots and the same caller-cell throw), because the two flavours
+        // share one ScrGen. What differs is the answer: a PROMISE, settled
+        // by the body when it reaches its next yield or completes -- which
+        // is why there is no pending check here. An async generator
+        // reports a body failure by REJECTING that promise, so the throw
+        // surfaces at the awaitExpr wrapped around this node, not here.
+        const genT = e.gen.type;
+        if (genT.kind !== "asyncGenerator") throw new Error("llvm emitter bug: agenResume on a non-async-generator");
+        if (e.type.kind !== "promise") throw new Error("llvm emitter bug: agenResume result is not a promise");
+        const g = this.emitExpr(e.gen); // borrowed for the calls below
+        const sendArg = (store: (aName: string, t: IrType) => void): void => {
+          const a = this.emitExpr(e.arg!);
+          if (isRefCounted(e.arg!.type)) this.moveTemp(a); // the slot takes ownership
+          store(a.name, e.arg!.type);
+        };
+        let entry: string;
+        if (e.mode === "next") {
+          if (e.arg === null) {
+            if (genT.nextT.kind === "dyn") {
+              // Valueless resume on a dyn channel: JS's undefined -- the
+              // dyn singleton rides the IN slot (+1 moves in).
+              this.declare(`declare ptr @scr_dyn_undefined()`);
+              this.declare(`declare ptr @scr_dyn_retain_v(ptr)`);
+              this.declare(`declare void @scr_dyn_release_v(ptr)`);
+              this.declare(`declare void @scr_gen_in_ref(ptr, ptr, ptr)`);
+              const u = B.tmp();
+              const r = B.tmp();
+              B.line(`${u} = call ptr @scr_dyn_undefined()`);
+              B.line(`${r} = call ptr @scr_dyn_retain_v(ptr ${u})`);
+              B.line(`call void @scr_gen_in_ref(ptr ${g.name}, ptr ${r}, ptr @scr_dyn_release_v)`);
+            } else {
+              this.declare(`declare void @scr_gen_in_none(ptr)`);
+              B.line(`call void @scr_gen_in_none(ptr ${g.name})`);
+            }
+          } else {
+            sendArg((name, t) => {
+              if (t.kind === "f64") {
+                this.declare(`declare void @scr_gen_in_f64(ptr, double)`);
+                B.line(`call void @scr_gen_in_f64(ptr ${g.name}, double ${name})`);
+              } else if (t.kind === "bool") {
+                this.declare(`declare void @scr_gen_in_bool(ptr, i1 zeroext)`);
+                B.line(`call void @scr_gen_in_bool(ptr ${g.name}, i1 ${name})`);
+              } else {
+                this.declare(`declare void @scr_gen_in_ref(ptr, ptr, ptr)`);
+                B.line(`call void @scr_gen_in_ref(ptr ${g.name}, ptr ${name}, ptr ${vAdapters(this, t).release})`);
+              }
+            });
+          }
+          this.declare(`declare ptr @scr_agen_next(ptr)`);
+          entry = "scr_agen_next";
+        } else if (e.mode === "return") {
+          if (e.arg === null) {
+            this.declare(`declare void @scr_gen_ret_none(ptr)`);
+            B.line(`call void @scr_gen_ret_none(ptr ${g.name})`);
+          } else {
+            sendArg((name, t) => {
+              if (t.kind === "f64") {
+                this.declare(`declare void @scr_gen_ret_f64(ptr, double)`);
+                B.line(`call void @scr_gen_ret_f64(ptr ${g.name}, double ${name})`);
+              } else if (t.kind === "bool") {
+                this.declare(`declare void @scr_gen_ret_bool(ptr, i1 zeroext)`);
+                B.line(`call void @scr_gen_ret_bool(ptr ${g.name}, i1 ${name})`);
+              } else {
+                this.declare(`declare void @scr_gen_ret_ref(ptr, ptr, ptr)`);
+                B.line(`call void @scr_gen_ret_ref(ptr ${g.name}, ptr ${name}, ptr ${vAdapters(this, t).release})`);
+              }
+            });
+          }
+          this.declare(`declare ptr @scr_agen_return(ptr)`);
+          entry = "scr_agen_return";
+        } else {
+          // .throw(e): park the payload in the CALLER's cell (the throw
+          // statement's exact kind dispatch); scr_agen_throw moves it into
+          // the fiber, or -- on a generator that never started or already
+          // finished -- into the REJECTION of the promise it answers.
+          if (e.arg === null) throw new Error("llvm emitter bug: agenResume throw with no payload");
+          const a = this.emitExpr(e.arg);
+          if (isRefCounted(e.arg.type)) this.moveTemp(a); // the cell takes ownership
+          this.emitThrowValue({ name: a.name, type: e.arg.type });
+          this.declare(`declare ptr @scr_agen_throw(ptr)`);
+          entry = "scr_agen_throw";
+        }
+        const t = B.tmp();
+        B.line(`${t} = call ptr @${entry}(ptr ${g.name})`);
+        return this.own({ name: t, type: e.type });
+      }
       default: {
         // Exhaustive: phase 6 claimed the last IR expression kinds.
         const _exhaustive: never = e;
