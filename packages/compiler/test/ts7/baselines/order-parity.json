@@ -9056,6 +9056,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5920-ambient-declare-class-has-no-runtime.ts": {
+   "order": [
+    "<repo>/tests/corpus/5920-ambient-declare-class-has-no-runtime.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"

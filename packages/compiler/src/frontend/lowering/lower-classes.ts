@@ -21,7 +21,7 @@ import { emitOverrideShapeReason, emitSpecSuperForward, emitterRooted, lowerEmit
 import { declSymbolOf } from "./lower-modules.js";
 import { uniqueSymbolKeyOf } from "./lower-exprs.js";
 import { lowerHttpAgentNew, lowerHttpServerNew } from "./lower-server.js";
-import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, fenceEarlyAliasUse, fenceEarlyNsMemberRef, nsMemberIdentOf, nsUndefRead } from "./lower-namespaces.js";
+import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedClassSymbolOf, ambientUndefinedFnSymbolOf, fenceEarlyAliasUse, fenceEarlyNsMemberRef, nsMemberIdentOf, nsUndefRead } from "./lower-namespaces.js";
 import { mixinResultBindingClassOf, type MixinInstanceInfo } from "./lower-mixins.js";
 
 /** The weak collections' constructor hints. Shared: the stdlib `new`
@@ -5517,6 +5517,21 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
       const callee = L.lowerExpr(expr.expression);
       const args = (expr.arguments ?? []).map((a) => L.jsvalIn(L.lowerExpr(a), a));
       return { kind: "jsOp", op: "construct", args: [callee, ...args], type: JSVAL, loc };
+    }
+    // `new Missing(...)` where `Missing` is a top-level ambient
+    // `declare class` NOTHING defines. Node erases the declaration, so
+    // the CALLEE reference throws ReferenceError before a single
+    // argument evaluates — undefRead reproduces that exactly, and the
+    // `declare const Missing: { new (...): ... }` spelling of the same
+    // declaration has always lowered this way. Without this arm the
+    // class collected like a program class and construction answered a
+    // calloc'd instance (every field 0 / "" / false, the constructor
+    // arguments dropped as surplus) — a silent wrong answer where Node
+    // throws. Placed after the npm and island arms so a package-declared
+    // class keeps its own diagnostic.
+    if (ts.isIdentifier(expr.expression) && ambientUndefinedClassSymbolOf(L, expr.expression) !== null) {
+      const t = ambientUndefReadType(L, expr) ?? F64;
+      return nsUndefRead(L, expr.expression.text, expr, t);
     }
     // `new events.EventEmitter()` — the namespace-member (and CJS
     // `require('events').EventEmitter`) construction form: the property's
