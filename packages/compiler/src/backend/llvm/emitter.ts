@@ -6692,20 +6692,31 @@ class LlEmitter {
         // suspending. Selected from the NODE, exactly as the C lane does,
         // and never from the enclosing function: neither helper can then
         // be emitted by forgetting to consult something.
-        const yfn = e.async === true ? "scr_agen_yield" : "scr_gen_yield";
+        //
+        // The six names are spelled IN FULL rather than built from a
+        // `scr_agen_yield` / `scr_gen_yield` prefix. llvm-runtime-abi's
+        // scanner reads this file as TEXT and checks every scr_* name the
+        // backend can emit against scr_runtime.h; a name assembled at
+        // runtime reaches it as a prefix that declares nothing, and the
+        // guard then reports a phantom missing prototype instead of
+        // checking the real ones. A symbol the backend emits has to be
+        // READABLE here.
+        const Y = e.async === true
+          ? { f64: "scr_agen_yield_f64", bool: "scr_agen_yield_bool", ref: "scr_agen_yield_ref" }
+          : { f64: "scr_gen_yield_f64", bool: "scr_gen_yield_bool", ref: "scr_gen_yield_ref" };
         if (e.value === null) throw new Error("llvm emitter bug: yieldExpr with no operand (frontend fills undefined)");
         const v = this.emitExpr(e.value);
         const yt = e.value.type;
         if (yt.kind === "f64") {
-          this.declare(`declare void @${yfn}_f64(double)`);
-          B.line(`call void @${yfn}_f64(double ${v.name})`);
+          this.declare(`declare void @${Y.f64}(double)`);
+          B.line(`call void @${Y.f64}(double ${v.name})`);
         } else if (yt.kind === "bool") {
-          this.declare(`declare void @${yfn}_bool(i1 zeroext)`);
-          B.line(`call void @${yfn}_bool(i1 ${v.name})`);
+          this.declare(`declare void @${Y.bool}(i1 zeroext)`);
+          B.line(`call void @${Y.bool}(i1 ${v.name})`);
         } else {
           this.moveTemp(v); // the OUT slot takes ownership
-          this.declare(`declare void @${yfn}_ref(ptr, ptr)`);
-          B.line(`call void @${yfn}_ref(ptr ${v.name}, ptr ${vAdapters(this, yt).release})`);
+          this.declare(`declare void @${Y.ref}(ptr, ptr)`);
+          B.line(`call void @${Y.ref}(ptr ${v.name}, ptr ${vAdapters(this, yt).release})`);
         }
         this.emitPendingCheck();
         if (e.type.kind === "void") {

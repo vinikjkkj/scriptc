@@ -7171,14 +7171,21 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // microtask hop and SETTLES the in-flight request promise before
         // suspending. Selected from the node, never from the enclosing
         // function, so neither can be emitted by omission.
-        const yfn = e.async === true ? "scr_agen_yield" : "scr_gen_yield";
+        //
+        // Spelled in full rather than built from a prefix, for the reason
+        // the LLVM twin records: a runtime symbol this backend can emit
+        // has to be findable by reading the source, and the ABI guard on
+        // the other lane is built on exactly that.
+        const Y = e.async === true
+          ? { f64: "scr_agen_yield_f64", bool: "scr_agen_yield_bool", ref: "scr_agen_yield_ref" }
+          : { f64: "scr_gen_yield_f64", bool: "scr_gen_yield_bool", ref: "scr_gen_yield_ref" };
         if (yt.kind === "f64") {
-          E.line(`${yfn}_f64(${v.name});${E.srcComment(e.loc)}`);
+          E.line(`${Y.f64}(${v.name});${E.srcComment(e.loc)}`);
         } else if (yt.kind === "bool") {
-          E.line(`${yfn}_bool(${v.name});${E.srcComment(e.loc)}`);
+          E.line(`${Y.bool}(${v.name});${E.srcComment(e.loc)}`);
         } else {
           E.moveTemp(v); // the OUT slot takes ownership
-          E.line(`${yfn}_ref(${v.name}, ${vAdapters(yt).release});${E.srcComment(e.loc)}`);
+          E.line(`${Y.ref}(${v.name}, ${vAdapters(yt).release});${E.srcComment(e.loc)}`);
         }
         E.emitPendingCheck();
         switch (e.type.kind) {
