@@ -1233,8 +1233,35 @@ export function lowerStreamStaticCall(L: Lowerer, call: ts.CallExpression,
     const arr: IrExpr = { kind: "arrayLit", elems: [v], type: arrayOf(v.type), loc };
     return { kind: "libCall", fn: "readable.fromArr", args: [arr, boolLit(strings, loc)], type, loc };
   }
-  // A source with NO static mapping (an async generator, an AsyncIterable,
-  // a package-declared iterable) reached `L.fmt(null)` and printed `'?'` —
+  // An ASYNC GENERATOR source: the stream PULLS, one entry per _read,
+  // through the runtime's native async-generator consumer. Node's from()
+  // is that same loop (objectMode, highWaterMark 1), so back-pressure,
+  // event order and a mid-stream rejection all keep their JS shapes —
+  // which is the whole reason this is not "drain the generator into
+  // push()". Only string and Uint8Array/Buffer yields are admitted: the
+  // pump reads the generator's OUT slot as a reference and hands it to
+  // the readable buffer unchanged, and those are the two entry shapes
+  // that buffer already holds (validate.ts re-checks it).
+  if (srcT?.kind === "asyncGenerator") {
+    const y = srcT.yieldT;
+    if (y.kind === "string" || (y.kind === "bytes" && y.elem === "u8")) {
+      const gen = L.lowerExpr(args[0]!);
+      return {
+        kind: "libCall",
+        fn: "readable.fromAgen",
+        args: [gen, boolLit(y.kind === "string", loc)],
+        type,
+        loc,
+      };
+    }
+    L.noLowering(
+      `Readable.from over an async generator yielding '${L.fmt(y)}'`,
+      args[0]!,
+      "the lowered source yields strings or Uint8Array/Buffer chunks — the stream buffer holds no other entry shape",
+    );
+  }
+  // A source with NO static mapping (a synchronous generator, an
+  // AsyncIterable, a package-declared iterable) reached `L.fmt(null)` and printed `'?'` —
   // an anonymous refusal. zapo's `Readable.from(zipChunks(entries))` has
   // carried that `?` through five censuses and no instrument could say what
   // the source type was; the CHECKER always can, so name it. MESSAGE TEXT
