@@ -4956,11 +4956,33 @@ export function mapParametersAliasOverBoundKey(type: ts.Type, ctx: TypeMapperCtx
   // Following an ALIASED handler sits behind the slot switch, like the rule
   // it serves. A key map that maps where it used to refuse changes what the
   // types AROUND it map to, and neutral builds must keep mapping exactly
-  // what they mapped before: measured on zapo, the ungated version takes
-  // neutral from 385 traps to 387 — the coordinator holding a
-  // `WaMobileEmit` field collects one step further and trades its single
-  // fence for two, one of them a latent `[]`-into-`readonly string[]`
+  // what they mapped before.
+  //
+  // WHY THE SWITCH EXISTS (f1abe027, 2026-08-04). Measured then: ungated,
+  // zapo's neutral build went 385 traps to 387, because the coordinator
+  // holding a `WaMobileEmit` field collects one step further and trades its
+  // single fence for two — one of them a latent `[]`-into-`readonly string[]`
   // coercion the earlier refusal had been masking.
+  //
+  // RE-MEASURED on main efaf24b5 (2026-08-21). That claim no longer holds, in
+  // three ways, and the third is the one that matters:
+  //   - Its UNITS are gone. The 385-trap population no longer exists; the TU
+  //     census now reports 7 refusals with the switch ON and 28 with it OFF.
+  //     "+2 out of 385" was half a percent; at today's scale it would be 29%.
+  //   - Its SIGN is inverted. Turning the switch on does not cost refusals, it
+  //     REMOVES 21 of them (28 -> 7), and as a strict subset: nothing refuses
+  //     in the ON lane that does not also refuse in the OFF lane. The entire
+  //     delta is SC1090 on `emitEvent` (19 -> 1) plus three refusals that only
+  //     exist downstream of it (SC1031, SC2004, SC2005).
+  //   - With the switch OFF the zapo binary DOES NOT RUN. It throws one of
+  //     those deferred SC1090 refusals as an uncaught error 129ms after boot
+  //     and exits 1 — five runs out of five, never paired, zero stanzas.
+  //
+  // It is still default-OFF, and NOT because of the trap counts above: the
+  // generic-member gate at the `SCRIPTC_GENERIC_SLOT` check further down runs
+  // a SPECULATIVE descent whose rollback is documented there as incomplete.
+  // Defaulting this on is a correctness question about that rollback. Do not
+  // flip it on a census number alone — including these ones.
   const followAliases = process.env["SCRIPTC_GENERIC_SLOT"] !== undefined;
   const arities = new Set<number>();
   const handlerNodes: ts.FunctionTypeNode[] = [];
@@ -6060,6 +6082,11 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
         console.error(`[memberwhy] ${checker.typeToString(widened).slice(0,40)} . ${p.name}`
           + ` generic=${generic} sigs=${cs.length} tps=${cs.map((x) => x.getTypeParameters()?.length ?? 0).join("/")}`);
       }
+      // THIS gate is the one with teeth. With the switch unset it is what
+      // makes zapo's `emitEvent` refuse: the OFF lane defers 19 SC1090s into
+      // the TU and the binary throws one of them 129ms after boot and exits 1
+      // (measured on main efaf24b5, five runs out of five, never paired). The
+      // full two-lane re-measurement is at the switch's other use above.
       if (generic && process.env["SCRIPTC_GENERIC_SLOT"] === undefined) continue;
       // REFUSE BEFORE DESCENDING. The attempt below is speculative and its
       // failure is rolled back, but the rollback does not undo everything
