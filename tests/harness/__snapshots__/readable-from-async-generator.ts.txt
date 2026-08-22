@@ -5,7 +5,7 @@ readable-from-async-generator.ts:34:24 - error SC2020: 'Readable.from over a 'Ge
      |                        ^~~~~~~~~~~~
   35 | }
 
-  hint: string[] / Buffer[] arrays (and a single string or Buffer) are the supported sources — generators and async iterables have no lowering yet
+  hint: string[] / Buffer[] arrays, a single string or Buffer, and an async generator yielding those are the supported sources — a synchronous generator and the async-iteration protocol have no lowering yet
 
 readable-from-async-generator.ts:50:24 - error SC2020: 'Readable.from over an async generator yielding 'number'' is part of the standard library types but has no scriptc lowering yet
 
