@@ -198,6 +198,48 @@ const ops: Ops = { pick: (k) => reg[k] };
 console.log(String(ops.pick("a")) + " " + String(ops.pick("b")));`],
 ];
 
+/* ── group 3: a refusal must not name a type the program never wrote ─────
+ *
+ * The aliasing in group 1 is not always a crash. One line of reordering and it
+ * comes out as a REFUSAL whose reason is another declaration's shape, which is
+ * the same defect wearing a diagnostic. On main `fd2d121e` this program gets
+ * three errors, and the second one is:
+ *
+ *   SC2002: record shapes must match exactly or width-coerce:
+ *           expected '{ w: number; y: number }', got '{ a: string; b: { c: number } }'
+ *
+ * at `const n: Nest = …`. `{ w: number; y: number }` is `o2`'s literal, two
+ * lines above; `Nest` is neither of those things. The retracted attempt freed
+ * `Nest`'s id, `o2` took it, and the memo still answered with it.
+ *
+ * SC1090 here is legitimate — a generic function held as a value genuinely has
+ * no pinned signature. The row asserts that it is the ONLY thing reported, so
+ * a phantom diagnostic about a type the source never mentions cannot come back
+ * disguised as a real one. */
+const NO_PHANTOM = `interface Nest { readonly a: string; readonly b: { c: number } }
+const f: <A extends Nest, B>(x: A, y: B) => void = (_x, _y) => {};
+void f;
+const o1 = { z: "one" };
+const o2 = { y: 2, w: 3 };
+console.log(o1.z, o2.y, o2.w);
+const n: Nest = { a: "s", b: { c: 42 } };
+console.log(n.a, n.b.c);`;
+
+describe.each(["c", "llvm"] as const)("a refusal names only what the program wrote (%s backend)", (backend) => {
+  test("no phantom shape mismatch against an unrelated literal", { timeout: 240_000 }, async () => {
+    const { node, exe } = await bothWays("no-phantom-shape-mismatch", backend, NO_PHANTOM);
+    expect(node.code, `Node failed to run the cell:\n${node.err}`).toBe(0);
+    expect(node.out).toBe("one 2 3\ns 42\n");
+    if (exe.code === -1) {
+      const codes = [...new Set(exe.err.match(/SC\d{4}/g) ?? [])].sort();
+      expect(codes, exe.err).toEqual(["SC1090"]);
+      return;
+    }
+    expect(exe.code, `compiled program failed:\n${exe.err}`).toBe(0);
+    expect(exe.out).toBe(node.out);
+  });
+});
+
 describe.each(["c", "llvm"] as const)("the ungated generic-member descent maps correctly (%s backend)", (backend) => {
   test.for(MUST_MATCH)("%s", { timeout: 240_000 }, async ([name, src]) => {
     const { node, exe } = await bothWays(name, backend, src);

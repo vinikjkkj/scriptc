@@ -231,6 +231,11 @@ export class ShapeRegistry {
     if (this.openMarks.length === 0) this.undoLog.length = 0;
   }
 
+  /** AUDIT ONLY (SCRIPTC_SPEC_AUDIT): is a speculative attempt open? */
+  speculating(): boolean {
+    return this.openMarks.length > 0;
+  }
+
   /** AUDIT ONLY (SCRIPTC_SPEC_AUDIT): the mutable side tables a rollback
    * would have to reach, snapshotted for a before/after diff. */
   auditState(): { granted: string[]; pending: string[]; len: number } {
@@ -466,6 +471,11 @@ export class UnionRegistry {
   commit(): void {
     this.openMarks.pop();
     if (this.openMarks.length === 0) this.undoLog.length = 0;
+  }
+
+  /** AUDIT ONLY (SCRIPTC_SPEC_AUDIT): see ShapeRegistry.speculating. */
+  speculating(): boolean {
+    return this.openMarks.length > 0;
   }
 
   /** AUDIT ONLY (SCRIPTC_SPEC_AUDIT): see ShapeRegistry.auditState. */
@@ -1325,8 +1335,12 @@ function collectIds(t: IrType, unions: UnionRegistry, shapes: ShapeRegistry, sOu
 }
 function specAuditRecordStore(type: ts.Type, result: IrType | null, ctx: TypeMapperCtx): void {
   if (!specAuditOn || result === null) return;
-  // Only inside a speculative descent — the two ctx flags that mark one.
-  if (ctx.speculative !== true && ctx.restTupleFromErasure !== true) return;
+  // Only while an attempt is OPEN, asked of the registries rather than of the
+  // ctx. A ctx-flag filter reads plausibly and is wrong: constraintErasedCtx
+  // maps its constraints under the ORIGINAL ctx, so exactly the stores that
+  // the constraint-erasure site is about would go unrecorded — the column
+  // would read 0 on the very program that motivated it.
+  if (!ctx.shapes.speculating() && !ctx.unions.speculating()) return;
   const sOut = new Set<string>();
   const uOut = new Set<string>();
   collectIds(result, ctx.unions, ctx.shapes, sOut, uOut);
