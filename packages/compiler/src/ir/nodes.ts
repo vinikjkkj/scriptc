@@ -4480,6 +4480,20 @@ export type IrLibFn =
    * property, and the walk refuses by name instead of answering. Never
    * throws for any other kind. */
   | "dyn.ownNamesFence"
+  /** The own-names walk's OTHER half (scr_json.c): put back the one own
+   * property the keys walk cannot see because nothing STORES it. A
+   * function's minted prototype object is born carrying `constructor`
+   * — an own data property { writable, NON-enumerable, configurable } in
+   * Node — and this tier answers its VALUE out of the constructor
+   * registry rather than holding it, precisely so the prototype does not
+   * retain the function. Object.hasOwn and `in` already say the property
+   * exists; without this the own-names list was silently SHORT by
+   * exactly that name (measured: `[]` where v25.9.0 answers
+   * `["constructor"]`). Mutates the list in place, at index 0 — a
+   * prototype is born with it, so it is first in CREATION order, which
+   * is the order JS lists own string keys in. A no-op for every other
+   * receiver, which is why the fence above still refuses those. */
+  | "dyn.ownNamesCtor"
   | "dyn.objValues"
   | "dyn.objEntries"
   /** structuredClone over the checked-dynamic tree (scr_json.c): the JSON-safe subset plus
