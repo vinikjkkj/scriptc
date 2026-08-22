@@ -859,7 +859,19 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
        * `[F]` past the depth limit where a plain object says [Object].
        * The name is the static literal the FUNC box carries, copied at
        * construction; a plain literal has none and renders unchanged. */
-      const char *cn = d->v.obj.cname;
+      /* …but NOT for the prototype object itself. Node's
+       * getConstructorName walks the chain for an own `constructor`
+       * descriptor and keeps it only when `value instanceof
+       * descriptor.value` — and `F.prototype instanceof F` is FALSE (the
+       * walk starts at F.prototype's [[Prototype]], which is
+       * Object.prototype). So Node skips F, reaches Object.prototype,
+       * and renders `F.prototype` as a bare `{}`. An INSTANCE passes the
+       * instanceof test and keeps its `F {`; so does the
+       * `Object.create(P.prototype)` object the ES5 idiom assigns
+       * through, which is why the cname on the MINTED prototype is what
+       * has to go and not the field. Measured on v25.9.0, three
+       * spellings, before this line was written. */
+      const char *cn = scr_dyn_is_minted_proto(d) ? NULL : d->v.obj.cname;
       /* Node lists own enumerable SYMBOL keys after the string keys, and
        * an INTERNAL SLOT is exactly what this tier keeps where Node keeps
        * a symbol: `Dirent { name: 'a.txt', parentPath: 'kd',

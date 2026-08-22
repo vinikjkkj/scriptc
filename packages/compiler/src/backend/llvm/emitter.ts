@@ -947,6 +947,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.objCreateDescs": "scr_dyn_obj_create_descs",
   "dyn.objCreateNullDescs": "scr_dyn_obj_create_null_descs",
   "dyn.ownNamesFence": "scr_dyn_own_names_fence",
+  "dyn.ownNamesCtor": "scr_dyn_own_names_ctor",
   "dyn.objValues": "scr_dyn_obj_values",
   "dyn.objEntries": "scr_dyn_obj_entries",
   "dyn.structuredClone": "scr_structured_clone",

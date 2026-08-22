@@ -892,6 +892,18 @@ typedef struct {
   const char *name;
   const char *src;
   uint32_t arity;
+  /* `delete F.prototype.constructor` ran. The implicit property is
+   * CONFIGURABLE in Node, so the delete succeeds and the object stops
+   * having an own `constructor` — Object.hasOwn goes false, the
+   * own-names list loses the name, and a later assignment creates an
+   * ORDINARY enumerable member (all three flags true) instead of
+   * re-filling a non-enumerable slot. The registry ENTRY has to survive
+   * it either way: it owns the teardown contract with the closure
+   * (scr_dyn_ctor_unlink), and `constructor` stays reachable through the
+   * chain in Node too — %Object.prototype% carries one — so `in` keeps
+   * answering true. Presence and OWNERSHIP stopped being the same
+   * question here, and this flag is the difference. */
+  bool ctor_gone;
 } ScrCtorDesc;
 
 typedef struct {
@@ -957,6 +969,24 @@ static const ScrCtorDesc *scr_ctor_find(const ScrDyn *p) {
     i = (i + 1) & (scr_ctor_cap - 1);
   }
   return NULL;
+}
+
+/* The implicit `constructor` was deleted off this prototype. The ENTRY
+ * stays — it carries the closure teardown contract — and only the
+ * ownership bit moves; scr_dyn_minted_proto_has_ctor is what reads it.
+ * A miss is impossible in practice (every caller tested
+ * scr_dyn_is_minted_proto first) and is a silent no-op if it happens. */
+static void scr_ctor_mark_gone(const ScrDyn *p) {
+  if (scr_ctor_cap == 0) return;
+  size_t i = scr_ctor_hash(p) & (scr_ctor_cap - 1);
+  for (size_t steps = 0; steps < scr_ctor_cap; steps++) {
+    if (scr_ctor_tab[i].proto == NULL) return;
+    if (scr_ctor_tab[i].proto == p) {
+      scr_ctor_tab[i].d.ctor_gone = true;
+      return;
+    }
+    i = (i + 1) & (scr_ctor_cap - 1);
+  }
 }
 
 static void scr_ctor_erase(const ScrDyn *p) {
@@ -1028,9 +1058,35 @@ static ScrDyn *scr_dyn_proto_chain_ctor(const ScrDyn *d) {
 
 /* Is this object a minted implicit prototype? `constructor` is an OWN
  * property of one in Node, so `in` and Object.hasOwn must say so even
- * though the value is computed rather than stored. */
-static bool scr_dyn_is_minted_proto(const ScrDyn *d) {
+ * though the value is computed rather than stored.
+ *
+ * PUBLIC (scr_runtime.h) because three surfaces outside this file's
+ * property walks need the same answer, and each of them is a place Node
+ * treats a minted prototype UNLIKE every other object: the keyed WRITE
+ * (its `constructor` is a pre-existing NON-ENUMERABLE own property, so
+ * [[Set]] keeps the attribute), the own-names walk (that property is
+ * OWN, and it is the first one the object was born with), and
+ * util.inspect (whose constructor-name walk requires
+ * `value instanceof descriptor.value`, which a prototype object fails
+ * against its OWN constructor). */
+bool scr_dyn_is_minted_proto(const ScrDyn *d) {
   return d != NULL && d->kind == SCR_DYN_OBJ && scr_ctor_find(d) != NULL;
+}
+
+/* …and the narrower question: does it still HAVE that own `constructor`?
+ * The two split at `delete F.prototype.constructor`, which SUCCEEDS in
+ * Node (the property is configurable) and leaves the object with no own
+ * `constructor` at all — while `constructor` stays READABLE through the
+ * chain, so `in` still answers true, and the registry entry still has a
+ * teardown contract with the closure to honour. Ownership is what
+ * Object.hasOwn, the own-names list and the attribute-preserving [[Set]]
+ * actually ask about; mintedness is what the chain walk and inspect ask
+ * about. Using one for the other is how a deleted property came back in
+ * a list. */
+bool scr_dyn_minted_proto_has_ctor(const ScrDyn *d) {
+  if (d == NULL || d->kind != SCR_DYN_OBJ) return false;
+  const ScrCtorDesc *c = scr_ctor_find(d);
+  return c != NULL && !c->ctor_gone;
 }
 
 /* The `constructor` fence (see scr_dyn_fn_prototype's header): loud,
@@ -4139,7 +4195,40 @@ bool scr_dyn_obj_has_own_prop(const ScrDyn *d, const char *key, size_t key_len) 
    * The Error one's value is a loud refusal and the function one's is
    * computed; both EXIST (scr_dyn_obj_key_present's note). */
   return key_len == 11 && memcmp(key, "constructor", 11) == 0 &&
-         (d == scr_error_proto || scr_dyn_is_minted_proto(d));
+         (d == scr_error_proto || scr_dyn_minted_proto_has_ctor(d));
+}
+
+/* The one hidden property whose CREATION POSITION this walk does know:
+ * a minted prototype is BORN carrying `constructor`, before any member a
+ * program can add, so it is own-key index 0 and every enumerable member
+ * follows in insertion order. Both halves of the fence's argument fail
+ * for it — the name is not missing (scr_dyn_own_names_ctor puts it back)
+ * and its order is not unrecorded — so it is not a reason to refuse.
+ * Every OTHER hidden property still is. */
+static bool scr_dyn_own_names_skip(const ScrDyn *d, const char *key, size_t key_len) {
+  return key_len == 11 && memcmp(key, "constructor", 11) == 0 &&
+         scr_dyn_minted_proto_has_ctor(d);
+}
+
+/* `Object.getOwnPropertyNames`'s other half: put back the own name the
+ * keys walk cannot see because it is not stored as a member at all. A
+ * minted prototype's `constructor` is an OWN property in Node
+ * (Object.hasOwn already says so) and the FIRST one in creation order,
+ * so it goes at index 0 of the list the keys walk produced. Borrowed
+ * both ways; a no-op for every other receiver. */
+void scr_dyn_own_names_ctor(ScrDyn *names, const ScrDyn *o) {
+  if (names == NULL || names->kind != SCR_DYN_ARR) return;
+  if (!scr_dyn_minted_proto_has_ctor(o)) return;
+  ScrStr *s = scr_str_new("constructor", 11);
+  ScrDyn *v = scr_dyn_new_str(s); /* retains */
+  scr_str_release(s);
+  scr_dyn_arr_push(names, v); /* ownership moves in; grows the vector */
+  /* …then rotate it to the front. The push is what guarantees capacity;
+   * own-key order is creation order and this name was created first. */
+  for (size_t i = names->v.arr.len - 1; i > 0; i--) {
+    names->v.arr.items[i] = names->v.arr.items[i - 1];
+  }
+  names->v.arr.items[0] = v;
 }
 
 /* `Object.getOwnPropertyNames`'s guard. The emitted own-names walk is
@@ -4155,19 +4244,30 @@ bool scr_dyn_obj_has_own_prop(const ScrDyn *d, const char *key, size_t key_len) 
  * with a hidden property refuses by name rather than answering a list
  * Node disagrees with — the answer would be silently SHORT, which is the
  * shape of a bug that surfaces somewhere else. Every other receiver pays
- * one NULL test. */
+ * one NULL test.
+ *
+ * ONE hidden property is exempt, and only because BOTH halves of that
+ * argument fail for it: scr_dyn_own_names_skip. */
 void scr_dyn_own_names_fence(const ScrDyn *d) {
   if (d == NULL || d->kind != SCR_DYN_OBJ || d->v.obj.hidden == NULL) return;
   if (d->v.obj.hidden->v.obj.len == 0) return;
+  size_t refusing = 0;
+  for (size_t i = 0; i < d->v.obj.hidden->v.obj.len; i++) {
+    const ScrDynEntry *e = &d->v.obj.hidden->v.obj.entries[i];
+    if (!scr_dyn_own_names_skip(d, e->key, e->key_len)) refusing++;
+  }
+  if (refusing == 0) return;
   ScrJsonBuf b;
   scr_jb_init(&b);
   scr_jb_puts(&b, "Object.getOwnPropertyNames over a dynamic object carrying NON-ENUMERABLE"
                   " own properties is not supported yet (");
+  size_t shown = 0;
   for (size_t i = 0; i < d->v.obj.hidden->v.obj.len; i++) {
-    if (i > 0) scr_jb_puts(&b, ", ");
+    const ScrDynEntry *e = &d->v.obj.hidden->v.obj.entries[i];
+    if (scr_dyn_own_names_skip(d, e->key, e->key_len)) continue;
+    if (shown++ > 0) scr_jb_puts(&b, ", ");
     scr_jb_putc(&b, '\'');
-    scr_jb_write(&b, d->v.obj.hidden->v.obj.entries[i].key,
-                 d->v.obj.hidden->v.obj.entries[i].key_len);
+    scr_jb_write(&b, e->key, e->key_len);
     scr_jb_putc(&b, '\'');
   }
   scr_jb_puts(&b, " — the walk behind this answers Object.keys plus 'length', so those"
@@ -4387,6 +4487,18 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
     return false;
   }
   if (recv->kind == SCR_DYN_OBJ) {
+    /* The implicit own `constructor` of a function's minted prototype
+     * (scr_dyn_fn_prototype) is CONFIGURABLE in Node, so this delete
+     * succeeds — and it has to be RECORDED, because the property's
+     * existence is answered by the registry rather than by either table.
+     * Without the mark, Object.hasOwn and Object.getOwnPropertyNames
+     * went on reporting a name the program had just removed. Marked
+     * BEFORE the two table walks below, which then remove the stored
+     * value if `F.prototype.constructor = F` ever put one there. */
+    if (key->len == 11 && memcmp(key->data, "constructor", 11) == 0 &&
+        scr_dyn_is_minted_proto(recv)) {
+      scr_ctor_mark_gone(recv);
+    }
     if (scr_dyn_obj_get(recv, key->data, key->len) != NULL) {
       scr_dyn_obj_unset(recv, key->data, key->len);
       return true;
@@ -4636,6 +4748,32 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
         scr_dyn_release(r); /* NULL-tolerant: a throwing setter leaves it pending */
         return;
       }
+    }
+    /* The ONE own property this representation knows Node has and does
+     * not STORE: a function's minted prototype is born carrying
+     * `constructor`, a data property { writable, NON-enumerable,
+     * configurable } (scr_dyn_fn_prototype answers its value out of the
+     * registry rather than holding it, so no cycle is created by the
+     * mint). `F.prototype.constructor = F` is therefore a [[Set]] over
+     * an EXISTING non-enumerable own property, and ES keeps every
+     * attribute and changes only [[Value]] — exactly the rule the
+     * SCR_PROP_HIDDEN_DATA arm above applies to the properties this
+     * runtime does store. Falling through to obj_set instead promoted
+     * the key into `entries`, which IS every enumeration surface at
+     * once: Object.keys/values/entries, Object.assign, util.inspect and
+     * deepStrictEqual all reported a `constructor` Node does not show.
+     *
+     * The narrowness is the point. On any OTHER receiver — a plain
+     * literal, or the `Object.create(Parent.prototype)` object the ES5
+     * inheritance idiom assigns through — Node has NO own
+     * `constructor` to preserve, so the assignment creates an ordinary
+     * enumerable one and `Object.keys` DOES list it. Both were measured
+     * against v25.9.0 before this arm was written; widening it to every
+     * receiver would trade one wrong answer for another. */
+    if (key->len == 11 && memcmp(key->data, "constructor", 11) == 0 &&
+        scr_dyn_minted_proto_has_ctor(recv)) {
+      scr_dyn_obj_define_hidden_data(recv, key->data, key->len, value, true, true);
+      return;
     }
     scr_dyn_obj_set(recv, key->data, key->len, scr_dyn_retain(value));
     return;

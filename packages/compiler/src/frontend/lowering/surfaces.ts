@@ -2112,6 +2112,23 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
           init: { kind: "libCall", fn: "dyn.objKeys", args: [oRef], type: DYN, loc },
           loc,
         },
+        // …and the one own name the keys walk cannot produce, because
+        // nothing stores it: a function's MINTED prototype object is
+        // born carrying `constructor` (an own NON-enumerable data
+        // property in Node, whose value this tier answers out of the
+        // constructor registry so the prototype does not retain the
+        // function). `Object.hasOwn(F.prototype, "constructor")` has
+        // said true here for a while; the own-names list said `[]`
+        // where v25.9.0 says `["constructor"]`, which is the silently
+        // SHORT answer the fence above exists to prevent. Prepended
+        // rather than appended: own string keys list in CREATION order
+        // and a prototype is born with this one. A no-op for every
+        // other receiver.
+        {
+          kind: "exprStmt",
+          expr: { kind: "libCall", fn: "dyn.ownNamesCtor", args: [outRef, oRef], type: VOID, loc },
+          loc,
+        },
         kindGuard("array"),
         kindGuard("string"),
         { kind: "return", value: outRef, loc },

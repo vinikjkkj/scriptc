@@ -3904,6 +3904,31 @@ ScrDyn *scr_dyn_obj_own_data(const ScrDyn *d, const char *key, size_t key_len);
  * table does not record — so this refuses by name (and names the keys)
  * instead. Borrows; throws catchably, otherwise one NULL test. */
 void scr_dyn_own_names_fence(const ScrDyn *d);
+/* …and the walk's other half: a minted prototype's `constructor` is an
+ * OWN property in Node but is not STORED anywhere (its value comes out
+ * of the constructor registry), so the keys walk cannot see it and the
+ * fence above deliberately does not refuse for it. This puts the name
+ * back, at index 0 — a prototype object is BORN carrying it, so it is
+ * first in creation order, which is the order JS lists own keys in.
+ * Both borrowed; a no-op for every other receiver. */
+void scr_dyn_own_names_ctor(ScrDyn *names, const ScrDyn *o);
+/* Is this object a function's MINTED implicit prototype (the object
+ * scr_dyn_fn_prototype made and registered)? Node treats one unlike
+ * every other object at three surfaces, and each asks here: the keyed
+ * WRITE (its `constructor` is a pre-existing NON-ENUMERABLE own
+ * property, so [[Set]] keeps the attribute rather than promoting the key
+ * into `Object.keys`), the own-names walk above, and util.inspect (whose
+ * constructor-name walk requires `value instanceof descriptor.value`,
+ * which a prototype object FAILS against its own constructor — so Node
+ * renders `F.prototype` as a plain `{}`, not as `F {}`). */
+bool scr_dyn_is_minted_proto(const ScrDyn *d);
+/* …and the narrower question the OWNERSHIP surfaces ask: does it still
+ * have that own `constructor`? `delete F.prototype.constructor` succeeds
+ * in Node (the property is configurable) and the two answers part
+ * company there — the name leaves Object.hasOwn and the own-names list,
+ * a later assignment creates an ORDINARY enumerable member, while `in`
+ * keeps answering true because the chain still reaches one. */
+bool scr_dyn_minted_proto_has_ctor(const ScrDyn *d);
 void scr_dyn_obj_set_proto(ScrDyn *obj, ScrDyn *proto);
 
 /* A FUNCTION value's `prototype` object, created on FIRST demand and
