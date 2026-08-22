@@ -1,53 +1,31 @@
-// `Readable.from` over an ASYNC GENERATOR — zapo's
-// `src/media/sticker/sticker-pack.ts:140`, reduced to six lines.
+// `Readable.from` over a generator — what is left of zapo's
+// `src/media/sticker/sticker-pack.ts:140` now that the row has fallen.
 //
-// The row used to be TWO fences stacked at one call site:
+// The row was TWO fences stacked at one call site:
 //
 //   1. SC1071 `async generators (async function*)` in
 //      `collectSignatureInner`, on the DECLARATION.
-//   2. SC2020 at the `Readable.from` CALL — `lowerStreamStaticCall` has
+//   2. SC2020 at the `Readable.from` CALL — `lowerStreamStaticCall` had
 //      array / string / Buffer sources and nothing else.
 //
-// Fence 1 is CLOSED: a declaration-scope `async function*` now lowers onto
-// the scr_agen_* fiber protocol and `for await` drives it. So `chunks`'s
-// body compiles, its type maps, and what remains at this call site is
-// fence 2 alone — the stream bridge, which is a separate feature: nothing
-// in the runtime turns an async iterator into a pull-based Readable with
-// Node's backpressure and objectMode semantics.
+// BOTH are closed for the zapo shape. A declaration-scope `async
+// function*` lowers onto the scr_agen_* fiber protocol, and an async
+// generator yielding Uint8Array/Buffer or string is now a PULL source for
+// a Readable — Node's from() loop, one `next()` per `_read`. The program
+// this file used to carry moved to `tests/corpus/5940-…`, where Node is
+// its oracle instead of a snapshot, which is what the old header asked
+// for in as many words.
 //
-// That closure is why the rendered name below changed. While the type was
-// unmapped the message fell back to the checker's spelling
-// (`AsyncGenerator<Uint8Array<ArrayBufferLike>, any, any>`); now that
-// `mapType` answers it, `L.fmt` renders the compiler's own NORMALIZED
-// channels — `AsyncGenerator<Uint8Array, void, unknown>`, a defaulted
-// TReturn being "no modeled return value" (void) and a defaulted TNext
-// riding dyn. The sync control below has always printed that way, so the
-// two lines now agree on one convention instead of two.
-//
-// The pin remains valuable in the same shape it always had: it is the one
-// place a widening of `Readable.from` would show up, and if this file ever
-// compiles clean, the bridge landed and this program belongs in
-// tests/corpus with Node as its oracle.
+// Two fences survive here, and each is a real boundary rather than an
+// omission:
 import { Readable } from "node:stream";
 
-
-async function* chunks(): AsyncGenerator<Uint8Array> {
-  yield new Uint8Array([1, 2, 3]);
-}
-
-export function make(): Readable {
-  return Readable.from(chunks());
-}
-
-console.log(typeof make);
-
-// The SYNC generator is the control, and now it is a control in the
-// strict sense: both sources map, both reach fence 2, and both render
-// through `L.fmt`. The two lines differ ONLY in the kind name
-// (Generator vs AsyncGenerator), which is what shows that the remaining
-// refusal is about the STREAM BRIDGE and not about either generator
-// flavour. Before async generators lowered, this line was the only one of
-// the pair whose name came from the compiler rather than the checker.
+// (a) A SYNCHRONOUS generator source. Node's from() accepts it — it wraps
+// the sync iterator in an async one — but the runtime's pump resumes an
+// ScrGen through the ASYNC protocol (a promise per request, an await
+// allowed between yields), and a synchronous generator has no such
+// handle. Wiring it means a second pump, not a wider type test, so the
+// fence stays until someone writes one.
 function* syncChunks(): Generator<Uint8Array> {
   yield new Uint8Array([4, 5]);
 }
@@ -57,3 +35,19 @@ export function makeSync(): Readable {
 }
 
 console.log(typeof makeSync);
+
+// (b) An async generator yielding something the readable buffer cannot
+// hold. Entries in that buffer are ScrBytes or ScrStr, and the pump moves
+// the generator's OUT slot straight into it as a reference — so a number
+// yield would be read as a pointer. The refusal NAMES the yield type,
+// which is the whole difference between this and the old anonymous `'?'`
+// the row carried through five censuses.
+async function* numbers(): AsyncGenerator<number> {
+  yield 1;
+}
+
+export function makeNumbers(): Readable {
+  return Readable.from(numbers());
+}
+
+console.log(typeof makeNumbers);
