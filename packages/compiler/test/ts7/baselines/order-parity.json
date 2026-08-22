@@ -9050,15 +9050,9 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/5911-prototype-ctor-backlink-is-non-enumerable.js": {
+  "<repo>/tests/corpus/5911-a-generic-member-slot-and-the-attempt-that-fails-beside-it.ts": {
    "order": [
-    "<repo>/tests/corpus/5911-prototype-ctor-backlink-is-non-enumerable.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/5920-ambient-declare-class-has-no-runtime.ts": {
-   "order": [
-    "<repo>/tests/corpus/5920-ambient-declare-class-has-no-runtime.ts"
+    "<repo>/tests/corpus/5911-a-generic-member-slot-and-the-attempt-that-fails-beside-it.ts"
    ],
    "diags": []
   },
