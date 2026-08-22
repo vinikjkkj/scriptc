@@ -235,6 +235,10 @@ export function releaseSym(host: ShapeHost, t: IrType): string {
       host.declare(`declare void @scr_child_stream_release_v(ptr)`);
       return "@scr_child_stream_release_v";
     case "generator":
+    // An async generator is the SAME ScrGen handle -- same allocation,
+    // same refcount, same release entry point. Only the resume protocol
+    // differs (a promise over the IteratorResult record, not the record).
+    case "asyncGenerator":
       host.declare(`declare void @scr_gen_release(ptr)`);
       return "@scr_gen_release";
     case "func":

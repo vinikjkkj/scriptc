@@ -201,11 +201,11 @@ const platform = process.platform;
 
 /** A default-built hello-world: no regex, no engine. */
 export const STATIC_CLASS_MAX =
-  platform === "linux" ? 397_632 : platform === "win32" ? 654_336 : 366_632;
+  platform === "linux" ? 397_632 : platform === "win32" ? 664_064 : 366_632;
 
 /** A program that uses regex: libregexp + libunicode, never the engine. */
 export const REGEX_CLASS_MAX =
-  platform === "linux" ? 552_680 : platform === "win32" ? 794_624 : 519_680;
+  platform === "linux" ? 552_680 : platform === "win32" ? 804_864 : 519_680;
 
 /* ── the ARMED half of the guard ───────────────────────────────────────
  *
@@ -563,12 +563,73 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * pay the same always-linked bytes, which is the cleanest available
  * statement that this change is a runtime-core cost and not a library
  * link. size-class-armed.test.ts asserts that distance separately.
+ *
+ * RECALIBRATED 2026-08-22, same toolchain, after async generators landed:
+ * `async function*` lowers onto a scr_agen_* resume protocol added to
+ * scr_async.c, which is in RUNTIME_SOURCES and therefore linked into every
+ * binary. Eleven functions and one two-word ScrGen field (`settle`,
+ * `pending`), 284 lines. A hello-world can reach none of it and still pays
+ * for all of it, for the reason this file has now recorded three times: the
+ * win32 link line carries no -ffunction-sections and no --gc-sections
+ * (cc.ts:382), so every line added to an always-linked TU costs every
+ * program.
+ *
+ * The A/B is on ONE tree rather than two worktrees, which is a deliberate
+ * departure from this file's standing rule and a STRICTER measurement for
+ * this particular change, not a looser one. The whole runtime cost of async
+ * generators is in two files, and a hello-world's emitted C is untouched by
+ * the compiler half — so `git checkout main -- scr_async.c scr_runtime.h`,
+ * rebuild, measure, restore reproduces main's binary EXACTLY while holding
+ * the install, the caches, the toolchain and every other source file fixed.
+ * It attributes the bytes with no cross-worktree drift to argue about.
+ * Measured through the harness (island.test.ts / regex.test.ts), and the
+ * CLI agreed to the byte on the two figures it can produce:
+ *
+ *                       base (main runtime)   this branch     delta
+ *   static hello-world        653,312           655,872      +2,560
+ *   regex-free program        653,312           655,872      +2,560
+ *   regex program             794,112           796,672      +2,560
+ *
+ * BASE DOES NOT REPRODUCE THE RECORDED ANCHORS, and that is the first thing
+ * to say about these numbers. The 2026-08-20 pair was 650,752 / 791,040;
+ * base measures 653,312 / 794,112. So 2,560 static and 3,072 regex bytes
+ * were spent by unrelated merges in the two days before this branch
+ * compiled a line, and this branch spent 2,560 of its own on each. The
+ * feature is HALF of the static complaint and less than half of the regex
+ * one — the fourth recalibration in a row reached mostly by drift.
+ *
+ * The class DISTANCE is byte-identical across the change: 794,112 -
+ * 653,312 = 140,800 and 796,672 - 655,872 = 140,800. Both classes pay the
+ * same always-linked bytes, which is the cleanest available statement that
+ * this is a runtime-core cost and not a library link. (The distance itself
+ * has drifted 512 bytes from the recorded pair's 140,288 — again, not this
+ * branch. size-class-armed.test.ts asserts it separately.)
+ *
+ * THE MAX CEILINGS MOVE, and the reason is a rule this file wrote down and
+ * then did not apply. The 2026-08-20 recalibration adopted
+ *
+ *     on win32, CLASS_MAX = CLASS_RECORDED + 2 x SIZE_DRIFT_PAGE
+ *
+ * so that a one-page drift always trips the informative RECORDED pair a
+ * full page before the coarse ceiling can say anything. It then moved
+ * RECORDED to 650,752 / 791,040 and LEFT MAX at 654,336 / 794,624, which
+ * are RECORDED + 8,192 for the pair BEFORE it (646,144 / 786,432). The
+ * headroom that survived was 3,584 and 3,584 — under one drift page, so the
+ * ceiling was once again positioned to fire first, which is precisely the
+ * inversion the prose above says must never be allowed to recur. On this
+ * branch both halves fired. The rule is applied here rather than restated:
+ *
+ *     664,064 = 655,872 + 8,192      804,864 = 796,672 + 8,192
+ *
+ * A ceiling that fires before the loud pair is a gate that has stopped
+ * guarding, and that is twice now that it got there by a recalibration
+ * moving one number of the pair.
  */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 650_752 : null;
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 655_872 : null;
 
 /** The regex program, same run, same tree. Deliberately NOT derived from
  * the static delta: this class moved +1,536 where that one moved +2,048. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 791_040 : null;
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 796_672 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown

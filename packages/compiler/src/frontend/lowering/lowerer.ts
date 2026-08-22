@@ -10604,7 +10604,7 @@ export class Lowerer {
     return bodyReturnType(this, isAsync, declared);
   }
   genBodyReturnType(declared: IrType): IrType {
-    return declared.kind === "generator" ? declared.retT : declared;
+    return declared.kind === "generator" || declared.kind === "asyncGenerator" ? declared.retT : declared;
   }
 
 

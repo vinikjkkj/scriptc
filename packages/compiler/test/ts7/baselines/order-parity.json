@@ -9080,6 +9080,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5930-async-generators-basics.ts": {
+   "order": [
+    "<repo>/tests/corpus/5930-async-generators-basics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5931-async-generators-unwind.ts": {
+   "order": [
+    "<repo>/tests/corpus/5931-async-generators-unwind.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5932-async-generators-ordering.ts": {
+   "order": [
+    "<repo>/tests/corpus/5932-async-generators-ordering.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5933-async-generators-abandon.ts": {
+   "order": [
+    "<repo>/tests/corpus/5933-async-generators-abandon.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5934-generators-labeled-jump-skips-close.ts": {
+   "order": [
+    "<repo>/tests/corpus/5934-generators-labeled-jump-skips-close.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"

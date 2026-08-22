@@ -5817,6 +5817,43 @@ bool scr_exc_genret_pending(void);
 void scr_gen_ret_to_out(ScrGen *g);
 ScrGen *scr_gen_of_fiber(ScrFiber *f);
 
+/* ── async generators (async function*) ───────────────────────────────
+ * The SAME ScrGen handle over the SAME suspended fiber as a synchronous
+ * generator; what changes is that a resume answers a PROMISE and the body
+ * may `await` between yields. Implementation notes in scr_async.c.
+ *
+ * scr_agen_new additionally takes the emitted per-generator-type SETTLE
+ * thunk: it reads OUT + scr_gen_done and FULFILLS the promise with the
+ * IteratorResult record (the runtime cannot build a typed C struct). The
+ * synchronous lane interns the same thunk shape, returning the record
+ * instead of settling a promise.
+ *
+ * The three resume entry points mirror the synchronous ones and take
+ * their arguments the same way (IN parked by scr_gen_in_*, RET by
+ * scr_gen_ret_*, a .throw payload pending in the CALLER's cell), but none
+ * of them can throw at the call site: an async generator reports failure
+ * by REJECTING the promise it returns.
+ *
+ * SEQUENTIAL CONSUMERS ONLY — no request queue. JS queues concurrent
+ * .next() calls; this does not, and the frontend refuses the direct
+ * .next()/.return()/.throw() surface so only the compiler's own for-await
+ * and Readable.from desugars (strictly one request at a time) reach here.
+ * An overlapping request aborts loudly rather than dropping a settlement.
+ */
+ScrGen *scr_agen_new(void (*entry)(ScrFiber *, void *), void *argpack,
+                     void (*drop_args)(void *),
+                     void (*settle)(ScrGen *, ScrPromise *));
+ScrPromise *scr_agen_next(ScrGen *g);
+ScrPromise *scr_agen_return(ScrGen *g);
+ScrPromise *scr_agen_throw(ScrGen *g);
+/* yield, body side: parks the value in OUT, takes JS's one-microtask
+ * AsyncGeneratorYield hop, settles the in-flight request, then suspends.
+ * Control returns at the next resume (the emitted pending check right
+ * after sees an injected .throw payload or the GENRET sentinel). */
+void scr_agen_yield_f64(double v);
+void scr_agen_yield_bool(bool v);
+void scr_agen_yield_ref(void *v, void (*release)(void *)); /* moves */
+
 #ifdef SCR_RC_AUDIT
 long scr_promise_live_count(void);
 #endif
