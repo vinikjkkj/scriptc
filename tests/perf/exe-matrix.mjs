@@ -116,7 +116,6 @@ function build(bench, extraArgs = []) {
   const out = exePath(bench)
   try { rmSync(out, { force: true }) } catch { /* nothing to remove */ }
   const t = process.hrtime.bigint()
-  const wallStart = Date.now()
   const res = spawnSync(
     process.execPath,
     [CLI, 'build', bench + '.bench.ts', '--backend', 'c', ...extraArgs, '-o', out],
@@ -130,12 +129,13 @@ function build(bench, extraArgs = []) {
   }
   // A build that failed is not a build that was fast, and a stale exe from
   // a previous session is the one artefact that reads as a spectacular win.
+  // The target was removed above, so its EXISTENCE now is the proof this
+  // build produced it. Deliberately NOT an mtime test: this lane USES the
+  // build cache, and the cache restores a linked binary with its original
+  // mtime, so a cache hit would read as stale.
   if (!existsSync(out)) throw new Error(`build for ${bench} reported success but wrote no ${out}`)
   const st = statSync(out)
   if (st.size === 0) throw new Error(`build for ${bench} wrote a ZERO-BYTE ${out}`)
-  if (st.mtimeMs < wallStart - 2000) {
-    throw new Error(`build for ${bench} left a STALE artefact: ${out} predates the build that claims to have written it`)
-  }
   return { out, buildMs: ms, bytes: st.size }
 }
 

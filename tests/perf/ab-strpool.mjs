@@ -181,7 +181,6 @@ function build(tag, cflags) {
   // that the build put a NEW one there.
   try { rmSync(out, { force: true }) } catch { /* nothing to remove */ }
   const t = process.hrtime.bigint()
-  const wallStart = Date.now()
   const res = spawnSync(process.execPath, [CLI, 'build', BENCH + '.bench.ts', '--backend', 'c', '-o', out],
     { cwd: BENCH_DIR, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, env })
   if (res.status !== 0) {
@@ -189,15 +188,15 @@ function build(tag, cflags) {
     process.stderr.write((res.stderr ?? '').slice(-4000))
     throw new Error('build failed for ' + tag)
   }
+  // The target was removed above, so its EXISTENCE now is the proof that
+  // this build produced it. Deliberately NOT an mtime test: scriptc's
+  // build cache restores a linked binary with its ORIGINAL mtime, so a
+  // legitimate cache hit looks older than the build that fetched it. That
+  // false positive was found on a real zapo relink whose whole link came
+  // back from cache byte-identical with a 106-minute-old timestamp.
   if (!existsSync(out)) throw new Error('build for ' + tag + ' reported success but wrote no ' + out)
   const st = statSync(out)
   if (st.size === 0) throw new Error('build for ' + tag + ' wrote a ZERO-BYTE ' + out)
-  // 2 s of slack for a coarse filesystem clock; anything older than the
-  // build's own start is an artefact this build did not produce.
-  if (st.mtimeMs < wallStart - 2000) {
-    throw new Error('build for ' + tag + ' left a STALE artefact: ' + out +
-      ' is ' + Math.round((wallStart - st.mtimeMs) / 1000) + 's older than the build that claims to have written it')
-  }
   console.log('  built ' + tag + ' in ' + (Number(process.hrtime.bigint() - t) / 1e9).toFixed(1) + 's -> ' + out)
   return out
 }
