@@ -76,6 +76,13 @@ export function overflowShapeKey(fields: readonly { name: string; type: IrType }
     .join(",");
 }
 
+/** A registry id's index in its own array (`r17` -> 17). Exact, and it
+ * stays exact, because neither registry ever truncates: an id at or above a
+ * speculative attempt's mark was minted BY that attempt. */
+function idIndex(id: string): number {
+  return Number(id.slice(1));
+}
+
 /** The frontend's record-shape interner. Records are monomorphic structural
  * shapes: fields sorted by name form the canonical identity, and two types
  * with the same canonical field list share one shapeId (and later one C
@@ -197,27 +204,93 @@ export class ShapeRegistry {
     return id;
   }
 
-  /** Rollback point for a SPECULATIVE mapping — UnionRegistry.mark's twin,
-   * for the same reason: an abandoned attempt must leave no placeholder
-   * behind for a later mapping to pick up through recIds. */
+  /** Undo actions for mutations a speculative attempt made to state that
+   * ALREADY EXISTED when it started (see rollback). Recorded only while an
+   * attempt is open, and only for pre-mark ids: anything the attempt minted
+   * itself is abandoned wholesale and needs no undo. */
+  private readonly undoLog: (() => void)[] = [];
+  /** The open attempts' (shapes.length, undoLog.length) at mark time, LIFO. */
+  private readonly openMarks: { shapes: number; undo: number }[] = [];
+  private recordUndo(id: string, f: () => void): void {
+    const open = this.openMarks[this.openMarks.length - 1];
+    if (open === undefined || idIndex(id) >= open.shapes) return;
+    this.undoLog.push(f);
+  }
+
+  /** Opens a SPECULATIVE mapping. Every open mark must be closed exactly
+   * once, by `rollback` (the attempt failed) or `commit` (it succeeded) —
+   * the call sites pair them in a `finally`. */
   mark(): number {
+    this.openMarks.push({ shapes: this.shapes.length, undo: this.undoLog.length });
     return this.shapes.length;
   }
 
-  /** Discards every shape minted since `mark`, with its cache entries. Safe
-   * only for a FAILED attempt: nothing kept may reference them. */
+  /** Closes an attempt that SUCCEEDED: everything it did stands. */
+  commit(): void {
+    this.openMarks.pop();
+    if (this.openMarks.length === 0) this.undoLog.length = 0;
+  }
+
+  /** AUDIT ONLY (SCRIPTC_SPEC_AUDIT): is a speculative attempt open? */
+  speculating(): boolean {
+    return this.openMarks.length > 0;
+  }
+
+  /** AUDIT ONLY (SCRIPTC_SPEC_AUDIT): the mutable side tables a rollback
+   * would have to reach, snapshotted for a before/after diff. */
+  auditState(): { granted: string[]; pending: string[]; len: number } {
+    return { granted: [...this.granted], pending: [...this.pendingRec], len: this.shapes.length };
+  }
+
+  /** RETRACTS a failed speculative attempt.
+   *
+   * What it must undo is everything a LATER mapping could find: the recIds
+   * bindings (the reason this machinery exists — an abandoned placeholder
+   * another frame picks up reaches the validator as a shape with no fields),
+   * and any verdict the attempt stamped on state that predates it.
+   *
+   * What it must NOT do is TRUNCATE. Shape ids are positional, so discarding
+   * the array hands the very same id to the next unrelated shape — and the
+   * ids the attempt minted are not confined to the attempt. mapType's memo
+   * is a WeakMap: it cannot be enumerated and therefore cannot be purged, so
+   * every answer it cached during the descent still names those ids. On main
+   * `fd2d121e` that aliasing was not theoretical and not gated by any dial:
+   *
+   *     interface Nest { readonly a: string; readonly b: { c: number } }
+   *     const f: <A extends Nest, B>(x: A, y: B) => void = (_x, _y) => {};
+   *     void f;
+   *     const n: Nest = { a: "s", b: { c: 42 } };
+   *     console.log(n.b.c);
+   *
+   * five lines, no dynamic anything, the DEFAULT lane, both backends: the
+   * constraint-erasure attempt maps `Nest` (interning `{c:number}` as r0),
+   * fails on the unconstrained `B`, truncates — and the next mapping reads
+   * the memo's `{c:number} -> r0` for a shape that no longer exists. The
+   * compiler died with `Cannot read properties of undefined (reading
+   * 'fields')`, a Node stack trace and no diagnostic. With SCRIPTC_NO_MEMO=1
+   * the same program reports the honest SC1090 refusal, which is what pins
+   * the memo as the carrier.
+   *
+   * So the minted shapes STAY, keeping their ids and their (correct — the
+   * speculative ctx decides only whether a refusal is written, never what an
+   * answer is) contents. Nothing references them once the bindings are gone,
+   * and moduleArtifacts is a reachability walk, so they cost nothing in the
+   * emitted program. */
   rollback(mark: number): void {
+    const open = this.openMarks.pop();
+    const undoTo = open?.undo ?? this.undoLog.length;
+    for (let i = this.undoLog.length - 1; i >= undoTo; i--) this.undoLog[i]!();
+    this.undoLog.length = undoTo;
+    if (this.openMarks.length === 0) this.undoLog.length = 0;
     if (mark >= this.shapes.length) return;
-    const dropped = new Set<string>();
-    for (let i = mark; i < this.shapes.length; i++) {
-      const shape = this.shapes[i]!;
-      dropped.add(shape.id);
-      this.byId.delete(shape.id);
-      this.pendingRec.delete(shape.id);
-    }
-    for (const [k, v] of [...this.byKey]) if (dropped.has(v)) this.byKey.delete(k);
-    for (const [t, id] of [...this.recIds]) if (dropped.has(id)) this.recIds.delete(t);
-    this.shapes.length = mark;
+    const abandoned = new Set<string>();
+    for (let i = mark; i < this.shapes.length; i++) abandoned.add(this.shapes[i]!.id);
+    // The recIds bindings go: a later mapping of the same checker type must
+    // walk it again on its own merits, not resume an abandoned frame's
+    // placeholder. A byKey binding is left alone — it names a COMPLETE shape
+    // (only intern and finalizeRecursive write byKey), so honouring it keeps
+    // the structural-dedup invariant IrModule.records states.
+    for (const [t, id] of [...this.recIds]) if (abandoned.has(id)) this.recIds.delete(t);
   }
 
   /** The FINALIZED recursive shape for a checker type — undefined while
@@ -248,9 +321,23 @@ export class ShapeRegistry {
     if (id === undefined) throw new Error("shape registry bug: finalizeRecursive without a placeholder");
     const declaredIndexValue = indexValue;
     indexValue = this.dialIndexValue(fields, false, indexValue);
-    if (indexValue !== declaredIndexValue) this.granted.add(id);
+    if (indexValue !== declaredIndexValue && !this.granted.has(id)) {
+      this.recordUndo(id, () => this.granted.delete(id));
+      this.granted.add(id);
+    }
     if (this.pendingRec.has(id)) {
       const shape = this.byId.get(id)!;
+      // A placeholder minted BEFORE an open speculative attempt is not the
+      // attempt's to complete: the attempt walks under a ctx that can change
+      // answers (the constraint-erased one sets indexUnionOk and
+      // restTupleFromErasure), and finalizeRecursive is first-writer-wins —
+      // the owning frame's later, authoritative call would be a no-op.
+      this.recordUndo(id, () => {
+        shape.fields = [];
+        delete shape.indexValue;
+        delete shape.declaredOrder;
+        this.pendingRec.add(id);
+      });
       shape.fields = fields;
       if (indexValue) shape.indexValue = indexValue;
       if (declaredOrder) shape.declaredOrder = declaredOrder;
@@ -263,7 +350,14 @@ export class ShapeRegistry {
 `,
         );
       }
-      if (!this.byKey.has(key)) this.byKey.set(key, id);
+      // The KEY claim goes with the finalization: undoing one without the
+      // other would leave a structural key pointing at a placeholder that is
+      // pending again, and the next intern of that field list would answer
+      // with an empty shape.
+      if (!this.byKey.has(key)) {
+        this.byKey.set(key, id);
+        this.recordUndo(id, () => this.byKey.delete(key));
+      }
     }
     return id;
   }
@@ -281,7 +375,10 @@ export class ShapeRegistry {
     indexValue = this.dialIndexValue(fields, tuple, indexValue);
     const key = this.keyOf(fields, tuple, indexValue, declaredOrder, builtin);
     let id = this.byKey.get(key);
-    if (id !== undefined && indexValue !== declaredIndexValue) this.granted.add(id);
+    if (id !== undefined && indexValue !== declaredIndexValue && !this.granted.has(id)) {
+      this.recordUndo(id, () => this.granted.delete(id!));
+      this.granted.add(id);
+    }
     if (id === undefined) {
       id = `r${this.shapes.length}`;
       const shape: IrRecordShape = {
@@ -354,37 +451,61 @@ export class UnionRegistry {
     return id;
   }
 
-  /** A rollback point for a SPECULATIVE mapping — an attempt whose failure
-   * must leave no trace. A failed attempt can mint a recursive PLACEHOLDER
-   * that nothing will ever finalize; the registry expects such an id to be
-   * unreachable and prune, but a later successful mapping can pick it up
-   * through recIds and carry it into the program, where the validator sees
-   * a union with no arms. Marking before the attempt and rolling back after
-   * a failure keeps ids dense and the caches honest. */
+  /** ShapeRegistry's undo journal, for the same three reasons. */
+  private readonly undoLog: (() => void)[] = [];
+  private readonly openMarks: { unions: number; undo: number }[] = [];
+  private recordUndo(id: string, f: () => void): void {
+    const open = this.openMarks[this.openMarks.length - 1];
+    if (open === undefined || idIndex(id) >= open.unions) return;
+    this.undoLog.push(f);
+  }
+
+  /** Opens a SPECULATIVE mapping — ShapeRegistry.mark's twin, closed the
+   * same way (exactly once, by `rollback` or `commit`, from a `finally`). */
   mark(): number {
+    this.openMarks.push({ unions: this.unions.length, undo: this.undoLog.length });
     return this.unions.length;
   }
 
-  /** Discards every union minted since `mark`, with its cache entries. Safe
-   * only for a FAILED attempt: nothing kept may reference them. */
+  /** Closes an attempt that SUCCEEDED. */
+  commit(): void {
+    this.openMarks.pop();
+    if (this.openMarks.length === 0) this.undoLog.length = 0;
+  }
+
+  /** AUDIT ONLY (SCRIPTC_SPEC_AUDIT): see ShapeRegistry.speculating. */
+  speculating(): boolean {
+    return this.openMarks.length > 0;
+  }
+
+  /** AUDIT ONLY (SCRIPTC_SPEC_AUDIT): see ShapeRegistry.auditState. */
+  auditState(): { poisoned: string[]; litsErased: string[]; pending: string[]; len: number } {
+    return {
+      poisoned: [...this.poisoned],
+      litsErased: [...this.litsErased],
+      pending: [...this.pendingRec],
+      len: this.unions.length,
+    };
+  }
+
+  /** RETRACTS a failed speculative attempt — ShapeRegistry.rollback's twin,
+   * and the long argument for why this does not truncate is written there.
+   *
+   * The reason the machinery exists at all is on this side: a failed attempt
+   * can mint a recursive PLACEHOLDER nothing will ever finalize, and a later
+   * successful mapping picking it up through recIds carries a union with no
+   * arms into the program. Dropping the BINDING is what fixes that; dropping
+   * the ID was what broke everything else. */
   rollback(mark: number): void {
+    const open = this.openMarks.pop();
+    const undoTo = open?.undo ?? this.undoLog.length;
+    for (let i = this.undoLog.length - 1; i >= undoTo; i--) this.undoLog[i]!();
+    this.undoLog.length = undoTo;
+    if (this.openMarks.length === 0) this.undoLog.length = 0;
     if (mark >= this.unions.length) return;
-    const dropped = new Set<string>();
-    for (let i = mark; i < this.unions.length; i++) {
-      const def = this.unions[i]!;
-      dropped.add(def.id);
-      this.byId.delete(def.id);
-      this.pendingRec.delete(def.id);
-    }
-    for (const [k, v] of [...this.byKey]) if (dropped.has(v)) this.byKey.delete(k);
-    for (const [t, id] of [...this.recIds]) if (dropped.has(id)) this.recIds.delete(t);
-    // The POISON goes with them. A speculative attempt that failed and was
-    // rolled back must leave no verdict behind: the same union reached
-    // again on a legitimate path has to be mapped on its own merits, not
-    // refused because a discarded attempt once tripped over it.
-    for (const id of dropped) this.poisoned.delete(id);
-    for (const id of dropped) this.litsErased.delete(id);
-    this.unions.length = mark;
+    const abandoned = new Set<string>();
+    for (let i = mark; i < this.unions.length; i++) abandoned.add(this.unions[i]!.id);
+    for (const [t, id] of [...this.recIds]) if (abandoned.has(id)) this.recIds.delete(t);
   }
 
   /** The FINALIZED recursive union for a checker type — undefined while
@@ -404,6 +525,16 @@ export class UnionRegistry {
   poisonPendingPlaceholder(t: ts.Type): void {
     const id = this.recIds.get(t);
     if (id === undefined || !this.pendingRec.has(id)) return;
+    // A verdict a DISCARDED attempt reached is not a verdict. Poisoning a
+    // placeholder that predates the attempt would refuse the union for the
+    // rest of the run over a frame that no longer exists — which is exactly
+    // what this rollback's own comment always said it must not do, and what
+    // it only ever did for the ids it was about to drop.
+    this.recordUndo(id, () => {
+      this.poisoned.delete(id);
+      this.pendingRec.add(id);
+      this.recIds.set(t, id);
+    });
     this.pendingRec.delete(id);
     this.recIds.delete(t);
     this.poisoned.add(id);
@@ -434,10 +565,22 @@ export class UnionRegistry {
     if (id === undefined) throw new Error("union registry bug: finalizeRecursive without a placeholder");
     if (this.pendingRec.has(id)) {
       const def = this.byId.get(id)!;
+      // See ShapeRegistry.finalizeRecursive: a placeholder older than the
+      // open attempt is not the attempt's to complete.
+      this.recordUndo(id, () => {
+        def.arms.length = 0;
+        delete def.armLits;
+        this.pendingRec.add(id);
+      });
       def.arms.push(...arms);
       this.pendingRec.delete(id);
       const key = JSON.stringify(arms.map(typeKey));
-      if (!this.byKey.has(key)) this.byKey.set(key, id);
+      // See ShapeRegistry.finalizeRecursive: the key claim is part of the
+      // finalization, not separate from it.
+      if (!this.byKey.has(key)) {
+        this.byKey.set(key, id);
+        this.recordUndo(id, () => this.byKey.delete(key));
+      }
       this.foldArmLits(def, armLits);
     }
     return id;
@@ -476,6 +619,11 @@ export class UnionRegistry {
         ? armLits
         : def.armLits.map((m, i) => mergeArmLitSets(m, armLits[i] ?? {}));
     if (armLitsConflict(next)) {
+      const prev = def.armLits;
+      this.recordUndo(def.id, () => {
+        if (prev === undefined) delete def.armLits;
+        else def.armLits = prev;
+      });
       def.armLits = next;
       return;
     }
@@ -487,6 +635,15 @@ export class UnionRegistry {
     // this site's value against literals it never had, and could prefer a
     // narrower arm over the wider one the value actually is.
     const had = def.armLits !== undefined;
+    // The erasure is permanent by design, which is precisely why a discarded
+    // attempt must not be the one to reach it.
+    if (!this.litsErased.has(def.id)) {
+      const prev = def.armLits;
+      this.recordUndo(def.id, () => {
+        this.litsErased.delete(def.id);
+        if (prev !== undefined) def.armLits = prev;
+      });
+    }
     delete def.armLits;
     this.litsErased.add(def.id);
     if (had && process.env["SCRIPTC_DISCRIM_WHY"] !== undefined) {
@@ -1132,6 +1289,121 @@ let voidUnionMappings = 0;
  * SCRIPTC_NO_MEMO bypasses the cache entirely, for A/B against it. */
 const mapTypeMemo = new WeakMap<ts.Type, { ctx: TypeMapperCtx; result: IrType | null }>();
 
+/* ── SCRIPTC_SPEC_AUDIT ────────────────────────────────────────────────────
+ * What a failed speculative attempt leaves behind, per attempt, on a real
+ * program. This is the instrument that found the five leaks the retraction
+ * had; it stays because four of the five are invariants no unit test can
+ * observe at zapo's scale, and a dial that can report "nothing" is the only
+ * way to tell "still clean" from "never ran".
+ *
+ * `memoRefs` is the one column that is EXPECTED to be non-zero: it counts the
+ * answers mapType cached during the descent that name ids the attempt minted.
+ * The memo is a WeakMap — unenumerable, therefore unpurgeable — so those
+ * references cannot be retracted, which is exactly why the retraction no
+ * longer truncates and the ids stay spent. Every other column is a leak and
+ * must read empty.
+ *
+ * Off, it costs one boolean per memo store. On, the store log is bounded to
+ * the open attempt: nothing is recorded outside a speculative ctx, and each
+ * report clears what it read. */
+const specAuditOn = process.env["SCRIPTC_SPEC_AUDIT"] !== undefined;
+const specAuditLog: { key: string; shapeIds: string[]; unionIds: string[]; sr: ShapeRegistry; ur: UnionRegistry }[] = [];
+function collectIds(t: IrType, unions: UnionRegistry, shapes: ShapeRegistry, sOut: Set<string>, uOut: Set<string>): void {
+  switch (t.kind) {
+    case "union": {
+      if (uOut.has(t.unionId)) return;
+      uOut.add(t.unionId);
+      for (const arm of unions.get(t.unionId)?.arms ?? []) collectIds(arm, unions, shapes, sOut, uOut);
+      return;
+    }
+    case "record": {
+      if (sOut.has(t.shapeId)) return;
+      sOut.add(t.shapeId);
+      const sh = shapes.get(t.shapeId);
+      for (const f of sh?.fields ?? []) collectIds(f.type, unions, shapes, sOut, uOut);
+      if (sh?.indexValue) collectIds(sh.indexValue, unions, shapes, sOut, uOut);
+      return;
+    }
+    case "array": collectIds(t.elem, unions, shapes, sOut, uOut); return;
+    case "func": {
+      for (const q of t.params) collectIds(q, unions, shapes, sOut, uOut);
+      collectIds(t.ret, unions, shapes, sOut, uOut);
+      return;
+    }
+    default: return;
+  }
+}
+function specAuditRecordStore(type: ts.Type, result: IrType | null, ctx: TypeMapperCtx): void {
+  if (!specAuditOn || result === null) return;
+  // Only while an attempt is OPEN, asked of the registries rather than of the
+  // ctx. A ctx-flag filter reads plausibly and is wrong: constraintErasedCtx
+  // maps its constraints under the ORIGINAL ctx, so exactly the stores that
+  // the constraint-erasure site is about would go unrecorded — the column
+  // would read 0 on the very program that motivated it.
+  if (!ctx.shapes.speculating() && !ctx.unions.speculating()) return;
+  const sOut = new Set<string>();
+  const uOut = new Set<string>();
+  collectIds(result, ctx.unions, ctx.shapes, sOut, uOut);
+  if (sOut.size === 0 && uOut.size === 0) return;
+  specAuditLog.push({
+    key: ctx.checker.typeToString(type).slice(0, 60),
+    shapeIds: [...sOut],
+    unionIds: [...uOut],
+    sr: ctx.shapes,
+    ur: ctx.unions,
+  });
+}
+function idNum(id: string): number { return Number(id.slice(1)); }
+/** Reports what a rollback to (sMark,uMark) leaves behind. */
+export function specAuditReport(
+  tag: string,
+  unions: UnionRegistry,
+  shapes: ShapeRegistry,
+  sMark: number,
+  uMark: number,
+  before: { s: ReturnType<ShapeRegistry["auditState"]>; u: ReturnType<UnionRegistry["auditState"]>; log: number },
+): void {
+  if (!specAuditOn) return;
+  let memoAlias = 0;
+  let example = "";
+  // Only entries this ATTEMPT stored, against THESE registries: the log and
+  // the memo outlive a single Lowerer (the discovery pass has its own
+  // registries), and an id number from another pass means nothing here.
+  for (let i = before.log; i < specAuditLog.length; i++) {
+    const e = specAuditLog[i]!;
+    if (e.sr !== shapes || e.ur !== unions) continue;
+    const bad = e.shapeIds.find((x) => idNum(x) >= sMark) ?? e.unionIds.find((x) => idNum(x) >= uMark);
+    if (bad !== undefined) {
+      memoAlias++;
+      if (example === "") example = `${e.key} -> ${bad}`;
+    }
+  }
+  const after = { s: shapes.auditState(), u: unions.auditState() };
+  const grantedLeak = after.s.granted.filter((x) => idNum(x) >= sMark);
+  // Side tables the rollback DOES reach only for dropped ids: a change to a
+  // PRE-mark id survives the rollback permanently.
+  const beforeP = new Set(before.u.poisoned);
+  const poisonLeak = after.u.poisoned.filter((x) => idNum(x) < uMark && !beforeP.has(x));
+  const beforeL = new Set(before.u.litsErased);
+  const litsLeak = after.u.litsErased.filter((x) => idNum(x) < uMark && !beforeL.has(x));
+  const afterSP = new Set(after.s.pending);
+  const shapeFinal = before.s.pending.filter((x) => idNum(x) < sMark && !afterSP.has(x));
+  const afterUP = new Set(after.u.pending);
+  const unionFinal = before.u.pending.filter((x) => idNum(x) < uMark && !afterUP.has(x));
+  specAuditLog.length = 0;
+  if (memoAlias === 0 && grantedLeak.length === 0 && poisonLeak.length === 0 && litsLeak.length === 0
+      && shapeFinal.length === 0 && unionFinal.length === 0) {
+    return;
+  }
+  console.error(
+    `[specleak] ${tag} shapes ${sMark}->${after.s.len} unions ${uMark}->${after.u.len}`
+    + ` memoRefs=${memoAlias}${example ? ` (${example})` : ""}`
+    + ` granted=${grantedLeak.length}`
+    + ` poison=${poisonLeak.join(",")} lits=${litsLeak.join(",")}`
+    + ` shapeFinalized=${shapeFinal.join(",")} unionFinalized=${unionFinal.join(",")}`,
+  );
+}
+
 /** Whether a cached answer may be READ under this context.
  *
  * What the entry needs is the guarantee the store side already established:
@@ -1204,6 +1476,7 @@ export function mapType(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       memoSensitivity === memoSensitivityAtEntry
     ) {
       mapTypeMemo.set(type, { ctx, result });
+      specAuditRecordStore(type, result, ctx);
     }
     return result;
   } finally {
@@ -3500,12 +3773,30 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       // would leave that placeholder for another mapping to pick up.
       const uMark = ctx.unions.mark();
       const sMark = ctx.shapes.mark();
-      const erased = constraintErasedCtx(sig, ctx);
-      if (!erased) {
-        ctx.unions.rollback(uMark);
-        ctx.shapes.rollback(sMark);
-        return null;
+      const auditBefore = specAuditOn
+        ? { s: ctx.shapes.auditState(), u: ctx.unions.auditState(), log: specAuditLog.length }
+        : null;
+      // The mark is closed EXACTLY ONCE, including on a throw. It has to be
+      // a `finally`: mapType runs inside this attempt and a PoisonError out
+      // of it is CAUGHT and the compile CONTINUES (lowerer.ts's generic
+      // instance and emit-override loops), so an attempt left open would
+      // sit on the registries' LIFO stack and be popped by somebody else's
+      // rollback, undoing a range that was never speculative.
+      let erased: TypeMapperCtx | null = null;
+      try {
+        erased = constraintErasedCtx(sig, ctx);
+      } finally {
+        if (erased === null) {
+          if (auditBefore) specAuditReport("CONSTRAINT", ctx.unions, ctx.shapes, sMark, uMark, auditBefore);
+          ctx.unions.rollback(uMark);
+          ctx.shapes.rollback(sMark);
+        } else {
+          // The constraints mapped, so what the attempt interned stands.
+          ctx.unions.commit();
+          ctx.shapes.commit();
+        }
       }
+      if (erased === null) return null;
       ctx = erased;
     }
     // A SYNTHESIZED rest param (tsc's JS inference for a function body
@@ -4953,37 +5244,30 @@ export function mapParametersAliasOverBoundKey(type: ts.Type, ctx: TypeMapperCtx
   // channel (measured: the sidecar dies mid-build on zapo). Caching is
   // not an option — the answer depends on the bindings, so it cannot
   // outlive the context — but the crossings themselves collapse.
-  // Following an ALIASED handler sits behind the slot switch, like the rule
-  // it serves. A key map that maps where it used to refuse changes what the
-  // types AROUND it map to, and neutral builds must keep mapping exactly
-  // what they mapped before.
+  // An ALIASED handler (`on: WaHandler` rather than a spelled function type)
+  // is followed to its declaration, like the generic-member rule this serves.
   //
-  // WHY THE SWITCH EXISTS (f1abe027, 2026-08-04). Measured then: ungated,
-  // zapo's neutral build went 385 traps to 387, because the coordinator
-  // holding a `WaMobileEmit` field collects one step further and trades its
-  // single fence for two — one of them a latent `[]`-into-`readonly string[]`
-  // coercion the earlier refusal had been masking.
+  // Both used to sit behind SCRIPTC_GENERIC_SLOT, default OFF, on the ground
+  // that the generic-member gate's speculative descent had an incomplete
+  // rollback. The rollback is now complete (see the gate, and both
+  // registries' `rollback`), and — the part that made the switch the wrong
+  // instrument all along — the identical descent already ran UNGATED at the
+  // constraint-erasure site, so the default lane never had the protection the
+  // switch was there to provide. Two `process.env` reads are gone from a hot
+  // type-mapping path with it.
   //
-  // RE-MEASURED on main efaf24b5 (2026-08-21). That claim no longer holds, in
-  // three ways, and the third is the one that matters:
-  //   - Its UNITS are gone. The 385-trap population no longer exists; the TU
-  //     census now reports 7 refusals with the switch ON and 28 with it OFF.
-  //     "+2 out of 385" was half a percent; at today's scale it would be 29%.
-  //   - Its SIGN is inverted. Turning the switch on does not cost refusals, it
-  //     REMOVES 21 of them (28 -> 7), and as a strict subset: nothing refuses
-  //     in the ON lane that does not also refuse in the OFF lane. The entire
-  //     delta is SC1090 on `emitEvent` (19 -> 1) plus three refusals that only
-  //     exist downstream of it (SC1031, SC2004, SC2005).
-  //   - With the switch OFF the zapo binary DOES NOT RUN. It throws one of
-  //     those deferred SC1090 refusals as an uncaught error 129ms after boot
-  //     and exits 1 — five runs out of five, never paired, zero stanzas.
-  //
-  // It is still default-OFF, and NOT because of the trap counts above: the
-  // generic-member gate at the `SCRIPTC_GENERIC_SLOT` check further down runs
-  // a SPECULATIVE descent whose rollback is documented there as incomplete.
-  // Defaulting this on is a correctness question about that rollback. Do not
-  // flip it on a census number alone — including these ones.
-  const followAliases = process.env["SCRIPTC_GENERIC_SLOT"] !== undefined;
+  // What the switch was measured to cost, and what it actually did:
+  //   - f1abe027 (2026-08-04) recorded "ungated, zapo's neutral build goes
+  //     385 traps to 387". Re-measured on main efaf24b5 (2026-08-21) that
+  //     population no longer exists: the TU census reported 7 refusals ON and
+  //     28 OFF. Not +2 — MINUS 21, and a strict subset (nothing refused ON
+  //     that did not also refuse OFF).
+  //   - The whole delta was SC1090 on `emitEvent` (19 -> 1) plus three
+  //     refusals downstream of it (SC1031, SC2004, SC2005).
+  //   - With it OFF the zapo binary did not run at all: it threw one of those
+  //     deferred SC1090s as an uncaught error 129ms after boot and exited 1,
+  //     five runs out of five, never paired, zero stanzas. The lane the
+  //     compiler shipped by default had never been executed.
   const arities = new Set<number>();
   const handlerNodes: ts.FunctionTypeNode[] = [];
   // ONE crossing for the whole property table, indexed locally. Asking
@@ -5005,9 +5289,7 @@ export function mapParametersAliasOverBoundKey(type: ts.Type, ctx: TypeMapperCtx
     // does not say plainly keeps the fence.
     const decl = checker.valueDeclarationOf(prop);
     const fnNode = decl !== undefined && ts.isPropertySignature(decl)
-      ? (followAliases
-        ? handlerFnTypeNodeOf(decl.type, checker)
-        : (decl.type !== undefined && ts.isFunctionTypeNode(decl.type) ? decl.type : null))
+      ? handlerFnTypeNodeOf(decl.type, checker)
       : null;
     if (fnNode === null) return pwhy(`no fn type node for ${name}`);
     if (fnNode.parameters.some((x) => x.dotDotDotToken !== undefined)) return pwhy(`rest handler ${name}`);
@@ -6082,28 +6364,53 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
         console.error(`[memberwhy] ${checker.typeToString(widened).slice(0,40)} . ${p.name}`
           + ` generic=${generic} sigs=${cs.length} tps=${cs.map((x) => x.getTypeParameters()?.length ?? 0).join("/")}`);
       }
-      // THIS gate is the one with teeth. With the switch unset it is what
-      // makes zapo's `emitEvent` refuse: the OFF lane defers 19 SC1090s into
-      // the TU and the binary throws one of them 129ms after boot and exits 1
-      // (measured on main efaf24b5, five runs out of five, never paired). The
-      // full two-lane re-measurement is at the switch's other use above.
-      if (generic && process.env["SCRIPTC_GENERIC_SLOT"] === undefined) continue;
-      // REFUSE BEFORE DESCENDING. The attempt below is speculative and its
-      // failure is rolled back, but the rollback does not undo everything
-      // the descent touches (measured: withholding refusals from the memo,
-      // and disabling the memo outright, both leave the regression intact).
-      // A member mentioning an unbound type parameter can only fail, so do
-      // not walk it at all — which is exactly what the feature-off path did.
+      // A GENERIC callable member is walked SPECULATIVELY: it leaves the
+      // shape if it fails, so the attempt runs under a rollback point.
+      //
+      // This used to sit behind SCRIPTC_GENERIC_SLOT, default OFF, and the
+      // reason given for keeping it off was that "the rollback does not undo
+      // everything the descent touches". That was true, and the flag was not
+      // the fix — the same rollback runs UNGATED at the constraint-erasure
+      // site (mapTypeInner's generic-signature rule), so the default lane was
+      // never protected from it. It leaked three ways, all now closed in the
+      // registries: it TRUNCATED the id arrays, handing a discarded shape's
+      // id to the next unrelated one while mapType's un-purgeable WeakMap
+      // memo still named it (ShapeRegistry.rollback carries the five-line
+      // program that ICEd the compiler on main in the DEFAULT lane); it left
+      // every verdict it stamped on state OLDER than the attempt standing
+      // (poison, the permanent armLits erasure, a placeholder finalized out
+      // from under its owning frame); and the second of its own two failure
+      // paths forgot to restore the sensitivity counters the first one
+      // restores on purpose.
       const uMark = generic ? ctx.unions.mark() : 0;
       const sMark = generic ? shapes.mark() : 0;
-      // The sensitivity counters are GLOBAL and drive two decisions outside
-      // this frame: the recursive fence (a frame whose counter moved
-      // refuses to intern by type identity) and the memo cache. A
-      // speculative walk that gets thrown away must not move them, or an
-      // ENCLOSING legitimate frame judges itself context-sensitive and
-      // gives up over work that no longer exists.
       const ctxResAtTry = contextResolutions;
       const memoSensAtTry = memoSensitivity;
+      let specOpen = generic;
+      /** Closes the attempt exactly once — `keep` commits, otherwise every
+       * trace of it is retracted. */
+      const closeSpec = (keep: boolean): void => {
+        if (!specOpen) return;
+        specOpen = false;
+        if (keep) {
+          ctx.unions.commit();
+          shapes.commit();
+          return;
+        }
+        ctx.unions.rollback(uMark);
+        shapes.rollback(sMark);
+        // The sensitivity counters are GLOBAL and drive two decisions outside
+        // this frame: the recursive fence (a frame whose counter moved
+        // refuses to intern by type identity) and the memo cache. A
+        // speculative walk that gets thrown away must not move them, or an
+        // ENCLOSING legitimate frame judges itself context-sensitive and
+        // gives up over work that no longer exists.
+        contextResolutions = ctxResAtTry;
+        memoSensitivity = memoSensAtTry;
+      };
+      const auditBefore = generic && specAuditOn
+        ? { s: shapes.auditState(), u: ctx.unions.auditState(), log: specAuditLog.length }
+        : null;
       // ...and the MEMO, which the rollback below cannot reach. A generic
       // member's attempt descends where the ordinary walk never goes (on
       // zapo: into WaClientPluginContext, down to an open `keyof
@@ -6111,49 +6418,56 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // the memo against the real ctx, so the legitimate mapping of
       // WaClientPluginDefinition later read back a null it never earned
       // and WaClientOptions stopped mapping entirely.
-      const tryCtx: TypeMapperCtx = generic ? { ...ctx, speculative: true } : ctx;
-      let pt = mapType(fieldTs, tryCtx);
-      // A field DECLARED in a `.d.ts` whose IMPLEMENTATION twin this build
-      // COMPILES: the twin is the only producer the slot can ever have, and
-      // it writes JS — an array literal, whose own inferred type is
-      // `readonly (A|B)[]`. A mixed TUPLE in the declaration is the precise
-      // spelling of that same runtime array, but it maps to a positional
-      // RECORD, so declaration and implementation disagree about the
-      // REPRESENTATION and every read across the boundary fences. Map the
-      // declaration the way its implementation builds it.
-      {
-        const viaTwin = declTwinTupleAsArray(p, fieldTs, pt, ctx);
-        if (viaTwin !== null) pt = viaTwin;
-      }
-      if (pt === null && generic) {
-        // The member leaves the shape — say so. An exclusion that prints
-        // nothing makes the NEXT failure invisible exactly where this
-        // change acts (it hid the rest-tuple fence for several rounds).
-        mapTrace(`GENMEMBER ${checker.typeToString(widened).slice(0, 40)} . ${p.name} : ${checker.typeToString(fieldTs).slice(0, 70)}`);
-        ctx.unions.rollback(uMark);
-        shapes.rollback(sMark);
-        contextResolutions = ctxResAtTry;
-        memoSensitivity = memoSensAtTry;
-        continue;
-      }
-      if (pt !== null && process.env["SCRIPTC_PENDING_WHY"] !== undefined) {
-        const anyPend = referencesPendingPlaceholder(pt, ctx.unions, shapes);
-        if (anyPend !== null) {
-          console.error(
-            `[pendwhy] ${generic ? "GEN" : "plain"} ${checker.typeToString(widened).slice(0, 80)} . ${p.name} -> ${anyPend}`,
-          );
+      let pt: IrType | null = null;
+      // The attempt is closed EXACTLY ONCE, on every path out of this block
+      // including a throw: the `continue`s below retract it, the finally
+      // keeps it. An unclosed mark would leave the registry journaling for
+      // the rest of the run.
+      try {
+        const tryCtx: TypeMapperCtx = generic ? { ...ctx, speculative: true } : ctx;
+        pt = mapType(fieldTs, tryCtx);
+        // A field DECLARED in a `.d.ts` whose IMPLEMENTATION twin this build
+        // COMPILES: the twin is the only producer the slot can ever have, and
+        // it writes JS — an array literal, whose own inferred type is
+        // `readonly (A|B)[]`. A mixed TUPLE in the declaration is the precise
+        // spelling of that same runtime array, but it maps to a positional
+        // RECORD, so declaration and implementation disagree about the
+        // REPRESENTATION and every read across the boundary fences. Map the
+        // declaration the way its implementation builds it.
+        {
+          const viaTwin = declTwinTupleAsArray(p, fieldTs, pt, ctx);
+          if (viaTwin !== null) pt = viaTwin;
         }
-      }
-      if (generic && pt !== null) {
-        const pend = referencesPendingPlaceholder(pt, ctx.unions, shapes);
-        if (pend !== null) {
-          // The slot would keep a placeholder whose own frame may still
-          // fail; the member leaves the shape instead, exactly as it did
-          // before it could map at all.
-          ctx.unions.rollback(uMark);
-          shapes.rollback(sMark);
+        if (pt === null && generic) {
+          // The member leaves the shape — say so. An exclusion that prints
+          // nothing makes the NEXT failure invisible exactly where this
+          // change acts (it hid the rest-tuple fence for several rounds).
+          mapTrace(`GENMEMBER ${checker.typeToString(widened).slice(0, 40)} . ${p.name} : ${checker.typeToString(fieldTs).slice(0, 70)}`);
+          if (auditBefore) specAuditReport(`GENMEMBER ${p.name}`, ctx.unions, shapes, sMark, uMark, auditBefore);
+          closeSpec(false);
           continue;
         }
+        if (pt !== null && process.env["SCRIPTC_PENDING_WHY"] !== undefined) {
+          const anyPend = referencesPendingPlaceholder(pt, ctx.unions, shapes);
+          if (anyPend !== null) {
+            console.error(
+              `[pendwhy] ${generic ? "GEN" : "plain"} ${checker.typeToString(widened).slice(0, 80)} . ${p.name} -> ${anyPend}`,
+            );
+          }
+        }
+        if (generic && pt !== null) {
+          const pend = referencesPendingPlaceholder(pt, ctx.unions, shapes);
+          if (pend !== null) {
+            // The slot would keep a placeholder whose own frame may still
+            // fail; the member leaves the shape instead, exactly as it did
+            // before it could map at all.
+            if (auditBefore) specAuditReport(`PENDMEMBER ${p.name}`, ctx.unions, shapes, sMark, uMark, auditBefore);
+            closeSpec(false);
+            continue;
+          }
+        }
+      } finally {
+        closeSpec(true);
       }
       // tsgo PANICS computing `readonly []` through the symbol-type query
       // (the TupleType conversion — the facade's panic fence answers
