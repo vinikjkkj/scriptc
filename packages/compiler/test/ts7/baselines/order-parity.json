@@ -9062,6 +9062,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5921-a-generic-member-slot-and-the-attempt-that-fails-beside-it.ts": {
+   "order": [
+    "<repo>/tests/corpus/5921-a-generic-member-slot-and-the-attempt-that-fails-beside-it.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"

@@ -719,11 +719,38 @@ export function collectJsonRequires(L: Lowerer, parts: FileParts[]): void {
         // Declared fields AND the index-signature value type: an
         // overflow-valued shape (`{ [key: string]: {script?: string} }`)
         // references its value shape through indexValue alone.
-        const shape = L.shapes.get(pendingShapes.pop()!);
+        const id = pendingShapes.pop()!;
+        // A PLACEHOLDER no frame ever finalized has no fields, and a
+        // zero-field record is a perfectly well-formed `{}` — so a reachable
+        // one is a SILENT wrong answer the validator cannot see. It is
+        // supposed to be impossible (the registries' own doc: such shapes
+        // "are referenced by nothing reachable and prune at module
+        // assembly"), and the only route to one is a reference a failed
+        // speculative attempt left behind — the family that used to alias
+        // discarded ids and kill the compiler (frontend/types.ts,
+        // ShapeRegistry.rollback). If the claim ever stops holding, this
+        // says so instead of emitting an empty struct.
+        if (L.shapes.isPending(id)) {
+          throw new Error(
+            `internal error: record shape ${id} reached the module without ever being finalized`,
+          );
+        }
+        const shape = L.shapes.get(id);
         visit(shape?.fields);
         if (shape?.indexValue) visit(shape.indexValue);
       }
-      while (pendingUnions.length > 0) visit(L.unions.get(pendingUnions.pop()!)?.arms);
+      while (pendingUnions.length > 0) {
+        const id = pendingUnions.pop()!;
+        // The union half of the same claim. A poisoned id cannot get here —
+        // mapType refuses anything that reaches one — so a pending id is
+        // exactly the abandoned-placeholder case.
+        if (L.unions.isPending(id)) {
+          throw new Error(
+            `internal error: union ${id} reached the module without ever being finalized`,
+          );
+        }
+        visit(L.unions.get(id)?.arms);
+      }
       while (pendingClasses.length > 0) {
         const name = pendingClasses.pop()!;
         const info = L.classes.get(name);
