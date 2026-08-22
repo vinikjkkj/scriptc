@@ -127,6 +127,22 @@ interface LlValue {
   name: string;
   type: IrType;
   slot?: boolean;
+  /** The value is an INTERNED STATIC — an immortal whose `rc` is SIZE_MAX
+   * for the whole run (the string-literal table). `scr_str_retain` is
+   * `if (s->rc != SIZE_MAX) s->rc++` and `scr_str_release` is
+   * `if (!s || s->rc == SIZE_MAX) return`, so on such a value BOTH are
+   * exactly no-ops and this lane may leave them out — the same argument
+   * the C emitter's `Temp.immortal` carries, and the same one that took
+   * zapo's image from 30,477,312 to 25,704,448 bytes on that lane.
+   *
+   * The name of such a value is the GLOBAL's own symbol (`@sc_lit_7`),
+   * not a fresh `%tN`, so two uses of one literal inside one frame carry
+   * the same name. `moveTemp` finds by name and strikes ONE entry; with
+   * both entries immortal, and `releaseFrame` writing nothing for either,
+   * striking the wrong one produces byte-identical IR. That is why the
+   * duplicate name is safe here and would not be in the C lane, whose
+   * temps are numbered. */
+  immortal?: boolean;
 }
 
 /** A scope entry: a refcounted local held in an alloca slot — releases
@@ -2948,6 +2964,17 @@ class LlEmitter {
     return v;
   }
 
+  /** `own` for a value that IS an interned immortal static (see
+   * `LlValue.immortal`): the frame entry is marked so `releaseFrame`
+   * writes no release. Every other part of the discipline is unchanged —
+   * the value is in its frame, `moveTemp` finds it, and a consumer that
+   * takes ownership of it and releases it later is releasing an immortal,
+   * which the runtime already treats as a no-op. */
+  private ownImmortal(v: LlValue): LlValue {
+    if (isRefCounted(v.type)) this.currentFrame().push({ ...v, immortal: true });
+    return v;
+  }
+
   /** Registers a SLOT whose current contents the frame owns (conditional
    * results: optional chains, branch joins that park ownership). */
   private ownSlot(slot: string, type: IrType): void {
@@ -3024,6 +3051,12 @@ class LlEmitter {
 
   private releaseFrame(frame: LlValue[]): void {
     for (const v of frame) {
+      // An interned immortal: its release is a runtime no-op by
+      // construction (rc == SIZE_MAX), so writing one costs a call and
+      // buys nothing. Skipped here rather than at the declaration so the
+      // value stays in the frame for moveTemp and the rest of the
+      // ownership discipline.
+      if (v.immortal) continue;
       if (v.slot) {
         const t = this.B.tmp();
         this.B.line(`${t} = load ptr, ptr ${v.name}`);
@@ -4699,6 +4732,17 @@ class LlEmitter {
         return { name: e.value ? "true" : "false", type: e.type };
       case "strLit": {
         const sym = this.internLiteral(e.value);
+        // The interned literal is an immortal static (rc == SIZE_MAX), so
+        // the +1 and every frame release of it are no-ops this lane can
+        // leave out — ownImmortal, whose doc carries the argument. The
+        // global's symbol IS a valid `ptr` operand, so the retain call
+        // disappears with nothing to replace it. The guard is the type: a
+        // strLit whose IrType is not `string` is some wrapped spelling
+        // whose retain/release are NOT the string pair, and it keeps the
+        // ordinary owned-value path (the C emitter's strLit case, verbatim).
+        if (e.type.kind === "string") {
+          return this.ownImmortal({ name: sym, type: e.type });
+        }
         return this.own({ name: this.retainValue(sym, e.type), type: e.type });
       }
       case "unitLit":
