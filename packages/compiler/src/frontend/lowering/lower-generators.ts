@@ -14,10 +14,14 @@ import { genResultRecord } from "../types.js";
 import { forOfVarTarget } from "./lower-stmts.js";
 
 type GenType = IrType & { kind: "generator" };
+/** Either generator flavour, for the helpers that only read the three
+ * CHANNELS (the result record and the per-element extraction are the same
+ * question for both — what differs is only how a resume is delivered). */
+type AnyGenType = IrType & { kind: "generator" | "asyncGenerator" };
 
 /** The interned IteratorResult record of a generator type (never null for
  * a MAPPED generator — mapType required it to intern). */
-function resultRecordOf(L: Lowerer, genT: GenType): IrType & { kind: "record" } {
+function resultRecordOf(L: Lowerer, genT: AnyGenType): IrType & { kind: "record" } {
   const rec = genResultRecord(genT.yieldT, genT.retT, L.shapes, L.unions);
   if (!rec) throw new Error("lowerer bug: mapped generator without a result record");
   return rec;
@@ -59,6 +63,7 @@ export function lowerYield(L: Lowerer, expr: ts.YieldExpression): IrExpr {
       "the value of 'yield*' (statement-position delegation compiles: 'yield* inner();' — bind the delegate's return value through its .next() protocol instead)",
     );
   }
+
   let value: IrExpr;
   if (expr.expression) {
     value = L.lowerExprExpecting(expr.expression, gen.yieldT);
@@ -77,7 +82,11 @@ export function lowerYield(L: Lowerer, expr: ts.YieldExpression): IrExpr {
   // the expression is void (statement position; the checker types reads of
   // it undefined, whose uses fence downstream).
   const type = gen.nextT.kind === "undefinedT" ? VOID : gen.nextT;
-  return { kind: "yieldExpr", value, type, loc };
+  // An ASYNC generator body carries the flag on the node: the emitters
+  // pick the yield helper from it, so neither backend can fall back to
+  // the synchronous one by forgetting to consult the enclosing function.
+  const isAsyncGen = L.ctx.isAsync === true;
+  return { kind: "yieldExpr", value, ...(isAsyncGen ? { async: true as const } : {}), type, loc };
 }
 
 /** `g.next(v)` / `g.return(v)` / `g.throw(e)` on a generator-typed
@@ -169,7 +178,7 @@ export function lowerGenMethodCall(
  * own done test). Null when no extraction exists. */
 function extractYieldValue(
   L: Lowerer,
-  genT: GenType,
+  genT: AnyGenType,
   valueT: IrType,
   read: IrExpr,
   loc: SrcLoc,
@@ -346,6 +355,162 @@ export function lowerForOfGenerator(
   }
 }
 
+
+
+/** `for await (const x of asyncGen())` — the desugared drive. Structurally
+ * the synchronous lowerForOfGenerator above with one change per resume:
+ * every `agenResume` answers a `promise<IteratorResult>` and is consumed
+ * through an `awaitExpr`, so the loop parks the consuming fiber wherever
+ * the synchronous form would have blocked on a stack switch.
+ *
+ *   { const %aof = <iterable>; let %adone = false;
+ *     while (true) {
+ *       const %ares = await %aof.next();      // agenResume + awaitExpr
+ *       if (%ares.done) { %adone = true; break; }
+ *       const x = <extract %ares.value>;
+ *       <body>
+ *     }
+ *     if (!%adone) await %aof.return();       // IteratorClose
+ *   }
+ *
+ * The IteratorClose is awaited too — the body's finally blocks are allowed
+ * to await, so discarding the promise would let the loop continue past a
+ * cleanup that had not finished. Both divergences the synchronous form
+ * carries apply unchanged: a consumer `return`/`throw` abandoning the loop
+ * does not close, and the close's own result record is dropped. */
+export function lowerForAwaitAsyncGenerator(
+  L: Lowerer,
+  stmt: ts.ForOfStatement,
+  iterable: IrExpr & { type: IrType & { kind: "asyncGenerator" } },
+  labels?: string[],
+): IrStmt {
+  if (!L.ctx.isAsync) {
+    L.unsupported("SC1090", stmt, "top-level 'for await' (await outside async functions)");
+  }
+  if (!ts.isVariableDeclarationList(stmt.initializer)) {
+    L.unsupported(
+      "SC1090",
+      stmt.initializer,
+      "for-await over a pre-declared variable (declare the loop variable in the loop: for await (const x of ...))",
+    );
+  }
+  const list = stmt.initializer;
+  if ((list.flags & ts.NodeFlags.Using) !== 0) {
+    L.unsupported("SC1090", list, "'using' declarations (dispose-at-scope-exit semantics)");
+  }
+  const isConst = (list.flags & ts.NodeFlags.Const) !== 0;
+  const isLet = (list.flags & ts.NodeFlags.Let) !== 0;
+  // `for await (var x of ...)`: the binding is per-await machinery here as
+  // it is in the stream desugar; a hoisted shared slot has no user.
+  if (!isConst && !isLet) L.unsupported("SC1030", list, "'var' loop bindings in 'for await' (use const)");
+  const decl = list.declarations[0]!;
+  if (!ts.isIdentifier(decl.name)) L.unsupported("SC1031", decl.name);
+  const genT = iterable.type;
+  if (genT.yieldT.kind === "void") {
+    L.unsupported(
+      "SC1090",
+      stmt.expression,
+      "for-await over an async generator that never yields (its element type is never)",
+    );
+  }
+  if (genT.nextT.kind !== "undefinedT" && genT.nextT.kind !== "dyn") {
+    L.unsupported(
+      "SC1090",
+      stmt.expression,
+      `for-await over an async generator whose yields expect .next(value) ('${L.fmt(genT.nextT)}')`,
+    );
+  }
+  const loc = locOf(stmt);
+  const recT = resultRecordOf(L, genT);
+  const promiseT: IrType = { kind: "promise", inner: recT };
+  const shape = L.shapes.get(recT.shapeId)!;
+  const valueT = shape.fields.find((f) => f.name === "value")!.type;
+  L.scopes.push(new Map());
+  try {
+    const g = L.declareHiddenLocal("%aof", genT);
+    const done = L.declareHiddenLocal("%adone", BOOL);
+    done.mutable = true;
+    const r = L.declareHiddenLocal("%ares", recT);
+    const gRef = (): IrExpr => ({ kind: "varRef", localId: g.id, type: genT, loc });
+    const rRef = (): IrExpr => ({ kind: "varRef", localId: r.id, type: recT, loc });
+    const valueRead: IrExpr = { kind: "recordGet", obj: rRef(), shapeId: recT.shapeId, field: "value", type: valueT, loc };
+    const extracted = extractYieldValue(L, genT, valueT, valueRead, loc);
+    if (!extracted) {
+      L.unsupported(
+        "SC1090",
+        stmt.expression,
+        `for-await over an async generator yielding '${L.fmt(genT.yieldT)}' (no per-element extraction exists)`,
+      );
+    }
+    const x = L.declareLocal(decl.name, decl.name.text, genT.yieldT, isLet);
+    const head: IrStmt[] = [
+      {
+        kind: "varDecl",
+        localId: r.id,
+        init: {
+          kind: "awaitExpr",
+          value: { kind: "agenResume", mode: "next", gen: gRef(), arg: null, type: promiseT, loc },
+          type: recT,
+          loc,
+        },
+        loc,
+      },
+      {
+        kind: "if",
+        cond: { kind: "recordGet", obj: rRef(), shapeId: recT.shapeId, field: "done", type: BOOL, loc },
+        then: [
+          { kind: "assign", localId: done.id, value: { kind: "boolLit", value: true, type: BOOL, loc }, loc },
+          { kind: "break", loc },
+        ],
+        else_: null,
+        loc,
+      },
+      { kind: "varDecl", localId: x.id, init: extracted, loc },
+    ];
+    const body = L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement));
+    return {
+      kind: "block",
+      body: [
+        { kind: "varDecl", localId: g.id, init: iterable, loc },
+        { kind: "varDecl", localId: done.id, init: { kind: "boolLit", value: false, type: BOOL, loc }, loc },
+        {
+          kind: "while",
+          cond: { kind: "boolLit", value: true, type: BOOL, loc },
+          body: [...head, ...body],
+          ...(labels && { labels }),
+          loc,
+        },
+        {
+          kind: "if",
+          cond: {
+            kind: "unary",
+            op: "!",
+            operand: { kind: "varRef", localId: done.id, type: BOOL, loc },
+            type: BOOL,
+            loc,
+          },
+          then: [
+            {
+              kind: "exprStmt",
+              expr: {
+                kind: "awaitExpr",
+                value: { kind: "agenResume", mode: "return", gen: gRef(), arg: null, type: promiseT, loc },
+                type: recT,
+                loc,
+              },
+              loc,
+            },
+          ],
+          else_: null,
+          loc,
+        },
+      ],
+      loc,
+    };
+  } finally {
+    L.scopes.pop();
+  }
+}
 /** Statement-position `yield* e;` — the forwarding loop:
  *
  *   { const %dele = <e>; let %dr = %dele.next();
@@ -361,6 +526,14 @@ export function lowerYieldStarStatement(L: Lowerer, expr: ts.Expression): IrStmt
   if (!ts.isYieldExpression(expr) || expr.asteriskToken === undefined) return null;
   const gen = L.ctx.generator;
   if (!gen) L.unsupported("SC1071", expr);
+  // Delegation from an ASYNC generator has no lowering: the forwarding
+  // loop below drives the delegate through the SYNCHRONOUS genResume
+  // protocol, and an async delegate answers promises. Refusing here keeps
+  // the boundary loud rather than compiling a loop that reads a promise
+  // as an IteratorResult.
+  if (L.ctx.isAsync === true) {
+    L.unsupported("SC1071", expr, "'yield*' inside an async generator (delegation has no async lowering)");
+  }
   if (!expr.expression) L.unsupported("SC1071", expr, "'yield*' with no operand");
   const loc = locOf(expr);
   const delegate = L.lowerExpr(expr.expression);

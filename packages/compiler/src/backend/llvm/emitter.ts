@@ -77,7 +77,7 @@ import type {
 import { irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals } from "../emission/emit-stmts.js";
-import { mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
+import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
 import {
   buildClassGraph,
@@ -2479,6 +2479,9 @@ class LlEmitter {
     const out: string[] = [];
     for (const fn of this.mod.functions) {
       if (fn.async !== true) continue;
+      // An async GENERATOR sets both flags and is not an async function:
+      // emitGenScaffolding owns it (and refuses it).
+      if (fn.generator !== undefined) continue;
       const pack = mangleArgPack(fn.name);
       const lifted = fn.captures !== undefined;
       const fieldTys = [...(lifted ? ["ptr"] : []), ...fn.params.map((p) => this.llType(p.type))];
@@ -2654,6 +2657,7 @@ class LlEmitter {
     const out: string[] = [];
     for (const fn of this.mod.functions) {
       if (fn.generator === undefined) continue;
+      const isAsyncGen = fn.async === true;
       const pack = mangleArgPack(fn.name);
       const lifted = fn.captures !== undefined;
       const fieldTys = [...(lifted ? ["ptr"] : []), ...fn.params.map((p) => this.llType(p.type))];
@@ -2783,8 +2787,25 @@ class LlEmitter {
           `  store ${ty} ${src}, ptr %sp${i}`,
         );
       });
+      if (isAsyncGen) {
+        // An ASYNC generator carries its emitted SETTLE thunk into the
+        // handle: the runtime calls it at every yield and at completion to
+        // fulfill the in-flight request promise. Same lazy allocation —
+        // nothing runs until the first resume.
+        const settle = this.agenSettleThunkFor(
+          { kind: "asyncGenerator", yieldT: fn.generator.yieldT, retT: fn.returnType, nextT: fn.generator.nextT },
+          { kind: "record", shapeId: fn.generator.resultShapeId! },
+        );
+        this.declare(`declare ptr @scr_agen_new(ptr, ptr, ptr, ptr)`);
+        sp.push(
+          `  %gg = call ptr @scr_agen_new(ptr @${mangleTrampoline(fn.name)}, ptr %ap, ptr @${mangleGenDrop(fn.name)}, ptr @${settle})`,
+        );
+      } else {
+        sp.push(
+          `  %gg = call ptr @scr_gen_new(ptr @${mangleTrampoline(fn.name)}, ptr %ap, ptr @${mangleGenDrop(fn.name)})`,
+        );
+      }
       sp.push(
-        `  %gg = call ptr @scr_gen_new(ptr @${mangleTrampoline(fn.name)}, ptr %ap, ptr @${mangleGenDrop(fn.name)})`,
         `  ret ptr %gg`,
         `}`,
         ``,
@@ -6658,6 +6679,11 @@ class LlEmitter {
         // The result is the .next(v) argument, moved out of the IN slot.
         const gen = this.currentGenerator;
         if (!gen) throw new Error("llvm emitter bug: yieldExpr outside a generator body");
+        // An ASYNC yield needs the settle-and-hop helper, which this lane
+        // does not emit. Refuse rather than fall through to the
+        // synchronous one: the program would park a request promise that
+        // nothing ever settles.
+        if (e.async === true) throw new LlvmUnsupportedError("yieldExpr:async", e.loc);
         if (e.value === null) throw new Error("llvm emitter bug: yieldExpr with no operand (frontend fills undefined)");
         const v = this.emitExpr(e.value);
         const yt = e.value.type;
@@ -7846,6 +7872,13 @@ class LlEmitter {
         this.moveTemp(v);
         return this.own({ name: v.name, type: e.type });
       }
+      case "agenResume":
+        // Async generators have no LLVM lowering yet. This is a REFUSAL,
+        // not a fallthrough: the default lane re-emits the whole module
+        // through the C backend (which does lower them) and an explicit
+        // --backend llvm fails with SC3001 naming this kind. What must
+        // never happen is emitting the synchronous resume here.
+        throw new LlvmUnsupportedError("agenResume", e.loc);
       default: {
         // Exhaustive: phase 6 claimed the last IR expression kinds.
         const _exhaustive: never = e;
@@ -8941,13 +8974,45 @@ class LlEmitter {
     return sym;
   }
 
+
+  /** The ASYNC generator's SETTLE thunk: `void (ptr %g, ptr %p)`, handed to
+   * scr_agen_new and called by the runtime at every yield and at
+   * completion. Like the C lane's, it is a WRAPPER over genResultThunkFor
+   * rather than a second copy of it — the record shape, the undefined arm
+   * and the arm-wise retagging are the same question for both flavours, and
+   * a second implementation is a second thing to drift out of step with the
+   * first (and with the other backend). Only the destination differs:
+   * fulfill a promise instead of returning the record. */
+  private agenSettleThunkFor(
+    genT: IrType & { kind: "asyncGenerator" },
+    recT: IrType & { kind: "record" },
+  ): string {
+    const key = `agres:${typeKey(genT)}`;
+    const cached = this.resolveThunks.get(key);
+    if (cached) return cached;
+    const inner = this.genResultThunkFor(genT, recT);
+    const sym = mangleAgenSettleThunk(this.resolveThunks.size);
+    this.resolveThunks.set(key, sym);
+    this.declare(`declare void @scr_promise_fulfill_ref(ptr, ptr, ptr, ptr, ptr)`);
+    const v = vAdapters(this, recT);
+    this.resolveThunkDefs.push(
+      `define internal void @${sym}(ptr %g, ptr %p) ${FN_ATTRS} { ; async generator settle`,
+      `entry:`,
+      `  %r = call ptr @${inner}(ptr %g)`,
+      `  call void @scr_promise_fulfill_ref(ptr %p, ptr %r, ptr ${v.retain}, ptr ${v.release}, ptr ${traceArg(this, recT)})`,
+      `  ret void`,
+      `}`,
+      ``,
+    );
+    return sym;
+  }
   /** Interned generator-resume result builder — emit-async.ts's
    * genResultThunkFor: reads the post-resume state of a generator into a
    * fresh IteratorResult record `{ done, value }`. While suspended, the
    * yielded value moves out of the OUT slot into its arm of V (retagging
    * arm-wise into a superset V); once done, a present completion value
    * wraps the same way and an empty OUT is JS's undefined. */
-  private genResultThunkFor(genT: IrType & { kind: "generator" }, recT: IrType & { kind: "record" }): string {
+  private genResultThunkFor(genT: IrType & { kind: "generator" | "asyncGenerator" }, recT: IrType & { kind: "record" }): string {
     const key = `gr:${typeKey(genT)}`;
     let sym = this.resolveThunks.get(key);
     if (sym) return sym;

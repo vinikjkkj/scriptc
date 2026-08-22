@@ -4,7 +4,7 @@
  * finally-crossing fence), and blocked-binding poisoning. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators.js";
+import { lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators.js";
 import { BIGINT, type IrLibFn, BOOL, isRefCounted, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrJsOp, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
@@ -8084,7 +8084,21 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
           }
         }
       }
-      L.unsupported("SC1070", stmt, "'for await' (async iteration over anything but process.stdin and readable streams)");
+      // An async generator OBJECT (an `async function*` call). Typed
+      // rather than syntactic, so a generator held in a local reaches it
+      // too. Anything else — an AsyncIterable, a user object with
+      // [Symbol.asyncIterator], an array of promises — keeps the refusal:
+      // none of them has a ScrGen handle to resume.
+      {
+        const srcT = L.mapTypeOf(L.typeOf(stmt.expression));
+        if (srcT?.kind === "asyncGenerator") {
+          const it = L.lowerExpr(stmt.expression);
+          if (it.type.kind === "asyncGenerator") {
+            return lowerForAwaitAsyncGenerator(L, stmt, it as IrExpr & { type: typeof it.type }, labels);
+          }
+        }
+      }
+      L.unsupported("SC1070", stmt, "'for await' (async iteration over anything but process.stdin, readable streams, and async generators)");
     }
     // A stored numeric value iterator declared in this function keeps its
     // built-in protocol state in hidden locals (lowerVarStatement). The

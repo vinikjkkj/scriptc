@@ -7167,13 +7167,18 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         if (e.value === null) throw new Error("emitter bug: yieldExpr with no operand (frontend fills undefined)");
         const v = E.emitExpr(e.value);
         const yt = e.value.type;
+        // The ASYNC form additionally takes JS's AsyncGeneratorYield
+        // microtask hop and SETTLES the in-flight request promise before
+        // suspending. Selected from the node, never from the enclosing
+        // function, so neither can be emitted by omission.
+        const yfn = e.async === true ? "scr_agen_yield" : "scr_gen_yield";
         if (yt.kind === "f64") {
-          E.line(`scr_gen_yield_f64(${v.name});${E.srcComment(e.loc)}`);
+          E.line(`${yfn}_f64(${v.name});${E.srcComment(e.loc)}`);
         } else if (yt.kind === "bool") {
-          E.line(`scr_gen_yield_bool(${v.name});${E.srcComment(e.loc)}`);
+          E.line(`${yfn}_bool(${v.name});${E.srcComment(e.loc)}`);
         } else {
           E.moveTemp(v); // the OUT slot takes ownership
-          E.line(`scr_gen_yield_ref(${v.name}, ${vAdapters(yt).release});${E.srcComment(e.loc)}`);
+          E.line(`${yfn}_ref(${v.name}, ${vAdapters(yt).release});${E.srcComment(e.loc)}`);
         }
         E.emitPendingCheck();
         switch (e.type.kind) {
@@ -7259,6 +7264,73 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // The record builds before the check so an unwind (a propagated
         // body exception) releases it as the frame's never-read dummy.
         return E.fallibleTemp(e.type, `${helper}(${g.name})`);
+      }
+      case "agenResume": {
+        // One consumer resume of an ASYNC generator. The argument parking
+        // is byte-for-byte the synchronous protocol (the same IN/RET slots
+        // and the same caller-cell throw), because the two flavours share
+        // one ScrGen. What differs is the answer: a PROMISE, settled by
+        // the body when it reaches its next yield or completes — which is
+        // why there is no pending check here. An async generator reports a
+        // body failure by rejecting that promise, so the throw surfaces at
+        // the awaitExpr wrapped around this node, not at this call site.
+        const genT = e.gen.type;
+        if (genT.kind !== "asyncGenerator") throw new Error("emitter bug: agenResume on a non-async-generator");
+        if (e.type.kind !== "promise") throw new Error("emitter bug: agenResume result is not a promise");
+        const g = E.emitExpr(e.gen); // borrowed for the calls below
+        const sendArg = (store: (a: Temp) => string): void => {
+          const a = E.emitExpr(e.arg!);
+          if (isRefCounted(e.arg!.type)) E.moveTemp(a); // the slot takes ownership
+          E.line(store(a));
+        };
+        let call: string;
+        if (e.mode === "next") {
+          if (e.arg === null) {
+            if (genT.nextT.kind === "dyn") {
+              E.line(`scr_gen_in_ref(${g.name}, scr_dyn_retain(scr_dyn_undefined()), scr_dyn_release_v);${E.srcComment(e.loc)}`);
+            } else {
+              E.line(`scr_gen_in_none(${g.name});${E.srcComment(e.loc)}`);
+            }
+          } else {
+            const nt = e.arg.type;
+            sendArg((a) =>
+              nt.kind === "f64" ? `scr_gen_in_f64(${g.name}, ${a.name});${E.srcComment(e.loc)}`
+              : nt.kind === "bool" ? `scr_gen_in_bool(${g.name}, ${a.name});${E.srcComment(e.loc)}`
+              : `scr_gen_in_ref(${g.name}, ${a.name}, ${vAdapters(nt).release});${E.srcComment(e.loc)}`);
+          }
+          call = `scr_agen_next(${g.name})`;
+        } else if (e.mode === "return") {
+          if (e.arg === null) {
+            E.line(`scr_gen_ret_none(${g.name});${E.srcComment(e.loc)}`);
+          } else {
+            const rt = e.arg.type;
+            sendArg((a) =>
+              rt.kind === "f64" ? `scr_gen_ret_f64(${g.name}, ${a.name});${E.srcComment(e.loc)}`
+              : rt.kind === "bool" ? `scr_gen_ret_bool(${g.name}, ${a.name});${E.srcComment(e.loc)}`
+              : `scr_gen_ret_ref(${g.name}, ${a.name}, ${vAdapters(rt).release});${E.srcComment(e.loc)}`);
+          }
+          call = `scr_agen_return(${g.name})`;
+        } else {
+          if (e.arg === null) throw new Error("emitter bug: agenResume throw with no payload");
+          const a = E.emitExpr(e.arg);
+          const t = e.arg.type;
+          if (isRefCounted(t)) E.moveTemp(a); // the cell takes ownership
+          if (t.kind === "f64") {
+            E.line(`scr_throw_f64(${a.name});${E.srcComment(e.loc)}`);
+          } else if (t.kind === "bool") {
+            E.line(`scr_throw_bool(${a.name});${E.srcComment(e.loc)}`);
+          } else if (t.kind === "string") {
+            E.line(`scr_throw_str(${a.name});${E.srcComment(e.loc)}`);
+          } else if (t.kind === "object" && E.classMeta.get(t.className)?.hierarchy) {
+            const rc = vAdapters(t);
+            E.line(`scr_throw_obj(${a.name}, &${rc.retain}, &${rc.release}, ${E.traceArgC(t)});${E.srcComment(e.loc)}`);
+          } else {
+            const rc = vAdapters(t);
+            E.line(`scr_throw_ref(${a.name}, &${rc.retain}, &${rc.release}, ${E.traceArgC(t)});${E.srcComment(e.loc)}`);
+          }
+          call = `scr_agen_throw(${g.name})`;
+        }
+        return E.newTemp(e.type, call);
       }
       case "awaitExpr": {
         // Parks the fiber until the promise settles; rejected promises

@@ -9,7 +9,7 @@ import { lowerAbortMethodCall } from "./lower-abort.js";
 import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, locOf } from "../program.js";
-import { isGenericCallableMemberType, isSymbolicCandidateType, typeKey} from "../types.js";
+import { genResultRecord, isGenericCallableMemberType, isSymbolicCandidateType, typeKey} from "../types.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
@@ -1169,8 +1169,15 @@ export function collectSignatureInner(L: Lowerer, decl: ts.FunctionDeclaration):
     if (!decl.typeParameters && mixinFnShapeOf(L, decl)) return;
     const isAsync = decl.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) === true;
     const isGenerator = decl.asteriskToken !== undefined;
-    if (isGenerator && isAsync) {
-      L.unsupported("SC1071", decl, "async generators (async function*)");
+    // `async function*` at DECLARATION scope lowers (see lower-generators
+    // and the runtime scr_agen_* protocol); every other spelling — a class
+    // or object-literal method, a function expression, a generic — keeps
+    // its SC1071 at its own collection site, including the generic form
+    // just below. The boundary is deliberately narrow: it is exactly the
+    // shape the queue-free resume protocol can serve, because only the
+    // compilers own for-await and Readable.from desugars consume it.
+    if (isGenerator && isAsync && decl.typeParameters) {
+      L.unsupported("SC1071", decl, "generic async generators (async function*)");
     }
     if (decl.typeParameters) {
       // Generic async composes: each monomorphized instance is an async
@@ -1238,10 +1245,12 @@ export function collectSignatureInner(L: Lowerer, decl: ts.FunctionDeclaration):
     }
     const nameBlame: ts.Node = decl.name ?? decl;
     const returnType = L.declaredReturnType(decl, nameBlame);
-    if (isAsync && returnType.kind !== "promise") {
-      L.badType(nameBlame, L.typeOf(nameBlame));
-    }
-    if (isGenerator && returnType.kind !== "generator") {
+    // An async generator is annotated AsyncGenerator<...>, not Promise<...>:
+    // the three shapes are checked against their own declared kind so a
+    // mis-annotated declaration is a type refusal, never a silent lowering
+    // through the wrong protocol.
+    const wantKind = isGenerator ? (isAsync ? "asyncGenerator" : "generator") : isAsync ? "promise" : null;
+    if (wantKind !== null && returnType.kind !== wantKind) {
       L.badType(nameBlame, L.typeOf(nameBlame));
     }
 
@@ -1257,8 +1266,19 @@ export function collectSignatureInner(L: Lowerer, decl: ts.FunctionDeclaration):
       returnType,
       isAsync,
       ...(argumentsBound ? { argumentsBound: true as const } : {}),
-      ...(isGenerator && returnType.kind === "generator"
-        ? { generator: { yieldT: returnType.yieldT, nextT: returnType.nextT } }
+      ...(isGenerator && (returnType.kind === "generator" || returnType.kind === "asyncGenerator")
+        ? {
+            generator: {
+              yieldT: returnType.yieldT,
+              nextT: returnType.nextT,
+              // The async spawn wrapper names its settle thunk, which is
+              // typed by this record. genResultRecord already succeeded —
+              // mapType required it before answering asyncGenerator.
+              ...(returnType.kind === "asyncGenerator"
+                ? { resultShapeId: genResultRecordOrThrow(L, returnType).shapeId }
+                : {}),
+            },
+          }
         : {}),
     });
   }
@@ -10515,6 +10535,18 @@ function blockBodyOf(decl: ts.FunctionLikeDeclaration): ts.Block | null {
   if (body === undefined) return null;
   if (ts.isBlock(body)) return body;
   return decl.forEachChild((c) => (ts.isBlock(c) ? c : undefined)) ?? null;
+}
+
+/** The interned IteratorResult record of a mapped generator type. mapType
+ * refuses to answer `generator`/`asyncGenerator` at all unless this record
+ * interns, so a miss here is a compiler bug, not a program error. */
+function genResultRecordOrThrow(
+  L: Lowerer,
+  genT: IrType & { kind: "generator" | "asyncGenerator" },
+): IrType & { kind: "record" } {
+  const rec = genResultRecord(genT.yieldT, genT.retT, L.shapes, L.unions);
+  if (!rec) throw new Error("lowerer bug: mapped generator without a result record");
+  return rec;
 }
 
 export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunction | null {
