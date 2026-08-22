@@ -6,10 +6,11 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { tmpdir } from "node:os";
 
-const repoRoot = process.env["KO_REPO"] ?? "G:/scriptc-keyorder";
-const cacheDir = process.env["KO_CACHE"] ?? "G:/ko/cache";
+const repoRoot = process.env["KO_REPO"] ?? resolve(fileURLToPath(import.meta.url), "../../../..");
+const cacheDir = process.env["KO_CACHE"] ?? join(tmpdir(), "scr-ko-cache");
 const { compile } = await import(pathToFileURL(join(repoRoot, "packages/compiler/dist/index.js")).href);
 const execFileAsync = promisify(execFile);
 

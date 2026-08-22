@@ -10,6 +10,7 @@
  */
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 /** Findings for one buffer. Returns [] for a clean file. */
 export function scan(buf) {
@@ -40,7 +41,7 @@ function counts(buf) {
 }
 
 function selftest() {
-  const d = "G:/pj/bytescan-selftest";
+  const d = join(process.env["PJ_TMP"] ?? tmpdir(), "scr-pj-bytescan-selftest");
   rmSync(d, { recursive: true, force: true });
   mkdirSync(d, { recursive: true });
   const w = (n, bytes) => { const p = join(d, n); writeFileSync(p, Buffer.from(bytes)); return p; };

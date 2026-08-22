@@ -12,9 +12,10 @@
 import { readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { tmpdir } from "node:os";
 import { nodeOracle, oneBackend } from "./run-keyorder.mjs";
 
-const SELFTEST_DIR = process.env["KO_SELFTEST"] ?? "G:/ko/selftest";
+const SELFTEST_DIR = process.env["KO_SELFTEST"] ?? join(tmpdir(), "scr-ko-selftest");
 const PLANTED = { st_exact: "EXACT", st_diverge: "DIVERGE", st_refuse: "REFUSE" };
 
 async function verdictOf(entry, backend) {

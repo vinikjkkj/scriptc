@@ -598,7 +598,8 @@ function trapTraceRequested(): boolean {
  * section flags and the strip add almost nothing on top. And it is the
  * wrong order of magnitude for the target: 93.33% of that image is the
  * emitted TU and 61.72% of the TU's code is one minified vendored bundle
- * compiled through the dyn path. See G:\zapo-work\estado-imagesize.md.
+ * compiled through the dyn path; tests/perf/imagesize/README.md carries
+ * the method and the numbers.
  *
  * Refused by zig's linker on x86_64-windows-gnu, with transcripts, beside
  * the --wrap note below:  --icf=all, --icf=safe, --no-rosegment

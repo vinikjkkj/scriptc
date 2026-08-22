@@ -11,9 +11,12 @@ import { createHash } from "node:crypto";
 import { globSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { promisify } from "node:util";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { tmpdir } from "node:os";
 
-const repoRoot = "G:/scriptc-projection";
+/* The repo this script lives in, not the worktree it was written in. */
+const repoRoot = process.env["PJ_REPO"] ?? resolve(fileURLToPath(import.meta.url), "../../../..");
+const PJ_TMP = process.env["PJ_TMP"] ?? join(tmpdir(), "scr-pj");
 const { compile } = await import(pathToFileURL(join(repoRoot, "packages/compiler/dist/index.js")).href);
 const execFileAsync = promisify(execFile);
 
@@ -63,7 +66,7 @@ async function sweep(dir, backend, cacheRoot) {
 }
 
 async function selftest() {
-  const d = "G:/pj/selftest-projection";
+  const d = join(PJ_TMP, "selftest-projection");
   rmSync(d, { recursive: true, force: true });
   mkdirSync(d, { recursive: true });
   writeFileSync(join(d, "a-exact.ts"), Buffer.from('console.log("ok");\n', "utf8"));
@@ -77,7 +80,7 @@ async function selftest() {
     'interface M { a?: number }\nconst m: M = { a: undefined };\nconsole.log(Object.keys(m).join(","));\n', "utf8"));
   writeFileSync(join(d, "c-refuse.ts"), Buffer.from(
     'function f(o: unknown): string { return JSON.stringify({ ...(o as object) }); }\nconsole.log(f({}));\n', "utf8"));
-  const rows = await sweep(d, "c", "G:/pj/cache-selftest");
+  const rows = await sweep(d, "c", join(PJ_TMP, "cache-selftest"));
   const got = Object.fromEntries(rows.map((r) => [r.name, r.v]));
   console.log("SELFTEST " + JSON.stringify(got));
   const ok = got["a-exact"] === "EXACT" && got["b-diverge"] === "DIVERGE" && got["c-refuse"] === "REFUSE";
@@ -91,7 +94,7 @@ const backend = process.argv.find((a) => a.startsWith("--backend="))?.slice(10) 
 if (process.argv.includes("--selftest") || !dir) { await selftest(); }
 else {
   if (!(await selftest())) { console.log("refusing to sweep: the instrument failed its self-test"); process.exit(1); }
-  const rows = await sweep(resolve(dir), backend, "G:/pj/cache-sweep-" + backend);
+  const rows = await sweep(resolve(dir), backend, join(PJ_TMP, "cache-sweep-" + backend));
   const tally = {};
   for (const r of rows) tally[r.v] = (tally[r.v] ?? 0) + 1;
   for (const r of rows) {

@@ -43,7 +43,7 @@
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, writeFileSync, existsSync, statSync, readFileSync, rmSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { cpus, totalmem, freemem } from 'node:os'
+import { cpus, totalmem, freemem, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { requireToolchain, toolchainLine } from './toolchain.mjs'
@@ -75,7 +75,7 @@ const BATCHES = flag('batches', '')
  * So when --batches is given and --min-ms is not, the time bound is
  * removed. Pass both explicitly to get the old behaviour back. */
 const MINMS = flag('min-ms', BATCHES ? '86400000' : '2000')
-const OUTDIR = flag('exe-dir', 'G:/zapo-work/caches/strpool/ab')
+const OUTDIR = flag('exe-dir', path.join(tmpdir(), 'scr-strpool-ab'))
 const A_CFLAGS = flag('a', '')
 const B_CFLAGS = flag('b', '')
 const A_LABEL = flag('label-a', A_CFLAGS || 'base')

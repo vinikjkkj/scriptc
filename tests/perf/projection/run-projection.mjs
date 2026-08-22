@@ -3,15 +3,18 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { pathToFileURL } from "node:url";
-const repoRootEarly = "G:/scriptc-projection";
+import { fileURLToPath, pathToFileURL } from "node:url";
+/* The repo this script lives in, not the worktree it was written in. An
+ * absolute path here silently compiled with ANOTHER tree's dist. */
+const repoRootEarly = process.env["PJ_REPO"] ?? resolve(fileURLToPath(import.meta.url), "../../../..");
 const { compile } = await import(pathToFileURL(join(repoRootEarly, "packages/compiler/dist/index.js")).href);
 
 const execFileAsync = promisify(execFile);
-const repoRoot = "G:/scriptc-projection";
-const cacheDir = "G:/pj/cache";
+const repoRoot = repoRootEarly;
+const cacheDir = process.env["PJ_CACHE"] ?? join(tmpdir(), "scr-pj-cache");
 
 async function runBinary(cmd, args) {
   const pending = execFileAsync(cmd, args, { encoding: "buffer", maxBuffer: 64 * 1024 * 1024 });

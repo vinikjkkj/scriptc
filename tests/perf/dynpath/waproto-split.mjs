@@ -6,8 +6,16 @@
 //   r({"node_modules/protobufjs/src/util/base64.js"(e,t){ ... }})
 // so the vendored region is exactly measurable from the bundle text.
 import { readFileSync } from "node:fs";
-const JS = process.argv[2] ?? "G:/zapo-work/app/node_modules/zapo-js/spec/proto/index.js";
-const DTS = process.argv[3] ?? "G:/zapo-work/app/node_modules/zapo-js/spec/proto/index.d.ts";
+/* No default: this measures a vendored bundle that lives OUTSIDE this repo,
+ * so a hardcoded path only ever worked on the machine it was written on.
+ * Usage: node waproto-split.mjs <bundle.js> <bundle.d.ts>  (or WAPROTO_JS/_DTS) */
+const JS = process.argv[2] ?? process.env["WAPROTO_JS"] ?? null;
+const DTS = process.argv[3] ?? process.env["WAPROTO_DTS"] ?? null;
+if (JS === null || DTS === null) {
+  console.error("usage: node waproto-split.mjs <bundle.js> <bundle.d.ts>");
+  console.error("   or: WAPROTO_JS=... WAPROTO_DTS=... node waproto-split.mjs");
+  process.exit(2);
+}
 const js = readFileSync(JS, "utf8");
 const dts = readFileSync(DTS, "utf8");
 

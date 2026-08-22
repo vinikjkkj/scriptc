@@ -86,5 +86,6 @@ and inside the program's 24.30 MiB of code, the two independent rules put
 module — `spec/proto/index.js`, 1,867,556 bytes of esbuild+terser-minified
 protobufjs, compiled through the dynamic (`ScrDyn`) path.
 
-Full numbers, method and the measurements that turned out wrong are in
-`G:\zapo-work\estado-imagesize.md`.
+The scripts in this directory reproduce every number above; each carries its
+own usage line, and each resolves paths from its own location so it runs from
+any checkout.

@@ -16,10 +16,10 @@
  */
 import { globSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 
-const repo = process.argv.find((a) => a.startsWith("--repo="))?.slice(7) ?? "G:/scriptc-projection";
+const repo = process.argv.find((a) => a.startsWith("--repo="))?.slice(7) ?? (process.env["PJ_REPO"] ?? resolve(fileURLToPath(import.meta.url), "../../../.."));
 const require = createRequire(join(repo, "package.json"));
 const ts = require("typescript");
 const { analyze } = await import(pathToFileURL(join(repo, "packages/compiler/dist/index.js")).href);
