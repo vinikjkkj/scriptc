@@ -9110,6 +9110,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5940-readable-from-async-generator.ts": {
+   "order": [
+    "<repo>/tests/corpus/5940-readable-from-async-generator.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5941-readable-from-async-generator-backpressure.ts": {
+   "order": [
+    "<repo>/tests/corpus/5941-readable-from-async-generator-backpressure.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5942-readable-from-async-generator-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/5942-readable-from-async-generator-errors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5943-readable-from-async-generator-pipe.ts": {
+   "order": [
+    "<repo>/tests/corpus/5943-readable-from-async-generator-pipe.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5944-readable-from-async-generator-close-edges.ts": {
+   "order": [
+    "<repo>/tests/corpus/5944-readable-from-async-generator-close-edges.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5945-for-await-over-a-stream-closes-it.ts": {
+   "order": [
+    "<repo>/tests/corpus/5945-for-await-over-a-stream-closes-it.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"

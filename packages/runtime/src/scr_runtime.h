@@ -1953,6 +1953,14 @@ ScrPromise *scr_sc_buffer(ScrStream *s);
  * chunk per element — strings or Buffers per the flag; hwm 1, already
  * EOF'd). Borrows arr. */
 ScrStream *scr_stream_from_arr(ScrArr *arr, bool strings);
+/* Readable.from(asyncGenerator): +1 object-entry stream (hwm 1) that
+ * pulls ONE entry per _read from `g` and pushes null when the generator
+ * completes -- Node's from() wrapper, back-pressure included. `strings`
+ * says the yield type is string rather than bytes. Borrows g (the stream
+ * takes its own reference); the generator is closed on destroy(). The
+ * pump is the native consumer described with scr_agen_next_native. */
+typedef struct ScrGen ScrGen; /* the generator section below (C11 repeat) */
+ScrStream *scr_stream_from_agen(ScrGen *g, bool strings);
 ScrStream *scr_stream_pause(ScrStream *s);            /* recv +1 */
 ScrStream *scr_stream_resume(ScrStream *s);           /* recv +1 */
 bool scr_stream_is_paused(ScrStream *s);
@@ -5853,6 +5861,50 @@ ScrPromise *scr_agen_throw(ScrGen *g);
 void scr_agen_yield_f64(double v);
 void scr_agen_yield_bool(bool v);
 void scr_agen_yield_ref(void *v, void (*release)(void *)); /* moves */
+
+/* ── the NATIVE consumer (Readable.from's stream bridge) ──────────────
+ * A second consumer shape for the SAME handle: instead of arming a
+ * request promise whose settlement carries the emitted IteratorResult
+ * record, the runtime asks for a callback. The record is a per-shape C
+ * struct only the emitted settle thunk can build, so a runtime consumer
+ * could never read one — but it does not need to: OUT already holds the
+ * yielded value and scr_gen_done() already says whether it was the last.
+ *
+ * The sink is called ONCE per request, on the MAIN stack, one microtask
+ * turn after the body yields (or completes) — never on the generator's own
+ * fiber. That is not a convenience: settling happens INSIDE the fiber's
+ * yield, so a sink that pushed into a stream there could re-enter the same
+ * suspended generator through the consumer's next pull. The hop is also
+ * what makes the turn count match JS's, where the consumer's `await
+ * gen.next()` resumes one job after AsyncGeneratorResolve.
+ *
+ * On entry the sink sees: `failed` false and scr_gen_done(g) false for a
+ * yield (OUT holds the value, +1 moved out by scr_gen_take_out_ref);
+ * `failed` false and done true for a completion (OUT holds the generator
+ * RETURN value — Node's from() discards it, scr_gen_out_drop releases it);
+ * `failed` true with the body's exception PENDING IN THE ACTIVE CELL,
+ * exactly as a synchronous resume would have left it.
+ *
+ * A native request holds its own +1 on the handle, so the consumer may drop
+ * its reference while the body is parked on an await without the fiber's
+ * back-pointer ever dangling. `ctx` is BORROWED and untraced on purpose: a
+ * counted edge from the generator into a cycle-collected consumer would be
+ * invisible to trial deletion and would make every ring through that
+ * consumer read as externally referenced. A consumer being torn down calls
+ * scr_agen_sink_detach instead, and a settlement arriving after that is
+ * dropped.
+ *
+ * Native and promise requests never overlap: scr_agen_arm aborts on a
+ * second promise request, and these abort on a second native one. */
+typedef void (*ScrAgenSink)(void *ctx, ScrGen *g, bool failed);
+void scr_agen_next_native(ScrGen *g, ScrAgenSink sink, void *ctx);
+void scr_agen_return_native(ScrGen *g, ScrAgenSink sink, void *ctx);
+/* The payload is PENDING IN THE ACTIVE CELL at the call, like scr_agen_throw. */
+void scr_agen_throw_native(ScrGen *g, ScrAgenSink sink, void *ctx);
+void scr_agen_sink_detach(ScrGen *g);
+/* Releases whatever OUT holds (a completion value the consumer discards).
+ * The slot knows its own release fn, so the caller needs no type. */
+void scr_gen_out_drop(ScrGen *g);
 
 #ifdef SCR_RC_AUDIT
 long scr_promise_live_count(void);
