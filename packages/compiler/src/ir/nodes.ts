@@ -360,6 +360,13 @@ export type IrType =
    * narrowing test — the map/set rule), map keys/values, set elements,
    * array elements, and JSON. */
   | { kind: "generator"; yieldT: IrType; retT: IrType; nextT: IrType }
+  /** The object an `async function*` call answers. Deliberately a SEPARATE
+   * kind from `generator` rather than a flag on it: every exhaustive
+   * switch over IrType kinds has to name it, so a path that would have
+   * treated an async generator as a synchronous one fails to compile
+   * instead of silently resuming a fiber that is allowed to await. Its
+   * `.next()` answers `promise<IteratorResult>`, not the record. */
+  | { kind: "asyncGenerator"; yieldT: IrType; retT: IrType; nextT: IrType }
   /** The `undefined` unit type — a payload-less arm kind. Representable
    * ONLY as a union arm (`string | undefined`) or as the type of a
    * `unitLit` on its way into a `unionWrap`; it can never stand alone in
@@ -389,6 +396,7 @@ export const REF_TRUTHY_KINDS: ReadonlySet<string> = new Set([
   "secureCtx", "abortSignal", "abortController", "fsWatcher", "childStream", "procStream", "bytes", "func", "object", "record", "promise",
   // A generator object is a JS object: always truthy.
   "generator",
+  "asyncGenerator",
   // A class object is a JS object (constructors are functions): always truthy.
   "classval",
 ]);
@@ -737,6 +745,8 @@ export function typeKey(t: IrType): string {
       return `promise<${typeKey(t.inner)}>`;
     case "generator":
       return `generator<${typeKey(t.yieldT)},${typeKey(t.retT)},${typeKey(t.nextT)}>`;
+    case "asyncGenerator":
+      return `asyncGenerator<${typeKey(t.yieldT)},${typeKey(t.retT)},${typeKey(t.nextT)}>`;
     case "abortSignal":
       return "abortSignal";
     case "abortController":
@@ -802,9 +812,13 @@ export function typeEquals(a: IrType, b: IrType): boolean {
   // Unions are interned like shapes: one unionId per canonical arm list.
   if (a.kind === "union") return b.kind === "union" && a.unionId === b.unionId;
   if (a.kind === "promise") return b.kind === "promise" && typeEquals(a.inner, b.inner);
-  if (a.kind === "generator") {
+  if (a.kind === "generator" || a.kind === "asyncGenerator") {
+    // The two kinds are never equal to each other even with identical
+    // channels: they answer .next() differently (a record vs a promise
+    // over one), so a path that let them unify would resume an awaiting
+    // fiber synchronously.
     return (
-      b.kind === "generator" &&
+      b.kind === a.kind &&
       typeEquals(a.yieldT, b.yieldT) &&
       typeEquals(a.retT, b.retT) &&
       typeEquals(a.nextT, b.nextT)
@@ -912,6 +926,7 @@ export function isRefCounted(t: IrType): boolean {
     // A generator object is a refcounted handle over its paused fiber and
     // typed channel slots (ScrGen — lean allocation, no cycle header).
     t.kind === "generator" ||
+    t.kind === "asyncGenerator" ||
     // A dyn value is a refcounted JSON dyn tree (ScrDyn).
     t.kind === "dyn" ||
     // An island value is a refcounted cell owning one engine value.
@@ -1738,8 +1753,21 @@ export interface IrFunction {
    * generator type `{ yieldT, retT: returnType, nextT }` from an emitted
    * spawn wrapper that only allocates. `yieldT` is what `yield e` sends
    * out, `nextT` what `.next(v)` sends in (the yield expression's result
-   * type). Mutually exclusive with `async` (async generators are fenced). */
-  generator?: { yieldT: IrType; nextT: IrType };
+   * type). Set TOGETHER with `async` for an `async function*`, and only
+   * then: the pair IS the async-generator discriminator the backends route
+   * on (`fn.generator !== undefined && fn.async === true`). For a plain
+   * `function*` `async` stays absent, and for a plain `async function`
+   * `generator` does. */
+  generator?: {
+    yieldT: IrType;
+    nextT: IrType;
+    /** ASYNC generators only (required there, absent otherwise): the shape
+     * id of the interned IteratorResult record. The spawn wrapper has to
+     * name the emitted SETTLE thunk at construction time, and that thunk
+     * is typed by this record — the backend cannot re-derive it, because
+     * the record's value union is interned by the frontend. */
+    resultShapeId?: string;
+  };
   body: IrStmt[];
   loc: SrcLoc;
 }
@@ -5723,8 +5751,14 @@ export type IrExpr =
    * as the GENRET sentinel — pending like an exception, it unwinds
    * through finally blocks but must NOT be taken by catch handlers
    * (backends emit a sentinel re-unwind prologue at catch entry inside
-   * generator bodies; scr_exc_genret_pending answers it). */
-  | { kind: "yieldExpr"; value: IrExpr | null; type: IrType; loc: SrcLoc }
+   * generator bodies; scr_exc_genret_pending answers it).
+   *
+   * `async: true` marks a yield in an ASYNC generator body. It is carried
+   * on the node rather than inferred from the enclosing function so a
+   * backend cannot emit the synchronous yield helper for it by omission:
+   * the async form additionally takes JS's AsyncGeneratorYield microtask
+   * hop and SETTLES the in-flight request promise before suspending. */
+  | { kind: "yieldExpr"; value: IrExpr | null; async?: true; type: IrType; loc: SrcLoc }
   /** One consumer resume of a generator: `g.next(arg)`, `g.return(arg)`,
    * `g.throw(arg)`, and the for-of/yield* desugars. `gen` is a borrowed
    * generator-typed temp. `arg` is the sent value (moves in): next's
@@ -5743,6 +5777,27 @@ export type IrExpr =
    * MAY-THROW SEED: a body exception (or the injected throw) propagates
    * into the caller synchronously. */
   | { kind: "genResume"; mode: "next" | "return" | "throw"; gen: IrExpr; arg: IrExpr | null; type: IrType; loc: SrcLoc }
+
+  /** One consumer resume of an ASYNC generator. Deliberately a separate
+   * node kind from `genResume` rather than a mode on it: the two answer
+   * different things (a record vs a `promise<record>`) and suspend for
+   * different reasons, so a backend that has not been taught this one
+   * fails on an unknown expression kind instead of quietly emitting a
+   * SYNCHRONOUS resume for a fiber that is allowed to await — which would
+   * come back with a stale out-slot and no diagnostic.
+   *
+   * `gen` is a borrowed asyncGenerator-typed temp; `arg` follows
+   * genResume's convention exactly. Result is `promise<R>` where R is the
+   * same interned IteratorResult record the synchronous lane builds (+1
+   * on the promise). NOT a may-throw seed: an async generator reports a
+   * body failure by REJECTING the promise, so the throw surfaces at the
+   * `await`, not here.
+   *
+   * The consumers are compiler-generated only — the `for await` desugar
+   * and the Readable.from bridge — because the runtime keeps no request
+   * queue; the frontend refuses the user-facing `.next()`/`.return()`/
+   * `.throw()` surface. */
+  | { kind: "agenResume"; mode: "next" | "return" | "throw"; gen: IrExpr; arg: IrExpr | null; type: IrType; loc: SrcLoc }
   /** Await a promise: parks the current fiber until it settles; a rejected
    * promise re-throws into the awaiter (may-throw seed). Result is the
    * promise's inner value (+1 for refcounted kinds). Only inside async fns. */
@@ -6757,6 +6812,7 @@ function isJsonSafeAt(
     case "caught":
     case "promise":
     case "generator":
+    case "asyncGenerator":
     case "void":
       return false;
     // Representable exactly as a union arm in record-field position (the

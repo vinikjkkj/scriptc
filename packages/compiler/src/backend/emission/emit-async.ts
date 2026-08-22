@@ -2,9 +2,9 @@
  * scaffolding, plus the interned resolve/child-exit thunks that adapt typed
  * payloads onto the runtime's promise and child-process machinery. */
 import { appendLines, type CEmitter } from "./emitter.js";
-import { mangleArgPack, mangleAsyncSpawn, mangleChildDataThunk, mangleChildExitThunk, mangleCloseBindThunk, mangleCloseOverrideWrap, mangleConnectSockThunk, mangleDgramMsgThunk, mangleDnsLookupThunk, mangleField, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRaceThunk, mangleRawParam, mangleNetLookupAnswerThunk, mangleEmitterInvokeThunk, mangleStreamCbThunk, mangleStreamDoneFn, mangleRecordNew, mangleRecordRelease, mangleRecordStruct, mangleResolveThunk, mangleSniAnswerThunk, mangleTrampoline } from "../mangle.js";
+import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleChildDataThunk, mangleChildExitThunk, mangleCloseBindThunk, mangleCloseOverrideWrap, mangleConnectSockThunk, mangleDgramMsgThunk, mangleDnsLookupThunk, mangleField, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRaceThunk, mangleRawParam, mangleNetLookupAnswerThunk, mangleEmitterInvokeThunk, mangleStreamCbThunk, mangleStreamDoneFn, mangleRecordNew, mangleRecordRelease, mangleRecordStruct, mangleResolveThunk, mangleSniAnswerThunk, mangleTrampoline } from "../mangle.js";
 import { cDecl, cType, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
-import { IrType, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
+import { IrFunction, IrType, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
 
 /** Per-async-function machinery: an argument pack, a fiber trampoline
    * (unpacks, runs the ordinary compiled body, settles the promise), and a
@@ -12,7 +12,10 @@ import { IrType, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/
    * their closure env through the pack (+1, released after the body). */
   export function emitAsyncScaffolding(E: CEmitter, out: string[]): void {
     for (const fn of E.mod.functions) {
-      if (!fn.async) continue;
+      // An ASYNC GENERATOR sets both flags; it is not an async function and
+      // must not get the eager spawn wrapper (nothing may run before the
+      // first .next()). emitGenScaffolding below owns it.
+      if (!fn.async || fn.generator !== undefined) continue;
       const pack = mangleArgPack(fn.name);
       const lifted = fn.captures !== undefined;
       const fields: string[] = [];
@@ -126,6 +129,33 @@ import { IrType, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/
     emitGenScaffolding(E, out);
   }
 
+
+/** The asyncGenerator TYPE of an async-generator IrFunction, rebuilt from
+ * the three places the IR keeps its channels: yield/next on `generator`,
+ * TReturn on `returnType` (the body-facing return type IS the generator's
+ * return channel). Used only to KEY the interned settle thunk, so it has
+ * to agree with the frontend's own key for the same generator — which it
+ * does, because both spell the same three channels. */
+function agenTypeOf(fn: IrFunction): IrType & { kind: "asyncGenerator" } {
+  if (!fn.generator) throw new Error("emitter bug: agenTypeOf on a non-generator");
+  return {
+    kind: "asyncGenerator",
+    yieldT: fn.generator.yieldT,
+    retT: fn.returnType,
+    nextT: fn.generator.nextT,
+  };
+}
+
+/** The interned IteratorResult record of an async generator, carried on the
+ * IR because the frontend interned its value union and the backend cannot
+ * re-derive it. */
+function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
+  const id = fn.generator?.resultShapeId;
+  if (id === undefined) {
+    throw new Error("emitter bug: async generator without a result shape id");
+  }
+  return { kind: "record", shapeId: id };
+}
 /** Per-generator-function machinery — the async scaffolding's lazy
    * sibling: the same argument pack, a fiber trampoline whose epilogue
    * stores the COMPLETION value (or consumes the GENRET sentinel,
@@ -135,6 +165,7 @@ import { IrType, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/
   function emitGenScaffolding(E: CEmitter, out: string[]): void {
     for (const fn of E.mod.functions) {
       if (!fn.generator) continue;
+      const isAsyncGen = fn.async === true;
       const pack = mangleArgPack(fn.name);
       const lifted = fn.captures !== undefined;
       const fields: string[] = [];
@@ -200,6 +231,11 @@ import { IrType, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/
         ...fn.params.map((p) => cDecl(p.type, pname(p))),
       ];
       out.push(
+        // The settle thunk is DEFINED with the interned walkers, far below
+        // this spawn wrapper, so its prototype has to be repeated here.
+        ...(isAsyncGen
+          ? [`static void ${agenSettleThunkFor(E, agenTypeOf(fn), agenResultTypeOf(fn))}(ScrGen *sc_g, ScrPromise *sc_p);`]
+          : []),
         `static void ${mangleGenDrop(fn.name)}(void *sc_ap0) {`,
         `  ${pack} sc_a = *(${pack} *)sc_ap0;`,
         `  free(sc_ap0);`,
@@ -214,7 +250,13 @@ import { IrType, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/
         `  if (!sc_ap) { ${E.oomAbortC()}; }`,
         ...(lifted ? [`  sc_ap->sc_env = scr_closure_retain(sc_env);`] : []),
         ...fn.params.map((p) => `  sc_ap->${pname(p)} = ${pname(p)};`),
-        `  return scr_gen_new(&${mangleTrampoline(fn.name)}, sc_ap, &${mangleGenDrop(fn.name)});`,
+        // An ASYNC generator carries its settle thunk into the handle: the
+        // runtime calls it at every yield and at completion to fulfill the
+        // in-flight request promise. Same lazy allocation either way —
+        // nothing runs until the first resume.
+        isAsyncGen
+          ? `  return scr_agen_new(&${mangleTrampoline(fn.name)}, sc_ap, &${mangleGenDrop(fn.name)}, &${agenSettleThunkFor(E, agenTypeOf(fn), agenResultTypeOf(fn))});`
+          : `  return scr_gen_new(&${mangleTrampoline(fn.name)}, sc_ap, &${mangleGenDrop(fn.name)});`,
         `}`,
       );
     }
@@ -733,7 +775,7 @@ import { IrType, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/
    * when V is dyn, the any/unknown channel). */
   export function genResultThunkFor(
     E: CEmitter,
-    genT: IrType & { kind: "generator" },
+    genT: IrType & { kind: "generator" | "asyncGenerator" },
     recT: IrType & { kind: "record" },
   ): string {
     const key = typeKey(genT);
@@ -832,6 +874,40 @@ import { IrType, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/
     lines.push(`  return sc_r;`, `}`);
     E.walkerProtos.push(`static ${struct} *${sym}(ScrGen *sc_g);`);
     E.walkerDefs.push(...lines, ``);
+    return sym;
+  }
+
+/** The async generator's SETTLE thunk: `void (ScrGen *, ScrPromise *)`,
+ * handed to scr_agen_new and called by the runtime at every yield and at
+ * completion. It is a four-line wrapper over genResultThunkFor rather than
+ * a second copy of it — the record shape, the undefined arm and the
+ * arm-wise retagging are exactly the same question for both flavours, and
+ * a second implementation is a second thing to drift. The only difference
+ * is the destination: fulfill a promise instead of returning the record.
+ *
+ * Interned per generator type, keyed apart from the synchronous thunk by
+ * the type key itself (asyncGenerator<...> vs generator<...>). */
+  export function agenSettleThunkFor(
+    E: CEmitter,
+    genT: IrType & { kind: "asyncGenerator" },
+    recT: IrType & { kind: "record" },
+  ): string {
+    const key = `agenSettle:${typeKey(genT)}`;
+    let sym = E.genResThunks.get(key);
+    if (sym) return sym;
+    const inner = genResultThunkFor(E, genT, recT);
+    sym = mangleAgenSettleThunk(E.genResThunks.size);
+    E.genResThunks.set(key, sym);
+    const struct = mangleRecordStruct(recT.shapeId);
+    const v = vAdapters(recT);
+    E.walkerProtos.push(`static void ${sym}(ScrGen *sc_g, ScrPromise *sc_p);`);
+    E.walkerDefs.push(
+      `static void ${sym}(ScrGen *sc_g, ScrPromise *sc_p) {`,
+      `  ${struct} *sc_r = ${inner}(sc_g);`,
+      `  scr_promise_fulfill_ref(sc_p, sc_r, ${v.retain}, ${v.release}, ${E.traceArgC(recT)});`,
+      `}`,
+      ``,
+    );
     return sym;
   }
 

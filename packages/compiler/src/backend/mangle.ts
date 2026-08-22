@@ -190,6 +190,12 @@ export function mangleResolveThunk(n: number): string {
 export function mangleGenResThunk(n: number): string {
   return `sc_gres_${n}`;
 }
+/** Emitted ASYNC generator settle thunk: builds the same IteratorResult
+ * record and FULFILLS the in-flight request promise with it. Interned in
+ * the same table as the synchronous builder, under its own key. */
+export function mangleAgenSettleThunk(n: number): string {
+  return `sc_agres_${n}`;
+}
 /** Emitted Promise.race fulfillment adapter (entry inner type → result
  * inner type), interned per type pair. */
 export function mangleRaceThunk(n: number): string {

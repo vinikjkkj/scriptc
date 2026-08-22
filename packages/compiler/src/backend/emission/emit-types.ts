@@ -123,6 +123,9 @@ export function cType(t: IrType): string {
     case "promise":
       return "ScrPromise *";
     case "generator":
+    // An async generator is the same ScrGen handle; only the resume
+    // protocol differs (a promise instead of the record).
+    case "asyncGenerator":
       return "ScrGen *";
     case "void":
       return "void";
@@ -222,6 +225,7 @@ export function retainCallC(type: IrType, expr: string): string {
     case "promise":
       return `scr_promise_retain(${expr})`;
     case "generator":
+    case "asyncGenerator":
       return `scr_gen_retain(${expr})`;
     case "union":
       return `scr_union_retain(${expr})`;
@@ -317,6 +321,7 @@ export function releaseCallC(type: IrType, expr: string): string {
     case "promise":
       return `scr_promise_release(${expr})`;
     case "generator":
+    case "asyncGenerator":
       return `scr_gen_release(${expr})`;
     case "union":
       return `scr_union_release(${expr})`;
@@ -392,6 +397,7 @@ export function boxKindC(t: IrType): string {
       // promises ride obj-boxes (boxNewC), never plain kind boxes
       throw new Error("emitter bug: promise boxes go through boxNewC");
     case "generator":
+    case "asyncGenerator":
       // generators ride obj-boxes too (boxNewC — vAdapters carries the
       // ScrGen RC entry points; no trace, like child).
       throw new Error("emitter bug: generator boxes go through boxNewC");
@@ -524,6 +530,7 @@ export function rcAdapters(t: IrType): RcAdapters | null {
     case "promise":
       return rt("scr_promise_retain_v", "scr_promise_release_v");
     case "generator":
+    case "asyncGenerator":
       return rt("scr_gen_retain_v", "scr_gen_release_v");
     case "dyn":
       return rt("scr_dyn_retain_v", "scr_dyn_release_v");
@@ -694,6 +701,7 @@ export function elemKindC(elem: IrType): string {
     case "dyn":
     case "caught":
     case "generator":
+    case "asyncGenerator":
     case "undefinedT":
     case "nullT":
       // (promise, http2Session, http2Stream and abortSignal were listed
