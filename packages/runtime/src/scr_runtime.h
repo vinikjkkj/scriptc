@@ -4798,11 +4798,22 @@ extern const char SCR_FN_SRC_BOUND[];  /* the result of Function#bind */
  * must be static literals (the box never frees them; name may be NULL).
  * This spelling marks the box NATIVE — it is the runtime's own entry
  * point, and every closure the runtime mints here really is native glue.
- * Compiled boxes go through scr_dyn_new_func_src with their source. */
+ * Compiled boxes go through scr_dyn_new_func_src with their source.
+ *
+ * `sig` is NOT decoration, and this spelling's contract is NARROWER than
+ * _src's: it must be a HUMAN-READABLE spelling ("()", "(error,data)"),
+ * never a compiler type key. The emitted dynCheck's exact-signature
+ * branch UNWRAPS the closure and calls `clo->fn` through the static C
+ * signature that key names, and a closure minted here holds a dyn thunk.
+ * Both halves are enforced at the mint and TRAP: NULL (which the emitted
+ * `strcmp` dereferences) in _src, and a `func(`-prefixed key here. */
 ScrDyn *scr_dyn_new_func(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity, const char *sig, const char *name);
 /* scr_dyn_new_func carrying the function's Function.prototype.toString
  * answer: a static source-text literal, one of the SCR_FN_SRC_* sentinels,
- * or NULL when the build carried no text (the renderers then refuse). */
+ * or NULL when the build carried no text (the renderers then refuse).
+ * This is the COMPILER's spelling, so `sig` here IS the interned type key
+ * of the function type the value was boxed from — that is what makes
+ * the exact-signature unwrap sound. It may not be NULL. */
 ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity, const char *sig, const char *name, const char *src);
 /* Function.prototype.toString over a SCR_DYN_FUNC box — the ONE renderer.
  * String(), `+`, template interpolation and `.toString()` all land here so
