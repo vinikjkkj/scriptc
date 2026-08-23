@@ -77,8 +77,18 @@ static void wsg_free_now(ScrWsGlobal *g);
 
 /* ── the ready-state notification ────────────────────────────── */
 
+/* NO RECORD, NO EVENT. A DELEGATED handle exists before
+ * scr_ws_global_set_user names its record and can outlive the moment the
+ * platform lets go of it (scr_ws_global_drop_user), and the emitted fire
+ * thunk writes readyState through its `user` pointer before it looks at
+ * anything -- so a NULL there is a null write, not a missed callback. The
+ * dialled path could never reach it; the delegated one can. */
+static bool wsg_can_fire(const ScrWsGlobal *g) {
+  return !g->dead && g->fire != NULL && g->user != NULL;
+}
+
 static void wsg_state(ScrWsGlobal *g) {
-  if (g->dead || g->fire == NULL) return;
+  if (!wsg_can_fire(g)) return;
   g->fire(g->user, SCR_WSG_STATE, scr_ws_client_ready_state(g->c), NULL, 0, false, 0, NULL, 0,
           false);
 }
@@ -110,7 +120,7 @@ static void wsg_leave(ScrWsGlobal *g) {
 
 static void wsg_on_open(void *u) {
   ScrWsGlobal *g = u;
-  if (g->dead) return;
+  if (!wsg_can_fire(g)) return;
   wsg_enter(g);
   g->fire(g->user, SCR_WSG_OPEN, scr_ws_client_ready_state(g->c), NULL, 0, false, 0, NULL, 0,
           false);
@@ -119,7 +129,7 @@ static void wsg_on_open(void *u) {
 
 static void wsg_on_message(void *u, const uint8_t *d, size_t n, bool is_text) {
   ScrWsGlobal *g = u;
-  if (g->dead) return;
+  if (!wsg_can_fire(g)) return;
   wsg_enter(g);
   g->fire(g->user, SCR_WSG_MESSAGE, scr_ws_client_ready_state(g->c), d, n, is_text, 0, NULL, 0,
           false);
@@ -128,7 +138,7 @@ static void wsg_on_message(void *u, const uint8_t *d, size_t n, bool is_text) {
 
 static void wsg_on_close(void *u, uint16_t code, const uint8_t *reason, size_t rlen) {
   ScrWsGlobal *g = u;
-  if (g->dead) return;
+  if (!wsg_can_fire(g)) return;
   wsg_enter(g);
   /* wasClean: the connection was closed through the protocol's own
    * handshake rather than torn down. scr_websocket.c reports code 1006
@@ -143,7 +153,7 @@ static void wsg_on_close(void *u, uint16_t code, const uint8_t *reason, size_t r
 
 static void wsg_on_error(void *u, const char *msg) {
   ScrWsGlobal *g = u;
-  if (g->dead) return;
+  if (!wsg_can_fire(g)) return;
   wsg_enter(g);
   g->fire(g->user, SCR_WSG_ERROR, scr_ws_client_ready_state(g->c), NULL, 0, false, 0, msg,
           msg != NULL ? strlen(msg) : 0, false);
@@ -337,6 +347,35 @@ void scr_ws_global_adopt(ScrWsGlobal *g, ScrWsClient *c, void *disp, const ScrWs
   g->disp_ops = ops;
 }
 
+/* NOTHING CAN FIRE ANY MORE, AND NO EVENT SAYS SO.
+ *
+ * The platform holds the API record for as long as the socket can still
+ * deliver, and a close or a transport error is what ends that. A DELEGATED
+ * WebSocket has a third ending with no event at all: the program's
+ * dispatcher returned without answering and then dropped the handler it
+ * was given. No socket was ever dialled, so nothing keeps the loop alive
+ * and nothing will ever call onUpgrade or onError -- and the oracle fires
+ * NOTHING in that case either (measured: a dispatcher that says nothing
+ * produces no event, not an error). So this drops the reference in
+ * silence. Without it the record, its four listener slots and the
+ * send/close closures were still live at exit, which is exactly what
+ * SCRIPTC_RC_AUDIT reported on the fixture that pins the shape.
+ *
+ * NOT `dead`: readyState stays CONNECTING, which is what the oracle
+ * answers for the same WebSocket. This is a reference being released, not
+ * a state transition. */
+void scr_ws_global_drop_user(ScrWsGlobal *g) {
+  if (g == NULL || !g->user_held) return;
+  if (g->depth > 0) {
+    g->want_drop = true;
+    return;
+  }
+  void *u = g->user;
+  g->user_held = false;
+  g->user = NULL;
+  g->user_release(u);
+}
+
 ScrWsGlobal *scr_ws_global_new(ScrStr *url, ScrStr *protocols, ScrStr *headers,
                                ScrWsGlobalFire fire) {
   const ScrWsClientCallbacks cb = wsg_cb;
@@ -365,6 +404,16 @@ ScrWsGlobal *scr_ws_global_new(ScrStr *url, ScrStr *protocols, ScrStr *headers,
 
 void scr_ws_global_set_user(ScrWsGlobal *g, void *user, void *(*retain)(void *),
                              void (*release)(void *)) {
+  /* A DELEGATED handle can already be past its only ending by the time
+   * this runs: `dispatch` is called from inside the constructor, and a
+   * dispatcher that answers nothing and drops the handler in that same
+   * call leaves nothing that can ever fire. Holding the record then would
+   * hold it forever -- there is no socket to end and no event to end it.
+   * So the platform simply never takes the reference. */
+  if (g->disp != NULL && g->disp_ops->orphaned(g->disp)) {
+    g->user_release = release;
+    return;
+  }
   g->user = retain(user);
   g->user_release = release;
   g->user_held = true;

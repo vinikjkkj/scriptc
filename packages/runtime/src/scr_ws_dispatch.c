@@ -37,11 +37,20 @@ struct ScrWsDisp {
    * once. Both are +1 and both are dropped by the teardown below, which
    * is what a program that threw away the WebSocket in the same turn
    * depends on. */
-  ScrNetSocket *pending_sock;
   ScrStr *pending_head;
   /* The delegation failed and the failure is likewise parked: an `error`
    * event has the same "not before the constructor returned" problem. */
   ScrStr *pending_fail;
+  /* The API handle, BORROWED -- it owns this state, so the edge back is
+   * never counted. It exists for exactly one thing: telling the handle to
+   * let go of the program's record when nobody can answer any more. See
+   * wsd_release_v. */
+  ScrWsGlobal *g;
+  /* The program let go of every handler member without settling, so no
+   * answer can ever arrive. Recorded rather than acted on immediately,
+   * because a dispatcher can reach this state INSIDE the constructor --
+   * before scr_ws_global_set_user has a record to let go of. */
+  bool orphaned;
 };
 
 static void wsd_free(ScrWsDisp *d) {
@@ -49,7 +58,6 @@ static void wsd_free(ScrWsDisp *d) {
     scr_ws_client_free(d->c);
     d->c = NULL;
   }
-  if (d->pending_sock != NULL) scr_net_sock_release(d->pending_sock);
   scr_str_release(d->pending_head);
   scr_str_release(d->pending_fail);
   free(d);
@@ -66,7 +74,44 @@ void scr_ws_disp_release(ScrWsDisp *d) {
 }
 
 static void *wsd_retain_v(void *p) { return wsd_retain((ScrWsDisp *)p); }
-static void wsd_release_v(void *p) { scr_ws_disp_release((ScrWsDisp *)p); }
+
+/* THE HANDLER'S OWN RELEASE, and the one place that can tell that nobody
+ * will ever answer.
+ *
+ * Every one of the ten handler members holds this state, so while any of
+ * them is reachable an onUpgrade or an onError can still arrive and the
+ * WebSocket has to stay alive -- 6060's dispatcher answers a turn later
+ * and depends on exactly that. When the LAST of them goes, the only
+ * reference left is the API handle's own, and at that instant the program
+ * has dropped every way it had of answering. A dispatcher that returned
+ * without dialling leaves nothing to keep the loop alive either, so the
+ * process is on its way out with the record still held.
+ *
+ * rc == 1 after the decrement is that instant. The handle then lets go of
+ * the record, silently, because the oracle fires nothing here either. */
+static void wsd_release_v(void *p) {
+  ScrWsDisp *d = (ScrWsDisp *)p;
+  if (d == NULL) return;
+  /* AN EXCEPTION IN FLIGHT IS AN ANSWER NOT YET RECORDED. A dispatcher
+   * that THROWS releases the handler on the way out -- the emitted callee
+   * drops its dyn parameters on the throw path -- so the last handler
+   * member dies BEFORE scr_ws_disp_begin has seen the pending exception
+   * and turned it into a parked failure. Treating that as "nobody can
+   * answer" dropped the record a moment before the failure needed it, and
+   * the `error`/close pair the oracle produces went missing. Measured:
+   * the throwing row of tests/corpus/6061 lost both its lines. */
+  if (d->rc == 2 && !d->settled && !d->dead && !scr_exc_pending()) {
+    d->rc = 1;
+    d->orphaned = true;
+    /* NULL until scr_ws_disp_global_new adopts, which is AFTER the
+     * delegation ran -- a dispatcher that dropped the handler in its own
+     * call lands here first. set_user then asks `orphaned` and never
+     * takes the reference at all. */
+    if (d->g != NULL) scr_ws_global_drop_user(d->g);
+    return;
+  }
+  scr_ws_disp_release(d);
+}
 
 ScrWsClient *scr_ws_disp_client(ScrWsDisp *d) { return d == NULL ? NULL : d->c; }
 
@@ -217,22 +262,9 @@ static void wsd_deliver(void *p) {
     scr_str_release(m);
     return;
   }
-  ScrNetSocket *sock = d->pending_sock;
   ScrStr *head = d->pending_head;
-  d->pending_sock = NULL;
   d->pending_head = NULL;
-  if (sock == NULL || head == NULL) {
-    if (sock != NULL) scr_net_sock_release(sock);
-    scr_str_release(head);
-    return;
-  }
-  if (!scr_ws_client_attach(d->c, sock)) {
-    scr_net_sock_release(sock);
-    scr_str_release(head);
-    scr_ws_client_fail(d->c, "the WebSocket dispatcher called onUpgrade twice");
-    return;
-  }
-  scr_net_sock_release(sock); /* attach took its own +1 */
+  if (head == NULL) return;
   /* Feeding the head is what OPENS the connection: scr_ws_conn_recv
    * validates it -- status, Upgrade/Connection tokens, and the
    * Sec-WebSocket-Accept against the key WE generated -- and only then
@@ -274,7 +306,19 @@ static ScrDyn *wsd_upgrade_at(ScrClosure *clo, ScrDyn *const *args, size_t argc,
     wsd_park_fail(d, "out of memory rebuilding the upgrade response");
     return scr_dyn_undefined();
   }
-  d->pending_sock = scr_net_sock_retain((ScrNetSocket *)sd->v.handle.ptr);
+  /* ATTACH NOW, FEED NEXT TURN. The socket gets its owner in this call,
+   * exactly as undici's does -- the dispatcher is about to unshift the
+   * bytes that arrived with the 101, and the read loop re-delivers them
+   * immediately. Whoever owns the socket at that instant gets them; if it
+   * were still the dispatcher's own 'data' listener they would be dropped
+   * on the floor. The client HOLDS them until the head lands (see
+   * scr_ws_client.c's head_pending), so nothing reaches the parser before
+   * the handshake it has to validate. */
+  if (!scr_ws_client_attach(d->c, (ScrNetSocket *)sd->v.handle.ptr)) {
+    scr_str_release(head);
+    wsd_park_fail(d, "the WebSocket dispatcher called onUpgrade twice");
+    return scr_dyn_undefined();
+  }
   d->pending_head = head;
   wsd_park(d);
   return scr_dyn_undefined();
@@ -481,6 +525,11 @@ ScrWsDisp *scr_ws_disp_begin(ScrStr *url, ScrStr *protocols, ScrStr *headers,
     return NULL;
   }
   d->rc = 1;
+  /* The API handle IS the callbacks' user pointer, and it exists before
+   * the delegation runs -- which matters, because a dispatcher can drop
+   * the handler inside its own call and the drop path needs a handle to
+   * talk to. */
+  d->g = (ScrWsGlobal *)user;
   d->c = scr_ws_client_detached(accept, cb, user);
   if (d->c == NULL) {
     free(d);
@@ -525,14 +574,43 @@ ScrWsDisp *scr_ws_disp_begin(ScrStr *url, ScrStr *protocols, ScrStr *headers,
   }
 
   scr_closure_release(fn);
+  /* A dispatcher that THREW. The oracle does not let it out of the
+   * constructor: undici catches it and fails the connection instead, so
+   * the program sees `error` then close 1006 -- measured on v25.9.0
+   * beside the onError shape, which produces the identical pair. Letting
+   * the exception ride out of `new WebSocket(...)` here would be a
+   * divergence AND a worse one, because the object the program is holding
+   * would never settle. */
+  if (scr_exc_pending()) {
+    ScrCaught *c = scr_exc_take();
+    /* A throw AFTER the handler already answered does not un-answer it:
+     * the oracle's "onError then onUpgrade" and "onUpgrade then onError"
+     * both settle on whichever came FIRST (measured). */
+    if (!d->settled) {
+      d->settled = true;
+      ScrStr *m = scr_caught_to_string(c);
+      wsd_park_fail(d, m != NULL && m->len > 0 ? m->data : "the WebSocket dispatcher failed");
+      scr_str_release(m);
+    }
+    scr_caught_release(c);
+  }
   return d;
 }
 
 /* ── the emitted entry point ────────────────────────────────────────── */
 
+static bool wsd_orphaned(void *p) {
+  ScrWsDisp *d = (ScrWsDisp *)p;
+  /* `settled` can be set AFTER the orphan flag: the delegation's own
+   * pending-exception arm parks a failure once `dispatch` has returned,
+   * and that failure still needs the record. */
+  return d != NULL && d->orphaned && !d->settled;
+}
+
 static const ScrWsDispOps WSD_OPS = {
     .invalidate = (void (*)(void *)) & scr_ws_disp_invalidate,
     .release = (void (*)(void *)) & scr_ws_disp_release,
+    .orphaned = &wsd_orphaned,
 };
 
 ScrWsGlobal *scr_ws_disp_global_new(ScrStr *url, ScrStr *protocols, ScrStr *headers,
