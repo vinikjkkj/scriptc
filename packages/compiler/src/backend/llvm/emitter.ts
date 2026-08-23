@@ -74,10 +74,10 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals } from "../emission/emit-stmts.js";
-import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
+import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
 import {
   buildClassGraph,
@@ -2952,6 +2952,24 @@ class LlEmitter {
   classInterval(className: string): { pre: number; post: number } {
     const meta = this.classMetaOf(className);
     return { pre: meta.pre, post: meta.post };
+  }
+
+  /** The C lane's loop over `E.classMeta` in emit-walkers.ts's OBJINST
+   * arm, as data — the gates are the same three and are spelled once each
+   * so the two lanes cannot answer `c[k]` differently for one class. */
+  classPropsTables(): { desc: string; struct: string; index: number }[] {
+    const out: { desc: string; struct: string; index: number }[] = [];
+    for (const [cname, meta] of this.classMeta) {
+      if (meta.hierarchy) continue;
+      if (!meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) continue;
+      if (!canBoxClassIntoDyn(cname)) continue;
+      out.push({
+        desc: this.dynClassDesc(cname),
+        struct: mangleClassStruct(cname),
+        index: classFieldIndex(meta, CLASS_PROPS_FIELD).index,
+      });
+    }
+    return out;
   }
 
   /** The undefined arm's tag of a union type, or -1 (not a union / no

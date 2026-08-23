@@ -121,6 +121,78 @@ const RUNS: readonly { name: string; src: string; out: string }[] = [
       "console.log(x)\nconsole.log(y)\n",
     out: "true false\nC { a: 1, plug: [Getter] }\nC { a: 2 }\n",
   },
+  {
+    // [[Get]] over the table. `scr_cls_props_get` shipped with NO caller
+    // and `c[k]` refused a property the program had just defined on `c`,
+    // while `in`, inspect and the enumerable count all read the same table.
+    // The read must go through a WIDENING cast, because that is the only
+    // spelling a class receiver has for a run-time key.
+    name: "a run-time-keyed property reads back through a widening cast",
+    src:
+      "class C { a: number\n  constructor() { this.a = 1 } }\n" +
+      "const c = new C()\n" +
+      RTKEY +
+      "Object.defineProperty(c, k, { value: 5, enumerable: true, writable: true, configurable: true })\n" +
+      "const r = c as unknown as Record<string, unknown>\n" +
+      "console.log(String(r[k]))\n",
+    out: "5\n",
+  },
+  {
+    // The accessor arm: the table RUNS the getter, with no receiver, which
+    // is sound only because the lowering admits an arrow and nothing else.
+    // A set-only accessor reads `undefined` — JS's answer, not a fence: the
+    // property exists and its [[Get]] is undefined.
+    name: "reading an accessor runs its getter; a set-only one reads undefined",
+    src:
+      "class C { a: number\n  constructor() { this.a = 1 } }\n" +
+      "const c = new C()\n" +
+      RTKEY +
+      "Object.defineProperty(c, k, { get: () => 9, enumerable: true, configurable: true })\n" +
+      "Object.defineProperty(c, k + 's', { set: (_v: unknown) => {}, enumerable: true, configurable: true })\n" +
+      "const r = c as unknown as Record<string, unknown>\n" +
+      "console.log(String(r[k]) + ' ' + String(r[k + 's']))\n",
+    out: "9 undefined\n",
+  },
+];
+
+/** Reads over a boxed instance that must stay the LOUD LADDER. Node answers
+ * for all of them, and that divergence is the point: a class instance's
+ * DECLARED members are struct cells the box cannot reach, so answering
+ * `undefined` for a table MISS would answer `undefined` for `c.a` too — the
+ * silent wrong answer the whole OBJINST arm exists to avoid. Every one of
+ * these was already the fence before [[Get]] read the table; the rows are
+ * here because the table lookup runs FIRST now, and a lookup that started
+ * answering its own misses would take all of them silently. */
+const READ_REFUSALS: readonly { name: string; src: string }[] = [
+  {
+    name: "a key no define ever put in the table",
+    src:
+      "class C { a: number\n  constructor() { this.a = 1 } }\n" +
+      "const c = new C()\n" +
+      RTKEY +
+      "Object.defineProperty(c, k, { value: 5, enumerable: true, writable: true, configurable: true })\n" +
+      "const r = c as unknown as Record<string, unknown>\n" +
+      "console.log('READ ' + String(r['nope']))\n",
+  },
+  {
+    name: "a DECLARED member read through the box",
+    src:
+      "class C { a: number\n  constructor() { this.a = 1 } }\n" +
+      "const c = new C()\n" +
+      RTKEY +
+      "Object.defineProperty(c, k, { value: 5, enumerable: true, writable: true, configurable: true })\n" +
+      "const r = c as unknown as Record<string, unknown>\n" +
+      "console.log('READ ' + String(r['a']))\n",
+  },
+  {
+    name: "any read on an instance of a class NO define names",
+    src:
+      "class C { a: number\n  constructor() { this.a = 1 } }\n" +
+      "const c = new C()\n" +
+      "const r = c as unknown as Record<string, unknown>\n" +
+      RTKEY +
+      "console.log('READ ' + String(r[k]))\n",
+  },
 ];
 
 /** Programs that must refuse AT RUN TIME, loudly and catchably. Node
@@ -278,6 +350,7 @@ beforeAll(async () => {
   for (const backend of LANES) {
     for (const p of RUNS) BUILT.set(`R:${p.name}:${backend}`, await build(p.name, p.src, backend));
     for (const p of RUNTIME_REFUSALS) BUILT.set(`T:${p.name}:${backend}`, await build(p.name, p.src, backend));
+    for (const p of READ_REFUSALS) BUILT.set(`G:${p.name}:${backend}`, await build(p.name, p.src, backend));
     for (const p of COMPILE_REFUSALS) BUILT.set(`C:${p.name}:${backend}`, await build(p.name, p.src, backend));
     BUILT.set(`N:no-table:${backend}`, await build("no-table", NO_TABLE_SRC, backend));
     BUILT.set(`N:table:${backend}`, await build("has-table", TABLE_SRC, backend));
@@ -320,6 +393,30 @@ describe("a compiled class instance's run-time property table", () => {
       expect(r.stdout, `${p.name} (${backend}) must throw a catchable error naming the collision`).toContain(
         p.fragment,
       );
+    }
+  });
+
+  test.for(READ_REFUSALS.map((p) => [p.name, p] as const))("a boxed read stays the loud ladder: %s", ([, p]) => {
+    for (const backend of LANES) {
+      const b = BUILT.get(`G:${p.name}:${backend}`)!;
+      expect(
+        b.ok,
+        `${p.name} (${backend}) did not compile: ` +
+          b.diags.map((d) => `${d.code} ${d.message.slice(0, 160)}`).join(" | "),
+      ).toBe(true);
+      const r = run(b.binaryPath!);
+      // `READ` on stdout means the read ANSWERED. Node answers here and this
+      // representation must not: a table miss and a declared member are the
+      // same NULL out of scr_cls_props_get, and answering `undefined` for
+      // either makes `c.a` read `undefined` in silence.
+      expect(
+        r.stdout,
+        `${p.name} (${backend}) ANSWERED a boxed property read instead of refusing`,
+      ).not.toContain("READ");
+      expect(
+        r.status,
+        `${p.name} (${backend}) must exit non-zero on the uncaught refusal`,
+      ).not.toBe(0);
     }
   });
 

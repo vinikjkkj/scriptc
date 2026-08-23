@@ -8,9 +8,9 @@
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
 import { bytesAliasOnExtract } from "../../ir/nodes.js";
-import { armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
+import { CLASS_PROPS_FIELD, armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
-import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
+import { mangleClassStruct, mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane } from "../kindgate.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 
@@ -1451,10 +1451,48 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`    return NULL;`);
     d.push(`  }`);
     d.push(`  if (d->kind == SCR_DYN_OBJINST) {`);
-    d.push(`    /* A class instance's members are struct fields the box has`);
-    d.push(`     * no table for. Falling through to the undefined tail would`);
-    d.push(`     * be a SILENT wrong answer for a property Node reads fine,`);
-    d.push(`     * so the read is the loud ladder, named by class. */`);
+    d.push(`    /* A class instance's DECLARED members are struct fields the`);
+    d.push(`     * box has no table for. Falling through to the undefined tail`);
+    d.push(`     * would be a SILENT wrong answer for a property Node reads`);
+    d.push(`     * fine, so those stay the loud ladder, named by class.`);
+    d.push(`     *`);
+    d.push(`     * What the box CAN answer is the run-time-keyed properties`);
+    d.push(`     * Object.defineProperty put in the instance's %props table,`);
+    d.push(`     * and it must: that table is the receiver row of`);
+    d.push(`     * defineProperty, its keys are exactly the ones that name no`);
+    d.push(`     * declared member (cls.propsDefine refuses the collision), and`);
+    d.push(`     * every other surface over it — \`in\`, util.inspect's frame,`);
+    d.push(`     * the enumerable count — already reads it. [[Get]] was the one`);
+    d.push(`     * that did not, so scr_cls_props_get shipped end to end with no`);
+    d.push(`     * caller while \`c[k]\` refused a property the program had just`);
+    d.push(`     * defined on c. */`);
+    for (const [cname, meta] of E.classMeta) {
+      // STANDALONE classes only. A hierarchy class's instance carries the
+      // rc+vt prefix and its box's `cls` is the descriptor of the STATIC
+      // type it was boxed from, which need not be the class whose struct
+      // holds the field — so the cast below would be a read at the wrong
+      // offset. The frontend never writes a table for one either
+      // (lowerDefinePropClassTable declines when the closed member set does
+      // not exist, i.e. exactly when the class has subclasses), so this
+      // gate costs no reachable case today and refuses rather than guesses
+      // if that ever changes.
+      if (meta.hierarchy) continue;
+      if (!meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) continue;
+      if (!canBoxClassIntoDyn(cname)) continue;
+      const desc = E.dynClassDesc(cname);
+      const struct = mangleClassStruct(cname);
+      const fld = mangleField(CLASS_PROPS_FIELD);
+      d.push(`    { void *po = scr_dyn_objinst_ptr_of(d, &${desc}); /* ${cname}'s %props table */`);
+      d.push(`    if (po != NULL) {`);
+      d.push(`      ScrDyn *pv = scr_cls_props_get(((${struct} *)po)->${fld}, k);`);
+      // NULL means two different things — "no such key" and "the getter
+      // threw" — and only the pending exception tells them apart. Reading
+      // the miss as a throw would swallow a real one into the fence's
+      // message; reading the throw as a miss would REPLACE it with the
+      // fence, which is the louder-but-wrong answer.
+      d.push(`      if (pv != NULL || scr_exc_pending()) return pv;`);
+      d.push(`    } }`);
+    }
     d.push(`    scr_dyn_objinst_fence(d, "a property read");`);
     d.push(`    return NULL;`);
     d.push(`  }`);
