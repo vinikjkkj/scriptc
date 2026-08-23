@@ -314,6 +314,10 @@ export function traceAdapter(host: ShapeHost, t: IrType): string | null {
     case "response":
       host.declare(`declare void @scr_response_trace_v(ptr, ptr, ptr)`);
       return "@scr_response_trace_v";
+    // The C twin's row: the init's signal edge.
+    case "requestInit":
+      host.declare(`declare void @scr_fetch_init_trace_v(ptr, ptr, ptr)`);
+      return "@scr_fetch_init_trace_v";
     case "promise":
       // Promises are unconditionally cycle-capable (a rejection payload
       // is an arbitrary thrown value) — emit-shapes.ts's row.

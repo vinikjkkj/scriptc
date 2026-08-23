@@ -71,6 +71,7 @@ import {
   IrExpr,
   IrType,
   NULL_T,
+  REQUESTINIT_T,
   RESPONSE_T,
   SrcLoc,
   STRING,
@@ -101,9 +102,24 @@ const INIT_POINTED_HINTS: Record<string, string | undefined> = {
   cache: "there is no HTTP cache in this runtime, so every mode but the default would be a lie",
   credentials: "no cookie jar exists here, so 'include' could not include anything",
   keepalive: "there is no connection pool: every request dials its own socket",
+  // MEASURED against Node v25.9.0, not assumed: a plain object with a
+  // `dispatch` method really is honoured — `fetch(url, { dispatcher })`
+  // calls it with (opts, handler) and waits for the handler's callbacks.
+  // So there is nothing to drop quietly here; honouring it would mean
+  // driving undici's handler protocol from a compiled program.
+  //
+  // The hint used to send the reader to NODE_USE_ENV_PROXY. That is true
+  // of the ISLAND fetch (scr_fetch.c reads it, matching undici's
+  // EnvHttpProxyAgent) and FALSE of this one: scr_fetch_static.c dials
+  // the origin itself and has no proxy path at all — a fact this file's
+  // header already states one line further down about CONNECT. Pointing
+  // at an environment variable that changes nothing is worse than saying
+  // there is no proxy support, so it says that.
   dispatcher:
-    "undici's dispatcher is an engine object with no static representation — " +
-    "a proxy is configured through NODE_USE_ENV_PROXY instead",
+    "undici's dispatcher is an engine object driving a callback protocol " +
+    "(dispatch(opts, handler)), and Node really does call it — there is no static " +
+    "representation for one; this build's fetch dials the origin directly and has " +
+    "no proxy path, environment-configured or otherwise",
 };
 
 /** The URL argument. `string` passes through; a `URL` value serializes
@@ -260,6 +276,124 @@ function applyKey(
   }
 }
 
+/** The two arguments every fetch entry point takes ahead of the optional
+ * body and signal. Factored out because THREE spellings now build them —
+ * the call with a literal init, the call with no init, and the
+ * `RequestInit` VALUE constructor — and a fourth copy of the "GET" default
+ * or of the header-fold choice is exactly how two spellings of one request
+ * start diverging. */
+function initHead(init: Init, loc: SrcLoc): { method: IrExpr; headers: IrExpr } {
+  const method: IrExpr = init.method ?? { kind: "strLit", value: "GET", type: STRING, loc };
+  // The header list is built by the runtime in both arms so the names are
+  // folded in exactly one place: a literal's written names go through
+  // _normalize, a record VALUE through _from_dyn.
+  const headers: IrExpr =
+    init.headerPairs !== null
+      ? { kind: "libCall", fn: "fetch.headersNorm", args: [init.headerPairs], type: arrayOf(STRING), loc }
+      : init.headerDyn !== null
+        ? { kind: "libCall", fn: "fetch.headersFromDyn", args: [init.headerDyn], type: arrayOf(STRING), loc }
+        : { kind: "arrayLit", elems: [], type: arrayOf(STRING), loc };
+  return { method, headers };
+}
+
+/** An object literal in a `RequestInit` SLOT — `const init: RequestInit =
+ * { … }`, an argument at a `RequestInit` parameter, a field of that type.
+ * Null for every other literal, so lowerObjectLiteral keeps its record
+ * path.
+ *
+ * The value is the SAME walk the call-site literal takes (initLiteral), so
+ * `fetch(url, { … })` and `const i: RequestInit = { … }; fetch(url, i)`
+ * cannot describe two different requests — one walk, one set of key
+ * fences, one folded form. What is stored is that folded form, which is
+ * why no member of the result can be read back: see requestInitMemberFence.
+ *
+ * The contextual type may be `RequestInit | undefined` (an optional
+ * parameter's slot), which is the union the arm below accepts as well. */
+export function lowerRequestInitLiteral(
+  L: Lowerer,
+  expr: ts.ObjectLiteralExpression,
+  ctxType: ts.Type | undefined,
+): IrExpr | null {
+  if (L.dynamic || ctxType === undefined) return null;
+  const mapped = L.mapTypeOf(ctxType);
+  if (mapped === null) return null;
+  const isInit =
+    mapped.kind === "requestInit" ||
+    (mapped.kind === "union" &&
+      (L.unions.get(mapped.unionId)?.arms ?? []).some((a) => a.kind === "requestInit"));
+  if (!isInit) return null;
+  const loc = locOf(expr);
+  const init = initLiteral(L, expr, loc);
+  const { method, headers } = initHead(init, loc);
+  const hasBody = init.body !== null;
+  const hasSignal = init.signal !== null;
+  const fn = hasBody
+    ? hasSignal
+      ? "fetch.initNewBodySignal"
+      : "fetch.initNewBody"
+    : hasSignal
+      ? "fetch.initNewSignal"
+      : "fetch.initNew";
+  const args: IrExpr[] = [method, headers];
+  if (hasBody) args.push(init.body!, { kind: "boolLit", value: init.bodyText, type: BOOL, loc });
+  if (hasSignal) args.push(init.signal!);
+  return { kind: "libCall", fn, args, type: REQUESTINIT_T, loc };
+}
+
+/** Every member of a `RequestInit` value is a refusal, and this is the
+ * one place that says so.
+ *
+ * It is NOT an omission. What the value holds is the FOLDED request head —
+ * header names already lowercased and flattened into the wire list, a
+ * string body already utf8-encoded — so `init.headers` would answer a
+ * string array where the program wrote a record, and `init.body` a byte
+ * array where it wrote a string. A read that answers something other than
+ * what was written is the failure this whole slice is built to avoid, so
+ * the read refuses and names the member.
+ *
+ * A WRITE lands here too, and `dispatcher` is the one that matters:
+ * `(init as { dispatcher?: unknown }).dispatcher = d` is how a program
+ * configures an undici proxy, Node v25.9.0 really does call that object's
+ * `dispatch(opts, handler)` — measured, not assumed — and there is no
+ * static representation for an engine object implementing undici's handler
+ * protocol. Dropping the key would be a proxy silently ignored. */
+export function requestInitMemberFence(L: Lowerer, node: ts.Node, name: string): never {
+  const pointed = INIT_POINTED_HINTS[name];
+  L.noLowering(
+    `RequestInit.${name}`,
+    node,
+    pointed ??
+      "a RequestInit value carries the FOLDED request head (lowercased header pairs, an " +
+      "encoded body), not the members as they were written, so no member of one reads back; " +
+      "write the options at the fetch call site instead",
+  );
+}
+
+/** A WRITE to a member of a RequestInit value, THROUGH an assertion or
+ * not: `(init as { dispatcher?: unknown }).dispatcher = d`.
+ *
+ * The assertion is why this needs its own test. `typeOf` on the receiver
+ * answers the ASSERTED shape — an ordinary record — so nothing downstream
+ * can tell what is being written to, and the write falls all the way to
+ * "assignment to non-variables", a message that names neither the value
+ * nor the reason. Peeling the assertions is what lets the refusal say
+ * `RequestInit.dispatcher` and carry the pointed hint. Returns null when
+ * the receiver is not a RequestInit, so every other write keeps its own
+ * path. */
+export function requestInitWriteFence(
+  L: Lowerer,
+  target: ts.PropertyAccessExpression,
+): null {
+  let recv: ts.Expression = target.expression;
+  for (;;) {
+    if (ts.isParenthesizedExpression(recv)) { recv = recv.expression; continue; }
+    if (ts.isAsExpression(recv)) { recv = recv.expression; continue; }
+    break;
+  }
+  if (L.mapTypeOf(L.typeOf(recv))?.kind !== "requestInit") return null;
+  requestInitMemberFence(L, target, target.name.text);
+}
+
 /** USER-code `fetch(url)` / `fetch(url, init)` in a STATIC build.
  * Provenance, not the name: a user's own `fetch` never matches. Null for
  * anything that is not THE ambient fetch, so lowerCall keeps trying — and
@@ -281,22 +415,27 @@ export function lowerStaticFetchCall(L: Lowerer, call: ts.CallExpression): IrExp
     );
   }
   const url = urlArg(L, call.arguments[0]!, loc);
+  // `fetch(url, initValue)` — the init held as a VALUE rather than written
+  // at the call. One entry point, and it unpacks into the same transfer:
+  // the two spellings cannot describe different requests.
+  if (call.arguments.length === 2) {
+    const argT = L.mapTypeOf(L.typeOf(call.arguments[1]!));
+    if (argT !== null && argT.kind === "requestInit") {
+      return {
+        kind: "libCall",
+        fn: "fetch.goInit",
+        args: [url, L.lowerExpr(call.arguments[1]!)],
+        type: { kind: "promise", inner: RESPONSE_T },
+        loc,
+      };
+    }
+  }
   const init =
     call.arguments.length === 2
       ? initLiteral(L, call.arguments[1]!, loc)
       : { method: null, bodyText: false, headerPairs: null, headerDyn: null, body: null, signal: null };
 
-  const method: IrExpr = init.method ?? { kind: "strLit", value: "GET", type: STRING, loc };
-  // The header list is built by the runtime in both arms so the names are
-  // folded in exactly one place: a literal's written names go through
-  // _normalize, a record VALUE through _from_dyn.
-  const headers: IrExpr =
-    init.headerPairs !== null
-      ? { kind: "libCall", fn: "fetch.headersNorm", args: [init.headerPairs], type: arrayOf(STRING), loc }
-      : init.headerDyn !== null
-        ? { kind: "libCall", fn: "fetch.headersFromDyn", args: [init.headerDyn], type: arrayOf(STRING), loc }
-        : { kind: "arrayLit", elems: [], type: arrayOf(STRING), loc };
-
+  const { method, headers } = initHead(init, loc);
   // Four entry points rather than sentinel arguments, the abort.abort /
   // abort.abortReason precedent: an omitted body is not an empty one (a
   // POST with `content-length: 0` is a different request from a GET), and
@@ -320,6 +459,7 @@ export function lowerStaticFetchCall(L: Lowerer, call: ts.CallExpression): IrExp
  * receiver, so the property chain keeps trying. */
 export function lowerFetchProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
   const kind = L.mapTypeOf(L.typeOf(expr.expression))?.kind;
+  if (kind === "requestInit") requestInitMemberFence(L, expr, expr.name.text);
   if (kind !== "response" && kind !== "headers") return null;
   if (!L.isStdlibMember(expr)) return null;
   const name = expr.name.text;

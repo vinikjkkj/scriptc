@@ -1,6 +1,6 @@
 import * as ts from "./ts7/adapter.js";
 import type { IrBuiltinRendering, IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
-import { ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
+import { ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile } from "./program.js";
 import { accessorSlotProp, armDiscrimLits, armLitsConflict, builtinRenderingKey, internalFieldNamesOf, mergeArmLitSets, wsGlobalPlan } from "../ir/nodes.js";
@@ -840,6 +840,10 @@ function formatIrTypeInner(t: IrType, shapes: ShapeRegistry, unions: UnionRegist
       return "Response";
     case "headers":
       return "Headers";
+    case "requestInit":
+      return "RequestInit";
+    case "request":
+      return "Request";
     case "promise":
       return `Promise<${formatIrType(t.inner, shapes, unions, seen)}>`;
     case "generator":
@@ -2667,6 +2671,36 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     )
   ) {
     return psym.name === "Response" ? RESPONSE_T : HEADERS_T;
+  }
+  // RequestInit and Request leave the island group last, and together,
+  // because separating them puts a refusal back where the other one was.
+  //
+  // `RequestInit` has a VALUE surface (an object literal in a RequestInit
+  // slot builds an ScrFetchInit through the same key walk the call site
+  // takes, and fetch(url, init) unpacks it), with NO member reads: what
+  // the value holds is the folded request head, so a read would answer
+  // something other than what the program wrote — lower-fetch.ts's
+  // requestInitMemberFence says it at each site.
+  //
+  // `Request` is a TYPE with no values at all — the AbortSignal
+  // precedent, one step further. It is an arm of the ambient fetch
+  // signature's input union and nothing else, and mapping it is precisely
+  // what makes an options record carrying `typeof fetch` compile.
+  // Constructing one is still a refusal, so nothing can build or observe
+  // a Request from here.
+  //
+  // Under --dynamic nothing moves: the island owns both surfaces and
+  // RequestInit keeps its jsval row below.
+  if (
+    !ctx.dynamic &&
+    (psym?.name === "RequestInit" || psym?.name === "Request") &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+        ctx.isStdlibFile(d.getSourceFile()),
+    )
+  ) {
+    return psym.name === "RequestInit" ? REQUESTINIT_T : REQUEST_T;
   }
   if (
     psym &&

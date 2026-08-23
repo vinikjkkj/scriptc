@@ -98,30 +98,67 @@ function libCall(fn: IrLibFn, args: readonly IrExpr[], type: IrType, loc: SrcLoc
 
 const FETCH_VALUE_RET: IrType = { kind: "promise", inner: RESPONSE_T };
 
+/** An entry whose signature is the CHECKER'S OWN mapping of the name
+ * rather than a shape written here.
+ *
+ * `fetch` is the only one, and it needs to be: its parameter types are
+ * UNIONS the ambient signature spells (`string | Request | URL` and
+ * `RequestInit | undefined`), and a union's IR identity is its interned
+ * id, which is per program. A fixed shape here could never equal the
+ * mapping, so the gate would reject the entry in every program — which is
+ * exactly what it did while `RequestInit` had no type at all.
+ *
+ * The resolver is a GATE in its own right, not a rubber stamp: it accepts
+ * only the arm sets `fetch.goValue` dispatches on, so a lib whose `fetch`
+ * is declared differently keeps its SC2020 instead of reaching a runtime
+ * entry point that would read a tag that is not there. */
+type BuiltinFnValueResolver = (L: Lowerer, mapped: IrType) => BuiltinFnValue | null;
+
+/** The arm kinds of a union IR type, or null when it is not a union. */
+function armKinds(L: Lowerer, t: IrType): Set<string> | null {
+  if (t.kind !== "union") return null;
+  const def = L.unions.get(t.unionId);
+  if (def === undefined) return null;
+  return new Set(def.arms.map((a) => a.kind));
+}
+
+const BUILTIN_FN_VALUE_RESOLVERS: Readonly<Record<string, BuiltinFnValueResolver | undefined>> = {
+  fetch: (L, mapped) => {
+    if (mapped.kind !== "func" || mapped.params.length !== 2) return null;
+    if (mapped.ret.kind !== "promise" || mapped.ret.inner.kind !== "response") return null;
+    const input = mapped.params[0]!;
+    const init = mapped.params[1]!;
+    // The INPUT union must be exactly what the runtime entry knows how to
+    // unpack: a string arm it can use as the URL, optionally a URL arm it
+    // serializes through url.href, optionally the uninhabitable Request
+    // arm. Any other arm would reach the entry's throw.
+    const inArms = armKinds(L, input);
+    if (inArms === null || !inArms.has("string")) return null;
+    for (const k of inArms) if (k !== "string" && k !== "url" && k !== "request") return null;
+    // The INIT union is `RequestInit | undefined` and nothing else: an
+    // absent init is not an empty one, and the entry tells them apart by
+    // tag.
+    const initArms = armKinds(L, init);
+    if (initArms === null || initArms.size !== 2) return null;
+    if (!initArms.has("requestInit") || !initArms.has("undefinedT")) return null;
+    return {
+      params: [["input", input], ["init", init]],
+      ret: mapped.ret,
+      body: (a, loc) => libCall("fetch.goValue", [a[0]!, a[1]!], mapped.ret, loc),
+      staticOnly: true,
+    };
+  },
+};
+
 /** The global builtins with a value form, each mapping to the SAME lib
  * entry its direct call lowers to (lower-calls.ts) -- so a program cannot
  * observe a difference between `parseInt(s, 10)` and `const f = parseInt;
  * f(s, 10)` beyond the arity rule stated in this file's header. */
 const BUILTIN_FN_VALUES: Readonly<Record<string, BuiltinFnValue | undefined>> = {
-  // fetch(url): the no-init form. `fetch.go` is the same entry point
-  // lowerStaticFetchCall reaches for a call with no init literal, with
-  // the same "GET" and the same empty header list.
-  fetch: {
-    params: [["input", STRING]],
-    ret: FETCH_VALUE_RET,
-    body: (a, loc) =>
-      libCall(
-        "fetch.go",
-        [
-          a[0]!,
-          { kind: "strLit", value: "GET", type: STRING, loc },
-          { kind: "arrayLit", elems: [], type: arrayOf(STRING), loc },
-        ],
-        FETCH_VALUE_RET,
-        loc,
-      ),
-    staticOnly: true,
-  },
+  // `fetch` has NO fixed row: its signature is the checker's own mapping
+  // of the ambient global, resolved per program by
+  // BUILTIN_FN_VALUE_RESOLVERS above. The FETCH_VALUE_RET constant stays
+  // as the shape that resolver requires.
   // parseInt's radix is EXPLICIT in the value form -- see the header's
   // arity note. Its direct call completes an omitted radix to 0.
   parseInt: {
@@ -171,9 +208,20 @@ const BUILTIN_FN_VALUES: Readonly<Record<string, BuiltinFnValue | undefined>> = 
 
 /** Does `name` have a value form in this build? */
 export function hasBuiltinFnValue(L: Lowerer, name: string): boolean {
+  if (BUILTIN_FN_VALUE_RESOLVERS[name] !== undefined) return !L.dynamic;
   const entry = BUILTIN_FN_VALUES[name];
   if (entry === undefined) return false;
   return !(entry.staticOnly === true && L.dynamic);
+}
+
+/** The entry for `name` at THIS identifier's mapped type: the fixed table
+ * row, or the resolver's row for the one name whose signature is the
+ * checker's. Null when the name has no value form here, or when the
+ * resolver refused the shape. */
+function entryFor(L: Lowerer, name: string, mapped: IrType | null): BuiltinFnValue | null {
+  const resolver = BUILTIN_FN_VALUE_RESOLVERS[name];
+  if (resolver !== undefined) return mapped === null ? null : resolver(L, mapped);
+  return BUILTIN_FN_VALUES[name] ?? null;
 }
 
 /** THE GATE, and the reason this file cannot produce a silently wrong
@@ -203,8 +251,9 @@ export function hasBuiltinFnValue(L: Lowerer, name: string): boolean {
  * builtinFnValueDeclType below is the only thing that can put it in a
  * slot. */
 function gatedValueType(L: Lowerer, expr: ts.Identifier): IrType | null {
-  const entry = BUILTIN_FN_VALUES[expr.text];
-  if (entry === undefined || !hasBuiltinFnValue(L, expr.text)) return null;
+  if (!hasBuiltinFnValue(L, expr.text)) return null;
+  const entry = entryFor(L, expr.text, L.mapTypeOf(L.typeOf(expr)));
+  if (entry === null) return null;
   // Provenance, and STRICTER than isStdlibSymbol — which answers `.some`
   // over the declaration list and is therefore true for a MERGED symbol.
   // The globals in this table are `declare function`s, so a user's own
@@ -234,19 +283,17 @@ function gatedValueType(L: Lowerer, expr: ts.Identifier): IrType | null {
  * one of these globals, and for one that is but does not pass the gate
  * above, so the caller keeps its own fence. */
 export function builtinFnValueOf(L: Lowerer, expr: ts.Identifier, loc: SrcLoc): IrExpr | null {
-  if (gatedValueType(L, expr) === null) return null;
-  return builtinFnValueClosure(L, expr.text, loc);
+  const want = gatedValueType(L, expr);
+  if (want === null) return null;
+  return builtinFnValueClosure(L, expr.text, want, loc);
 }
 
 /** The mint, split out so the declaration-type arm and the expression arm
  * cannot disagree about the shape. Memoized per program by name. */
-export function builtinFnValueClosure(L: Lowerer, name: string, loc: SrcLoc): IrExpr {
-  const entry = BUILTIN_FN_VALUES[name]!;
+export function builtinFnValueClosure(L: Lowerer, name: string, want: IrType, loc: SrcLoc): IrExpr {
+  const entry = entryFor(L, name, want)!;
   const fnName = `%builtin.${name}.value`;
-  const fnT = funcOf(
-    entry.params.map(([, t]) => t),
-    entry.ret,
-  );
+  const fnT = want;
   if (!L.liftedFns.some((f) => f.name === fnName)) {
     const args: IrExpr[] = entry.params.map(([pname, type], i) => ({
       kind: "varRef",
@@ -309,7 +356,12 @@ export function builtinFnValueDeclType(L: Lowerer, decl: ts.VariableDeclaration)
   if (want === null) return null;
   // The mapped case needs nothing from this arm — the ordinary rule
   // already puts the identical type in the slot (the gate proved they are
-  // identical). `fetch` is the case that does.
+  // identical). `fetch` USED to be the one case that reached here, because
+  // its `init` parameter had no type; now that RequestInit and Request map,
+  // every entry in the table is mapped and this arm answers null for all of
+  // them. It is kept rather than deleted: it is the only thing that would
+  // put a table entry with no checker-side mapping into a slot, and the
+  // day another one is added it is what the value form will need.
   if (L.mapTypeOf(L.typeOf(inner)) !== null) return null;
   return want;
 }

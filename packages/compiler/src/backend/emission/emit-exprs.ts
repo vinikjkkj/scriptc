@@ -3669,6 +3669,40 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_fetch_start(${arg(0)}, ${arg(1)}, ${arg(2)}, NULL, false, ${arg(3)})`);
           case "fetch.goBodySignal":
             return finish(`scr_fetch_start(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)})`);
+          // The RequestInit VALUE, with the same four-way presence split
+          // as the call entry points above and for the same reason.
+          case "fetch.initNew":
+            return finish(`scr_fetch_init_new(${arg(0)}, ${arg(1)}, NULL, false, NULL)`);
+          case "fetch.initNewBody":
+            return finish(`scr_fetch_init_new(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, NULL)`);
+          case "fetch.initNewSignal":
+            return finish(`scr_fetch_init_new(${arg(0)}, ${arg(1)}, NULL, false, ${arg(2)})`);
+          case "fetch.initNewBodySignal":
+            return finish(`scr_fetch_init_new(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)})`);
+          case "fetch.goInit":
+            return finish(`scr_fetch_start_init(${arg(0)}, ${arg(1)})`);
+          case "fetch.goValue": {
+            // The value form's two arguments are the ambient signature's
+            // unions; the arm tags are read off the union DEFINITION here
+            // (headers.get's rule) rather than assumed, so a program whose
+            // union interned in another order still dispatches right.
+            const tagOf = (t: IrType, kind: string): number => {
+              if (t.kind !== "union") return -1;
+              const def = E.unionsById.get(t.unionId);
+              return def ? def.arms.findIndex((a) => a.kind === kind) : -1;
+            };
+            const inT = e.args[0]!.type;
+            const initT = e.args[1]!.type;
+            const strTag = inT.kind === "string" ? -2 : tagOf(inT, "string");
+            const urlTag = inT.kind === "url" ? -2 : tagOf(inT, "url");
+            const initTag = initT.kind === "requestInit" ? -2 : tagOf(initT, "requestInit");
+            if (strTag === -2 || urlTag === -2 || initTag === -2) {
+              throw new Error("emitter bug: fetch.goValue argument is not a union");
+            }
+            return finish(
+              `scr_fetch_start_value(${arg(0)}, ${strTag}, ${urlTag}, ${arg(1)}, ${initTag})`,
+            );
+          }
           case "fetch.headersNorm":
             return finish(`scr_fetch_headers_normalize(${arg(0)})`);
           case "fetch.headersFromDyn":
