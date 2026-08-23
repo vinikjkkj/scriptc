@@ -9393,6 +9393,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/6100-require-as-a-value.cjs": {
+   "order": [
+    "<repo>/tests/corpus/6100-require-as-a-value.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/700-classes-basic.ts": {
    "order": [
     "<repo>/tests/corpus/700-classes-basic.ts"
