@@ -33,7 +33,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { DYN, funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID } from "../../ir/nodes.js";
+import { DYN, funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID } from "../../ir/nodes.js";
 import { readKindgateDials } from "../kindgate.js";
 import {
   mangleAsyncSpawn,
@@ -1324,6 +1324,10 @@ export class CEmitter {
       ...(moduleUsesFetchStatic(this.mod) && moduleUsesAbortSignal(this.mod)
         ? [`  scr_fetch_abort_install();`]
         : []),
+      // The static fetch's DISPATCHER seam, the same way: installed only
+      // when a program writes a dispatcher onto a RequestInit, which is
+      // exactly when cc.ts links scr_fetch_dispatch.c.
+      ...(moduleUsesFetchDispatch(this.mod) ? [`  scr_fetch_dispatch_install();`] : []),
       // Dgram/dns-surface programs fill the loop's dgram hooks the same
       // way — scr_dgram.c links only when this line is emitted.
       ...(moduleUsesDgram(this.mod) ? [`  scr_dgram_install();`] : []),

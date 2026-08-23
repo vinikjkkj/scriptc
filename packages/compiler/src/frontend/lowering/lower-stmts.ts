@@ -6329,8 +6329,13 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
           // below: that path would take `(init as { dispatcher?: unknown
           // }).dispatcher = d` for a checked-dynamic store, and a
           // RequestInit is not a dyn tree — the write has to name what it
-          // is refusing and why (lower-fetch.ts).
-          requestInitWriteFence(L, expr.left);
+          // is refusing and why (lower-fetch.ts). `dispatcher` is the one
+          // member that is honoured rather than refused, so this answers a
+          // STATEMENT now instead of only throwing.
+          {
+            const st = requestInitWriteFence(L, expr, expr.left);
+            if (st !== null) return st;
+          }
           {
             // `re.lastIndex = 0` — the reset idiom, and the ONE value this
             // regex model can honour. Claimed here, with the fence beside

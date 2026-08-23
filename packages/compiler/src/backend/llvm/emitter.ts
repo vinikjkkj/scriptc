@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals } from "../emission/emit-stmts.js";
 import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
@@ -1637,6 +1637,8 @@ class LlEmitter {
     // cannot produce them.
     const usesFetchAbort = moduleUsesFetchStatic(this.mod) && moduleUsesAbortSignal(this.mod);
     if (usesFetchAbort) this.declare(`declare void @scr_fetch_abort_install()`);
+    const usesFetchDispatch = moduleUsesFetchDispatch(this.mod);
+    if (usesFetchDispatch) this.declare(`declare void @scr_fetch_dispatch_install()`);
     if (usesNet) {
       this.declare(`declare void @scr_net_install()`);
       this.declare(`declare void @scr_net_dyn_install()`);
@@ -2032,6 +2034,8 @@ class LlEmitter {
       ...(usesStream ? [`  call void @scr_stream_install()`] : []),
       // The C twin's row: the static fetch's abort seam.
       ...(usesFetchAbort ? [`  call void @scr_fetch_abort_install()`] : []),
+      // The C twin's row: the static fetch's DISPATCHER seam.
+      ...(usesFetchDispatch ? [`  call void @scr_fetch_dispatch_install()`] : []),
       ...(usesHttp2 ? [`  call void @scr_http2_dyn_install()`] : []),
       ...(usesDgram ? [`  call void @scr_dgram_install()`] : []),
       ...(embedsZlib ? [`  call void @scr_zlib_island_install()`] : []),
@@ -12394,6 +12398,30 @@ class LlEmitter {
       B.line(
         `${out} = call ptr @scr_fetch_init_new(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ` +
           `${body}, ${bodyText}, ${signal})`,
+      );
+      return this.own({ name: out, type: e.type });
+    }
+    // `init.dispatcher = d`. Arg 1 is the program's own `dispatch`
+    // closure (a recordGet the lowering built) and args 2/3 are the C
+    // signature it is CALLED through, proved by dispatcherCallPlan. They
+    // are read off the numLit nodes rather than emitted as doubles: the
+    // runtime takes i32, and a float in an int slot is a conversion
+    // nobody wrote.
+    if (e.fn === "fetch.initDispatch") {
+      const kindOf = (i: number): number => {
+        const a = e.args[i]!;
+        if (a.kind !== "numLit") {
+          throw new Error("llvm emitter bug: fetch.initDispatch kind is not a literal");
+        }
+        return a.value | 0;
+      };
+      const ck = kindOf(2);
+      const rk = kindOf(3);
+      const args = e.args.slice(0, 2).map((a) => this.emitExpr(a));
+      this.declare(`declare ptr @scr_fetch_init_with_dispatch(ptr, ptr, i32, i32)`);
+      const out = B.tmp();
+      B.line(
+        `${out} = call ptr @scr_fetch_init_with_dispatch(ptr ${args[0]!.name}, ptr ${args[1]!.name}, i32 ${ck}, i32 ${rk})`,
       );
       return this.own({ name: out, type: e.type });
     }
