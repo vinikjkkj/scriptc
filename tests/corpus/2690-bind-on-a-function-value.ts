@@ -1,19 +1,25 @@
 // `f.bind(thisArg)` on a function VALUE, which a lock wrapper writes when it
 // re-exposes a store's method.
 //
-// In TYPESCRIPT it is ERASURE, and here the reason holds: `this` in a plain
-// TypeScript function does not compile at all (noImplicitThis is tsc's error
-// and SC1080 is the lowerer's), so no TypeScript function value can observe a
-// bound receiver and `f` really is `f.bind(x)`. The receiver is the answer;
-// the argument still evaluates for its effects (the last case pins that).
+// THE RECEIVER IS STILL DROPPED IN TYPESCRIPT, AND THE VALUE IS STILL A NEW
+// FUNCTION OBJECT. The two halves are separate and this file used to run them
+// together. `this` in a plain TypeScript function does not compile at all
+// (noImplicitThis is tsc's error and SC1080 is the lowerer's), so no
+// TypeScript function value can observe a bound receiver and dropping it is
+// sound -- that half is unchanged, and the argument still evaluates for its
+// effects (the last case pins that). But `bind` does not only re-route a
+// receiver, it CONSTRUCTS, and the erasure that dropped the receiver dropped
+// the ALLOCATION with it: `plain.bind(null) === plain` printed `true` where
+// every engine prints `false`. 6030 is where that identity now lives; here
+// the wrapper is simply what these three programs compile through.
 //
-// JAVASCRIPT is the opposite and 2767 is where it lives: a plain JS function's
-// `this` IS a runtime read, so the same erasure was a silent wrong answer
-// there and the bind now builds a real bound function.
+// JAVASCRIPT differs only in the receiver, and 2767 is where it lives: a plain
+// JS function's `this` IS a runtime read, so the JS arm opens a `this` window
+// around the wrapped call where the TypeScript arm opens none.
 //
-// Extra arguments are partial application, which in TypeScript keeps the
-// fence -- not exercised here, since a corpus case only holds programs that
-// compile.
+// Extra arguments are partial application, and they now compile on both arms
+// over the same wrapper (`two.bind(null, 1)` in 6030); in TypeScript they used
+// to keep the fence.
 type Store = { readonly ttl: () => number; readonly name: string };
 const impl: Store = { ttl: () => 42, name: "s" };
 
