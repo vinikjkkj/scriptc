@@ -9224,6 +9224,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/6000-ws-init-bag-ignores-agent.ts": {
+   "order": [
+    "<repo>/tests/corpus/6000-ws-init-bag-ignores-agent.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/6001-ws-init-bag-dispatcher-absence.ts": {
+   "order": [
+    "<repo>/tests/corpus/6001-ws-init-bag-dispatcher-absence.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/6002-ws-init-bag-unknown-members-lower.ts": {
+   "order": [
+    "<repo>/tests/corpus/6002-ws-init-bag-unknown-members-lower.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/601-closures-loops.ts": {
    "order": [
     "<repo>/tests/corpus/601-closures-loops.ts"

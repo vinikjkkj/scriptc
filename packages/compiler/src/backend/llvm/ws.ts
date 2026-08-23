@@ -561,8 +561,17 @@ function initBagArm(
     const v = slot(r.name);
     const cond = B.tmp();
     if (r.kind === "dyn") {
-      host.declare(`declare zeroext i1 @scr_dyn_truthy(ptr)`);
-      B.line(`${cond} = call zeroext i1 @scr_dyn_truthy(ptr ${v})`);
+      // PRESENT is "not `undefined`", not "truthy" -- the C twin's test,
+      // and for the reason spelled there: the oracle throws on a `null`,
+      // `0`, `false`, `''` or `NaN` dispatcher rather than dialling
+      // direct, so a truthiness test silently connected on all five. The
+      // dyn kind is an i32 at offset 8, enum member 6 (scr_runtime.h's
+      // ScrDynKind) -- the same read llvm/walkers.ts does.
+      const kp = B.tmp();
+      const kd = B.tmp();
+      B.line(`${kp} = getelementptr inbounds i8, ptr ${v}, i64 8 ; ->kind`);
+      B.line(`${kd} = load i32, ptr ${kp}`);
+      B.line(`${cond} = icmp ne i32 ${kd}, 6 ; != SCR_DYN_UNDEF`);
     } else {
       B.line(`${cond} = icmp ne i32 ${unionTag(v)}, ${r.absentTag!}`);
     }

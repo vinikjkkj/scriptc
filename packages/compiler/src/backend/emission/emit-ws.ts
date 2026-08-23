@@ -434,24 +434,34 @@ const FENCE_MSG =
   "the 'ws' package's option-bag second argument to a WebSocket constructor has no " +
   "scriptc lowering yet -- globalThis.WebSocket takes (url, protocols)";
 
-/** The same refusal, narrowed to the one field that earned it: a bag whose
- * `dispatcher`/`agent` is undefined lowers, and only a live one refuses.
+/** The same refusal, narrowed to the ONE field that earned it: `dispatcher`.
+ * A bag whose `dispatcher` is undefined lowers; any other value refuses.
  *
- * REACH (block/all24, read off zapo's own control flow at
- * src/transport/WaWebSocket.ts:525-575, not inferred from a run): the two
- * fields are NOT symmetric, and only one of them is reachable HERE.
- * Arriving at the init-bag construct requires `socketRuntime === 'node'`
- * (the first conjunct of the `:554` guard).  But `:546` is
- * `if (socketRuntime === 'node' && agent) { … return new nodeWsCtor(url,
- * protocols, { headers, agent }) }` — the real `ws` package's THREE-argument
- * form, which has already returned.  So there is no execution of that
- * program in which `agent` is truthy and the `agent` test below runs:
- * `agent` is dead at this site, `dispatcher` is live (an undici dispatcher
- * with no agent passes :546, satisfies :554, reaches :565).  Both measured
- * x0 across three paired runs because none configured a proxy.
- * estado-todas24.md §3.10 and §4.
+ * THERE USED TO BE TWO.  `agent` was fenced here as well, and that fence
+ * was wrong — not too weak, WRONG.  Node's global WebSocket reads exactly
+ * three members out of the init bag, `protocols`, `headers` and
+ * `dispatcher`, and reads NOTHING else: a bag assembled from getters
+ * records those three and no fourth, an `agent`'s `addRequest` is never
+ * called, and the upgrade request a bag carrying a live `agent` puts on
+ * the wire is BYTE-EQUAL to the one the same bag without it puts on the
+ * wire.  All of it measured against v25.9.0 and re-measured on every gate
+ * by tests/harness/ws-init-bag.test.ts.  So scriptc was refusing a program
+ * the oracle runs — and runs by connecting direct.  `agent` and the rest
+ * of the `ws` PACKAGE's option names are now ignored here exactly as the
+ * oracle ignores them (wsInitBagPlan, ir/nodes.ts).
  *
- * REACH, the other half, MEASURED (block/blindspots): the init-bag ARM
+ * That also settles a piece of reach analysis two earlier blocks left
+ * here, which was CORRECT and IRRELEVANT.  Re-read at
+ * src/transport/WaWebSocket.ts:525-575: reaching the init-bag construct at
+ * :565 needs `socketRuntime === 'node'` (:554's first conjunct), and :546
+ * is `if (socketRuntime === 'node' && agent) { … return new nodeWsCtor(
+ * url, protocols, { headers, agent }) }`, so `agent` is provably falsy by
+ * the time :559 builds the bag.  True — but it made the `agent` fence look
+ * merely DEAD, which is why it survived so long.  It was not dead code, it
+ * was a live divergence waiting for any other program to construct the
+ * same shape.
+ *
+ * REACH of what remains, MEASURED (block/blindspots): the init-bag ARM
  * itself is cold on a fresh zapo dial.  :554 needs `hasHeaders`, and
  * WaComms.applyRoutingInfoToSocketConfig returns the config UNTOUCHED when
  * there is no routing token, so withStickyRoutingCookie never runs and
@@ -469,7 +479,8 @@ function initFieldMsg(field: string): string {
 
 /* CENSUS: this refusal is emitted in the BACKEND, so it has no diagnostic
  * and no source location OF ITS OWN, and for a long time that meant no
- * `[SCxxxx at file:line]` — which made these two the only rows in zapo's
+ * `[SCxxxx at file:line]` — which made it (and the `agent` row that has
+ * since been withdrawn) the only rows in zapo's
  * whole translation unit that no bracket-keyed instrument could see (a
  * grep, census.mjs, a reader; SCRIPTC_TRAP_TRACE always could, since it
  * filters on SC-numericness and these are coded).  Only
@@ -483,9 +494,10 @@ function initFieldMsg(field: string): string {
  * serves every construct through the same closure value, so there is no
  * per-construct code to anchor to — but it is the one real source
  * location on the path.  wsRefusalText (ir/nodes.ts) is shared with the
- * LLVM lane so the two cannot drift.  Both still fire on a VALUE rather
- * than on a construct, so they stay dark until a program configures a
- * proxy.
+ * LLVM lane so the two cannot drift.  It still fires on a VALUE rather
+ * than on a construct, so it stays dark until a program configures a
+ * proxy DISPATCHER — which the oracle really does honour, handing the
+ * whole upgrade to `dispatcher.dispatch(opts, handler)`.
  */
 function refuseC(msg: string, site: string | undefined): string {
   const text = wsRefusalText(msg, site);
@@ -502,7 +514,14 @@ function initBagBody(plan: WsGlobalPlan, expr: string, ind: string, site: string
   const b = `${ind}  `;
   for (const r of ib.refuseIfPresent) {
     const slot = `sc_ib->${mangleField(r.name)}`;
-    const present = r.kind === "dyn" ? `scr_dyn_truthy(${slot})` : `${slot}->tag != ${r.absentTag!}`;
+    // PRESENT means "not `undefined`", never "truthy". The oracle reaches a
+    // direct dial only when the member is absent or `undefined`; every other
+    // value -- `null`, `0`, `false`, `''`, `NaN` included -- throws there
+    // (measured, v25.9.0). A truthiness test connected direct on all five.
+    const present =
+      r.kind === "dyn"
+        ? `${slot}->kind != SCR_DYN_UNDEF`
+        : `${slot}->tag != ${r.absentTag!}`;
     out.push(`${b}if (${present}) { ${refuseC(initFieldMsg(r.name), site)} }`);
   }
   if (ib.refuseIfPresent.length > 0) out.push(`${b}if (!scr_exc_pending()) {`);
