@@ -7364,23 +7364,23 @@ export class Lowerer {
    * Declines (and the caller keeps its fence) on a rest signature, on more
    * bound arguments than the target declares, and on a target or bound
    * argument whose type cannot ride a capture box. */
-  bindThisClosure(fn: IrExpr, thisArg: IrExpr, boundArgs: IrExpr[], loc: SrcLoc): IrExpr | null {
+  bindThisClosure(fn: IrExpr, thisArg: IrExpr, boundArgs: IrExpr[], loc: SrcLoc, pushThis = true): IrExpr | null {
     const ft = fn.type;
     if (ft.kind !== "func" || ft.rest === true) return null;
-    if (thisArg.type.kind !== "dyn" && !this.dynConvertible(thisArg.type)) return null;
+    if (pushThis && thisArg.type.kind !== "dyn" && !this.dynConvertible(thisArg.type)) return null;
     if (boundArgs.length > ft.params.length) return null;
     for (let i = 0; i < boundArgs.length; i++) {
       if (!typeEquals(boundArgs[i]!.type, ft.params[i]!)) return null;
     }
     const rest = ft.params.slice(boundArgs.length);
     const outT = funcOf(rest, ft.ret);
-    const key = `bindthis:${typeKey(ft)}:${boundArgs.length}`;
+    const key = `bindthis:${typeKey(ft)}:${boundArgs.length}:${pushThis ? "this" : "nothis"}`;
     const existing = this.widthHelpers.get(key);
     const name = existing ?? `%bindthis.${this.widthHelpers.size}`;
     if (!existing) {
       this.widthHelpers.set(key, name);
       const capParams: IrParam[] = [
-        { localId: "bt.0", name: "bt", type: DYN },
+        ...(pushThis ? [{ localId: "bt.0", name: "bt", type: DYN }] : []),
         { localId: "tf.0", name: "tf", type: ft },
         ...boundArgs.map((_, i) => ({ localId: `b.${i}`, name: `b${i}`, type: ft.params[i]! })),
       ];
@@ -7396,32 +7396,40 @@ export class Lowerer {
         type: ft.ret,
         loc,
       };
-      const body: IrStmt[] = [
-        {
-          kind: "exprStmt",
-          expr: {
-            kind: "libCall",
-            fn: "dyn.thisPush",
-            args: [{ kind: "varRef", localId: "bt.0", type: DYN, loc }],
-            type: VOID,
-            loc,
-          },
-          loc,
-        },
-        {
-          kind: "tryCatch",
-          tryBody:
-            ft.ret.kind === "void"
-              ? [{ kind: "exprStmt", expr: call, loc }]
-              : [{ kind: "return", value: call, loc }],
-          catchBody: null,
-          catchLocalId: null,
-          finallyBody: [
-            { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.thisPop", args: [], type: VOID, loc }, loc },
-          ],
-          loc,
-        },
-      ];
+      // The TypeScript arm carries NO receiver (see the header): its body
+      // is the forwarding call and nothing else, so the wrapper costs one
+      // allocation and one indirect call and opens no `this` window a
+      // nested JS callee could read out of.
+      const body: IrStmt[] = pushThis
+        ? [
+            {
+              kind: "exprStmt",
+              expr: {
+                kind: "libCall",
+                fn: "dyn.thisPush",
+                args: [{ kind: "varRef", localId: "bt.0", type: DYN, loc }],
+                type: VOID,
+                loc,
+              },
+              loc,
+            },
+            {
+              kind: "tryCatch",
+              tryBody:
+                ft.ret.kind === "void"
+                  ? [{ kind: "exprStmt", expr: call, loc }]
+                  : [{ kind: "return", value: call, loc }],
+              catchBody: null,
+              catchLocalId: null,
+              finallyBody: [
+                { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.thisPop", args: [], type: VOID, loc }, loc },
+              ],
+              loc,
+            },
+          ]
+        : ft.ret.kind === "void"
+          ? [{ kind: "exprStmt", expr: call, loc }]
+          : [{ kind: "return", value: call, loc }];
       this.liftedFns.push({
         name,
         params,
@@ -7448,7 +7456,9 @@ export class Lowerer {
       inits.push({ kind: "varDecl", localId: id, init, loc });
       capIds.push(id);
     };
-    hold(thisArg.type.kind === "dyn" ? thisArg : { kind: "dynFrom", value: thisArg, type: DYN, loc });
+    if (pushThis) {
+      hold(thisArg.type.kind === "dyn" ? thisArg : { kind: "dynFrom", value: thisArg, type: DYN, loc });
+    }
     hold(fn);
     for (const a of boundArgs) hold(a);
     return {
@@ -7459,7 +7469,6 @@ export class Lowerer {
       loc,
     };
   }
-
   /** A class METHOD taken as a BOUND VALUE — `obj.m` / `obj.m.bind(obj)`,
    * the coordinator `.bind(this)` idiom — becomes a closure that captures
    * the receiver and calls the method. The receiver is bound into a fresh

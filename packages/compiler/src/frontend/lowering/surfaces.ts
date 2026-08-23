@@ -1687,13 +1687,69 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     return L.mapTypeOf(L.checker.getTypeAtLocation(iface.name))?.kind === "child";
   }
 
-/** True iff some declaration of the symbol lives in the standard library
+/** A declaration that DEFINES A VALUE the program itself writes: a
+   * function body, a class, a non-`declare` variable. What it is not: an
+   * `interface`, a `type`, a `declare module` augmentation — the
+   * TYPE-space merges that are the whole reason isStdlibSymbol answers
+   * `some` rather than `[0]`.
+   *
+   * The distinction is the one that keeps a user's own `function
+   * encodeURI(s) { ... }` from being read as the library's. */
+  function isUserValueDeclaration(d: ts.Node): boolean {
+    if (ts.isFunctionDeclaration(d)) return d.body !== undefined;
+    if (ts.isClassDeclaration(d)) return true;
+    if (ts.isVariableDeclaration(d)) {
+      const stmt: ts.Node | undefined = d.parent?.parent;
+      if (stmt !== undefined && ts.isVariableStatement(stmt)) {
+        return !(stmt.modifiers ?? []).some((m) => m.kind === ts.SyntaxKind.DeclareKeyword);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /** True iff some declaration of the symbol lives in the standard library
    * (shipped ambient or default lib — the provenance half of every
-   * supported-surface check). `some`, not `[0]`: divergence overrides merge
-   * with lib interfaces, so a member can carry declarations from both. A
-   * user's own declaration is in neither, so shadowing never matches. */
+   * supported-surface check) AND THE PROGRAM DOES NOT DEFINE THE NAME
+   * ITSELF.
+   *
+   * `some`, not `[0]`, for the first half: divergence overrides merge with
+   * lib interfaces, so a member can carry declarations from both.
+   *
+   * The second half is not caution — it is a family of SILENT WRONG
+   * ANSWERS this test shipped. The sentence that stood here said "a user's
+   * own declaration is in neither, so shadowing never matches", and it is
+   * false for the case that matters most: at the TOP LEVEL OF A SCRIPT (a
+   * file with no import or export), a `function isNaN(n) { ... }` does not
+   * shadow the ambient `declare function isNaN` — TypeScript MERGES the
+   * two into ONE symbol carrying both declarations, and `some` said yes.
+   * Node runs the program's function; this compiler ran the library's.
+   * Measured on main, six global names answered wrong that way, `isNaN`,
+   * `isFinite`, `parseInt`, `parseFloat`, `decodeURIComponent` and
+   * `structuredClone` among them:
+   *
+   *     function isNaN(n: number): boolean { return n === 42 }
+   *     console.log(isNaN(42))     // Node: true      main: false
+   *
+   * A program that DEFINES a name defines it; that is the whole rule. A
+   * declaration-only merge (`interface`, `type`, `declare module`, a
+   * `declare` variable — the divergence-override and ambient-augmentation
+   * spellings) adds no value and keeps the library's provenance, so every
+   * type-space merge this test was written for still matches. */
   export function isStdlibSymbol(L: Lowerer, symbol: ts.Symbol | undefined): boolean {
-    return !!symbol && L.checker.declarationsOf(symbol).some((d) => L.isStdlibFile(d.getSourceFile()));
+    if (!symbol) return false;
+    // ONE isStdlibFile call per declaration, which is what the `.some`
+    // this replaced cost: the kind test only runs for a declaration that
+    // is already known not to be the library's. This sits on a hot path
+    // (83 call sites, one of them the identifier chokepoint), so the
+    // second half is deliberately free for every symbol the library
+    // wholly owns.
+    let sawLib = false;
+    for (const d of L.checker.declarationsOf(symbol)) {
+      if (L.isStdlibFile(d.getSourceFile())) sawLib = true;
+      else if (isUserValueDeclaration(d)) return false;
+    }
+    return sawLib;
   }
 
 /** The canonical stdlib-global name `expr` denotes, or null. Three
