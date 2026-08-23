@@ -553,6 +553,12 @@ struct ScrNetSocket {
    * re-stamped at each sweep head until it is emitted. */
   bool close_deferred;
   bool read_armed, write_armed;
+  /* Consumer-less back-off: a socket nobody reads was PEEKED and found
+   * bytes waiting. Node stops reading at its high-water mark for the same
+   * reason; here the bytes stay in the kernel, so the poller must stop
+   * signalling until a consumer appears (a level-triggered readable that
+   * nothing drains is a spin). Cleared the moment there is a consumer. */
+  bool rd_probe_off;
   /* write buffer: [whead, wlen) of wbuf is unsent */
   char *wbuf;
   size_t whead, wlen, wcap;
@@ -927,23 +933,51 @@ static ScrNetSocket *scr_net_sock_new(void) {
   return s;
 }
 
-/* Consumer-driven read arming (the stdin discipline: never read a byte
- * nobody consumes — the socket buffer is the backpressure). */
+/* One byte of MSG_PEEK: 1 when bytes are waiting, 0 at the peer's FIN,
+ * -1/EAGAIN when neither has arrived yet. Peeking answers "FIN or data?"
+ * WITHOUT taking anything out of the kernel — which is the whole point:
+ * a socket nobody reads can see EOF exactly where Node does while the
+ * bytes it did not ask for stay where they were, so back-pressure and a
+ * late listener's byte count are both untouched. */
+static ssize_t scr_net_peek1(int fd) {
+  char b;
+#ifdef _WIN32
+  int n = recv((SOCKET)fd, &b, 1, MSG_PEEK);
+  if (n < 0) scr_w32_seterr();
+  return n;
+#else
+  return recv(fd, &b, 1, MSG_PEEK);
+#endif
+}
+
+/* Read arming. Consumers drive a real read (the stdin discipline: never
+ * take a byte nobody consumes — the socket buffer is the backpressure).
+ * A socket with NO consumer is watched too, because Node's afterConnect
+ * and its accepted-socket constructor both call read(0): a socket that is
+ * not paused notices its peer's FIN with no 'data' listener anywhere, and
+ * without that this one never leaves the registry and the loop never
+ * drains. That watch is served by a PEEK rather than a read (see
+ * scr_net_sock_read) and switches itself off through rd_probe_off the
+ * moment the peek finds bytes nobody wants. An explicitly PAUSED socket
+ * is watched by neither rule — Node's paused socket does not observe EOF
+ * either (measured against the oracle). */
 static void scr_net_sock_update_read(ScrNetSocket *s) {
+  bool consumer = s->data_ls.n > 0 || s->pipe_dst != NULL || s->native_data != NULL ||
+                  s->flowing /* resume(): flow (and discard sans listeners) */ ||
+                  s->readable_ls.n > 0 /* paused-mode consumer: bytes buffer */ ||
+                  s->tops != NULL /* a transport is ALWAYS a consumer: the TLS
+                                   * layer must process protocol frames (the
+                                   * handshake, close_notify, 1.3 tickets)
+                                   * even when no app consumer exists, and a
+                                   * peer's FIN must reach the teardown —
+                                   * decrypted app data buffers like the
+                                   * paused-mode path's */ ||
+                  s->wr_done /* FIN sent: drain to EOF so the peer's close is
+                              * seen even with no consumer — Node resumes a
+                              * finished socket the same way */;
+  if (consumer) s->rd_probe_off = false; /* a consumer re-opens the peek */
   bool want = s->fd >= 0 && !s->connecting && !s->rd_eof && !s->user_paused &&
-              (s->data_ls.n > 0 || s->pipe_dst != NULL || s->native_data != NULL ||
-               s->flowing /* resume(): flow (and discard sans listeners) */ ||
-               s->readable_ls.n > 0 /* paused-mode consumer: bytes buffer */ ||
-               s->tops != NULL /* a transport is ALWAYS a consumer: the TLS
-                                * layer must process protocol frames (the
-                                * handshake, close_notify, 1.3 tickets)
-                                * even when no app consumer exists, and a
-                                * peer's FIN must reach the teardown —
-                                * decrypted app data buffers like the
-                                * paused-mode path's */ ||
-               s->wr_done /* FIN sent: drain to EOF so the peer's close is
-                           * seen even with no consumer — Node resumes a
-                           * finished socket the same way */);
+              (consumer || !s->rd_probe_off);
   if (want && !s->read_armed) {
     scr_net_watch_read(s->fd, s, true);
     s->read_armed = true;
@@ -1221,12 +1255,51 @@ static void scr_net_sock_read(ScrNetSocket *s) {
       scr_net_sock_update_read(s);
       continue;
     }
-    if (s->rd_eof || (!flowing && s->readable_ls.n == 0 && !s->wr_done &&
-                      !(s->tops != NULL && s->t_est))) {
-      /* No consumer: stay paused — except through an ESTABLISHED
-       * transport, which must keep processing protocol frames (close
-       * alerts, 1.3 tickets) so a peer's close reaches the teardown
-       * (the handler-less TLS server whose client hangs up). */
+    if (s->rd_eof) return;
+    if (!flowing && s->readable_ls.n == 0 && !s->wr_done &&
+        !(s->tops != NULL && s->t_est)) {
+      /* No consumer — but not "stay paused" either. Node's afterConnect
+       * and its accepted-socket constructor both call read(0), so a
+       * socket with no 'data' listener still notices its peer's FIN and
+       * still closes; without that it never leaves the registry,
+       * scr_net_pending never goes false, and THE LOOP NEVER DRAINS.
+       *
+       * The answer is a PEEK, not a read. Node buffers what it takes only
+       * up to the high-water mark and then stops; taking bytes here would
+       * change back-pressure and hand a listener added later a different
+       * byte count, so one byte of MSG_PEEK separates the only two cases
+       * that matter and consumes neither:
+       *
+       *   0  the peer's FIN with nothing in front of it — Node ends the
+       *      readable side here (its buffer is empty), so 'end'/'close'
+       *      fire and the loop drains.
+       *   >0 bytes nobody asked for. Node stops reading at its mark and
+       *      does NOT see the FIN behind them: 1000 unread bytes leave
+       *      readableEnded false and no 'close' ever fires (measured).
+       *      So stop watching until a consumer appears; the bytes stay
+       *      in the kernel exactly where they were.
+       *
+       * An ESTABLISHED transport is excluded above — it must keep
+       * processing protocol frames (close alerts, 1.3 tickets) so a
+       * peer's close reaches the teardown (the handler-less TLS server
+       * whose client hangs up), and it reads them for real. */
+      ssize_t p = scr_net_peek1(s->fd);
+      if (p > 0) {
+        s->rd_probe_off = true;
+        scr_net_sock_update_read(s);
+        return;
+      }
+      if (p < 0) {
+        if (errno == EINTR) continue;
+        if (errno == EAGAIN || errno == EWOULDBLOCK) return;
+        char msg[96];
+        snprintf(msg, sizeof msg, "read %s", scr_net_errname(errno));
+        if (!s->pending_err) s->pending_err = scr_str_new(msg, strlen(msg));
+        s->had_error = true;
+        scr_net_sock_close_fd(s);
+        return;
+      }
+      scr_net_sock_eof(s); /* p == 0: FIN, nothing in front of it */
       return;
     }
     char buf[65536];
@@ -1762,6 +1835,14 @@ static void scr_net_server_accept(ScrNetServer *srv) {
       scr_dyn_this_pop();
       free(snap);
     }
+    /* Node's accepted-socket constructor ends with this.read(0) unless
+     * pauseOnConnect: an accepted socket is watched from the moment the
+     * 'connection' listeners have had their say, whether or not any of
+     * them asked for data. Without this call a handler-less connection is
+     * never watched at all, so the peer's FIN is never seen, the socket
+     * never leaves the registry, and the loop never drains. The watch is
+     * a peek while there is no consumer (see scr_net_sock_update_read). */
+    scr_net_sock_update_read(sock);
     scr_net_sock_release(sock); /* registry + server-count refs remain */
     if (scr_exc_pending()) return;
   }
