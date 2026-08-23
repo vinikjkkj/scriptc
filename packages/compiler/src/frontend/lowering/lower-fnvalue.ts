@@ -195,10 +195,21 @@ export function hasBuiltinFnValue(L: Lowerer, name: string): boolean {
 function gatedValueType(L: Lowerer, expr: ts.Identifier): IrType | null {
   const entry = BUILTIN_FN_VALUES[expr.text];
   if (entry === undefined || !hasBuiltinFnValue(L, expr.text)) return null;
-  // Provenance, not the name: a user's own `function fetch()` shadowing
-  // the global has a different, non-stdlib symbol and must keep its own
-  // lowering. The same test every direct-call arm in lower-calls.ts uses.
-  if (!L.isStdlibSymbol(L.resolveValueSymbol(expr) ?? undefined)) return null;
+  // Provenance, and STRICTER than isStdlibSymbol — which answers `.some`
+  // over the declaration list and is therefore true for a MERGED symbol.
+  // The globals in this table are `declare function`s, so a user's own
+  // `function isNaN(n: number) { return n === 42 }` at module scope does
+  // not shadow the ambient one: it MERGES with it into a single symbol
+  // carrying both declarations, and isStdlibSymbol says yes. Offering the
+  // builtin value there would answer the LIBRARY's function for a name the
+  // program itself defines — measured: with the loose test, `function
+  // encodeURI(s) { return s + "!" }` compiled and printed the library's
+  // answer for a direct call while the alias answered the user's. Every
+  // declaration must be the library's.
+  const sym = L.resolveValueSymbol(expr);
+  if (!sym) return null;
+  const decls = L.checker.declarationsOf(sym);
+  if (decls.length === 0 || !decls.every((d) => L.isStdlibFile(d.getSourceFile()))) return null;
   const want = funcOf(
     entry.params.map(([, t]) => t),
     entry.ret,
