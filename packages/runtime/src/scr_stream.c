@@ -4368,14 +4368,19 @@ static void scr_stream_run_tick(ScrStreamTick *t) {
       break;
     }
     case SCR_ST_NEXT_WAKE: {
-      if (!st->r.next_waiter) {
-        st->r.next_wake = false;
-        break;
+      if (st->r.next_waiter) {
+        ScrStream *outer_wake = scr_next_waking;
+        scr_next_waking = s;
+        scr_stream_settle_next(s);
+        scr_next_waking = outer_wake;
       }
-      ScrStream *outer_wake = scr_next_waking;
-      scr_next_waking = s;
-      scr_stream_settle_next(s);
-      scr_next_waking = outer_wake;
+      /* The tick is spent either way. It has to be cleared even when the
+       * waiter is STILL parked: what woke us can be gone by the time we
+       * run — a 'readable' listener that calls read() drains the buffer
+       * from the tick queued just before this one — and a wake left
+       * marked as pending would stop every later push from queueing a
+       * fresh one, hanging the loop for the rest of the program. */
+      st->r.next_wake = false;
       break;
     }
     case SCR_ST_NEXT_EOF: {
@@ -4390,6 +4395,7 @@ static void scr_stream_run_tick(ScrStreamTick *t) {
         scr_stream_settle_next(s); /* content raced in: deliver it */
       }
       scr_next_waking = outer_wake;
+      st->r.next_wake = false;
       break;
     }
   }
