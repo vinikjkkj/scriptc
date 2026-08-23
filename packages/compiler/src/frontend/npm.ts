@@ -761,6 +761,24 @@ export function nodeRequireResolvableRoots(
   fromFile: string,
   host: Host = realHost,
 ): Set<string> | null {
+  // The answer depends only on the DIRECTORY chain, and a bundle can hold
+  // many require sites in one file. Memoized per directory, and only for
+  // the real host: a caller passing its own host is testing this
+  // function's filesystem reading and must not be served a cached answer
+  // from somebody else's disk.
+  const dirKey = dirname(resolve(fromFile));
+  if (host === realHost) {
+    const hit = resolvableRootsMemo.get(dirKey);
+    if (hit !== undefined) return hit;
+  }
+  const answer = computeResolvableRoots(fromFile, host);
+  if (host === realHost) resolvableRootsMemo.set(dirKey, answer);
+  return answer;
+}
+
+const resolvableRootsMemo = new Map<string, Set<string> | null>();
+
+function computeResolvableRoots(fromFile: string, host: Host): Set<string> | null {
   const out = new Set<string>();
   for (const b of NODE_BUILTIN_ROOTS) out.add(b);
   const importer = resolve(fromFile);
