@@ -9303,6 +9303,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/6030-bound-function-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/6030-bound-function-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/6031-function-name-length.ts": {
+   "order": [
+    "<repo>/tests/corpus/6031-function-name-length.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/604-closures-for-of.ts": {
    "order": [
     "<repo>/tests/corpus/604-closures-for-of.ts"
