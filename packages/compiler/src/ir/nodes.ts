@@ -5485,6 +5485,9 @@ export type IrLibFn =
   | "fetch.initNewSignal"
   | "fetch.initNewBodySignal"
   | "fetch.goInit"
+  | "fetch.goInitOpt"
+  | "fetch.goUnion"
+  | "fetch.goUnionInit"
   | "fetch.goValue"
   /** Response reads. `status` is a double because every numeric IR value
    * is; `headers` answers the Headers VIEW with the response's own

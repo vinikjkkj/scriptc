@@ -385,6 +385,18 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
     argTypes: [STRING, REQUESTINIT_T],
     result: { kind: "promise", inner: RESPONSE_T },
   },
+  // `init` is `RequestInit | undefined` — a per-program union, so `null`
+  // (any type) and the backends read the arm off the definition.
+  "fetch.goInitOpt": {
+    argTypes: [STRING, null],
+    result: { kind: "promise", inner: RESPONSE_T },
+  },
+  // A forwarding call whose INPUT is the ambient signature's own union.
+  "fetch.goUnion": { argTypes: [null], result: { kind: "promise", inner: RESPONSE_T } },
+  "fetch.goUnionInit": {
+    argTypes: [null, REQUESTINIT_T],
+    result: { kind: "promise", inner: RESPONSE_T },
+  },
   // The two arguments are the ambient signature's own unions, so their
   // arm sets vary per program: `null` is "any type", and the backends
   // read the arms off the union definition (headers.get's rule).

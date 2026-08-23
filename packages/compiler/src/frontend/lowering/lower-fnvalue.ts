@@ -285,7 +285,50 @@ function gatedValueType(L: Lowerer, expr: ts.Identifier): IrType | null {
 export function builtinFnValueOf(L: Lowerer, expr: ts.Identifier, loc: SrcLoc): IrExpr | null {
   const want = gatedValueType(L, expr);
   if (want === null) return null;
+  narrowedSlotFence(L, expr, want);
   return builtinFnValueClosure(L, expr.text, want, loc);
+}
+
+/** A builtin value flowing into a slot whose function type is NOT the
+ * builtin's own — `const g: (u: string) => Promise<Response> = fetch`, a
+ * record field or an array element or a parameter of that shape.
+ *
+ * The ADAPTER would take it: `%fn.adapt.N` wraps the value in a fresh
+ * closure that converts at the boundary, and every CALL through it is
+ * right. What is not right is the identity — a fresh closure is a
+ * different pointer, so `rec.call === fetch` answers false where Node
+ * answers true. That is the exact failure the gate above was written for,
+ * one level out: there the danger was the checker's mapping disagreeing
+ * with a shape written in this file, here it is the PROGRAM's slot
+ * disagreeing with both.
+ *
+ * It became reachable when `fetch` stopped being arity-one. While its
+ * value form was `(input: string) => Promise<Response>`, that was also
+ * the only slot shape a program could write for it, so no adapter could
+ * fire; now the value carries the ambient signature and any narrower
+ * annotation is a different type.
+ *
+ * The refusal is the answer rather than the adapter, and the hint names
+ * the fix (`typeof fetch`), because a silently non-identical function is
+ * exactly the trade this whole table refuses to make. */
+function narrowedSlotFence(L: Lowerer, expr: ts.Identifier, want: IrType): void {
+  const ctx = (() => {
+    try {
+      return L.checker.getContextualType(expr);
+    } catch {
+      return undefined;
+    }
+  })();
+  if (ctx === undefined) return;
+  const mapped = L.mapTypeOf(ctx);
+  if (mapped === null || mapped.kind !== "func" || typeEquals(mapped, want)) return;
+  L.noLowering(
+    `'${expr.text}' stored in a slot typed '${L.fmt(mapped)}'`,
+    expr,
+    `the value's own signature is '${L.fmt(want)}'; a slot of another shape would take an ` +
+      `adapter, and an adapter is a FRESH closure — '${expr.text}' held there would compare ` +
+      `unequal to '${expr.text}' where Node compares equal. Annotate the slot 'typeof ${expr.text}'`,
+  );
 }
 
 /** The mint, split out so the declaration-type arm and the expression arm

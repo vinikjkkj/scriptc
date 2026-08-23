@@ -296,6 +296,53 @@ function initHead(init: Init, loc: SrcLoc): { method: IrExpr; headers: IrExpr } 
   return { method, headers };
 }
 
+/** The `RequestInit` VALUE expression for an already-walked init: the
+ * four-way presence split that keeps an omitted body from becoming an
+ * empty one. Shared by the literal-in-a-slot path and the union-input
+ * call, so both build the identical handle. */
+function initValueExpr(init: Init, loc: SrcLoc): IrExpr {
+  const { method, headers } = initHead(init, loc);
+  const hasBody = init.body !== null;
+  const hasSignal = init.signal !== null;
+  const fn = hasBody
+    ? hasSignal
+      ? "fetch.initNewBodySignal"
+      : "fetch.initNewBody"
+    : hasSignal
+      ? "fetch.initNewSignal"
+      : "fetch.initNew";
+  const args: IrExpr[] = [method, headers];
+  if (hasBody) args.push(init.body!, { kind: "boolLit", value: init.bodyText, type: BOOL, loc });
+  if (hasSignal) args.push(init.signal!);
+  return { kind: "libCall", fn, args, type: REQUESTINIT_T, loc };
+}
+
+/** Is `t` exactly `RequestInit | undefined` — the slot an optional init
+ * parameter takes? The undefined arm is an ABSENT init, told apart by tag
+ * at the entry point, never an empty one. */
+function optionalInitUnion(L: Lowerer, t: IrType): boolean {
+  if (t.kind !== "union") return false;
+  const arms = L.unions.get(t.unionId)?.arms ?? [];
+  return (
+    arms.length === 2 &&
+    arms.some((a) => a.kind === "requestInit") &&
+    arms.some((a) => a.kind === "undefinedT")
+  );
+}
+
+/** The URL argument when it is the ambient signature's own INPUT UNION
+ * (`string | Request | URL`, or any subset carrying the string arm). The
+ * lowered union value, or null when the argument is not one — in which
+ * case urlArg's single-type path takes it. */
+function unionUrlArg(L: Lowerer, node: ts.Expression): IrExpr | null {
+  const t = L.mapTypeOf(L.typeOf(node));
+  if (t === null || t.kind !== "union") return null;
+  const arms = L.unions.get(t.unionId)?.arms ?? [];
+  if (arms.length === 0 || !arms.some((a) => a.kind === "string")) return null;
+  if (arms.some((a) => a.kind !== "string" && a.kind !== "url" && a.kind !== "request")) return null;
+  return L.lowerExpr(node);
+}
+
 /** An object literal in a `RequestInit` SLOT — `const init: RequestInit =
  * { … }`, an argument at a `RequestInit` parameter, a field of that type.
  * Null for every other literal, so lowerObjectLiteral keeps its record
@@ -414,16 +461,76 @@ export function lowerStaticFetchCall(L: Lowerer, call: ts.CallExpression): IrExp
       "fetch(url) and fetch(url, init) are the shapes",
     );
   }
+  // A UNION input (`string | Request | URL`) — the ambient signature's own
+  // parameter type, which a program can now write because `typeof fetch`
+  // maps. A forwarding stub (`const mine: typeof fetch = (input, init) =>
+  // fetch(input, init)`) is the shape that needs it, and it is the shape
+  // the `fetch` OPTION on an options record exists to let people write.
+  // The arm is chosen at runtime by tag; the Request arm cannot be
+  // inhabited and answers a rejected promise rather than reading a wild
+  // pointer.
+  const unionInput = unionUrlArg(L, call.arguments[0]!);
+  if (unionInput !== null) {
+    const promiseT: IrType = { kind: "promise", inner: RESPONSE_T };
+    if (call.arguments.length === 1) {
+      return { kind: "libCall", fn: "fetch.goUnion", args: [unionInput], type: promiseT, loc };
+    }
+    const initArg = call.arguments[1]!;
+    const initT = L.mapTypeOf(L.typeOf(initArg));
+    if (initT !== null && initT.kind === "requestInit") {
+      return {
+        kind: "libCall",
+        fn: "fetch.goUnionInit",
+        args: [unionInput, L.lowerExpr(initArg)],
+        type: promiseT,
+        loc,
+      };
+    }
+    if (initT !== null && optionalInitUnion(L, initT)) {
+      return {
+        kind: "libCall",
+        fn: "fetch.goValue",
+        args: [unionInput, L.lowerExpr(initArg)],
+        type: promiseT,
+        loc,
+      };
+    }
+    // An init LITERAL beside a union input: build the init as a VALUE
+    // first, through the same walk, and hand it to the same entry.
+    const lit = initLiteral(L, initArg, loc);
+    return {
+      kind: "libCall",
+      fn: "fetch.goUnionInit",
+      args: [unionInput, initValueExpr(lit, loc)],
+      type: promiseT,
+      loc,
+    };
+  }
   const url = urlArg(L, call.arguments[0]!, loc);
   // `fetch(url, initValue)` — the init held as a VALUE rather than written
   // at the call. One entry point, and it unpacks into the same transfer:
   // the two spellings cannot describe different requests.
   if (call.arguments.length === 2) {
     const argT = L.mapTypeOf(L.typeOf(call.arguments[1]!));
-    if (argT !== null && argT.kind === "requestInit") {
+    // `RequestInit | undefined` reaches here too — a call through a
+    // parameter (`function via(url, init?) { return fetch(url, init) }`,
+    // which is what an injected fetch stub is). The undefined arm is an
+    // ABSENT init, told apart by tag at the entry, never an empty one.
+    const optInit =
+      argT !== null &&
+      argT.kind === "union" &&
+      (() => {
+        const arms = L.unions.get(argT.unionId)?.arms ?? [];
+        return (
+          arms.length === 2 &&
+          arms.some((a) => a.kind === "requestInit") &&
+          arms.some((a) => a.kind === "undefinedT")
+        );
+      })();
+    if (argT !== null && (argT.kind === "requestInit" || optInit)) {
       return {
         kind: "libCall",
-        fn: "fetch.goInit",
+        fn: optInit ? "fetch.goInitOpt" : "fetch.goInit",
         args: [url, L.lowerExpr(call.arguments[1]!)],
         type: { kind: "promise", inner: RESPONSE_T },
         loc,

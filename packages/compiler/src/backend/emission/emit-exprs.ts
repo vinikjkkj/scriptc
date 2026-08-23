@@ -3681,6 +3681,27 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_fetch_init_new(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)})`);
           case "fetch.goInit":
             return finish(`scr_fetch_start_init(${arg(0)}, ${arg(1)})`);
+          case "fetch.goInitOpt": {
+            const t = e.args[1]!.type;
+            if (t.kind !== "union") {
+              throw new Error("emitter bug: fetch.goInitOpt init is not a union");
+            }
+            const def = E.unionsById.get(t.unionId);
+            const tag = def ? def.arms.findIndex((a) => a.kind === "requestInit") : -1;
+            return finish(`scr_fetch_start_init_opt(${arg(0)}, ${arg(1)}, ${tag})`);
+          }
+          case "fetch.goUnion":
+          case "fetch.goUnionInit": {
+            const t = e.args[0]!.type;
+            if (t.kind !== "union") {
+              throw new Error(`emitter bug: ${e.fn} input is not a union`);
+            }
+            const def = E.unionsById.get(t.unionId);
+            const strTag = def ? def.arms.findIndex((a) => a.kind === "string") : -1;
+            const urlTag = def ? def.arms.findIndex((a) => a.kind === "url") : -1;
+            const init = e.fn === "fetch.goUnionInit" ? arg(1) : "NULL";
+            return finish(`scr_fetch_start_union(${arg(0)}, ${strTag}, ${urlTag}, ${init})`);
+          }
           case "fetch.goValue": {
             // The value form's two arguments are the ambient signature's
             // unions; the arm tags are read off the union DEFINITION here

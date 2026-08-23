@@ -4,15 +4,21 @@
  * fetch-static origin process, and it is the half that decides zapo's
  * row 5: `options.fetch ?? fetch`.
  *
- * The VALUE form is arity ONE — `(input: string) => Promise<Response>`.
- * fetch's `init` has no static representation (lower-fetch.ts walks an
- * object LITERAL at the call site), so a two-argument call through a
- * value is a compile error rather than a request with silently dropped
- * options. Every cell below therefore compares the value form against
- * Node's OWN one-argument `fetch`, on the same origin, in the same
- * process order — including the two things a wrong answer would hide:
- * the request the server actually SEES when it arrives through the value,
- * and a network failure REJECTING rather than resolving.
+ * The VALUE form carries the AMBIENT signature — `(input: string |
+ * Request | URL, init?: RequestInit) => Promise<Response>`. It was arity
+ * ONE while `RequestInit` had no type at all, and every slot in this file
+ * was annotated to match that narrower shape; they say `typeof fetch` now,
+ * which is what a program would write and what keeps IDENTITY. A slot of
+ * some OTHER function type is a refusal, not an adapter, and the boundary
+ * test in builtin-fn-value.test.ts is why: an adapter is a fresh closure,
+ * so the value held there would compare unequal to `fetch` where Node
+ * compares equal.
+ *
+ * Every cell below compares the value form against Node's own `fetch`, on
+ * the same origin, in the same process order — including the two things
+ * a wrong answer would hide: the request the server actually SEES when it
+ * arrives through the value, and a network failure REJECTING rather than
+ * resolving.
  *
  * __HTTP__ / __ALT__ are substituted before compiling: a static build has
  * no runtime string it could assemble a URL literal from, and the
@@ -24,14 +30,14 @@ function log(key: string, value: string): void {
 }
 
 const f = fetch;
-const rec: { call: (u: string) => Promise<Response> } = { call: fetch };
-const arr: Array<(u: string) => Promise<Response>> = [fetch];
+const rec: { call: typeof fetch } = { call: fetch };
+const arr: Array<typeof fetch> = [fetch];
 
-function takes(g: (u: string) => Promise<Response>): boolean {
+function takes(g: typeof fetch): boolean {
   return g === fetch;
 }
 
-function gives(): (u: string) => Promise<Response> {
+function gives(): typeof fetch {
   return fetch;
 }
 
@@ -55,16 +61,19 @@ async function main(): Promise<void> {
   log("typeof-alias", typeof f);
 
   // ------------------------------------ the ?? default: zapo's own shape
-  const optAbsent: { fetch?: (u: string) => Promise<Response> } = {};
+  const optAbsent: { fetch?: typeof fetch } = {};
   const chosen = optAbsent.fetch ?? fetch;
   log("nullish-absent-identity", String(chosen === fetch));
 
   let stubCalls = 0;
-  const stub = async (u: string): Promise<Response> => {
+  // The stub carries the AMBIENT signature and FORWARDS its input, which
+  // is the shape a program injecting a fetch really writes -- and which
+  // needs the input UNION to reach the call.
+  const stub: typeof fetch = async (input, init) => {
     stubCalls++;
-    return await fetch(u);
+    return await fetch(input, init);
   };
-  const optPresent: { fetch?: (u: string) => Promise<Response> } = { fetch: stub };
+  const optPresent: { fetch?: typeof fetch } = { fetch: stub };
   const overridden = optPresent.fetch ?? fetch;
   log("nullish-present-identity", String(overridden === fetch));
 
@@ -114,7 +123,7 @@ async function main(): Promise<void> {
 
   // A stale binding: the `let` is reassigned to a stub, and the OLD value
   // must still be the real fetch through whatever else holds it.
-  let slot: (u: string) => Promise<Response> = fetch;
+  let slot: typeof fetch = fetch;
   const held = slot;
   log("stale-before-identity", String(slot === fetch));
   slot = stub;
