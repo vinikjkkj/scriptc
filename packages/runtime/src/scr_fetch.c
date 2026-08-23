@@ -25,6 +25,19 @@
  *   AbortSignal.timeout stays punctual through the loop's island-timer
  *   deadline hook (scr_loop_set_island_deadline — armed island timers cap
  *   the idle sleep exactly the way the curl poll capped its own).
+ * - THE OTHER LANE. scr_fetch_static.c implements this same semantics
+ *   layer for a build with no engine in it, delivering into a static
+ *   ScrPromise and an ScrResponse handle instead of into engine values,
+ *   over the same scr_http client this unit drives. The two are
+ *   independently link-gated and neither names the other's symbols. The
+ *   rules below — the header table and its order, the redirect rewrites,
+ *   the credential strip, the content-encoding set, the error causes —
+ *   are DUPLICATED there on purpose rather than shared: this unit's
+ *   delivery points are JSValue at every line, and the island lane has no
+ *   static differential harness, so a shared core would have put a
+ *   working lane at risk to deduplicate a header table. A change to any
+ *   rule below belongs in both files, and tests/harness/fetch-static.test.ts
+ *   is what notices if only one of them moves.
  * - fetch SEMANTICS, matched to Node/undici: HTTP errors RESOLVE (only
  *   network failure rejects, with TypeError "fetch failed" — Node's exact
  *   message); redirects are followed IN THIS UNIT (20 hops, fetch's

@@ -13,8 +13,9 @@
  * island lane is the one lane in this repo with no static differential
  * harness. A shared core would have put the working lane at risk to save
  * duplication in a layer that is, in the end, a header table and a
- * redirect rule. The duplication is deliberate and is listed in the
- * matching comment at the head of scr_fetch.c's semantics section.
+ * redirect rule. The duplication is deliberate; scr_fetch.c's own header
+ * carries the matching note, and a change to any semantics rule below
+ * belongs in BOTH files.
  *
  * What it inherits, and therefore does not reimplement:
  *   - the HTTP/1.1 client, its parser, chunked/content-length/read-to-EOF
