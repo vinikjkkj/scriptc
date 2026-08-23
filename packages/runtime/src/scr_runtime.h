@@ -8199,9 +8199,20 @@ void scr_fetch_init_release_v(void *p);
 void scr_fetch_init_trace_v(void *p, ScrTraceVisit visit, void *ctx);
 ScrPromise *scr_fetch_start_init(ScrStr *url /*borrowed*/,
                                  ScrFetchInit *init /*borrowed, nullable*/); /* +1 */
-/* The `fetch`-as-a-VALUE entry: both arguments are the ambient signature's
- * own unions, and the arm tags are program-specific constants the backends
- * pass in (a negative tag means the union has no such arm). */
+/* fetch(url, init) with an OPTIONAL init value (`RequestInit | undefined`):
+ * the undefined arm is an absent init, not an empty one. */
+ScrPromise *scr_fetch_start_init_opt(ScrStr *url /*borrowed*/, ScrUnion *init /*borrowed*/,
+                                     int init_tag); /* +1 */
+/* fetch(input, init) where the INPUT is the ambient signature's own union
+ * (`string | Request | URL`) — a forwarding call inside a `typeof
+ * fetch`-typed function. The arm tags are program-specific constants the
+ * backends pass in (a negative tag means the union has no such arm); the
+ * Request arm cannot be inhabited and answers a rejected promise rather
+ * than being assumed away. */
+ScrPromise *scr_fetch_start_union(ScrUnion *input, int str_tag, int url_tag,
+                                  ScrFetchInit *init /*borrowed, nullable*/); /* +1 */
+/* The `fetch`-as-a-VALUE entry: both arguments are unions — the one above
+ * plus `RequestInit | undefined`. */
 ScrPromise *scr_fetch_start_value(ScrUnion *input, int str_tag, int url_tag,
                                   ScrUnion *init, int init_tag); /* +1 */
 

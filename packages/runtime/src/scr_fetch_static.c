@@ -1210,6 +1210,19 @@ ScrPromise *scr_fetch_start_init(ScrStr *url /*borrowed*/,
   return p;
 }
 
+/* fetch(url, init) where `init` is `RequestInit | undefined` — a call
+ * through a parameter, or through a `??`-defaulted slot, rather than a
+ * literal. The undefined arm is an ABSENT init, which is not an empty
+ * one: `fetch(url, undefined)` is `fetch(url)`, and Node agrees. */
+ScrPromise *scr_fetch_start_init_opt(ScrStr *url /*borrowed*/, ScrUnion *init /*borrowed*/,
+                                     int init_tag) {
+  ScrFetchInit *iv = NULL;
+  if (init != NULL && init_tag >= 0 && init->tag == (uint32_t)init_tag) {
+    iv = (ScrFetchInit *)scr_union_peek(init);
+  }
+  return scr_fetch_start_init(url, iv);
+}
+
 /* fetch as a VALUE — `const f = options.fetch ?? fetch; f(url, init)`.
  *
  * The interned closure's body reaches exactly one entry point, and its two
@@ -1224,8 +1237,8 @@ ScrPromise *scr_fetch_start_init(ScrStr *url /*borrowed*/,
  * throws rather than being assumed away, because "unreachable" is a claim
  * about the whole compiler and this is the one place a wrong answer would
  * be a wild pointer. */
-ScrPromise *scr_fetch_start_value(ScrUnion *input, int str_tag, int url_tag,
-                                  ScrUnion *init, int init_tag) {
+ScrPromise *scr_fetch_start_union(ScrUnion *input, int str_tag, int url_tag,
+                                  ScrFetchInit *init /*borrowed, nullable*/) {
   ScrStr *url = NULL;
   ScrStr *owned = NULL;
   if (input != NULL && str_tag >= 0 && input->tag == (uint32_t)str_tag) {
@@ -1234,19 +1247,27 @@ ScrPromise *scr_fetch_start_value(ScrUnion *input, int str_tag, int url_tag,
     owned = scr_url_href((ScrUrl *)scr_union_peek(input));
     url = owned;
   } else {
+    /* The Request arm, or a tag no arm claims. fetch never throws
+     * synchronously, so this is an already-rejected promise carrying the
+     * error Node gives an unusable input. */
     ScrPromise *p = scr_promise_new();
     scr_throw_obj(fs_failure("ERR_INVALID_URL"), &scr_error_retain_v, &scr_error_release_v,
                   scr_error_trace_arg());
     scr_promise_reject_pending(p);
     return p;
   }
+  ScrPromise *p = scr_fetch_start_init(url, init);
+  if (owned != NULL) scr_str_release(owned);
+  return p;
+}
+
+ScrPromise *scr_fetch_start_value(ScrUnion *input, int str_tag, int url_tag,
+                                  ScrUnion *init, int init_tag) {
   ScrFetchInit *iv = NULL;
   if (init != NULL && init_tag >= 0 && init->tag == (uint32_t)init_tag) {
     iv = (ScrFetchInit *)scr_union_peek(init);
   }
-  ScrPromise *p = scr_fetch_start_init(url, iv);
-  if (owned != NULL) scr_str_release(owned);
-  return p;
+  return scr_fetch_start_union(input, str_tag, url_tag, iv);
 }
 
 /* Build the wire header list from a checked-dynamic record/object: every

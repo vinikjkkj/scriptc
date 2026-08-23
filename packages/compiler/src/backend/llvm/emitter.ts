@@ -12381,6 +12381,35 @@ class LlEmitter {
       B.line(`${out} = call ptr @scr_fetch_start_init(ptr ${args[0]!.name}, ptr ${args[1]!.name})`);
       return this.own({ name: out, type: e.type });
     }
+    if (e.fn === "fetch.goInitOpt") {
+      const t = e.args[1]!.type;
+      if (t.kind !== "union") throw new Error("llvm emitter bug: fetch.goInitOpt init is not a union");
+      const def = this.unionsById.get(t.unionId);
+      const tag = def ? def.arms.findIndex((a) => a.kind === "requestInit") : -1;
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.declare(`declare ptr @scr_fetch_start_init_opt(ptr, ptr, i32)`);
+      const out = B.tmp();
+      B.line(
+        `${out} = call ptr @scr_fetch_start_init_opt(ptr ${args[0]!.name}, ptr ${args[1]!.name}, i32 ${tag})`,
+      );
+      return this.own({ name: out, type: e.type });
+    }
+    if (e.fn === "fetch.goUnion" || e.fn === "fetch.goUnionInit") {
+      const t = e.args[0]!.type;
+      if (t.kind !== "union") throw new Error(`llvm emitter bug: ${e.fn} input is not a union`);
+      const def = this.unionsById.get(t.unionId);
+      const strTag = def ? def.arms.findIndex((a) => a.kind === "string") : -1;
+      const urlTag = def ? def.arms.findIndex((a) => a.kind === "url") : -1;
+      const args = e.args.map((a) => this.emitExpr(a));
+      const init = e.fn === "fetch.goUnionInit" ? `ptr ${args[1]!.name}` : "ptr null";
+      this.declare(`declare ptr @scr_fetch_start_union(ptr, i32, i32, ptr)`);
+      const out = B.tmp();
+      B.line(
+        `${out} = call ptr @scr_fetch_start_union(ptr ${args[0]!.name}, i32 ${strTag}, ` +
+          `i32 ${urlTag}, ${init})`,
+      );
+      return this.own({ name: out, type: e.type });
+    }
     if (e.fn === "fetch.goValue") {
       // The arm tags are read off the union DEFINITION, not assumed — the
       // C twin's row, and headers.get's rule right above.
