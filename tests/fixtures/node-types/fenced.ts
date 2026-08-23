@@ -16,10 +16,14 @@ timer.unref();
 timer.refresh();
 timer.close();
 /* The web-platform globals ride in with @types/node (undici): they RESOLVE
- * (no "Cannot find name") and their uses fence cleanly. */
+ * (no "Cannot find name") and the ones with no lowering fence cleanly.
+ * AbortController/AbortSignal lower, and so does fetch itself now (with
+ * Response and Headers behind it) — what still fences here is the init
+ * option this build cannot honour and the Response CONSTRUCTOR, which
+ * would have to invent a body. */
 const controller = new AbortController();
 controller.abort();
-fetch("https://example.invalid/");
+void fetch("https://example.invalid/", { redirect: "manual" });
 /* Members of SUPPORTED builtin modules beyond the lowered tables: they
  * typecheck under @types/node and fence with the module-qualified name —
  * calls and value reads alike. */

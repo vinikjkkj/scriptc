@@ -18,7 +18,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "./nodes.js";
-import { settleOrValuePromiseTag, arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
+import { settleOrValuePromiseTag, arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is how many may be omitted
@@ -338,6 +338,43 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // null leaves it unchecked, exactly like fs.watchCb's callback.
   "abort.on": { argTypes: [ABORTSIGNAL_T, null, BOOL], result: VOID },
   "abort.off": { argTypes: [ABORTSIGNAL_T, null], result: VOID },
+  // The static fetch surface. `headers` is a flat [name, value, ...]
+  // string array in every arm, built by one of the two builders below, so
+  // the call itself never has to know which shape the program wrote.
+  "fetch.go": { argTypes: [STRING, STRING, arrayOf(STRING)], result: { kind: "promise", inner: RESPONSE_T } },
+  // The trailing BOOL is `body written as a string`: fetch derives
+  // content-type text/plain;charset=UTF-8 from a string BodyInit and
+  // NOTHING from a BufferSource, and that distinction cannot survive the
+  // encoding to bytes on its own.
+  "fetch.goBody": {
+    argTypes: [STRING, STRING, arrayOf(STRING), BYTES_U8, BOOL],
+    result: { kind: "promise", inner: RESPONSE_T },
+  },
+  "fetch.goSignal": {
+    argTypes: [STRING, STRING, arrayOf(STRING), ABORTSIGNAL_T],
+    result: { kind: "promise", inner: RESPONSE_T },
+  },
+  "fetch.goBodySignal": {
+    argTypes: [STRING, STRING, arrayOf(STRING), BYTES_U8, BOOL, ABORTSIGNAL_T],
+    result: { kind: "promise", inner: RESPONSE_T },
+  },
+  "fetch.headersNorm": { argTypes: [arrayOf(STRING)], result: arrayOf(STRING) },
+  "fetch.headersFromDyn": { argTypes: [DYN], result: arrayOf(STRING) },
+  "resp.ok": { argTypes: [RESPONSE_T], result: BOOL },
+  "resp.status": { argTypes: [RESPONSE_T], result: F64 },
+  "resp.statusText": { argTypes: [RESPONSE_T], result: STRING },
+  "resp.url": { argTypes: [RESPONSE_T], result: STRING },
+  "resp.redirected": { argTypes: [RESPONSE_T], result: BOOL },
+  "resp.bodyUsed": { argTypes: [RESPONSE_T], result: BOOL },
+  "resp.headers": { argTypes: [RESPONSE_T], result: HEADERS_T },
+  "resp.text": { argTypes: [RESPONSE_T], result: { kind: "promise", inner: STRING } },
+  "resp.json": { argTypes: [RESPONSE_T], result: { kind: "promise", inner: DYN } },
+  "resp.arrayBuffer": { argTypes: [RESPONSE_T], result: { kind: "promise", inner: BYTES_U8 } },
+  "resp.bytes": { argTypes: [RESPONSE_T], result: { kind: "promise", inner: BYTES_U8 } },
+  // `string | null`: the sp.get sentinel — VOID here, the union checked
+  // in the libCall case the way sp.get's is.
+  "headers.get": { argTypes: [HEADERS_T, STRING], result: VOID },
+  "headers.has": { argTypes: [HEADERS_T, STRING], result: BOOL },
   "crypto.x509Fingerprint": { argTypes: [BYTES_U8], result: STRING },
   "crypto.x509FingerprintStr": { argTypes: [STRING], result: STRING },
   "crypto.x509ValidFrom": { argTypes: [BYTES_U8], result: STRING },
@@ -4456,6 +4493,19 @@ function validateFunction(
             def.arms.some((a) => a.kind === "nullT");
           if (!ok) {
             err(`libCall spawnRes.signal must return the 'string | null' union`, e.loc);
+          }
+          break;
+        }
+        if (e.fn === "headers.get") {
+          // The sp.get row exactly: the interned `string | null` union.
+          const hdef = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
+          const hok =
+            hdef &&
+            hdef.arms.length === 2 &&
+            hdef.arms.some((a) => a.kind === "string") &&
+            hdef.arms.some((a) => a.kind === "nullT");
+          if (!hok) {
+            err(`libCall headers.get must return the 'string | null' union`, e.loc);
           }
           break;
         }

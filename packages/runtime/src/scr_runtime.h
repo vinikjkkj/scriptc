@@ -8076,6 +8076,82 @@ ScrHttpClientReq *scr_https_request_agent(ScrStr *host /*borrowed*/, double port
  * the fresh socket. The ctx moves into the transport at wrap time. */
 void *scr_tls_fetch_client_ctx(ScrStr *host /*borrowed*/, bool reject_unauthorized);
 void scr_tls_fetch_client_wrap(ScrNetSocket *sock, void *ctx);
+
+/* ── fetch(), the STATIC lane (scr_fetch_static.c) ────────────────────
+ * The WHATWG fetch surface for a build with NO embedded engine, over the
+ * same client machinery scr_fetch.c drives for the island: scr_http's
+ * HTTP/1.1 client, scr_tls's verified client transport, scr_net's dial
+ * and DNS, and zlib for content-encoding. Link-gated on `fetchStatic`
+ * (cc.ts) — a program that never writes `fetch` links none of it.
+ *
+ * `ScrResponse` is cycle-headered: it holds the parked body-consumer
+ * promise, and a promise can reach a closure that reaches the response.
+ * `ScrFetchHeaders` is not: every edge it owns is an ScrStr. */
+typedef struct ScrFetchHeaders ScrFetchHeaders;
+typedef struct ScrResponse ScrResponse;
+
+/* Starts one transfer and answers the fetch() promise (+1), which
+ * fulfills with an ScrResponse when the HEAD arrives — not when the body
+ * ends, which is where Node settles it too. An unparsable URL, a
+ * non-http(s) scheme and an already-aborted signal answer an
+ * already-rejected promise: fetch never throws synchronously.
+ * `header_pairs` is a flat [name, value, ...] string array. */
+ScrPromise *scr_fetch_start(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*/,
+                            ScrArr *header_pairs /*borrowed*/,
+                            ScrBytes *body /*borrowed, nullable*/, bool body_text,
+                            void *signal /*borrowed, nullable*/); /* +1 */
+
+/* The two header-list builders the lowering emits in front of the call:
+ * `_from_dyn` walks a checked-dynamic record/object (the
+ * `Record<string, string>` VALUE form), `_normalize` folds a
+ * caller-assembled pairs array (the OBJECT-LITERAL form). Both answer a
+ * fresh +1 SCR_ELEM_STR array with lowercased names. */
+ScrArr *scr_fetch_headers_from_dyn(const struct ScrDyn *d /*borrowed, nullable*/); /* +1 */
+ScrArr *scr_fetch_headers_normalize(ScrArr *pairs /*borrowed*/);                   /* +1 */
+
+ScrResponse *scr_response_retain(ScrResponse *r);
+void scr_response_release(ScrResponse *r);
+void *scr_response_retain_v(void *p);
+void scr_response_release_v(void *p);
+void scr_response_trace_v(void *p, ScrTraceVisit visit, void *ctx);
+double scr_response_status(ScrResponse *r);
+bool scr_response_ok(ScrResponse *r);
+ScrStr *scr_response_status_text(ScrResponse *r); /* +1 */
+ScrStr *scr_response_url(ScrResponse *r);         /* +1 */
+bool scr_response_redirected(ScrResponse *r);
+bool scr_response_body_used(ScrResponse *r);
+ScrFetchHeaders *scr_response_headers(ScrResponse *r); /* +1 */
+/* The four body consumers. Each answers a +1 promise, or NULL with a
+ * pending TypeError when the body was already read (Node throws there
+ * rather than rejecting). json() rejects with JSON.parse's own
+ * SyntaxError on malformed input. */
+ScrPromise *scr_response_text(ScrResponse *r);
+ScrPromise *scr_response_json(ScrResponse *r);
+ScrPromise *scr_response_array_buffer(ScrResponse *r);
+ScrPromise *scr_response_bytes(ScrResponse *r);
+
+ScrFetchHeaders *scr_fetch_headers_retain(ScrFetchHeaders *h);
+void scr_fetch_headers_release(ScrFetchHeaders *h);
+void *scr_fetch_headers_retain_v(void *p);
+void scr_fetch_headers_release_v(void *p);
+/* headers.get: the ", "-joined value of every matching field (+1), or
+ * NULL for the null arm. headers.has: the same walk, no allocation. */
+ScrStr *scr_fetch_headers_get(ScrFetchHeaders *h, ScrStr *name /*borrowed*/);
+bool scr_fetch_headers_has(ScrFetchHeaders *h, ScrStr *name /*borrowed*/);
+ScrArr *scr_fetch_headers_pairs(ScrFetchHeaders *h); /* +1, [name, value, ...] */
+
+/* The abort SEAM (scr_fetch_abort.c, gated on abortSignal && fetchStatic):
+ * scr_abort.c and scr_fetch_static.c are independently link-gated, so
+ * neither names the other. The conjunction unit installs these at
+ * startup. */
+void scr_fetch_abort_seam(void *(*retain)(void *), void (*release)(void *),
+                          void (*attach)(void *sig, ScrHttpClientReq *c),
+                          bool (*aborted)(void *sig), ScrError *(*error)(void *sig));
+/* Live transfers — the RC-audit counterpart of scr_abortsig_live_count. */
+size_t scr_fetch_live_count(void);
+/* scr_fetch_abort.c's installer, emitted into main() when both gates
+ * are on. */
+void scr_fetch_abort_install(void);
 /* The loop-side registration (scr_async.c, always linked): `pending`
  * joins the exhaustion test (a live handle keeps the process alive, like
  * Node's active TCP handles), `dispatch` runs at every turn top like the

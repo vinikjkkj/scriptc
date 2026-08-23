@@ -82,6 +82,10 @@ export function cType(t: IrType): string {
       return "ScrSecureCtx *";
     case "abortSignal":
       return "ScrAbortSignal *";
+    case "response":
+      return "ScrResponse *";
+    case "headers":
+      return "ScrFetchHeaders *";
     case "abortController":
       return "ScrAbortController *";
     case "fsWatcher":
@@ -204,6 +208,10 @@ export function retainCallC(type: IrType, expr: string): string {
       return `scr_secure_ctx_retain(${expr})`;
     case "abortSignal":
       return `scr_abort_signal_retain(${expr})`;
+    case "response":
+      return `scr_response_retain(${expr})`;
+    case "headers":
+      return `scr_fetch_headers_retain(${expr})`;
     case "abortController":
       return `scr_abort_controller_retain(${expr})`;
     case "fsWatcher":
@@ -301,6 +309,10 @@ export function releaseCallC(type: IrType, expr: string): string {
       return `scr_secure_ctx_release(${expr})`;
     case "abortSignal":
       return `scr_abort_signal_release(${expr})`;
+    case "response":
+      return `scr_response_release(${expr})`;
+    case "headers":
+      return `scr_fetch_headers_release(${expr})`;
     case "abortController":
       return `scr_abort_controller_release(${expr})`;
     case "fsWatcher":
@@ -383,6 +395,8 @@ export function boxKindC(t: IrType): string {
     case "childStream":
     case "abortSignal":
     case "abortController":
+    case "response":
+    case "headers":
     case "bytes":
       throw new Error(`emitter bug: ${t.kind} boxes go through boxNewC, not boxKindC`);
     case "procStream":
@@ -513,6 +527,10 @@ export function rcAdapters(t: IrType): RcAdapters | null {
       return rt("scr_secure_ctx_retain_v", "scr_secure_ctx_release_v");
     case "abortSignal":
       return rt("scr_abort_signal_retain_v", "scr_abort_signal_release_v");
+    case "response":
+      return rt("scr_response_retain_v", "scr_response_release_v");
+    case "headers":
+      return rt("scr_fetch_headers_retain_v", "scr_fetch_headers_release_v");
     case "abortController":
       return rt("scr_abort_controller_retain_v", "scr_abort_controller_release_v");
     case "fsWatcher":
@@ -682,6 +700,11 @@ export function elemKindC(elem: IrType): string {
     // construct through scr_arr_new_ref with a real trace.
     case "abortSignal":
     case "abortController":
+    // A Response array traces (the response's parked body promise is a
+    // real edge); a Headers array does not, and elemTraceC decides which
+    // — the element CLASS is SCR_ELEM_REF for both.
+    case "response":
+    case "headers":
       return "SCR_ELEM_REF";
     case "url":
     case "searchParams":
