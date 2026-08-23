@@ -2583,6 +2583,40 @@ export type IrLibFn =
    * not an own enumerable key. A FUNC target, and any `enumerable: true`
    * accessor, keep a loud runtime refusal. In the may-throw seed set. */
   | "dyn.defineProp"
+  /** The per-instance property table a COMPILED class instance carries
+   * as its one extra `%props` field — the receiver row of
+   * `Object.defineProperty` that has no dyn spelling at all, because a
+   * class instance is a C struct with one cell per DECLARED member and a
+   * run-time string key names none of them (zapo's `install.ts:114`).
+   *
+   * `cls.propsEnsure` answers the table to store back into the field:
+   * the existing one, or a fresh one on the first define. Never throws.
+   *
+   * `cls.propsDefine` is ValidateAndApplyPropertyDescriptor over it —
+   * args (the table, the run-time key, the descriptor, whether the key
+   * names a DECLARED member, the class's display name), no result
+   * (statement position only, like the hidden-symbol-slot define). LOUD
+   * for the two shapes this representation cannot hold, catchable for
+   * every shape JS itself rejects. In the may-throw seed set.
+   *
+   * `cls.propsHas` is the table's contribution to `in` over a class
+   * receiver — the closed-member-set helper ORs it in, and MUST, because
+   * what made that set closed was precisely that this define had no
+   * lowering. Never throws.
+   *
+   * `cls.propsGet` is [[Get]] over the table: a data property answers
+   * its value, an accessor RUNS its getter (in the may-throw seed set —
+   * the getter is user code). */
+  | "cls.propsEnsure"
+  | "cls.propsDefine"
+  | "cls.propsHas"
+  /** How many ENUMERABLE properties the table holds — the one thing
+   * util.inspect has to know BEFORE the depth gate, because Node prints
+   * `C {}` for an object with no keys whatever the depth budget says,
+   * and a class whose only possible keys are run-time ones cannot answer
+   * that statically. Never throws. */
+  | "cls.propsCount"
+  | "cls.propsGet"
   /** Bare `typeof v` on a dyn value AS A STRING (arg: the dyn value,
    * borrowed; result: an owned string) — the dyn kind's JS answer:
    * undefined→"undefined", null/object/array/bytes→"object" (JS's oldest
@@ -4980,6 +5014,17 @@ export type IrLibFn =
   | "insp.jsval"
   | "insp.begin"
   | "insp.entry"
+  /** The frame entries for a compiled class instance's run-time property
+   * table (args: the `%props` dyn table, recurse, depth) — one per
+   * ENUMERABLE key, in JS own-key order, emitted right after the
+   * declared fields' entries — TWICE, because OrdinaryOwnPropertyKeys puts
+ * every ARRAY-INDEX key ahead of every string key ACROSS THE WHOLE
+ * object and the declared fields sit between the two halves. The fourth
+ * argument selects the half: true for the index keys (emitted before the
+ * fields), false for the rest (after). An accessor renders `[Getter]` /
+   * `[Setter]` / `[Getter/Setter]` and is NOT invoked, which is Node's
+   * answer. Never throws. */
+  | "insp.clsProps"
   | "insp.key"
   | "insp.moreItems"
   /* Circular references over cycle-capable composites (recursive record/
@@ -8507,7 +8552,19 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
         // linked and must not name the dispatch.
         (node.fn === "dyn.hasKey" ||
           node.fn === "dyn.defineProps" || node.fn === "dyn.defineProp" ||
-          node.fn === "dyn.objCreateDescs" || node.fn === "dyn.objCreateNullDescs"))
+          node.fn === "dyn.objCreateDescs" || node.fn === "dyn.objCreateNullDescs" ||
+          // The per-instance property table of a compiled class instance
+          // lives in the same unit as the property definers beside it,
+          // and for the same reason: in the always-linked scr_json.c it
+          // cost EVERY binary 6 144 bytes (the island/regex size-class
+          // pair measured it) for a table almost no program has. All five
+          // entry points gate together — `in` reads the table through
+          // cls.propsHas without ever defining anything, so gating only
+          // the definer would leave that program calling a symbol its
+          // link line does not carry.
+          node.fn === "cls.propsEnsure" || node.fn === "cls.propsDefine" ||
+          node.fn === "cls.propsHas" || node.fn === "cls.propsGet" ||
+          node.fn === "cls.propsCount"))
     ) {
       found = true;
       return;
@@ -9737,6 +9794,7 @@ const LIB_MODE_REFUSED_PREFIXES: readonly [string, string][] = [
   // (scr_dyn_invoke.c → scr_async_dyn.c).
   ["dyn.defineProps", "checked-dynamic prototype dispatch"],
   ["dyn.defineProp", "checked-dynamic prototype dispatch"],
+  ["cls.props", "checked-dynamic prototype dispatch"],
   ["dyn.objCreateDescs", "checked-dynamic prototype dispatch"],
   ["dyn.objCreateNullDescs", "checked-dynamic prototype dispatch"],
 ];
@@ -10240,6 +10298,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "insp.fmtS",
   "dyn.defineProps",
   "dyn.defineProp",
+  "cls.propsDefine",
+  "cls.propsGet",
   "process.chdir",
   "fs.realpathSync",
   "fs.readFileSync",

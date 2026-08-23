@@ -171,6 +171,22 @@ export interface ClassInfo {
    * enumeration path reads this set. Inherited entries seed from the base
    * like `symbolFields`. */
   hiddenSymbolFields?: Set<string>;
+  /** True when the class carries the RUN-TIME property table — the single
+   * `%props` field an `Object.defineProperty(<an instance>, <a
+   * string-typed key>, desc)` site somewhere in the program needs
+   * (definePropTableSiteOf's shape; zapo's `install.ts:114`). Set on
+   * every class in the hierarchy that declares it and inherited by
+   * subclasses with the field, because the table is per INSTANCE.
+   *
+   * Every surface that could answer a property question about an
+   * instance has to read it once this is true: `in` (both the literal
+   * and the run-time key), and util.inspect. The others — Object.keys,
+   * for-in, spread, JSON.stringify, getOwnPropertyNames, delete,
+   * hasOwnProperty — refuse over a class receiver today and keep
+   * refusing, which is what keeps the slice exact rather than partial.
+   * If one of them ever gains a lowering, this flag is what it has to
+   * consult. */
+  hasPropsTable?: boolean;
   /** GENERIC class FAMILY (`class Box<T>` itself): the synthetic,
    * never-constructed ancestor every instantiation extends. It owns what
    * JS's one runtime `Box` owns — the statics (one storage location for
@@ -373,6 +389,14 @@ export interface GenericClassInfo {
    * the bindings this scan runs without. */
   function receiverClassDeclOf(L: Lowerer, recv: ts.Expression): ts.ClassLikeDeclaration | null {
     if (!ts.isIdentifier(recv)) return null;
+    return receiverClassDeclOfAny(L, recv);
+  }
+
+  /** The same resolution without the bare-identifier requirement. The
+   * SYMBOL-slot recognizer wants the identifier — its write is a field
+   * store through one local — but the run-time property TABLE lowers any
+   * receiver, because it binds one to a hidden local first. */
+  function receiverClassDeclOfAny(L: Lowerer, recv: ts.Expression): ts.ClassLikeDeclaration | null {
     // The CHECKER's type, never L.typeOf: the scan runs before any lowering
     // (so the narrowing maps typeOf consults are empty) but the recognizer
     // is asked again at the write site with them live, and the two must
@@ -405,6 +429,164 @@ export interface GenericClassInfo {
       sym = next;
     }
     return null;
+  }
+
+/** The layout name of the run-time property table. `%`-prefixed, so no
+   * string key spells it, `in`'s member walk already skips it, and
+   * util.inspect's field loop already omits it. */
+  export const CLASS_PROPS_FIELD = "%props";
+
+  /** A `Object.defineProperty(<an instance of a program class>, <a
+   * STRING-typed key>, <an object literal descriptor>)` site — the row
+   * the per-instance table exists for, and the one the hidden SYMBOL
+   * slot above cannot serve: a symbol key resolves to a compile-time
+   * constant and gets its own layout cell, while a string key,
+   * especially a RUN-TIME string, names no cell at all.
+   *
+   * Three clauses, and each one is load-bearing:
+   *
+   *  - the KEY must be string-typed. A unique-symbol key is the other
+   *    recognizer's, and it must stay so: the symbol form has a typed
+   *    slot and a static read, both of which this table would lose.
+   *  - the DESCRIPTOR must be an object LITERAL. It is lowered as a dyn
+   *    object either way, but the getter check below needs to see the
+   *    syntax.
+   *  - a `get`/`set` half must be an ARROW function. The table stores
+   *    the closure and calls it with NO receiver, because a compiled
+   *    instance has no dyn spelling to bind as `this`; an arrow's `this`
+   *    is lexical and already captured, so nothing is lost. A `function`
+   *    expression or a bare identifier could read `this` and would get
+   *    the wrong one — that keeps the fence.
+   *
+   * Answers the class DECLARATION (receiverClassDeclOf's interface hop
+   * included — `export interface WaClient extends WaClientImpl` is
+   * exactly zapo's shape), so the whole-program scan can put the field in
+   * the layout before any site is lowered. */
+  export function definePropTableSiteOf(L: Lowerer, call: ts.CallExpression): ts.ClassLikeDeclaration | null {
+    if (call.questionDotToken) return null;
+    const access = call.expression;
+    if (!ts.isPropertyAccessExpression(access) || access.questionDotToken) return null;
+    if (access.name.text !== "defineProperty") return null;
+    if (call.arguments.length !== 3 || call.arguments.some(ts.isSpreadElement)) return null;
+    if (!L.isStdlibGlobal(access.expression, "Object")) return null;
+    if (definePropTableDescriptorDecline(L, call) !== null) return null;
+    const d = receiverClassDeclOfAny(L, call.arguments[0]!);
+    if (process.env["SCRIPTC_DEFPROP_WHY"]) process.stderr.write(`[defprop] cand recvDecl=${d ? (d.name?.text ?? "?") : "null"}\n`);
+    return d;
+  }
+
+  /** Why this call is NOT the run-time-property-table shape, as a phrase
+   * the SC2020 hint can finish a sentence with — or null when the KEY and
+   * DESCRIPTOR halves are both admissible. The recognizer above is this
+   * function plus the receiver resolution, so the hint and the lowering
+   * can never disagree about which clause failed.
+   *
+   * These are the SYNTACTIC clauses only. The receiver's class and the
+   * statement position are checked at the lowering (which has mapType and
+   * the class table live) and are named there. */
+  export function definePropTableDescriptorDecline(L: Lowerer, call: ts.CallExpression): string | null {
+    // NOT a type test on the key. This runs from the middle of class
+    // collection (the layout is interned before any site is lowered), so
+    // it may not call mapType — and the checker's raw TypeFlags are the
+    // BUNDLED checker's numbering, which is not `ts.TypeFlags`'s:
+    // `string` reads back as 134217728 here, the value
+    // `ts.TypeFlags.TemplateLiteral` names, so a flag test silently
+    // rejected every site. What is needed is only "not the SYMBOL
+    // recognizer's row", and that one has a syntactic answer.
+    // Over-approximating costs one unused field on a class, exactly as it
+    // does for the symbol slots; the LOWERING checks the real key type,
+    // with mapType live.
+    if (uniqueSymbolKeyOf(L, call.arguments[1]!) !== null) {
+      return "the key is a unique SYMBOL, which is the hidden-slot recognizer's row and keeps its own typed cell";
+    }
+    let desc: ts.Expression = call.arguments[2]!;
+    while (ts.isParenthesizedExpression(desc)) desc = desc.expression;
+    if (!ts.isObjectLiteralExpression(desc)) {
+      return "the descriptor is not an OBJECT LITERAL, so its get/set halves cannot be checked at all";
+    }
+    for (const p of desc.properties) {
+      if (!ts.isPropertyAssignment(p)) {
+        return "the descriptor has a shorthand, spread or method member rather than plain `name: value` assignments";
+      }
+      const nm = ts.isIdentifier(p.name) || ts.isStringLiteral(p.name) ? p.name.text : null;
+      if (nm === null) return "the descriptor has a COMPUTED member name";
+      if (nm !== "get" && nm !== "set" && nm !== "value" && nm !== "writable" &&
+        nm !== "enumerable" && nm !== "configurable") {
+        return `the descriptor carries '${nm}', which is not one of get/set/value/writable/enumerable/configurable`;
+      }
+      if (nm !== "get" && nm !== "set") continue;
+      let half: ts.Expression = p.initializer;
+      while (ts.isParenthesizedExpression(half)) half = half.expression;
+      if (!ts.isArrowFunction(half)) {
+        // The table calls the half with NO receiver: a compiled instance
+        // has no dyn spelling to bind as `this`. An arrow's `this` is
+        // lexical and already captured, so nothing is lost; anything else
+        // could read `this` and would get the wrong one.
+        return `the descriptor's '${nm}' is not an ARROW function, and the table calls it with no receiver — only an arrow's \`this\` is already captured`;
+      }
+    }
+    return null;
+  }
+
+  /** Why an `Object.defineProperty` whose receiver IS a program class did
+   * not take the run-time-property-table lowering — a phrase the SC2020
+   * hint finishes its sentence with. It reads the same clauses the
+   * lowering does, in the same order, so the two cannot disagree.
+   *
+   * Never "no key table": a class receiver HAS one now (for the classes
+   * the pre-pass named), and telling a reader otherwise is the wrong-blame
+   * mistake estado-accessor.md paid for from the other side. */
+  export function definePropTableDecline(L: Lowerer, call: ts.CallExpression): string {
+    const shape = definePropTableDescriptorDecline(L, call);
+    if (shape !== null) return shape;
+    if (call.parent === undefined || !ts.isExpressionStatement(call.parent)) {
+      return "the call is used as a VALUE, and only STATEMENT position lowers — the call's " +
+        "value is the receiver at the checker's laundered type for the call, which is not what " +
+        "the binding holds";
+    }
+    const recvIr = L.mapTypeOf(L.typeOf(call.arguments[0]!));
+    const info = recvIr?.kind === "object" ? L.classes.get(recvIr.className) : undefined;
+    if (!info) return "the receiver's class is not one this program declares";
+    if (info.hasPropsTable !== true) {
+      return "the whole-program pre-pass declared no table on this class — the receiver's " +
+        "written type does not resolve to the class declaration (a generic class cannot carry " +
+        "one, because a single declaration node stands for every instantiation)";
+    }
+    if (info.subclasses.length > 0) {
+      return `'${info.def.name}' has a subclass, so the closed member set the collision check ` +
+        "reads is not exact: a base-typed binding can hold a derived instance, and answering " +
+        "\"does this key name a declared member\" without the derived members is a silent wrong " +
+        "answer";
+    }
+    for (let a: ClassInfo | null = info; a; a = a.base) {
+      if (a.builtinEmitter) continue;
+      if (a.def.runtime) {
+        return `the chain reaches the runtime builtin '${a.def.name}', whose members the object ` +
+          "model does not carry, so the collision check has no closed set to read";
+      }
+    }
+    return "the key is not STRING-typed";
+  }
+
+  /** Every class declaration the program defines a run-time-keyed
+   * property on. The whole-program shape and the reason it cannot be
+   * decided at the site are scanDefinePropSymbolSlots's: a class layout
+   * is interned from the TYPE long before the defining call is lowered,
+   * and the call usually lives in a different module. */
+  export function scanDefinePropStringTables(L: Lowerer): Set<ts.ClassLikeDeclaration> {
+    const out = new Set<ts.ClassLikeDeclaration>();
+    const visit = (n: ts.Node): void => {
+      if (ts.isCallExpression(n)) {
+        const decl = definePropTableSiteOf(L, n);
+        if (decl) out.add(decl);
+      }
+      ts.forEachChild(n, visit);
+    };
+    for (const sf of L.fileTag.keys()) {
+      if (sf.isDeclarationFile) continue;
+      ts.forEachChild(sf, visit);
+    }
+    return out;
   }
 
   export function definePropSlotSiteOf(L: Lowerer, call: ts.CallExpression): DefinePropSlotSite | null {
@@ -2606,6 +2788,30 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         }
       }
 
+      // The RUN-TIME property table — one dyn field, and only for the
+      // classes some `Object.defineProperty(<an instance>, <a string
+      // key>, desc)` site in the program names (definePropTableSiteOf).
+      // It is deliberately NOT on every class: it is 8 bytes and a
+      // traced edge per instance, and the whole point of a compiled
+      // class is that the property set is the layout.
+      //
+      // Inherited through `fields` like every other field, so a subclass
+      // of a table-carrying base has the table too — which is right,
+      // because the receiver's STATIC type decides where the field is
+      // declared and its RUNTIME type decides nothing.
+      // receiverClassDeclOf already refuses a declaration file and any
+      // source the program did not tag, so a runtime builtin can never
+      // reach this set — the guard is that recognizer's, not a second one.
+      const ownPropsTable = L.definePropStringTable(decl);
+      const hasPropsTable = ownPropsTable || base?.hasPropsTable === true;
+      if (ownPropsTable && !fields.has(CLASS_PROPS_FIELD)) {
+        fields.set(CLASS_PROPS_FIELD, DYN);
+        fieldOrder.push({ name: CLASS_PROPS_FIELD, type: DYN, initializer: undefined });
+        if (process.env["SCRIPTC_DEFPROP_WHY"]) {
+          process.stderr.write(`[defprop] table ${className}.${CLASS_PROPS_FIELD}\n`);
+        }
+      }
+
       // Second refinement chance, OWN symbol slots: the member loop ran
       // before the constructor scan declared this class's own symbol-keyed
       // fields, so methods returning those slots (1731's `extra()` —
@@ -2690,6 +2896,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         ...(staticBlocks.length > 0 ? { staticBlocks } : {}),
         ...(symbolFields.size > 0 ? { symbolFields } : {}),
         ...(hiddenSymbolFields.size > 0 ? { hiddenSymbolFields } : {}),
+        ...(hasPropsTable ? { hasPropsTable: true as const } : {}),
         ...(classDecoratorNodes.length > 0 ? { classDecorators: { nodes: classDecoratorNodes } } : {}),
         ...(deferredInitFields.size > 0 ? { deferredInitFields } : {}),
       };

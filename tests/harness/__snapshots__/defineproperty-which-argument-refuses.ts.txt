@@ -1,35 +1,44 @@
-defineproperty-which-argument-refuses.ts:25:1 - error SC2020: 'Object.defineProperty' is part of the standard library types but has no scriptc lowering yet
+defineproperty-which-argument-refuses.ts:34:1 - error SC2020: 'Object.defineProperty' is part of the standard library types but has no scriptc lowering yet
 
-  24 | //    This is zapo's src/client/plugins/install.ts:114 exactly.
-  25 | Object.defineProperty(client, runtimeKey, {
+  33 | //    zapo's install.ts:114 and lowers.
+  34 | Object.defineProperty(client, runtimeKey, {
      | ^~~~~~~~~~~~~~~~~~~~~
-  26 |   get: () => bag.get(runtimeKey),
+  35 |   get: function () { return bag.get(runtimeKey); },
 
-  hint: the RECEIVER is a compiled 'Client' instance, whose property set is FIXED at compile time (a C struct, one field per declared member, no key table) — a property named by a string, and above all by a run-time string, has nowhere to live, so this refuses at the receiver whatever the descriptor says. The one property a define CAN install on a program class is the hidden symbol slot the whole-program pre-pass declared; what lowers is a hidden per-instance DATA slot: Object.defineProperty(<a bare identifier typed as a program class>, <a module-level `const k = Symbol('...')`>, { value, enumerable: false, configurable: false, writable: false })
+  hint: the RECEIVER is a compiled 'Client' instance, and a property named by a RUN-TIME string DOES have somewhere to live on one — the per-instance property table. What refuses here is the SHAPE: the descriptor's 'get' is not an ARROW function, and the table calls it with no receiver — only an arrow's `this` is already captured. What lowers is Object.defineProperty(<an expression typed as a program class with no subclass>, <a STRING-typed key>, <an OBJECT LITERAL descriptor whose get/set halves are ARROW functions>) in STATEMENT position; the symbol-keyed form beside it is a hidden per-instance DATA slot: Object.defineProperty(<a bare identifier typed as a program class>, <a module-level `const k = Symbol('...')`>, { value, enumerable: false, configurable: false, writable: false })
 
-defineproperty-which-argument-refuses.ts:33:1 - error SC2020: 'Object.defineProperty' is part of the standard library types but has no scriptc lowering yet
+defineproperty-which-argument-refuses.ts:42:14 - error SC2020: 'Object.defineProperty' is part of the standard library types but has no scriptc lowering yet
 
-  32 | const fixed = { a: 1 };
-  33 | Object.defineProperty(fixed, "b", { value: 2, writable: true, enumerable: true, configurable: true });
+  41 | //    descriptor are both fine and the POSITION is the wall.
+  42 | const back = Object.defineProperty(client, runtimeKey, {
+     |              ^~~~~~~~~~~~~~~~~~~~~
+  43 |   get: () => "v",
+
+  hint: the RECEIVER is a compiled 'Client' instance, and a property named by a RUN-TIME string DOES have somewhere to live on one — the per-instance property table. What refuses here is the SHAPE: the call is used as a VALUE, and only STATEMENT position lowers — the call's value is the receiver at the checker's laundered type for the call, which is not what the binding holds. What lowers is Object.defineProperty(<an expression typed as a program class with no subclass>, <a STRING-typed key>, <an OBJECT LITERAL descriptor whose get/set halves are ARROW functions>) in STATEMENT position; the symbol-keyed form beside it is a hidden per-instance DATA slot: Object.defineProperty(<a bare identifier typed as a program class>, <a module-level `const k = Symbol('...')`>, { value, enumerable: false, configurable: false, writable: false })
+
+defineproperty-which-argument-refuses.ts:52:1 - error SC2020: 'Object.defineProperty' is part of the standard library types but has no scriptc lowering yet
+
+  51 | const fixed = { a: 1 };
+  52 | Object.defineProperty(fixed, "b", { value: 2, writable: true, enumerable: true, configurable: true });
      | ^~~~~~~~~~~~~~~~~~~~~
-  34 | 
+  53 | 
 
-  hint: the RECEIVER is a record of a fixed shape, whose property set is FIXED at compile time (a C struct, one field per declared member, no key table) — a property named by a string, and above all by a run-time string, has nowhere to live, so this refuses at the receiver whatever the descriptor says. The one property a define CAN install on a program class is the hidden symbol slot the whole-program pre-pass declared; what lowers is a hidden per-instance DATA slot: Object.defineProperty(<a bare identifier typed as a program class>, <a module-level `const k = Symbol('...')`>, { value, enumerable: false, configurable: false, writable: false })
+  hint: the RECEIVER is a record of a fixed shape, whose property set is FIXED at compile time (a C struct, one field per declared member, no key table) — a property named by a string, and above all by a run-time string, has nowhere to live, so this refuses at the receiver whatever the descriptor says. A program CLASS is the receiver kind that DOES carry a run-time property table; a record shape does not; what lowers is a hidden per-instance DATA slot: Object.defineProperty(<a bare identifier typed as a program class>, <a module-level `const k = Symbol('...')`>, { value, enumerable: false, configurable: false, writable: false })
 
-defineproperty-which-argument-refuses.ts:38:1 - error SC2020: 'Object.defineProperty' is part of the standard library types but has no scriptc lowering yet
+defineproperty-which-argument-refuses.ts:57:1 - error SC2020: 'Object.defineProperty' is part of the standard library types but has no scriptc lowering yet
 
-  37 | const bagRecord: Record<string, unknown> = { a: 1 };
-  38 | Object.defineProperty(bagRecord, runtimeKey, { value: 2, enumerable: true, writable: true, configurable: true });
+  56 | const bagRecord: Record<string, unknown> = { a: 1 };
+  57 | Object.defineProperty(bagRecord, runtimeKey, { value: 2, enumerable: true, writable: true, configurable: true });
      | ^~~~~~~~~~~~~~~~~~~~~
-  39 | 
+  58 | 
 
   hint: the RECEIVER is a record with an index signature, so a run-time key DOES have somewhere to live (the overflow map) — what it has nowhere to live is the descriptor's ATTRIBUTES: overflow entries carry no writable/enumerable/configurable bits and no accessor slot, and defineProperty defaults all three flags to FALSE, so nothing but the fully-open data descriptor could be honoured. Write the key: o[k] = v IS { value: v, writable: true, enumerable: true, configurable: true } on a shape with no prototype chain and no attributes
 
-defineproperty-which-argument-refuses.ts:42:1 - error SC2020: 'Object.defineProperty' is part of the standard library types but has no scriptc lowering yet
+defineproperty-which-argument-refuses.ts:61:1 - error SC2020: 'Object.defineProperty' is part of the standard library types but has no scriptc lowering yet
 
-  41 | //    before the descriptor is read.
-  42 | Object.defineProperty(Client.prototype, "dbl", {
+  60 | //    before the descriptor is read.
+  61 | Object.defineProperty(Client.prototype, "dbl", {
      | ^~~~~~~~~~~~~~~~~~~~~
-  43 |   get: function () { return 2; },
+  62 |   get: function () { return 2; },
 
   hint: the RECEIVER is a prototype object, and prototype objects are not values here (method lookup is static) — there is no object for the property to live on, so this refuses at the receiver whatever the descriptor says; what lowers is a hidden per-instance DATA slot: Object.defineProperty(<a bare identifier typed as a program class>, <a module-level `const k = Symbol('...')`>, { value, enumerable: false, configurable: false, writable: false })

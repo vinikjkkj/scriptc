@@ -9,6 +9,7 @@ import type { Lowerer } from "./lowerer.js";
 import { UNSUPPORTED } from "../../diagnostics/diagnostic.js";
 import { BOOL, BYTES_U8, CHILD_T, DYN, F64, FILEHANDLE_T, IrExpr, IrLibFn, IrParam, IrStmt, IrStrIntrinsicMethod, IrType, KEYOBJ, SPAWNRES_T, STATS_T, STRING, SrcLoc, URL_T, VOID, arrayOf, funcOf, typeEquals, } from "../../ir/nodes.js";
 import { STR_INTRINSIC_SIGS } from "../../ir/validate.js";
+import { definePropTableDecline } from "./lower-classes.js";
 import { isJsSourceFile, isNodeTypesPath, locOf, requireSpecOf } from "../program.js";
 
 /** Statement-level constructs rejected wholesale, keyed by syntax kind. */
@@ -1608,19 +1609,40 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     // ATTRIBUTES. Say so rather than sweeping it in below.
     const overflowKeys =
       recvIr?.kind === "record" && L.shapes.get(recvIr.shapeId)?.indexValue !== undefined;
+    // A CLASS receiver is no longer the receiver's wall. A compiled
+    // instance carries a per-instance property table for exactly the
+    // classes some `Object.defineProperty(<an instance>, <a string key>,
+    // ...)` site in the program names, so zapo's install.ts:114 lowers \u2014
+    // and a site that still refuses is refusing at one of the
+    // recognizer's CLAUSES, not at the receiver. Naming the clause is the
+    // whole job of this hint: telling a reader "no key table" when there
+    // is one would budget the wrong work again, which is the mistake
+    // estado-accessor.md paid for from the other side.
+    if (recvIr?.kind === "object") {
+      const why = definePropTableDecline(L, call);
+      return (
+        `the RECEIVER is a compiled '${recvIr.className}' instance, and a property named by a ` +
+        "RUN-TIME string DOES have somewhere to live on one \u2014 the per-instance property table. " +
+        "What refuses here is the SHAPE: " + why + ". What lowers is " +
+        "Object.defineProperty(<an expression typed as a program class with no subclass>, " +
+        "<a STRING-typed key>, <an OBJECT LITERAL descriptor whose get/set halves are ARROW " +
+        "functions>) in STATEMENT position; the symbol-keyed form beside it is a hidden " +
+        "per-instance DATA slot: Object.defineProperty(<a bare identifier typed as a program " +
+        "class>, <a module-level `const k = Symbol('...')`>, { value, enumerable: false, " +
+        "configurable: false, writable: false })"
+      );
+    }
     if (recvIr != null && !overflowKeys && recvIr.kind !== "dyn" && recvIr.kind !== "func") {
       const what =
-        recvIr.kind === "object"
-          ? `a compiled '${recvIr.className}' instance`
-          : recvIr.kind === "record"
-            ? "a record of a fixed shape"
-            : `a '${recvIr.kind}' value`;
+        recvIr.kind === "record"
+          ? "a record of a fixed shape"
+          : `a '${recvIr.kind}' value`;
       return (
         "the RECEIVER is " + what + ", whose property set is FIXED at compile time (a C struct, " +
         "one field per declared member, no key table) \u2014 a property named by a string, and " +
         "above all by a run-time string, has nowhere to live, so this refuses at the receiver " +
-        "whatever the descriptor says. The one property a define CAN install on a program class " +
-        "is the hidden symbol slot the whole-program pre-pass declared; " + LOWERED_SHAPE
+        "whatever the descriptor says. A program CLASS is the receiver kind that DOES carry a " +
+        "run-time property table; a record shape does not; " + LOWERED_SHAPE
       );
     }
     if (overflowKeys) {

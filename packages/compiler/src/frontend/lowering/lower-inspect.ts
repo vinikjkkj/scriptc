@@ -37,7 +37,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { isJsSourceFile } from "../program.js";
 import { BOOL, DYN, F64, internalSlotFields, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
-import type { ClassInfo } from "./lower-classes.js";
+import { CLASS_PROPS_FIELD, type ClassInfo } from "./lower-classes.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { lowerPromisifiedDiffieHellmanValue } from "./lower-builtins.js";
 
@@ -806,13 +806,61 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       // own properties without showHidden, so Node omits them exactly as it
       // omits #private fields.
       const hidden = info.hiddenSymbolFields;
-      const visible = info.def.fields.filter((f) => !f.name.startsWith("#") && hidden?.has(f.name) !== true);
-      if (visible.length === 0) {
+      // The RUN-TIME property table is not a property: it is the storage
+      // the run-time-keyed defineProperty writes into, and its own name
+      // is `%props`, which no JS key spells. Left in `visible` it printed
+      // itself and its raw descriptor arrays —
+      // `Client { name: 'c', '%props': { plug: [ false, [Function: get],
+      // undefined, false, true ] } }` where Node says
+      // `Client { name: 'c', plug: [Getter] }` — which is the whole
+      // reason this arm has to know about the table at all.
+      const propsTable = info.hasPropsTable === true;
+      const visible = info.def.fields.filter(
+        (f) => !f.name.startsWith("#") && f.name !== CLASS_PROPS_FIELD && hidden?.has(f.name) !== true,
+      );
+      const get = (field: string, type: IrType): IrExpr => ({ kind: "fieldGet", obj: v(), className: t.className, field, type, loc });
+      const propsRef = (): IrExpr => get(CLASS_PROPS_FIELD, DYN);
+      // TWO calls, not one, and the declared fields go between them:
+      // OrdinaryOwnPropertyKeys lists every ARRAY-INDEX key ahead of
+      // every string key across the WHOLE object, so a table holding
+      // "2" and "10" prints them BEFORE a field the constructor
+      // assigned. Node: `C { '2': [Getter], '10': [Getter], a: 1, z:
+      // [Getter] }`; one call answered `C { a: 1, '2': …` — the right
+      // keys in the wrong order, which is a WRONG answer, not a partial
+      // one.
+      const propsEntries = (indexKeys: boolean): IrStmt => ({
+        kind: "exprStmt",
+        expr: {
+          kind: "libCall", fn: "insp.clsProps",
+          args: [propsRef(), rPlus1(), d(), boolLit(indexKeys, loc)],
+          type: { kind: "void" }, loc,
+        },
+        loc,
+      });
+      if (visible.length === 0 && !propsTable) {
         body = [ret(str(`${display} {}`, loc))];
         break;
       }
-      const get = (field: string, type: IrType): IrExpr => ({ kind: "fieldGet", obj: v(), className: t.className, field, type, loc });
-      body = [depthGate(`[${display}]`), ...begin()];
+      body = [];
+      if (visible.length === 0) {
+        // Every key this class can have is a RUN-TIME one, so "is it
+        // empty" is a runtime question — and it has to be asked BEFORE
+        // the depth gate, because Node prints `C {}` for a keyless
+        // object however deep it is and `[C]` only for one with keys.
+        body.push({
+          kind: "if",
+          cond: {
+            kind: "bin", op: "===",
+            left: { kind: "libCall", fn: "cls.propsCount", args: [propsRef()], type: F64, loc },
+            right: num(0, loc), type: BOOL, loc,
+          },
+          then: [ret(str(`${display} {}`, loc))],
+          else_: null,
+          loc,
+        });
+      }
+      body.push(depthGate(`[${display}]`), ...begin());
+      if (propsTable) body.push(propsEntries(true));
       // def.fields carries layout order: the base chain first, then own —
       // exactly the own-property insertion order of a constructor that
       // assigns in declaration order (SEMANTICS.md 36's stance). SYMBOL-
@@ -831,6 +879,11 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
           entry(concatAll([str(`${key}: `, loc), child(f.type, get(f.name, f.type))], loc), boolLit(false, loc)),
         );
       }
+      // The run-time table's entries come AFTER the declared fields, and
+      // that IS Node's order: the table can only be filled once the
+      // constructor has run, so every key in it was inserted later than
+      // every field the constructor assigned.
+      if (propsTable) body.push(propsEntries(false));
       body.push(ret(end(str("", loc), str(`${display} {`, loc), str("}", loc), false, boolLit(false, loc))));
       break;
     }
