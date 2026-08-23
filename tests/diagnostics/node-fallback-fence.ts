@@ -3,8 +3,10 @@
 // @types/node needed to preflight) and every reached use without a
 // lowering terminates in a clean SC2020-family diagnostic at its use
 // site — the coverage report's honest blocker list, never a raw
-// "Cannot find name". fetch/AbortSignal.timeout DO lower (island-backed
-// ambients): in this static build their sites report SC2012 instead.
+// "Cannot find name". `fetch` LOWERS in a static build now
+// (scr_fetch_static.c), with Response and Headers behind it; the
+// AbortSignal STATICS still report SC2012, so the site below is a
+// `signal` this build cannot mint rather than a call it cannot make.
 // setInterval/clearInterval, process.on/once/off (signals and "exit"),
 // the stdin events, and stdin.destroy() all LOWER now — the fences here
 // are the members BEYOND the lowered slice.
