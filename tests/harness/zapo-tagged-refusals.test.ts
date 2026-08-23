@@ -4,9 +4,10 @@
  * unit reported `REFUSAL.tagged 7 statements / 7 ways to die` at SIX source
  * sites, and that population is the whole distance between the compiler's
  * standing objective ("no [SCxxxx] throws left in the emitted C") and where
- * it stands. One of the six has since closed (`Readable.from` over an async
- * generator) and moved to the CLOSED list below, which asserts the opposite
- * direction with the same instrument. It has been re-measured by a dozen blocks and enumerated in
+ * it stands. TWO of the six have since closed (`Readable.from` over an
+ * async generator, and `Object.defineProperty` with a run-time string key
+ * on a compiled class instance) and moved to the CLOSED list below, which
+ * asserts the opposite direction with the same instrument. It has been re-measured by a dozen blocks and enumerated in
  * prose, but NOTHING IN THE REPOSITORY PINNED IT: no test compiled any of
  * those shapes, so a widening that turned one of them into a silently WRONG
  * answer -- the failure mode this project ranks above every other, because a
@@ -91,25 +92,6 @@ const PLANTS: readonly {
   forbid?: readonly string[];
   src: string;
 }[] = [
-  {
-    name: "defineprop-on-a-compiled-class",
-    ext: "ts",
-    zapoSite: "src/client/plugins/install.ts:114 -- Object.defineProperty(client, exposeAs, {get})",
-    accept: [{ code: "SC2020", fragment: "'Object.defineProperty' is part of the standard library types" }],
-    src: [
-      "class Client { readonly x: number = 1 }",
-      "declare const exposeAs: string",
-      "declare const inst: Map<string, unknown>",
-      "const client = new Client()",
-      "Object.defineProperty(client, exposeAs, {",
-      "  get: () => inst.get(exposeAs),",
-      "  enumerable: true,",
-      "  configurable: false",
-      "})",
-      "console.log(client.x)",
-      "",
-    ].join("\n"),
-  },
   {
     name: "an-options-record-carrying-typeof-fetch",
     ext: "ts",
@@ -259,6 +241,35 @@ const CLOSED: readonly {
   provedBy: string;
   src: string;
 }[] = [
+  {
+    name: "defineprop-on-a-compiled-class",
+    ext: "ts",
+    zapoSite: "src/client/plugins/install.ts:114 -- Object.defineProperty(client, exposeAs, {get})",
+    provedBy:
+      "tests/corpus/5990-5995 (the answer, the attributes, the key order, the descriptor shapes, " +
+      "the loud refusal and the receivers - Node is the oracle on both lanes) and " +
+      "tests/harness/class-runtime-property-table.test.ts (the shapes that must stay LOUD, which " +
+      "no differential can assert because Node answers where this refuses)",
+    // Reduced from zapo's own lines, INCLUDING the `Map<string, unknown>`
+    // the getter reads: `instances.get(exposeAs)` is where the second
+    // wall was, and a plant that used a `Map<string, string>` instead
+    // would carry zero refusals while zapo still carried one.
+    src: [
+      "class Client { readonly x: number = 1 }",
+      "const inst = new Map<string, unknown>()",
+      "const exposeAs = process.argv.length > 99 ? 'zz' : 'plug'",
+      "const client = new Client()",
+      "if (!(exposeAs in client)) {",
+      "  Object.defineProperty(client, exposeAs, {",
+      "    get: () => inst.get(exposeAs),",
+      "    enumerable: true,",
+      "    configurable: false",
+      "  })",
+      "}",
+      "console.log(client.x, exposeAs in client)",
+      "",
+    ].join("\n"),
+  },
   {
     name: "readable-from-an-async-generator",
     ext: "ts",

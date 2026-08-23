@@ -1618,6 +1618,16 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // in canonical arm order, so V's tags coincide with the result
             // union's and no re-tag exists (validated).
             const k = E.emitExpr(e.args[0]!);
+            if (value.kind === "dyn") {
+              // A dyn-valued map: the stored node comes back +1 on a hit
+              // and NULL on a miss, and the miss answers the interned
+              // immortal undefined — a VALUE of the checked-dynamic tree,
+              // so there is no union box and no tag. Immortal means the
+              // release the caller emits is a no-op on that path.
+              const t = E.newTemp(e.type, `(ScrDyn *)scr_map_get_${kAcc}_ref(${r.name}, ${k.name})`);
+              E.line(`if (!${t.name}) ${t.name} = scr_dyn_undefined();`);
+              return t;
+            }
             if (e.type.kind !== "union") throw new Error("emitter bug: map get result is not a union");
             const def = E.unionsById.get(e.type.unionId);
             const undefTag = E.undefinedArmTag(e.type);

@@ -8552,7 +8552,19 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
         // linked and must not name the dispatch.
         (node.fn === "dyn.hasKey" ||
           node.fn === "dyn.defineProps" || node.fn === "dyn.defineProp" ||
-          node.fn === "dyn.objCreateDescs" || node.fn === "dyn.objCreateNullDescs"))
+          node.fn === "dyn.objCreateDescs" || node.fn === "dyn.objCreateNullDescs" ||
+          // The per-instance property table of a compiled class instance
+          // lives in the same unit as the property definers beside it,
+          // and for the same reason: in the always-linked scr_json.c it
+          // cost EVERY binary 6 144 bytes (the island/regex size-class
+          // pair measured it) for a table almost no program has. All five
+          // entry points gate together — `in` reads the table through
+          // cls.propsHas without ever defining anything, so gating only
+          // the definer would leave that program calling a symbol its
+          // link line does not carry.
+          node.fn === "cls.propsEnsure" || node.fn === "cls.propsDefine" ||
+          node.fn === "cls.propsHas" || node.fn === "cls.propsGet" ||
+          node.fn === "cls.propsCount"))
     ) {
       found = true;
       return;
@@ -9782,6 +9794,7 @@ const LIB_MODE_REFUSED_PREFIXES: readonly [string, string][] = [
   // (scr_dyn_invoke.c → scr_async_dyn.c).
   ["dyn.defineProps", "checked-dynamic prototype dispatch"],
   ["dyn.defineProp", "checked-dynamic prototype dispatch"],
+  ["cls.props", "checked-dynamic prototype dispatch"],
   ["dyn.objCreateDescs", "checked-dynamic prototype dispatch"],
   ["dyn.objCreateNullDescs", "checked-dynamic prototype dispatch"],
 ];
