@@ -732,6 +732,47 @@ ScrStr *scr_insp_key(ScrStr *k) {
   return ib_take(&b);
 }
 
+/* ── a compiled class instance's run-time property table ──────────────
+ *
+ * The frame entries for the properties `Object.defineProperty(instance,
+ * <a run-time string>, desc)` put in the `%props` table (scr_runtime.h
+ * carries the representation). Called by the emitted `%util.insp.N`
+ * helper for a class that HAS the field, immediately after the entries
+ * for the declared fields — which is Node's order, because the table can
+ * only be filled after the constructor ran.
+ *
+ * ENUMERABLE only, without showHidden — the same rule the OBJ walk above
+ * gets for free by keeping non-enumerables out of `entries`; this table
+ * holds both families, so the filter is explicit. An ACCESSOR is NOT
+ * invoked: Node prints `[Getter]` / `[Setter]` / `[Getter/Setter]` and
+ * calls nothing, and calling it here would be a side effect at a print. */
+void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth) {
+  if (tbl == NULL || tbl->kind != SCR_DYN_OBJ) return;
+  size_t *ord = scr_dyn_obj_key_order(tbl);
+  for (size_t i = 0; i < tbl->v.obj.len; i++) {
+    const ScrDynEntry *ent = &tbl->v.obj.entries[ord ? ord[i] : i];
+    const ScrDyn *q = ent->value;
+    if (q->kind != SCR_DYN_ARR || q->v.arr.len < 5) continue;
+    if (!scr_dyn_truthy(q->v.arr.items[4])) continue; /* non-enumerable */
+    InspBuf eb = {0};
+    insp_key_into(&eb, ent->key, ent->key_len);
+    ib_cstr(&eb, ": ");
+    if (scr_dyn_truthy(q->v.arr.items[0])) { /* data: the value renders */
+      ScrStr *val = scr_insp_dyn(q->v.arr.items[1], recurse + 1, depth);
+      ib_bytes(&eb, val->data, val->len);
+      scr_str_release(val);
+    } else {
+      bool g = q->v.arr.items[1]->kind == SCR_DYN_FUNC;
+      bool s = q->v.arr.items[2]->kind == SCR_DYN_FUNC;
+      ib_cstr(&eb, g && s ? "[Getter/Setter]" : g ? "[Getter]" : "[Setter]");
+    }
+    ScrStr *entry = ib_take(&eb);
+    scr_insp_entry(entry, false);
+    scr_str_release(entry);
+  }
+  free(ord);
+}
+
 
 /* ── internal slots, which Node keeps under own SYMBOLS ───────────────
  *

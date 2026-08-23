@@ -2069,6 +2069,17 @@ export class CEmitter {
     if (t.kind === "jsval") {
       return [`  o->${mangleField(name)} = scr_jsval_undefined(); /* ${name} starts undefined */`];
     }
+    // A CHECKED-DYNAMIC field (`unknown`/`any` without --dynamic, and the
+    // `%props` table a run-time-keyed defineProperty needs) admits
+    // undefined too, and the calloc NULL was not "undefined": every read
+    // of it is a scr_dyn_retain(NULL) — a SEGFAULT, measured on
+    // `class C { u?: unknown; n: number; constructor(){ this.n = 1 } }`,
+    // where Node answers `true` to `c.u === undefined`. The interned
+    // undefined singleton is immortal, so the retain/release pair around
+    // the field costs nothing and the store needs no teardown.
+    if (t.kind === "dyn") {
+      return [`  o->${mangleField(name)} = scr_dyn_undefined(); /* ${name} starts undefined */`];
+    }
     const tag = this.undefinedArmTag(t);
     if (tag < 0 || t.kind !== "union") return [];
     return [`  o->${mangleField(name)} = ${this.unitInstanceRef(t.unionId, tag)}; /* ${name} starts undefined */`];
