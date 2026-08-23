@@ -89,14 +89,68 @@ const RUNS: readonly { name: string; src: string; stdout: string; exit: number }
     exit: 1,
   },
   {
+    // `instanceof` is the one operator whose lowering may skip its RIGHT
+    // operand: the static class graph answers "unrelated, so false", and
+    // an ambient class is unrelated to everything. It folded to `false`
+    // without ever looking at the identifier, which is why it survived
+    // the value-read arms above.
+    //
+    // The left operand here is a plain LOCAL. That is the shape that
+    // compiled and LIED on base (`after false`, exit 0, both lanes); the
+    // call-expression spelling below was a LOUD SC1090 refusal on base,
+    // so the two are separate entries and each says which it was.
+    name: "instanceof an ambient class throws (bound left operand -- WRONG on base)",
+    src:
+      DECLS + "class Real { v = 1 }\nconst r = new Real()\n" +
+      "console.log('before')\nconst v = r instanceof EC\nconsole.log('never', v)\n",
+    stdout: "before\n",
+    exit: 1,
+  },
+  {
+    // JS evaluates the LEFT operand first, so its effects happen before
+    // the right operand's reference throws. On base this shape REFUSED
+    // (`SC1090: statically-decided 'instanceof' on computed operands`),
+    // so it is TRAP->MATCH; it is pinned so the ordering can never
+    // regress into "drop the left operand, the answer is a throw anyway".
+    name: "instanceof an ambient class still runs the left operand first",
+    src:
+      DECLS + "class Real { v = 1 }\nlet n = 0\n" +
+      "function mk(): Real { n = n + 1; console.log('lhs', n); return new Real() }\n" +
+      "console.log('before')\nconst v = mk() instanceof EC\nconsole.log('never', v, n)\n",
+    stdout: "before\nlhs 1\n",
+    exit: 1,
+  },
+  {
+    // A CATCH BINDING on the left: the one left operand whose ordinary
+    // lowering itself fences (base: `SC1090: 'instanceof' on a catch
+    // binding against the standalone class 'EC'`). It has no effects, so
+    // it is dropped rather than lowered, and the throw is the answer.
+    name: "instanceof an ambient class from a catch binding",
+    src:
+      DECLS + "console.log('before')\n" +
+      "try { throw new Error('boom') } catch (err) { console.log('in catch')" +
+      "; const v = err instanceof EC; console.log('never', v) }\n" +
+      "console.log('after')\n",
+    stdout: "before\nin catch\n",
+    exit: 1,
+  },
+  {
     // The neighbours. A real class's `.name` is a compile-time constant
-    // and must stay one; `typeof` over real bindings must stay exact.
+    // and must stay one; `typeof` over real bindings must stay exact;
+    // `instanceof` between two REAL classes must still answer, in both
+    // directions — the widening must not turn every `instanceof` into a
+    // throw.
     name: "the neighbours are untouched",
     src:
-      "class Real { v = 1 }\nfunction f(): number { return 1 }\nconst n = 1\n" +
+      "class Real { v = 1 }\nclass Sub extends Real { }\n" +
+      "function f(): number { return 1 }\nconst n = 1\n" +
       "console.log(Real.name, typeof Real, typeof f, typeof n, typeof new Real())\n" +
-      "console.log(typeof JSON, typeof Math, typeof parseInt, typeof undefined)\n",
-    stdout: "Real function function number object\nobject object function undefined\n",
+      "console.log(typeof JSON, typeof Math, typeof parseInt, typeof undefined)\n" +
+      "const s = new Sub()\nconst r = new Real()\n" +
+      "console.log(s instanceof Real, r instanceof Sub, new Error('x') instanceof Error)\n",
+    stdout:
+      "Real function function number object\nobject object function undefined\n" +
+      "true false true\n",
     exit: 0,
   },
 ];
