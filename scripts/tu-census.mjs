@@ -630,7 +630,13 @@ const byCat = new Map();
 const waysByCat = new Map();
 for (const r of rows) { bump(byCat, r.cat); bump(waysByCat, r.cat, r.ways); }
 const statements = rows.length;
-if (statements === 0) fail("zero failure statements in the whole TU — an empty or wrong input file reads exactly like a perfect one");
+/* ZERO-POPULATION is a TAG, not decoration: a caller that has to tell this
+ * apart from a broken accounting invariant (both exit 3) needs something
+ * stabler than the prose behind it. It is the one problem a CALLER can
+ * legitimately expect — a program whose every refusal closed has nothing
+ * left to count — and every other problem on this list is the instrument
+ * saying it does not trust its own reading. */
+if (statements === 0) fail("ZERO-POPULATION: zero failure statements in the whole TU — an empty or wrong input file reads exactly like a perfect one");
 if (nCodedCalls + nUncodedCalls + nTrapCalls !== statements) {
   fail(`family totals ${nCodedCalls}+${nUncodedCalls}+${nTrapCalls} != ${statements} rows`);
 }
@@ -755,6 +761,12 @@ if (jsonOut) {
     file, lane, bytes: raw.length,
     old: { traps: oldTraps, sites: oldSites.size, prose: oldProse },
     statements, byCat: Object.fromEntries(byCat), waysByCat: Object.fromEntries(waysByCat),
+    /* Why the exit code is what it is. A reader that only sees `exit 3`
+     * cannot tell "this TU broke an accounting invariant" from "this TU
+     * has nothing in it to count", and those are opposite facts: the
+     * first is an instrument failure, the second is what a program with
+     * every refusal closed actually looks like. Empty on exit 0. */
+    problems: [...problems],
     ctx, rows: rows.map((r) => ({ line: r.line, cat: r.cat, code: r.code, site: r.site, host: r.host, ways: r.ways, msg: r.msg.slice(0, 200) })),
   }, null, 1));
 }
