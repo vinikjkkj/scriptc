@@ -711,7 +711,7 @@ export function probeNodeRequireRefusal(
         return null; // unreadable manifest — conservative
       }
     }
-    if (host.isDirectory(join(dir, "node_modules", name))) return null;
+    if (nodeModulesRootResolves(host, join(dir, "node_modules", name))) return null;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
@@ -719,6 +719,45 @@ export function probeNodeRequireRefusal(
   return {
     message: `Cannot find module '${specifier}'\nRequire stack:\n- ${nativePath(importer)}`,
   };
+}
+
+/** Node's LOAD_AS_FILE list for a CJS require, exactly: the path
+ * VERBATIM, then the three extensions require's own extension table
+ * serves. `.mjs` and `.cjs` are NOT in it -- measured against Node
+ * v25.9.0, where `node_modules/d.mjs` leaves `require("d")` throwing
+ * MODULE_NOT_FOUND while `node_modules/a.js` hands the module over. */
+const CJS_LOAD_AS_FILE_EXTS: readonly string[] = ["", ".js", ".json", ".node"];
+
+/** Does Node's CJS resolution find anything at `node_modules/<root>`?
+ *
+ * A package root need NOT be a directory. Node tries LOAD_AS_FILE on the
+ * path before LOAD_AS_DIRECTORY, so a loose `node_modules/x.js`,
+ * `x.json`, `x.node` -- or an extension-less file named `x` -- makes
+ * `require("x")` resolve and hand back a module. A walk that asked only
+ * isDirectory answered "nothing installed resolves this" for every one of
+ * them, and the callers turn that answer into Node's catchable
+ * MODULE_NOT_FOUND: a THROW where Node returns a module, swallowed by the
+ * very `try { require(x) } catch {}` idiom the throw was built for. */
+function nodeModulesRootResolves(host: Host, base: string): boolean {
+  if (host.isDirectory(base)) return true;
+  for (const ext of CJS_LOAD_AS_FILE_EXTS) if (host.isFile(base + ext)) return true;
+  return false;
+}
+
+/** The bare ROOT a node_modules FILE entry additionally spells, or null.
+ * `readdir` gives `x.js`; the caller adds that name itself
+ * (`require("x.js")` resolves too -- the path is tried verbatim first),
+ * and this adds the `x` that Node's extension list also serves. Only a
+ * real FILE counts: a DIRECTORY named `x.js` spells no root but its own
+ * name, because every LOAD_AS_FILE candidate has to be a file. */
+function cjsFileEntryRoot(host: Host, path: string, entry: string): string | null {
+  for (const ext of CJS_LOAD_AS_FILE_EXTS) {
+    if (ext === "") continue;
+    if (entry.length > ext.length && entry.endsWith(ext)) {
+      return host.isFile(path) ? entry.slice(0, -ext.length) : null;
+    }
+  }
+  return null;
 }
 
 /** Every name Node's CJS loader serves as a BUILTIN, prefix-less. Node's
@@ -805,10 +844,17 @@ function computeResolvableRoots(fromFile: string, host: Host): Set<string> | nul
         if (e.startsWith("@")) {
           const scoped = host.readdir(join(nm, e));
           if (scoped === null) return null;
-          for (const s2 of scoped) if (!s2.startsWith(".")) out.add(`${e}/${s2}`);
+          for (const s2 of scoped) {
+            if (s2.startsWith(".")) continue;
+            out.add(`${e}/${s2}`);
+            const fileRoot = cjsFileEntryRoot(host, join(nm, e, s2), s2);
+            if (fileRoot !== null) out.add(`${e}/${fileRoot}`);
+          }
           continue;
         }
         out.add(e);
+        const fileRoot = cjsFileEntryRoot(host, join(nm, e), e);
+        if (fileRoot !== null) out.add(fileRoot);
       }
     }
     const parent = dirname(dir);
