@@ -1583,14 +1583,27 @@ ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity,
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_FUNC);
   d->v.fn.clo = clo;
   d->v.fn.thunk = thunk;
-  /* NEVER NULL. The emitted dynCheck for a function type reaches straight
-   * for `strcmp(d->v.fn.sig, "<typeKey>")`, so a NULL here is a segfault
-   * inside GENERATED code, naming no unit and no line -- which is how it
-   * was found. The empty string is the honest stand-in for "no interned
-   * signature": it can never equal a typeKey, so the check falls through
-   * to the per-target adapter, which is the right answer for a box whose
-   * closure holds a dyn thunk rather than a typed entry point. */
-  d->v.fn.sig = sig != NULL ? sig : "";
+  /* NEVER NULL, and the box refuses to exist rather than carry one. The
+   * emitted dynCheck for a function type reaches straight for
+   * `strcmp(d->v.fn.sig, "<typeKey>")` -- so a NULL stored here is a
+   * segfault inside GENERATED code, naming no unit and no line, which is
+   * exactly how it was found and is the worst diagnostic shape this
+   * project has.
+   *
+   * Substituting the empty string here (what this line used to do) makes
+   * the crash go away and makes the DEFECT unnameable: a runtime unit
+   * that forgot its signature ships a box that silently takes the
+   * per-target adapter forever, and nothing ever says so. A missing
+   * signature is a violation of THIS function's contract by its CALLER,
+   * so it is answered where the Map box already answers the identical
+   * question about its missing type key -- a trap, at the mint, naming
+   * the box. The trap is uncatchable on purpose: a catchable throw from
+   * a boxing conversion has no site to be caught at. */
+  if (sig == NULL) {
+    scr_trap_fmt("scriptc: internal error: a dyn function box was minted with no signature (name=%s)\n",
+                 name != NULL ? name : "<anonymous>");
+  }
+  d->v.fn.sig = sig;
   d->v.fn.name = (name != NULL || clo == NULL) ? name : scr_fn_name_of(clo->fn);
   d->v.fn.src = src;
   d->v.fn.arity = arity;
@@ -1602,6 +1615,31 @@ ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity,
  * wrapper), so `[native code]` is the truthful answer and the box says so
  * rather than leaving the slot ambiguous. */
 ScrDyn *scr_dyn_new_func(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity, const char *sig, const char *name) {
+  /* The SILENT twin of the NULL signature, and the reason this spelling
+   * exists separately from _src at all. A box minted HERE holds a dyn
+   * thunk in `clo->fn` -- the closure's C entry point takes
+   * (ScrClosure *, ScrDyn *const *, size_t) and nothing else. The
+   * compiler's exact-signature branch
+   *
+   *     if (strcmp(d->v.fn.sig, "func(f64,dyn)=>void") == 0)
+   *         return scr_closure_retain(d->v.fn.clo);
+   *
+   * UNWRAPS the closure and calls `clo->fn` through the STATIC C
+   * signature that type key names. So a runtime sig that happens to
+   * equal a compiler type key is a call through the wrong signature: a
+   * crash, or worse a silent one, inside emitted code naming no unit --
+   * the same shape as the NULL, one strcmp later. `typeKey` spells every
+   * function type `func(...)=>...` (ir/nodes.ts), and no human-readable
+   * spelling starts that way, which is the convention scr_stream.c,
+   * scr_dc.c and scr_ws_dispatch.c already follow in comments. This is
+   * that convention made checkable. The COMPILER's boxes carry real type
+   * keys and go through _src, which is untouched. */
+  if (sig != NULL && strncmp(sig, "func(", 5) == 0) {
+    scr_trap_fmt("scriptc: internal error: a runtime-minted dyn function box was given the compiler type "
+                 "key '%s' as its signature (name=%s); the emitted dynCheck would unwrap its closure and "
+                 "call the dyn thunk through that static C signature\n",
+                 sig, name != NULL ? name : "<anonymous>");
+  }
   return scr_dyn_new_func_src(clo, thunk, arity, sig, name, SCR_FN_SRC_NATIVE);
 }
 
