@@ -8,55 +8,70 @@
  * it reappears at the call; lower the call and it reappears at the
  * Response the call answers. They land together.
  *
- * `RequestInit` and `Request` are NOT mapped, and that is deliberate: an
- * options record carrying `typeof fetch` (zapo's
- * `WaFetchVersionOptions`) still refuses through them. Mapping the two
- * types would let the record compile and would then surface the rest of
- * that function as NEW refusals at sites that do not exist today —
- * `options.fetch ?? fetch` needs a builtin to have a first-class closure
- * form, and `(init as { dispatcher?: unknown }).dispatcher = ...` is the
- * assignment-target family. The whole group has to land at once, for the
- * reason lower-abort.ts's header gives about the same shape of family:
- * lower the visible members alone and the hidden ones surface, so it gets
- * worse before it gets better.
+ * `RequestInit` AND `Request` ARE MAPPED NOW, and the two paragraphs this
+ * one replaced were right to refuse doing it by halves. They said: map the
+ * two types and zapo's `WaFetchVersionOptions` record compiles, and the
+ * rest of that function then surfaces as NEW refusals at sites that do not
+ * exist today. Measured on a faithful reduction, that was exactly correct
+ * — three of them, at `options.fetch ?? fetch`, at `const init:
+ * RequestInit = {…}` and at the dispatcher write. What was wrong was only
+ * the conclusion drawn from it, that the group could not be taken; it
+ * lands here as one change, and the residue is one statement.
+ *
+ * A RequestInit VALUE carries exactly what scr_fetch_start takes and
+ * nothing else. That is the whole design, and it is the same rule the
+ * non-literal-init refusal below always stated: the compiler has to know
+ * every key the program wrote, so the value is built by THIS file's key
+ * walk (initLiteral) at the point the literal is written, and what it
+ * stores is the folded head. Which is why no member of one reads back.
  *
  * WHAT IS LOWERED
- *   fetch(url)                       a string OR a URL value (not a
- *                                    `string | URL` UNION — that union has
- *                                    no static representation yet, SC2001)
+ *   fetch(url)                       a string, a URL value, OR the ambient
+ *                                    signature's own input UNION
+ *                                    (`string | Request | URL`), dispatched
+ *                                    by tag at the entry point
  *   fetch(url, <object literal>)     method / headers / body / signal
+ *   fetch(url, initValue)            a `RequestInit`, or a `RequestInit |
+ *                                    undefined` — the undefined arm is an
+ *                                    ABSENT init, not an empty one
+ *   const init: RequestInit = {…}    the same key walk, folded into a value
  *   response.ok / .status / .statusText / .url / .redirected / .bodyUsed
  *   response.headers                 the Headers view
  *   response.text() / .json() / .arrayBuffer() / .bytes()
  *   headers.get(name) / .has(name)
  *
  * WHAT IS NOT, and why each is a refusal rather than an invention:
- *   - a NON-LITERAL init. The options-record stance (lower-builtins.ts's
- *     fs.createReadStream comment): the runtime call has one fixed shape
- *     whose absent members are sentinels, so the compiler has to know
- *     every key the program wrote. Handed an opaque init it would have to
- *     ignore the keys it cannot see, and an ignored `signal` is a fetch
- *     that never aborts — silently.
+ *   - a NON-LITERAL init at the point one is BUILT. The options-record
+ *     stance (lower-builtins.ts's fs.createReadStream comment): the
+ *     runtime call has one fixed shape whose absent members are sentinels,
+ *     so the compiler has to know every key the program wrote. Handed an
+ *     opaque init it would have to ignore the keys it cannot see, and an
+ *     ignored `signal` is a fetch that never aborts — silently. Passing an
+ *     init VALUE around is fine precisely because it was built through
+ *     that walk.
+ *   - every MEMBER of a RequestInit value (requestInitMemberFence). The
+ *     stored form is folded — header names lowercased and flattened, a
+ *     string body already encoded — so a read would answer something other
+ *     than what the program wrote.
+ *   - `dispatcher`, in a literal or written through an assertion. MEASURED
+ *     against Node v25.9.0: `fetch(url, { dispatcher })` really does call a
+ *     plain object's `dispatch(opts, handler)` and wait for the handler's
+ *     callbacks. There is no static representation for an engine object
+ *     driving undici's handler protocol, and dropping the key would be a
+ *     proxy silently ignored. This is the one refusal zapo still carries in
+ *     wa-version-fetcher.ts.
  *   - `response.body`. It is a ReadableStream in Node, this slice has no
  *     stream body, and answering `null` (the shape a bodyless response
  *     really has) for a response that HAS one would be a wrong value.
- *   - `new Response(...)` / `new Headers(...)` / `Request`. Nothing in
- *     reach constructs one, and a constructor that silently dropped its
- *     init would be worse than the fence.
+ *   - `new Response(...)` / `new Headers(...)` / `new Request(...)`.
+ *     Nothing in reach constructs one, and a constructor that silently
+ *     dropped its init would be worse than the fence. `Request` is a TYPE
+ *     with no values at all: the union arm exists so the ambient signature
+ *     maps, and scr_fetch_start_union's branch for it answers a rejected
+ *     promise rather than reading a pointer that cannot be there.
  *   - `headers.forEach` / `entries` / `keys` / `values` / `getSetCookie`.
  *     Not needed by anything reachable, and each is its own iteration
  *     protocol.
- *   - `typeof fetch` AS A TYPE. `fetch` as a VALUE now lowers -- see
- *     lower-fnvalue.ts, which mints the interned zero-capture closure
- *     `String`/`Number`/`Boolean` already had -- but its value form is
- *     `(input: string) => Promise<Response>`, arity ONE, because `init`
- *     has no static representation. The TYPE is not mapped to that
- *     narrower signature: doing so would let zapo's
- *     `WaFetchVersionOptions` record compile and would then turn every
- *     two-argument call through the field into a NEW refusal inside a
- *     body that produces none today. So zapo's own
- *     `options.fetch ?? fetch` still does not compile, and it is the
- *     record's `typeof fetch` that stops it, not the value form.
  */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";

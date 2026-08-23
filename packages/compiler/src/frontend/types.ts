@@ -14,7 +14,16 @@ export { typeKey };
  * engine's fetch mints the Response; AbortSignal.timeout mints the
  * signal), so under --dynamic they map to island handles (jsval) exactly
  * like npm-declared types. Checked with declaration provenance in mapType;
- * consumed by the lowerer's badType for the static-build wording. */
+ * consumed by the lowerer's badType for the static-build wording.
+ *
+ * It is a --dynamic list ONLY now. Every name on it has a static
+ * representation of its own in a static build — AbortSignal first,
+ * Response and Headers with the static fetch, RequestInit with the init
+ * VALUE — so the arms above this one in mapType claim all four before the
+ * jsval-or-nothing row at the bottom is reached, and badType's
+ * island-ambient wording is unreachable for them there. The list stays
+ * because the DYNAMIC lane still needs exactly these four to become
+ * jsval. */
 export const ISLAND_AMBIENT_TYPES = ["Response", "RequestInit", "AbortSignal", "Headers"] as const;
 
 /** The shapes a double assertion RESHAPES INTO, named by a pass-stable
