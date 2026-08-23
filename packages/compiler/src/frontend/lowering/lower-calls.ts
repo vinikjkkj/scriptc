@@ -11722,9 +11722,25 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
       // `r.apply(null, t)` where `t` was filled from `arguments`) has no
       // static arity, so no direct call can be spelled for it — it takes
       // the DYN dispatch instead, in the second arm.
+      //
+      // TYPESCRIPT reaches the same first arm, and only that one. A plain
+      // TypeScript function cannot read a receiver at all (noImplicitThis
+      // is tsc's error, SC1080 is the lowerer's), so `f.call(x, a)` IS
+      // `f(a)` with `x` evaluated for its effects — the same erasure the
+      // TypeScript side of `.bind` performs, and sound for the same
+      // reason. Unlike `.bind` there is nothing to lose by it: a CALL
+      // produces the result, not a function object, so no identity rides
+      // on the wrapper. The window is opened only on the JS side, which is
+      // what `pushThis` selects below.
+      //
+      // The RUNTIME-LENGTH pack arm stays JavaScript-only. Its whole
+      // subject is `arguments`, which TypeScript has no spelling for, and
+      // it routes through a dyn dispatch whose arity rule diverges from a
+      // compiled call's; importing that into a path that refuses today is
+      // the trade this project does not make.
+      const callApplyIsJs = isJsSourceFile(call.getSourceFile());
       if (
         (name === "call" || name === "apply") &&
-        isJsSourceFile(call.getSourceFile()) &&
         L.checker.getCallSignatures(recvT).length > 0 &&
         call.arguments.length >= 1 &&
         !call.arguments.some((a) => ts.isSpreadElement(a))
@@ -11770,15 +11786,43 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
             fn.type.params.length === argNodes.length
           ) {
             const thisArg = L.lowerExpr(call.arguments[0]!);
-            const bound = L.bindThisClosure(fn, thisArg, [], locOf(call));
-            if (bound) {
-              const args = L.completeArgs(
+            const args = (): IrExpr[] =>
+              L.completeArgs(
                 argNodes,
-                fn.type.params.map((t) => ({ type: t, mode: "required" as const })),
+                fn!.type.kind === "func"
+                  ? fn!.type.params.map((t) => ({ type: t, mode: "required" as const }))
+                  : [],
                 locOf(call),
                 call,
               );
-              return { kind: "callValue", callee: bound, args, type: fn.type.ret, loc: locOf(call) };
+            if (!callApplyIsJs) {
+              // TypeScript: the receiver is dropped, so the call is the
+              // call. `droppableStatic` is the `f.call(null, ...)` /
+              // `f.call(undefined, ...)` spelling that needs nowhere to
+              // put the evaluation; anything else rides a seqExpr, which
+              // carries a value and so wants a non-void result.
+              const direct: IrExpr = {
+                kind: "callValue",
+                callee: fn,
+                args: args(),
+                type: fn.type.ret,
+                loc: locOf(call),
+              };
+              if (droppableStatic(thisArg)) return direct;
+              if (fn.type.ret.kind !== "void") {
+                return {
+                  kind: "seqExpr",
+                  stmts: [{ kind: "exprStmt", expr: thisArg, loc: locOf(call) }],
+                  result: direct,
+                  type: fn.type.ret,
+                  loc: locOf(call),
+                };
+              }
+            } else {
+              const bound = L.bindThisClosure(fn, thisArg, [], locOf(call));
+              if (bound) {
+                return { kind: "callValue", callee: bound, args: args(), type: fn.type.ret, loc: locOf(call) };
+              }
             }
           }
           // `fn.apply(thisArg, <runtime-length pack>)` over a compiled
@@ -11827,8 +11871,8 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
                       : !canBoxFuncIntoDyn(fn.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))
                         ? "receiver-does-not-box"
                         : "OK";
-          if (packWhy !== null && packWhy !== "OK") applyPackWhy(call, `NOT-CLOSED=${packWhy}`);
-          if (packWhy === "OK" && fn !== null && fn.type.kind === "func") {
+          if (packWhy !== null && packWhy !== "OK" && callApplyIsJs) applyPackWhy(call, `NOT-CLOSED=${packWhy}`);
+          if (packWhy === "OK" && callApplyIsJs && fn !== null && fn.type.kind === "func") {
             // BOTH OPERANDS MUST REACH THE RUNTIME AS DYNS. The pack is
             // the load-bearing one: scr_dyn_invoke reads its `arr` payload,
             // so a value that arrived unconverted would be read as a
