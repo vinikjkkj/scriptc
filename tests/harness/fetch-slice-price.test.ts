@@ -145,8 +145,7 @@ const CLOSED: readonly { name: string; src: string; provedBy: string }[] = [
     // compiles.
     name: "RequestInit in an argument position",
     provedBy:
-      "tests/harness/request-init.test.ts (25 cells against Node, both backends) " +
-      "and tests/corpus/6080, 6081",
+      "tests/harness/request-init.test.ts (25 cells against Node, both backends)",
     src: optionsRecord("readonly hook?: (input: string, init?: RequestInit) => Promise<string>"),
   },
   {
