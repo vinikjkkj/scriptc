@@ -5564,6 +5564,13 @@ double scr_set_immediate(ScrClosure *cb); /* cb ownership moves in */
  * synchronously on a non-function; borrowed. */
 void scr_queue_microtask(ScrClosure *cb);
 void scr_queue_microtask_dyn(const ScrDyn *cb);
+/* The runtime-internal twin: `fn(arg)` on the next microtask turn, with
+ * `arg`'s reference moving in (released through `arg_release` after fn
+ * returns, or not at all when that is NULL). A runtime unit that must
+ * land its own work exactly one microtask turn out uses this rather than
+ * boxing a closure. */
+void scr_queue_microtask_raw(void (*fn)(void *), void *arg,
+                             void (*arg_release)(void *));
 /* setImmediate AS A dyn VALUE (the traceCallback shape): a minted dyn
  * callable that schedules args[0](args[1..]) on the immediate queue and
  * answers undefined; a non-function first argument throws Node's

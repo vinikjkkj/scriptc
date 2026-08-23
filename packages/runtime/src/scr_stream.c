@@ -186,6 +186,13 @@ struct ScrStreamState {
      * shape: a dyn boxed by tag (the JS lane), or bytes. */
     ScrPromise *next_waiter;
     bool next_dyn;
+    /* A wake tick is queued for this waiter: content (or the end) turned
+     * up while the loop was parked, and Node answers such a waiter from
+     * emitReadable_'s nextTick, never from the push itself. */
+    bool next_wake;
+    /* Re-entrancy guard for the iterator read's own `_read` kick: a
+     * synchronous push from inside it settles through the same path. */
+    bool next_kicking;
     ScrClosure *read_cb;
     ScrStreamReadInv read_inv;
   } r;
@@ -430,6 +437,8 @@ typedef enum {
   SCR_ST_CLOSE,         /* 'close' (when emitClose) */
   SCR_ST_END_W,         /* half-open: end the writable side */
   SCR_ST_WCB_ERR,       /* a failed write's user cb (called plain) */
+  SCR_ST_NEXT_WAKE,     /* emitReadable_'s wake of a parked for-await: the
+                         * READ happens here, not at the push */
   SCR_ST_NEXT_EOF,      /* a parked for-await's EOF sentinel, AFTER 'end' */
   SCR_ST_FIN,           /* notify finished()/pipeline watchers (already-
                          * terminal registration) */
@@ -531,7 +540,7 @@ static void scr_stream_error_or_destroy(ScrStream *s, ScrError *err) {
       st->error_scheduled = true;
       scr_st_tick(s, SCR_ST_ERROR, scr_error_retain(err), NULL);
     }
-    scr_stream_settle_next(s); /* a parked for-await rejects with the error */
+    scr_stream_settle_next(s); /* a parked for-await takes its wake tick */
   }
 }
 
@@ -819,7 +828,7 @@ static bool scr_stream_add_chunk(ScrStream *s, ScrBytes *chunk, bool front) {
     if (st->r.need_readable) scr_stream_emit_readable_nt(s);
   }
   if (!front) scr_stream_maybe_read_more(s);
-  scr_stream_settle_next(s); /* a parked for-await consumes buffered content */
+  scr_stream_settle_next(s); /* a parked for-await takes its wake tick */
   return !st->r.ended && (st->r.length < st->r.hwm || st->r.length == 0);
 }
 
@@ -1059,11 +1068,204 @@ bool scr_stream_write_dyn(ScrStream *s, const ScrDyn *d, ScrClosure *cb) {
   }
 }
 
+/* ── the settle delay (Node's async-iterator turn count) ─────────────── */
+
+/* `for await (const c of stream)` is NOT `await stream.read()` in Node:
+ * `Readable.prototype[Symbol.asyncIterator]` is itself an
+ * `async function*` (lib/internal/streams/readable.js,
+ * createAsyncIterator), so every chunk it hands out pays that wrapper's
+ * cost before the loop body runs. Fulfilling the waiter the moment the
+ * buffer can answer delivered every chunk EARLY — a skew no byte
+ * comparison sees, and one that reorders any program whose loop races
+ * another promise chain.
+ *
+ * Counted against node v25.9.0 with a microtask ruler (a self-chaining
+ * `Promise.resolve().then`) rather than read off the spec, in the two
+ * states the wrapper can be in:
+ *
+ *   INLINE — `stream.read()` answered during the iterator's own next():
+ *     the buffer held content, or the `_read` it kicked pushed
+ *     synchronously. The wrapper reaches `yield chunk`, whose
+ *     AsyncGeneratorYield awaits the operand (turn 1) before resolving
+ *     the next() promise (turn 2), and the loop's own await IS that
+ *     second turn. Two turns; we owe ONE on top of the await.
+ *
+ *   PARKED — read() answered null and the wrapper is sitting on
+ *     `await new Promise(next)` with 'readable'/'end' handlers
+ *     registered. The push does not wake it: emitReadable_ does, and
+ *     that is a process.nextTick. Three turns follow it, so we owe a
+ *     TICK plus TWO on top of the await.
+ *
+ * The delay is on the settling side, not the consumer's, so it costs the
+ * caller no stack and applies identically to the C and LLVM lanes (both
+ * emit a call to scr_stream_next_chunk).
+ *
+ * The two states are held as the STREAM being answered, not as plain
+ * flags: a synchronous `_read` may run user code that pushes to a
+ * DIFFERENT stream, and that stream's parked loop is still parked — it
+ * owes the wake's tick, not this one's inline turn. */
+static ScrStream *scr_next_inline = NULL; /* inside its own next_chunk */
+static ScrStream *scr_next_waking = NULL; /* on its wake tick */
+
+typedef struct ScrNextSettle {
+  ScrPromise *p; /* owned */
+  void *v;       /* owned, moved into the fulfil; NULL when err is set */
+  void *(*retain)(void *);
+  void (*release)(void *);
+  ScrError *err; /* owned or NULL: reject with this instead of fulfilling */
+  ScrStream *end_after; /* owned or NULL: end the readable side as this fires */
+  int hops;      /* microtask turns still owed */
+  struct ScrNextSettle *next; /* the tick queue link */
+} ScrNextSettle;
+
+static ScrNextSettle *scr_ns_head = NULL;
+static ScrNextSettle *scr_ns_tail = NULL;
+
+static void scr_next_settle_fire(ScrNextSettle *ns) {
+  if (ns->end_after != NULL) {
+    /* Node's endReadable runs inside the read() that EMPTIED the buffer,
+     * and for a parked iterator that read is here, not at the push: the
+     * 'end' nextTick is enqueued from a microtask and so lands behind
+     * every microtask already queued. Enqueuing it at push time put
+     * 'end' a whole phase early. */
+    scr_stream_end_readable(ns->end_after);
+    scr_stream_release(ns->end_after);
+    ns->end_after = NULL;
+  }
+  if (ns->err != NULL) {
+    scr_throw_obj(ns->err, &scr_error_retain_v, &scr_error_release_v,
+                  scr_error_trace_arg());
+    scr_promise_reject_pending(ns->p);
+  } else {
+    scr_promise_fulfill_ref(ns->p, ns->v, ns->retain, ns->release, NULL);
+  }
+  scr_promise_release(ns->p);
+  free(ns);
+}
+
+static void scr_next_settle_micro(void *arg) {
+  ScrNextSettle *ns = (ScrNextSettle *)arg;
+  if (--ns->hops > 0) {
+    scr_queue_microtask_raw(&scr_next_settle_micro, ns, NULL);
+    return;
+  }
+  scr_next_settle_fire(ns);
+}
+
+/* One marker per parked settle on the user tick queue, so the wake keeps
+ * its FIFO place among the stream's own emissions (emitReadable_ is
+ * enqueued first, by the push that produced the content) and among user
+ * nextTicks. */
+static void scr_next_settle_tick(void) {
+  ScrNextSettle *ns = scr_ns_head;
+  if (ns == NULL) return; /* dropped by teardown */
+  scr_ns_head = ns->next;
+  if (scr_ns_head == NULL) scr_ns_tail = NULL;
+  ns->next = NULL;
+  scr_queue_microtask_raw(&scr_next_settle_micro, ns, NULL);
+}
+
+static void scr_next_settle_schedule(ScrNextSettle *ns, bool inline_answer,
+                                     bool on_wake) {
+  if (inline_answer) {
+    ns->hops = 1;
+    scr_queue_microtask_raw(&scr_next_settle_micro, ns, NULL);
+    return;
+  }
+  if (on_wake) {
+    /* already ON the wake tick: only the three turns that follow it. */
+    ns->hops = 2;
+    scr_queue_microtask_raw(&scr_next_settle_micro, ns, NULL);
+    return;
+  }
+  /* Neither: a settlement the gate in scr_stream_settle_next did not
+   * route (a direct fulfil from a stream tick). It still owes the wake's
+   * shape, so it takes its own tick. */
+  ns->hops = 2;
+  if (scr_ns_tail) scr_ns_tail->next = ns;
+  else scr_ns_head = ns;
+  scr_ns_tail = ns;
+  scr_next_tick_raw(&scr_next_settle_tick);
+}
+
+/* Fulfil `w` with `v` (moves) once the owed turns have passed. `end_after`
+ * (borrowed, may be NULL) is a readable whose 'end' this settlement
+ * empties the buffer for. */
+static void scr_next_settle_value(ScrStream *s, ScrPromise *w /*moves*/, void *v /*moves*/,
+                                  void *(*retain)(void *),
+                                  void (*release)(void *),
+                                  ScrStream *end_after) {
+  ScrNextSettle *ns = (ScrNextSettle *)calloc(1, sizeof *ns);
+  if (!ns) scr_stream_oom();
+  ns->p = w;
+  ns->v = v;
+  ns->retain = retain;
+  ns->release = release;
+  if (end_after) ns->end_after = scr_stream_retain(end_after);
+  scr_next_settle_schedule(ns, scr_next_inline == s, scr_next_waking == s);
+}
+
+/* The parked iterator read the stream empty and ended: it now enqueues
+ * endReadable and parks AGAIN on 'end'. Both of those happen in Node from
+ * the microtask the wake resumed, not from the wake tick itself, so the
+ * turns are owed BEFORE the 'end' tick is queued rather than after. */
+typedef struct ScrNextRepark {
+  ScrStream *s; /* owned */
+  int hops;
+} ScrNextRepark;
+
+static void scr_next_repark_micro(void *arg) {
+  ScrNextRepark *rp = (ScrNextRepark *)arg;
+  if (--rp->hops > 0) {
+    scr_queue_microtask_raw(&scr_next_repark_micro, rp, NULL);
+    return;
+  }
+  ScrStream *s = rp->s;
+  free(rp);
+  ScrStreamState *st = s->st;
+  if (st->r.next_waiter) {
+    if (st->r.length == 0 && st->r.ended && !st->r.end_emitted) {
+      scr_stream_end_readable(s);
+      scr_st_tick(s, SCR_ST_NEXT_EOF, NULL, NULL);
+    } else {
+      /* content raced in, or 'end' already went out: answer as the wake */
+      ScrStream *outer = scr_next_waking;
+      scr_next_waking = s;
+      scr_stream_settle_next(s);
+      scr_next_waking = outer;
+    }
+  } else {
+    st->r.next_wake = false;
+  }
+  scr_stream_release(s);
+}
+
+static void scr_next_repark(ScrStream *s) {
+  ScrNextRepark *rp = (ScrNextRepark *)calloc(1, sizeof *rp);
+  if (!rp) scr_stream_oom();
+  rp->s = scr_stream_retain(s);
+  rp->hops = 2;
+  scr_queue_microtask_raw(&scr_next_repark_micro, rp, NULL);
+}
+
+/* Reject `w` with `err` (moves) once the owed turns have passed. */
+static void scr_next_settle_error(ScrStream *s, ScrPromise *w /*moves*/, ScrError *err /*moves*/) {
+  ScrNextSettle *ns = (ScrNextSettle *)calloc(1, sizeof *ns);
+  if (!ns) scr_stream_oom();
+  ns->p = w;
+  ns->err = err;
+  scr_next_settle_schedule(ns, scr_next_inline == s, scr_next_waking == s);
+}
+
 /* ── the for-await surface (readable.nextChunk) ───────────────────────── */
 
-/* Resolve the parked waiter with a taken chunk (moves), the EOF
- * sentinel, or dyn-boxed content per next_dyn. */
-static void scr_stream_next_fulfill(ScrStreamState *st, ScrPromise *w /*moves*/, void *chunk /*moves or NULL=EOF*/) {
+/* Answer the parked waiter with a taken chunk (moves), the EOF sentinel,
+ * or dyn-boxed content per next_dyn. The VALUE is built here, at the
+ * moment the stream could answer — the buffer take must not slide — and
+ * the promise settles the turns later scr_next_settle_value owes. */
+static void scr_stream_next_fulfill(ScrStream *s, ScrPromise *w /*moves*/, void *chunk /*moves or NULL=EOF*/,
+                                    ScrStream *end_after /*borrowed or NULL*/) {
+  ScrStreamState *st = s->st;
   if (st->r.next_dyn) {
     ScrDyn *d;
     if (chunk == NULL) {
@@ -1075,60 +1277,130 @@ static void scr_stream_next_fulfill(ScrStreamState *st, ScrPromise *w /*moves*/,
       d = scr_dyn_new_buffer_copy((ScrBytes *)chunk);
       scr_bytes_release((ScrBytes *)chunk);
     }
-    scr_promise_fulfill_ref(w, d, scr_dyn_retain_v, scr_dyn_release_v, NULL);
+    scr_next_settle_value(s, w, d, scr_dyn_retain_v, scr_dyn_release_v, end_after);
   } else {
     ScrBytes *b = chunk ? (ScrBytes *)chunk : scr_bytes_stamp_buffer(scr_bytes_new(SCR_BYTES_U8, 0));
-    scr_promise_fulfill_ref(w, b, scr_bytes_retain_v, scr_bytes_release_v, NULL);
+    scr_next_settle_value(s, w, b, scr_bytes_retain_v, scr_bytes_release_v, end_after);
   }
-  scr_promise_release(w);
 }
 
-/* Settle the parked waiter if the stream's state can answer now: an
- * error rejects, buffered content fulfills (one whole entry in from
- * mode, the whole buffer otherwise — Node's iterator read()), EOF
- * fulfills the sentinel. Called from push/eof/destroy transitions. */
+/* The iterator's read(), and the gate in front of it. Called from every
+ * push/eof/destroy transition, but only the two windows that ARE the
+ * read — inside the loop's own next_chunk, or on the wake tick that
+ * emitReadable_ stands for — go past the gate; every other caller just
+ * queues that wake. Past it: an error rejects, buffered content fulfills
+ * (one whole entry in from mode, the whole buffer otherwise — Node's
+ * iterator read()), EOF fulfills the sentinel, and the settlement itself
+ * lands the turns Node's async-generator wrapper costs. */
 static void scr_stream_settle_next(ScrStream *s) {
   ScrStreamState *st = s->st;
   if (!st->r.next_waiter) return;
+  if (scr_next_inline != s && scr_next_waking != s) {
+    /* The push does NOT answer a parked iterator in Node: the wrapper is
+     * sitting on `await new Promise(next)` and emitReadable_ — a
+     * process.nextTick — is what resumes it, with stream.read() running
+     * THERE. Answering from the push both delivered the chunk a whole
+     * phase early and emptied the buffer before any 'readable' listener
+     * could see it. */
+    if (!st->r.next_wake) {
+      st->r.next_wake = true;
+      scr_st_tick(s, SCR_ST_NEXT_WAKE, NULL, NULL);
+    }
+    return;
+  }
   if (st->errored) {
     ScrPromise *w = st->r.next_waiter;
     st->r.next_waiter = NULL;
+    st->r.next_wake = false;
     st->next_err_consumed = true;
-    scr_throw_obj(scr_error_retain(st->errored), &scr_error_retain_v, &scr_error_release_v,
-                  scr_error_trace_arg());
-    scr_promise_reject_pending(w);
-    scr_promise_release(w);
+    scr_next_settle_error(s, w, scr_error_retain(st->errored));
     return;
+  }
+  /* Node's read() runs doRead FIRST — the `_read` kick happens while the
+   * buffer still holds only what is already there — and takes from the
+   * list only afterwards. For a from(asyncGenerator) source that kick IS
+   * the next pull, so starting it after the take (or at the loop's next
+   * call, which is where it used to start) runs the generator a whole
+   * settlement behind the consumer. Reached only from the two windows
+   * that ARE the iterator's read: inline, and on the wake. */
+  if (!st->r.next_kicking && !st->r.reading && !st->r.ended && !st->destroyed &&
+      !st->errored) {
+    st->r.next_kicking = true;
+    if (st->r.length == 0) st->r.need_readable = true;
+    scr_stream_call_read(s);
+    st->r.next_kicking = false;
+    if (scr_exc_pending()) {
+      ScrPromise *w = st->r.next_waiter;
+      if (w) {
+        st->r.next_waiter = NULL;
+        st->r.next_wake = false;
+        scr_promise_reject_pending(w);
+        scr_promise_release(w);
+      }
+      return;
+    }
+    if (!st->r.next_waiter) return; /* a re-entrant settle answered it */
+    if (st->errored) {
+      ScrPromise *w = st->r.next_waiter;
+      st->r.next_waiter = NULL;
+      st->r.next_wake = false;
+      st->next_err_consumed = true;
+      scr_next_settle_error(s, w, scr_error_retain(st->errored));
+      return;
+    }
   }
   if (st->r.length > 0) {
     ScrPromise *w = st->r.next_waiter;
     st->r.next_waiter = NULL;
+    st->r.next_wake = false;
     void *chunk = scr_stream_rbuf_take(st, st->r.object_entries ? 1 : st->r.length);
-    scr_stream_next_fulfill(st, w, chunk);
-    if (st->r.ended && st->r.length == 0) scr_stream_end_readable(s);
+    bool drained = st->r.ended && st->r.length == 0;
+    /* inline: this IS the consumer's read(), so 'end' is enqueued now,
+     * exactly where Node enqueues it; parked: it rides the settlement. */
+    scr_stream_next_fulfill(s, w, chunk, (drained && scr_next_inline != s) ? s : NULL);
+    if (drained && scr_next_inline == s) scr_stream_end_readable(s);
     return;
   }
   if (st->r.ended || st->destroyed) {
     if (st->r.ended && !st->r.end_emitted) {
       /* Node's iterator completes AFTER 'end' (and its autoDestroy):
        * queue the sentinel BEHIND the pending 'end' tick, so code after
-       * the loop reads readableEnded/destroyed true. */
-      scr_stream_end_readable(s);
-      scr_st_tick(s, SCR_ST_NEXT_EOF, NULL, NULL);
+       * the loop reads readableEnded/destroyed true.
+       *
+       * WHERE endReadable is enqueued from decides a whole phase. Node
+       * enqueues it inside the read() that found the stream empty and
+       * ended — and on the parked path that read runs on the wake, from
+       * the microtask the wake resumed, so the 'end' tick lands behind
+       * every microtask already queued. Reached inline, the read IS the
+       * consumer's, and enqueuing now is exactly right. */
+      if (scr_next_inline == s) {
+        scr_stream_end_readable(s);
+        scr_st_tick(s, SCR_ST_NEXT_EOF, NULL, NULL);
+      } else {
+        scr_next_repark(s);
+      }
       return;
     }
     ScrPromise *w = st->r.next_waiter;
     st->r.next_waiter = NULL;
-    scr_stream_next_fulfill(st, w, NULL);
+    st->r.next_wake = false;
+    scr_stream_next_fulfill(s, w, NULL, NULL);
   }
 }
 
 static ScrPromise *scr_stream_next_chunk_impl(ScrStream *s, bool dyn) {
   ScrStreamState *st = s->st;
   ScrPromise *p = scr_promise_new();
+  /* Everything settled before this call returns is what Node's read()
+   * answers INLINE, and owes the yield's turns rather than the parked
+   * wake's tick. Saved and restored: a synchronous _read may itself run
+   * user code that iterates another stream. */
+  ScrStream *outer_inline = scr_next_inline;
+  scr_next_inline = s;
   if (!st->has_r) {
     st->r.next_dyn = dyn;
-    scr_stream_next_fulfill(st, scr_promise_retain(p), NULL);
+    scr_stream_next_fulfill(s, scr_promise_retain(p), NULL, NULL);
+    scr_next_inline = outer_inline;
     return p;
   }
   if (st->r.next_waiter) {
@@ -1136,25 +1408,15 @@ static ScrPromise *scr_stream_next_chunk_impl(ScrStream *s, bool dyn) {
     static const char msg[] = "concurrent for-await iteration of one stream is not supported yet";
     scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
     scr_promise_reject_pending(p);
+    scr_next_inline = outer_inline;
     return p;
   }
   st->r.next_dyn = dyn;
   st->r.next_waiter = scr_promise_retain(p);
-  /* answer from the current state, or kick a _read and park */
+  st->r.next_wake = false;
+  /* kick a _read and answer from what the stream can give, or park */
   scr_stream_settle_next(s);
-  if (st->r.next_waiter && !st->r.reading && !st->r.ended && !st->destroyed) {
-    st->r.need_readable = true;
-    scr_stream_call_read(s);
-    if (scr_exc_pending()) {
-      ScrPromise *w = st->r.next_waiter;
-      st->r.next_waiter = NULL;
-      scr_promise_reject_pending(w);
-      scr_promise_release(w);
-      return p;
-    }
-    /* a synchronous push may have answered already */
-    scr_stream_settle_next(s);
-  }
+  scr_next_inline = outer_inline;
   return p;
 }
 
@@ -1220,7 +1482,7 @@ static bool scr_stream_agen_push(ScrStream *s, void *entry /*moves*/) {
     if (st->r.need_readable) scr_stream_emit_readable_nt(s);
   }
   scr_stream_maybe_read_more(s);
-  scr_stream_settle_next(s); /* a parked for-await consumes it */
+  scr_stream_settle_next(s); /* a parked for-await takes its wake tick */
   return !st->r.ended && (st->r.length < st->r.hwm || st->r.length == 0);
 }
 
@@ -3179,7 +3441,7 @@ static void scr_stream_do_destroy(ScrStream *s, ScrError *err /*borrowed*/) {
   if (st->destroyed || st->destroy_calling) return;
   st->destroyed = true;
   if (err && !st->errored) st->errored = scr_error_retain(err);
-  scr_stream_settle_next(s); /* a parked for-await rejects/finishes */
+  scr_stream_settle_next(s); /* a parked for-await takes its wake tick */
   if (st->r.agen != NULL && !scr_gen_done(st->r.agen)) {
     /* Node's from() gives the stream its own _destroy: 'error'/'close'
      * wait for the source generator to close, so a destroy() mid-stream
@@ -3304,9 +3566,13 @@ static void scr_stream_emit_readable_now(ScrStream *s) {
   st->r.need_readable = st->r.flowing != 1 && !st->r.ended &&
                         st->r.length <= st->r.hwm;
   scr_stream_flow(s);
-  if (!scr_exc_pending() && st->r.ended && st->r.length == 0) {
-    scr_stream_end_readable(s);
-  }
+  /* Node's emitReadable_ ENDS here (lib/internal/streams/readable.js):
+   * endReadable is read()'s job, and flow() above is the read this tick
+   * performs. An unconditional end here fired 'end' on a stream nobody
+   * ever read — `push(null)` on a paused stream with an 'end' listener
+   * and no consumer emits nothing at all in Node — and, for a parked
+   * `for await`, it moved the loop's exit a whole phase earlier than the
+   * read that discovers the stream empty. */
 }
 
 /* ── fs-backed streams (fs.createReadStream / fs.createWriteStream) ─────
@@ -4101,14 +4367,35 @@ static void scr_stream_run_tick(ScrStreamTick *t) {
       scr_stream_notify_finished(s);
       break;
     }
+    case SCR_ST_NEXT_WAKE: {
+      if (st->r.next_waiter) {
+        ScrStream *outer_wake = scr_next_waking;
+        scr_next_waking = s;
+        scr_stream_settle_next(s);
+        scr_next_waking = outer_wake;
+      }
+      /* The tick is spent either way. It has to be cleared even when the
+       * waiter is STILL parked: what woke us can be gone by the time we
+       * run — a 'readable' listener that calls read() drains the buffer
+       * from the tick queued just before this one — and a wake left
+       * marked as pending would stop every later push from queueing a
+       * fresh one, hanging the loop for the rest of the program. */
+      st->r.next_wake = false;
+      break;
+    }
     case SCR_ST_NEXT_EOF: {
+      ScrStream *outer_wake = scr_next_waking;
+      scr_next_waking = s;
       if (st->r.next_waiter && st->r.length == 0 && (st->r.ended || st->destroyed)) {
         ScrPromise *w = st->r.next_waiter;
         st->r.next_waiter = NULL;
-        scr_stream_next_fulfill(st, w, NULL);
+        st->r.next_wake = false;
+        scr_stream_next_fulfill(s, w, NULL, NULL);
       } else if (st->r.next_waiter) {
         scr_stream_settle_next(s); /* content raced in: deliver it */
       }
+      scr_next_waking = outer_wake;
+      st->r.next_wake = false;
       break;
     }
   }
