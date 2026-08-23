@@ -29,8 +29,10 @@
  * Both lanes are checked. The LLVM lane keeps its own emitter and this
  * project has shipped a fix green on one lane and wrong on the other.
  *
- * THE `ws` OPTION-BAG ROWS ARE REDUCED HERE NOW, and the note that said they
- * could not be is what this file was wrong about. It read: "planted by the
+ * THE `ws` OPTION-BAG ROWS ARE REDUCED HERE NOW -- and both of them have
+ * since CLOSED, so the reduction is on the other side of the file. The note
+ * that said they could not be reduced at all is what this file was wrong
+ * about. It read: "planted by the
  * BACKEND (emit-ws.ts) on the `globalThis.WebSocket` interning path, not
  * through pushDiag, and need a bag carrying a live `dispatcher`/`agent`" --
  * every clause of which is true, and the conclusion false. The fence is
@@ -40,13 +42,17 @@
  * API, and the census reads back the same code, the same message and the
  * same emitted host (`sc_wsw_N`) as zapo's own translation unit does.
  *
- * That reduction is also why those rows went from two to one. With a shape
- * to compile, `agent` could be measured instead of reasoned about: Node's
- * global WebSocket never reads that member of the bag at all, so the refusal
- * was a refusal where the oracle CONNECTS. `forbid` below pins its absence
- * inside the same instrument that pins `dispatcher`'s presence -- a
- * two-sided contract needs both directions in one reading, or a widening
- * that puts the wrong one back shows up only as a number moving.
+ * That reduction is also why those rows went from two to one, and then to
+ * none. With a shape to compile, `agent` could be measured instead of
+ * reasoned about: Node's global WebSocket never reads that member of the bag
+ * at all, so the refusal was a refusal where the oracle CONNECTS.
+ *
+ * `dispatcher` did not fall to a measurement -- the oracle really does hand
+ * the whole upgrade away -- but to the observation that the socket a
+ * dispatcher answers with, in a COMPILED program, can only ever be a
+ * runtime handle. scr_ws_dispatch.c calls the program's `dispatch` and
+ * adopts what comes back. The plant is unchanged and now has to carry ZERO
+ * refusals, which is the same two-sided contract read the other way round.
  *
  * NOT REDUCED HERE, and why:
  *   - `new WebAssembly.Module(...)` (SC1090, spec/proto/index.js:1) needs a
@@ -140,75 +146,6 @@ const PLANTS: readonly {
     ].join("\n"),
   },
   {
-    name: "the-ws-option-bag-with-a-proxy-dispatcher",
-    ext: "ts",
-    zapoSite:
-      "src/transport/WaWebSocket.ts:68 -- the globalThis.WebSocket read that interns the ctor " +
-      "wrapper for the init bag built at :559 and constructed at :565",
-    accept: [
-      { code: "SC2020", fragment: "carries 'dispatcher', which has no scriptc lowering yet" },
-    ],
-    // The withdrawn half. Node reads exactly `protocols`, `headers` and
-    // `dispatcher` out of the init bag, so refusing on a live `agent`
-    // refused a program the oracle runs BY CONNECTING DIRECT. Behaviour is
-    // pinned by tests/corpus/6000 and the oracle's own contract by
-    // tests/harness/ws-init-bag.test.ts; what is pinned HERE is that the
-    // emitted C carries no such refusal, on either lane.
-    forbid: ["carries 'agent'"],
-    src: [
-      "interface WaProxyDispatcher { readonly dispatch: (a: unknown, b: unknown) => boolean }",
-      "interface WaProxyAgent { readonly addRequest: (a: unknown, b: unknown) => void }",
-      "interface RawWsEvent {",
-      "  readonly code?: number",
-      "  readonly reason?: string",
-      "  readonly wasClean?: boolean",
-      "  readonly data?: unknown",
-      "}",
-      "interface RawWebSocket {",
-      "  binaryType: string",
-      "  readyState: number",
-      "  onopen: ((ev: RawWsEvent) => void) | undefined",
-      "  onmessage: ((ev: RawWsEvent) => void) | undefined",
-      "  onclose: ((ev: RawWsEvent) => void) | undefined",
-      "  onerror: ((ev: RawWsEvent) => void) | undefined",
-      "  send: (data: string) => void",
-      "  close: (code?: number, reason?: string) => void",
-      "}",
-      "interface WaRawWebSocketInit {",
-      "  readonly protocols?: string | readonly string[]",
-      "  readonly headers?: Readonly<Record<string, string>>",
-      "  readonly dispatcher?: WaProxyDispatcher",
-      "  readonly agent?: WaProxyAgent",
-      "}",
-      "type RawWebSocketConstructor = new (",
-      "  url: string,",
-      "  protocols?: string | readonly string[] | WaRawWebSocketInit,",
-      ") => RawWebSocket",
-      "declare const wsUrl: string",
-      "declare const wsHeaders: Readonly<Record<string, string>> | undefined",
-      "declare const wsDispatcher: WaProxyDispatcher | undefined",
-      "declare const wsAgent: WaProxyAgent | undefined",
-      "function resolveWebSocketConstructor(): RawWebSocketConstructor {",
-      "  const ctor = (globalThis as typeof globalThis & { WebSocket?: RawWebSocketConstructor })",
-      "    .WebSocket",
-      "  if (!ctor) { throw new Error('global WebSocket is not available in this runtime') }",
-      "  return ctor",
-      "}",
-      "export function dial(): RawWebSocket {",
-      "  const ctor = resolveWebSocketConstructor()",
-      "  const init: WaRawWebSocketInit = {",
-      "    protocols: ['a'],",
-      "    headers: wsHeaders,",
-      "    dispatcher: wsDispatcher,",
-      "    agent: wsAgent,",
-      "  }",
-      "  return new ctor(wsUrl, init)",
-      "}",
-      "console.log(typeof dial)",
-      "",
-    ].join("\n"),
-  },
-  {
     name: "require-with-a-computed-specifier",
     ext: "cjs",
     zapoSite: "spec/proto/index.js:1 -- protobufjs inquire()'s require(moduleName)",
@@ -262,6 +199,75 @@ const CLOSED: readonly {
   provedBy: string;
   src: string;
 }[] = [
+  {
+    name: "the-ws-option-bag-with-a-proxy-dispatcher",
+    ext: "ts",
+    zapoSite:
+      "src/transport/WaWebSocket.ts:68 -- the globalThis.WebSocket read that interns the ctor " +
+      "wrapper for the init bag built at :559 and constructed at :565",
+    provedBy:
+      "tests/corpus/6060 (a real proxy dispatcher carrying an upgrade end to end), 6061 (the " +
+      "three ways one fails to deliver) and 6062 (the other call arm and a mandatory slot) -- " +
+      "Node is the oracle on both lanes -- and tests/harness/ws-dispatcher.test.ts, which " +
+      "measures what the ORACLE hands a dispatcher and demands back, because every key, order " +
+      "and arity scr_ws_dispatch.c builds is a claim about undici that no differential can check",
+    // The SAME fifty lines that carried the refusal, now carrying none.
+    // What the census must see here is ZERO: the delegation replaced the
+    // fence rather than moving it, and the `forbid` this entry used to
+    // need on the withdrawn `agent` half is now the whole assertion.
+    src: [
+      "interface WaProxyDispatcher { dispatch(...args: readonly unknown[]): unknown }",
+      "interface WaProxyAgent { readonly addRequest: (a: unknown, b: unknown) => void }",
+      "interface RawWsEvent {",
+      "  readonly code?: number",
+      "  readonly reason?: string",
+      "  readonly wasClean?: boolean",
+      "  readonly data?: unknown",
+      "}",
+      "interface RawWebSocket {",
+      "  binaryType: string",
+      "  readyState: number",
+      "  onopen: ((ev: RawWsEvent) => void) | undefined",
+      "  onmessage: ((ev: RawWsEvent) => void) | undefined",
+      "  onclose: ((ev: RawWsEvent) => void) | undefined",
+      "  onerror: ((ev: RawWsEvent) => void) | undefined",
+      "  send: (data: string) => void",
+      "  close: (code?: number, reason?: string) => void",
+      "}",
+      "interface WaRawWebSocketInit {",
+      "  readonly protocols?: string | readonly string[]",
+      "  readonly headers?: Readonly<Record<string, string>>",
+      "  readonly dispatcher?: WaProxyDispatcher",
+      "  readonly agent?: WaProxyAgent",
+      "}",
+      "type RawWebSocketConstructor = new (",
+      "  url: string,",
+      "  protocols?: string | readonly string[] | WaRawWebSocketInit,",
+      ") => RawWebSocket",
+      "declare const wsUrl: string",
+      "declare const wsHeaders: Readonly<Record<string, string>> | undefined",
+      "declare const wsDispatcher: WaProxyDispatcher | undefined",
+      "declare const wsAgent: WaProxyAgent | undefined",
+      "function resolveWebSocketConstructor(): RawWebSocketConstructor {",
+      "  const ctor = (globalThis as typeof globalThis & { WebSocket?: RawWebSocketConstructor })",
+      "    .WebSocket",
+      "  if (!ctor) { throw new Error('global WebSocket is not available in this runtime') }",
+      "  return ctor",
+      "}",
+      "export function dial(): RawWebSocket {",
+      "  const ctor = resolveWebSocketConstructor()",
+      "  const init: WaRawWebSocketInit = {",
+      "    protocols: ['a'],",
+      "    headers: wsHeaders,",
+      "    dispatcher: wsDispatcher,",
+      "    agent: wsAgent,",
+      "  }",
+      "  return new ctor(wsUrl, init)",
+      "}",
+      "console.log(typeof dial)",
+      "",
+    ].join("\n"),
+  },
   {
     name: "defineprop-on-a-compiled-class",
     ext: "ts",
