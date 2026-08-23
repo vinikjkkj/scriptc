@@ -1695,8 +1695,7 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
    *
    * The distinction is the one that keeps a user's own `function
    * encodeURI(s) { ... }` from being read as the library's. */
-  function isUserValueDeclaration(L: Lowerer, d: ts.Node): boolean {
-    if (L.isStdlibFile(d.getSourceFile())) return false;
+  function isUserValueDeclaration(d: ts.Node): boolean {
     if (ts.isFunctionDeclaration(d)) return d.body !== undefined;
     if (ts.isClassDeclaration(d)) return true;
     if (ts.isVariableDeclaration(d)) {
@@ -1739,9 +1738,18 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
    * type-space merge this test was written for still matches. */
   export function isStdlibSymbol(L: Lowerer, symbol: ts.Symbol | undefined): boolean {
     if (!symbol) return false;
-    const decls = L.checker.declarationsOf(symbol);
-    if (decls.some((d) => isUserValueDeclaration(L, d))) return false;
-    return decls.some((d) => L.isStdlibFile(d.getSourceFile()));
+    // ONE isStdlibFile call per declaration, which is what the `.some`
+    // this replaced cost: the kind test only runs for a declaration that
+    // is already known not to be the library's. This sits on a hot path
+    // (83 call sites, one of them the identifier chokepoint), so the
+    // second half is deliberately free for every symbol the library
+    // wholly owns.
+    let sawLib = false;
+    for (const d of L.checker.declarationsOf(symbol)) {
+      if (L.isStdlibFile(d.getSourceFile())) sawLib = true;
+      else if (isUserValueDeclaration(d)) return false;
+    }
+    return sawLib;
   }
 
 /** The canonical stdlib-global name `expr` denotes, or null. Three
