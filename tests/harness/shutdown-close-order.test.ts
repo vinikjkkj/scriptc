@@ -143,6 +143,22 @@ const cases = [
   // The non-regression control: close-request order among servers that
   // were all drained already.
   "net-close-order-request",
+  // The socket-vs-server queue: two busy servers drained in one turn with
+  // a drained one between them, and the three cases that pin the close
+  // PHASE itself -- that it comes last, that it is LIFO, and that a socket
+  // destroyed inside its own event closes an iteration ahead.
+  "net-close-order-two-busy",
+  "net-close-order-many",
+  "net-close-order-phase",
+  "net-close-order-self",
+  // The guard on the other side: a server closed while a client socket is
+  // still draining, where the socket's 'close' comes FIRST because it
+  // belonged to an earlier loop iteration.
+  "net-close-order-drain",
+  "net-close-order-last-conn",
+  // Both queues at once: a tick between two close callbacks, and a second
+  // server draining in the poll phase of the iteration between them.
+  "net-close-order-tick-between",
 ];
 
 describe(`shutdown close order (${REPEATS} runs per case)`, () => {
