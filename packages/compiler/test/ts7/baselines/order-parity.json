@@ -9369,6 +9369,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/6060-ws-dispatcher-carries-the-upgrade.ts": {
+   "order": [
+    "<repo>/tests/corpus/6060-ws-dispatcher-carries-the-upgrade.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/6061-ws-dispatcher-failure-shapes.ts": {
+   "order": [
+    "<repo>/tests/corpus/6061-ws-dispatcher-failure-shapes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/6062-ws-dispatcher-two-params-mandatory.ts": {
+   "order": [
+    "<repo>/tests/corpus/6062-ws-dispatcher-two-params-mandatory.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/6063-ws-dispatcher-undefined-still-dials.ts": {
+   "order": [
+    "<repo>/tests/corpus/6063-ws-dispatcher-undefined-still-dials.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/700-classes-basic.ts": {
    "order": [
     "<repo>/tests/corpus/700-classes-basic.ts"

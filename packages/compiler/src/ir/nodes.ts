@@ -269,7 +269,32 @@ export type IrType =
    * (fn.length semantics). Rest-marked values are only ever CALLED
    * through the dyn boundary (boxed thunks); direct static calls box
    * first (lower-calls). */
-  | { kind: "func"; params: IrType[]; ret: IrType; rest?: true; restAbi?: "jsval" }
+  | {
+      kind: "func";
+      params: IrType[];
+      ret: IrType;
+      rest?: true;
+      restAbi?: "jsval";
+      /** The LAST entry of `params` is a declared REST slot, not a fixed
+       * parameter -- `(...args: unknown[]) => T`, mapped as a signature
+       * rather than lowered from a declaration.
+       *
+       * It is a different fact from `rest` above, which marks the
+       * UNSPELLED trailing dyn array a boxed thunk fills. Here the slot IS
+       * spelled: the ABI is one dyn holding the packed arguments, which is
+       * exactly the ABI of a fixed `(x: unknown) => T`, and mapType used to
+       * throw the distinction away. That made the two signatures the same
+       * IrType and therefore the same record shape -- harmless while
+       * nothing called such a value from OUTSIDE the compiler, and a silent
+       * wrong answer the moment something did: scr_ws_dispatch.c has to
+       * choose between handing a dispatcher [opts, handler] and handing it
+       * opts, and the two are indistinguishable without this.
+       *
+       * It participates in typeKey AND typeEquals, deliberately: a marker
+       * that split the key without splitting equality would leave two
+       * "equal" types interning to different shapes. */
+      restIn?: true;
+    }
   /* Arbitrary-precision integer (ScrBigInt) — heap, refcounted. Never
    * implicitly convertible with f64: JS itself refuses to mix them in
    * arithmetic, so the fence is the language's, not ours. */
@@ -743,7 +768,7 @@ export function typeKey(t: IrType): string {
     case "set":
       return `set<${typeKey(t.elem)}>`;
     case "func":
-      return `func(${[...t.params.map(typeKey), ...(t.rest ? [t.restAbi === "jsval" ? "...jsval[]" : "...dyn[]"] : [])].join(",")})=>${typeKey(t.ret)}`;
+      return `func(${[...t.params.map((p, i) => (t.restIn === true && i === t.params.length - 1 ? `...${typeKey(p)}` : typeKey(p))), ...(t.rest ? [t.restAbi === "jsval" ? "...jsval[]" : "...dyn[]"] : [])].join(",")})=>${typeKey(t.ret)}`;
     case "object":
       return `object:${t.className}`;
     case "classval":
@@ -827,6 +852,7 @@ export function typeEquals(a: IrType, b: IrType): boolean {
       b.kind === "func" &&
       a.params.length === b.params.length &&
       (a.rest === true) === (b.rest === true) &&
+      (a.restIn === true) === (b.restIn === true) &&
       a.params.every((p, i) => typeEquals(p, b.params[i]!)) &&
       typeEquals(a.ret, b.ret)
     );
@@ -9250,6 +9276,40 @@ export function moduleUsesWsGlobal(mod: IrModule): boolean {
   return found;
 }
 
+/** True when some `globalThis.WebSocket` construct signature carries an
+ * init bag whose `dispatcher` this compiler DELEGATES — the link switch
+ * for scr_ws_dispatch.c.
+ *
+ * Gated separately from moduleUsesWsGlobal on purpose: the delegation
+ * drags the whole checked-dynamic object surface (an opts record, ten
+ * boxed callables) into a binary, and a WebSocket program that never
+ * mentions a dispatcher must not pay for it. It is the type that decides,
+ * not a value — the same fact that made the refusal it replaces visible in
+ * zapo's translation unit whether or not zapo ever configured a proxy. */
+export function moduleUsesWsDispatch(mod: IrModule): boolean {
+  const records = new Map((mod.records ?? []).map((r) => [r.id, r]));
+  const unions = new Map((mod.unions ?? []).map((u) => [u.id, u]));
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; type?: IrType };
+    if (node.kind === "wsCtor" && node.type !== undefined) {
+      const plan = wsGlobalPlan(node.type, (id) => records.get(id), (id) => unions.get(id));
+      if (plan !== null && plan.initBag !== null && plan.initBag.dispatcher !== null) {
+        found = true;
+        return;
+      }
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 /* ── the WebSocket global's shape ─────────────────────────────────────
  *
  * `globalThis.WebSocket` is unusual among lowered globals: the value it
@@ -9315,6 +9375,47 @@ export type WsProtocolsArm = "absent" | "string" | "strArray" | "init" | "fence"
  * There is exactly ONE such field, `dispatcher`, because it is the only
  * member of the oracle's init bag that this unit reads and cannot honour.
  * The others the oracle never reads (wsInitBagPlan). */
+/** The init bag's `dispatcher`, LOWERED — the shape scriptc can hand the
+ * upgrade to instead of refusing it.
+ *
+ * The oracle does not dial when the bag carries one: it builds undici's
+ * request-options record and a ten-member handler and calls
+ * `dispatcher.dispatch(opts, handler)`, and the connection reaches the
+ * origin only if the dispatcher takes it there. scr_ws_dispatch.c does the
+ * same, and gets the socket back through `handler.onUpgrade(status,
+ * headers, socket)`.
+ *
+ * WHAT MAKES THIS TRACTABLE, and it is the opposite of what was recorded:
+ * the socket a dispatcher hands back was priced as needing "a duplex
+ * bridge from a compiled program object into ScrNetSocket -- Node-streams
+ * interop". In a COMPILED program there is no such object. The only value
+ * a scriptc program can produce that carries real bytes is a runtime
+ * handle, and `net.connect` boxes one as SCR_DYNH_NET_SOCKET, which is an
+ * ScrNetSocket the transport already pumps. There is nothing to bridge.
+ *
+ * The C signature of `dispatch` is proved HERE and passed down, because a
+ * closure called through the wrong signature is undefined behaviour rather
+ * than a diagnosable failure. Everything this cannot prove keeps the
+ * refusal (WsInitRefusal): declining is the loud direction. */
+export interface WsInitDispatcher {
+  /** The bag field's name. `dispatcher` today; the type stays general. */
+  name: string;
+  /** The `undefined` arm of the bag field's union, or -1 for a MANDATORY
+   * dispatcher (a slot with no absence: always delegated). */
+  absentTag: number;
+  /** The dispatcher record's shape, reached through the union's value
+   * arm — the struct the emitters cast to for the method. */
+  recShapeId: string;
+  /** The method field on that record. `dispatch`. */
+  method: string;
+  /** SCR_WSD_CALL_REST (0) — one dyn parameter, the rest array, which is
+   *  how `dispatch(...args: unknown[])` lowers (zapo's spelling);
+   *  SCR_WSD_CALL_TWO (1) — two dyn parameters. */
+  callKind: 0 | 1;
+  /** SCR_WSD_RET_DYN (0) / _BOOL (1) / _VOID (2). */
+  retKind: 0 | 1 | 2;
+}
+
 export interface WsInitRefusal {
   /** The bag field's name. `dispatcher` today; the type stays general. */
   name: string;
@@ -9345,6 +9446,9 @@ export interface WsInitBagPlan {
   headers: { unionId: string; valueTag: number; absentTag: number; recShapeId: string } | null;
   /** Fields with no lowering, tested at runtime. */
   refuseIfPresent: readonly WsInitRefusal[];
+  /** `dispatcher`, when its shape can be handed the upgrade. Mutually
+   * exclusive with a `dispatcher` entry in `refuseIfPresent`. */
+  dispatcher: WsInitDispatcher | null;
 }
 
 export interface WsGlobalPlan {
@@ -9418,6 +9522,7 @@ function wsInitBagPlan(
   let protocols: WsInitBagPlan["protocols"] = null;
   let headers: WsInitBagPlan["headers"] = null;
   const refuseIfPresent: WsInitRefusal[] = [];
+  let dispatcher: WsInitDispatcher | null = null;
   let sawDispatcher = false;
   for (const f of shape.fields) {
     if (f.name === "protocols") {
@@ -9494,6 +9599,9 @@ function wsInitBagPlan(
     sawDispatcher = true;
     if (f.type.kind === "undefinedT") continue; // no dispatcher possible: nothing to refuse
     if (f.type.kind === "dyn") {
+      // A `dispatcher: unknown` carries no proof that it HAS a `dispatch`,
+      // let alone what signature. Delegating through a guess is the one
+      // thing worse than refusing.
       refuseIfPresent.push({ name: f.name, kind: "dyn" });
       continue;
     }
@@ -9505,17 +9613,89 @@ function wsInitBagPlan(
       // leave the site its unconditional fence rather than dial on null.
       const undefTag = def.arms.findIndex((x) => x.kind === "undefinedT");
       if (undefTag < 0) return null;
+      if (def.arms.length === 2) {
+        const d = wsDispatcherPlan(f.name, def.arms[1 - undefTag]!, undefTag, getRecord);
+        if (d !== null) {
+          dispatcher = d;
+          continue;
+        }
+      }
       refuseIfPresent.push({ name: f.name, kind: "union", absentTag: undefTag });
       continue;
     }
-    return null; // a MANDATORY dispatcher: never absent, so never lowerable
+    {
+      // A MANDATORY dispatcher: never absent, so the delegation is
+      // unconditional. Before scr_ws_dispatch.c this had to decline the
+      // whole bag, because a slot with no absence had no lowerable state.
+      const d = wsDispatcherPlan(f.name, f.type, -1, getRecord);
+      if (d === null) return null;
+      dispatcher = d;
+    }
   }
   // The record still has to LOOK like a WebSocketInit: a `protocols` union
   // arm that is some unrelated record must keep the site's fence rather
   // than be dialled as a bag whose every member happened to be one this
   // unit ignores.
   if (protocols === null && headers === null && !sawDispatcher) return null;
-  return { shapeId: a.shapeId, tag, protocols, headers, refuseIfPresent };
+  return { shapeId: a.shapeId, tag, protocols, headers, refuseIfPresent, dispatcher };
+}
+
+/** The dispatcher VALUE's shape: a record carrying a `dispatch` this
+ * compiler can call, or null (which leaves the refusal standing).
+ *
+ * The two spellings accepted are the two that exist in the wild and the
+ * two whose C signature is unambiguous:
+ *
+ *     dispatch(...args: readonly unknown[]): unknown   // zapo's, and
+ *                                                      // undici's own
+ *     dispatch(opts: unknown, handler: unknown): boolean
+ *
+ * A rest parameter lowers to ONE dyn holding the argument array; two
+ * declared parameters lower to two dyns. Both were read off the emitted C
+ * rather than inferred, because getting this wrong is a call through a
+ * mismatched signature, which no diagnostic can catch.
+ *
+ * Anything narrower than `unknown` in a parameter is DECLINED rather than
+ * coerced: `opts` and the handler are dyn objects this runtime builds, and
+ * a program that declared a record parameter would be handed a value of a
+ * shape it never had. */
+function wsDispatcherPlan(
+  name: string,
+  value: IrType,
+  absentTag: number,
+  getRecord: (shapeId: string) => IrRecordShape | undefined,
+): WsInitDispatcher | null {
+  if (value.kind !== "record") return null;
+  const shape = getRecord(value.shapeId);
+  if (!shape || shape.tuple || shape.indexValue !== undefined || shapeHasAccessorSlots(shape)) {
+    return null;
+  }
+  const f = shape.fields.find((x) => x.name === "dispatch");
+  if (f === undefined || f.type.kind !== "func") return null;
+  const fn = f.type;
+  let callKind: 0 | 1;
+  // The island rest ABI packs into a JSValue, and the UNSPELLED dyn rest
+  // (`rest`) is a slot no direct call fills — both are different calls
+  // entirely from the one this unit builds arguments for.
+  if (fn.rest === true || fn.restAbi !== undefined) return null;
+  if (fn.restIn === true) {
+    if (fn.params.length !== 1 || fn.params[0]!.kind !== "dyn") return null;
+    callKind = 0;
+  } else {
+    if (fn.params.length !== 2) return null;
+    if (fn.params[0]!.kind !== "dyn" || fn.params[1]!.kind !== "dyn") return null;
+    callKind = 1;
+  }
+  const retKind: 0 | 1 | 2 | null =
+    fn.ret.kind === "dyn"
+      ? 0
+      : fn.ret.kind === "bool"
+        ? 1
+        : fn.ret.kind === "void" || fn.ret.kind === "undefinedT"
+          ? 2
+          : null;
+  if (retKind === null) return null;
+  return { name, absentTag, recShapeId: value.shapeId, method: "dispatch", callKind, retKind };
 }
 
 /** The WS deferred refusal's text, TAGGED. Both backends build the same
