@@ -1,44 +1,61 @@
-/* The PRICE of zapo's `SC2011` row, pinned so the next reader gets it
- * from a measurement instead of from a paragraph.
+/* The PRICE of zapo's `SC2011` row, re-measured after the static fetch
+ * landed — and pinned two-sided, so neither half can move silently.
  *
- * The row: `src/transport/wa-version-fetcher.ts:211` declares an options
- * record with a `readonly fetch?: typeof fetch` member, and the record
- * has no static representation. The received account of it -- carried in
- * three consecutive briefs -- was "the blockers are already bisected to
- * exactly three names, `Response`, `RequestInit`, `Request`, so this is
- * three type surfaces, not a language feature". Both halves are wrong,
- * and this file is the bisection that says so.
+ * THE ROW: `src/transport/wa-version-fetcher.ts:211` names
+ * `WaFetchLatestMobileVersionOptions` as a parameter type; the record it
+ * reaches (`WaFetchVersionOptions`, declared at :47) carries a
+ * `readonly fetch?: typeof fetch` member, and the whole declaration
+ * refuses.
  *
- *   Response      SC2011   blocks, as recorded
- *   RequestInit   SC2011   blocks, as recorded
- *   Headers       SC2011   blocks, and is NOT in the received list --
- *                          though the compiler's own ISLAND_AMBIENT_TYPES
- *                          does list it
- *   Request       SC0001   `Cannot find name 'Request'` -- it is not a
- *                          type surface awaiting a static representation,
- *                          it is a name this lib set does not resolve at
- *                          all, bare or as `globalThis.Request`
- *   fetch(...)    SC2012   and this is the half that decides the price: a
- *                          fetch CALL in a static build refuses even with
- *                          no record in sight. `fetch` exists in this
- *                          compiler only as an island global behind
- *                          requireDynamicApi, so mapping the three types
- *                          MOVES the refusal to the call site. The
- *                          missing feature is an HTTP/1.1 + TLS client
- *                          with the Response/body/stream surface behind
- *                          it, not three type mappings.
+ * WHAT THIS FILE USED TO SAY, AND WHY IT WAS WRONG. The received account
+ * was "the blockers are three names, `Response`, `RequestInit`,
+ * `Request` — three type surfaces, not a language feature". This file's
+ * previous revision corrected that to "the type half is not the price: a
+ * bare `fetch()` CALL answers SC2012 on its own, so mapping the types
+ * would only MOVE the refusal to the call site", and recorded that
+ * `Request` "does not resolve at all". Both corrections were measured in a
+ * BARE temp directory, and both are lane artifacts:
  *
- * The controls matter as much as the blockers: a function type IS a legal
- * record member today, and `AbortSignal` and `URL` in the same position
- * compile. A future change that "fixed" this row by refusing every
- * function-typed member would take those down and this file would say so.
+ *   - `Request` DOES resolve in the lane zapo compiles in. With this
+ *     repo's `@types/node` adopted it is undici-types' class and the
+ *     refusal is `SC2009` naming the member's type; only with no
+ *     `@types/node` in sight does it answer `SC0001`. Pinned below in
+ *     both spellings rather than in whichever one this host produces.
+ *   - the call and the types were never separable, and the previous
+ *     revision was right about that for the wrong reason. They landed
+ *     TOGETHER (scr_fetch_static.c and lower-fetch.ts): a static `fetch`
+ *     with a static `Response` and `Headers` behind it.
  *
- * Compiled in a BARE temp directory with no tsconfig. Every answer above
- * was cross-checked against the same reductions compiled next to a
- * tsconfig that adopts this repo's @types/node (typeof fetch resolving to
- * SC2011 rather than SC0001 is the discriminator that says the node types
- * were really in play); all five agreed, so the codes below are compiler
- * facts and not lib-set accidents of the temp directory.
+ * WHAT IS CLOSED NOW, and it is most of the priced work: a `fetch()` call
+ * compiles and runs in a static build, over the same HTTP/1.1 + TLS client
+ * the island fetch already drove, and `Response` and `Headers` have static
+ * representations. `tests/harness/fetch-static.test.ts` proves the
+ * BEHAVIOUR against Node v25.9.0 on both backends across 64 compared
+ * cells; this file only proves the FENCES moved and stayed moved.
+ *
+ * WHAT STILL BLOCKS THE ROW — three things, each named at its line, and
+ * none of them an HTTP client:
+ *
+ *   1. `RequestInit` has no static representation (SC2011). It is the one
+ *      remaining member type inside `typeof fetch`, and it is what this
+ *      row's SC2011 now comes from.
+ *   2. `Request` likewise (SC2009 / SC0001 by lane) — it rides in
+ *      `typeof fetch`'s INPUT union under `@types/node`, which is why it
+ *      is part of the row even though zapo never constructs one.
+ *   3. `fetch` AS A VALUE (SC2020). zapo writes `options.fetch ?? fetch`
+ *      and then CALLS the result, so even with every type mapped the
+ *      site needs a builtin to have a first-class closure form, which
+ *      nothing in this compiler has.
+ *
+ * (And a fourth, outside the fetch family entirely: the same function
+ * writes `(init as { dispatcher?: unknown }).dispatcher = dispatcher`,
+ * which is SC1090 "assignment to non-variables" — an assignment-target
+ * feature that has nothing to do with fetch.)
+ *
+ * Every answer below was cross-checked against the same reductions
+ * compiled next to a tsconfig adopting this repo's `@types/node`; where
+ * the two lanes differ, BOTH codes are accepted and the difference is the
+ * point being recorded.
  */
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -57,80 +74,104 @@ function optionsRecord(member: string): string {
   );
 }
 
-const BLOCKERS: readonly { name: string; code: string; fragment: string; src: string }[] = [
+interface Row {
+  name: string;
+  /** Accepted codes: more than one where the lib set decides which. */
+  codes: readonly string[];
+  fragments: readonly string[];
+  src: string;
+}
+
+const BLOCKERS: readonly Row[] = [
   {
-    name: "Response in the return position",
-    code: "SC2011",
-    fragment: "have no static representation but run in the embedded dynamic engine",
-    src: optionsRecord("readonly hook?: (input: string) => Promise<Response>"),
-  },
-  {
-    name: "RequestInit in an argument position",
-    code: "SC2011",
-    fragment: "have no static representation but run in the embedded dynamic engine",
+    name: "RequestInit in an argument position — the row's remaining type blocker",
+    codes: ["SC2011"],
+    fragments: ["have no static representation but run in the embedded dynamic engine"],
     src: optionsRecord("readonly hook?: (input: string, init?: RequestInit) => Promise<string>"),
   },
   {
-    // Not named by any brief this row has travelled with, and the one the
-    // compiler's own ISLAND_AMBIENT_TYPES does list.
-    name: "Headers, which the received bisection omits",
-    code: "SC2011",
-    fragment: "have no static representation but run in the embedded dynamic engine",
-    src: optionsRecord("readonly hook?: (input: string) => Promise<Headers>"),
-  },
-  {
-    // `typeof fetch` is the spelling zapo actually uses; it lands on the
-    // same fence as its parts.
+    // The spelling zapo actually uses. It refuses through RequestInit
+    // now, not through Response.
     name: "typeof fetch, the spelling zapo uses",
-    code: "SC2011",
-    fragment: "have no static representation but run in the embedded dynamic engine",
+    codes: ["SC2011"],
+    fragments: ["have no static representation but run in the embedded dynamic engine"],
     src: optionsRecord("readonly fetchFn?: typeof fetch"),
   },
   {
-    // NOT SC2011. `Request` does not resolve, so it cannot be a type
-    // surface awaiting a static representation.
-    name: "Request does not resolve at all",
-    code: "SC0001",
-    fragment: "Cannot find name 'Request'",
+    // TWO LANES, both real. Bare: the name does not resolve at all.
+    // Next to @types/node — zapo's lane — it resolves to undici-types'
+    // class and the refusal names the member's type instead.
+    name: "Request, in whichever way this lane refuses it",
+    codes: ["SC0001", "SC2009"],
+    fragments: ["Cannot find name 'Request'", "which does not compile"],
     src: optionsRecord("readonly hook?: (input: Request) => Promise<string>"),
   },
   {
-    name: "Request does not resolve through globalThis either",
-    code: "SC0001",
-    fragment: "Namespace 'globalThis' has no exported member 'Request'",
-    src: optionsRecord("readonly hook?: (input: globalThis.Request) => Promise<string>"),
+    // The third blocker, and the one no type mapping can reach: a
+    // builtin has no closure form here.
+    name: "fetch as a VALUE, which zapo's `options.fetch ?? fetch` needs",
+    codes: ["SC2020", "SC1090"],
+    fragments: ["has no scriptc lowering yet", "is not supported yet"],
+    src:
+      "const g = fetch\nasync function go(): Promise<void> {\n" +
+      "  const r = await g('http://example.com')\n  console.log(r.status)\n}\nvoid go()\n",
   },
+];
+
+/** Rows that HAVE closed. A closed fence does not just leave this file —
+ * it changes sides, and now has to keep COMPILING. That is what stops the
+ * next change from quietly putting the refusal back, and it is the only
+ * reading that keeps a price file honest as the price falls. */
+const CLOSED: readonly { name: string; src: string; provedBy: string }[] = [
   {
-    // The half that sets the price: no record, no member, just the call.
-    name: "a fetch call refuses on its own",
-    code: "SC2012",
-    fragment: "'fetch' runs in the embedded dynamic engine, which this build does not include",
+    name: "a fetch call compiles on its own",
+    provedBy: "tests/harness/fetch-static.test.ts (64 cells against Node, both backends)",
     src:
       "async function go(): Promise<void> {\n" +
-      "  const r = await fetch('http://example.com')\n  console.log(typeof r)\n}\n" +
-      "void go()\n",
+      "  const r = await fetch('http://127.0.0.1:1/')\n  console.log(r.status)\n}\n" +
+      "void go().catch(() => { console.log('rejected') })\n",
+  },
+  {
+    name: "Response in the return position",
+    provedBy: "tests/corpus/5980, 5981, 5982",
+    src: optionsRecord("readonly hook?: (input: string) => Promise<Response>"),
+  },
+  {
+    name: "Headers in the return position",
+    provedBy: "tests/corpus/5981",
+    src: optionsRecord("readonly hook?: (input: string) => Promise<Headers>"),
+  },
+  {
+    name: "a Response value read for status and ok",
+    provedBy: "tests/corpus/5980",
+    src:
+      "async function go(): Promise<void> {\n" +
+      "  const r = await fetch('http://127.0.0.1:1/')\n" +
+      "  console.log(r.ok, r.status, r.statusText, r.redirected, r.url)\n" +
+      "  console.log(r.headers.get('content-type'))\n" +
+      "  console.log((await r.text()).length)\n}\n" +
+      "void go().catch(() => { console.log('rejected') })\n",
   },
 ];
 
 /** The controls: a function type IS a legal record member, and these two
- * standard types in the same position map today. */
+ * standard types in the same position map today. A future change that
+ * "fixed" a row by refusing every function-typed member would take these
+ * down and this file would say so. */
 const COMPILES: readonly { name: string; src: string }[] = [
-  {
-    name: "a function member over URL",
-    src: optionsRecord("readonly hook?: (input: URL) => Promise<string>"),
-  },
+  { name: "a function member over URL", src: optionsRecord("readonly hook?: (input: URL) => Promise<string>") },
   {
     name: "a function member carrying AbortSignal",
     src: optionsRecord("readonly hook?: (input: string, signal?: AbortSignal) => Promise<string>"),
   },
-  {
-    name: "a plain function member",
-    src: optionsRecord("readonly hook?: (input: string) => number"),
-  },
+  { name: "a plain function member", src: optionsRecord("readonly hook?: (input: string) => number") },
 ];
 
 let lab = "";
-interface Built { ok: boolean; diags: { code: string; message: string }[] }
+interface Built {
+  ok: boolean;
+  diags: { code: string; message: string }[];
+}
 const BUILT = new Map<string, Built>();
 
 async function build(name: string, src: string): Promise<Built> {
@@ -145,16 +186,28 @@ async function build(name: string, src: string): Promise<Built> {
 beforeAll(async () => {
   lab = await mkdtemp(join(tmpdir(), "scriptc-fetch-slice-"));
   for (const p of BLOCKERS) BUILT.set(`X:${p.name}`, await build(p.name, p.src));
+  for (const p of CLOSED) BUILT.set(`O:${p.name}`, await build(p.name, p.src));
   for (const p of COMPILES) BUILT.set(`C:${p.name}`, await build(p.name, p.src));
 }, 1_800_000);
 
 describe("the fetch slice, priced", () => {
-  test.for(BLOCKERS.map((p) => [p.name, p] as const))("blocks: %s", ([, p]) => {
+  test.for(BLOCKERS.map((p) => [p.name, p] as const))("still blocks: %s", ([, p]) => {
     const b = BUILT.get(`X:${p.name}`)!;
     expect(b.ok, `${p.name} compiled, but this row is supposed to refuse`).toBe(false);
+    const seen = b.diags.map((d) => `${d.code} ${d.message.slice(0, 160)}`).join(" | ");
     expect(
-      b.diags.some((d) => d.code === p.code && d.message.includes(p.fragment)),
-      `${p.name} refuses, but not with ${p.code} / "${p.fragment}". Saw: ` +
+      b.diags.some((d, i) => p.codes.includes(d.code) && p.fragments.some((f) => d.message.includes(f)) && i >= 0),
+      `${p.name} refuses, but not with one of ${p.codes.join("/")} carrying one of the recorded ` +
+        `fragments. Saw: ${seen}`,
+    ).toBe(true);
+  });
+
+  test.for(CLOSED.map((p) => [p.name, p] as const))("CLOSED, and must stay closed: %s", ([, p]) => {
+    const b = BUILT.get(`O:${p.name}`)!;
+    expect(
+      b.ok,
+      `${p.name} refuses again. This row was closed by the static fetch and is proved by ` +
+        `${p.provedBy}; a refusal here is a regression, not a re-measurement. Diagnostics: ` +
         b.diags.map((d) => `${d.code} ${d.message.slice(0, 160)}`).join(" | "),
     ).toBe(true);
   });
