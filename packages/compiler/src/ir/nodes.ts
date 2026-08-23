@@ -5017,7 +5017,11 @@ export type IrLibFn =
   /** The frame entries for a compiled class instance's run-time property
    * table (args: the `%props` dyn table, recurse, depth) — one per
    * ENUMERABLE key, in JS own-key order, emitted right after the
-   * declared fields' entries. An accessor renders `[Getter]` /
+   * declared fields' entries — TWICE, because OrdinaryOwnPropertyKeys puts
+ * every ARRAY-INDEX key ahead of every string key ACROSS THE WHOLE
+ * object and the declared fields sit between the two halves. The fourth
+ * argument selects the half: true for the index keys (emitted before the
+ * fields), false for the rest (after). An accessor renders `[Getter]` /
    * `[Setter]` / `[Getter/Setter]` and is NOT invoked, which is Node's
    * answer. Never throws. */
   | "insp.clsProps"
