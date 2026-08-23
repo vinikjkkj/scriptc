@@ -102,16 +102,19 @@ export interface DynHost extends WalkerHost {
   /** The class's preorder interval and hierarchy membership — the same
    * numbers `instanceof` compares against. */
   classInterval(className: string): { pre: number; post: number };
-  /** Every STANDALONE class carrying a run-time `%props` table, as the
-   * three things [[Get]] over a boxed instance needs: the `@`-ref of its
-   * SCR_DYN_OBJINST descriptor (to recognise the box), its struct
-   * spelling and the field's GEP index (to reach the table). Hierarchy
-   * classes are excluded on both lanes for the same reason — a box's
-   * `cls` is the descriptor of the STATIC type it was boxed from, and a
-   * Derived instance in a Base-typed slot boxes as Base, whose struct has
-   * no such field. That IS a reachable case (a class with a base takes a
-   * table today) and it keeps the fence; emit-walkers.ts's arm carries
-   * why, and estado-nullsig.md names it as the next step. */
+  /** Every class carrying a run-time `%props` table whose BASE does not,
+   * as the three things [[Get]] over a boxed instance needs: the `@`-ref
+   * of its SCR_DYN_OBJINST descriptor, its struct spelling and the
+   * field's GEP index. Hierarchy classes are INCLUDED: the box proves
+   * itself through scr_dyn_objinst_ptr_of, which tests the instance's
+   * run-time preorder position (read from its vtable, the same one
+   * `instanceof` reads) against the descriptor's interval, so no answer
+   * depends on the static type of the slot the value passed through. A
+   * class whose base already has the field is skipped because the base's
+   * interval covers it at the same index -- unreachable today, since the
+   * frontend refuses a table on a class that has a subclass and every
+   * table-carrying class is therefore a leaf. emit-walkers.ts's arm
+   * carries the full reasoning and both lanes spell the gates once each. */
   classPropsTables(): { desc: string; struct: string; index: number }[];
 }
 

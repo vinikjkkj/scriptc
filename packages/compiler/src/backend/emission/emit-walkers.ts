@@ -1467,21 +1467,45 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`     * caller while \`c[k]\` refused a property the program had just`);
     d.push(`     * defined on c. */`);
     for (const [cname, meta] of E.classMeta) {
-      // STANDALONE classes only, and this DOES cost a reachable case: a
-      // class with a BASE takes the table fine (`class D extends B` and a
-      // define on a D is compiled today, measured), and its boxed read
-      // still fences. The reason is the box, not the table. `cls` is the
-      // descriptor of the STATIC type the value was boxed FROM, so a
-      // Derived instance in a Base-typed slot boxes as Base — and the
-      // field lives in DERIVED's struct, at an index Base's spelling does
-      // not have. The exact-descriptor test would let the box's OWN class
-      // through soundly, but it would also make the answer depend on the
-      // static type of the slot the value happened to pass through, which
-      // is a worse thing to ship than a fence. Named in estado-nullsig.md
-      // as the next step here; until then a hierarchy class refuses, which
-      // is what it did before this arm existed.
-      if (meta.hierarchy) continue;
+      // Which classes get an arm, and what the box must prove first.
+      //
+      // A box's `cls` is the descriptor of the STATIC type the value was
+      // boxed FROM, so a Derived instance in a Base-typed slot boxes as
+      // Base. Trusting THAT descriptor to name the struct is unsound --
+      // and refusing every hierarchy class because of it, which is what
+      // this loop used to do, refuses zapo's own WaClientImpl, the only
+      // class in its 3M-line TU that carries a table at all. Neither is
+      // necessary, because the descriptor is not the only thing the box
+      // carries: a hierarchy instance carries its VTABLE, and
+      // scr_dyn_objinst_pre reads the class's own preorder position out
+      // of it -- which is exactly how `instanceof` narrows a base-typed
+      // box to the derived class. scr_dyn_objinst_ptr_of tests that
+      // RUN-TIME position against this descriptor's interval, so the
+      // answer depends on what the object IS and never on the declared
+      // type of a slot it passed through. That last clause is the whole
+      // reason the static-descriptor test was not shippable.
+      //
+      // The INTERVAL and not equality because a subclass's layout opens
+      // with its base chain's fields as an IDENTICAL prefix (that is what
+      // makes an upcast a reinterpret), so this class's %props sits at
+      // this index in every class below it too.
+      //
+      // WHAT THE INTERVAL DOES NOT BUY TODAY: the frontend refuses a table
+      // on a class that HAS A SUBCLASS (SC2020 -- the closed member set its
+      // collision check reads would not be exact), so every table-carrying
+      // class is a LEAF and its interval is a single point. The interval is
+      // still what belongs here rather than `==`: it is the predicate
+      // instanceof already uses, it needs no second runtime entry point,
+      // and it is what stays correct if that leaf rule is ever relaxed.
+      // tests/harness/class-runtime-property-table.test.ts pins the
+      // refusal, so the day it lifts is a day this arm is already right.
       if (!meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) continue;
+      // A class whose BASE already carries the field needs no arm: the
+      // field is the base's, at the base's index, and the base's arm
+      // covers this class's whole interval. lower-classes.ts adds %props
+      // only when the base chain has none, so the field is never
+      // duplicated and "the base's index" is the only index there is.
+      if (meta.base?.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) continue;
       if (!canBoxClassIntoDyn(cname)) continue;
       const desc = E.dynClassDesc(cname);
       const struct = mangleClassStruct(cname);
