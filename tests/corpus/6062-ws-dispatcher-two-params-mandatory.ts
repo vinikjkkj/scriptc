@@ -142,7 +142,11 @@ const dispatcher: WaProxyDispatcher = {
                     hdrs.push(line.slice(c + 1).trim())
                 }
             }
-            console.log('proxy got status', status, 'trailing bytes', rest.length)
+            // The COUNT is not printed and must not be: whether the frame
+            // arrives in the same read as the 101 is the kernel's business,
+            // and it differs run to run in BOTH runtimes. What is asserted
+            // is that the message still lands, two lines below.
+            console.log('proxy got status', status)
             if (rest.length > 0) sock.unshift(rest)
             handler.onUpgrade(status, hdrs, sock)
         })

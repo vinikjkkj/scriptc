@@ -67,6 +67,11 @@ typedef struct {
   /* The owner is going away: drop the client and refuse late callbacks. */
   void (*invalidate)(void *disp);
   void (*release)(void *disp);
+  /* Nobody can answer any more: the program let go of every handler
+   * member without settling. Asked at scr_ws_global_set_user, because the
+   * dispatcher runs INSIDE the constructor and can reach that state
+   * before the API record has a name. */
+  bool (*orphaned)(void *disp);
 } ScrWsDispOps;
 
 /* A handle with no transport yet. `fire` cannot be called before
@@ -83,6 +88,13 @@ void scr_ws_global_adopt(ScrWsGlobal *g, ScrWsClient *c /*borrowed*/, void *disp
 /* The four callbacks a delegated client must be built with, so both
  * transports reach this unit's state machine through one code path. */
 const ScrWsClientCallbacks *scr_ws_global_client_cbs(void);
+
+/* Release the platform's reference to the API record WITHOUT firing
+ * anything, for the one ending that has no event: a dispatcher that
+ * answered nothing and then let go of the handler, so no callback can
+ * ever arrive. readyState is left where it is -- this is a reference
+ * released, not a state change. See the .c for why the oracle agrees. */
+void scr_ws_global_drop_user(ScrWsGlobal *g);
 
 /* `{ headers: { Name: value } }` from the init bag, flattened into the
  * request block scr_ws_build_request appends. The map is the header
