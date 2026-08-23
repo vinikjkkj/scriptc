@@ -42,7 +42,6 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { locOf } from "../program.js";
 import {
-  ABORTSIGNAL_T,
   arrayOf,
   BOOL,
   BYTES_U8,
@@ -230,7 +229,6 @@ function applyKey(
         "string and Uint8Array/Buffer bodies are lowered; FormData, URLSearchParams and " +
         "streams each need a body representation this slice does not have");
     }
-    // eslint-disable-next-line no-fallthrough
     case "signal": {
       const v = L.lowerExpr(value);
       if (v.type.kind !== "abortSignal") L.badType(value, L.typeOf(value));

@@ -73,9 +73,11 @@ interface Origins {
 }
 
 /** Starts the fixture origin process and waits for its PORTS line. The
- * https leg needs `openssl` to mint a self-signed cert; without it the
- * origin reports port 0 and the TLS case is skipped rather than silently
- * asserting nothing. */
+ * https leg needs `openssl` to mint a self-signed cert; without one the
+ * origin reports port 0 and the TLS case degrades to a connect failure —
+ * still a rejection, still compared against Node's, but no longer a
+ * CERTIFICATE rejection. Stated rather than hidden: on a host with no
+ * openssl this file proves less than its comment above claims. */
 function startOrigins(): Promise<Origins> {
   return new Promise((resolve, reject) => {
     const proc = spawn(process.execPath, [join(fixtureDir, "origin.mjs")], {
