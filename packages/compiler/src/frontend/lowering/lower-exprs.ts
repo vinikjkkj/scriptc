@@ -10,6 +10,7 @@ import type { Lowerer, WidthLift } from "./lowerer.js";
 import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { lowerFetchProperty } from "./lower-fetch.js";
+import { builtinFnValueOf } from "./lower-fnvalue.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
@@ -1364,6 +1365,28 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           expr,
           `module namespace objects as values (access '${expr.text}' members directly)`,
         );
+      }
+      // The plain FUNCTION globals as VALUES (`const f = fetch`,
+      // `const a = isNaN`, `{ dec: decodeURIComponent }`): the same
+      // interned zero-capture closure the primitive constructors get
+      // further down, one synthesized module function per builtin per
+      // program, so every reference is the SAME pointer and `fetch ===
+      // fetch` is JS identity. The lift's body IS the libCall the direct
+      // call form lowers to — see lower-fnvalue.ts, which states the three
+      // things the table deliberately does not answer (`typeof fetch` as a
+      // TYPE, `.name`/`.length`, and a builtin METHOD off its object) and
+      // carries the gate that keeps a table entry from ever disagreeing
+      // with the checker's own mapping for the same name.
+      //
+      // AHEAD of the island-globals fence right below, because two of the
+      // table's names (`parseFloat`, `isFinite`) are ALSO island-surface
+      // globals and that fence would otherwise claim them first. It can
+      // only take a name the table already holds, and every table entry
+      // whose call form is the island's is static-lane only.
+      // JavaScript sources keep the identity-token path further down.
+      if (!isJsSourceFile(expr.getSourceFile())) {
+        const bfn = builtinFnValueOf(L, expr, loc);
+        if (bfn) return bfn;
       }
       if (L.islandGlobalFnOf(expr)) {
         // Island-backed functions have no closure representation (they

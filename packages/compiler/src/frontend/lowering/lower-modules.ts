@@ -19,6 +19,7 @@ import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingG
 import { isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalArmedType, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
 import { diffieHellmanFnValueDeclType, objectStaticFnValueDeclType, stdlibGlobalAliasDecl } from "./surfaces.js";
+import { builtinFnValueDeclType } from "./lower-fnvalue.js";
 import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-namespaces.js";
 import { collectExpandoMembers, expandoBindStmts } from "./lower-expando.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
@@ -1713,7 +1714,12 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
                   // fences on its type here, which is why 2717 was green
                   // in the corpus's fallback world and red in the world
                   // every real project (zapo included) compiles in.
-                  diffieHellmanFnValueDeclType(L, decl.initializer))
+                  diffieHellmanFnValueDeclType(L, decl.initializer) ??
+                  // `const f = fetch` at FILE scope — the same story once
+                  // more, for a plain global builtin in value position.
+                  // See lower-fnvalue.ts; lowerVarDecl carries the
+                  // function-scope twin of this arm.
+                  builtinFnValueDeclType(L, decl))
                 : null;
             if (isJsSourceFile(sf) && objFnValueT === null && !L.mapTypeOf(L.typeOf(nameNode))) continue;
             if (objFnValueT !== null && process.env["SCRIPTC_OBJFNVALUE_WHY"] !== undefined) {
