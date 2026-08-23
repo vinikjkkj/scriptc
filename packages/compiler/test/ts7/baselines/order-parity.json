@@ -9399,6 +9399,13 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/6101-require-self-scope/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/6101-require-self-scope/inner/t.cjs",
+    "<repo>/tests/corpus/6101-require-self-scope/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/700-classes-basic.ts": {
    "order": [
     "<repo>/tests/corpus/700-classes-basic.ts"
