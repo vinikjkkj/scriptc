@@ -159,6 +159,11 @@ const cases = [
   // Both queues at once: a tick between two close callbacks, and a second
   // server draining in the poll phase of the iteration between them.
   "net-close-order-tick-between",
+  // The same program with the resume() taken back OUT: it hung on both
+  // sides until a consumer-less socket started noticing its peer's FIN,
+  // and it is the case that proves the FIN lands in the right loop
+  // iteration rather than merely eventually.
+  "net-read-arm-tick-between",
 ];
 
 describe(`shutdown close order (${REPEATS} runs per case)`, () => {
