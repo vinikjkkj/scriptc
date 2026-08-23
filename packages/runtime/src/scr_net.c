@@ -528,6 +528,14 @@ struct ScrNetSocket {
   bool had_error;
   bool emit_close;    /* fd closed; 'close' fires at the next sweep */
   bool close_emitted; /* settled */
+  /* This socket is still counted in server->nconns. Node drops the count
+   * inside Socket._destroy — SYNCHRONOUSLY, at destroy() time — and not
+   * when the socket's own 'close' is finally delivered, so the server's
+   * _emitCloseIfDrained tick is scheduled a whole event-loop phase before
+   * any close callback runs. We do the same: the count comes off in
+   * scr_net_sock_detach_server() the moment the fd goes, and this flag is
+   * the one-shot that keeps the later settle from decrementing twice. */
+  bool conn_counted;
   bool read_armed, write_armed;
   /* write buffer: [whead, wlen) of wbuf is unsent */
   char *wbuf;
@@ -940,6 +948,34 @@ static void scr_net_sock_update_write(ScrNetSocket *s) {
   }
 }
 
+static void scr_net_server_mark_due(ScrNetServer *s);
+
+/* Drops this socket from its server's connection count, and stamps the
+ * server's settle order if that emptied it.
+ *
+ * Node's Socket.prototype._destroy runs `this._server._connections--`
+ * and `_emitCloseIfDrained()` on the destroying STACK, while the socket's
+ * own 'close' waits for libuv to run the handle's close callback in the
+ * loop's close phase. The nextTick queue drains before that phase, so a
+ * server drained by a dying socket emits its 'close' BEFORE the socket
+ * that drained it, and before every other socket closing in the same
+ * turn. Decrementing here — rather than in the sweep's close-emission
+ * branch, where it used to live — is what puts the server's stamp on the
+ * right side of that boundary.
+ *
+ * The server REFERENCE is deliberately left in place: scr_net_sock_server()
+ * is the receiver scr_http.c/scr_http2.c push as `this` for handlers that
+ * may still run, and the ref is released at the settle as before. Only the
+ * count and the due stamp move. */
+static void scr_net_sock_detach_server(ScrNetSocket *s) {
+  if (!s->conn_counted || s->server == NULL) return;
+  s->conn_counted = false;
+  s->server->nconns--;
+  if (s->server->closing && s->server->nconns == 0 && !s->server->close_emitted) {
+    scr_net_server_mark_due(s->server);
+  }
+}
+
 /* Close the fd (registrations dropped first — the epoll obligation) and
  * flag the 'close' sweep. */
 static void scr_net_sock_close_fd(ScrNetSocket *s) {
@@ -951,6 +987,7 @@ static void scr_net_sock_close_fd(ScrNetSocket *s) {
     s->read_armed = s->write_armed = false;
   }
   if (!s->close_emitted) s->emit_close = true;
+  scr_net_sock_detach_server(s); /* Node counts down inside _destroy */
 }
 
 /* The FIN half: called when the write half is ENDING and the buffer just
@@ -1656,6 +1693,7 @@ static void scr_net_server_accept(ScrNetServer *srv) {
     sock->fd = fd;
     sock->server = scr_net_server_retain(srv);
     srv->nconns++;
+    sock->conn_counted = true;
     scr_net_sock_register(sock);
     if (srv->native_conn) {
       /* the protocol layer (scr_http.c / scr_tls.c) claims the connection */
@@ -2962,27 +3000,33 @@ static void scr_net_sweep(void) {
     if (sock->emit_close && !sock->close_emitted && sock->fd < 0) {
       sock->close_emitted = true;
       sock->emit_close = false;
-      /* The owning server's count drains FIRST, and a now-drained closing
-       * server settles before this socket's own 'close' fires — Node's
-       * observed order (differential: the net-echo fixture). */
+      /* EVERY server whose 'close' is already due emits before this
+       * socket's own 'close' — not just the server this socket drained.
+       *
+       * Node's boundary is a phase boundary, not a per-socket one: the
+       * server 'close' is a process.nextTick, the socket 'close' is a
+       * libuv close callback, and the whole tick queue drains before the
+       * loop's close phase. So a turn that destroys two connections and
+       * drains two servers emits BOTH server closes and only then the
+       * two socket closes. Settling only the server this socket happened
+       * to drain interleaved them — server, socket, server, socket —
+       * where Node prints server, server, socket, socket.
+       *
+       * The counts themselves came off at fd-close time
+       * (scr_net_sock_detach_server), which is why anything due is
+       * already stamped by the time this runs. */
+      scr_net_sock_detach_server(sock); /* belt and braces: a socket that
+                                         * reached emit_close without a
+                                         * close_fd (a failed dial) */
+      scr_net_settle_due_servers();
+      if (scr_exc_pending()) {
+        scr_net_sock_release(sock);
+        return;
+      }
       if (sock->server) {
         ScrNetServer *srv = sock->server;
         sock->server = NULL;
-        srv->nconns--;
-        if (srv->closing && srv->nconns == 0 && !srv->close_emitted) {
-          /* This socket's death made srv due; settle the whole due queue
-           * in due order, because a server that came due EARLIER (a
-           * drained one closed in a previous turn) must still emit first
-           * — the handler that closes a busy server and then a drained one
-           * can put both settles in this single branch. */
-          scr_net_server_mark_due(srv);
-          scr_net_settle_due_servers();
-        }
         scr_net_server_release(srv);
-        if (scr_exc_pending()) {
-          scr_net_sock_release(sock);
-          return;
-        }
       }
       if (sock->native_closed) {
         sock->native_closed(sock->native_ctx);
@@ -3176,7 +3220,10 @@ static void scr_net_cleanup_atexit(void) {
       s->conn_pending = NULL;
     }
     if (s->server) {
-      s->server->nconns--;
+      if (s->conn_counted) {
+        s->conn_counted = false;
+        s->server->nconns--;
+      }
       scr_net_server_release(s->server);
       s->server = NULL;
     }
