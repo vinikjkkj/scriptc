@@ -215,8 +215,7 @@ const CLOSED: readonly {
     provedBy:
       "tests/harness/request-init.test.ts (25 cells against Node on both backends, including an " +
       "INJECTED fetch through exactly this option), tests/harness/builtin-fn-value.test.ts (the " +
-      "`typeof fetch` record differential and the 38 fetch-as-a-value cells) and " +
-      "tests/corpus/6080, 6081",
+      "`typeof fetch` record differential and the 38 fetch-as-a-value cells)",
     // The SAME record that carried the refusal, now carrying none -- and
     // with the BODY that was hidden behind it. The declaration used to
     // poison before a single statement of the function was lowered, so

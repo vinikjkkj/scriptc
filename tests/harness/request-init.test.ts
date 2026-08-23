@@ -261,6 +261,97 @@ describe("a RequestInit value, against Node", () => {
   }
 });
 
+describe("the collector, measured rather than argued", () => {
+  test(
+    "the audited fixture leaks nothing, and the audit really ran",
+    async () => {
+      // A ScrFetchInit is cycle-headered and owns a signal, a string, a
+      // string array and a byte array, so it is audited rather than
+      // reasoned about. THE AUDIT SILENCES ITSELF when a fiber never
+      // resumes ("RC audit skipped: N fiber(s) never resumed" returns
+      // BEFORE auditing), so a clean stderr proves nothing on its own —
+      // the abandoned-fiber CONTROL below is what makes this a measurement.
+      //
+      // It found a leak, and not in this feature:
+      // `scr_fetch_headers_from_dyn` dropped the +1 that
+      // `scr_dyn_arr_at` gives it, leaking one ScrDyn and its ScrStr per
+      // header key on the RECORD-VALUE header form. It was on main, under
+      // the literal spelling too, and only a row like this one sees it.
+      const prev = process.env["SCRIPTC_RC_AUDIT"];
+      process.env["SCRIPTC_RC_AUDIT"] = "1";
+      try {
+        const dir = stage(
+          "audited",
+          [
+            "async function main(): Promise<void> {",
+            "  const hs: Record<string, string> = { 'X-Test': 'rec', 'content-type': 'text/plain' }",
+            "  const init: RequestInit = { method: 'POST', headers: hs, body: 'q' }",
+            `  const r = await fetch('${origin!.http}/echo', init)`,
+            "  console.log((await r.text()).length > 0)",
+            "  const c = new AbortController()",
+            "  const i2: RequestInit = { signal: c.signal }",
+            `  const r2 = await fetch('${origin!.http}/ok', i2)`,
+            "  console.log((await r2.text()).length > 0)",
+            "}",
+            "void main()",
+            "",
+          ].join("\n"),
+        );
+        const built = await compile(join(dir, "main.ts"), {
+          outPath: join(dir, exeName("program")),
+          outDir: dir,
+          backend: "c",
+        });
+        expect(
+          built.ok,
+          "the audited fixture must compile:\n" +
+            (built.diagnostics ?? []).map((d) => `${d.code}: ${d.message}`).join("\n"),
+        ).toBe(true);
+        // The define LANDED: an audit that was never compiled in is a
+        // silent pass, and `SCTRAP lines(0)` on an untraced binary is the
+        // same class of non-result.
+        expect(
+          readFileSync(built.binaryPath!).includes(Buffer.from("scriptc RC audit")),
+          "the binary must carry the audit — otherwise a clean stderr is a DID-NOT-RUN",
+        ).toBe(true);
+        const audited = await run(built.binaryPath!, [], dir);
+        expect(audited.stderr, "the audit must report nothing live at exit").toBe("");
+        expect(audited.exitCode).toBe(0);
+
+        // THE CONTROL. Same build settings, a fiber that never resumes:
+        // the audit must SAY it skipped. Without this the row above cannot
+        // tell "audited and clean" from "skipped before auditing".
+        const cdir = stage(
+          "audit-control",
+          [
+            "function never(): Promise<number> { return new Promise<number>(() => {}) }",
+            "async function f(): Promise<void> { await never(); console.log('unreachable') }",
+            "void f()",
+            "console.log('done')",
+            "",
+          ].join("\n"),
+        );
+        const cbuilt = await compile(join(cdir, "main.ts"), {
+          outPath: join(cdir, exeName("program")),
+          outDir: cdir,
+          backend: "c",
+        });
+        expect(cbuilt.ok, "the abandoned-fiber control must compile").toBe(true);
+        const control = await run(cbuilt.binaryPath!, [], cdir);
+        expect(
+          control.stderr,
+          "the control must show the audit SKIPPING — if it is silent too, the row above " +
+            "proves nothing",
+        ).toContain("never resumed");
+      } finally {
+        if (prev === undefined) delete process.env["SCRIPTC_RC_AUDIT"];
+        else process.env["SCRIPTC_RC_AUDIT"] = prev;
+      }
+    },
+    900_000,
+  );
+});
+
 describe("the boundary a RequestInit value stops at", () => {
   test(
     "no member of a RequestInit value reads back",

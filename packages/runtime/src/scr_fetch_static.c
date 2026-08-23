@@ -1281,14 +1281,28 @@ ScrArr *scr_fetch_headers_from_dyn(const ScrDyn *d /*borrowed, nullable*/) {
   double n = scr_dyn_arr_len(keys);
   ScrStr *enc = scr_str_new("utf8", 4);
   for (double i = 0; i < n; i += 1) {
+    /* scr_dyn_arr_at is +1 (scr_runtime.h says so), and this loop used to
+     * drop that reference on every path: one leaked ScrDyn per header key,
+     * each holding its own ScrStr. It is only visible under
+     * SCRIPTC_RC_AUDIT and only on the RECORD-VALUE header form -- an
+     * object LITERAL never reaches this function -- which is why it
+     * survived the slice's own differential. `v` is borrowed. */
     ScrDyn *k = scr_dyn_arr_at(keys, i);
-    if (k == NULL || k->kind != SCR_DYN_STR) continue;
+    if (k == NULL) continue;
+    if (k->kind != SCR_DYN_STR) {
+      scr_dyn_release(k);
+      continue;
+    }
     ScrDyn *v = scr_dyn_obj_get(d, k->v.str->data, k->v.str->len);
-    if (v == NULL || v->kind == SCR_DYN_UNDEF || v->kind == SCR_DYN_NULL) continue;
+    if (v == NULL || v->kind == SCR_DYN_UNDEF || v->kind == SCR_DYN_NULL) {
+      scr_dyn_release(k);
+      continue;
+    }
     ScrStr *lo = fs_lower(k->v.str);
     ScrStr *vs = scr_dyn_to_string(v, enc);
     scr_arr_push_ref(out, lo);
     scr_arr_push_ref(out, vs);
+    scr_dyn_release(k);
   }
   scr_str_release(enc);
   scr_dyn_release(keys);
