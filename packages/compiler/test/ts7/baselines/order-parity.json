@@ -9182,6 +9182,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5960-for-await-over-a-stream-pays-the-iterators-turns.ts": {
+   "order": [
+    "<repo>/tests/corpus/5960-for-await-over-a-stream-pays-the-iterators-turns.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5961-a-stream-loop-and-a-generator-loop-race.ts": {
+   "order": [
+    "<repo>/tests/corpus/5961-a-stream-loop-and-a-generator-loop-race.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5962-a-parked-for-await-wakes-on-a-tick-not-on-the-push.ts": {
+   "order": [
+    "<repo>/tests/corpus/5962-a-parked-for-await-wakes-on-a-tick-not-on-the-push.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5963-readable-from-a-generator-delivers-a-phase-out.ts": {
+   "order": [
+    "<repo>/tests/corpus/5963-readable-from-a-generator-delivers-a-phase-out.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5964-two-for-await-loops-over-two-streams.ts": {
+   "order": [
+    "<repo>/tests/corpus/5964-two-for-await-loops-over-two-streams.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5965-a-readable-listener-races-a-for-await.ts": {
+   "order": [
+    "<repo>/tests/corpus/5965-a-readable-listener-races-a-for-await.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/5970-require-of-what-nothing-resolves.cjs": {
    "order": [
     "<repo>/tests/corpus/5970-require-of-what-nothing-resolves.cjs"
@@ -9195,9 +9231,45 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5980-fetch-failures-all-reject.ts": {
+   "order": [
+    "<repo>/tests/corpus/5980-fetch-failures-all-reject.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5981-response-and-headers-as-record-members.ts": {
+   "order": [
+    "<repo>/tests/corpus/5981-response-and-headers-as-record-members.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5982-fetch-accepts-a-url-object.ts": {
+   "order": [
+    "<repo>/tests/corpus/5982-fetch-accepts-a-url-object.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/6000-ws-init-bag-ignores-agent.ts": {
+   "order": [
+    "<repo>/tests/corpus/6000-ws-init-bag-ignores-agent.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/6001-ws-init-bag-dispatcher-absence.ts": {
+   "order": [
+    "<repo>/tests/corpus/6001-ws-init-bag-dispatcher-absence.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/6002-ws-init-bag-unknown-members-lower.ts": {
+   "order": [
+    "<repo>/tests/corpus/6002-ws-init-bag-unknown-members-lower.ts"
    ],
    "diags": []
   },
