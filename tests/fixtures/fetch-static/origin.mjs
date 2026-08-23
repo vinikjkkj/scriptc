@@ -43,7 +43,14 @@ function routes(req, res, origin, alt) {
   if (p === "/redircross") { res.writeHead(302, { location: alt + "/echo" }); res.end(); return; }
   if (p === "/redirnoloc") { res.writeHead(302, { "content-type": "text/plain" }); res.end("threeohtwo"); return; }
   if (p === "/headers") {
-    res.writeHead(200, { "X-Mixed-Case": "One", "x-repeat": ["a", "b"], "content-type": "text/plain" });
+    res.writeHead(200, {
+      "X-Mixed-Case": "One",
+      "x-repeat": ["a", "b"],
+      // set-cookie is the header the spec singles out, and the one real
+      // servers repeat. get() must answer Node's JOINED value.
+      "set-cookie": ["a=1; Path=/", "b=2; Path=/"],
+      "content-type": "text/plain",
+    });
     res.end("h"); return;
   }
   if (p === "/json") { res.writeHead(200, { "content-type": "application/json" }); res.end('{"a":[1,2],"b":"z"}'); return; }

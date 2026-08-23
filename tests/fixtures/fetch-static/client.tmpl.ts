@@ -134,6 +134,8 @@ async function main(): Promise<void> {
     say("h.upper", String(r.headers.get("X-MIXED-CASE")))
     say("h.mixed", String(r.headers.get("X-Mixed-Case")))
     say("h.repeat", String(r.headers.get("x-repeat")))
+    say("h.cookie", String(r.headers.get("set-cookie")))
+    say("h.cookieup", String(r.headers.get("Set-Cookie")))
     say("h.absent", String(r.headers.get("x-nothing")))
     say("h.has", String(r.headers.has("Content-Type")))
     say("h.hasnot", String(r.headers.has("x-nothing")))
