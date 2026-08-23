@@ -1098,16 +1098,14 @@ bool scr_stream_write_dyn(ScrStream *s, const ScrDyn *d, ScrClosure *cb) {
  *
  * The delay is on the settling side, not the consumer's, so it costs the
  * caller no stack and applies identically to the C and LLVM lanes (both
- * emit a call to scr_stream_next_chunk). `scr_next_inline` names the
- * stream whose next_chunk call is answering synchronously — the same
- * window Node's read() answers in. */
-/* The stream whose waiter is being answered INLINE (inside its own
- * next_chunk call), and the one being answered ON its wake tick. Held per
- * STREAM, not as a plain flag: a synchronous `_read` may run user code
- * that pushes to a DIFFERENT stream, and that stream's parked loop is
- * still parked — it owes the wake's tick, not this one's inline turn. */
-static ScrStream *scr_next_inline = NULL;
-static ScrStream *scr_next_waking = NULL;
+ * emit a call to scr_stream_next_chunk).
+ *
+ * The two states are held as the STREAM being answered, not as plain
+ * flags: a synchronous `_read` may run user code that pushes to a
+ * DIFFERENT stream, and that stream's parked loop is still parked — it
+ * owes the wake's tick, not this one's inline turn. */
+static ScrStream *scr_next_inline = NULL; /* inside its own next_chunk */
+static ScrStream *scr_next_waking = NULL; /* on its wake tick */
 
 typedef struct ScrNextSettle {
   ScrPromise *p; /* owned */
@@ -1215,8 +1213,6 @@ typedef struct ScrNextRepark {
   ScrStream *s; /* owned */
   int hops;
 } ScrNextRepark;
-
-static void scr_stream_settle_next(ScrStream *s);
 
 static void scr_next_repark_micro(void *arg) {
   ScrNextRepark *rp = (ScrNextRepark *)arg;

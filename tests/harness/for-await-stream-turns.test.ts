@@ -21,7 +21,7 @@
  */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
@@ -32,44 +32,6 @@ const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
-
-/* A ruler that counts microtask turns, and one loop per state the
- * iterator's read() can be in. Each line names the turn its chunk landed
- * on, so the assertion below is a count and not an interleaving. */
-const PROGRAM = [
-  `import { Readable } from "node:stream"`,
-  ``,
-  `let n = 0`,
-  `let era = 0`,
-  `function tick(k: number): void {`,
-  `  if (k === era && n < 12) {`,
-  `    n += 1`,
-  `    void Promise.resolve().then(() => { tick(k) })`,
-  `  }`,
-  `}`,
-  `function ruler(): void {`,
-  `  era += 1`,
-  `  n = 0`,
-  `  const k = era`,
-  `  void Promise.resolve().then(() => { tick(k) })`,
-  `}`,
-  ``,
-  `async function* three(): AsyncGenerator<string> { yield "a"; yield "b"; yield "c" }`,
-  ``,
-  `async function main(): Promise<void> {`,
-  `  ruler()`,
-  `  for await (const c of three()) console.log("gen " + c + " @" + String(n))`,
-  `  ruler()`,
-  `  for await (const c of Readable.from(["a", "b", "c"])) {`,
-  `    console.log("inline " + String(c) + " @" + String(n))`,
-  `  }`,
-  `  const r = new Readable({ read() {} })`,
-  `  setTimeout(() => { ruler(); r.push("p"); r.push(null) }, 5)`,
-  `  for await (const c of r) console.log("parked " + String(c) + " @" + String(n))`,
-  `}`,
-  `void main()`,
-  ``,
-].join("\n");
 
 /* Node v25.9.0. The generator is the control: two turns per chunk is the
  * cost the stream's wrapper has to match, because the wrapper IS one. */
@@ -89,16 +51,18 @@ async function run(cmd: string, args: string[]): Promise<string> {
   return stdout.replace(/\r\n/g, "\n");
 }
 
+/* The program lives in tests/fixtures, NOT under node_modules/.cache:
+ * node refuses to strip types from a .ts file inside node_modules, so an
+ * oracle run from the build cache would fail before it printed a line. */
+const src = join(repoRoot, "tests/fixtures/for-await-turns/turns.ts");
+
 describe("for-await over a stream: the iterator's turn count", () => {
   const key = createHash("sha256")
-    .update(PROGRAM)
+    .update(readFileSync(src))
     .update(sanitize ? "san" : "plain")
     .digest("hex")
     .slice(0, 16);
   const dir = join(cacheDir, `for-await-turns-${key}`);
-  mkdirSync(dir, { recursive: true });
-  const src = join(dir, "turns.ts");
-  writeFileSync(src, PROGRAM);
 
   test("node is the oracle and agrees with the pinned counts", async () => {
     expect(await run("node", [src])).toBe(EXPECTED);
