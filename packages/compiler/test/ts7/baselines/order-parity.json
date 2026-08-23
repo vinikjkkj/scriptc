@@ -9285,6 +9285,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/6020-builtin-fn-value-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/6020-builtin-fn-value-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/6021-builtin-fn-value-calls.ts": {
+   "order": [
+    "<repo>/tests/corpus/6021-builtin-fn-value-calls.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/603-closures-rc-stress.ts": {
    "order": [
     "<repo>/tests/corpus/603-closures-rc-stress.ts"
