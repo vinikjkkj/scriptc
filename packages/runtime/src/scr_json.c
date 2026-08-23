@@ -2099,20 +2099,40 @@ const char *scr_dyn_objinst_cls(const ScrDyn *d) {
   return d->v.inst.cls->name;
 }
 
-/* The boxed instance pointer, and only for the EXACT descriptor asked
- * for. The one thing a compiled walker needs before it may GEP into a
- * class struct through a box, and the reason it lives here rather than
- * as a pair of byte offsets in each backend: the offsets of `o` and
- * `cls` inside the ScrDyn payload union are this file's fact, and the
- * two lanes had already hardcoded three of the FUNC arm's. Exactness is
- * not a convenience either -- a HIERARCHY class's box carries the
- * descriptor of the STATIC type it was boxed from, so `==` is what makes
- * "the struct at this pointer really has that field at that index" true.
- * Answers NULL for every other kind, descriptor or NULL box; never
- * throws. */
+/* The boxed instance pointer, and only when the instance's OWN class is
+ * `cls` or below it. The one thing a compiled walker needs before it may
+ * GEP into a class struct through a box, and the reason it lives here
+ * rather than as a pair of byte offsets in each backend: the offsets of
+ * `o` and `cls` inside the ScrDyn payload union are this file's fact,
+ * and the two lanes had already hardcoded three of the FUNC arm's.
+ *
+ * The test is `scr_dyn_objinst_is`, i.e. the RUN-TIME preorder position
+ * against this descriptor's interval -- the very predicate `instanceof`
+ * uses, and it is the whole point. This function used to compare
+ * `d->v.inst.cls == cls`, which is a test on the box's STATIC descriptor:
+ * a Derived instance in a Base-typed slot boxes as Base, so the walker
+ * that asked about Derived was told no and every hierarchy class had to
+ * be refused an arm. But the descriptor is not the only thing the box
+ * carries. A hierarchy instance carries its VTABLE, scr_dyn_objinst_pre
+ * reads the class's own position out of it, and that position is a fact
+ * about the OBJECT -- never about the declared type of a slot the value
+ * happened to pass through, which is the property that made the
+ * descriptor test unusable in the first place.
+ *
+ * The INTERVAL rather than equality because a subclass's layout opens
+ * with its base chain's fields as an identical prefix (that is what makes
+ * an upcast a reinterpret), so a field at index i in `cls` is at index i
+ * in every class below it. Today that buys nothing: the only caller is
+ * the emitted [[Get]] arm, and the frontend refuses a run-time property
+ * table on a class that has a subclass, so every descriptor reaching here
+ * has pre == post. The interval is still the right spelling -- it is the
+ * predicate `instanceof` already uses, so this is one shared narrowing
+ * rule and not a second one, and it stays correct if that leaf rule
+ * lifts. Answers NULL for every other kind, for a position outside the
+ * interval, and for a NULL box or descriptor; never throws. */
 void *scr_dyn_objinst_ptr_of(const ScrDyn *d, const ScrDynClass *cls) {
-  if (d == NULL || d->kind != SCR_DYN_OBJINST || d->v.inst.cls != cls) return NULL;
-  return d->v.inst.o;
+  if (d == NULL || cls == NULL) return NULL;
+  return scr_dyn_objinst_is(d, cls->pre, cls->post) ? d->v.inst.o : NULL;
 }
 
 bool scr_dyn_objinst_fence(const ScrDyn *d, const char *what) {

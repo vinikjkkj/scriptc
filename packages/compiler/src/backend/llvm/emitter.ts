@@ -2960,8 +2960,13 @@ class LlEmitter {
   classPropsTables(): { desc: string; struct: string; index: number }[] {
     const out: { desc: string; struct: string; index: number }[] = [];
     for (const [cname, meta] of this.classMeta) {
-      if (meta.hierarchy) continue;
       if (!meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) continue;
+      // A class whose BASE already carries the field needs no arm: the
+      // field is the base's, at the base's index, and the base's arm
+      // covers this class's whole interval. lower-classes.ts adds %props
+      // only when the base chain has none, so the field is never
+      // duplicated and "the base's index" is the only index there is.
+      if (meta.base?.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) continue;
       if (!canBoxClassIntoDyn(cname)) continue;
       out.push({
         desc: this.dynClassDesc(cname),

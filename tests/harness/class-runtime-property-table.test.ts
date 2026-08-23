@@ -153,6 +153,41 @@ const RUNS: readonly { name: string; src: string; out: string }[] = [
       "console.log(String(r[k]) + ' ' + String(r[k + 's']))\n",
     out: "9 undefined\n",
   },
+  {
+    // A class WITH A BASE. This row was a REFUSAL until the arm stopped
+    // testing the box's static descriptor for identity: `cls` names the
+    // type the value was boxed FROM, so a hierarchy class could never
+    // recognise itself through it. It proves itself now by the run-time
+    // preorder position in its VTABLE, against the descriptor's interval.
+    name: "a table key on an instance of a class WITH A BASE",
+    src:
+      "class B { a: number\n  constructor() { this.a = 1 } }\n" +
+      "class D extends B { b: number\n  constructor() { super(); this.b = 2 } }\n" +
+      "const d = new D()\n" +
+      RTKEY +
+      "Object.defineProperty(d, k, { value: 5, enumerable: true, writable: true, configurable: true })\n" +
+      "const r = d as unknown as Record<string, unknown>\n" +
+      "console.log(String(r[k]))\n",
+    out: "5\n",
+  },
+  {
+    // Through a box that names the BASE -- the cell that decides WHICH
+    // rule is sound. `b` is typed B, so the box carries B's descriptor and
+    // B has no table at all; only the vtable says the object is a D. An
+    // identity test on the box's descriptor fences here, which is why the
+    // rule is the interval over the RUN-TIME position and not `==`.
+    name: "a table key read through a box that names the BASE",
+    src:
+      "class B { a: number\n  constructor() { this.a = 1 } }\n" +
+      "class D extends B { b: number\n  constructor() { super(); this.b = 2 } }\n" +
+      "const d = new D()\n" +
+      RTKEY +
+      "Object.defineProperty(d, k, { value: 5, enumerable: true, writable: true, configurable: true })\n" +
+      "const up: B = d\n" +
+      "const r = up as unknown as Record<string, unknown>\n" +
+      "console.log(String(r[k]))\n",
+    out: "5\n",
+  },
 ];
 
 /** Reads over a boxed instance that must stay the LOUD LADDER. Node answers
@@ -185,13 +220,13 @@ const READ_REFUSALS: readonly { name: string; src: string }[] = [
       "console.log('READ ' + String(r['a']))\n",
   },
   {
-    // NAMED GAP, not an accident. A class with a BASE takes the table fine
-    // and its boxed read still fences, because the box carries the
-    // descriptor of the STATIC type the value passed through and the field
-    // lives in the DERIVED struct. This row exists so the day that changes
-    // is a day this file fails rather than a day the answer quietly starts
-    // depending on a slot's declared type.
-    name: "a table key on an instance of a class WITH A BASE",
+    // A hierarchy instance's table MISS. The old row here pinned "a class
+    // WITH A BASE fences" as a NAMED GAP; the gap is closed and the two
+    // answering rows are in RUNS. What has to stay pinned is the sharper
+    // claim, because a hierarchy arm is reached by an INTERVAL test: a
+    // whole subtree routes through it, and a miss anywhere in that subtree
+    // is still a declared member or a typo, both of which the fence names.
+    name: "a hierarchy instance's table MISS",
     src:
       "class B { a: number\n  constructor() { this.a = 1 } }\n" +
       "class D extends B { b: number\n  constructor() { super(); this.b = 2 } }\n" +
@@ -199,7 +234,22 @@ const READ_REFUSALS: readonly { name: string; src: string }[] = [
       RTKEY +
       "Object.defineProperty(d, k, { value: 5, enumerable: true, writable: true, configurable: true })\n" +
       "const r = d as unknown as Record<string, unknown>\n" +
-      "console.log('READ ' + String(r[k]))\n",
+      "console.log('READ ' + String(r['nope']))\n",
+  },
+  {
+    // A DECLARED member of the BASE, read through the derived instance's
+    // box. The table is D's and the member is B's struct cell, so this is
+    // the shape that would go silently wrong the day the arm answered its
+    // own misses -- and it is reachable only now that D has an arm at all.
+    name: "a base's DECLARED member read through a derived instance's box",
+    src:
+      "class B { a: number\n  constructor() { this.a = 1 } }\n" +
+      "class D extends B { b: number\n  constructor() { super(); this.b = 2 } }\n" +
+      "const d = new D()\n" +
+      RTKEY +
+      "Object.defineProperty(d, k, { value: 5, enumerable: true, writable: true, configurable: true })\n" +
+      "const r = d as unknown as Record<string, unknown>\n" +
+      "console.log('READ ' + String(r['a']))\n",
   },
   {
     name: "any read on an instance of a class NO define names",
@@ -245,6 +295,28 @@ const RUNTIME_REFUSALS: readonly { name: string; src: string; fragment: string }
 
 /** Programs that must refuse AT COMPILE TIME. */
 const COMPILE_REFUSALS: readonly { name: string; code: string; src: string }[] = [
+  {
+    // THE BOUNDARY OF THE HIERARCHY ARM, and the reason it is a point and
+    // not an interval. A class with a BASE takes a table and its boxed
+    // read now answers; a class with a SUBCLASS is refused the table
+    // outright, because the collision check that guarantees a table key
+    // never shadows a declared member reads a member set that a derived
+    // instance would widen. So every table-carrying class is a LEAF, its
+    // preorder interval is a single point, and the interval test in
+    // scr_dyn_objinst_ptr_of is equality in every program that compiles.
+    // The day this row goes green is the day that stops being true --
+    // which is exactly when the interval starts earning its spelling.
+    name: "a class that HAS A SUBCLASS",
+    code: "SC2020",
+    src:
+      "class D { a: number\n  constructor() { this.a = 1 } }\n" +
+      "class E extends D { b: number\n  constructor() { super(); this.b = 2 } }\n" +
+      "const d = new D()\n" +
+      "const e = new E()\n" +
+      RTKEY +
+      "Object.defineProperty(d, k, { value: 5, enumerable: true, writable: true, configurable: true })\n" +
+      "console.log(String(e.b))\n",
+  },
   {
     // The table calls the getter with NO receiver, so only a getter whose
     // `this` is already captured is safe. A `function` expression could

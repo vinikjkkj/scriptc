@@ -4940,12 +4940,19 @@ void *scr_dyn_objinst_unbox(const ScrDyn *d, size_t pre, size_t post,
                             const ScrDynPath *path, const char *want);
 /* The boxed class's display name — error texts across units. */
 const char *scr_dyn_objinst_cls(const ScrDyn *d);
-/* The boxed instance pointer, and only when the box carries EXACTLY
- * this descriptor -- what a compiled walker needs before it may GEP
- * into a class struct through a box. A hierarchy class's box carries
- * the descriptor of the STATIC type it was boxed from, so the
- * identity test is what makes the field offset sound. NULL for every
- * other kind or descriptor; never throws. */
+/* The boxed instance pointer, and only when the instance's OWN class
+ * is `cls` or below it -- what a compiled walker needs before it may
+ * GEP into a class struct through a box. The test is
+ * scr_dyn_objinst_is, so it reads the position out of the instance's
+ * VTABLE and not out of the box's descriptor: a Derived instance in a
+ * Base-typed slot boxes as Base, and the answer must depend on what
+ * the object is, not on the declared type of a slot it passed
+ * through. The interval and not equality because a subclass's layout
+ * opens with its base chain's fields as an identical prefix -- which
+ * buys nothing yet (every descriptor that reaches here has pre ==
+ * post) and costs nothing, being the predicate instanceof already
+ * uses. NULL for every other kind, for a position outside the
+ * interval, and for a NULL box or descriptor; never throws. */
 void *scr_dyn_objinst_ptr_of(const ScrDyn *d, const ScrDynClass *cls);
 /* The loud ladder for every operation the box has no layout to answer
  * (keyed access, calls, iteration, JSON, structuredClone, inspect,

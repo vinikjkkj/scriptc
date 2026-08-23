@@ -9406,6 +9406,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/6091-defineproperty-hierarchy-class-read-back.ts": {
+   "order": [
+    "<repo>/tests/corpus/6091-defineproperty-hierarchy-class-read-back.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/700-classes-basic.ts": {
    "order": [
     "<repo>/tests/corpus/700-classes-basic.ts"
