@@ -147,6 +147,14 @@ function creationOf(L: Lowerer, node: ts.Node, seen: Set<ts.Symbol>): Creation |
     const d = decls[0];
     if (d === undefined) return null;
     if (ts.isFunctionDeclaration(d)) {
+      // A BODY, so the declaration is the function. An ambient `declare
+      // function` names a value this program did not write -- its real
+      // parameter list and its real name are the implementation's, and
+      // nothing here can see them, so it keeps its refusal. (This is also
+      // what holds every stdlib global's `.name` where it was: the whole
+      // point of the file is that an unprovable creation site is an
+      // SC2020, not a guess.)
+      if (d.body === undefined) return null;
       return { kind: "node", node: d, name: d.name !== undefined ? d.name.text : null };
     }
     if (!ts.isVariableDeclaration(d) || !ts.isIdentifier(d.name) || d.initializer === undefined) return null;

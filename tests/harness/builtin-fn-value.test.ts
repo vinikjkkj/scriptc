@@ -287,24 +287,45 @@ describe("the boundary this feature stops at", () => {
   );
 
   test(
-    "fetch.name and fetch.length still refuse — and so do a USER function's",
+    "fetch.name and fetch.length still refuse — and a USER function's now answer",
     async () => {
-      // Not a builtin question: the family is "properties of a function
-      // object", and a user function's own `.name` is SC2020 too. This row
-      // holds BOTH halves so the day someone lands function-object
-      // properties, they land for every function at once.
+      // The two halves moved apart, and that is the right shape rather
+      // than a drift. This row used to assert that a user function's
+      // `.name` was SC2020 as well, with a note that the day someone
+      // landed function-object properties they should land for every
+      // function at once. Someone did (lower-fnprops.ts, tests/harness/
+      // fn-identity.test.ts): a user function's `.name` and `.length` now
+      // fold from the value's proven CREATION SITE.
+      //
+      // A BUILTIN has no creation site in the program. `fetch` is an
+      // ambient `declare function` — its real name and its real parameter
+      // list belong to an implementation nothing in the program can see —
+      // so it keeps its refusal, which is what this half now pins.
       const builtin = await refusalCodes(
         workDir,
         "no-fetch-name",
         "console.log(fetch.name, fetch.length)\n",
       );
       expect(builtin, "fetch.name must not compile").toContain("SC2020");
-      const user = await refusalCodes(
+      const dir = stage(
         workDir,
-        "no-user-name",
-        "function g(s: string): number { return s.length }\nconsole.log(g.name)\n",
+        "user-name",
+        "function g(s: string): number { return s.length }\nconsole.log(g.name, g.length)\n",
       );
-      expect(user, "a user function's .name must not compile either").toContain("SC2020");
+      const built = await compile(join(dir, "main.ts"), {
+        outPath: join(dir, exeName("program")),
+        outDir: dir,
+        backend: "c",
+      });
+      expect(
+        built.ok,
+        "a user function's .name must compile:\n" +
+          (built.diagnostics ?? []).map((d) => `${d.code}: ${d.message}`).join("\n"),
+      ).toBe(true);
+      const mine = await run(built.binaryPath!, [], dir);
+      const node = await run(process.execPath, [join(dir, "main.ts")], dir);
+      expect(node.stdout.trim()).toBe("g 1");
+      expect(mine.stdout, "a user function's .name must answer what Node answers").toBe(node.stdout);
     },
     900_000,
   );
@@ -387,21 +408,20 @@ describe("the boundary this feature stops at", () => {
   test(
     "`.bind` on a builtin answers exactly what `.bind` on a USER function answers",
     async () => {
-      // A DIVERGENCE, named rather than blessed, and it is not this
-      // feature's: in TypeScript `f.bind(x)` is a documented ERASURE that
-      // compiles to `f` itself (lower-calls.ts, corpus 2690), on the sound
-      // reason that a TypeScript function value cannot observe a bound
-      // receiver -- `this` in a plain TS function is tsc's own error. What
-      // the erasure also loses is IDENTITY: Node says
-      // `g.bind(null) === g` is false, and this compiler says true, for a
-      // user function on main today.
+      // THE ERASURE IS FIXED, AND THIS ROW IS WHY IT COST NOTHING TO
+      // FIND IT AGAIN. It used to record a DIVERGENCE rather than bless
+      // it: in TypeScript `f.bind(x)` was an erasure that compiled to `f`
+      // itself, so `g.bind(null) === g` printed `true` where Node prints
+      // `false`, and this row asserted only that the builtin half and the
+      // user half gave the SAME answer — "the day someone fixes the
+      // erasure, both move together and this row still passes".
       //
-      // So this row does NOT assert which answer is right. It asserts that
-      // the builtin and the user function give the SAME answer, which is
-      // the property this feature could have broken and the one that
-      // matters: the day someone fixes the erasure, both move together and
-      // this row still passes. Measured on main before the builtin value
-      // existed: the user half already printed `true`.
+      // They moved together. The TypeScript arm now mints a real wrapper
+      // (lower-calls.ts, bindThisClosure's `pushThis: false` arm), the two
+      // halves are still equal, and the answer they are equal AT is now
+      // Node's. The uniformity assertion is kept as it was — it is the
+      // property this feature could break — and the recorded Node line
+      // below is now an assertion about the compiler too.
       const dir = stage(
         workDir,
         "bind-uniformity",
@@ -433,6 +453,7 @@ describe("the boundary this feature stops at", () => {
       // visible in the file rather than only in a report.
       const node = await run(process.execPath, [join(dir, "main.ts")], dir);
       expect(node.stdout.trim()).toBe("false false");
+      expect(mineRun.stdout.trim(), "and both now answer what Node answers").toBe("false false");
     },
     900_000,
   );
