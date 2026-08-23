@@ -23,7 +23,7 @@ import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-name
 import { collectExpandoMembers, expandoBindStmts } from "./lower-expando.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import type { ClassInfo } from "./lower-classes.js";
-import { decoratorNodesOf, genericIfaceBindingKeepsClass, guaranteedDecorationThrow, bindingHoldsItsInitializer, castAliasedClassRefOf, constructedClassInfoOf, adoptedInstanceClassOf} from "./lower-classes.js";
+import { decoratorNodesOf, genericIfaceBindingKeepsClass, guaranteedDefinitionThrow, bindingHoldsItsInitializer, castAliasedClassRefOf, constructedClassInfoOf, adoptedInstanceClassOf} from "./lower-classes.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 
 /** One file's declarations, split for collection and init-body lowering. */
@@ -1058,7 +1058,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             ts.isClassExpression(inner) && !isJsSourceFile(sf) &&
             inner.typeParameters === undefined &&
             (decoratorNodesOf(inner).length > 0 || inner.members.some((m) => decoratorNodesOf(m).length > 0)) &&
-            guaranteedDecorationThrow(L, inner) !== null
+            guaranteedDefinitionThrow(L, inner) !== null
           ) {
             continue;
           }
@@ -2447,7 +2447,7 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
           ts.isClassExpression(inner) && !isJsSourceFile(stmt.getSourceFile()) &&
           inner.typeParameters === undefined &&
           (decoratorNodesOf(inner).length > 0 || inner.members.some((m) => decoratorNodesOf(m).length > 0)) &&
-          guaranteedDecorationThrow(L, inner) !== null
+          guaranteedDefinitionThrow(L, inner) !== null
         ) {
           return { kind: "exprStmt", expr: L.lowerExpr(stmt.expression), loc: locOf(stmt) };
         }
