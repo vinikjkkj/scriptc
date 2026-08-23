@@ -46,10 +46,17 @@
  *   - `headers.forEach` / `entries` / `keys` / `values` / `getSetCookie`.
  *     Not needed by anything reachable, and each is its own iteration
  *     protocol.
- *   - fetch as a VALUE (`const f = fetch`). A builtin has no closure form
- *     in this compiler; the existing SC2020 stands, and it is the reason
- *     zapo's own `options.fetch ?? fetch` still does not compile. Named
- *     here so the next reader does not have to rediscover it.
+ *   - `typeof fetch` AS A TYPE. `fetch` as a VALUE now lowers -- see
+ *     lower-fnvalue.ts, which mints the interned zero-capture closure
+ *     `String`/`Number`/`Boolean` already had -- but its value form is
+ *     `(input: string) => Promise<Response>`, arity ONE, because `init`
+ *     has no static representation. The TYPE is not mapped to that
+ *     narrower signature: doing so would let zapo's
+ *     `WaFetchVersionOptions` record compile and would then turn every
+ *     two-argument call through the field into a NEW refusal inside a
+ *     body that produces none today. So zapo's own
+ *     `options.fetch ?? fetch` still does not compile, and it is the
+ *     record's `typeof fetch` that stops it, not the value form.
  */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";

@@ -41,10 +41,3 @@ stdlib.ts:20:13 - error SC1090: number methods as values (call 'toFixed' directl
   20 | const fix = (1.5).toFixed;
      |             ^~~~~~~~~~~~~
   21 | const pf = parseFloat;
-
-stdlib.ts:21:12 - error SC1090: library functions as values (call 'parseFloat' directly) are not supported yet
-
-  20 | const fix = (1.5).toFixed;
-  21 | const pf = parseFloat;
-     |            ^~~~~~~~~~
-  22 | 
