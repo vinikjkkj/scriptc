@@ -10,7 +10,13 @@ import type { Lowerer } from "./lowerer.js";
 import { PoisonError, dynUndefinedExpr, ladderFenceExpr, newFnCtx, nodeThrowExpr, own } from "./lowerer.js";
 import { canonicalBuiltinModule, isCjsJsFile, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
 import { isRelativeSpecifier, nativePath } from "../shared.js";
-import { nodeRequireResolvableRoots, probeNodeRequireRefusal, requireResolutionBase } from "../npm.js";
+import {
+  nodeBuiltinRootsLiteral,
+  nodeRequireImportsScope,
+  nodeRequireResolvableRoots,
+  probeNodeRequireRefusal,
+  requireResolutionBase,
+} from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
 import { invalidJsonModuleDiag, noLoweringDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
 import {
@@ -586,6 +592,13 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
           // provenance-mapped source is where the RUNNING program keeps
           // the file, not the cache checkout the compiler read it from.
           { kind: "strLit", value: nativePath(resolve(requireResolutionBase(sf.fileName))), type: STRING, loc },
+          // The two answers the ROOT SET cannot give, because their
+          // specifier classes are not roots. `node:x` is decided by a
+          // NAME TABLE alone, and `#x` by the requiring file's package
+          // scope; both are read at BUILD time and baked, so the binary
+          // still reads no filesystem to answer a require.
+          { kind: "strLit", value: nodeBuiltinRootsLiteral(), type: STRING, loc },
+          { kind: "strLit", value: nodeRequireImportsScope(sf.fileName), type: STRING, loc },
         ],
         type: BOOL,
         loc,

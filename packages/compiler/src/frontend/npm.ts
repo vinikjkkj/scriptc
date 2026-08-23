@@ -87,7 +87,7 @@
  */
 import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import { builtinModules } from "node:module";
-import { dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import ts from "typescript5";
 import { cjsLexedExportsOf } from "./cjs-lexer.js";
 import { provenanceInstalledCounterpart } from "./provenance-registry.js";
@@ -905,6 +905,78 @@ function computeResolvableRoots(fromFile: string, host: Host): Set<string> | nul
     dir = parent;
   }
   return out;
+}
+
+/** Every name `require("node:<name>")` resolves, newline joined and
+ * delimited exactly like the root set, for baking into the emitted C.
+ *
+ * The `node:` prefix serves builtins ONLY, so this is the whole answer
+ * for that specifier class and no filesystem is involved. It is the SAME
+ * table the root set draws its builtins from, on purpose: over-including
+ * makes `node:<name>` FENCE, which is the loud direction, and Node's own
+ * `builtinModules` carries four prefix-only entries (`node:sea`,
+ * `node:sqlite`, `node:test`, `node:test/reporters`) whose stripped names
+ * belong here even though a BARE require of them is MODULE_NOT_FOUND. */
+export function nodeBuiltinRootsLiteral(): string {
+  return `\n${[...NODE_BUILTIN_ROOTS].sort().join("\n")}\n`;
+}
+
+/** The requiring file's package scope, for a run-time `require("#...")`,
+ * baked into the emitted C.
+ *
+ * Node resolves a `#` specifier against the "imports" field of the
+ * NEAREST enclosing package.json, and what it answers when nothing
+ * matches depends on whether that field exists at all. Measured against
+ * Node v25.9.0, from a file in each shape:
+ *
+ *   no package.json above it, or one with no "imports"
+ *       Cannot find module '#ok' + the require stack — MODULE_NOT_FOUND
+ *   an "imports" field, EVEN AN EMPTY ONE, that no key matches
+ *       Package import specifier "#ok" is not defined in package …
+ *       — ERR_PACKAGE_IMPORT_NOT_DEFINED, a TypeError
+ *
+ * The two are different errors with different codes and different
+ * classes, and the optional-dependency idiom reads `e.code`. Neither is
+ * something the ROOT SET can say: `#` specifiers are not roots, which is
+ * why this class stayed fenced while the root set was being made exact.
+ *
+ * The encoding is three-valued, and the empty string is CANNOT
+ * ENUMERATE — an unreadable or unparseable manifest, or keys this
+ * encoding cannot carry — which fences every `#` specifier:
+ *
+ *   ""                              cannot enumerate: fence
+ *   "-"                             a scope with no "imports" field
+ *   "+<package.json>\n<key>\n…\n"   a scope that has one
+ *
+ * Node's LOOKUP_PACKAGE_SCOPE stops at a `node_modules` segment, so a
+ * file directly under one has no scope at all — the "-" answer, not the
+ * outer package's. */
+export function nodeRequireImportsScope(fromFile: string, host: Host = realHost): string {
+  const importer = resolve(requireResolutionBase(fromFile));
+  for (let dir = dirname(importer); ; ) {
+    if (basename(dir) === "node_modules") return "-";
+    const path = join(dir, "package.json");
+    const text = host.readFile(path);
+    if (text !== null) {
+      let pkg: { imports?: unknown };
+      try {
+        pkg = JSON.parse(text) as { imports?: unknown };
+      } catch {
+        return ""; // unreadable manifest — conservative, fence
+      }
+      const imports = pkg.imports;
+      if (imports === undefined || imports === null) return "-";
+      if (typeof imports !== "object" || Array.isArray(imports)) return "";
+      const keys = Object.keys(imports as Record<string, unknown>);
+      // A key carrying a newline cannot ride this encoding. Node allows
+      // it in principle; "cannot enumerate" is the honest answer.
+      if (keys.some((k) => k.includes("\n"))) return "";
+      return `+${nativePath(path)}\n${keys.join("\n")}\n`;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return "-";
+    dir = parent;
+  }
 }
 
 export class NpmGraphBuilder {
