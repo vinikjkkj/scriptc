@@ -58,6 +58,18 @@ const MYLIB_JS = "module.exports = { v: 42, tag: 'from-mylib' };\n";
 const MYLIB_DTS = "declare const m: { v: number; tag: string };\nexport = m;\n";
 const MYLIB_PKG = '{ "name": "mylib", "version": "1.0.0", "main": "index.js", "types": "index.d.ts" }\n';
 
+/** LOOSE FILES in node_modules — a package root that is not a
+ * DIRECTORY. Node's CJS loader tries LOAD_AS_FILE on
+ * `node_modules/<root>` before LOAD_AS_DIRECTORY, and its extension
+ * list is exactly ["", ".js", ".json", ".node"], so `filepkg.js`,
+ * `jsonpkg.json` and `@s/sfile.js` all resolve while `dmjs.mjs` does
+ * NOT. Measured against Node v25.9.0; `dmjs` is the over-fire
+ * control. */
+const LOOSE_JS = 'module.exports = { v: 42, tag: "loose-file" };\n';
+const LOOSE_SCOPED_JS = 'module.exports = { v: 9, tag: "loose-scoped" };\n';
+const LOOSE_JSON = '{ "v": 7 }\n';
+const LOOSE_MJS = "export const v = 5;\n";
+
 interface Program {
   readonly name: string;
   /** The entry's extension: ".cjs" is a CommonJS module, ".mjs" an ES one. */
@@ -195,6 +207,74 @@ const RUNS: readonly Program[] = [
     stdout: "code MODULE_NOT_FOUND\nafter\n",
     exit: 0,
   },
+  {
+    // `require` NOT called. In a JavaScript source every stdlib global
+    // taken as a bare value became the interned identity TOKEN
+    // `"[builtin require]"`, so all four of these printed "string"
+    // against Node's "function" — and the last line is protobufjs's own
+    // guard one binding away: `inquire()` reads
+    // `if ("function" != typeof require) return null`, and an alias of
+    // it answered "absent" for a require that works.
+    name: "require as a VALUE is a function in every value position",
+    src:
+      "const r = require;\n" +
+      "const a = [require];\n" +
+      "const o = { q: require };\n" +
+      "console.log(typeof require, typeof r, typeof a[0], typeof o.q);\n" +
+      "console.log('function' === typeof r ? 'usable' : 'absent');\n" +
+      "console.log(require === r);\n",
+    stdout: "function function function function\nusable\ntrue\n",
+    exit: 0,
+  },
+  {
+    // Calling THROUGH the value is the same require: the lifted body IS
+    // the run-time-specifier arm the direct call lowers to, so a
+    // specifier the build ruled out reaches Node's MODULE_NOT_FOUND here
+    // exactly as it does at a call site. It used to be a TypeError on a
+    // string.
+    name: "a call through the alias is the same require: Node's MODULE_NOT_FOUND",
+    src:
+      "const r = require;\n" +
+      "try { r('no-such-pkg-xyz'); console.log('no throw') } " +
+      "catch (e) { console.log(e.code, /Cannot find module 'no-such-pkg-xyz'/.test(e.message)) }\n",
+    stdout: "MODULE_NOT_FOUND true\n",
+    exit: 0,
+  },
+  {
+    // Node checks the ARGUMENT before it resolves anything, so the value
+    // form has to as well — which is why the lifted parameter is dyn and
+    // not string: a string parameter would make r(42) a compile-time type
+    // error the direct call form does not have.
+    name: "a call through the alias checks Node's argument types first",
+    src:
+      "const r = require;\n" +
+      "try { r(42) } catch (e) { console.log(e.code) }\n" +
+      "try { r('') } catch (e) { console.log(e.code) }\n",
+    stdout: "ERR_INVALID_ARG_TYPE\nERR_INVALID_ARG_VALUE\n",
+    exit: 0,
+  },
+  {
+    name: "require PASSED to a function and called there",
+    src:
+      "function use(f) { try { return f('no-such-pkg-xyz') } catch (e) { return 'caught ' + e.code } }\n" +
+      "console.log(use(require));\n",
+    stdout: "caught MODULE_NOT_FOUND\n",
+    exit: 0,
+  },
+  {
+    // THE OVER-FIRE CONTROL for the loose-file roots. Node's LOAD_AS_FILE
+    // list is exactly ["", ".js", ".json", ".node"] — `.mjs` is NOT in it,
+    // measured against Node v25.9.0 — so `node_modules/dmjs.mjs` leaves
+    // `require("dmjs")` throwing MODULE_NOT_FOUND. A fix that simply
+    // stripped every extension off every entry would answer the refusal
+    // here instead, and this cell is what catches that.
+    name: "a loose .mjs in node_modules spells NO bare root",
+    src:
+      "function g(s) { try { return 'GOT ' + require(s) } catch (e) { return 'threw ' + e.code } }\n" +
+      "console.log(g('dmjs'));\n",
+    stdout: "threw MODULE_NOT_FOUND\n",
+    exit: 0,
+  },
   /* ── the neighbours ────────────────────────────────────────────────── */
   {
     name: "NEIGHBOUR: a literal relative require still imports its module",
@@ -284,6 +364,68 @@ const FENCED: readonly {
     stdout: "threw SC2020\n",
   },
   {
+    // The BOUNDARY this branch created, recorded rather than hidden. The
+    // identity-token spelling made this cell pass by accident — two
+    // mentions of one interned string compare equal — and a container
+    // slot in a JavaScript source is checked-dynamic, so comparing the
+    // real closure against the dyn it was boxed into fences. The alias
+    // form (`require === r`) answers Node's `true` and is in RUNS above;
+    // this is the one cell that went the other way, from a right answer
+    // for a wrong reason to a refusal.
+    name: "identity through a CONTAINER slot, the cell this branch moved backwards",
+    src:
+      "const a = [require];\n" +
+      "try { console.log('GOT', require === a[0]) } catch (e) { console.log('threw', e.code) }\n",
+    code: "SC1100",
+    nodeSays: "GOT true",
+    stdout: "threw SC1100\n",
+  },
+  {
+    name: "a call through the alias naming a program module",
+    src:
+      "const r = require;\n" +
+      "try { console.log('GOT', r('./m.cjs').v) } catch (e) { console.log('threw', e.code) }\n",
+    code: "SC2020",
+    nodeSays: "GOT 42",
+    stdout: "threw SC2020\n",
+  },
+  {
+    name: "a call through the alias naming an INSTALLED package",
+    src:
+      "const r = require;\n" +
+      "try { console.log('GOT', r('mylib').v) } catch (e) { console.log('threw', e.code) }\n",
+    code: "SC2020",
+    nodeSays: "GOT 42",
+    stdout: "threw SC2020\n",
+  },
+  {
+    // A package ROOT need not be a DIRECTORY. Node tries LOAD_AS_FILE on
+    // `node_modules/filepkg` before LOAD_AS_DIRECTORY, so the loose
+    // `filepkg.js` resolves and hands back a module. Both halves of the
+    // require machinery asked only isDirectory, "proved" nothing
+    // installed resolved it, and compiled this to Node's catchable
+    // MODULE_NOT_FOUND — a THROW where Node returns a module, and the
+    // program's own catch swallows it. It refuses now, which is the loud
+    // direction; what it would take to MATCH is the module value.
+    name: "a LITERAL specifier a loose node_modules FILE resolves",
+    src: "try { console.log('GOT', require('filepkg').v) } catch (e) { console.log('threw', e.code) }\n",
+    code: "SC2013",
+    nodeSays: "GOT 42",
+    stdout: "threw SC2013\n",
+  },
+  {
+    // The same three roots reached through a RUN-TIME specifier, where
+    // the verdict is decided at run time against the baked root set. All
+    // three used to answer MODULE_NOT_FOUND.
+    name: "RUN-TIME specifiers a loose node_modules FILE resolves",
+    src:
+      "function g(s) { try { return 'GOT ' + require(s).v } catch (e) { return 'threw ' + e.code } }\n" +
+      "console.log(g('filepkg'), g('jsonpkg'), g('@s/sfile'));\n",
+    code: "SC2020",
+    nodeSays: "GOT 42 GOT 7 GOT 9",
+    stdout: "threw SC2020 threw SC2020 threw SC2020\n",
+  },
+  {
     // The wall, named: a required module used AS A VALUE. Everything in
     // this list needs it, and it is the reason a run-time specifier that
     // DOES resolve cannot be served.
@@ -308,12 +450,18 @@ const BUILT = new Map<string, Built>();
 async function build(name: string, p: { src: string; ext?: string }, backend: Lane): Promise<Built> {
   const dir = join(lab, `${name.replace(/[^a-z0-9]+/gi, "-").slice(0, 60)}-${backend}`);
   await mkdir(join(dir, "node_modules", "mylib"), { recursive: true });
+  await mkdir(join(dir, "node_modules", "@s"), { recursive: true });
   await writeFile(join(dir, "package.json"), '{ "name": "require-parity-probe", "version": "0.0.0" }\n', "utf8");
   await writeFile(join(dir, "m.cjs"), M, "utf8");
   await writeFile(join(dir, "side.cjs"), "console.log('side body');\nmodule.exports = { n: 7 };\n", "utf8");
   await writeFile(join(dir, "node_modules", "mylib", "package.json"), MYLIB_PKG, "utf8");
   await writeFile(join(dir, "node_modules", "mylib", "index.js"), MYLIB_JS, "utf8");
   await writeFile(join(dir, "node_modules", "mylib", "index.d.ts"), MYLIB_DTS, "utf8");
+  await writeFile(join(dir, "node_modules", "filepkg.js"), LOOSE_JS, "utf8");
+  await writeFile(join(dir, "node_modules", "filepkg.d.ts"), MYLIB_DTS, "utf8");
+  await writeFile(join(dir, "node_modules", "jsonpkg.json"), LOOSE_JSON, "utf8");
+  await writeFile(join(dir, "node_modules", "@s", "sfile.js"), LOOSE_SCOPED_JS, "utf8");
+  await writeFile(join(dir, "node_modules", "dmjs.mjs"), LOOSE_MJS, "utf8");
   const file = join(dir, `entry${p.ext ?? ".cjs"}`);
   await writeFile(file, p.src, "utf8");
   const res = await compile(file, {

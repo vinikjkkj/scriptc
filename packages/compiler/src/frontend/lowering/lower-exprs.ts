@@ -11,6 +11,7 @@ import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBi
 import { lowerAbortProperty } from "./lower-abort.js";
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
 import { builtinFnValueOf } from "./lower-fnvalue.js";
+import { requireFnValueOf } from "./lower-builtins.js";
 import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
@@ -1463,6 +1464,18 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // global, one token; what a token cannot do (be called, answer
       // typeof "function") meets per-site fences/divergences, and
       // SEMANTICS.md documents the stance.
+      // The ambient CommonJS `require` as a VALUE, AHEAD of the
+      // identity-token arm right below -- which would answer the string
+      // `"[builtin require]"` for it, so `typeof r` printed "string"
+      // against Node's "function" and a call through the alias was a
+      // TypeError where Node hands back the module. It is the one stdlib
+      // global in a CommonJS file with a real function value to give:
+      // requireFnValueOf lifts the same run-time-specifier arm the direct
+      // call lowers to (lower-builtins.ts).
+      {
+        const rv = requireFnValueOf(L, expr, loc);
+        if (rv) return rv;
+      }
       {
         const sym = L.checker.getSymbolAtLocation(expr);
         if (L.isStdlibSymbol(sym) || expr.text === "globalThis") {
