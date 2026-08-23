@@ -33,29 +33,29 @@
  * BEHAVIOUR against Node v25.9.0 on both backends across 64 compared
  * cells; this file only proves the FENCES moved and stayed moved.
  *
- * WHAT STILL BLOCKS THE ROW — two things, each named at its line, and
- * neither of them an HTTP client:
+ * THE ROW IS CLOSED, and every blocker this file used to list has changed
+ * sides. `RequestInit` is a VALUE (an object literal in a RequestInit slot
+ * builds the same folded request head the call site builds, and
+ * `fetch(url, init)` unpacks it), `Request` is a TYPE with no values, and
+ * `fetch` as a value carries the AMBIENT signature rather than a narrowed
+ * one — so `readonly fetch?: typeof fetch` compiles and the body behind
+ * it lowers.
  *
- *   1. `RequestInit` has no static representation (SC2011). It is the one
- *      remaining member type inside `typeof fetch`, and it is what this
- *      row's SC2011 now comes from.
- *   2. `Request` likewise (SC2009 / SC0001 by lane) — it rides in
- *      `typeof fetch`'s INPUT union under `@types/node`, which is why it
- *      is part of the row even though zapo never constructs one.
+ * WHAT IS LEFT AT ZAPO'S OWN SITE, and it is one statement rather than a
+ * declaration: `(init as { dispatcher?: unknown }).dispatcher = dispatcher`
+ * refuses BY NAME (SC2020 `RequestInit.dispatcher`). That is not an
+ * omission and not the assignment-target family it was previously filed
+ * under — it is a capability this build does not have. MEASURED against
+ * Node v25.9.0: `fetch(url, { dispatcher })` really does call a plain
+ * object's `dispatch(opts, handler)` and wait for the handler's callbacks,
+ * so honouring the key means driving undici's handler protocol from a
+ * compiled program, and dropping it means a proxy silently ignored.
  *
- * The third used to be `fetch` AS A VALUE, and it CLOSED: a builtin now
- * has a first-class closure form (lower-fnvalue.ts), so that row has
- * changed sides and must keep compiling. It does not close zapo's own
- * line, because `options.fetch ?? fetch` needs the FIELD to be typed
- * `typeof fetch` and that type still refuses through blocker 1.
- *
- * (And a fourth, outside the fetch family entirely: the same function
- * writes `(init as { dispatcher?: unknown }).dispatcher = dispatcher`,
- * which is SC1090 "assignment to non-variables" — an assignment-target
- * feature that has nothing to do with fetch. MEASURED on a reduction of
- * that function with the record and the func type made mappable: it is
- * the ONLY refusal left in the body, so the price of the row is
- * blockers 1 and 2 plus this one, not three more.)
+ * The count is therefore unchanged and the program is not: zapo carried
+ * ONE tagged refusal for this file before (the whole declaration) and
+ * carries ONE after (that one statement), while the two exported version
+ * fetchers went from throwing at any call to working unless a proxy is
+ * configured.
  *
  * Every answer below was cross-checked against the same reductions
  * compiled next to a tsconfig adopting this repo's `@types/node`; where
@@ -89,26 +89,17 @@ interface Row {
 
 const BLOCKERS: readonly Row[] = [
   {
-    name: "RequestInit in an argument position — the row's remaining type blocker",
-    codes: ["SC2011"],
-    fragments: ["have no static representation but run in the embedded dynamic engine"],
-    src: optionsRecord("readonly hook?: (input: string, init?: RequestInit) => Promise<string>"),
-  },
-  {
-    // The spelling zapo actually uses. It refuses through RequestInit
-    // now, not through Response.
-    name: "typeof fetch, the spelling zapo uses",
-    codes: ["SC2011"],
-    fragments: ["have no static representation but run in the embedded dynamic engine"],
-    src: optionsRecord("readonly fetchFn?: typeof fetch"),
-  },
-  {
-    // TWO LANES, both real. Bare: the name does not resolve at all.
-    // Next to @types/node — zapo's lane — it resolves to undici-types'
-    // class and the refusal names the member's type instead.
-    name: "Request, in whichever way this lane refuses it",
-    codes: ["SC0001", "SC2009"],
-    fragments: ["Cannot find name 'Request'", "which does not compile"],
+    // NOT a compiler row, and it is here so nobody mistakes it for one.
+    // This file compiles in a BARE temp directory, and there the name
+    // `Request` does not resolve at all — no lib in reach declares it, so
+    // the refusal is tsc's, before any lowering runs. In the lane zapo
+    // compiles in (this repo's @types/node adopted) the same member
+    // COMPILES, and the CLOSED row below is the one that says so. Keeping
+    // both is the whole point: the previous two revisions of this file
+    // each recorded one lane's answer as the compiler's.
+    name: "Request in a BARE lane — a lib-set fact, not a lowering one",
+    codes: ["SC0001"],
+    fragments: ["Cannot find name 'Request'"],
     src: optionsRecord("readonly hook?: (input: Request) => Promise<string>"),
   },
 ];
@@ -146,6 +137,26 @@ const CLOSED: readonly { name: string; src: string; provedBy: string }[] = [
       "  console.log(r.headers.get('content-type'))\n" +
       "  console.log((await r.text()).length)\n}\n" +
       "void go().catch(() => { console.log('rejected') })\n",
+  },
+  {
+    // THE ROW ITSELF. `RequestInit` is a VALUE now — an object literal in
+    // one of these slots builds the same folded request head the call
+    // site builds — so a function type carrying one maps, and the member
+    // compiles.
+    name: "RequestInit in an argument position",
+    provedBy:
+      "tests/harness/request-init.test.ts (25 cells against Node, both backends) " +
+      "and tests/corpus/6080, 6081",
+    src: optionsRecord("readonly hook?: (input: string, init?: RequestInit) => Promise<string>"),
+  },
+  {
+    // The spelling zapo actually uses, at
+    // src/transport/wa-version-fetcher.ts:47. This is the row.
+    name: "typeof fetch, the spelling zapo uses",
+    provedBy:
+      "tests/harness/request-init.test.ts and tests/harness/builtin-fn-value.test.ts " +
+      "(the `typeof fetch` record differential)",
+    src: optionsRecord("readonly fetchFn?: typeof fetch"),
   },
   {
     // The third blocker, and the one no type mapping could reach: a
