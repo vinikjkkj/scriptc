@@ -516,15 +516,32 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
     // the old fence rather than handing that context a dyn.
     const mapped = L.mapTypeOf(L.typeOf(call));
     if (mapped !== null && mapped.kind !== "dyn") return null;
-    const roots = nodeRequireResolvableRoots(sf.fileName);
-    // "Cannot enumerate" is spelled as the EMPTY set, which the runtime
-    // reads as "fence everything" — the conservative direction.
-    const rootsLit = roots === null ? "" : `\n${[...roots].sort().join("\n")}\n`;
     const specExpr = L.lowerExpr(arg);
     const specDyn: IrExpr = specExpr.type.kind === "dyn"
       ? specExpr
       : { kind: "dynFrom", value: specExpr, type: DYN, loc };
-    const fence = requireNoLoweringDiag(L, call, loc);
+    return runtimeSpecifierRequire(L, call, sf, specDyn, loc);
+  }
+
+/** The run-time-specifier arm, shared by the CALL site and by `require`
+   * taken as a VALUE. The verdict decides at run time, against the set of
+   * bare specifier roots the BUILD could not rule out, which of the two
+   * compiled answers this specifier gets: Node's own catchable
+   * MODULE_NOT_FOUND (nothing installed resolves it), or the site's
+   * refusal (something might, and a module namespace object has no value
+   * representation in a compiled program). */
+  function runtimeSpecifierRequire(
+    L: Lowerer,
+    node: ts.Node,
+    sf: ts.SourceFile,
+    specDyn: IrExpr,
+    loc: SrcLoc,
+  ): IrExpr {
+    const roots = nodeRequireResolvableRoots(sf.fileName);
+    // "Cannot enumerate" is spelled as the EMPTY set, which the runtime
+    // reads as "fence everything" — the conservative direction.
+    const rootsLit = roots === null ? "" : `\n${[...roots].sort().join("\n")}\n`;
+    const fence = requireNoLoweringDiag(L, node, loc);
     return {
       kind: "ternary",
       cond: {
@@ -558,13 +575,94 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
     };
   }
 
+/** One lifted `(id) => ...` per SOURCE FILE that mentions `require` as a
+   * VALUE, memoized per program. Per FILE and not per program because
+   * both baked strings differ per file: the resolvable-root set is the
+   * requiring directory's node_modules chain, and MODULE_NOT_FOUND's
+   * message carries the requiring file's own path. */
+  const requireValueLifts = new WeakMap<Lowerer, Map<string, string>>();
+
+/** `require` NOT called: `const r = require`, `[require]`, `{ q: require }`,
+   * `use(require)`.
+   *
+   * In a JavaScript source every stdlib global taken as a bare value
+   * becomes an opaque IDENTITY TOKEN — the interned string
+   * `"[builtin <name>]"` (lower-exprs). For `require` that answered
+   * `typeof r === "string"` where Node answers `"function"`, and
+   * `r("./m")` was a TypeError where Node hands back the module: a WRONG
+   * answer at exit 0 with no diagnostic, which is the one outcome this
+   * project ranks below a refusal. `require` is the one stdlib global in
+   * a CommonJS file the compiler can now produce a real function value
+   * for, because the run-time-specifier arm above IS that function’s
+   * body: calling through the value answers exactly what the direct call
+   * answers, Node's MODULE_NOT_FOUND and the site's refusal alike.
+   *
+   * The value is `{ kind: "closure", captures: [] }` over a lifted module
+   * function, the same interned zero-capture shape lower-fnvalue.ts uses,
+   * so `require === require` stays true (it was true before too — the
+   * token is one interned string) and every value position gets the same
+   * pointer.
+   *
+   * The parameter is DYN, not string: Node checks the argument BEFORE it
+   * resolves anything, so `r(42)` has to reach ERR_INVALID_ARG_TYPE rather
+   * than a compile-time type error the direct call form does not have. */
+  export function requireFnValueOf(L: Lowerer, expr: ts.Identifier, loc: SrcLoc): IrExpr | null {
+    if (expr.text !== "require" || !isAmbientCjsRequire(L, expr)) return null;
+    const sf = expr.getSourceFile();
+    const key = resolve(sf.fileName);
+    let byFile = requireValueLifts.get(L);
+    if (byFile === undefined) {
+      byFile = new Map<string, string>();
+      requireValueLifts.set(L, byFile);
+    }
+    let fnName = byFile.get(key);
+    if (fnName === undefined) {
+      fnName = `%builtin.require.value.${byFile.size}`;
+      byFile.set(key, fnName);
+      const param: IrExpr = { kind: "varRef", localId: "id.0", type: DYN, loc };
+      const fn: IrFunction = {
+        name: fnName,
+        params: [{ localId: "id.0", name: "id", type: DYN }],
+        returnType: DYN,
+        locals: [{ id: "id.0", name: "id", type: DYN, mutable: false }],
+        body: [{ kind: "return", value: runtimeSpecifierRequire(L, expr, sf, param, loc), loc }],
+        loc,
+      };
+      L.liftedFns.push(fn);
+    }
+    return { kind: "closure", fnName, captures: [], type: funcOf([DYN], DYN), loc };
+  }
+
+
+/** `const r = require` — the DECLARATION’s type.
+   *
+   * `require`'s declared type is NodeRequire, a call signature plus four
+   * properties, which maps NOWHERE. Without this arm the binding takes the
+   * checked-dynamic slot an unmappable JS binding gets, and `require === r`
+   * then fences on `unknown` where it used to answer Node’s `true` — the
+   * identity-token spelling compared two mentions of one interned string.
+   * The value form is a zero-capture closure over one lifted function per
+   * file, so with the slot typed as the value the comparison is pointer
+   * identity and answers `true` again.
+   *
+   * An explicit annotation is never overridden (the same rule
+   * builtinFnValueDeclType states): only the UNANNOTATED form reaches
+   * here. Null for every other declaration. */
+  export function requireFnValueDeclType(L: Lowerer, decl: ts.VariableDeclaration): IrType | null {
+    if (decl.type !== undefined || decl.initializer === undefined) return null;
+    let inner: ts.Expression = decl.initializer;
+    while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+    if (!ts.isIdentifier(inner) || inner.text !== "require") return null;
+    if (!isAmbientCjsRequire(L, inner)) return null;
+    return funcOf([DYN], DYN);
+  }
 /** The refusal a run-time-specifier require still carries for the
    * specifiers the build cannot rule out, rendered eagerly (message plus
    * the "[code at file:line]" stamp the deferred statement fence carries)
    * and recorded in the runtime-fence ledger exactly like one — so the
    * coverage report and the translation-unit census both see the site
    * they always saw. */
-  function requireNoLoweringDiag(L: Lowerer, call: ts.CallExpression, loc: SrcLoc): { text: string; code: string } {
+  function requireNoLoweringDiag(L: Lowerer, call: ts.Node, loc: SrcLoc): { text: string; code: string } {
     const d = noLoweringDiag(
       "require() with a run-time specifier",
       loc,
