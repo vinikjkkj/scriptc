@@ -156,6 +156,9 @@ const cases = [
   // belonged to an earlier loop iteration.
   "net-close-order-drain",
   "net-close-order-last-conn",
+  // Both queues at once: a tick between two close callbacks, and a second
+  // server draining in the poll phase of the iteration between them.
+  "net-close-order-tick-between",
 ];
 
 describe(`shutdown close order (${REPEATS} runs per case)`, () => {
