@@ -261,6 +261,82 @@ describe("a RequestInit value, against Node", () => {
   }
 });
 
+describe("the SECOND statement the blocked declaration was hiding", () => {
+  // `WaFetchLatestMobileVersionOptions` extends the record that refused, so
+  // `fetchLatestWaMobileVersion` never lowered EITHER — and it carries a
+  // statement of its own that nothing had ever priced:
+  // `versionPattern.lastIndex = 0` (wa-version-fetcher.ts:220). It surfaced
+  // the moment the record compiled, took zapo from three tagged refusals
+  // to four, and is the exact shape every previous estimate of this row
+  // missed. It is here because a row that closes while the census grows is
+  // the failure this whole subject has already produced twice.
+  //
+  // A compiled regex is IMMUTABLE and has no lastIndex: /g and /y lower
+  // only where the iteration is internal, `.exec()` on one is a loud
+  // RUNTIME refusal, and READING `.lastIndex` is a compile refusal. So
+  // lastIndex is permanently 0 in every program this compiler runs to
+  // completion, writing 0 is exact, and writing anything else refuses.
+  test(
+    "a lastIndex reset behaves exactly as Node's does, on both lanes",
+    async () => {
+      const src = [
+        "const DEFAULT = /\\b(2(?:\\.\\d{1,4}){3})\\b/",
+        "function pick(p: RegExp | undefined, body: string): string {",
+        "  const re = p ?? DEFAULT",
+        "  re.lastIndex = 0",
+        "  const m = re.exec(body)",
+        "  return m === null || m[1] === undefined ? 'none' : m[1]",
+        "}",
+        "console.log(pick(undefined, 'x 2.26.1.4 y'))",
+        "console.log(pick(/(\\d+)-(\\d+)/, 'ab 12-34 cd'))",
+        "console.log(pick(undefined, 'nothing here'))",
+        "",
+      ].join("\n");
+      for (const backend of ["c", "llvm"] as const) {
+        const dir = stage(`lastindex-${backend}`, src);
+        const built = await compile(join(dir, "main.ts"), {
+          outPath: join(dir, exeName("program")),
+          outDir: dir,
+          backend,
+        });
+        expect(
+          built.ok,
+          `${backend}: the lastIndex reset must compile:\n` +
+            (built.diagnostics ?? []).map((d) => `${d.code}: ${d.message}`).join("\n"),
+        ).toBe(true);
+        const mine = await run(built.binaryPath!, [], dir);
+        const node = await run(process.execPath, [join(dir, "main.ts")], dir);
+        expect(node.stdout.trim().split("\n")).toEqual(["2.26.1.4", "12", "none"]);
+        expect(mine.stdout, `${backend}: differs from Node`).toBe(node.stdout);
+        expect(mine.exitCode).toBe(node.exitCode);
+      }
+    },
+    900_000,
+  );
+
+  test(
+    "writing a NON-zero lastIndex refuses — the state does not exist",
+    async () => {
+      const codes = await refusalCodes(
+        "lastindex-nonzero",
+        "const r = /a(\\d)/\nr.lastIndex = 5\nconsole.log('x')\n",
+      );
+      expect(codes.length, "a non-zero lastIndex write must refuse").toBeGreaterThan(0);
+      expect(codes).toContain("SC1120");
+      // And READING it still refuses, which is what makes the zero-write a
+      // no-op rather than a dropped store: close that channel and the
+      // value can never be observed.
+      const read = await refusalCodes(
+        "lastindex-read",
+        "const r = /a(\\d)/\nconsole.log(r.lastIndex)\n",
+      );
+      expect(read.length, "reading lastIndex must still refuse").toBeGreaterThan(0);
+      expect(read).toContain("SC2020");
+    },
+    900_000,
+  );
+});
+
 describe("the collector, measured rather than argued", () => {
   test(
     "the audited fixture leaks nothing, and the audit really ran",

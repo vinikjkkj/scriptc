@@ -260,6 +260,37 @@ const CLOSED: readonly {
     ].join("\n"),
   },
   {
+    name: "a-lastindex-reset-before-exec",
+    ext: "ts",
+    zapoSite: "src/transport/wa-version-fetcher.ts:220 -- versionPattern.lastIndex = 0",
+    provedBy:
+      "tests/harness/request-init.test.ts (the reset compared against Node on both lanes, and " +
+      "the two channels that keep the no-op honest: a NON-zero write refuses, and reading " +
+      "lastIndex refuses)",
+    // NOBODY PRICED THIS ONE. `WaFetchLatestMobileVersionOptions` extends
+    // the record that refused, so this function never lowered either, and
+    // this statement was invisible to every estimate the row was ever
+    // given -- it appeared only when the record compiled, and it took the
+    // census from three tagged refusals to four before it was closed.
+    //
+    // A compiled regex is immutable and has no lastIndex: /g and /y lower
+    // only where the iteration is internal, .exec() on one is a loud
+    // runtime refusal, and reading .lastIndex is a compile refusal. So
+    // lastIndex is permanently 0 in every program that runs to
+    // completion, and writing 0 is exact rather than ignored.
+    src: [
+      "const DEFAULT = /\\b(2(?:\\.\\d{1,4}){3})\\b/",
+      "export function pick(p: RegExp | undefined, body: string): string {",
+      "  const re = p ?? DEFAULT",
+      "  re.lastIndex = 0",
+      "  const m = re.exec(body)",
+      "  return m === null || m[1] === undefined ? 'none' : m[1]",
+      "}",
+      "console.log(pick(undefined, 'x 2.26.1.4 y'))",
+      "",
+    ].join("\n"),
+  },
+  {
     name: "the-ws-option-bag-with-a-proxy-dispatcher",
     ext: "ts",
     zapoSite:

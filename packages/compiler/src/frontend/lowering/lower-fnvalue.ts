@@ -24,16 +24,20 @@
  *
  * WHAT IS DELIBERATELY NOT HERE
  *
- *   `typeof fetch` AS A TYPE. The value form's signature is
- *   `(input: string) => Promise<Response>` -- arity ONE, because fetch's
- *   `init` argument has no static representation (lower-fetch.ts walks an
- *   object LITERAL at the call site, and there is no RequestInit value).
- *   Adding a mapType arm for `typeof fetch` would make zapo's
- *   `WaFetchVersionOptions` record compile, and every two-argument call
- *   through that field would then become a NEW refusal inside a function
- *   body that produces none today. That is the trade lower-fetch.ts's
- *   header already refused, for the same reason, and refusing a type is
- *   loud where a narrowed type mapping would be a silent lie about arity.
+ *   A NARROWED signature for `fetch`. Its value form used to be
+ *   `(input: string) => Promise<Response>` -- arity ONE, because `init`
+ *   had no static representation -- and this paragraph used to say that
+ *   mapping `typeof fetch` to that narrower shape would be a silent lie
+ *   about arity. It would have been. What landed instead is the AMBIENT
+ *   signature: `RequestInit` is a value now and `Request` a type, so the
+ *   entry is resolved from the checker's own mapping rather than written
+ *   down here (BUILTIN_FN_VALUE_RESOLVERS), and nothing is narrowed.
+ *
+ *   A NARROWED SLOT, though, is a refusal -- see narrowedSlotFence. A slot
+ *   whose function type is not the builtin's own takes an adapter, and an
+ *   adapter is a fresh closure with a different pointer: `rec.call ===
+ *   fetch` printed false against Node's true, measured, the first time
+ *   that became reachable.
  *
  *   `.name` and `.length`. Not a builtin question at all: they are SC2020
  *   on a USER function value too (`function g() {}; g.name`), so the
