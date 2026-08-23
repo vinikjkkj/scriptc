@@ -24,7 +24,7 @@ import { bindingHoldsItsInitializer, genericIfaceBindingKeepsClass, isProvenPref
 import { lowerStreamUnderscoreAssign, streamClassAliasDecl, streamSidesOf } from "./lower-stream.js";
 import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment } from "./lower-server.js";
 import { namespaceConditionalOf } from "./lower-nsvalue.js";
-import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl } from "./lower-builtins.js";
+import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, nodeRequireArgumentError, requireFnValueDeclType } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
 import { ctorObjectGlobalValue, dynAssertionReceiver, isDynSafeReadWidth, isImmutablePrimitiveWidth } from "./lower-exprs.js";
 import { localTakesWidenedKeyedRead, narrowBridgeUnion, unitArmsOf } from "./lower-exprs.js";
@@ -4600,7 +4600,9 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       // (mapTypeOf answered above, and a mismatch is a loud type error at
       // the assignment). Keyed on the initializer's shape, so no other
       // declaration in the program can be affected. See lower-fnvalue.ts.
-      (!isLet && init.type.kind === "func" ? builtinFnValueDeclType(L, decl) : null);
+      (!isLet && init.type.kind === "func"
+        ? builtinFnValueDeclType(L, decl) ?? requireFnValueDeclType(L, decl)
+        : null);
     // A JS `let x = {}`: TS's empty-object-literal type admits ANY later
     // non-nullish assignment (`envs = {}`, later `envs =
     // Object.fromEntries(...)` — tsc accepts every such write, since
@@ -6200,6 +6202,13 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       // IS that throw, wherever it sits.
       if (isCjsJsFile(sf)) {
         const spec = requireSpecOf(expr)!;
+        // Node's argument errors come BEFORE any resolution, and a
+        // require in statement position never reaches the expression
+        // path that already answers them.
+        {
+          const argErr = nodeRequireArgumentError(spec, locOf(expr));
+          if (argErr !== null) return { kind: "exprStmt", expr: argErr, loc: locOf(expr) };
+        }
         if (
           !isRelativeSpecifier(spec) &&
           canonicalBuiltinModule(spec) === null

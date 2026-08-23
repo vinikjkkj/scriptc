@@ -39,6 +39,12 @@ export interface ProvenancePackageSource {
   /** Absolute path of the package's directory inside the cached source
    * tree (== the tree root except in monorepos). */
   dir: string;
+  /** Absolute path of the package as INSTALLED in the driver's tree —
+   * where these files SIT when Node runs the program, as opposed to `dir`,
+   * where the compiler reads them from. Node's own resolution has to be
+   * asked from here (provenanceInstalledCounterpart). Optional because a
+   * registry built by a caller that has no installed tree has none. */
+  installedDir?: string;
   /** specifier → absolute mapped source file ("cookie" → …/src/index.ts). */
   entries: Record<string, string>;
   /** The source tree's OWN tsconfig "paths", baseUrl-resolved to absolute
@@ -242,6 +248,40 @@ export function provenancePackageOfFile(fileName: string): ProvenancePackageSour
   const f = tsgoPath(fileName);
   for (let i = 0; i < state.packageDirs.length; i++) {
     if (f.startsWith(state.packageDirs[i]!)) return state.sources.packages[i]!;
+  }
+  return null;
+}
+
+/** Where Node's OWN resolver has to be asked from for a provenance-mapped
+ * source file: the same relative path inside the package as INSTALLED in
+ * the driver's tree.
+ *
+ * This file's own contract (ProvenancePackageSource.external) already says
+ * it: the source tree is a bare git checkout in the content-addressed
+ * cache with no node_modules of its own, so NOTHING resolves from where
+ * these files sit, and the driver's installed tree is what the versions
+ * come from. A resolution asked from the cache path does not answer
+ * "nothing" though — it climbs out of the cache and answers with whatever
+ * node_modules happens to sit above the user's HOME directory, a set that
+ * has nothing to do with the program and differs per build host.
+ *
+ * The relative path need not exist under `installedDir`; a published dist
+ * rarely mirrors its source layout. Only the DIRECTORY CHAIN above the
+ * file is ever read, and a level that does not exist contributes nothing —
+ * exactly as it would for a file Node loaded from there.
+ *
+ * Null when `fileName` is not inside a registered package's source tree,
+ * or when the package was recorded without its installed location: the
+ * caller then keeps the path it was handed. */
+export function provenanceInstalledCounterpart(fileName: string): string | null {
+  if (state === null) return null;
+  const f = tsgoPath(fileName);
+  for (let i = 0; i < state.packageDirs.length; i++) {
+    const prefix = state.packageDirs[i]!;
+    if (!f.startsWith(prefix)) continue;
+    const installed = state.sources.packages[i]!.installedDir;
+    if (installed === undefined || installed === "") return null;
+    return `${provenanceDirPrefix(installed)}${f.slice(prefix.length)}`;
   }
   return null;
 }

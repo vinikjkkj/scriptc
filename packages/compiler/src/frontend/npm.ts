@@ -90,6 +90,7 @@ import { builtinModules } from "node:module";
 import { dirname, extname, join, resolve } from "node:path";
 import ts from "typescript5";
 import { cjsLexedExportsOf } from "./cjs-lexer.js";
+import { provenanceInstalledCounterpart } from "./provenance-registry.js";
 import { nativePath, pathFileUrl, tsgoPath } from "./shared.js";
 
 export type EmbeddedFormat = "esm" | "cjs" | "json";
@@ -676,6 +677,32 @@ export function probeNodeImportRefusal(
  * the ESM startup-crash channel (SEMANTICS.md 287), this refusal is a
  * RUNTIME throw at the require site, catchable — the optional-dependency
  * try/require pattern depends on exactly that. */
+/** The path Node's OWN resolution has to be asked from for a file the
+ * compiler holds somewhere other than where the running program keeps
+ * it.
+ *
+ * Today that is exactly one thing: `--provenance-sources` compiles a
+ * package's attested SOURCE out of a content-addressed cache, and that
+ * checkout has no node_modules of its own -- this module's own
+ * ProvenancePackageSource.external says so and resolves the tree's bare
+ * imports from the DRIVER's installed tree for exactly that reason.
+ * Node's node_modules walk was still being asked from where the files
+ * SIT, and from there it does not answer "nothing": it climbs OUT of the
+ * cache and answers with whatever node_modules sits above the user's HOME
+ * directory. Measured on zapo's own build: 205 package roots that are not
+ * the program's, while `argo-codec` and `typescript`, which the program
+ * really can require, were provably absent.
+ *
+ * Both directions are wrong and one of them is SILENT. A root the walk
+ * cannot see compiles to Node's catchable MODULE_NOT_FOUND, and the
+ * `try { require(x) } catch` idiom this whole path exists for swallows
+ * it -- so the program answers null for a module Node hands over.
+ *
+ * Every other file is its own base. */
+export function requireResolutionBase(fromFile: string): string {
+  return provenanceInstalledCounterpart(fromFile) ?? fromFile;
+}
+
 export function probeNodeRequireRefusal(
   fromFile: string,
   specifier: string,
@@ -699,7 +726,9 @@ export function probeNodeRequireRefusal(
   // slice: `require("vm")` and `require("repl")` fell straight through
   // to a MODULE_NOT_FOUND for a module Node hands over.
   if (isNodeBuiltinRoot(specifier.split("/")[0]!)) return null;
-  const importer = resolve(fromFile);
+  // Where the RUNNING program keeps this file, which is both where Node
+  // resolves from and the path its require stack names.
+  const importer = resolve(requireResolutionBase(fromFile));
   for (let dir = dirname(importer); ; ) {
     // A self-scope whose "name" matches: Node's require honors package
     // self-reference — conservative null (resolvable or its own story).
@@ -711,7 +740,7 @@ export function probeNodeRequireRefusal(
         return null; // unreadable manifest — conservative
       }
     }
-    if (host.isDirectory(join(dir, "node_modules", name))) return null;
+    if (nodeModulesRootResolves(host, join(dir, "node_modules", name))) return null;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
@@ -719,6 +748,45 @@ export function probeNodeRequireRefusal(
   return {
     message: `Cannot find module '${specifier}'\nRequire stack:\n- ${nativePath(importer)}`,
   };
+}
+
+/** Node's LOAD_AS_FILE list for a CJS require, exactly: the path
+ * VERBATIM, then the three extensions require's own extension table
+ * serves. `.mjs` and `.cjs` are NOT in it -- measured against Node
+ * v25.9.0, where `node_modules/d.mjs` leaves `require("d")` throwing
+ * MODULE_NOT_FOUND while `node_modules/a.js` hands the module over. */
+const CJS_LOAD_AS_FILE_EXTS: readonly string[] = ["", ".js", ".json", ".node"];
+
+/** Does Node's CJS resolution find anything at `node_modules/<root>`?
+ *
+ * A package root need NOT be a directory. Node tries LOAD_AS_FILE on the
+ * path before LOAD_AS_DIRECTORY, so a loose `node_modules/x.js`,
+ * `x.json`, `x.node` -- or an extension-less file named `x` -- makes
+ * `require("x")` resolve and hand back a module. A walk that asked only
+ * isDirectory answered "nothing installed resolves this" for every one of
+ * them, and the callers turn that answer into Node's catchable
+ * MODULE_NOT_FOUND: a THROW where Node returns a module, swallowed by the
+ * very `try { require(x) } catch {}` idiom the throw was built for. */
+function nodeModulesRootResolves(host: Host, base: string): boolean {
+  if (host.isDirectory(base)) return true;
+  for (const ext of CJS_LOAD_AS_FILE_EXTS) if (host.isFile(base + ext)) return true;
+  return false;
+}
+
+/** The bare ROOT a node_modules FILE entry additionally spells, or null.
+ * `readdir` gives `x.js`; the caller adds that name itself
+ * (`require("x.js")` resolves too -- the path is tried verbatim first),
+ * and this adds the `x` that Node's extension list also serves. Only a
+ * real FILE counts: a DIRECTORY named `x.js` spells no root but its own
+ * name, because every LOAD_AS_FILE candidate has to be a file. */
+function cjsFileEntryRoot(host: Host, path: string, entry: string): string | null {
+  for (const ext of CJS_LOAD_AS_FILE_EXTS) {
+    if (ext === "") continue;
+    if (entry.length > ext.length && entry.endsWith(ext)) {
+      return host.isFile(path) ? entry.slice(0, -ext.length) : null;
+    }
+  }
+  return null;
 }
 
 /** Every name Node's CJS loader serves as a BUILTIN, prefix-less. Node's
@@ -766,12 +834,16 @@ export function nodeRequireResolvableRoots(
   // the real host: a caller passing its own host is testing this
   // function's filesystem reading and must not be served a cached answer
   // from somebody else's disk.
-  const dirKey = dirname(resolve(fromFile));
+  // The RUNNING program's location decides the chain, so the memo is
+  // keyed by it too: one source path can map to two installed trees
+  // across compiles in one process.
+  const base = requireResolutionBase(fromFile);
+  const dirKey = dirname(resolve(base));
   if (host === realHost) {
     const hit = resolvableRootsMemo.get(dirKey);
     if (hit !== undefined) return hit;
   }
-  const answer = computeResolvableRoots(fromFile, host);
+  const answer = computeResolvableRoots(base, host);
   if (host === realHost) resolvableRootsMemo.set(dirKey, answer);
   return answer;
 }
@@ -782,16 +854,26 @@ function computeResolvableRoots(fromFile: string, host: Host): Set<string> | nul
   const out = new Set<string>();
   for (const b of NODE_BUILTIN_ROOTS) out.add(b);
   const importer = resolve(fromFile);
+  let scopeSeen = false;
   for (let dir = dirname(importer); ; ) {
-    const pkgText = host.readFile(join(dir, "package.json"));
+    // Node's require honors package SELF-reference under two rules this
+    // walk used to ignore. Measured against Node v25.9.0: a package
+    // scope with no "exports" field self-references NOTHING (its own
+    // name answers MODULE_NOT_FOUND), and only the NEAREST enclosing
+    // package.json is the file's scope -- an OUTER package's name, asked
+    // from inside a nested one, is MODULE_NOT_FOUND even with "exports".
+    // Adding either spelled a fence where Node throws: loud, so never a
+    // wrong answer, but a refusal the program need not carry. An
+    // unreadable manifest is the same "cannot enumerate" answer the null
+    // return exists for.
+    const pkgText = scopeSeen ? null : host.readFile(join(dir, "package.json"));
     if (pkgText !== null) {
-      // Node's require honors package SELF-reference, so the enclosing
-      // package's own name resolves from inside it. An unreadable
-      // manifest is the same "cannot enumerate" answer the null return
-      // exists for.
+      scopeSeen = true;
       try {
-        const name = (JSON.parse(pkgText) as PkgJson).name;
-        if (typeof name === "string" && name !== "") out.add(name);
+        const pkg = JSON.parse(pkgText) as PkgJson;
+        if (typeof pkg.name === "string" && pkg.name !== "" && pkg.exports !== undefined) {
+          out.add(pkg.name);
+        }
       } catch {
         return null;
       }
@@ -805,10 +887,17 @@ function computeResolvableRoots(fromFile: string, host: Host): Set<string> | nul
         if (e.startsWith("@")) {
           const scoped = host.readdir(join(nm, e));
           if (scoped === null) return null;
-          for (const s2 of scoped) if (!s2.startsWith(".")) out.add(`${e}/${s2}`);
+          for (const s2 of scoped) {
+            if (s2.startsWith(".")) continue;
+            out.add(`${e}/${s2}`);
+            const fileRoot = cjsFileEntryRoot(host, join(nm, e, s2), s2);
+            if (fileRoot !== null) out.add(`${e}/${fileRoot}`);
+          }
           continue;
         }
         out.add(e);
+        const fileRoot = cjsFileEntryRoot(host, join(nm, e), e);
+        if (fileRoot !== null) out.add(fileRoot);
       }
     }
     const parent = dirname(dir);
