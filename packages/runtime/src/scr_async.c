@@ -1763,8 +1763,8 @@ void scr_queue_microtask(ScrClosure *cb) {
 
 /* The runtime-internal twin: `fn(arg)` on the next microtask turn, with
  * `arg`'s reference moving in (released after fn returns). */
-static void scr_queue_microtask_raw(void (*fn)(void *), void *arg,
-                                    void (*arg_release)(void *)) {
+void scr_queue_microtask_raw(void (*fn)(void *), void *arg,
+                             void (*arg_release)(void *)) {
   ScrFiber *f = calloc(1, sizeof *f);
   if (!f) scr_oom();
   f->micro_raw = fn;
