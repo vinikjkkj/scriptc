@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals } from "../emission/emit-stmts.js";
 import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
@@ -545,6 +545,24 @@ const LIB_FN_SYMS: Record<string, string> = {
   "abort.aborted": "scr_abort_signal_aborted",
   "abort.reason": "scr_abort_signal_reason",
   "abort.off": "scr_abort_signal_off",
+  // The static fetch surface (scr_fetch_static.c) — the C twin's rows.
+  // The four call entry points share one runtime symbol; the NULL
+  // sentinels for an absent body/signal are supplied by the arity fixup
+  // below, because this table carries names, not argument lists.
+  "fetch.headersNorm": "scr_fetch_headers_normalize",
+  "fetch.headersFromDyn": "scr_fetch_headers_from_dyn",
+  "resp.ok": "scr_response_ok",
+  "resp.status": "scr_response_status",
+  "resp.statusText": "scr_response_status_text",
+  "resp.url": "scr_response_url",
+  "resp.redirected": "scr_response_redirected",
+  "resp.bodyUsed": "scr_response_body_used",
+  "resp.headers": "scr_response_headers",
+  "resp.text": "scr_response_text",
+  "resp.json": "scr_response_json",
+  "resp.arrayBuffer": "scr_response_array_buffer",
+  "resp.bytes": "scr_response_bytes",
+  "headers.has": "scr_fetch_headers_has",
   "url.new": "scr_url_new",
   "url.newRel": "scr_url_new_rel",
   "url.protocol": "scr_url_protocol",
@@ -1553,7 +1571,8 @@ class LlEmitter {
     // unreachable while `wsCtor` refused, which is exactly how it got
     // here; llvm-main-installs.test.ts now compares the two tables rather
     // than this one line.
-    const usesNet = moduleUsesNet(this.mod) || moduleUsesWsGlobal(this.mod);
+    const usesNet =
+      moduleUsesNet(this.mod) || moduleUsesWsGlobal(this.mod) || moduleUsesFetchStatic(this.mod);
     const usesHttp = moduleUsesHttpServer(this.mod);
     // Fetch-referencing programs register the native fetch bridge before
     // any island entry (the engine's lazy boot consults it) — cc.ts
@@ -1604,6 +1623,11 @@ class LlEmitter {
     if (usesEvents) this.declare(`declare void @scr_events_install()`);
     if (usesFsWatch) this.declare(`declare void @scr_watch_install()`);
     if (usesStream) this.declare(`declare void @scr_stream_install()`);
+    // No --dynamic guard needed on either backend: `response`/`headers`
+    // only reach the IR from the static mapType arm, so an island build
+    // cannot produce them.
+    const usesFetchAbort = moduleUsesFetchStatic(this.mod) && moduleUsesAbortSignal(this.mod);
+    if (usesFetchAbort) this.declare(`declare void @scr_fetch_abort_install()`);
     if (usesNet) {
       this.declare(`declare void @scr_net_install()`);
       this.declare(`declare void @scr_net_dyn_install()`);
@@ -1990,11 +2014,15 @@ class LlEmitter {
       // scr_watch.c links only when this line is emitted.
       ...(usesFsWatch ? [`  call void @scr_watch_install()`] : []),
       ...(usesFetch ? [`  call void @scr_fetch_install()`] : []),
+      // The C twin's row: the static fetch dials through the poller, so
+      // without the net hooks the loop exits before the response head.
       ...(usesNet ? [`  call void @scr_net_install()`, `  call void @scr_net_dyn_install()`] : []),
       ...(usesHttp ? [`  call void @scr_http_dyn_install()`] : []),
       ...(usesRegex ? [`  call void @scr_regex_dyn_install()`] : []),
       ...(usesChildStream ? [`  call void @scr_child_stream_dyn_install()`] : []),
       ...(usesStream ? [`  call void @scr_stream_install()`] : []),
+      // The C twin's row: the static fetch's abort seam.
+      ...(usesFetchAbort ? [`  call void @scr_fetch_abort_install()`] : []),
       ...(usesHttp2 ? [`  call void @scr_http2_dyn_install()`] : []),
       ...(usesDgram ? [`  call void @scr_dgram_install()`] : []),
       ...(embedsZlib ? [`  call void @scr_zlib_island_install()`] : []),
@@ -3349,6 +3377,8 @@ class LlEmitter {
             case "fsWatcher":
             case "abortSignal":
             case "abortController":
+            case "response":
+            case "headers":
               B.line(`store i1 true, ptr ${slot} ; ${arm.kind}: objects are truthy`);
               break;
             default:
@@ -12238,6 +12268,37 @@ class LlEmitter {
       this.declare(`declare void @${sym}(double)`);
       B.line(`call void @${sym}(double ${h.name})`);
       return { name: h.name, type: e.type };
+    }
+    // The four fetch call entry points: ONE runtime symbol, with the
+    // absent body/signal supplied as NULL here rather than by four
+    // separate C functions. The IR keeps them as four names so its arity
+    // check can tell an omitted body from an empty one (nodes.ts's row).
+    if (e.fn === "fetch.go" || e.fn === "fetch.goBody" || e.fn === "fetch.goSignal" || e.fn === "fetch.goBodySignal") {
+      const hasBody = e.fn === "fetch.goBody" || e.fn === "fetch.goBodySignal";
+      const hasSignal = e.fn === "fetch.goSignal" || e.fn === "fetch.goBodySignal";
+      const args = e.args.map((a) => this.emitExpr(a));
+      const body = hasBody ? `ptr ${args[3]!.name}` : "ptr null";
+      const signal = hasSignal ? `ptr ${args[hasBody ? 4 : 3]!.name}` : "ptr null";
+      this.declare(`declare ptr @scr_fetch_start(ptr, ptr, ptr, ptr, ptr)`);
+      const out = B.tmp();
+      B.line(
+        `${out} = call ptr @scr_fetch_start(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ` +
+          `ptr ${args[2]!.name}, ${body}, ${signal})`,
+      );
+      return this.own({ name: out, type: e.type });
+    }
+    if (e.fn === "headers.get") {
+      // `string | null`, sp.get's row exactly.
+      if (e.type.kind !== "union") throw new Error("llvm emitter bug: headers.get result is not a union");
+      const def = this.unionsById.get(e.type.unionId);
+      const strTag = def ? def.arms.findIndex((a) => a.kind === "string") : -1;
+      const nullTag = def ? def.arms.findIndex((a) => a.kind === "nullT") : -1;
+      if (strTag < 0 || nullTag < 0) throw new Error("llvm emitter bug: headers.get union lacks its arms");
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.declare(`declare ptr @scr_fetch_headers_get(ptr, ptr)`);
+      const raw = B.tmp();
+      B.line(`${raw} = call ptr @scr_fetch_headers_get(ptr ${args[0]!.name}, ptr ${args[1]!.name})`);
+      return this.wrapNullable(raw, raw, STRING, strTag, e.type, nullTag);
     }
     if (e.fn === "sp.get") {
       // `string | null` — the sym.desc pattern with a null arm: the

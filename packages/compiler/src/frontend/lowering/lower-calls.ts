@@ -6,6 +6,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerGenMethodCall } from "./lower-generators.js";
 import { lowerAbortMethodCall } from "./lower-abort.js";
+import { lowerFetchMethodCall } from "./lower-fetch.js";
 import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, locOf } from "../program.js";
@@ -4928,6 +4929,8 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         // methods. Position among the handle paths is arbitrary — the
         // receiver kind discriminates.
         lowerAbortMethodCall(L, expr, expr.expression) ??
+        // response.text()/json()/arrayBuffer()/bytes() and headers.get/has.
+        lowerFetchMethodCall(L, expr, expr.expression) ??
         L.lowerUrlMethodCall(expr, expr.expression) ??
         L.lowerSearchParamsMethodCall(expr, expr.expression) ??
         L.lowerStatsMethodCall(expr, expr.expression) ??

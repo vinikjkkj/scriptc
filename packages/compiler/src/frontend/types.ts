@@ -1,6 +1,6 @@
 import * as ts from "./ts7/adapter.js";
 import type { IrBuiltinRendering, IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
-import { ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
+import { ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile } from "./program.js";
 import { accessorSlotProp, armDiscrimLits, armLitsConflict, builtinRenderingKey, internalFieldNamesOf, mergeArmLitSets, wsGlobalPlan } from "../ir/nodes.js";
@@ -836,6 +836,10 @@ function formatIrTypeInner(t: IrType, shapes: ShapeRegistry, unions: UnionRegist
       return "AbortSignal";
     case "abortController":
       return "AbortController";
+    case "response":
+      return "Response";
+    case "headers":
+      return "Headers";
     case "promise":
       return `Promise<${formatIrType(t.inner, shapes, unions, seen)}>`;
     case "generator":
@@ -2646,6 +2650,23 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     )
   ) {
     return ABORTCONTROLLER_T;
+  }
+  // Response and Headers leave the island group for the same reason
+  // AbortSignal did, and now with a value surface behind them: a STATIC
+  // build has its own fetch (scr_fetch_static.c) whose promise fulfills
+  // with an ScrResponse. Under --dynamic nothing moves — the island still
+  // mints the Response, so the handle stays jsval and every existing
+  // engine-op dispatch keeps working.
+  if (
+    !ctx.dynamic &&
+    (psym?.name === "Response" || psym?.name === "Headers") &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+        ctx.isStdlibFile(d.getSourceFile()),
+    )
+  ) {
+    return psym.name === "Response" ? RESPONSE_T : HEADERS_T;
   }
   if (
     psym &&
