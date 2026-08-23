@@ -952,6 +952,18 @@ static void fs_start_hop(FsTransfer *t) {
   }
   if (!fs_pairs_have(t->headers, "accept")) fs_pairs_push(pairs, "accept", "*/*", 3);
   if (!fs_pairs_have(t->headers, "accept-language")) fs_pairs_push(pairs, "accept-language", "*", 1);
+  /* WHATWG fetch step: "if request's body is null and request's method is
+   * POST or PUT, append `Content-Length: 0`". The DIALLED path never had to
+   * spell it -- scr_http computes a content-length from the body it is
+   * handed -- but a delegated hop's `opts.headers` IS the header list, and
+   * a dispatcher that never sees it sends a bodyless POST with no length
+   * at all. MEASURED on Node v25.9.0 across seven methods: POST and PUT
+   * carry it and GET, HEAD, DELETE, PATCH and OPTIONS do not, and it sits
+   * exactly here, between accept-language and sec-fetch-mode. */
+  if (deleg && t->body == NULL && !fs_pairs_have(t->headers, "content-length") &&
+      (fs_str_is(t->method, "POST") || fs_str_is(t->method, "PUT"))) {
+    fs_pairs_push(pairs, "content-length", "0", 1);
+  }
   if (!fs_pairs_have(t->headers, "sec-fetch-mode")) fs_pairs_push(pairs, "sec-fetch-mode", "cors", 4);
   if (!fs_pairs_have(t->headers, "user-agent")) fs_pairs_push(pairs, "user-agent", "node", 4);
   if (!fs_pairs_have(t->headers, "accept-encoding")) {
