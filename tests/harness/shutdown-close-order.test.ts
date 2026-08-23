@@ -134,6 +134,9 @@ async function build(entry: string): Promise<string> {
 const cases = [
   // The one that carried the defect as a RATE.
   "http-proxy-pipe",
+  // The same program with the coincidence pinned, so it carried the defect
+  // on every run instead of some of them.
+  "http-proxy-close-order",
   // The one that carries it deterministically; repeated here too, so a
   // future defect that makes IT intermittent is caught by the same net.
   "net-close-order-drained",
