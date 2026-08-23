@@ -90,6 +90,7 @@ import { builtinModules } from "node:module";
 import { dirname, extname, join, resolve } from "node:path";
 import ts from "typescript5";
 import { cjsLexedExportsOf } from "./cjs-lexer.js";
+import { provenanceInstalledCounterpart } from "./provenance-registry.js";
 import { nativePath, pathFileUrl, tsgoPath } from "./shared.js";
 
 export type EmbeddedFormat = "esm" | "cjs" | "json";
@@ -676,6 +677,32 @@ export function probeNodeImportRefusal(
  * the ESM startup-crash channel (SEMANTICS.md 287), this refusal is a
  * RUNTIME throw at the require site, catchable — the optional-dependency
  * try/require pattern depends on exactly that. */
+/** The path Node's OWN resolution has to be asked from for a file the
+ * compiler holds somewhere other than where the running program keeps
+ * it.
+ *
+ * Today that is exactly one thing: `--provenance-sources` compiles a
+ * package's attested SOURCE out of a content-addressed cache, and that
+ * checkout has no node_modules of its own -- this module's own
+ * ProvenancePackageSource.external says so and resolves the tree's bare
+ * imports from the DRIVER's installed tree for exactly that reason.
+ * Node's node_modules walk was still being asked from where the files
+ * SIT, and from there it does not answer "nothing": it climbs OUT of the
+ * cache and answers with whatever node_modules sits above the user's HOME
+ * directory. Measured on zapo's own build: 205 package roots that are not
+ * the program's, while `argo-codec` and `typescript`, which the program
+ * really can require, were provably absent.
+ *
+ * Both directions are wrong and one of them is SILENT. A root the walk
+ * cannot see compiles to Node's catchable MODULE_NOT_FOUND, and the
+ * `try { require(x) } catch` idiom this whole path exists for swallows
+ * it -- so the program answers null for a module Node hands over.
+ *
+ * Every other file is its own base. */
+export function requireResolutionBase(fromFile: string): string {
+  return provenanceInstalledCounterpart(fromFile) ?? fromFile;
+}
+
 export function probeNodeRequireRefusal(
   fromFile: string,
   specifier: string,
@@ -699,7 +726,9 @@ export function probeNodeRequireRefusal(
   // slice: `require("vm")` and `require("repl")` fell straight through
   // to a MODULE_NOT_FOUND for a module Node hands over.
   if (isNodeBuiltinRoot(specifier.split("/")[0]!)) return null;
-  const importer = resolve(fromFile);
+  // Where the RUNNING program keeps this file, which is both where Node
+  // resolves from and the path its require stack names.
+  const importer = resolve(requireResolutionBase(fromFile));
   for (let dir = dirname(importer); ; ) {
     // A self-scope whose "name" matches: Node's require honors package
     // self-reference — conservative null (resolvable or its own story).
@@ -805,12 +834,16 @@ export function nodeRequireResolvableRoots(
   // the real host: a caller passing its own host is testing this
   // function's filesystem reading and must not be served a cached answer
   // from somebody else's disk.
-  const dirKey = dirname(resolve(fromFile));
+  // The RUNNING program's location decides the chain, so the memo is
+  // keyed by it too: one source path can map to two installed trees
+  // across compiles in one process.
+  const base = requireResolutionBase(fromFile);
+  const dirKey = dirname(resolve(base));
   if (host === realHost) {
     const hit = resolvableRootsMemo.get(dirKey);
     if (hit !== undefined) return hit;
   }
-  const answer = computeResolvableRoots(fromFile, host);
+  const answer = computeResolvableRoots(base, host);
   if (host === realHost) resolvableRootsMemo.set(dirKey, answer);
   return answer;
 }
@@ -821,16 +854,26 @@ function computeResolvableRoots(fromFile: string, host: Host): Set<string> | nul
   const out = new Set<string>();
   for (const b of NODE_BUILTIN_ROOTS) out.add(b);
   const importer = resolve(fromFile);
+  let scopeSeen = false;
   for (let dir = dirname(importer); ; ) {
-    const pkgText = host.readFile(join(dir, "package.json"));
+    // Node's require honors package SELF-reference under two rules this
+    // walk used to ignore. Measured against Node v25.9.0: a package
+    // scope with no "exports" field self-references NOTHING (its own
+    // name answers MODULE_NOT_FOUND), and only the NEAREST enclosing
+    // package.json is the file's scope -- an OUTER package's name, asked
+    // from inside a nested one, is MODULE_NOT_FOUND even with "exports".
+    // Adding either spelled a fence where Node throws: loud, so never a
+    // wrong answer, but a refusal the program need not carry. An
+    // unreadable manifest is the same "cannot enumerate" answer the null
+    // return exists for.
+    const pkgText = scopeSeen ? null : host.readFile(join(dir, "package.json"));
     if (pkgText !== null) {
-      // Node's require honors package SELF-reference, so the enclosing
-      // package's own name resolves from inside it. An unreadable
-      // manifest is the same "cannot enumerate" answer the null return
-      // exists for.
+      scopeSeen = true;
       try {
-        const name = (JSON.parse(pkgText) as PkgJson).name;
-        if (typeof name === "string" && name !== "") out.add(name);
+        const pkg = JSON.parse(pkgText) as PkgJson;
+        if (typeof pkg.name === "string" && pkg.name !== "" && pkg.exports !== undefined) {
+          out.add(pkg.name);
+        }
       } catch {
         return null;
       }

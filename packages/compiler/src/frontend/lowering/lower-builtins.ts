@@ -10,7 +10,7 @@ import type { Lowerer } from "./lowerer.js";
 import { PoisonError, dynUndefinedExpr, ladderFenceExpr, newFnCtx, nodeThrowExpr, own } from "./lowerer.js";
 import { canonicalBuiltinModule, isCjsJsFile, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
 import { isRelativeSpecifier, nativePath } from "../shared.js";
-import { nodeRequireResolvableRoots, probeNodeRequireRefusal } from "../npm.js";
+import { nodeRequireResolvableRoots, probeNodeRequireRefusal, requireResolutionBase } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
 import { invalidJsonModuleDiag, noLoweringDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
 import {
@@ -550,7 +550,10 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
         args: [
           specDyn,
           { kind: "strLit", value: rootsLit, type: STRING, loc },
-          { kind: "strLit", value: nativePath(resolve(sf.fileName)), type: STRING, loc },
+          // The path Node's own require stack names, which for a
+          // provenance-mapped source is where the RUNNING program keeps
+          // the file, not the cache checkout the compiler read it from.
+          { kind: "strLit", value: nativePath(resolve(requireResolutionBase(sf.fileName))), type: STRING, loc },
         ],
         type: BOOL,
         loc,
