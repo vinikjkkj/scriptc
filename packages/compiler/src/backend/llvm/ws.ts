@@ -584,6 +584,43 @@ function initBagArm(
     B.label(ok);
   }
 
+  // The dispatcher, PICKED UP rather than refused -- the C twin's arm.
+  // NOTE the shape of the bug this replaces: with `dispatcher` moved out
+  // of refuseIfPresent and no arm here, this lane emitted NEITHER the
+  // fence nor the delegation and dialled DIRECT, ignoring the proxy in
+  // silence. That is the worst outcome this project recognises, and it is
+  // exactly what "the fence has an LLVM twin" is there to prevent.
+  if (ib.dispatcher !== null) {
+    const d = ib.dispatcher;
+    const drec = mangleRecordStruct(d.recShapeId);
+    const v = slot(d.name);
+    const take = (recPtr: string): void => {
+      const fp = B.tmp();
+      const fn = B.tmp();
+      const rt = B.tmp();
+      B.line(
+        `${fp} = getelementptr inbounds %${drec}, ptr ${recPtr}, i64 0, i32 ${fieldIdx(host, d.recShapeId, d.method)}`,
+      );
+      B.line(`${fn} = load ptr, ptr ${fp}`);
+      B.line(`${rt} = call ptr @scr_closure_retain_v(ptr ${fn})`);
+      B.line(`store ptr ${rt}, ptr %dispp`);
+    };
+    host.declare(`declare ptr @scr_closure_retain_v(ptr)`);
+    if (d.absentTag < 0) {
+      take(v);
+    } else {
+      const cond = B.tmp();
+      const has = B.lbl("bagdisp");
+      const no = B.lbl("bagnodisp");
+      B.line(`${cond} = icmp ne i32 ${unionTag(v)}, ${d.absentTag}`);
+      B.line(`br i1 ${cond}, label %${has}, label %${no}`);
+      B.label(has);
+      take(unionPayload(v));
+      B.line(`br label %${no}`);
+      B.label(no);
+    }
+  }
+
   if (ib.protocols !== null) {
     const v = slot("protocols");
     if (ib.protocols.unionId !== undefined) {
@@ -673,6 +710,15 @@ function ctorWrapper(
   B.line(`store ptr null, ptr %protop`);
   B.line(`%hdrsp = alloca ptr`);
   B.line(`store ptr null, ptr %hdrsp`);
+  // The program's `dispatch`, when the bag delegates. NULL means "dial",
+  // which is also what an `undefined` dispatcher means.
+  const del = plan.initBag?.dispatcher ?? null;
+  if (del !== null) {
+    B.line(`%dispp = alloca ptr`);
+    B.line(`store ptr null, ptr %dispp`);
+    host.declare(`declare ptr @scr_ws_disp_global_new(ptr, ptr, ptr, ptr, ptr, i32, i32)`);
+    host.declare(`declare void @scr_closure_release(ptr)`);
+  }
 
   const refuse = (msg: string): void => {
     const text = wsRefusalText(msg, site);
@@ -764,17 +810,54 @@ function ctorWrapper(
   B.line(`call void @scr_str_release(ptr %a0)`);
   B.line(`call void @scr_str_release(ptr ${pr1})`);
   B.line(`call void @scr_str_release(ptr ${hd1})`);
+  if (del !== null) {
+    const dr = B.tmp();
+    B.line(`${dr} = load ptr, ptr %dispp`);
+    B.line(`call void @scr_closure_release(ptr ${dr})`);
+  }
   B.line(`ret ptr null`);
   B.label(dial);
   const pr = B.tmp();
   const hd = B.tmp();
-  const g = B.tmp();
+  let g = B.tmp();
   const bad = B.tmp();
   const nourl = B.lbl("wnourl");
   const build = B.lbl("wbuild");
   B.line(`${pr} = load ptr, ptr %protop`);
   B.line(`${hd} = load ptr, ptr %hdrsp`);
-  B.line(`${g} = call ptr @scr_ws_global_new(ptr %a0, ptr ${pr}, ptr ${hd}, ptr @${names.dispatch})`);
+  if (del !== null) {
+    // THE DELEGATION. Arm for arm with emit-ws.ts: `dispatch` runs inside
+    // this call, exactly as it does in the oracle.
+    const dp = B.tmp();
+    const has = B.tmp();
+    const yes = B.lbl("wdeleg");
+    const no = B.lbl("wdirect");
+    const join = B.lbl("wgot");
+    const gd = B.tmp();
+    const gn = B.tmp();
+    B.line(`${dp} = load ptr, ptr %dispp`);
+    B.line(`${has} = icmp ne ptr ${dp}, null`);
+    B.line(`br i1 ${has}, label %${yes}, label %${no}`);
+    B.label(yes);
+    B.line(
+      `${gd} = call ptr @scr_ws_disp_global_new(ptr %a0, ptr ${pr}, ptr ${hd}, ptr @${names.dispatch}, ptr ${dp}, i32 ${del.callKind}, i32 ${del.retKind})`,
+    );
+    B.line(`br label %${join}`);
+    B.label(no);
+    B.line(
+      `${gn} = call ptr @scr_ws_global_new(ptr %a0, ptr ${pr}, ptr ${hd}, ptr @${names.dispatch})`,
+    );
+    B.line(`br label %${join}`);
+    B.label(join);
+    const phi = B.tmp();
+    B.line(`${phi} = phi ptr [ ${gd}, %${yes} ], [ ${gn}, %${no} ]`);
+    B.line(`call void @scr_closure_release(ptr ${dp})`);
+    g = phi;
+  } else {
+    B.line(
+      `${g} = call ptr @scr_ws_global_new(ptr %a0, ptr ${pr}, ptr ${hd}, ptr @${names.dispatch})`,
+    );
+  }
   B.line(`call void @scr_str_release(ptr %a0)`);
   B.line(`call void @scr_str_release(ptr ${pr})`);
   B.line(`call void @scr_str_release(ptr ${hd})`);
