@@ -18,7 +18,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "./nodes.js";
-import { settleOrValuePromiseTag, arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
+import { settleOrValuePromiseTag, arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, REQUESTINIT_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is how many may be omitted
@@ -368,6 +368,27 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
     argTypes: [STRING, STRING, arrayOf(STRING), BYTES_U8, BOOL, ABORTSIGNAL_T],
     result: { kind: "promise", inner: RESPONSE_T },
   },
+  "fetch.initNew": { argTypes: [STRING, arrayOf(STRING)], result: REQUESTINIT_T },
+  "fetch.initNewBody": {
+    argTypes: [STRING, arrayOf(STRING), BYTES_U8, BOOL],
+    result: REQUESTINIT_T,
+  },
+  "fetch.initNewSignal": {
+    argTypes: [STRING, arrayOf(STRING), ABORTSIGNAL_T],
+    result: REQUESTINIT_T,
+  },
+  "fetch.initNewBodySignal": {
+    argTypes: [STRING, arrayOf(STRING), BYTES_U8, BOOL, ABORTSIGNAL_T],
+    result: REQUESTINIT_T,
+  },
+  "fetch.goInit": {
+    argTypes: [STRING, REQUESTINIT_T],
+    result: { kind: "promise", inner: RESPONSE_T },
+  },
+  // The two arguments are the ambient signature's own unions, so their
+  // arm sets vary per program: `null` is "any type", and the backends
+  // read the arms off the union definition (headers.get's rule).
+  "fetch.goValue": { argTypes: [null, null], result: { kind: "promise", inner: RESPONSE_T } },
   "fetch.headersNorm": { argTypes: [arrayOf(STRING)], result: arrayOf(STRING) },
   "fetch.headersFromDyn": { argTypes: [DYN], result: arrayOf(STRING) },
   "resp.ok": { argTypes: [RESPONSE_T], result: BOOL },

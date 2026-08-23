@@ -2243,9 +2243,12 @@ export class CEmitter {
       case "decipher":
       // A signal handle is an object: always truthy when present.
       case "abortSignal":
-      // A Response and a Headers view are objects too.
+      // A Response and a Headers view are objects too, and so is a
+      // RequestInit (a Request would be one).
       case "response":
       case "headers":
+      case "requestInit":
+      case "request":
         return `${t.name} != NULL`;
       case "void":
         throw new Error("emitter bug: truthiness of void");

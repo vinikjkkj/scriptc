@@ -12,6 +12,7 @@ import { recordKeyReadRow } from "./keyread-census.js";
 import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, isCjsWholeExportAssign, isJsSourceFile, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
 import { COMPOUND_ASSIGN_OPS, CompoundOp, STR_METHODS, UNSUPPORTED_STMT, isStdlibMember, sideEffectFreeOptionValue, stdlibGlobalAliasDecl, stdlibGlobalNameOf } from "./surfaces.js";
 import { builtinFnValueDeclType } from "./lower-fnvalue.js";
+import { requestInitWriteFence } from "./lower-fetch.js";
 import { isProvenanceSourceFile } from "../provenance-registry.js";
 import { ambientUndefVarRootOf, lowerImportEquals, nsUndefRead, nsWritableTarget, trapDeclRootOf } from "./lower-namespaces.js";
 import { expandoWritableTarget, lowerExpandoAssignStmt } from "./lower-expando.js";
@@ -6272,6 +6273,13 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         }
         if (ts.isElementAccessExpression(expr.left)) return L.lowerElementWrite(expr);
         if (ts.isPropertyAccessExpression(expr.left)) {
+          // A write to a member of a fetch RequestInit VALUE, assertion or
+          // not. Claimed FIRST, ahead of the asserted-receiver path just
+          // below: that path would take `(init as { dispatcher?: unknown
+          // }).dispatcher = d` for a checked-dynamic store, and a
+          // RequestInit is not a dyn tree — the write has to name what it
+          // is refusing and why (lower-fetch.ts).
+          requestInitWriteFence(L, expr.left);
           // `(u as {n: number}).n = v` — the DOTTED twin of the keyed write
           // in lowerElementWrite.  Same argument, same routing:
           // dynAssertionReceiver's comment carries it.  Claimed before every

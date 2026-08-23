@@ -260,6 +260,34 @@ export type IrType =
    * positions that never read it, and mapping it is what lets those
    * compile. */
   | { kind: "headers" }
+  /** A fetch `RequestInit` held as a VALUE rather than walked at the call
+   * site. It carries exactly what scr_fetch_start takes and nothing else
+   * — method, the folded header pair list, an optional body with its
+   * text/bytes provenance, an optional signal — because that is the whole
+   * of what this runtime can act on: an init able to hold a key the
+   * transfer ignores would be a silently dropped option, which is the one
+   * failure this slice exists to avoid.
+   *
+   * Refcounted and CYCLE-CAPABLE through one edge, the signal: an
+   * AbortSignal owns a listener vector, a listener closure can capture the
+   * init that holds the signal, and that closes the loop. Every other edge
+   * it owns is a string, a string array or a byte array, none of which can
+   * point back.
+   *
+   * NO member surface. `init.method` is a refusal, not a read: what is
+   * stored is the FOLDED form (header names lowercased and flattened, a
+   * string body already utf8-encoded), so answering a read would answer
+   * something other than what the program wrote. */
+  | { kind: "requestInit" }
+  /** A fetch `Request`. It exists as a TYPE ONLY — the arm the ambient
+   * `fetch` signature spells in its input union (`string | Request |
+   * URL`), and mapping it is what lets an options record carrying `typeof
+   * fetch` compile. NOTHING in this compiler constructs one: `new
+   * Request(...)` is a refusal, no lowering answers a Request and no
+   * library entry point returns one. The runtime struct exists so the
+   * union arm has a C type and the ownership machinery stays uniform; it
+   * is never allocated. */
+  | { kind: "request" }
   /** Heap, refcounted closure. `rest` marks a VARIADIC JS function (a
    * `...args` rest parameter, or a zero-param function body reading
    * `arguments` — test/common's mustCall wrapper): the lifted function
@@ -440,6 +468,8 @@ export const REF_TRUTHY_KINDS: ReadonlySet<string> = new Set([
   "secureCtx", "abortSignal", "abortController", "fsWatcher", "childStream", "procStream", "bytes", "func", "object", "record", "promise",
   // A Response and a Headers view are JS objects: always truthy.
   "response", "headers",
+  // A RequestInit is a JS object, and a Request would be one.
+  "requestInit", "request",
   // A generator object is a JS object: always truthy.
   "generator",
   "asyncGenerator",
@@ -481,6 +511,8 @@ export const ABORTSIGNAL_T: IrType = { kind: "abortSignal" };
 export const ABORTCONTROLLER_T: IrType = { kind: "abortController" };
 export const RESPONSE_T: IrType = { kind: "response" };
 export const HEADERS_T: IrType = { kind: "headers" };
+export const REQUESTINIT_T: IrType = { kind: "requestInit" };
+export const REQUEST_T: IrType = { kind: "request" };
 export const FSWATCHER_T: IrType = { kind: "fsWatcher" };
 export const CHILDSTREAM_T: IrType = { kind: "childStream" };
 export const PROCSTREAM_T: IrType = { kind: "procStream" };
@@ -803,6 +835,10 @@ export function typeKey(t: IrType): string {
       return "response";
     case "headers":
       return "headers";
+    case "requestInit":
+      return "requestInit";
+    case "request":
+      return "request";
     default: {
       const _exhaustive: never = t;
       void _exhaustive;
@@ -951,6 +987,10 @@ export function isRefCounted(t: IrType): boolean {
     // anything.
     t.kind === "response" ||
     t.kind === "headers" ||
+    // A RequestInit (cycle-capable through its signal edge) and a Request
+    // (never constructed, owned uniformly wherever it is typed).
+    t.kind === "requestInit" ||
+    t.kind === "request" ||
     // bigint and the four crypto handles. Ordinary refcounted heap values
     // with NULL-tolerant, immortal-tolerant releases and — decisively —
     // NO collector header and no edge that could point back at anything
@@ -5434,6 +5474,18 @@ export type IrLibFn =
    * conversion `Buffer.from(s)` makes and is fetch's encoding for one. */
   | "fetch.headersNorm"
   | "fetch.headersFromDyn"
+  /** A `RequestInit` VALUE. The same four-way presence split as the call
+   * entry points, and for the same reason. `goInit` is the call that takes
+   * one; `goValue` is the entry the `fetch`-as-a-VALUE closure calls, and
+   * it is the only row whose two arguments are UNIONS (`string | Request |
+   * URL` and `RequestInit | undefined` — the shapes the ambient signature
+   * spells), unpacked by tag in the backends. */
+  | "fetch.initNew"
+  | "fetch.initNewBody"
+  | "fetch.initNewSignal"
+  | "fetch.initNewBodySignal"
+  | "fetch.goInit"
+  | "fetch.goValue"
   /** Response reads. `status` is a double because every numeric IR value
    * is; `headers` answers the Headers VIEW with the response's own
    * identity, so two reads compare equal the way Node's getter does. */
@@ -7035,6 +7087,11 @@ function isJsonSafeAt(
     // honest JSON surface. A Headers view is the same answer.
     case "response":
     case "headers":
+    // A RequestInit does not keep the keys the program wrote in the form
+    // it wrote them, and a Request is never constructed: neither has an
+    // honest JSON surface.
+    case "requestInit":
+    case "request":
       return false;
     default: {
       const _exhaustive: never = t;
@@ -8112,7 +8169,12 @@ export function moduleUsesFetchStatic(mod: IrModule): boolean {
       return;
     }
     const rec = v as { kind?: unknown; fn?: unknown };
-    if (rec.kind === "response" || rec.kind === "headers") {
+    if (
+      rec.kind === "response" ||
+      rec.kind === "headers" ||
+      rec.kind === "requestInit" ||
+      rec.kind === "request"
+    ) {
       found = true;
       return;
     }
@@ -10005,6 +10067,8 @@ const LIB_MODE_REFUSED_KINDS: ReadonlyMap<string, string> = new Map([
   ["abortController", "the AbortSignal surface"],
   ["response", "the fetch surface"],
   ["headers", "the fetch surface"],
+  ["requestInit", "the fetch surface"],
+  ["request", "the fetch surface"],
   ["dynInvoke", "checked-dynamic prototype dispatch"],
 ]);
 
