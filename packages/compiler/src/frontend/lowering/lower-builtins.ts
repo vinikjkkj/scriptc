@@ -480,6 +480,36 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
     return null;
   }
 
+/** Node's own argument errors for a WRITTEN require specifier, or null
+   * when the specifier is one Node would go on to resolve.
+   *
+   * Node validates the id BEFORE it resolves anything, and the empty
+   * string is the one such error a written specifier can spell (a
+   * non-string literal is not a specifier at all and reaches the
+   * run-time arm's ERR_INVALID_ARG_TYPE). The run-time arm has always
+   * answered it -- scr_require_verdict's own first check -- but the
+   * WRITTEN spelling went to the node_modules walk, where
+   * join(dir, "node_modules", "") IS the node_modules directory: the
+   * probe answered "something resolves this", nothing was proven
+   * missing, and the site kept its refusal. Measured on both backends:
+   * SC1090 where Node throws a coded TypeError.
+   *
+   * The message is the one scr_require_verdict renders, so the two
+   * roads to this answer print the same bytes. Both the expression
+   * path and the statement path (lower-stmts' bare `require(x);`) call
+   * this, because a require in statement position never reaches the
+   * expression path at all. */
+  export function nodeRequireArgumentError(spec: string, loc: SrcLoc): IrExpr | null {
+    if (spec !== "") return null;
+    return nodeThrowExpr(
+      1,
+      "ERR_INVALID_ARG_VALUE",
+      "The argument 'id' must be a non-empty string. Received ''",
+      DYN,
+      loc,
+    );
+  }
+
 /** The ambient `require(...)` call, off the import-statement path. Null
    * when the callee is not that require, when the call shape is one Node
    * itself would not treat as a plain require (no argument, a spread), or
@@ -495,6 +525,8 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
 
     const spec = comptimeSpecifierOf(L, arg);
     if (spec !== null) {
+      const argErr = nodeRequireArgumentError(spec, loc);
+      if (argErr !== null) return argErr;
       // A specifier NOTHING installed resolves: Node throws at the require
       // site, catchably, and the compiled expression IS that throw. Every
       // other static specifier keeps whatever the existing paths do with
