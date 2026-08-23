@@ -2099,6 +2099,22 @@ const char *scr_dyn_objinst_cls(const ScrDyn *d) {
   return d->v.inst.cls->name;
 }
 
+/* The boxed instance pointer, and only for the EXACT descriptor asked
+ * for. The one thing a compiled walker needs before it may GEP into a
+ * class struct through a box, and the reason it lives here rather than
+ * as a pair of byte offsets in each backend: the offsets of `o` and
+ * `cls` inside the ScrDyn payload union are this file's fact, and the
+ * two lanes had already hardcoded three of the FUNC arm's. Exactness is
+ * not a convenience either -- a HIERARCHY class's box carries the
+ * descriptor of the STATIC type it was boxed from, so `==` is what makes
+ * "the struct at this pointer really has that field at that index" true.
+ * Answers NULL for every other kind, descriptor or NULL box; never
+ * throws. */
+void *scr_dyn_objinst_ptr_of(const ScrDyn *d, const ScrDynClass *cls) {
+  if (d == NULL || d->kind != SCR_DYN_OBJINST || d->v.inst.cls != cls) return NULL;
+  return d->v.inst.o;
+}
+
 bool scr_dyn_objinst_fence(const ScrDyn *d, const char *what) {
   ScrJsonBuf b;
   scr_jb_init(&b);

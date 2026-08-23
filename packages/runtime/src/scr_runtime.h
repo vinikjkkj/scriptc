@@ -4940,6 +4940,13 @@ void *scr_dyn_objinst_unbox(const ScrDyn *d, size_t pre, size_t post,
                             const ScrDynPath *path, const char *want);
 /* The boxed class's display name — error texts across units. */
 const char *scr_dyn_objinst_cls(const ScrDyn *d);
+/* The boxed instance pointer, and only when the box carries EXACTLY
+ * this descriptor -- what a compiled walker needs before it may GEP
+ * into a class struct through a box. A hierarchy class's box carries
+ * the descriptor of the STATIC type it was boxed from, so the
+ * identity test is what makes the field offset sound. NULL for every
+ * other kind or descriptor; never throws. */
+void *scr_dyn_objinst_ptr_of(const ScrDyn *d, const ScrDynClass *cls);
 /* The loud ladder for every operation the box has no layout to answer
  * (keyed access, calls, iteration, JSON, structuredClone, inspect,
  * String()): "<what> on a dynamic <Class> is not supported yet". Always
