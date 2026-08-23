@@ -331,8 +331,10 @@ static void fs_settle_body(ScrPromise *p, ScrResponse *r, int kind) {
   }
   ScrBytes *all = fs_body_bytes(r);
   if (kind == FS_BODY_BUFFER || kind == FS_BODY_BYTES) {
+    /* fulfill_ref MOVES the +1 in (scr_async.c: it releases the value
+     * itself on an already-settled promise), so `all` is not released
+     * here. Releasing it too was a double free. */
     scr_promise_fulfill_ref(p, all, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
-    scr_bytes_release(all);
     return;
   }
   ScrStr *enc = scr_str_new("utf8", 4);
@@ -350,7 +352,6 @@ static void fs_settle_body(ScrPromise *p, ScrResponse *r, int kind) {
     return;
   }
   scr_promise_fulfill_ref(p, doc, &scr_dyn_retain_v, &scr_dyn_release_v, &scr_dyn_trace_v);
-  scr_dyn_release(doc);
 }
 
 /* The body-ended (or body-failed) edge: settle whatever is parked. */
@@ -961,7 +962,12 @@ static void fs_on_response(ScrClosure *cb, ScrHttpReq *res /*+1*/) {
   ScrPromise *p = t->promise;
   t->promise = NULL;
   if (p != NULL) {
-    scr_promise_fulfill_ref(p, r, &scr_response_retain_v, &scr_response_release_v, &scr_response_trace_v);
+    /* The promise gets its OWN reference: fulfill_ref MOVES a +1 in, and
+     * `t->resp` keeps the constructor's. Handing the constructor's +1 to
+     * both was a use-after-free at teardown — the transfer released a
+     * Response the program had already dropped to zero. */
+    scr_promise_fulfill_ref(p, scr_response_retain(r), &scr_response_retain_v,
+                            &scr_response_release_v, &scr_response_trace_v);
     scr_promise_release(p);
   }
 

@@ -808,6 +808,12 @@ export interface ClassMeta {
         return "scr_abort_signal_trace_v";
       case "abortController":
         return "scr_abort_controller_trace_v";
+      // A Response holds the parked body-consumer promise a `.text()`
+      // before the body ended installs, and a promise reaches arbitrary
+      // values — so the edge is traced, unconditionally. A Headers view
+      // owns only strings and answers null below (the default).
+      case "response":
+        return "scr_response_trace_v";
       case "union":
         return E.tracedUnions.has(t.unionId) ? "scr_union_trace_v" : null;
       case "promise":

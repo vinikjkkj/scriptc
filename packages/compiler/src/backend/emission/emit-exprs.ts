@@ -3618,6 +3618,69 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // identity and releases the vector's OWN reference.
           case "abort.off":
             return finish(`scr_abort_signal_off(${arg(0)}, ${arg(1)})`);
+          // ── the static fetch surface (scr_fetch_static.c) ──────────
+          // The call never throws: an unparsable URL, a bad scheme and an
+          // already-aborted signal all answer an already-REJECTED
+          // promise, which is where Node puts every one of them. So these
+          // are plain `finish` rows, not fallibleTemp ones.
+          case "fetch.go":
+            return finish(`scr_fetch_start(${arg(0)}, ${arg(1)}, ${arg(2)}, NULL, NULL)`);
+          case "fetch.goBody":
+            return finish(`scr_fetch_start(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, NULL)`);
+          case "fetch.goSignal":
+            return finish(`scr_fetch_start(${arg(0)}, ${arg(1)}, ${arg(2)}, NULL, ${arg(3)})`);
+          case "fetch.goBodySignal":
+            return finish(`scr_fetch_start(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)})`);
+          case "fetch.headersNorm":
+            return finish(`scr_fetch_headers_normalize(${arg(0)})`);
+          case "fetch.headersFromDyn":
+            return finish(`scr_fetch_headers_from_dyn(${arg(0)})`);
+          case "resp.ok":
+            return finish(`scr_response_ok(${arg(0)})`);
+          case "resp.status":
+            return finish(`scr_response_status(${arg(0)})`);
+          case "resp.statusText":
+            return finish(`scr_response_status_text(${arg(0)})`);
+          case "resp.url":
+            return finish(`scr_response_url(${arg(0)})`);
+          case "resp.redirected":
+            return finish(`scr_response_redirected(${arg(0)})`);
+          case "resp.bodyUsed":
+            return finish(`scr_response_body_used(${arg(0)})`);
+          case "resp.headers":
+            return finish(`scr_response_headers(${arg(0)})`);
+          // The four body consumers THROW on a second read (Node's
+          // synchronous TypeError, not a rejection), so each is a
+          // fallibleTemp: the emitted pending check is what turns the
+          // runtime's NULL into the program's catchable throw.
+          case "resp.text":
+            return E.fallibleTemp(e.type, `scr_response_text(${arg(0)})`);
+          case "resp.json":
+            return E.fallibleTemp(e.type, `scr_response_json(${arg(0)})`);
+          case "resp.arrayBuffer":
+            return E.fallibleTemp(e.type, `scr_response_array_buffer(${arg(0)})`);
+          case "resp.bytes":
+            return E.fallibleTemp(e.type, `scr_response_bytes(${arg(0)})`);
+          case "headers.get": {
+            // `string | null` — sp.get's row exactly: the runtime answers
+            // a +1 string or NULL, and NULL takes the null arm.
+            if (e.type.kind !== "union") {
+              throw new Error("emitter bug: headers.get result is not a union");
+            }
+            const def = E.unionsById.get(e.type.unionId);
+            const strTag = def ? def.arms.findIndex((a) => a.kind === "string") : -1;
+            const nullTag = def ? def.arms.findIndex((a) => a.kind === "nullT") : -1;
+            if (strTag < 0 || nullTag < 0) {
+              throw new Error("emitter bug: headers.get union lacks its arms");
+            }
+            const raw = E.newTemp(STRING, `scr_fetch_headers_get(${arg(0)}, ${arg(1)})`);
+            E.moveTemp(raw); // ownership passes into the union arm below
+            const present = `scr_union_new_ref(${strTag}, ${raw.name}, &scr_str_retain_v, &scr_str_release_v, NULL)`;
+            const absent = E.unitInstanceRef(e.type.unionId, nullTag);
+            return E.newTemp(e.type, `${raw.name} != NULL ? ${present} : ${absent}`);
+          }
+          case "headers.has":
+            return finish(`scr_fetch_headers_has(${arg(0)}, ${arg(1)})`);
           case "watcher.close":
             E.line(`scr_watcher_close(${arg(0)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };

@@ -33,7 +33,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { DYN, funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID } from "../../ir/nodes.js";
+import { DYN, funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID } from "../../ir/nodes.js";
 import { readKindgateDials } from "../kindgate.js";
 import {
   mangleAsyncSpawn,
@@ -1277,7 +1277,14 @@ export class CEmitter {
       // through scr_net_connect and reads through the poller, so without
       // this line the loop never polls and the process exits between the
       // constructor and the handshake (measured).
-      ...(moduleUsesNet(this.mod) || moduleUsesWsGlobal(this.mod)
+      // The static fetch rides the same hooks for the same reason
+      // globalThis.WebSocket does: scr_fetch_static.c dials through
+      // scr_http's client, which reads through the poller — without this
+      // line the loop has no pending work at the first turn, so the
+      // process exits between the dial and the response head and the
+      // program prints NOTHING with exit 0 (measured, and exactly the
+      // silent failure a fetch must never have).
+      ...(moduleUsesNet(this.mod) || moduleUsesWsGlobal(this.mod) || moduleUsesFetchStatic(this.mod)
         ? [`  scr_net_install();`, `  scr_net_dyn_install();`]
         : []),
       // Http-surface programs additionally stamp the httpReq/httpRes
@@ -1303,6 +1310,13 @@ export class CEmitter {
       // next-tick emissions) before %main — scr_stream.c links only when
       // this line is emitted (cc.ts gates on the same predicate).
       ...(moduleUsesStream(this.mod) ? [`  scr_stream_install();`] : []),
+      // The static fetch's abort seam: installed only when a program both
+      // fetches and holds a signal, which is exactly when cc.ts links
+      // scr_fetch_abort.c. It runs BEFORE %main so an already-aborted
+      // signal handed to the very first fetch is seen.
+      ...(moduleUsesFetchStatic(this.mod) && moduleUsesAbortSignal(this.mod)
+        ? [`  scr_fetch_abort_install();`]
+        : []),
       // Dgram/dns-surface programs fill the loop's dgram hooks the same
       // way — scr_dgram.c links only when this line is emitted.
       ...(moduleUsesDgram(this.mod) ? [`  scr_dgram_install();`] : []),
@@ -2211,6 +2225,9 @@ export class CEmitter {
       case "decipher":
       // A signal handle is an object: always truthy when present.
       case "abortSignal":
+      // A Response and a Headers view are objects too.
+      case "response":
+      case "headers":
         return `${t.name} != NULL`;
       case "void":
         throw new Error("emitter bug: truthiness of void");
