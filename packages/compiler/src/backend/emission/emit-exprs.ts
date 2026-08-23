@@ -5314,6 +5314,27 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // +1 string or NULL with the exception pending (user
             // toString/valueOf throws propagate). Borrows the dyn.
             return finish(`scr_dyn_string_coerce_js(${arg(0)})`);
+          case "module.requireVerdict":
+            // The run-time-specifier require: answers whether the BUILD
+            // could not rule the specifier out (the caller then throws the
+            // tagged refusal the site already carried), and throws Node's
+            // own error for everything Node itself rejects. Borrows all
+            // three arguments.
+            return finish(`scr_require_verdict(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "error.fenceThrow": {
+            // The deferred compile fence as an EXPRESSION, emitted as the
+            // very same scr_throw_error_msg_code text the runtimeFence
+            // STATEMENT emits and from LITERAL arguments — so
+            // scripts/tu-census.mjs reads it as the tagged refusal it is
+            // instead of losing it behind a runtime helper. (Always
+            // throws; the typed dummy is abandoned by the pending check's
+            // unwind, the error.nodeThrow pattern.)
+            if (e.fence === undefined) throw new Error("emitter bug: error.fenceThrow carries no fence");
+            const fenceBytes = Buffer.from(e.fence.message, "utf8");
+            return finish(
+              `(scr_throw_error_msg_code(SCR_ERR_ERROR, ${cStringLiteral(fenceBytes)}, ${fenceBytes.length}, "${e.fence.code}"), ${isRefCounted(e.type) ? `(${cType(e.type).trim()})NULL` : "0"})`,
+            );
+          }
           case "error.nodeThrow":
             // The compiler-resolved Node-parity throw (always throws —
             // the typed dummy is abandoned by the pending check's

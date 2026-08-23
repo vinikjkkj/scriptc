@@ -11780,6 +11780,43 @@ class LlEmitter {
         return out;
       }
     }
+    if (e.fn === "module.requireVerdict") {
+      // The run-time-specifier require: answers whether the BUILD could
+      // not rule the specifier out (the caller then throws the tagged
+      // refusal the site already carried), and throws Node's own error
+      // for everything Node itself rejects. Borrows all three.
+      const spec = this.emitExpr(e.args[0]!);
+      const roots = this.emitExpr(e.args[1]!);
+      const from = this.emitExpr(e.args[2]!);
+      this.declare(`declare i1 @scr_require_verdict(ptr, ptr, ptr)`);
+      const out = B.tmp();
+      B.line(`${out} = call i1 @scr_require_verdict(ptr ${spec.name}, ptr ${roots.name}, ptr ${from.name})`);
+      this.emitPendingCheck();
+      return { name: out, type: e.type };
+    }
+    if (e.fn === "error.fenceThrow") {
+      // The deferred compile fence as an EXPRESSION — the same
+      // scr_throw_error_msg_code call the runtimeFence STATEMENT emits
+      // twenty lines up, from literal arguments, so the LLVM half of
+      // scripts/tu-census.mjs reads it as the tagged refusal it is.
+      // SCR_ERR_ERROR = 0. Always throws; the typed dummy is abandoned by
+      // the pending check's unwind.
+      if (e.fence === undefined) throw new Error("emitter bug: error.fenceThrow carries no fence");
+      const fenceBytes = Buffer.byteLength(e.fence.message, "utf8");
+      this.declare(`declare void @scr_throw_error_msg_code(i32, ptr, i64, ptr)`);
+      B.line(
+        `call void @scr_throw_error_msg_code(i32 0, ptr ${this.cstr(e.fence.message)}, i64 ${fenceBytes}, ptr ${this.cstr(e.fence.code)})`,
+      );
+      const fty = this.llType(e.type);
+      if (fty === "void") {
+        this.emitPendingCheck();
+        return { name: "", type: e.type };
+      }
+      const fdummy = fty === "double" ? f64Lit(0) : fty === "i1" ? "false" : "null";
+      const fout = this.own({ name: fdummy, type: e.type });
+      this.emitPendingCheck();
+      return fout;
+    }
     if (e.fn === "error.nodeThrow") {
       // The compiler-resolved Node-parity throw (always throws — the
       // typed dummy is abandoned by the pending check's unwind).

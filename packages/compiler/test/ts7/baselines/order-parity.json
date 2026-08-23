@@ -9218,6 +9218,19 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5970-require-of-what-nothing-resolves.cjs": {
+   "order": [
+    "<repo>/tests/corpus/5970-require-of-what-nothing-resolves.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5971-require-neighbours/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/5971-require-neighbours/dep.cjs",
+    "<repo>/tests/corpus/5971-require-neighbours/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/5980-fetch-failures-all-reject.ts": {
    "order": [
     "<repo>/tests/corpus/5980-fetch-failures-all-reject.ts"

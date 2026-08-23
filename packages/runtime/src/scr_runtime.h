@@ -667,6 +667,17 @@ void scr_throw_error_msg_code(int kind, const char *message, size_t len, const c
 /* The compiler-resolved Node-parity throw (error.nodeThrow): builtin
  * error of `kind`, `code` stamped when non-empty. Borrows both. */
 void scr_throw_node_coded(double kind, const ScrStr *code, const ScrStr *msg);
+/* The compiled CommonJS require with a RUN-TIME specifier (the
+ * module.requireVerdict libCall). Answers true when the BUILD could not
+ * rule the specifier out - the caller then throws the same tagged
+ * refusal the site carried before - and THROWS Node own error for every
+ * case Node itself rejects: ERR_INVALID_ARG_TYPE, ERR_INVALID_ARG_VALUE,
+ * and the catchable MODULE_NOT_FOUND. The roots argument is the
+ * newline-joined set of resolvable bare specifier roots (leading and
+ * trailing newline; empty means "could not enumerate", so everything
+ * fences); the from argument is the requiring file native path for the
+ * Require stack line. Borrows all three; never answers false. */
+bool scr_require_verdict(const struct ScrDyn *spec, const ScrStr *roots, const ScrStr *from);
 
 /* ── string methods ─────────────────────────────────────────────────
  * ECMA-262 observable semantics (UTF-16 code units) computed over the
