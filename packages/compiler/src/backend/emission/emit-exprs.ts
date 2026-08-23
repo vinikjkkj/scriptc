@@ -3724,6 +3724,23 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               `scr_fetch_start_value(${arg(0)}, ${strTag}, ${urlTag}, ${arg(1)}, ${initTag})`,
             );
           }
+          case "fetch.initDispatch": {
+            // The dispatcher's own `dispatch` member, read off the record
+            // through the ordinary recordGet the lowering built -- the C
+            // signature that member is CALLED through is the pair of
+            // integer constants beside it, proved by dispatcherCallPlan.
+            // Read off the numLit nodes rather than emitted as doubles:
+            // the runtime takes ints, and `0.0` in an int slot is a
+            // conversion nobody meant to write.
+            const kindOf = (i: number): number => {
+              const a = e.args[i]!;
+              if (a.kind !== "numLit") throw new Error("emitter bug: fetch.initDispatch kind is not a literal");
+              return a.value | 0;
+            };
+            return finish(
+              `scr_fetch_init_with_dispatch(${arg(0)}, ${arg(1)}, ${kindOf(2)}, ${kindOf(3)})`,
+            );
+          }
           case "fetch.headersNorm":
             return finish(`scr_fetch_headers_normalize(${arg(0)})`);
           case "fetch.headersFromDyn":

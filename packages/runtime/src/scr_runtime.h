@@ -8241,6 +8241,66 @@ ScrPromise *scr_fetch_start_union(ScrUnion *input, int str_tag, int url_tag,
 ScrPromise *scr_fetch_start_value(ScrUnion *input, int str_tag, int url_tag,
                                   ScrUnion *init, int init_tag); /* +1 */
 
+/* `init.dispatcher = d` — undici's proxy engine, honoured rather than
+ * dropped. The closure is the program's own `dispatch` member, read by the
+ * lowering; `call_kind`/`ret_kind` are its C signature, PROVED by the
+ * compiler (fetchDispatcherPlan) because a closure called through the
+ * wrong signature is undefined behaviour rather than a diagnosable
+ * failure. A NULL closure clears it, which is the `undefined` arm of an
+ * optional slot — never a truthiness test, because every OTHER falsy
+ * dispatcher is an error in Node and a truthiness test would dial DIRECT
+ * on each one, silently bypassing the proxy. */
+#define SCR_FD_CALL_REST 0 /* (...args: unknown[]) -- one dyn ARRAY param */
+#define SCR_FD_CALL_TWO 1  /* (opts: unknown, handler: unknown) -- two dyn params */
+#define SCR_FD_RET_DYN 0
+#define SCR_FD_RET_BOOL 1
+#define SCR_FD_RET_VOID 2
+void scr_fetch_init_set_dispatch(ScrFetchInit *i, ScrClosure *dispatch /*borrowed, nullable*/,
+                                 int call_kind, int ret_kind);
+/* The same, ANSWERING the init (+1) so one lowered row serves both the
+ * literal spelling and the statement one. */
+ScrFetchInit *scr_fetch_init_with_dispatch(ScrFetchInit *i /*borrowed*/,
+                                           ScrClosure *dispatch /*borrowed, nullable*/,
+                                           int call_kind, int ret_kind);
+
+/* One in-flight fetch, opaque. scr_fetch_dispatch.c drives a whole HTTP
+ * response into one of these through the five entries below; everything
+ * else about it stays private to scr_fetch_static.c. */
+typedef struct FsTransfer ScrFetchXfer;
+ScrFetchXfer *scr_fetch_xfer_retain(ScrFetchXfer *t);
+void scr_fetch_xfer_release(ScrFetchXfer *t);
+bool scr_fetch_xfer_live(const ScrFetchXfer *t);
+bool scr_fetch_xfer_responded(const ScrFetchXfer *t);
+/* The response head. `status_text` (+1, nullable) and `raw` (+1, a flat
+ * [name, value, ...] array in wire case) both MOVE IN. A 3xx carrying a
+ * Location is followed here, through the dispatcher again, exactly as
+ * Node does it. */
+void scr_fetch_xfer_head(ScrFetchXfer *t, int status, ScrStr *status_text, ScrArr *raw);
+void scr_fetch_xfer_data(ScrFetchXfer *t, const uint8_t *data, size_t len);
+void scr_fetch_xfer_end(ScrFetchXfer *t);
+/* Every way a delegated request dies: onError, a throw out of `dispatch`,
+ * and the abort. `code` may be NULL. */
+void scr_fetch_xfer_fail(ScrFetchXfer *t, const char *code);
+/* The program dropped every handler member without answering. Node lets
+ * the promise hang and exits 0; this leaves the registry silently so the
+ * RC audit has nothing to count at exit. */
+void scr_fetch_xfer_orphan(ScrFetchXfer *t);
+/* The two halves of the dispatcher SEAM, filled by scr_fetch_dispatch.c at
+ * startup (cc.ts gates that unit on `fetchDispatch`, apart from
+ * `fetchStatic`: the delegation drags the whole checked-dynamic object
+ * surface and a fetch program with no dispatcher must not pay for it). */
+void scr_fetch_dispatch_seam(void (*hop)(ScrFetchXfer *t, ScrStr *origin, ScrStr *path,
+                                         ScrStr *method, ScrArr *header_pairs,
+                                         ScrClosure *dispatch, int call_kind, int ret_kind));
+void scr_fetch_dispatch_abort_seam(void (*abort)(void *hop));
+/* The dispatcher unit hands its per-hop state to the transfer so an abort
+ * can reach the `abort` the dispatcher gave us through onConnect. MOVES a
+ * reference in; the transfer drops it at settle. */
+void scr_fetch_xfer_set_hop(ScrFetchXfer *t, void *hop, void (*release)(void *));
+/* scr_fetch_dispatch.c's installer, emitted into main() when the gate is
+ * on — the scr_fetch_abort_install pattern one unit over. */
+void scr_fetch_dispatch_install(void);
+
 /* The Request ownership pair. Dead code in every program: nothing
  * constructs a ScrRequest. */
 ScrRequest *scr_request_retain(ScrRequest *r);
@@ -8283,9 +8343,16 @@ ScrArr *scr_fetch_headers_pairs(ScrFetchHeaders *h); /* +1, [name, value, ...] *
  * scr_abort.c and scr_fetch_static.c are independently link-gated, so
  * neither names the other. The conjunction unit installs these at
  * startup. */
+/* `on`/`off` are the NATIVE listener pair (scr_abort_signal_add_native).
+ * The dialled path never needs them — scr_http_client_signal owns that
+ * teardown — but a hop DELEGATED to a dispatcher has no socket and no
+ * client, so without a listener an aborted fetch would hang where Node
+ * rejects. */
 void scr_fetch_abort_seam(void *(*retain)(void *), void (*release)(void *),
                           void (*attach)(void *sig, ScrHttpClientReq *c),
-                          bool (*aborted)(void *sig), ScrError *(*error)(void *sig));
+                          bool (*aborted)(void *sig), ScrError *(*error)(void *sig),
+                          void (*on)(void *sig, void (*fn)(void *), void *ctx),
+                          void (*off)(void *sig, void (*fn)(void *), void *ctx));
 /* Live transfers — the RC-audit counterpart of scr_abortsig_live_count. */
 size_t scr_fetch_live_count(void);
 /* scr_fetch_abort.c's installer, emitted into main() when both gates

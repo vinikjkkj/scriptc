@@ -79,8 +79,22 @@ static void scr_fetch_abort_attach(void *sig, ScrHttpClientReq *c) {
 /* Installed before %main runs (the compiler emits the call whenever both
  * gates are on), so an already-aborted signal handed to the very first
  * fetch is seen. */
+/* The NATIVE listener pair, for a hop DELEGATED to a dispatcher: no socket
+ * was dialled, so there is no client whose teardown could surface the
+ * abort and a poll would never run while the dispatcher is thinking.
+ * scr_abort_signal_add_native keys on (fn, ctx) and fires in true
+ * registration order among the JS listeners, which is what makes it safe
+ * to register one per redirect hop and remove it at settle. */
+static void scr_fetch_abort_on(void *sig, void (*fn)(void *), void *ctx) {
+  scr_abort_signal_add_native((ScrAbortSignal *)sig, fn, ctx);
+}
+
+static void scr_fetch_abort_off(void *sig, void (*fn)(void *), void *ctx) {
+  scr_abort_signal_off_native((ScrAbortSignal *)sig, fn, ctx);
+}
+
 void scr_fetch_abort_install(void) {
   scr_fetch_abort_seam(&scr_fetch_abort_retain, &scr_fetch_abort_release,
                        &scr_fetch_abort_attach, &scr_fetch_abort_aborted,
-                       &scr_fetch_abort_error);
+                       &scr_fetch_abort_error, &scr_fetch_abort_on, &scr_fetch_abort_off);
 }
