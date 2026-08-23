@@ -281,6 +281,27 @@ describe("the boundary the function-object properties stop at", () => {
   );
 
   test(
+    "the EXACT-arity rule survives .call — a cast that hides a parameter still refuses",
+    async () => {
+      // The compiled ABI has no missing-argument default, so a short list
+      // through `.call` keeps the fence rather than silently mis-calling.
+      // Node answers NaN here; a compiled short call cannot, and the
+      // refusal is loud.
+      const codes = await refusalCodes(
+        workDir,
+        "call-short",
+        [
+          "function two(a: number, b: number): number { return a + b }",
+          "console.log((two as (a: number) => number).call(null, 1))",
+          "",
+        ].join("\n"),
+      );
+      expect(codes, "a short .call must not compile").toContain("SC1090");
+    },
+    900_000,
+  );
+
+  test(
     "a bound function's identity is fresh per BIND, not per call site",
     async () => {
       // The wrapper is interned per signature, so a single lift backs

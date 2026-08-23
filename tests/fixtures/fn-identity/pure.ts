@@ -47,6 +47,10 @@ function rest(n: number, ...r: number[]): number {
     return n + r.length
 }
 
+function none(): number {
+    return 0
+}
+
 const arrow = (n: number): boolean => n === 42
 const namedExpr = function inner(n: number): boolean {
     return n === 42
@@ -142,6 +146,20 @@ console.log('len-alias', alias.length)
 console.log('len-method', k.m.length)
 console.log('len-bound', b1.length)
 console.log('len-record-anon', rec.f.length)
+
+// ── .call / .apply: the receiver is dropped, the call is the call ───────
+console.log('call-one', g.call(null, 42), g.call(null, 1))
+console.log('apply-one', g.apply(null, [42]), g.apply(null, [1]))
+console.log('call-two', two.call(null, 1, 2), two.apply(null, [3, 4]))
+console.log('call-zero', none.call(null), none.apply(null))
+console.log('call-arrow', arrow.call(null, 42))
+console.log('call-bound', b1.call(null, 42))
+let calls = 0
+function recv(): number {
+    calls += 1
+    return 1
+}
+console.log('call-effect', two.call(recv(), 10, 11), calls)
 
 // ── typeof, which never moved and is the control ───────────────────────
 console.log('typeof-decl', typeof g)
