@@ -255,3 +255,94 @@ describe("package self-reference, against Node's two rules", () => {
     }
   });
 });
+
+/* THE SET FOLLOWS THE DISK, AND IT HAS TO.
+ *
+ * A recurring proposal, made twice in one session, is that the resolvable-
+ * root set should be derived from what the program can REACH - its import
+ * graph, or its declared `dependencies` - rather than from what
+ * `node_modules` holds. The argument is that a devDependency or an
+ * optional peer "is not part of the program", so fencing for it is a
+ * refusal the program need not carry.
+ *
+ * The set does not answer "what does this program use". It answers "what
+ * would NODE resolve if you ran this program here", because that is the
+ * only question whose wrong answer is observable: everything outside the
+ * set compiles to Node's catchable MODULE_NOT_FOUND. Node's CJS resolver
+ * reads directories. It has never read a manifest's dependency KIND, and
+ * `peerDependenciesMeta.optional` is a switch for the INSTALLER, not for
+ * the resolver - it says npm will not error when the package is absent,
+ * not that it is absent.
+ *
+ * So a set filtered by dependency kind would mint MODULE_NOT_FOUND for a
+ * package that is sitting right there and that Node hands over. And the
+ * idiom on the other side of that throw is exactly the one this whole
+ * lowering exists for: an optional dependency is loaded inside a
+ * try/catch whose catch means "not installed". Measured in zapo's own
+ * library, which does `await import('argo-codec')` and answers
+ * `throw new Error('argo-codec not installed')` on failure, and
+ * `const WS_OPTIONAL_MODULE = 'ws'` with
+ * `'optional dependency "ws" is not installed'`. A compiler that decided
+ * those two were "not part of the program" would tell a build that HAS
+ * them installed that they are missing, and the program would quietly run
+ * a different way. That is the silent wrong answer this file exists to
+ * prevent, arriving through the front door.
+ *
+ * The cells below are three-sided as everywhere else: Node's own resolver
+ * decides, and the compiler is compared to it. The last one is the
+ * over-fire control - the set follows the disk in BOTH directions, so a
+ * package that is DECLARED but not installed must be outside it. */
+describe("the root set follows the disk, not the manifest", () => {
+  let file = "";
+
+  beforeAll(() => {
+    const base = join(root, "kinds");
+    // Declares one real dependency, one dev, one optional peer - and
+    // installs none of them by that route. What is on disk is what counts.
+    write(join(base, "package.json"), JSON.stringify({
+      name: "kinds-app",
+      version: "1.0.0",
+      dependencies: { "kinds-declared-absent": "^1.0.0" },
+      devDependencies: { "kinds-dev": "^1.0.0" },
+      peerDependencies: { "kinds-optpeer": "^1.0.0" },
+      peerDependenciesMeta: { "kinds-optpeer": { optional: true } },
+    }));
+    file = join(base, "main.cjs");
+    write(file, "\n");
+    for (const n of ["kinds-dev", "kinds-optpeer", "kinds-undeclared"]) {
+      write(join(base, "node_modules", n, "package.json"), `{"name":"${n}","version":"1.0.0","main":"index.js"}`);
+      write(join(base, "node_modules", n, "index.js"), "module.exports = 1;\n");
+    }
+    // `kinds-declared-absent` is deliberately NOT installed.
+  });
+
+  test("a devDependency that is INSTALLED is resolvable, so it is in the set", () => {
+    setProvenanceSources(null);
+    expect(nodeResolve(file, "kinds-dev")).toContain("kinds-dev");
+    expect(nodeRequireResolvableRoots(file)!.has("kinds-dev")).toBe(true);
+    expect(probeNodeRequireRefusal(file, "kinds-dev")).toBeNull();
+  });
+
+  test("an OPTIONAL peer that is installed is resolvable, so it is in the set", () => {
+    setProvenanceSources(null);
+    expect(nodeResolve(file, "kinds-optpeer")).toContain("kinds-optpeer");
+    expect(nodeRequireResolvableRoots(file)!.has("kinds-optpeer")).toBe(true);
+    expect(probeNodeRequireRefusal(file, "kinds-optpeer")).toBeNull();
+  });
+
+  test("a package no manifest mentions at all is resolvable, so it is in the set", () => {
+    setProvenanceSources(null);
+    expect(nodeResolve(file, "kinds-undeclared")).toContain("kinds-undeclared");
+    expect(nodeRequireResolvableRoots(file)!.has("kinds-undeclared")).toBe(true);
+  });
+
+  test("OVER-FIRE CONTROL: a DECLARED dependency that is not installed is OUT of the set", () => {
+    setProvenanceSources(null);
+    // Without this cell every assertion above passes for a set containing
+    // everything, which never mints a wrong MODULE_NOT_FOUND and never
+    // answers one either.
+    expect(nodeResolve(file, "kinds-declared-absent")).toBe("MODULE_NOT_FOUND");
+    expect(nodeRequireResolvableRoots(file)!.has("kinds-declared-absent")).toBe(false);
+    expect(probeNodeRequireRefusal(file, "kinds-declared-absent")).not.toBeNull();
+  });
+});
