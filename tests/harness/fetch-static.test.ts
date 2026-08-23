@@ -31,8 +31,15 @@
  *                                        Location delivering its own body;
  *                                        a redirect LOOP that must reject
  *   headers case-folded wrongly          three spellings of one name, a
- *                                        repeated name joined, an absent
- *                                        name answering null
+ *                                        repeated name joined, set-cookie
+ *                                        joined the way NODE joins it (the
+ *                                        spec's exception is getSetCookie,
+ *                                        which this slice does not have —
+ *                                        inventing a different join rule
+ *                                        for `get` would have disagreed
+ *                                        with Node on a header real
+ *                                        servers repeat), an absent name
+ *                                        answering null
  *   a timeout that resolves rather       an abort mid-flight and an
  *   than rejects                         already-aborted signal
  *   a TLS failure that returns           a self-signed https origin — it
@@ -183,7 +190,7 @@ describe("the static fetch, against Node", () => {
     expect(nodeRun!.stdout.trimEnd().split("\n").at(-1)).toBe("END done");
     // A floor on the matrix: a fixture edited down to nothing must fail
     // here rather than report a green 3-cell comparison.
-    expect(nodeRun!.stdout.trimEnd().split("\n").length).toBeGreaterThanOrEqual(60);
+    expect(nodeRun!.stdout.trimEnd().split("\n").length).toBeGreaterThanOrEqual(62);
   });
 
   for (const backend of ["c", "llvm"] as const) {

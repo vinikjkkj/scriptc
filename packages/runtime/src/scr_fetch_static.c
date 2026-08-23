@@ -49,8 +49,8 @@
  *     15+32 auto-detect). br and zstd are never offered, so they never
  *     arrive.
  *   - header names are case-INSENSITIVE on read and are stored
- *     lowercased; repeated headers join with ", " (set-cookie excepted —
- *     see scr_fetch_headers_get).
+ *     lowercased; repeated headers join with ", ", set-cookie included
+ *     (Node's own answer — see scr_fetch_headers_get).
  *   - a TLS failure, a refused connection and an unresolvable name all
  *     REJECT. None of them can answer a Response.
  *
@@ -63,6 +63,8 @@
  *   - Response.body (a ReadableStream) is not part of this slice; the
  *     body is consumed through text()/json()/arrayBuffer()/bytes(). The
  *     compiler refuses `.body` by name rather than answering null.
+ *   - Headers.getSetCookie() is absent (the compiler refuses it by
+ *     name). get('set-cookie') answers Node's joined value.
  *   - no connection pooling: one dialed connection per hop, which is
  *     scr_http.c's stance for every client in this runtime.
  *   - https-over-CONNECT proxying is out of the slice, as it is for
@@ -168,15 +170,15 @@ void scr_fetch_headers_release_v(void *p) { scr_fetch_headers_release((ScrFetchH
  * separated — the Headers spec's rule, and Node's answer. NULL (the null
  * arm) when the name is absent.
  *
- * set-cookie is the spec's single exception (getSetCookie exists because
- * joining cookies is lossy); this slice has no getSetCookie, and joining
- * would be a WRONG answer, so a set-cookie read answers only the FIRST
- * field and the omission is recorded here rather than silently joined.
- * Node's own `headers.get('set-cookie')` joins with ", " — we differ on
- * purpose and the test file pins the difference. */
+ * set-cookie is NOT excepted here, and that is measured rather than
+ * assumed: Node v25.9.0 answers "a=1, b=2" for a `get('set-cookie')`
+ * over two appended cookies. The spec's exception is `getSetCookie()`,
+ * which answers the UNJOINED list and which this slice does not have —
+ * so the missing surface is getSetCookie, not a different join rule, and
+ * inventing one here would have made `get` disagree with Node on a
+ * header real servers repeat. */
 ScrStr *scr_fetch_headers_get(ScrFetchHeaders *h, ScrStr *name /*borrowed*/) {
   size_t n = (size_t)scr_arr_len(h->pairs);
-  bool cookie = fs_lit_ci(name->data, name->len, "set-cookie");
   ScrStr *acc = NULL;
   for (size_t i = 0; i + 1 < n; i += 2) {
     ScrStr *nm = (ScrStr *)scr_arr_get_ref(h->pairs, (double)i);
@@ -186,7 +188,6 @@ ScrStr *scr_fetch_headers_get(ScrFetchHeaders *h, ScrStr *name /*borrowed*/) {
     ScrStr *v = (ScrStr *)scr_arr_get_ref(h->pairs, (double)(i + 1));
     if (acc == NULL) {
       acc = v;
-      if (cookie) break;
     } else {
       size_t len = acc->len + 2 + v->len;
       char *b = malloc(len);
