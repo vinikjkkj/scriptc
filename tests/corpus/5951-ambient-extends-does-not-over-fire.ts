@@ -1,11 +1,11 @@
-// THE OTHER DIRECTION of 5940. That program asserts that
+// THE OTHER DIRECTION of 5950. That program asserts that
 // `class D extends <ambient declare class>` throws where Node throws; a
 // compiler that refused, or mis-lowered, EVERY `extends` in the language
 // would satisfy it just as well. This program is the shape of the mistake
 // that would go unnoticed otherwise: every neighbouring heritage form that
 // DOES have a runtime, asserted to still produce Node's answer.
 //
-// Nothing here is exotic. That is the point — the rule in 5940 fires on a
+// Nothing here is exotic. That is the point — the rule in 5950 fires on a
 // heritage identifier resolving to a top-level `declare class` nothing
 // defines, and this file is the list of things that look like that from a
 // distance and are not.

@@ -28,7 +28,7 @@ declare class Amb {
 
 console.log("before");
 
-// `typeof` is the one exception and it is asserted in 5942; here the name
+// `typeof` is the one exception and it is asserted in 5952; here the name
 // is READ, and the read throws.
 console.log("after", Amb.name);
 

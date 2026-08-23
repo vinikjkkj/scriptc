@@ -17,7 +17,7 @@
 // it does: this program covers the `new <ambient class>` edge. The sibling
 // shape `class D extends <ambient-undefined class>` -- which was STILL
 // WRONG when this program was added, and said so here -- is now covered by
-// 5940 (the throw, run) and 5941 (the shapes it must NOT fire on). Node
+// 5950 (the throw, run) and 5951 (the shapes it must NOT fire on). Node
 // throws `ReferenceError: <name> is not defined` when the DERIVED CLASS
 // STATEMENT evaluates, so nothing below it runs; the compiler now compiles
 // exactly that throw for a non-generic class declaration, and refuses
