@@ -15488,6 +15488,27 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       const right = L.lowerExpr(expr.right);
       return { kind: "jsOp", op: "instanceOf", args: [left, right], type: BOOL, loc };
     }
+    // `x instanceof <ambient declare class>`. Node ERASES the declaration,
+    // so evaluating the RHS is a ReferenceError — which means the answer
+    // is a throw, never a boolean. The static fold below decided `false`
+    // off the class graph WITHOUT evaluating the RHS at all (`r instanceof
+    // Amb` printed `after false` and exited 0 on both backends, where Node
+    // exits 1 having printed nothing): the same silent wrong answer the
+    // other value positions carried, arriving through the one operator
+    // whose fold is allowed to skip its right operand.
+    //
+    // JS evaluates the LEFT operand first, so its effects are kept and
+    // sequenced ahead of the throw. A catch binding on the left is the one
+    // read that has no effects and whose ordinary lowering fences, so it
+    // is dropped rather than lowered.
+    if (ts.isIdentifier(expr.right) && ambientUndefinedClassSymbolOf(L, expr.right) !== null) {
+      const thrown = nsUndefRead(L, expr.right.text, expr.right, BOOL);
+      if (L.caughtLocalOf(expr.left) !== null) return thrown;
+      const stmts: IrStmt[] = [
+        { kind: "exprStmt", expr: L.lowerExpr(expr.left), loc: locOf(expr.left) },
+      ];
+      return { kind: "seqExpr", stmts, result: thrown, type: BOOL, loc };
+    }
     const rhsSymbol = ts.isIdentifier(expr.right) ? L.resolveValueSymbol(expr.right) : null;
     // `x instanceof events.EventEmitter` — the namespace-member spelling
     // resolves to the same ambient class as the named import.
