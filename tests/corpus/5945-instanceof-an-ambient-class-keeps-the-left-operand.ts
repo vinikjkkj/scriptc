@@ -1,9 +1,9 @@
 // @exit: 1
-// The other half of 5934: when the LEFT operand of an ambient `instanceof`
+// The other half of 5944: when the LEFT operand of an ambient `instanceof`
 // has effects, JavaScript performs them BEFORE evaluating the right one
 // and dying there. So the counter must reach 1 and its line must print.
 //
-// On base (75d8f879) both backends REFUSED this shape at build time
+// On the compiler as it stood before that fix, both backends REFUSED this shape at build time
 // (`SC1090: statically-decided 'instanceof' on computed operands`), so
 // this cell is TRAP->MATCH, not WRONG->MATCH — it was loud, and it is
 // recorded here only so the ordering can never regress into "drop the

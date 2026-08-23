@@ -6,18 +6,21 @@
 // instance-of check happens. There is no boolean answer to this
 // expression at all.
 //
-// WHY THIS PROGRAM EXISTS, and why it is a SEPARATE file from 5932/5933:
+// WHY THIS PROGRAM EXISTS, and why it is a SEPARATE file from 5942/5943:
 // `instanceof` is the one operator whose lowering is allowed to skip its
 // right operand. The static fold decides the answer off the class graph —
 // "these two classes are unrelated, so always false" — and an ambient
 // class is unrelated to everything, so it folded to `false` WITHOUT ever
 // looking at the identifier. That made this the one position in the
-// family that survived the value-read fix of 27db58cb: the arms that
-// answer for `Amb.name` and `const B = Amb` never see this identifier.
+// family that survived the value-read fix (the commit that made an
+// erased `declare` name answer every read but `typeof` with a throw):
+// the arms that answer for `Amb.name` and `const B = Amb` never see
+// this identifier.
 //
-// MEASURED ON BASE (75d8f879, both backends), and the shapes differ —
-// which is why the wrong-answer cell below binds its left operand to a
-// local instead of calling a function:
+// MEASURED ON THE COMPILER AS IT STOOD BEFORE THIS FIX, on both
+// backends — and the two spellings differ, which is why the
+// wrong-answer cell below binds its left operand to a local instead of
+// calling a function:
 //
 //   const r = new Real(); r instanceof Amb   ->  `after false`, exit 0
 //                                                WRONG: Node prints
