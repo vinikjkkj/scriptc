@@ -6,7 +6,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators.js";
 import { BIGINT, type IrLibFn, BOOL, isRefCounted, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrJsOp, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
-import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
+import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, nodeThrowExpr, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { recordKeyReadRow } from "./keyread-census.js";
 import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, isCjsWholeExportAssign, isJsSourceFile, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
@@ -6152,15 +6152,14 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
           const refusal = probeNodeRequireRefusal(sf.fileName, spec);
           if (refusal !== null) {
             const loc = locOf(expr);
+            // WITH Node's `code`. The message alone is not the error: the
+            // idiom this exists for reads `e.code === "MODULE_NOT_FOUND"`,
+            // and a bare Error answered `undefined` there — measured
+            // against Node v25.9.0, the one cell of the require matrix
+            // where the message matched and the code did not.
             return {
-              kind: "throw",
-              value: {
-                kind: "libCall",
-                fn: "error.new",
-                args: [{ kind: "strLit", value: refusal.message, type: STRING, loc }],
-                type: { kind: "object", className: "%Error" },
-                loc,
-              },
+              kind: "exprStmt",
+              expr: nodeThrowExpr(0, "MODULE_NOT_FOUND", refusal.message, DYN, loc),
               loc,
             };
           }

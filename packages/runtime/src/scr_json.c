@@ -1826,6 +1826,117 @@ void scr_throw_prop_type(const ScrStr *name, const ScrStr *expected, const ScrDy
   scr_dyn_prop_type_fail(name->data, expected->data, got);
 }
 
+/* ── the compiled CommonJS require, with a RUN-TIME specifier ─────────
+ * A compiled binary reads no node_modules: the resolution the specifier
+ * would drive under Node happened at BUILD time, and what survives into
+ * the C is this verdict function plus `roots` — every bare specifier ROOT
+ * (package name or builtin name) the build could not rule out, joined
+ * with '\n' and carrying a leading and a trailing '\n' so membership is
+ * one substring search.
+ *
+ * The answer is a BOOL and it is deliberately one-sided:
+ *   false   never returned — the function either throws or answers true;
+ *   true    the build cannot serve this specifier, and the CALLER's next
+ *           statement is the same tagged refusal the site carried before
+ *           (the caller emits it, so the refusal stays visible to the
+ *           translation-unit census exactly where it was);
+ *   throws  every case Node itself rejects, with Node's own error:
+ *           ERR_INVALID_ARG_TYPE for a non-string, ERR_INVALID_ARG_VALUE
+ *           for the empty string, and MODULE_NOT_FOUND — catchable, which
+ *           is the whole point — for a bare specifier whose root NOTHING
+ *           installed at build time can resolve. That last arm is the
+ *           optional-dependency `try { require(x) } catch {}` idiom, the
+ *           one this compiler used to answer by swallowing its own fence.
+ *
+ * A specifier the compiler CANNOT prove unresolvable fences instead: a
+ * relative or absolute path, a '#' import, a 'node:' builtin, a drive- or
+ * protocol-shaped specifier, or a bare root in `roots`. Wrong in the LOUD
+ * direction by construction — never a value where Node throws, and never
+ * a MODULE_NOT_FOUND where Node hands back a module.
+ *
+ * `roots` empty means "cannot enumerate": everything fences. Borrows all
+ * three arguments. */
+static bool scr_require_root_known(const ScrStr *roots, const char *name, size_t len) {
+  /* `roots` is a newline-joined list with a LEADING and a TRAILING
+   * newline (or the empty string for "cannot enumerate"), so membership
+   * is one substring search for newline + name + newline: no allocation,
+   * and a name that is a PREFIX of another ("ws" against "wsrun") cannot
+   * match, because both delimiters are required. */
+  if (roots->len == 0) return true; /* cannot enumerate: fence */
+  for (size_t i = 0; i + len + 1 < roots->len; i++) {
+    if (roots->data[i] != '\n') continue;
+    if (memcmp(roots->data + i + 1, name, len) != 0) continue;
+    if (roots->data[i + 1 + len] == '\n') return true;
+  }
+  return false;
+}
+bool scr_require_verdict(const struct ScrDyn *spec, const ScrStr *roots, const ScrStr *from) {
+  const ScrDyn *arg = spec != NULL ? spec : scr_dyn_undefined();
+  if (arg->kind != SCR_DYN_STR) {
+    /* Node checks the argument BEFORE it resolves anything: require(42)
+     * is ERR_INVALID_ARG_TYPE, and the "Received ..." tail is rendered
+     * from the value exactly as determineSpecificType does. */
+    scr_dyn_arg_type_fail("id", "of type string", arg);
+    return true; /* unreachable: the call above always throws */
+  }
+  const ScrStr *s = arg->v.str;
+  if (s->len == 0) {
+    static const char m[] = "The argument 'id' must be a non-empty string. Received ''";
+    scr_throw_error_msg_code(SCR_ERR_TYPE, m, sizeof m - 1, "ERR_INVALID_ARG_VALUE");
+    return true;
+  }
+  const char c0 = s->data[0];
+  /* Relative, absolute, subpath-import, and any protocol- or drive-shaped
+   * specifier: Node's resolution for these reads the filesystem the
+   * binary does not carry, so the build cannot prove they fail. Fence. */
+  if (c0 == '.' || c0 == '/' || c0 == (char)92 || c0 == '#') return true;
+  if (memchr(s->data, ':', s->len) != NULL) return true; /* node:, file:, a drive letter */
+  /* The bare specifier's ROOT: "@scope/pkg" or "pkg". A subpath after the
+   * root belongs to the same package and fences with it, which is the
+   * loud direction: a package whose "exports" rejects the subpath makes
+   * Node throw ERR_PACKAGE_PATH_NOT_EXPORTED, and a fence is never a
+   * value where Node throws. */
+  size_t root = 0;
+  if (c0 == '@') {
+    while (root < s->len && s->data[root] != '/') root++;
+    if (root < s->len) {
+      root++;
+      while (root < s->len && s->data[root] != '/') root++;
+    }
+  } else {
+    while (root < s->len && s->data[root] != '/') root++;
+  }
+  if (scr_require_root_known(roots, s->data, root)) return true;
+  /* Nothing the build could see resolves this root, so Node's answer is
+   * the catchable require-site MODULE_NOT_FOUND, message and code exact
+   * (the message really does carry the "Require stack" line). */
+  {
+    static const char head[] = "Cannot find module '";
+    static const char mid[] = "'\nRequire stack:\n- ";
+    size_t len = (sizeof head - 1) + s->len + (sizeof mid - 1) + from->len;
+    char *msg = (char *)malloc(len + 1);
+    if (msg == NULL) scr_trap("scriptc: out of memory\n");
+    size_t at = 0;
+    memcpy(msg + at, head, sizeof head - 1); at += sizeof head - 1;
+    memcpy(msg + at, s->data, s->len); at += s->len;
+    memcpy(msg + at, mid, sizeof mid - 1); at += sizeof mid - 1;
+    memcpy(msg + at, from->data, from->len); at += from->len;
+    msg[at] = '\0';
+    /* Built by hand rather than through scr_throw_error_msg_code, which
+     * takes a (char*, len) it copies: the scratch buffer could then only
+     * be freed AFTER a call that never returns. The ScrStr takes its own
+     * copy, the buffer frees here, and the error owns the string from
+     * there on. */
+    ScrStr *m = scr_str_new(msg, at);
+    free(msg);
+    ScrError *e = scr_error_new(SCR_ERR_ERROR, m);
+    scr_str_release(m); /* scr_error_new retained its own */
+    scr_error_set_code(e, "MODULE_NOT_FOUND");
+    scr_throw_obj(e, &scr_error_retain_v, &scr_error_release_v, scr_error_trace_arg());
+  }
+  return true; /* unreachable */
+}
+
 /* ERR_INVALID_ARG_VALUE's "Received" tail — util.inspect where ARG_TYPE
  * renders determineSpecificType: strings quote, scalars print plain.
  * Deep shapes render their bracket sketch (enough for the validators'

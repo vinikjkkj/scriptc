@@ -2189,9 +2189,18 @@ function preflight7(load: LoadResult): {
                 // Node throws MODULE_NOT_FOUND at the require site — the
                 // lowering compiles exactly that catchable throw (the
                 // optional-dependency try/require pattern), so no fence.
-                // Binding forms keep the fence: their downstream reads
-                // would need the module that never loads.
-                if (req.decl !== null || probeNodeRequireRefusal(sf.fileName, req.spec) === null) {
+                //
+                // A BINDING form is the same throw. The binding was said
+                // to keep the fence because "its downstream reads would
+                // need the module that never loads" — but there are no
+                // downstream reads: the require THROWS, so nothing after
+                // it in that path runs, and Node's own answer to
+                // `const m = require("nope")` is the identical
+                // MODULE_NOT_FOUND at the identical position. The
+                // declaration takes the ordinary variable path
+                // (lower-stmts skips its require arm for exactly this
+                // specifier) and its initializer compiles to the throw.
+                if (probeNodeRequireRefusal(sf.fileName, req.spec) === null) {
                   diags.push(unsupportedDiag("SC1010", loc, unsupportedModuleFeatureOf(req.spec)));
                 }
               }
