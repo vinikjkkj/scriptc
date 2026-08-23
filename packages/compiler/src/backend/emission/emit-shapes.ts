@@ -814,6 +814,13 @@ export interface ClassMeta {
       // owns only strings and answers null below (the default).
       case "response":
         return "scr_response_trace_v";
+      // A RequestInit holds the AbortSignal the program handed it, and a
+      // signal's listener closure can capture the init back — so the edge
+      // is traced, unconditionally, exactly as the abortSignal row above
+      // is. A Request owns nothing (it is never constructed) and answers
+      // null below.
+      case "requestInit":
+        return "scr_fetch_init_trace_v";
       case "union":
         return E.tracedUnions.has(t.unionId) ? "scr_union_trace_v" : null;
       case "promise":

@@ -9,7 +9,7 @@ import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
 import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
-import { lowerFetchProperty } from "./lower-fetch.js";
+import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
 import { builtinFnValueOf } from "./lower-fnvalue.js";
 import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
@@ -8423,6 +8423,15 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     }
 
     const ctxType0 = L.checker.getContextualType(expr);
+    // A `RequestInit` SLOT: the literal is not a record at all, it is a
+    // fetch init VALUE built by the same key walk the call site takes
+    // (lower-fetch.ts). Checked here, before any record shape is interned,
+    // because the members it accepts and the members a record accepts are
+    // different sets and the fences differ with them.
+    {
+      const ri = lowerRequestInitLiteral(L, expr, ctxType0);
+      if (ri !== null) return ri;
+    }
     let tsType = ctxType0 ?? L.typeOf(expr);
     /** The literal is being built at its OWN inferred type rather than at
      * a shape the program declared. It matters for exactly one rule: the

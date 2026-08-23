@@ -452,6 +452,118 @@ void scr_fetch_abort_seam(void *(*retain)(void *), void (*release)(void *),
   fs_signal_error = error;
 }
 
+/* ── RequestInit, held as a VALUE ────────────────────────────────────
+ * `const init: RequestInit = { … }` and `fetch(url, init)` with the init
+ * in a variable rather than written at the call.
+ *
+ * It carries EXACTLY scr_fetch_start's argument list and nothing else.
+ * That is the whole design constraint: a RequestInit able to hold a key
+ * this transfer does not act on would be an option silently dropped, and
+ * the compiler refuses every such key at the literal instead (see
+ * lower-fetch.ts's FETCH_INIT_DOCUMENTED_OPTIONS). What is stored is the
+ * FOLDED form — header names already lowercased and flattened into the
+ * wire list, a string body already utf8-encoded with its provenance in
+ * `body_text` — which is why the compiler answers no member READ off one
+ * of these: the value here is not what the program wrote.
+ *
+ * Cycle-headered, one traced edge: the signal. An AbortSignal owns a
+ * listener vector, a listener closure can capture the init that holds the
+ * signal, and that closes the loop — the same reasoning that puts a trace
+ * on the abort pair itself. Everything else it owns (a string, a string
+ * array, a byte array) cannot reach back. */
+
+struct ScrFetchInit {
+  size_t rc;
+  ScrStr *method;  /* owned, never NULL */
+  ScrArr *headers; /* owned, SCR_ELEM_STR, flat [name, value, ...] */
+  ScrBytes *body;  /* owned, or NULL — an omitted body is not an empty one */
+  bool body_text;
+  void *signal; /* owned through the seam, or NULL */
+};
+
+static void fs_init_trace(void *obj, ScrTraceVisit visit, void *ctx) {
+  ScrFetchInit *i = (ScrFetchInit *)obj;
+  if (i->signal != NULL) visit(i->signal, ctx);
+}
+
+/* The collector's teardown: the complement of the trace. The signal edge
+ * was already accounted by markGray, so it is NOT released here; every
+ * untraced edge is. fs_response_gcfree's contract, one object over. */
+static void fs_init_gcfree(void *obj) {
+  ScrFetchInit *i = (ScrFetchInit *)obj;
+  scr_str_release(i->method);
+  scr_arr_release(i->headers);
+  if (i->body != NULL) scr_bytes_release(i->body);
+  scr_cyc_free(i);
+}
+
+ScrFetchInit *scr_fetch_init_new(ScrStr *method /*borrowed, nullable*/,
+                                 ScrArr *header_pairs /*borrowed, nullable*/,
+                                 ScrBytes *body /*borrowed, nullable*/, bool body_text,
+                                 void *signal /*borrowed, nullable*/) {
+  ScrFetchInit *i = scr_cyc_alloc(sizeof *i, &fs_init_trace, &fs_init_gcfree);
+  i->rc = 1;
+  i->method = method != NULL && method->len > 0 ? scr_str_retain(method) : scr_str_new("GET", 3);
+  i->headers = header_pairs != NULL ? scr_arr_retain(header_pairs) : scr_arr_new(SCR_ELEM_STR, 0);
+  i->body = body != NULL ? scr_bytes_retain(body) : NULL;
+  i->body_text = body_text;
+  i->signal = signal != NULL && fs_signal_retain != NULL ? fs_signal_retain(signal) : NULL;
+  return i;
+}
+
+ScrFetchInit *scr_fetch_init_retain(ScrFetchInit *i) {
+  if (i != NULL && i->rc != SIZE_MAX) {
+    i->rc++;
+    scr_cyc_mark_live(i);
+  }
+  return i;
+}
+
+void scr_fetch_init_release(ScrFetchInit *i) {
+  if (i == NULL || i->rc == SIZE_MAX) return;
+  if (--i->rc == 0) {
+    scr_cyc_on_dead(i);
+    scr_str_release(i->method);
+    scr_arr_release(i->headers);
+    if (i->body != NULL) scr_bytes_release(i->body);
+    if (i->signal != NULL && fs_signal_release != NULL) fs_signal_release(i->signal);
+    scr_cyc_free(i);
+  } else {
+    scr_cyc_on_release(i);
+  }
+}
+
+void *scr_fetch_init_retain_v(void *p) { return scr_fetch_init_retain((ScrFetchInit *)p); }
+void scr_fetch_init_release_v(void *p) { scr_fetch_init_release((ScrFetchInit *)p); }
+void scr_fetch_init_trace_v(void *p, ScrTraceVisit visit, void *ctx) { fs_init_trace(p, visit, ctx); }
+
+/* ── Request ─────────────────────────────────────────────────────────
+ * A TYPE with no values. `Request` is an arm of the ambient fetch
+ * signature's input union, and mapping it is what lets a record carrying
+ * `typeof fetch` compile; NOTHING constructs one — `new Request(...)` is
+ * a compile refusal and no entry point here answers a ScrRequest *. These
+ * two functions exist so the ownership machinery (union arms, capture
+ * boxes, array elements) stays uniform for the kind, and they are dead
+ * code in every program that links this file. Deliberately NOT a
+ * cycle-headered allocation: there is nothing to allocate. */
+
+struct ScrRequest {
+  size_t rc;
+};
+
+ScrRequest *scr_request_retain(ScrRequest *r) {
+  if (r != NULL && r->rc != SIZE_MAX) r->rc++;
+  return r;
+}
+
+void scr_request_release(ScrRequest *r) {
+  if (r == NULL || r->rc == SIZE_MAX) return;
+  if (--r->rc == 0) free(r);
+}
+
+void *scr_request_retain_v(void *p) { return scr_request_retain((ScrRequest *)p); }
+void scr_request_release_v(void *p) { scr_request_release((ScrRequest *)p); }
+
 static FsTransfer *fs_retain(FsTransfer *t) {
   t->rc++;
   return t;
@@ -1079,6 +1191,85 @@ ScrPromise *scr_fetch_start(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*
   return p;
 }
 
+/* fetch(url, init) with the init held as a VALUE. One line of unpacking
+ * over the same scr_fetch_start every other spelling reaches, so the two
+ * forms cannot diverge: an init written at the call site and the same
+ * init stored in a variable produce the identical transfer.
+ *
+ * A NULL init is `fetch(url, undefined)`, which is fetch(url): Node treats
+ * an absent init and an undefined one identically. */
+ScrPromise *scr_fetch_start_init(ScrStr *url /*borrowed*/,
+                                 ScrFetchInit *init /*borrowed, nullable*/) {
+  if (init != NULL) {
+    return scr_fetch_start(url, init->method, init->headers, init->body, init->body_text,
+                           init->signal);
+  }
+  ScrArr *empty = scr_arr_new(SCR_ELEM_STR, 0);
+  ScrPromise *p = scr_fetch_start(url, NULL, empty, NULL, false, NULL);
+  scr_arr_release(empty);
+  return p;
+}
+
+/* fetch(url, init) where `init` is `RequestInit | undefined` — a call
+ * through a parameter, or through a `??`-defaulted slot, rather than a
+ * literal. The undefined arm is an ABSENT init, which is not an empty
+ * one: `fetch(url, undefined)` is `fetch(url)`, and Node agrees. */
+ScrPromise *scr_fetch_start_init_opt(ScrStr *url /*borrowed*/, ScrUnion *init /*borrowed*/,
+                                     int init_tag) {
+  ScrFetchInit *iv = NULL;
+  if (init != NULL && init_tag >= 0 && init->tag == (uint32_t)init_tag) {
+    iv = (ScrFetchInit *)scr_union_peek(init);
+  }
+  return scr_fetch_start_init(url, iv);
+}
+
+/* fetch as a VALUE — `const f = options.fetch ?? fetch; f(url, init)`.
+ *
+ * The interned closure's body reaches exactly one entry point, and its two
+ * arguments are the ambient signature's own unions (`string | Request |
+ * URL` and `RequestInit | undefined`), so the ARM TAGS are program
+ * specific and arrive as constants the backends read off the union
+ * definition. A tag argument below zero means the program's union has no
+ * such arm.
+ *
+ * The `Request` arm cannot be inhabited: nothing in this compiler
+ * constructs one (see the ScrRequest note above). The branch is kept and
+ * throws rather than being assumed away, because "unreachable" is a claim
+ * about the whole compiler and this is the one place a wrong answer would
+ * be a wild pointer. */
+ScrPromise *scr_fetch_start_union(ScrUnion *input, int str_tag, int url_tag,
+                                  ScrFetchInit *init /*borrowed, nullable*/) {
+  ScrStr *url = NULL;
+  ScrStr *owned = NULL;
+  if (input != NULL && str_tag >= 0 && input->tag == (uint32_t)str_tag) {
+    url = (ScrStr *)scr_union_peek(input);
+  } else if (input != NULL && url_tag >= 0 && input->tag == (uint32_t)url_tag) {
+    owned = scr_url_href((ScrUrl *)scr_union_peek(input));
+    url = owned;
+  } else {
+    /* The Request arm, or a tag no arm claims. fetch never throws
+     * synchronously, so this is an already-rejected promise carrying the
+     * error Node gives an unusable input. */
+    ScrPromise *p = scr_promise_new();
+    scr_throw_obj(fs_failure("ERR_INVALID_URL"), &scr_error_retain_v, &scr_error_release_v,
+                  scr_error_trace_arg());
+    scr_promise_reject_pending(p);
+    return p;
+  }
+  ScrPromise *p = scr_fetch_start_init(url, init);
+  if (owned != NULL) scr_str_release(owned);
+  return p;
+}
+
+ScrPromise *scr_fetch_start_value(ScrUnion *input, int str_tag, int url_tag,
+                                  ScrUnion *init, int init_tag) {
+  ScrFetchInit *iv = NULL;
+  if (init != NULL && init_tag >= 0 && init->tag == (uint32_t)init_tag) {
+    iv = (ScrFetchInit *)scr_union_peek(init);
+  }
+  return scr_fetch_start_union(input, str_tag, url_tag, iv);
+}
+
 /* Build the wire header list from a checked-dynamic record/object: every
  * own key, lowercased, with its value stringified. NULL is an empty list.
  * Non-object values are the caller's fence, not ours. */
@@ -1090,14 +1281,28 @@ ScrArr *scr_fetch_headers_from_dyn(const ScrDyn *d /*borrowed, nullable*/) {
   double n = scr_dyn_arr_len(keys);
   ScrStr *enc = scr_str_new("utf8", 4);
   for (double i = 0; i < n; i += 1) {
+    /* scr_dyn_arr_at is +1 (scr_runtime.h says so), and this loop used to
+     * drop that reference on every path: one leaked ScrDyn per header key,
+     * each holding its own ScrStr. It is only visible under
+     * SCRIPTC_RC_AUDIT and only on the RECORD-VALUE header form -- an
+     * object LITERAL never reaches this function -- which is why it
+     * survived the slice's own differential. `v` is borrowed. */
     ScrDyn *k = scr_dyn_arr_at(keys, i);
-    if (k == NULL || k->kind != SCR_DYN_STR) continue;
+    if (k == NULL) continue;
+    if (k->kind != SCR_DYN_STR) {
+      scr_dyn_release(k);
+      continue;
+    }
     ScrDyn *v = scr_dyn_obj_get(d, k->v.str->data, k->v.str->len);
-    if (v == NULL || v->kind == SCR_DYN_UNDEF || v->kind == SCR_DYN_NULL) continue;
+    if (v == NULL || v->kind == SCR_DYN_UNDEF || v->kind == SCR_DYN_NULL) {
+      scr_dyn_release(k);
+      continue;
+    }
     ScrStr *lo = fs_lower(k->v.str);
     ScrStr *vs = scr_dyn_to_string(v, enc);
     scr_arr_push_ref(out, lo);
     scr_arr_push_ref(out, vs);
+    scr_dyn_release(k);
   }
   scr_str_release(enc);
   scr_dyn_release(keys);

@@ -8,55 +8,70 @@
  * it reappears at the call; lower the call and it reappears at the
  * Response the call answers. They land together.
  *
- * `RequestInit` and `Request` are NOT mapped, and that is deliberate: an
- * options record carrying `typeof fetch` (zapo's
- * `WaFetchVersionOptions`) still refuses through them. Mapping the two
- * types would let the record compile and would then surface the rest of
- * that function as NEW refusals at sites that do not exist today —
- * `options.fetch ?? fetch` needs a builtin to have a first-class closure
- * form, and `(init as { dispatcher?: unknown }).dispatcher = ...` is the
- * assignment-target family. The whole group has to land at once, for the
- * reason lower-abort.ts's header gives about the same shape of family:
- * lower the visible members alone and the hidden ones surface, so it gets
- * worse before it gets better.
+ * `RequestInit` AND `Request` ARE MAPPED NOW, and the two paragraphs this
+ * one replaced were right to refuse doing it by halves. They said: map the
+ * two types and zapo's `WaFetchVersionOptions` record compiles, and the
+ * rest of that function then surfaces as NEW refusals at sites that do not
+ * exist today. Measured on a faithful reduction, that was exactly correct
+ * — three of them, at `options.fetch ?? fetch`, at `const init:
+ * RequestInit = {…}` and at the dispatcher write. What was wrong was only
+ * the conclusion drawn from it, that the group could not be taken; it
+ * lands here as one change, and the residue is one statement.
+ *
+ * A RequestInit VALUE carries exactly what scr_fetch_start takes and
+ * nothing else. That is the whole design, and it is the same rule the
+ * non-literal-init refusal below always stated: the compiler has to know
+ * every key the program wrote, so the value is built by THIS file's key
+ * walk (initLiteral) at the point the literal is written, and what it
+ * stores is the folded head. Which is why no member of one reads back.
  *
  * WHAT IS LOWERED
- *   fetch(url)                       a string OR a URL value (not a
- *                                    `string | URL` UNION — that union has
- *                                    no static representation yet, SC2001)
+ *   fetch(url)                       a string, a URL value, OR the ambient
+ *                                    signature's own input UNION
+ *                                    (`string | Request | URL`), dispatched
+ *                                    by tag at the entry point
  *   fetch(url, <object literal>)     method / headers / body / signal
+ *   fetch(url, initValue)            a `RequestInit`, or a `RequestInit |
+ *                                    undefined` — the undefined arm is an
+ *                                    ABSENT init, not an empty one
+ *   const init: RequestInit = {…}    the same key walk, folded into a value
  *   response.ok / .status / .statusText / .url / .redirected / .bodyUsed
  *   response.headers                 the Headers view
  *   response.text() / .json() / .arrayBuffer() / .bytes()
  *   headers.get(name) / .has(name)
  *
  * WHAT IS NOT, and why each is a refusal rather than an invention:
- *   - a NON-LITERAL init. The options-record stance (lower-builtins.ts's
- *     fs.createReadStream comment): the runtime call has one fixed shape
- *     whose absent members are sentinels, so the compiler has to know
- *     every key the program wrote. Handed an opaque init it would have to
- *     ignore the keys it cannot see, and an ignored `signal` is a fetch
- *     that never aborts — silently.
+ *   - a NON-LITERAL init at the point one is BUILT. The options-record
+ *     stance (lower-builtins.ts's fs.createReadStream comment): the
+ *     runtime call has one fixed shape whose absent members are sentinels,
+ *     so the compiler has to know every key the program wrote. Handed an
+ *     opaque init it would have to ignore the keys it cannot see, and an
+ *     ignored `signal` is a fetch that never aborts — silently. Passing an
+ *     init VALUE around is fine precisely because it was built through
+ *     that walk.
+ *   - every MEMBER of a RequestInit value (requestInitMemberFence). The
+ *     stored form is folded — header names lowercased and flattened, a
+ *     string body already encoded — so a read would answer something other
+ *     than what the program wrote.
+ *   - `dispatcher`, in a literal or written through an assertion. MEASURED
+ *     against Node v25.9.0: `fetch(url, { dispatcher })` really does call a
+ *     plain object's `dispatch(opts, handler)` and wait for the handler's
+ *     callbacks. There is no static representation for an engine object
+ *     driving undici's handler protocol, and dropping the key would be a
+ *     proxy silently ignored. This is the one refusal zapo still carries in
+ *     wa-version-fetcher.ts.
  *   - `response.body`. It is a ReadableStream in Node, this slice has no
  *     stream body, and answering `null` (the shape a bodyless response
  *     really has) for a response that HAS one would be a wrong value.
- *   - `new Response(...)` / `new Headers(...)` / `Request`. Nothing in
- *     reach constructs one, and a constructor that silently dropped its
- *     init would be worse than the fence.
+ *   - `new Response(...)` / `new Headers(...)` / `new Request(...)`.
+ *     Nothing in reach constructs one, and a constructor that silently
+ *     dropped its init would be worse than the fence. `Request` is a TYPE
+ *     with no values at all: the union arm exists so the ambient signature
+ *     maps, and scr_fetch_start_union's branch for it answers a rejected
+ *     promise rather than reading a pointer that cannot be there.
  *   - `headers.forEach` / `entries` / `keys` / `values` / `getSetCookie`.
  *     Not needed by anything reachable, and each is its own iteration
  *     protocol.
- *   - `typeof fetch` AS A TYPE. `fetch` as a VALUE now lowers -- see
- *     lower-fnvalue.ts, which mints the interned zero-capture closure
- *     `String`/`Number`/`Boolean` already had -- but its value form is
- *     `(input: string) => Promise<Response>`, arity ONE, because `init`
- *     has no static representation. The TYPE is not mapped to that
- *     narrower signature: doing so would let zapo's
- *     `WaFetchVersionOptions` record compile and would then turn every
- *     two-argument call through the field into a NEW refusal inside a
- *     body that produces none today. So zapo's own
- *     `options.fetch ?? fetch` still does not compile, and it is the
- *     record's `typeof fetch` that stops it, not the value form.
  */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
@@ -71,6 +86,7 @@ import {
   IrExpr,
   IrType,
   NULL_T,
+  REQUESTINIT_T,
   RESPONSE_T,
   SrcLoc,
   STRING,
@@ -101,9 +117,24 @@ const INIT_POINTED_HINTS: Record<string, string | undefined> = {
   cache: "there is no HTTP cache in this runtime, so every mode but the default would be a lie",
   credentials: "no cookie jar exists here, so 'include' could not include anything",
   keepalive: "there is no connection pool: every request dials its own socket",
+  // MEASURED against Node v25.9.0, not assumed: a plain object with a
+  // `dispatch` method really is honoured — `fetch(url, { dispatcher })`
+  // calls it with (opts, handler) and waits for the handler's callbacks.
+  // So there is nothing to drop quietly here; honouring it would mean
+  // driving undici's handler protocol from a compiled program.
+  //
+  // The hint used to send the reader to NODE_USE_ENV_PROXY. That is true
+  // of the ISLAND fetch (scr_fetch.c reads it, matching undici's
+  // EnvHttpProxyAgent) and FALSE of this one: scr_fetch_static.c dials
+  // the origin itself and has no proxy path at all — a fact this file's
+  // header already states one line further down about CONNECT. Pointing
+  // at an environment variable that changes nothing is worse than saying
+  // there is no proxy support, so it says that.
   dispatcher:
-    "undici's dispatcher is an engine object with no static representation — " +
-    "a proxy is configured through NODE_USE_ENV_PROXY instead",
+    "undici's dispatcher is an engine object driving a callback protocol " +
+    "(dispatch(opts, handler)), and Node really does call it — there is no static " +
+    "representation for one; this build's fetch dials the origin directly and has " +
+    "no proxy path, environment-configured or otherwise",
 };
 
 /** The URL argument. `string` passes through; a `URL` value serializes
@@ -260,6 +291,171 @@ function applyKey(
   }
 }
 
+/** The two arguments every fetch entry point takes ahead of the optional
+ * body and signal. Factored out because THREE spellings now build them —
+ * the call with a literal init, the call with no init, and the
+ * `RequestInit` VALUE constructor — and a fourth copy of the "GET" default
+ * or of the header-fold choice is exactly how two spellings of one request
+ * start diverging. */
+function initHead(init: Init, loc: SrcLoc): { method: IrExpr; headers: IrExpr } {
+  const method: IrExpr = init.method ?? { kind: "strLit", value: "GET", type: STRING, loc };
+  // The header list is built by the runtime in both arms so the names are
+  // folded in exactly one place: a literal's written names go through
+  // _normalize, a record VALUE through _from_dyn.
+  const headers: IrExpr =
+    init.headerPairs !== null
+      ? { kind: "libCall", fn: "fetch.headersNorm", args: [init.headerPairs], type: arrayOf(STRING), loc }
+      : init.headerDyn !== null
+        ? { kind: "libCall", fn: "fetch.headersFromDyn", args: [init.headerDyn], type: arrayOf(STRING), loc }
+        : { kind: "arrayLit", elems: [], type: arrayOf(STRING), loc };
+  return { method, headers };
+}
+
+/** The `RequestInit` VALUE expression for an already-walked init: the
+ * four-way presence split that keeps an omitted body from becoming an
+ * empty one. Shared by the literal-in-a-slot path and the union-input
+ * call, so both build the identical handle. */
+function initValueExpr(init: Init, loc: SrcLoc): IrExpr {
+  const { method, headers } = initHead(init, loc);
+  const hasBody = init.body !== null;
+  const hasSignal = init.signal !== null;
+  const fn = hasBody
+    ? hasSignal
+      ? "fetch.initNewBodySignal"
+      : "fetch.initNewBody"
+    : hasSignal
+      ? "fetch.initNewSignal"
+      : "fetch.initNew";
+  const args: IrExpr[] = [method, headers];
+  if (hasBody) args.push(init.body!, { kind: "boolLit", value: init.bodyText, type: BOOL, loc });
+  if (hasSignal) args.push(init.signal!);
+  return { kind: "libCall", fn, args, type: REQUESTINIT_T, loc };
+}
+
+/** Is `t` exactly `RequestInit | undefined` — the slot an optional init
+ * parameter takes? The undefined arm is an ABSENT init, told apart by tag
+ * at the entry point, never an empty one. */
+function optionalInitUnion(L: Lowerer, t: IrType): boolean {
+  if (t.kind !== "union") return false;
+  const arms = L.unions.get(t.unionId)?.arms ?? [];
+  return (
+    arms.length === 2 &&
+    arms.some((a) => a.kind === "requestInit") &&
+    arms.some((a) => a.kind === "undefinedT")
+  );
+}
+
+/** The URL argument when it is the ambient signature's own INPUT UNION
+ * (`string | Request | URL`, or any subset carrying the string arm). The
+ * lowered union value, or null when the argument is not one — in which
+ * case urlArg's single-type path takes it. */
+function unionUrlArg(L: Lowerer, node: ts.Expression): IrExpr | null {
+  const t = L.mapTypeOf(L.typeOf(node));
+  if (t === null || t.kind !== "union") return null;
+  const arms = L.unions.get(t.unionId)?.arms ?? [];
+  if (arms.length === 0 || !arms.some((a) => a.kind === "string")) return null;
+  if (arms.some((a) => a.kind !== "string" && a.kind !== "url" && a.kind !== "request")) return null;
+  return L.lowerExpr(node);
+}
+
+/** An object literal in a `RequestInit` SLOT — `const init: RequestInit =
+ * { … }`, an argument at a `RequestInit` parameter, a field of that type.
+ * Null for every other literal, so lowerObjectLiteral keeps its record
+ * path.
+ *
+ * The value is the SAME walk the call-site literal takes (initLiteral), so
+ * `fetch(url, { … })` and `const i: RequestInit = { … }; fetch(url, i)`
+ * cannot describe two different requests — one walk, one set of key
+ * fences, one folded form. What is stored is that folded form, which is
+ * why no member of the result can be read back: see requestInitMemberFence.
+ *
+ * The contextual type may be `RequestInit | undefined` (an optional
+ * parameter's slot), which is the union the arm below accepts as well. */
+export function lowerRequestInitLiteral(
+  L: Lowerer,
+  expr: ts.ObjectLiteralExpression,
+  ctxType: ts.Type | undefined,
+): IrExpr | null {
+  if (L.dynamic || ctxType === undefined) return null;
+  const mapped = L.mapTypeOf(ctxType);
+  if (mapped === null) return null;
+  const isInit =
+    mapped.kind === "requestInit" ||
+    (mapped.kind === "union" &&
+      (L.unions.get(mapped.unionId)?.arms ?? []).some((a) => a.kind === "requestInit"));
+  if (!isInit) return null;
+  const loc = locOf(expr);
+  const init = initLiteral(L, expr, loc);
+  const { method, headers } = initHead(init, loc);
+  const hasBody = init.body !== null;
+  const hasSignal = init.signal !== null;
+  const fn = hasBody
+    ? hasSignal
+      ? "fetch.initNewBodySignal"
+      : "fetch.initNewBody"
+    : hasSignal
+      ? "fetch.initNewSignal"
+      : "fetch.initNew";
+  const args: IrExpr[] = [method, headers];
+  if (hasBody) args.push(init.body!, { kind: "boolLit", value: init.bodyText, type: BOOL, loc });
+  if (hasSignal) args.push(init.signal!);
+  return { kind: "libCall", fn, args, type: REQUESTINIT_T, loc };
+}
+
+/** Every member of a `RequestInit` value is a refusal, and this is the
+ * one place that says so.
+ *
+ * It is NOT an omission. What the value holds is the FOLDED request head —
+ * header names already lowercased and flattened into the wire list, a
+ * string body already utf8-encoded — so `init.headers` would answer a
+ * string array where the program wrote a record, and `init.body` a byte
+ * array where it wrote a string. A read that answers something other than
+ * what was written is the failure this whole slice is built to avoid, so
+ * the read refuses and names the member.
+ *
+ * A WRITE lands here too, and `dispatcher` is the one that matters:
+ * `(init as { dispatcher?: unknown }).dispatcher = d` is how a program
+ * configures an undici proxy, Node v25.9.0 really does call that object's
+ * `dispatch(opts, handler)` — measured, not assumed — and there is no
+ * static representation for an engine object implementing undici's handler
+ * protocol. Dropping the key would be a proxy silently ignored. */
+export function requestInitMemberFence(L: Lowerer, node: ts.Node, name: string): never {
+  const pointed = INIT_POINTED_HINTS[name];
+  L.noLowering(
+    `RequestInit.${name}`,
+    node,
+    pointed ??
+      "a RequestInit value carries the FOLDED request head (lowercased header pairs, an " +
+      "encoded body), not the members as they were written, so no member of one reads back; " +
+      "write the options at the fetch call site instead",
+  );
+}
+
+/** A WRITE to a member of a RequestInit value, THROUGH an assertion or
+ * not: `(init as { dispatcher?: unknown }).dispatcher = d`.
+ *
+ * The assertion is why this needs its own test. `typeOf` on the receiver
+ * answers the ASSERTED shape — an ordinary record — so nothing downstream
+ * can tell what is being written to, and the write falls all the way to
+ * "assignment to non-variables", a message that names neither the value
+ * nor the reason. Peeling the assertions is what lets the refusal say
+ * `RequestInit.dispatcher` and carry the pointed hint. Returns null when
+ * the receiver is not a RequestInit, so every other write keeps its own
+ * path. */
+export function requestInitWriteFence(
+  L: Lowerer,
+  target: ts.PropertyAccessExpression,
+): null {
+  let recv: ts.Expression = target.expression;
+  for (;;) {
+    if (ts.isParenthesizedExpression(recv)) { recv = recv.expression; continue; }
+    if (ts.isAsExpression(recv)) { recv = recv.expression; continue; }
+    break;
+  }
+  if (L.mapTypeOf(L.typeOf(recv))?.kind !== "requestInit") return null;
+  requestInitMemberFence(L, target, target.name.text);
+}
+
 /** USER-code `fetch(url)` / `fetch(url, init)` in a STATIC build.
  * Provenance, not the name: a user's own `fetch` never matches. Null for
  * anything that is not THE ambient fetch, so lowerCall keeps trying — and
@@ -280,23 +476,88 @@ export function lowerStaticFetchCall(L: Lowerer, call: ts.CallExpression): IrExp
       "fetch(url) and fetch(url, init) are the shapes",
     );
   }
+  // A UNION input (`string | Request | URL`) — the ambient signature's own
+  // parameter type, which a program can now write because `typeof fetch`
+  // maps. A forwarding stub (`const mine: typeof fetch = (input, init) =>
+  // fetch(input, init)`) is the shape that needs it, and it is the shape
+  // the `fetch` OPTION on an options record exists to let people write.
+  // The arm is chosen at runtime by tag; the Request arm cannot be
+  // inhabited and answers a rejected promise rather than reading a wild
+  // pointer.
+  const unionInput = unionUrlArg(L, call.arguments[0]!);
+  if (unionInput !== null) {
+    const promiseT: IrType = { kind: "promise", inner: RESPONSE_T };
+    if (call.arguments.length === 1) {
+      return { kind: "libCall", fn: "fetch.goUnion", args: [unionInput], type: promiseT, loc };
+    }
+    const initArg = call.arguments[1]!;
+    const initT = L.mapTypeOf(L.typeOf(initArg));
+    if (initT !== null && initT.kind === "requestInit") {
+      return {
+        kind: "libCall",
+        fn: "fetch.goUnionInit",
+        args: [unionInput, L.lowerExpr(initArg)],
+        type: promiseT,
+        loc,
+      };
+    }
+    if (initT !== null && optionalInitUnion(L, initT)) {
+      return {
+        kind: "libCall",
+        fn: "fetch.goValue",
+        args: [unionInput, L.lowerExpr(initArg)],
+        type: promiseT,
+        loc,
+      };
+    }
+    // An init LITERAL beside a union input: build the init as a VALUE
+    // first, through the same walk, and hand it to the same entry.
+    const lit = initLiteral(L, initArg, loc);
+    return {
+      kind: "libCall",
+      fn: "fetch.goUnionInit",
+      args: [unionInput, initValueExpr(lit, loc)],
+      type: promiseT,
+      loc,
+    };
+  }
   const url = urlArg(L, call.arguments[0]!, loc);
+  // `fetch(url, initValue)` — the init held as a VALUE rather than written
+  // at the call. One entry point, and it unpacks into the same transfer:
+  // the two spellings cannot describe different requests.
+  if (call.arguments.length === 2) {
+    const argT = L.mapTypeOf(L.typeOf(call.arguments[1]!));
+    // `RequestInit | undefined` reaches here too — a call through a
+    // parameter (`function via(url, init?) { return fetch(url, init) }`,
+    // which is what an injected fetch stub is). The undefined arm is an
+    // ABSENT init, told apart by tag at the entry, never an empty one.
+    const optInit =
+      argT !== null &&
+      argT.kind === "union" &&
+      (() => {
+        const arms = L.unions.get(argT.unionId)?.arms ?? [];
+        return (
+          arms.length === 2 &&
+          arms.some((a) => a.kind === "requestInit") &&
+          arms.some((a) => a.kind === "undefinedT")
+        );
+      })();
+    if (argT !== null && (argT.kind === "requestInit" || optInit)) {
+      return {
+        kind: "libCall",
+        fn: optInit ? "fetch.goInitOpt" : "fetch.goInit",
+        args: [url, L.lowerExpr(call.arguments[1]!)],
+        type: { kind: "promise", inner: RESPONSE_T },
+        loc,
+      };
+    }
+  }
   const init =
     call.arguments.length === 2
       ? initLiteral(L, call.arguments[1]!, loc)
       : { method: null, bodyText: false, headerPairs: null, headerDyn: null, body: null, signal: null };
 
-  const method: IrExpr = init.method ?? { kind: "strLit", value: "GET", type: STRING, loc };
-  // The header list is built by the runtime in both arms so the names are
-  // folded in exactly one place: a literal's written names go through
-  // _normalize, a record VALUE through _from_dyn.
-  const headers: IrExpr =
-    init.headerPairs !== null
-      ? { kind: "libCall", fn: "fetch.headersNorm", args: [init.headerPairs], type: arrayOf(STRING), loc }
-      : init.headerDyn !== null
-        ? { kind: "libCall", fn: "fetch.headersFromDyn", args: [init.headerDyn], type: arrayOf(STRING), loc }
-        : { kind: "arrayLit", elems: [], type: arrayOf(STRING), loc };
-
+  const { method, headers } = initHead(init, loc);
   // Four entry points rather than sentinel arguments, the abort.abort /
   // abort.abortReason precedent: an omitted body is not an empty one (a
   // POST with `content-length: 0` is a different request from a GET), and
@@ -320,6 +581,7 @@ export function lowerStaticFetchCall(L: Lowerer, call: ts.CallExpression): IrExp
  * receiver, so the property chain keeps trying. */
 export function lowerFetchProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
   const kind = L.mapTypeOf(L.typeOf(expr.expression))?.kind;
+  if (kind === "requestInit") requestInitMemberFence(L, expr, expr.name.text);
   if (kind !== "response" && kind !== "headers") return null;
   if (!L.isStdlibMember(expr)) return null;
   const name = expr.name.text;

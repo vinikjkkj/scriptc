@@ -550,6 +550,14 @@ describe("LLVM backend declares match scr_runtime.h prototypes", () => {
     abortController: { kind: "abortController" },
     response: { kind: "response" },
     headers: { kind: "headers" },
+    requestInit: { kind: "requestInit" },
+    // A TYPE with no values: nothing constructs a ScrRequest, and the RC
+    // pair exists only so the union arm and every container that could
+    // hold one stay uniform. It gets a row for the same reason
+    // asyncGenerator does -- the table is what forces a new kind to be
+    // LOOKED at on both backends, and "nothing makes one" is a claim that
+    // should be written down where the adapters are checked, not assumed.
+    request: { kind: "request" },
     fsWatcher: { kind: "fsWatcher" },
     childStream: { kind: "childStream" },
     func: { kind: "func", params: [], ret: { kind: "void" } },

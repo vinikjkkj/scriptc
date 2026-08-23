@@ -350,27 +350,78 @@ describe("the boundary this feature stops at", () => {
   );
 
   test(
-    "`typeof fetch` as a TYPE still refuses — zapo's record at wa-version-fetcher.ts:47",
+    "`typeof fetch` as a TYPE COMPILES now, and answers what Node answers",
     async () => {
-      // THE row that does not close, stated as a test rather than as
-      // prose. The value form landed; the TYPE did not, because mapping
-      // `typeof fetch` to the one-argument value signature would let this
-      // record compile and would then turn every two-argument call through
-      // the field into a NEW refusal inside a body that produces none
-      // today. When someone lands RequestInit, this test is the one to
-      // delete — deliberately, with the census in hand.
+      // THIS ROW HAS CHANGED SIDES, and the reason is written here rather
+      // than in a report. It used to assert that zapo's record REFUSED, on
+      // the argument that mapping `typeof fetch` to the one-argument value
+      // signature would let the record compile and would then turn every
+      // two-argument call through the field into a NEW refusal inside a
+      // body that produced none. That argument was right about the
+      // NARROWED mapping and wrong about the row: what closes it is
+      // `RequestInit` becoming a real VALUE and `Request` a real type, so
+      // the field carries the AMBIENT signature and a two-argument call
+      // through it is an ordinary call.
+      //
+      // It is a DIFFERENTIAL now, not a refusal check, because a record
+      // that merely compiles is exactly the failure this file ranks worst.
+      // The program dials a dead port: Node rejects, and so must this.
+      const dir = stage(
+        workDir,
+        "typeof-fetch-record",
+        "interface Opts { readonly fetch?: typeof fetch }\n" +
+          "async function f(o: Opts): Promise<string> {\n" +
+          "  const impl = o.fetch ?? fetch\n" +
+          "  const init: RequestInit = { method: 'GET' }\n" +
+          '  const r = await impl("http://127.0.0.1:1/x", init)\n' +
+          "  return String(r.status)\n" +
+          "}\n" +
+          "async function main(): Promise<void> {\n" +
+          "  try { console.log('resolved', await f({})) }\n" +
+          "  catch (e) { console.log('rejected', (e as Error).name, (e as Error).message) }\n" +
+          "}\n" +
+          "void main()\n",
+      );
+      const built = await compile(join(dir, "main.ts"), {
+        outPath: join(dir, exeName("program")),
+        outDir: dir,
+        backend: "c",
+      });
+      expect(
+        built.ok,
+        "zapo's record must compile now:\n" +
+          (built.diagnostics ?? []).map((d) => `${d.code}: ${d.message}`).join("\n"),
+      ).toBe(true);
+      const mine = await run(built.binaryPath!, [], dir);
+      const node = await run(process.execPath, [join(dir, "main.ts")], dir);
+      expect(node.stdout.trim(), "the Node lane must REJECT against a dead port").toBe(
+        "rejected TypeError fetch failed",
+      );
+      expect(mine.stdout, "and the compiled program must answer the same").toBe(node.stdout);
+    },
+    900_000,
+  );
+
+  test(
+    "a builtin value in a slot of ANOTHER function type refuses rather than adapting",
+    async () => {
+      // The wrong answer that widening `fetch` made reachable, kept
+      // reachable on purpose. A slot of a different function type takes an
+      // adapter; an adapter is a FRESH closure; a fresh closure is a
+      // different pointer, so `rec.call === fetch` printed FALSE against
+      // Node's true. Found by RUNNING the differential above with the old
+      // narrow annotations, not by reading the lowering.
       const codes = await refusalCodes(
         workDir,
-        "no-typeof-fetch",
-        "interface Opts { readonly fetch?: typeof fetch }\n" +
-          "async function f(o: Opts): Promise<number> {\n" +
-          '  const impl = o.fetch ?? fetch\n' +
-          '  return (await impl("http://127.0.0.1:1/x")).status\n' +
-          "}\n" +
-          "f({}).catch(() => console.log('caught'))\n",
+        "narrow-fetch-slot",
+        "const rec: { call: (u: string) => Promise<Response> } = { call: fetch }\n" +
+          "console.log(rec.call === fetch)\n",
       );
-      expect(codes.length, "`typeof fetch` in a record must not compile yet").toBeGreaterThan(0);
-      expect(codes).toContain("SC2011");
+      expect(
+        codes.length,
+        "a narrowed slot must refuse, not adapt into a silently non-identical value",
+      ).toBeGreaterThan(0);
+      expect(codes).toContain("SC2020");
     },
     900_000,
   );

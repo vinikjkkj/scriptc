@@ -3516,10 +3516,17 @@ export class Lowerer {
       this.pushDiag(noLoweringDiag(this.checker.typeToString(type), locOf(node), undefined, true));
       throw new PoisonError();
     }
-    // Island-backed ambient TYPES (Response, AbortSignal, RequestInit) in a
-    // STATIC build: the values live in the embedded engine, so the honest
-    // story is the per-site SC2012 — the same one the fetch call itself
-    // reports — not the generic supported-types recitation.
+    // Island-backed ambient TYPES (Response, AbortSignal, RequestInit,
+    // Headers) in a STATIC build: the values live in the embedded engine,
+    // so the honest story is the per-site SC2012 — the same one the fetch
+    // call itself reports — not the generic supported-types recitation.
+    //
+    // ALL FOUR have static representations of their own now, so mapType
+    // answers for them in a static build and this arm no longer fires for
+    // any of them there. It is kept rather than deleted because the LIST
+    // is what the dynamic lane still keys on, and a fifth name added to it
+    // without a static mapping would land here and want exactly this
+    // wording.
     if (
       !this.dynamic &&
       typeSym &&

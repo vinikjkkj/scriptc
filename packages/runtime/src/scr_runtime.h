@@ -8157,6 +8157,12 @@ void scr_tls_fetch_client_wrap(ScrNetSocket *sock, void *ctx);
  * `ScrFetchHeaders` is not: every edge it owns is an ScrStr. */
 typedef struct ScrFetchHeaders ScrFetchHeaders;
 typedef struct ScrResponse ScrResponse;
+/* `ScrFetchInit` is a RequestInit held as a VALUE — cycle-headered
+ * through its signal edge. `ScrRequest` is a type with no values: the arm
+ * the ambient fetch signature spells in its input union, declared so the
+ * ownership machinery stays uniform, never allocated. */
+typedef struct ScrFetchInit ScrFetchInit;
+typedef struct ScrRequest ScrRequest;
 
 /* Starts one transfer and answers the fetch() promise (+1), which
  * fulfills with an ScrResponse when the HEAD arrives — not when the body
@@ -8176,6 +8182,46 @@ ScrPromise *scr_fetch_start(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*
  * fresh +1 SCR_ELEM_STR array with lowercased names. */
 ScrArr *scr_fetch_headers_from_dyn(const struct ScrDyn *d /*borrowed, nullable*/); /* +1 */
 ScrArr *scr_fetch_headers_normalize(ScrArr *pairs /*borrowed*/);                   /* +1 */
+
+/* A RequestInit VALUE. `_new` takes exactly what scr_fetch_start takes,
+ * already folded (lowercased header pairs, a utf8-encoded string body with
+ * body_text set) — the init carries no key this transfer cannot act on,
+ * which is why the compiler answers no member read off one. `_start_init`
+ * unpacks it into the one transfer path; a NULL init is fetch(url). */
+ScrFetchInit *scr_fetch_init_new(ScrStr *method /*borrowed, nullable*/,
+                                 ScrArr *header_pairs /*borrowed, nullable*/,
+                                 ScrBytes *body /*borrowed, nullable*/, bool body_text,
+                                 void *signal /*borrowed, nullable*/); /* +1 */
+ScrFetchInit *scr_fetch_init_retain(ScrFetchInit *i);
+void scr_fetch_init_release(ScrFetchInit *i);
+void *scr_fetch_init_retain_v(void *p);
+void scr_fetch_init_release_v(void *p);
+void scr_fetch_init_trace_v(void *p, ScrTraceVisit visit, void *ctx);
+ScrPromise *scr_fetch_start_init(ScrStr *url /*borrowed*/,
+                                 ScrFetchInit *init /*borrowed, nullable*/); /* +1 */
+/* fetch(url, init) with an OPTIONAL init value (`RequestInit | undefined`):
+ * the undefined arm is an absent init, not an empty one. */
+ScrPromise *scr_fetch_start_init_opt(ScrStr *url /*borrowed*/, ScrUnion *init /*borrowed*/,
+                                     int init_tag); /* +1 */
+/* fetch(input, init) where the INPUT is the ambient signature's own union
+ * (`string | Request | URL`) — a forwarding call inside a `typeof
+ * fetch`-typed function. The arm tags are program-specific constants the
+ * backends pass in (a negative tag means the union has no such arm); the
+ * Request arm cannot be inhabited and answers a rejected promise rather
+ * than being assumed away. */
+ScrPromise *scr_fetch_start_union(ScrUnion *input, int str_tag, int url_tag,
+                                  ScrFetchInit *init /*borrowed, nullable*/); /* +1 */
+/* The `fetch`-as-a-VALUE entry: both arguments are unions — the one above
+ * plus `RequestInit | undefined`. */
+ScrPromise *scr_fetch_start_value(ScrUnion *input, int str_tag, int url_tag,
+                                  ScrUnion *init, int init_tag); /* +1 */
+
+/* The Request ownership pair. Dead code in every program: nothing
+ * constructs a ScrRequest. */
+ScrRequest *scr_request_retain(ScrRequest *r);
+void scr_request_release(ScrRequest *r);
+void *scr_request_retain_v(void *p);
+void scr_request_release_v(void *p);
 
 ScrResponse *scr_response_retain(ScrResponse *r);
 void scr_response_release(ScrResponse *r);
