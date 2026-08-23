@@ -689,6 +689,16 @@ export function probeNodeRequireRefusal(
     return null;
   }
   const name = packageNameOf(specifier);
+  // A BUILTIN, spelled without the prefix. Node's CJS loader answers the
+  // builtin before it ever looks at node_modules, so `require("http")`
+  // resolves and this function must say so — the header always said
+  // builtins answer null, but the test was only ever the "node:" prefix,
+  // and the node_modules walk below then "proved" that a builtin nothing
+  // installs cannot be found. Every EXISTING caller happened to guard
+  // with canonicalBuiltinModule first, which knows only the SUPPORTED
+  // slice: `require("vm")` and `require("repl")` fell straight through
+  // to a MODULE_NOT_FOUND for a module Node hands over.
+  if (isNodeBuiltinRoot(specifier.split("/")[0]!)) return null;
   const importer = resolve(fromFile);
   for (let dir = dirname(importer); ; ) {
     // A self-scope whose "name" matches: Node's require honors package
@@ -709,6 +719,20 @@ export function probeNodeRequireRefusal(
   return {
     message: `Cannot find module '${specifier}'\nRequire stack:\n- ${nativePath(importer)}`,
   };
+}
+
+/** Every name Node's CJS loader serves as a BUILTIN, prefix-less. Node's
+ * own `builtinModules` is the source of truth (the compiler's
+ * KNOWN_BUILTINS is a subset with its own purpose, and SUPPORTED_* is a
+ * subset of that); the union is taken so a builtin Node drops in a future
+ * release still reads as one here. */
+const NODE_BUILTIN_ROOTS: ReadonlySet<string> = new Set<string>([
+  ...KNOWN_BUILTINS,
+  ...builtinModules.map((m) => (m.startsWith("node:") ? m.slice(5) : m)),
+]);
+
+function isNodeBuiltinRoot(root: string): boolean {
+  return NODE_BUILTIN_ROOTS.has(root);
 }
 
 /** The answer probeNodeRequireRefusal can only give one specifier at a
@@ -738,8 +762,7 @@ export function nodeRequireResolvableRoots(
   host: Host = realHost,
 ): Set<string> | null {
   const out = new Set<string>();
-  for (const b of KNOWN_BUILTINS) out.add(b);
-  for (const b of builtinModules) out.add(b.startsWith("node:") ? b.slice(5) : b);
+  for (const b of NODE_BUILTIN_ROOTS) out.add(b);
   const importer = resolve(fromFile);
   for (let dir = dirname(importer); ; ) {
     const pkgText = host.readFile(join(dir, "package.json"));

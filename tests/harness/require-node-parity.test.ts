@@ -1,0 +1,398 @@
+/* The ambient CommonJS `require`, against Node v25.9.0, on both lanes.
+ *
+ * WHY THIS FILE EXISTS. `const x = require("./m")` at a module's top level
+ * is an IMPORT and was always handled. EVERY OTHER POSITION — a require
+ * inside a function, a require whose specifier is not a written literal, a
+ * require whose value is consumed as a value — reached the callee-as-a-
+ * value fence. In a JavaScript file that fence is DEFERRED into the
+ * translation unit, so a program's own `try { require(x) } catch {}` — the
+ * optional-dependency idiom, and protobufjs's `inquire()` verbatim —
+ * swallowed a COMPILER REFUSAL and carried on with `null`, at exit 0, with
+ * no diagnostic. Node's answer there is a module, or a throw. Never null.
+ *
+ * A 30-program matrix against Node v25.9.0 found ELEVEN cells answering
+ * WRONG at exit 0 on both backends. This file pins the ones that close and
+ * — just as important — the ones that do NOT, because the population that
+ * is left is the price of the row and it must not be misread as absent.
+ *
+ * THREE-SIDED, because a one-sided version passes by accident:
+ *
+ *  1. RUNS — programs that must compile CLEAN (no best-effort) and print
+ *     Node's bytes at Node's exit code. A compiler that turned every
+ *     require into a throw would fail these.
+ *  2. FENCED — the shapes that must STILL refuse, and refuse as the SAME
+ *     tagged refusal at the SAME site. The module value they would have to
+ *     answer is a module namespace object, which has no value
+ *     representation in a compiled program (the SC1090 fence in
+ *     lower-exprs). A compiler that answered MODULE_NOT_FOUND for these
+ *     would pass side 1 and be silently, dangerously wrong: it would tell
+ *     a program that an INSTALLED package is missing.
+ *  3. NEIGHBOURS — the require shapes that already worked. The import
+ *     statement, the builtin alias, evaluation order, a LOCAL binding
+ *     named `require`, and an ES module (where Node defines no `require`
+ *     at all, so `typeof require` is "undefined" and must stay that way).
+ *
+ * Every expected string here was measured by running the same source under
+ * Node v25.9.0 and is re-derivable that way. Nothing prints an absolute
+ * path: MODULE_NOT_FOUND's message carries the requiring file, so the
+ * programs print `e.code` and a path-free slice of `e.message`.
+ */
+import { execFileSync } from "node:child_process";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { beforeAll, describe, expect, test } from "vitest";
+import { compile } from "@scriptc/compiler";
+import { exeName } from "./exe.js";
+
+const LANES = ["c", "llvm"] as const;
+type Lane = (typeof LANES)[number];
+
+/** A module of the compiled program, required by the entries below. */
+const M = "module.exports = { v: 42, tag: 'from-m' };\n";
+
+/** An INSTALLED package the program never imports: present in
+ * node_modules at build time, so Node resolves it — and so the compiler
+ * must never answer MODULE_NOT_FOUND for it. */
+const MYLIB_JS = "module.exports = { v: 42, tag: 'from-mylib' };\n";
+const MYLIB_DTS = "declare const m: { v: number; tag: string };\nexport = m;\n";
+const MYLIB_PKG = '{ "name": "mylib", "version": "1.0.0", "main": "index.js", "types": "index.d.ts" }\n';
+
+interface Program {
+  readonly name: string;
+  /** The entry's extension: ".cjs" is a CommonJS module, ".mjs" an ES one. */
+  readonly ext?: ".cjs" | ".mjs";
+  readonly src: string;
+  /** Node v25.9.0's stdout, byte for byte. */
+  readonly stdout: string;
+  /** Node v25.9.0's exit code. */
+  readonly exit: number;
+}
+
+const RUNS: readonly Program[] = [
+  {
+    // The optional-dependency idiom, whole. Node cannot resolve the
+    // specifier, throws MODULE_NOT_FOUND at the require, the program's own
+    // catch swallows it and answers null. Before this file the compiled
+    // program also answered null — by swallowing an SC2011 of its own,
+    // which is the same answer for a reason that would have been wrong the
+    // moment the module existed.
+    name: "a literal specifier nothing installed resolves throws Node's MODULE_NOT_FOUND",
+    src:
+      "try { var m = require('no-such-pkg-xyz'); console.log('GOT') }\n" +
+      "catch (e) { console.log('code', e.code, '|', String(e.message).split('\\n')[0]) }\n" +
+      "console.log('after')\n",
+    stdout: "code MODULE_NOT_FOUND | Cannot find module 'no-such-pkg-xyz'\nafter\n",
+    exit: 0,
+  },
+  {
+    // A constant ONE BINDING AWAY is the same require. This is the cell
+    // the handover called out by name: it used to reach a different
+    // emitter than the written literal and answer null.
+    name: "a constant one binding away is the literal",
+    src:
+      "var NAME = 'no-such-pkg-xyz';\n" +
+      "try { var m = require(NAME); console.log('GOT') }\n" +
+      "catch (e) { console.log('code', e.code, '|', String(e.message).split('\\n')[0]) }\n",
+    stdout: "code MODULE_NOT_FOUND | Cannot find module 'no-such-pkg-xyz'\n",
+    exit: 0,
+  },
+  {
+    // A genuine RUN-TIME specifier — the zapo row's own shape. The build
+    // cannot know the string, so the verdict is decided at run time
+    // against the set of bare specifier roots the build could resolve.
+    name: "a run-time specifier nothing installed resolves throws MODULE_NOT_FOUND",
+    src:
+      "function g(s) { try { return require(s) } catch (e) { return e.code + '|' + String(e.message).split('\\n')[0] } }\n" +
+      "console.log(g('no-such-pkg-xyz'));\n" +
+      "console.log(g('@nope/nothing'));\n" +
+      "console.log(g('@nope/nothing/sub'));\n",
+    stdout:
+      "MODULE_NOT_FOUND|Cannot find module 'no-such-pkg-xyz'\n" +
+      "MODULE_NOT_FOUND|Cannot find module '@nope/nothing'\n" +
+      "MODULE_NOT_FOUND|Cannot find module '@nope/nothing/sub'\n",
+    exit: 0,
+  },
+  {
+    // protobufjs's inquire(), verbatim (the `typeof require` guard
+    // included — it must fold to "function", because this IS a CommonJS
+    // module), over a specifier nothing resolves. zapo's own site.
+    name: "protobufjs inquire() over an absent optional dependency answers null",
+    src:
+      "function inquire(moduleName) {\n" +
+      "  try {\n" +
+      "    if (typeof require !== 'function') return null;\n" +
+      "    var mod = require(moduleName);\n" +
+      "    return mod && (mod.length || Object.keys(mod).length) ? mod : null;\n" +
+      "  } catch (e) {}\n" +
+      "  return null;\n" +
+      "}\n" +
+      "console.log('long ->', String(inquire('long')));\n" +
+      "console.log('done');\n",
+    stdout: "long -> null\ndone\n",
+    exit: 0,
+  },
+  {
+    // A name that is a PREFIX of an installed one, and one the installed
+    // name is a prefix of. Both are MODULE_NOT_FOUND: the membership test
+    // requires BOTH delimiters, so "myli" and "mylibx" cannot match
+    // "mylib". Without that the set would answer for names nothing
+    // installs — the loud direction, but wrong all the same.
+    name: "a prefix of an installed package name is not that package",
+    src:
+      "function g(s) { try { require(s); return 'GOT' } catch (e) { return e.code } }\n" +
+      "console.log(g('myli'), g('mylibx'));\n",
+    stdout: "MODULE_NOT_FOUND MODULE_NOT_FOUND\n",
+    exit: 0,
+  },
+  {
+    // Node validates the id BEFORE it resolves anything, and the
+    // "Received" tail is rendered from the value.
+    name: "Node's own argument errors, literal and run-time",
+    src:
+      "function g(x) { try { require(x); return 'GOT' } catch (e) { return e.code + '/' + e.message } }\n" +
+      "console.log(g(42));\n" +
+      "console.log(g(null));\n" +
+      "console.log(g(undefined));\n" +
+      "console.log(g(''));\n",
+    stdout:
+      'ERR_INVALID_ARG_TYPE/The "id" argument must be of type string. Received type number (42)\n' +
+      'ERR_INVALID_ARG_TYPE/The "id" argument must be of type string. Received null\n' +
+      'ERR_INVALID_ARG_TYPE/The "id" argument must be of type string. Received undefined\n' +
+      "ERR_INVALID_ARG_VALUE/The argument 'id' must be a non-empty string. Received ''\n",
+    exit: 0,
+  },
+  {
+    // The specifier EXPRESSION evaluates before the resolution fails —
+    // the throw must not be hoisted over the argument's side effects.
+    name: "the specifier expression runs before the resolution fails",
+    src:
+      "function spec() { console.log('spec ran'); return 'no-such-pkg-xyz' }\n" +
+      "try { require(spec()) } catch (e) { console.log('code', e.code) }\n",
+    stdout: "spec ran\ncode MODULE_NOT_FOUND\n",
+    exit: 0,
+  },
+  {
+    // The bare side-effect form. Its message was already right; its
+    // `code` was `undefined`, which is the property the idiom reads.
+    name: "the side-effect form carries the code, not only the message",
+    src:
+      "try { require('no-such-pkg-xyz') } catch (e) { console.log('code', e.code) }\n" +
+      "console.log('after');\n",
+    stdout: "code MODULE_NOT_FOUND\nafter\n",
+    exit: 0,
+  },
+  /* ── the neighbours ────────────────────────────────────────────────── */
+  {
+    name: "NEIGHBOUR: a literal relative require still imports its module",
+    src: "var m = require('./m.cjs');\nconsole.log(m.v, m.tag);\n",
+    stdout: "42 from-m\n",
+    exit: 0,
+  },
+  {
+    name: "NEIGHBOUR: a literal builtin require still binds the namespace",
+    src: "var p = require('node:path');\nconsole.log(p.join('a', 'b') === 'a' + require('node:path').sep + 'b');\n",
+    stdout: "true\n",
+    exit: 0,
+  },
+  {
+    name: "NEIGHBOUR: the required module's body runs at the require, once",
+    src:
+      "console.log('before');\n" +
+      "var s = require('./side.cjs');\n" +
+      "console.log('after', s.n);\n",
+    stdout: "before\nside body\nafter 7\n",
+    exit: 0,
+  },
+  {
+    // A LOCAL binding named `require` is not the module global, and must
+    // keep whatever the program gave it.
+    name: "NEIGHBOUR: a local binding named require is not the module global",
+    src:
+      "function require(x) { return 'local:' + x }\n" +
+      "console.log(require('no-such-pkg-xyz'));\n",
+    stdout: "local:no-such-pkg-xyz\n",
+    exit: 0,
+  },
+  {
+    // Node defines no `require` in an ES module at all, so the CommonJS
+    // sniff every vendored bundle opens with must answer "undefined".
+    name: "NEIGHBOUR: an ES module has no require",
+    ext: ".mjs",
+    src: "console.log(typeof require);\n",
+    stdout: "undefined\n",
+    exit: 0,
+  },
+];
+
+/** The shapes that must STILL refuse — every one of them because the
+ * value they would have to answer is a module namespace object, which has
+ * no value representation in a compiled program.
+ *
+ * They are checked by RUNNING the built program (a JS file's fence is
+ * deferred into the translation unit, so the build succeeds) and reading
+ * the SC code back off the thrown error. `caught` says whether the
+ * program's own catch swallows the fence: under the deferred-fence stance
+ * a refusal inside a `try` IS catchable, and that is the lane zapo builds
+ * in — recorded, not hidden. */
+const FENCED: readonly {
+  readonly name: string;
+  readonly src: string;
+  readonly code: string;
+  /** What Node v25.9.0 answers — the distance still to go, written down. */
+  readonly nodeSays: string;
+  readonly stdout: string;
+}[] = [
+  {
+    name: "a run-time specifier naming an INSTALLED package",
+    src:
+      "function g(s) { try { var m = require(s); return 'GOT ' + m.v } catch (e) { return 'threw ' + e.code } }\n" +
+      "console.log(g('mylib'));\n",
+    code: "SC2020",
+    nodeSays: "GOT 42",
+    stdout: "threw SC2020\n",
+  },
+  {
+    name: "a run-time specifier naming a builtin",
+    src:
+      "function g(s) { try { var m = require(s); return 'GOT ' + typeof m } catch (e) { return 'threw ' + e.code } }\n" +
+      "console.log(g('node:path'), g('vm'));\n",
+    code: "SC2020",
+    nodeSays: "GOT object GOT object",
+    stdout: "threw SC2020 threw SC2020\n",
+  },
+  {
+    name: "a run-time RELATIVE specifier naming a program module",
+    src:
+      "function g(s) { try { var m = require(s); return 'GOT ' + m.v } catch (e) { return 'threw ' + e.code } }\n" +
+      "console.log(g('./m.cjs'));\n",
+    code: "SC2020",
+    nodeSays: "GOT 42",
+    stdout: "threw SC2020\n",
+  },
+  {
+    // The wall, named: a required module used AS A VALUE. Everything in
+    // this list needs it, and it is the reason a run-time specifier that
+    // DOES resolve cannot be served.
+    name: "a literal relative require used as a value",
+    src:
+      "var m = require('./m.cjs');\n" +
+      "try { console.log('GOT', Object.keys(m).length) } catch (e) { console.log('threw', e.code) }\n",
+    code: "SC1090",
+    nodeSays: "GOT 2",
+    stdout: "threw SC1090\n",
+  },
+];
+
+let lab = "";
+interface Built {
+  ok: boolean;
+  diags: { code: string; message: string }[];
+  binaryPath?: string;
+}
+const BUILT = new Map<string, Built>();
+
+async function build(name: string, p: { src: string; ext?: string }, backend: Lane): Promise<Built> {
+  const dir = join(lab, `${name.replace(/[^a-z0-9]+/gi, "-").slice(0, 60)}-${backend}`);
+  await mkdir(join(dir, "node_modules", "mylib"), { recursive: true });
+  await writeFile(join(dir, "package.json"), '{ "name": "require-parity-probe", "version": "0.0.0" }\n', "utf8");
+  await writeFile(join(dir, "m.cjs"), M, "utf8");
+  await writeFile(join(dir, "side.cjs"), "console.log('side body');\nmodule.exports = { n: 7 };\n", "utf8");
+  await writeFile(join(dir, "node_modules", "mylib", "package.json"), MYLIB_PKG, "utf8");
+  await writeFile(join(dir, "node_modules", "mylib", "index.js"), MYLIB_JS, "utf8");
+  await writeFile(join(dir, "node_modules", "mylib", "index.d.ts"), MYLIB_DTS, "utf8");
+  const file = join(dir, `entry${p.ext ?? ".cjs"}`);
+  await writeFile(file, p.src, "utf8");
+  const res = await compile(file, {
+    outPath: join(dir, exeName("program")),
+    outDir: dir,
+    backend,
+  });
+  return {
+    ok: res.ok,
+    diags: (res.diagnostics ?? []).map((d) => ({ code: d.code, message: d.message })),
+    binaryPath: res.ok ? res.binaryPath : undefined,
+  };
+}
+
+function run(binary: string): { stdout: string; stderr: string; status: number | null } {
+  try {
+    const stdout = execFileSync(binary, [], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    return { stdout, stderr: "", status: 0 };
+  } catch (e) {
+    const err = e as { status?: number; stdout?: string; stderr?: string };
+    return { stdout: err.stdout ?? "", stderr: err.stderr ?? "", status: err.status ?? null };
+  }
+}
+
+beforeAll(async () => {
+  lab = await mkdtemp(join(tmpdir(), "scriptc-require-parity-"));
+  for (const backend of LANES) {
+    for (const p of RUNS) BUILT.set(`R:${p.name}:${backend}`, await build(p.name, p, backend));
+    for (const p of FENCED) BUILT.set(`F:${p.name}:${backend}`, await build(p.name, p, backend));
+  }
+}, 1_800_000);
+
+describe("the ambient CommonJS require, against Node v25.9.0", () => {
+  test.for(RUNS.map((p) => [p.name, p] as const))("%s", ([, p]) => {
+    for (const backend of LANES) {
+      const b = BUILT.get(`R:${p.name}:${backend}`)!;
+      // NO best-effort: these must compile clean. A deferred fence
+      // anywhere in them would show up as a run-time [SCxxxx] below, so
+      // both halves of "it compiled" are checked.
+      expect(
+        b.ok,
+        `${p.name} (${backend}) did not compile. Diagnostics: ` +
+          b.diags.map((d) => `${d.code} ${d.message.slice(0, 160)}`).join(" | "),
+      ).toBe(true);
+      const r = run(b.binaryPath!);
+      expect(
+        /\[SC\d{4}\b/.test(r.stdout + r.stderr),
+        `${p.name} (${backend}) carried a deferred compile fence into the RUN: ${(r.stdout + r.stderr).slice(0, 300)}`,
+      ).toBe(false);
+      expect(r.stdout, `${p.name} (${backend}) stdout`).toBe(p.stdout);
+      expect(r.status, `${p.name} (${backend}) exit code`).toBe(p.exit);
+    }
+  });
+
+  test.for(FENCED.map((p) => [p.name, p] as const))("still refuses: %s", ([, p]) => {
+    for (const backend of LANES) {
+      const b = BUILT.get(`F:${p.name}:${backend}`)!;
+      expect(
+        b.ok,
+        `${p.name} (${backend}) did not build at all; the fence is deferred, so it should. ` +
+          b.diags.map((d) => `${d.code} ${d.message.slice(0, 160)}`).join(" | "),
+      ).toBe(true);
+      const r = run(b.binaryPath!);
+      const all = r.stdout + r.stderr;
+      expect(
+        all.includes(p.code),
+        `${p.name} (${backend}) no longer carries ${p.code}. Node v25.9.0 answers "${p.nodeSays}"; ` +
+          `if this shape now answers it too, MOVE THIS ENTRY to RUNS. If it answers something ELSE, ` +
+          `that is a silent wrong answer where an installed module exists. Saw: ${all.slice(0, 400)}`,
+      ).toBe(true);
+      expect(r.stdout, `${p.name} (${backend}) stdout`).toBe(p.stdout);
+    }
+  });
+
+  test("the fence never fires where the build PROVED nothing resolves", () => {
+    // The one-line statement of the whole contract, as a distinct test so
+    // a failure names it: a specifier the build ruled out must reach
+    // Node's MODULE_NOT_FOUND and never the refusal, on either lane.
+    for (const backend of LANES) {
+      for (const name of [
+        "a literal specifier nothing installed resolves throws Node's MODULE_NOT_FOUND",
+        "a constant one binding away is the literal",
+        "a run-time specifier nothing installed resolves throws MODULE_NOT_FOUND",
+        "protobufjs inquire() over an absent optional dependency answers null",
+      ]) {
+        const b = BUILT.get(`R:${name}:${backend}`)!;
+        const r = run(b.binaryPath!);
+        expect(
+          /\[SC\d{4}\b/.test(r.stdout + r.stderr),
+          `${name} (${backend}) fenced where Node throws MODULE_NOT_FOUND`,
+        ).toBe(false);
+      }
+    }
+  });
+});

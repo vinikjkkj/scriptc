@@ -209,18 +209,24 @@ const PLANTS: readonly {
     name: "require-with-a-computed-specifier",
     ext: "cjs",
     zapoSite: "spec/proto/index.js:1 -- protobufjs inquire()'s require(moduleName)",
-    // TWO ARMS, both real and both measured. With the project's
-    // @types/node adopted (zapo's build, and any entry compiled next to a
-    // tsconfig that pulls the node types in) the reference resolves to the
-    // NAMED `Require` surface and the fence is the named-surface SC2020.
-    // Compiled bare -- as this suite's temp dir is, with no tsconfig -- the
-    // same reference resolves to the STRUCTURAL call/`main`/`resolve` type
-    // and the fence is the unmappable-TYPE SC2011 instead. Same site, same
-    // construct, same refusal: only the blame differs, so both are named
-    // rather than pinning whichever one this host happens to produce.
+    // ONE ARM now, and the change is the point. This used to reach the
+    // callee-as-a-VALUE fence, which named whatever the checker had made
+    // of the `require` binding: with @types/node adopted the named
+    // `Require` surface (SC2020), compiled bare the structural
+    // call/`main`/`resolve` type (SC2011). Both spellings of "we cannot
+    // lower the require FUNCTION".
+    //
+    // The require is lowered now (require-node-parity.test.ts), and what
+    // is left is a narrower and much later refusal: the specifier is a
+    // RUN-TIME string, so the verdict runs, and for a specifier the build
+    // could not rule out the answer would have to be the module's exports
+    // AS A VALUE — which is the SC1090 module-namespace wall. That is the
+    // refusal this plant now carries, at the same site, with the same
+    // code. What the plant no longer proves is reachability: the
+    // specifier 'long' resolves to nothing, so the RUN takes Node's
+    // MODULE_NOT_FOUND path and the fence is emitted-but-not-taken.
     accept: [
-      { code: "SC2020", fragment: "'Require' is typed by @types/node" },
-      { code: "SC2011", fragment: "(id: string): any" },
+      { code: "SC2020", fragment: "'require() with a run-time specifier'" },
     ],
     src: [
       "function inquire(moduleName) {",
