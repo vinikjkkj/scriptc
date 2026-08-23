@@ -87,6 +87,47 @@ const REFUSALS: readonly { name: string; code: string; fragment: string; src: st
       "class Box<T> extends AmbientBase { v: T\n  constructor(v: T) { super(); this.v = v } }\nconsole.log(new Box<number>(3).v)\n",
   },
   {
+    // THE SHAPE THAT MAKES THE CHEAP FIX WRONG, pinned so it is noticed
+    // if anyone tries it.
+    //
+    // The residual this file's stance leaves open is that a VALUE use of
+    // the derived class is a build REFUSAL rather than a compiled throw,
+    // and the obvious repair is to lower such uses to the same undefRead
+    // shape `L.trapBindings` uses -- "it is provably dead code, so any
+    // throw will do". It is not: a use ABOVE the class statement is
+    // reachable, and Node answers it with the class's own TDZ, not with
+    // the ambient name.
+    //
+    //   function g() { return new D().s }
+    //   try { g() } catch (e) { console.log('caught', e.message) }
+    //   class D extends AmbientBase { s = 1 }
+    //
+    //   Node v25.9.0   before
+    //                  caught Cannot access 'D' before initialization
+    //                  then ReferenceError: AmbientBase is not defined, rc=1
+    //
+    // An undefRead lowering would print `caught AmbientBase is not
+    // defined` -- a refusal traded for a WRONG answer, which is the one
+    // trade this project ranks worst. Closing the residual therefore
+    // needs the source-order guard (earliestSameFileDeclStart /
+    // fenceEarlyAliasUse), not twenty lines.
+    //
+    // The refusal's own wording is imprecise for THIS program -- nothing
+    // below the class statement runs, but this use is above it and does
+    // run under Node. It is still loud and still names the real cause,
+    // and the fragment asserted here is the part that is true of every
+    // shape in the family.
+    name: "a use of the derived class ABOVE the throwing class statement (TDZ in Node)",
+    code: "SC1090",
+    fragment: "whose extends clause provably throws ('AmbientBase' is an ambient name nothing defines",
+    src:
+      AMBIENT +
+      "function g(): number { return new D().s }\n" +
+      "console.log('before')\n" +
+      "try { console.log('v', g()) } catch (e) { console.log('caught', (e as Error).message) }\n" +
+      "class D extends AmbientBase { s = 1 }\nconsole.log('after')\n",
+  },
+  {
     name: "a class expression extending the ambient class",
     code: "SC1090",
     fragment: "extending the ambient class 'AmbientBase' that nothing defines",
