@@ -385,6 +385,59 @@ describe("the boundary this feature stops at", () => {
   );
 
   test(
+    "`.bind` on a builtin answers exactly what `.bind` on a USER function answers",
+    async () => {
+      // A DIVERGENCE, named rather than blessed, and it is not this
+      // feature's: in TypeScript `f.bind(x)` is a documented ERASURE that
+      // compiles to `f` itself (lower-calls.ts, corpus 2690), on the sound
+      // reason that a TypeScript function value cannot observe a bound
+      // receiver -- `this` in a plain TS function is tsc's own error. What
+      // the erasure also loses is IDENTITY: Node says
+      // `g.bind(null) === g` is false, and this compiler says true, for a
+      // user function on main today.
+      //
+      // So this row does NOT assert which answer is right. It asserts that
+      // the builtin and the user function give the SAME answer, which is
+      // the property this feature could have broken and the one that
+      // matters: the day someone fixes the erasure, both move together and
+      // this row still passes. Measured on main before the builtin value
+      // existed: the user half already printed `true`.
+      const dir = stage(
+        workDir,
+        "bind-uniformity",
+        [
+          "function mine(n: number): boolean { return n === 42 }",
+          "const bm = mine.bind(null)",
+          "const bb = isNaN.bind(null)",
+          "console.log(bm === mine, bb === isNaN)",
+          "",
+        ].join("\n"),
+      );
+      const built = await compile(join(dir, "main.ts"), {
+        outPath: join(dir, exeName("program")),
+        outDir: dir,
+        backend: "c",
+      });
+      expect(
+        built.ok,
+        "the bind-uniformity fixture must compile:\n" +
+          (built.diagnostics ?? []).map((d) => `${d.code}: ${d.message}`).join("\n"),
+      ).toBe(true);
+      const mineRun = await run(built.binaryPath!, [], dir);
+      const [userAnswer, builtinAnswer] = mineRun.stdout.trim().split(" ");
+      expect(
+        builtinAnswer,
+        "a bound builtin must compare the way a bound user function does",
+      ).toBe(userAnswer);
+      // And Node's own answer for both, recorded so the divergence is
+      // visible in the file rather than only in a report.
+      const node = await run(process.execPath, [join(dir, "main.ts")], dir);
+      expect(node.stdout.trim()).toBe("false false");
+    },
+    900_000,
+  );
+
+  test(
     "a user function that really does shadow keeps its own lowering",
     async () => {
       // The BLOCK-scoped spelling is a genuine shadow — a separate symbol,
