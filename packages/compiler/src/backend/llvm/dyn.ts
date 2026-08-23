@@ -102,6 +102,20 @@ export interface DynHost extends WalkerHost {
   /** The class's preorder interval and hierarchy membership — the same
    * numbers `instanceof` compares against. */
   classInterval(className: string): { pre: number; post: number };
+  /** Every class carrying a run-time `%props` table whose BASE does not,
+   * as the three things [[Get]] over a boxed instance needs: the `@`-ref
+   * of its SCR_DYN_OBJINST descriptor, its struct spelling and the
+   * field's GEP index. Hierarchy classes are INCLUDED: the box proves
+   * itself through scr_dyn_objinst_ptr_of, which tests the instance's
+   * run-time preorder position (read from its vtable, the same one
+   * `instanceof` reads) against the descriptor's interval, so no answer
+   * depends on the static type of the slot the value passed through. A
+   * class whose base already has the field is skipped because the base's
+   * interval covers it at the same index -- unreachable today, since the
+   * frontend refuses a table on a class that has a subclass and every
+   * table-carrying class is therefore a leaf. emit-walkers.ts's arm
+   * carries the full reasoning and both lanes spell the gates once each. */
+  classPropsTables(): { desc: string; struct: string; index: number }[];
 }
 
 /** Exact double literal (the emitter's f64Lit — the walkers' copy). */
@@ -3424,10 +3438,18 @@ export class LlDyn {
       B.terminate(`ret ptr null`);
       B.startBlock(lNext);
     }
-    // OBJINST: a class instance's members are struct fields the box has no
-    // table for. Falling through to the undefined tail would be a SILENT
-    // wrong answer for a property Node reads fine, so the read is the loud
-    // ladder — the C emitter's arm, same runtime entry point.
+    // OBJINST: a class instance's DECLARED members are struct fields the
+    // box has no table for. Falling through to the undefined tail would be
+    // a SILENT wrong answer for a property Node reads fine, so those stay
+    // the loud ladder — the C emitter's arm, same runtime entry point.
+    //
+    // The run-time-keyed properties Object.defineProperty put in the
+    // instance's %props table DO answer, and must: `in`, util.inspect's
+    // frame and the enumerable count all read that table already, and
+    // [[Get]] was the one surface that did not — which is why
+    // scr_cls_props_get shipped end to end with no caller. The gates and
+    // their reasons are emit-walkers.ts's, spelled once in
+    // host.classPropsTables().
     {
       const isCi = B.tmp();
       B.line(`${isCi} = icmp eq i32 ${kd}, ${DK.OBJINST}`);
@@ -3435,6 +3457,47 @@ export class LlDyn {
       const lNext = B.newLabel("kg.n");
       B.condBr(isCi, lCi, lNext);
       B.startBlock(lCi);
+      const tables = host.classPropsTables();
+      if (tables.length > 0) {
+        host.declare(`declare ptr @scr_dyn_objinst_ptr_of(ptr, ptr)`);
+        host.declare(`declare ptr @scr_cls_props_get(ptr, ptr)`);
+        host.declare(`declare zeroext i1 @scr_exc_pending()`);
+      }
+      for (const t of tables) {
+        const o = B.tmp();
+        B.line(`${o} = call ptr @scr_dyn_objinst_ptr_of(ptr %d, ptr ${t.desc})`);
+        const isMine = B.tmp();
+        B.line(`${isMine} = icmp ne ptr ${o}, null`);
+        const lMine = B.newLabel("kg.cp");
+        const lSkip = B.newLabel("kg.cs");
+        B.condBr(isMine, lMine, lSkip);
+        B.startBlock(lMine);
+        const tp = B.tmp();
+        const tbl = B.tmp();
+        B.line(`${tp} = getelementptr inbounds %${t.struct}, ptr ${o}, i64 0, i32 ${t.index} ; %props`);
+        B.line(`${tbl} = load ptr, ptr ${tp}`);
+        const pv = B.tmp();
+        B.line(`${pv} = call ptr @scr_cls_props_get(ptr ${tbl}, ptr %k)`);
+        // NULL is "no such key" AND "the getter threw", and only the
+        // pending exception tells them apart. Reading the miss as a throw
+        // swallows a real one into the fence's message; reading the throw
+        // as a miss REPLACES it with the fence — louder, and wrong.
+        const hit = B.tmp();
+        B.line(`${hit} = icmp ne ptr ${pv}, null`);
+        const lHit = B.newLabel("kg.ch");
+        const lMaybe = B.newLabel("kg.cm");
+        B.condBr(hit, lHit, lMaybe);
+        B.startBlock(lHit);
+        B.terminate(`ret ptr ${pv}`);
+        B.startBlock(lMaybe);
+        const pe = B.tmp();
+        B.line(`${pe} = call zeroext i1 @scr_exc_pending()`);
+        const lThrew = B.newLabel("kg.ce");
+        B.condBr(pe, lThrew, lSkip);
+        B.startBlock(lThrew);
+        B.terminate(`ret ptr null`);
+        B.startBlock(lSkip);
+      }
       host.declare(`declare zeroext i1 @scr_dyn_objinst_fence(ptr, ptr)`);
       B.line(`call zeroext i1 @scr_dyn_objinst_fence(ptr %d, ptr ${host.cstr("a property read")})`);
       B.terminate(`ret ptr null`);

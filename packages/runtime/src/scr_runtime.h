@@ -4798,11 +4798,22 @@ extern const char SCR_FN_SRC_BOUND[];  /* the result of Function#bind */
  * must be static literals (the box never frees them; name may be NULL).
  * This spelling marks the box NATIVE — it is the runtime's own entry
  * point, and every closure the runtime mints here really is native glue.
- * Compiled boxes go through scr_dyn_new_func_src with their source. */
+ * Compiled boxes go through scr_dyn_new_func_src with their source.
+ *
+ * `sig` is NOT decoration, and this spelling's contract is NARROWER than
+ * _src's: it must be a HUMAN-READABLE spelling ("()", "(error,data)"),
+ * never a compiler type key. The emitted dynCheck's exact-signature
+ * branch UNWRAPS the closure and calls `clo->fn` through the static C
+ * signature that key names, and a closure minted here holds a dyn thunk.
+ * Both halves are enforced at the mint and TRAP: NULL (which the emitted
+ * `strcmp` dereferences) in _src, and a `func(`-prefixed key here. */
 ScrDyn *scr_dyn_new_func(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity, const char *sig, const char *name);
 /* scr_dyn_new_func carrying the function's Function.prototype.toString
  * answer: a static source-text literal, one of the SCR_FN_SRC_* sentinels,
- * or NULL when the build carried no text (the renderers then refuse). */
+ * or NULL when the build carried no text (the renderers then refuse).
+ * This is the COMPILER's spelling, so `sig` here IS the interned type key
+ * of the function type the value was boxed from — that is what makes
+ * the exact-signature unwrap sound. It may not be NULL. */
 ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity, const char *sig, const char *name, const char *src);
 /* Function.prototype.toString over a SCR_DYN_FUNC box — the ONE renderer.
  * String(), `+`, template interpolation and `.toString()` all land here so
@@ -4929,6 +4940,20 @@ void *scr_dyn_objinst_unbox(const ScrDyn *d, size_t pre, size_t post,
                             const ScrDynPath *path, const char *want);
 /* The boxed class's display name — error texts across units. */
 const char *scr_dyn_objinst_cls(const ScrDyn *d);
+/* The boxed instance pointer, and only when the instance's OWN class
+ * is `cls` or below it -- what a compiled walker needs before it may
+ * GEP into a class struct through a box. The test is
+ * scr_dyn_objinst_is, so it reads the position out of the instance's
+ * VTABLE and not out of the box's descriptor: a Derived instance in a
+ * Base-typed slot boxes as Base, and the answer must depend on what
+ * the object is, not on the declared type of a slot it passed
+ * through. The interval and not equality because a subclass's layout
+ * opens with its base chain's fields as an identical prefix -- which
+ * buys nothing yet (every descriptor that reaches here has pre ==
+ * post) and costs nothing, being the predicate instanceof already
+ * uses. NULL for every other kind, for a position outside the
+ * interval, and for a NULL box or descriptor; never throws. */
+void *scr_dyn_objinst_ptr_of(const ScrDyn *d, const ScrDynClass *cls);
 /* The loud ladder for every operation the box has no layout to answer
  * (keyed access, calls, iteration, JSON, structuredClone, inspect,
  * String()): "<what> on a dynamic <Class> is not supported yet". Always
