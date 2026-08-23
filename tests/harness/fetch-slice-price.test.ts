@@ -33,8 +33,8 @@
  * BEHAVIOUR against Node v25.9.0 on both backends across 64 compared
  * cells; this file only proves the FENCES moved and stayed moved.
  *
- * WHAT STILL BLOCKS THE ROW — three things, each named at its line, and
- * none of them an HTTP client:
+ * WHAT STILL BLOCKS THE ROW — two things, each named at its line, and
+ * neither of them an HTTP client:
  *
  *   1. `RequestInit` has no static representation (SC2011). It is the one
  *      remaining member type inside `typeof fetch`, and it is what this
@@ -42,15 +42,20 @@
  *   2. `Request` likewise (SC2009 / SC0001 by lane) — it rides in
  *      `typeof fetch`'s INPUT union under `@types/node`, which is why it
  *      is part of the row even though zapo never constructs one.
- *   3. `fetch` AS A VALUE (SC2020). zapo writes `options.fetch ?? fetch`
- *      and then CALLS the result, so even with every type mapped the
- *      site needs a builtin to have a first-class closure form, which
- *      nothing in this compiler has.
+ *
+ * The third used to be `fetch` AS A VALUE, and it CLOSED: a builtin now
+ * has a first-class closure form (lower-fnvalue.ts), so that row has
+ * changed sides and must keep compiling. It does not close zapo's own
+ * line, because `options.fetch ?? fetch` needs the FIELD to be typed
+ * `typeof fetch` and that type still refuses through blocker 1.
  *
  * (And a fourth, outside the fetch family entirely: the same function
  * writes `(init as { dispatcher?: unknown }).dispatcher = dispatcher`,
  * which is SC1090 "assignment to non-variables" — an assignment-target
- * feature that has nothing to do with fetch.)
+ * feature that has nothing to do with fetch. MEASURED on a reduction of
+ * that function with the record and the func type made mappable: it is
+ * the ONLY refusal left in the body, so the price of the row is
+ * blockers 1 and 2 plus this one, not three more.)
  *
  * Every answer below was cross-checked against the same reductions
  * compiled next to a tsconfig adopting this repo's `@types/node`; where
@@ -106,16 +111,6 @@ const BLOCKERS: readonly Row[] = [
     fragments: ["Cannot find name 'Request'", "which does not compile"],
     src: optionsRecord("readonly hook?: (input: Request) => Promise<string>"),
   },
-  {
-    // The third blocker, and the one no type mapping can reach: a
-    // builtin has no closure form here.
-    name: "fetch as a VALUE, which zapo's `options.fetch ?? fetch` needs",
-    codes: ["SC2020", "SC1090"],
-    fragments: ["has no scriptc lowering yet", "is not supported yet"],
-    src:
-      "const g = fetch\nasync function go(): Promise<void> {\n" +
-      "  const r = await g('http://example.com')\n  console.log(r.status)\n}\nvoid go()\n",
-  },
 ];
 
 /** Rows that HAVE closed. A closed fence does not just leave this file —
@@ -151,6 +146,24 @@ const CLOSED: readonly { name: string; src: string; provedBy: string }[] = [
       "  console.log(r.headers.get('content-type'))\n" +
       "  console.log((await r.text()).length)\n}\n" +
       "void go().catch(() => { console.log('rejected') })\n",
+  },
+  {
+    // The third blocker, and the one no type mapping could reach: a
+    // builtin had no closure form here. It has one now -- an interned
+    // zero-capture closure over a synthesized module function, the
+    // shape String/Number/Boolean already used -- so this row changed
+    // sides and now has to keep COMPILING.
+    //
+    // It does NOT close zapo's own line. `options.fetch ?? fetch`
+    // needs the FIELD to be typed `typeof fetch`, and that type still
+    // refuses through RequestInit -- the BLOCKED row above.
+    name: "fetch as a VALUE",
+    provedBy:
+      "tests/harness/builtin-fn-value.test.ts (38 fetch cells against Node, both backends) " +
+      "and tests/corpus/6020, 6021",
+    src:
+      "const g = fetch\nasync function go(): Promise<void> {\n" +
+      "  const r = await g('http://example.com')\n  console.log(r.status)\n}\nvoid go()\n",
   },
 ];
 
