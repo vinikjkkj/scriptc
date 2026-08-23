@@ -23,10 +23,12 @@
  */
 #include "scr_runtime.h"
 
+#include <errno.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 /* Live dyn-node count for the RC audit lane (-DSCR_RC_AUDIT); same contract
  * as scr_str_live_count in scr_string.c. */
@@ -2011,6 +2013,70 @@ static bool scr_require_import_key_matches(const ScrStr *scope, const ScrStr *s)
   }
   return false;
 }
+/* Can the binary PROVE that a relative or absolute specifier resolves to
+ * nothing?
+ *
+ * This is the one specifier class whose answer is genuinely a filesystem
+ * question — Node's own answer for `require("./x")` is different on two
+ * machines — so the honest compiled answer is to ask the same question,
+ * and the honest LINE is: this reads whether a path EXISTS and never
+ * reads a byte of any file. Nothing is loaded, parsed or evaluated; a
+ * path that IS there still fences, because handing it back means the
+ * module's exports as a value. Only ABSENCE is proven here, and absence
+ * is exactly what Node's catchable MODULE_NOT_FOUND reports.
+ *
+ * Three guards keep every failure LOUD:
+ *
+ *  1. The REQUIRING FILE must itself still be where the build recorded
+ *     it. A binary shipped away from its sources answers `false` for
+ *     everything and keeps the refusal it has today — the alternative
+ *     would be telling such a program that a module the binary CONTAINS
+ *     is missing, which is the silent direction.
+ *  2. Non-ASCII bytes in either path fence. `stat` is the ANSI entry
+ *     point on Windows, and a path it cannot spell would come back
+ *     "missing" for a file that is right there.
+ *  3. A stat that fails for any reason OTHER than "no such entry"
+ *     fences: a permission error is not a proof of absence.
+ *
+ * The candidate set is Node's LOAD_AS_FILE list (the path VERBATIM, then
+ * .js/.json/.node) widened with .mjs/.cjs, and any DIRECTORY at the path
+ * counts as present because LOAD_AS_DIRECTORY would then have a manifest
+ * or an index to find. Widening can only ever add a fence. */
+static bool scr_require_path_absent(const ScrStr *from, const ScrStr *s) {
+  if (from->len == 0 || s->len == 0) return false;
+  for (size_t i = 0; i < from->len; i++) if ((unsigned char)from->data[i] >= 0x80u) return false;
+  for (size_t i = 0; i < s->len; i++) if ((unsigned char)s->data[i] >= 0x80u) return false;
+  static const char *const exts[] = { "", ".js", ".json", ".node", ".mjs", ".cjs" };
+  size_t dirlen = from->len;
+  while (dirlen > 0 && from->data[dirlen - 1] != '/' && from->data[dirlen - 1] != (char)92) dirlen--;
+  const char c0 = s->data[0];
+  const bool absolute = c0 == '/' || c0 == (char)92 ||
+                        (s->len >= 2 && s->data[1] == ':' &&
+                         ((c0 >= 'A' && c0 <= 'Z') || (c0 >= 'a' && c0 <= 'z')));
+  const size_t base = absolute ? 0 : dirlen;
+  /* '.' and '..' segments are left in the path: every platform this
+   * targets resolves them itself, and a normalizer here would be one
+   * more thing to get wrong. */
+  size_t cap = base + s->len + 8;
+  if (cap < from->len + 1) cap = from->len + 1;
+  char *buf = (char *)malloc(cap);
+  if (buf == NULL) scr_trap("scriptc: out of memory\n");
+  struct stat st;
+  memcpy(buf, from->data, from->len);
+  buf[from->len] = '\0';
+  if (stat(buf, &st) != 0) { free(buf); return false; } /* detached from its sources */
+  if (base > 0) memcpy(buf, from->data, base);
+  memcpy(buf + base, s->data, s->len);
+  for (size_t i = 0; i < sizeof exts / sizeof exts[0]; i++) {
+    size_t elen = strlen(exts[i]);
+    memcpy(buf + base + s->len, exts[i], elen + 1);
+    errno = 0;
+    if (stat(buf, &st) == 0) { free(buf); return false; } /* something is there */
+    if (errno != ENOENT) { free(buf); return false; }     /* not a proof of absence */
+  }
+  free(buf);
+  return true;
+}
 bool scr_require_verdict(const struct ScrDyn *spec, const ScrStr *roots, const ScrStr *from,
                          const ScrStr *builtins, const ScrStr *scope) {
   const ScrDyn *arg = spec != NULL ? spec : scr_dyn_undefined();
@@ -2087,9 +2153,14 @@ bool scr_require_verdict(const struct ScrDyn *spec, const ScrStr *roots, const S
    * 'data:text/js,1' and 'mylib:sub' all take Node's node_modules walk
    * and all answer MODULE_NOT_FOUND, which the bare arm below gets
    * right. The blanket test fenced all four. */
-  if (c0 == '.' || c0 == '/' || c0 == (char)92) return true;
-  if (s->len >= 2 && s->data[1] == ':' &&
-      ((c0 >= 'A' && c0 <= 'Z') || (c0 >= 'a' && c0 <= 'z'))) {
+  if (c0 == '.' || c0 == '/' || c0 == (char)92 ||
+      (s->len >= 2 && s->data[1] == ':' &&
+       ((c0 >= 'A' && c0 <= 'Z') || (c0 >= 'a' && c0 <= 'z')))) {
+    /* Nothing at any path Node's resolution would try, proven without
+     * reading a byte of any file: Node's answer here is its catchable
+     * MODULE_NOT_FOUND. Anything present, or any doubt at all, keeps the
+     * refusal. */
+    if (scr_require_path_absent(from, s)) { scr_require_throw_not_found(s, from); return true; }
     return true;
   }
   /* The bare specifier's ROOT: "@scope/pkg" or "pkg". A subpath after the
