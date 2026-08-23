@@ -82,12 +82,25 @@ function bindCallOf(n: ts.Node): ts.CallExpression | null {
   return null;
 }
 
+/** Parentheses and TYPE-space wrappers, peeled. A cast changes the static
+ * view and nothing else: the value it wraps is the same object, made at
+ * the same site, with the same name and the same parameter list. Both
+ * walks below peel with this, for the same reason `stdlibGlobalNameOf`
+ * does. */
+function peel(e: ts.Node): ts.Node {
+  let n = e;
+  for (;;) {
+    if (ts.isParenthesizedExpression(n)) n = n.expression;
+    else if (ts.isAsExpression(n) || ts.isSatisfiesExpression(n) || ts.isNonNullExpression(n)) n = n.expression;
+    else return n;
+  }
+}
+
 /** Pure enough to fold away: evaluating it twice, or not at all, is
  * unobservable. The fold emits a literal and never lowers the receiver,
  * so a receiver that could DO something must decline. */
 function isEffectFree(n: ts.Expression): boolean {
-  let e: ts.Expression = n;
-  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  const e = peel(n) as ts.Expression;
   if (ts.isIdentifier(e) || e.kind === ts.SyntaxKind.ThisKeyword) return true;
   if (ts.isStringLiteral(e) || ts.isNumericLiteral(e)) return true;
   if (
@@ -118,8 +131,7 @@ function ownNameOfFunctionNode(d: ts.SignatureDeclaration): string | null {
  * `seen` breaks `var a = b, b = a` cycles, like the two walks in
  * lowerer.ts this one is modelled on. */
 function creationOf(L: Lowerer, node: ts.Node, seen: Set<ts.Symbol>): Creation | null {
-  let n: ts.Node = node;
-  while (ts.isParenthesizedExpression(n)) n = n.expression;
+  const n = peel(node);
 
   const bind = bindCallOf(n);
   if (bind) {
@@ -165,12 +177,11 @@ function creationOf(L: Lowerer, node: ts.Node, seen: Set<ts.Symbol>): Creation |
     // NamedEvaluation: an ANONYMOUS function literal bound straight to a
     // name takes that name. A named one keeps its own, and a value that
     // merely FLOWED here (`const h = g`) keeps g's -- which is why the
-    // rename applies only when the initializer IS the literal.
-    if (
-      inner.kind === "node" &&
-      inner.name === null &&
-      (ts.isArrowFunction(d.initializer) || ts.isFunctionExpression(d.initializer))
-    ) {
+    // rename applies only when the initializer IS the literal. A cast over
+    // the literal is still the literal (`const f = (() => {}) as F` is
+    // `"f"` in Node), which is what the peel is for.
+    const lit = peel(d.initializer);
+    if (inner.kind === "node" && inner.name === null && (ts.isArrowFunction(lit) || ts.isFunctionExpression(lit))) {
       return { kind: "node", node: inner.node, name: d.name.text };
     }
     return inner;
@@ -191,11 +202,8 @@ function creationOf(L: Lowerer, node: ts.Node, seen: Set<ts.Symbol>): Creation |
     if (init === undefined) return null;
     const inner = creationOf(L, init, seen);
     if (inner === null) return null;
-    if (
-      inner.kind === "node" &&
-      inner.name === null &&
-      (ts.isArrowFunction(init) || ts.isFunctionExpression(init))
-    ) {
+    const lit = peel(init);
+    if (inner.kind === "node" && inner.name === null && (ts.isArrowFunction(lit) || ts.isFunctionExpression(lit))) {
       return { kind: "node", node: inner.node, name: n.name.text };
     }
     return inner;
