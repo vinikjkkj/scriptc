@@ -9548,7 +9548,6 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     const site = definePropSlotSiteOf(L, call);
     if (!site) return null;
     const recv = call.arguments[0]!;
-    if (!ts.isIdentifier(recv)) return null;
     const recvIr = L.mapTypeOf(L.typeOf(recv));
     if (recvIr?.kind !== "object") return null;
     const info = L.classes.get(recvIr.className);
@@ -9559,20 +9558,30 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     if (!fieldType || fieldType.kind !== "union") return null;
     const undefTag = L.armTag(fieldType.unionId, UNDEFINED_T);
     if (undefTag < 0) return null;
-    // The receiver reads through its OWN local slot rather than lowering
-    // three times: the store, the guard's read and the result are one
-    // borrow of one binding, which is also why a bare identifier is the
-    // only admitted receiver.
-    const local = L.resolveLocal(recv);
-    if (!local || !typeEquals(local.type, recvIr)) return null;
+    // The receiver reads through ONE slot rather than lowering three
+    // times: the store, the guard's read and the result are one borrow
+    // of one binding. It used to be the receiver's OWN local, which
+    // declined a receiver that is not one — and a module-level
+    // `const c = new C()` is a GLOBAL, so the whole spelling
+    //
+    //     const c = new C()
+    //     Object.defineProperty(c, KS, { value, enumerable: false,
+    //       configurable: false, writable: false })
+    //
+    // refused at top level and lowered inside a function, measured on
+    // main. A hidden local (the run-time table's %dpRecv, same reason)
+    // admits both and re-evaluates nothing.
     const loc = locOf(call);
-    const obj = (): IrExpr => ({ kind: "varRef", localId: local.id, type: local.type, loc });
+    const local = ts.isIdentifier(recv) ? L.resolveLocal(recv) : null;
+    const slot = local && typeEquals(local.type, recvIr) ? local : L.declareHiddenLocal("%dpRecv", recvIr);
+    const bind: IrStmt[] = slot === local ? [] : [{ kind: "varDecl", localId: slot.id, init: L.lowerExpr(recv), loc }];
+    const obj = (): IrExpr => ({ kind: "varRef", localId: slot.id, type: recvIr, loc });
     const value = L.lowerExprExpecting(site.value, fieldType);
     const set: IrStmt = { kind: "fieldSet", obj: obj(), className: recvIr.className, field, value, loc };
     if (process.env["SCRIPTC_DEFPROP_WHY"]) {
       process.stderr.write(`[defprop] write ${recvIr.className}.${field} at ${loc.file}:${loc.start}\n`);
     }
-    return {
+    const guarded: IrExpr = {
       kind: "ternary",
       cond: {
         kind: "unionIsTag",
@@ -9583,11 +9592,12 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         type: BOOL,
         loc,
       },
-      then: nodeThrowExpr(1, "", `Cannot redefine property: ${field}`, local.type, loc),
-      else_: { kind: "seqExpr", stmts: [set], result: obj(), type: local.type, loc },
-      type: local.type,
+      then: nodeThrowExpr(1, "", `Cannot redefine property: ${field}`, recvIr, loc),
+      else_: { kind: "seqExpr", stmts: [set], result: obj(), type: recvIr, loc },
+      type: recvIr,
       loc,
     };
+    return bind.length === 0 ? guarded : { kind: "seqExpr", stmts: bind, result: guarded, type: recvIr, loc };
   }
 
 /** `Object.defineProperty(target, key, descriptor)` over a
@@ -9667,16 +9677,21 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
    * lowering, and it is `cls.propsHas` in the `in` path that keeps it
    * true now that it does.
    *
-   * STATEMENT position only, and a BARE IDENTIFIER receiver only, for
-   * the hidden-slot lowering's two reasons: the call's value is the
-   * receiver at a laundered type nothing needs, and the receiver is read
-   * three times (ensure's load, ensure's store, define's load) out of
-   * one local rather than lowered three times. */
+   * STATEMENT position only, for the hidden-slot lowering's reason: the
+   * call's value IS the receiver, and in expression position that value
+   * would have to be produced at the checker's type for the call, which
+   * is not what the binding holds. The receiver itself is any
+   * expression — it is lowered ONCE into a hidden local and read three
+   * times from there (ensure's load, ensure's store, the define's
+   * load). */
   function lowerDefinePropClassTable(L: Lowerer, call: ts.CallExpression): IrExpr | null {
     if (call.parent === undefined || !ts.isExpressionStatement(call.parent)) return null;
     if (definePropTableSiteOf(L, call) === null) return null;
+    // ANY receiver expression, not just a bare identifier: it is lowered
+    // ONCE into a hidden local and read from there, so an element access
+    // (`xs[0]`) or a member read costs no re-evaluation and keeps JS's
+    // order — target, then key, then descriptor, all before the define.
     const recv = call.arguments[0]!;
-    if (!ts.isIdentifier(recv)) return null;
     const recvIr = L.mapTypeOf(L.typeOf(recv));
     if (recvIr?.kind !== "object") return null;
     const info = L.classes.get(recvIr.className);

@@ -389,6 +389,14 @@ export interface GenericClassInfo {
    * the bindings this scan runs without. */
   function receiverClassDeclOf(L: Lowerer, recv: ts.Expression): ts.ClassLikeDeclaration | null {
     if (!ts.isIdentifier(recv)) return null;
+    return receiverClassDeclOfAny(L, recv);
+  }
+
+  /** The same resolution without the bare-identifier requirement. The
+   * SYMBOL-slot recognizer wants the identifier — its write is a field
+   * store through one local — but the run-time property TABLE lowers any
+   * receiver, because it binds one to a hidden local first. */
+  function receiverClassDeclOfAny(L: Lowerer, recv: ts.Expression): ts.ClassLikeDeclaration | null {
     // The CHECKER's type, never L.typeOf: the scan runs before any lowering
     // (so the narrowing maps typeOf consults are empty) but the recognizer
     // is asked again at the write site with them live, and the two must
@@ -488,7 +496,7 @@ export interface GenericClassInfo {
       while (ts.isParenthesizedExpression(half)) half = half.expression;
       if (!ts.isArrowFunction(half)) return null;
     }
-    const d = receiverClassDeclOf(L, call.arguments[0]!);
+    const d = receiverClassDeclOfAny(L, call.arguments[0]!);
     if (process.env["SCRIPTC_DEFPROP_WHY"]) process.stderr.write(`[defprop] cand recvDecl=${d ? (d.name?.text ?? "?") : "null"}\n`);
     return d;
   }
