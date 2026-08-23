@@ -11,6 +11,7 @@ import { enforceLibBoundary } from "./lib-boundary.js";
 import { recordKeyReadRow } from "./keyread-census.js";
 import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, isCjsWholeExportAssign, isJsSourceFile, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
 import { COMPOUND_ASSIGN_OPS, CompoundOp, STR_METHODS, UNSUPPORTED_STMT, isStdlibMember, sideEffectFreeOptionValue, stdlibGlobalAliasDecl, stdlibGlobalNameOf } from "./surfaces.js";
+import { builtinFnValueDeclType } from "./lower-fnvalue.js";
 import { isProvenanceSourceFile } from "../provenance-registry.js";
 import { ambientUndefVarRootOf, lowerImportEquals, nsUndefRead, nsWritableTarget, trapDeclRootOf } from "./lower-namespaces.js";
 import { expandoWritableTarget, lowerExpandoAssignStmt } from "./lower-expando.js";
@@ -4545,7 +4546,18 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       // keeps the declared type: a later assignment could pick another arm.
       (!isLet && init.type.kind === "func" && L.checker.getCallSignatures(L.typeOf(decl.name)).length > 1
         ? init.type
-        : null);
+        : null) ??
+      // `const f = fetch` — a BUILTIN in value position. Same argument as
+      // the overload arm above, one step further out: the initializer
+      // lowered to a real function value (the interned builtin closure),
+      // while the DECLARED type is the builtin's own signature, which maps
+      // nowhere — fetch's `init` parameter is a RequestInit, and there is
+      // no RequestInit value in this compiler. The slot takes the value's
+      // type; a program that wrote its OWN annotation never reaches here
+      // (mapTypeOf answered above, and a mismatch is a loud type error at
+      // the assignment). Keyed on the initializer's shape, so no other
+      // declaration in the program can be affected. See lower-fnvalue.ts.
+      (!isLet && init.type.kind === "func" ? builtinFnValueDeclType(L, decl) : null);
     // A JS `let x = {}`: TS's empty-object-literal type admits ANY later
     // non-nullish assignment (`envs = {}`, later `envs =
     // Object.fromEntries(...)` — tsc accepts every such write, since
