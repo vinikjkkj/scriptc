@@ -253,6 +253,12 @@ export class CEmitter {
    * closure this maps to: one per program, so two reads of the global
    * compare equal the way they do in a browser. */
   readonly wsCtors = new Map<string, string>();
+  /** Some wsCtor wrapper DELEGATES its init bag to a program dispatcher,
+   * so the TU names scr_ws_disp_global_new and needs that unit's header.
+   * Set by emit-ws.ts while it emits the wrapper, which is the only place
+   * that knows -- the gate in index.ts answers the same question off the
+   * IR, and the two must agree or the link fails naming no gate. */
+  wsDispatchUsed = false;
   /** setTimeout appeared somewhere: main must run the event loop even in
    * programs with no async functions. */
   usesTimers = false;
@@ -933,6 +939,7 @@ export class CEmitter {
       // SCR_WSG_* event codes. Only when the program took the global:
       // the unit is not in a link line that never did.
       ...(this.wsCtors.size > 0 ? [`#include "scr_ws_global.h"`] : []),
+      ...(this.wsDispatchUsed ? [`#include "scr_ws_dispatch.h"`] : []),
       `#include <math.h>`,
       `#include <stdio.h>`,
       `#include <stdlib.h>`,

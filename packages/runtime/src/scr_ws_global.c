@@ -65,6 +65,12 @@ struct ScrWsGlobal {
   /* Set the moment the socket is finished, so a second message already
    * parsed out of the same read cannot fire after it. */
   bool dead;
+  /* The DELEGATED transport's state, when the init bag carried a
+   * `dispatcher`. Non-NULL means `c` is BORROWED: the handler this
+   * program's dispatcher was given may outlive the API object, so the
+   * client belongs to that state and not to this handle. */
+  void *disp;
+  const ScrWsDispOps *disp_ops;
 };
 
 static void wsg_free_now(ScrWsGlobal *g);
@@ -306,14 +312,34 @@ ScrStr *scr_ws_headers_block(const ScrMap *headers) {
   return out;
 }
 
+/* The one callback table, shared by both transports so a dialled socket
+ * and a delegated one reach this unit's state machine identically. */
+static const ScrWsClientCallbacks wsg_cb = {
+    .on_open = &wsg_on_open,
+    .on_message = &wsg_on_message,
+    .on_close = &wsg_on_close,
+    .on_error = &wsg_on_error,
+};
+
+const ScrWsClientCallbacks *scr_ws_global_client_cbs(void) { return &wsg_cb; }
+
+ScrWsGlobal *scr_ws_global_new_detached(ScrWsGlobalFire fire) {
+  ScrWsGlobal *g = calloc(1, sizeof *g);
+  if (g == NULL) return NULL;
+  g->rc = 1;
+  g->fire = fire;
+  return g;
+}
+
+void scr_ws_global_adopt(ScrWsGlobal *g, ScrWsClient *c, void *disp, const ScrWsDispOps *ops) {
+  g->c = c;
+  g->disp = disp;
+  g->disp_ops = ops;
+}
+
 ScrWsGlobal *scr_ws_global_new(ScrStr *url, ScrStr *protocols, ScrStr *headers,
                                ScrWsGlobalFire fire) {
-  static const ScrWsClientCallbacks cb = {
-      .on_open = &wsg_on_open,
-      .on_message = &wsg_on_message,
-      .on_close = &wsg_on_close,
-      .on_error = &wsg_on_error,
-  };
+  const ScrWsClientCallbacks cb = wsg_cb;
   ScrStr *norm = wsg_normalize_url(url);
   if (norm == NULL) return NULL; /* SyntaxError pending */
   ScrWsGlobal *g = calloc(1, sizeof *g);
@@ -452,7 +478,17 @@ double scr_ws_global_ready_state(const ScrWsGlobal *g) {
 /* ── lifetime ───────────────────────────────────────────────────────── */
 
 static void wsg_free_now(ScrWsGlobal *g) {
-  if (g->c != NULL) {
+  if (g->disp != NULL) {
+    /* The delegated transport owns the client (its handler may outlive
+     * this object), so the teardown goes through the ops rather than
+     * freeing a pointer this handle only borrows. */
+    void *d = g->disp;
+    const ScrWsDispOps *ops = g->disp_ops;
+    g->disp = NULL;
+    g->c = NULL;
+    ops->invalidate(d);
+    ops->release(d);
+  } else if (g->c != NULL) {
     scr_ws_client_free(g->c); /* defers itself if a callback is on the stack */
     g->c = NULL;
   }

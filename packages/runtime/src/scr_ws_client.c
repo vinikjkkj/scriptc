@@ -266,6 +266,65 @@ ScrWsClient *scr_ws_client_connect(ScrStr *url, ScrStr *protocols,
   return c;
 }
 
+/* ── the delegated transport ────────────────────────────────────────── */
+
+/* Everything scr_ws_client_connect does that is NOT the dial: the handle
+ * and the conn driver, expecting the same handshake response. Splitting
+ * it here rather than duplicating it is the point -- a delegated upgrade
+ * that skipped scr_ws_conn_recv's validation would be a WebSocket whose
+ * accept key nobody checked. */
+ScrWsClient *scr_ws_client_detached(const char *expected_accept,
+                                    const ScrWsClientCallbacks *cb, void *user) {
+  static const ScrWsCallbacks conn_cb = {
+      .on_open = &wsc_on_open,
+      .on_message = &wsc_on_message,
+      .on_close = &wsc_on_close,
+      .on_error = &wsc_on_error,
+      .want_write = &wsc_want_write,
+  };
+  ScrWsClient *c = calloc(1, sizeof *c);
+  if (c == NULL) return NULL;
+  c->cb = *cb;
+  c->user = user;
+  c->ready = SCR_WS_CONNECTING;
+  uint8_t mask_seed[4];
+  arc4random_buf(mask_seed, sizeof mask_seed);
+  c->conn = scr_ws_conn_new(expected_accept, &conn_cb, c, mask_seed);
+  if (c->conn == NULL) {
+    free(c);
+    return NULL;
+  }
+  return c;
+}
+
+bool scr_ws_client_attach(ScrWsClient *c, ScrNetSocket *sock) {
+  if (c == NULL || sock == NULL || c->sock != NULL) return false;
+  c->sock = scr_net_sock_retain(sock);
+  /* The same two registrations the dialled path makes, in the same
+   * order. The socket is already connected and already upgraded, so
+   * there is nothing to buffer and no TLS leg to install -- whatever the
+   * dispatcher connected through, it connected through. */
+  scr_net_sock_set_native_reader(c->sock, &wsc_data, &wsc_eof, &wsc_eof, c, NULL);
+  scr_net_sock_set_native_events(c->sock, NULL, &wsc_err);
+  return true;
+}
+
+bool scr_ws_client_attached(const ScrWsClient *c) {
+  return c != NULL && c->sock != NULL;
+}
+
+void scr_ws_client_feed(ScrWsClient *c, const uint8_t *data, size_t len) {
+  if (c == NULL || c->dead || len == 0) return;
+  wsc_data(c, (const char *)data, len);
+}
+
+void scr_ws_client_fail(ScrWsClient *c, const char *msg) {
+  if (c == NULL || c->dead) return;
+  c->depth++;
+  wsc_fail(c, msg);
+  if (--c->depth == 0 && c->want_free) wsc_free_now(c);
+}
+
 /* ── the caller's side ──────────────────────────────────────────────── */
 
 void scr_ws_client_send(ScrWsClient *c, const uint8_t *data, size_t len, bool is_text) {

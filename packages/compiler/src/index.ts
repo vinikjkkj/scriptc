@@ -22,7 +22,7 @@ import {
 import { validateSidecar } from "./library/sidecar-validate.js";
 import { entryFunctionExports, type EntryExportInfo } from "./frontend/lib-exports.js";
 import { entryContractFacts, type ContractFacts } from "./frontend/lib-contract.js";
-import { moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsBuiltin, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesBigInt,
+import { moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsBuiltin, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesBigInt,
   moduleUsesAsym, moduleUsesCipher, moduleUsesZlib, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc } from "./ir/nodes.js";
 import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
@@ -901,6 +901,12 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
       // net AND tls in cc.ts -- the codec dials over scr_net, and wss://
       // is most of what a WebSocket is for.
       wsGlobal: moduleUsesWsGlobal(lowered.module),
+      // The link switch for scr_ws_dispatch.c: a wsCtor whose init bag
+      // carries a dispatcher this compiler DELEGATES to. Apart from the
+      // wsGlobal gate on purpose -- the delegation drags the whole
+      // checked-dynamic object surface, and a WebSocket program with no
+      // dispatcher must not pay for it.
+      wsDispatch: moduleUsesWsDispatch(lowered.module),
       // The link switch for scr_abort.c: an abortSignal-typed slot
       // anywhere on the IR. The unit was unconditional until the value
       // surface made its size matter -- see cc.ts's CcOptions comment.
