@@ -746,12 +746,13 @@ ScrStr *scr_insp_key(ScrStr *k) {
  * holds both families, so the filter is explicit. An ACCESSOR is NOT
  * invoked: Node prints `[Getter]` / `[Setter]` / `[Getter/Setter]` and
  * calls nothing, and calling it here would be a side effect at a print. */
-void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth) {
+void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth, bool index_keys) {
   if (tbl == NULL || tbl->kind != SCR_DYN_OBJ) return;
   size_t *ord = scr_dyn_obj_key_order(tbl);
   for (size_t i = 0; i < tbl->v.obj.len; i++) {
     const ScrDynEntry *ent = &tbl->v.obj.entries[ord ? ord[i] : i];
     const ScrDyn *q = ent->value;
+    if (scr_dyn_obj_key_is_index(ent->key, ent->key_len) != index_keys) continue;
     if (q->kind != SCR_DYN_ARR || q->v.arr.len < 5) continue;
     if (!scr_dyn_truthy(q->v.arr.items[4])) continue; /* non-enumerable */
     InspBuf eb = {0};

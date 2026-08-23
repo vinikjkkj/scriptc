@@ -1235,7 +1235,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "insp.jsval": { argTypes: [JSVAL, F64, F64], result: STRING },
   "insp.begin": { argTypes: [F64], result: VOID },
   "insp.entry": { argTypes: [STRING, BOOL], result: VOID },
-  "insp.clsProps": { argTypes: [DYN, F64, F64], result: VOID },
+  "insp.clsProps": { argTypes: [DYN, F64, F64, BOOL], result: VOID },
   // Circular references: the receiver slot is program-dependent (any
   // cycle-capable record/array/map/class type — the insp.error precedent).
   "insp.circCheck": { argTypes: [null], result: F64 },

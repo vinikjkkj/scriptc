@@ -4512,6 +4512,11 @@ bool scr_cls_props_has(const ScrDyn *tbl, const ScrStr *key) {
  * before its depth gate: Node prints `C {}` for an object with no own
  * enumerable keys whatever the depth budget says, and a class whose only
  * possible keys are run-time ones cannot answer that at compile time. */
+bool scr_dyn_obj_key_is_index(const char *key, size_t len) {
+  double ignored = 0;
+  return scr_dyn_key_is_index(key, len, &ignored);
+}
+
 double scr_cls_props_count(const ScrDyn *tbl) {
   if (tbl == NULL || tbl->kind != SCR_DYN_OBJ) return 0;
   size_t n = 0;

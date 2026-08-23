@@ -4207,8 +4207,16 @@ bool scr_cls_props_define(ScrDyn *tbl, const ScrStr *key, ScrDyn *desc,
                           bool declared, const ScrStr *cname);
 bool scr_cls_props_has(const ScrDyn *tbl, const ScrStr *key);
 double scr_cls_props_count(const ScrDyn *tbl);
+/* The spec's array-index test over a property key — a canonical decimal
+ * string with no leading zero, strictly below 2^32-1. Public because
+ * util.inspect has to interleave the run-time table's keys with a
+ * compiled class's DECLARED fields, and OrdinaryOwnPropertyKeys puts
+ * every index key ahead of every string key across the WHOLE object:
+ * Node prints `C { '2': [Getter], '10': [Getter], a: 1, z: [Getter] }`
+ * for a class whose only declared field is `a`. */
+bool scr_dyn_obj_key_is_index(const char *key, size_t len);
 ScrDyn *scr_cls_props_get(const ScrDyn *tbl, const ScrStr *key);
-void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth);
+void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth, bool index_keys);
 
 /* scriptc's INTERNAL-SLOT pair — the `slots` member's whole API. It is
  * deliberately tiny and deliberately NOT part of any property protocol:

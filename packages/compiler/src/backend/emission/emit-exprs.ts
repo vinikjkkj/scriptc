@@ -7024,7 +7024,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "insp.entry":
             return finish(`scr_insp_entry(${arg(0)}, ${arg(1)})`);
           case "insp.clsProps":
-            return finish(`scr_cls_props_inspect(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+            return finish(`scr_cls_props_inspect(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "insp.key":
             return finish(`scr_insp_key(${arg(0)})`);
           case "insp.moreItems":

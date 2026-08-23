@@ -820,9 +820,21 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       );
       const get = (field: string, type: IrType): IrExpr => ({ kind: "fieldGet", obj: v(), className: t.className, field, type, loc });
       const propsRef = (): IrExpr => get(CLASS_PROPS_FIELD, DYN);
-      const propsEntries = (): IrStmt => ({
+      // TWO calls, not one, and the declared fields go between them:
+      // OrdinaryOwnPropertyKeys lists every ARRAY-INDEX key ahead of
+      // every string key across the WHOLE object, so a table holding
+      // "2" and "10" prints them BEFORE a field the constructor
+      // assigned. Node: `C { '2': [Getter], '10': [Getter], a: 1, z:
+      // [Getter] }`; one call answered `C { a: 1, '2': …` — the right
+      // keys in the wrong order, which is a WRONG answer, not a partial
+      // one.
+      const propsEntries = (indexKeys: boolean): IrStmt => ({
         kind: "exprStmt",
-        expr: { kind: "libCall", fn: "insp.clsProps", args: [propsRef(), rPlus1(), d()], type: { kind: "void" }, loc },
+        expr: {
+          kind: "libCall", fn: "insp.clsProps",
+          args: [propsRef(), rPlus1(), d(), boolLit(indexKeys, loc)],
+          type: { kind: "void" }, loc,
+        },
         loc,
       });
       if (visible.length === 0 && !propsTable) {
@@ -848,6 +860,7 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
         });
       }
       body.push(depthGate(`[${display}]`), ...begin());
+      if (propsTable) body.push(propsEntries(true));
       // def.fields carries layout order: the base chain first, then own —
       // exactly the own-property insertion order of a constructor that
       // assigns in declaration order (SEMANTICS.md 36's stance). SYMBOL-
@@ -870,7 +883,7 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       // that IS Node's order: the table can only be filled once the
       // constructor has run, so every key in it was inserted later than
       // every field the constructor assigned.
-      if (propsTable) body.push(propsEntries());
+      if (propsTable) body.push(propsEntries(false));
       body.push(ret(end(str("", loc), str(`${display} {`, loc), str("}", loc), false, boolLit(false, loc))));
       break;
     }
