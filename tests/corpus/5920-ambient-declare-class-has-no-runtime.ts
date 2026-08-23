@@ -14,17 +14,14 @@
 // so a future widening cannot fix one and re-break the other.
 
 // COVERAGE BOUNDARY, stated so nobody reads this file as covering more than
-// it does: the sibling shape `class D extends <ambient-undefined class>` is
-// STILL WRONG at the revision this program was added. Node throws
-// `ReferenceError: Base is not defined` when the derived class STATEMENT
-// evaluates (before anything after it in the module runs); the compiler
-// prints the statements after it and constructs a fabricated instance. It is
-// deliberately NOT asserted here, because asserting it would make this file
-// red rather than make the compiler right. The machinery to fix it already
-// exists and is named in estado-seven.md: the ambient-decorator path builds a
-// stub `info` with `classDecorators.shapes = [{ kind: "ambientThrow", name }]`
-// and the emitter puts `nsUndefRead` in the class's %init, which unwinds
-// before any later statement — the exact semantics the extends edge needs.
+// it does: this program covers the `new <ambient class>` edge. The sibling
+// shape `class D extends <ambient-undefined class>` -- which was STILL
+// WRONG when this program was added, and said so here -- is now covered by
+// 5930 (the throw, run) and 5931 (the shapes it must NOT fire on). Node
+// throws `ReferenceError: <name> is not defined` when the DERIVED CLASS
+// STATEMENT evaluates, so nothing below it runs; the compiler now compiles
+// exactly that throw for a non-generic class declaration, and refuses
+// loudly for the shapes the throw shell does not cover.
 
 declare const MissingCtorValue: { new (x: number): { readonly y: number } };
 declare class MissingClass {
