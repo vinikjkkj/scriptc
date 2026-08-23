@@ -2,7 +2,7 @@
 //
 // A non-generic class DECLARATION whose `extends` clause names a top-level
 // `declare class` nothing defines COMPILES — to exactly the ReferenceError
-// Node throws at the class statement (tests/corpus/5940-…). Everything
+// Node throws at the class statement (tests/corpus/5950-…). Everything
 // here is one of the shapes that does NOT take that shell, plus the value
 // uses of a class whose statement provably throws; each must say which
 // ambient name is responsible, and no two of them may collapse into the

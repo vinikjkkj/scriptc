@@ -1,5 +1,5 @@
 // @exit: 1
-// The other half of 5944: when the LEFT operand of an ambient `instanceof`
+// The other half of 5954: when the LEFT operand of an ambient `instanceof`
 // has effects, JavaScript performs them BEFORE evaluating the right one
 // and dying there. So the counter must reach 1 and its line must print.
 //

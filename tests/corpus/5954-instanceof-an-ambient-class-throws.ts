@@ -6,7 +6,7 @@
 // instance-of check happens. There is no boolean answer to this
 // expression at all.
 //
-// WHY THIS PROGRAM EXISTS, and why it is a SEPARATE file from 5942/5943:
+// WHY THIS PROGRAM EXISTS, and why it is a SEPARATE file from 5952/5953:
 // `instanceof` is the one operator whose lowering is allowed to skip its
 // right operand. The static fold decides the answer off the class graph —
 // "these two classes are unrelated, so always false" — and an ambient
