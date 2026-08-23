@@ -540,7 +540,7 @@ static void scr_stream_error_or_destroy(ScrStream *s, ScrError *err) {
       st->error_scheduled = true;
       scr_st_tick(s, SCR_ST_ERROR, scr_error_retain(err), NULL);
     }
-    scr_stream_settle_next(s); /* a parked for-await rejects with the error */
+    scr_stream_settle_next(s); /* a parked for-await takes its wake tick */
   }
 }
 
@@ -828,7 +828,7 @@ static bool scr_stream_add_chunk(ScrStream *s, ScrBytes *chunk, bool front) {
     if (st->r.need_readable) scr_stream_emit_readable_nt(s);
   }
   if (!front) scr_stream_maybe_read_more(s);
-  scr_stream_settle_next(s); /* a parked for-await consumes buffered content */
+  scr_stream_settle_next(s); /* a parked for-await takes its wake tick */
   return !st->r.ended && (st->r.length < st->r.hwm || st->r.length == 0);
 }
 
@@ -1284,10 +1284,14 @@ static void scr_stream_next_fulfill(ScrStream *s, ScrPromise *w /*moves*/, void 
   }
 }
 
-/* Settle the parked waiter if the stream's state can answer now: an
- * error rejects, buffered content fulfills (one whole entry in from
- * mode, the whole buffer otherwise — Node's iterator read()), EOF
- * fulfills the sentinel. Called from push/eof/destroy transitions. */
+/* The iterator's read(), and the gate in front of it. Called from every
+ * push/eof/destroy transition, but only the two windows that ARE the
+ * read — inside the loop's own next_chunk, or on the wake tick that
+ * emitReadable_ stands for — go past the gate; every other caller just
+ * queues that wake. Past it: an error rejects, buffered content fulfills
+ * (one whole entry in from mode, the whole buffer otherwise — Node's
+ * iterator read()), EOF fulfills the sentinel, and the settlement itself
+ * lands the turns Node's async-generator wrapper costs. */
 static void scr_stream_settle_next(ScrStream *s) {
   ScrStreamState *st = s->st;
   if (!st->r.next_waiter) return;
@@ -1478,7 +1482,7 @@ static bool scr_stream_agen_push(ScrStream *s, void *entry /*moves*/) {
     if (st->r.need_readable) scr_stream_emit_readable_nt(s);
   }
   scr_stream_maybe_read_more(s);
-  scr_stream_settle_next(s); /* a parked for-await consumes it */
+  scr_stream_settle_next(s); /* a parked for-await takes its wake tick */
   return !st->r.ended && (st->r.length < st->r.hwm || st->r.length == 0);
 }
 
@@ -3437,7 +3441,7 @@ static void scr_stream_do_destroy(ScrStream *s, ScrError *err /*borrowed*/) {
   if (st->destroyed || st->destroy_calling) return;
   st->destroyed = true;
   if (err && !st->errored) st->errored = scr_error_retain(err);
-  scr_stream_settle_next(s); /* a parked for-await rejects/finishes */
+  scr_stream_settle_next(s); /* a parked for-await takes its wake tick */
   if (st->r.agen != NULL && !scr_gen_done(st->r.agen)) {
     /* Node's from() gives the stream its own _destroy: 'error'/'close'
      * wait for the source generator to close, so a destroy() mid-stream
