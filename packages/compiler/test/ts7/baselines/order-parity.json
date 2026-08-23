@@ -9218,6 +9218,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5980-fetch-failures-all-reject.ts": {
+   "order": [
+    "<repo>/tests/corpus/5980-fetch-failures-all-reject.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5981-response-and-headers-as-record-members.ts": {
+   "order": [
+    "<repo>/tests/corpus/5981-response-and-headers-as-record-members.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5982-fetch-accepts-a-url-object.ts": {
+   "order": [
+    "<repo>/tests/corpus/5982-fetch-accepts-a-url-object.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
