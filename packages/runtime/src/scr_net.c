@@ -2838,10 +2838,57 @@ static void scr_net_server_settle(ScrNetServer *srv) {
   scr_net_server_unregister(srv);
 }
 
+/* Every drained closing server whose 'close' is DUE, settled now, in
+ * close-REQUEST order (close_seq) rather than registry order — Node emits
+ * 'close' in the order close() was called when several drain in one turn.
+ *
+ * Called at BOTH ends of the sweep, and the leading call is the load-
+ * bearing one. Node's Server.close() on an already-drained server runs
+ * _emitCloseIfDrained, which schedules emitCloseNT on a NEXT TICK: the
+ * 'close' lands before any further I/O is delivered. This runtime has no
+ * per-server tick; the settle is polled out of the sweep. Settling only
+ * at the sweep's END put that 'close' AFTER every socket serviced in the
+ * same pass — after their 'close' events, and after any OTHER server
+ * those sockets drained through the mid-sweep settle below. So a program
+ * that closes a busy server and then a drained one saw the drained one's
+ * 'close' last, where Node emits it first.
+ *
+ * The shape that found it (tests/fixtures/server/cases/http-proxy-pipe,
+ * and the deterministic tests/corpus/6010 witness): proxy.close() with the
+ * request's own connection still up, then backend.close() already drained.
+ * Whether the proxy's connection died in the SAME sweep pass as the
+ * backend's pending settle decided the order, so the program printed
+ * "backend closed" then "proxy closed" most of the time and the reverse
+ * the rest — a silent wrong answer at a rate, invisible to any gate that
+ * runs the case once. Settling first thing in the pass removes the pass
+ * from the question: a 'close' that was already due beats every socket
+ * event the pass is about to deliver, which is exactly what a next tick
+ * buys Node. */
+static void scr_net_settle_due_servers(void) {
+  for (;;) {
+    ScrNetServer *due = NULL;
+    for (ScrNetServer *it = scr_net_servers; it; it = it->next) {
+      if (it->closing && it->nconns == 0 && !it->close_emitted &&
+          (due == NULL || it->close_seq < due->close_seq)) {
+        due = it;
+      }
+    }
+    if (due == NULL) return;
+    scr_net_server_retain(due);
+    scr_net_server_settle(due);
+    scr_net_server_release(due);
+    if (scr_exc_pending()) return;
+  }
+}
+
 /* Sockets first (a dying connection may drain its server), servers after.
  * Every fire checks for a pending exception and bails — the loop surfaces
  * it as an uncaught throw. */
 static void scr_net_sweep(void) {
+  /* Ticks before I/O: a 'close' that came due in an earlier turn fires
+   * before this pass delivers a single socket event (see the helper). */
+  scr_net_settle_due_servers();
+  if (scr_exc_pending()) return;
   scr_net_proto_sweep();
   if (scr_exc_pending()) return;
   ScrNetSocket *sock = scr_net_socks;
@@ -2986,23 +3033,7 @@ static void scr_net_sweep(void) {
     scr_net_server_release(srv);
     srv = next;
   }
-  /* Drained closing servers settle in close-REQUEST order (close_seq),
-   * not registry order — Node emits 'close' in the order close() was
-   * called when several drain in one turn. */
-  for (;;) {
-    ScrNetServer *due = NULL;
-    for (ScrNetServer *it = scr_net_servers; it; it = it->next) {
-      if (it->closing && it->nconns == 0 && !it->close_emitted &&
-          (due == NULL || it->close_seq < due->close_seq)) {
-        due = it;
-      }
-    }
-    if (due == NULL) return;
-    scr_net_server_retain(due);
-    scr_net_server_settle(due);
-    scr_net_server_release(due);
-    if (scr_exc_pending()) return;
-  }
+  scr_net_settle_due_servers();
 }
 
 /* ── the loop hooks (scr_async.c) ────────────────────────────────────── */
