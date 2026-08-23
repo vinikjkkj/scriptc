@@ -188,6 +188,29 @@ const RUNS: readonly Program[] = [
     exit: 0,
   },
   {
+    // The WRITTEN empty specifier, which is a different road to the
+    // same answer than the entry above: a literal is knowable at
+    // compile time, so it never reaches scr_require_verdict, and the
+    // static arm walked node_modules for it instead -- where
+    // join(dir, "node_modules", "") IS the node_modules directory, so
+    // the probe answered "resolvable" and the site refused SC1090
+    // where Node throws a coded TypeError. Both spellings are here
+    // because a test of either alone passes for a compiler that gets
+    // the other wrong.
+    name: "the WRITTEN empty specifier is Node's argument error, not a refusal",
+    src:
+      "try { require('') } catch (e) { console.log(e.code, e instanceof TypeError, e.message) }\n" +
+      "var s = '';\n" +
+      "try { require(s) } catch (e) { console.log(e.code) }\n" +
+      "function f() { return '' }\n" +
+      "try { require(f()) } catch (e) { console.log(e.code) }\n",
+    stdout:
+      "ERR_INVALID_ARG_VALUE true The argument 'id' must be a non-empty string. Received ''\n" +
+      "ERR_INVALID_ARG_VALUE\n" +
+      "ERR_INVALID_ARG_VALUE\n",
+    exit: 0,
+  },
+  {
     // The specifier EXPRESSION evaluates before the resolution fails —
     // the throw must not be hoisted over the argument's side effects.
     name: "the specifier expression runs before the resolution fails",
