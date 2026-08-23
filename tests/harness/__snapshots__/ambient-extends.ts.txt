@@ -1,0 +1,50 @@
+ambient-extends.ts:22:1 - error SC1090: using the class 'Derived' whose extends clause provably throws ('AmbientBase' is an ambient name nothing defines — the class statement crashes before the binding exists, so nothing below it ever runs) are not supported yet
+
+  21 | }
+  22 | new Derived();
+     | ^~~~~~~~~~~~~
+  23 | Derived.s;
+
+ambient-extends.ts:23:1 - error SC1090: using the class 'Derived' whose extends clause provably throws ('AmbientBase' is an ambient name nothing defines — the class statement crashes before the binding exists, so nothing below it ever runs) are not supported yet
+
+  22 | new Derived();
+  23 | Derived.s;
+     | ^~~~~~~~~
+  24 | class UnderDerived extends Derived {}
+
+ambient-extends.ts:24:28 - error SC1090: using the class 'Derived' whose extends clause provably throws ('AmbientBase' is an ambient name nothing defines — the class statement crashes before the binding exists, so nothing below it ever runs) are not supported yet
+
+  23 | Derived.s;
+  24 | class UnderDerived extends Derived {}
+     |                            ^~~~~~~
+  25 | void UnderDerived;
+
+ambient-extends.ts:25:6 - error SC2004: uses of 'UnderDerived' inherit the blocker on its declaration
+
+  24 | class UnderDerived extends Derived {}
+  25 | void UnderDerived;
+     |      ^~~~~~~~~~~~
+  26 | 
+
+  hint: the declaration of 'UnderDerived' did not compile — fix the diagnostic reported there and these sites clear with it
+
+ambient-extends.ts:30:22 - error SC1090: extending the ambient class 'AmbientBase' that nothing defines (Node erases the declaration, so evaluating this 'extends' clause throws ReferenceError: AmbientBase is not defined — a non-generic class declaration compiles to exactly that throw) are not supported yet
+
+  29 | // not with "extending classes not declared in the program".
+  30 | class Box<T> extends AmbientBase {
+     |                      ^~~~~~~~~~~
+  31 |   v: T;
+
+ambient-extends.ts:37:6 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
+
+  36 | }
+  37 | void new Box<number>(3);
+     |      ^~~~~~~~~~~~~~~~~~
+  38 | 
+
+ambient-extends.ts:41:25 - error SC1090: extending the ambient class 'AmbientBase' that nothing defines (Node erases the declaration, so evaluating this 'extends' clause throws ReferenceError: AmbientBase is not defined — a non-generic class declaration compiles to exactly that throw) are not supported yet
+
+  40 | // lowerClassExpressionInfo.
+  41 | const K = class extends AmbientBase {};
+     |                         ^~~~~~~~~~~
+  42 | void K;

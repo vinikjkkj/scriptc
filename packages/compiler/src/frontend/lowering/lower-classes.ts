@@ -201,24 +201,34 @@ export interface ClassInfo {
    * pass (a decorator's return type may name a subclass declared BELOW the
    * class, so analysis cannot run while shapes are still collecting). */
   classDecorators?: ClassDecorationInfo;
-  /** The class's decoration PROVABLY throws before anything else in its
-   * definition evaluates (the first effectful item in TC39 evaluation
-   * order — class decorators, then heritage, then member decorators and
-   * computed keys interleaved — is an AMBIENT decorator name nothing
-   * defines; Node erases the declaration, so the read is a
-   * ReferenceError). The class registers as an empty SHELL: no members
-   * collect (nothing after the throw ever runs — member fences would be
-   * fences on dead code), the %init at the class statement is exactly the
-   * throw, and every VALUE use (new, the class as a value, extends)
+  /** The class's DEFINITION provably throws before anything else in it
+   * evaluates: the first effectful item in TC39 evaluation order — class
+   * decorators, then heritage, then member decorators and computed keys
+   * interleaved — is a name nothing defines, and Node erases the
+   * declaration, so the read is a ReferenceError. `via` says which item:
+   * an AMBIENT DECORATOR name (`@dec` over `declare let dec: any`), or an
+   * `extends` clause naming an ambient `declare class`. Both throw at the
+   * class statement, so both take the same shell.
+   *
+   * The class registers as an empty SHELL: no members collect (nothing
+   * after the throw ever runs — member fences would be fences on dead
+   * code), the %init at the class statement is exactly the throw, and
+   * every VALUE use (new, the class as a value, extends, a static read)
    * fences — the binding never initializes, so compiled code can never
    * legitimately reach one. */
-  decorationThrows?: { name: string };
+  decorationThrows?: { name: string; via: "decoration" | "extends clause" };
 }
 
 /** A decorated class's decoration state (see ClassInfo.classDecorators). */
 export interface ClassDecorationInfo {
-  /** The class-level decorator nodes, source order. */
-  nodes: ts.Decorator[];
+  /** The class-level decorator nodes, source order. The HERITAGE clause
+   * appears here in exactly one shape: the guaranteed-throw shell, whose
+   * single entry pairs with an `ambientThrow` and is used only for its
+   * source location (`extends <ambient class>` throws where the class
+   * statement stands, and no decorator is involved). No analysis path
+   * ever sees it — the shell publishes `shapes`, and analyzeClassDecoration
+   * returns on any info that already has them. */
+  nodes: (ts.Decorator | ts.ExpressionWithTypeArguments)[];
   /** Per-decorator analysis (parallel to `nodes`). `call`: the decorator
    * expression's completed function type — the type its VALUE lowers to
    * and the ABI the application call dispatches — and whether it can
@@ -776,18 +786,57 @@ export const EMITTER_API_MEMBERS: ReadonlySet<string> = new Set([
     return null;
   }
 
-/** The guaranteed decoration THROW of a decorated class, or null. Walks
-   * the class definition's evaluation-order items — class decorators
-   * (source order), the heritage expression, then per member in body
-   * order its decorators and computed key (the verified TC39/tsc-downlevel
-   * order) — and answers the first AMBIENT decorator name, provided every
-   * item BEFORE it is provably effect-free and non-throwing: bare
-   * identifier decorators over defined values (a pure read), an absent /
-   * `null` / bare-identifier heritage, literal or bare-identifier
-   * computed keys. Anything richer (factory calls over defined values,
-   * property-access reads, computed-key calls) stops the proof — the
-   * named fences answer instead. */
-  export function guaranteedDecorationThrow(L: Lowerer, decl: ts.ClassLikeDeclaration,): { name: string; node: ts.Decorator } | null {
+/** The AMBIENT name an `extends` clause reads, or null: the heritage
+   * expression is a bare identifier naming a top-level `declare class`
+   * NOTHING defines. Node erases the declaration, so evaluating the
+   * heritage clause — which happens when the CLASS STATEMENT evaluates,
+   * before any member — throws `ReferenceError: <name> is not defined`.
+   *
+   * WHY IT EXISTS: the ambient class is still COLLECTED like a program
+   * class (ambientUndefinedClassSymbolOf answers at the `new` site, not
+   * at collection), so `L.classBySymbol.get(sym)` FOUND it here and the
+   * derived class inherited a fabricated base. `declare class Base {...}`
+   * followed by `class D extends Base {}` therefore compiled, ran every
+   * statement after the class — static field initializers included, whose
+   * side effects Node never performs — and constructed instances reading
+   * their fields back out of `calloc`. A SILENT wrong answer, exit 0,
+   * where Node exits 1 having printed nothing past the class statement.
+   *
+   * Deliberately narrow, matching the `new` arm's predicate exactly: only
+   * a `declare class` whose parent is the SOURCE FILE, never a .d.ts,
+   * never a stdlib symbol, never a class merged with an implementation.
+   * The `declare const B: { new(): T }` and `declare function` spellings
+   * of a base are NOT accepted here: they never resolved to a ClassInfo,
+   * so they already answer with the loud
+   * `extending classes not declared in the program` refusal — a refusal
+   * standing where a correct answer is available is a separate row, not a
+   * wrong answer, and widening it is not what this fix is for. */
+  export function ambientHeritageThrowNameOf(L: Lowerer, hExpr: ts.Expression): string | null {
+    let e: ts.Expression = hExpr;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    if (!ts.isIdentifier(e)) return null;
+    return ambientUndefinedClassSymbolOf(L, e) !== null ? e.text : null;
+  }
+
+/** The guaranteed DEFINITION throw of a class, or null. Walks the class
+   * definition's evaluation-order items — class decorators (source
+   * order), the heritage expression, then per member in body order its
+   * decorators and computed key (the verified TC39/tsc-downlevel order)
+   * — and answers the first item that provably throws Node's
+   * ReferenceError: an AMBIENT decorator name, or an `extends` clause
+   * naming an ambient `declare class` nothing defines. Every item BEFORE
+   * it must be provably effect-free and non-throwing: bare identifier
+   * decorators over defined values (a pure read), an absent / `null` /
+   * bare-identifier heritage, literal or bare-identifier computed keys.
+   * Anything richer (factory calls over defined values, property-access
+   * reads, computed-key calls) stops the proof — the named fences answer
+   * instead.
+   *
+   * The heritage step answers BOTH ways for a reason: a bare-identifier
+   * base over a defined value is effect-free and the walk continues past
+   * it to the member decorators, exactly as before; a bare-identifier
+   * base over an ambient-undefined class IS the throw. */
+  export function guaranteedDefinitionThrow(L: Lowerer, decl: ts.ClassLikeDeclaration,): { name: string; node: ts.Decorator | ts.ExpressionWithTypeArguments } | null {
     const stripParens = (e: ts.Expression): ts.Expression => {
       let x = e;
       while (ts.isParenthesizedExpression(x)) x = x.expression;
@@ -811,6 +860,8 @@ export const EMITTER_API_MEMBERS: ReadonlySet<string> = new Set([
       ?.types[0];
     if (heritage) {
       const h = stripParens(heritage.expression);
+      const ambientBase = ambientHeritageThrowNameOf(L, h);
+      if (ambientBase !== null) return { name: ambientBase, node: heritage };
       if (h.kind !== ts.SyntaxKind.NullKeyword && !ts.isIdentifier(h)) return null;
     }
     for (const member of decl.members) {
@@ -933,14 +984,22 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
               "decorators in JavaScript sources (V8 has not shipped decorators — Node cannot execute this file)",
             );
           }
+        }
+        {
           // The guaranteed-throw SHELL: declarations only (expressions
           // lower their throw at the expression — lowerClassExpression),
           // never instantiations/mixins (they share a family declaration).
+          //
+          // NOT gated on the class carrying decorators. It once was, when
+          // an ambient DECORATOR was the only item that could throw here;
+          // an `extends` clause naming an ambient `declare class` throws
+          // at the same point in the same evaluation order, on a class
+          // with no decorator anywhere in it.
           if (
             inst === undefined && mixin === undefined &&
             ts.isClassDeclaration(decl) && decl.typeParameters === undefined
           ) {
-            const thrown = guaranteedDecorationThrow(L, decl);
+            const thrown = guaranteedDefinitionThrow(L, decl);
             if (thrown) {
               const className = L.classNamer(decl);
               const info: ClassInfo = {
@@ -960,7 +1019,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
                 subclasses: [],
                 throwingSetters: [],
                 staticFields: [],
-                decorationThrows: { name: thrown.name },
+                decorationThrows: {
+                  name: thrown.name,
+                  via: ts.isDecorator(thrown.node) ? "decoration" : "extends clause",
+                },
                 // The existing ambientThrow emission (lowerClassDecoration)
                 // owns the %init: earlier expressions are all pure reads,
                 // so the throw is the first observable effect.
@@ -977,6 +1039,8 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
               return;
             }
           }
+        }
+        if (classDecoratorNodes.length > 0 || decoratedMembers.length > 0) {
           for (const member of decoratedMembers) {
             const dec = decoratorNodesOf(member)[0]!;
             const kind = ts.isMethodDeclaration(member)
@@ -1193,6 +1257,22 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           L.unsupported("SC1090", clause, "extending computed expressions");
         }
         const symbol = L.resolveValueSymbol(t.expression);
+        // `extends <ambient declare class>` on a class shape the throw
+        // SHELL does not cover — a GENERIC family, a mixin instantiation,
+        // a class EXPRESSION reached through lowerClassExpressionInfo.
+        // The ambient class is still collected like a program class, so
+        // `L.classBySymbol.get(symbol)` below would FIND it and this
+        // derived class would inherit a fabricated base and run on past a
+        // statement Node never gets through. Refuse loudly instead: the
+        // shell answers exactly for the shape it covers, and everything
+        // else says why rather than answering wrongly.
+        if (ambientUndefinedClassSymbolOf(L, t.expression) !== null) {
+          L.unsupported(
+            "SC1090",
+            t,
+            `extending the ambient class '${t.expression.text}' that nothing defines (Node erases the declaration, so evaluating this 'extends' clause throws ReferenceError: ${t.expression.text} is not defined — a non-generic class declaration compiles to exactly that throw)`,
+          );
+        }
         // Extending a REBINDABLE decorated class (analysis already ran —
         // this collection is a class expression or a generic
         // instantiation demanded during lowering): the runtime base is
@@ -3274,6 +3354,28 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     // whose devirtualization and .name rules answer for every legal
     // runtime value.
     if (info.classDecorators?.valueGlobalId !== undefined) return null;
+    // The RECEIVER is an ambient `declare class` nothing defines. Node
+    // erases the declaration, so `Amb.name` is a ReferenceError on `Amb`
+    // — it never reaches the property. The `.name` fold at the bottom of
+    // this function is a compile-time constant read off the collected
+    // shape, so it answered `"Amb"` and the program ran on: measured
+    // WRONG at exit 0 on both backends, where Node exits 1. Every other
+    // member took the "static member has no lowering" refusal, which is
+    // loud but names the wrong cause. Both answer with the throw now.
+    if (ambientUndefinedClassSymbolOf(L, expr.expression) !== null) {
+      return nsUndefRead(
+        L,
+        expr.expression.text,
+        expr,
+        ambientUndefReadType(L, expr) ?? F64,
+      );
+    }
+    // A class whose DEFINITION provably throws collected as a member-less
+    // shell, so every static read misses and would report "the static
+    // member 's' … has no lowering" — a true sentence about a class that
+    // does not exist, naming the wrong cause. The shell's own diagnostic
+    // is the one that explains the program.
+    fenceDecorationThrows(L, info, expr);
     const loc = locOf(expr);
     const found = findStaticOn(L, info, expr.name.text);
     // A #private static resolves only through the DECLARING class's own
@@ -3432,12 +3534,23 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
    * throws identically, which is why the once-evaluated restriction and
    * the member fences don't apply. */
   export function lowerClassExpression(L: Lowerer, expr: ts.ClassExpression): IrExpr {
+    // Deliberately still gated on DECORATORS. `class extends <ambient
+    // declare class> {}` throws the same ReferenceError at the same
+    // point, but answering it HERE types the whole expression by the
+    // undefRead's F64 dummy, and the consumer of a class expression is
+    // normally a binding that wants a classval: `const K = class extends
+    // Ambient {}` then reports `'number' values where 'typeof cx67.' is
+    // expected` — a refusal that names the dummy instead of the cause.
+    // Measured, not assumed. The heritage guard in collectClassShapeInner
+    // answers that shape with the cause instead. Making it a MATCH means
+    // making the BINDING a trap binding (L.trapBindings), which is a
+    // separate change to ambientUndefVarRootOf.
     if (
       decoratorNodesOf(expr).length > 0 ||
       expr.members.some((m) => decoratorNodesOf(m).length > 0)
     ) {
       if (!isJsSourceFile(expr.getSourceFile()) && expr.typeParameters === undefined) {
-        const thrown = guaranteedDecorationThrow(L, expr);
+        const thrown = guaranteedDefinitionThrow(L, expr);
         if (thrown) {
           // The expression's static type never materializes — the read
           // throws — so the nominal IR type only has to satisfy the
@@ -5267,16 +5380,26 @@ function genericNewTarget(L: Lowerer, expr: ts.NewExpression, info: ClassInfo): 
   return instInfo;
 }
 
-/** A class whose decoration provably throws has no reachable VALUE form:
- * the binding never initializes (the %init ReferenceError unwinds first),
- * so `new`, the class as a value, and `extends` all fence — reaching one
- * in compiled code would require executing past the throw. */
+/** A class whose DEFINITION provably throws — its decoration, or an
+ * `extends` clause naming an ambient class nothing defines — has no
+ * reachable VALUE form: the binding never initializes (the %init
+ * ReferenceError unwinds first), so `new`, the class as a value, and
+ * `extends` all fence — reaching one in compiled code would require
+ * executing past the throw.
+ *
+ * This is a refusal standing on PROVABLY DEAD code, and that is
+ * deliberate: the alternative is lowering those uses to the same
+ * undefRead trap shape (trapBindings' stance for `declare const` chains),
+ * which is sound but would change what shipped for the decorator case.
+ * The distance it costs is measurable and stated: a program that
+ * constructs the class after declaring it stops being a WRONG answer and
+ * becomes a build refusal, not a MATCH. */
 export function fenceDecorationThrows(L: Lowerer, info: ClassInfo, blame: ts.Node): void {
   if (info.decorationThrows === undefined) return;
   L.unsupported(
     "SC1090",
     blame,
-    `using the class '${info.def.jsName || info.def.name}' whose decoration provably throws ('${info.decorationThrows.name}' is an ambient name nothing defines — the class statement crashes before the binding exists)`,
+    `using the class '${info.def.jsName || info.def.name}' whose ${info.decorationThrows.via} provably throws ('${info.decorationThrows.name}' is an ambient name nothing defines — the class statement crashes before the binding exists, so nothing below it ever runs)`,
   );
 }
 
