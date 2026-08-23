@@ -28,12 +28,26 @@
  * Both lanes are checked. The LLVM lane keeps its own emitter and this
  * project has shipped a fix green on one lane and wrong on the other.
  *
- * NOT REDUCED HERE, and why (both are real zapo rows; neither has a
- * standalone spelling this suite can build):
- *   - the two `ws` option-bag rows (SC2020, WaWebSocket.ts:68) are planted
- *     by the BACKEND (emit-ws.ts) on the `globalThis.WebSocket` interning
- *     path, not through pushDiag, and need a bag carrying a live
- *     `dispatcher`/`agent`;
+ * THE `ws` OPTION-BAG ROWS ARE REDUCED HERE NOW, and the note that said they
+ * could not be is what this file was wrong about. It read: "planted by the
+ * BACKEND (emit-ws.ts) on the `globalThis.WebSocket` interning path, not
+ * through pushDiag, and need a bag carrying a live `dispatcher`/`agent`" --
+ * every clause of which is true, and the conclusion false. The fence is
+ * emitted from the ctor wrapper whenever the bag's SHAPE carries the field;
+ * a live value is what makes it FIRE at runtime, not what makes it appear in
+ * the C. So the plant is fifty lines of the program's own declaration of the
+ * API, and the census reads back the same code, the same message and the
+ * same emitted host (`sc_wsw_N`) as zapo's own translation unit does.
+ *
+ * That reduction is also why those rows went from two to one. With a shape
+ * to compile, `agent` could be measured instead of reasoned about: Node's
+ * global WebSocket never reads that member of the bag at all, so the refusal
+ * was a refusal where the oracle CONNECTS. `forbid` below pins its absence
+ * inside the same instrument that pins `dispatcher`'s presence -- a
+ * two-sided contract needs both directions in one reading, or a widening
+ * that puts the wrong one back shows up only as a number moving.
+ *
+ * NOT REDUCED HERE, and why:
  *   - `new WebAssembly.Module(...)` (SC1090, spec/proto/index.js:1) needs a
  *     lib that declares `WebAssembly`; under this repo's lib set the name
  *     does not resolve, and the nearest spellings (`new Intl.NumberFormat`,
@@ -69,6 +83,12 @@ const PLANTS: readonly {
   ext: "ts" | "js" | "cjs";
   zapoSite: string;
   accept: readonly { code: string; fragment: string }[];
+  /** Fragments that must appear in NO tagged refusal of this plant. Where a
+   * site once carried two refusals and one has since been withdrawn, the
+   * survivor keeps the plant honest in the "still refuses" direction and
+   * this keeps it honest in the other: without it, putting the withdrawn
+   * refusal back would leave every assertion above green. */
+  forbid?: readonly string[];
   src: string;
 }[] = [
   {
@@ -113,6 +133,75 @@ const PLANTS: readonly {
       "  return String(options.url ?? 'x')",
       "}",
       "void fetchLatest()",
+      "",
+    ].join("\n"),
+  },
+  {
+    name: "the-ws-option-bag-with-a-proxy-dispatcher",
+    ext: "ts",
+    zapoSite:
+      "src/transport/WaWebSocket.ts:68 -- the globalThis.WebSocket read that interns the ctor " +
+      "wrapper for the init bag built at :559 and constructed at :565",
+    accept: [
+      { code: "SC2020", fragment: "carries 'dispatcher', which has no scriptc lowering yet" },
+    ],
+    // The withdrawn half. Node reads exactly `protocols`, `headers` and
+    // `dispatcher` out of the init bag, so refusing on a live `agent`
+    // refused a program the oracle runs BY CONNECTING DIRECT. Behaviour is
+    // pinned by tests/corpus/6000 and the oracle's own contract by
+    // tests/harness/ws-init-bag.test.ts; what is pinned HERE is that the
+    // emitted C carries no such refusal, on either lane.
+    forbid: ["carries 'agent'"],
+    src: [
+      "interface WaProxyDispatcher { readonly dispatch: (a: unknown, b: unknown) => boolean }",
+      "interface WaProxyAgent { readonly addRequest: (a: unknown, b: unknown) => void }",
+      "interface RawWsEvent {",
+      "  readonly code?: number",
+      "  readonly reason?: string",
+      "  readonly wasClean?: boolean",
+      "  readonly data?: unknown",
+      "}",
+      "interface RawWebSocket {",
+      "  binaryType: string",
+      "  readyState: number",
+      "  onopen: ((ev: RawWsEvent) => void) | undefined",
+      "  onmessage: ((ev: RawWsEvent) => void) | undefined",
+      "  onclose: ((ev: RawWsEvent) => void) | undefined",
+      "  onerror: ((ev: RawWsEvent) => void) | undefined",
+      "  send: (data: string) => void",
+      "  close: (code?: number, reason?: string) => void",
+      "}",
+      "interface WaRawWebSocketInit {",
+      "  readonly protocols?: string | readonly string[]",
+      "  readonly headers?: Readonly<Record<string, string>>",
+      "  readonly dispatcher?: WaProxyDispatcher",
+      "  readonly agent?: WaProxyAgent",
+      "}",
+      "type RawWebSocketConstructor = new (",
+      "  url: string,",
+      "  protocols?: string | readonly string[] | WaRawWebSocketInit,",
+      ") => RawWebSocket",
+      "declare const wsUrl: string",
+      "declare const wsHeaders: Readonly<Record<string, string>> | undefined",
+      "declare const wsDispatcher: WaProxyDispatcher | undefined",
+      "declare const wsAgent: WaProxyAgent | undefined",
+      "function resolveWebSocketConstructor(): RawWebSocketConstructor {",
+      "  const ctor = (globalThis as typeof globalThis & { WebSocket?: RawWebSocketConstructor })",
+      "    .WebSocket",
+      "  if (!ctor) { throw new Error('global WebSocket is not available in this runtime') }",
+      "  return ctor",
+      "}",
+      "export function dial(): RawWebSocket {",
+      "  const ctor = resolveWebSocketConstructor()",
+      "  const init: WaRawWebSocketInit = {",
+      "    protocols: ['a'],",
+      "    headers: wsHeaders,",
+      "    dispatcher: wsDispatcher,",
+      "    agent: wsAgent,",
+      "  }",
+      "  return new ctor(wsUrl, init)",
+      "}",
+      "console.log(typeof dial)",
       "",
     ].join("\n"),
   },
@@ -286,6 +375,18 @@ describe("zapo's tagged refusals, as shapes", () => {
           `[${p.accept.map((a) => `${a.code} / "${a.fragment}"`).join(", ")}]. ` +
           `Saw: ${tagged.map((r) => `${r.code} ${r.msg.slice(0, 90)}`).join(" | ")}`,
       ).toBeGreaterThan(0);
+      // Direction 3, for a site where one refusal has been WITHDRAWN: it
+      // must not have come back. Direction 1 only counts refusals and
+      // direction 2 only matches the survivor, so between them a
+      // resurrected sibling passes unnoticed.
+      for (const gone of p.forbid ?? []) {
+        expect(
+          tagged.filter((r) => r.msg.includes(gone)).map((r) => `${r.code} ${r.msg.slice(0, 90)}`),
+          `${p.name}:${backend} refuses again on "${gone}" -- that refusal was withdrawn ` +
+            `because the oracle does not refuse there, so this is now a program Node runs ` +
+            `and scriptc does not`,
+        ).toEqual([]);
+      }
     }
   });
 });

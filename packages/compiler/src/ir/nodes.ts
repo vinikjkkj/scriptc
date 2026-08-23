@@ -9105,13 +9105,21 @@ export type WsProtocolsArm = "absent" | "string" | "strArray" | "init" | "fence"
 
 /** One field of the init bag that this lowering cannot honour, and the
  * runtime test that says whether the program actually supplied it. A bag
- * with `dispatcher: undefined` is lowerable; the same bag with a real
- * dispatcher is not, and the difference is only visible at runtime. */
+ * with `dispatcher: undefined` is lowerable; the same bag with ANY other
+ * dispatcher value is not, and the difference is only visible at runtime.
+ *
+ * There is exactly ONE such field, `dispatcher`, because it is the only
+ * member of the oracle's init bag that this unit reads and cannot honour.
+ * The others the oracle never reads (wsInitBagPlan). */
 export interface WsInitRefusal {
-  /** The bag field's name (`dispatcher`, `agent`, ...). */
+  /** The bag field's name. `dispatcher` today; the type stays general. */
   name: string;
-  /** `union`: present when the slot's tag is not `absentTag`.
-   *  `dyn`: present when the slot is truthy. */
+  /** `union`: absent only at `absentTag`, which is the `undefined` ARM
+   *    specifically -- not merely a unit arm, since a `null` dispatcher
+   *    throws in Node rather than falling back to a direct dial.
+   *  `dyn`: absent only when the value IS `undefined`. NOT a truthiness
+   *    test: `null`/`0`/`false`/`''`/`NaN` are all errors in the oracle,
+   *    and a truthiness test would dial direct on every one of them. */
   kind: "union" | "dyn";
   absentTag?: number;
 }
@@ -9206,6 +9214,7 @@ function wsInitBagPlan(
   let protocols: WsInitBagPlan["protocols"] = null;
   let headers: WsInitBagPlan["headers"] = null;
   const refuseIfPresent: WsInitRefusal[] = [];
+  let sawDispatcher = false;
   for (const f of shape.fields) {
     if (f.name === "protocols") {
       let arms: WsProtocolsArm[];
@@ -9247,9 +9256,39 @@ function wsInitBagPlan(
       };
       continue;
     }
-    // Everything else must be OPTIONAL, so the common case (the bag zapo
-    // builds, whose dispatcher and agent are undefined) lowers, and the
-    // uncommon one still refuses instead of dropping a proxy in silence.
+    // EVERY OTHER MEMBER IS IGNORED, because the ORACLE ignores it.
+    //
+    // MEASURED against Node v25.9.0 (tests/harness/ws-init-bag.test.ts
+    // re-runs the probe on every gate): the global WebSocket's init bag is
+    // a WebIDL dictionary with exactly three members, and a bag built out
+    // of getters records reads of `protocols`, `headers` and `dispatcher`
+    // AND OF NOTHING ELSE. `agent`, `origin`, `ca`, `rejectUnauthorized`,
+    // `followRedirects`, `perMessageDeflate`, `handshakeTimeout`,
+    // `localAddress`, `servername` are never so much as READ: the upgrade
+    // request a bag carrying a LIVE `agent` sends is byte-equal to the one
+    // the same bag without it sends, and the agent's `addRequest` is never
+    // called.
+    //
+    // So refusing on a live `agent` was never a safety net -- it was a
+    // divergence from the oracle, and in the direction that costs a whole
+    // program: scriptc refused what Node runs, and what Node runs by
+    // connecting DIRECT. Those names are the `ws` PACKAGE's options, and
+    // the `ws` package is not what this bag reaches; a program that means
+    // them passes the third argument, which both runtimes drop on the
+    // floor (the "init" note above).
+    if (f.name !== "dispatcher") continue;
+    // `dispatcher` the oracle HONOURS: it hands the entire upgrade to
+    // `dispatcher.dispatch(opts, handler)` and the connection never
+    // reaches the origin. There is no lowering for that, so the bag has to
+    // be provably WITHOUT one -- and "without" means `undefined`, nothing
+    // else. undici asserts the dispatcher truthy AFTER the dictionary
+    // default fills it in, so `null`, `0`, `false`, `''` and `NaN` all
+    // THROW rather than falling back to a direct dial (all five measured).
+    // A truthiness test here let every one of them through to a silent
+    // direct connection: precisely the wrong-answer-for-a-refusal trade
+    // this fence exists to prevent.
+    sawDispatcher = true;
+    if (f.type.kind === "undefinedT") continue; // no dispatcher possible: nothing to refuse
     if (f.type.kind === "dyn") {
       refuseIfPresent.push({ name: f.name, kind: "dyn" });
       continue;
@@ -9257,14 +9296,21 @@ function wsInitBagPlan(
     if (f.type.kind === "union") {
       const def = getUnion(f.type.unionId);
       if (!def) return null;
-      const layout = wsUnitArm(def.arms);
-      if (!layout) return null;
-      refuseIfPresent.push({ name: f.name, kind: "union", absentTag: layout.absentTag });
+      // Specifically the `undefined` arm. A `Dispatcher | null` slot has no
+      // way to spell an absence the oracle accepts, so decline the bag and
+      // leave the site its unconditional fence rather than dial on null.
+      const undefTag = def.arms.findIndex((x) => x.kind === "undefinedT");
+      if (undefTag < 0) return null;
+      refuseIfPresent.push({ name: f.name, kind: "union", absentTag: undefTag });
       continue;
     }
-    return null;
+    return null; // a MANDATORY dispatcher: never absent, so never lowerable
   }
-  if (protocols === null && headers === null) return null;
+  // The record still has to LOOK like a WebSocketInit: a `protocols` union
+  // arm that is some unrelated record must keep the site's fence rather
+  // than be dialled as a bag whose every member happened to be one this
+  // unit ignores.
+  if (protocols === null && headers === null && !sawDispatcher) return null;
   return { shapeId: a.shapeId, tag, protocols, headers, refuseIfPresent };
 }
 
