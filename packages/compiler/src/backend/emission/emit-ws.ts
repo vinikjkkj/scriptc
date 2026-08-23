@@ -345,6 +345,14 @@ function ctorWrapper(
   // `protocols` → the Sec-WebSocket-Protocol header value, and (from the
   // init bag only) `headers` → the extra request block.
   lines.push(`  ScrStr *sc_proto = NULL;`, `  ScrStr *sc_hdrs = NULL;`);
+  // The program's `dispatch`, when the bag carries a dispatcher this
+  // lowering delegates to. NULL means "dial", which is also what an
+  // `undefined` dispatcher means -- see wsInitBagPlan.
+  const del = plan.initBag?.dispatcher ?? null;
+  if (del !== null) {
+    lines.push(`  ScrClosure *sc_disp = NULL;`);
+    E.wsDispatchUsed = true;
+  }
   const protoT = plan.protocolsParam;
   if (protoT !== undefined) {
     // The arm's BODY, with no `break` of its own: the caller adds one
@@ -390,9 +398,27 @@ function ctorWrapper(
     `    scr_str_release(sc_a0);`,
     `    scr_str_release(sc_proto);`,
     `    scr_str_release(sc_hdrs);`,
+    ...(del !== null ? [`    scr_closure_release(sc_disp);`] : []),
     `    return NULL;`,
     `  }`,
-    `  ScrWsGlobal *sc_g = scr_ws_global_new(sc_a0, sc_proto, sc_hdrs, &${names.dispatch});`,
+  );
+  if (del !== null) {
+    // The DELEGATION. `dispatch` runs inside this call, exactly as it does
+    // in the oracle (which calls it from the constructor); the socket it
+    // answers with arrives one microtask later -- scr_ws_dispatch.c's
+    // pending_* fields say why.
+    lines.push(
+      `  ScrWsGlobal *sc_g = sc_disp != NULL`,
+      `    ? scr_ws_disp_global_new(sc_a0, sc_proto, sc_hdrs, &${names.dispatch}, sc_disp, ${del.callKind}, ${del.retKind})`,
+      `    : scr_ws_global_new(sc_a0, sc_proto, sc_hdrs, &${names.dispatch});`,
+      `  scr_closure_release(sc_disp);`,
+    );
+  } else {
+    lines.push(
+      `  ScrWsGlobal *sc_g = scr_ws_global_new(sc_a0, sc_proto, sc_hdrs, &${names.dispatch});`,
+    );
+  }
+  lines.push(
     `  scr_str_release(sc_a0);`,
     `  scr_str_release(sc_proto);`,
     `  scr_str_release(sc_hdrs);`,
@@ -523,6 +549,16 @@ function initBagBody(plan: WsGlobalPlan, expr: string, ind: string, site: string
         ? `${slot}->kind != SCR_DYN_UNDEF`
         : `${slot}->tag != ${r.absentTag!}`;
     out.push(`${b}if (${present}) { ${refuseC(initFieldMsg(r.name), site)} }`);
+  }
+  // The dispatcher, PICKED UP rather than refused. `absentTag` is -1 for a
+  // mandatory slot, which has no absence to test.
+  if (ib.dispatcher !== null) {
+    const d = ib.dispatcher;
+    const slot = `sc_ib->${mangleField(d.name)}`;
+    const drec = mangleRecordStruct(d.recShapeId);
+    const take = `sc_disp = scr_closure_retain(((${drec} *)${d.absentTag < 0 ? slot : `scr_union_peek(${slot})`})->${mangleField(d.method)});`;
+    if (d.absentTag < 0) out.push(`${b}${take}`);
+    else out.push(`${b}if (${slot}->tag != ${d.absentTag}) { ${take} }`);
   }
   if (ib.refuseIfPresent.length > 0) out.push(`${b}if (!scr_exc_pending()) {`);
   const c = ib.refuseIfPresent.length > 0 ? `${b}  ` : b;

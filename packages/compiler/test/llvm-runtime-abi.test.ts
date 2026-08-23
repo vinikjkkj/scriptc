@@ -43,7 +43,7 @@ const runtimeSrcDir = join(repoRoot, "packages/runtime/src");
  * correct `declare`s in ws.ts reported as "no prototype" purely because
  * the parser could not see the header they agree with. The guard test
  * below fails if the emitter ever grows a third include. */
-const HEADER_FILES = ["scr_runtime.h", "scr_ws_global.h"];
+const HEADER_FILES = ["scr_runtime.h", "scr_ws_global.h", "scr_ws_dispatch.h"];
 const llvmSrcDir = join(import.meta.dirname, "../src/backend/llvm");
 const corpusDir = join(repoRoot, "tests/corpus");
 
@@ -140,34 +140,63 @@ function splitParams(argsText: string): string[] {
 async function parseHeader(): Promise<{ protos: Map<string, CProto>; dataSyms: Set<string> }> {
   const protos = new Map<string, CProto>();
   const dataSyms = new Set<string>();
+  // The typedef tables are collected ACROSS the whole set first, then each
+  // file is parsed with all of them in hand. They are one ABI surface: a
+  // gated header uses the core's typedefs, and scr_ws_dispatch.h spells a
+  // parameter `ScrWsGlobalFire` that is typedef'd in scr_ws_global.h --
+  // scanned alone it reads as an unmappable type and the guard throws.
+  // PROTOTYPES still parse one file at a time, which is the part that
+  // matters: a concatenation would let one header's trailing text become
+  // the next one's "return type".
+  const shared: HeaderTypes = await collectHeaderTypes();
   for (const file of HEADER_FILES) {
-    // Parsed one file at a time: the typedef tables (enums, function
-    // pointers) are per-header, and a concatenation would also let one
-    // header's trailing text become the next one's "return type".
-    const one = await parseOneHeader(join(runtimeSrcDir, file));
+    const one = await parseOneHeader(join(runtimeSrcDir, file), shared);
     for (const [k, v] of one.protos) if (!protos.has(k)) protos.set(k, v);
     for (const s of one.dataSyms) dataSyms.add(s);
   }
   return { protos, dataSyms };
 }
 
-async function parseOneHeader(
-  headerPath: string,
-): Promise<{ protos: Map<string, CProto>; dataSyms: Set<string> }> {
+/** Strip comments and preprocessor lines -- the shape every scan below
+ * wants. */
+async function headerSource(headerPath: string): Promise<string> {
   const raw = await readFile(headerPath, "utf8");
-  const src = raw
+  return raw
     .replace(/\/\*[\s\S]*?\*\//g, " ")
     .replace(/\/\/[^\n]*/g, " ")
     .replace(/^[ \t]*#[^\n]*$/gm, " ");
+}
+
+/** Every enum and function-pointer typedef across the WHOLE header set.
+ *
+ * Collected across all of them rather than per file, because they ARE one
+ * ABI surface: a gated header spells its parameters with the core's
+ * typedefs. scr_ws_dispatch.h takes a `ScrWsGlobalFire`, which
+ * scr_ws_global.h declares -- scanned alone it reads as an unmappable type
+ * and cTypeToLl throws on EVERY test in this file. PROTOTYPES still parse
+ * one file at a time, which is the part that matters: a concatenation
+ * would let one header's trailing text become the next one's "return
+ * type". */
+async function collectHeaderTypes(): Promise<HeaderTypes> {
   const enums = new Set<string>();
-  for (const m of src.matchAll(/typedef\s+enum(?:\s+[A-Za-z_][A-Za-z0-9_]*)?\s*\{[^}]*\}\s*([A-Za-z_][A-Za-z0-9_]*)\s*;/g)) {
-    enums.add(m[1]!);
-  }
   const ptrTypedefs = new Set<string>();
-  for (const m of src.matchAll(/typedef\s+[^;{()]*\(\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*\(/g)) {
-    ptrTypedefs.add(m[1]!);
+  for (const file of HEADER_FILES) {
+    const src = await headerSource(join(runtimeSrcDir, file));
+    for (const m of src.matchAll(/typedef\s+enum(?:\s+[A-Za-z_][A-Za-z0-9_]*)?\s*\{[^}]*\}\s*([A-Za-z_][A-Za-z0-9_]*)\s*;/g)) {
+      enums.add(m[1]!);
+    }
+    for (const m of src.matchAll(/typedef\s+[^;{()]*\(\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*\(/g)) {
+      ptrTypedefs.add(m[1]!);
+    }
   }
-  const types: HeaderTypes = { enums, ptrTypedefs };
+  return { enums, ptrTypedefs };
+}
+
+async function parseOneHeader(
+  headerPath: string,
+  types: HeaderTypes,
+): Promise<{ protos: Map<string, CProto>; dataSyms: Set<string> }> {
+  const src = await headerSource(headerPath);
   const protos = new Map<string, CProto>();
   for (const m of src.matchAll(/\b(scr_[a-z0-9_]+)\s*\(/g)) {
     const name = m[1]!;

@@ -15,6 +15,10 @@
 #include <stdint.h>
 
 #include "scr_runtime.h"
+/* ScrWsClient and its callback table appear in the DELEGATED transport's
+ * seam below, so this header carries the client's rather than leaving
+ * every includer to guess the order. */
+#include "scr_ws_client.h"
 
 typedef struct ScrWsGlobal ScrWsGlobal;
 
@@ -49,6 +53,48 @@ typedef void (*ScrWsGlobalFire)(void *user, int which, int state,
 ScrWsGlobal *scr_ws_global_new(ScrStr *url /*borrowed*/, ScrStr *protocols /*borrowed, nullable*/,
                                ScrStr *headers /*borrowed, nullable*/,
                                ScrWsGlobalFire fire);
+
+/* ── the DELEGATED transport (an init-bag `dispatcher`) ──────────────
+ *
+ * A bag carrying a dispatcher does not dial: scr_ws_dispatch.c hands the
+ * upgrade to the program and gets a socket back. That unit is gated
+ * separately (a WebSocket program that never mentions a dispatcher must
+ * not carry it), so the two may not name each other's symbols -- the
+ * ScrWsTlsOps seam one file over, one level up. The DISPATCH unit drives:
+ * it mints the handle here, builds its own state, and adopts.
+ */
+typedef struct {
+  /* The owner is going away: drop the client and refuse late callbacks. */
+  void (*invalidate)(void *disp);
+  void (*release)(void *disp);
+  /* Nobody can answer any more: the program let go of every handler
+   * member without settling. Asked at scr_ws_global_set_user, because the
+   * dispatcher runs INSIDE the constructor and can reach that state
+   * before the API record has a name. */
+  bool (*orphaned)(void *disp);
+} ScrWsDispOps;
+
+/* A handle with no transport yet. `fire` cannot be called before
+ * scr_ws_global_adopt names one. +1. */
+ScrWsGlobal *scr_ws_global_new_detached(ScrWsGlobalFire fire);
+
+/* Give the handle the client the delegation built, and the state that
+ * owns it. `disp`/`ops` MOVE IN (the handle releases through ops at
+ * teardown); `c` stays owned by `disp`, so this handle will NOT free it
+ * directly. */
+void scr_ws_global_adopt(ScrWsGlobal *g, ScrWsClient *c /*borrowed*/, void *disp,
+                         const ScrWsDispOps *ops);
+
+/* The four callbacks a delegated client must be built with, so both
+ * transports reach this unit's state machine through one code path. */
+const ScrWsClientCallbacks *scr_ws_global_client_cbs(void);
+
+/* Release the platform's reference to the API record WITHOUT firing
+ * anything, for the one ending that has no event: a dispatcher that
+ * answered nothing and then let go of the handler, so no callback can
+ * ever arrive. readyState is left where it is -- this is a reference
+ * released, not a state change. See the .c for why the oracle agrees. */
+void scr_ws_global_drop_user(ScrWsGlobal *g);
 
 /* `{ headers: { Name: value } }` from the init bag, flattened into the
  * request block scr_ws_build_request appends. The map is the header

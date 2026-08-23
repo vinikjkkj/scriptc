@@ -23,6 +23,24 @@ struct ScrWsClient {
    * waits for the frame to finish. */
   int depth;
   bool want_free;
+  /* THE ADOPTED SOCKET'S HEAD HAS NOT BEEN FED YET.
+   *
+   * A delegated upgrade attaches SYNCHRONOUSLY -- the instant onUpgrade
+   * returns, this client owns the socket, exactly as undici's does -- but
+   * the response head it must validate first arrives one microtask later
+   * (scr_ws_dispatch.c's pending_head says why). Anything the socket
+   * delivers in that window is FRAME data that belongs after the head, so
+   * it waits here rather than reaching the conn driver as handshake input.
+   *
+   * Not hypothetical: when the 101 and the first frame arrive in one read,
+   * the dispatcher unshifts the frame bytes back onto the socket and the
+   * read loop re-delivers them immediately. Without this hold they either
+   * went to the dispatcher's own listener and vanished, or reached the
+   * parser before the handshake. The message was lost, silently, on a run
+   * that exited 0. */
+  bool head_pending;
+  char *hold;
+  size_t hold_len, hold_cap;
 };
 
 static void wsc_free_now(ScrWsClient *c);
@@ -35,9 +53,26 @@ static void wsc_want_write(void *u, const uint8_t *data, size_t len) {
   scr_net_sock_write_native(c->sock, (const char *)data, len);
 }
 
+static void wsc_hold(ScrWsClient *c, const char *buf, size_t n) {
+  if (c->hold_len + n > c->hold_cap) {
+    size_t cap = c->hold_cap == 0 ? 256 : c->hold_cap;
+    while (cap < c->hold_len + n) cap *= 2;
+    char *nb = realloc(c->hold, cap);
+    if (nb == NULL) return; /* the handshake will fail on the short read */
+    c->hold = nb;
+    c->hold_cap = cap;
+  }
+  memcpy(c->hold + c->hold_len, buf, n);
+  c->hold_len += n;
+}
+
 static void wsc_data(void *ctx, const char *buf, size_t n) {
   ScrWsClient *c = ctx;
   if (c->dead) return;
+  if (c->head_pending) {
+    wsc_hold(c, buf, n);
+    return;
+  }
   c->depth++;
   /* recv answers false once the conn is finished with the stream — a
    * protocol error it has already reported, or a close it has replied to.
@@ -266,6 +301,78 @@ ScrWsClient *scr_ws_client_connect(ScrStr *url, ScrStr *protocols,
   return c;
 }
 
+/* ── the delegated transport ────────────────────────────────────────── */
+
+/* Everything scr_ws_client_connect does that is NOT the dial: the handle
+ * and the conn driver, expecting the same handshake response. Splitting
+ * it here rather than duplicating it is the point -- a delegated upgrade
+ * that skipped scr_ws_conn_recv's validation would be a WebSocket whose
+ * accept key nobody checked. */
+ScrWsClient *scr_ws_client_detached(const char *expected_accept,
+                                    const ScrWsClientCallbacks *cb, void *user) {
+  static const ScrWsCallbacks conn_cb = {
+      .on_open = &wsc_on_open,
+      .on_message = &wsc_on_message,
+      .on_close = &wsc_on_close,
+      .on_error = &wsc_on_error,
+      .want_write = &wsc_want_write,
+  };
+  ScrWsClient *c = calloc(1, sizeof *c);
+  if (c == NULL) return NULL;
+  c->cb = *cb;
+  c->user = user;
+  c->ready = SCR_WS_CONNECTING;
+  uint8_t mask_seed[4];
+  arc4random_buf(mask_seed, sizeof mask_seed);
+  c->conn = scr_ws_conn_new(expected_accept, &conn_cb, c, mask_seed);
+  if (c->conn == NULL) {
+    free(c);
+    return NULL;
+  }
+  return c;
+}
+
+bool scr_ws_client_attach(ScrWsClient *c, ScrNetSocket *sock) {
+  if (c == NULL || sock == NULL || c->sock != NULL) return false;
+  c->sock = scr_net_sock_retain(sock);
+  c->head_pending = true;
+  /* The same two registrations the dialled path makes, in the same
+   * order. The socket is already connected and already upgraded, so
+   * there is nothing to buffer and no TLS leg to install -- whatever the
+   * dispatcher connected through, it connected through. */
+  scr_net_sock_set_native_reader(c->sock, &wsc_data, &wsc_eof, &wsc_eof, c, NULL);
+  scr_net_sock_set_native_events(c->sock, NULL, &wsc_err);
+  return true;
+}
+
+bool scr_ws_client_attached(const ScrWsClient *c) {
+  return c != NULL && c->sock != NULL;
+}
+
+void scr_ws_client_feed(ScrWsClient *c, const uint8_t *data, size_t len) {
+  if (c == NULL || c->dead) return;
+  c->head_pending = false;
+  if (len > 0) wsc_data(c, (const char *)data, len);
+  /* Whatever arrived while the head was in flight, in arrival order and
+   * behind it. */
+  if (c->hold_len > 0 && !c->dead) {
+    char *h = c->hold;
+    size_t n = c->hold_len;
+    c->hold = NULL;
+    c->hold_len = 0;
+    c->hold_cap = 0;
+    wsc_data(c, h, n);
+    free(h);
+  }
+}
+
+void scr_ws_client_fail(ScrWsClient *c, const char *msg) {
+  if (c == NULL || c->dead) return;
+  c->depth++;
+  wsc_fail(c, msg);
+  if (--c->depth == 0 && c->want_free) wsc_free_now(c);
+}
+
 /* ── the caller's side ──────────────────────────────────────────────── */
 
 void scr_ws_client_send(ScrWsClient *c, const uint8_t *data, size_t len, bool is_text) {
@@ -284,6 +391,8 @@ int scr_ws_client_ready_state(const ScrWsClient *c) {
 }
 
 static void wsc_free_now(ScrWsClient *c) {
+  free(c->hold);
+  c->hold = NULL;
   if (c->sock != NULL) {
     scr_net_sock_clear_native_reader(c->sock);
     scr_net_sock_release(c->sock);

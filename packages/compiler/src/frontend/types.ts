@@ -3863,6 +3863,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       }
     }
     const params: IrType[] = [];
+    let sawRestIn = false;
     for (const p of sig.getParameters()) {
       const decl = checker.valueDeclarationOf(p);
       if (decl && ts.isParameter(decl) && decl.dotDotDotToken) {
@@ -3892,6 +3893,13 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         }
         if (!restT || (restT.kind !== "array" && restT.kind !== "dyn")) return null;
         params.push(restT);
+        // MARK it. The slot and a fixed parameter of the same type have the
+        // same ABI, so the mapped signature used to be identical for
+        // `(...a: unknown[]) => T` and `(x: unknown) => T` -- and anything
+        // that has to BUILD the arguments from outside the compiler must
+        // tell them apart or it packs an array where the callee wanted the
+        // first argument. See IrType.restIn.
+        sawRestIn = true;
         continue;
       }
       const optional =
@@ -3925,7 +3933,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       mapTrace(`FNRET ${checker.typeToString(type).slice(0, 46)} -> ${checker.typeToString(retT).slice(0, 60)}`);
       return null;
     }
-    return funcOf(params, ret);
+    return sawRestIn ? { kind: "func" as const, params, ret, restIn: true as const } : funcOf(params, ret);
   }
   // Records: object types whose members are all data properties (shorthand
   // methods in type position count — they're func-typed fields) with

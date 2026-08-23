@@ -77,6 +77,7 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   "scr_tls.c": ["scr_dyn_handle.c", "scr_http.c", "scr_net.c", "scr_tls_ca.c"],
   "scr_ws_client.c": ["scr_net.c", "scr_url.c", "scr_websocket.c"],
   "scr_ws_global.c": ["scr_tls.c", "scr_url.c", "scr_ws_client.c"],
+  "scr_ws_dispatch.c": ["scr_net.c", "scr_url.c", "scr_websocket.c", "scr_ws_client.c", "scr_ws_global.c"],
   "scr_zlib_island.c": ["scr_zlib.c"],
 };
 
@@ -376,6 +377,14 @@ export interface CcOptions {
    * scr_http.c unconditionally. Programs that never name the global keep
    * their exact link line and never build mbedTLS. */
   wsGlobal?: boolean;
+  /** The program's WebSocket init bag carries a `dispatcher` this compiler
+   * DELEGATES to (moduleUsesWsDispatch on the IR): compiles
+   * scr_ws_dispatch.c, which builds undici's request-options record and
+   * its ten-member handler as checked-dynamic values and hands the upgrade
+   * to the program. Gated apart from `wsGlobal` because that surface is
+   * not free and a WebSocket program with no dispatcher must not carry it;
+   * it IMPLIES wsGlobal, since the unit mints the API handle. */
+  wsDispatch?: boolean;
   /** The program uses the CA-store introspection surface (moduleUsesTlsCa
    * on the IR — getCACertificates / rootCertificates /
    * setDefaultCACertificates): compiles scr_tls_ca.c, plain PEM-block
@@ -1423,7 +1432,8 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // scr_tls.c's client wrap, and scr_tls.c's https half calls into
   // scr_http.c unconditionally (measured -- the link fails on
   // scr_http_request_ex without it).
-  const wsGlobal = opts.wsGlobal ?? false;
+  const wsDispatch = opts.wsDispatch ?? false;
+  const wsGlobal = (opts.wsGlobal ?? false) || wsDispatch;
   // The server-family gates CLOSE over each other here, not only in the IR
   // detectors that happen to call this (ir/nodes.ts makes moduleUsesNet
   // answer true for every http/tls/https/http2 spelling). Measured edges:
@@ -1652,6 +1662,8 @@ export async function compileC(opts: CcOptions): Promise<void> {
           rt(join(rtDir, "scr_ws_global.c")),
         ]
       : []),
+    // The DELEGATED transport, on its own gate beside the three above.
+    ...(wsDispatch ? [rt(join(rtDir, "scr_ws_dispatch.c"))] : []),
     ...(opts.dgram ? [rt(join(rtDir, "scr_dgram.c"))] : []),
     ...(opts.watch ? [rt(join(rtDir, "scr_watch.c"))] : []),
     ...(opts.fileHandle ? [rt(join(rtDir, "scr_filehandle.c"))] : []),

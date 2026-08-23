@@ -1583,7 +1583,14 @@ ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity,
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_FUNC);
   d->v.fn.clo = clo;
   d->v.fn.thunk = thunk;
-  d->v.fn.sig = sig;
+  /* NEVER NULL. The emitted dynCheck for a function type reaches straight
+   * for `strcmp(d->v.fn.sig, "<typeKey>")`, so a NULL here is a segfault
+   * inside GENERATED code, naming no unit and no line -- which is how it
+   * was found. The empty string is the honest stand-in for "no interned
+   * signature": it can never equal a typeKey, so the check falls through
+   * to the per-target adapter, which is the right answer for a box whose
+   * closure holds a dyn thunk rather than a typed entry point. */
+  d->v.fn.sig = sig != NULL ? sig : "";
   d->v.fn.name = (name != NULL || clo == NULL) ? name : scr_fn_name_of(clo->fn);
   d->v.fn.src = src;
   d->v.fn.arity = arity;
