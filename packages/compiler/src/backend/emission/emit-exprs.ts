@@ -5423,8 +5423,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // could not rule the specifier out (the caller then throws the
             // tagged refusal the site already carried), and throws Node's
             // own error for everything Node itself rejects. Borrows all
-            // three arguments.
-            return finish(`scr_require_verdict(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+            // five arguments.
+            return finish(`scr_require_verdict(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)})`);
           case "error.fenceThrow": {
             // The deferred compile fence as an EXPRESSION, emitted as the
             // very same scr_throw_error_msg_code text the runtimeFence

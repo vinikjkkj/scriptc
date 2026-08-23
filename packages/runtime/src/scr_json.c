@@ -1894,28 +1894,125 @@ void scr_throw_prop_type(const ScrStr *name, const ScrStr *expected, const ScrDy
  *           one this compiler used to answer by swallowing its own fence.
  *
  * A specifier the compiler CANNOT prove unresolvable fences instead: a
- * relative or absolute path, a '#' import, a 'node:' builtin, a drive- or
- * protocol-shaped specifier, or a bare root in `roots`. Wrong in the LOUD
- * direction by construction — never a value where Node throws, and never
- * a MODULE_NOT_FOUND where Node hands back a module.
+ * relative or absolute path, a drive-shaped one, a 'node:' name Node
+ * really serves, a '#' import a baked "imports" key matches, or a bare
+ * root in `roots`. Wrong in the LOUD direction by construction — never a
+ * value where Node throws, and never a MODULE_NOT_FOUND where Node hands
+ * back a module.
  *
- * `roots` empty means "cannot enumerate": everything fences. Borrows all
- * three arguments. */
-static bool scr_require_root_known(const ScrStr *roots, const char *name, size_t len) {
-  /* `roots` is a newline-joined list with a LEADING and a TRAILING
-   * newline (or the empty string for "cannot enumerate"), so membership
-   * is one substring search for newline + name + newline: no allocation,
-   * and a name that is a PREFIX of another ("ws" against "wsrun") cannot
-   * match, because both delimiters are required. */
-  if (roots->len == 0) return true; /* cannot enumerate: fence */
-  for (size_t i = 0; i + len + 1 < roots->len; i++) {
-    if (roots->data[i] != '\n') continue;
-    if (memcmp(roots->data + i + 1, name, len) != 0) continue;
-    if (roots->data[i + 1 + len] == '\n') return true;
+ * `builtins` and `scope` are the two baked answers the ROOT SET cannot
+ * give, and both are name tables — no filesystem is read here at run
+ * time, by design. `builtins` is Node's own builtinModules, newline
+ * joined and delimited like `roots`, and decides 'node:x'. `scope`
+ * carries the requiring file's package scope: "" for cannot-enumerate,
+ * "-" for a scope with no "imports" field, "+<package.json>\n<key>\n..."
+ * for one that has it.
+ *
+ * `roots` empty means "cannot enumerate": everything bare fences.
+ * Borrows all five arguments. */
+/* Membership in one of the newline-joined baked sets. Each is a list
+ * with a LEADING and a TRAILING newline (or the empty string), so the
+ * test is one substring search for newline + name + newline: no
+ * allocation, and a name that is a PREFIX of another ("ws" against
+ * "wsrun") cannot match, because both delimiters are required. */
+static bool scr_require_name_listed(const ScrStr *set, const char *name, size_t len) {
+  if (set->len < len + 2) return false;
+  for (size_t i = 0; i + len + 1 < set->len; i++) {
+    if (set->data[i] != '\n') continue;
+    if (memcmp(set->data + i + 1, name, len) != 0) continue;
+    if (set->data[i + 1 + len] == '\n') return true;
   }
   return false;
 }
-bool scr_require_verdict(const struct ScrDyn *spec, const ScrStr *roots, const ScrStr *from) {
+static bool scr_require_root_known(const ScrStr *roots, const char *name, size_t len) {
+  if (roots->len == 0) return true; /* cannot enumerate: fence */
+  return scr_require_name_listed(roots, name, len);
+}
+
+/* Node's require-site MODULE_NOT_FOUND, message and code exact — the
+ * message really does carry the one-entry "Require stack" line. Three
+ * arms reach it (a bare root nothing installed resolves, a '#' specifier
+ * in a scope with no "imports" field, and Node's own argument-shaped
+ * refusals), so it is built once. Never returns. */
+static void scr_require_throw_not_found(const ScrStr *s, const ScrStr *from) {
+  static const char head[] = "Cannot find module '";
+  static const char mid[] = "'\nRequire stack:\n- ";
+  size_t len = (sizeof head - 1) + s->len + (sizeof mid - 1) + from->len;
+  char *msg = (char *)malloc(len + 1);
+  if (msg == NULL) scr_trap("scriptc: out of memory\n");
+  size_t at = 0;
+  memcpy(msg + at, head, sizeof head - 1); at += sizeof head - 1;
+  memcpy(msg + at, s->data, s->len); at += s->len;
+  memcpy(msg + at, mid, sizeof mid - 1); at += sizeof mid - 1;
+  memcpy(msg + at, from->data, from->len); at += from->len;
+  msg[at] = '\0';
+  /* Built by hand rather than through scr_throw_error_msg_code, which
+   * takes a (char*, len) it copies: the scratch buffer could then only
+   * be freed AFTER a call that never returns. The ScrStr takes its own
+   * copy, the buffer frees here, and the error owns the string from
+   * there on. */
+  ScrStr *m = scr_str_new(msg, at);
+  free(msg);
+  ScrError *e = scr_error_new(SCR_ERR_ERROR, m);
+  scr_str_release(m); /* scr_error_new retained its own */
+  scr_error_set_code(e, "MODULE_NOT_FOUND");
+  scr_throw_obj(e, &scr_error_retain_v, &scr_error_release_v, scr_error_trace_arg());
+}
+
+/* The three-part message ERR_PACKAGE_IMPORT_NOT_DEFINED renders, and
+ * ERR_UNKNOWN_BUILTIN_MODULE's two-part one, from pieces that are not
+ * all NUL-terminated. Never returns. */
+static void scr_require_throw_parts(int kind, const char *code,
+                                    const char *const *parts, const size_t *lens, size_t n) {
+  size_t len = 0;
+  for (size_t i = 0; i < n; i++) len += lens[i];
+  char *msg = (char *)malloc(len + 1);
+  if (msg == NULL) scr_trap("scriptc: out of memory\n");
+  size_t at = 0;
+  for (size_t i = 0; i < n; i++) { memcpy(msg + at, parts[i], lens[i]); at += lens[i]; }
+  msg[at] = '\0';
+  ScrStr *m = scr_str_new(msg, at);
+  free(msg);
+  ScrError *err = scr_error_new(kind, m);
+  scr_str_release(m);
+  scr_error_set_code(err, code);
+  scr_throw_obj(err, &scr_error_retain_v, &scr_error_release_v, scr_error_trace_arg());
+}
+
+/* Does any key of the baked "imports" map match this '#' specifier?
+ *
+ * `scope` is "+<package.json path>\n<key>\n<key>\n..." (see the header
+ * above). A key is either exact or carries ONE '*'; Node picks the best
+ * pattern among several, but "some key matches" is all this needs — a
+ * matched key means the answer is a MODULE, which is the fence. */
+static bool scr_require_import_key_matches(const ScrStr *scope, const ScrStr *s) {
+  size_t i = 0;
+  while (i < scope->len && scope->data[i] != '\n') i++; /* past the path */
+  while (i < scope->len) {
+    i++; /* past the '\n' */
+    size_t j = i;
+    while (j < scope->len && scope->data[j] != '\n') j++;
+    size_t klen = j - i;
+    if (klen > 0) {
+      const char *k = scope->data + i;
+      const char *star = (const char *)memchr(k, '*', klen);
+      if (star == NULL) {
+        if (klen == s->len && memcmp(k, s->data, klen) == 0) return true;
+      } else {
+        size_t plen = (size_t)(star - k);
+        size_t slen = klen - plen - 1;
+        if (s->len >= plen + slen && memcmp(s->data, k, plen) == 0 &&
+            (slen == 0 || memcmp(s->data + s->len - slen, star + 1, slen) == 0)) {
+          return true;
+        }
+      }
+    }
+    i = j;
+  }
+  return false;
+}
+bool scr_require_verdict(const struct ScrDyn *spec, const ScrStr *roots, const ScrStr *from,
+                         const ScrStr *builtins, const ScrStr *scope) {
   const ScrDyn *arg = spec != NULL ? spec : scr_dyn_undefined();
   if (arg->kind != SCR_DYN_STR) {
     /* Node checks the argument BEFORE it resolves anything: require(42)
@@ -1931,11 +2028,70 @@ bool scr_require_verdict(const struct ScrDyn *spec, const ScrStr *roots, const S
     return true;
   }
   const char c0 = s->data[0];
-  /* Relative, absolute, subpath-import, and any protocol- or drive-shaped
-   * specifier: Node's resolution for these reads the filesystem the
-   * binary does not carry, so the build cannot prove they fail. Fence. */
-  if (c0 == '.' || c0 == '/' || c0 == (char)92 || c0 == '#') return true;
-  if (memchr(s->data, ':', s->len) != NULL) return true; /* node:, file:, a drive letter */
+  /* The 'node:' prefix serves BUILTINS ONLY, and it is the one specifier
+   * class whose whole answer is a NAME TABLE — no filesystem anywhere in
+   * it. A name Node's own builtinModules carries is a module this binary
+   * would have to hand back as a value, so it fences; every other name
+   * is Node's ERR_UNKNOWN_BUILTIN_MODULE, whose message is the WHOLE
+   * specifier, prefix included, and which carries no require stack.
+   * Measured against Node v25.9.0: 'node:fs/promises' resolves, and
+   * 'node:fs/nosuch', 'node:fs/' and bare 'node:' all throw. */
+  if (s->len >= 5 && memcmp(s->data, "node:", 5) == 0) {
+    if (scr_require_name_listed(builtins, s->data + 5, s->len - 5)) return true;
+    {
+      static const char nb[] = "No such built-in module: ";
+      const char *parts[2] = { nb, s->data };
+      const size_t lens[2] = { sizeof nb - 1, s->len };
+      scr_require_throw_parts(SCR_ERR_ERROR, "ERR_UNKNOWN_BUILTIN_MODULE", parts, lens, 2);
+    }
+    return true; /* unreachable */
+  }
+  /* A '#' subpath import. Node resolves it against the "imports" field of
+   * the NEAREST enclosing package.json, and what it answers when nothing
+   * matches depends on whether that field exists at all — measured, both
+   * ways, against Node v25.9.0:
+   *
+   *   no package.json, or one with no "imports"    MODULE_NOT_FOUND
+   *   an "imports" field, even {}, no key matches  ERR_PACKAGE_IMPORT_NOT_DEFINED
+   *
+   * so the BUILD bakes which of the two this file sits in. `scope` is ""
+   * for "cannot enumerate" (fence everything, the conservative
+   * direction), "-" for a scope with no imports map, and
+   * "+<package.json path>\n<key>\n<key>\n..." for one that has it. A key
+   * that MATCHES means the answer is a module, which is the fence this
+   * row is about; the malformed shapes ('#', '#/...', a trailing slash)
+   * are Node's ERR_INVALID_MODULE_SPECIFIER family and fence too — loud,
+   * because their exact wording is not what this row is buying. */
+  if (c0 == '#') {
+    if (scope->len == 0) return true; /* cannot enumerate: fence */
+    if (scope->data[0] == '-') { scr_require_throw_not_found(s, from); return true; }
+    if (s->len == 1 || s->data[1] == '/' || s->data[s->len - 1] == '/') return true;
+    if (scr_require_import_key_matches(scope, s)) return true;
+    {
+      static const char h[] = "Package import specifier \"";
+      static const char m1[] = "\" is not defined in package ";
+      static const char m2[] = " imported from ";
+      size_t pjlen = 0;
+      while (1 + pjlen < scope->len && scope->data[1 + pjlen] != '\n') pjlen++;
+      const char *parts[6] = { h, s->data, m1, scope->data + 1, m2, from->data };
+      const size_t lens[6] = { sizeof h - 1, s->len, sizeof m1 - 1, pjlen, sizeof m2 - 1, from->len };
+      scr_require_throw_parts(SCR_ERR_TYPE, "ERR_PACKAGE_IMPORT_NOT_DEFINED", parts, lens, 6);
+    }
+    return true; /* unreachable */
+  }
+  /* Relative, absolute and drive-shaped: Node's resolution for these
+   * reads the filesystem the binary does not carry, so the build cannot
+   * prove they fail. Fence. A DRIVE letter is spelled out rather than
+   * left to a blanket ':' test, because every OTHER colon-bearing
+   * specifier is a plain BARE one — 'file:///x', 'http://x',
+   * 'data:text/js,1' and 'mylib:sub' all take Node's node_modules walk
+   * and all answer MODULE_NOT_FOUND, which the bare arm below gets
+   * right. The blanket test fenced all four. */
+  if (c0 == '.' || c0 == '/' || c0 == (char)92) return true;
+  if (s->len >= 2 && s->data[1] == ':' &&
+      ((c0 >= 'A' && c0 <= 'Z') || (c0 >= 'a' && c0 <= 'z'))) {
+    return true;
+  }
   /* The bare specifier's ROOT: "@scope/pkg" or "pkg". A subpath after the
    * root belongs to the same package and fences with it, which is the
    * loud direction: a package whose "exports" rejects the subpath makes
@@ -1953,32 +2109,8 @@ bool scr_require_verdict(const struct ScrDyn *spec, const ScrStr *roots, const S
   }
   if (scr_require_root_known(roots, s->data, root)) return true;
   /* Nothing the build could see resolves this root, so Node's answer is
-   * the catchable require-site MODULE_NOT_FOUND, message and code exact
-   * (the message really does carry the "Require stack" line). */
-  {
-    static const char head[] = "Cannot find module '";
-    static const char mid[] = "'\nRequire stack:\n- ";
-    size_t len = (sizeof head - 1) + s->len + (sizeof mid - 1) + from->len;
-    char *msg = (char *)malloc(len + 1);
-    if (msg == NULL) scr_trap("scriptc: out of memory\n");
-    size_t at = 0;
-    memcpy(msg + at, head, sizeof head - 1); at += sizeof head - 1;
-    memcpy(msg + at, s->data, s->len); at += s->len;
-    memcpy(msg + at, mid, sizeof mid - 1); at += sizeof mid - 1;
-    memcpy(msg + at, from->data, from->len); at += from->len;
-    msg[at] = '\0';
-    /* Built by hand rather than through scr_throw_error_msg_code, which
-     * takes a (char*, len) it copies: the scratch buffer could then only
-     * be freed AFTER a call that never returns. The ScrStr takes its own
-     * copy, the buffer frees here, and the error owns the string from
-     * there on. */
-    ScrStr *m = scr_str_new(msg, at);
-    free(msg);
-    ScrError *e = scr_error_new(SCR_ERR_ERROR, m);
-    scr_str_release(m); /* scr_error_new retained its own */
-    scr_error_set_code(e, "MODULE_NOT_FOUND");
-    scr_throw_obj(e, &scr_error_retain_v, &scr_error_release_v, scr_error_trace_arg());
-  }
+   * the catchable require-site MODULE_NOT_FOUND, message and code exact. */
+  scr_require_throw_not_found(s, from);
   return true; /* unreachable */
 }
 

@@ -676,8 +676,16 @@ void scr_throw_node_coded(double kind, const ScrStr *code, const ScrStr *msg);
  * newline-joined set of resolvable bare specifier roots (leading and
  * trailing newline; empty means "could not enumerate", so everything
  * fences); the from argument is the requiring file native path for the
- * Require stack line. Borrows all three; never answers false. */
-bool scr_require_verdict(const struct ScrDyn *spec, const ScrStr *roots, const ScrStr *from);
+ * Require stack line. The builtins argument is Node own builtinModules,
+ * joined and delimited the same way, and decides a node: specifier; the
+ * scope argument carries the requiring file package scope for a #
+ * import - "" cannot enumerate, "-" no imports field,
+ * "+<package.json>
+<key>
+..." one that has it. No filesystem is read
+ * here. Borrows all five; never answers false. */
+bool scr_require_verdict(const struct ScrDyn *spec, const ScrStr *roots, const ScrStr *from,
+                         const ScrStr *builtins, const ScrStr *scope);
 
 /* ── string methods ─────────────────────────────────────────────────
  * ECMA-262 observable semantics (UTF-16 code units) computed over the
