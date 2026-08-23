@@ -1198,6 +1198,16 @@ export interface IrLibIdentity {
   abiVersion: number;
 }
 
+/** The layout name of a class's run-time property table -- the ONE extra
+ * field an instance carrying `Object.defineProperty` writes grows. It is
+ * `%`-prefixed so no string key can spell it, and it lives HERE rather
+ * than in the lowering because both layers have to agree on it: the
+ * frontend writes the field and the cls.props* libCalls over it, and the
+ * backends read it back off IrClassDef.fields to answer [[Get]] over a
+ * boxed instance. A private copy on either side is a rename away from
+ * silently disabling the other. */
+export const CLASS_PROPS_FIELD = "%props";
+
 export interface IrClassDef {
   name: string;
   /** The JS-observable `.name` of the class (the runtime class object's
