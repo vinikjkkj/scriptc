@@ -2,15 +2,28 @@
  * Headers view (scr_fetch_static.c).
  *
  * Until this file existed, every `fetch(...)` in a static build was its own
- * SC2012 — the ambient global lives behind requireDynamicApi — and every
- * type that only fetch can mint (Response, Headers, and so RequestInit
- * beside them) had no static representation, which is what stopped OPTIONS
- * RECORDS carrying `typeof fetch` from compiling at all. The refusal moved
- * around: map the types alone and it lands on the call; lower the call
- * alone and it lands on the Response the call answers. They land together.
+ * SC2012 — the ambient global lives behind requireDynamicApi — and the two
+ * types the call answers had no static representation either. The refusal
+ * moved rather than shrank if either half landed alone: map the types and
+ * it reappears at the call; lower the call and it reappears at the
+ * Response the call answers. They land together.
+ *
+ * `RequestInit` and `Request` are NOT mapped, and that is deliberate: an
+ * options record carrying `typeof fetch` (zapo's
+ * `WaFetchVersionOptions`) still refuses through them. Mapping the two
+ * types would let the record compile and would then surface the rest of
+ * that function as NEW refusals at sites that do not exist today —
+ * `options.fetch ?? fetch` needs a builtin to have a first-class closure
+ * form, and `(init as { dispatcher?: unknown }).dispatcher = ...` is the
+ * assignment-target family. The whole group has to land at once, for the
+ * reason lower-abort.ts's header gives about the same shape of family:
+ * lower the visible members alone and the hidden ones surface, so it gets
+ * worse before it gets better.
  *
  * WHAT IS LOWERED
- *   fetch(url)                       url: string | URL
+ *   fetch(url)                       a string OR a URL value (not a
+ *                                    `string | URL` UNION — that union has
+ *                                    no static representation yet, SC2001)
  *   fetch(url, <object literal>)     method / headers / body / signal
  *   response.ok / .status / .statusText / .url / .redirected / .bodyUsed
  *   response.headers                 the Headers view
