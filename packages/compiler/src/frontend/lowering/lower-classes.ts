@@ -3354,6 +3354,22 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     // whose devirtualization and .name rules answer for every legal
     // runtime value.
     if (info.classDecorators?.valueGlobalId !== undefined) return null;
+    // The RECEIVER is an ambient `declare class` nothing defines. Node
+    // erases the declaration, so `Amb.name` is a ReferenceError on `Amb`
+    // — it never reaches the property. The `.name` fold at the bottom of
+    // this function is a compile-time constant read off the collected
+    // shape, so it answered `"Amb"` and the program ran on: measured
+    // WRONG at exit 0 on both backends, where Node exits 1. Every other
+    // member took the "static member has no lowering" refusal, which is
+    // loud but names the wrong cause. Both answer with the throw now.
+    if (ambientUndefinedClassSymbolOf(L, expr.expression) !== null) {
+      return nsUndefRead(
+        L,
+        expr.expression.text,
+        expr,
+        ambientUndefReadType(L, expr) ?? F64,
+      );
+    }
     // A class whose DEFINITION provably throws collected as a member-less
     // shell, so every static read misses and would report "the static
     // member 's' … has no lowering" — a true sentence about a class that
