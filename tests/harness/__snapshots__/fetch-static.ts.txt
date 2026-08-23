@@ -1,44 +1,33 @@
-fetch-static.ts:6:19 - error SC2012: 'fetch' runs in the embedded dynamic engine, which this build does not include
+fetch-static.ts:27:13 - error SC2012: 'AbortSignal.timeout' runs in the embedded dynamic engine, which this build does not include
 
-  5 | async function probe(url: string): Promise<number> {
-  6 |   const r = await fetch(url);
-    |                   ^~~~~~~~~~
-  7 |   return r.status;
-
-  hint: build with --dynamic to run this call in the embedded engine (adds ~620KB to the binary); static builds never include it
-
-fetch-static.ts:7:10 - error SC2020: 'Response.status' is part of the standard library types but has no scriptc lowering yet
-
-  6 |   const r = await fetch(url);
-  7 |   return r.status;
-    |          ^~~~~~~~
-  8 | }
-
-  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
-
-fetch-static.ts:12:13 - error SC2012: 'AbortSignal.timeout' runs in the embedded dynamic engine, which this build does not include
-
-  11 | }
-  12 | const sig = AbortSignal.timeout(100);
+  26 | }
+  27 | const sig = AbortSignal.timeout(100);
      |             ^~~~~~~~~~~~~~~~~~~~~~~~
-  13 | async function timed(url: string): Promise<string> {
+  28 | async function timed(url: string): Promise<string> {
 
   hint: build with --dynamic to run this call in the embedded engine (adds ~620KB to the binary); static builds never include it
 
-fetch-static.ts:14:19 - error SC2012: 'fetch' runs in the embedded dynamic engine, which this build does not include
+fetch-static.ts:29:40 - error SC2012: 'AbortSignal.timeout' runs in the embedded dynamic engine, which this build does not include
 
-  13 | async function timed(url: string): Promise<string> {
-  14 |   const r = await fetch(url, { signal: AbortSignal.timeout(100) });
-     |                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  15 |   return r.text();
+  28 | async function timed(url: string): Promise<string> {
+  29 |   const r = await fetch(url, { signal: AbortSignal.timeout(100) });
+     |                                        ^~~~~~~~~~~~~~~~~~~~~~~~
+  30 |   return r.text();
 
   hint: build with --dynamic to run this call in the embedded engine (adds ~620KB to the binary); static builds never include it
 
-fetch-static.ts:15:10 - error SC2020: 'Response.text' is part of the standard library types but has no scriptc lowering yet
+fetch-static.ts:34:10 - error SC2020: 'Response.body' is part of the standard library types but has no scriptc lowering yet
 
-  14 |   const r = await fetch(url, { signal: AbortSignal.timeout(100) });
-  15 |   return r.text();
+  33 |   const r = await fetch(url);
+  34 |   return r.body !== null;
      |          ^~~~~~
-  16 | }
+  35 | }
 
-  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+  hint: this build has no ReadableStream body — read the body with text(), json(), arrayBuffer() or bytes()
+
+fetch-static.ts:39:13 - error SC1090: console.log of '(Response) => boolean' values (function values have no inspect lowering (no runtime name exists — Node prints '[Function: name]'; pass the function's declared identifier directly to util.inspect for the baked form)) are not supported yet
+
+  38 | streamed("http://localhost/c");
+  39 | console.log(inspect, sig);
+     |             ^~~~~~~
+  40 | 

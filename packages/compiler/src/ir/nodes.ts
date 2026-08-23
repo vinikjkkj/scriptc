@@ -241,6 +241,25 @@ export type IrType =
    * objects in Node, and making controller.signal answer the controller
    * would be a silently wrong object rather than a refusal. */
   | { kind: "abortController" }
+  /** A fetch Response — the handle scr_fetch_static.c mints when the
+   * response HEAD arrives (not when the body ends: that is where Node
+   * settles fetch's promise too). Refcounted and CYCLE-CAPABLE, through
+   * exactly one edge: the parked body-consumer promise a `.text()` before
+   * the body ended installs. A promise can reach a closure that reaches
+   * the response, so the edge is traced; every other edge a Response owns
+   * is a string, a byte array or an error, none of which can point back.
+   * Distinct from `headers` for the same reason abortSignal is distinct
+   * from abortController: they are two objects in Node, and answering one
+   * for the other would be a silently wrong object rather than a
+   * refusal. */
+  | { kind: "response" }
+  /** A fetch Headers view — the response's header list, names lowercased,
+   * in arrival order. Refcounted but NOT cycle-capable: every edge it
+   * owns is a string. It exists as a TYPE first, the abortSignal
+   * argument: `Response.headers` appears in options records and return
+   * positions that never read it, and mapping it is what lets those
+   * compile. */
+  | { kind: "headers" }
   /** Heap, refcounted closure. `rest` marks a VARIADIC JS function (a
    * `...args` rest parameter, or a zero-param function body reading
    * `arguments` — test/common's mustCall wrapper): the lifted function
@@ -394,6 +413,8 @@ export const REF_TRUTHY_KINDS: ReadonlySet<string> = new Set([
   "fileHandle",
   "netServer", "netSocket", "http2Session", "http2Stream", "dgramSocket", "testCtx", "httpReq", "httpRes", "httpClientReq",
   "secureCtx", "abortSignal", "abortController", "fsWatcher", "childStream", "procStream", "bytes", "func", "object", "record", "promise",
+  // A Response and a Headers view are JS objects: always truthy.
+  "response", "headers",
   // A generator object is a JS object: always truthy.
   "generator",
   "asyncGenerator",
@@ -433,6 +454,8 @@ export const HTTPCLIENTREQ_T: IrType = { kind: "httpClientReq" };
 export const SECURECTX_T: IrType = { kind: "secureCtx" };
 export const ABORTSIGNAL_T: IrType = { kind: "abortSignal" };
 export const ABORTCONTROLLER_T: IrType = { kind: "abortController" };
+export const RESPONSE_T: IrType = { kind: "response" };
+export const HEADERS_T: IrType = { kind: "headers" };
 export const FSWATCHER_T: IrType = { kind: "fsWatcher" };
 export const CHILDSTREAM_T: IrType = { kind: "childStream" };
 export const PROCSTREAM_T: IrType = { kind: "procStream" };
@@ -751,6 +774,10 @@ export function typeKey(t: IrType): string {
       return "abortSignal";
     case "abortController":
       return "abortController";
+    case "response":
+      return "response";
+    case "headers":
+      return "headers";
     default: {
       const _exhaustive: never = t;
       void _exhaustive;
@@ -891,6 +918,13 @@ export function isRefCounted(t: IrType): boolean {
     // through it.
     t.kind === "abortSignal" ||
     t.kind === "abortController" ||
+    // A fetch Response and its Headers view. The Response carries the
+    // collector header (its parked body-consumer promise is a real edge
+    // back into the graph, and traceAdapterC answers a trace for it); the
+    // Headers view does not, because a list of strings cannot reach
+    // anything.
+    t.kind === "response" ||
+    t.kind === "headers" ||
     // bigint and the four crypto handles. Ordinary refcounted heap values
     // with NULL-tolerant, immortal-tolerant releases and — decisively —
     // NO collector header and no edge that could point back at anything
@@ -5286,6 +5320,48 @@ export type IrLibFn =
   | "abort.reason"
   | "abort.on"
   | "abort.off"
+  /** The static fetch surface (scr_fetch_static.c). Four call entry
+   * points rather than sentinel arguments, the abort.abort /
+   * abort.abortReason precedent: an omitted body is not an empty one (a
+   * POST with content-length 0 is a DIFFERENT request from a GET) and an
+   * omitted signal is not an unaborted one, so the presence lives in the
+   * NAME where the IR's arity check can see it. Every one answers a
+   * `promise of response` — fetch settles when the HEAD arrives, which is
+   * where Node settles it too. */
+  | "fetch.go"
+  | "fetch.goBody"
+  | "fetch.goSignal"
+  | "fetch.goBodySignal"
+  /** The two header-list builders the call emits in front of itself:
+   * `headersNorm` folds a written object literal's names, `headersFromDyn`
+   * walks a `Record<string, string>` VALUE at runtime. Both answer the
+   * same flat [name, value, ...] string array, so the fold happens in
+   * exactly one place. A string BODY needs no row of its own: it lowers
+   * through buffer.fromStr with an explicit "utf8", which is the same
+   * conversion `Buffer.from(s)` makes and is fetch's encoding for one. */
+  | "fetch.headersNorm"
+  | "fetch.headersFromDyn"
+  /** Response reads. `status` is a double because every numeric IR value
+   * is; `headers` answers the Headers VIEW with the response's own
+   * identity, so two reads compare equal the way Node's getter does. */
+  | "resp.ok"
+  | "resp.status"
+  | "resp.statusText"
+  | "resp.url"
+  | "resp.redirected"
+  | "resp.bodyUsed"
+  | "resp.headers"
+  /** The four body consumers. Each is a promise; a SECOND read throws
+   * Node's TypeError synchronously rather than rejecting, which is where
+   * Node puts it. */
+  | "resp.text"
+  | "resp.json"
+  | "resp.arrayBuffer"
+  | "resp.bytes"
+  /** Headers reads. `get` answers `string | null` — the sp.get pattern,
+   * with the runtime's NULL taking the null arm. */
+  | "headers.get"
+  | "headers.has"
   /** The composed `new crypto.X509Certificate(data).fingerprint` read
    * (scr_lib.c — no certificate handle exists): the SHA-1 of the DER,
    * uppercase colon-separated, over PEM or raw-DER Buffer input; other
@@ -6853,6 +6929,11 @@ function isJsonSafeAt(
     // AbortController (one internal signal slot) is the same answer.
     case "abortSignal":
     case "abortController":
+    // A Response's own enumerable properties are none (status/ok/headers
+    // are accessors on the prototype), so Node stringifies it to {} — no
+    // honest JSON surface. A Headers view is the same answer.
+    case "response":
+    case "headers":
       return false;
     default: {
       const _exhaustive: never = t;
@@ -7903,6 +7984,42 @@ export function moduleUsesAbortSignal(mod: IrModule): boolean {
     }
     const k = (v as { kind?: unknown }).kind;
     if (k === "abortSignal" || k === "abortController") {
+      found = true;
+      return;
+    }
+    for (const x of Object.values(v as Record<string, unknown>)) visit(x);
+  };
+  visit(mod);
+  return found;
+}
+
+/** True when the module has a static-fetch value anywhere — a `response`
+ * or `headers` typed slot, or one of the fetch.* / resp.* / headers.*
+ * libCalls. Both halves are needed and neither implies the other: a
+ * program can hold a `Response` in an options record it never fetches
+ * into (the TYPE walk), and `fetch(u).then(...)` never names a Response
+ * type at all if the callback's parameter is inferred away (the libCall
+ * walk). Same generic JSON walk as moduleUsesAbortSignal, and the same
+ * reason it cannot false-positive on user strings: `kind`/`fn`
+ * discriminants live only on IR objects. */
+export function moduleUsesFetchStatic(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const rec = v as { kind?: unknown; fn?: unknown };
+    if (rec.kind === "response" || rec.kind === "headers") {
+      found = true;
+      return;
+    }
+    if (
+      rec.kind === "libCall" &&
+      typeof rec.fn === "string" &&
+      (rec.fn.startsWith("fetch.") || rec.fn.startsWith("resp.") || rec.fn.startsWith("headers."))
+    ) {
       found = true;
       return;
     }
@@ -9618,6 +9735,8 @@ const LIB_MODE_REFUSED_KINDS: ReadonlyMap<string, string> = new Map([
   ["secureCtx", "the node:tls surface"],
   ["abortSignal", "the AbortSignal surface"],
   ["abortController", "the AbortSignal surface"],
+  ["response", "the fetch surface"],
+  ["headers", "the fetch surface"],
   ["dynInvoke", "checked-dynamic prototype dispatch"],
 ]);
 
@@ -9790,6 +9909,16 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.writeStreamOpts",
   "num.toFixed",
   "num.toStringRadix",
+  // The four fetch body consumers: a SECOND read of a body throws Node's
+  // TypeError SYNCHRONOUSLY (not a rejection), which is where Node puts
+  // it, so the runtime answers NULL with a pending exception. Both
+  // backends need the seed — without it the LLVM lane read the NULL
+  // promise and took an access violation (measured), where the C lane's
+  // explicit fallibleTemp had already covered it.
+  "resp.text",
+  "resp.json",
+  "resp.arrayBuffer",
+  "resp.bytes",
   "insp.jsonDyn",
   // diagnostics_channel: publish runs subscribers synchronously (a throw
   // propagates — the documented divergence from triggerUncaughtException);

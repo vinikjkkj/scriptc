@@ -159,16 +159,20 @@ describe("the two mains install the same hooks on the same predicates", () => {
     expect(problems).toEqual([]);
   });
 
-  test("the net hooks carry the WebSocket disjunct on BOTH sides", async () => {
-    // Named on its own because it is the row that was wrong, and because
-    // the symptom — a socket that dials and never fires — is invisible to
-    // every compile-time check there is.
+  test("the net hooks carry the WebSocket and static-fetch disjuncts on BOTH sides", async () => {
+    // Named on its own because it is the row that was wrong TWICE, and
+    // because the symptom — a socket that dials and never fires — is
+    // invisible to every compile-time check there is. The WebSocket
+    // disjunct was the first; the static fetch was the second, and it
+    // presented as a program that printed NOTHING and exited 0 between
+    // the dial and the response head.
     const c = installTable(await readFile(cEmitter, "utf8"));
     const ll = installTable(await readFile(llvmEmitter, "utf8"));
     for (const [name, t] of [["C", c], ["LLVM", ll]] as const) {
       const preds = t.get("scr_net_install");
       expect(preds, `${name} main does not install scr_net_install at all`).toBeDefined();
       expect([...preds!].sort(), `${name} main's scr_net_install gate`).toEqual([
+        "moduleUsesFetchStatic",
         "moduleUsesNet",
         "moduleUsesWsGlobal",
       ]);

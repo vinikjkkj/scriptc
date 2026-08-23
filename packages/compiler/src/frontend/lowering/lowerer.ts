@@ -108,6 +108,7 @@ import { builtinImportOf, createRequireBindingDecl, createRequireNamespaceDecl, 
 import { isIslandExpr, islandFuncValueFence, islandRegexpOf, jsvalIn, requireDynamicApi, islandGlobalFnOf, lowerDynamicImportCall, lowerFetchCall, lowerIslandMethodCall, lowerMathProperty, npmPackageOf, npmMemberFence, npmPackageOfSymbol } from "./lower-island.js";
 import { lowerHttpHeadersElement, lowerNetModuleCall, lowerServerMethodCall, lowerServerProperty, lowerTlsRootCertificates } from "./lower-server.js";
 import { lowerNamespaceConditionalCall, namespaceOverrideOf } from "./lower-nsvalue.js";
+import { lowerStaticFetchCall } from "./lower-fetch.js";
 import { lowerDgramDnsModuleCall, lowerDgramMethodCall } from "./lower-dgram.js";
 import { lowerNodeTestModuleCall, lowerTestDirectCall, lowerTestMethodCall, lowerTestCtxProperty } from "./lower-test.js";
 import { lowerAssertModuleCall, lowerAssertDirectCall } from "./lower-assert.js";
@@ -12159,6 +12160,9 @@ export class Lowerer {
     // `import` is a keyword callee no identifier path matches).
     return (
       lowerFfiCall(this, expr) ??
+      // The STATIC fetch claims the site first and declines under
+      // --dynamic, where the island's own lowering below still owns it.
+      lowerStaticFetchCall(this, expr) ??
       lowerFetchCall(this, expr) ??
       lowerDynamicImportCall(this, expr) ??
       lowerCall(this, expr)

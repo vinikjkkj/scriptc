@@ -39,6 +39,15 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   // not have http), so neither may name the other — this TU names both and
   // is gated on the two together, the scr_cipher_key.c pattern.
   "scr_abort_http.c": ["scr_abort.c", "scr_http.c"],
+  // Measured edges: scr_http_request_ex / scr_http_req_* / the client
+  // listeners (scr_http.c), scr_tls_fetch_client_ctx and _wrap
+  // (scr_tls.c), scr_url_new / scr_url_release (scr_url.c). The socket
+  // and DNS half arrives through scr_http.c's own row.
+  "scr_fetch_static.c": ["scr_http.c", "scr_net.c", "scr_tls.c", "scr_url.c"],
+  // The conjunction seam, scr_abort_http.c's shape: it names
+  // scr_abort_signal_* AND scr_http_client_signal (which lives in
+  // scr_abort_http.c), plus scr_fetch_abort_seam.
+  "scr_fetch_abort.c": ["scr_abort.c", "scr_abort_http.c", "scr_fetch_static.c"],
   "scr_cipher_key.c": ["scr_asym.c", "scr_cipher_value.c"],
   "scr_cipher_value.c": ["scr_cipher.c"],
   "scr_dc.c": ["scr_async_dyn.c"],
@@ -389,6 +398,13 @@ export interface CcOptions {
    * symbols, so the emitted TU is the only caller and it names them
    * exactly when an abortSignal-typed slot exists. */
   abortSignal?: boolean;
+  /** The program has a static-fetch value anywhere
+   * (moduleUsesFetchStatic on the IR): compiles scr_fetch_static.c, and
+   * with it the whole net/http/tls/url/zlib stack it stands on. The gate
+   * is why a program that never writes `fetch` pays nothing for it —
+   * which matters more here than for any other unit in this table,
+   * because linking it pulls in mbedTLS. */
+  fetchStatic?: boolean;
 }
 
 /** Structured compiler-driver failure. Most callers still let this surface
@@ -1418,8 +1434,16 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // FUTURE detector edge (http2Session/http2Stream reaching the IR with no
   // http2.* libCall beside it) from becoming an lld-link error.
   const http2 = opts.http2 ?? false;
-  const tls = (opts.tls ?? false) || http2 || nativeFetch || netIsland || wsGlobal;
-  const abortHttp = opts.abortHttp ?? false;
+  // The STATIC fetch. It stands on exactly the units the island fetch
+  // does, and closes over them for the same reason every gate here does:
+  // a `false` that should be `true` is an undefined symbol at the very
+  // end of the build, naming no gate. It also drags the abort seam
+  // whenever a signal is in the program, because the seam names
+  // scr_http_client_signal, which lives behind the abortHttp gate.
+  const fetchStatic = (opts.fetchStatic ?? false) && !dynamic;
+  const fetchAbort = fetchStatic && (opts.abortSignal ?? false);
+  const abortHttp = (opts.abortHttp ?? false) || fetchAbort;
+  const tls = (opts.tls ?? false) || http2 || nativeFetch || netIsland || wsGlobal || fetchStatic;
   /* The body view implies BOTH halves it bridges, for the abortHttp
    * reason: the two detectors answer independently and one of them can be
    * false at a site that needs the unit. */
@@ -1428,8 +1452,8 @@ export async function compileC(opts: CcOptions): Promise<void> {
   /* The seam implies its two halves: a wrong `false` here would be an
    * undefined symbol at the very end of the build naming no gate. */
   const abortSignal = (opts.abortSignal ?? false) || abortHttp;
-  const http = (opts.http ?? false) || tls || http2 || nativeFetch || netIsland || wsGlobal || abortHttp || httpBody;
-  const net = (opts.net ?? false) || http || tls || http2 || nativeFetch || netIsland || wsGlobal;
+  const http = (opts.http ?? false) || tls || http2 || nativeFetch || netIsland || wsGlobal || abortHttp || httpBody || fetchStatic;
+  const net = (opts.net ?? false) || http || tls || http2 || nativeFetch || netIsland || wsGlobal || fetchStatic;
   /* scr_url.c's gate closes over every unit that calls into it, the `net`
    * discipline one line up. Measured edges (objects paired U-against-T,
    * the RUNTIME_UNIT_DEPS recipe): scr_http.c, scr_url_params.c,
@@ -1441,7 +1465,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
    * further down) because every --dynamic build links scr_island.c and
    * such a build already carries the ~620KB engine — spending a
    * conservative 16KB there costs nothing anyone measures. */
-  const url = (opts.url ?? false) || http || (opts.searchParams ?? false) || wsGlobal || fetchOn || dynamic;
+  const url = (opts.url ?? false) || http || (opts.searchParams ?? false) || wsGlobal || fetchOn || dynamic || fetchStatic;
   const driver = resolveCc();
   if (driver.target !== null) {
     // See the resolveCc block: these inputs are built on and for the HOST
@@ -1489,7 +1513,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // historical `-lz` system link (see CcOptions.zlib). The native fetch's
   // gzip decoder rides the same objects/link.
   const zlibObjects =
-    ((opts.zlib ?? false) || nativeFetch) && driver.target !== null
+    ((opts.zlib ?? false) || nativeFetch || (opts.fetchStatic ?? false)) && driver.target !== null
       ? await ensureZlibObjects(opts.sanitize ?? false, driver)
       : [];
   // The libcurl import stub is likewise CROSS-only — host builds keep the
@@ -1563,7 +1587,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
       ? driver.target !== null
         ? ["-I", vendorZlibDir(), rt(join(rtDir, "scr_zlib.c")), ...zlibObjects]
         : [rt(join(rtDir, "scr_zlib.c")), "-lz"]
-      : nativeFetch
+      : nativeFetch || fetchStatic
         ? driver.target !== null
           ? ["-I", vendorZlibDir(), ...zlibObjects]
           : ["-lz"]
@@ -1595,6 +1619,12 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opts.qs ? [rt(join(rtDir, "scr_qs.c"))] : []),
     ...(abortSignal ? [rt(join(rtDir, "scr_abort.c"))] : []),
     ...(abortHttp ? [rt(join(rtDir, "scr_abort_http.c"))] : []),
+    // The static fetch and the conjunction seam that gives it `signal`.
+    // The seam is the scr_cipher_key.c / scr_abort_http.c shape: it links
+    // only when BOTH halves do, and the emitted main calls its installer
+    // exactly then.
+    ...(fetchStatic ? [rt(join(rtDir, "scr_fetch_static.c"))] : []),
+    ...(fetchAbort ? [rt(join(rtDir, "scr_fetch_abort.c"))] : []),
     ...(stream ? [rt(join(rtDir, "scr_stream.c"))] : []),
     // The readiness-poller backends (scr_platform.h): kqueue on macOS/BSD,
     // epoll on Linux, WSAPoll on Windows — each TU is empty off its

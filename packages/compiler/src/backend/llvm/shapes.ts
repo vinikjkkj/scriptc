@@ -310,6 +310,10 @@ export function traceAdapter(host: ShapeHost, t: IrType): string | null {
     case "abortController":
       host.declare(`declare void @scr_abort_controller_trace_v(ptr, ptr, ptr)`);
       return "@scr_abort_controller_trace_v";
+    // The C twin's row: the Response's parked body-consumer promise.
+    case "response":
+      host.declare(`declare void @scr_response_trace_v(ptr, ptr, ptr)`);
+      return "@scr_response_trace_v";
     case "promise":
       // Promises are unconditionally cycle-capable (a rejection payload
       // is an arbitrary thrown value) — emit-shapes.ts's row.
