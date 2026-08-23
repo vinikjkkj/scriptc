@@ -11604,21 +11604,53 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
             const bound = L.bindThisClosure(fn, thisArg, boundArgs, locOf(call));
             if (bound) return bound;
           }
-        } else if (call.arguments.length === 1) {
-          // TypeScript: the erasure, unchanged (see above — a TS function
-          // value cannot read a receiver, so `f` IS `f.bind(x)`). The
-          // argument still evaluates for its effects.
+        } else {
+          // TypeScript: no receiver, but STILL A NEW FUNCTION OBJECT.
+          //
+          // This used to be the ERASURE — `f.bind(x)` compiled to `f`
+          // itself — and the reason written here was sound as far as it
+          // went: a TS function value cannot read a `this`, so the bound
+          // receiver has nothing to change. What it missed is that
+          // `Function.prototype.bind` does not only re-route a receiver,
+          // it CONSTRUCTS. `g.bind(null) === g` is `false` in every
+          // engine, and this compiler answered `true` — a silent wrong
+          // answer for every TypeScript program that binds, invisible to
+          // the trap census because an erasure emits no trap. Two separate
+          // binds of one function compared to each other were `true` as
+          // well, and so were a bound function stored in a record and the
+          // original.
+          //
+          // The wrapper is bindThisClosure's `pushThis: false` arm: the
+          // same interned forwarding lift, minus the `this` window the TS
+          // arm has no use for — so the receiver argument is EVALUATED for
+          // its effects and then dropped, exactly as the erasure did, and
+          // the only thing that changes is that the value is a fresh
+          // ScrClosure with its own identity. Leading bound arguments ride
+          // the same wrapper here as they do on the JS side, which is what
+          // turns `f.bind(null, 1)` from a refusal into partial
+          // application.
+          //
+          // The receiver evaluates in JS's own order: after the callee,
+          // before the bound arguments — index 1 of the wrapper's init
+          // list, which is the slot just past the one holding the callee.
           const fn = L.lowerExpr(access.expression);
-          if (fn.type.kind === "func") {
+          if (fn.type.kind === "func" && fn.type.params.length >= call.arguments.length - 1) {
             const thisArg = L.lowerExpr(call.arguments[0]!);
-            if (droppableStatic(thisArg)) return fn;
-            return {
-              kind: "seqExpr",
-              stmts: [{ kind: "exprStmt", expr: thisArg, loc: locOf(call) }],
-              result: fn,
-              type: fn.type,
-              loc: locOf(call),
-            };
+            const boundArgs = call.arguments
+              .slice(1)
+              .map((a, i) => L.coerceInto(a, L.lowerExpr(a), (fn.type as { params: IrType[] }).params[i]!));
+            const bound = L.bindThisClosure(fn, thisArg, boundArgs, locOf(call), false);
+            if (bound) {
+              if (droppableStatic(thisArg) || bound.kind !== "seqExpr") return bound;
+              return {
+                ...bound,
+                stmts: [
+                  ...bound.stmts.slice(0, 1),
+                  { kind: "exprStmt", expr: thisArg, loc: locOf(call) },
+                  ...bound.stmts.slice(1),
+                ],
+              };
+            }
           }
         }
       }

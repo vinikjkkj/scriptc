@@ -11,6 +11,7 @@ import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBi
 import { lowerAbortProperty } from "./lower-abort.js";
 import { lowerFetchProperty } from "./lower-fetch.js";
 import { builtinFnValueOf } from "./lower-fnvalue.js";
+import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
@@ -2499,6 +2500,15 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       {
         const lifted = objectStaticFnValueOf(L, expr);
         if (lifted) return lifted;
+      }
+      // `f.name` / `f.length` on a compiled function value — the two own
+      // properties every JS function object carries, refused for EVERY
+      // function in this language until now. Folded from the value's
+      // proven CREATION site, and null (so the fence below still fires)
+      // whenever the creation site is not provable. lower-fnprops.ts.
+      {
+        const prop = funcObjectPropOf(L, expr, loc);
+        if (prop) return prop;
       }
       // The lib fence's PROPERTY chokepoint: a stdlib-declared member that
       // no lowering above claimed ([1,2].entries, Math.SQRT2, Promise.all,
