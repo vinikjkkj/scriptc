@@ -120,28 +120,37 @@ const PLANTS: readonly {
   src: string;
 }[] = [
   {
-    name: "an-options-record-carrying-typeof-fetch",
+    name: "the-undici-dispatcher-written-onto-a-fetch-init",
     ext: "ts",
-    zapoSite: "src/transport/wa-version-fetcher.ts:211 -- WaFetchLatestMobileVersionOptions = {}",
-    accept: [{ code: "SC2011", fragment: "have no static representation but run in the embedded dynamic engine" }],
+    zapoSite:
+      "src/transport/wa-version-fetcher.ts:133 -- " +
+      "(init as { dispatcher?: unknown }).dispatcher = dispatcher",
+    accept: [{ code: "SC2020", fragment: "'RequestInit.dispatcher'" }],
+    // THE ROW THAT REPLACED THE RECORD, one statement instead of a whole
+    // declaration -- and it is a different KIND of refusal, which is why
+    // it is planted rather than described. The record's blocker was a
+    // missing type; this is a missing CAPABILITY, measured against the
+    // oracle rather than assumed: Node v25.9.0's `fetch(url, {
+    // dispatcher })` really does call a plain object's
+    // `dispatch(opts, handler)` and wait for the handler's callbacks. So
+    // there is nothing here to drop quietly, and dropping it would be a
+    // proxy silently ignored.
+    //
+    // It used to answer SC1090 "assignment to non-variables", which named
+    // neither the value nor the reason, and which is why the row was
+    // filed under the assignment-target family for three blocks running.
+    // The fragment below is the whole correction: the refusal names the
+    // member.
     src: [
-      "interface ProxyTransport { readonly kind: 'undici' }",
-      "interface FetchVersionOptions {",
-      "  readonly proxy?: ProxyTransport",
-      "  readonly timeoutMs?: number",
-      "  readonly signal?: AbortSignal",
-      "  readonly userAgent?: string",
-      "  readonly headers?: Readonly<Record<string, string>>",
-      "  readonly fetch?: typeof fetch",
+      "declare const dispatcher: { dispatch: (a: unknown, b: unknown) => unknown } | undefined",
+      "export async function go(url: string): Promise<number> {",
+      "  const init: RequestInit = { method: 'GET' }",
+      "  if (dispatcher) {",
+      "    ;(init as { dispatcher?: unknown }).dispatcher = dispatcher",
+      "  }",
+      "  return (await fetch(url, init)).status",
       "}",
-      "interface LatestMobileOptions extends FetchVersionOptions {",
-      "  readonly url?: string",
-      "  readonly versionPattern?: RegExp",
-      "}",
-      "export async function fetchLatest(options: LatestMobileOptions = {}): Promise<string> {",
-      "  return String(options.url ?? 'x')",
-      "}",
-      "void fetchLatest()",
+      "void go('http://127.0.0.1:1/x').catch(() => console.log('caught'))",
       "",
     ].join("\n"),
   },
@@ -199,6 +208,58 @@ const CLOSED: readonly {
   provedBy: string;
   src: string;
 }[] = [
+  {
+    name: "an-options-record-carrying-typeof-fetch",
+    ext: "ts",
+    zapoSite: "src/transport/wa-version-fetcher.ts:47 -- WaFetchVersionOptions.fetch?: typeof fetch",
+    provedBy:
+      "tests/harness/request-init.test.ts (25 cells against Node on both backends, including an " +
+      "INJECTED fetch through exactly this option), tests/harness/builtin-fn-value.test.ts (the " +
+      "`typeof fetch` record differential and the 38 fetch-as-a-value cells) and " +
+      "tests/corpus/6080, 6081",
+    // The SAME record that carried the refusal, now carrying none -- and
+    // with the BODY that was hidden behind it. The declaration used to
+    // poison before a single statement of the function was lowered, so
+    // "zero tagged refusals" here is a claim about the body as well as
+    // about the record, which is exactly what the old plant could not say.
+    //
+    // What is NOT in this plant, deliberately: zapo's
+    // `(init as { dispatcher?: unknown }).dispatcher = d`. That still
+    // refuses, at its own line, and it is a PLANT of its own above --
+    // folding it in here would let this row pass while the site it stands
+    // for still carried a refusal.
+    src: [
+      "interface ProxyTransport { readonly kind: 'undici' }",
+      "interface FetchVersionOptions {",
+      "  readonly proxy?: ProxyTransport",
+      "  readonly timeoutMs?: number",
+      "  readonly signal?: AbortSignal",
+      "  readonly userAgent?: string",
+      "  readonly headers?: Readonly<Record<string, string>>",
+      "  readonly fetch?: typeof fetch",
+      "}",
+      "interface LatestMobileOptions extends FetchVersionOptions {",
+      "  readonly url?: string",
+      "  readonly versionPattern?: RegExp",
+      "}",
+      "async function sourceText(url: string, options: FetchVersionOptions): Promise<string> {",
+      "  const fetchImpl = options.fetch ?? fetch",
+      "  const headers: Record<string, string> = { 'user-agent': options.userAgent ?? 'ua' }",
+      "  if (options.headers) {",
+      "    for (const key in options.headers) { headers[key.toLowerCase()] = options.headers[key]! }",
+      "  }",
+      "  const init: RequestInit = { method: 'GET', headers }",
+      "  const response = await fetchImpl(url, init)",
+      "  if (!response.ok) { throw new Error('http ' + String(response.status)) }",
+      "  return await response.text()",
+      "}",
+      "export async function fetchLatest(options: LatestMobileOptions = {}): Promise<string> {",
+      "  return await sourceText(options.url ?? 'http://127.0.0.1:1/x', options)",
+      "}",
+      "void fetchLatest().catch(() => console.log('caught'))",
+      "",
+    ].join("\n"),
+  },
   {
     name: "the-ws-option-bag-with-a-proxy-dispatcher",
     ext: "ts",
