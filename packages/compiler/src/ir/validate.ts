@@ -961,6 +961,12 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // program-dependent object types, checked in the libCall case.
   "error.new": { argTypes: [STRING], result: VOID },
   "error.nodeThrow": { argTypes: [F64, STRING, STRING], result: VOID },
+  // The run-time-specifier require verdict: [specifier, resolvable-roots,
+  // requiring file]. Answers a bool; throws for every case Node rejects.
+  "module.requireVerdict": { argTypes: [DYN, STRING, STRING], result: BOOL },
+  // Always throws; the result is the replaced expression type (skipped
+  // below with the rest of the always-throw family).
+  "error.fenceThrow": { argTypes: [STRING, STRING], result: VOID },
   "dyn.toStringCoerce": { argTypes: [DYN], result: STRING },
   // Always throws; the result is the READ's declared type (a typed dummy
   // the unwind abandons) — the libCall case skips the result check.
@@ -4616,7 +4622,7 @@ function validateFunction(
           // of the undefined global mapped to (never materialized).
           break;
         }
-        if (e.fn === "error.nodeThrow" || e.fn === "error.argTypeThrow" || e.fn === "error.propTypeThrow" ||
+        if (e.fn === "error.nodeThrow" || e.fn === "error.fenceThrow" || e.fn === "error.argTypeThrow" || e.fn === "error.propTypeThrow" ||
             e.fn === "fs.mkdtempChk" || e.fn === "fs.readFileChk" ||
             e.fn === "fs.opendirChk" || e.fn === "fs.watchFileChk" || e.fn === "fs.lchmodChk" ||
             e.fn === "fs.readChk" || e.fn === "fs.streamOptsChk" || e.fn === "net.connectOptsChk" ||

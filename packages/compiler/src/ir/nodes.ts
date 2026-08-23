@@ -4277,6 +4277,28 @@ export type IrLibFn =
    * the replaced expression's own (never materialized — the
    * global.undefRead pattern). May-throw seed. */
   | "error.nodeThrow"
+  /** The compiled CommonJS require with a RUN-TIME specifier: args are
+   * [specifier (dyn, unvalidated - Node checks the argument itself),
+   * the newline-joined set of bare specifier ROOTS the build could not
+   * rule out (leading and trailing newline; EMPTY means the build could
+   * not enumerate, so everything fences), the requiring file native path
+   * for the Require stack line]. Answers TRUE when the build cannot
+   * serve the specifier - the caller then throws the tagged refusal the
+   * site already carried, so the census still sees it where it was - and
+   * THROWS Node own error for every case Node itself rejects
+   * (ERR_INVALID_ARG_TYPE, ERR_INVALID_ARG_VALUE, and the catchable
+   * MODULE_NOT_FOUND). Never answers false. May-throw seed. */
+  | "module.requireVerdict"
+  /** The deferred compile fence as an EXPRESSION: args are [message,
+   * SC code], both string LITERALS, and the emission is the same
+   * scr_throw_error_msg_code call the runtimeFence STATEMENT emits - the
+   * same text, so scripts/tu-census.mjs counts it as the same tagged
+   * refusal. It exists because a fence can now be CONDITIONAL (the
+   * require verdict), and a conditional cannot poison a statement.
+   * ALWAYS THROWS; the result type is the replaced expression own
+   * (never materialized - the global.undefRead pattern). May-throw
+   * seed. */
+  | "error.fenceThrow"
   /** JS ToString over a dyn value WITH the object protocol (a user
    * toString/valueOf member is CALLED and its throw propagates;
    * exhaustion throws "Cannot convert object to primitive value"; units
@@ -10085,6 +10107,11 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "global.undefRead",
   // The compiler-resolved Node-parity throw: always throws, catchably.
   "error.nodeThrow",
+  // The run-time-specifier require: throws Node MODULE_NOT_FOUND and the
+  // two argument errors, catchably.
+  "module.requireVerdict",
+  // The conditional deferred fence: always throws, catchably.
+  "error.fenceThrow",
   // USVString coercion runs user toString/valueOf — throws propagate.
   "dyn.toStringCoerce",
   "child.kill",
