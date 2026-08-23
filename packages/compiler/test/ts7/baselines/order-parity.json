@@ -9393,6 +9393,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/6090-defineproperty-runtime-key-read-back.ts": {
+   "order": [
+    "<repo>/tests/corpus/6090-defineproperty-runtime-key-read-back.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/6091-defineproperty-hierarchy-class-read-back.ts": {
+   "order": [
+    "<repo>/tests/corpus/6091-defineproperty-hierarchy-class-read-back.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/6100-require-as-a-value.cjs": {
    "order": [
     "<repo>/tests/corpus/6100-require-as-a-value.cjs"
@@ -9403,12 +9415,6 @@
    "order": [
     "<repo>/tests/corpus/6101-require-self-scope/inner/t.cjs",
     "<repo>/tests/corpus/6101-require-self-scope/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/6091-defineproperty-hierarchy-class-read-back.ts": {
-   "order": [
-    "<repo>/tests/corpus/6091-defineproperty-hierarchy-class-read-back.ts"
    ],
    "diags": []
   },
