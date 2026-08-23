@@ -9863,6 +9863,16 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.writeStreamOpts",
   "num.toFixed",
   "num.toStringRadix",
+  // The four fetch body consumers: a SECOND read of a body throws Node's
+  // TypeError SYNCHRONOUSLY (not a rejection), which is where Node puts
+  // it, so the runtime answers NULL with a pending exception. Both
+  // backends need the seed — without it the LLVM lane read the NULL
+  // promise and took an access violation (measured), where the C lane's
+  // explicit fallibleTemp had already covered it.
+  "resp.text",
+  "resp.json",
+  "resp.arrayBuffer",
+  "resp.bytes",
   "insp.jsonDyn",
   // diagnostics_channel: publish runs subscribers synchronously (a throw
   // propagates — the documented divergence from triggerUncaughtException);

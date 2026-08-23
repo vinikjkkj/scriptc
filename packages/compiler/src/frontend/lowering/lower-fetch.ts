@@ -100,6 +100,10 @@ function urlArg(L: Lowerer, node: ts.Expression, loc: SrcLoc): IrExpr {
 
 interface Init {
   method: IrExpr | null;
+  /** True when `body` was WRITTEN as a string rather than as bytes —
+   * fetch's content-type derivation reads the BodyInit's kind, which the
+   * encoded bytes no longer carry. */
+  bodyText: boolean;
   /** A flat [name, value, ...] string array (the object-literal form) or
    * a dyn (the `Record<string, string>` VALUE form) — never both. */
   headerPairs: IrExpr | null;
@@ -166,7 +170,7 @@ function headersValue(L: Lowerer, node: ts.Expression, into: Init, loc: SrcLoc):
 
 /** The init OBJECT LITERAL, walked key by key. */
 function initLiteral(L: Lowerer, node: ts.Expression, loc: SrcLoc): Init {
-  const into: Init = { method: null, headerPairs: null, headerDyn: null, body: null, signal: null };
+  const into: Init = { method: null, bodyText: false, headerPairs: null, headerDyn: null, body: null, signal: null };
   if (!ts.isObjectLiteralExpression(node)) {
     L.noLowering("fetch with a computed init argument", node,
       "an object literal is the lowered form: the request has one fixed shape and " +
@@ -215,6 +219,7 @@ function applyKey(
         // than minting a second one.
         const enc: IrExpr = { kind: "strLit", value: "utf8", type: STRING, loc };
         into.body = { kind: "libCall", fn: "buffer.fromStr", args: [v, enc], type: BYTES_U8, loc };
+        into.bodyText = true;
         return;
       }
       if (v.type.kind === "bytes") {
@@ -261,7 +266,7 @@ export function lowerStaticFetchCall(L: Lowerer, call: ts.CallExpression): IrExp
   const init =
     call.arguments.length === 2
       ? initLiteral(L, call.arguments[1]!, loc)
-      : { method: null, headerPairs: null, headerDyn: null, body: null, signal: null };
+      : { method: null, bodyText: false, headerPairs: null, headerDyn: null, body: null, signal: null };
 
   const method: IrExpr = init.method ?? { kind: "strLit", value: "GET", type: STRING, loc };
   // The header list is built by the runtime in both arms so the names are
@@ -288,7 +293,7 @@ export function lowerStaticFetchCall(L: Lowerer, call: ts.CallExpression): IrExp
       ? "fetch.goSignal"
       : "fetch.go";
   const args: IrExpr[] = [url, method, headers];
-  if (hasBody) args.push(init.body!);
+  if (hasBody) args.push(init.body!, { kind: "boolLit", value: init.bodyText, type: BOOL, loc });
   if (hasSignal) args.push(init.signal!);
   return { kind: "libCall", fn, args, type: { kind: "promise", inner: RESPONSE_T }, loc };
 }

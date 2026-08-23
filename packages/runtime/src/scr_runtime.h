@@ -8098,7 +8098,7 @@ typedef struct ScrResponse ScrResponse;
  * `header_pairs` is a flat [name, value, ...] string array. */
 ScrPromise *scr_fetch_start(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*/,
                             ScrArr *header_pairs /*borrowed*/,
-                            ScrBytes *body /*borrowed, nullable*/,
+                            ScrBytes *body /*borrowed, nullable*/, bool body_text,
                             void *signal /*borrowed, nullable*/); /* +1 */
 
 /* The two header-list builders the lowering emits in front of the call:

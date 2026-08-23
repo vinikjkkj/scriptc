@@ -12278,12 +12278,15 @@ class LlEmitter {
       const hasSignal = e.fn === "fetch.goSignal" || e.fn === "fetch.goBodySignal";
       const args = e.args.map((a) => this.emitExpr(a));
       const body = hasBody ? `ptr ${args[3]!.name}` : "ptr null";
-      const signal = hasSignal ? `ptr ${args[hasBody ? 4 : 3]!.name}` : "ptr null";
-      this.declare(`declare ptr @scr_fetch_start(ptr, ptr, ptr, ptr, ptr)`);
+      // The body_text bool rides arg 4 when a body is present; a
+      // bodyless call passes false.
+      const bodyText = hasBody ? `i1 ${args[4]!.name}` : "i1 false";
+      const signal = hasSignal ? `ptr ${args[hasBody ? 5 : 3]!.name}` : "ptr null";
+      this.declare(`declare ptr @scr_fetch_start(ptr, ptr, ptr, ptr, i1, ptr)`);
       const out = B.tmp();
       B.line(
         `${out} = call ptr @scr_fetch_start(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ` +
-          `ptr ${args[2]!.name}, ${body}, ${signal})`,
+          `ptr ${args[2]!.name}, ${body}, ${bodyText}, ${signal})`,
       );
       return this.own({ name: out, type: e.type });
     }
