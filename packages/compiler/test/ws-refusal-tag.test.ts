@@ -27,6 +27,16 @@
  * Both backends must agree byte for byte: they build these messages from
  * duplicated literals, so a tag added to one lane and not the other is
  * exactly the drift this file exists to catch.
+ *
+ * WHAT THE SURVIVING ROW IS NOW. `dispatcher` is LOWERED when its shape is
+ * one the compiler can call -- scr_ws_dispatch.c hands the upgrade to the
+ * program and adopts the socket it answers with. The refusal this file
+ * pins is the other case, and the bag below spells it deliberately:
+ * `dispatcher?: object` carries no proof that it even HAS a `dispatch`,
+ * let alone what signature, and delegating through a guess is the one
+ * thing worse than refusing. So this is no longer "the dispatcher row" --
+ * it is the fence that stands where the shape cannot be proved, and
+ * tests/harness/ws-dispatcher.test.ts holds the other direction.
  */
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -34,10 +44,11 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compile } from "../src/index.js";
 
-/** The bag zapo dials with: two lowered fields, one proxy field the oracle
- * honours and this compiler cannot (`dispatcher` — a runtime
- * `if (present) throw`), and one the oracle never even READS (`agent` — no
- * test, no throw, ignored exactly as Node ignores it). */
+/** Two lowered fields, one proxy field whose SHAPE this compiler cannot
+ * prove callable (`dispatcher?: object` — a runtime `if (present) throw`;
+ * zapo's own `dispatch(...args)` record delegates instead), and one the
+ * oracle never even READS (`agent` — no test, no throw, ignored exactly as
+ * Node ignores it). */
 const PROGRAM = `
 interface WSEventLike { readonly code?: number; readonly reason?: string; readonly wasClean?: boolean; readonly data?: unknown }
 interface RawWS {
