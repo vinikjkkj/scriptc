@@ -1433,10 +1433,19 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
       // load nothing). Binding requires anywhere else would need lazily-
       // initialized alias storage this model doesn't represent; named
       // fence.
+      // ...except when NOTHING INSTALLED resolves the specifier. Node's
+      // answer there is a catchable MODULE_NOT_FOUND at the require, and
+      // there is no module for the binding to alias, so the declaration
+      // takes the ORDINARY variable path and its initializer compiles to
+      // that throw (lowerBareRequireCall). Without this the nested form
+      // reported the "outside the module's top level" fence, which a
+      // program's own try/catch swallowed — a compiler refusal answering
+      // where Node answers MODULE_NOT_FOUND, at exit 0.
       if (
         decl.initializer !== undefined &&
         requireSpecOf(decl.initializer) !== null &&
-        isJsSourceFile(decl.getSourceFile())
+        isJsSourceFile(decl.getSourceFile()) &&
+        probeNodeRequireRefusal(decl.getSourceFile().fileName, requireSpecOf(decl.initializer)!) === null
       ) {
         if (ts.isSourceFile(stmt.parent)) {
           const init = L.requireInitStmt(requireSpecOf(decl.initializer)!, decl);
