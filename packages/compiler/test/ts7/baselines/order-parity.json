@@ -9146,6 +9146,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5934-instanceof-an-ambient-class-throws.ts": {
+   "order": [
+    "<repo>/tests/corpus/5934-instanceof-an-ambient-class-throws.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5935-instanceof-an-ambient-class-keeps-the-left-operand.ts": {
+   "order": [
+    "<repo>/tests/corpus/5935-instanceof-an-ambient-class-keeps-the-left-operand.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"
@@ -9794,6 +9806,12 @@
   "<repo>/tests/diagnostics/accessors.ts": {
    "order": [
     "<repo>/tests/diagnostics/accessors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/ambient-extends.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/ambient-extends.ts"
    ],
    "diags": []
   },
