@@ -5329,14 +5329,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // instead of losing it behind a runtime helper. (Always
             // throws; the typed dummy is abandoned by the pending check's
             // unwind, the error.nodeThrow pattern.)
-            const msgArg = e.args[0]!;
-            const codeArg = e.args[1]!;
-            if (msgArg.kind !== "strLit" || codeArg.kind !== "strLit") {
-              throw new Error("emitter bug: error.fenceThrow needs a literal message and code");
-            }
-            const fenceBytes = Buffer.from(msgArg.value, "utf8");
+            if (e.fence === undefined) throw new Error("emitter bug: error.fenceThrow carries no fence");
+            const fenceBytes = Buffer.from(e.fence.message, "utf8");
             return finish(
-              `(scr_throw_error_msg_code(SCR_ERR_ERROR, ${cStringLiteral(fenceBytes)}, ${fenceBytes.length}, "${codeArg.value}"), ${isRefCounted(e.type) ? `(${cType(e.type).trim()})NULL` : "0"})`,
+              `(scr_throw_error_msg_code(SCR_ERR_ERROR, ${cStringLiteral(fenceBytes)}, ${fenceBytes.length}, "${e.fence.code}"), ${isRefCounted(e.type) ? `(${cType(e.type).trim()})NULL` : "0"})`,
             );
           }
           case "error.nodeThrow":

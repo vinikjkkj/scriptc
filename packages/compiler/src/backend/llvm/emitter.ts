@@ -11801,15 +11801,11 @@ class LlEmitter {
       // scripts/tu-census.mjs reads it as the tagged refusal it is.
       // SCR_ERR_ERROR = 0. Always throws; the typed dummy is abandoned by
       // the pending check's unwind.
-      const msgArg = e.args[0]!;
-      const codeArg = e.args[1]!;
-      if (msgArg.kind !== "strLit" || codeArg.kind !== "strLit") {
-        throw new Error("emitter bug: error.fenceThrow needs a literal message and code");
-      }
-      const fenceBytes = Buffer.byteLength(msgArg.value, "utf8");
+      if (e.fence === undefined) throw new Error("emitter bug: error.fenceThrow carries no fence");
+      const fenceBytes = Buffer.byteLength(e.fence.message, "utf8");
       this.declare(`declare void @scr_throw_error_msg_code(i32, ptr, i64, ptr)`);
       B.line(
-        `call void @scr_throw_error_msg_code(i32 0, ptr ${this.cstr(msgArg.value)}, i64 ${fenceBytes}, ptr ${this.cstr(codeArg.value)})`,
+        `call void @scr_throw_error_msg_code(i32 0, ptr ${this.cstr(e.fence.message)}, i64 ${fenceBytes}, ptr ${this.cstr(e.fence.code)})`,
       );
       const fty = this.llType(e.type);
       if (fty === "void") {
