@@ -4508,6 +4508,20 @@ bool scr_cls_props_has(const ScrDyn *tbl, const ScrStr *key) {
   return scr_dyn_obj_get(tbl, key->data, key->len) != NULL;
 }
 
+/* How many ENUMERABLE properties the table holds. util.inspect asks
+ * before its depth gate: Node prints `C {}` for an object with no own
+ * enumerable keys whatever the depth budget says, and a class whose only
+ * possible keys are run-time ones cannot answer that at compile time. */
+double scr_cls_props_count(const ScrDyn *tbl) {
+  if (tbl == NULL || tbl->kind != SCR_DYN_OBJ) return 0;
+  size_t n = 0;
+  for (size_t i = 0; i < tbl->v.obj.len; i++) {
+    const ScrDyn *q = tbl->v.obj.entries[i].value;
+    if (q->kind == SCR_DYN_ARR && scr_clsprop_enumerable(q)) n++;
+  }
+  return (double)n;
+}
+
 ScrDyn *scr_cls_props_get(const ScrDyn *tbl, const ScrStr *key) {
   if (tbl == NULL || tbl->kind != SCR_DYN_OBJ || key == NULL) return NULL;
   ScrDyn *ent = scr_dyn_obj_get(tbl, key->data, key->len);

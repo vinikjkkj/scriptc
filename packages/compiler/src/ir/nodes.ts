@@ -2610,6 +2610,12 @@ export type IrLibFn =
   | "cls.propsEnsure"
   | "cls.propsDefine"
   | "cls.propsHas"
+  /** How many ENUMERABLE properties the table holds — the one thing
+   * util.inspect has to know BEFORE the depth gate, because Node prints
+   * `C {}` for an object with no keys whatever the depth budget says,
+   * and a class whose only possible keys are run-time ones cannot answer
+   * that statically. Never throws. */
+  | "cls.propsCount"
   | "cls.propsGet"
   /** Bare `typeof v` on a dyn value AS A STRING (arg: the dyn value,
    * borrowed; result: an owned string) — the dyn kind's JS answer:

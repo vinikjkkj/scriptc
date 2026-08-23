@@ -19,9 +19,9 @@ import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerBytesStaticFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerObjectIterOverIndexShape, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
 import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDiffieHellmanCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
-import { droppableStatic, dynAssertionReceiver, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
+import { classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
-import { EMITTER_API_MEMBERS, definePropSlotSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js";
+import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
 import { lowerConsoleInspectArg, lowerFormatCall } from "./lower-inspect.js";
 import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lowerStreamStaticCall, streamSidesOf } from "./lower-stream.js";
@@ -9639,6 +9639,111 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     return { kind: "libCall", fn: "dyn.defineProp", args: [target, key, desc], type: DYN, loc: locOf(call) };
   }
 
+/** `Object.defineProperty(<a bare identifier typed as a program class>,
+   * <a STRING-typed key>, <an object-literal descriptor>)` — the receiver
+   * row that had no lowering at all, and the one zapo's
+   * `install.ts:114` is:
+   *
+   *     Object.defineProperty(client, exposeAs, {
+   *       get: () => registry.instances.get(exposeAs),
+   *       enumerable: true, configurable: false })
+   *
+   * The property goes into the instance's `%props` table
+   * (definePropTableSiteOf declared the field over the whole program;
+   * scr_runtime.h carries the representation and why the table cannot
+   * escape). Three statements, in JS's evaluation order:
+   *
+   *   1. the table, minted on first use and stored back into the field;
+   *   2. the KEY, then the DESCRIPTOR — the argument order, and both
+   *      before anything is stored, because both can have effects;
+   *   3. the define, which is where every refusal and every TypeError
+   *      lives.
+   *
+   * The `declared` argument is the SAME `%cls.haskey` helper `in` calls,
+   * so the two can never disagree about which names the class owns: a
+   * run-time key that hits a declared member is a loud runtime refusal
+   * rather than a second property of one name. That coupling is the
+   * point — the member set was "closed" only because this define had no
+   * lowering, and it is `cls.propsHas` in the `in` path that keeps it
+   * true now that it does.
+   *
+   * STATEMENT position only, and a BARE IDENTIFIER receiver only, for
+   * the hidden-slot lowering's two reasons: the call's value is the
+   * receiver at a laundered type nothing needs, and the receiver is read
+   * three times (ensure's load, ensure's store, define's load) out of
+   * one local rather than lowered three times. */
+  function lowerDefinePropClassTable(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+    if (call.parent === undefined || !ts.isExpressionStatement(call.parent)) return null;
+    if (definePropTableSiteOf(L, call) === null) return null;
+    const recv = call.arguments[0]!;
+    if (!ts.isIdentifier(recv)) return null;
+    const recvIr = L.mapTypeOf(L.typeOf(recv));
+    if (recvIr?.kind !== "object") return null;
+    const info = L.classes.get(recvIr.className);
+    if (!info || info.hasPropsTable !== true) return null;
+    // The closed member set is what the collision fence reads. When it
+    // does not exist — a class with subclasses, or one rooted in a
+    // runtime builtin whose members the object model does not carry —
+    // there is no honest answer to "does this key name a declared
+    // member", so the site keeps the fence rather than guessing.
+    const members = classInMemberNames(L, recvIr.className);
+    if (!members) return null;
+    const loc = locOf(call);
+    const helper = classHasKeyHelper(L, recvIr.className, members, loc);
+    // The receiver goes through ONE hidden local (the `in` lowering's
+    // %inRecv, same reason): it is read three times — ensure's load,
+    // ensure's store and the define's load — and a module-level `const`
+    // receiver is a GLOBAL, not a local, so resolveLocal would decline
+    // exactly the spelling a test writes first.
+    const rTmp = L.declareHiddenLocal("%dpRecv", recvIr);
+    const obj = (): IrExpr => ({ kind: "varRef", localId: rTmp.id, type: recvIr, loc });
+    const table = (): IrExpr => ({
+      kind: "fieldGet", obj: obj(), className: recvIr.className, field: CLASS_PROPS_FIELD, type: DYN, loc,
+    });
+    markDescriptorMapLiterals(L, call.arguments[2]!, 0);
+    const key = L.lowerExprExpecting(call.arguments[1]!, STRING);
+    if (key.type.kind !== "string") return null;
+    const kTmp = L.declareHiddenLocal("%dpKey", STRING);
+    const desc = L.lowerExprExpecting(call.arguments[2]!, DYN);
+    if (desc.type.kind !== "dyn") return null;
+    const dTmp = L.declareHiddenLocal("%dpDesc", DYN);
+    const kRef = (): IrExpr => ({ kind: "varRef", localId: kTmp.id, type: STRING, loc });
+    if (process.env["SCRIPTC_DEFPROP_WHY"]) {
+      process.stderr.write(`[defprop] table-write ${recvIr.className} at ${loc.file}:${loc.start}\n`);
+    }
+    const stmts: IrStmt[] = [
+      { kind: "varDecl", localId: rTmp.id, init: L.lowerExpr(recv), loc },
+      { kind: "varDecl", localId: kTmp.id, init: key, loc },
+      { kind: "varDecl", localId: dTmp.id, init: desc, loc },
+      {
+        kind: "fieldSet",
+        obj: obj(),
+        className: recvIr.className,
+        field: CLASS_PROPS_FIELD,
+        value: { kind: "libCall", fn: "cls.propsEnsure", args: [table()], type: DYN, loc },
+        loc,
+      },
+      {
+        kind: "exprStmt",
+        expr: {
+          kind: "libCall",
+          fn: "cls.propsDefine",
+          args: [
+            table(),
+            kRef(),
+            { kind: "varRef", localId: dTmp.id, type: DYN, loc },
+            { kind: "call", callee: helper, args: [kRef()], type: BOOL, loc },
+            { kind: "strLit", value: info.decl?.name?.text ?? info.def.name.replace(/^%/, ""), type: STRING, loc },
+          ],
+          type: VOID,
+          loc,
+        },
+        loc,
+      },
+    ];
+    return { kind: "seqExpr", stmts, result: obj(), type: recvIr, loc };
+  }
+
   /** Mark a property-DESCRIPTOR map, and the descriptor objects one level
    * inside it, to build as DYN OBJECTS rather than at the library's
    * contextual type (`PropertyDescriptorMap` / `PropertyDescriptor`,
@@ -9670,6 +9775,8 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     if (member === "defineProperty") {
       const slot = lowerDefinePropHiddenSlot(L, call);
       if (slot) return slot;
+      const table = lowerDefinePropClassTable(L, call);
+      if (table) return table;
       const dynDefine = lowerDefinePropDyn(L, call);
       if (dynDefine) return dynDefine;
     }
