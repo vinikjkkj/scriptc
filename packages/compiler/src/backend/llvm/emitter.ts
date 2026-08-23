@@ -526,6 +526,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "insp.error": "scr_insp_error",
   "insp.begin": "scr_insp_begin",
   "insp.entry": "scr_insp_entry",
+  "insp.clsProps": "scr_cls_props_inspect",
   "insp.key": "scr_insp_key",
   "insp.moreItems": "scr_insp_more_items",
   "insp.end": "scr_insp_end",
@@ -671,6 +672,14 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.instanceOf": "scr_dyn_instance_of",
   "dyn.defineProps": "scr_dyn_define_props",
   "dyn.defineProp": "scr_dyn_define_prop",
+  // The `%props` table a compiled class instance carries (scr_json.c):
+  // ensure answers +1, define/has borrow and allocate nothing, get is +1
+  // and runs a getter. define and get are in the may-throw seed set.
+  "cls.propsEnsure": "scr_cls_props_ensure",
+  "cls.propsDefine": "scr_cls_props_define",
+  "cls.propsHas": "scr_cls_props_has",
+  "cls.propsCount": "scr_cls_props_count",
+  "cls.propsGet": "scr_cls_props_get",
   "dyn.typeof": "scr_dyn_typeof",
   "dyn.toString": "scr_dyn_to_string_method",
   "dyn.toStringRange": "scr_dyn_to_string_range",
@@ -10722,6 +10731,21 @@ class LlEmitter {
         // instance. When V is itself a union, the stored box IS the
         // result (`undefined` sorts last in canonical arm order).
         const k = this.emitExpr(e.args[0]!);
+        if (value.kind === "dyn") {
+          // The C twin's arm: +1 on a hit, the interned immortal
+          // undefined on a miss, no union box and no tag.
+          this.declare(`declare ptr @scr_map_get_${kAcc}_ref(ptr, ${kTy})`);
+          this.declare(`declare ptr @scr_dyn_undefined()`);
+          const raw = B.tmp();
+          const und = B.tmp();
+          const isnull = B.tmp();
+          const t = B.tmp();
+          B.line(`${raw} = call ptr @scr_map_get_${kAcc}_ref(ptr ${r.name}, ${kTy} ${k.name})`);
+          B.line(`${und} = call ptr @scr_dyn_undefined()`);
+          B.line(`${isnull} = icmp eq ptr ${raw}, null`);
+          B.line(`${t} = select i1 ${isnull}, ptr ${und}, ptr ${raw}`);
+          return this.own({ name: t, type: e.type });
+        }
         if (e.type.kind !== "union") throw new Error("llvm emitter bug: map get result is not a union");
         const def = this.unionsById.get(e.type.unionId);
         const undefTag = this.undefinedArmTag(e.type);

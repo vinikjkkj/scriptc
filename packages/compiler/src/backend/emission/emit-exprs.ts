@@ -1618,6 +1618,16 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // in canonical arm order, so V's tags coincide with the result
             // union's and no re-tag exists (validated).
             const k = E.emitExpr(e.args[0]!);
+            if (value.kind === "dyn") {
+              // A dyn-valued map: the stored node comes back +1 on a hit
+              // and NULL on a miss, and the miss answers the interned
+              // immortal undefined — a VALUE of the checked-dynamic tree,
+              // so there is no union box and no tag. Immortal means the
+              // release the caller emits is a no-op on that path.
+              const t = E.newTemp(e.type, `(ScrDyn *)scr_map_get_${kAcc}_ref(${r.name}, ${k.name})`);
+              E.line(`if (!${t.name}) ${t.name} = scr_dyn_undefined();`);
+              return t;
+            }
             if (e.type.kind !== "union") throw new Error("emitter bug: map get result is not a union");
             const def = E.unionsById.get(e.type.unionId);
             const undefTag = E.undefinedArmTag(e.type);
@@ -2983,6 +2993,28 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // form, and the one an ACCESSOR descriptor arrives in. All
             // three borrowed, result the target (+1); throws catchably.
             return finish(`scr_dyn_define_prop(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "cls.propsEnsure":
+            // The `%props` table of a compiled class instance: the field's
+            // current value borrowed, the table +1 (the same node when
+            // there already is one), so the fieldSet that stores it back
+            // balances. Never throws.
+            return finish(`scr_cls_props_ensure(${arg(0)})`);
+          case "cls.propsDefine":
+            // All five borrowed, no result; throws catchably (may-throw
+            // seed) for a JS-rejected descriptor and LOUDLY for a shape
+            // this table cannot hold.
+            return finish(
+              `(void)scr_cls_props_define(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)})`,
+            );
+          case "cls.propsHas":
+            // Both borrowed, no allocation, never throws.
+            return finish(`scr_cls_props_has(${arg(0)}, ${arg(1)})`);
+          case "cls.propsCount":
+            return finish(`scr_cls_props_count(${arg(0)})`);
+          case "cls.propsGet":
+            // Both borrowed, result +1; an ACCESSOR runs its getter, so
+            // this is in the may-throw seed set.
+            return finish(`scr_cls_props_get(${arg(0)}, ${arg(1)})`);
           case "dyn.hasKey":
             // `k in v` with a runtime key: the dyn presence answer (both
             // borrowed, no allocation, never throws). The _full spelling
@@ -7001,6 +7033,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_insp_circular(${arg(0)})`);
           case "insp.entry":
             return finish(`scr_insp_entry(${arg(0)}, ${arg(1)})`);
+          case "insp.clsProps":
+            return finish(`scr_cls_props_inspect(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "insp.key":
             return finish(`scr_insp_key(${arg(0)})`);
           case "insp.moreItems":

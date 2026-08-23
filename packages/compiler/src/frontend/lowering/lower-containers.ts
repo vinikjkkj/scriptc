@@ -3529,8 +3529,24 @@ function lowerOptionalDefaultArg(
       // result union. `undefined` sorts LAST among all possible arm
       // typeKeys, so when V is itself a union its arms keep their tags in
       // the result union — the backend leans on that (docs/ir.md).
+      //
+      // Except when V is `unknown`. `unknown | undefined` IS `unknown`,
+      // so the checker hands back no union at all and there was nothing
+      // to intern — `L.badType` fired SC2001 and the whole spelling
+      // refused, on a map kind isSupportedMapValue has admitted all
+      // along (`case "dyn": return true`). `set`, `has`, `delete`, `size`
+      // and the iteration all worked; only the READ refused, which is
+      // why the gap survived. zapo's `registry.instances` is exactly
+      // `Map<string, unknown>` and its exposed-plugin getter is
+      // `instances.get(exposeAs)`.
+      //
+      // The dyn result needs no union: `undefined` is a VALUE of the
+      // checked-dynamic tree (the interned immortal singleton), so a miss
+      // answers it directly and the arm/tag machinery has nothing to do.
       const type = L.irTypeOf(call);
-      if (type.kind !== "union") L.badType(call, L.typeOf(call));
+      if (type.kind !== "union" && !(type.kind === "dyn" && receiverIr.value.kind === "dyn")) {
+        L.badType(call, L.typeOf(call));
+      }
       return { kind: "mapIntrinsic", method: "get", receiver, args: [k], type, loc };
     }
     if (name === "set") {

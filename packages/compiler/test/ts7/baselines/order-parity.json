@@ -9249,6 +9249,48 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5990-defineproperty-runtime-key-on-a-class-instance.ts": {
+   "order": [
+    "<repo>/tests/corpus/5990-defineproperty-runtime-key-on-a-class-instance.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5991-defineproperty-runtime-key-attributes.ts": {
+   "order": [
+    "<repo>/tests/corpus/5991-defineproperty-runtime-key-attributes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5992-defineproperty-runtime-key-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/5992-defineproperty-runtime-key-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5993-defineproperty-runtime-key-shapes.ts": {
+   "order": [
+    "<repo>/tests/corpus/5993-defineproperty-runtime-key-shapes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5994-defineproperty-runtime-key-refuses-a-declared-member.ts": {
+   "order": [
+    "<repo>/tests/corpus/5994-defineproperty-runtime-key-refuses-a-declared-member.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5995-defineproperty-runtime-key-receivers.ts": {
+   "order": [
+    "<repo>/tests/corpus/5995-defineproperty-runtime-key-receivers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5996-a-dyn-class-field-starts-undefined.ts": {
+   "order": [
+    "<repo>/tests/corpus/5996-a-dyn-class-field-starts-undefined.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/600-closures-basic.ts": {
    "order": [
     "<repo>/tests/corpus/600-closures-basic.ts"

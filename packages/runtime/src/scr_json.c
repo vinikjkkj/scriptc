@@ -4484,6 +4484,17 @@ void scr_dyn_obj_drop_hidden(ScrDyn *recv, const char *key, size_t key_len) {
   scr_dyn_obj_unset(recv->v.obj.hidden, key, key_len);
 }
 
+/* The spec's array-index test, public because util.inspect has to
+ * interleave two key sources on a compiled class instance and
+ * OrdinaryOwnPropertyKeys puts every index key ahead of every string key
+ * across the WHOLE object. The predicate itself is the one the entry
+ * table's own ordering uses (scr_dyn_obj_key_order), so there is one
+ * definition of "array index" in the runtime and not two. */
+bool scr_dyn_obj_key_is_index(const char *key, size_t len) {
+  double ignored = 0;
+  return scr_dyn_key_is_index(key, len, &ignored);
+}
+
 /* scriptc's INTERNAL-SLOT table — contract in scr_runtime.h. Note what is
  * NOT here: no accessor family, no prototype walk, no `in`/hasOwn/delete
  * arm, and no reader anywhere else in this file. That absence IS the
