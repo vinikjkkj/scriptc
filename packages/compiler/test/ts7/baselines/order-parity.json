@@ -9146,15 +9146,39 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/5934-instanceof-an-ambient-class-throws.ts": {
+  "<repo>/tests/corpus/5950-ambient-extends-throws-at-the-class-statement.ts": {
    "order": [
-    "<repo>/tests/corpus/5934-instanceof-an-ambient-class-throws.ts"
+    "<repo>/tests/corpus/5950-ambient-extends-throws-at-the-class-statement.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/5935-instanceof-an-ambient-class-keeps-the-left-operand.ts": {
+  "<repo>/tests/corpus/5951-ambient-extends-does-not-over-fire.ts": {
    "order": [
-    "<repo>/tests/corpus/5935-instanceof-an-ambient-class-keeps-the-left-operand.ts"
+    "<repo>/tests/corpus/5951-ambient-extends-does-not-over-fire.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5952-typeof-an-erased-ambient-name-is-undefined.ts": {
+   "order": [
+    "<repo>/tests/corpus/5952-typeof-an-erased-ambient-name-is-undefined.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5953-an-ambient-class-as-a-value-throws.ts": {
+   "order": [
+    "<repo>/tests/corpus/5953-an-ambient-class-as-a-value-throws.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5954-instanceof-an-ambient-class-throws.ts": {
+   "order": [
+    "<repo>/tests/corpus/5954-instanceof-an-ambient-class-throws.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5955-instanceof-an-ambient-class-keeps-the-left-operand.ts": {
+   "order": [
+    "<repo>/tests/corpus/5955-instanceof-an-ambient-class-keeps-the-left-operand.ts"
    ],
    "diags": []
   },
