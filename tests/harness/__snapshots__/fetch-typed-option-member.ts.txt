@@ -1,17 +1,8 @@
-fetch-typed-option-member.ts:40:33 - error SC2011: values of type 'VersionOptions' have no static representation but run in the embedded dynamic engine, which this build does not include
+fetch-typed-option-member.ts:57:5 - error SC2020: 'RequestInit.dispatcher' is part of the standard library types but has no scriptc lowering yet
 
-  39 | 
-  40 | export function describeOptions(options: VersionOptions = {}): string {
-     |                                 ^~~~~~~
-  41 |   const pattern = options.versionPattern ?? /\b(2(?:\.\d{1,4}){3})\b/;
+  56 |   if (dispatcher) {
+  57 |     (init as { dispatcher?: unknown }).dispatcher = dispatcher;
+     |     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  58 |   }
 
-  hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
-
-fetch-typed-option-member.ts:45:13 - error SC2004: uses of 'describeOptions' inherit the blocker on its declaration
-
-  44 | 
-  45 | console.log(describeOptions());
-     |             ^~~~~~~~~~~~~~~
-  46 | 
-
-  hint: the declaration of 'describeOptions' did not compile — fix the diagnostic reported there and these sites clear with it
+  hint: undici's dispatcher is an engine object driving a callback protocol (dispatch(opts, handler)), and Node really does call it — there is no static representation for one; this build's fetch dials the origin directly and has no proxy path, environment-configured or otherwise
