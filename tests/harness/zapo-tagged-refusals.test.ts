@@ -68,9 +68,30 @@ const CENSUS = join(repoRoot, "scripts/tu-census.mjs");
 
 interface CensusJson {
   lane: "c" | "llvm";
+  bytes: number;
+  statements: number;
   byCat: Partial<Record<string, number>>;
   rows: { cat: string; code: string; msg: string }[];
+  /** Why the census exited non-zero, verbatim from the script. Read rather
+   * than the exit code alone because exit 3 covers two opposite facts --
+   * see CLOSED_ZERO_POPULATION below. */
+  problems: string[];
 }
+
+/** The ONE census problem a CLOSED row may legitimately carry.
+ *
+ * The census refuses to call a TU with zero failure statements a pass: an
+ * empty or wrong input file reads exactly like a perfect one, so it exits 3
+ * rather than report a clean count it cannot vouch for. That guard is right,
+ * and for a plant whose refusal has CLOSED it is also the strongest possible
+ * outcome -- there is nothing left in the TU to count, which is a stricter
+ * result than "zero of the tagged kind among many". The `clean-control` test
+ * above asserts exactly this exit for exactly this reason.
+ *
+ * So a CLOSED row accepts exit 0, or exit 3 whose ONLY problem is this one.
+ * Every other problem is the instrument saying it does not trust its reading
+ * and still fails the row. */
+const CLOSED_ZERO_POPULATION = "ZERO-POPULATION:";
 
 /** One zapo refusal, reduced. Each entry of `accept` is a (code, message
  * fragment) pair that identifies ONE emitter; the plant passes when the
@@ -373,6 +394,13 @@ describe("zapo's tagged refusals, as shapes", () => {
       expect(run.exit, `clean-control:${backend}: the census answered ${run.exit}, not its zero-population guard`).toBe(3);
       const d = run.json;
       expect(d, `clean-control:${backend}: the census produced no JSON`).not.toBeNull();
+      // Exit 3 alone would also be satisfied by a BROKEN accounting
+      // invariant, which is the opposite fact. Name the reason.
+      expect(
+        d!.problems,
+        `clean-control:${backend}: exit 3 for something other than the zero-population guard`,
+      ).toEqual([expect.stringContaining(CLOSED_ZERO_POPULATION)]);
+      expect(d, `clean-control:${backend}: the census produced no JSON`).not.toBeNull();
       expect(d!.lane, `clean-control:${backend}: wrong lane`).toBe(backend);
       for (const c of ["REFUSAL.tagged", "REFUSAL.untagged", "REFUSAL.uncoded"]) {
         expect(d!.byCat[c] ?? 0, `clean-control:${backend} reports ${c}`).toBe(0);
@@ -383,9 +411,25 @@ describe("zapo's tagged refusals, as shapes", () => {
   test.for(CLOSED.map((p) => [p.name, p] as const))("%s (CLOSED)", ([, p]) => {
     for (const backend of LANES) {
       const run = CEN.get(`${p.name}:${backend}`)!;
-      expect(run.exit, `${p.name}:${backend}: the census itself failed (exit ${run.exit})`).toBe(0);
       const d = run.json;
       expect(d, `${p.name}:${backend}: the census produced no JSON`).not.toBeNull();
+      if (run.exit !== 0) {
+        // See CLOSED_ZERO_POPULATION. Anything else, and the count below is
+        // read off an instrument that has said it does not trust itself.
+        expect(
+          d!.problems,
+          `${p.name}:${backend}: the census itself failed (exit ${run.exit}) for a reason a CLOSED row ` +
+            `does not get to ignore`,
+        ).toEqual([expect.stringContaining(CLOSED_ZERO_POPULATION)]);
+        // …and the guard exists because an empty or wrong FILE reads the
+        // same way, so say which of the two this is rather than assuming.
+        expect(d!.statements, `${p.name}:${backend}: ZERO-POPULATION with a non-zero statement count`).toBe(0);
+        expect(
+          d!.bytes,
+          `${p.name}:${backend}: the census read an EMPTY translation unit — that is the case the ` +
+            `zero-population guard is really for, and it is not a closed refusal`,
+        ).toBeGreaterThan(1024);
+      }
       expect(d!.lane, `${p.name}:${backend}: wrong lane`).toBe(backend);
       const tagged = d!.rows.filter((r) => r.cat === "REFUSAL.tagged");
       expect(
