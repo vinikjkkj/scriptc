@@ -36,13 +36,26 @@ try {
   console.log('L2', e.code, '|', firstLine(e.message));
 }
 
-/* ── 3. a constant ONE BINDING AWAY is the same require ─────────────── */
-var NAME = 'no-such-pkg-xyz';
+/* ── 3. a constant ONE BINDING AWAY is the same require — BOTH
+ *      spellings, which reach the answer by different roads. `const`
+ *      gives the checker a string LITERAL type, so the specifier is
+ *      known at COMPILE time and the verdict is decided there; `var`
+ *      widens to `string`, so nothing is known and the same answer comes
+ *      out of the RUN-TIME verdict instead. One of them alone leaves half
+ *      the machinery unproven. ────────────────────────────────────────── */
+const CONST_NAME = 'no-such-pkg-xyz';
+var VAR_NAME = 'no-such-pkg-xyz';
 try {
-  var m3 = require(NAME);
+  var m3 = require(CONST_NAME);
   console.log('L3 GOT', typeof m3);
 } catch (e) {
   console.log('L3', e.code, '|', firstLine(e.message));
+}
+try {
+  var m3b = require(VAR_NAME);
+  console.log('L3b GOT', typeof m3b);
+} catch (e) {
+  console.log('L3b', e.code, '|', firstLine(e.message));
 }
 
 /* ── 4. a genuine RUN-TIME specifier, through a parameter ───────────── */

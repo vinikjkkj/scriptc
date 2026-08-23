@@ -86,15 +86,28 @@ const RUNS: readonly Program[] = [
     exit: 0,
   },
   {
-    // A constant ONE BINDING AWAY is the same require. This is the cell
-    // the handover called out by name: it used to reach a different
-    // emitter than the written literal and answer null.
-    name: "a constant one binding away is the literal",
+    // A constant ONE BINDING AWAY is the same require — the cell the
+    // handover called out by name: it used to reach a different emitter
+    // than the written literal and answer null.
+    //
+    // The TWO SPELLINGS reach the answer by different roads and both are
+    // here because only one of them is the constant fold. `const` gives
+    // the checker a string LITERAL type, so the specifier is known at
+    // compile time and the verdict is decided there. `var` WIDENS to
+    // `string`, so nothing is known at compile time and the same answer
+    // comes out of the RUN-TIME verdict instead. Testing only `const`
+    // would leave the run-time road unproven; only `var`, the fold.
+    name: "a constant one binding away is the literal, both spellings",
     src:
-      "var NAME = 'no-such-pkg-xyz';\n" +
-      "try { var m = require(NAME); console.log('GOT') }\n" +
-      "catch (e) { console.log('code', e.code, '|', String(e.message).split('\\n')[0]) }\n",
-    stdout: "code MODULE_NOT_FOUND | Cannot find module 'no-such-pkg-xyz'\n",
+      "const CN = 'no-such-pkg-xyz';\n" +
+      "var VN = 'no-such-pkg-xyz';\n" +
+      "try { var a = require(CN); console.log('GOT') }\n" +
+      "catch (e) { console.log('const', e.code, '|', String(e.message).split('\\n')[0]) }\n" +
+      "try { var b = require(VN); console.log('GOT') }\n" +
+      "catch (e) { console.log('var  ', e.code, '|', String(e.message).split('\\n')[0]) }\n",
+    stdout:
+      "const MODULE_NOT_FOUND | Cannot find module 'no-such-pkg-xyz'\n" +
+      "var   MODULE_NOT_FOUND | Cannot find module 'no-such-pkg-xyz'\n",
     exit: 0,
   },
   {
@@ -382,7 +395,7 @@ describe("the ambient CommonJS require, against Node v25.9.0", () => {
     for (const backend of LANES) {
       for (const name of [
         "a literal specifier nothing installed resolves throws Node's MODULE_NOT_FOUND",
-        "a constant one binding away is the literal",
+        "a constant one binding away is the literal, both spellings",
         "a run-time specifier nothing installed resolves throws MODULE_NOT_FOUND",
         "protobufjs inquire() over an absent optional dependency answers null",
       ]) {
