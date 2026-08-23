@@ -46,6 +46,16 @@
  *   A method carries a `this` question this table has no answer for, and
  *   `k.m` on a user class is SC1090 for the same reason.
  *
+ *   `.bind`. In TypeScript `f.bind(x)` is a documented ERASURE that
+ *   compiles to `f` itself (lower-calls.ts, corpus 2690), so a builtin
+ *   value inherits it: `isNaN.bind(null) === isNaN` answers true where
+ *   Node answers false. That divergence is NOT this table's -- a USER
+ *   function's `g.bind(null) === g` already answers true on main, measured
+ *   -- and making the builtin behave differently from every other function
+ *   value would be the worse trade. builtin-fn-value.test.ts pins the two
+ *   halves EQUAL rather than pinning either answer, so the day the erasure
+ *   is fixed both move together.
+ *
  *   ARITY. Each entry declares ONE exact arity, and a call through the
  *   value at any other arity is a type error at the call -- loud. Node
  *   would complete `parseInt("42")` to radix 0; a compiled value cannot,
