@@ -282,21 +282,39 @@ const CLOSED: readonly {
  * program the same instrument reads as zero. */
 const CLEAN = "function add(a: number, b: number): number { return a + b }\nconsole.log(add(1, 2))\n";
 
-function censusOf(tu: string): CensusJson | null {
+interface CensusRun {
+  json: CensusJson | null;
+  /** The census's OWN exit code. It is not decoration: the script closes on
+   * an accounting invariant -- every "[SCxxxx at ...]" tag in the
+   * translation unit must belong to exactly one coded throw -- and exits
+   * non-zero when that fails. A fence emitted through a strLit ARGUMENT is
+   * interned as a static ScrStr as well as inlined into the call, so its tag
+   * lands in the TU twice; the count of refusals is still right, and the
+   * instrument that has to notice is this one. Measured, not predicted: it
+   * is exactly what happened while this file was being extended. */
+  exit: number;
+}
+
+function censusOf(tu: string): CensusRun {
   const j = `${tu}.refusal-shapes.json`;
+  let exit = 0;
   try {
     execFileSync(process.execPath, [CENSUS, tu, "--quiet", "--json", j], {
       encoding: "utf8",
       maxBuffer: 1 << 28,
     });
-  } catch {
+  } catch (e) {
     /* a non-zero census still writes its JSON; the assertions below judge it */
+    exit = (e as { status?: number }).status ?? -1;
   }
-  return existsSync(j) ? (JSON.parse(readFileSync(j, "utf8")) as CensusJson) : null;
+  return {
+    json: existsSync(j) ? (JSON.parse(readFileSync(j, "utf8")) as CensusJson) : null,
+    exit,
+  };
 }
 
 const LANES = ["c", "llvm"] as const;
-const CEN = new Map<string, CensusJson | null>();
+const CEN = new Map<string, CensusRun>();
 
 beforeAll(async () => {
   const lab = await mkdtemp(join(tmpdir(), "scriptc-refusal-shapes-"));
@@ -334,7 +352,15 @@ beforeAll(async () => {
 describe("zapo's tagged refusals, as shapes", () => {
   test("the control program carries no refusal of any kind, on either lane", () => {
     for (const backend of LANES) {
-      const d = CEN.get(`clean-control:${backend}`);
+      const run = CEN.get(`clean-control:${backend}`)!;
+      // NOT exit 0, and that is the census being careful rather than
+      // broken: a TU with ZERO failure statements "reads exactly like an
+      // empty or wrong input file", so the script refuses to call it a
+      // pass. Exit 3 is that guard, and asserting it here keeps the
+      // control honest -- the control's whole job is to be the program
+      // with nothing in it. The PLANTS below do assert exit 0.
+      expect(run.exit, `clean-control:${backend}: the census answered ${run.exit}, not its zero-population guard`).toBe(3);
+      const d = run.json;
       expect(d, `clean-control:${backend}: the census produced no JSON`).not.toBeNull();
       expect(d!.lane, `clean-control:${backend}: wrong lane`).toBe(backend);
       for (const c of ["REFUSAL.tagged", "REFUSAL.untagged", "REFUSAL.uncoded"]) {
@@ -345,7 +371,9 @@ describe("zapo's tagged refusals, as shapes", () => {
 
   test.for(CLOSED.map((p) => [p.name, p] as const))("%s (CLOSED)", ([, p]) => {
     for (const backend of LANES) {
-      const d = CEN.get(`${p.name}:${backend}`);
+      const run = CEN.get(`${p.name}:${backend}`)!;
+      expect(run.exit, `${p.name}:${backend}: the census itself failed (exit ${run.exit})`).toBe(0);
+      const d = run.json;
       expect(d, `${p.name}:${backend}: the census produced no JSON`).not.toBeNull();
       expect(d!.lane, `${p.name}:${backend}: wrong lane`).toBe(backend);
       const tagged = d!.rows.filter((r) => r.cat === "REFUSAL.tagged");
@@ -359,7 +387,9 @@ describe("zapo's tagged refusals, as shapes", () => {
 
   test.for(PLANTS.map((p) => [p.name, p] as const))("%s", ([, p]) => {
     for (const backend of LANES) {
-      const d = CEN.get(`${p.name}:${backend}`);
+      const run = CEN.get(`${p.name}:${backend}`)!;
+      expect(run.exit, `${p.name}:${backend}: the census itself failed (exit ${run.exit})`).toBe(0);
+      const d = run.json;
       expect(d, `${p.name}:${backend}: the census produced no JSON`).not.toBeNull();
       expect(d!.lane, `${p.name}:${backend}: wrong lane`).toBe(backend);
       const tagged = d!.rows.filter((r) => r.cat === "REFUSAL.tagged");

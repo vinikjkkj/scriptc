@@ -966,7 +966,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "module.requireVerdict": { argTypes: [DYN, STRING, STRING], result: BOOL },
   // Always throws; the result is the replaced expression type (skipped
   // below with the rest of the always-throw family).
-  "error.fenceThrow": { argTypes: [STRING, STRING], result: VOID },
+  "error.fenceThrow": { argTypes: [], result: VOID },
   "dyn.toStringCoerce": { argTypes: [DYN], result: STRING },
   // Always throws; the result is the READ's declared type (a typed dummy
   // the unwind abandons) — the libCall case skips the result check.

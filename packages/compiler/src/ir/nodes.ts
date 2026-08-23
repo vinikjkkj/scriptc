@@ -6557,7 +6557,15 @@ export type IrExpr =
    * the may-throw seed set (MAY_THROW_LIB_FNS) in their analysis and emit
    * pending checks; process.* members never throw. `process.exit` flushes
    * stdout and terminates the process without running exit handlers. */
-  | { kind: "libCall"; fn: IrLibFn; args: IrExpr[]; type: IrType; loc: SrcLoc }
+  /** `fence` belongs to ONE fn — error.fenceThrow — and the reason it is a
+   * node FIELD instead of two strLit arguments is the translation-unit
+   * census. A strLit argument is INTERNED as a static ScrStr as well as
+   * inlined into the call, so the "[SCxxxx at file:line]" tag would appear
+   * TWICE in the emitted C for one refusal, and scripts/tu-census.mjs's
+   * closing invariant ("bracket occurrences == tagged coded throws") would
+   * fail — measured, not predicted. Carried here, the text reaches the
+   * emitters and nothing else. */
+  | { kind: "libCall"; fn: IrLibFn; args: IrExpr[]; fence?: { message: string; code: string }; type: IrType; loc: SrcLoc }
   /** `JSON.stringify(v)` — type-DIRECTED serialization: `value`'s static IR
    * type must be JSON-safe (f64/string/bool/record/array/union of those,
    * recursively — validated), and backends emit one serializer per type used

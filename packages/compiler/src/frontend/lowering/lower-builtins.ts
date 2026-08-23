@@ -540,13 +540,15 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
       },
       // The verdict either threw or answered true, so `else_` is
       // unreachable; it exists because a ternary has two arms.
+      // The fence text rides the NODE, not two strLit arguments: a strLit
+      // argument is interned as a static ScrStr as well as inlined into the
+      // call, which put the "[SCxxxx at ...]" tag in the translation unit
+      // TWICE for one refusal and broke the census's closing invariant.
       then: {
         kind: "libCall",
         fn: "error.fenceThrow",
-        args: [
-          { kind: "strLit", value: fence.text, type: STRING, loc },
-          { kind: "strLit", value: fence.code, type: STRING, loc },
-        ],
+        args: [],
+        fence: { message: fence.text, code: fence.code },
         type: DYN,
         loc,
       },
