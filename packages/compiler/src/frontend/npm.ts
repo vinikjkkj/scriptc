@@ -85,7 +85,8 @@
  * lives under its key (requireHelperOriginOf follows the import and
  * re-export hops).
  */
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync, readdirSync, realpathSync } from "node:fs";
+import { builtinModules } from "node:module";
 import { dirname, extname, join, resolve } from "node:path";
 import ts from "typescript5";
 import { cjsLexedExportsOf } from "./cjs-lexer.js";
@@ -431,6 +432,11 @@ interface Host {
   isDirectory: (path: string) => boolean;
   /** fs.realpathSync semantics; returns the input when resolution fails. */
   realpath: (path: string) => string;
+  /** The directory's entry names, or null when it does not exist. THROWS
+   * nothing: a directory that exists but cannot be listed answers null,
+   * and the one caller treats null-on-an-existing-directory as "cannot
+   * enumerate" rather than "empty". */
+  readdir: (path: string) => string[] | null;
 }
 
 const realHost: Host = {
@@ -450,6 +456,13 @@ const realHost: Host = {
       return tsgoPath(realpathSync(path));
     } catch {
       return tsgoPath(path);
+    }
+  },
+  readdir: (path) => {
+    try {
+      return readdirSync(path);
+    } catch {
+      return null;
     }
   },
 };
@@ -676,6 +689,16 @@ export function probeNodeRequireRefusal(
     return null;
   }
   const name = packageNameOf(specifier);
+  // A BUILTIN, spelled without the prefix. Node's CJS loader answers the
+  // builtin before it ever looks at node_modules, so `require("http")`
+  // resolves and this function must say so — the header always said
+  // builtins answer null, but the test was only ever the "node:" prefix,
+  // and the node_modules walk below then "proved" that a builtin nothing
+  // installs cannot be found. Every EXISTING caller happened to guard
+  // with canonicalBuiltinModule first, which knows only the SUPPORTED
+  // slice: `require("vm")` and `require("repl")` fell straight through
+  // to a MODULE_NOT_FOUND for a module Node hands over.
+  if (isNodeBuiltinRoot(specifier.split("/")[0]!)) return null;
   const importer = resolve(fromFile);
   for (let dir = dirname(importer); ; ) {
     // A self-scope whose "name" matches: Node's require honors package
@@ -696,6 +719,103 @@ export function probeNodeRequireRefusal(
   return {
     message: `Cannot find module '${specifier}'\nRequire stack:\n- ${nativePath(importer)}`,
   };
+}
+
+/** Every name Node's CJS loader serves as a BUILTIN, prefix-less. Node's
+ * own `builtinModules` is the source of truth (the compiler's
+ * KNOWN_BUILTINS is a subset with its own purpose, and SUPPORTED_* is a
+ * subset of that); the union is taken so a builtin Node drops in a future
+ * release still reads as one here. */
+const NODE_BUILTIN_ROOTS: ReadonlySet<string> = new Set<string>([
+  ...KNOWN_BUILTINS,
+  ...builtinModules.map((m) => (m.startsWith("node:") ? m.slice(5) : m)),
+]);
+
+function isNodeBuiltinRoot(root: string): boolean {
+  return NODE_BUILTIN_ROOTS.has(root);
+}
+
+/** The answer probeNodeRequireRefusal can only give one specifier at a
+ * time, given for ALL of them at once: every BARE specifier ROOT (a
+ * package name, or a builtin's name) that Node's require could resolve
+ * from `fromFile`. A compiled binary reads no node_modules at run time,
+ * so a `require(<run-time string>)` has to decide the resolution verdict
+ * from what the BUILD saw — this is that set, baked into the emitted C.
+ *
+ * The direction of every approximation here is LOUD. The set is what the
+ * compiler cannot rule out, so a name in it fences (the refusal it
+ * already had) and only a name PROVABLY outside it compiles to Node's
+ * catchable MODULE_NOT_FOUND. That is why subpaths are not modeled: a
+ * package's own "exports" map may reject 'pkg/private', where Node
+ * throws ERR_PACKAGE_PATH_NOT_EXPORTED and this set says "fence" — a
+ * refusal where Node throws, never a value where Node throws.
+ *
+ * Null means CANNOT ENUMERATE (a node_modules directory that exists but
+ * will not list, an unreadable manifest): the caller must then fence
+ * every specifier, because "not in the set" would no longer be a proof.
+ *
+ * Builtins come from Node's own `builtinModules` unioned with
+ * KNOWN_BUILTINS — the compiler's list is the SUPPORTED slice and would
+ * under-report `vm`/`repl`/... , which Node resolves all the same. */
+export function nodeRequireResolvableRoots(
+  fromFile: string,
+  host: Host = realHost,
+): Set<string> | null {
+  // The answer depends only on the DIRECTORY chain, and a bundle can hold
+  // many require sites in one file. Memoized per directory, and only for
+  // the real host: a caller passing its own host is testing this
+  // function's filesystem reading and must not be served a cached answer
+  // from somebody else's disk.
+  const dirKey = dirname(resolve(fromFile));
+  if (host === realHost) {
+    const hit = resolvableRootsMemo.get(dirKey);
+    if (hit !== undefined) return hit;
+  }
+  const answer = computeResolvableRoots(fromFile, host);
+  if (host === realHost) resolvableRootsMemo.set(dirKey, answer);
+  return answer;
+}
+
+const resolvableRootsMemo = new Map<string, Set<string> | null>();
+
+function computeResolvableRoots(fromFile: string, host: Host): Set<string> | null {
+  const out = new Set<string>();
+  for (const b of NODE_BUILTIN_ROOTS) out.add(b);
+  const importer = resolve(fromFile);
+  for (let dir = dirname(importer); ; ) {
+    const pkgText = host.readFile(join(dir, "package.json"));
+    if (pkgText !== null) {
+      // Node's require honors package SELF-reference, so the enclosing
+      // package's own name resolves from inside it. An unreadable
+      // manifest is the same "cannot enumerate" answer the null return
+      // exists for.
+      try {
+        const name = (JSON.parse(pkgText) as PkgJson).name;
+        if (typeof name === "string" && name !== "") out.add(name);
+      } catch {
+        return null;
+      }
+    }
+    const nm = join(dir, "node_modules");
+    if (host.isDirectory(nm)) {
+      const entries = host.readdir(nm);
+      if (entries === null) return null; // exists but will not list
+      for (const e of entries) {
+        if (e.startsWith(".")) continue;
+        if (e.startsWith("@")) {
+          const scoped = host.readdir(join(nm, e));
+          if (scoped === null) return null;
+          for (const s2 of scoped) if (!s2.startsWith(".")) out.add(`${e}/${s2}`);
+          continue;
+        }
+        out.add(e);
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return out;
 }
 
 export class NpmGraphBuilder {

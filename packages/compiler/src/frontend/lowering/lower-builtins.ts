@@ -8,11 +8,11 @@ import { dirname, resolve } from "node:path";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { PoisonError, dynUndefinedExpr, ladderFenceExpr, newFnCtx, nodeThrowExpr, own } from "./lowerer.js";
-import { canonicalBuiltinModule, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
-import { isRelativeSpecifier } from "../shared.js";
-import { probeNodeRequireRefusal } from "../npm.js";
+import { canonicalBuiltinModule, isCjsJsFile, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
+import { isRelativeSpecifier, nativePath } from "../shared.js";
+import { nodeRequireResolvableRoots, probeNodeRequireRefusal } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
-import { invalidJsonModuleDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
+import { invalidJsonModuleDiag, noLoweringDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
 import {
   BuiltinModuleFn,
   builtinModuleFnOf,
@@ -419,6 +419,161 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
       type: JSVAL,
       loc,
     };
+  }
+
+/* ── the ambient CommonJS `require`, off the statement path ───────────
+ * `const x = require("./m")` at a module's top level is an IMPORT: the
+ * bindings are alias plumbing and program.ts already put the edge in the
+ * module order. What arrives HERE is every other position — a require
+ * inside a function, a require whose specifier is not a written literal,
+ * a require whose value is consumed as a value — and until this pass the
+ * whole family reached the callee-as-a-value fence, which under a JS
+ * file's deferred-fence stance means the program's own `try/catch`
+ * swallowed a compiler refusal and carried on with `null`. Node's answer
+ * there is not `null`: it is a module, or a THROW.
+ *
+ * The two arms this can serve exactly, and one it deliberately cannot:
+ *
+ *  1. A specifier the BUILD can prove Node does not resolve compiles to
+ *     Node's own catchable MODULE_NOT_FOUND — message and code — which
+ *     is the whole optional-dependency `try { require(x) } catch {}`
+ *     idiom (protobufjs's inquire() is exactly this shape). Static
+ *     specifiers answer through probeNodeRequireRefusal; a RUN-TIME
+ *     specifier answers through the baked root set at run time.
+ *  2. Everything Node itself rejects before it resolves anything —
+ *     a non-string id, the empty string — throws Node's TypeError.
+ *  3. A specifier the build CANNOT rule out still fences, and fences
+ *     LOUDLY: the module value it would have to produce is a module
+ *     namespace object, which has no value representation in a compiled
+ *     program (the SC1090 fence in lower-exprs). The conditional shape
+ *     keeps that refusal exactly where it was — error.fenceThrow emits
+ *     the same scr_throw_error_msg_code text the poisoned-statement
+ *     fence does, so the translation-unit census still counts it.
+ *
+ * The direction of every approximation is loud: a fence is never a value
+ * where Node throws, and MODULE_NOT_FOUND is only ever emitted where the
+ * build PROVED nothing resolves. */
+
+/** True when `callee` is the ambient CommonJS `require` — the module-scope
+   * binding Node defines in a CommonJS module, not a local of that name and
+   * not a createRequire-made one (those have their own lowering). ES modules
+   * stay out: Node defines no `require` there at all. */
+  function isAmbientCjsRequire(L: Lowerer, callee: ts.Expression): boolean {
+    if (!ts.isIdentifier(callee) || callee.text !== "require") return false;
+    if (!L.isStdlibGlobal(callee, "require")) return false;
+    return isCjsJsFile(callee.getSourceFile());
+  }
+
+/** The specifier a require call names when it is knowable at COMPILE time:
+   * a written string literal, or any expression whose checker type is a
+   * string LITERAL type — `const N = "./m"; require(N)` is the same require
+   * as `require("./m")`, and answering it differently is how a constant one
+   * binding away used to become a silent `null`. Null when the specifier is
+   * a genuine run-time value. */
+  function comptimeSpecifierOf(L: Lowerer, arg: ts.Expression): string | null {
+    if (ts.isStringLiteralLike(arg)) return arg.text;
+    const t = L.typeOf(arg);
+    if (t.isStringLiteralType()) {
+      const v = (t as { value?: unknown }).value;
+      if (typeof v === "string") return v;
+    }
+    return null;
+  }
+
+/** The ambient `require(...)` call, off the import-statement path. Null
+   * when the callee is not that require, when the call shape is one Node
+   * itself would not treat as a plain require (no argument, a spread), or
+   * when the existing machinery already serves the site — the caller then
+   * falls through exactly as before. */
+  export function lowerBareRequireCall(L: Lowerer, call: ts.CallExpression, loc: SrcLoc): IrExpr | null {
+    if (L.chainBlocked(call)) return null;
+    if (!isAmbientCjsRequire(L, call.expression)) return null;
+    if (call.arguments.length !== 1) return null;
+    const arg = call.arguments[0]!;
+    if (ts.isSpreadElement(arg)) return null;
+    const sf = call.getSourceFile();
+
+    const spec = comptimeSpecifierOf(L, arg);
+    if (spec !== null) {
+      // A specifier NOTHING installed resolves: Node throws at the require
+      // site, catchably, and the compiled expression IS that throw. Every
+      // other static specifier keeps whatever the existing paths do with
+      // it (the module edge, the builtin alias, or the fence).
+      const refusal = probeNodeRequireRefusal(sf.fileName, spec);
+      if (refusal !== null) return nodeThrowExpr(0, "MODULE_NOT_FOUND", refusal.message, DYN, loc);
+      return null;
+    }
+
+    // A RUN-TIME specifier. The value this would have to answer is a
+    // module namespace object, so the only compiled answers are Node's
+    // throws and the site's own refusal — but WHICH one is a run-time
+    // question, decided against the set of bare specifier roots the build
+    // could not rule out.
+    // `require` is declared to answer `any`, which maps to NOTHING (that
+    // unmappable type IS the SC2011 this replaces) — so the answer's type
+    // is the checked-dynamic kind a JS file gives every `any` binding.
+    // A file whose checker resolved the call to something narrower keeps
+    // the old fence rather than handing that context a dyn.
+    const mapped = L.mapTypeOf(L.typeOf(call));
+    if (mapped !== null && mapped.kind !== "dyn") return null;
+    const roots = nodeRequireResolvableRoots(sf.fileName);
+    // "Cannot enumerate" is spelled as the EMPTY set, which the runtime
+    // reads as "fence everything" — the conservative direction.
+    const rootsLit = roots === null ? "" : `\n${[...roots].sort().join("\n")}\n`;
+    const specExpr = L.lowerExpr(arg);
+    const specDyn: IrExpr = specExpr.type.kind === "dyn"
+      ? specExpr
+      : { kind: "dynFrom", value: specExpr, type: DYN, loc };
+    const fence = requireNoLoweringDiag(L, call, loc);
+    return {
+      kind: "ternary",
+      cond: {
+        kind: "libCall",
+        fn: "module.requireVerdict",
+        args: [
+          specDyn,
+          { kind: "strLit", value: rootsLit, type: STRING, loc },
+          { kind: "strLit", value: nativePath(resolve(sf.fileName)), type: STRING, loc },
+        ],
+        type: BOOL,
+        loc,
+      },
+      // The verdict either threw or answered true, so `else_` is
+      // unreachable; it exists because a ternary has two arms.
+      // The fence text rides the NODE, not two strLit arguments: a strLit
+      // argument is interned as a static ScrStr as well as inlined into the
+      // call, which put the "[SCxxxx at ...]" tag in the translation unit
+      // TWICE for one refusal and broke the census's closing invariant.
+      then: {
+        kind: "libCall",
+        fn: "error.fenceThrow",
+        args: [],
+        fence: { message: fence.text, code: fence.code },
+        type: DYN,
+        loc,
+      },
+      else_: dynUndefinedExpr(loc),
+      type: DYN,
+      loc,
+    };
+  }
+
+/** The refusal a run-time-specifier require still carries for the
+   * specifiers the build cannot rule out, rendered eagerly (message plus
+   * the "[code at file:line]" stamp the deferred statement fence carries)
+   * and recorded in the runtime-fence ledger exactly like one — so the
+   * coverage report and the translation-unit census both see the site
+   * they always saw. */
+  function requireNoLoweringDiag(L: Lowerer, call: ts.CallExpression, loc: SrcLoc): { text: string; code: string } {
+    const d = noLoweringDiag(
+      "require() with a run-time specifier",
+      loc,
+      "the compiled module graph is fixed at build time: a specifier nothing installed resolves compiles to Node's MODULE_NOT_FOUND, and every other one needs the module's exports as a value",
+    );
+    L.runtimeFences.push(d);
+    const sf = call.getSourceFile();
+    const pos = ts.getLineAndCharacterOfPosition(sf, loc.start);
+    return { text: `${d.message} [${d.code} at ${loc.file}:${pos.line + 1}]`, code: d.code };
   }
 
 /** The builtin modules whose `constants` object bakes as literals at

@@ -209,18 +209,24 @@ const PLANTS: readonly {
     name: "require-with-a-computed-specifier",
     ext: "cjs",
     zapoSite: "spec/proto/index.js:1 -- protobufjs inquire()'s require(moduleName)",
-    // TWO ARMS, both real and both measured. With the project's
-    // @types/node adopted (zapo's build, and any entry compiled next to a
-    // tsconfig that pulls the node types in) the reference resolves to the
-    // NAMED `Require` surface and the fence is the named-surface SC2020.
-    // Compiled bare -- as this suite's temp dir is, with no tsconfig -- the
-    // same reference resolves to the STRUCTURAL call/`main`/`resolve` type
-    // and the fence is the unmappable-TYPE SC2011 instead. Same site, same
-    // construct, same refusal: only the blame differs, so both are named
-    // rather than pinning whichever one this host happens to produce.
+    // ONE ARM now, and the change is the point. This used to reach the
+    // callee-as-a-VALUE fence, which named whatever the checker had made
+    // of the `require` binding: with @types/node adopted the named
+    // `Require` surface (SC2020), compiled bare the structural
+    // call/`main`/`resolve` type (SC2011). Both spellings of "we cannot
+    // lower the require FUNCTION".
+    //
+    // The require is lowered now (require-node-parity.test.ts), and what
+    // is left is a narrower and much later refusal: the specifier is a
+    // RUN-TIME string, so the verdict runs, and for a specifier the build
+    // could not rule out the answer would have to be the module's exports
+    // AS A VALUE — which is the SC1090 module-namespace wall. That is the
+    // refusal this plant now carries, at the same site, with the same
+    // code. What the plant no longer proves is reachability: the
+    // specifier 'long' resolves to nothing, so the RUN takes Node's
+    // MODULE_NOT_FOUND path and the fence is emitted-but-not-taken.
     accept: [
-      { code: "SC2020", fragment: "'Require' is typed by @types/node" },
-      { code: "SC2011", fragment: "(id: string): any" },
+      { code: "SC2020", fragment: "'require() with a run-time specifier'" },
     ],
     src: [
       "function inquire(moduleName) {",
@@ -276,21 +282,39 @@ const CLOSED: readonly {
  * program the same instrument reads as zero. */
 const CLEAN = "function add(a: number, b: number): number { return a + b }\nconsole.log(add(1, 2))\n";
 
-function censusOf(tu: string): CensusJson | null {
+interface CensusRun {
+  json: CensusJson | null;
+  /** The census's OWN exit code. It is not decoration: the script closes on
+   * an accounting invariant -- every "[SCxxxx at ...]" tag in the
+   * translation unit must belong to exactly one coded throw -- and exits
+   * non-zero when that fails. A fence emitted through a strLit ARGUMENT is
+   * interned as a static ScrStr as well as inlined into the call, so its tag
+   * lands in the TU twice; the count of refusals is still right, and the
+   * instrument that has to notice is this one. Measured, not predicted: it
+   * is exactly what happened while this file was being extended. */
+  exit: number;
+}
+
+function censusOf(tu: string): CensusRun {
   const j = `${tu}.refusal-shapes.json`;
+  let exit = 0;
   try {
     execFileSync(process.execPath, [CENSUS, tu, "--quiet", "--json", j], {
       encoding: "utf8",
       maxBuffer: 1 << 28,
     });
-  } catch {
+  } catch (e) {
     /* a non-zero census still writes its JSON; the assertions below judge it */
+    exit = (e as { status?: number }).status ?? -1;
   }
-  return existsSync(j) ? (JSON.parse(readFileSync(j, "utf8")) as CensusJson) : null;
+  return {
+    json: existsSync(j) ? (JSON.parse(readFileSync(j, "utf8")) as CensusJson) : null,
+    exit,
+  };
 }
 
 const LANES = ["c", "llvm"] as const;
-const CEN = new Map<string, CensusJson | null>();
+const CEN = new Map<string, CensusRun>();
 
 beforeAll(async () => {
   const lab = await mkdtemp(join(tmpdir(), "scriptc-refusal-shapes-"));
@@ -328,7 +352,15 @@ beforeAll(async () => {
 describe("zapo's tagged refusals, as shapes", () => {
   test("the control program carries no refusal of any kind, on either lane", () => {
     for (const backend of LANES) {
-      const d = CEN.get(`clean-control:${backend}`);
+      const run = CEN.get(`clean-control:${backend}`)!;
+      // NOT exit 0, and that is the census being careful rather than
+      // broken: a TU with ZERO failure statements "reads exactly like an
+      // empty or wrong input file", so the script refuses to call it a
+      // pass. Exit 3 is that guard, and asserting it here keeps the
+      // control honest -- the control's whole job is to be the program
+      // with nothing in it. The PLANTS below do assert exit 0.
+      expect(run.exit, `clean-control:${backend}: the census answered ${run.exit}, not its zero-population guard`).toBe(3);
+      const d = run.json;
       expect(d, `clean-control:${backend}: the census produced no JSON`).not.toBeNull();
       expect(d!.lane, `clean-control:${backend}: wrong lane`).toBe(backend);
       for (const c of ["REFUSAL.tagged", "REFUSAL.untagged", "REFUSAL.uncoded"]) {
@@ -339,7 +371,9 @@ describe("zapo's tagged refusals, as shapes", () => {
 
   test.for(CLOSED.map((p) => [p.name, p] as const))("%s (CLOSED)", ([, p]) => {
     for (const backend of LANES) {
-      const d = CEN.get(`${p.name}:${backend}`);
+      const run = CEN.get(`${p.name}:${backend}`)!;
+      expect(run.exit, `${p.name}:${backend}: the census itself failed (exit ${run.exit})`).toBe(0);
+      const d = run.json;
       expect(d, `${p.name}:${backend}: the census produced no JSON`).not.toBeNull();
       expect(d!.lane, `${p.name}:${backend}: wrong lane`).toBe(backend);
       const tagged = d!.rows.filter((r) => r.cat === "REFUSAL.tagged");
@@ -353,7 +387,9 @@ describe("zapo's tagged refusals, as shapes", () => {
 
   test.for(PLANTS.map((p) => [p.name, p] as const))("%s", ([, p]) => {
     for (const backend of LANES) {
-      const d = CEN.get(`${p.name}:${backend}`);
+      const run = CEN.get(`${p.name}:${backend}`)!;
+      expect(run.exit, `${p.name}:${backend}: the census itself failed (exit ${run.exit})`).toBe(0);
+      const d = run.json;
       expect(d, `${p.name}:${backend}: the census produced no JSON`).not.toBeNull();
       expect(d!.lane, `${p.name}:${backend}: wrong lane`).toBe(backend);
       const tagged = d!.rows.filter((r) => r.cat === "REFUSAL.tagged");
