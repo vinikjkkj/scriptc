@@ -3388,6 +3388,8 @@ class LlEmitter {
             case "abortController":
             case "response":
             case "headers":
+            case "requestInit":
+            case "request":
               B.line(`store i1 true, ptr ${slot} ; ${arm.kind}: objects are truthy`);
               break;
             default:
@@ -12348,6 +12350,83 @@ class LlEmitter {
       B.line(
         `${out} = call ptr @scr_fetch_start(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ` +
           `ptr ${args[2]!.name}, ${body}, ${bodyText}, ${signal})`,
+      );
+      return this.own({ name: out, type: e.type });
+    }
+    // The RequestInit VALUE and the two calls that take one. The C twin's
+    // rows, one runtime symbol each, with the absent body/signal supplied
+    // as NULL here rather than by four separate C functions.
+    if (
+      e.fn === "fetch.initNew" || e.fn === "fetch.initNewBody" ||
+      e.fn === "fetch.initNewSignal" || e.fn === "fetch.initNewBodySignal"
+    ) {
+      const hasBody = e.fn === "fetch.initNewBody" || e.fn === "fetch.initNewBodySignal";
+      const hasSignal = e.fn === "fetch.initNewSignal" || e.fn === "fetch.initNewBodySignal";
+      const args = e.args.map((a) => this.emitExpr(a));
+      const body = hasBody ? `ptr ${args[2]!.name}` : "ptr null";
+      const bodyText = hasBody ? `i1 ${args[3]!.name}` : "i1 false";
+      const signal = hasSignal ? `ptr ${args[hasBody ? 4 : 2]!.name}` : "ptr null";
+      this.declare(`declare ptr @scr_fetch_init_new(ptr, ptr, ptr, i1, ptr)`);
+      const out = B.tmp();
+      B.line(
+        `${out} = call ptr @scr_fetch_init_new(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ` +
+          `${body}, ${bodyText}, ${signal})`,
+      );
+      return this.own({ name: out, type: e.type });
+    }
+    if (e.fn === "fetch.goInit") {
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.declare(`declare ptr @scr_fetch_start_init(ptr, ptr)`);
+      const out = B.tmp();
+      B.line(`${out} = call ptr @scr_fetch_start_init(ptr ${args[0]!.name}, ptr ${args[1]!.name})`);
+      return this.own({ name: out, type: e.type });
+    }
+    if (e.fn === "fetch.goInitOpt") {
+      const t = e.args[1]!.type;
+      if (t.kind !== "union") throw new Error("llvm emitter bug: fetch.goInitOpt init is not a union");
+      const def = this.unionsById.get(t.unionId);
+      const tag = def ? def.arms.findIndex((a) => a.kind === "requestInit") : -1;
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.declare(`declare ptr @scr_fetch_start_init_opt(ptr, ptr, i32)`);
+      const out = B.tmp();
+      B.line(
+        `${out} = call ptr @scr_fetch_start_init_opt(ptr ${args[0]!.name}, ptr ${args[1]!.name}, i32 ${tag})`,
+      );
+      return this.own({ name: out, type: e.type });
+    }
+    if (e.fn === "fetch.goUnion" || e.fn === "fetch.goUnionInit") {
+      const t = e.args[0]!.type;
+      if (t.kind !== "union") throw new Error(`llvm emitter bug: ${e.fn} input is not a union`);
+      const def = this.unionsById.get(t.unionId);
+      const strTag = def ? def.arms.findIndex((a) => a.kind === "string") : -1;
+      const urlTag = def ? def.arms.findIndex((a) => a.kind === "url") : -1;
+      const args = e.args.map((a) => this.emitExpr(a));
+      const init = e.fn === "fetch.goUnionInit" ? `ptr ${args[1]!.name}` : "ptr null";
+      this.declare(`declare ptr @scr_fetch_start_union(ptr, i32, i32, ptr)`);
+      const out = B.tmp();
+      B.line(
+        `${out} = call ptr @scr_fetch_start_union(ptr ${args[0]!.name}, i32 ${strTag}, ` +
+          `i32 ${urlTag}, ${init})`,
+      );
+      return this.own({ name: out, type: e.type });
+    }
+    if (e.fn === "fetch.goValue") {
+      // The arm tags are read off the union DEFINITION, not assumed — the
+      // C twin's row, and headers.get's rule right above.
+      const tagOf = (t: IrType, kind: string): number => {
+        if (t.kind !== "union") throw new Error("llvm emitter bug: fetch.goValue argument is not a union");
+        const def = this.unionsById.get(t.unionId);
+        return def ? def.arms.findIndex((a) => a.kind === kind) : -1;
+      };
+      const strTag = tagOf(e.args[0]!.type, "string");
+      const urlTag = tagOf(e.args[0]!.type, "url");
+      const initTag = tagOf(e.args[1]!.type, "requestInit");
+      const args = e.args.map((a) => this.emitExpr(a));
+      this.declare(`declare ptr @scr_fetch_start_value(ptr, i32, i32, ptr, i32)`);
+      const out = B.tmp();
+      B.line(
+        `${out} = call ptr @scr_fetch_start_value(ptr ${args[0]!.name}, i32 ${strTag}, ` +
+          `i32 ${urlTag}, ptr ${args[1]!.name}, i32 ${initTag})`,
       );
       return this.own({ name: out, type: e.type });
     }

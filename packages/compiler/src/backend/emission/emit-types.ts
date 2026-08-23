@@ -86,6 +86,12 @@ export function cType(t: IrType): string {
       return "ScrResponse *";
     case "headers":
       return "ScrFetchHeaders *";
+    case "requestInit":
+      return "ScrFetchInit *";
+    case "request":
+      // Declared so the union arm has a C type. Nothing constructs one —
+      // see the IrType comment; the pointer is always NULL in practice.
+      return "ScrRequest *";
     case "abortController":
       return "ScrAbortController *";
     case "fsWatcher":
@@ -212,6 +218,10 @@ export function retainCallC(type: IrType, expr: string): string {
       return `scr_response_retain(${expr})`;
     case "headers":
       return `scr_fetch_headers_retain(${expr})`;
+    case "requestInit":
+      return `scr_fetch_init_retain(${expr})`;
+    case "request":
+      return `scr_request_retain(${expr})`;
     case "abortController":
       return `scr_abort_controller_retain(${expr})`;
     case "fsWatcher":
@@ -313,6 +323,10 @@ export function releaseCallC(type: IrType, expr: string): string {
       return `scr_response_release(${expr})`;
     case "headers":
       return `scr_fetch_headers_release(${expr})`;
+    case "requestInit":
+      return `scr_fetch_init_release(${expr})`;
+    case "request":
+      return `scr_request_release(${expr})`;
     case "abortController":
       return `scr_abort_controller_release(${expr})`;
     case "fsWatcher":
@@ -397,6 +411,8 @@ export function boxKindC(t: IrType): string {
     case "abortController":
     case "response":
     case "headers":
+    case "requestInit":
+    case "request":
     case "bytes":
       throw new Error(`emitter bug: ${t.kind} boxes go through boxNewC, not boxKindC`);
     case "procStream":
@@ -531,6 +547,10 @@ export function rcAdapters(t: IrType): RcAdapters | null {
       return rt("scr_response_retain_v", "scr_response_release_v");
     case "headers":
       return rt("scr_fetch_headers_retain_v", "scr_fetch_headers_release_v");
+    case "requestInit":
+      return rt("scr_fetch_init_retain_v", "scr_fetch_init_release_v");
+    case "request":
+      return rt("scr_request_retain_v", "scr_request_release_v");
     case "abortController":
       return rt("scr_abort_controller_retain_v", "scr_abort_controller_release_v");
     case "fsWatcher":
@@ -705,6 +725,11 @@ export function elemKindC(elem: IrType): string {
     // — the element CLASS is SCR_ELEM_REF for both.
     case "response":
     case "headers":
+    // A RequestInit array traces (the init's signal edge); a Request array
+    // holds nothing that can exist. elemTraceC decides which — the element
+    // CLASS is SCR_ELEM_REF for both.
+    case "requestInit":
+    case "request":
       return "SCR_ELEM_REF";
     case "url":
     case "searchParams":
