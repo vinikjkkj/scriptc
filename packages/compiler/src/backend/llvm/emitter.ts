@@ -526,6 +526,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "insp.error": "scr_insp_error",
   "insp.begin": "scr_insp_begin",
   "insp.entry": "scr_insp_entry",
+  "insp.clsProps": "scr_cls_props_inspect",
   "insp.key": "scr_insp_key",
   "insp.moreItems": "scr_insp_more_items",
   "insp.end": "scr_insp_end",
@@ -671,6 +672,13 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.instanceOf": "scr_dyn_instance_of",
   "dyn.defineProps": "scr_dyn_define_props",
   "dyn.defineProp": "scr_dyn_define_prop",
+  // The `%props` table a compiled class instance carries (scr_json.c):
+  // ensure answers +1, define/has borrow and allocate nothing, get is +1
+  // and runs a getter. define and get are in the may-throw seed set.
+  "cls.propsEnsure": "scr_cls_props_ensure",
+  "cls.propsDefine": "scr_cls_props_define",
+  "cls.propsHas": "scr_cls_props_has",
+  "cls.propsGet": "scr_cls_props_get",
   "dyn.typeof": "scr_dyn_typeof",
   "dyn.toString": "scr_dyn_to_string_method",
   "dyn.toStringRange": "scr_dyn_to_string_range",

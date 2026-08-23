@@ -4161,6 +4161,54 @@ bool scr_dyn_obj_hidden_attrs(const ScrDyn *recv, const char *key, size_t key_le
 /* …and drops one, for the redefinition back to an ENUMERABLE member. */
 void scr_dyn_obj_drop_hidden(ScrDyn *recv, const char *key, size_t key_len);
 
+/* ── the per-instance property table of a COMPILED class instance ─────
+ *
+ * `Object.defineProperty(instance, k, desc)` where `k` is a run-time
+ * STRING and the receiver is a program class. An instance is a C struct
+ * with one field per declared member, so the property has no cell in the
+ * layout — it goes into a table the class carries as ONE extra `%props`
+ * field, `undefined` until the first define mints it.
+ *
+ * The table is a dyn OBJ used as PRIVATE STORAGE, and only the five
+ * functions below read it. That is the whole safety argument. `entries`
+ * on an ordinary dyn object IS every enumeration surface at once, so
+ * parking descriptor arrays in one would be a silent wrong answer the
+ * moment the object escaped — and this one cannot escape: it lives in a
+ * `%`-named field, which no string key spells and which the `in` member
+ * set already filters out, and no dyn conversion of a class instance
+ * copies fields (a boxed instance is SCR_DYN_OBJINST, which carries the
+ * pointer and answers the loud ladder).
+ *
+ * A member is a five-element descriptor ARR — the `hidden` table's four
+ * in the SAME order, plus `enumerable`:
+ *
+ *     [false, getter, setter,   configurable, enumerable]   accessor
+ *     [true,  value,  writable, configurable, enumerable]   data
+ *
+ * `enumerable` is the element `hidden` cannot have: that table holds the
+ * non-enumerables BY CONTRACT, and the property zapo's install.ts:114
+ * defines is an enumerable accessor. Keeping the first four elements in
+ * `hidden`'s order is not decoration — the same scr_hid_* readers walk
+ * both.
+ *
+ * scr_cls_props_ensure answers the table to store back into the field:
+ * the existing one retained, or a fresh one. scr_cls_props_define is
+ * ValidateAndApplyPropertyDescriptor over it, LOUD for every shape it
+ * cannot represent (a key the class already declares, a data descriptor
+ * whose flags no cell can carry) and a catchable TypeError for every
+ * shape JS itself rejects (a redefinition of a non-configurable
+ * property, a non-callable getter). scr_cls_props_has is `in`'s
+ * contribution, scr_cls_props_get is [[Get]]'s (it RUNS the getter), and
+ * scr_cls_props_inspect pushes one util.inspect frame entry per
+ * ENUMERABLE key — `k: [Getter]`, which is what Node prints for an
+ * accessor it will not call. */
+ScrDyn *scr_cls_props_ensure(ScrDyn *cur);
+bool scr_cls_props_define(ScrDyn *tbl, const ScrStr *key, ScrDyn *desc,
+                          bool declared, const ScrStr *cname);
+bool scr_cls_props_has(const ScrDyn *tbl, const ScrStr *key);
+ScrDyn *scr_cls_props_get(const ScrDyn *tbl, const ScrStr *key);
+void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth);
+
 /* scriptc's INTERNAL-SLOT pair — the `slots` member's whole API. It is
  * deliberately tiny and deliberately NOT part of any property protocol:
  * no [[Get]], no [[Set]], no `in`, no enumeration, no descriptor family,

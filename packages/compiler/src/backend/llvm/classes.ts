@@ -228,6 +228,15 @@ function undefFieldInits(host: ClassHost, meta: LlClassMeta): string[] {
       );
       return;
     }
+    if (f.type.kind === "dyn") {
+      host.declare(`declare ptr @scr_dyn_undefined()`);
+      out.push(
+        `  %udv${i} = call ptr @scr_dyn_undefined()`,
+        `  %uf${i} = getelementptr inbounds %${mangleClassStruct(meta.def.name)}, ptr %o, i64 0, i32 ${index}`,
+        `  store ptr %udv${i}, ptr %uf${i} ; ${f.name} starts undefined`,
+      );
+      return;
+    }
     if (f.type.kind !== "union") return;
     const tag = host.undefinedArmTag(f.type);
     if (tag < 0) return;

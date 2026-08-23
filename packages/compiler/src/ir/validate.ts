@@ -111,6 +111,15 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.toStringRange": { argTypes: [DYN, STRING, DYN, DYN, STRING], result: STRING },
   "dyn.defineProps": { argTypes: [DYN, DYN], result: DYN },
   "dyn.defineProp": { argTypes: [DYN, STRING, DYN], result: DYN },
+  // The per-instance property table of a COMPILED class instance: the
+  // `%props` field's ensure/define/has/get. `cls.propsDefine` takes the
+  // table, the run-time key, the descriptor, whether the key names a
+  // DECLARED member (the emitted %cls.haskey helper's answer) and the
+  // class's display name for the refusal text.
+  "cls.propsEnsure": { argTypes: [DYN], result: DYN },
+  "cls.propsDefine": { argTypes: [DYN, STRING, DYN, BOOL, STRING], result: VOID },
+  "cls.propsHas": { argTypes: [DYN, STRING], result: BOOL },
+  "cls.propsGet": { argTypes: [DYN, STRING], result: DYN },
   "dyn.typeof": { argTypes: [DYN], result: STRING },
   // The JS operator conversions over dyn operands. `+` answers DYN
   // because its result kind is a runtime property of the operands
@@ -1225,6 +1234,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "insp.jsval": { argTypes: [JSVAL, F64, F64], result: STRING },
   "insp.begin": { argTypes: [F64], result: VOID },
   "insp.entry": { argTypes: [STRING, BOOL], result: VOID },
+  "insp.clsProps": { argTypes: [DYN, F64, F64], result: VOID },
   // Circular references: the receiver slot is program-dependent (any
   // cycle-capable record/array/map/class type — the insp.error precedent).
   "insp.circCheck": { argTypes: [null], result: F64 },

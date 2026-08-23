@@ -2583,6 +2583,34 @@ export type IrLibFn =
    * not an own enumerable key. A FUNC target, and any `enumerable: true`
    * accessor, keep a loud runtime refusal. In the may-throw seed set. */
   | "dyn.defineProp"
+  /** The per-instance property table a COMPILED class instance carries
+   * as its one extra `%props` field — the receiver row of
+   * `Object.defineProperty` that has no dyn spelling at all, because a
+   * class instance is a C struct with one cell per DECLARED member and a
+   * run-time string key names none of them (zapo's `install.ts:114`).
+   *
+   * `cls.propsEnsure` answers the table to store back into the field:
+   * the existing one, or a fresh one on the first define. Never throws.
+   *
+   * `cls.propsDefine` is ValidateAndApplyPropertyDescriptor over it —
+   * args (the table, the run-time key, the descriptor, whether the key
+   * names a DECLARED member, the class's display name), no result
+   * (statement position only, like the hidden-symbol-slot define). LOUD
+   * for the two shapes this representation cannot hold, catchable for
+   * every shape JS itself rejects. In the may-throw seed set.
+   *
+   * `cls.propsHas` is the table's contribution to `in` over a class
+   * receiver — the closed-member-set helper ORs it in, and MUST, because
+   * what made that set closed was precisely that this define had no
+   * lowering. Never throws.
+   *
+   * `cls.propsGet` is [[Get]] over the table: a data property answers
+   * its value, an accessor RUNS its getter (in the may-throw seed set —
+   * the getter is user code). */
+  | "cls.propsEnsure"
+  | "cls.propsDefine"
+  | "cls.propsHas"
+  | "cls.propsGet"
   /** Bare `typeof v` on a dyn value AS A STRING (arg: the dyn value,
    * borrowed; result: an owned string) — the dyn kind's JS answer:
    * undefined→"undefined", null/object/array/bytes→"object" (JS's oldest
@@ -4980,6 +5008,13 @@ export type IrLibFn =
   | "insp.jsval"
   | "insp.begin"
   | "insp.entry"
+  /** The frame entries for a compiled class instance's run-time property
+   * table (args: the `%props` dyn table, recurse, depth) — one per
+   * ENUMERABLE key, in JS own-key order, emitted right after the
+   * declared fields' entries. An accessor renders `[Getter]` /
+   * `[Setter]` / `[Getter/Setter]` and is NOT invoked, which is Node's
+   * answer. Never throws. */
+  | "insp.clsProps"
   | "insp.key"
   | "insp.moreItems"
   /* Circular references over cycle-capable composites (recursive record/
@@ -10240,6 +10275,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "insp.fmtS",
   "dyn.defineProps",
   "dyn.defineProp",
+  "cls.propsDefine",
+  "cls.propsGet",
   "process.chdir",
   "fs.realpathSync",
   "fs.readFileSync",
