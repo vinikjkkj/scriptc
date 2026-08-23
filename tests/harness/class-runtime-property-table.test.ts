@@ -185,6 +185,23 @@ const READ_REFUSALS: readonly { name: string; src: string }[] = [
       "console.log('READ ' + String(r['a']))\n",
   },
   {
+    // NAMED GAP, not an accident. A class with a BASE takes the table fine
+    // and its boxed read still fences, because the box carries the
+    // descriptor of the STATIC type the value passed through and the field
+    // lives in the DERIVED struct. This row exists so the day that changes
+    // is a day this file fails rather than a day the answer quietly starts
+    // depending on a slot's declared type.
+    name: "a table key on an instance of a class WITH A BASE",
+    src:
+      "class B { a: number\n  constructor() { this.a = 1 } }\n" +
+      "class D extends B { b: number\n  constructor() { super(); this.b = 2 } }\n" +
+      "const d = new D()\n" +
+      RTKEY +
+      "Object.defineProperty(d, k, { value: 5, enumerable: true, writable: true, configurable: true })\n" +
+      "const r = d as unknown as Record<string, unknown>\n" +
+      "console.log('READ ' + String(r[k]))\n",
+  },
+  {
     name: "any read on an instance of a class NO define names",
     src:
       "class C { a: number\n  constructor() { this.a = 1 } }\n" +

@@ -107,8 +107,11 @@ export interface DynHost extends WalkerHost {
    * SCR_DYN_OBJINST descriptor (to recognise the box), its struct
    * spelling and the field's GEP index (to reach the table). Hierarchy
    * classes are excluded on both lanes for the same reason — a box's
-   * `cls` is the descriptor of the STATIC type it was boxed from, so the
-   * GEP would read at the wrong offset. */
+   * `cls` is the descriptor of the STATIC type it was boxed from, and a
+   * Derived instance in a Base-typed slot boxes as Base, whose struct has
+   * no such field. That IS a reachable case (a class with a base takes a
+   * table today) and it keeps the fence; emit-walkers.ts's arm carries
+   * why, and estado-nullsig.md names it as the next step. */
   classPropsTables(): { desc: string; struct: string; index: number }[];
 }
 

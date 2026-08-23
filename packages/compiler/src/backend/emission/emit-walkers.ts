@@ -1467,15 +1467,19 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`     * caller while \`c[k]\` refused a property the program had just`);
     d.push(`     * defined on c. */`);
     for (const [cname, meta] of E.classMeta) {
-      // STANDALONE classes only. A hierarchy class's instance carries the
-      // rc+vt prefix and its box's `cls` is the descriptor of the STATIC
-      // type it was boxed from, which need not be the class whose struct
-      // holds the field — so the cast below would be a read at the wrong
-      // offset. The frontend never writes a table for one either
-      // (lowerDefinePropClassTable declines when the closed member set does
-      // not exist, i.e. exactly when the class has subclasses), so this
-      // gate costs no reachable case today and refuses rather than guesses
-      // if that ever changes.
+      // STANDALONE classes only, and this DOES cost a reachable case: a
+      // class with a BASE takes the table fine (`class D extends B` and a
+      // define on a D is compiled today, measured), and its boxed read
+      // still fences. The reason is the box, not the table. `cls` is the
+      // descriptor of the STATIC type the value was boxed FROM, so a
+      // Derived instance in a Base-typed slot boxes as Base — and the
+      // field lives in DERIVED's struct, at an index Base's spelling does
+      // not have. The exact-descriptor test would let the box's OWN class
+      // through soundly, but it would also make the answer depend on the
+      // static type of the slot the value happened to pass through, which
+      // is a worse thing to ship than a fence. Named in estado-nullsig.md
+      // as the next step here; until then a hierarchy class refuses, which
+      // is what it did before this arm existed.
       if (meta.hierarchy) continue;
       if (!meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) continue;
       if (!canBoxClassIntoDyn(cname)) continue;
