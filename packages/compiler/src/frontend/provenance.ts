@@ -606,6 +606,10 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
         repo,
         commit,
         dir,
+        // Where these files SIT when Node runs the program. Node's own
+        // require resolution is asked from here, not from the cache
+        // checkout, which has no node_modules of its own.
+        installedDir: tsgoPath(installed.dir),
         entries,
         ...(aliases !== undefined ? { aliases } : {}),
         ...(Object.keys(external).length > 0 ? { external } : {}),
