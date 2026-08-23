@@ -2999,6 +2999,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "cls.propsHas":
             // Both borrowed, no allocation, never throws.
             return finish(`scr_cls_props_has(${arg(0)}, ${arg(1)})`);
+          case "cls.propsCount":
+            return finish(`scr_cls_props_count(${arg(0)})`);
           case "cls.propsGet":
             // Both borrowed, result +1; an ACCESSOR runs its getter, so
             // this is in the may-throw seed set.

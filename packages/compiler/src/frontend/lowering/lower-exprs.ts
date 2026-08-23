@@ -34,7 +34,7 @@ import { lowerYield } from "./lower-generators.js";
 import { lowerStreamProperty, lowerStreamStateProperty, streamInstanceOfExpr, streamSidesOf } from "./lower-stream.js";
 import { lowerWebSocketGlobal } from "./lower-ws.js";
 import { emitterRooted } from "./lower-emitter.js";
-import { EMITTER_API_MEMBERS, type ClassInfo } from "./lower-classes.js";
+import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, type ClassInfo } from "./lower-classes.js";
 
 /** SCRIPTC_DTSTWIN_WHY probe: how many reads have taken the declaration-
  * module fence instead of the silent erasure stance. Read in the SAME run
@@ -16184,7 +16184,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * on an Error is the standing example, and answering `false` for it
    * would be a lie rather than a fence. Statics are excluded: Node
    * answers `false` for them on an instance. */
-  function classInMemberNames(L: Lowerer, className: string): Set<string> | null {
+  export function classInMemberNames(L: Lowerer, className: string): Set<string> | null {
     const leaf = L.classes.get(className);
     if (!leaf) return null;
     // The receiver's own class must be a class the PROGRAM declares. A
@@ -16238,7 +16238,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * set. The answer depends on the KEY alone (unlike a record's, no
    * optional slot decides per value), so the receiver is not a parameter;
    * the call site still evaluates it, because JS does. */
-  function classHasKeyHelper(L: Lowerer, className: string, members: ReadonlySet<string>, loc: SrcLoc): string {
+  export function classHasKeyHelper(L: Lowerer, className: string, members: ReadonlySet<string>, loc: SrcLoc): string {
     const hkey = `clshaskey:${className}`;
     const existing = L.widthHelpers.get(hkey);
     if (existing) return existing;
@@ -16345,13 +16345,43 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             const kTmp = L.declareHiddenLocal("%inKey", STRING);
             const recvIr = L.lowerExpr(expr.right);
             const rTmp = L.declareHiddenLocal("%inRecv", recvIr.type);
+            const kRef = (): IrExpr => ({ kind: "varRef", localId: kTmp.id, type: STRING, loc });
+            const declared: IrExpr = { kind: "call", callee: helper, args: [kRef()], type: BOOL, loc };
+            // …OR the instance's RUN-TIME property table, when the class
+            // has one. The closed-member-set argument above rests on
+            // "every construct which could ADD a member to an instance
+            // at run time is itself refused", and the construct it names
+            // is `Object.defineProperty(o, k, …)` with a string key —
+            // which now lowers. This disjunction is what keeps that
+            // paragraph true: the two read ONE helper for the declared
+            // half and one table for the other, so the define and the
+            // `in` six lines above it in zapo's install.ts cannot
+            // disagree about a name.
+            const info = L.classes.get(probed.type.className);
+            const answer: IrExpr = info?.hasPropsTable !== true ? declared : {
+              kind: "logical",
+              op: "||",
+              left: declared,
+              right: {
+                kind: "libCall",
+                fn: "cls.propsHas",
+                args: [
+                  { kind: "fieldGet", obj: { kind: "varRef", localId: rTmp.id, type: recvIr.type, loc }, className: probed.type.className, field: CLASS_PROPS_FIELD, type: DYN, loc },
+                  kRef(),
+                ],
+                type: BOOL,
+                loc,
+              },
+              type: BOOL,
+              loc,
+            };
             return {
               kind: "seqExpr",
               stmts: [
                 { kind: "varDecl", localId: kTmp.id, init: keyIr, loc },
                 { kind: "varDecl", localId: rTmp.id, init: recvIr, loc },
               ],
-              result: { kind: "call", callee: helper, args: [{ kind: "varRef", localId: kTmp.id, type: STRING, loc }], type: BOOL, loc },
+              result: answer,
               type: BOOL,
               loc,
             };
@@ -16441,7 +16471,25 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         const members = classInMemberNames(L, recv.type.className);
         if (members) {
           if (recv.kind === "varRef" || recv.kind === "recordGet" || recv.kind === "fieldGet" || pureRecvNode) {
-            return { kind: "boolLit", value: members.has(key), type: BOOL, loc };
+            // A DECLARED name still folds to the constant true. Anything
+            // else no longer folds to false on a class that carries the
+            // run-time property table: `Object.defineProperty(o, "plug",
+            // …)` can have put `plug` there, and a constant-folded
+            // `false` would be exactly the silent wrong answer the
+            // closed-member-set comment warns about.
+            if (members.has(key)) return { kind: "boolLit", value: true, type: BOOL, loc };
+            const cinfo = L.classes.get(recv.type.className);
+            if (cinfo?.hasPropsTable !== true) return { kind: "boolLit", value: false, type: BOOL, loc };
+            return {
+              kind: "libCall",
+              fn: "cls.propsHas",
+              args: [
+                { kind: "fieldGet", obj: recv, className: recv.type.className, field: CLASS_PROPS_FIELD, type: DYN, loc },
+                { kind: "strLit", value: key, type: STRING, loc },
+              ],
+              type: BOOL,
+              loc,
+            };
           }
           L.unsupported("SC1090", expr, "statically-decided 'in' on computed receivers (bind the value to a variable first)");
         }

@@ -4206,6 +4206,7 @@ ScrDyn *scr_cls_props_ensure(ScrDyn *cur);
 bool scr_cls_props_define(ScrDyn *tbl, const ScrStr *key, ScrDyn *desc,
                           bool declared, const ScrStr *cname);
 bool scr_cls_props_has(const ScrDyn *tbl, const ScrStr *key);
+double scr_cls_props_count(const ScrDyn *tbl);
 ScrDyn *scr_cls_props_get(const ScrDyn *tbl, const ScrStr *key);
 void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth);
 
