@@ -19,7 +19,7 @@ import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../shared.js";
 import { declModuleWithoutTwin, declTwinGlobalOf } from "./lower-modules.js";
 import { fenceEnumObjectValue, lowerEnumAccess } from "./lower-enums.js";
-import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, lowerNsIdentifierValue, nsMemberIdentOf, nsUndefRead, nsWritableTarget } from "./lower-namespaces.js";
+import { ambientErasedIdent, ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedClassSymbolOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, lowerNsIdentifierValue, nsMemberIdentOf, nsUndefRead, nsWritableTarget } from "./lower-namespaces.js";
 import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
 import { lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { fenceNamespaceConditionalValue, lowerNamespaceConditionalDecl } from "./lower-nsvalue.js";
@@ -1007,6 +1007,18 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         if (sym === undefined) {
           return { kind: "strLit", value: "undefined", type: STRING, loc };
         }
+        // The same answer for a name the checker DOES resolve but Node
+        // ERASES: `declare const x: T`, `declare function f(): T`,
+        // `declare class C {}` in a program file. There is no binding at
+        // run time, so `typeof` answers "undefined" here exactly as it
+        // does for the unresolvable name above — while every other read
+        // of the same name is the ReferenceError those arms already
+        // lower. Without this fold the operand lowered like any other and
+        // the undefRead threw AT the typeof, one line before Node throws.
+        // (ambientErasedIdent; trap bindings excluded — they have a TDZ.)
+        if (ambientErasedIdent(L, expr.expression)) {
+          return { kind: "strLit", value: "undefined", type: STRING, loc };
+        }
       }
       // Island values ask the engine; static primitives constant-fold to
       // the JS answer (the operand still evaluates — JS evaluates typeof
@@ -1499,6 +1511,20 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         if (ambientUndefinedFnSymbolOf(L, expr)) {
           const t = ambientUndefReadType(L, expr);
           if (t) return nsUndefRead(L, expr.text, expr, t);
+        }
+      }
+      // An ambient `declare class` nothing defines, taken as a VALUE.
+      // `new Amb()` got its own arm in lowerNew; the class NAME in every
+      // other position did not, and the block below claimed it as a
+      // program class — so `const B = Amb`, `[Amb]` and `Amb.name` all
+      // answered (`function`, length 1, `"Amb"`) where Node throws
+      // ReferenceError, silently and at exit 0, on both backends.
+      // Deliberately placed ABOVE the program-class arm and BELOW the
+      // trap-binding one, matching the `declare function` order.
+      {
+        if (ambientUndefinedClassSymbolOf(L, expr)) {
+          const t = ambientUndefReadType(L, expr) ?? contextualUndefReadType(L, expr) ?? F64;
+          return nsUndefRead(L, expr.text, expr, t);
         }
       }
       // A read of a TRAP binding — a declaration whose own initializer
