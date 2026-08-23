@@ -3623,14 +3623,20 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // already-aborted signal all answer an already-REJECTED
           // promise, which is where Node puts every one of them. So these
           // are plain `finish` rows, not fallibleTemp ones.
+          // The `body_text` argument carries whether the body was
+          // WRITTEN as a string: fetch derives content-type
+          // text/plain;charset=UTF-8 from a string BodyInit and derives
+          // nothing from a BufferSource, and the distinction cannot
+          // survive the encoding to bytes on its own. The lowering
+          // records it in the entry-point name.
           case "fetch.go":
-            return finish(`scr_fetch_start(${arg(0)}, ${arg(1)}, ${arg(2)}, NULL, NULL)`);
+            return finish(`scr_fetch_start(${arg(0)}, ${arg(1)}, ${arg(2)}, NULL, false, NULL)`);
           case "fetch.goBody":
-            return finish(`scr_fetch_start(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, NULL)`);
+            return finish(`scr_fetch_start(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, NULL)`);
           case "fetch.goSignal":
-            return finish(`scr_fetch_start(${arg(0)}, ${arg(1)}, ${arg(2)}, NULL, ${arg(3)})`);
+            return finish(`scr_fetch_start(${arg(0)}, ${arg(1)}, ${arg(2)}, NULL, false, ${arg(3)})`);
           case "fetch.goBodySignal":
-            return finish(`scr_fetch_start(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)})`);
+            return finish(`scr_fetch_start(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)})`);
           case "fetch.headersNorm":
             return finish(`scr_fetch_headers_normalize(${arg(0)})`);
           case "fetch.headersFromDyn":

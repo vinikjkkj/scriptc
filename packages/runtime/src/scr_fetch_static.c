@@ -325,7 +325,11 @@ static ScrBytes *fs_body_bytes(ScrResponse *r) { return scr_bytes_concat(r->chun
  * raises — the same channel scr_stream.c's consumers use. */
 static void fs_settle_body(ScrPromise *p, ScrResponse *r, int kind) {
   if (r->err != NULL) {
-    scr_throw_obj(r->err, &scr_error_retain_v, &scr_error_release_v, scr_error_trace_arg());
+    /* scr_throw_obj TAKES OWNERSHIP (scr_runtime.h), so the Response's
+     * own reference must not be the one thrown — handing it over stole
+     * the error out from under a second read. */
+    scr_throw_obj(scr_error_retain(r->err), &scr_error_retain_v, &scr_error_release_v,
+                  scr_error_trace_arg());
     scr_promise_reject_pending(p);
     return;
   }
@@ -403,6 +407,11 @@ typedef struct FsTransfer {
   ScrStr *method;      /* owned */
   ScrArr *headers;     /* owned, flat [name, value, ...] user pairs */
   ScrBytes *body;      /* owned, or NULL */
+  /* The body was written as a STRING. fetch derives `content-type:
+   * text/plain;charset=UTF-8` from a string BodyInit and derives NOTHING
+   * from a BufferSource, so the distinction has to survive the encoding
+   * to bytes. */
+  bool body_text;
   ScrUrl *url;         /* owned — the CURRENT hop */
   int hops;
   bool redirected;
@@ -521,9 +530,9 @@ static void fs_error(FsTransfer *t, const char *code) {
     ScrPromise *p = t->promise;
     t->promise = NULL;
     if (p != NULL) {
+      /* +1 in, and scr_throw_obj keeps it: no release here. */
       ScrError *e = aborted ? fs_signal_error(t->signal) : fs_failure(code);
       scr_throw_obj(e, &scr_error_retain_v, &scr_error_release_v, scr_error_trace_arg());
-      scr_error_release(e);
       scr_promise_reject_pending(p);
       scr_promise_release(p);
     }
@@ -694,6 +703,14 @@ static void fs_start_hop(FsTransfer *t) {
   for (size_t i = 0; i + 1 < nuser; i += 2) {
     scr_arr_push_ref(pairs, scr_arr_get_ref(t->headers, (double)i));
     scr_arr_push_ref(pairs, scr_arr_get_ref(t->headers, (double)(i + 1)));
+  }
+  /* The BodyInit-derived content-type, beside the user headers where
+   * undici puts it. A string body gets text/plain;charset=UTF-8; a
+   * BufferSource gets nothing, which is also what Node does. A user
+   * content-type always wins. A redirect that rewrites to GET drops the
+   * body, so this never survives one. */
+  if (t->body != NULL && t->body_text && !fs_pairs_have(t->headers, "content-type")) {
+    fs_pairs_push(pairs, "content-type", "text/plain;charset=UTF-8", 24);
   }
   if (!fs_pairs_have(t->headers, "accept")) fs_pairs_push(pairs, "accept", "*/*", 3);
   if (!fs_pairs_have(t->headers, "accept-language")) fs_pairs_push(pairs, "accept-language", "*", 1);
@@ -1023,13 +1040,12 @@ static void fs_on_client_error(ScrClosure *cb, ScrStr *msg /*borrowed*/) {
  * synchronously). */
 ScrPromise *scr_fetch_start(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*/,
                             ScrArr *header_pairs /*borrowed*/, ScrBytes *body /*borrowed, nullable*/,
-                            void *signal /*borrowed, nullable*/) {
+                            bool body_text, void *signal /*borrowed, nullable*/) {
   ScrPromise *p = scr_promise_new();
 
   if (signal != NULL && fs_signal_aborted != NULL && fs_signal_aborted(signal)) {
-    ScrError *e = fs_signal_error(signal);
-    scr_throw_obj(e, &scr_error_retain_v, &scr_error_release_v, scr_error_trace_arg());
-    scr_error_release(e);
+    scr_throw_obj(fs_signal_error(signal), &scr_error_retain_v, &scr_error_release_v,
+                  scr_error_trace_arg());
     scr_promise_reject_pending(p);
     return p;
   }
@@ -1037,9 +1053,8 @@ ScrPromise *scr_fetch_start(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*
   ScrUrl *u = fs_url_parse(url);
   if (u == NULL || !(fs_str_is(u->scheme, "http") || fs_str_is(u->scheme, "https"))) {
     if (u != NULL) scr_url_release(u);
-    ScrError *e = fs_failure(u == NULL ? "ERR_INVALID_URL" : "ERR_UNSUPPORTED_PROTOCOL");
-    scr_throw_obj(e, &scr_error_retain_v, &scr_error_release_v, scr_error_trace_arg());
-    scr_error_release(e);
+    scr_throw_obj(fs_failure(u == NULL ? "ERR_INVALID_URL" : "ERR_UNSUPPORTED_PROTOCOL"),
+                  &scr_error_retain_v, &scr_error_release_v, scr_error_trace_arg());
     scr_promise_reject_pending(p);
     return p;
   }
@@ -1051,6 +1066,7 @@ ScrPromise *scr_fetch_start(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*
   t->method = method != NULL && method->len > 0 ? scr_str_retain(method) : scr_str_new("GET", 3);
   t->headers = scr_arr_retain(header_pairs);
   t->body = body != NULL ? scr_bytes_retain(body) : NULL;
+  t->body_text = body_text;
   t->url = u;
   t->signal = signal != NULL && fs_signal_retain != NULL ? fs_signal_retain(signal) : NULL;
   t->next = fs_live;

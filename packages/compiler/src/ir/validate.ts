@@ -342,8 +342,12 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // string array in every arm, built by one of the two builders below, so
   // the call itself never has to know which shape the program wrote.
   "fetch.go": { argTypes: [STRING, STRING, arrayOf(STRING)], result: { kind: "promise", inner: RESPONSE_T } },
+  // The trailing BOOL is `body written as a string`: fetch derives
+  // content-type text/plain;charset=UTF-8 from a string BodyInit and
+  // NOTHING from a BufferSource, and that distinction cannot survive the
+  // encoding to bytes on its own.
   "fetch.goBody": {
-    argTypes: [STRING, STRING, arrayOf(STRING), BYTES_U8],
+    argTypes: [STRING, STRING, arrayOf(STRING), BYTES_U8, BOOL],
     result: { kind: "promise", inner: RESPONSE_T },
   },
   "fetch.goSignal": {
@@ -351,7 +355,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
     result: { kind: "promise", inner: RESPONSE_T },
   },
   "fetch.goBodySignal": {
-    argTypes: [STRING, STRING, arrayOf(STRING), BYTES_U8, ABORTSIGNAL_T],
+    argTypes: [STRING, STRING, arrayOf(STRING), BYTES_U8, BOOL, ABORTSIGNAL_T],
     result: { kind: "promise", inner: RESPONSE_T },
   },
   "fetch.headersNorm": { argTypes: [arrayOf(STRING)], result: arrayOf(STRING) },
