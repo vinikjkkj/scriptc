@@ -70,14 +70,14 @@ class-decorators.ts:90:1 - error SC1090: class decorators returning 'typeof Some
      | ^~~~~~
   91 | class Sometimes {}
 
-class-decorators.ts:105:1 - error SC1090: using the class 'ShellDoomed' whose decoration provably throws ('ambientDec' is an ambient name nothing defines — the class statement crashes before the binding exists) are not supported yet
+class-decorators.ts:105:1 - error SC1090: using the class 'ShellDoomed' whose decoration provably throws ('ambientDec' is an ambient name nothing defines — the class statement crashes before the binding exists, so nothing below it ever runs) are not supported yet
 
   104 | }
   105 | new ShellDoomed();
       | ^~~~~~~~~~~~~~~~~
   106 | const shellVal = ShellDoomed;
 
-class-decorators.ts:106:18 - error SC1090: using the class 'ShellDoomed' whose decoration provably throws ('ambientDec' is an ambient name nothing defines — the class statement crashes before the binding exists) are not supported yet
+class-decorators.ts:106:18 - error SC1090: using the class 'ShellDoomed' whose decoration provably throws ('ambientDec' is an ambient name nothing defines — the class statement crashes before the binding exists, so nothing below it ever runs) are not supported yet
 
   105 | new ShellDoomed();
   106 | const shellVal = ShellDoomed;

@@ -325,6 +325,12 @@ export function ambientNsRootOf(L: Lowerer, e: ts.Expression): ts.Identifier | n
  *     defined";
  *   - an ambient `declare function` nothing defines (the same erasure,
  *     ambientUndefinedFnSymbolOf);
+ *   - an ambient `declare class` nothing defines (the same erasure again,
+ *     ambientUndefinedClassSymbolOf). `new Amb()` already had its own arm
+ *     in lowerNew; every OTHER way of touching the name is a read of the
+ *     same erased binding — `Amb.name`, `Amb.make()`, `const B = Amb`,
+ *     `@Amb class …` — and each of them answered without throwing, or
+ *     refused, where Node throws;
  *   - a TRAP BINDING (L.trapBindings) — a binding whose own initializer
  *     provably threw before producing a value, so module init unwound and
  *     no reference to it can ever execute (any lowering is sound there;
@@ -389,6 +395,7 @@ export function ambientUndefVarRootOf(L: Lowerer, e: ts.Expression): ts.Identifi
     if (L.trapBindings.has(sym)) return root;
     if (L.isStdlibSymbol(sym)) return null;
     if (ambientUndefinedFnSymbolOf(L, root) !== null) return root;
+    if (ambientUndefinedClassSymbolOf(L, root) !== null) return root;
     const decls = L.checker.declarationsOf(sym);
     if (decls.length === 0) return null;
     for (const d of decls) {
@@ -400,6 +407,46 @@ export function ambientUndefVarRootOf(L: Lowerer, e: ts.Expression): ts.Identifi
   } finally {
     L.collecting = wasCollecting;
   }
+}
+
+/** True when `e` is (parens aside) a bare identifier naming an AMBIENT
+ * declaration NOTHING defines — `declare const/let/var x: T`,
+ * `declare function f(): T`, `declare class C {}` in a program file.
+ *
+ * `typeof` is the ONE read of an unbound name JavaScript does not throw
+ * on: Node erases all three declarations, so the name is unbound at run
+ * time and `typeof x` is the string "undefined", while every other read
+ * of the same name is a ReferenceError. The compiler lowered the operand
+ * like any other and threw at the `typeof` — measured on both backends:
+ *
+ *     declare function amb(): number
+ *     console.log('before'); console.log('typeof', typeof amb)
+ *     const b = amb
+ *
+ *     Node     before / typeof undefined     rc=1 (the ReferenceError is at `const b`)
+ *     scriptc  before                        rc=1 (thrown one line too early)
+ *
+ * TRAP BINDINGS are deliberately NOT included, which is why this does not
+ * simply call ambientUndefVarRootOf and take its answer: a trap binding is
+ * a real `const` with a real TDZ, so Node answers `typeof` on one from
+ * above its declaration with `ReferenceError: Cannot access 'b' before
+ * initialization` — not "undefined". Erased ambient declarations have no
+ * TDZ because they have no binding at all. */
+export function ambientErasedIdent(L: Lowerer, e: ts.Expression): boolean {
+  let x: ts.Expression = e;
+  while (ts.isParenthesizedExpression(x)) x = x.expression;
+  if (!ts.isIdentifier(x)) return false;
+  // Probe resolution, for ambientUndefVarRootOf's stated reason: asking
+  // the question must not flush the root's deferred diagnostics.
+  const wasCollecting = L.collecting;
+  L.collecting = true;
+  try {
+    const sym = L.resolveValueSymbol(x);
+    if (!sym || L.trapBindings.has(sym)) return false;
+  } finally {
+    L.collecting = wasCollecting;
+  }
+  return ambientUndefVarRootOf(L, x) !== null;
 }
 
 /** The declaration-classification form of ambientUndefVarRootOf: the root
