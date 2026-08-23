@@ -2774,6 +2774,16 @@ function validateFunction(
           }
           checkExpr(e.args[0]!);
           expectType(e.args[0]!, key, "mapIntrinsic get key");
+          // A DYN-valued map answers a bare dyn: `unknown | undefined` is
+          // `unknown`, and the checked-dynamic tree carries `undefined` as
+          // a value, so the miss needs no arm and there is no union to
+          // check the arms of.
+          if (value.kind === "dyn") {
+            if (e.type.kind !== "dyn") {
+              err(`mapIntrinsic get over a dyn-valued map must return dyn`, e.loc);
+            }
+            break;
+          }
           const def = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
           const rest = def ? def.arms.filter((a) => a.kind !== "undefinedT") : [];
           // When V is itself a union its own undefined arm (if any) folds

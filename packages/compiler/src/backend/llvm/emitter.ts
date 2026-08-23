@@ -10731,6 +10731,21 @@ class LlEmitter {
         // instance. When V is itself a union, the stored box IS the
         // result (`undefined` sorts last in canonical arm order).
         const k = this.emitExpr(e.args[0]!);
+        if (value.kind === "dyn") {
+          // The C twin's arm: +1 on a hit, the interned immortal
+          // undefined on a miss, no union box and no tag.
+          this.declare(`declare ptr @scr_map_get_${kAcc}_ref(ptr, ${kTy})`);
+          this.declare(`declare ptr @scr_dyn_undefined()`);
+          const raw = B.tmp();
+          const und = B.tmp();
+          const isnull = B.tmp();
+          const t = B.tmp();
+          B.line(`${raw} = call ptr @scr_map_get_${kAcc}_ref(ptr ${r.name}, ${kTy} ${k.name})`);
+          B.line(`${und} = call ptr @scr_dyn_undefined()`);
+          B.line(`${isnull} = icmp eq ptr ${raw}, null`);
+          B.line(`${t} = select i1 ${isnull}, ptr ${und}, ptr ${raw}`);
+          return this.own({ name: t, type: e.type });
+        }
         if (e.type.kind !== "union") throw new Error("llvm emitter bug: map get result is not a union");
         const def = this.unionsById.get(e.type.unionId);
         const undefTag = this.undefinedArmTag(e.type);
