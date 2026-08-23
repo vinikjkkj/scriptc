@@ -536,6 +536,12 @@ struct ScrNetSocket {
    * scr_net_sock_detach_server() the moment the fd goes, and this flag is
    * the one-shot that keeps the later settle from decrementing twice. */
   bool conn_counted;
+  /* CLOSE-PHASE order. libuv pushes a closing handle onto the front of
+   * loop->closing_handles and uv__run_closing_handles walks that list, so
+   * the close callbacks of one iteration run in REVERSE order of the
+   * uv_close() calls: two sockets destroyed in one turn emit 'close' in
+   * the opposite order. Stamped once, when the fd goes; 0 = not closing. */
+  size_t close_seq;
   bool read_armed, write_armed;
   /* write buffer: [whead, wlen) of wbuf is unsent */
   char *wbuf;
@@ -950,6 +956,12 @@ static void scr_net_sock_update_write(ScrNetSocket *s) {
 
 static void scr_net_server_mark_due(ScrNetServer *s);
 
+/* Stamps this socket's place in the close phase (see close_seq). */
+static void scr_net_sock_mark_closing(ScrNetSocket *s) {
+  static size_t scr_net_sock_close_seq = 0;
+  if (s->close_seq == 0 && !s->close_emitted) s->close_seq = ++scr_net_sock_close_seq;
+}
+
 /* Drops this socket from its server's connection count, and stamps the
  * server's settle order if that emptied it.
  *
@@ -986,7 +998,10 @@ static void scr_net_sock_close_fd(ScrNetSocket *s) {
     s->fd = -1;
     s->read_armed = s->write_armed = false;
   }
-  if (!s->close_emitted) s->emit_close = true;
+  if (!s->close_emitted) {
+    s->emit_close = true;
+    scr_net_sock_mark_closing(s);
+  }
   scr_net_sock_detach_server(s); /* Node counts down inside _destroy */
 }
 
@@ -1845,6 +1860,7 @@ static void scr_net_sock_dial_peer(ScrNetSocket *s) {
     s->pending_err = scr_str_new(msg, strlen(msg));
     s->had_error = true;
     s->emit_close = true;
+    scr_net_sock_mark_closing(s);
     s->connecting = false;
     return;
   }
@@ -2185,6 +2201,7 @@ static void scr_net_sock_dial_next(ScrNetSocket *s) {
   s->connecting = false;
   s->had_error = true;
   s->emit_close = true;
+  scr_net_sock_mark_closing(s);
 }
 
 /* The attempt budget elapsed with the connect still unanswered — the
@@ -2266,6 +2283,7 @@ void scr_net_lookup_answer(ScrClosure *self, bool has_err, ScrStr *msg /*borrowe
     s->connecting = false;
     s->had_error = true;
     s->emit_close = true;
+    scr_net_sock_mark_closing(s);
     scr_net_sock_release(s);
     return;
   }
@@ -2936,6 +2954,109 @@ static void scr_net_settle_due_servers(void) {
   }
 }
 
+/* One socket's 'close': the tick queue first (every server already due
+ * emits before any close callback — see scr_net_settle_due_servers), then
+ * the protocol layer's teardown, the listeners, and the settle that drops
+ * every list and leaves the registry. Answers false if a callback left an
+ * exception pending; the caller stops the phase. The socket is retained by
+ * the caller. */
+static bool scr_net_sock_emit_close(ScrNetSocket *sock) {
+  sock->close_emitted = true;
+  sock->emit_close = false;
+  scr_net_sock_detach_server(sock); /* belt and braces: a socket that
+                                     * reached emit_close without a
+                                     * close_fd (a failed dial) */
+  scr_net_settle_due_servers();
+  if (scr_exc_pending()) return false;
+  if (sock->server) {
+    ScrNetServer *srv = sock->server;
+    sock->server = NULL;
+    scr_net_server_release(srv);
+  }
+  if (sock->native_closed) {
+    sock->native_closed(sock->native_ctx);
+    if (scr_exc_pending()) return false;
+  }
+  scr_net_fire_close(&sock->close_ls, sock, SCR_DYNH_NET_SOCKET, sock->had_error);
+  /* settle: listeners drop (cycle story) */
+  scr_net_ls_drop(&sock->data_ls);
+  scr_net_ls_drop(&sock->end_ls);
+  scr_net_ls_drop(&sock->close_ls);
+  scr_net_ls_drop(&sock->err_ls);
+  scr_net_ls_drop(&sock->conn_ls);
+  scr_net_ls_drop(&sock->timeout_ls);
+  scr_net_ls_drop(&sock->readable_ls);
+  scr_net_ls_drop(&sock->finish_ls);
+  scr_net_ls_drop(&sock->wcb_ls);
+  if (sock->pipe_dst) {
+    scr_net_sock_release(sock->pipe_dst);
+    sock->pipe_dst = NULL;
+  }
+  if (sock->conn_pending) {
+    scr_net_server_release(sock->conn_pending);
+    sock->conn_pending = NULL;
+  }
+  scr_net_sock_unregister(sock);
+  return !scr_exc_pending();
+}
+
+/* The CLOSE PHASE, run once per sweep pass after every other socket event
+ * — libuv's uv__run_closing_handles, modelled where it is observable.
+ *
+ * Two properties of it show through to JavaScript and neither held before.
+ * First, it comes LAST: 'close' is a close-phase callback, while 'data',
+ * 'error' and the write/finish callbacks come out of the poll phase, so in
+ * Node every one of those beats every 'close' of the same turn. Emitting
+ * the close inline in the socket walk fired one socket's 'close' before
+ * the next socket's 'data'.
+ *
+ * Second, it is LIFO. uv_close pushes onto the FRONT of
+ * loop->closing_handles and uv__run_closing_handles walks that list, so
+ * one iteration's callbacks run in the reverse of the destroy order:
+ *
+ *   sockets destroyed 0,1,2,3  ->  'close' 3,2,1,0
+ *   sockets destroyed 3,2,0,1  ->  'close' 1,0,2,3
+ *
+ * (measured against Node v25.9.0, four sockets, both orders, three runs
+ * each). Walking the socket registry forwards gave the opposite of that
+ * for any two connections destroyed in one turn.
+ *
+ * The BARRIER is the other half of libuv's shape: uv__run_closing_handles
+ * takes the whole list and nulls it before running a single callback, so a
+ * handle closed BY a close callback belongs to the next iteration and not
+ * to this batch. Without it, LIFO would let a socket that a 'close'
+ * handler destroys jump ahead of sockets that were already waiting.
+ * Sockets stamped after the phase began are left for the next sweep pass;
+ * the loop keeps running while any socket is registered, so nothing is
+ * stranded.
+ *
+ * O(n^2) in the sockets closing at once, like the due-server settle beside
+ * it. Nothing here has closed more than a handful in one pass; a program
+ * that closed hundreds would want a stamped list rather than a scan. */
+static void scr_net_sock_close_phase(void) {
+  size_t barrier = 0;
+  for (ScrNetSocket *it = scr_net_socks; it; it = it->next) {
+    if (it->emit_close && !it->close_emitted && it->fd < 0 && it->close_seq > barrier) {
+      barrier = it->close_seq;
+    }
+  }
+  if (barrier == 0) return;
+  for (;;) {
+    ScrNetSocket *pick = NULL;
+    for (ScrNetSocket *it = scr_net_socks; it; it = it->next) {
+      if (it->emit_close && !it->close_emitted && it->fd < 0 && it->close_seq <= barrier &&
+          (pick == NULL || it->close_seq > pick->close_seq)) {
+        pick = it;
+      }
+    }
+    if (pick == NULL) return;
+    scr_net_sock_retain(pick);
+    bool ok = scr_net_sock_emit_close(pick);
+    scr_net_sock_release(pick);
+    if (!ok) return;
+  }
+}
+
 /* Sockets first (a dying connection may drain its server), servers after.
  * Every fire checks for a pending exception and bails — the loop surfaces
  * it as an uncaught throw. */
@@ -2997,72 +3118,11 @@ static void scr_net_sweep(void) {
         return;
       }
     }
-    if (sock->emit_close && !sock->close_emitted && sock->fd < 0) {
-      sock->close_emitted = true;
-      sock->emit_close = false;
-      /* EVERY server whose 'close' is already due emits before this
-       * socket's own 'close' — not just the server this socket drained.
-       *
-       * Node's boundary is a phase boundary, not a per-socket one: the
-       * server 'close' is a process.nextTick, the socket 'close' is a
-       * libuv close callback, and the whole tick queue drains before the
-       * loop's close phase. So a turn that destroys two connections and
-       * drains two servers emits BOTH server closes and only then the
-       * two socket closes. Settling only the server this socket happened
-       * to drain interleaved them — server, socket, server, socket —
-       * where Node prints server, server, socket, socket.
-       *
-       * The counts themselves came off at fd-close time
-       * (scr_net_sock_detach_server), which is why anything due is
-       * already stamped by the time this runs. */
-      scr_net_sock_detach_server(sock); /* belt and braces: a socket that
-                                         * reached emit_close without a
-                                         * close_fd (a failed dial) */
-      scr_net_settle_due_servers();
-      if (scr_exc_pending()) {
-        scr_net_sock_release(sock);
-        return;
-      }
-      if (sock->server) {
-        ScrNetServer *srv = sock->server;
-        sock->server = NULL;
-        scr_net_server_release(srv);
-      }
-      if (sock->native_closed) {
-        sock->native_closed(sock->native_ctx);
-        if (scr_exc_pending()) {
-          scr_net_sock_release(sock);
-          return;
-        }
-      }
-      scr_net_fire_close(&sock->close_ls, sock, SCR_DYNH_NET_SOCKET, sock->had_error);
-      /* settle: listeners drop (cycle story) */
-      scr_net_ls_drop(&sock->data_ls);
-      scr_net_ls_drop(&sock->end_ls);
-      scr_net_ls_drop(&sock->close_ls);
-      scr_net_ls_drop(&sock->err_ls);
-      scr_net_ls_drop(&sock->conn_ls);
-      scr_net_ls_drop(&sock->timeout_ls);
-      scr_net_ls_drop(&sock->readable_ls);
-      scr_net_ls_drop(&sock->finish_ls);
-      scr_net_ls_drop(&sock->wcb_ls);
-      if (sock->pipe_dst) {
-        scr_net_sock_release(sock->pipe_dst);
-        sock->pipe_dst = NULL;
-      }
-      if (sock->conn_pending) {
-        scr_net_server_release(sock->conn_pending);
-        sock->conn_pending = NULL;
-      }
-      scr_net_sock_unregister(sock);
-      if (scr_exc_pending()) {
-        scr_net_sock_release(sock);
-        return;
-      }
-    }
     scr_net_sock_release(sock);
     sock = next;
   }
+  scr_net_sock_close_phase(); /* libuv's close phase: last, and LIFO */
+  if (scr_exc_pending()) return;
   ScrNetServer *srv = scr_net_servers;
   while (srv) {
     ScrNetServer *next = srv->next;
