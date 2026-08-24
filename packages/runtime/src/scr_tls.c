@@ -955,7 +955,7 @@ static const ScrNetTransportOps SCR_TLS_OPS = {
   .on_established = scr_tls_on_established,
   .pending = scr_tls_pending,
   .shutdown_write = scr_tls_shutdown_write,
-  .free = scr_tls_free,
+  .free_fn = scr_tls_free,
 };
 
 /* ── the server surface ──────────────────────────────────────────────── */

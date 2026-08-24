@@ -709,7 +709,7 @@ void scr_net_sock_release(ScrNetSocket *s) {
   if (!s || s->rc == SIZE_MAX) return;
   if (--s->rc == 0) {
     if (s->native_ctx_free) s->native_ctx_free(s->native_ctx);
-    if (s->tops && s->tops->free) s->tops->free(s->tctx);
+    if (s->tops && s->tops->free_fn) s->tops->free_fn(s->tctx);
     scr_net_ls_drop(&s->data_ls);
     scr_net_ls_drop(&s->end_ls);
     scr_net_ls_drop(&s->close_ls);
