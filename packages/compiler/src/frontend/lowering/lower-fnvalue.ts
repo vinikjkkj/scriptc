@@ -85,6 +85,7 @@ import {
   typeEquals,
 } from "../../ir/nodes.js";
 import { type BuiltinModuleFn, builtinMemberFnValueAllowed, builtinModuleFnOf } from "./surfaces.js";
+import { isJsSourceFile } from "../program.js";
 
 interface BuiltinFnValue {
   /** The value form's exact parameter types, in order. */
@@ -472,6 +473,17 @@ export function builtinMemberFnValueType(
   node: ts.Node,
   bi: { module: string; member: string },
 ): { want: IrType; row: BuiltinModuleFn } | null {
+  // TYPESCRIPT SOURCES ONLY, exactly like the globals table above.
+  //
+  // A JS source already has an identity story for a builtin member and it
+  // is a different one: the named-import spelling lowers to the token
+  // string `[builtin path.dirname]`. Offering a real closure for the
+  // NAMESPACE spelling and leaving the named one a token would make
+  // `path.dirname === dirname` refuse inside one file where Node answers
+  // true -- measured on a .cjs probe, which is why this guard exists
+  // rather than being assumed unnecessary. The JS lane keeps exactly the
+  // answers it had; nothing in this commit moves it.
+  if (isJsSourceFile(node.getSourceFile())) return null;
   if (!builtinMemberFnValueAllowed(bi.module, bi.member)) return null;
   const row = builtinModuleFnOf(L, bi.module, bi.member);
   if (!row) return null;
