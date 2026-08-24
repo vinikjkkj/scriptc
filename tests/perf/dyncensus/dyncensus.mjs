@@ -364,11 +364,260 @@ function selfTest() {
   return fail === 0 ? 0 : 1;
 }
 
+// ── the STRING census ────────────────────────────────────────────────────
+//
+// tests/perf/dyncensus/scr_str_census.h is the ScrStr half of this lane. It
+// exists because the ScrDyn half comes back with livePeak=0 on the messaging
+// bench's two SEND scenarios: that workload allocates no ScrDyn at all, so
+// the instrument built to price a representation change could not see the
+// representation the workload is actually made of. Same directory, same
+// reader, same refusals; a report is dispatched here when it carries STRCEN
+// tags, so neither half can ever render the other's report.
+//
+// Rows 0..exactRows-1 are EXACT capacities. Row exactRows+b is the band
+// [2^b, 2^(b+1)) and is priced at its LOWER bound, which UNDERSTATES the
+// population's cost; the checker's cross-account test is therefore only an
+// equality when every populated row is exact, and an inequality otherwise.
+
+const RC_LABELS = ["1", "2", "3", "4", "5-8", "9-16", "17+"];
+
+export function strParse(text) {
+  const r = { layout: null, rows: new Map(), walk: [], rc: [], total: null };
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const sp = line.split(/\s+/);
+    if (sp[0] === "STRCEN-LAYOUT") { r.layout = kv(sp.slice(1)); continue; }
+    if (sp[0] === "STRCEN-ROW") { r.rows.set(+sp[1], { peak: +sp[2], exit: +sp[3] }); continue; }
+    if (sp[0] === "STRCEN-RC") { r.rc[+sp[1]] = sp.slice(2).map(Number); continue; }
+    if (sp[0] === "STRCEN-WALK") { r.walk[+sp[1]] = kv(sp.slice(2)); continue; }
+    if (sp[0] === "STRCEN-TOTAL") { r.total = kv(sp.slice(1)); continue; }
+  }
+  return r;
+}
+
+/** The capacity a row index stands for, and whether that is exact. */
+function rowCap(i, exactRows) {
+  if (i < exactRows) return { cap: i, exact: true };
+  return { cap: 2 ** (i - exactRows), exact: false };
+}
+
+/**
+ * Physical bytes one string of capacity `cap` costs with a header of `hdr`.
+ * TWO roundings, and both were measured rather than assumed: scr_str_alloc
+ * asks for `poolGrain`-rounded bytes so a recycled block is a whole size
+ * class wide, and the CRT then rounds THAT to its own bucket.
+ */
+export function strPhys(hdr, cap, poolGrain, mallocHdr, mallocGrain) {
+  const req = Math.ceil((hdr + cap + 1) / poolGrain) * poolGrain;
+  return Math.ceil((req + mallocHdr) / mallocGrain) * mallocGrain;
+}
+
+export function strCheck(r) {
+  const bad = [];
+  const T = r.total, L = r.layout;
+  if (!T) return ["no STRCEN-TOTAL line: the report is truncated or the run did not reach its exit hook"];
+  if (!L) return ["no STRCEN-LAYOUT line"];
+
+  // 1. the instrument lost nothing
+  if (T.ptrLost > 0) bad.push(`ptrLost=${T.ptrLost}: the live-pointer table overflowed, so the walk saw fewer strings than the program held`);
+  if (T.hashLost > 0) bad.push(`hashLost=${T.hashLost}: the content table filled, so duplication is a floor and not a count`);
+  if (T.deadUnknown > 0) bad.push(`deadUnknown=${T.deadUnknown}: a string reached the free hook the alloc hooks never saw - the hook set is incomplete`);
+
+  // 2. the layout came from the BUILD, not from this reader
+  for (const k of ["sizeofStr", "offData", "poolGrain", "mallocGrain", "exactRows"])
+    if (!(L[k] > 0)) bad.push(`layout.${k} is ${L[k]}: the constructor that stamps the build's own sizes did not run`);
+  if (L.offData !== L.sizeofStr)
+    bad.push(`offData=${L.offData} != sizeofStr=${L.sizeofStr}: data[] is not at the end of the header, so every size below is wrong`);
+
+  // 3. the arm: a planted population, alive at the peak AND at exit
+  if (!(T.armN > 0)) bad.push(`no arm: build with -DSCR_STRCEN_ARM=N. Without it nothing here has been shown to work.`);
+  else {
+    const row = r.rows.get(T.armCap);
+    if (!row) bad.push(`the arm planted ${T.armN} strings at cap ${T.armCap} and that row is empty: the histogram is not this population`);
+    else {
+      if (row.peak !== T.armN) bad.push(`the arm row at the peak is ${row.peak}, the arm is ${T.armN}: the peak snapshot is not a snapshot of this population`);
+      if (row.exit !== T.armN) bad.push(`the arm row at exit is ${row.exit}, the arm is ${T.armN}: the arm was freed, so the two hooks are not paired`);
+    }
+    if (T.liveN < T.armN) bad.push(`liveN=${T.liveN} is below the arm's ${T.armN}: strings were freed twice`);
+  }
+
+  // 4. books balance
+  if (T.allocs - T.deaths !== T.liveN) bad.push(`allocs(${T.allocs}) - deaths(${T.deaths}) != liveN(${T.liveN})`);
+
+  // 5. the ROW TABLE and the running byte counter are INDEPENDENT accounts of
+  //    the same population and must agree. This is the control that catches a
+  //    histogram which silently dropped a row - the figure a header-width
+  //    projection is computed from is the row table, not the counter.
+  let sumN = 0, histPhys = 0, allExact = true;
+  for (const [i, row] of r.rows) {
+    if (row.peak === 0) continue;
+    const { cap, exact } = rowCap(i, L.exactRows);
+    if (!exact) allExact = false;
+    sumN += row.peak;
+    histPhys += row.peak * strPhys(L.sizeofStr, cap, L.poolGrain, L.mallocHdr, L.mallocGrain);
+  }
+  if (sumN !== T.peakN)
+    bad.push(`the peak rows sum to ${sumN} strings but peakN is ${T.peakN}`);
+  if (allExact && histPhys !== T.peakPhys)
+    bad.push(`the row table prices the peak at ${histPhys} B, the running counter says ${T.peakPhys} B: the two accounts disagree`);
+  if (histPhys > T.peakPhys)
+    bad.push(`the row table prices the peak ABOVE the running counter (${histPhys} > ${T.peakPhys}), which lower-bound banding makes impossible`);
+
+  // 6. the PEAK walk ran. Set 1 is the EXIT walk, and on a bench that frees
+  //    everything before returning it sees only the arm; a reader that quoted
+  //    it would report the arm as the population and look plausible doing it.
+  const w0 = r.walk[0];
+  if (!w0) bad.push(`no STRCEN-WALK 0 line`);
+  else if (T.peakN > T.armN && !(w0.n > T.armN))
+    bad.push(`the peak walk saw ${w0.n} strings against a peak of ${T.peakN}: it never ran, so rc and duplication are the arm's`);
+  if (w0 && w0.distinct > w0.n) bad.push(`distinct(${w0.distinct}) > n(${w0.n})`);
+  if (w0 && w0.rcSum < w0.n) bad.push(`rcSum(${w0.rcSum}) < n(${w0.n}): a live string with no reference`);
+  if (w0 && w0.lenSum > T.peakCap) bad.push(`the walk's lenSum(${w0.lenSum}) exceeds the peak capSum(${T.peakCap})`);
+  return bad;
+}
+
+export function strRender(r) {
+  const L = r.layout, T = r.total, w0 = r.walk[0] || {}, o = [];
+  const arm = T.armN || 0;
+  o.push(`LAYOUT  sizeof(ScrStr)=${L.sizeofStr}  data[] at +${L.offData}  pool grain ${L.poolGrain}  concat slack ${L.chainSlack}`);
+  o.push(`        one string of capacity c costs roundup(roundup(${L.sizeofStr}+c+1, ${L.poolGrain}) + ${L.mallocHdr}, ${L.mallocGrain})`);
+  o.push(`        the CRT's ${L.mallocHdr}-byte header and ${L.mallocGrain}-byte grain are MEASURED on this target, not assumed`);
+  o.push(`RUN     allocs=${n(T.allocs)} deaths=${n(T.deaths)} liveAtExit=${n(T.liveN)}`);
+  o.push(`PEAK    ${n(T.peakN)} live heap strings at allocation #${n(T.peakOrd)}, holding ${n(T.peakPhys)} B`);
+  o.push(`        arm=${arm} strings planted at cap ${T.armCap}; instrument tables ${n(T.tableBytes)} B of BSS`);
+  o.push(`        mean capacity ${(T.peakCap / T.peakN).toFixed(1)} B, mean physical ${(T.peakPhys / T.peakN).toFixed(1)} B` +
+    (w0.n ? `, mean length ${(w0.lenSum / w0.n).toFixed(1)} B (max ${w0.lenMax})` : ""));
+  o.push(`        immortal interned literals are static and never allocate, so they are NOT in this population`);
+  o.push("");
+
+  if (w0.n) {
+    o.push(`── THE PEAK WALK: ${n(w0.n)} strings read, ${pct(w0.n, T.peakN)} of the peak population`);
+    o.push(`   references   rcSum=${n(w0.rcSum)} over ${n(w0.n)} values = ${(w0.rcSum / w0.n).toFixed(4)} references per value (max ${w0.rcMax})`);
+    o.push(`                ` + RC_LABELS.map((l, i) => `rc ${l}: ${n((r.rc[0] || [])[i] ?? 0)}`).join("  "));
+    o.push(`   duplication  ${n(w0.distinct)} distinct of ${n(w0.n)} = ${pct(w0.n - w0.distinct, w0.n)} duplicated, holding ${n(w0.dupBytes)} B`);
+    o.push(`                that is the CEILING on what interning could ever recover here`);
+    o.push(`   encoding     ${n(w0.ascii)} of ${n(w0.n)} = ${pct(w0.ascii, w0.n)} pure ASCII`);
+    o.push("");
+  }
+
+  const live = [...r.rows.entries()].filter(([, v]) => v.peak > 0)
+    .sort((a, b) => b[1].peak - a[1].peak);
+  o.push(`── CAPACITY DISTRIBUTION AT THE PEAK (top rows; exact below cap ${L.exactRows})`);
+  o.push(`   cap      strings        %   phys/str      total B        %`);
+  for (const [i, row] of live.slice(0, 14)) {
+    const { cap, exact } = rowCap(i, L.exactRows);
+    const p = strPhys(L.sizeofStr, cap, L.poolGrain, L.mallocHdr, L.mallocGrain);
+    o.push(`${(exact ? String(cap) : ">=" + cap).padStart(6)} ${n(row.peak).padStart(12)} ${pct(row.peak, T.peakN).padStart(8)}` +
+      `${String(p).padStart(11)} ${n(row.peak * p).padStart(12)} ${pct(row.peak * p, T.peakPhys).padStart(8)}`);
+  }
+  o.push("");
+
+  o.push(`── WHAT A DIFFERENT HEADER WOULD COST, over THIS distribution`);
+  o.push(`   Not "24 minus 16 is 8 bytes a string": the CRT's grain is ${L.mallocGrain}, so a`);
+  o.push(`   narrower header saves a WHOLE BUCKET on some capacities and NOTHING on`);
+  o.push(`   others. Priced per row against the measured population and summed.`);
+  o.push(`   hdr      total B        delta         %   strings that move`);
+  for (const hdr of [24, 20, 16, 12, 8]) {
+    let tot = 0, moved = 0;
+    for (const [i, row] of r.rows) {
+      if (row.peak === 0) continue;
+      const { cap } = rowCap(i, L.exactRows);
+      const a = strPhys(L.sizeofStr, cap, L.poolGrain, L.mallocHdr, L.mallocGrain);
+      const b = strPhys(hdr, cap, L.poolGrain, L.mallocHdr, L.mallocGrain);
+      tot += row.peak * b;
+      if (b !== a) moved += row.peak;
+    }
+    const d = tot - T.peakPhys;
+    o.push(`${String(hdr).padStart(6)} ${n(tot).padStart(12)} ${n(d).padStart(12)} ${(100 * d / T.peakPhys).toFixed(2).padStart(9)}%   ${n(moved)}`);
+  }
+  return o.join("\n");
+}
+
+function strSelfTestFixture() {
+  // 100 strings of cap 64, 40 of cap 18, and an arm of 8 at cap 251.
+  const phys = (cap) => strPhys(24, cap, 8, 8, 16);
+  const peakPhys = 100 * phys(64) + 40 * phys(18) + 8 * phys(251);
+  return [
+    "STRCEN-LAYOUT sizeofStr=24 offData=24 poolGrain=8 chainSlack=8 mallocHdr=8 mallocGrain=16 exactRows=256",
+    "STRCEN-ROW 18 40 0",
+    "STRCEN-ROW 64 100 0",
+    "STRCEN-ROW 251 8 8",
+    "STRCEN-RC 0 140 8 0 0 0 0 0",
+    `STRCEN-WALK 0 walks=2 n=148 atLiveN=148 rcSum=156 rcMax=2 distinct=140 dupBytes=1024 ascii=148 phys=${peakPhys} lenSum=5000 lenMax=64`,
+    "STRCEN-RC 1 8 0 0 0 0 0 0",
+    "STRCEN-WALK 1 walks=2 n=8 atLiveN=8 rcSum=8 rcMax=1 distinct=1 dupBytes=896 ascii=8 phys=2304 lenSum=0 lenMax=0",
+    `STRCEN-TOTAL allocs=1148 deaths=1140 liveN=8 peakN=148 peakPhys=${peakPhys} peakCap=7148 peakOrd=1100 exitPhys=2304 capMax=251 lenMax=64 ptrLost=0 hashLost=0 deadUnknown=0 armN=8 armCap=251 pslots=4194304 tableBytes=33554432`,
+  ].join("\n");
+}
+
+function strSelfTest() {
+  let pass = 0, fail = 0;
+  const ok = (cond, what) => { if (cond) { pass++; } else { fail++; console.log("FAIL " + what); } };
+  const good = strSelfTestFixture();
+  const g = strParse(good);
+  ok(strCheck(g).length === 0, "the well-formed STRCEN fixture is BELIEVED: " + JSON.stringify(strCheck(g)));
+  ok(g.layout.sizeofStr === 24, "STRCEN layout parsed");
+  ok(g.rows.get(64).peak === 100, "STRCEN row parsed");
+  ok(strRender(g).includes("CAPACITY DISTRIBUTION"), "STRCEN render prints the distribution");
+  // The arithmetic itself, on paper. cap 64 costs 112 with a 24-byte header
+  // and 96 with a 16-byte one; cap 18 costs 64 and 48. Both move by one
+  // 16-byte bucket. cap 251 costs 288 either way and must NOT move - that is
+  // the case a naive "8 bytes off every string" would get wrong.
+  ok(strPhys(24, 64, 8, 8, 16) === 112 && strPhys(16, 64, 8, 8, 16) === 96, "cap 64: 112 -> 96");
+  ok(strPhys(24, 18, 8, 8, 16) === 64 && strPhys(16, 18, 8, 8, 16) === 48, "cap 18: 64 -> 48");
+  ok(strPhys(24, 251, 8, 8, 16) === 288 && strPhys(16, 251, 8, 8, 16) === 288, "cap 251 does not move");
+  ok(strRender(g).includes("-2,240"), "the 16-byte row prices this fixture at 140 x 16 = 2,240 B saved");
+
+  const neg = [
+    ["a pointer table that overflowed", (s) => s.replace("ptrLost=0", "ptrLost=3"), /ptrLost=3/],
+    ["a content table that filled", (s) => s.replace("hashLost=0", "hashLost=9"), /hashLost=9/],
+    ["a free the alloc hooks never saw", (s) => s.replace("deadUnknown=0", "deadUnknown=4"), /deadUnknown=4/],
+    ["a missing arm is a lane nobody has shown to work", (s) => s.replace("armN=8", "armN=0"), /no arm/],
+    ["an arm that was freed means the hooks are not paired", (s) => s.replace("STRCEN-ROW 251 8 8", "STRCEN-ROW 251 8 0"), /arm was freed/],
+    ["an arm missing from the peak snapshot", (s) => s.replace("STRCEN-ROW 251 8 8", "STRCEN-ROW 251 4 8"), /not a snapshot of this population/],
+    ["rows that do not sum to the population they claim", (s) => s.replace("STRCEN-ROW 64 100 0", "STRCEN-ROW 64 90 0"), /rows sum to/],
+    ["a row table that prices the peak differently from the byte counter",
+      (s) => s.replace(/peakPhys=(\d+) peakCap/, (m, v) => `peakPhys=${+v + 4096} peakCap`), /two accounts disagree/],
+    ["a layout the build never stamped", (s) => s.replace("sizeofStr=24", "sizeofStr=0"), /layout.sizeofStr/],
+    ["a header whose data\\[\\] is not at its end", (s) => s.replace("offData=24", "offData=16"), /is not at the end/],
+    ["books that do not balance", (s) => s.replace("allocs=1148", "allocs=1149"), /!= liveN/],
+    ["a peak walk that never ran, so rc and duplication are the arm's",
+      (s) => s.replace("STRCEN-WALK 0 walks=2 n=148", "STRCEN-WALK 0 walks=2 n=8"), /it never ran/],
+    ["more distinct strings than strings", (s) => s.replace("distinct=140", "distinct=900"), /distinct\(900\)/],
+    ["a live string with no reference", (s) => s.replace("rcSum=156", "rcSum=4"), /rcSum\(4\)/],
+  ];
+  for (const [what, mutate, want] of neg) {
+    const bad = strCheck(strParse(mutate(good)));
+    ok(bad.length > 0 && bad.some((s) => want.test(s)),
+      `REFUSED: ${what} - got ${JSON.stringify(bad)}`);
+  }
+  console.log(`STRCEN SELFTEST ${fail === 0 ? "OK" : "FAILED"}: ${pass} passed, ${fail} failed`);
+  return fail === 0 ? 0 : 1;
+}
+
 const argv = process.argv.slice(2);
 if (argv.includes("--self-test")) {
-  process.exit(selfTest());
+  process.exit(selfTest() || strSelfTest());
 } else if (argv.length && !argv[0].startsWith("--")) {
-  const r = parse(readFileSync(argv[0], "utf8"));
+  const text = readFileSync(argv[0], "utf8");
+  // One reader, two lanes. A STRCEN report is the ScrStr half of this
+  // instrument and is dispatched by its own tag rather than by a flag, so a
+  // report can never be rendered by the wrong half.
+  if (/^STRCEN-/m.test(text)) {
+    const sr = strParse(text);
+    const sbad = strCheck(sr);
+    if (sbad.length) {
+      console.log("REFUSED - this report is not believed:");
+      for (const s of sbad) console.log("  * " + s);
+      process.exit(2);
+    }
+    console.log(argv.includes("--json")
+      ? JSON.stringify(sr, (k, v) => (v instanceof Map ? Object.fromEntries(v) : v), 1)
+      : strRender(sr));
+    process.exit(0);
+  }
+  const r = parse(text);
   const bad = check(r);
   if (bad.length) {
     console.log("REFUSED — this report is not believed:");
