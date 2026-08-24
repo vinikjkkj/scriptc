@@ -1098,7 +1098,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         //     signature test picks the arm the value actually is.
         const sigLit = cStringLiteral(Buffer.from(key, "utf8"));
         d.push(`  if (d->kind != SCR_DYN_FUNC) return false;`);
-        d.push(`  return strcmp(d->v.fn.sig, ${sigLit}) == 0;`);
+        d.push(`  return strcmp(scr_dyn_fn_sig(d), ${sigLit}) == 0;`);
         break;
       }
       case "map":
@@ -2503,13 +2503,13 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           // anyway — the predicate had already demanded this strcmp.
           d.push(`  (void)path;`);
           d.push(
-            `  if (d->kind != SCR_DYN_FUNC || strcmp(d->v.fn.sig, ${sigLit}) != 0) { *ok = false; return NULL; }`,
+            `  if (d->kind != SCR_DYN_FUNC || strcmp(scr_dyn_fn_sig(d), ${sigLit}) != 0) { *ok = false; return NULL; }`,
           );
           d.push(`  return scr_closure_retain(d->v.fn.clo);`);
           break;
         }
         d.push(fail(`  `, "func.kind", `d->kind != SCR_DYN_FUNC`, `NULL`));
-        d.push(`  if (strcmp(d->v.fn.sig, ${sigLit}) == 0) return scr_closure_retain(d->v.fn.clo);`);
+        d.push(`  if (strcmp(scr_dyn_fn_sig(d), ${sigLit}) == 0) return scr_closure_retain(d->v.fn.clo);`);
         if (canAdaptDynFuncTo(t, (id) => E.recordsById.get(id), (id) => E.unionsById.get(id))) {
           const adapter = dynFuncAdapterHelper(E, t);
           d.push(`  {`);
