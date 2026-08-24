@@ -4098,6 +4098,63 @@ export function keyedReadGlobalIsDyn(L: Lowerer, decl: ts.VariableDeclaration): 
   );
 }
 
+/** The binding whose initializer names an EXISTING checked-dynamic value —
+ * `const a = ns`, where `ns` is a JS file-scope object literal and so holds
+ * the dyn object itself (collectGlobals' object-literal rule, which exists
+ * precisely so the literal keeps JS's object identity).
+ *
+ * Without this the identity is lost one statement later. The checker types
+ * `a` by INFERENCE over `ns`'s literal, which maps to a closed record, and a
+ * record is a monomorphic C struct: the assignment materializes a FRESH
+ * instance through the dynCheck builder and copies the declared members into
+ * it. So `a === ns` is false, `a.v = 99` lands on the copy, and a write made
+ * through `ns` after the binding exists is invisible through `a`. Node has
+ * ONE object. This is the dyn face of adoptedInstanceClassOf, whose comment
+ * makes the identical argument for a class instance, and of the file-scope
+ * object-literal rule itself one declaration along.
+ *
+ * A record slot cannot be persuaded to alias — its fields ARE struct
+ * members — so the only place the copy can be declined is the slot's TYPE,
+ * which is what this answers.
+ *
+ * The dyn-ness is a LOWERING fact, not a checker one: `ns`'s checker type is
+ * the very record this refuses, and what makes the value dynamic is the
+ * global collectGlobals already registered for it. So the question asked is
+ * that global's type, and a name with no registered dyn global answers no.
+ *
+ * JAVASCRIPT sources only, and only where the initializer is a bare
+ * identifier: everything past one — a call, a keyed read, a property read —
+ * has a lowering of its own whose result this cannot predict, and collect-
+ * Globals runs before any body lowers. In TypeScript the record is an
+ * ANNOTATION the author wrote, and a checked cast into it is what they
+ * asked for; the copy is then the promise, not the defect.
+ *
+ * `bindingHoldsItsInitializer` is the same proof both adoption arms rest on:
+ * a `let` reassigned later could name an unrelated value. */
+export function dynAliasBindingName(L: Lowerer, decl: ts.VariableDeclaration): ts.Identifier | null {
+  if (decl.initializer === undefined || decl.type !== undefined) return null;
+  if (!ts.isIdentifier(decl.name)) return null;
+  if (!isJsSourceFile(decl.getSourceFile())) return null;
+  if (!bindingHoldsItsInitializer(L, decl)) return null;
+  // Only where the slot would otherwise COPY. A binding the checker already
+  // types `any` is dyn by the ordinary fallback and nothing here fires.
+  if (L.mapTypeOf(L.typeOf(decl.name))?.kind !== "record") return null;
+  let init: ts.Expression = decl.initializer;
+  while (ts.isParenthesizedExpression(init)) init = init.expression;
+  return ts.isIdentifier(init) ? init : null;
+}
+
+/** The FILE-SCOPE half, which has to PREDICT: collectGlobals runs before any
+ * body lowers, so it asks the registered global instead of the lowered
+ * value. lowerVarDecl's local rung asks the value itself. */
+export function dynAliasBindingIsDyn(L: Lowerer, decl: ts.VariableDeclaration): boolean {
+  const init = dynAliasBindingName(L, decl);
+  if (init === null) return false;
+  const sym = L.checker.getSymbolAtLocation(init);
+  if (!sym) return false;
+  return L.globalsBySymbol.get(sym)?.type.kind === "dyn";
+}
+
 /** The COMPOSITE twin of keyedReadGlobalIsDyn, and the reason it had to be
  * written separately: a FILE-SCOPE declaration never reaches lowerVarDecl's
  * local rung ladder at all. Its slot is fixed by collectGlobals before any
@@ -4542,6 +4599,18 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
         ? (L.mapTypeOf(L.typeOf(decl.name))?.kind === "record"
             ? (adoptWhy(L, decl, init.type), isLet && adoptLetOff ? null : init.type)
             : null)
+        : null) ??
+      // The DYN twin of the arm directly above, for the value the same
+      // sentence describes one representation over: `const a = ns` in a JS
+      // file, where `ns` holds a checked-dynamic object. The record slot
+      // COPIES — its fields are struct members, so the assignment runs the
+      // dynCheck builder and materializes a fresh instance — and the copy
+      // loses object identity, drops a write made through the binding, and
+      // never sees one made through the source. Node has ONE object.
+      // dynAliasBindingName carries the gates; the initializer's LOWERED
+      // type is the proof this scope has and collectGlobals' twin does not.
+      (dynAliasBindingName(L, decl) !== null && init.type.kind === "dyn" && !bindingTainted
+        ? (adoptWhy(L, decl, DYN), DYN)
         : null) ??
       // A binding whose INITIALIZER is an ARRAY while the checker spells a
       // UNIFORM TUPLE of the same element: `const rs = await
