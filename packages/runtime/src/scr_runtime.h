@@ -372,22 +372,17 @@ static inline bool scr_pool_give(ScrPool *p, void *b, size_t n) {
 #endif
 }
 
-/* The image base, provided by the linker on every PE target. Code lives
- * within 2 GB of it, so a function pointer fits in 32 bits as an offset
- * -- which is what lets this header be 16 bytes instead of 32. */
-extern char __ImageBase[];
-
 typedef struct ScrCycHdr {
-  /* The trace and teardown functions, as offsets from __ImageBase
-   * rather than as pointers. EVERY cycle-headered object carries this
+  /* The trace and teardown functions, as SIGNED offsets from one anchor
+   * (see scr_cyc_base below) rather than as pointers. EVERY cycle-headered object carries this
    * header, and on zapo that is the single largest term in the heap:
    * two 8-byte function pointers were 16 of the 32 header bytes and 16
    * of the 104 physical bytes of a ScrDyn. Storing them as RVAs is a
    * runtime-only change -- scr_cyc_alloc keeps taking real function
    * pointers, so none of the 1,451 call sites (1,434 of them in the
    * emitted TU) moves. */
-  uint32_t trace_off;
-  uint32_t free_off;
+  int32_t trace_off;
+  int32_t free_off;
   /* color, buffered and blk were a uint32 each and needed 2, 1 and 6
    * bits. They are bytes now, which keeps the single-byte store in
    * scr_cyc_mark_live -- the inlined retain writes color on every
@@ -416,15 +411,38 @@ typedef struct ScrCycHdr {
 
 static inline ScrCycHdr *scr_cyc_hdr(void *obj) { return (ScrCycHdr *)obj - 1; }
 
-/* The header stores RVAs; these three are the only places that convert. */
-static inline uint32_t scr_cyc_off(const void *fn) {
-  return (uint32_t)((const char *)fn - __ImageBase);
+/* The header stores the two functions as SIGNED 32-bit offsets from one
+ * anchor; these three inlines are the only places that convert.
+ *
+ * THE ANCHOR IS A FUNCTION IN THIS FILE'S OWN UNIT, NOT `__ImageBase`, AND
+ * THE GATE IS WHY. __ImageBase is the obvious anchor on a PE target and it
+ * is what this was written with; scriptc also cross-compiles, and
+ * `cc-driver.test.ts` linked five ELF targets that have no such symbol —
+ * `ld.lld: error: undefined symbol: __ImageBase`, five red cells, on a
+ * change whose Windows lane was already MATCH on both backends.
+ *
+ * A function anchor needs no platform symbol at all, and it is exact for a
+ * reason worth stating: `scr_cyc_off` and the two readers all call
+ * `scr_cyc_base()`, so THE BASE CANCELS. It does not matter whether the
+ * address of `scr_collect_cycles` resolves to the function or to a PLT
+ * stub, only that it is the same value throughout one process — which it
+ * is. The single requirement is that every trace/free_fn is within 2 GB of
+ * it, and they are all in the same image's .text as the anchor.
+ *
+ * Signed, because a callee may sit BEFORE the anchor. */
+void scr_collect_cycles(void); /* the anchor; declared again below with its
+                                * own comment, which C permits */
+static inline const char *scr_cyc_base(void) {
+  return (const char *)(const void *)&scr_collect_cycles;
+}
+static inline int32_t scr_cyc_off(const void *fn) {
+  return (int32_t)((const char *)fn - scr_cyc_base());
 }
 static inline ScrTraceFn scr_cyc_trace_of(const ScrCycHdr *h) {
-  return (ScrTraceFn)(void *)(__ImageBase + h->trace_off);
+  return (ScrTraceFn)(void *)(scr_cyc_base() + h->trace_off);
 }
 static inline ScrCycFreeFn scr_cyc_free_of(const ScrCycHdr *h) {
-  return (ScrCycFreeFn)(void *)(__ImageBase + h->free_off);
+  return (ScrCycFreeFn)(void *)(scr_cyc_base() + h->free_off);
 }
 
 /* Zeroed allocation with a cycle header in front; returns the OBJECT
