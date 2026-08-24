@@ -426,6 +426,11 @@ ScrStr *scr_fs_mkdtemp_sync_chk(const ScrDyn *prefix, const ScrDyn *opts, const 
   if (!scr_fs_encoding_chk(opts)) return NULL;
   bool utf8 = true;
   if (opts->kind == SCR_DYN_OBJ) {
+    /* No getter path in this walk: an option provided by an ENUMERABLE
+     * ACCESSOR would read as the SLOT's undefined and be taken for
+     * absent, which is how an effectful option gets silently ignored. */
+    scr_dyn_obj_acc_fence(opts, "an fs options object");
+    if (scr_exc_pending()) return NULL;
     for (size_t i = 0; i < opts->v.obj.len; i++) {
       const ScrDynEntry *e = &opts->v.obj.entries[i];
       if (scr_fs_dyn_absent(e->value)) continue;
