@@ -662,7 +662,18 @@ void scr_dyn_release(ScrDyn *d) {
 ScrDyn *scr_dyn_obj_get(const ScrDyn *d, const char *key, size_t key_len) {
   for (size_t i = 0; i < d->v.obj.len; i++) {
     const ScrDynEntry *e = &d->v.obj.entries[i];
-    if (e->key_len == key_len && memcmp(e->key, key, key_len) == 0) return e->value;
+    if (e->key_len == key_len && memcmp(e->key, key, key_len) == 0) {
+      /* An accessor SLOT is not a member. It sits in this table to hold
+       * the property's CREATION POSITION and carries no value at all, so
+       * the one honest answer here is the same NULL a missing key gets —
+       * which is what makes scr_dyn_obj_resolve fall through to the
+       * descriptor in `hidden`, and with it [[Get]], [[Set]], [[Delete]]
+       * and `in`, unchanged. Every builtin that reads an option out of a
+       * bag through this function then behaves exactly as it did when an
+       * accessor could only be non-enumerable: it sees no option. */
+      if (e->value == scr_dyn_acc_slot()) return NULL;
+      return e->value;
+    }
   }
   return NULL;
 }
@@ -1322,6 +1333,40 @@ static void scr_dyn_obj_put(ScrDyn *obj, char *key, size_t key_len, ScrDyn *valu
 ScrDyn *scr_dyn_undefined(void) {
   static ScrDyn undef = { SIZE_MAX, SCR_DYN_UNDEF, { false } };
   return &undef;
+}
+
+/* THE accessor SLOT: a second immortal node, distinct from `undefined`
+ * by POINTER and by nothing else.
+ *
+ * An ENUMERABLE accessor has to be two things at once and the two tables
+ * each hold one of them. `hidden` holds the descriptor — the getter, the
+ * setter, `configurable` — and cannot be enumerated, because it records
+ * no creation order (scr_dyn_own_names_fence says so in its own message,
+ * and that sentence is what this node answers). `entries` IS the
+ * creation order, and holds no attributes and no getter.
+ *
+ * So the property lives in BOTH: the descriptor in `hidden`, and a SLOT
+ * in `entries` that carries the key and nothing else. The slot is what
+ * makes `Object.keys` list the name in the position JS puts it in, with
+ * scr_dyn_obj_key_order — the one own-key projection — untouched.
+ *
+ * Two rules keep the split from becoming a wrong answer:
+ *   - scr_dyn_obj_get answers NULL for a slot, so every [[Get]], [[Set]],
+ *     [[Delete]] and `in` falls through to the descriptor exactly as it
+ *     did when the accessor was in `hidden` alone;
+ *   - a slot SURVIVES the property going non-enumerable, as a position
+ *     tombstone, because ES does not move a property that is redefined.
+ *     `hidden`'s `enumerable` element is the live answer; the slot only
+ *     says WHERE.
+ *
+ * Every enumeration surface therefore has to ask two questions per entry
+ * — is this a slot, and is it enumerable — and scr_dyn_obj_entry_read
+ * answers both in one call. A surface that does NOT ask refuses, loudly,
+ * through scr_dyn_obj_acc_fence: a key silently missing from Object.keys
+ * is the shape of a bug that surfaces somewhere else. */
+ScrDyn *scr_dyn_acc_slot(void) {
+  static ScrDyn slot = { SIZE_MAX, SCR_DYN_UNDEF, { false } };
+  return &slot;
 }
 
 ScrDyn *scr_dyn_new_null(void) { return scr_dyn_alloc(SCR_DYN_NULL); }
@@ -2942,7 +2987,18 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
        * the key bytes and the value. `ent` is not read again after this
        * pair. */
       ScrStr *k = scr_str_new(ent->key, ent->key_len); /* +1 */
-      ScrDyn *mv = scr_dyn_retain(ent->value);         /* +1 */
+      /* An ENUMERABLE ACCESSOR is read by RUNNING its getter, here, in
+       * this position — SerializeJSONProperty is a [[Get]], and Node
+       * calls the getter once per stringify. A tombstone is not an own
+       * enumerable key and is stepped over. */
+      bool sl_skip = false;
+      ScrDyn *mv = scr_dyn_obj_entry_read((ScrDyn *)d, ent, &sl_skip); /* +1 or NULL */
+      if (mv == NULL) {
+        scr_str_release(k);
+        if (sl_skip) continue;
+        free(ord);
+        return true; /* the getter threw; the caller checks the pending exception */
+      }
       /* The toJSON protocol runs BEFORE the drop test — an omitted member
        * is decided by what toJSON ANSWERED, not by the raw member (a hook
        * returning undefined drops the key; a hook on an undefined-looking
@@ -4116,6 +4172,161 @@ static ScrDyn *scr_hid_setter(const ScrDyn *q) { return q->v.arr.items[2]; }
 static ScrDyn *scr_hid_value(const ScrDyn *q) { return q->v.arr.items[1]; }
 static bool scr_hid_writable(const ScrDyn *q) { return scr_dyn_truthy(q->v.arr.items[2]); }
 static bool scr_hid_configurable(const ScrDyn *q) { return scr_dyn_truthy(q->v.arr.items[3]); }
+/* The FIFTH element, and the one this table could not hold. It is read
+ * defensively rather than by index alone because the class instance's
+ * run-time property table (scr_cls_props_*) shares these readers and
+ * already carries five, and because a four-element entry written before
+ * this element existed means exactly what a `false` here means. */
+static bool scr_hid_enumerable(const ScrDyn *q) {
+  return q->v.arr.len >= 5 && scr_dyn_truthy(q->v.arr.items[4]);
+}
+
+/* Is this key's member-table entry an accessor SLOT rather than a value?
+ * Pointer identity against the one immortal node, and nothing else — no
+ * kind test, no sentinel value a program could forge. */
+bool scr_dyn_obj_entry_is_slot(const ScrDyn *d, const char *key, size_t key_len) {
+  if (d == NULL || d->kind != SCR_DYN_OBJ) return false;
+  for (size_t i = 0; i < d->v.obj.len; i++) {
+    const ScrDynEntry *e = &d->v.obj.entries[i];
+    if (e->key_len == key_len && memcmp(e->key, key, key_len) == 0) {
+      return e->value == scr_dyn_acc_slot();
+    }
+  }
+  return false;
+}
+
+/* Does this object carry an own property that is BOTH an accessor and
+ * currently ENUMERABLE? The question every entries-walking surface has
+ * to be able to ask, and the reason it is cheap: an object with no
+ * hidden table at all — which is nearly every object in a program —
+ * answers on one NULL test and never touches the member table. */
+bool scr_dyn_obj_has_enum_acc(const ScrDyn *d) {
+  if (d == NULL || d->kind != SCR_DYN_OBJ || d->v.obj.hidden == NULL) return false;
+  const ScrDyn *h = d->v.obj.hidden;
+  for (size_t i = 0; i < h->v.obj.len; i++) {
+    const ScrDyn *ent = h->v.obj.entries[i].value;
+    if (ent->kind == SCR_DYN_ARR && !scr_hid_is_data(ent) && scr_hid_enumerable(ent)) return true;
+  }
+  return false;
+}
+
+/* The fence for an entries-walking surface that has NOT been taught the
+ * slot. Reading a slot as a value answers `undefined` — a key silently
+ * missing from a JSON document, a header quietly unset, a marshalled
+ * value short by a field — and this project ranks a silent wrong answer
+ * below a refusal every time. `surface` is the JS spelling the message
+ * names, so the refusal says which call to change. */
+void scr_dyn_obj_acc_fence(const ScrDyn *d, const char *surface) {
+  if (!scr_dyn_obj_has_enum_acc(d)) return;
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_jb_puts(&b, surface);
+  scr_jb_puts(&b, " over a dynamic object carrying an ENUMERABLE ACCESSOR property is not"
+                  " supported yet (");
+  size_t shown = 0;
+  const ScrDyn *h = d->v.obj.hidden;
+  for (size_t i = 0; i < h->v.obj.len; i++) {
+    const ScrDyn *ent = h->v.obj.entries[i].value;
+    if (ent->kind != SCR_DYN_ARR || scr_hid_is_data(ent) || !scr_hid_enumerable(ent)) continue;
+    if (shown++ > 0) scr_jb_puts(&b, ", ");
+    scr_jb_putc(&b, '\'');
+    scr_jb_write(&b, h->v.obj.entries[i].key, h->v.obj.entries[i].key_len);
+    scr_jb_putc(&b, '\'');
+  }
+  scr_jb_puts(&b, " — this walk reads the member table directly, where such a property"
+                  " keeps only its POSITION, so the value it would carry across is the"
+                  " getter's, uncalled. Object.keys, Object.values, Object.entries,"
+                  " JSON.stringify, Object.assign, structuredClone, util.inspect and"
+                  " assert.deepStrictEqual all call the getter and are exact)");
+  scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+}
+
+/* ONE own entry, resolved for an ENUMERATION surface. Three outcomes,
+ * and a caller that collapses two of them is a wrong answer waiting:
+ *
+ *   +1 value, *skip = false     an ordinary member (retained), or an
+ *                               enumerable accessor whose getter has
+ *                               just RUN — with `this` bound to `recv`,
+ *                               once per read and never cached, which is
+ *                               what JS promises and what a snapshot
+ *                               would break
+ *   NULL, *skip = true          a TOMBSTONE: the entry holds a position
+ *                               for a property that is not currently
+ *                               enumerable, so it is not an own
+ *                               enumerable key and the surface steps
+ *                               over it
+ *   NULL, *skip = false         the getter threw; the exception is
+ *                               pending and the surface unwinds
+ *
+ * `e` must be an entry of `recv`. Borrowed in, +1 out. */
+ScrDyn *scr_dyn_obj_entry_read(ScrDyn *recv, const ScrDynEntry *e, bool *skip) {
+  *skip = false;
+  if (e->value != scr_dyn_acc_slot()) return scr_dyn_retain(e->value);
+  ScrDyn *ent = recv->v.obj.hidden != NULL
+                    ? scr_dyn_obj_get(recv->v.obj.hidden, e->key, e->key_len)
+                    : NULL;
+  if (ent == NULL || ent->kind != SCR_DYN_ARR || !scr_hid_enumerable(ent)) {
+    /* A tombstone, or — the case that cannot happen but must not answer
+     * `undefined` if it does — a slot whose descriptor is gone. */
+    *skip = true;
+    return NULL;
+  }
+  ScrDyn *getter = scr_hid_getter(ent);
+  /* A set-only accessor READS as undefined in JS. It is still an own
+   * enumerable key, so it is NOT skipped: Object.keys lists it and
+   * JSON.stringify drops it for being undefined, both of which Node
+   * does. */
+  if (getter->kind != SCR_DYN_FUNC) return scr_dyn_retain(scr_dyn_undefined());
+  scr_dyn_this_push_dyn(recv);
+  ScrDyn *r = scr_dyn_call(getter, NULL, 0, "getter");
+  scr_dyn_this_pop();
+  return r; /* +1, or NULL with the getter's own exception pending */
+}
+
+/* The same question WITHOUT running anything: is this entry an own
+ * enumerable KEY? Object.keys and `for…in` ask only this — Node lists
+ * an accessor's name without calling its getter, and calling one here
+ * would be an observable side effect JS does not have. */
+bool scr_dyn_obj_entry_listed(const ScrDyn *recv, const ScrDynEntry *e) {
+  if (e->value != scr_dyn_acc_slot()) return true;
+  if (recv->v.obj.hidden == NULL) return false;
+  const ScrDyn *ent = scr_dyn_obj_get(recv->v.obj.hidden, e->key, e->key_len);
+  return ent != NULL && ent->kind == SCR_DYN_ARR && scr_hid_enumerable(ent);
+}
+
+/* How many own ENUMERABLE string keys the object has — `entries` length
+ * MINUS its tombstones. Anything that compares two objects by key count
+ * has to ask this rather than read `len`, or an object that once had an
+ * enumerable getter compares unequal to one that never did. Costs a scan
+ * only for an object that has a hidden table at all. */
+size_t scr_dyn_obj_enum_key_count(const ScrDyn *d) {
+  if (d == NULL || d->kind != SCR_DYN_OBJ) return 0;
+  if (d->v.obj.hidden == NULL) return d->v.obj.len; /* no slots are possible */
+  size_t n = 0;
+  for (size_t i = 0; i < d->v.obj.len; i++) {
+    if (scr_dyn_obj_entry_listed(d, &d->v.obj.entries[i])) n++;
+  }
+  return n;
+}
+
+/* The own ENUMERABLE property named `key`, READ — the getter runs for an
+ * accessor. NULL when there is no such own enumerable property (a
+ * tombstone, a non-enumerable one, or nothing), and NULL with a pending
+ * exception when the getter threw; a caller that has to tell those apart
+ * asks scr_exc_pending. +1 on success. Deliberately own-only and
+ * enumerable-only: it is the other half of an own-key WALK, not a
+ * [[Get]] (scr_dyn_obj_key_get is that, and it walks the chain). */
+ScrDyn *scr_dyn_obj_own_enum_read(ScrDyn *recv, const char *key, size_t key_len) {
+  if (recv == NULL || recv->kind != SCR_DYN_OBJ) return NULL;
+  for (size_t i = 0; i < recv->v.obj.len; i++) {
+    const ScrDynEntry *e = &recv->v.obj.entries[i];
+    if (e->key_len != key_len || memcmp(e->key, key, key_len) != 0) continue;
+    bool skip = false;
+    ScrDyn *v = scr_dyn_obj_entry_read(recv, e, &skip);
+    return v; /* NULL for a tombstone, or with the getter's throw pending */
+  }
+  return NULL;
+}
 
 /* One property lookup over the receiver and its [[Prototype]] chain,
  * shared by [[Get]], [[Set]], [[Delete]] and `in` so they can never
@@ -4287,8 +4498,24 @@ bool scr_dyn_obj_has_own_prop(const ScrDyn *d, const char *key, size_t key_len) 
  * and its order is not unrecorded — so it is not a reason to refuse.
  * Every OTHER hidden property still is. */
 static bool scr_dyn_own_names_skip(const ScrDyn *d, const char *key, size_t key_len) {
-  return key_len == 11 && memcmp(key, "constructor", 11) == 0 &&
-         scr_dyn_minted_proto_has_ctor(d);
+  if (key_len == 11 && memcmp(key, "constructor", 11) == 0 &&
+      scr_dyn_minted_proto_has_ctor(d)) {
+    return true;
+  }
+  /* An ENUMERABLE ACCESSOR is the second property both halves of the
+   * fence's argument fail for, and for the same two reasons: the name is
+   * not missing — the keys walk finds its SLOT in the member table and
+   * lists it — and its order is not unrecorded, because the slot is
+   * exactly the record. It is not a reason to refuse.
+   *
+   * A TOMBSTONE still is. Its position is known but it is not an own
+   * enumerable key, so the keys walk skips it and the list this fence
+   * guards would be short by it. Loud, as before. */
+  if (!scr_dyn_obj_entry_is_slot(d, key, key_len)) return false;
+  const ScrDyn *ent = d->v.obj.hidden != NULL
+                          ? scr_dyn_obj_get(d->v.obj.hidden, key, key_len)
+                          : NULL;
+  return ent != NULL && ent->kind == SCR_DYN_ARR && scr_hid_enumerable(ent);
 }
 
 /* `Object.getOwnPropertyNames`'s other half: put back the own name the
@@ -4383,16 +4610,35 @@ static void scr_dyn_obj_unset(ScrDyn *obj, const char *key, size_t key_len) {
  * them). Any own ENUMERABLE member of the same name is dropped — a
  * define CONVERTS a property, it does not layer one over the other. */
 static void scr_dyn_obj_put_hidden(ScrDyn *recv, const char *key, size_t key_len,
-                                   bool is_data, ScrDyn *a, ScrDyn *b, bool configurable) {
+                                   bool is_data, ScrDyn *a, ScrDyn *b, bool configurable,
+                                   bool enumerable) {
   if (recv->kind != SCR_DYN_OBJ) return;
   if (recv->v.obj.hidden == NULL) recv->v.obj.hidden = scr_dyn_new_obj();
-  scr_dyn_obj_unset(recv, key, key_len);
+  /* A SLOT already standing for this key keeps its place. ES redefines a
+   * property where it is — `Object.keys` does not move a name because
+   * its `enumerable` flipped — and the slot IS the recorded position, so
+   * dropping and re-adding it would put the key back at the END of the
+   * order. Anything else of this name in the member table is a real
+   * member, and a define CONVERTS a property rather than layering one
+   * over the other, so that one goes. */
+  bool slot_held = scr_dyn_obj_entry_is_slot(recv, key, key_len);
+  if (!slot_held) scr_dyn_obj_unset(recv, key, key_len);
   ScrDyn *ent = scr_dyn_new_arr();
   scr_dyn_arr_push(ent, scr_dyn_new_bool(is_data));
   scr_dyn_arr_push(ent, scr_dyn_retain(a));
   scr_dyn_arr_push(ent, scr_dyn_retain(b));
   scr_dyn_arr_push(ent, scr_dyn_new_bool(configurable));
+  scr_dyn_arr_push(ent, scr_dyn_new_bool(enumerable));
   scr_dyn_obj_set(recv->v.obj.hidden, key, key_len, ent); /* ownership moves in */
+  /* …and CLAIM a position for a property that is enumerable and has none
+   * yet. The claim is made at the end of the member table, which is
+   * where a property created now belongs. A slot is never withdrawn when
+   * `enumerable` goes false: it becomes a tombstone, so a later
+   * redefinition back to true restores the key to the position it had
+   * rather than to a new one. */
+  if (enumerable && !slot_held) {
+    scr_dyn_obj_set(recv, key, key_len, scr_dyn_retain(scr_dyn_acc_slot()));
+  }
 }
 
 /* Install `key` as an accessor property of `recv`. Both halves are
@@ -4401,8 +4647,9 @@ static void scr_dyn_obj_put_hidden(ScrDyn *recv, const char *key, size_t key_len
  * answer JS's "Cannot redefine property" instead of silently replacing a
  * sealed getter. */
 void scr_dyn_obj_define_accessor(ScrDyn *recv, const char *key, size_t key_len,
-                                 ScrDyn *getter, ScrDyn *setter, bool configurable) {
-  scr_dyn_obj_put_hidden(recv, key, key_len, false, getter, setter, configurable);
+                                 ScrDyn *getter, ScrDyn *setter, bool configurable,
+                                 bool enumerable) {
+  scr_dyn_obj_put_hidden(recv, key, key_len, false, getter, setter, configurable, enumerable);
 }
 
 /* Install `key` as a NON-ENUMERABLE data property — what
@@ -4414,7 +4661,12 @@ void scr_dyn_obj_define_accessor(ScrDyn *recv, const char *key, size_t key_len,
 void scr_dyn_obj_define_hidden_data(ScrDyn *recv, const char *key, size_t key_len,
                                     ScrDyn *value, bool writable, bool configurable) {
   ScrDyn *w = scr_dyn_new_bool(writable); /* +1 */
-  scr_dyn_obj_put_hidden(recv, key, key_len, true, value, w, configurable);
+  /* Always NON-enumerable: an enumerable data property is an ordinary
+   * member and is stored as one, so this family never needs the slot.
+   * The element is written anyway so that both families in this table
+   * have the same five, which is what lets the scr_hid_* readers stay
+   * one set. */
+  scr_dyn_obj_put_hidden(recv, key, key_len, true, value, w, configurable, false);
   scr_dyn_release(w);
 }
 
@@ -4422,7 +4674,8 @@ void scr_dyn_obj_define_hidden_data(ScrDyn *recv, const char *key, size_t key_le
  * (ES keeps every field a descriptor OMITS). False when there is none.
  * Any out-pointer may be NULL. */
 bool scr_dyn_obj_hidden_attrs(const ScrDyn *recv, const char *key, size_t key_len,
-                              bool *is_data, bool *writable, bool *configurable) {
+                              bool *is_data, bool *writable, bool *configurable,
+                              bool *enumerable) {
   if (recv->kind != SCR_DYN_OBJ || recv->v.obj.hidden == NULL) return false;
   ScrDyn *ent = scr_dyn_obj_get(recv->v.obj.hidden, key, key_len);
   if (ent == NULL || ent->v.arr.len < 4) return false;
@@ -4431,6 +4684,11 @@ bool scr_dyn_obj_hidden_attrs(const ScrDyn *recv, const char *key, size_t key_le
    * redefinition over one should inherit (ES's conversion defaults it). */
   if (writable) *writable = scr_hid_is_data(ent) && scr_hid_writable(ent);
   if (configurable) *configurable = scr_hid_configurable(ent);
+  /* And the element this table could not hold until the slot existed.
+   * It is what makes a bare `{ get }` REDEFINITION over an enumerable
+   * accessor keep the flag ES says it keeps, instead of quietly
+   * demoting the key out of Object.keys. */
+  if (enumerable) *enumerable = scr_hid_enumerable(ent);
   return true;
 }
 
@@ -4452,6 +4710,13 @@ bool scr_dyn_obj_hidden_sealed(const ScrDyn *recv, const char *key, size_t key_l
 void scr_dyn_obj_drop_hidden(ScrDyn *recv, const char *key, size_t key_len) {
   if (recv->kind != SCR_DYN_OBJ || recv->v.obj.hidden == NULL) return;
   scr_dyn_obj_unset(recv->v.obj.hidden, key, key_len);
+  /* …and the SLOT with it, if the property had one. The caller is about
+   * to write an ordinary member of this name, and a slot left standing
+   * would take the write's position AND answer NULL from
+   * scr_dyn_obj_get, so the member would read back undefined. */
+  if (scr_dyn_obj_entry_is_slot(recv, key, key_len)) {
+    scr_dyn_obj_unset(recv, key, key_len);
+  }
 }
 
 /* The spec's array-index test, public because util.inspect has to
@@ -4608,6 +4873,13 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
         return false;
       }
       scr_dyn_obj_unset(recv->v.obj.hidden, key->data, key->len);
+      /* An enumerable accessor is TWO table entries and a delete removes
+       * the property, not one half of it. The slot has to go with the
+       * descriptor or the key would stay in Object.keys with nothing
+       * behind it. */
+      if (scr_dyn_obj_entry_is_slot(recv, key->data, key->len)) {
+        scr_dyn_obj_unset(recv, key->data, key->len);
+      }
       return true;
     }
     return true;
@@ -5181,7 +5453,16 @@ static void scr_jb_put_dyn_raw(ScrJsonBuf *b, const ScrDyn *d) {
       /* SNAPSHOT before any user code runs — `e` is not read again.
        * Keys escape exactly like string values (put_json_str quotes). */
       ScrStr *k = scr_str_new(e->key, e->key_len); /* +1 */
-      ScrDyn *mv = scr_dyn_retain(e->value);       /* +1 */
+      /* The getter runs here too — util.format's `%j` is JSON.stringify
+       * and cannot answer a different key set from it. */
+      bool sl_skip = false;
+      ScrDyn *mv = scr_dyn_obj_entry_read((ScrDyn *)d, e, &sl_skip); /* +1 or NULL */
+      if (mv == NULL) {
+        scr_str_release(k);
+        if (sl_skip) continue;
+        free(ord);
+        return;
+      }
       /* toJSON first, then the drop test on what it ANSWERED. */
       ScrDyn *sub = scr_dyn_json_tojson(mv, k->data, k->len); /* +1 or NULL */
       if (scr_exc_pending()) { /* the hook threw: propagate, do not swallow */
@@ -7192,7 +7473,10 @@ static void scr_u8_define_method(ScrDyn *target, const char *name, ScrDynThunk t
 
 static void scr_u8_define_getter(ScrDyn *target, const char *name, ScrDynThunk thunk) {
   ScrDyn *g = scr_u8_new_func(name, thunk, 0); /* +1 */
-  scr_dyn_obj_define_accessor(target, name, strlen(name), g, scr_dyn_undefined(), true);
+  /* NON-enumerable, like every accessor on a builtin prototype in Node —
+   * `Object.keys(Uint8Array.prototype)` is `[]` there, and this getter
+   * must not be the one thing that puts a name in it. */
+  scr_dyn_obj_define_accessor(target, name, strlen(name), g, scr_dyn_undefined(), true, false);
   scr_dyn_release(g);
 }
 
@@ -7518,12 +7802,29 @@ static ScrDyn *scr_sc_clone(const ScrDyn *v, const ScrScParent *up) {
     ScrDyn *out = scr_dyn_new_obj();
     for (size_t i = 0; i < v->v.obj.len; i++) {
       const ScrDynEntry *e = &v->v.obj.entries[i];
-      ScrDyn *c = scr_sc_clone(e->value, &self);
+      /* StructuredSerialize reads each own enumerable property with
+       * [[Get]], so an ENUMERABLE ACCESSOR's getter RUNS and its value is
+       * what crosses — the clone is a plain data object either way, which
+       * is Node's answer too. A tombstone is not an own enumerable key.
+       * The key bytes are snapshotted before the getter can delete them. */
+      ScrStr *k = scr_str_new(e->key, e->key_len); /* +1 */
+      bool sl_skip = false;
+      ScrDyn *mv = scr_dyn_obj_entry_read((ScrDyn *)v, e, &sl_skip); /* +1 or NULL */
+      if (mv == NULL) {
+        scr_str_release(k);
+        if (sl_skip) continue;
+        scr_dyn_release(out);
+        return NULL; /* the getter threw */
+      }
+      ScrDyn *c = scr_sc_clone(mv, &self);
+      scr_dyn_release(mv);
       if (c == NULL) {
+        scr_str_release(k);
         scr_dyn_release(out);
         return NULL;
       }
-      scr_dyn_obj_set(out, e->key, e->key_len, c); /* ownership moves */
+      scr_dyn_obj_set(out, k->data, k->len, c); /* ownership moves */
+      scr_str_release(k);
     }
     return out;
   }
@@ -7714,9 +8015,35 @@ static ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
      * Object.keys ended up right while JSON.stringify, util.format's %j
      * and util.inspect were all wrong about the same object. */
     size_t *ord = scr_dyn_obj_key_order(v);
-    for (size_t oi = 0; oi < v->v.obj.len; oi++) {
+    const size_t n = v->v.obj.len;
+    for (size_t oi = 0; oi < n; oi++) {
+      if (v->v.obj.len != n) break; /* a getter below resized the table */
       const ScrDynEntry *e = &v->v.obj.entries[ord ? ord[oi] : oi];
-      scr_dyn_objwalk_push(out, mode, e->key, e->key_len, e->value);
+      /* KEYS runs nothing: Node lists an accessor's name without calling
+       * its getter, and a call here would be an observable side effect
+       * JS does not have. VALUES and ENTRIES do call it, once, in this
+       * position. */
+      if (mode == SCR_OBJWALK_KEYS) {
+        if (!scr_dyn_obj_entry_listed(v, e)) continue;
+        scr_dyn_objwalk_push(out, mode, e->key, e->key_len, e->value);
+        continue;
+      }
+      /* SNAPSHOT the key before any user code runs: a getter can reach
+       * this object through its closure and delete the key, which frees
+       * the bytes `e` points at. */
+      ScrStr *k = scr_str_new(e->key, e->key_len); /* +1 */
+      bool skip = false;
+      ScrDyn *val = scr_dyn_obj_entry_read((ScrDyn *)v, e, &skip); /* +1 or NULL */
+      if (val == NULL) {
+        scr_str_release(k);
+        if (skip) continue;
+        free(ord);
+        scr_dyn_release(out);
+        return NULL; /* the getter threw; the exception is pending */
+      }
+      scr_dyn_objwalk_push(out, mode, k->data, k->len, val);
+      scr_dyn_release(val);
+      scr_str_release(k);
     }
     free(ord);
     return out;
@@ -7835,10 +8162,25 @@ static void scr_dyn_assign_from(ScrDyn *target, const ScrDyn *src) {
   if (target->kind != SCR_DYN_OBJ) return;
   if (src->kind == SCR_DYN_UNDEF || src->kind == SCR_DYN_NULL) return;
   if (src->kind == SCR_DYN_OBJ) {
-    for (size_t i = 0; i < src->v.obj.len; i++) {
-      scr_dyn_obj_set(target, src->v.obj.entries[i].key,
-                      src->v.obj.entries[i].key_len,
-                      scr_dyn_retain(src->v.obj.entries[i].value));
+    const size_t n = src->v.obj.len;
+    for (size_t i = 0; i < n; i++) {
+      if (src->v.obj.len != n) break; /* a getter below resized the source */
+      const ScrDynEntry *e = &src->v.obj.entries[i];
+      /* CopyDataProperties is a [[Get]] per key, so an ENUMERABLE
+       * ACCESSOR's getter runs and the TARGET receives an ordinary data
+       * property — Object.assign copies values, never descriptors, which
+       * is why `Object.keys(Object.assign({}, o))` and `Object.keys(o)`
+       * agree while the target has no accessor at all. */
+      ScrStr *k = scr_str_new(e->key, e->key_len); /* +1 */
+      bool sl_skip = false;
+      ScrDyn *mv = scr_dyn_obj_entry_read((ScrDyn *)src, e, &sl_skip); /* +1 or NULL */
+      if (mv == NULL) {
+        scr_str_release(k);
+        if (sl_skip) continue;
+        return; /* the getter threw; the pending exception unwinds */
+      }
+      scr_dyn_obj_set(target, k->data, k->len, mv); /* ownership moves */
+      scr_str_release(k);
     }
     return;
   }

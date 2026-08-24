@@ -1667,8 +1667,16 @@ static DynAttrs dyn_effective_attrs(ScrDyn *target, const char *key, size_t key_
       curEnum = curWrite = curConf = true;
     } else {
       /* An own hidden property, or nothing — in which case the three
-       * stay false, which IS the creation default. */
-      scr_dyn_obj_hidden_attrs(target, key, key_len, NULL, &curWrite, &curConf);
+       * stay false, which IS the creation default.
+       *
+       * `curEnum` comes out of the SAME call now rather than staying
+       * false: an ENUMERABLE accessor is a hidden property whose
+       * `enumerable` is true, and the arm above cannot see it because
+       * scr_dyn_obj_get answers NULL for its slot. Leaving it false
+       * would make a bare `{ get }` redefinition over an enumerable
+       * accessor silently DEMOTE the key out of Object.keys, which is
+       * the exact class of error this function exists to prevent. */
+      scr_dyn_obj_hidden_attrs(target, key, key_len, NULL, &curWrite, &curConf, &curEnum);
     }
   }
   ScrDyn *en = scr_dyn_obj_get(desc, "enumerable", 10);
@@ -1697,26 +1705,27 @@ static DynAttrs dyn_effective_attrs(ScrDyn *target, const char *key, size_t key_
  * that `_f` reads run a function while `Object.keys(msg)` never mentions
  * it. Both halves are exact here (scr_json.c's accessor block).
  *
- * Two shapes stay LOUD rather than answer wrongly:
+ * An EFFECTIVE `enumerable: true` used to be a refusal here, and its
+ * message was the statement of a real blocker: Object.keys reads
+ * `entries` and an accessor never entered it, so admitting the flag
+ * would have answered a key set Node disagrees with. It lands now. The
+ * accessor's descriptor still goes to `hidden`; what changed is that an
+ * enumerable one ALSO takes a SLOT in `entries` — a position holder
+ * carrying the key and nothing else — so scr_dyn_obj_key_order, the one
+ * own-key projection this runtime has, lists the name where JS lists it.
+ * scr_dyn_acc_slot's header comment is the whole representation.
+ *
+ * "Effective" was, and remains, the subtlety: ES only defaults an omitted
+ * attribute to false when the property is being CREATED — over an
+ * EXISTING one the omitted flags are KEPT — and every own member of a
+ * dynamic object is enumerable. So a bare `{get}` over `o.k = v` is an
+ * ENUMERABLE accessor in Node, and is one here.
+ *
+ * ONE shape stays LOUD rather than answer wrongly:
  *   FUNC target      a function's own properties live in its CLOSURE's
  *                    table, read through scr_dyn_fn_get rather than the
  *                    OBJ accessor walk; a half-wired accessor there would
  *                    answer undefined instead of running.
- *   an EFFECTIVE `enumerable: true`
- *                    Object.keys reads `entries` and an accessor never
- *                    enters it, so admitting the flag would silently
- *                    answer a key set Node disagrees with. The DEFAULT —
- *                    what a bare get/set descriptor declares over a FRESH
- *                    key, and what pbjs writes — is exact.
- *
- *                    "Effective" is the whole subtlety: ES only defaults
- *                    an omitted attribute to false when the property is
- *                    being CREATED — over an EXISTING one the omitted
- *                    flags are KEPT — and every own member of a dynamic
- *                    object is enumerable. So a bare `{get}` over
- *                    `o.k = v` is an ENUMERABLE accessor in Node and
- *                    refuses here, while `{get, enumerable: false}` over
- *                    the same member is exact and lands.
  *
  * Returns false with a pending catchable throw. Everything borrowed. */
 static bool dyn_define_accessor_desc(ScrDyn *target, const char *key, size_t key_len,
@@ -1734,19 +1743,6 @@ static bool dyn_define_accessor_desc(ScrDyn *target, const char *key, size_t key
     return false;
   }
   DynAttrs at = dyn_effective_attrs(target, key, key_len, desc);
-  if (at.enumerable) {
-    ScrJsonBuf b;
-    scr_jb_init(&b);
-    scr_jb_puts(&b, api);
-    scr_jb_puts(&b, " with an ENUMERABLE accessor descriptor is not supported yet"
-                    " (Object.keys reads the member table and an accessor never enters it,"
-                    " so the key would be missing from a set Node reports. A non-enumerable"
-                    " accessor compiles exactly: reads call the getter, writes the setter."
-                    " Over an EXISTING own member, `enumerable` is INHERITED as true unless"
-                    " the descriptor says `enumerable: false` — say it, and this lands)");
-    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
-    return false;
-  }
   /* Node's own check, and it fires before anything is stored. */
   bool badGet = getter != NULL && getter->kind != SCR_DYN_FUNC && getter->kind != SCR_DYN_UNDEF;
   bool badSet = setter != NULL && setter->kind != SCR_DYN_FUNC && setter->kind != SCR_DYN_UNDEF;
@@ -1761,7 +1757,7 @@ static bool dyn_define_accessor_desc(ScrDyn *target, const char *key, size_t key
   scr_dyn_obj_define_accessor(target, key, key_len,
                               getter ? getter : scr_dyn_undefined(),
                               setter ? setter : scr_dyn_undefined(),
-                              at.configurable);
+                              at.configurable, at.enumerable);
   return true;
 }
 
@@ -1918,6 +1914,13 @@ ScrDyn *scr_dyn_define_props(ScrDyn *target, ScrDyn *descs) {
                         strlen("Object.defineProperties called on non-object"));
     return NULL;
   }
+  /* ES reads each descriptor out of the MAP with [[Get]], so a
+   * descriptor delivered by an ENUMERABLE ACCESSOR is legal there; this
+   * walk reads the member table and would see the SLOT instead, and
+   * "Property description must be an object: undefined" would name the
+   * wrong problem. Loud and accurate. */
+  scr_dyn_obj_acc_fence(descs, "Object.defineProperties' descriptor map");
+  if (scr_exc_pending()) return NULL;
   for (size_t i = 0; i < descs->v.obj.len; i++) {
     ScrDynEntry *ent = &descs->v.obj.entries[i];
     if (ent->value->kind != SCR_DYN_OBJ) {
@@ -2008,6 +2011,10 @@ static bool dyn_install_descs(ScrDyn *target, ScrDyn *descs) {
     scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
     return false;
   }
+  /* The same reason as Object.defineProperties' map: this walk has no
+   * getter path, so a descriptor behind one would arrive as the SLOT. */
+  scr_dyn_obj_acc_fence(descs, "Object.create's descriptor map");
+  if (scr_exc_pending()) return false;
   for (size_t i = 0; i < descs->v.obj.len; i++) {
     ScrDynEntry *ent = &descs->v.obj.entries[i];
     if (!dyn_define_one(target, ent->key, ent->key_len, ent->value, "Object.create")) return false;
