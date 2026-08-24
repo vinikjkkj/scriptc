@@ -4321,6 +4321,216 @@ function memberRecvArmBridge(L: Lowerer, expr: IrExpr, narrowed: IrType, node: t
   return out;
 }
 
+/** A width a union ARM can carry — lower-stmts.ts's `armCarryableWidth`,
+ * the predicate keyedReadLocalAtUndefinedArm already draws this line with.
+ * A `dyn` read answers a miss itself; `jsval`, `void`, `caught`, a unit and
+ * a UNION are arms this IR either cannot intern or would nest. */
+function armCarryableReadWidth(t: IrType): boolean {
+  return (
+    t.kind !== "dyn" &&
+    t.kind !== "jsval" &&
+    t.kind !== "void" &&
+    t.kind !== "caught" &&
+    t.kind !== "union" &&
+    !isUnitType(t)
+  );
+}
+
+/** THE MEMBER-RECEIVER DESTINATION for `recordKeyReadAtUndefinedArm`, asked
+ * of the READ ITSELF rather than of a local that stored one.
+ *
+ * `AB_PROP_CONFIGS[name].defaultValue` — zapo
+ * `client/coordinators/WaAbPropsCoordinator.ts:55:16`, sites #10 and #11 of
+ * the thirteen `ABORT.real` call sites `estado-abort13` maps. The table has
+ * NO index signature, so tsc typed the read by the declared fields' one
+ * common type and a miss has nowhere to go: the emitted helper calls
+ * `scr_trap_fmt` and the process ABORTS, walking straight past the
+ * program's own `try/catch`.
+ *
+ * NODE THROWS THERE, AND IT THROWS CATCHABLY. `undefined.defaultValue` is
+ * `TypeError: Cannot read properties of undefined (reading 'defaultValue')`
+ * — measured against v25.9.0, not argued — and the program's own `catch`
+ * sees it and finishes at exit 0. So the receiver position needs NO width
+ * change downstream and no new machinery: the value the member read
+ * consumes still has the shape's own type, and the ONE state that used to
+ * abort now takes the throw JS itself specifies for it.
+ *
+ * This is `memberRecvArmBridge` one construct earlier. That rung answers
+ * the same question for a REFERENCE to a local a widened keyed read stored
+ * into, with the same message from the same `nodeThrowExpr`, and is pinned
+ * by `packages/compiler/test/assignarm-dials.test.ts`. The direct read
+ * could not reach it, because there is no local and therefore no
+ * `localTakesWidenedKeyedRead` symbol to scope it to — a reason that is not
+ * the reason, exactly as `keyedReadRefAtUndefinedArm`'s doc says of the
+ * mirror case.
+ *
+ * WHAT DOES NOT CHANGE, which is the whole safety argument:
+ *
+ * - the value handed to the member read is the arm the union holds, which
+ *   is the very value the map holds (`recordKeyReadAtUndefinedArm` says so
+ *   in its own doc: a union wrap is not a `dynFrom` deep copy, so no
+ *   aliasing is severed);
+ * - a HIT costs one tag compare that always fails plus the bridge's own,
+ *   and reads the same field of the same record;
+ * - a MISS is the only behaviour that moves, and it moves from an abort to
+ *   the catchable TypeError Node throws at that exact point in the
+ *   program's control flow. Nothing downstream ever observes a value: the
+ *   throw is unconditional on that path.
+ *
+ * The receiver is bound to a hidden local rather than re-emitted, because
+ * the tag test and the bridge both read it and a keyed read is a HELPER
+ * CALL — `memberRecvArmBridge` can re-emit its `varRef` for free and this
+ * cannot. The `%` name puts the local in `seqScopedLocals`, so its live
+ * range ends with the region.
+ *
+ * A METHOD CALL through the receiver (`TABLE[k].m()`) keeps today's
+ * lowering: the method dispatchers choose their path from the receiver's
+ * SHAPE and re-emit it, and a `seqExpr` is neither. Node's message there
+ * is this same one, so the destination is right; the lowering is a
+ * separate seat.
+ *
+ * `SCRIPTC_RECVKEY_OFF=1` ablates it, so one binary emits both sides;
+ * `SCRIPTC_RECVKEY_WHY` names every site it takes. */
+export function keyedReadAtMemberReceiver(L: Lowerer, node: ts.Expression, read: IrExpr, declared: IrType): IrExpr | null {
+  if (process.env["SCRIPTC_RECVKEY_OFF"] === "1") return null;
+  if (read.kind !== "recordKeyGet") return null;
+  if (!armCarryableReadWidth(declared)) return null;
+  const p = node.parent;
+  if (!p) return null;
+  let prop: string | null = null;
+  if (ts.isPropertyAccessExpression(p) && p.expression === node && p.questionDotToken === undefined) {
+    prop = p.name.text;
+  } else if (ts.isElementAccessExpression(p) && p.expression === node && p.questionDotToken === undefined) {
+    const a = p.argumentExpression;
+    if (ts.isStringLiteralLike(a)) prop = a.text;
+    else if (ts.isNumericLiteral(a)) prop = String(Number(a.text));
+  }
+  if (prop === null) return null;
+  if (p.parent && ts.isCallExpression(p.parent) && p.parent.expression === p) return null;
+  const armedT = L.withUndefinedArm(declared);
+  if (armedT.kind !== "union") return null;
+  const armed = L.recordKeyReadAtUndefinedArm(read, armedT);
+  if (armed === null) return null;
+  const tag = L.armTag(armedT.unionId, UNDEFINED_T);
+  if (tag < 0) return null;
+  const loc = read.loc;
+  const tmp = L.declareHiddenLocal("%recvKeyArm", armedT);
+  const ref: IrExpr = { kind: "varRef", localId: tmp.id, type: armedT, loc };
+  if (process.env["SCRIPTC_RECVKEY_WHY"] !== undefined) {
+    console.error(`[recvkey] ${loc.file}:${String(loc.start)} .${prop} on ${L.fmt(armedT)}`);
+  }
+  return {
+    kind: "seqExpr",
+    stmts: [{ kind: "varDecl", localId: tmp.id, init: armed, loc }],
+    result: {
+      kind: "ternary",
+      cond: { kind: "unionIsTag", unionId: armedT.unionId, tag, negated: false, value: ref, type: BOOL, loc },
+      then: nodeThrowExpr(1, "", `Cannot read properties of undefined (reading '${prop}')`, declared, loc),
+      else_: checkedArmBridge(L, ref, declared, loc),
+      type: declared,
+      loc,
+    },
+    type: declared,
+    loc,
+  };
+}
+
+/** THE CALL-CALLEE DESTINATION for `recordKeyReadAtUndefinedArm`.
+ *
+ * `CONSOLE_WRITERS[level](message, context)` — zapo
+ * `infra/log/ConsoleLogger.ts:73:13` and `:76:9`, sites #3 and #4 of the
+ * thirteen, and the two that `SCRIPTC_RKG_COUNT` measures EXECUTING on
+ * every paired run. Same signature-free table, same aborting helper.
+ *
+ * `estado-abortreal` §6 kept this site on the grounds that widening it
+ * makes "the call receiver a dyn where a function was promised", so there
+ * is no right answer. There is, and it costs no dyn: Node throws
+ * `TypeError: CONSOLE_WRITERS[level] is not a function` — the SOURCE TEXT
+ * of the callee, measured against v25.9.0 — catchably, and the program's
+ * own `catch` finishes at exit 0.
+ *
+ * WIDENING TO `dyn` WOULD ALSO PRODUCE THAT MESSAGE — `scr_dyn_call`
+ * (`packages/runtime/src/scr_json.c:1700`) builds it verbatim — AND IT IS
+ * THE WRONG RUNG. A dyn callee converts every ARGUMENT into dyn, and
+ * `dynFrom`'s record arm is a deep copy: a writer that mutated its context
+ * object would mutate a copy, silently, on the HIT path, which is the
+ * trade this family exists not to make. The undefined arm changes nothing
+ * on a hit — one tag compare — and keeps the typed call, the typed ABI and
+ * the typed arguments exactly as they are today.
+ *
+ * ARGUMENT ORDER IS THE PART THAT IS NOT OBVIOUS. JS evaluates the
+ * argument list BEFORE it checks that the callee is callable
+ * (EvaluateCall: ArgumentListEvaluation, then IsCallable), so
+ * `T[k](sideEffect())` runs the effect and only then throws. Measured, not
+ * assumed. So the arguments are bound to hidden locals FIRST and the tag
+ * test runs after them — a `seqExpr` of straight-line writes, which is the
+ * only statement set that region admits.
+ *
+ * The throw rides an `exprStmt` over an F64-typed ternary rather than a
+ * ternary around the call, because the call's result type is very often
+ * `void` (it is at both zapo sites) and a void-typed ternary has no temp to
+ * be. The void case therefore puts the call in the region too and answers
+ * with `js.voidOperand`, the void-typed leaf `seqExpr`'s result slot exists
+ * for.
+ *
+ * Scope, deliberately narrow — everything outside keeps today's lowering
+ * and therefore today's abort: no `?.`, no spread, no rest/island callee
+ * signature, and the call's argument count exactly the callee type's
+ * parameter count (the omitted-trailing-argument completion is a lane of
+ * its own).
+ *
+ * `SCRIPTC_CALLKEY_OFF=1` ablates it; `SCRIPTC_CALLKEY_WHY` names every
+ * site it takes. */
+export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, callee: IrExpr, loc: SrcLoc): IrExpr | null {
+  if (process.env["SCRIPTC_CALLKEY_OFF"] === "1") return null;
+  if (callee.kind !== "recordKeyGet") return null;
+  if (callee.type.kind !== "func") return null;
+  const fnT = callee.type;
+  if (fnT.rest === true) return null;
+  if (expr.questionDotToken !== undefined) return null;
+  if (expr.arguments.some((a) => ts.isSpreadElement(a))) return null;
+  if (expr.arguments.length !== fnT.params.length) return null;
+  if (!ts.isPropertyAccessExpression(expr.expression) && !ts.isElementAccessExpression(expr.expression)) return null;
+  const armedT = L.withUndefinedArm(fnT);
+  if (armedT.kind !== "union") return null;
+  const armed = L.recordKeyReadAtUndefinedArm(callee, armedT);
+  if (armed === null) return null;
+  const tag = L.armTag(armedT.unionId, UNDEFINED_T);
+  if (tag < 0) return null;
+  const text = expr.expression.getText();
+  const calLocal = L.declareHiddenLocal("%callKeyArm", armedT);
+  const calRef: IrExpr = { kind: "varRef", localId: calLocal.id, type: armedT, loc };
+  const stmts: IrStmt[] = [{ kind: "varDecl", localId: calLocal.id, init: armed, loc }];
+  const args: IrExpr[] = [];
+  for (let i = 0; i < fnT.params.length; i++) {
+    const lowered = L.lowerArgExpecting(expr.arguments[i]!, fnT.params[i]);
+    const slot = L.declareHiddenLocal("%callKeyArg", lowered.type);
+    stmts.push({ kind: "varDecl", localId: slot.id, init: lowered, loc: lowered.loc });
+    args.push({ kind: "varRef", localId: slot.id, type: lowered.type, loc: lowered.loc });
+  }
+  stmts.push({
+    kind: "exprStmt",
+    expr: {
+      kind: "ternary",
+      cond: { kind: "unionIsTag", unionId: armedT.unionId, tag, negated: false, value: calRef, type: BOOL, loc },
+      then: nodeThrowExpr(1, "", `${text} is not a function`, F64, loc),
+      else_: { kind: "numLit", value: 0, type: F64, loc },
+      type: F64,
+      loc,
+    },
+    loc,
+  });
+  if (process.env["SCRIPTC_CALLKEY_WHY"] !== undefined) {
+    console.error(`[callkey] ${loc.file}:${String(loc.start)} ${text} at ${L.fmt(armedT)}`);
+  }
+  const call: IrExpr = { kind: "callValue", callee: checkedArmBridge(L, calRef, fnT, loc), args, type: fnT.ret, loc };
+  if (fnT.ret.kind === "void") {
+    stmts.push({ kind: "exprStmt", expr: call, loc });
+    return { kind: "seqExpr", stmts, result: { kind: "libCall", fn: "js.voidOperand", args: [], type: VOID, loc }, type: VOID, loc };
+  }
+  return { kind: "seqExpr", stmts, result: call, type: fnT.ret, loc };
+}
+
 /** The checker-driven union bridge's ONE extraction, tag-checked.
  *
  * tsc proved the arm; the runtime never did. Where the proof is real the
@@ -11711,7 +11921,16 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     // dyn one, whose miss answers undefined (guardedKeyReadAtDynWidth).
     const guarded = guardedKeyReadAtDynWidth(L, expr, read, declared);
     if (guarded !== null) return guarded;
-    return L.maybeNarrow(read, expr);
+    const narrowed = L.maybeNarrow(read, expr);
+    // THE MEMBER-RECEIVER DESTINATION for recordKeyReadAtUndefinedArm
+    // (keyedReadAtMemberReceiver above): a read whose value has a MEMBER
+    // taken off it answers a miss the way Node does -- a catchable
+    // TypeError the program's own catch sees -- instead of aborting the
+    // process past it. Asked of the narrowed value, so a checker-bridged
+    // occurrence (no longer a recordKeyGet) declines by its own rule.
+    const atRecv = keyedReadAtMemberReceiver(L, expr, narrowed, declared);
+    if (atRecv !== null) return atRecv;
+    return narrowed;
   }
 
   /** The compile-time string spelling of a record key literal: a string
