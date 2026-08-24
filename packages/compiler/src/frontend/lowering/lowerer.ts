@@ -4363,18 +4363,19 @@ export class Lowerer {
       // An ACCESSOR-carrying shape: the crossing is refused in
       // canConvertToDyn, and the reason is worth naming because the
       // generic wording sends the reader looking for an unconvertible
-      // MEMBER when the problem is the property model. An object-literal
-      // getter is an ENUMERABLE accessor; the dyn object has no
-      // representation for one (its accessor table is the
-      // non-enumerable Object.defineProperty family), so a crossing
-      // value would carry the reserved `%get:`/`%set:` slot as an
+      // MEMBER when the problem is the CONVERTER. An object-literal
+      // getter is an ENUMERABLE accessor. The dyn object model has a
+      // representation for one now (scr_dyn_acc_slot); what it has no
+      // way to build is the CLOSURE behind it — the record-to-dyn walk
+      // copies field values and mints no function — so a crossing value
+      // would still carry the reserved `%get:`/`%set:` slot as an
       // ordinary key and lack the property name entirely.
       const accPath = this.firstAccessorShapePath(actual);
       if (accPath !== null) {
         this.unsupported(
           "SC1101",
           node,
-          `converting '${this.fmt(actual)}' values to 'unknown' (${accPath} carries get/set accessor properties — an object-literal getter is an enumerable accessor and the dynamic object model has no representation for one, so the crossing would list the reserved '%get:'/'%set:' slot as a key and drop the property Node answers; read the accessor into a const and pass that)`,
+          `converting '${this.fmt(actual)}' values to 'unknown' (${accPath} carries get/set accessor properties — an object-literal getter is an enumerable accessor, and while the dynamic object model can now hold one, the record-to-dyn converter builds no closure to put behind it, so the crossing would list the reserved '%get:'/'%set:' slot as a key and drop the property Node answers; read the accessor into a const and pass that)`,
         );
       }
       this.unsupported("SC1101", node);

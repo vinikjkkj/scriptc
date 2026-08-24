@@ -4614,6 +4614,21 @@ static void scr_dyn_obj_put_hidden(ScrDyn *recv, const char *key, size_t key_len
                                    bool enumerable) {
   if (recv->kind != SCR_DYN_OBJ) return;
   if (recv->v.obj.hidden == NULL) recv->v.obj.hidden = scr_dyn_new_obj();
+  /* RETAIN BEFORE DROP, and the order is not cosmetic. `a` may BE the
+   * member table's current value for this key — that is what a
+   * redefinition which names only attributes means, `{ writable: false }`
+   * over `o.k = 1`, where ES keeps the value — so unsetting the member
+   * first would release the last reference to the very node about to be
+   * stored, and the freelist would hand the recycled node straight back
+   * as one of the bools below. (Measured: `o.k` answered `true`, the
+   * `writable` flag, read out of a node that had been a 1.) Building the
+   * entry first makes both halves +1 before anything is given up. */
+  ScrDyn *ent = scr_dyn_new_arr();
+  scr_dyn_arr_push(ent, scr_dyn_new_bool(is_data));
+  scr_dyn_arr_push(ent, scr_dyn_retain(a));
+  scr_dyn_arr_push(ent, scr_dyn_retain(b));
+  scr_dyn_arr_push(ent, scr_dyn_new_bool(configurable));
+  scr_dyn_arr_push(ent, scr_dyn_new_bool(enumerable));
   /* A SLOT already standing for this key keeps its place. ES redefines a
    * property where it is — `Object.keys` does not move a name because
    * its `enumerable` flipped — and the slot IS the recorded position, so
@@ -4623,12 +4638,6 @@ static void scr_dyn_obj_put_hidden(ScrDyn *recv, const char *key, size_t key_len
    * over the other, so that one goes. */
   bool slot_held = scr_dyn_obj_entry_is_slot(recv, key, key_len);
   if (!slot_held) scr_dyn_obj_unset(recv, key, key_len);
-  ScrDyn *ent = scr_dyn_new_arr();
-  scr_dyn_arr_push(ent, scr_dyn_new_bool(is_data));
-  scr_dyn_arr_push(ent, scr_dyn_retain(a));
-  scr_dyn_arr_push(ent, scr_dyn_retain(b));
-  scr_dyn_arr_push(ent, scr_dyn_new_bool(configurable));
-  scr_dyn_arr_push(ent, scr_dyn_new_bool(enumerable));
   scr_dyn_obj_set(recv->v.obj.hidden, key, key_len, ent); /* ownership moves in */
   /* …and CLAIM a position for a property that is enumerable and has none
    * yet. The claim is made at the end of the member table, which is
@@ -4710,13 +4719,15 @@ bool scr_dyn_obj_hidden_sealed(const ScrDyn *recv, const char *key, size_t key_l
 void scr_dyn_obj_drop_hidden(ScrDyn *recv, const char *key, size_t key_len) {
   if (recv->kind != SCR_DYN_OBJ || recv->v.obj.hidden == NULL) return;
   scr_dyn_obj_unset(recv->v.obj.hidden, key, key_len);
-  /* …and the SLOT with it, if the property had one. The caller is about
-   * to write an ordinary member of this name, and a slot left standing
-   * would take the write's position AND answer NULL from
-   * scr_dyn_obj_get, so the member would read back undefined. */
-  if (scr_dyn_obj_entry_is_slot(recv, key, key_len)) {
-    scr_dyn_obj_unset(recv, key, key_len);
-  }
+  /* The SLOT is deliberately LEFT STANDING. Every caller of this
+   * function is converting the property into an ordinary enumerable
+   * MEMBER and writes one immediately after, and scr_dyn_obj_put
+   * replaces an existing entry's value IN PLACE — so the member inherits
+   * the accessor's position, which is what ES says (a redefinition does
+   * not move a property) and what Node answers: after
+   * `Object.defineProperty(o, "g", {get})` between `o.a` and `o.z`, a
+   * redefinition of `g` to a data property keeps `["a","g","z"]`.
+   * Unsetting the slot here moved it to `["a","z","g"]`. */
 }
 
 /* The spec's array-index test, public because util.inspect has to
