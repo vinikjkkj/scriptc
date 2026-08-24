@@ -110,6 +110,11 @@ static ScrSidx *scr_sidx(const ScrStr *s) {
 static ScrPool scr_str_blocks;
 
 static ScrStr *scr_str_alloc(size_t len, size_t cap) {
+  /* The one fence every heap string passes through. len <= cap at every call
+   * site, but checking both costs one predictable branch and makes the
+   * invariant a property of this function rather than of its callers. */
+  scr_str_size_check(len);
+  scr_str_size_check(cap);
   size_t want = sizeof(ScrStr) + cap + 1;
   ScrStr *s = scr_pool_take(&scr_str_blocks, want);
   /* scr_pool_bytes, not want: a recycled block is a whole class wide and
@@ -117,8 +122,8 @@ static ScrStr *scr_str_alloc(size_t len, size_t cap) {
   if (!s) s = malloc(scr_pool_bytes(want));
   if (!s) scr_oom();
   s->rc = 1;
-  s->len = len;
-  s->cap = cap;
+  s->len = (uint32_t)len;
+  s->cap = (uint32_t)cap;
 #ifdef SCR_RC_AUDIT
   scr_live_strings++;
 #endif
@@ -157,7 +162,7 @@ static ScrStr *scr_str_take_spare(size_t len) {
   if (s && s->cap >= len && s->cap / 4 <= len) {
     scr_str_spare = NULL;
     s->rc = 1;
-    s->len = len; /* keeps its larger cap */
+    s->len = (uint32_t)len; /* keeps its larger cap; s->cap >= len was tested */
 #ifdef SCR_STRCEN_ON
     scr_strcen_born(s, (long long)len, (long long)s->cap);
 #endif
@@ -173,9 +178,10 @@ static ScrStr *scr_str_take_spare(size_t len) {
  * an rc==1-only grow. The spare block is worth trying first — a stringify
  * loop's previous output is usually the right size for the next one. */
 ScrStr *scr_str_alloc_raw(size_t len, size_t cap) {
+  scr_str_size_check(cap); /* the spare path skips scr_str_alloc's fence */
   ScrStr *s = scr_str_take_spare(cap);
   if (!s) return scr_str_alloc(len, cap);
-  s->len = len; /* keeps its (possibly larger) cap */
+  s->len = (uint32_t)len; /* keeps its (possibly larger) cap */
   return s;
 }
 
@@ -184,9 +190,10 @@ ScrStr *scr_str_regrow(ScrStr *s, size_t newcap) {
 #ifdef SCR_STRCEN_ON
   scr_strcen_died(s, (long long)s->len, (long long)s->cap);
 #endif
+  scr_str_size_check(newcap); /* realloc, not scr_str_alloc: its own fence */
   ScrStr *r = realloc(s, scr_pool_bytes(sizeof(ScrStr) + newcap + 1));
   if (!r) scr_oom();
-  r->cap = newcap;
+  r->cap = (uint32_t)newcap;
 #ifdef SCR_STRCEN_ON
   scr_strcen_born(r, (long long)r->len, (long long)newcap);
 #endif
@@ -194,7 +201,7 @@ ScrStr *scr_str_regrow(ScrStr *s, size_t newcap) {
 }
 
 void scr_str_release(ScrStr *s) {
-  if (!s || s->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
+  if (!s || s->rc == SCR_STR_IMMORTAL) return; /* NULL: an uninitialized `let` */
   if (--s->rc == 0) {
     scr_sidx_purge(s); /* the address may be recycled by the next malloc */
 #ifdef SCR_STRCEN_ON
@@ -220,16 +227,21 @@ void scr_str_release(ScrStr *s) {
 }
 
 ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
-  if (a->len > SIZE_MAX - b->len - sizeof(ScrStr) - 1) scr_oom();
-  size_t newlen = a->len + b->len;
+  /* The cast is on an OPERAND, not on the sum. With 32-bit lengths
+   * `a->len + b->len` is evaluated in unsigned int and WRAPS before the
+   * assignment widens it, so a guard written against the sum would be
+   * checking a number that had already lost the overflow it exists to
+   * catch. Same reason for every (size_t) below. */
+  size_t newlen = (size_t)a->len + (size_t)b->len;
+  scr_str_size_check(newlen);
   /* In-place append: a is uniquely owned by the caller's borrow (rc == 1 —
-   * never an interned literal, those are SIZE_MAX) and has room. Fires on
+   * never an interned literal, those are SCR_STR_IMMORTAL) and has room. Fires on
    * concat chains (`a + b + c`, template literals), where each intermediate
    * result reaches the next concat as a sole-reference temp. Any string
    * with rc > 1 might be aliased and is copied, never mutated. */
   if (a->rc == 1 && a != b && a->cap >= newlen) {
     memcpy(a->data + a->len, b->data, b->len);
-    a->len = newlen;
+    a->len = (uint32_t)newlen;
     a->data[newlen] = '\0';
     /* A cached UTF-16 length for a is stale now; its cursor still valid. */
     for (int i = 0; i < SCR_SIDX_N; i++) {
@@ -246,9 +258,9 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
    * iteration's slightly-larger allocation). */
   size_t newcap = newlen;
   if (a->rc == 1) {
-    size_t grown = a->cap + (a->cap >> 1) + 16;
+    size_t grown = (size_t)a->cap + ((size_t)a->cap >> 1) + 16;
     if (grown > newcap) newcap = grown;
-  } else if (newlen >= 512 && newlen <= (SIZE_MAX - sizeof(ScrStr) - 1) / 2) {
+  } else if (newlen >= 512 && newlen <= SCR_STR_MAX_LEN / 2) {
     newcap = newlen + (newlen >> 1);
   }
 #if SCR_STR_CHAIN_SLACK
@@ -261,6 +273,9 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
      (`members[m] + "|" + seq`). Measured, not assumed - see the ablation. */
   else if (newlen < 512) newcap = newlen + SCR_STR_CHAIN_SLACK;
 #endif
+  /* Slack is an optimisation and is never worth a trap: a result that fits
+   * but whose SLACK would not is allocated exact. */
+  if (newcap > SCR_STR_MAX_LEN) newcap = newlen;
   ScrStr *s = scr_str_take_spare(newlen);
   if (!s) s = scr_str_alloc(newlen, newcap);
   memcpy(s->data, a->data, a->len);
@@ -343,8 +358,8 @@ int scr_str_cmp_u16(ScrStr *a, ScrStr *b) {
  * statics (same layout the emitter uses for literals): charAt/slice churn
  * in tight loops returns these without allocating.
  */
-typedef struct { size_t rc; size_t len; size_t cap; char data[2]; } ScrChar1;
-#define SCR_A(c) {SIZE_MAX, 1, 1, {(char)(c), 0}}
+typedef SCR_STR_LIT(2) ScrChar1;
+#define SCR_A(c) {SCR_STR_IMMORTAL, 1, 1, {(char)(c), 0}}
 #define SCR_A8(c) \
   SCR_A(c), SCR_A(c + 1), SCR_A(c + 2), SCR_A(c + 3), \
   SCR_A(c + 4), SCR_A(c + 5), SCR_A(c + 6), SCR_A(c + 7)
@@ -354,8 +369,7 @@ static const ScrChar1 scr_ascii1[128] = {
   SCR_A8(64),  SCR_A8(72),  SCR_A8(80),  SCR_A8(88),
   SCR_A8(96),  SCR_A8(104), SCR_A8(112), SCR_A8(120),
 };
-static const struct { size_t rc; size_t len; size_t cap; char data[1]; }
-    scr_lit_empty = {SIZE_MAX, 0, 0, ""};
+static const SCR_STR_LIT(1) scr_lit_empty = {SCR_STR_IMMORTAL, 0, 0, ""};
 
 static ScrStr *scr_str_empty(void) { return (ScrStr *)&scr_lit_empty; }
 
@@ -663,7 +677,7 @@ ScrStr *scr_str_repeat(ScrStr *s, double count) {
   if (n == 0 || s->len == 0) return scr_str_empty();
   /* n is a finite non-negative integer here. Reject sizes malloc could not
    * satisfy anyway before the double→size_t conversion can overflow. */
-  if (n > (double)((SIZE_MAX - sizeof(ScrStr) - 1) / s->len)) scr_oom();
+  if (n > (double)(SCR_STR_MAX_LEN / s->len)) scr_oom();
   size_t total = (size_t)n * s->len;
   ScrStr *r = scr_str_alloc(total, total);
   memcpy(r->data, s->data, s->len);
@@ -757,8 +771,7 @@ ScrStr *scr_str_trim_end(ScrStr *s) {
 /* Immortal U+FFFD — the divergence-2 stand-in wherever JS would produce a
  * lone surrogate (empty-separator split of an astral char, a pad fill
  * truncated mid-pair). */
-static const struct { size_t rc; size_t len; size_t cap; char data[4]; }
-    scr_lit_fffd = {SIZE_MAX, 3, 3, "\xEF\xBF\xBD"};
+static const SCR_STR_LIT(4) scr_lit_fffd = {SCR_STR_IMMORTAL, 3, 3, "\xEF\xBF\xBD"};
 
 /* split(separator) with a STRING separator, no limit (ECMA-262 22.1.3.23):
  * an empty separator splits into single UTF-16 code units ("".split("") is
@@ -817,7 +830,7 @@ static ScrStr *scr_pad_impl(ScrStr *s, double maxLength, ScrStr *fill,
   /* Reject pad sizes malloc could not satisfy before the double→size_t
    * conversion can overflow (each unit is at most 3 bytes here: BMP chars
    * and the U+FFFD stand-in; astral chars are 4 bytes for 2 units). */
-  if (target > (double)((SIZE_MAX - sizeof(ScrStr) - 1) / 4)) scr_oom();
+  if (target > (double)(SCR_STR_MAX_LEN / 4)) scr_oom();
   size_t pad16 = (size_t)target - len16;
   size_t fill16 = scr_sidx_len(fill, scr_sidx(fill));
   size_t reps = pad16 / fill16, rem16 = pad16 % fill16;
@@ -838,7 +851,7 @@ static ScrStr *scr_pad_impl(ScrStr *s, double maxLength, ScrStr *fill,
   }
   size_t pad_b = reps * fill->len + prefix_b +
                  (prefix_fffd ? SCR_REPLACEMENT_LEN : 0);
-  if (pad_b > SIZE_MAX - sizeof(ScrStr) - 1 - s->len) scr_oom();
+  if (pad_b > SCR_STR_MAX_LEN - s->len) scr_oom();
   size_t total = s->len + pad_b;
   ScrStr *r = scr_str_alloc(total, total);
   char *w = r->data + (at_start ? 0 : s->len);
@@ -1221,7 +1234,7 @@ static ScrStr *scr_encode_uri_impl(ScrStr *s, bool keep_reserved) {
       *w++ = hex[b[i] & 0xF];
     }
   }
-  out->len = out_len;
+  out->len = (uint32_t)out_len;
   out->data[out_len] = '\0';
   return out;
 }
@@ -1247,10 +1260,8 @@ ScrStr *scr_str_to_well_formed(ScrStr *s) { return scr_str_retain(s); }
 
 /* Immortal interned booleans (same layout trick the emitter uses for
  * string literals). */
-static const struct { size_t rc; size_t len; size_t cap; char data[5]; }
-    scr_lit_true = {SIZE_MAX, 4, 4, "true"};
-static const struct { size_t rc; size_t len; size_t cap; char data[6]; }
-    scr_lit_false = {SIZE_MAX, 5, 5, "false"};
+static const SCR_STR_LIT(5) scr_lit_true = {SCR_STR_IMMORTAL, 4, 4, "true"};
+static const SCR_STR_LIT(6) scr_lit_false = {SCR_STR_IMMORTAL, 5, 5, "false"};
 
 ScrStr *scr_bool_to_scrstr(bool b) {
   return b ? (ScrStr *)&scr_lit_true : (ScrStr *)&scr_lit_false;
@@ -1396,7 +1407,7 @@ ScrStr *scr_str_decode_uri_component_try(ScrStr *s) {
       out->data[w++] = (char)bc;
     }
   }
-  out->len = w;
+  out->len = (uint32_t)w;
   out->data[w] = '\0';
   return out;
 malformed:

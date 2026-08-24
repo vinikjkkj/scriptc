@@ -492,23 +492,108 @@ typedef struct ScrVt {
 } ScrVt;
 
 /* ── strings ──────────────────────────────────────────────────────────
- * UTF-8 bytes, refcounted, immutable. rc == SIZE_MAX marks an immortal
- * interned literal (emitted as a static object; retain/release are no-ops).
- * data is NUL-terminated for C convenience; len excludes the NUL.
+ * UTF-8 bytes, refcounted, immutable. rc == SCR_STR_IMMORTAL marks an
+ * immortal interned literal (emitted as a static object; retain/release are
+ * no-ops). data is NUL-terminated for C convenience; len excludes the NUL.
  *
  * cap is the usable byte capacity of data[] excluding the NUL (allocation
  * is sizeof(ScrStr) + cap + 1); cap == len for interned literals and plain
  * allocations. Spare capacity (cap > len) exists only on concat results so
  * scr_str_concat can append in place when the left operand is uniquely
  * owned (rc == 1) — observable immutability is preserved: a string with
- * rc > 1 or rc == SIZE_MAX is never mutated.
+ * rc > 1 or rc == SCR_STR_IMMORTAL is never mutated.
+ *
+ * THE HEADER IS 12 BYTES AND EVERY ONE OF THE THREE FIELDS WAS 8. That is
+ * not a tidiness change and it is not "8 bytes off every string": it is
+ * MEASURED against the allocator's real bucket function and against a
+ * measured length distribution, and both halves matter.
+ *
+ * The bucket function on x86_64-windows-gnu with zig 0.16.0's mingw CRT is
+ * `roundup16(request + 8)` — an 8-byte block header and a 16-byte grain,
+ * established by allocating 300,000 same-size blocks and reading the modal
+ * pointer stride together with the working-set delta per block. Requests of
+ * 40/44/48/56/64/72/80/88/89/96/104/112/128 cost 48/64/64/64/80/80/96/96/
+ * 112/112/112/128/144. So the saving is not eight bytes a string: it is a
+ * WHOLE 16-BYTE BUCKET on the capacities that cross a boundary and NOTHING
+ * on the rest, and which of the two you get depends on the population.
+ *
+ * The population is measured too (tests/perf/dyncensus/scr_str_census.h,
+ * which reports capacity EXACTLY per byte because an aggregate over "33-64"
+ * cannot tell 63 from 64 and those differ by a bucket). On the messaging
+ * bench's four scenarios the live string bytes at the peak fall from
+ * 140,886,736 / 88,144,064 / 16,123,920 / 38,414,864 to
+ * 115,342,912 / 70,612,384 / 12,921,456 / 32,056,160 - that is
+ * -18.1% / -19.9% / -19.9% / -16.6%, measured on BOTH sides against a
+ * projection the row table makes from the base population alone, which
+ * the measurement matches to a tenth of a point.
+ *
+ * TWELVE, NOT SIXTEEN. `size_t rc; uint32_t len; uint32_t cap;` is the
+ * obvious narrowing and it is worth exactly half of this on RECV 1:1: that
+ * scenario retains 450,000 strings of capacity 10, where 24 and 16 both
+ * cost 48 bytes and only 12 reaches 32. Sixteen is a local minimum that
+ * looks like the answer.
+ *
+ * TWELVE, NOT EIGHT. Dropping `cap` and deriving it from the block's size
+ * class is worth a further 0.02% on this population — every capacity that
+ * a 12-byte header moves, an 8-byte one moves to the same bucket — and it
+ * costs the in-place concat arm its capacity test. Measured, then not done.
+ *
+ * The lengths are UNSIGNED 32-BIT, so a string is capped at 4 GiB - 2, and
+ * `rc` is too. Every write into a length field goes through
+ * scr_str_size_check below, which TRAPS rather than truncating: a 5 GiB
+ * string used to be an allocation failure and it must not become a silently
+ * shortened string. `rc` has no such fence and needs none: four billion
+ * simultaneous references to one string is 32 GB of pointers holding them.
  */
+#define SCR_STR_IMMORTAL UINT32_MAX
+/* One below the sentinel: a string of exactly this length would be
+ * indistinguishable from an immortal literal in every rc test. */
+#define SCR_STR_MAX_LEN (UINT32_MAX - 1u)
+
 typedef struct ScrStr {
-  size_t rc;
-  size_t len;
-  size_t cap;
+  uint32_t rc;
+  uint32_t len;
+  uint32_t cap;
   char data[];
 } ScrStr;
+
+/* The literal layout, spelled ONCE.
+ *
+ * An ScrStr has a flexible array member, so no immortal literal can be
+ * declared with the type itself: every one of them is an anonymous struct of
+ * the same shape, cast to `ScrStr *`. There are five in scr_string.c, three
+ * in the runtime's C tests, one per string in every program the C backend
+ * emits, and nothing in the language checks that any of them agrees with the
+ * type. A field that changed width here and not there is a type pun that
+ * compiles clean and reads every literal at the wrong offset.
+ *
+ * So the shape is a macro, the emitter emits the macro, and the static
+ * asserts below make a disagreement a build failure instead of a wrong
+ * answer. `n` is the array size INCLUDING the NUL. */
+#define SCR_STR_LIT(n) \
+  struct { uint32_t rc; uint32_t len; uint32_t cap; char data[n]; }
+
+typedef SCR_STR_LIT(1) ScrStrLit0;
+_Static_assert(sizeof(ScrStr) == 12, "ScrStr's header must stay 12 bytes");
+_Static_assert(offsetof(ScrStr, data) == 12, "ScrStr.data must follow the header");
+_Static_assert(offsetof(ScrStrLit0, data) == offsetof(ScrStr, data),
+               "SCR_STR_LIT's data[] must land where ScrStr's does, or every "
+               "interned literal in every compiled program is read at the "
+               "wrong offset");
+_Static_assert(offsetof(ScrStrLit0, len) == offsetof(ScrStr, len) &&
+                   offsetof(ScrStrLit0, cap) == offsetof(ScrStr, cap),
+               "SCR_STR_LIT's fields must land where ScrStr's do");
+_Static_assert(sizeof(((ScrStrLit0 *)0)->rc) == sizeof(((ScrStr *)0)->rc),
+               "SCR_STR_LIT's rc must be as wide as ScrStr's, or the "
+               "immortal sentinel is written into the wrong bytes");
+
+/* Every length that reaches a 32-bit field passes through here. It TRAPS
+ * rather than truncating: the old fields were 64-bit, so a 5 GiB result was
+ * an out-of-memory abort, and a narrowing must not turn a loud failure into
+ * a string that quietly reports the wrong length. */
+static inline void scr_str_size_check(size_t n) {
+  if (n > SCR_STR_MAX_LEN) scr_trap("scriptc: string length exceeds 4 GiB\n");
+}
 
 ScrStr *scr_str_new(const char *bytes, size_t len); /* returns +1 */
 
@@ -520,7 +605,7 @@ ScrStr *scr_str_alloc_raw(size_t len, size_t cap);
 ScrStr *scr_str_regrow(ScrStr *s, size_t newcap);
 
 static inline ScrStr *scr_str_retain(ScrStr *s) {
-  if (s->rc != SIZE_MAX) s->rc++;
+  if (s->rc != SCR_STR_IMMORTAL) s->rc++;
   return s;
 }
 

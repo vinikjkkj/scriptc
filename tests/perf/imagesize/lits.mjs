@@ -17,7 +17,13 @@ const t = readFileSync(cFile, 'latin1')
 const lines = t.split('\n')
 let n = 0, bytes = 0
 const seen = new Map()
-const declRe = /^static struct \{ size_t rc; size_t len; size_t cap; char data\[(\d+)\]; \} (sc_lit_\d+) =/
+// The emitter spells the literal's layout with scr_runtime.h's SCR_STR_LIT
+// macro rather than inline, so the header width lives in ONE place and is
+// static-asserted against the real ScrStr. This reader has to know that
+// width to price the headers, and it cannot read it out of the TU - so it
+// is named here, once, beside the macro it tracks.
+const HDR_BYTES = 12 // sizeof(ScrStr): uint32 rc, len, cap
+const declRe = /^static SCR_STR_LIT\((\d+)\) (sc_lit_\d+) =/
 for (let i = 0; i < lines.length; i++) {
   const m = declRe.exec(lines[i])
   if (!m) continue
@@ -34,7 +40,7 @@ let dupDecls = 0, dupBytes = 0
 for (const [c, k] of seen) if (k > 1) { dupDecls += k - 1; dupBytes += (k - 1) * c.length }
 console.log('literal declarations      ' + fmt(n))
 console.log('distinct contents         ' + fmt(seen.size))
-console.log('declared data bytes       ' + fmt(bytes) + '  (+ 24 bytes of header each = ' + fmt(bytes + 24 * n) + ')')
+console.log('declared data bytes       ' + fmt(bytes) + '  (+ ' + HDR_BYTES + ' bytes of header each = ' + fmt(bytes + HDR_BYTES * n) + ')')
 console.log('duplicate declarations    ' + fmt(dupDecls) + '   approx wasted ' + fmt(dupBytes) + ' bytes')
 const refs = (t.match(/\bsc_lit_\d+\b/g) ?? []).length
 console.log('references to literals    ' + fmt(refs) + '   mean uses per literal ' + (refs / n).toFixed(1))

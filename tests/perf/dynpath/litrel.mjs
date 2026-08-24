@@ -5,7 +5,7 @@
 //     ScrStr *sc_tN = scr_str_retain((ScrStr *)&sc_lit_M);
 // and then releases sc_tN on the normal path and again inside every
 // unwind epilogue that is live at that point. The literal is IMMORTAL
-// (rc == SIZE_MAX), so both the retain and every one of those releases is
+// (rc == SCR_STR_IMMORTAL), so both the retain and every one of those releases is
 // a no-op the emitter keeps "for ownership uniformity" (emit-types.ts:213).
 //
 // This counts, exactly:

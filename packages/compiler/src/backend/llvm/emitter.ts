@@ -129,10 +129,11 @@ interface LlValue {
   name: string;
   type: IrType;
   slot?: boolean;
-  /** The value is an INTERNED STATIC — an immortal whose `rc` is SIZE_MAX
-   * for the whole run (the string-literal table). `scr_str_retain` is
-   * `if (s->rc != SIZE_MAX) s->rc++` and `scr_str_release` is
-   * `if (!s || s->rc == SIZE_MAX) return`, so on such a value BOTH are
+  /** The value is an INTERNED STATIC — an immortal whose `rc` is
+   * UINT32_MAX for the whole run (the string-literal table).
+   * `scr_str_retain` is `if (s->rc != UINT32_MAX) s->rc++` and
+   * `scr_str_release` is `if (!s || s->rc == UINT32_MAX) return`, so on
+   * such a value BOTH are
    * exactly no-ops and this lane may leave them out — the same argument
    * the C emitter's `Temp.immortal` carries, and the same one that took
    * zapo's image from 30,477,312 to 25,704,448 bytes on that lane.
@@ -1070,11 +1071,11 @@ const LIB_FN_MOVE_ARGS: Record<string, readonly number[]> = {
 };
 
 /** The rows where a STRING argument is handed to the runtime as its raw
- * `const char *` — the inline bytes at offset 24 — rather than as the
+ * `const char *` — the inline bytes at offset 12 — rather than as the
  * ScrStr handle. The C tier writes `arg->data` and clang checks it; in
  * LLVM both spellings are `ptr`, which is exactly why this has to be a
  * table and cannot be derived: passing the handle type-checks, links,
- * and hands the runtime a 24-byte header to read as text. Index is into
+ * and hands the runtime a 12-byte header to read as text. Index is into
  * the IR's argument list. */
 const LIB_FN_ARG_STRDATA: Record<string, readonly number[]> = {
   // scr_tls_pem_from_dyn(v, const char *what) — `what` names the option
@@ -1800,7 +1801,7 @@ class LlEmitter {
       // the C layout (4 bytes padding after the tag). ScrUnion/ScrClosure
       // mirror scr_runtime.h field-for-field (tag reads, slot peeks, the
       // fn pointer, and the caps[] tail all address through them).
-      `%ScrStr = type { i64, i64, i64 }`,
+      `%ScrStr = type { i32, i32, i32 }`,
       `%ScrLogArg = type { i32, i64 }`,
       `%ScrVt = type { i64, i64, ptr }`,
       `%ScrUnion = type { i64, i32, ptr, ptr, ptr, i64 }`,
@@ -1864,11 +1865,11 @@ class LlEmitter {
     for (const d of this.decls) out.push(d);
     out.push(``);
     for (const [text, lit] of this.literals) {
-      // Immortal interned ScrStr: { rc = SIZE_MAX, len, cap = len, bytes\0 } —
-      // the C emitter's static table, retain/release skip rc == SIZE_MAX.
+      // Immortal interned ScrStr: { rc = UINT32_MAX, len, cap = len, bytes\0 }
+      // — the C emitter's static table, retain/release skip rc == UINT32_MAX.
       out.push(
-        `@${lit.sym} = internal global { i64, i64, i64, [${lit.len + 1} x i8] } ` +
-          `{ i64 -1, i64 ${lit.len}, i64 ${lit.len}, [${lit.len + 1} x i8] c"${llStrBytes(text)}" }`,
+        `@${lit.sym} = internal global { i32, i32, i32, [${lit.len + 1} x i8] } ` +
+          `{ i32 -1, i32 ${lit.len}, i32 ${lit.len}, [${lit.len + 1} x i8] c"${llStrBytes(text)}" }`,
       );
     }
     if (this.literals.size > 0) out.push(``);
@@ -3090,8 +3091,9 @@ class LlEmitter {
    * byte length the runtime entry takes. At the IR it is an ScrStr OR an
    * ScrBytes, which is why ONE C emission shape serves both (`->data` and
    * `->len` name a member on each); here the two layouts differ — a
-   * string's bytes are INLINE at offset 24, a Buffer's are behind a
-   * pointer at 24 — so the read is per kind and the wrong one silently
+   * string's bytes are INLINE at offset 12 (and its `len` is a u32), a
+   * Buffer's are behind a pointer at 24 with an i64 `len` at 8 — so the
+   * read is per kind and the wrong one silently
    * hands the runtime a header to parse as PEM. Factored out of the
    * https.request CA slot, which was the only caller, so the servers
    * below and it cannot drift. */
@@ -3101,9 +3103,11 @@ class LlEmitter {
     const len = B.tmp();
     if (v.type.kind === "string") {
       const data = B.tmp();
+      const rawLen = B.tmp();
       B.line(`${lenPtr} = getelementptr inbounds %ScrStr, ptr ${v.name}, i64 0, i32 1`);
-      B.line(`${len} = load i64, ptr ${lenPtr}`);
-      B.line(`${data} = getelementptr inbounds i8, ptr ${v.name}, i64 24`);
+      B.line(`${rawLen} = load i32, ptr ${lenPtr}`);
+      B.line(`${len} = zext i32 ${rawLen} to i64`);
+      B.line(`${data} = getelementptr inbounds i8, ptr ${v.name}, i64 12`);
       return { data, len };
     }
     if (v.type.kind === "bytes" && v.type.elem === "u8") {
@@ -3119,11 +3123,11 @@ class LlEmitter {
   }
 
   /** A string argument's raw `const char *`: the inline bytes at offset
-   * 24, not the ScrStr handle (LIB_FN_ARG_STRDATA). */
+   * 12, not the ScrStr handle (LIB_FN_ARG_STRDATA). */
   private strDataPtr(fn: string, v: LlValue): string {
     if (v.type.kind !== "string") throw new Error(`llvm emitter bug: ${fn} char* argument is not a string`);
     const t = this.B.tmp();
-    this.B.line(`${t} = getelementptr inbounds i8, ptr ${v.name}, i64 24`);
+    this.B.line(`${t} = getelementptr inbounds i8, ptr ${v.name}, i64 12`);
     return t;
   }
 
@@ -3305,10 +3309,12 @@ class LlEmitter {
       }
       case "string": {
         const lenp = B.tmp();
+        const rawLen = B.tmp();
         const len = B.tmp();
         const t = B.tmp();
         B.line(`${lenp} = getelementptr inbounds %ScrStr, ptr ${v.name}, i64 0, i32 1`);
-        B.line(`${len} = load i64, ptr ${lenp}`);
+        B.line(`${rawLen} = load i32, ptr ${lenp}`);
+        B.line(`${len} = zext i32 ${rawLen} to i64`);
         B.line(`${t} = icmp ne i64 ${len}, 0`);
         return t;
       }
@@ -3401,10 +3407,12 @@ class LlEmitter {
             case "string": {
               const p = this.unionPeek(v.name);
               const lenp = B.tmp();
+              const rawLen = B.tmp();
               const len = B.tmp();
               const t = B.tmp();
               B.line(`${lenp} = getelementptr inbounds %ScrStr, ptr ${p}, i64 0, i32 1`);
-              B.line(`${len} = load i64, ptr ${lenp}`);
+              B.line(`${rawLen} = load i32, ptr ${lenp}`);
+              B.line(`${len} = zext i32 ${rawLen} to i64`);
               B.line(`${t} = icmp ne i64 ${len}, 0`);
               B.line(`store i1 ${t}, ptr ${slot}`);
               break;
@@ -3757,7 +3765,7 @@ class LlEmitter {
     const lk = B.newLabel("gtdz.k");
     B.condBr(empty, lt, lk);
     B.startBlock(lt);
-    // Interned literals are immortal (rc SIZE_MAX), so handing them to
+    // Interned literals are immortal (rc UINT32_MAX), so handing them to
     // the ownership-taking thrower is safe.
     const errName = this.internLiteral("ReferenceError");
     const msg = this.internLiteral(`Cannot access '${name}' before initialization`);
@@ -3783,7 +3791,7 @@ class LlEmitter {
     const lk = B.newLabel("tdz.k");
     B.condBr(empty, lt, lk);
     B.startBlock(lt);
-    // Interned literals are immortal (rc SIZE_MAX), so handing them to
+    // Interned literals are immortal (rc UINT32_MAX), so handing them to
     // the ownership-taking thrower is safe.
     const errName = this.internLiteral("ReferenceError");
     const msg = this.internLiteral(`Cannot access '${name}' before initialization`);
@@ -4849,7 +4857,7 @@ class LlEmitter {
         return { name: e.value ? "true" : "false", type: e.type };
       case "strLit": {
         const sym = this.internLiteral(e.value);
-        // The interned literal is an immortal static (rc == SIZE_MAX), so
+        // The interned literal is an immortal static (rc == UINT32_MAX), so
         // the +1 and every frame release of it are no-ops this lane can
         // leave out — ownImmortal, whose doc carries the argument. The
         // global's symbol IS a valid `ptr` operand, so the retain call
@@ -6324,11 +6332,13 @@ class LlEmitter {
             }
             case "string": {
               const lenPtr = B.tmp();
+              const rawLen = B.tmp();
               const len = B.tmp();
               const data = B.tmp();
               B.line(`${lenPtr} = getelementptr inbounds %ScrStr, ptr ${arg.name}, i64 0, i32 1`);
-              B.line(`${len} = load i64, ptr ${lenPtr}`);
-              B.line(`${data} = getelementptr inbounds i8, ptr ${arg.name}, i64 24`);
+              B.line(`${rawLen} = load i32, ptr ${lenPtr}`);
+              B.line(`${len} = zext i32 ${rawLen} to i64`);
+              B.line(`${data} = getelementptr inbounds i8, ptr ${arg.name}, i64 12`);
               nativeParamTypes.push("ptr", "i64");
               nativeArgs.push(`ptr ${data}`, `i64 ${len}`);
               break;
