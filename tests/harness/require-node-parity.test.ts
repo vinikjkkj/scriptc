@@ -70,6 +70,21 @@ const LOOSE_SCOPED_JS = 'module.exports = { v: 9, tag: "loose-scoped" };\n';
 const LOOSE_JSON = '{ "v": 7 }\n';
 const LOOSE_MJS = "export const v = 5;\n";
 
+/** node_modules DIRECTORIES Node's LOAD_AS_DIRECTORY finds NOTHING in.
+ * The bare directory name used to be enough to make the root set carry
+ * them, and a name in that set fences — so each of these was a refusal
+ * standing where Node throws its own catchable MODULE_NOT_FOUND.
+ * `typesonly` is the `@types/*` shape verbatim. */
+const TYPESONLY_PKG = '{ "name": "typesonly", "version": "1.0.0", "types": "index.d.ts" }\n';
+const TYPESONLY_DTS = "export declare const v: number;\n";
+const NOMAIN_PKG = '{ "name": "nomainnoidx", "version": "1.0.0", "main": "nope.js" }\n';
+
+/** The two shapes that must STAY in the set. Node throws for both, and
+ * for neither does it throw MODULE_NOT_FOUND, so the compiled answer has
+ * to be the refusal rather than a wrong error. */
+const EXPORTS_MISSING_PKG = '{ "name": "expmissing", "version": "1.0.0", "exports": "./gone.js" }\n';
+const BROKEN_PKG = "{ this is not json\n";
+
 interface Program {
   readonly name: string;
   /** The entry's extension: ".cjs" is a CommonJS module, ".mjs" an ES one. */
@@ -465,6 +480,46 @@ const RUNS: readonly Program[] = [
     stdout: "undefined\n",
     exit: 0,
   },
+  {
+    // A node_modules DIRECTORY is not a package root: `require` still has
+    // to find a module INSIDE it. The set carried every directory name
+    // the walk saw, so each of these four fenced a specifier Node answers
+    // with its own catchable MODULE_NOT_FOUND — and the first of them,
+    // the `@types/*` shape, is in almost every node_modules tree there
+    // is. Measured against Node v25.9.0 over 26 package shapes; the four
+    // here are the ones with no manifest at all, a manifest with no
+    // "main", a directory whose only index is `index.mjs` (NOT in Node's
+    // LOAD_INDEX list), and a "main" that resolves to nothing with no
+    // index to fall back to.
+    name: "a node_modules directory Node cannot load is MODULE_NOT_FOUND, not a fence",
+    src:
+      "function g(s) { try { require(s); return 'GOT' } catch (e) { return e.code } }\n" +
+      "console.log(g('typesonly'), g('emptydir'), g('mjsonly'), g('nomainnoidx'));\n",
+    stdout: "MODULE_NOT_FOUND MODULE_NOT_FOUND MODULE_NOT_FOUND MODULE_NOT_FOUND\n",
+    exit: 0,
+  },
+  {
+    // The WRITTEN spelling of the same question. It is a different road —
+    // probeNodeRequireRefusal rather than the baked root set — through
+    // the same predicate, and a fix that moved only one of the two would
+    // leave the other answering differently for the same specifier.
+    name: "a WRITTEN specifier naming a directory Node cannot load is MODULE_NOT_FOUND",
+    src: "try { require('typesonly'); console.log('GOT') } catch (e) { console.log(e.code) }\n",
+    stdout: "MODULE_NOT_FOUND\n",
+    exit: 0,
+  },
+  {
+    // The no-over-fire control for the require-property fence below, and
+    // the load-bearing half of it. An ARBITRARY property of `require` is
+    // `undefined` in JavaScript and Node agrees — `require` has a real
+    // function value here — so only the four names Node actually defines
+    // may refuse. `require.main.filename` keeps its exact answer: that
+    // chain is claimed whole, ahead of the fence.
+    name: "an arbitrary property of require stays undefined, and require.main.filename stays exact",
+    src: "console.log(require.zzz === undefined, typeof require.main.filename, typeof require);\n",
+    stdout: "true string function\n",
+    exit: 0,
+  },
 ];
 
 /** The shapes that must STILL refuse — every one of them because the
@@ -628,6 +683,75 @@ const FENCED: readonly {
     nodeSays: "GOT 2",
     stdout: "threw SC1090\n",
   },
+  {
+    // The four properties Node DEFINES on the CommonJS `require`
+    // function: `Object.keys(require)` in Node v25.9.0 is exactly
+    // `resolve,main,extensions,cache`. Every one of them answered
+    // `undefined` on BOTH backends at exit 0 with no diagnostic, so
+    // `if (require.main === module)` — the canonical CommonJS
+    // entry-point test — took the WRONG BRANCH through the first of
+    // them. They refuse now, which is the loud direction.
+    //
+    // `resolve` is the one of the four that is servable in principle:
+    // its answer is a PATH STRING, not a module value, so the
+    // module-namespace wall the rest of this file is about does not
+    // stand in front of it. Nothing serves it yet, and this entry is
+    // where that shows.
+    name: "the four properties Node defines on require refuse instead of answering undefined",
+    src:
+      "try { console.log('main ' + (require.main === undefined)) } catch (e) { console.log('main threw ' + e.code) }\n" +
+      "try { console.log('cache ' + (require.cache === undefined)) } catch (e) { console.log('cache threw ' + e.code) }\n" +
+      "try { console.log('ext ' + (require.extensions === undefined)) } catch (e) { console.log('ext threw ' + e.code) }\n" +
+      "try { console.log('resolve ' + (typeof require.resolve)) } catch (e) { console.log('resolve threw ' + e.code) }\n",
+    code: "SC1090",
+    nodeSays: "main false / cache false / ext false / resolve function",
+    stdout: "main threw SC1090\ncache threw SC1090\next threw SC1090\nresolve threw SC1090\n",
+  },
+  {
+    // THE CELL NOBODY HAD SCORED, and it is the one that decides what
+    // "close the first two groups" could ever mean. Every other relative
+    // and absolute entry in this file names a file the build NEVER
+    // COMPILED, so serving it would need a run-time JavaScript loader —
+    // the embedded engine this objective exists to exclude. Here the same
+    // `m.cjs` is IN the compiled program, pulled in by the top-level
+    // require above, so the module value is the one population the build
+    // can enumerate completely.
+    //
+    // It still refuses, and the second half says why the refusal is not
+    // one step away from an answer: Node hands the SAME object back to
+    // both roads (`identity=true`), and a compiled module's exports are
+    // C globals with no object anywhere — so an object built for this
+    // would be a SNAPSHOT, and a write through either binding would
+    // vanish from the other.
+    name: "a relative specifier naming a module the build COMPILED still refuses",
+    src:
+      "var mm = require('./m.cjs');\n" +
+      "function g(s) { try { var m = require(s); return 'GOT ' + m.v } catch (e) { return 'threw ' + e.code } }\n" +
+      "var same = 'n/a';\n" +
+      "try { same = String(require('./m.cjs') === mm) } catch (e) { same = 'threw ' + e.code }\n" +
+      "console.log(g('./m.cjs') + ' identity=' + same);\n",
+    code: "SC2020",
+    nodeSays: "GOT 42 identity=true",
+    stdout: "threw SC2020 identity=threw SC1090\n",
+  },
+  {
+    // The CONSERVATIVE half of the package-root predicate, pinned from
+    // the side that would break first. An "exports" field of any shape
+    // keeps its root — the map is not modelled — and so does a manifest
+    // that will not parse. Node throws for both, and for NEITHER does it
+    // throw MODULE_NOT_FOUND (it answers MODULE_NOT_FOUND for the first
+    // only because the target is missing, and ERR_INVALID_PACKAGE_CONFIG
+    // for the second), so compiling either to MODULE_NOT_FOUND would be a
+    // wrong error rather than a refusal. This fails the day somebody
+    // makes the predicate answer for an exports map.
+    name: "a package root with an exports map, or an unreadable manifest, keeps its refusal",
+    src:
+      "function g(s) { try { require(s); return 'GOT' } catch (e) { return e.code } }\n" +
+      "console.log(g('expmissing'), g('badjson'));\n",
+    code: "SC2020",
+    nodeSays: "MODULE_NOT_FOUND ERR_INVALID_PACKAGE_CONFIG",
+    stdout: "SC2020 SC2020\n",
+  },
 ];
 
 let lab = "";
@@ -642,6 +766,9 @@ async function build(name: string, p: { src: string; ext?: string; pkg?: string 
   const dir = join(lab, `${name.replace(/[^a-z0-9]+/gi, "-").slice(0, 60)}-${backend}`);
   await mkdir(join(dir, "node_modules", "mylib"), { recursive: true });
   await mkdir(join(dir, "node_modules", "@s"), { recursive: true });
+  for (const d of ["typesonly", "emptydir", "mjsonly", "nomainnoidx", "expmissing", "badjson"]) {
+    await mkdir(join(dir, "node_modules", d), { recursive: true });
+  }
   await writeFile(
     join(dir, "package.json"),
     p.pkg ?? '{ "name": "require-parity-probe", "version": "0.0.0" }\n',
@@ -657,6 +784,25 @@ async function build(name: string, p: { src: string; ext?: string; pkg?: string 
   await writeFile(join(dir, "node_modules", "jsonpkg.json"), LOOSE_JSON, "utf8");
   await writeFile(join(dir, "node_modules", "@s", "sfile.js"), LOOSE_SCOPED_JS, "utf8");
   await writeFile(join(dir, "node_modules", "dmjs.mjs"), LOOSE_MJS, "utf8");
+  // DIRECTORIES Node's own LOAD_AS_DIRECTORY comes up EMPTY in. The root
+  // set used to carry every directory name it saw, so every one of these
+  // FENCED a specifier Node answers with its catchable MODULE_NOT_FOUND.
+  // `typesonly` is the `@types/*` shape — a manifest with "types", no
+  // "main", and a .d.ts beside it — and it is why the class matters at
+  // all: it sits in almost every node_modules tree there is.
+  await writeFile(join(dir, "node_modules", "typesonly", "package.json"), TYPESONLY_PKG, "utf8");
+  await writeFile(join(dir, "node_modules", "typesonly", "index.d.ts"), TYPESONLY_DTS, "utf8");
+  await writeFile(join(dir, "node_modules", "mjsonly", "index.mjs"), LOOSE_MJS, "utf8");
+  await writeFile(join(dir, "node_modules", "nomainnoidx", "package.json"), NOMAIN_PKG, "utf8");
+  // The CONSERVATIVE half, from the other side. An "exports" field of any
+  // shape and a manifest that will not parse both KEEP their root, so
+  // both keep the refusal: Node throws for each of them, and it throws
+  // something OTHER than MODULE_NOT_FOUND (this pair answers
+  // MODULE_NOT_FOUND and ERR_INVALID_PACKAGE_CONFIG). A fence is never a
+  // value where Node throws; these fail if anyone ever makes the
+  // predicate answer for an exports map or an unreadable manifest.
+  await writeFile(join(dir, "node_modules", "expmissing", "package.json"), EXPORTS_MISSING_PKG, "utf8");
+  await writeFile(join(dir, "node_modules", "badjson", "package.json"), BROKEN_PKG, "utf8");
   const file = join(dir, `entry${p.ext ?? ".cjs"}`);
   await writeFile(file, p.src, "utf8");
   const res = await compile(file, {
