@@ -120,6 +120,66 @@ SCR_DYNCEN_FN int scr_dyncen_bucket(long long n) {
   return 9;
 }
 
+/* Capacity classes, for the term the first map ranked second and did not
+ * price: `cap` against the `len` that fills it. The growth policy doubles
+ * from 4, so a class per power of two says which STEP of the doubling the
+ * spare capacity is sitting in — and the class holds the exact cap sum
+ * and the exact len sum of the objects in it, so the spare capacity of a
+ * class is a subtraction and never an average times a count. */
+#define SCR_DYNCEN_CAPS 14
+SCR_DYNCEN_FN int scr_dyncen_capclass(long long cap) {
+  if (cap <= 4) return (int)cap;         /* 0,1,2,3,4 */
+  if (cap <= 8) return 5;
+  if (cap <= 16) return 6;
+  if (cap <= 32) return 7;
+  if (cap <= 64) return 8;
+  if (cap <= 128) return 9;
+  if (cap <= 256) return 10;
+  if (cap <= 512) return 11;
+  if (cap <= 1024) return 12;
+  return 13;
+}
+
+/* ── what the ALLOCATOR charges ───────────────────────────────────────
+ * The first map costed every buffer at `cap * sizeof(entry)` and every
+ * key at the pool's 8-byte rounding. Neither is what the process pays:
+ * both are ordinary malloc blocks (the size-class pool is a FREELIST over
+ * individually malloc'd blocks — scr_pool_take hands one back or the
+ * caller mallocs), and a malloc block on this target costs an 8-byte
+ * header and 16-byte alignment.
+ *
+ * MEASURED, not assumed: tests/perf/dyncensus/mallocgrain.c prints the
+ * modal stride between consecutive equal-size allocations and the
+ * committed private bytes per block. It also shows why _msize is NOT the
+ * instrument here — on x86_64-windows-gnu it echoes the request back and
+ * reports zero slack for every size, which is what a first probe of mine
+ * believed. Override both constants if a target disagrees with the probe.
+ */
+#ifndef SCR_DYNCEN_MALLOC_HDR
+#define SCR_DYNCEN_MALLOC_HDR 8
+#endif
+#ifndef SCR_DYNCEN_MALLOC_ALIGN
+#define SCR_DYNCEN_MALLOC_ALIGN 16
+#endif
+SCR_DYNCEN_FN long long scr_dyncen_phys(long long n) {
+  if (n <= 0) return 0; /* a NULL buffer is not a block */
+  n += SCR_DYNCEN_MALLOC_HDR;
+  return (n + (SCR_DYNCEN_MALLOC_ALIGN - 1)) &
+         ~(long long)(SCR_DYNCEN_MALLOC_ALIGN - 1);
+}
+
+/* scr_runtime.h's scr_pool_bytes, MIRRORED — this header is -include'd,
+ * so it is read before scr_runtime.h and cannot call the real one. The
+ * walk header, which is read after, checks the two agree at every grain
+ * this program uses and bumps scr_dyncen_pool_mismatch if they ever do
+ * not; the reader refuses on that, so the mirror can never be silently
+ * stale. */
+#define SCR_DYNCEN_POOL_GRAIN 8
+SCR_DYNCEN_FN long long scr_dyncen_pool_bytes(long long n) {
+  return (n + (SCR_DYNCEN_POOL_GRAIN - 1)) & ~(long long)(SCR_DYNCEN_POOL_GRAIN - 1);
+}
+SCR_DYNCEN_SHARED long long scr_dyncen_pool_mismatch = 0;
+
 typedef struct {
   long long n;            /* live objects of this kind */
   long long rc_sum, rc_max;
@@ -133,6 +193,15 @@ typedef struct {
   long long has_proto, has_cname, has_hidden, has_slots, has_any_extra;
   long long key_n, key_bytes, key_max;
   long long key_le7, key_le15, key_le23, key_le31;
+  /* cap cross-tabbed against len, per capacity class: how many objects,
+   * how much capacity they hold between them, and how many members are
+   * actually in it. The spare capacity of a class is the subtraction. */
+  long long cap_hist[SCR_DYNCEN_CAPS];
+  long long cap_cap_sum[SCR_DYNCEN_CAPS];
+  long long cap_len_sum[SCR_DYNCEN_CAPS];
+  /* the same buffers and keys priced at what malloc charges rather than
+   * at what the policy asked for (scr_dyncen_phys). */
+  long long phys_side, phys_key;
   /* STR only: the ScrStr behind the pointer. */
   long long str_len_sum, str_len_max, str_phys;
   long long str_hist[SCR_DYNCEN_BUCKETS];
@@ -249,6 +318,134 @@ SCR_DYNCEN_FN int scr_dyncen_ptbl_del(const void *p) {
   return 0;
 }
 
+/* ── the KEY table ────────────────────────────────────────────────────
+ * The first map priced member keys at 303,520 B and could not say what
+ * fraction of that is the SAME NAME stored again. Every key is its own
+ * malloc'd copy (scr_json_key_alloc), so a duplicate name is a duplicate
+ * block, and "how many distinct names are there" is the whole question
+ * behind interning. It cannot be answered by counting: it needs the
+ * bytes.
+ *
+ * Two populations, and they answer different questions:
+ *   SNAP/EXIT — the keys the LIVE objects hold at the walk. What a
+ *     shared representation would save in RESIDENT bytes.
+ *   RUN — every key ever stored, fed from scr_dyn_obj_put. What an
+ *     intern table would save in ALLOCATIONS over the whole run, which
+ *     is a different and larger number.
+ *
+ * Open addressing, linear probe, no deletion (nothing is ever removed
+ * from a census table). A key longer than the inline width is stored
+ * truncated and FLAGGED: two distinct long keys sharing a prefix and a
+ * length would merge into one row, so `trunc` is reported and the reader
+ * refuses to call the distinct count exact when it is non-zero. */
+#ifndef SCR_DYNCEN_KEYSLOTS
+#define SCR_DYNCEN_KEYSLOTS (1u << 14)
+#endif
+#define SCR_DYNCEN_KEYINL 48
+#define SCR_DYNCEN_KEYTOP 24   /* how many of the commonest to report */
+
+typedef struct {
+  int used;
+  int trunc;
+  long long len;
+  long long n;
+  char b[SCR_DYNCEN_KEYINL];
+} ScrDynCenKey;
+
+typedef struct {
+  ScrDynCenKey s[SCR_DYNCEN_KEYSLOTS];
+  long long distinct;   /* occupied slots */
+  long long total;      /* occurrences fed in */
+  long long full;       /* fed in and dropped: the table was saturated */
+  long long trunc;      /* keys stored truncated */
+  long long len_sum;    /* sum of key_len over OCCURRENCES */
+  long long dist_len_sum;   /* sum of key_len over DISTINCT keys */
+  long long dist_phys;      /* what the distinct keys cost as blocks */
+  long long occ_phys;       /* what the occurrences cost as blocks */
+} ScrDynCenKeyTab;
+
+SCR_DYNCEN_SHARED ScrDynCenKeyTab scr_dyncen_keysnap = {{{0, 0, 0, 0, {0}}}, 0, 0, 0, 0, 0, 0, 0, 0};
+SCR_DYNCEN_SHARED ScrDynCenKeyTab scr_dyncen_keyexit = {{{0, 0, 0, 0, {0}}}, 0, 0, 0, 0, 0, 0, 0, 0};
+SCR_DYNCEN_SHARED ScrDynCenKeyTab scr_dyncen_keyrun  = {{{0, 0, 0, 0, {0}}}, 0, 0, 0, 0, 0, 0, 0, 0};
+
+SCR_DYNCEN_FN unsigned scr_dyncen_khash(const char *k, long long n) {
+  unsigned long long h = 1469598103934665603ULL;
+  long long i;
+  for (i = 0; i < n; i++) {
+    h ^= (unsigned char)k[i];
+    h *= 1099511628211ULL;
+  }
+  h ^= (unsigned long long)n * 0x9e3779b97f4a7c15ULL;
+  h ^= h >> 29;
+  return (unsigned)(h & (SCR_DYNCEN_KEYSLOTS - 1u));
+}
+
+SCR_DYNCEN_FN void scr_dyncen_key_reset(ScrDynCenKeyTab *t) {
+  memset(t, 0, sizeof *t);
+}
+
+SCR_DYNCEN_FN void scr_dyncen_key_note(ScrDynCenKeyTab *t, const char *k, long long n) {
+  unsigned h, i;
+  long long inl = n < SCR_DYNCEN_KEYINL ? n : SCR_DYNCEN_KEYINL;
+  if (k == NULL || n < 0) return;
+  t->total++;
+  t->len_sum += n;
+  t->occ_phys += scr_dyncen_phys(scr_dyncen_pool_bytes(n + 1));
+  h = scr_dyncen_khash(k, n);
+  for (i = 0; i < SCR_DYNCEN_KEYSLOTS; i++) {
+    unsigned j = (h + i) & (SCR_DYNCEN_KEYSLOTS - 1u);
+    ScrDynCenKey *s = &t->s[j];
+    if (!s->used) {
+      /* Refuse to fill the last eighth: a linear probe over a table at
+       * load 1.0 walks the whole table for every miss and the run hook
+       * is on the hottest path in the program. */
+      if (t->distinct * 8 >= (long long)SCR_DYNCEN_KEYSLOTS * 7) { t->full++; return; }
+      s->used = 1;
+      s->len = n;
+      s->n = 1;
+      s->trunc = n > SCR_DYNCEN_KEYINL ? 1 : 0;
+      if (s->trunc) t->trunc++;
+      memcpy(s->b, k, (size_t)inl);
+      t->distinct++;
+      t->dist_len_sum += n;
+      t->dist_phys += scr_dyncen_phys(scr_dyncen_pool_bytes(n + 1));
+      return;
+    }
+    if (s->len == n && memcmp(s->b, k, (size_t)inl) == 0) { s->n++; return; }
+  }
+  t->full++;
+}
+
+/* ── the growth policy, as it actually runs ───────────────────────────
+ * One counter per capacity class at each of the two growth sites, so
+ * "the policy doubles from 4" becomes a measured request histogram
+ * rather than a reading of the source. `bytes` is what was asked for and
+ * `phys` what the allocator charged. */
+SCR_DYNCEN_SHARED long long scr_dyncen_grow_obj[SCR_DYNCEN_CAPS] = {0};
+SCR_DYNCEN_SHARED long long scr_dyncen_grow_arr[SCR_DYNCEN_CAPS] = {0};
+SCR_DYNCEN_SHARED long long scr_dyncen_grow_obj_bytes = 0;
+SCR_DYNCEN_SHARED long long scr_dyncen_grow_arr_bytes = 0;
+SCR_DYNCEN_SHARED long long scr_dyncen_grow_obj_phys = 0;
+SCR_DYNCEN_SHARED long long scr_dyncen_grow_arr_phys = 0;
+/* A capacity that ever went DOWN. The source has no shrink site; this is
+ * the control that says so from the run rather than from a grep. */
+SCR_DYNCEN_SHARED long long scr_dyncen_shrinks = 0;
+
+SCR_DYNCEN_FN void scr_dyncen_note_grow(int is_obj, long long from, long long to,
+                                        long long elem) {
+  int c = scr_dyncen_capclass(to);
+  if (to < from) scr_dyncen_shrinks++;
+  if (is_obj) {
+    scr_dyncen_grow_obj[c]++;
+    scr_dyncen_grow_obj_bytes += to * elem;
+    scr_dyncen_grow_obj_phys += scr_dyncen_phys(to * elem);
+  } else {
+    scr_dyncen_grow_arr[c]++;
+    scr_dyncen_grow_arr_bytes += to * elem;
+    scr_dyncen_grow_arr_phys += scr_dyncen_phys(to * elem);
+  }
+}
+
 SCR_DYNCEN_FN void scr_dyncen_report(void) {
   if (scr_dyncen_reported) return;
   scr_dyncen_reported = 1;
@@ -299,8 +496,76 @@ SCR_DYNCEN_FN void scr_dyncen_report(void) {
           fprintf(f, "DYNCEN-%s-STRLEN %u", tag, k);
           for (b = 0; b < SCR_DYNCEN_BUCKETS; b++) fprintf(f, " %lld", r->str_hist[b]);
           fprintf(f, "\n");
+          fprintf(f, "DYNCEN-%s-PHYS %u side=%lld key=%lld\n", tag, k,
+                  r->phys_side, r->phys_key);
+          fprintf(f, "DYNCEN-%s-CAP %u", tag, k);
+          for (b = 0; b < SCR_DYNCEN_CAPS; b++)
+            fprintf(f, " %lld/%lld/%lld", r->cap_hist[b], r->cap_cap_sum[b],
+                    r->cap_len_sum[b]);
+          fprintf(f, "\n");
         }
       }
+    }
+    /* the three key populations */
+    {
+      int pass;
+      for (pass = 0; pass < 3; pass++) {
+        const ScrDynCenKeyTab *t = pass == 0 ? &scr_dyncen_keysnap
+                                 : pass == 1 ? &scr_dyncen_keyexit
+                                             : &scr_dyncen_keyrun;
+        const char *tag = pass == 0 ? "PEAK" : pass == 1 ? "EXIT" : "RUN";
+        unsigned j;
+        long long shown = 0;
+        fprintf(f,
+                "DYNCEN-KEYTAB %s distinct=%lld total=%lld full=%lld trunc=%lld "
+                "lenSum=%lld distLenSum=%lld distPhys=%lld occPhys=%lld slots=%u\n",
+                tag, t->distinct, t->total, t->full, t->trunc, t->len_sum,
+                t->dist_len_sum, t->dist_phys, t->occ_phys,
+                (unsigned)SCR_DYNCEN_KEYSLOTS);
+        /* the commonest names, by repeated max-scan: SCR_DYNCEN_KEYTOP
+         * passes over the table beats sorting 16,384 rows in an exit
+         * hook, and the report is a text file a human reads. */
+        {
+          long long floor_n = -1;
+          while (shown < SCR_DYNCEN_KEYTOP) {
+            long long best = -1;
+            unsigned bj = 0;
+            int found = 0;
+            for (j = 0; j < SCR_DYNCEN_KEYSLOTS; j++) {
+              const ScrDynCenKey *s = &t->s[j];
+              if (!s->used) continue;
+              if (floor_n >= 0 && s->n >= floor_n) continue;
+              if (s->n > best) { best = s->n; bj = j; found = 1; }
+            }
+            if (!found) break;
+            {
+              const ScrDynCenKey *s = &t->s[bj];
+              long long i2, w = s->len < SCR_DYNCEN_KEYINL ? s->len : SCR_DYNCEN_KEYINL;
+              fprintf(f, "DYNCEN-KEYTOP %s %lld %lld %d ", tag, s->n, s->len, s->trunc);
+              for (i2 = 0; i2 < w; i2++) {
+                unsigned char c = (unsigned char)s->b[i2];
+                fputc(c >= 32 && c < 127 && c != ' ' ? (int)c : '.', f);
+              }
+              fputc('\n', f);
+              floor_n = s->n;
+            }
+            shown++;
+          }
+        }
+      }
+    }
+    {
+      int c;
+      fprintf(f, "DYNCEN-GROW obj");
+      for (c = 0; c < SCR_DYNCEN_CAPS; c++) fprintf(f, " %lld", scr_dyncen_grow_obj[c]);
+      fprintf(f, " bytes=%lld phys=%lld\n", scr_dyncen_grow_obj_bytes,
+              scr_dyncen_grow_obj_phys);
+      fprintf(f, "DYNCEN-GROW arr");
+      for (c = 0; c < SCR_DYNCEN_CAPS; c++) fprintf(f, " %lld", scr_dyncen_grow_arr[c]);
+      fprintf(f, " bytes=%lld phys=%lld\n", scr_dyncen_grow_arr_bytes,
+              scr_dyncen_grow_arr_phys);
+      fprintf(f, "DYNCEN-SHRINK %lld poolMismatch=%lld\n", scr_dyncen_shrinks,
+              scr_dyncen_pool_mismatch);
     }
     for (long long i = 0; i < scr_dyncen_ncurve; i++)
       fprintf(f, "DYNCEN-CURVE %lld %lld %lld %lld\n", i, scr_dyncen_curve[i][0],
@@ -317,7 +582,9 @@ SCR_DYNCEN_FN void scr_dyncen_report(void) {
             scr_dyncen_ptr_lost, scr_dyncen_dead_unknown, scr_dyncen_arm_n,
             (unsigned)SCR_DYNCEN_PSLOTS,
             (long long)(sizeof scr_dyncen_ptbl + sizeof scr_dyncen_curve +
-                        sizeof scr_dyncen_snap + sizeof scr_dyncen_exit));
+                        sizeof scr_dyncen_snap + sizeof scr_dyncen_exit +
+                        sizeof scr_dyncen_keysnap + sizeof scr_dyncen_keyexit +
+                        sizeof scr_dyncen_keyrun));
     fclose(f);
   }
 }
