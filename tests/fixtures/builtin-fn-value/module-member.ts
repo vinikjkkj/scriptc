@@ -23,6 +23,8 @@
  * and the direct call reach the SAME implementation.
  */
 import * as pathNs from "node:path";
+import * as posixNs from "node:path/posix";
+import * as win32Ns from "node:path/win32";
 import { dirname, extname, isAbsolute, normalize, relative, toNamespacedPath } from "node:path";
 import * as osNs from "node:os";
 import { homedir, platform, release, tmpdir, totalmem, type as osType } from "node:os";
@@ -145,5 +147,36 @@ console.log("qs.escape.c " + vEsc("~-_."));
 console.log("qs.unescape.ident " + String(vUnesc === qsUnescape) + " " + String(vUnesc === qsNs.unescape));
 console.log("qs.unescape.a " + vUnesc("a%20b%26c"));
 console.log("qs.unescape.b " + vUnesc("nopercent"));
+
+/* THE CROSS-TABLE CELL, and the one a per-MODULE lift key would have got
+ * wrong in both directions at once.
+ *
+ * Node's bare `path` IS the host platform's implementation: on Windows
+ * `path.dirname === path.win32.dirname` is true and `=== path.posix.dirname`
+ * is false, and on a posix host the two swap. The lift here is keyed on the
+ * ROW's libFn, not on the module name, so the two specifiers that resolve
+ * to one row mint one function and the third mints its own -- which is
+ * exactly Node's answer, on either host, with no platform test written
+ * anywhere. A key per module would have answered false three times; one
+ * key for all of `path` would have answered true three times.
+ *
+ * Both halves self-adjust: Node answers for the host it runs on and the
+ * compiler binds the bare table to the TARGET it builds for, and this
+ * fixture compares the two. */
+const bareD = pathNs.dirname;
+const posixD = posixNs.dirname;
+const win32D = win32Ns.dirname;
+console.log("cross.bare-is-posix " + String(bareD === posixD));
+console.log("cross.bare-is-win32 " + String(bareD === win32D));
+console.log("cross.posix-is-win32 " + String(posixD === win32D));
+console.log("cross.posix-call " + posixD("/a/b/c"));
+console.log("cross.win32-call " + win32D("C:" + String.fromCharCode(92) + "a" + String.fromCharCode(92) + "b"));
+
+/* `typeof <member>` as a slot ANNOTATION: the shape a program writes when
+ * it wants the value's own signature. It must keep the identity, because
+ * the alternative is an adapter. */
+const annotated: typeof pathNs.dirname = pathNs.dirname;
+console.log("annot.ident " + String(annotated === bareD));
+console.log("annot.call " + annotated("/x/y/z"));
 
 console.log("END done");

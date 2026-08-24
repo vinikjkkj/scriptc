@@ -221,12 +221,22 @@ describe("builtins as values, against Node", () => {
     expect(memberNode, "the module-member Node lane did not run").not.toBeNull();
     expect(memberNode!.exitCode, `Node module-member lane failed:\n${memberNode!.stderr}`).toBe(0);
     expect(memberNode!.stdout.trimEnd().split("\n").at(-1)).toBe("END done");
-    expect(memberNode!.stdout.trimEnd().split("\n").length).toBeGreaterThanOrEqual(60);
+    expect(memberNode!.stdout.trimEnd().split("\n").length).toBeGreaterThanOrEqual(70);
     // The floor that makes every identity cell below mean something: if
     // Node itself ever answered `false` here, the comparison would be
     // pinning two wrongs together.
     expect(memberNode!.stdout).toContain("path.dirname.ident true");
     expect(memberNode!.stdout).toContain("path.dirname.nsid true");
+    // Node's own cross-table answer must be ONE true and TWO falses,
+    // whichever host this runs on. If Node ever printed three of a kind
+    // the compiled comparison below would be pinning two wrongs together.
+    {
+      const cross = memberNode!.stdout
+        .split("\n")
+        .filter((l) => l.startsWith("cross.bare-is-") || l.startsWith("cross.posix-is-"));
+      expect(cross.length, "the three cross-table cells must all print").toBe(3);
+      expect(cross.filter((l) => l.endsWith("true")).length).toBe(1);
+    }
   });
 
   for (const backend of ["c", "llvm"] as const) {
