@@ -399,6 +399,25 @@ console.log(c.sub === root.sub, c.k, c.sub.v);
 c.sub.v = 5;
 console.log(root.sub.v);
 `],
+  /* `Object.assign` is the third spelling of the same width question and the
+   * only one of the three that ALIASES — it mutates the target and answers
+   * it. Both halves are here: a fresh-literal target answers a new object
+   * carrying every key the source had, and a named dyn target answers the
+   * target itself. Neither used to. */
+  ["object-assign-into-a-fresh-target", `const o = { a: 1 };
+o.b = 3;
+const c = Object.assign({}, o);
+c.a = 9;
+console.log(o.a, c.a, JSON.stringify(c));
+`],
+  ["object-assign-binding-aliases-its-target", `const o = { a: 1 };
+o.b = 3;
+const t = { z: 0 };
+const c = Object.assign(t, o);
+console.log(c === t, JSON.stringify(t));
+c.q = 5;
+console.log(t.q, JSON.stringify(Object.keys(t)));
+`],
 ];
 
 describe.each(["c", "llvm"] as const)("a JS binding that names an object literal IS that object (%s backend)", (backend) => {
@@ -594,29 +613,33 @@ console.log(root.xs[0]);
     }
   });
 
-  /* A binding whose initializer is an `Object.assign` CALL. The call already
-   * answers a dyn value — `JSON.stringify(Object.assign({}, o))` prints
-   * Node's answer — and the binding is where it is lost: the slot is the
-   * checker's inferred record and the dyn result is checked back into it,
-   * dropping exactly the run-time keys the call had just copied. It is the
-   * same sentence as the spread and the clone; what it needs is the call
-   * added to the initializer shapes the slot rule can predict, and no
-   * measurement here says which other calls would want the same. */
-  test("a binding holding an Object.assign result still narrows (both backends)", { timeout: 480_000 }, async () => {
+  /* An `Object.assign` whose TARGET is neither a fresh literal nor a
+   * checked-dynamic value — `Object.assign(staticRec, dynSrc)`. The call
+   * answers staticRec, a slot the value has no dyn representation of, so the
+   * rule stays out on purpose: predicting dyn there would replace an alias
+   * with a boxed copy, which is a silent wrong answer traded for a silent
+   * wrong answer. It refuses loudly today and that is the acceptable half.
+   *
+   * (The two spellings that DO answer — a fresh-literal target and a named
+   * dyn target — are LANDS above.) */
+  test("Object.assign into a static-record target still refuses (both backends)", { timeout: 480_000 }, async () => {
     const src = `const o = { a: 1 };
 o.b = 3;
-const c = Object.assign({}, o);
-c.a = 9;
-console.log(o.a, c.a, JSON.stringify(c));
+function main() {
+  const t = { z: 0, a: 0 };
+  const c = Object.assign(t, o);
+  console.log(JSON.stringify(c), c === t);
+}
+main();
 `;
     for (const backend of ["c", "llvm"] as const) {
-      const { node, exe } = await bothWays("object-assign-binding", backend, src);
-      expect(node.out.trim()).toBe('1 9 {"a":9,"b":3}');
-      expect(exe.code, `${backend}: ${exe.err}`).toBe(0);
+      const { node, exe } = await bothWays("object-assign-static-target", backend, src);
+      expect(node.out.trim()).toBe('{"z":0,"a":1,"b":3} true');
       expect(
-        exe.out.trim(),
-        `${backend}: if this now prints Node's answer the remainder is CLOSED — move the row into LANDS`,
-      ).toBe('1 9 {"a":9}');
+        exe.code,
+        `${backend}: expected the fence, got ${exe.out} — if this now prints Node's answer the remainder is CLOSED`,
+      ).not.toBe(0);
+      expect(exe.out + exe.err).toMatch(/SC2020/);
     }
   });
 
