@@ -4435,6 +4435,64 @@ export function keyedReadAtMemberReceiver(L: Lowerer, node: ts.Expression, read:
   };
 }
 
+/** V8's OWN SPELLING of a callee expression, or null where scriptc cannot
+ * reproduce it — the text that rides Node's "<callee> is not a function".
+ *
+ * `getText()` is NOT that text and the difference is measurable, which is
+ * how this function came to exist: Node prints `CONSOLE_WRITERS[bad]` for
+ * the source `CONSOLE_WRITERS[bad as LogLevel]`, because V8's CallPrinter
+ * reconstructs the access from the AST rather than slicing the file. Four
+ * rules, each measured against v25.9.0 rather than inferred:
+ *
+ *     T[k]()        ->  T[k]         an identifier key stays bracketed
+ *     T["lit"]()    ->  T.lit        a STRING key becomes the dot form,
+ *                                    even when it is not an identifier
+ *                                    ("a-b" prints as T.a-b)
+ *     T[0]()        ->  T[0]         a numeric key stays bracketed
+ *     T[(k)]()      ->  T[k]         parentheses are not in the AST, and
+ *                                    neither is a TypeScript `as`
+ *
+ * Everything else — a computed key (`T[k + ""]` prints `T[(k + "")]`, a
+ * call key prints `T[key(...)]`), a receiver that is not a plain
+ * identifier/this/dot chain — returns null and the RUNG DECLINES, keeping
+ * today's abort. A refusal replaced by a WRONG MESSAGE would be the worse
+ * half of the trade this whole family exists to avoid. */
+function v8CalleeText(node: ts.Expression): string | null {
+  let e: ts.Expression = node;
+  for (;;) {
+    if (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isNonNullExpression(e) || ts.isTypeAssertion(e)) {
+      e = e.expression;
+      continue;
+    }
+    break;
+  }
+  if (ts.isIdentifier(e)) return e.text;
+  if (e.kind === ts.SyntaxKind.ThisKeyword) return "this";
+  if (ts.isPropertyAccessExpression(e)) {
+    if (e.questionDotToken !== undefined || !ts.isIdentifier(e.name)) return null;
+    const r = v8CalleeText(e.expression);
+    return r === null ? null : `${r}.${e.name.text}`;
+  }
+  if (ts.isElementAccessExpression(e)) {
+    if (e.questionDotToken !== undefined) return null;
+    const r = v8CalleeText(e.expression);
+    if (r === null) return null;
+    let a: ts.Expression = e.argumentExpression;
+    for (;;) {
+      if (ts.isParenthesizedExpression(a) || ts.isAsExpression(a) || ts.isNonNullExpression(a) || ts.isTypeAssertion(a)) {
+        a = a.expression;
+        continue;
+      }
+      break;
+    }
+    if (ts.isIdentifier(a)) return `${r}[${a.text}]`;
+    if (ts.isStringLiteral(a)) return `${r}.${a.text}`;
+    if (ts.isNumericLiteral(a)) return `${r}[${a.text}]`;
+    return null;
+  }
+  return null;
+}
+
 /** THE CALL-CALLEE DESTINATION for `recordKeyReadAtUndefinedArm`.
  *
  * `CONSOLE_WRITERS[level](message, context)` — zapo
@@ -4497,7 +4555,8 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
   if (armed === null) return null;
   const tag = L.armTag(armedT.unionId, UNDEFINED_T);
   if (tag < 0) return null;
-  const text = expr.expression.getText();
+  const text = v8CalleeText(expr.expression);
+  if (text === null) return null;
   const calLocal = L.declareHiddenLocal("%callKeyArm", armedT);
   const calRef: IrExpr = { kind: "varRef", localId: calLocal.id, type: armedT, loc };
   const stmts: IrStmt[] = [{ kind: "varDecl", localId: calLocal.id, init: armed, loc }];
