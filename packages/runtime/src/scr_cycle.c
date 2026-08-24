@@ -91,10 +91,10 @@ void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
     h = calloc(1, phys);
     if (!h) scr_cyc_oom();
   }
-  h->trace = trace;
-  h->free_fn = free_fn;
+  h->trace_off = scr_cyc_off((const void *)trace);
+  h->free_off = scr_cyc_off((const void *)free_fn);
   h->color = SCR_CYC_BLACK;
-  h->blk = phys <= SCR_POOL_MAX ? (uint32_t)(phys / SCR_POOL_GRAIN) : 0u;
+  h->blk = phys <= SCR_POOL_MAX ? (uint8_t)(phys / SCR_POOL_GRAIN) : 0u;
   scr_cyc_live++; /* the pacing denominator; see below */
 #ifdef SCR_CYCEN_ON
   scr_cycen_hdr_bytes = (long long)sizeof(ScrCycHdr);
@@ -220,7 +220,7 @@ static void scr_mark_gray(void *obj) {
   ScrCycHdr *h = scr_cyc_hdr(obj);
   if (h->color == SCR_CYC_GRAY) return;
   h->color = SCR_CYC_GRAY;
-  h->trace(obj, scr_mg_visit, NULL);
+  scr_cyc_trace_of(h)(obj, scr_mg_visit, NULL);
 }
 
 static void scr_scan_black(void *obj);
@@ -232,7 +232,7 @@ static void scr_sb_visit(void *child, void *ctx) {
 }
 static void scr_scan_black(void *obj) {
   scr_cyc_hdr(obj)->color = SCR_CYC_BLACK;
-  scr_cyc_hdr(obj)->trace(obj, scr_sb_visit, NULL);
+  scr_cyc_trace_of(scr_cyc_hdr(obj))(obj, scr_sb_visit, NULL);
 }
 
 static void scr_scan(void *obj);
@@ -250,7 +250,7 @@ static void scr_scan(void *obj) {
     return;
   }
   h->color = SCR_CYC_WHITE;
-  h->trace(obj, scr_scan_visit, NULL);
+  scr_cyc_trace_of(h)(obj, scr_scan_visit, NULL);
 }
 
 /* The gathered white set (freed after the walk completes). */
@@ -267,7 +267,7 @@ static void scr_collect_white(void *obj) {
   ScrCycHdr *h = scr_cyc_hdr(obj);
   if (h->color != SCR_CYC_WHITE || h->buffered) return;
   h->color = SCR_CYC_BLACK; /* visited marker — prevents re-gathering */
-  h->trace(obj, scr_cw_visit, NULL);
+  scr_cyc_trace_of(h)(obj, scr_cw_visit, NULL);
   if (scr_nwhite == scr_white_cap) {
     scr_white_cap = scr_white_cap ? scr_white_cap * 2 : 64;
     scr_white = realloc(scr_white, scr_white_cap * sizeof *scr_white);
@@ -311,7 +311,7 @@ void scr_collect_cycles(void) {
    * never touch traced (white, already-accounted) edges. */
   for (size_t i = 0; i < scr_nwhite; i++) {
     void *obj = scr_white[i];
-    scr_cyc_hdr(obj)->free_fn(obj);
+    scr_cyc_free_of(scr_cyc_hdr(obj))(obj);
   }
   scr_nwhite = 0;
 

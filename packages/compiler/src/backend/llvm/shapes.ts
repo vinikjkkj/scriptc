@@ -629,10 +629,34 @@ export function srcProtoSlotIndex(shape: IrRecordShape): number {
   return ownMaskSlotIndex(shape) + (shape.ownmask ? 1 : 0);
 }
 
-/** The immortal-skip + mark-live retain body shared by every shape. The
- * cycle header sits 32 bytes before the object; `color` is at header+16,
- * so mark-live is one i32 store at obj-16 (scr_cyc_mark_live inlined —
- * the runtime's is a static inline with no external symbol). */
+/** THE ONE PLACE the cycle header's layout is written down on this side of
+ * the compiler.
+ *
+ * The C emitter writes `scr_cyc_mark_live(o)` and recompiles with whatever
+ * `ScrCycHdr` currently is. LLVM cannot: the runtime's mark-live is a
+ * `static inline` with no external symbol, so this backend inlines it and
+ * therefore knows the layout. It had THREE independent copies of that
+ * knowledge — here, in classes.ts and in emitter.ts — each spelling
+ * `getelementptr i8 ... -16` and `store i32 0` for a 32-byte header whose
+ * `color` was a uint32 at header+16. When the header became 16 bytes with a
+ * BYTE `color` at header+8, the C lane recompiled correctly and the LLVM
+ * lane wrote a 4-byte zero over color, buffered, blk and pad: it cleared
+ * the pool size class and the buffered flag on every retain, and the first
+ * program to collect a cycle segfaulted. Three copies is why it was three
+ * bugs; there is one now.
+ *
+ * `color` is at `ScrCycHdr` offset 8 of 16 (asserted in C by
+ * `offsetof`), and the object pointer is header + sizeof(ScrCycHdr), so
+ * the store is one BYTE at obj-8. */
+export const CYC_COLOR_OFF_FROM_OBJ = -8;
+export function cycMarkLiveIr(reg: string): string[] {
+  return [
+    `  %colorp = getelementptr i8, ptr ${reg}, i64 ${CYC_COLOR_OFF_FROM_OBJ}`,
+    `  store i8 0, ptr %colorp ; mark live (ScrCycHdr.color, scr_runtime.h)`,
+  ];
+}
+
+/** The immortal-skip + mark-live retain body shared by every shape. */
 function retainBody(fnName: string, traced: boolean): string[] {
   return [
     `define internal ptr @${fnName}(ptr %o) ${FN_ATTRS} {`,
@@ -646,9 +670,7 @@ function retainBody(fnName: string, traced: boolean): string[] {
     `inc:`,
     `  %n = add i64 %rc, 1`,
     `  store i64 %n, ptr %o`,
-    ...(traced
-      ? [`  %colorp = getelementptr i8, ptr %o, i64 -16`, `  store i32 0, ptr %colorp ; mark live`]
-      : []),
+    ...(traced ? cycMarkLiveIr("%o") : []),
     `  br label %done`,
     `done:`,
     `  ret ptr %o`,

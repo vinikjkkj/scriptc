@@ -372,26 +372,60 @@ static inline bool scr_pool_give(ScrPool *p, void *b, size_t n) {
 #endif
 }
 
+/* The image base, provided by the linker on every PE target. Code lives
+ * within 2 GB of it, so a function pointer fits in 32 bits as an offset
+ * -- which is what lets this header be 16 bytes instead of 32. */
+extern char __ImageBase[];
+
 typedef struct ScrCycHdr {
-  ScrTraceFn trace;
-  ScrCycFreeFn free_fn;
-  uint32_t color;    /* SCR_CYC_* */
-  uint32_t buffered; /* 1 = sitting in the candidate-root buffer */
-  /* Position in the candidate-root buffer (O(1) removal when rc hits 0).
-   * uint32 rather than size_t so the block class below fits WITHOUT
-   * growing the header: it stays exactly 32 bytes, which matters
-   * because every cycle-headered object in a compiled program carries
-   * one. The buffer holds candidate roots, not objects, and 4 billion
-   * of them is not a limit any program reaches. */
-  uint32_t buf_index;
+  /* The trace and teardown functions, as offsets from __ImageBase
+   * rather than as pointers. EVERY cycle-headered object carries this
+   * header, and on zapo that is the single largest term in the heap:
+   * two 8-byte function pointers were 16 of the 32 header bytes and 16
+   * of the 104 physical bytes of a ScrDyn. Storing them as RVAs is a
+   * runtime-only change -- scr_cyc_alloc keeps taking real function
+   * pointers, so none of the 1,451 call sites (1,434 of them in the
+   * emitted TU) moves. */
+  uint32_t trace_off;
+  uint32_t free_off;
+  /* color, buffered and blk were a uint32 each and needed 2, 1 and 6
+   * bits. They are bytes now, which keeps the single-byte store in
+   * scr_cyc_mark_live -- the inlined retain writes color on every
+   * retain in the program, so it must not become a read-modify-write. */
+  uint8_t color;    /* SCR_CYC_* */
+  uint8_t buffered; /* 1 = sitting in the candidate-root buffer */
   /* The block's physical size in SCR_POOL_GRAIN units, stamped by
    * scr_cyc_alloc so scr_cyc_free can hand the block back to the right
-   * pool class without every one of the ~16 object teardowns having to
-   * pass its own size down. 0 = not pooled, free it. */
-  uint32_t blk;
+   * pool class. SCR_POOL_MAX / SCR_POOL_GRAIN is 32, so a byte holds it
+   * with room. 0 = not pooled, free it. */
+  uint8_t blk;
+  uint8_t pad;
+  /* Position in the candidate-root buffer (O(1) removal when rc hits 0).
+   * uint32 rather than size_t: the header is EXACTLY 16 bytes and
+   * every cycle-headered object in a compiled program carries one, so
+   * a word here is tens of thousands of words of heap on zapo. The
+   * buffer holds candidate roots, not objects, and 4 billion of them
+   * is not a limit any program reaches.
+   *
+   * 16 also keeps the OBJECT pointer 16-byte aligned behind a
+   * 16-byte aligned block, which 24 would not -- that is why the two
+   * function pointers became RVAs rather than the flags simply being
+   * packed into one word. */
+  uint32_t buf_index;
 } ScrCycHdr;
 
 static inline ScrCycHdr *scr_cyc_hdr(void *obj) { return (ScrCycHdr *)obj - 1; }
+
+/* The header stores RVAs; these three are the only places that convert. */
+static inline uint32_t scr_cyc_off(const void *fn) {
+  return (uint32_t)((const char *)fn - __ImageBase);
+}
+static inline ScrTraceFn scr_cyc_trace_of(const ScrCycHdr *h) {
+  return (ScrTraceFn)(void *)(__ImageBase + h->trace_off);
+}
+static inline ScrCycFreeFn scr_cyc_free_of(const ScrCycHdr *h) {
+  return (ScrCycFreeFn)(void *)(__ImageBase + h->free_off);
+}
 
 /* Zeroed allocation with a cycle header in front; returns the OBJECT
  * pointer (header at scr_cyc_hdr). Aborts on OOM. */
