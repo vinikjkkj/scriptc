@@ -10,7 +10,7 @@
  * copy, the linker keeps exactly one, and the counters are single
  * instances.
  *
- * Two independent instruments, each behind its own -D:
+ * Three independent instruments, each behind its own -D:
  *
  *   -DSCR_PROF_ALLOC  interposes malloc/calloc/realloc/free. Gives COUNTS
  *                     AND BYTES per source site, which the runtime has
@@ -24,6 +24,13 @@
  *   -DSCR_PROF_CPU    -finstrument-functions hooks: EXACT per-function
  *                     call counts, not samples. Verified working under
  *                     zig cc for x86_64-windows-gnu.
+ *
+ *   -DSCR_PROF_LIVE   an add-on to SCR_PROF_ALLOC: a pointer -> (size,
+ *                     owning row) table, so a free is charged back to the
+ *                     site that ALLOCATED it. That is what turns the churn
+ *                     ranking above into a RESIDENCY ranking, and the two
+ *                     are different lists - peak RSS is a residency
+ *                     question and nothing here could answer it before.
  *
  * Both write to the file named by SCR_PROF_OUT at exit, one record per
  * line, with no aggregation done in C that the driver could do better.
@@ -113,6 +120,15 @@ typedef struct {
    * so one parser reads every lane. */
   long long self;
   long long incl;
+  /* LIVE lane only (-DSCR_PROF_LIVE). live = bytes this site has allocated
+   * and not yet had freed; snap = that same figure sampled when the
+   * PROCESS-WIDE live total was at (or within the snapshot band of) its
+   * high-water mark. The two answer different questions and the report
+   * prints both: `live` is what leaked or is still held at exit, `snap` is
+   * what the site was holding at the moment peak RSS was set. Both stay 0
+   * in every other lane. */
+  long long live;
+  long long snap;
 } ScrProfRow;
 
 /* "file:line" as one compile-time literal. Each expansion is its own static
@@ -185,6 +201,49 @@ SCR_PROF_NI SCR_PROF_WEAK ScrProfRow *scr_prof_row(const void *key, const char *
   return NULL;
 }
 
+/* The process's own peak working set, read from the SAME counter the
+ * runtime's process.resourceUsage() reads (scr_lib.c scr_process_rusage
+ * case 2 -> K32GetProcessMemoryInfo PeakWorkingSetSize). It is printed
+ * beside the live-heap peak so the DIFFERENCE - image, stacks, CRT arenas,
+ * allocator slack, and anything allocated inside libc or a vendored
+ * archive - is a visible number rather than a silent omission.
+ *
+ * Type and function names are deliberately NOT scr_lib.c's: this header is
+ * -include'd INTO scr_lib.c, so a shared typedef name would be a
+ * redefinition. Resolved through GetProcAddress for the same reason as
+ * there: no <psapi.h>, no extra -l on the emitted link line. */
+#ifdef _WIN32
+typedef struct {
+  DWORD cb;
+  DWORD PageFaultCount;
+  SIZE_T PeakWorkingSetSize;
+  SIZE_T WorkingSetSize;
+  SIZE_T QuotaPeakPagedPoolUsage;
+  SIZE_T QuotaPagedPoolUsage;
+  SIZE_T QuotaPeakNonPagedPoolUsage;
+  SIZE_T QuotaNonPagedPoolUsage;
+  SIZE_T PagefileUsage;
+  SIZE_T PeakPagefileUsage;
+} ScrProfWinMem;
+typedef BOOL(WINAPI *ScrProfGetMemFn)(HANDLE, ScrProfWinMem *, DWORD);
+#endif
+
+SCR_PROF_NI SCR_PROF_WEAK long long scr_prof_peak_rss(void) {
+#ifdef _WIN32
+  HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
+  ScrProfGetMemFn fn =
+      k32 ? (ScrProfGetMemFn)(void *)GetProcAddress(k32, "K32GetProcessMemoryInfo") : NULL;
+  if (fn == NULL) return 0;
+  ScrProfWinMem m;
+  for (unsigned i = 0; i < sizeof m; i++) ((unsigned char *)&m)[i] = 0;
+  m.cb = (DWORD)sizeof m;
+  if (!fn(GetCurrentProcess(), &m, (DWORD)sizeof m)) return 0;
+  return (long long)m.PeakWorkingSetSize;
+#else
+  return 0;
+#endif
+}
+
 SCR_PROF_NI SCR_PROF_WEAK size_t scr_prof_base(void) {
 #ifdef _WIN32
   static size_t b = 0;
@@ -195,7 +254,193 @@ SCR_PROF_NI SCR_PROF_WEAK size_t scr_prof_base(void) {
 #endif
 }
 
+/* ---- the RESIDENCY lane (-DSCR_PROF_LIVE, an add-on to -DSCR_PROF_ALLOC)
+ *
+ * WHY IT EXISTS. The allocation lane above answers "who allocates", which
+ * is CHURN. It cannot answer "who is holding the memory", and the two are
+ * not the same population - measured on the messaging bench before this
+ * lane was written: scr_string.c:117 is 100.0% of allocations by count and
+ * 74.1% of bytes ever allocated, while 36 allocations at two lines of
+ * scr_map.c hold 83 MB that is never freed. A churn ranking puts the
+ * strings first and the map nowhere; a residency ranking is the reverse.
+ * Peak RSS is a residency question, so it needs a residency instrument.
+ *
+ * WHY IT COULD NOT BE DERIVED FROM THE EXISTING ROWS. free() is handed a
+ * pointer, not a size and not the site that allocated it, so the alloc
+ * lane's `freed` column counts frees AT THE FREEING SITE - which is a
+ * different line from the allocating one (scr_string.c:117 allocates
+ * 3,462,773 times and frees 0; scr_string.c:199 allocates 0 and frees
+ * 3,462,427). Subtracting one column from the other is meaningless. This
+ * lane keeps a pointer -> (size, owning row) table so a free is charged
+ * back to the site that made the allocation.
+ *
+ * WHAT IT IS NOT. Live heap bytes are not RSS. RSS additionally holds the
+ * image, the stacks, the C runtime's own arenas and any allocator slack
+ * between a request and the page it lands on, and this lane sees NONE of
+ * them - it sees exactly the bytes scriptc sources asked for. The report
+ * prints the process peak-RSS counter beside the live-heap peak so the
+ * unattributed remainder is a number rather than an omission.
+ *
+ * THE TABLE IS FIXED SIZE, like everything else here, because this code
+ * sits under the allocator and must not allocate. A full table increments
+ * scr_prof_ptr_lost and a free of a pointer the table never saw increments
+ * scr_prof_free_unknown; both are printed, so an overflow can never read
+ * as a small number.
+ *
+ * SINGLE-THREADED, exactly like the tables above it. */
+#ifdef SCR_PROF_LIVE
+#ifndef SCR_PROF_ALLOC
+#error "SCR_PROF_LIVE is an add-on to SCR_PROF_ALLOC and needs it defined"
+#endif
+
+/* 2^21 slots x 24 bytes = 50 MB of BSS. Zero pages until touched, and the
+ * count is a hard ceiling on SIMULTANEOUSLY LIVE allocations, not on the
+ * number made: the bench frees 3,462,427 of 3,462,773 and never holds more
+ * than a few hundred at once. */
+#ifndef SCR_PROF_PSLOTS
+#define SCR_PROF_PSLOTS (1u << 21)
+#endif
+
+typedef struct {
+  const void *p; /* NULL = empty. There are no tombstones - see below. */
+  size_t n;
+  ScrProfRow *row;
+} ScrProfPtr;
+
+SCR_PROF_WEAK ScrProfPtr scr_prof_ptbl[SCR_PROF_PSLOTS];
+
+/* NOT scr_prof_hash: that one folds its result with (SCR_PROF_SLOTS - 1),
+ * i.e. into 65,536 buckets, because the row table is that size. Reusing it
+ * here confined every pointer to the first 65,536 slots of a 2,097,152-slot
+ * table, so 207,979 simultaneously-live pointers formed one linear-probe
+ * cluster and the lane ran 191x slower than the plain alloc lane on
+ * identical fixed work. That is the whole reason this second hash exists,
+ * written down because the symptom (a slow profiler) looks nothing like
+ * the cause (a mask from the wrong table). */
+SCR_PROF_NI SCR_PROF_WEAK unsigned scr_prof_phash(const void *p) {
+  unsigned long long x = (unsigned long long)(size_t)p;
+  x ^= x >> 33;
+  x *= 0xff51afd7ed558ccdULL;
+  x ^= x >> 29;
+  x *= 0xc4ceb9fe1a85ec53ULL;
+  x ^= x >> 32;
+  return (unsigned)(x & (SCR_PROF_PSLOTS - 1u));
+}
+SCR_PROF_WEAK long long scr_prof_live;
+SCR_PROF_WEAK long long scr_prof_live_peak;
+SCR_PROF_WEAK long long scr_prof_live_snap_at;
+SCR_PROF_WEAK long long scr_prof_ptr_lost;
+SCR_PROF_WEAK long long scr_prof_free_unknown;
+SCR_PROF_WEAK long long scr_prof_snaps;
+SCR_PROF_WEAK long long scr_prof_ptr_live;
+SCR_PROF_WEAK long long scr_prof_ptr_live_peak;
+
+/* A snapshot walks all 65,536 rows, so it must not run on every byte the
+ * peak grows by. It runs when the live total exceeds the last snapshot by
+ * more than 1% or 64 KiB, whichever is larger - so the recorded snapshot
+ * is within that band of the true peak, and the band is printed. The peak
+ * ITSELF is exact and unconditional; only the per-site breakdown is
+ * sampled this way. */
+#ifndef SCR_PROF_SNAP_PCT
+#define SCR_PROF_SNAP_PCT 100 /* 1/100 = 1% */
+#endif
+#ifndef SCR_PROF_SNAP_MIN
+#define SCR_PROF_SNAP_MIN 65536
+#endif
+
+SCR_PROF_NI SCR_PROF_WEAK void scr_prof_snapshot(void) {
+  scr_prof_snaps++;
+  scr_prof_live_snap_at = scr_prof_live;
+  for (unsigned i = 0; i < SCR_PROF_SLOTS; i++) scr_prof_tbl[i].snap = scr_prof_tbl[i].live;
+}
+
+SCR_PROF_NI SCR_PROF_WEAK void scr_prof_live_add(const void *p, size_t n, ScrProfRow *row) {
+  if (p == NULL) return;
+  unsigned h = scr_prof_phash(p);
+  for (unsigned i = 0; i < SCR_PROF_PSLOTS; i++) {
+    unsigned j = (h + i) & (SCR_PROF_PSLOTS - 1u);
+    if (scr_prof_ptbl[j].p == NULL) {
+      scr_prof_ptbl[j].p = p;
+      scr_prof_ptbl[j].n = n;
+      scr_prof_ptbl[j].row = row;
+      scr_prof_live += (long long)n;
+      if (row) row->live += (long long)n;
+      scr_prof_ptr_live++;
+      if (scr_prof_ptr_live > scr_prof_ptr_live_peak) scr_prof_ptr_live_peak = scr_prof_ptr_live;
+      if (scr_prof_live > scr_prof_live_peak) scr_prof_live_peak = scr_prof_live;
+      {
+        long long band = scr_prof_live_snap_at / SCR_PROF_SNAP_PCT;
+        if (band < SCR_PROF_SNAP_MIN) band = SCR_PROF_SNAP_MIN;
+        if (scr_prof_live > scr_prof_live_snap_at + band) scr_prof_snapshot();
+      }
+      return;
+    }
+  }
+  scr_prof_ptr_lost++;
+}
+
+/* Removes p and charges the bytes back to the row that ALLOCATED it.
+ *
+ * DELETION IS BACKWARD-SHIFT, NOT A TOMBSTONE, and the reason is a
+ * measurement rather than a preference. The first version of this lane
+ * marked a freed slot with a tombstone that a later insert could reuse.
+ * That is textbook and it was 191x SLOWER than the plain alloc lane on the
+ * messaging bench (137.81 s against 0.72 s for identical fixed work) -
+ * because a workload that frees almost everything it allocates turns every
+ * slot it has ever touched into a non-empty one, and a linear probe that
+ * stops only at an EMPTY slot then walks a chain that grows without bound.
+ * 1.5 million allocations into a 2-million-slot table was already enough.
+ *
+ * Backward-shift keeps the invariant that no probe chain contains a gap,
+ * so a lookup still stops at the first empty slot and the table degrades
+ * only with real occupancy. An element may only be moved into the hole if
+ * its ideal slot is NOT cyclically inside (hole, here]. */
+SCR_PROF_NI SCR_PROF_WEAK void scr_prof_live_del(const void *p) {
+  if (p == NULL) return;
+  unsigned mask = SCR_PROF_PSLOTS - 1u;
+  unsigned h = scr_prof_phash(p);
+  unsigned hole = 0;
+  int found = 0;
+  for (unsigned i = 0; i < SCR_PROF_PSLOTS; i++) {
+    unsigned j = (h + i) & mask;
+    if (scr_prof_ptbl[j].p == NULL) break; /* never inserted */
+    if (scr_prof_ptbl[j].p == p) {
+      scr_prof_live -= (long long)scr_prof_ptbl[j].n;
+      if (scr_prof_ptbl[j].row) scr_prof_ptbl[j].row->live -= (long long)scr_prof_ptbl[j].n;
+      scr_prof_ptr_live--;
+      hole = j;
+      found = 1;
+      break;
+    }
+  }
+  if (!found) {
+    scr_prof_free_unknown++;
+    return;
+  }
+  scr_prof_ptbl[hole].p = NULL;
+  scr_prof_ptbl[hole].n = 0;
+  scr_prof_ptbl[hole].row = NULL;
+  for (unsigned k = (hole + 1u) & mask; scr_prof_ptbl[k].p != NULL; k = (k + 1u) & mask) {
+    unsigned ideal = scr_prof_phash(scr_prof_ptbl[k].p);
+    /* cyclically in (hole, k] means it cannot move up to the hole */
+    int blocked = (hole <= k) ? (ideal > hole && ideal <= k) : (ideal > hole || ideal <= k);
+    if (blocked) continue;
+    scr_prof_ptbl[hole] = scr_prof_ptbl[k];
+    scr_prof_ptbl[k].p = NULL;
+    scr_prof_ptbl[k].n = 0;
+    scr_prof_ptbl[k].row = NULL;
+    hole = k;
+  }
+}
+#endif /* SCR_PROF_LIVE */
+
+SCR_PROF_WEAK int scr_prof_reported;
+
 SCR_PROF_NI SCR_PROF_WEAK void scr_prof_report(void) {
+  /* Two producers now reach this (atexit and the _Exit interposer below),
+   * and a second report would truncate the first. */
+  if (scr_prof_reported) return;
+  scr_prof_reported = 1;
   const char *path = getenv("SCR_PROF_OUT");
   FILE *f = fopen(path && *path ? path : "scr-prof.txt", "w");
   if (!f) return;
@@ -226,6 +471,40 @@ SCR_PROF_NI SCR_PROF_WEAK void scr_prof_report(void) {
   fprintf(f, "PROF-TOTAL rows=%lld count=%lld bytes=%lld freed=%lld lost=%lld cycles=%lld framesLost=%lld resyncs=%lld\n",
           rows, tc, tb, tf, scr_prof_lost,
           scr_prof_t1 - scr_prof_t0, scr_prof_frames_lost, scr_prof_resyncs);
+#ifdef SCR_PROF_LIVE
+  /* A SEPARATE record type, not extra columns on PROF: every reader of the
+   * three existing schemas keeps working, because "PROFLIVE " does not
+   * start with "PROF ". snap = the site's live bytes when the process-wide
+   * live total was last sampled at its high-water mark; live = its live
+   * bytes at exit. */
+  {
+    long long lrows = 0;
+    for (unsigned i = 0; i < SCR_PROF_SLOTS; i++) {
+      ScrProfRow *r = &scr_prof_tbl[i];
+      if (r->key == NULL || (r->snap == 0 && r->live == 0)) continue;
+      lrows++;
+      fprintf(f, "PROFLIVE %lld %lld %llx %s\n", r->snap, r->live,
+              (unsigned long long)((size_t)r->key - base), r->name ? r->name : "?");
+    }
+    fprintf(f,
+            "PROF-LIVE-TOTAL rows=%lld livePeak=%lld liveSnapAt=%lld liveNow=%lld "
+            "ptrLost=%lld freeUnknown=%lld snaps=%lld ptrLivePeak=%lld pslots=%u peakRSSbytes=%lld "
+            "profTableBytes=%lld\n",
+            lrows, scr_prof_live_peak, scr_prof_live_snap_at, scr_prof_live,
+            scr_prof_ptr_lost, scr_prof_free_unknown, scr_prof_snaps,
+            scr_prof_ptr_live_peak, (unsigned)SCR_PROF_PSLOTS, scr_prof_peak_rss(),
+            /* THE INSTRUMENT'S OWN FOOTPRINT. Both tables are BSS, so only
+             * the pages actually touched become resident and this is an
+             * UPPER bound - but peakRSSbytes above is the INSTRUMENTED
+             * process's, and without this number a reader would subtract
+             * the live-heap peak from it and call the remainder the
+             * program's unattributed memory. It is not: some of it is
+             * this profiler. The clean-run peak RSS is the denominator to
+             * quote, and it has to be measured on an uninstrumented
+             * build. */
+            (long long)(sizeof scr_prof_tbl + sizeof scr_prof_ptbl));
+  }
+#endif
   fclose(f);
 }
 
@@ -235,6 +514,29 @@ SCR_PROF_NI SCR_PROF_WEAK void scr_prof_install(void) {
   scr_prof_t0 = scr_prof_tsc();
   atexit(scr_prof_report);
 }
+
+/* ---- the _Exit blind spot ------------------------------------------
+ * atexit ALONE cannot profile the program this compiler exists for.
+ * process.exit() lowers to scr_lib.c's scr_process_exit, which ends in
+ * _Exit "on purpose: no further code runs (matching Node)". _Exit skips
+ * every atexit handler, so on any entry that calls process.exit() the
+ * report above is never written and the run produces an EMPTY profile -
+ * which reads as "the instrument did not work", not as "the program did
+ * not report". zapo's entry ends in process.exit(0), so every lane in this
+ * header was unusable on the actual target until this interposer existed.
+ * Five _Exit call sites in the runtime are covered by it: scr_lib.c:1185
+ * (process.exit), scr_abort.c, scr_tls.c, scr_console.c and scr_child.c.
+ *
+ * A function-like macro does not re-expand its own name, so the inner
+ * _Exit is the real one and no recursion is possible. It must come AFTER
+ * scr_prof_report's definition and after <stdlib.h>, both of which are
+ * above.
+ *
+ * CAVEAT, stated rather than hidden: a child process that inherits
+ * SCR_PROF_OUT and exits through _Exit will write to the SAME path and
+ * overwrite the parent's profile. Point SCR_PROF_OUT at a per-run file and
+ * check the totals line survived. */
+#define _Exit(c) (scr_prof_report(), _Exit(c))
 
 /* ---- the allocation lane ------------------------------------------- */
 #ifdef SCR_PROF_ALLOC
@@ -247,6 +549,9 @@ SCR_PROF_NI SCR_PROF_WEAK void *scr_prof_malloc(size_t n, const char *site) {
     r->count++;
     r->bytes += (long long)n;
   }
+#ifdef SCR_PROF_LIVE
+  scr_prof_live_add(p, n, r);
+#endif
   return p;
 }
 
@@ -258,17 +563,30 @@ SCR_PROF_NI SCR_PROF_WEAK void *scr_prof_calloc(size_t a, size_t b, const char *
     r->count++;
     r->bytes += (long long)(a * b);
   }
+#ifdef SCR_PROF_LIVE
+  scr_prof_live_add(p, a * b, r);
+#endif
   return p;
 }
 
 SCR_PROF_NI SCR_PROF_WEAK void *scr_prof_realloc(void *q, size_t n, const char *site) {
   scr_prof_install();
+#ifdef SCR_PROF_LIVE
+  /* The old block is retired BEFORE the call: realloc may return the same
+   * address, and re-inserting a pointer already in the table would double
+   * count it. A grow-in-place therefore reads as one delete and one add,
+   * which is what the site's live bytes should record. */
+  scr_prof_live_del(q);
+#endif
   void *p = realloc(q, n);
   ScrProfRow *r = scr_prof_row((const void *)site, site);
   if (r) {
     r->count++;
     r->bytes += (long long)n;
   }
+#ifdef SCR_PROF_LIVE
+  scr_prof_live_add(p, n, r);
+#endif
   return p;
 }
 
@@ -277,6 +595,12 @@ SCR_PROF_NI SCR_PROF_WEAK void scr_prof_free(void *p, const char *site) {
     ScrProfRow *r = scr_prof_row((const void *)site, site);
     if (r) r->freed++;
   }
+#ifdef SCR_PROF_LIVE
+  /* Charged back to the ALLOCATING row, which is why this lane exists:
+   * `site` here is the FREEING line and is a different line in every hot
+   * case measured so far. */
+  scr_prof_live_del(p);
+#endif
   free(p);
 }
 
@@ -317,6 +641,43 @@ __attribute__((constructor)) SCR_PROF_NI SCR_PROF_WEAK void scr_prof_arm_ctor(vo
   if (scr_prof_armed) return;
   scr_prof_armed = 1;
   scr_prof_arm();
+}
+#endif
+
+/* ---- arming the RESIDENCY lane --------------------------------------
+ * -DSCR_PROF_LIVE_ARM=N plants N allocations of 4096 bytes at ONE known
+ * line and then frees exactly half of them at a DIFFERENT known line. The
+ * lane is only believable if all four of these hold:
+ *
+ *   POSITIVE  the allocating line reports count = N, bytes = N*4096
+ *   POSITIVE  the allocating line reports live  = (N - N/2)*4096, i.e. the
+ *             frees were charged BACK to it and not to the freeing line
+ *   NEGATIVE  the FREEING line reports live = 0 and bytes = 0. This is the
+ *             control that must fire: it is exactly the mistake the lane
+ *             exists to avoid, and the alloc lane's own `freed` column
+ *             makes it - it charges the free to the freeing site.
+ *   NEGATIVE  livePeak >= N*4096 while liveNow is half of it, so a lane
+ *             that reported the same number for both would be caught.
+ *
+ * It uses the ordinary macro path, so it tests the instrument and not a
+ * private back door, and it runs from a constructor with the same
+ * run-once guard the other arms need (a constructor is emitted per TU). */
+#ifdef SCR_PROF_LIVE_ARM
+#ifndef SCR_PROF_LIVE
+#error "SCR_PROF_LIVE_ARM needs -DSCR_PROF_LIVE"
+#endif
+SCR_PROF_WEAK void *scr_prof_live_arm_keep[64];
+SCR_PROF_WEAK int scr_prof_live_armed;
+SCR_PROF_NI SCR_PROF_WEAK void scr_prof_live_arm(void) {
+  long n = (long)(SCR_PROF_LIVE_ARM);
+  if (n > 64) n = 64;
+  for (long i = 0; i < n; i++) scr_prof_live_arm_keep[i] = malloc(4096); /* ALLOC LINE */
+  for (long i = 0; i < n / 2; i++) free(scr_prof_live_arm_keep[i]);      /* FREE LINE */
+}
+__attribute__((constructor)) SCR_PROF_NI SCR_PROF_WEAK void scr_prof_live_arm_ctor(void) {
+  if (scr_prof_live_armed) return;
+  scr_prof_live_armed = 1;
+  scr_prof_live_arm();
 }
 #endif
 

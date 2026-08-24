@@ -80,6 +80,7 @@ if (has('cpu')) LANES.push('cpu')
 if (has('cputime')) LANES.push('cputime')
 if (has('edges')) LANES.push('edges')
 if (has('alloc')) LANES.push('alloc')
+if (has('live')) LANES.push('live')
 if (LANES.length === 0) LANES.push('alloc')
 
 // A prebuilt binary (zapo's) can be profiled instead of a bench, but only if
@@ -102,10 +103,13 @@ export function profFlagsFor(lane) {
     '-include', PROF_H,
     // cputime is the cpu lane with the shadow stack turned on: same
     // exact counts, plus self and inclusive CYCLES per function.
-    ...(lane === 'alloc' ? ['-DSCR_PROF_ALLOC'] : ['-DSCR_PROF_CPU']),
+    ...(lane === 'alloc' || lane === 'live' ? ['-DSCR_PROF_ALLOC'] : ['-DSCR_PROF_CPU']),
+    // `live` is the alloc lane plus the pointer->(size, owning row) table
+    // that lets a free be charged back to the site that ALLOCATED it.
+    ...(lane === 'live' ? ['-DSCR_PROF_LIVE'] : []),
     ...(lane === 'cputime' ? ['-DSCR_PROF_CPU_TIME'] : []),
     ...(lane === 'edges' ? ['-DSCR_PROF_EDGES'] : []),
-    ...(lane === 'alloc' ? [] : ['-finstrument-functions']),
+    ...(lane === 'alloc' || lane === 'live' ? [] : ['-finstrument-functions']),
     ...(EXTRA ? EXTRA.split(new RegExp(String.fromCharCode(92)+"s+")).filter(Boolean) : [])
   ].join(' ')
 }
@@ -172,12 +176,27 @@ function runProfiled(exe, lane, cwd) {
 
 function parseProf(file) {
   const rows = []
+  // The residency lane emits its own record type rather than extra columns
+  // on PROF, so every reader of the three earlier schemas keeps working.
+  const liveRows = []
+  let liveTotal = null
   let kind = null
   let total = null
   for (const line of readFileSync(file, 'utf8').split(NL)) {
     const s = line.replace(/\r$/, '')
     if (s.startsWith('PROF-KIND ')) {
       kind = s.slice(10).trim()
+    } else if (s.startsWith('PROFLIVE ')) {
+      // PROFLIVE <snapBytes> <liveNowBytes> <rva> <name>
+      const m = /^PROFLIVE (-?\d+) (-?\d+) ([0-9a-f]+) (.*)$/.exec(s)
+      if (m) liveRows.push({ snap: Number(m[1]), live: Number(m[2]), rva: m[3], name: m[4] === '?' ? null : m[4] })
+    } else if (s.startsWith('PROF-LIVE-TOTAL ')) {
+      liveTotal = Object.fromEntries(
+        s.slice(16).trim().split(/\s+/).map((kv) => {
+          const p = kv.split('=')
+          return [p[0], Number(p[1])]
+        })
+      )
     } else if (s.startsWith('PROF-TOTAL ')) {
       total = Object.fromEntries(
         s.slice(11).trim().split(/\s+/).map((kv) => {
@@ -215,7 +234,7 @@ function parseProf(file) {
       })
     }
   }
-  return { kind, rows, total }
+  return { kind, rows, total, liveRows, liveTotal }
 }
 
 const fmt = (n) => Number(n).toLocaleString('en-US')
@@ -249,7 +268,7 @@ function main() {
     // A row that lands in a gap between symbols is marked INEXACT
     // rather than being given the preceding name outright.
     let symStat = null
-    if (lane !== 'alloc' && !NOSYM) {
+    if (lane !== 'alloc' && lane !== 'live' && !NOSYM) {
       const pdb = String(exe).replace(/[.]exe$/i, '.pdb')
       if (existsSync(pdb)) {
         try {
@@ -301,10 +320,10 @@ function main() {
       bySym.set(key, a)
     }
     const agg = [...bySym.values()].sort((a, b) =>
-      lane === 'alloc' ? b.bytes - a.bytes : lane === 'cputime' ? b.self - a.self : b.count - a.count)
+      lane === 'alloc' || lane === 'live' ? b.bytes - a.bytes : lane === 'cputime' ? b.self - a.self : b.count - a.count)
 
     console.log('')
-    if (lane === 'alloc') {
+    if (lane === 'alloc' || lane === 'live') {
       const tb = (prof.total && prof.total.bytes) || 0
       const tc = (prof.total && prof.total.count) || 0
       const tf = (prof.total && prof.total.freed) || 0
@@ -335,6 +354,55 @@ function main() {
           (tc ? ((a.count / tc) * 100).toFixed(1) : '0').padStart(8) + '  ' + a.symbol)
       }
       if (tc) console.log('  top ' + Math.min(TOP, byCount.length) + ' sites = ' + ((cc / tc) * 100).toFixed(1) + '% of allocations')
+
+      // ---- RESIDENCY -------------------------------------------------
+      // The table above is CHURN: who allocates. This one is who is still
+      // HOLDING, which is the population peak RSS is made of, and the two
+      // rankings are not the same list.
+      if (lane === 'live') {
+        const lt = prof.liveTotal || {}
+        const lrows = prof.liveRows || []
+        const peak = lt.livePeak || 0
+        const snapAt = lt.liveSnapAt || 0
+        const rss = lt.peakRSSbytes || 0
+        console.log('')
+        console.log('  RESIDENCY - live heap bytes, charged back to the ALLOCATING site')
+        console.log('  live-heap peak ' + fmt(peak) + ' B (' + (peak / 1048576).toFixed(1) + ' MiB)' +
+          '   process peak RSS ' + fmt(rss) + ' B (' + (rss / 1048576).toFixed(1) + ' MiB)')
+        if (rss) {
+          console.log('  UNATTRIBUTED ' + fmt(rss - peak) + ' B (' + (((rss - peak) / rss) * 100).toFixed(1) +
+            '% of peak RSS): the image, thread stacks, CRT arenas, allocator slack,')
+          console.log('  and every allocation made inside libc or a vendored archive. This lane sees')
+          console.log('  ONLY the bytes scriptc sources asked for, and never claims otherwise.')
+          console.log('  THAT peak RSS IS THE INSTRUMENTED PROCESS. This profiler owns ' +
+            fmt(lt.profTableBytes || 0) + ' B of BSS tables (upper bound; only touched pages')
+          console.log('  become resident), so quote a CLEAN uninstrumented run for peak RSS and use')
+          console.log('  this lane only for the SHAPE of the live heap.')
+        }
+        console.log('  per-site column is sampled at live=' + fmt(snapAt) + ' B, ' +
+          (peak ? (((peak - snapAt) / peak) * 100).toFixed(2) : '0') + '% below the exact peak (' +
+          fmt(lt.snaps || 0) + ' snapshots)')
+        console.log('  health: ptrLost=' + fmt(lt.ptrLost || 0) + ' freeUnknown=' + fmt(lt.freeUnknown || 0) +
+          ' ptrLivePeak=' + fmt(lt.ptrLivePeak || 0) + ' of ' + fmt(lt.pslots || 0) + ' slots')
+        if (lt.ptrLost) console.log('  WARNING: the pointer table overflowed - every residency figure is a FLOOR')
+        const byPeak = [...lrows].sort((a, b) => b.snap - a.snap)
+        console.log('  ' + 'atPeak B'.padStart(15) + 'MiB'.padStart(9) + '%peak'.padStart(8) +
+          '%RSS'.padStart(7) + 'atExit B'.padStart(15) + '  site')
+        let cum = 0
+        for (const a of byPeak.slice(0, TOP)) {
+          if (a.snap === 0 && a.live === 0) continue
+          cum += a.snap
+          console.log('  ' + fmt(a.snap).padStart(15) + (a.snap / 1048576).toFixed(1).padStart(9) +
+            (peak ? ((a.snap / peak) * 100).toFixed(1) : '0').padStart(8) +
+            (rss ? ((a.snap / rss) * 100).toFixed(1) : '0').padStart(7) +
+            fmt(a.live).padStart(15) + '  ' + (a.name || '<' + a.rva + '>'))
+        }
+        if (snapAt) console.log('  top ' + Math.min(TOP, byPeak.length) + ' = ' +
+          ((cum / snapAt) * 100).toFixed(1) + '% of the sampled live heap')
+        report.lanes[lane] = report.lanes[lane] || {}
+        report.lanes[lane].liveTotal = lt
+        report.lanes[lane].liveSites = byPeak.slice(0, 500)
+      }
     } else {
       const tc = (prof.total && prof.total.count) || 0
       const cyc = (prof.total && prof.total.cycles) || 0
@@ -384,6 +452,7 @@ function main() {
     }
     console.log('')
     report.lanes[lane] = {
+      ...(report.lanes[lane] || {}),
       exe,
       symbols: symStat,
       wallMs: run.wallMs,
