@@ -8284,7 +8284,7 @@ void scr_fetch_xfer_fail(ScrFetchXfer *t, const char *code);
 /* The program dropped every handler member without answering. Node lets
  * the promise hang and exits 0; this leaves the registry silently so the
  * RC audit has nothing to count at exit. */
-void scr_fetch_xfer_orphan(ScrFetchXfer *t);
+bool scr_fetch_xfer_orphan(ScrFetchXfer *t);
 /* The two halves of the dispatcher SEAM, filled by scr_fetch_dispatch.c at
  * startup (cc.ts gates that unit on `fetchDispatch`, apart from
  * `fetchStatic`: the delegation drags the whole checked-dynamic object

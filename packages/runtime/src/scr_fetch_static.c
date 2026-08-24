@@ -1603,13 +1603,33 @@ void scr_fetch_xfer_fail(ScrFetchXfer *t, const char *code) {
  * worse in both directions: keeping the transfer would leave an object the
  * RC audit counts at exit and a rejection would be an answer Node never
  * gives. */
-void scr_fetch_xfer_orphan(ScrFetchXfer *t) {
-  if (t == NULL || t->done || t->responded) return;
+bool scr_fetch_xfer_orphan(ScrFetchXfer *t) {
+  if (t == NULL || t->done || t->responded) return false;
+  /* A SIGNAL IS A SECOND WAY TO ANSWER, and forgetting that turned this
+   * function from a leak fix into a hang.
+   *
+   * "The program dropped every handler member" is only "nobody can
+   * answer" when the handler was the ONLY channel. A transfer with an
+   * un-aborted signal attached can still be settled -- by the abort --
+   * and the oracle settles it there too: a dispatcher that drops the
+   * handler and never answers still gives the AbortError when the signal
+   * fires, measured. Orphaning here instead removed the abort listener
+   * (fs_settle does) and the fetch then never settled at all: the
+   * differential's `abort` cell stopped running, on both lanes, and the
+   * RC fixture stopped at the cell before it.
+   *
+   * So a live signal keeps the transfer. If the program drops its
+   * controller as well the transfer does outlive the request -- which is
+   * what Node does too, since its promise never settles either. */
+  if (t->signal != NULL && fs_signal_aborted != NULL && !fs_signal_aborted(t->signal)) {
+    return false;
+  }
   if (t->promise != NULL) {
     scr_promise_release(t->promise);
     t->promise = NULL;
   }
   fs_settle(t);
+  return true;
 }
 
 /* The signal fired on a hop with no client. The dispatcher unit's own
