@@ -59,7 +59,7 @@
  *   node tests/perf/platform-divergence.mjs --only scr_object.c --show scr_str_retain
  */
 import { spawnSync } from 'node:child_process'
-import { readdirSync, existsSync, writeFileSync } from 'node:fs'
+import { readdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -134,7 +134,7 @@ const norm = (p) => String(p).replace(/\\/g, '/').toLowerCase()
  *  compiled from the same tree for both targets. */
 function isProjectFile(file, tuPath) {
   const f = norm(file)
-  if (tuPath && f === norm(tuPath)) return true
+  if (tuPath && String(tuPath).split(',').some((t) => norm(t.trim()) === f)) return true
   if (f.includes('/packages/runtime/')) return true
   return false
 }
@@ -218,18 +218,39 @@ function functionName(headRaw) {
 /** T0: whitespace only. A reformat is not a divergence; anything else is. */
 const t0 = (b) => b.replace(/\s+/g, ' ').trim()
 
-/** T1: T0 plus integer literals reduced to their VALUE. mingw spells SIZE_MAX
- *  `0xffffffffffffffffULL`, glibc `(18446744073709551615UL)`; the emitted
- *  instruction is the same either way, and calling that a divergence would
- *  have inflated the headline number by a third. Suffixes and hex are
- *  canonicalised; `(<literal>)` loses its redundant parens. */
+/** C tokens, coarsely: strings, char literals, identifiers, numbers, and any
+ *  other single non-space character. Both whitespace AND its placement stop
+ *  mattering, which T1 needs: with NDEBUG, mingw's assert() is `((void)0)`
+ *  and glibc's is `((void) (0))`, the same nothing spelled two ways. */
+const TOKEN = /("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[A-Za-z_][A-Za-z0-9_]*|0[xX][0-9a-fA-F]+[uUlL]*|\d+(?:\.\d*)?(?:[eE][+-]?\d+)?[uUlLfF]*|\.\d+(?:[eE][+-]?\d+)?[fFlL]*|\S)/g
+
+/** T1: the same TOKENS, integer literals reduced to their VALUE, redundant
+ *  parens around a literal dropped. mingw spells SIZE_MAX
+ *  `0xffffffffffffffffULL` and glibc `(18446744073709551615UL)`; the emitted
+ *  instruction is the same either way, and calling that a divergence inflated
+ *  the headline by a third when it was first measured. */
 function t1(b) {
-  let s = t0(b)
-  s = s.replace(/\b0[xX]([0-9a-fA-F]+)[uUlL]*\b/g, (_, h) => BigInt('0x' + h).toString(10))
-  s = s.replace(/\b(\d+)[uUlL]+\b/g, (_, d) => d)
-  // strip parens that wrap a bare literal, repeatedly (`((18446744073709551615))`)
-  for (let k = 0; k < 4; k += 1) s = s.replace(/\(\s*(\d+)\s*\)/g, '$1')
-  return s
+  const toks = String(b).match(TOKEN) ?? []
+  const out = toks.map((t) => {
+    let m = /^0[xX]([0-9a-fA-F]+)[uUlL]*$/.exec(t)
+    if (m) return BigInt('0x' + m[1]).toString(10)
+    m = /^(\d+)[uUlL]+$/.exec(t)
+    if (m) return m[1]
+    return t
+  })
+  // strip parens wrapping a bare literal, repeatedly: `( ( 0 ) )` -> `0`
+  for (let pass = 0; pass < 4; pass += 1) {
+    let changed = false
+    for (let i = out.length - 1; i >= 2; i -= 1) {
+      if (out[i] === ')' && out[i - 2] === '(' && /^\d/.test(out[i - 1])) {
+        out.splice(i, 1)
+        out.splice(i - 2, 1)
+        changed = true
+      }
+    }
+    if (!changed) break
+  }
+  return out.join(' ')
 }
 
 /* ── one source, both targets, both define sets ─────────────────────────── */
@@ -271,7 +292,101 @@ function tally(rows, tier) {
   return { fns, lines }
 }
 
+/* ── cost weighting ─────────────────────────────────────────────────────── */
+
+/**
+ * COST-WEIGHTED DIVERGENCE, which is the number that actually decides whether
+ * a Linux profile is worth reading.
+ *
+ * Counting functions weights `scr_child.c`'s 102 spawn helpers the same as
+ * `scr_map.c`'s hash probe, and a messaging run calls the first zero times.
+ * The decisive question is not how many functions diverge but how much of the
+ * MEASURED COST lands on functions that are the same C - so this joins the
+ * per-function verdicts to ab-callgrind.mjs's per-function Ir and reports the
+ * split per scenario.
+ *
+ *   --weight <ab-callgrind json>   --div <a previous --json output>
+ *
+ * The join is by function NAME, because that is all callgrind reports. Names
+ * that appear in more than one origin file are counted once and listed, and
+ * cost that lands on a frame this tool never saw (libc, ld.so, an
+ * unsymbolised address) is reported as UNATTRIBUTED rather than folded into
+ * either side.
+ */
+function weightMain() {
+  const divPath = flag('div', null)
+  const weightPath = flag('weight', null)
+  if (divPath === null) { console.error('--weight needs --div <platform-divergence json>'); process.exit(2) }
+  const div = JSON.parse(readFileSync(divPath, 'utf8'))
+  const cg = JSON.parse(readFileSync(weightPath, 'utf8'))
+  const TIER = flag('tier', 'T2-algorithmic')
+
+  const byName = new Map()
+  const collisions = new Set()
+  for (const f of div.functions) {
+    const prev = byName.get(f.name)
+    if (prev === undefined) byName.set(f.name, f)
+    else if (prev.tiers[TIER] !== f.tiers[TIER]) collisions.add(f.name)
+  }
+
+  const pad = (s, w) => String(s).padEnd(w)
+  const rpad = (s, w) => String(s).padStart(w)
+  const fmt = (n) => Number(n).toLocaleString('en-US')
+  console.log('cost-weighted divergence   tier=' + TIER + '   cost=self Ir from ' + path.basename(weightPath))
+  console.log('bench=' + cg.bench + '   triple=' + cg.triple)
+  if (collisions.size > 0) console.log('name collisions across origin files (verdict differs): ' + [...collisions].join(', '))
+  console.log('')
+  console.log(pad('scenario', 24) + rpad('total Ir', 15) + rpad('same%', 9) + rpad('diverg%', 9) +
+    rpad('winOnly%', 10) + rpad('linOnly%', 10) + rpad('system%', 9) + rpad('unattrib%', 11))
+  const out = []
+  for (const sc of cg.scenarios) {
+    /* SYSTEM is its own bucket and not folded into either side. A frame in
+     * libc/libm/ld is by construction a DIFFERENT implementation on Windows -
+     * glibc's fmod is not msvcrt's - so counting it as "same" would be a lie;
+     * but it is also not scriptc's code, so counting it as divergence would
+     * blame the compiler for a libm call it merely emitted. numeric-modulo
+     * spends 36.8% of its instructions in glibc's fmod, and that fact belongs
+     * in its own column. */
+    const acc = { same: 0, divergent: 0, 'win-only': 0, 'linux-only': 0, system: 0, unattributed: 0 }
+    const unattributedTop = []
+    const systemTop = []
+    for (const r of sc.rows) {
+      const foreign = /\s\[[^\]]+\]$/.test(r.name)
+      if (foreign) { acc.system += r.self; systemTop.push(r); continue }
+      // callgrind names a recursive instance `fn'2`; it is the same function
+      const hit = byName.get(r.name.replace(/'\d+$/, ''))
+      if (hit === undefined) { acc.unattributed += r.self; unattributedTop.push(r); continue }
+      acc[hit.tiers[TIER]] += r.self
+    }
+    const t = sc.total || Object.values(acc).reduce((a, b) => a + b, 0)
+    const p = (x) => (100 * x / t).toFixed(2)
+    console.log(pad(sc.scenario, 24) + rpad(fmt(t), 15) + rpad(p(acc.same), 9) + rpad(p(acc.divergent), 9) +
+      rpad(p(acc['win-only']), 10) + rpad(p(acc['linux-only']), 10) + rpad(p(acc.system), 9) + rpad(p(acc.unattributed), 11))
+    unattributedTop.sort((a, b) => b.self - a.self)
+    systemTop.sort((a, b) => b.self - a.self)
+    out.push({ scenario: sc.scenario, total: t, ...acc,
+      systemTop: systemTop.slice(0, 6).map((r) => ({ name: r.name, self: r.self })),
+      unattributedTop: unattributedTop.slice(0, 8).map((r) => ({ name: r.name, self: r.self })) })
+  }
+  console.log('')
+  console.log('largest SYSTEM frames per scenario (a different C library on each platform):')
+  for (const o of out) {
+    console.log('  ' + pad(o.scenario, 22) + o.systemTop.map((r) => r.name.slice(0, 34) + ' ' + fmt(r.self)).join(' | '))
+  }
+  const anyUnattr = out.filter((o) => o.unattributed > 0)
+  if (anyUnattr.length > 0) {
+    console.log('')
+    console.log('UNATTRIBUTED frames (a name this tool never parsed - pass its TU with --tu):')
+    for (const o of anyUnattr) {
+      console.log('  ' + pad(o.scenario, 22) + o.unattributedTop.map((r) => r.name.slice(0, 34) + ' ' + fmt(r.self)).join(' | '))
+    }
+  }
+  const jsonOut = flag('json', null)
+  if (jsonOut) { writeFileSync(jsonOut, JSON.stringify({ tier: TIER, bench: cg.bench, scenarios: out }, null, 2)); console.log(NL + 'json -> ' + jsonOut) }
+}
+
 function main() {
+  if (flag('weight', null) !== null) return weightMain()
   const selftest = has('selftest')
   const tuPath = flag('tu', null)
   const only = flag('only', null)
@@ -283,14 +398,17 @@ function main() {
     if (only && !n.includes(only)) continue
     sources.push(path.join(RT_DIR, n))
   }
-  if (tuPath) {
-    if (!existsSync(tuPath)) { console.error('no such TU: ' + tuPath); process.exit(2) }
-    sources.push(tuPath)
+  // --tu takes a comma-separated list: one emitted TU per bench, and the
+  // cost weighting needs every TU whose functions appear in the profile.
+  const tuList = tuPath === null ? [] : String(tuPath).split(',').map((x) => x.trim()).filter(Boolean)
+  for (const t of tuList) {
+    if (!existsSync(t)) { console.error('no such TU: ' + t); process.exit(2) }
+    sources.push(t)
   }
 
   const B = selftest ? WIN : LIN
   console.log('platform-divergence  A=' + WIN + '  B=' + B + (selftest ? '   (SELFTEST: same target twice)' : ''))
-  console.log('sources: ' + sources.length + (tuPath ? '  (runtime + ' + path.basename(tuPath) + ')' : '  (runtime)'))
+  console.log('sources: ' + sources.length + (tuList.length ? '  (runtime + ' + tuList.map((t) => path.basename(t)).join(' + ') + ')' : '  (runtime)'))
   console.log('')
 
   const uniq = new Map()
