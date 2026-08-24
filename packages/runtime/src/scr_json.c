@@ -1787,8 +1787,20 @@ ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity,
    * Function.prototype.toString. Widening the existing condition keeps
    * the count of uncatchable abort CALL SITES exactly where it was. */
   if (sig == NULL || !scr_rva_fits(sig) || !scr_rva_fits(name) || !scr_rva_fits(src)) {
-    scr_trap_fmt("scriptc: internal error: a dyn function box was minted with %s (name=%s)\n",
-                 sig == NULL ? "no signature" : "a non-static signature/name/source",
+    /* TWO whole format strings, not one with a word spliced in, and ONE
+     * call site. dyn-fn-sig-contract.test.ts byte-scans the compiled
+     * BINARY for "was minted with no signature", because a literal in
+     * the image is the only direct evidence that this guard was linked
+     * into that build — a sentence assembled at runtime out of "%s" is
+     * invisible to it. And one call site keeps the uncatchable-abort
+     * census where it was. */
+    scr_trap_fmt(sig == NULL
+                     ? "scriptc: internal error: a dyn function box was minted with no signature"
+                       " (name=%s)\n"
+                     : "scriptc: internal error: a dyn function box was minted with a"
+                       " NON-STATIC signature, name or source (name=%s); the three are stored"
+                       " as 32-bit offsets from the cycle anchor and only a static literal in"
+                       " this image round-trips through one\n",
                  name != NULL ? name : "<anonymous>");
   }
   d->v.fn.sig = scr_rva_of(sig);
