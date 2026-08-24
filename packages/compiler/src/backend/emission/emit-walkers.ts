@@ -3392,7 +3392,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const name = `sc_rkg_${E.recordKeyGetFns.size}`;
     E.recordKeyGetFns.set(key, name);
     const struct = mangleRecordStruct(shapeId);
-    const sig = `static ${cType(t)}${cType(t).endsWith("*") ? "" : " "}${name}(${struct} *r, ScrStr *k)`;
+    // Does the MISS path abort?  Decided here rather than at the bottom
+    // where it is emitted, because an aborting helper carries an extra
+    // parameter — the SOURCE SITE of the read — and the signature is
+    // written before the body.  The three arms below are the miss ladder
+    // at the end of this function, in the same order.
+    const aborts = t.kind !== "dyn" && !(t.kind === "union" && E.undefinedArmTag(t) >= 0);
+    if (aborts) E.recordKeyGetAborts.add(name);
+    const sig = `static ${cType(t)}${cType(t).endsWith("*") ? "" : " "}${name}(${struct} *r, ScrStr *k${aborts ? ", const char *sc_site" : ""})`;
     E.walkerProtos.push(`${sig}; /* r[k] on ${shapeId} as ${typeKey(t)} */`);
     const d: string[] = [`${sig} { /* r[k] on ${shapeId} as ${typeKey(t)} */`];
     // How a value of type `vt` (a field, or the overflow hit) surfaces as T.
@@ -3476,12 +3483,51 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       // JS would answer undefined; T has no way to say it (the checker
       // claimed T without noUncheckedIndexedAccess) — trap like an array
       // OOB read instead of corrupting a typed slot (SEMANTICS.md).
-      d.push(`  scr_trap_fmt("scriptc: TypeError: record has no key '%.*s' (typed '${E.dynDesc(t)}' — no undefined is representable)\\n", (int)k->len, k->data);`);
-      // This helper is in the ABORT.real population: its miss path is the
-      // untagged process abort.  Recorded so a CALL SITE can ask, and so
-      // SCRIPTC_RKG_COUNT counts the sites that can really die and not the
-      // ones that answer undefined.
-      E.recordKeyGetAborts.add(name);
+      //
+      // This helper is in the ABORT.real population (recorded at the
+      // signature above, because an aborting helper takes `sc_site`).
+      // The abort used to name NOTHING: no code, no file, no line, only
+      // the runtime key — the worst diagnostic shape this project has,
+      // and the same one `scr_dyn_new_func`'s NULL `sig` had. It names
+      // itself now, in three parts:
+      //
+      //   (SC9003 at <file>:<line>:<col>)  the CALL SITE, passed in — the
+      //     helper is shared by every read of this (shape, result type)
+      //     pair, so the site cannot be baked into the message.
+      //     PARENTHESES and not the brackets every other coded message
+      //     uses, and that is not cosmetic: `[SCxxxx at ...]` is this
+      //     project's mark for a DEFERRED COMPILE FENCE inside a coded
+      //     throw, and two instruments rest on the identity — census.mjs
+      //     counts every bracket occurrence in the file as a trap, and
+      //     tu-census.mjs FAILS the run when the bracket count and the
+      //     tagged-coded-throw count disagree. Nine bracketed aborts in
+      //     zapo's TU would have moved a historical number and broken
+      //     that accounting, which is a worse outcome than a different
+      //     pair of delimiters;
+      //   the KEY, which was always there;
+      //   and WHY the compiler believed the miss could not happen, which
+      //     is a property of the SHAPE and so is baked in.
+      //
+      // The why is not decoration: it is the whole classification of this
+      // abort family, and it is structural rather than guessed. A shape
+      // with NO index signature cannot be read at `r[k]` in TypeScript
+      // unless the checker proved `k` is one of its declared keys — so
+      // its miss path is reachable only through an unchecked cast or a
+      // dynamic crossing that validated the key as `string` and not as
+      // the literal union. A shape WITH one has a genuinely absent key
+      // and a result width with no `undefined` in it; that is a different
+      // question with a different answer, and the message says which one
+      // the reader is looking at.
+      const proven = !shape.indexValue;
+      const names = shape.fields.map((f) => f.name);
+      const shown = names.length > 6 ? `${names.slice(0, 6).join(", ")}, ... (${names.length} in all)` : names.join(", ");
+      const why = proven
+        ? `  the shape declares only {${shown}} and has no index signature, so no key outside that set typechecks at this read: an unchecked cast or an unvalidated dynamic crossing reached it`
+        : `  the key is absent from the index signature and the result width has no undefined to answer with`;
+      const msg =
+        `scriptc: TypeError: record has no key '%.*s' (typed '${E.dynDesc(t)}' — no undefined is representable) (SC9003 at %s)\n` +
+        `${why}\n`;
+      d.push(`  scr_trap_fmt(${cStringLiteral(Buffer.from(msg, "utf8"))}, (int)k->len, k->data, sc_site);`);
     }
     d.push(`}`, ``);
     E.walkerDefs.push(...d);
