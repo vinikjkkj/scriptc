@@ -2191,12 +2191,17 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // Bare unit literals (an `undefined`/`null` stored under an
         // `unknown` index signature) are the dyn unit values directly.
         if (e.value.kind === "unitLit") {
-          return E.newTemp(
-            e.type,
-            e.value.unit === "undefined"
-              ? "scr_dyn_retain(scr_dyn_undefined())"
-              : "scr_dyn_new_null()",
-          );
+          // THE undefined dyn is ONE immortal static node (scr_json.c:
+          // `static ScrDyn undef = { SIZE_MAX, ... }`), so its +1 and every
+          // frame release of it are already runtime no-ops — writing them
+          // costs a 20-byte inlined retain and an 8.5-byte release call site
+          // and buys nothing. newImmortalTemp, exactly the interned-strLit
+          // argument one type over. `null` is a fresh allocation and keeps
+          // the ordinary owned-temp path.
+          if (e.value.unit === "undefined") {
+            return E.newImmortalTemp(e.type, "scr_dyn_undefined()");
+          }
+          return E.newTemp(e.type, "scr_dyn_new_null()");
         }
         // A VOID operand (a void call or `await` of a promise<void> landing
         // in an 'unknown' slot): there is no value to convert — evaluate for
@@ -2204,7 +2209,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // void result is. The unionWrap void-payload rule, one kind over.
         if (e.value.type.kind === "void") {
           E.emitExpr(e.value);
-          return E.newTemp(e.type, "scr_dyn_retain(scr_dyn_undefined())");
+          return E.newImmortalTemp(e.type, "scr_dyn_undefined()");
         }
         const v = E.emitExpr(e.value);
         if (v.type.kind === "func") {
@@ -2366,13 +2371,18 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // which the RC entry points and the cycle collector both skip).
         const arm = e.value.type;
         if (isUnitType(arm)) {
-          return E.newTemp(e.type, E.unitInstanceRef(e.unionId, e.tag));
+          // The interned instance IS immortal (emitted `.rc = SIZE_MAX`), as
+          // the comment above already says — so the frame release the
+          // emitter used to write for it was a call site that could never
+          // do anything. newImmortalTemp leaves it out and keeps the temp
+          // in its frame for moveTemp and the rest of the discipline.
+          return E.newImmortalTemp(e.type, E.unitInstanceRef(e.unionId, e.tag));
         }
         // A VOID payload (a void call wrapping into an undefined arm):
         // evaluate for effects, produce the interned unit instance.
         if (arm.kind === "void") {
           E.emitExpr(e.value);
-          return E.newTemp(e.type, E.unitInstanceRef(e.unionId, e.tag));
+          return E.newImmortalTemp(e.type, E.unitInstanceRef(e.unionId, e.tag));
         }
         const v = E.emitExpr(e.value);
         // f64 and bool are the only unboxed scalar payloads; every other
