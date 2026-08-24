@@ -1,6 +1,8 @@
-ns-import-object/main.ts:8:17 - error SC1013: module namespace objects as first-class values (access 'lib' members directly: lib.<member>) are not supported yet
+ns-import-object/main.ts:8:17 - error SC1013: module namespace objects as first-class values (access 'lib' members directly: lib.<member>, or enumerate it: Object.keys(lib) folds to the export names) are not supported yet
 
   7 | console.log(lib.one());
   8 | const grabbed = lib;
     |                 ^~~
   9 | console.log(grabbed.one());
+
+  hint: the KEY SET is exact and compiles today — what has no compiled representation is the OBJECT: Node's namespace is exotic (a null prototype, the "Module" tag, one instance per module, and a [[Set]] that always fails), and a checked-dynamic object is none of those
