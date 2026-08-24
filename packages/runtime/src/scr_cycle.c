@@ -65,6 +65,12 @@ static ScrPool scr_cyc_blocks;
 void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
   size_t phys = scr_pool_bytes(sizeof(ScrCycHdr) + size);
   ScrCycHdr *h = scr_pool_take(&scr_cyc_blocks, phys);
+#ifdef SCR_CYCEN_ON
+  /* tests/perf/cycensus/scr_cyc_census.h, -include'd. Defined only when
+   * that header is, so an ordinary build has no trace of these four lines
+   * — verified by building both ways and diffing the binary. */
+  const int scr_cycen_pooled = (h != NULL);
+#endif
   if (h) {
     /* calloc's contract, kept, but only where it is observable. Four of
      * the header's six fields are assigned unconditionally below and the
@@ -85,11 +91,16 @@ void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
     h = calloc(1, phys);
     if (!h) scr_cyc_oom();
   }
-  h->trace = trace;
-  h->free_fn = free_fn;
+  h->trace_off = scr_cyc_off((const void *)trace);
+  h->free_off = scr_cyc_off((const void *)free_fn);
   h->color = SCR_CYC_BLACK;
-  h->blk = phys <= SCR_POOL_MAX ? (uint32_t)(phys / SCR_POOL_GRAIN) : 0u;
+  h->blk = phys <= SCR_POOL_MAX ? (uint8_t)(phys / SCR_POOL_GRAIN) : 0u;
   scr_cyc_live++; /* the pacing denominator; see below */
+#ifdef SCR_CYCEN_ON
+  scr_cycen_hdr_bytes = (long long)sizeof(ScrCycHdr);
+  scr_cycen_note_alloc(h, phys, size, (const void *)free_fn, scr_cycen_pooled,
+                       scr_cyc_live);
+#endif
   return h + 1;
 }
 
@@ -98,8 +109,14 @@ void scr_cyc_free(void *obj) {
   ScrCycHdr *h = scr_cyc_hdr(obj);
   if (h->blk != 0 &&
       scr_pool_give(&scr_cyc_blocks, h, (size_t)h->blk * SCR_POOL_GRAIN)) {
+#ifdef SCR_CYCEN_ON
+    scr_cycen_note_free(h, 1, scr_cyc_live);
+#endif
     return;
   }
+#ifdef SCR_CYCEN_ON
+  scr_cycen_note_free(h, 0, scr_cyc_live);
+#endif
   free(h);
 }
 
@@ -203,7 +220,7 @@ static void scr_mark_gray(void *obj) {
   ScrCycHdr *h = scr_cyc_hdr(obj);
   if (h->color == SCR_CYC_GRAY) return;
   h->color = SCR_CYC_GRAY;
-  h->trace(obj, scr_mg_visit, NULL);
+  scr_cyc_trace_of(h)(obj, scr_mg_visit, NULL);
 }
 
 static void scr_scan_black(void *obj);
@@ -215,7 +232,7 @@ static void scr_sb_visit(void *child, void *ctx) {
 }
 static void scr_scan_black(void *obj) {
   scr_cyc_hdr(obj)->color = SCR_CYC_BLACK;
-  scr_cyc_hdr(obj)->trace(obj, scr_sb_visit, NULL);
+  scr_cyc_trace_of(scr_cyc_hdr(obj))(obj, scr_sb_visit, NULL);
 }
 
 static void scr_scan(void *obj);
@@ -233,7 +250,7 @@ static void scr_scan(void *obj) {
     return;
   }
   h->color = SCR_CYC_WHITE;
-  h->trace(obj, scr_scan_visit, NULL);
+  scr_cyc_trace_of(h)(obj, scr_scan_visit, NULL);
 }
 
 /* The gathered white set (freed after the walk completes). */
@@ -250,7 +267,7 @@ static void scr_collect_white(void *obj) {
   ScrCycHdr *h = scr_cyc_hdr(obj);
   if (h->color != SCR_CYC_WHITE || h->buffered) return;
   h->color = SCR_CYC_BLACK; /* visited marker — prevents re-gathering */
-  h->trace(obj, scr_cw_visit, NULL);
+  scr_cyc_trace_of(h)(obj, scr_cw_visit, NULL);
   if (scr_nwhite == scr_white_cap) {
     scr_white_cap = scr_white_cap ? scr_white_cap * 2 : 64;
     scr_white = realloc(scr_white, scr_white_cap * sizeof *scr_white);
@@ -294,7 +311,7 @@ void scr_collect_cycles(void) {
    * never touch traced (white, already-accounted) edges. */
   for (size_t i = 0; i < scr_nwhite; i++) {
     void *obj = scr_white[i];
-    scr_cyc_hdr(obj)->free_fn(obj);
+    scr_cyc_free_of(scr_cyc_hdr(obj))(obj);
   }
   scr_nwhite = 0;
 

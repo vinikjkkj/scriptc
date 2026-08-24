@@ -35,7 +35,7 @@ import {
   mangleVtInstance,
   mangleVtStruct,
 } from "../mangle.js";
-import { FN_ATTRS, llFieldType, releaseSym, traceAdapter, type ShapeHost } from "./shapes.js";
+import { cycMarkLiveIr, FN_ATTRS, llFieldType, releaseSym, traceAdapter, type ShapeHost } from "./shapes.js";
 
 /** One virtual method slot of a hierarchy: the ROOT-MOST declaring class
  * owns the slot; its declaration's IrFunction fixes the slot's ABI (the
@@ -357,9 +357,7 @@ export function emitClassShapes(
       `inc:`,
       `  %n = add i64 %rc, 1`,
       `  store i64 %n, ptr %o`,
-      ...(traced
-        ? [`  %colorp = getelementptr i8, ptr %o, i64 -16`, `  store i32 0, ptr %colorp ; mark live`]
-        : []),
+      ...(traced ? cycMarkLiveIr("%o") : []),
       `  br label %done`,
       `done:`,
       `  ret ptr %o`,
