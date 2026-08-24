@@ -78,8 +78,13 @@ static void fd_release_v(void *p) {
    * that block a corpus row's two events to find. */
   if (h->rc == 2 && !h->settled && !scr_exc_pending()) {
     h->rc = 1;
-    h->settled = true;
-    scr_fetch_xfer_orphan(h->t);
+    /* `settled` FOLLOWS the orphan rather than preceding it: the transfer
+     * DECLINES to be orphaned while an un-aborted signal is attached,
+     * because the abort is still a way to answer. Asserting `settled`
+     * ahead of the call made fd_abort decline to call the dispatcher's
+     * own abort, and the differential's `abort-told` cell answered false
+     * where the oracle answers true. */
+    h->settled = scr_fetch_xfer_orphan(h->t);
     return;
   }
   fd_release(h);
@@ -366,6 +371,34 @@ static void fd_hop(ScrFetchXfer *t, ScrStr *origin, ScrStr *path, ScrStr *method
     }
   }
   scr_closure_release(fn);
+
+  /* THE SYNCHRONOUS ABANDON, and this arm exists because measuring found
+   * that it did not.
+   *
+   * fd_release_v spots "nobody can answer" by seeing the hop's rc fall to
+   * 2 -- this function's own reference plus the transfer's -- as the LAST
+   * handler member goes. That works when a dispatcher keeps the handler
+   * and drops it a turn later. It cannot work when the dispatcher drops it
+   * INSIDE its own call, because fd_hop is still holding a THIRD reference
+   * at that moment: the count bottoms out at 2 through the plain
+   * fd_release path and the test never fires. The transfer then stays in
+   * the registry forever, and an RC audit over a program whose fetch
+   * promise is simply dropped reported 7 heap strings, 1 array, 1 box and
+   * 2 closures live at exit -- exit 99.
+   *
+   * scr_ws_dispatch.c does not have this arm and does not need it: its
+   * begin() hands its own reference to the caller instead of dropping one
+   * here, so its arithmetic bottoms out at 2 inside the call. The extra
+   * reference is deliberate on this path -- the transfer holds the hop so
+   * an abort can reach it -- so the check is explicit rather than implied.
+   *
+   * rc == 2 here means the transfer's reference and this function's, with
+   * no handler member reachable by the program. `settled` is checked first
+   * because a dispatcher that answered synchronously has already settled
+   * and must not be orphaned on top of it. */
+  if (!h->settled && h->rc == 2 && !scr_exc_pending()) {
+    h->settled = scr_fetch_xfer_orphan(h->t);
+  }
 
   /* A dispatcher that THREW. The oracle does not let it out of fetch:
    * undici catches it and rejects with the network-failure shape instead,

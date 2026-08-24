@@ -625,6 +625,44 @@ describe("the reference-count audit", () => {
         cr.stderr,
         "the abandoned-fiber control did not report a skip — the audit above may not have run either",
       ).toMatch(/RC audit skipped: 1 fiber\(s\) never resumed/);
+
+      // THE ABANDONED DISPATCHER, and it needs its own program because the
+      // fixture above cannot carry it: a fetch whose promise is never
+      // settled leaves a fiber suspended, and the audit RETURNS before
+      // auditing when one exists. So the promise is DROPPED instead --
+      // nothing awaits it, no fiber is left, and the audit runs.
+      //
+      // This row exists because the leak was real. A dispatcher that
+      // returns without answering releases the handler INSIDE its own
+      // call, and the "nobody can answer" test could not see that: the
+      // transfer stayed in the registry and this program exited 99 with
+      // 7 heap strings, 1 array, 1 box and 2 closures live.
+      const adir = stage(
+        "rc-abandoned",
+        "interface D { dispatch(...args: readonly unknown[]): unknown }\n" +
+          "async function main(): Promise<void> {\n" +
+          "  const d: D = { dispatch: (...a: readonly unknown[]): unknown => { void a; return true } }\n" +
+          "  const i: RequestInit = {}\n" +
+          "  ;(i as { dispatcher?: unknown }).dispatcher = d\n" +
+          "  void fetch('http://127.0.0.1:65001/x', i)\n" +
+          "  await new Promise<void>((r) => { setTimeout(() => { r() }, 200) })\n" +
+          "  console.log('dropped')\n" +
+          "}\n" +
+          "void main()\n",
+      );
+      const abuilt = await compile(join(adir, "main.ts"), {
+        outPath: join(adir, exeName("program")),
+        outDir: adir,
+        backend: "c",
+      });
+      expect(abuilt.ok, (abuilt.diagnostics ?? []).map((x) => x.code).join(",")).toBe(true);
+      const ar = await run(abuilt.binaryPath!, [], adir, 60_000);
+      expect(ar.stdout.trim()).toBe("dropped");
+      expect(
+        ar.stderr.trim(),
+        "an abandoned dispatcher left the transfer in the registry",
+      ).toBe("");
+      expect(ar.exitCode).toBe(0);
     } finally {
       if (prev === undefined) delete process.env["SCRIPTC_RC_AUDIT"];
       else process.env["SCRIPTC_RC_AUDIT"] = prev;
