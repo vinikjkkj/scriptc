@@ -682,6 +682,61 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
   }
 
 
+
+/** The four properties Node defines on the CommonJS `require` function,
+   * taken as VALUES: `resolve`, `main`, `extensions`, `cache`. Measured
+   * against Node v25.9.0 — `Object.keys(require)` is exactly those four,
+   * in that order, and every one of them is defined.
+   *
+   * All four answered `undefined` on BOTH backends, at exit 0, with no
+   * diagnostic. Measured at main `51609fb1` from a CommonJS JavaScript
+   * source:
+   *
+   *   require.main === undefined         Node false      compiled TRUE
+   *   typeof require.resolve             Node "function" compiled "undefined"
+   *   require.cache === undefined        Node false      compiled TRUE
+   *   require.extensions === undefined   Node false      compiled TRUE
+   *
+   * That is four SILENT wrong answers on the one binding this row is
+   * about, and the canonical CommonJS entry-point test — `if
+   * (require.main === module)` — takes the WRONG BRANCH through it. A
+   * refusal is the loud direction and this is where the four take it.
+   *
+   * Only these four names are claimed. `require` has a real function
+   * value (requireFnValueOf), and an arbitrary property of a function IS
+   * `undefined` in JavaScript — `require.zzz` answers undefined and Node
+   * agrees — so widening this to every name would turn a right answer
+   * into a refusal.
+   *
+   * Why none of the four has a value: `main` and `cache` are Module
+   * objects belonging to a LOADER, and a compiled program links its
+   * modules instead of loading them, so there is no Module and no cache
+   * to hand back; `extensions` is that same loader's extension table.
+   * `resolve` is the one of the four that is servable in principle — its
+   * answer is a PATH STRING, not a module value, so the module-namespace
+   * wall the rest of this file describes does not stand in front of it —
+   * and it refuses here rather than answering `undefined` until somebody
+   * builds it.
+   *
+   * `require.main.filename` keeps its exact answer: that chain is
+   * claimed whole in lower-exprs, ahead of this, and never lowers
+   * `require.main` on its own. */
+  export function requireMemberFence(L: Lowerer, expr: ts.PropertyAccessExpression): void {
+    if (!ts.isIdentifier(expr.name)) return;
+    if (!isAmbientCjsRequire(L, expr.expression)) return;
+    const hint = REQUIRE_MEMBER_FENCE_HINTS[expr.name.text];
+    if (hint === undefined) return;
+    L.unsupported("SC1090", expr, hint);
+  }
+
+/** One hint per name, each stating what Node has there and why a linked
+   * program does not. */
+  const REQUIRE_MEMBER_FENCE_HINTS: Readonly<Record<string, string | undefined>> = {
+    main: "require.main as a value (Node's entry Module object — a linked program has no Module objects; require.main.filename lowers to the entry file's own path)",
+    cache: "require.cache (a compiled program links its modules instead of loading them, so no module cache object exists to hand back)",
+    extensions: "require.extensions (a runtime loader's extension table, and a compiled program has no runtime loader)",
+    resolve: "require.resolve as a value (module resolution is decided at build time; the answer is a path, not a module, so this is servable — nothing serves it yet)",
+  };
 /** `const r = require` — the DECLARATION’s type.
    *
    * `require`'s declared type is NodeRequire, a call signature plus four
