@@ -94,6 +94,15 @@ const TRIPLE = flag('triple', 'x86_64-linux-gnu.2.39')
  * same check reports percent-scale drift. */
 const FLOOR_PCT = Number.parseFloat(flag('floor', '0.01'))
 const NO_PIN = has('no-pin')
+/* --cache turns on the cache and branch-predictor SIMULATION. It is off by
+ * default and that is deliberate: the default Ir count is a property of the
+ * program, while a simulated D1/LL miss is a property of a MODEL of a cache
+ * that is not this host's, and reading it as "cache misses on the shipping
+ * box" would be exactly the over-read this lane exists to avoid. It is worth
+ * having because it makes the "callgrind cannot see cache effects" claim
+ * precise: it can see a MODEL of them, and the model still is not the
+ * Windows machine. */
+const CACHE = has('cache')
 const WSLDIR = '/tmp/fnprof-cg'
 
 const SCENARIOS = {
@@ -181,7 +190,8 @@ function profile(exeWinPath, scenario, tag, benchEnv) {
     'chmod +x ' + WSLDIR + '/run.elf',
     'cd ' + WSLDIR,
     envLines + ' timeout 3600 valgrind --tool=callgrind --callgrind-out-file=' + WSLDIR + '/p.out' +
-      ' --separate-threads=no --cache-sim=no --branch-sim=no ./run.elf > ' + WSLDIR + '/p.log 2>&1 || true',
+      (CACHE ? ' --separate-threads=no --cache-sim=yes --branch-sim=yes' : ' --separate-threads=no --cache-sim=no --branch-sim=no') +
+      ' ./run.elf > ' + WSLDIR + '/p.log 2>&1 || true',
     'cp ' + WSLDIR + '/p.out ' + JSON.stringify(toWsl(outFile)),
     'cp ' + WSLDIR + '/p.log ' + JSON.stringify(toWsl(logFile)),
     'echo WSL_OK'
@@ -255,7 +265,7 @@ function parseCallgrind(file) {
  *  and cycles; a naive sum over the call graph does not). */
 function inclusiveOf(outFileWin) {
   const r = wsl('callgrind_annotate --threshold=100 --inclusive=yes --auto=no ' +
-    JSON.stringify(toWsl(outFileWin)) + ' 2>/dev/null')
+    (CACHE ? '--show=Ir ' : '') + JSON.stringify(toWsl(outFileWin)) + ' 2>/dev/null')
   const map = new Map()
   for (const raw of r.out.split(NL)) {
     const m = /^\s*([\d,]+)\s*\(\s*[\d.]+%\)\s+(.*?)\s*$/.exec(raw)
@@ -298,7 +308,8 @@ function fileOf(rest) {
 }
 
 function selfTable(outFileWin) {
-  const r = wsl('callgrind_annotate --threshold=100 --auto=no ' + JSON.stringify(toWsl(outFileWin)) + ' 2>/dev/null')
+  const r = wsl('callgrind_annotate --threshold=100 --auto=no ' +
+    (CACHE ? '--show=Ir ' : '') + JSON.stringify(toWsl(outFileWin)) + ' 2>/dev/null')
   const rows = new Map()
   let total = 0
   for (const raw of r.out.split(NL)) {
