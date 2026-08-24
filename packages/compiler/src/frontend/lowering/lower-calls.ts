@@ -25,7 +25,7 @@ import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, definePro
 import { boundEmitDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
 import { lowerConsoleInspectArg, lowerFormatCall } from "./lower-inspect.js";
 import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lowerStreamStaticCall, streamSidesOf } from "./lower-stream.js";
-import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, nsMemberIdentOf, nsPathPrefix, nsUndefRead } from "./lower-namespaces.js";
+import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, moduleNsOwnKeys, moduleNsSourceFileOf, nsMemberIdentOf, nsPathPrefix, nsUndefRead } from "./lower-namespaces.js";
 import { declSymbolOf } from "./lower-modules.js";
 import { expandoMemberRead } from "./lower-expando.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
@@ -10459,6 +10459,52 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     if (objMember !== "keys" && objMember !== "values" && objMember !== "entries") return null;
     if (call.arguments.length !== 1 || ts.isSpreadElement(call.arguments[0]!)) return null;
     const argNode = call.arguments[0]!;
+    // A MODULE NAMESPACE of a module the build COMPILED. The key set of a
+    // namespace object is a pure function of the module's export table —
+    // `Object.keys` never reads a value — so the ENUMERATING half needs no
+    // object, and the build holds that table complete for every module in
+    // the compiled graph. The names fold to a literal array in Node's own
+    // order (code-unit sort), evaluated at build time, costing the program
+    // nothing when nothing asks.
+    //
+    // `getOwnPropertyNames` answers the same list here and is not a fold
+    // onto keys by convenience: a module namespace has no non-enumerable
+    // own STRING key at all (its one extra own key is Symbol.toStringTag),
+    // so the two coincide by the exotic object's definition.
+    //
+    // The namespace VALUE itself keeps its SC1013 fence. The line is not
+    // "can the build enumerate the exports" — it can, always, here — it is
+    // that the OBJECT is exotic: a null prototype, the "Module" tag, one
+    // instance per module, and a [[Set]] that always fails. A
+    // checked-dynamic object is none of those, and would answer
+    // `console.log(ns)` and `Object.getPrototypeOf(ns)` wrongly at exit 0.
+    //
+    // `values` and `entries` are NOT served: they read every export's
+    // value, and an export whose value cannot cross into a dynamic slot
+    // exactly (a class, a generic function, an aggregate whose identity a
+    // copy would break) has no representation to hand back. They keep the
+    // fence, which is the loud direction.
+    if (objMember === "keys" && ts.isIdentifier(argNode)) {
+      const nsSf = moduleNsSourceFileOf(L, argNode);
+      if (nsSf !== null) {
+        const own = moduleNsOwnKeys(L, nsSf);
+        if (own.keys === null) {
+          L.unsupported(
+            "SC1013",
+            call,
+            `Object.${member} of the namespace of '${argNode.text}' (${own.missing})`,
+            "the key set has to be COMPLETE or it is worse than no answer: a namespace that lists the keys the build happens to know and omits the rest is a silent wrong answer to Object.keys",
+          );
+        }
+        const nsLoc = locOf(call);
+        return {
+          kind: "arrayLit",
+          elems: own.keys.map((k): IrExpr => ({ kind: "strLit", value: k, type: STRING, loc: nsLoc })),
+          type: arrayOf(STRING),
+          loc: nsLoc,
+        };
+      }
+    }
     // A CHECKED-DYNAMIC argument — the checker may still spell a record
     // type (the JS file-scope object-literal identity story stores the
     // dyn object), so the LOWERED value's kind is the dispatch: the
