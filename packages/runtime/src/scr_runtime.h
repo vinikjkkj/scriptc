@@ -4152,6 +4152,34 @@ const char *scr_dyn_fn_src_of(const ScrDyn *d);
  * compiler has ever seen live is 62 bytes, and a program that really
  * reaches a four-gigabyte property name is out of memory, which is what
  * the two store sites answer. */
+/* The FIRST allocation of a dyn object's `entries` or a dyn array's
+ * `items`, in slots. Both were the constant 4, and 4 is where almost all
+ * of the spare capacity in a real program sits: at zapo's peak 7,168 of
+ * 10,104 live objects were in the cap-4 class holding 14,805 members
+ * between them, and 3,238 objects held exactly ONE member and paid for
+ * four. Exact-fit removes that floor; the doubling above it is unchanged,
+ * so capacity stays under 2x the members it holds.
+ *
+ * These are macros rather than literals because the trade they make is
+ * BYTES FOR ALLOCATOR CALLS -- exact-fit costs ~19,000 extra reallocs over
+ * a 47-second zapo run -- and that trade has to be measurable per site,
+ * from arms that differ by nothing else. `-DSCR_DYN_OBJ_FIRST_CAP=4`
+ * restores the old policy for objects alone, `-DSCR_DYN_ARR_FIRST_CAP=4`
+ * for arrays alone, so an A/B can price either half without a source
+ * change and without confounding it with the key-representation work in
+ * the same commit. The SHIPPING value is the default below; nothing reads
+ * an environment variable and no shipped configuration takes a branch
+ * these do not. */
+#ifndef SCR_DYN_OBJ_FIRST_CAP
+#define SCR_DYN_OBJ_FIRST_CAP 1
+#endif
+#ifndef SCR_DYN_ARR_FIRST_CAP
+#define SCR_DYN_ARR_FIRST_CAP 1
+#endif
+#if SCR_DYN_OBJ_FIRST_CAP < 1 || SCR_DYN_ARR_FIRST_CAP < 1
+#error "a first capacity below 1 cannot hold the member that triggered the growth"
+#endif
+
 #define SCR_DYN_KEY_MAX 0xffffffffu
 
 

@@ -1272,7 +1272,8 @@ void scr_dyn_arr_push(ScrDyn *arr, ScrDyn *item) {
      * histogram says why -- 2,920 arrays hold exactly ONE element and
      * 800 hold two. `new Array(n)` still reserves exactly n in one
      * shot (scr_dyn_new_arr_len); this is the doubling push path. */
-    size_t cap = arr->v.arr.cap ? (size_t)arr->v.arr.cap * 2 : 1;
+    size_t cap = arr->v.arr.cap ? (size_t)arr->v.arr.cap * 2
+                                : (size_t)SCR_DYN_ARR_FIRST_CAP;
     ScrDyn **items =
         cap > SCR_DYN_LEN_MAX ? NULL : realloc(arr->v.arr.items, cap * sizeof *items);
     if (!items) scr_json_oom();
@@ -1486,7 +1487,8 @@ static void scr_dyn_obj_put_k(ScrDyn *obj, char *key, size_t key_len, ScrDyn *va
      *
      * The members' half of the same uint32 ceiling; 2^31 entries is a
      * 51 GB table. */
-    size_t cap = obj->v.obj.cap ? (size_t)obj->v.obj.cap * 2 : 1;
+    size_t cap = obj->v.obj.cap ? (size_t)obj->v.obj.cap * 2
+                                : (size_t)SCR_DYN_OBJ_FIRST_CAP;
     ScrDynEntry *entries =
         cap > SCR_DYN_LEN_MAX ? NULL : realloc(obj->v.obj.entries, cap * sizeof *entries);
     if (!entries) scr_json_oom();
