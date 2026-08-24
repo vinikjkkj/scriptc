@@ -752,6 +752,46 @@ const FENCED: readonly {
     nodeSays: "MODULE_NOT_FOUND ERR_INVALID_PACKAGE_CONFIG",
     stdout: "SC2020 SC2020\n",
   },
+  {
+    // THE FENCE IS ALREADY NOT LOUD HERE, and this row exists to keep that
+    // written down, because it is the cell that decides whether SC2020 may
+    // be replaced by a run-time MODULE_NOT_FOUND.
+    //
+    // The argument for replacing it goes: a miss should throw Node's own
+    // MODULE_NOT_FOUND, and protobufjs's inquire() catches, so the program
+    // sees exactly what it sees on a host where the module is absent. That
+    // is true for a specifier NOTHING resolves — 'long' — and the row above
+    // and corpus 5970 both prove it, byte for byte.
+    //
+    // It is false for a specifier Node DOES serve, and 'buffer' is one of
+    // the two protobufjs itself inquires for. Measured on both lanes: Node
+    // answers the module, the compiled program answers null, at exit 0,
+    // with nothing printed — because the SC2020 is thrown INTO the
+    // program's own catch and swallowed there. So the refusal is already
+    // silent at exactly the population a MODULE_NOT_FOUND would be silent
+    // at, and replacing it would not trade a loud answer for a quiet one:
+    // it would trade an attributable wrong answer for one that reads
+    // exactly like Node's, for a builtin that is never actually absent.
+    //
+    // The uncaught spelling is the control: there the code is still visible,
+    // and that visibility is the only thing the tag is still buying.
+    name: "the refusal is SWALLOWED whole by the idiom, for a specifier Node DOES serve",
+    src:
+      "function inquire(moduleName) {\n" +
+      "  try {\n" +
+      "    if (typeof require !== 'function') return null\n" +
+      "    var mod = require(moduleName)\n" +
+      "    return mod && (mod.length || Object.keys(mod).length) ? mod : null\n" +
+      "  } catch (e) { /* protobufjs swallows it, whatever it is */ }\n" +
+      "  return null\n" +
+      "}\n" +
+      "function raw(s) { try { require(s); return 'GOT' } catch (e) { return e.code } }\n" +
+      "console.log('caught', String(inquire('buffer') === null ? 'null' : 'MODULE'))\n" +
+      "console.log('uncaught', raw('buffer'))\n",
+    code: "SC2020",
+    nodeSays: "caught MODULE / uncaught GOT",
+    stdout: "caught null\nuncaught SC2020\n",
+  },
 ];
 
 let lab = "";
