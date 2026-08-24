@@ -19,7 +19,7 @@ import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerBytesStaticFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerObjectIterOverIndexShape, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
 import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDiffieHellmanCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
-import { classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
+import { classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
@@ -5270,10 +5270,48 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // value is CALLED answers a miss with Node's own catchable
     // "<callee> is not a function" TypeError instead of aborting the
     // process past the program's own catch. Declines keep this path.
-    {
-      const atCallee = keyedCalleeAtUndefinedArm(L, expr, callee, loc);
-      if (atCallee !== null) return atCallee;
+    const keyArm = keyedCalleeAtUndefinedArm(L, expr, callee);
+    let keyArmLocal: IrLocal | null = null;
+    if (keyArm !== null) {
+      keyArmLocal = L.declareHiddenLocal("%callKeyArm", keyArm.armedT);
+      const armRef: IrExpr = { kind: "varRef", localId: keyArmLocal.id, type: keyArm.armedT, loc };
+      callee = unionArmBridge(L, armRef, callee.type, loc);
     }
+    /** The wrap: the callee's undefined arm is already bound, the call's
+     * own arguments are lifted into hidden locals so they evaluate FIRST
+     * (JS runs ArgumentListEvaluation before IsCallable — measured against
+     * v25.9.0), and the tag test throws Node's own catchable
+     * "<callee> is not a function" after them. A void result puts the call
+     * in the region too and answers with js.voidOperand, the void-typed
+     * leaf seqExpr's result slot exists for. */
+    const finishKeyArm = (call: IrExpr & { args: IrExpr[] }): IrExpr => {
+      if (keyArm === null || keyArmLocal === null) return call;
+      const armRef: IrExpr = { kind: "varRef", localId: keyArmLocal.id, type: keyArm.armedT, loc };
+      const stmts: IrStmt[] = [{ kind: "varDecl", localId: keyArmLocal.id, init: keyArm.armed, loc }];
+      const lifted = call.args.map((a) => {
+        const slot = L.declareHiddenLocal("%callKeyArg", a.type);
+        stmts.push({ kind: "varDecl", localId: slot.id, init: a, loc: a.loc });
+        return { kind: "varRef" as const, localId: slot.id, type: a.type, loc: a.loc };
+      });
+      stmts.push({
+        kind: "exprStmt",
+        expr: {
+          kind: "ternary",
+          cond: { kind: "unionIsTag", unionId: keyArm.armedT.kind === "union" ? keyArm.armedT.unionId : "", tag: keyArm.tag, negated: false, value: armRef, type: BOOL, loc },
+          then: nodeThrowExpr(1, "", `${keyArm.text} is not a function`, F64, loc),
+          else_: { kind: "numLit", value: 0, type: F64, loc },
+          type: F64,
+          loc,
+        },
+        loc,
+      });
+      const out = { ...call, args: lifted };
+      if (out.type.kind === "void") {
+        stmts.push({ kind: "exprStmt", expr: out, loc });
+        return { kind: "seqExpr", stmts, result: { kind: "libCall", fn: "js.voidOperand", args: [], type: VOID, loc }, type: VOID, loc };
+      }
+      return { kind: "seqExpr", stmts, result: out, type: out.type, loc };
+    };
     if (callee.type.kind === "record") callee = L.hybridCallUnwrap(callee);
     // A CHECKED-DYNAMIC callee — `fn(a, b)` where fn is an implicit-any
     // JS binding (the mustCall body's `fn(...args)`), a dyn capture, or a
@@ -5337,7 +5375,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       });
       const restArgs = expr.arguments.slice(fixed.length).map((a) => L.lowerExprExpecting(a, JSVAL));
       args.push({ kind: "jsOp", op: "arrLit", args: restArgs, type: JSVAL, loc });
-      return { kind: "callValue", callee, args, type: callee.type.ret, loc };
+      return finishKeyArm({ kind: "callValue", callee, args, type: callee.type.ret, loc });
     }
     // A JS call with MORE arguments than the callee's lowered signature
     // (`cb(1, 'x')` where the mustCall wrapper's inferred type declared
@@ -5354,11 +5392,11 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       const args = expr.arguments.map((a) => L.lowerExprExpecting(a, DYN));
       const calleeName = ts.isIdentifier(expr.expression) ? expr.expression.text : "value";
       const boxed: IrExpr = { kind: "dynFrom", value: callee, type: DYN, loc };
-      return { kind: "dynCall", callee: boxed, calleeName, args, type: DYN, loc };
+      return finishKeyArm({ kind: "dynCall", callee: boxed, calleeName, args, type: DYN, loc });
     }
     const params = callee.type.params;
     const packed = restPackedArgs(L, expr, params, loc);
-    if (packed) return { kind: "callValue", callee, args: packed, type: callee.type.ret, loc };
+    if (packed) return finishKeyArm({ kind: "callValue", callee, args: packed, type: callee.type.ret, loc });
     const args = expr.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
     // Optional-param func TYPES map their `x?: T` slots as `T | undefined`
     // ABI unions, and tsc admits calls that omit the optional suffix —
@@ -5378,7 +5416,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       }
       args.push(absent);
     }
-    return { kind: "callValue", callee, args, type: callee.type.ret, loc };
+    return finishKeyArm({ kind: "callValue", callee, args, type: callee.type.ret, loc });
   }
 
 /** The RUNTIME-ARITY spread call — `f(...args)`, the rest-forwarding idiom

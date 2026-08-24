@@ -4577,25 +4577,46 @@ function v8CalleeText(node: ts.Expression): string | null {
  * with `js.voidOperand`, the void-typed leaf `seqExpr`'s result slot exists
  * for.
  *
- * Scope, deliberately narrow — everything outside keeps today's lowering
- * and therefore today's abort: no `?.`, no spread, no rest/island callee
- * signature, and the call's argument count exactly the callee type's
- * parameter count (the omitted-trailing-argument completion is a lane of
- * its own).
+ * THE RUNG DOES NOT BUILD THE ARGUMENT LIST, and the first cut of it did,
+ * which is how it came to DECLINE on the very site it was written for:
+ * zapo's `CONSOLE_WRITERS` is `(...args: unknown[]) => void`, a REST
+ * signature whose call rides `restPackedArgs`, and a rung that rebuilt
+ * the arguments itself had to exclude rest to stay honest. So it prepares
+ * the widened callee and lowerCall WRAPS its own result: every argument
+ * list lowerCall can build — rest-packed, island-packed, completed with
+ * omitted trailing parameters — is lifted into hidden locals in source
+ * order and the tag test runs after them.
+ *
+ * Scope: no `?.`, and no SPREAD argument — a spread leaves through
+ * `lowerSpreadArgsCall`, the one tail the wrap does not own, and the
+ * hidden local would then be read by a bridge nothing bound.
  *
  * `SCRIPTC_CALLKEY_OFF=1` ablates it; `SCRIPTC_CALLKEY_WHY` names every
  * site it takes. */
-export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, callee: IrExpr, loc: SrcLoc): IrExpr | null {
+export interface KeyedCalleeArm {
+  readonly armed: IrExpr;
+  readonly armedT: IrType;
+  readonly tag: number;
+  readonly text: string;
+}
+
+/** The union bridge, for the one caller outside this file. tsc proved the
+ * arm; the extraction checks it anyway. */
+export function unionArmBridge(L: Lowerer, value: IrExpr, arm: IrType, loc: SrcLoc): IrExpr {
+  return checkedArmBridge(L, value, arm, loc);
+}
+
+export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, callee: IrExpr): KeyedCalleeArm | null {
   if (process.env["SCRIPTC_CALLKEY_OFF"] === "1") return null;
   if (callee.kind !== "recordKeyGet") return null;
   if (callee.type.kind !== "func") return null;
-  const fnT = callee.type;
-  if (fnT.rest === true) return null;
   if (expr.questionDotToken !== undefined) return null;
+  // A SPREAD argument leaves through `lowerSpreadArgsCall`, which is the one
+  // tail this rung's wrap does not own; the hidden local would then be read
+  // by a bridge nothing bound. Out.
   if (expr.arguments.some((a) => ts.isSpreadElement(a))) return null;
-  if (expr.arguments.length !== fnT.params.length) return null;
   if (!ts.isPropertyAccessExpression(expr.expression) && !ts.isElementAccessExpression(expr.expression)) return null;
-  const armedT = L.withUndefinedArm(fnT);
+  const armedT = L.withUndefinedArm(callee.type);
   if (armedT.kind !== "union") return null;
   const armed = L.recordKeyReadAtUndefinedArm(callee, armedT);
   if (armed === null) return null;
@@ -4603,37 +4624,11 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
   if (tag < 0) return null;
   const text = v8CalleeText(expr.expression);
   if (text === null) return null;
-  const calLocal = L.declareHiddenLocal("%callKeyArm", armedT);
-  const calRef: IrExpr = { kind: "varRef", localId: calLocal.id, type: armedT, loc };
-  const stmts: IrStmt[] = [{ kind: "varDecl", localId: calLocal.id, init: armed, loc }];
-  const args: IrExpr[] = [];
-  for (let i = 0; i < fnT.params.length; i++) {
-    const lowered = L.lowerArgExpecting(expr.arguments[i]!, fnT.params[i]);
-    const slot = L.declareHiddenLocal("%callKeyArg", lowered.type);
-    stmts.push({ kind: "varDecl", localId: slot.id, init: lowered, loc: lowered.loc });
-    args.push({ kind: "varRef", localId: slot.id, type: lowered.type, loc: lowered.loc });
-  }
-  stmts.push({
-    kind: "exprStmt",
-    expr: {
-      kind: "ternary",
-      cond: { kind: "unionIsTag", unionId: armedT.unionId, tag, negated: false, value: calRef, type: BOOL, loc },
-      then: nodeThrowExpr(1, "", `${text} is not a function`, F64, loc),
-      else_: { kind: "numLit", value: 0, type: F64, loc },
-      type: F64,
-      loc,
-    },
-    loc,
-  });
   if (process.env["SCRIPTC_CALLKEY_WHY"] !== undefined) {
-    console.error(`[callkey] ${loc.file}:${String(loc.start)} ${text} at ${L.fmt(armedT)}`);
+    const l = armed.loc;
+    console.error(`[callkey] ${l.file}:${String(l.start)} ${text} at ${L.fmt(armedT)}`);
   }
-  const call: IrExpr = { kind: "callValue", callee: checkedArmBridge(L, calRef, fnT, loc), args, type: fnT.ret, loc };
-  if (fnT.ret.kind === "void") {
-    stmts.push({ kind: "exprStmt", expr: call, loc });
-    return { kind: "seqExpr", stmts, result: { kind: "libCall", fn: "js.voidOperand", args: [], type: VOID, loc }, type: VOID, loc };
-  }
-  return { kind: "seqExpr", stmts, result: call, type: fnT.ret, loc };
+  return { armed, armedT, tag, text };
 }
 
 /** The checker-driven union bridge's ONE extraction, tag-checked.

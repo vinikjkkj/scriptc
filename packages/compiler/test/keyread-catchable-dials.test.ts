@@ -52,17 +52,39 @@ const P_MEMBER = `${TABLES}console.log(ROWS[k as K].v);
 export {};
 `;
 
-/* Every shape both rungs must decline, and nothing they must not. */
-const P_DECL = `${TABLES}interface Obj { m(): string }
-const OBJS: Record<K, Obj> = { a: { m: () => 'A' }, b: { m: () => 'B' } };
+/* zapo's OWN callee shape: `(...args: unknown[]) => void`. The first cut of
+ * the rung excluded rest signatures and therefore declined on the very two
+ * sites it was written for — caught only by the zapo A/B, which is why the
+ * shape is pinned here. */
+const P_REST = `type K = 'a' | 'b';
+const REST: Readonly<Record<K, (...args: unknown[]) => void>> = {
+  a: (...args: unknown[]) => { console.log('a ' + String(args.length)); },
+  b: (...args: unknown[]) => { console.log('b ' + String(args.length)); },
+};
+const kk = process.argv[2] ?? 'a';
+REST[kk as K]('x', 'y');
+export {};
+`;
+
+/* An OMITTED TRAILING ARGUMENT. The completion lane is lowerCall's, and
+ * the rung wraps whatever list lowerCall built, so this is SERVED — it was
+ * a decliner while the rung rebuilt the arguments itself. */
+const P_OPT = `type K = 'a' | 'b';
 const OPT: Record<K, (m: string, n?: string) => void> = {
   a: (m: string) => { console.log('a ' + m); },
   b: (m: string) => { console.log('b ' + m); },
 };
+const k = process.argv[2] ?? 'a';
+OPT[k as K]('x');
+export {};
+`;
+
+/* Every shape both rungs must decline, and nothing they must not. */
+const P_DECL = `${TABLES}interface Obj { m(): string }
+const OBJS: Record<K, Obj> = { a: { m: () => 'A' }, b: { m: () => 'B' } };
 function key(): K { return k as K }
 FNS[(k + '') as K]('x', 'y');
 FNS[key()]('x', 'y');
-OPT[k as K]('x');
 console.log(OBJS[k as K].m());
 ROWS[k as K].v = 'Z';
 [ROWS[k as K].v] = ['Z'];
@@ -147,6 +169,26 @@ describe("the two keyed-read consumers that throw the way Node throws", () => {
     expect(on.diags).toEqual([]);
     expect(count(on.tu, TRAP)).toBe(0);
     expect(count(on.tu, NO_PROPS)).toBe(1);
+  }, 300_000);
+
+  test("a REST callee is served — zapo's own shape, and the first cut's blind spot", async () => {
+    const off = await emit(P_REST, ["SCRIPTC_CALLKEY_OFF"]);
+    expect(off.diags).toEqual([]);
+    expect(count(off.tu, TRAP)).toBeGreaterThan(0);
+    const on = await emit(P_REST, []);
+    expect(on.diags).toEqual([]);
+    expect(count(on.tu, TRAP)).toBe(0);
+    expect(on.tu).toContain("REST[kk] is not a function");
+  }, 300_000);
+
+  test("an omitted trailing argument is served, completion and all", async () => {
+    const off = await emit(P_OPT, ["SCRIPTC_CALLKEY_OFF"]);
+    expect(off.diags).toEqual([]);
+    expect(count(off.tu, TRAP)).toBeGreaterThan(0);
+    const on = await emit(P_OPT, []);
+    expect(on.diags).toEqual([]);
+    expect(count(on.tu, TRAP)).toBe(0);
+    expect(on.tu).toContain("OPT[k] is not a function");
   }, 300_000);
 
   test("each dial changes its OWN program and no other", async () => {
