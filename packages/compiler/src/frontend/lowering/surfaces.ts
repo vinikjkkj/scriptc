@@ -972,6 +972,20 @@ export const BUILTIN_MODULE_FN_ALIASES: Record<string, Record<string, readonly I
  * the value form, which is strictly worse than the refusal it replaced.
  * Nothing here is inferred; each name was read against the dispatch.
  *
+ * WHAT THE SET ACTUALLY BUYS, measured rather than predicted. The set
+ * names 49 members. How many of them get a value form depends on the TYPE
+ * SURFACE the build reads, because the gate compares against the
+ * checker's own mapping: 29 under @types/node 24.13.3, and 47 under this
+ * compiler's own fallback .d.ts (whose signatures are narrower --
+ * `existsSync(path: string)` rather than `PathLike`). Both numbers are
+ * right; a program gets a value exactly where its own types justify one.
+ *
+ * The reach those 49 cover is bounded, and the bound is worth writing
+ * down: over four corpora (zapo's compiled closure, this repo's own
+ * accepted corpus, and two node_modules trees) the 99 tabled members are
+ * named 1409 times in VALUE position, and 649 of those -- 46% -- are
+ * path.join and path.resolve, which no fixed-arity value form can ever be.
+ *
  * MEMBERSHIP IS NOT SUFFICIENT. The gate in lower-fnvalue.ts still
  * requires the CHECKER's own mapping of the member's type to equal
  * `funcOf(row.params, row.result)` exactly, the same gate the global
