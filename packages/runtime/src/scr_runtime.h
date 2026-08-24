@@ -373,25 +373,77 @@ static inline bool scr_pool_give(ScrPool *p, void *b, size_t n) {
 }
 
 typedef struct ScrCycHdr {
-  ScrTraceFn trace;
-  ScrCycFreeFn free_fn;
-  uint32_t color;    /* SCR_CYC_* */
-  uint32_t buffered; /* 1 = sitting in the candidate-root buffer */
-  /* Position in the candidate-root buffer (O(1) removal when rc hits 0).
-   * uint32 rather than size_t so the block class below fits WITHOUT
-   * growing the header: it stays exactly 32 bytes, which matters
-   * because every cycle-headered object in a compiled program carries
-   * one. The buffer holds candidate roots, not objects, and 4 billion
-   * of them is not a limit any program reaches. */
-  uint32_t buf_index;
+  /* The trace and teardown functions, as SIGNED offsets from one anchor
+   * (see scr_cyc_base below) rather than as pointers. EVERY cycle-headered object carries this
+   * header, and on zapo that is the single largest term in the heap:
+   * two 8-byte function pointers were 16 of the 32 header bytes and 16
+   * of the 104 physical bytes of a ScrDyn. Storing them as RVAs is a
+   * runtime-only change -- scr_cyc_alloc keeps taking real function
+   * pointers, so none of the 1,451 call sites (1,434 of them in the
+   * emitted TU) moves. */
+  int32_t trace_off;
+  int32_t free_off;
+  /* color, buffered and blk were a uint32 each and needed 2, 1 and 6
+   * bits. They are bytes now, which keeps the single-byte store in
+   * scr_cyc_mark_live -- the inlined retain writes color on every
+   * retain in the program, so it must not become a read-modify-write. */
+  uint8_t color;    /* SCR_CYC_* */
+  uint8_t buffered; /* 1 = sitting in the candidate-root buffer */
   /* The block's physical size in SCR_POOL_GRAIN units, stamped by
    * scr_cyc_alloc so scr_cyc_free can hand the block back to the right
-   * pool class without every one of the ~16 object teardowns having to
-   * pass its own size down. 0 = not pooled, free it. */
-  uint32_t blk;
+   * pool class. SCR_POOL_MAX / SCR_POOL_GRAIN is 32, so a byte holds it
+   * with room. 0 = not pooled, free it. */
+  uint8_t blk;
+  uint8_t pad;
+  /* Position in the candidate-root buffer (O(1) removal when rc hits 0).
+   * uint32 rather than size_t: the header is EXACTLY 16 bytes and
+   * every cycle-headered object in a compiled program carries one, so
+   * a word here is tens of thousands of words of heap on zapo. The
+   * buffer holds candidate roots, not objects, and 4 billion of them
+   * is not a limit any program reaches.
+   *
+   * 16 also keeps the OBJECT pointer 16-byte aligned behind a
+   * 16-byte aligned block, which 24 would not -- that is why the two
+   * function pointers became RVAs rather than the flags simply being
+   * packed into one word. */
+  uint32_t buf_index;
 } ScrCycHdr;
 
 static inline ScrCycHdr *scr_cyc_hdr(void *obj) { return (ScrCycHdr *)obj - 1; }
+
+/* The header stores the two functions as SIGNED 32-bit offsets from one
+ * anchor; these three inlines are the only places that convert.
+ *
+ * THE ANCHOR IS A FUNCTION IN THIS FILE'S OWN UNIT, NOT `__ImageBase`, AND
+ * THE GATE IS WHY. __ImageBase is the obvious anchor on a PE target and it
+ * is what this was written with; scriptc also cross-compiles, and
+ * `cc-driver.test.ts` linked five ELF targets that have no such symbol —
+ * `ld.lld: error: undefined symbol: __ImageBase`, five red cells, on a
+ * change whose Windows lane was already MATCH on both backends.
+ *
+ * A function anchor needs no platform symbol at all, and it is exact for a
+ * reason worth stating: `scr_cyc_off` and the two readers all call
+ * `scr_cyc_base()`, so THE BASE CANCELS. It does not matter whether the
+ * address of `scr_collect_cycles` resolves to the function or to a PLT
+ * stub, only that it is the same value throughout one process — which it
+ * is. The single requirement is that every trace/free_fn is within 2 GB of
+ * it, and they are all in the same image's .text as the anchor.
+ *
+ * Signed, because a callee may sit BEFORE the anchor. */
+void scr_collect_cycles(void); /* the anchor; declared again below with its
+                                * own comment, which C permits */
+static inline const char *scr_cyc_base(void) {
+  return (const char *)(const void *)&scr_collect_cycles;
+}
+static inline int32_t scr_cyc_off(const void *fn) {
+  return (int32_t)((const char *)fn - scr_cyc_base());
+}
+static inline ScrTraceFn scr_cyc_trace_of(const ScrCycHdr *h) {
+  return (ScrTraceFn)(void *)(scr_cyc_base() + h->trace_off);
+}
+static inline ScrCycFreeFn scr_cyc_free_of(const ScrCycHdr *h) {
+  return (ScrCycFreeFn)(void *)(scr_cyc_base() + h->free_off);
+}
 
 /* Zeroed allocation with a cycle header in front; returns the OBJECT
  * pointer (header at scr_cyc_hdr). Aborts on OOM. */
