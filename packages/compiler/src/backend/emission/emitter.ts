@@ -76,26 +76,41 @@ export function rcSitesRequested(): boolean {
  * and no SourceFile, so the file is read once and indexed. Only ever called
  * under rcSitesRequested(); an unreadable file degrades to the offset. */
 const rcLineIndex = new Map<string, number[] | null>();
-export function rcSiteLabel(loc: { file: string; start: number } | undefined, name: string): string {
-  if (!loc) return name;
-  let starts = rcLineIndex.get(loc.file);
+function lineStartsOf(file: string): number[] | null {
+  let starts = rcLineIndex.get(file);
   if (starts === undefined) {
     try {
-      const text = fs.readFileSync(loc.file, "utf8");
+      const text = fs.readFileSync(file, "utf8");
       starts = [0];
       for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) starts.push(i + 1);
     } catch {
       starts = null;
     }
-    rcLineIndex.set(loc.file, starts);
+    rcLineIndex.set(file, starts);
   }
-  if (!starts) return `${loc.file}@${loc.start} ${name}`;
+  return starts;
+}
+
+/** `file:line:col` for a SrcLoc, degrading to `file@offset` when the source
+ * is no longer readable. The one spelling of a SOURCE SITE inside emitted
+ * code — `rcSiteLabel` below appends a name to it, and the keyed-read abort
+ * (SC9003) passes it as the argument that makes an otherwise nameless
+ * process abort say WHERE it happened. */
+export function srcSite(loc: { file: string; start: number } | undefined): string {
+  if (!loc) return "<unknown>";
+  const starts = lineStartsOf(loc.file);
+  if (!starts) return `${loc.file}@${loc.start}`;
   let lo = 0, hi = starts.length - 1;
   while (lo < hi) {
     const mid = (lo + hi + 1) >> 1;
     if (starts[mid]! <= loc.start) lo = mid; else hi = mid - 1;
   }
-  return `${loc.file}:${lo + 1}:${loc.start - starts[lo]! + 1} ${name}`;
+  return `${loc.file}:${lo + 1}:${loc.start - starts[lo]! + 1}`;
+}
+
+export function rcSiteLabel(loc: { file: string; start: number } | undefined, name: string): string {
+  if (!loc) return name;
+  return `${srcSite(loc)} ${name}`;
 }
 
 export function emitModule(mod: IrModule, sourceText?: string): string {
@@ -489,6 +504,25 @@ export class CEmitter {
     if (!this.rkCount || !this.recordKeyGetAborts.has(helper)) return "";
     const k = this.rkSites++;
     return `SC_RK_HIT(${k}); /*RKSITE k=${k} h=${helper} s=${shapeId} t=${width}*/ `;
+  }
+  /** The trailing `, "<file>:<line>:<col>"` argument an ABORTING keyed-read
+   * helper takes, and nothing at all for one that answers `undefined`.
+   *
+   * The helper is interned per (shape, result type), so it is shared by
+   * every read of that pair and cannot name the site itself; the site has
+   * to arrive from the call. This is the whole reason the aborting and the
+   * non-aborting helper have different signatures — the ones that can
+   * never die pay nothing, in text or in code, and on zapo that is 25 of
+   * the 34 helpers and every one of their call sites.
+   *
+   * NOT behind a dial. `SCRIPTC_RKG_COUNT` answers "which sites does a run
+   * REACH", which is a question you ask while investigating; this answers
+   * "where did this process just abort", which is the question the abort
+   * itself asks, and an instrument you have to have turned on beforehand
+   * cannot answer it. */
+  rkSiteArgC(helper: string, loc: { file: string; start: number } | undefined): string {
+    if (!this.recordKeyGetAborts.has(helper)) return "";
+    return `, ${cStringLiteral(Buffer.from(srcSite(loc), "utf8"))}`;
   }
   /** The counter table and its exit dump, spliced beside the shared trap
    * helpers. Empty unless the dial is on AND the program emitted a site.

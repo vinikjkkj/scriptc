@@ -34,6 +34,36 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
 const TRAP = /scr_trap_fmt\("scriptc: TypeError: record has no key '%\.\*s' \(typed '([^']*)'/;
+
+/** The LAST TOP-LEVEL argument of the call whose `(` sits at `open`, when
+ * that argument is a string literal — otherwise null.  Character-by-
+ * character rather than a regex because the arguments carry casts and
+ * nested calls (`sc_rkg_6((sc_rs_r1850 *)scr_union_peek(t), k, "…")`) and
+ * a regex over parentheses is how an instrument silently reads the wrong
+ * one.  `null` is the honest answer for a TU emitted before the site
+ * argument existed, and the report says so rather than inventing a site. */
+export function lastStringArg(line, open) {
+  if (line[open] !== "(") return null;
+  let depth = 0, inStr = false, argStart = open + 1, last = null;
+  for (let i = open; i < line.length; i++) {
+    const c = line[i];
+    if (inStr) {
+      if (c === "\\") { i++; continue; }
+      if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') { inStr = true; continue; }
+    if (c === "(") { depth++; continue; }
+    if (c === ")") {
+      depth--;
+      if (depth === 0) { last = line.slice(argStart, i).trim(); break; }
+      continue;
+    }
+    if (c === "," && depth === 1) argStart = i + 1;
+  }
+  if (last === null || last.length < 2 || last[0] !== '"' || last[last.length - 1] !== '"') return null;
+  return last.slice(1, -1);
+}
 const HDR = /^static\s+(.+?)\s*\*?\s*(sc_rkg_\d+)\(([^)]*)\)\s*\{\s*\/\* r\[k\] on (\S+) as (.+?) \*\//;
 
 export function analyse(raw) {
@@ -85,6 +115,7 @@ export function analyse(raw) {
       traps,
       line: i + 1,
       callers: new Map(),
+      sites: [],
       ptr: 0,
       declMentions: 0,
     });
@@ -109,6 +140,15 @@ export function analyse(raw) {
         }
         const host = hostName[i] ?? "<file scope>";
         h.callers.set(host, (h.callers.get(host) ?? 0) + 1);
+        // The SOURCE SITE, off the TU and nothing else.  An aborting
+        // helper takes a trailing `const char *sc_site` (SC9003), so the
+        // last top-level argument of the call IS the file:line:col the
+        // read was written at.  Before that argument existed the only way
+        // to answer "which source line is this call site" was a separate
+        // frontend census joined by byte offset, in a second file that
+        // could drift; there is nothing to join now.  A helper that
+        // cannot abort takes no such argument and gets no row.
+        h.sites.push({ host, cline: i + 1, site: lastStringArg(l, m.index + m[0].length - 1) });
       }
       PTR.lastIndex = 0;
       for (let m; (m = PTR.exec(l)) !== null; ) {
@@ -150,12 +190,28 @@ const FIXTURE = [
   "  }",
   '  scr_trap_fmt("scriptc: TypeError: record has no key \'%.*s\' (typed \'{ a: string }\' - no undefined is representable)\\n", (int)k->len, k->data);',
   "}",
+  // The DECLARED-KEYS shape: fields, no index signature, no overflow line
+  // at all -- the zapo lookup-table population, and the class the report
+  // has to be able to tell apart from the two above.
+  "static double sc_rkg_3(sc_rs_r4 *r, ScrStr *k, const char *sc_site) { /* r[k] on r4 as f64 */",
+  "  if (scr_str_eq(k, (ScrStr *)&sc_s_2)) { /* trace */",
+  "    return r->sc_m_trace;",
+  "  }",
+  "  if (scr_str_eq(k, (ScrStr *)&sc_s_3)) { /* debug */",
+  "    return r->sc_m_debug;",
+  "  }",
+  '  scr_trap_fmt("scriptc: TypeError: record has no key \'%.*s\' (typed \'number\' - no undefined is representable) [SC9003 at %s]\\n", (int)k->len, k->data, sc_site);',
+  "}",
   "static void sc_f_parse(void) {",
-  "  ScrStr * a = sc_rkg_0(n, k1);",
-  "  ScrStr * b = sc_rkg_0(n, k2);",
+  '  double t = sc_rkg_3(tbl, k0, "G:/x/ConsoleLogger.ts:70:13");',
+  '  ScrStr * a = sc_rkg_0(n, k1, "G:/x/xml.ts:41:19");',
+  '  ScrStr * b = sc_rkg_0(n, k2, "G:/x/xml.ts:42:19");',
   "}",
   "static void sc_f_other(void) {",
-  "  double d = sc_rkg_1(m, k3);",
+  // A cast and a nested call between the helper name and its site, which
+  // is the shape the union-arm call site really has -- a parenthesis-
+  // counting reader gets this right and a regex over `,` does not.
+  '  double d = sc_rkg_1((sc_rs_r2 *)scr_union_peek(u), k3, "G:/x/log.ts:26:32");',
   "  sc_rs_r9 * z = sc_rkg_2(q, k4);",
   "}",
   "static void sc_f_ptruser(void) {",
@@ -168,8 +224,19 @@ if (process.argv.includes("--selftest")) {
   const a = analyse(FIXTURE);
   const h0 = a.helpers.find((h) => h.name === "sc_rkg_0");
   const h1 = a.helpers.find((h) => h.name === "sc_rkg_1");
+  const h3 = a.helpers.find((h) => h.name === "sc_rkg_3");
   const need = [
-    ["three helpers found", a.helpers.length === 3],
+    ["four helpers found", a.helpers.length === 4],
+    // The SITE, and the two ways a reader could get it wrong: taking the
+    // first string on the line, or losing the argument behind a cast.
+    ["the site argument is recovered", h0?.sites.map((s) => s.site).join("|") === "G:/x/xml.ts:41:19|G:/x/xml.ts:42:19"],
+    ["a site behind a cast and a nested call is recovered", h1?.sites[0]?.site === "G:/x/log.ts:26:32"],
+    ["a call with NO site argument reports null, not a guess", a.helpers.find((h) => h.name === "sc_rkg_2")?.sites[0]?.site === null],
+    ["the site rides with its HOST", h0?.sites[0]?.host === "sc_f_parse"],
+    // The CLASS, which is the whole classification of this abort family.
+    ["a shape with no index signature has overflow null (DECLARED-KEYS)", h3?.overflow === null && h3?.nFields === 2],
+    ["a shape with an index signature keeps its accessor (INDEX-MISS)", h0?.overflow === "ref" && h1?.overflow === "f64"],
+    ["the DECLARED-KEYS helper traps and is counted", h3?.traps === true && h3?.ways === 1],
     ["a POINTER result type parses (no space before the name)", a.helpers.some((h) => h.name === "sc_rkg_0")],
     ["a RECORD result type parses", a.helpers.find((h) => h.name === "sc_rkg_2")?.typeKey === "record:r9"],
     ["a multi-word typed quote parses", a.helpers.find((h) => h.name === "sc_rkg_2")?.traps === true],
@@ -210,7 +277,7 @@ const raw = readFileSync(file, "latin1");
 // compiler regression and is really a wrong-lane instrument.
 if ((raw.match(/^(?:declare|define) /gm) ?? []).length > 0 && (raw.match(/^#include /gm) ?? []).length === 0) {
   console.error(`real-aborts: ${file} is an LLVM translation unit (the default lane's .ll), and this reader is C-only.`);
-  console.error("  It reads the per-result-type `sc_rkg_<n>` keyed-read helpers and their `/* r[k] on <shape> */`\n  header comments.  The LLVM emitter has no per-type keyed-read helper at all: llvm/emitter.ts\n  helperDefs() emits ONE @sc_bad_key for the whole module, carrying a fixed message that names no\n  shape and no result type.  The 'why' this pass exists to answer is not IN the .ll.");
+  console.error("  It reads the per-result-type `sc_rkg_<n>` keyed-read helpers and their `/* r[k] on <shape> */`\n  header comments.  The LLVM emitter has no per-type keyed-read helper at all: llvm/emitter.ts\n  helperDefs() emits ONE @sc_bad_key for the whole module, and while every CALL of it now carries\n  the source site and the declared-keys sentence (SC9003), the shape and the result width are\n  still not in the .ll.  The 'why' this pass exists to answer is only half there.");
   console.error("  scripts/tu-census.mjs reads BOTH lanes; use it for the category counts.");
   process.exit(4);
 }
@@ -255,6 +322,46 @@ for (const h of [...abort].sort((x, y) => y.ways - x.ways)) {
   out.push(`     callers: ${cs.map(([k, v]) => `${k}x${v}`).join("  ") || "(none - pointer only)"}`);
   if (h.nFields > 0) out.push(`     declared: ${h.fields.slice(0, 12).join(", ")}${h.nFields > 12 ? " ..." : ""}`);
 }
+out.push("");
+// ------------------------------------------------------------------
+// THE CALL SITES AS SOURCE LINES, and the one structural question that
+// splits them.
+//
+// A shape with NO index signature cannot be read at `r[k]` in TypeScript
+// unless the checker proved `k` is one of its declared keys -- there is
+// no index signature for any other key to typecheck against.  So its
+// miss path is reachable only by defeating the checker: an `as` cast, or
+// a dynamic crossing that validated the key as `string` and not as the
+// literal union (scriptc's dyn boundary has no literal-union type, so it
+// validates `string`; measured, not assumed).  That is a genuinely
+// different claim from a shape WITH an index signature, whose key really
+// can be absent at run time and whose result width simply has no
+// `undefined` to answer with.
+//
+// The split is read off the TU: `overflow=null` is the absence of the
+// index signature.  Nothing here consults the frontend.
+out.push("=== EVERY ABORTABLE CALL SITE, AS A SOURCE LINE ================");
+const KEYS_ONLY = "DECLARED-KEYS";
+const INDEX_MISS = "INDEX-MISS";
+let nProven = 0, nIndex = 0, nUnnamed = 0;
+const siteRows = [];
+for (const h of abort) {
+  const cls = h.overflow === null ? KEYS_ONLY : INDEX_MISS;
+  for (const s of h.sites) {
+    if (cls === KEYS_ONLY) nProven++; else nIndex++;
+    if (s.site === null) nUnnamed++;
+    siteRows.push({ cls, ...s, helper: h.name, shape: h.shapeId, result: h.typeKey });
+  }
+}
+siteRows.sort((x, y) => (x.cls === y.cls ? String(x.site).localeCompare(String(y.site)) : x.cls.localeCompare(y.cls)));
+for (const r of siteRows) {
+  out.push(`  ${r.cls.padEnd(13)} ${r.site ?? "(no site: TU predates the SC9003 site argument)"}`);
+  out.push(`      in ${r.host}   ${r.helper} on ${r.shape} as ${r.result}   TU line ${r.cline}`);
+}
+out.push(
+  `  ${KEYS_ONLY} ${nProven}   ${INDEX_MISS} ${nIndex}   unnamed ${nUnnamed}` +
+    (nUnnamed > 0 ? "   <- rebuild with a compiler that emits the site argument" : ""),
+);
 out.push("");
 out.push("=== CALLERS, RANKED (a source function is a place the abort can happen) ===");
 const byCaller = new Map();
