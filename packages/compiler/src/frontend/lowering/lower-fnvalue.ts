@@ -84,6 +84,7 @@ import {
   STRING,
   typeEquals,
 } from "../../ir/nodes.js";
+import { type BuiltinModuleFn, builtinMemberFnValueAllowed, builtinModuleFnOf } from "./surfaces.js";
 
 interface BuiltinFnValue {
   /** The value form's exact parameter types, in order. */
@@ -411,4 +412,127 @@ export function builtinFnValueDeclType(L: Lowerer, decl: ts.VariableDeclaration)
   // day another one is added it is what the value form will need.
   if (L.mapTypeOf(L.typeOf(inner)) !== null) return null;
   return want;
+}
+
+/* ── builtin MODULE MEMBERS as values ────────────────────────────────────
+ *
+ * `const exists = fs.existsSync`, `const d = path.dirname`, `{ dir:
+ * dirname }` — a member of a node builtin module taken as a value rather
+ * than called.
+ *
+ * The file's own list of what it deliberately does not answer says "a
+ * builtin METHOD taken off its object (`const p = console.log`, `const m
+ * = Math.max`) ... a method carries a `this` question this table has no
+ * answer for". A builtin MODULE member is not that: node's module
+ * functions do not read `this` — `const d = require("path").dirname;
+ * d("/a/b")` is `/a` in Node, measured — so the `this` reason does not
+ * reach them and the SC1090 they were keeping was a fence with no
+ * argument behind it.
+ *
+ * WHAT MAKES IT SAFE, in three layers, none of which is optional:
+ *
+ *   1. BUILTIN_MEMBER_FN_VALUES (surfaces.ts) — the explicit allow-list of
+ *      members whose table ROW is the whole truth about the call. A member
+ *      whose dispatch special-cases an argument shape is absent, because a
+ *      value minted from its row would answer a different libCall than the
+ *      call form does.
+ *   2. THE GATE — `mapTypeOf` of the member's own type must equal
+ *      `funcOf(row.params, row.result)` EXACTLY. This is the same gate
+ *      gatedValueType applies to the globals, for the same reason, and it
+ *      is what keeps the wider @types/node signatures out: `existsSync`
+ *      takes a `PathLike`, `platform()` returns `NodeJS.Platform`,
+ *      `randomUUID` has an optional options bag. Each of those would take
+ *      an ADAPTER, and an adapter is a fresh closure with a different
+ *      pointer — `f === existsSync` would answer false where Node answers
+ *      true. They keep their SC1090.
+ *   3. THE SLOT FENCE — a value flowing into a slot of another function
+ *      type refuses rather than adapting, exactly as narrowedSlotFence
+ *      does for the globals.
+ *
+ * Identity comes out right for free, the same way it does above: the
+ * value is a zero-capture closure over a LIFTED function, and the
+ * backends intern exactly that shape into one immortal static closure per
+ * function, so every mention of `path.dirname` in a program is the same
+ * pointer and `dirname === dirname` is `true`.
+ *
+ * `.name` and `.length` are NOT answered here, and that is the same
+ * decision the globals took: they are SC2020 on a user function value
+ * too, so answering them for builtin members would make these the only
+ * functions in the language that have them. `path.dirname.name` keeps its
+ * refusal — loud — rather than gaining an answer this table cannot keep
+ * true for every other function.
+ *
+ * The lift is keyed on the ROW's libFn rather than on the module name, so
+ * `path.dirname` and `path/posix.dirname` on a posix target — the same
+ * row, reached through two specifiers — mint ONE function and compare
+ * equal, which is what Node does (`path.dirname === path.posix.dirname`
+ * is true there). */
+export function builtinMemberFnValueType(
+  L: Lowerer,
+  node: ts.Node,
+  bi: { module: string; member: string },
+): { want: IrType; row: BuiltinModuleFn } | null {
+  if (!builtinMemberFnValueAllowed(bi.module, bi.member)) return null;
+  const row = builtinModuleFnOf(L, bi.module, bi.member);
+  if (!row) return null;
+  // Belt and braces over the allow-list: neither shape can be a value.
+  if (row.variadicPack === true || row.defaults !== undefined) return null;
+  const want = funcOf([...row.params], row.result);
+  const mapped = L.mapTypeOf(L.typeOf(node));
+  if (mapped === null || !typeEquals(mapped, want)) return null;
+  return { want, row };
+}
+
+/** The slot fence, module-member spelling. Identical rule to
+ * narrowedSlotFence: a slot of another function type would take an
+ * adapter, and an adapter compares unequal. */
+function memberNarrowedSlotFence(L: Lowerer, node: ts.Expression, text: string, want: IrType): void {
+  const ctx = (() => {
+    try {
+      return L.checker.getContextualType(node);
+    } catch {
+      return undefined;
+    }
+  })();
+  if (ctx === undefined) return;
+  const mapped = L.mapTypeOf(ctx);
+  if (mapped === null || mapped.kind !== "func" || typeEquals(mapped, want)) return;
+  L.noLowering(
+    `'${text}' stored in a slot typed '${L.fmt(mapped)}'`,
+    node,
+    `the value's own signature is '${L.fmt(want)}'; a slot of another shape would take an ` +
+      `adapter, and an adapter is a FRESH closure — '${text}' held there would compare ` +
+      `unequal to '${text}' where Node compares equal. Annotate the slot 'typeof ${text}'`,
+  );
+}
+
+/** `fs.existsSync` / `dirname` (a named import binding) as a VALUE: the
+ * interned zero-capture closure over the memoized lift, or null when the
+ * member is not in the allow-list or does not pass the gate — in which
+ * case the caller keeps its own SC1090. */
+export function builtinMemberFnValueOf(
+  L: Lowerer,
+  node: ts.Expression,
+  bi: { module: string; member: string },
+  text: string,
+  loc: SrcLoc,
+): IrExpr | null {
+  const got = builtinMemberFnValueType(L, node, bi);
+  if (got === null) return null;
+  memberNarrowedSlotFence(L, node, text, got.want);
+  const fnName = `%builtin.${got.row.fn}.value`;
+  if (!L.liftedFns.some((f) => f.name === fnName)) {
+    const params = got.row.params.map((type, i) => ({ localId: `a.${i}`, name: `a${i}`, type }));
+    const args: IrExpr[] = params.map((p) => ({ kind: "varRef", localId: p.localId, type: p.type, loc }));
+    const fn: IrFunction = {
+      name: fnName,
+      params,
+      returnType: got.row.result,
+      locals: params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+      body: [{ kind: "return", value: libCall(got.row.fn, args, got.row.result, loc), loc }],
+      loc,
+    };
+    L.liftedFns.push(fn);
+  }
+  return { kind: "closure", fnName, captures: [], type: got.want, loc };
 }

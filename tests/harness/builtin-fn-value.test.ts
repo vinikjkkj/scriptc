@@ -14,6 +14,17 @@
  * actually SEES when it arrives through the value, and a network failure
  * REJECTING rather than resolving.
  *
+ * module-member.ts is the third: a member of a node BUILTIN MODULE held
+ * as a value (`const d = dirname`, `path.dirname` through the namespace,
+ * passed as an argument, in a record field, in an array, captured by a
+ * closure that outlives its frame). Same four cells per member — typeof,
+ * `===` against the name, `===` against the OTHER spelling, and the value
+ * CALLED — because the wrong answer available here is the worst kind: a
+ * member that read back as anything other than the same function would be
+ * silent. The boundary rows at the end of this file are what keep the
+ * allow-list honest: `fs.existsSync`, `path.join`, `path.basename` and
+ * `crypto.randomUUID` must STILL refuse, each for a different reason.
+ *
  * WHY IDENTITY IS THE FIRST THING BOTH FIXTURES ASSERT. The value is a
  * zero-capture closure over a synthesized module function, and the
  * backends intern exactly that shape into one immortal static closure —
@@ -145,10 +156,18 @@ let origins: Origins | null = null;
 let fetchDir = "";
 let fetchNode: Run | null = null;
 
+// --------------------------------------------------- builtin-module members
+
+let memberDir = "";
+let memberNode: Run | null = null;
+
 beforeAll(async () => {
   workDir = mkdtempSync(join(tmpdir(), "scriptc-builtin-fn-value-"));
   pureDir = stage(workDir, "pure", readFileSync(join(fixtureDir, "pure.ts"), "utf8"));
   pureNode = await run(process.execPath, [join(pureDir, "main.ts")], pureDir);
+
+  memberDir = stage(workDir, "member", readFileSync(join(fixtureDir, "module-member.ts"), "utf8"));
+  memberNode = await run(process.execPath, [join(memberDir, "main.ts")], memberDir);
 
   origins = await startOrigins();
   fetchDir = stage(
@@ -198,6 +217,16 @@ describe("builtins as values, against Node", () => {
     // function object as the global. If this line ever reads false, every
     // identity cell below is comparing two wrongs.
     expect(fetchNode!.stdout).toContain("id-alias true");
+
+    expect(memberNode, "the module-member Node lane did not run").not.toBeNull();
+    expect(memberNode!.exitCode, `Node module-member lane failed:\n${memberNode!.stderr}`).toBe(0);
+    expect(memberNode!.stdout.trimEnd().split("\n").at(-1)).toBe("END done");
+    expect(memberNode!.stdout.trimEnd().split("\n").length).toBeGreaterThanOrEqual(60);
+    // The floor that makes every identity cell below mean something: if
+    // Node itself ever answered `false` here, the comparison would be
+    // pinning two wrongs together.
+    expect(memberNode!.stdout).toContain("path.dirname.ident true");
+    expect(memberNode!.stdout).toContain("path.dirname.nsid true");
   });
 
   for (const backend of ["c", "llvm"] as const) {
@@ -239,6 +268,27 @@ describe("builtins as values, against Node", () => {
             (built.diagnostics ?? []).map((d) => `${d.code}: ${d.message}`).join("\n"),
         ).toBe(true);
         compareCells(backend, fetchNode!, await run(built.binaryPath!, [], outDir));
+      },
+      900_000,
+    );
+
+    test(
+      `${backend}: every builtin-MODULE-MEMBER cell matches Node`,
+      async () => {
+        const outDir = join(memberDir, backend);
+        mkdirSync(outDir, { recursive: true });
+        const built = await compile(join(memberDir, "main.ts"), {
+          outPath: join(outDir, exeName("program")),
+          outDir,
+          backend,
+          sanitize,
+        });
+        expect(
+          built.ok,
+          "the builtin-module-member fixture must COMPILE:\n" +
+            (built.diagnostics ?? []).map((d) => `${d.code}: ${d.message}`).join("\n"),
+        ).toBe(true);
+        compareCells(backend, memberNode!, await run(built.binaryPath!, [], outDir));
       },
       900_000,
     );
@@ -541,6 +591,179 @@ describe("the boundary this feature stops at", () => {
       const node = await run(process.execPath, [join(dir, "main.ts")], dir);
       expect(mine.stdout).toBe(node.stdout);
       expect(node.stdout.trim()).toBe("true false");
+    },
+    900_000,
+  );
+});
+
+/* THE BUILTIN-MODULE-MEMBER BOUNDARY. Five rows, five different reasons,
+ * and every one of them would be a wrong answer rather than a missing one
+ * if it started compiling. The fixture above is green; without these a
+ * widened allow-list or a loosened gate would leave it exactly as green. */
+describe("the builtin-module-member boundary", () => {
+  test(
+    "fs.readSync as a value still refuses — the checker's signature is not the row's",
+    async () => {
+      // The gate: `mapTypeOf` of the member's own type must EQUAL
+      // `funcOf(row.params, row.result)`. readSync's declared buffer
+      // parameter is not the row's `bytes<u8>`, so a value here would be
+      // ADAPTED into its own slot and `f === readSync` would print false
+      // against Node's true -- the failure `parseInt` had.
+      //
+      // This row is on the gate, not on the allow-list: readSync IS
+      // allow-listed. What refuses it is the type surface this build
+      // reads, and that is the point -- the allow-list widens what MAY be
+      // offered, never what is.
+      const codes = await refusalCodes(
+        workDir,
+        "no-readsync",
+        [
+          'import { readSync } from "node:fs"',
+          "const f = readSync",
+          "console.log(String(typeof f))",
+          "",
+        ].join("\n"),
+      );
+      expect(codes.length, "fs.readSync as a value must not compile").toBeGreaterThan(0);
+      expect(codes).toContain("SC1090");
+    },
+    900_000,
+  );
+
+  test(
+    "path.join as a value still refuses — a rest parameter has no fixed-arity value form",
+    async () => {
+      // Node's `join(...paths: string[])`. The func ABI is fixed-arity, so
+      // no value this compiler can mint IS that function: a one-argument
+      // form would refuse the two-argument call Node accepts, and an
+      // array-taking form would be a different function wearing the name.
+      const codes = await refusalCodes(
+        workDir,
+        "no-join",
+        [
+          'import { join } from "node:path"',
+          "const f = join",
+          'console.log(f("a", "b"))',
+          "",
+        ].join("\n"),
+      );
+      expect(codes.length, "path.join as a value must not compile").toBeGreaterThan(0);
+      expect(codes).toContain("SC1090");
+    },
+    900_000,
+  );
+
+  test(
+    "path.basename as a value still refuses — an omitted trailing argument the row completes",
+    async () => {
+      // The row completes basename's omitted suffix to "" (a Node no-op).
+      // An exact-arity value form would refuse `basename(p)`, which Node
+      // accepts, so the member stays out of the allow-list even though its
+      // lowering is otherwise a single libCall.
+      const codes = await refusalCodes(
+        workDir,
+        "no-basename",
+        [
+          'import { basename } from "node:path"',
+          "const f = basename",
+          'console.log(f("/a/b.txt", ""))',
+          "",
+        ].join("\n"),
+      );
+      expect(codes.length, "path.basename as a value must not compile").toBeGreaterThan(0);
+      expect(codes).toContain("SC1090");
+    },
+    900_000,
+  );
+
+  test(
+    "fs.readFileSync as a value still refuses — its row is not the whole call",
+    async () => {
+      // readFileSync's dispatch special-cases the encoding argument and
+      // has five other libCall spellings (BUILTIN_MODULE_FN_ALIASES). A
+      // value minted from the ROW would answer `fs.readFileSync` where the
+      // direct call answers `fs.readFileSyncBuf` or `fs.readFileSyncDyn`,
+      // which is a silent wrong answer manufactured BY the value form. It
+      // is deliberately absent from BUILTIN_MEMBER_FN_VALUES.
+      const codes = await refusalCodes(
+        workDir,
+        "no-readfilesync",
+        [
+          'import { readFileSync } from "node:fs"',
+          "const f = readFileSync",
+          'console.log(f("x", "utf8"))',
+          "",
+        ].join("\n"),
+      );
+      expect(codes.length, "fs.readFileSync as a value must not compile").toBeGreaterThan(0);
+      expect(codes).toContain("SC1090");
+    },
+    900_000,
+  );
+
+  test(
+    "child_process.spawn as a value still refuses — the whole module's calls are special-cased",
+    async () => {
+      // Every child_process member's call completion is written by hand in
+      // lowerBuiltinModuleCall (an omitted args list, spawn's exact
+      // `{ stdio: "ignore" }`, execSync's shell flag). None of their rows
+      // describes their call, so none of them can have a value form.
+      const codes = await refusalCodes(
+        workDir,
+        "no-spawn",
+        [
+          'import { spawn } from "node:child_process"',
+          "const f = spawn",
+          "console.log(String(typeof f))",
+          "",
+        ].join("\n"),
+      );
+      expect(codes.length, "child_process.spawn as a value must not compile").toBeGreaterThan(0);
+      expect(codes).toContain("SC1090");
+    },
+    900_000,
+  );
+
+  test(
+    "a builtin member's .name and .length still refuse",
+    async () => {
+      // `.name`/`.length` are SC2020 on a USER function value too, so
+      // answering them for a builtin member would make these the only
+      // functions in the language that have them. The member having a
+      // value now must not quietly widen that.
+      const codes = await refusalCodes(
+        workDir,
+        "no-member-name",
+        [
+          'import { dirname } from "node:path"',
+          "const f = dirname",
+          "console.log(f.name, f.length)",
+          "",
+        ].join("\n"),
+      );
+      expect(codes.length, "a builtin member's .name/.length must not compile").toBeGreaterThan(0);
+    },
+    900_000,
+  );
+
+  test(
+    "a value in a slot of another function type refuses rather than adapting",
+    async () => {
+      // A slot whose function type is not the member's own would take an
+      // adapter, and an adapter is a fresh closure: the value held there
+      // would compare unequal to the member where Node compares equal.
+      // The refusal is the answer, and its hint names `typeof dirname`.
+      const codes = await refusalCodes(
+        workDir,
+        "narrow-slot",
+        [
+          'import { dirname } from "node:path"',
+          'const f: (p: string, extra?: number) => string = dirname',
+          'console.log(f("/a/b"))',
+          "",
+        ].join("\n"),
+      );
+      expect(codes.length, "a slot of another shape must not silently adapt").toBeGreaterThan(0);
     },
     900_000,
   );
