@@ -48,6 +48,14 @@ const PROGRAM = [
   `  debug: (m: string, c: Ctx) => { c.seen = c.seen + 2; console.log('debug ' + m); },`,
   `  info: (m: string, c: Ctx) => { c.seen = c.seen + 3; console.log('info ' + m); },`,
   `};`,
+  // zapo's OWN writer table is a REST signature, and the first cut of the
+  // call rung excluded rest and so declined on the two sites it was written
+  // for. Same table, same keys, the arity carried through the rest pack.
+  `const REST_WRITERS: Readonly<Record<LogLevel, (...args: unknown[]) => void>> = {`,
+  `  trace: (...args: unknown[]) => { console.log('rtrace ' + String(args.length)); },`,
+  `  debug: (...args: unknown[]) => { console.log('rdebug ' + String(args.length)); },`,
+  `  info: (...args: unknown[]) => { console.log('rinfo ' + String(args.length)); },`,
+  `};`,
   `interface Cfg { dflt: string; rank: number }`,
   `const CONFIGS: Record<'alpha' | 'beta', Cfg> = {`,
   `  alpha: { dflt: 'A', rank: 1 },`,
@@ -104,7 +112,16 @@ const PROGRAM = [
   `  }`,
   `  console.log('n=' + String(n) + ' seen=' + String(ctx.seen));`,
   `  console.log('rank=' + String(CONFIGS['beta' as 'alpha' | 'beta'].rank));`,
-  `} else {`,
+  `} else if (mode === 'rest') {`,
+  `  REST_WRITERS['info' as LogLevel]('m', 1);`,
+  `  REST_WRITERS['debug' as LogLevel]('m');`,
+  `  try {`,
+  `    REST_WRITERS[bad as LogLevel]('m', noisy('ARG', { seen: 0 }));`,
+  `  } catch (e) {`,
+  `    console.log('caught ' + (e as Error).message);`,
+  `  }`,
+  `  console.log('effects=' + effects);`,
+`} else {`,
   `  const w = CONSOLE_WRITERS[bad as LogLevel] as ((m: string, c: Ctx) => void) | undefined;`,
   `  console.log('guard=' + String(w === undefined));`,
   `}`,
@@ -195,6 +212,16 @@ describe.each(["c", "llvm"] as const)("the catchable keyed-read rungs on the %s 
   test("the program continues after its own catch with the state Node has", async () => {
     // Two hits (+3, +2 on a `seen` that started at 7) and one miss.
     await cell(backend, "after", "info m\ndebug m\nn=102 seen=12\nrank=2\nend\n");
+  }, 600_000);
+
+  test("a REST callee is served too — zapo's own writer table", async () => {
+    // 2 and 1 arguments through the rest pack, then a miss whose argument
+    // still evaluates before the throw.
+    await cell(
+      backend,
+      "rest",
+      "rinfo 2\nrdebug 1\ncaught REST_WRITERS[bad] is not a function\neffects=ARG\nend\n",
+    );
   }, 600_000);
 
   test("the guarded spelling, which already worked, does not move", async () => {
