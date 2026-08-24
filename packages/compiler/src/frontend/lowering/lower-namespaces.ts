@@ -259,6 +259,232 @@ export function moduleNsSourceFileOf(L: Lowerer, e: ts.Expression): ts.SourceFil
   return null;
 }
 
+
+/** The own keys Node's module-namespace object answers for a module THE
+ * BUILD COMPILED, in Node's own order (code-unit sort) — or the reason
+ * the build cannot answer them EXACTLY.
+ *
+ * This is the half of a namespace object that needs no object at all.
+ * `Object.keys(ns)` never reads a value: the key set is a pure function
+ * of the module's export table, which the build holds COMPLETE for every
+ * module in the compiled graph — and a type-only export carries no Value
+ * meaning, exactly as it carries no key in Node.
+ *
+ * `export *` IS WALKED HERE RATHER THAN ASKED OF THE CHECKER, and that is
+ * the load-bearing part. `moduleSymbol.getExports()` answers a module's
+ * OWN export table only: declarations, named re-exports and `export * as
+ * ns` are in it, and star re-exports are NOT — the checker resolves those
+ * lazily, per member access. Reading the key set off `getExports()` alone
+ * answers a SHORT list where Node answers a long one, at exit 0, with no
+ * diagnostic: measured, `export * from "./a"` lost every one of a's names
+ * and a two-hop chain lost all of them. Walking the star declarations
+ * gives Node's three rules their own code, each with a case behind it:
+ *   - `default` is never re-exported by a star;
+ *   - a LOCAL export shadows a starred one of the same name;
+ *   - a name two DIFFERENT stars both provide is ambiguous and Node omits
+ *     it (tsc errors first here, so this arm refuses rather than guesses).
+ *
+ * What it REFUSES rather than guesses, each because the name would be
+ * right only if something OUTSIDE the compiled graph agreed:
+ *   - an export, or an `export *` target, that resolves into a file the
+ *     build never compiled: the name would come from a .d.ts, which is a
+ *     CLAIM about a module this program does not contain;
+ *   - an ambient declaration, which declares a name without creating one;
+ *   - a CommonJS `export =` module, whose namespace Node assembles from
+ *     module.exports through its own lexer.
+ * A partially-known key set is worse than no answer, so any one of those
+ * refuses the whole call rather than shortening the list. */
+export function moduleNsOwnKeys(
+  L: Lowerer,
+  sf: ts.SourceFile,
+): { keys: string[]; missing: null } | { keys: null; missing: string } {
+  const blocked: string[] = [];
+  const names = nsNameSet(L, sf, new Set<ts.SourceFile>(), blocked);
+  if (blocked.length > 0) return { keys: null, missing: blocked.sort()[0]! };
+  return { keys: [...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)), missing: null };
+}
+
+/** One module's OWN export names — the checker's export table, filtered to
+ * the bindings that exist at run time in THIS program. */
+function nsOwnNameSet(L: Lowerer, sf: ts.SourceFile, blocked: string[]): Set<string> {
+  const out = new Set<string>();
+  const modSym = L.checker.getSymbolAtLocation(sf);
+  if (modSym === undefined) {
+    blocked.push("the module has no export table the build can read");
+    return out;
+  }
+  modSym.getExports().forEach((sym: ts.Symbol, key: ts.__String) => {
+    const n = String(key);
+    if (n === "export=") {
+      blocked.push(
+        "it is a CommonJS `export =` module, whose namespace Node assembles from module.exports through its own lexer",
+      );
+      return;
+    }
+    if (n.startsWith("__")) return;
+    let resolved = sym;
+    if (sym.flags & ts.SymbolFlags.Alias) {
+      for (const d of L.checker.declarationsOf(sym)) {
+        if (ts.isExportSpecifier(d)) {
+          const decl = d.parent.parent;
+          if (d.isTypeOnly || (ts.isExportDeclaration(decl) && decl.isTypeOnly)) return;
+        }
+        if (ts.isImportSpecifier(d)) {
+          const clause = d.parent.parent;
+          if (d.isTypeOnly || (ts.isImportClause(clause) && clause.phaseModifier === ts.SyntaxKind.TypeKeyword)) return;
+        }
+      }
+      resolved = L.checker.getAliasedSymbol(sym);
+    }
+    // A pure type surface erases: Node's namespace never lists it either.
+    if (!(resolved.flags & ts.SymbolFlags.Value)) return;
+    const decls = L.checker.declarationsOf(resolved);
+    if (decls.length === 0) {
+      blocked.push(`the '${n}' export has no declaration the build can see`);
+      return;
+    }
+    if (!decls.some((d) => !d.getSourceFile().isDeclarationFile && L.fileTag.has(d.getSourceFile()))) {
+      blocked.push(`the '${n}' export resolves into a module the build did not compile`);
+      return;
+    }
+    if (decls.every((d) => (ts.getCombinedModifierFlags(d) & ts.ModifierFlags.Ambient) !== 0)) {
+      blocked.push(`the '${n}' export is an ambient declaration, which names a binding without creating one`);
+      return;
+    }
+    out.add(n);
+  });
+  return out;
+}
+
+/** One module's export names INCLUDING its `export *` chain, by Node's
+ * rules. `seen` breaks a re-export cycle exactly as Node's [[GetExportedNames]]
+ * does — a module already on the stack contributes nothing further. */
+function nsNameSet(
+  L: Lowerer,
+  sf: ts.SourceFile,
+  seen: Set<ts.SourceFile>,
+  blocked: string[],
+): Set<string> {
+  if (seen.has(sf)) return new Set<string>();
+  seen.add(sf);
+  const local = nsOwnNameSet(L, sf, blocked);
+  const out = new Set<string>(local);
+  const starOwner = new Map<string, ts.SourceFile>();
+  for (const stmt of sf.statements) {
+    if (!ts.isExportDeclaration(stmt)) continue;
+    if (stmt.exportClause !== undefined) continue; // named / `* as ns`: already in the own table
+    if (stmt.isTypeOnly) continue;
+    if (stmt.moduleSpecifier === undefined || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+    const spec = stmt.moduleSpecifier.text;
+    const dep = resolveImport(L.program, sf, spec);
+    if (dep === null || dep === undefined || dep.isDeclarationFile || !L.fileTag.has(dep)) {
+      blocked.push(`its \`export * from "${spec}"\` names a module the build did not compile`);
+      continue;
+    }
+    for (const n of nsNameSet(L, dep, seen, blocked)) {
+      if (n === "default") continue; // a star never re-exports default
+      if (local.has(n)) continue; // a local export shadows a starred one
+      const owner = starOwner.get(n);
+      if (owner !== undefined && owner !== dep) {
+        blocked.push(
+          `the name '${n}' arrives through two different \`export *\` sources (Node omits an ambiguous star export)`,
+        );
+        continue;
+      }
+      starOwner.set(n, dep);
+      out.add(n);
+    }
+  }
+  return out;
+}
+
+
+/** The (name, symbol) pairs an `export *` chain contributes to a module's
+ * namespace — the ones `moduleSymbol.getExports()` does NOT carry.
+ *
+ * `getExports()` answers a module's OWN export table: declarations, named
+ * re-exports and `export * as ns` are in it, star re-exports are not (the
+ * checker resolves those lazily, per member access). Any walk that builds
+ * a namespace off `getExports()` alone therefore SILENTLY OMITS every
+ * starred name — measured on main at `27343f6f`, a dynamic-import
+ * namespace answered `undefined` for a star-re-exported const where Node
+ * answers its value, at exit 0, with no diagnostic.
+ *
+ * Only the STAR contribution is returned, already de-duplicated against
+ * the root's own table, so a caller appends it to its existing walk and
+ * nothing else about that walk changes. Node's rules, each with a case
+ * behind it in tests/harness/module-ns-keys.test.ts: `default` is never
+ * re-exported by a star, a LOCAL export shadows a starred one, a name two
+ * DIFFERENT stars provide is ambiguous and omitted, and a re-export cycle
+ * terminates.
+ *
+ * `unresolved` names an `export *` target the build did not compile. Its
+ * names would come from a .d.ts — a claim about a module this program
+ * does not contain — so a caller must REFUSE rather than answer a short
+ * namespace. */
+export function moduleNsStarExports(
+  L: Lowerer,
+  sf: ts.SourceFile,
+): { entries: [string, ts.Symbol][]; unresolved: string | null } {
+  const own = new Set<string>();
+  L.checker.getSymbolAtLocation(sf)?.getExports().forEach((_s: ts.Symbol, key: ts.__String) => {
+    own.add(String(key));
+  });
+  const found = new Map<string, ts.Symbol>();
+  const owner = new Map<string, ts.SourceFile>();
+  const ambiguous = new Set<string>();
+  const state = { unresolved: null as string | null };
+  collectStarExports(L, sf, new Set<ts.SourceFile>([sf]), own, found, owner, ambiguous, state);
+  for (const n of ambiguous) found.delete(n);
+  return {
+    entries: [...found.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
+    unresolved: state.unresolved,
+  };
+}
+
+function collectStarExports(
+  L: Lowerer,
+  sf: ts.SourceFile,
+  seen: Set<ts.SourceFile>,
+  shadowed: ReadonlySet<string>,
+  found: Map<string, ts.Symbol>,
+  owner: Map<string, ts.SourceFile>,
+  ambiguous: Set<string>,
+  state: { unresolved: string | null },
+): void {
+  for (const stmt of sf.statements) {
+    if (!ts.isExportDeclaration(stmt)) continue;
+    if (stmt.exportClause !== undefined) continue; // named / `* as ns`: the own table has it
+    if (stmt.isTypeOnly) continue;
+    if (stmt.moduleSpecifier === undefined || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+    const spec = stmt.moduleSpecifier.text;
+    const dep = resolveImport(L.program, sf, spec);
+    if (dep === null || dep === undefined || dep.isDeclarationFile || !L.fileTag.has(dep)) {
+      state.unresolved ??= spec;
+      continue;
+    }
+    if (seen.has(dep)) continue; // a re-export cycle contributes nothing further
+    seen.add(dep);
+    const depOwn: [string, ts.Symbol][] = [];
+    L.checker.getSymbolAtLocation(dep)?.getExports().forEach((sym: ts.Symbol, key: ts.__String) => {
+      depOwn.push([String(key), sym]);
+    });
+    for (const [n, sym] of depOwn) {
+      if (n === "default" || n === "export=" || n.startsWith("__")) continue;
+      if (shadowed.has(n)) continue; // the root's own export shadows a starred one
+      const prev = owner.get(n);
+      if (prev !== undefined && prev !== dep) {
+        ambiguous.add(n); // Node omits a name two different stars provide
+        continue;
+      }
+      owner.set(n, dep);
+      found.set(n, sym);
+    }
+    // The far hop, whose names the NEAR hop's own table shadows in turn.
+    const depNames = new Set<string>([...shadowed, ...depOwn.map(([n]) => n)]);
+    collectStarExports(L, dep, seen, depNames, found, owner, ambiguous, state);
+  }
+}
 /** The member identifier of a qualified namespace reference, when `access`
  * reads a member declared in a lowered (or type-only) namespace block —
  * or an EXPORT of a program module read through its namespace-import
@@ -935,7 +1161,8 @@ export function lowerNsIdentifierValue(L: Lowerer, ident: ts.Identifier): IrExpr
     L.unsupported(
       "SC1013",
       ident,
-      `module namespace objects as first-class values (access '${ident.text}' members directly: ${ident.text}.<member>)`,
+      `module namespace objects as first-class values (access '${ident.text}' members directly: ${ident.text}.<member>, or enumerate it: Object.keys(${ident.text}) folds to the export names)`,
+      `the KEY SET is exact and compiles today — what has no compiled representation is the OBJECT: Node's namespace is exotic (a null prototype, the "Module" tag, one instance per module, and a [[Set]] that always fails), and a checked-dynamic object is none of those`,
     );
   }
   L.unsupported(
