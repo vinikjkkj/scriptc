@@ -335,19 +335,29 @@ function measure(exe, scenario, label, benchEnv) {
       rows: st.rows, inc, calls: parsed.calls, log: p.log
     })
   }
-  // HEALTH 4: determinism
+  /* HEALTH 4: reproducibility, gated on a PERCENTAGE rather than on exact
+   * equality. Exact equality is what the measured WORK achieves, but the
+   * harness also prints its own elapsedMs/throughput, and ryu's d2d spends a
+   * different number of instructions on a different number of digits. That
+   * residue is ~20-200 Ir on 48-533 MILLION, and demanding zero would paint
+   * every scenario red for a reason that is not the instrument's. The drift
+   * is printed frame by frame, so a real regression cannot hide inside it. */
   const a = reps[0]
-  let deterministic = true
   const drift = []
+  let worstPct = 0
   for (const r of reps.slice(1)) {
-    if (r.total !== a.total) { deterministic = false; drift.push('total ' + a.total + ' vs ' + r.total) }
+    const dp = a.total > 0 ? Math.abs(100 * (r.total - a.total) / a.total) : 0
+    worstPct = Math.max(worstPct, dp)
+    if (r.total !== a.total) drift.push('total ' + fmt(a.total) + ' vs ' + fmt(r.total) +
+      '  (' + (r.total - a.total >= 0 ? '+' : '') + fmt(r.total - a.total) + ' Ir, ' + dp.toFixed(6) + '%)')
     for (const [name, row] of a.rows) {
       const other = r.rows.get(name)
-      if (other === undefined) { deterministic = false; drift.push('missing ' + name); continue }
-      if (other.self !== row.self) { deterministic = false; drift.push(name + ' ' + row.self + ' vs ' + other.self) }
+      if (other === undefined) { drift.push('MISSING IN REPEAT: ' + name); worstPct = Infinity; continue }
+      if (other.self !== row.self) drift.push(name + ': ' + fmt(row.self) + ' vs ' + fmt(other.self))
     }
   }
-  return { scenario, reps, rep: a, deterministic, drift }
+  const deterministic = worstPct < FLOOR_PCT
+  return { scenario, reps, rep: a, deterministic, drift, driftPct: worstPct }
 }
 
 /* ── report ─────────────────────────────────────────────────────────────── */
@@ -364,10 +374,12 @@ function printScenario(m) {
     'SCBENCH-line=' + (r.ran ? 'yes' : 'NO  <-- DID-NOT-RUN'),
     'summary=' + fmt(r.summary) + (r.summary > 0 ? '' : '  <-- ZERO'),
     'unsymbolised=' + (r.total > 0 ? (100 * r.unsym / r.total).toFixed(2) : '0.00') + '%',
-    'reproducible(' + REPS + 'x)=' + (m.deterministic ? 'EXACT' : 'NO  <-- NON-DETERMINISTIC')
+    'reproducible(' + REPS + 'x)=' + (m.drift.length === 0 ? 'EXACT'
+      : m.deterministic ? 'within ' + m.driftPct.toFixed(6) + '% (gate ' + FLOOR_PCT + '%)'
+        : 'NO  <-- ' + m.driftPct.toFixed(6) + '% EXCEEDS the ' + FLOOR_PCT + '% gate')
   ]
   console.log('   health: ' + health.join('   '))
-  if (!m.deterministic) for (const d of m.drift.slice(0, 8)) console.log('     drift: ' + d)
+  for (const d of m.drift.slice(0, 8)) console.log('     drift: ' + d)
   if (!r.ran || r.summary === 0) { console.log('   (health check failed - no table)'); return }
 
   const rows = [...r.rows.values()]
