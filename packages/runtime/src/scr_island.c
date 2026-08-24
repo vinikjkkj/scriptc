@@ -1076,6 +1076,11 @@ static JSValue isl_from_dyn(const ScrDyn *d) {
     return arr;
   }
   case SCR_DYN_OBJ: {
+    /* Marshalling reads the member table directly, so an ENUMERABLE
+     * ACCESSOR would cross as the SLOT's undefined where Node's own
+     * copy would carry the getter's value. Loud rather than short. */
+    scr_dyn_obj_acc_fence(d, "marshalling an object into the island");
+    if (scr_exc_pending()) return JS_EXCEPTION;
     JSValue obj = JS_NewObject(isl_ctx);
     if (JS_IsException(obj)) return obj;
     for (size_t i = 0; i < d->v.obj.len; i++) {

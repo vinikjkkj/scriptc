@@ -623,11 +623,33 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
           if (!bv || !scr_assert_dyn_deep_eq(ent->value, bv)) return false;
         }
       }
-      if (a->v.obj.len != b->v.obj.len) return false;
+      /* Own ENUMERABLE keys, counted rather than measured off the table
+       * length: an accessor that is currently NON-enumerable keeps a
+       * position TOMBSTONE in `entries` (scr_runtime.h, the accessor
+       * SLOT), and counting one would make two objects Node calls equal
+       * compare unequal because one of them had once had a getter. */
+      if (scr_dyn_obj_enum_key_count(a) != scr_dyn_obj_enum_key_count(b)) return false;
       for (size_t i = 0; i < a->v.obj.len; i++) {
         const ScrDynEntry *ent = &a->v.obj.entries[i];
-        ScrDyn *bv = scr_dyn_obj_get(b, ent->key, ent->key_len);
-        if (!bv || !scr_assert_dyn_deep_eq(ent->value, bv)) return false;
+        /* Node's deepStrictEqual reads each own enumerable property with
+         * [[Get]], so an ENUMERABLE ACCESSOR's getter RUNS on both sides
+         * — `deepStrictEqual({get g(){return 2}}, {g: 2})` PASSES in
+         * v25.9.0, which is only true if the getter ran. */
+        bool skip = false;
+        ScrDyn *av = scr_dyn_obj_entry_read((ScrDyn *)a, ent, &skip); /* +1 or NULL */
+        if (av == NULL) {
+          if (skip) continue;
+          return false; /* the getter threw; the exception is pending */
+        }
+        ScrDyn *bv = scr_dyn_obj_own_enum_read((ScrDyn *)b, ent->key, ent->key_len); /* +1/NULL */
+        if (bv == NULL) {
+          scr_dyn_release(av);
+          return false;
+        }
+        bool eq = scr_assert_dyn_deep_eq(av, bv);
+        scr_dyn_release(av);
+        scr_dyn_release(bv);
+        if (!eq) return false;
       }
       return true;
     }
@@ -877,23 +899,50 @@ static void scr_assert_cf_value(ScrAssertBuf *b, const ScrDyn *d, size_t indent,
        * sorted:true sorts formatted entries, quotes included). */
       ScrCfEntry *ents = malloc(d->v.obj.len * sizeof *ents);
       if (!ents) scr_assert_oom();
+      size_t nents = 0;
       for (size_t i = 0; i < d->v.obj.len; i++) {
         const ScrDynEntry *ent = &d->v.obj.entries[i];
+        /* An ENUMERABLE ACCESSOR renders as `[Getter]` and its getter is
+         * NOT called: this is the FAILURE MESSAGE, and running user code
+         * to print a diff is a side effect the assertion did not ask
+         * for. Node's own diff prints `[Getter]` here too. A tombstone
+         * is not an own enumerable key and prints nothing. */
+        if (ent->value == scr_dyn_acc_slot()) {
+          const ScrDyn *q = d->v.obj.hidden != NULL
+                                ? scr_dyn_obj_get(d->v.obj.hidden, ent->key, ent->key_len)
+                                : NULL;
+          if (q == NULL || q->kind != SCR_DYN_ARR || q->v.arr.len < 5 ||
+              !scr_dyn_truthy(q->v.arr.items[4])) {
+            continue;
+          }
+          bool g = q->v.arr.items[1]->kind == SCR_DYN_FUNC;
+          bool s = q->v.arr.items[2]->kind == SCR_DYN_FUNC;
+          ScrAssertBuf ab = {0};
+          scr_assert_cf_key(&ab, ent->key, ent->key_len);
+          ab_cstr(&ab, ": ");
+          ab_cstr(&ab, g && s ? "[Getter/Setter]" : g ? "[Getter]" : "[Setter]");
+          ents[nents].text = ab.data ? ab.data : malloc(1);
+          if (!ents[nents].text) scr_assert_oom();
+          ents[nents].len = ab.len;
+          nents++;
+          continue;
+        }
         ScrAssertBuf eb = {0};
         scr_assert_cf_key(&eb, ent->key, ent->key_len);
         ab_cstr(&eb, ": ");
         scr_assert_cf_value(&eb, ent->value, indent + 2, depth - 1);
-        ents[i].text = eb.data ? eb.data : malloc(1);
-        if (!ents[i].text) scr_assert_oom();
-        ents[i].len = eb.len;
+        ents[nents].text = eb.data ? eb.data : malloc(1);
+        if (!ents[nents].text) scr_assert_oom();
+        ents[nents].len = eb.len;
+        nents++;
       }
-      qsort(ents, d->v.obj.len, sizeof *ents, scr_assert_cf_entry_cmp);
+      qsort(ents, nents, sizeof *ents, scr_assert_cf_entry_cmp);
       ab_char(b, '{');
-      for (size_t i = 0; i < d->v.obj.len; i++) {
+      for (size_t i = 0; i < nents; i++) {
         ab_char(b, '\n');
         scr_assert_cf_pad(b, indent + 2);
         ab_bytes(b, ents[i].text, ents[i].len);
-        if (i + 1 < d->v.obj.len) ab_char(b, ',');
+        if (i + 1 < nents) ab_char(b, ',');
         free(ents[i].text);
       }
       free(ents);
@@ -1315,8 +1364,21 @@ void scr_assert_expects_err_dyn(ScrDyn *actual, ScrDyn *expected, ScrStr *msg, b
     if (scr_dyn_is_error_encoding(expected)) ok = scr_assert_err_pair_eq(expected, actual);
     for (size_t i = 0; i < expected->v.obj.len && ok; i++) {
       const ScrDynEntry *e = &expected->v.obj.entries[i];
-      ScrDyn *av = scr_dyn_obj_get(actual, e->key, e->key_len);
-      if (av == NULL || !scr_assert_dyn_deep_eq(av, e->value)) ok = false;
+      /* Both sides read through the enumerable-own walk, so an
+       * ENUMERABLE ACCESSOR on either the expected shape or the thrown
+       * error compares by the getter's VALUE — which is what Node does,
+       * and what keeps a tombstone from being demanded of `actual`. */
+      bool skip = false;
+      ScrDyn *ev = scr_dyn_obj_entry_read((ScrDyn *)expected, e, &skip); /* +1/NULL */
+      if (ev == NULL) {
+        if (skip) continue;
+        ok = false;
+        break;
+      }
+      ScrDyn *av = scr_dyn_obj_own_enum_read(actual, e->key, e->key_len); /* +1/NULL */
+      if (av == NULL || !scr_assert_dyn_deep_eq(av, ev)) ok = false;
+      if (av != NULL) scr_dyn_release(av);
+      scr_dyn_release(ev);
     }
     if (ok) return;
   }

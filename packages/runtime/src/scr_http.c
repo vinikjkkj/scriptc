@@ -1054,6 +1054,11 @@ void scr_http_res_write_head_dyn(ScrHttpRes *r, double status, const ScrDyn *hea
     scr_dyn_arg_type_fail("headers", "an instance of Object", headers);
     return;
   }
+  /* This walk reads the member table directly and has no getter path, so
+   * an ENUMERABLE ACCESSOR here would send a header whose value is the
+   * SLOT — undefined — where Node sends the getter's. Loud. */
+  scr_dyn_obj_acc_fence(headers, "setting response headers from an object");
+  if (scr_exc_pending()) return;
   for (size_t i = 0; i < headers->v.obj.len; i++) {
     const ScrDynEntry *e = &headers->v.obj.entries[i];
     const ScrDyn *v = e->value;
@@ -3835,6 +3840,9 @@ static bool scr_http_dynh_req_set(void *h, const char *key, size_t key_len, cons
  * consecutive same-name pairs). Numbers format through String(n). NULL =
  * a value this surface cannot honestly carry (exception pending). */
 static ScrArr *scr_http_dynh_pairs(const ScrDyn *headers) {
+  /* No getter path in this walk — see the writeHead object form above. */
+  scr_dyn_obj_acc_fence(headers, "writeHead with a headers object");
+  if (scr_exc_pending()) return NULL;
   ScrArr *pairs = scr_arr_new(SCR_ELEM_STR, headers->v.obj.len * 2);
   for (size_t i = 0; i < headers->v.obj.len; i++) {
     const ScrDynEntry *e = &headers->v.obj.entries[i];

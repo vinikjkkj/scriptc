@@ -958,8 +958,33 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       size_t *ord = scr_dyn_obj_key_order(d);
       for (size_t i = 0; i < d->v.obj.len; i++) {
         ScrDynEntry *ent = &d->v.obj.entries[ord ? ord[i] : i];
-        ScrStr *val = scr_insp_dyn(ent->value, recurse + 1, depth);
         InspBuf eb = {0};
+        /* An ENUMERABLE ACCESSOR renders as `[Getter]` / `[Setter]` /
+         * `[Getter/Setter]` and its getter is NOT invoked — Node's
+         * default `getters: false`, and calling one at a print would be
+         * a side effect the program did not ask for. This is the same
+         * rendering scr_cls_props_inspect gives the same descriptor on a
+         * compiled class instance, deliberately: one shape, one string.
+         * A tombstone is not an own enumerable key and shows nothing. */
+        if (ent->value == scr_dyn_acc_slot()) {
+          const ScrDyn *q = d->v.obj.hidden != NULL
+                                ? scr_dyn_obj_get(d->v.obj.hidden, ent->key, ent->key_len)
+                                : NULL;
+          if (q == NULL || q->kind != SCR_DYN_ARR || q->v.arr.len < 5 ||
+              !scr_dyn_truthy(q->v.arr.items[4])) {
+            continue;
+          }
+          bool g = q->v.arr.items[1]->kind == SCR_DYN_FUNC;
+          bool s = q->v.arr.items[2]->kind == SCR_DYN_FUNC;
+          insp_key_into(&eb, ent->key, ent->key_len);
+          ib_cstr(&eb, ": ");
+          ib_cstr(&eb, g && s ? "[Getter/Setter]" : g ? "[Getter]" : "[Setter]");
+          ScrStr *aentry = ib_take(&eb);
+          scr_insp_entry(aentry, false);
+          scr_str_release(aentry);
+          continue;
+        }
+        ScrStr *val = scr_insp_dyn(ent->value, recurse + 1, depth);
         insp_key_into(&eb, ent->key, ent->key_len);
         ib_cstr(&eb, ": ");
         ib_bytes(&eb, val->data, val->len);

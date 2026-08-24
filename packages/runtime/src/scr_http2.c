@@ -2847,6 +2847,11 @@ static void scr_h2_dyn_fire_goaway(ScrClosure *cb, double code, double last) {
 /* Flatten a dyn headers object into the flat pairs array (numbers via
  * String(n); the :status/:method/... pseudo-headers pass through). */
 static ScrArr *scr_h2_dom_to_pairs(const ScrDyn *headers) {
+  /* This walk reads the member table directly and has no getter path, so
+   * an ENUMERABLE ACCESSOR here would send the SLOT's undefined where
+   * Node sends the getter's value. Loud. */
+  scr_dyn_obj_acc_fence(headers, "http2 headers from an object");
+  if (scr_exc_pending()) return NULL;
   ScrArr *pairs = scr_arr_new(SCR_ELEM_STR, headers->v.obj.len * 2);
   for (size_t i = 0; i < headers->v.obj.len; i++) {
     const ScrDynEntry *e = &headers->v.obj.entries[i];
