@@ -757,6 +757,77 @@ export function probeNodeRequireRefusal(
  * MODULE_NOT_FOUND while `node_modules/a.js` hands the module over. */
 const CJS_LOAD_AS_FILE_EXTS: readonly string[] = ["", ".js", ".json", ".node"];
 
+/** Node's LOAD_INDEX list for a CJS require, exactly: `index` plus the
+ * three extensions require's own extension table serves. `index.mjs` and
+ * `index.cjs` are NOT in it — measured against Node v25.9.0, where a
+ * node_modules directory holding only `index.mjs` (or only `index.cjs`)
+ * leaves `require("<dir>")` throwing MODULE_NOT_FOUND. */
+const CJS_LOAD_INDEX_FILES: readonly string[] = ["index.js", "index.json", "index.node"];
+
+/** Node's LOAD_AS_FILE(X): the path VERBATIM, then the three extensions. */
+function cjsLoadAsFile(host: Host, base: string): boolean {
+  for (const ext of CJS_LOAD_AS_FILE_EXTS) if (host.isFile(base + ext)) return true;
+  return false;
+}
+
+/** Node's LOAD_INDEX(X). */
+function cjsLoadIndex(host: Host, dir: string): boolean {
+  for (const f of CJS_LOAD_INDEX_FILES) if (host.isFile(join(dir, f))) return true;
+  return false;
+}
+
+/** Node's LOAD_AS_DIRECTORY(X): does `require` find a module at this
+ * DIRECTORY?
+ *
+ * The root set used to answer "a directory under node_modules is a root"
+ * and stop there. A name IN the set fences (the module value it would
+ * have to produce has no representation) and only a name provably
+ * OUTSIDE it compiles to Node's catchable MODULE_NOT_FOUND — so every
+ * directory Node does NOT resolve was a refusal the program need not
+ * carry. The population is not exotic: `@types/*` is exactly this shape
+ * (a manifest with "types", no "main", and a .d.ts beside it), and it is
+ * in almost every node_modules tree there is. Two of zapo's own five
+ * non-builtin roots are it.
+ *
+ * Measured against Node v25.9.0 over 26 package shapes
+ * (`tests/harness/require-node-parity.test.ts` re-derives every row):
+ *
+ *   no package.json                     index.js/.json/.node, nothing else
+ *   package.json, no "main"             the same LOAD_INDEX
+ *   "main" that resolves                LOAD_AS_FILE then LOAD_INDEX of it
+ *   "main" that does NOT resolve        falls back to LOAD_INDEX of the ROOT
+ *   "main" a directory with a nested package.json   NOT re-read: LOAD_INDEX only
+ *   "main" empty / not a string         ignored, LOAD_INDEX of the root
+ *
+ * THE DIRECTION MATTERS AND ONLY ONE WAY IS SAFE. Answering false for a
+ * directory Node resolves compiles to MODULE_NOT_FOUND for a module Node
+ * hands over — swallowed by the very `try { require(x) } catch` idiom
+ * this machinery exists for, so silent. Every doubt therefore answers
+ * TRUE, and three shapes answer TRUE where Node itself throws, because
+ * Node throws something OTHER than MODULE_NOT_FOUND there and a fence is
+ * never a value where Node throws:
+ *
+ *   an "exports" field of any shape     the map is not modelled here
+ *   a package.json that will not parse  Node's ERR_INVALID_PACKAGE_CONFIG
+ *   ("exports": null is not a field — Node ignores it, and so does this.)
+ */
+function cjsLoadAsDirectory(host: Host, dir: string): boolean {
+  const pkgText = host.readFile(join(dir, "package.json"));
+  if (pkgText === null) return cjsLoadIndex(host, dir);
+  let pkg: { main?: unknown; exports?: unknown };
+  try {
+    pkg = JSON.parse(pkgText) as { main?: unknown; exports?: unknown };
+  } catch {
+    return true; // unparseable: Node throws a DIFFERENT error — keep the fence
+  }
+  if (pkg === null || typeof pkg !== "object") return cjsLoadIndex(host, dir);
+  if (pkg.exports !== undefined && pkg.exports !== null) return true;
+  if (typeof pkg.main === "string" && pkg.main !== "") {
+    const m = join(dir, pkg.main);
+    if (cjsLoadAsFile(host, m) || cjsLoadIndex(host, m)) return true;
+  }
+  return cjsLoadIndex(host, dir);
+}
 /** Does Node's CJS resolution find anything at `node_modules/<root>`?
  *
  * A package root need NOT be a directory. Node tries LOAD_AS_FILE on the
@@ -766,11 +837,15 @@ const CJS_LOAD_AS_FILE_EXTS: readonly string[] = ["", ".js", ".json", ".node"];
  * isDirectory answered "nothing installed resolves this" for every one of
  * them, and the callers turn that answer into Node's catchable
  * MODULE_NOT_FOUND: a THROW where Node returns a module, swallowed by the
- * very `try { require(x) } catch {}` idiom the throw was built for. */
+ * very `try { require(x) } catch {}` idiom the throw was built for.
+ *
+ * And a DIRECTORY is not a package either: `require` still has to find a
+ * module INSIDE it, which is LOAD_AS_DIRECTORY and not "it exists" —
+ * cjsLoadAsDirectory above, with the 26 shapes it was measured over and
+ * the reason every doubt answers true. */
 function nodeModulesRootResolves(host: Host, base: string): boolean {
-  if (host.isDirectory(base)) return true;
-  for (const ext of CJS_LOAD_AS_FILE_EXTS) if (host.isFile(base + ext)) return true;
-  return false;
+  if (cjsLoadAsFile(host, base)) return true;
+  return host.isDirectory(base) && cjsLoadAsDirectory(host, base);
 }
 
 /** The bare ROOT a node_modules FILE entry additionally spells, or null.
@@ -889,13 +964,22 @@ function computeResolvableRoots(fromFile: string, host: Host): Set<string> | nul
           if (scoped === null) return null;
           for (const s2 of scoped) {
             if (s2.startsWith(".")) continue;
-            out.add(`${e}/${s2}`);
+            if (nodeModulesRootResolves(host, join(nm, e, s2))) out.add(`${e}/${s2}`);
             const fileRoot = cjsFileEntryRoot(host, join(nm, e, s2), s2);
             if (fileRoot !== null) out.add(`${e}/${fileRoot}`);
           }
           continue;
         }
-        out.add(e);
+        // An ENTRY is not a root: `require("<entry>")` still has to find a
+        // module, and a directory Node's LOAD_AS_DIRECTORY comes up empty
+        // in is one Node answers MODULE_NOT_FOUND for. The set used to
+        // carry every directory name, so `@types/node` — a manifest with
+        // "types", no "main" and a .d.ts beside it — fenced a specifier
+        // Node throws on. nodeModulesRootResolves is the same predicate
+        // the WRITTEN-specifier road uses, and every doubt in it answers
+        // "resolvable", so this can only ever REMOVE a refusal, never add
+        // a MODULE_NOT_FOUND for something Node serves.
+        if (nodeModulesRootResolves(host, join(nm, e))) out.add(e);
         const fileRoot = cjsFileEntryRoot(host, join(nm, e), e);
         if (fileRoot !== null) out.add(fileRoot);
       }
