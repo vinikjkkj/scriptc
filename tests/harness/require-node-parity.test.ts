@@ -38,9 +38,9 @@
  * programs print `e.code` and a path-free slice of `e.message`.
  */
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { beforeAll, describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { exeName } from "./exe.js";
@@ -74,6 +74,14 @@ interface Program {
   readonly name: string;
   /** The entry's extension: ".cjs" is a CommonJS module, ".mjs" an ES one. */
   readonly ext?: ".cjs" | ".mjs";
+  /** The fixture's own package.json, when the program's answer depends on
+   * it. A `#` specifier is resolved against the "imports" field of the
+   * NEAREST enclosing package.json, and what Node answers when nothing
+   * matches depends on whether that field EXISTS — MODULE_NOT_FOUND
+   * without it, ERR_PACKAGE_IMPORT_NOT_DEFINED with it, even when it is
+   * empty. Two different codes and two different classes for the same
+   * specifier, so both trees have to be in this file. */
+  readonly pkg?: string;
   readonly src: string;
   /** Node v25.9.0's stdout, byte for byte. */
   readonly stdout: string;
@@ -82,6 +90,112 @@ interface Program {
 }
 
 const RUNS: readonly Program[] = [
+  {
+    // 'node:' serves BUILTINS ONLY, and that makes it the one refusing
+    // class whose whole answer is a NAME TABLE: no filesystem, no module
+    // value. A name Node's own builtinModules carries is a module and
+    // still fences (below); every other name is this error, whose
+    // message is the WHOLE specifier and which carries NO require stack.
+    // Bare 'node:' is in here because the prefix test and the name test
+    // are two different tests and only this spelling separates them.
+    name: "a run-time 'node:' name Node has no builtin for is ERR_UNKNOWN_BUILTIN_MODULE",
+    src:
+      "function g(s) { try { require(s); return 'GOT' } catch (e) { return e.code + '|' + e.message } }\n" +
+      "console.log(g('node:nosuchmod'));\n" +
+      "console.log(g('node:fs/nosuch'));\n" +
+      "console.log(g('node:'));\n",
+    stdout:
+      "ERR_UNKNOWN_BUILTIN_MODULE|No such built-in module: node:nosuchmod\n" +
+      "ERR_UNKNOWN_BUILTIN_MODULE|No such built-in module: node:fs/nosuch\n" +
+      "ERR_UNKNOWN_BUILTIN_MODULE|No such built-in module: node:\n",
+    exit: 0,
+  },
+  {
+    // A colon does NOT make a specifier a path. Node's CJS resolver walks
+    // node_modules for every one of these and answers MODULE_NOT_FOUND;
+    // a blanket ':' test fenced all four to catch the one shape that
+    // really is a path, a DRIVE letter, which is spelled out instead.
+    // 'mylib:sub' is the sharp one: `mylib` IS installed here, and the
+    // root Node looks for is the whole 'mylib:sub'.
+    name: "a colon does not make a specifier a path",
+    src:
+      "function g(s) { try { require(s); return 'GOT' } catch (e) { return e.code } }\n" +
+      "console.log(g('file:///nothing-xyz'), g('http://example.com/x'));\n" +
+      "console.log(g('data:text/js,1'), g('mylib:sub'));\n",
+    stdout: "MODULE_NOT_FOUND MODULE_NOT_FOUND\nMODULE_NOT_FOUND MODULE_NOT_FOUND\n",
+    exit: 0,
+  },
+  {
+    // A '#' import in a scope with NO "imports" field. Every shape,
+    // malformed ones included, is MODULE_NOT_FOUND here — measured.
+    name: "a '#' import with no imports map anywhere is MODULE_NOT_FOUND",
+    src:
+      "function g(s) { try { require(s); return 'GOT' } catch (e) { return e.code + '|' + String(e.message).split('\\n')[0] } }\n" +
+      "console.log(g('#ok'));\n" +
+      "console.log(g('#nope'));\n" +
+      "console.log(g('#/x'));\n",
+    stdout:
+      "MODULE_NOT_FOUND|Cannot find module '#ok'\n" +
+      "MODULE_NOT_FOUND|Cannot find module '#nope'\n" +
+      "MODULE_NOT_FOUND|Cannot find module '#/x'\n",
+    exit: 0,
+  },
+  {
+    // The SAME specifier in a scope that HAS an imports map is a
+    // different error with a different code AND a different class — a
+    // TypeError, not an Error. The optional-dependency idiom reads
+    // e.code, so a program asking "was it just not installed?" got the
+    // wrong branch. The message names two absolute paths, so this cell
+    // prints the code and the class instead.
+    name: "a '#' import an imports map does not define is ERR_PACKAGE_IMPORT_NOT_DEFINED",
+    pkg: '{ "name": "require-parity-probe", "version": "0.0.0", "imports": { "#ok": "./m.cjs", "#pat/*": "./*.cjs" } }\n',
+    src:
+      "function g(s) { try { require(s); return 'GOT' } catch (e) { return e.code + ' ' + (e instanceof TypeError) } }\n" +
+      "console.log(g('#nope'));\n" +
+      "console.log(g('#other/deep'));\n",
+    stdout: "ERR_PACKAGE_IMPORT_NOT_DEFINED true\nERR_PACKAGE_IMPORT_NOT_DEFINED true\n",
+    exit: 0,
+  },
+  {
+    // An EMPTY imports map is still an imports map, which is the cell
+    // that separates "does the field exist" from "does it have keys".
+    name: "an EMPTY imports map is still an imports map",
+    pkg: '{ "name": "require-parity-probe", "version": "0.0.0", "imports": {} }\n',
+    src:
+      "function g(s) { try { require(s); return 'GOT' } catch (e) { return e.code } }\n" +
+      "console.log(g('#ok'));\n",
+    stdout: "ERR_PACKAGE_IMPORT_NOT_DEFINED\n",
+    exit: 0,
+  },
+  {
+    // A relative specifier that resolves to NOTHING. The binary proves
+    // that by asking the filesystem the same question Node asks, and by
+    // never reading a byte of any file — a path that IS there still
+    // fences (see FENCED below), because handing it back means the
+    // module's exports as a value.
+    name: "a relative specifier that resolves to nothing is MODULE_NOT_FOUND",
+    src:
+      "function g(s) { try { require(s); return 'GOT' } catch (e) { return e.code + '|' + String(e.message).split('\\n')[0] } }\n" +
+      "console.log(g('./missing.cjs'));\n" +
+      "console.log(g('./missing'));\n" +
+      "console.log(g('../nothing-here-xyz'));\n",
+    stdout:
+      "MODULE_NOT_FOUND|Cannot find module './missing.cjs'\n" +
+      "MODULE_NOT_FOUND|Cannot find module './missing'\n" +
+      "MODULE_NOT_FOUND|Cannot find module '../nothing-here-xyz'\n",
+    exit: 0,
+  },
+  {
+    // The absolute spelling of the same question. The message carries the
+    // absolute path, so this prints the code alone.
+    name: "an absolute specifier that resolves to nothing is MODULE_NOT_FOUND",
+    src:
+      "var path = require('path');\n" +
+      "function g(s) { try { require(s); return 'GOT' } catch (e) { return e.code } }\n" +
+      "console.log(g(path.resolve(__dirname, 'nope-xyz.cjs')));\n",
+    stdout: "MODULE_NOT_FOUND\n",
+    exit: 0,
+  },
   {
     // The optional-dependency idiom, whole. Node cannot resolve the
     // specifier, throws MODULE_NOT_FOUND at the require, the program's own
@@ -120,6 +234,18 @@ const RUNS: readonly Program[] = [
     stdout:
       "const MODULE_NOT_FOUND | Cannot find module 'no-such-pkg-xyz'\n" +
       "var   MODULE_NOT_FOUND | Cannot find module 'no-such-pkg-xyz'\n",
+    exit: 0,
+  },
+  {
+    // The program the NODE_PATH control below re-runs with NODE_PATH set.
+    // Here, with it unset, its answer is Node's own — which is the half
+    // of that control that keeps "fence whenever anything is uncertain"
+    // from passing it.
+    name: "the bare specifier the NODE_PATH control reuses",
+    src:
+      "function g(s) { try { require(s); return 'GOT' } catch (e) { return e.code } }\n" +
+      "console.log(g('np-only-xyz'));\n",
+    stdout: "MODULE_NOT_FOUND\n",
     exit: 0,
   },
   {
@@ -354,11 +480,53 @@ const RUNS: readonly Program[] = [
 const FENCED: readonly {
   readonly name: string;
   readonly src: string;
+  /** The fixture's own package.json, when the answer depends on it. */
+  readonly pkg?: string;
   readonly code: string;
   /** What Node v25.9.0 answers — the distance still to go, written down. */
   readonly nodeSays: string;
   readonly stdout: string;
 }[] = [
+  {
+    // The other half of the 'node:' class, and the reason the name table
+    // alone does not close the row: a name Node DOES serve is a module,
+    // and a module is a value this compiler has no representation for.
+    name: "a run-time 'node:' name Node DOES serve still refuses",
+    src:
+      "function g(s) { try { return 'GOT ' + typeof require(s) } catch (e) { return 'threw ' + e.code } }\n" +
+      "console.log(g('node:fs'), g('node:fs/promises'));\n",
+    code: "SC2020",
+    nodeSays: "GOT object GOT object",
+    stdout: "threw SC2020 threw SC2020\n",
+  },
+  {
+    // A '#' key that MATCHES. The imports map is read at build time and
+    // the match is decided at run time, and both roads end at the same
+    // wall as everything else here.
+    name: "a '#' import key that MATCHES still refuses",
+    pkg: '{ "name": "require-parity-probe", "version": "0.0.0", "imports": { "#ok": "./m.cjs", "#pat/*": "./*.cjs" } }\n',
+    src:
+      "function g(s) { try { return 'GOT ' + require(s).v } catch (e) { return 'threw ' + e.code } }\n" +
+      "console.log(g('#ok'), g('#pat/m'));\n",
+    code: "SC2020",
+    nodeSays: "GOT 42 GOT 42",
+    stdout: "threw SC2020 threw SC2020\n",
+  },
+  {
+    // The boundary of the filesystem arm, from the other side: the path
+    // is THERE, so nothing is proven and the refusal stands. This is the
+    // entry that fails if somebody ever makes the absence probe answer
+    // for presence too — which would be reading a file, and would be the
+    // embedded engine this objective excludes.
+    name: "an ABSOLUTE specifier that DOES resolve still refuses",
+    src:
+      "var path = require('path');\n" +
+      "function g(s) { try { return 'GOT ' + require(s).v } catch (e) { return 'threw ' + e.code } }\n" +
+      "console.log(g(path.resolve(__dirname, 'm.cjs')));\n",
+    code: "SC2020",
+    nodeSays: "GOT 42",
+    stdout: "threw SC2020\n",
+  },
   {
     name: "a run-time specifier naming an INSTALLED package",
     src:
@@ -470,11 +638,15 @@ interface Built {
 }
 const BUILT = new Map<string, Built>();
 
-async function build(name: string, p: { src: string; ext?: string }, backend: Lane): Promise<Built> {
+async function build(name: string, p: { src: string; ext?: string; pkg?: string }, backend: Lane): Promise<Built> {
   const dir = join(lab, `${name.replace(/[^a-z0-9]+/gi, "-").slice(0, 60)}-${backend}`);
   await mkdir(join(dir, "node_modules", "mylib"), { recursive: true });
   await mkdir(join(dir, "node_modules", "@s"), { recursive: true });
-  await writeFile(join(dir, "package.json"), '{ "name": "require-parity-probe", "version": "0.0.0" }\n', "utf8");
+  await writeFile(
+    join(dir, "package.json"),
+    p.pkg ?? '{ "name": "require-parity-probe", "version": "0.0.0" }\n',
+    "utf8",
+  );
   await writeFile(join(dir, "m.cjs"), M, "utf8");
   await writeFile(join(dir, "side.cjs"), "console.log('side body');\nmodule.exports = { n: 7 };\n", "utf8");
   await writeFile(join(dir, "node_modules", "mylib", "package.json"), MYLIB_PKG, "utf8");
@@ -499,9 +671,16 @@ async function build(name: string, p: { src: string; ext?: string }, backend: La
   };
 }
 
-function run(binary: string): { stdout: string; stderr: string; status: number | null } {
+function run(
+  binary: string,
+  extraEnv?: Record<string, string>,
+): { stdout: string; stderr: string; status: number | null } {
+  // `extraEnv` exists for one thing and it is not a convenience: NODE_PATH
+  // changes what Node's own require RESOLVES, so it is the only way to
+  // reach the resolution road the build cannot see.
+  const env = extraEnv === undefined ? process.env : { ...process.env, ...extraEnv };
   try {
-    const stdout = execFileSync(binary, [], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const stdout = execFileSync(binary, [], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env });
     return { stdout, stderr: "", status: 0 };
   } catch (e) {
     const err = e as { status?: number; stdout?: string; stderr?: string };
@@ -556,6 +735,90 @@ describe("the ambient CommonJS require, against Node v25.9.0", () => {
           `that is a silent wrong answer where an installed module exists. Saw: ${all.slice(0, 400)}`,
       ).toBe(true);
       expect(r.stdout, `${p.name} (${backend}) stdout`).toBe(p.stdout);
+    }
+  });
+
+  test("NODE_PATH is a resolution road the BUILD cannot see", async () => {
+    // `require("x")` does not stop at the node_modules chain. Module's
+    // globalPaths — every NODE_PATH entry, plus $HOME/.node_modules and
+    // $HOME/.node_libraries — are searched after it, and a NODE_PATH
+    // entry acts as a node_modules directory. Measured against Node
+    // v25.9.0: with NODE_PATH naming a directory that holds the package,
+    // `require` hands the module over from a program whose whole
+    // node_modules chain has never heard of it.
+    //
+    // The BUILD cannot see any of that: NODE_PATH is a RUN-TIME
+    // environment variable. So the arm that compiles "nothing installed
+    // resolves this" to Node's catchable MODULE_NOT_FOUND was answering
+    // MODULE_NOT_FOUND for a module Node hands over — on both backends —
+    // and `try { require(x) } catch` swallowed it. That is the silent
+    // direction, arriving through the front door of the arm built to
+    // remove it.
+    //
+    // TWO halves, and the second is why the first is not enough alone:
+    // with NODE_PATH unset the answer must STILL be Node's
+    // MODULE_NOT_FOUND, or a compiler that refused everything would pass.
+    const root = join(lab, "node-path-ext");
+    const ext = join(root, "np-only-xyz");
+    await mkdir(ext, { recursive: true });
+    await writeFile(join(ext, "package.json"), '{ "name": "np-only-xyz", "main": "index.js" }\n', "utf8");
+    await writeFile(join(ext, "index.js"), "module.exports = { v: 99 };\n", "utf8");
+    for (const backend of LANES) {
+      const b = BUILT.get(`R:the bare specifier the NODE_PATH control reuses:${backend}`)!;
+      const bare = run(b.binaryPath!);
+      expect(
+        bare.stdout,
+        `${backend}: with NODE_PATH unset this must still be Node's MODULE_NOT_FOUND`,
+      ).toBe("MODULE_NOT_FOUND\n");
+      const withPath = run(b.binaryPath!, { NODE_PATH: root });
+      const all = withPath.stdout + withPath.stderr;
+      // The program prints `e.code`, so the refusal arrives as the bare
+      // SCxxxx rather than the bracketed "[SCxxxx at file:line]" tag.
+      expect(
+        /\bSC\d{4}\b/.test(all),
+        `${backend}: NODE_PATH names a directory holding 'np-only-xyz', so Node hands the module over. ` +
+          `The binary must refuse, not answer MODULE_NOT_FOUND. Saw: ${all.slice(0, 300)}`,
+      ).toBe(true);
+      expect(
+        all.includes("MODULE_NOT_FOUND"),
+        `${backend}: answered MODULE_NOT_FOUND for a module Node hands over. Saw: ${all.slice(0, 300)}`,
+      ).toBe(false);
+    }
+  });
+
+  test("a binary away from its sources keeps the refusal", async () => {
+    // The guard the filesystem arm stands on, as its own test.
+    //
+    // A relative specifier's answer is a filesystem question — Node's own
+    // answer differs between two machines — so the compiled binary asks
+    // the same question. That is only honest while the program's SOURCES
+    // are where the build recorded them. A binary shipped away from them
+    // would otherwise prove "nothing is there" for a module the binary
+    // CONTAINS and answer MODULE_NOT_FOUND: a fence traded for a silent
+    // wrong answer, swallowed by the very try/catch this row is about.
+    //
+    // So the requiring file's own presence gates the whole arm, and this
+    // renames it out from under an already-built binary to prove the gate
+    // fires. Both lanes, because the two emitters call the runtime
+    // separately.
+    for (const backend of LANES) {
+      const b = BUILT.get(`R:a relative specifier that resolves to nothing is MODULE_NOT_FOUND:${backend}`)!;
+      const entry = join(dirname(b.binaryPath!), "entry.cjs");
+      await rename(entry, `${entry}.hidden`);
+      try {
+        const r = run(b.binaryPath!);
+        const all = r.stdout + r.stderr;
+        expect(
+          /\[SC2020\b/.test(all),
+          `${backend}: a binary whose sources are gone proved nothing and should have refused. Saw: ${all.slice(0, 300)}`,
+        ).toBe(true);
+        expect(
+          all.includes("MODULE_NOT_FOUND"),
+          `${backend}: a binary whose sources are gone answered MODULE_NOT_FOUND — for a module it may CONTAIN. Saw: ${all.slice(0, 300)}`,
+        ).toBe(false);
+      } finally {
+        await rename(`${entry}.hidden`, entry);
+      }
     }
   });
 

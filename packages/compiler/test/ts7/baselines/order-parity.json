@@ -9418,6 +9418,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/6120-require-run-time-specifier-classes.cjs": {
+   "order": [
+    "<repo>/tests/corpus/6120-require-run-time-specifier-classes.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/700-classes-basic.ts": {
    "order": [
     "<repo>/tests/corpus/700-classes-basic.ts"

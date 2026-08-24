@@ -11837,13 +11837,18 @@ class LlEmitter {
       // The run-time-specifier require: answers whether the BUILD could
       // not rule the specifier out (the caller then throws the tagged
       // refusal the site already carried), and throws Node's own error
-      // for everything Node itself rejects. Borrows all three.
+      // for everything Node itself rejects. Borrows all five.
       const spec = this.emitExpr(e.args[0]!);
       const roots = this.emitExpr(e.args[1]!);
       const from = this.emitExpr(e.args[2]!);
-      this.declare(`declare i1 @scr_require_verdict(ptr, ptr, ptr)`);
+      const builtins = this.emitExpr(e.args[3]!);
+      const scope = this.emitExpr(e.args[4]!);
+      this.declare(`declare i1 @scr_require_verdict(ptr, ptr, ptr, ptr, ptr)`);
       const out = B.tmp();
-      B.line(`${out} = call i1 @scr_require_verdict(ptr ${spec.name}, ptr ${roots.name}, ptr ${from.name})`);
+      B.line(
+        `${out} = call i1 @scr_require_verdict(ptr ${spec.name}, ptr ${roots.name}, ptr ${from.name}, ` +
+          `ptr ${builtins.name}, ptr ${scope.name})`,
+      );
       this.emitPendingCheck();
       return { name: out, type: e.type };
     }
