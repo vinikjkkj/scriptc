@@ -406,6 +406,101 @@ describe("the boundary: what still refuses, and why", () => {
   }, 600_000);
 });
 
+/* ── the two divergences, measured from the ORACLE's side ─────────
+ * Neither is reproduced. Each row measures what Node does and asserts that
+ * this build does the LOUD thing instead, so the divergence cannot drift
+ * into an accident: if Node's behaviour ever changes, the oracle half of
+ * the row fails first.
+ */
+describe("onError after the head", () => {
+  test("the oracle HANGS and this build errors the body instead", async () => {
+    // NODE, measured here rather than quoted: a dispatcher that calls
+    // onData and then onError AFTER onHeaders leaves the body promise
+    // unsettled. `.text()` had not settled after six seconds in the probe
+    // that motivated this row; the timer below is what turns that into a
+    // reported fact instead of a suite that never finishes.
+    const src =
+      "const BASE = '__HTTP__'\n" +
+      "const d = { dispatch(o, h) {\n" +
+      "  setTimeout(() => {\n" +
+      "    h.onConnect(() => {})\n" +
+      "    h.onHeaders(200, [Buffer.from('content-type'), Buffer.from('text/plain')], () => {}, 'OK')\n" +
+      "    h.onData(Buffer.from('AB'))\n" +
+      "    h.onError(new Error('MIDBODY'))\n" +
+      "  }, 5)\n" +
+      "  return true\n" +
+      "} }\n" +
+      "const res = await fetch(BASE + '/never-a-route', { dispatcher: d })\n" +
+      "console.log('head ' + res.status)\n" +
+      "try {\n" +
+      "  const t = await Promise.race([res.text(), new Promise((_, rj) => setTimeout(() => rj(new Error('HANG')), 3000))])\n" +
+      "  console.log('body TEXT ' + JSON.stringify(t))\n" +
+      "} catch (e) { console.log('body ' + (e.message === 'HANG' ? 'HANG' : 'ERR ' + e.constructor.name + ':' + e.message)) }\n" +
+      "process.exit(0)\n";
+    const dir = join(workDir, "oracle-midbody");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "probe.mjs"), src.replaceAll("__HTTP__", origin!.http), "utf8");
+    const oracle = await run(process.execPath, [join(dir, "probe.mjs")], dir, 60_000);
+    expect(oracle.exitCode, oracle.stderr).toBe(0);
+    // The head resolves — which is why this cannot be folded into the
+    // byte-identical differential: the two lanes agree on the head and
+    // disagree, deliberately, on the body.
+    expect(oracle.stdout).toMatch(/^head 200$/m);
+    expect(
+      oracle.stdout,
+      "the oracle no longer hangs on a mid-body onError — if it now ERRORS, this " +
+        "build should stop diverging and match it instead",
+    ).toMatch(/^body HANG$/m);
+
+    // THIS BUILD: the body errors, with the shape its own DIALLED path
+    // already gives a mid-body death. A hang is not an answer, and a
+    // response that never settles is the one outcome a program cannot
+    // recover from.
+    const mine =
+      "interface Handler {\n" +
+      "  onConnect(abort: unknown): unknown\n" +
+      "  onHeaders(status: number, headers: readonly unknown[], resume: unknown, statusText: unknown): unknown\n" +
+      "  onData(chunk: unknown): unknown\n" +
+      "  onError(err: unknown): unknown\n" +
+      "}\n" +
+      "interface D { dispatch(...args: readonly unknown[]): unknown }\n" +
+      "const BASE = '__HTTP__'\n" +
+      "async function main(): Promise<void> {\n" +
+      "  const d: D = { dispatch: (...a: readonly unknown[]): unknown => {\n" +
+      "    const h = a[1] as unknown as Handler\n" +
+      "    h.onConnect((): void => {})\n" +
+      "    h.onHeaders(200, ['content-type', 'text/plain'], null, 'OK')\n" +
+      "    h.onData('AB')\n" +
+      "    h.onError(new Error('MIDBODY'))\n" +
+      "    return true\n" +
+      "  } }\n" +
+      "  const i: RequestInit = {}\n" +
+      "  ;(i as { dispatcher?: unknown }).dispatcher = d\n" +
+      "  const res = await fetch(BASE + '/never-a-route', i)\n" +
+      "  console.log('head ' + String(res.status))\n" +
+      "  try { console.log('body TEXT ' + (await res.text())) }\n" +
+      "  catch (e: unknown) { console.log('body ERR ' + (e instanceof Error ? e.name + ':' + e.message : String(e))) }\n" +
+      "}\n" +
+      "void main()\n";
+    const mdir = stage("midbody", mine.replaceAll("__HTTP__", origin!.http));
+    const built = await compile(join(mdir, "main.ts"), {
+      outPath: join(mdir, exeName("program")),
+      outDir: mdir,
+      backend: "c",
+    });
+    expect(built.ok, (built.diagnostics ?? []).map((x) => x.code).join(",")).toBe(true);
+    // The timeout IS the assertion's other half: if this build ever starts
+    // hanging like the oracle, the run is killed and reported as a hang
+    // rather than passing quietly.
+    const r = await run(built.binaryPath!, [], mdir, 60_000);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toMatch(/^head 200$/m);
+    expect(r.stdout, "the body must settle, and it must settle as an ERROR").toMatch(
+      /^body ERR TypeError:terminated$/m,
+    );
+  }, 900_000);
+});
+
 /* ── the collector ────────────────────────────────────────────────────
  * A dispatcher holds a program object alive across turns and the handler
  * this runtime hands it holds the transfer, so an untraced edge here
