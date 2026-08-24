@@ -7682,7 +7682,9 @@ class LlEmitter {
           const len = B.tmp();
           const inR = B.tmp();
           B.line(`${lenp} = getelementptr inbounds i8, ptr ${d.name}, i64 16 ; ->v.arr.len`);
-          B.line(`${len} = load i64, ptr ${lenp}`);
+          const lenw = B.tmp();
+          B.line(`${lenw} = load i32, ptr ${lenp}`);
+          B.line(`${len} = zext i32 ${lenw} to i64`);
           B.line(`${inR} = icmp ugt i64 ${len}, ${e.key}`);
           B.line(`store i1 ${inR}, ptr ${slot}`);
         }
