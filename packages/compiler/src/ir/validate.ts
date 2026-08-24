@@ -1019,8 +1019,11 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "error.new": { argTypes: [STRING], result: VOID },
   "error.nodeThrow": { argTypes: [F64, STRING, STRING], result: VOID },
   // The run-time-specifier require verdict: [specifier, resolvable-roots,
-  // requiring file]. Answers a bool; throws for every case Node rejects.
-  "module.requireVerdict": { argTypes: [DYN, STRING, STRING], result: BOOL },
+  // requiring file, node: builtin names, the '#' import scope]. Answers a
+  // bool; throws for every case Node rejects. The last two are the
+  // answers the root set cannot give: neither a 'node:' name nor a '#'
+  // import is a bare specifier ROOT.
+  "module.requireVerdict": { argTypes: [DYN, STRING, STRING, STRING, STRING], result: BOOL },
   // Always throws; the result is the replaced expression type (skipped
   // below with the rest of the always-throw family).
   "error.fenceThrow": { argTypes: [], result: VOID },
