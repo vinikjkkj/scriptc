@@ -114,6 +114,14 @@ export function auditCensus(c, { armAllocs = ARM_ALLOCS } = {}) {
   if (sum('liveN') !== t.liveN) problems.push(`rows sum liveN=${sum('liveN')} != liveN=${t.liveN}`)
   if (sum('livePhys') !== t.livePhys) problems.push(`rows sum livePhys=${sum('livePhys')} != livePhys=${t.livePhys}`)
   if (sum('snapPhys') !== t.liveAtPeak) problems.push(`rows sum snapPhys=${sum('snapPhys')} != liveAtPeak=${t.liveAtPeak}`)
+  // The peak is exact; the per-kind breakdown is a snapshot taken inside a
+  // band. If the snapshot is further from the peak than the band allows,
+  // the breakdown does not describe the peak and must not be printed as if
+  // it did.
+  if (t.snapOs !== undefined) {
+    const band = Math.max(t.snapBand ?? 4096, Math.floor(t.snapOs / 1024))
+    if (t.osPeak - t.snapOs > band) problems.push(`the per-kind snapshot is ${t.osPeak - t.snapOs} B below the peak, outside its ${band} B band`)
+  }
   if (t.livePhys + t.poolPhys > t.osPeak) problems.push(`os held now (${t.livePhys + t.poolPhys}) exceeds osPeak=${t.osPeak}`)
   if (t.allocs - t.frees !== t.liveN) problems.push(`allocs-frees=${t.allocs - t.frees} != liveN=${t.liveN}`)
   if (t.parkUnknown !== 0) problems.push(`parkUnknown=${t.parkUnknown}: a freelist park named an object the census never saw allocated`)
@@ -193,6 +201,7 @@ function main(argv) {
   // The arm's allocations are planted from a constructor, so they are the
   // FIRST ones the census ever sees and the real ordinal is offset by
   // exactly the arm's count - a known constant, not an estimate.
+  console.log(`                     per-kind snapshot at os ${fmt(t.snapOs ?? 0)} B, ${fmt(t.osPeak - (t.snapOs ?? 0))} B below the exact peak`)
   console.log(`                     reached at allocation ${fmt(Math.max(0, t.snapOrd - ARM_ALLOCS))} of ${fmt(t.allocs - ARM_ALLOCS)}`)
   console.log(`   of that live half:   program ${fmt(snapTot - t.parkAtPeak)} + parked on the dyn freelist ${fmt(t.parkAtPeak)} (+${fmt(t.parkSideAtPeak)} B of items/entries riding along)`)
   console.log(`AT EXIT              os ${fmt(t.livePhys + t.poolPhys - armLive)} B = live ${fmt(liveTot)} + pool ${fmt(t.poolPhys)}`)
@@ -270,7 +279,7 @@ function selfTest() {
     rows: 2, allocs: 1064, frees: 432, liveN: 632, livePhys: 179072, livePayload: 158848,
     poolN: 200, poolPhys: 16000, osPeak: 195072, osPeakN: 732, livePeak: 187072,
     poolPeak: 16000, liveAtPeak: 187072, poolAtPeak: 8000, snapOrd: 900, snaps: 700,
-    lost: 0, ptrLost: 0, freeUnknown: 0, ptrLive: 632, ptrLivePeak: 732,
+    snapOs: 195072, snapBand: 4096, lost: 0, ptrLost: 0, freeUnknown: 0, ptrLive: 632, ptrLivePeak: 732,
     pslots: 262144, cycLive: 632, armPhys: 131072, parkN: 150, parkPhys: 12000,
     parkSide: 9600, parkPeak: 28800, parkAtPeak: 16000, parkNAtPeak: 200,
     parkSideAtPeak: 12800, parkUnknown: 0, tableBytes: 6516736,
@@ -312,6 +321,11 @@ function selfTest() {
   const stray = build([armRow, bigRow, strayRow], { ...total, rows: 3, frees: 482 })
   ok(auditCensus(parseCensus(stray)).some((s) => s.includes('frees but no allocations')),
     'a free-keyed row is refused')
+
+  // NEGATIVE 4b: a per-kind snapshot taken far below the peak.
+  const stale = build([armRow, bigRow], { ...total, snapOs: 100000 })
+  ok(auditCensus(parseCensus(stale)).some((s) => s.includes('below the peak')),
+    'a snapshot outside its band is refused')
 
   // NEGATIVE 5: parked bytes that exceed live bytes. Parked is a strict
   // SUBSET of live (a parked node was never freed at any level), so this
