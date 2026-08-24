@@ -403,12 +403,19 @@ if (isLl) {
   const CODED_LL = /call void @scr_throw_error_msg_code\(i32 -?\d+, ptr ([^,)]+), i64 (\d+), ptr ([^,)]+)\)/g;
   const UNCODED_LL = /call void @scr_throw_error_msg\(i32 -?\d+, ptr ([^,)]+), i64 (\d+)\)/g;
   const TRAP_LL = /call void @scr_trap\(ptr ([^,)]+)\)/g;
-  // The C lane has a FORMATTED trap (scr_trap_fmt, the per-type keyed-read
-  // template) and the LLVM lane has never emitted one.  If it ever does, this
-  // reader would drop the whole family in silence, so say so instead.
-  if (lines.some((l) => !l.startsWith("declare ") && !l.startsWith("define ") && l.includes("@scr_trap_fmt("))) {
-    fail("this .ll calls @scr_trap_fmt, a family the LLVM reader does not classify (the C lane spells the keyed-read abort that way; the LLVM lane used to have one shared @sc_bad_key)");
-  }
+  // The FORMATTED trap.  The LLVM lane grew one when the keyed-read abort
+  // started naming its source site (SC9003): @sc_bad_key takes the site and
+  // the why as pointers and hands them to scr_trap_fmt, exactly as the C
+  // lane's per-shape sc_rkg_N helper does.  Its MESSAGE is still the first
+  // pointer operand, so it classifies through the same table; what changed
+  // is only the call shape (a varargs call carries the `(ptr, ...)` type).
+  //
+  // A scr_trap_fmt call this pattern does NOT match would be a family the
+  // reader drops in silence, which for an instrument whose whole job is to
+  // count ways to die is the worst possible failure.  It is counted here
+  // and cross-checked below.
+  const TRAPF_LL = /call void \(ptr, \.\.\.\) @scr_trap_fmt\(ptr ([^,)]+)[^)]*\)/g;
+  let nTrapFmtLines = 0, nTrapFmtParsed = 0;
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (l.length === 0 || l.startsWith("declare ") || l.startsWith("define ")) continue;
@@ -472,6 +479,32 @@ if (isLl) {
         nTrapCalls++;
       }
     }
+
+    if (l.includes("@scr_trap_fmt(")) {
+      nTrapFmtLines++;
+      let m, seen = 0;
+      TRAPF_LL.lastIndex = 0;
+      while ((m = TRAPF_LL.exec(l)) !== null) {
+        seen++; nTrapCalls++; nTrapFmtParsed++;
+        const raw0 = llMsg(m[1]);
+        if (raw0 === null) {
+          rows.push({ line: i + 1, family: "trap", cat: "UNKNOWN", code: "trap", site: "operand not in the module string table", msg: l.trim().slice(0, 200), host: hostName[i] });
+          continue;
+        }
+        const msg = raw0.replace(/\n$/, "");
+        const { cat, site, valueType } = classifyTrap(msg);
+        rows.push({ line: i + 1, family: "trap", cat, code: "trap", site, msg, host: hostName[i], valueType });
+      }
+      if (seen === 0) {
+        rows.push({ line: i + 1, family: "trap", cat: "UNKNOWN", code: "trap", site: "unparsed", msg: l.trim().slice(0, 200), host: hostName[i] });
+        nTrapCalls++;
+      }
+    }
+  }
+  // Every formatted-trap CALL line produced at least one row: a shape this
+  // reader cannot parse is reported, never dropped.
+  if (nTrapFmtLines > 0 && nTrapFmtParsed === 0) {
+    fail(`this .ll has ${nTrapFmtLines} @scr_trap_fmt call line(s) and the reader parsed none of them — the keyed-read abort family would be counted as zero`);
   }
 }
 // ------------------------------------------- 4. the OLD instruments, verbatim
