@@ -186,7 +186,8 @@ export function render(r) {
   const armN = T.armN || 0;
   const out = [];
   out.push(`LAYOUT  sizeof(ScrDyn)=${L.sizeofDyn}  +ScrCycHdr ${L.sizeofHdr} = ${phys} physical`);
-  out.push(`        union at +${L.offUnion}, ${L.sizeofUnion} wide; head ${L.offUnion} B; ScrDynEntry ${L.sizeofEntry} B; ScrStr ${L.sizeofStr} B`);
+  out.push(`        union at +${L.offUnion}, ${L.sizeofUnion} wide; head ${L.offUnion} B; ScrDynEntry ${L.sizeofEntry} B; ScrStr ${L.sizeofStr} B` +
+    (L.sizeofExt ? `; ScrDynObjExt ${L.sizeofExt} B (the OBJ arm's rare members, behind one pointer)` : ""));
   out.push(`RUN     allocs=${n(T.allocs)} deaths=${n(T.deaths)} liveAtExit=${n(T.liveN)} livePeak=${n(T.livePeak)}`);
   out.push(`        snapshot at liveN=${n(T.snapN)} (alloc #${n(T.snapOrd)}, t=${T.snapT}s), band ${T.snapBand}, ${T.snaps} snapshots, ${n(T.walkReads)} object reads`);
   out.push(`        arm=${armN} objects (subtracted from every figure below); instrument tables ${n(T.tableBytes)} B of BSS`);

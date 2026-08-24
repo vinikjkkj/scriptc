@@ -182,6 +182,11 @@ SCR_DYNCEN_SHARED long long scr_dyncen_t0 = 0;
 SCR_DYNCEN_SHARED long long scr_dyncen_sizeof_dyn = 0;
 SCR_DYNCEN_SHARED long long scr_dyncen_sizeof_hdr = 0;
 SCR_DYNCEN_SHARED long long scr_dyncen_sizeof_entry = 0;
+/* 0 on a build whose OBJ arm still carries its four rare members inline;
+ * sizeof(ScrDynObjExt) once they moved behind one pointer. Printed beside
+ * the arm widths so two revisions' maps can be read against each other
+ * without either assuming the other's layout. */
+SCR_DYNCEN_SHARED long long scr_dyncen_sizeof_ext = 0;
 SCR_DYNCEN_SHARED long long scr_dyncen_sizeof_str = 0;
 SCR_DYNCEN_SHARED long long scr_dyncen_off_union = 0;
 SCR_DYNCEN_SHARED long long scr_dyncen_sizeof_union = 0;
@@ -253,10 +258,10 @@ SCR_DYNCEN_FN void scr_dyncen_report(void) {
     if (!f) return;
     fprintf(f,
             "DYNCEN-LAYOUT sizeofDyn=%lld sizeofHdr=%lld sizeofEntry=%lld "
-            "sizeofStr=%lld offUnion=%lld sizeofUnion=%lld kindCount=%lld\n",
+            "sizeofStr=%lld offUnion=%lld sizeofUnion=%lld kindCount=%lld sizeofExt=%lld\n",
             scr_dyncen_sizeof_dyn, scr_dyncen_sizeof_hdr, scr_dyncen_sizeof_entry,
             scr_dyncen_sizeof_str, scr_dyncen_off_union, scr_dyncen_sizeof_union,
-            scr_dyncen_kind_count);
+            scr_dyncen_kind_count, scr_dyncen_sizeof_ext);
     for (unsigned k = 0; k < SCR_DYNCEN_KINDS; k++)
       fprintf(f, "DYNCEN-ARM %u %lld\n", k, scr_dyncen_arm_bytes[k]);
     for (unsigned k = 0; k < SCR_DYNCEN_KINDS; k++)
