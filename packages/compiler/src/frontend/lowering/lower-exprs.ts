@@ -7464,10 +7464,20 @@ function rejectSuperInObjectMethod(L: Lowerer, node: ts.Node): void {
    *
    * Spreads and accessors stay fenced (an accessor is not a data
    * property; the dyn object has no getter machinery to define it into). */
-  export function lowerDynObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression): IrExpr {
-    const loc = locOf(expr);
+  /** One RUN of ordinary properties of a dyn object literal, lowered to the
+   * key/value pairs a `dynObjLit` holds. Split out of lowerDynObjectLiteral so
+   * lowerDynSpreadObjectLiteral can build the runs BETWEEN spreads with the
+   * identical per-property rules — the same fences, the same method handling,
+   * the same boxed-fence-closure deferral — instead of a second spelling of
+   * them that could drift. `props` is always a contiguous slice of
+   * `expr.properties` and never contains a spread. */
+  function dynObjLitFields(
+    L: Lowerer,
+    expr: ts.ObjectLiteralExpression,
+    props: readonly ts.ObjectLiteralElementLike[],
+  ): { key: IrExpr; value: IrExpr }[] {
     const fields: { key: IrExpr; value: IrExpr }[] = [];
-    for (const prop of expr.properties) {
+    for (const prop of props) {
       const isMethod = ts.isMethodDeclaration(prop) && prop.body !== undefined;
       if (!ts.isPropertyAssignment(prop) && !ts.isShorthandPropertyAssignment(prop) && !isMethod) {
         L.unsupported(
@@ -7641,7 +7651,80 @@ function rejectSuperInObjectMethod(L: Lowerer, node: ts.Node): void {
       }
       fields.push({ key, value: v });
     }
-    return { kind: "dynObjLit", fields, type: DYN, loc };
+    return fields;
+  }
+
+  export function lowerDynObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression): IrExpr {
+    return { kind: "dynObjLit", fields: dynObjLitFields(L, expr, expr.properties), type: DYN, loc: locOf(expr) };
+  }
+
+/** A JS object literal one of whose SPREADS names a checked-dynamic value.
+ *
+ * The record desugar copies the source's DECLARED fields one at a time, so a
+ * key the source grew at run time has nowhere to land: `{ ...o }` answered
+ * `{"a":1}` where Node answers `{"a":1,"b":3}`. It is SILENT rather than loud
+ * only because of one line in that desugar — the source's type is read from
+ * the CHECKER whenever the source is a bare identifier, and from the LOWERING
+ * otherwise. A JS binding holding a dyn object has a closed record for the
+ * first and `dyn` for the second, so `{ ...x }` copied two declared fields
+ * while `{ ...root.sub }` met the honest 'unknown' spread fence.
+ *
+ * A spread is JS's SHALLOW COPY: the source's own enumerable keys, read in
+ * source order, later contributors winning. That is exactly scr_dyn_assign
+ * onto a FRESH dyn object — its own comment spells the rule for Object.assign,
+ * whose only divergence from spread is setters on the target, and an empty
+ * target has none. It also copies index keys of a string/array source and
+ * nothing for a nullish one, which is Node's answer for those too.
+ *
+ * So the literal builds as a dyn object: one `dynObjLit` per run of ordinary
+ * properties, one `dyn.assign` per spread, folded left to right. Every
+ * property still evaluates exactly once, in source order.
+ *
+ * The result ALIASES NOTHING. `{ ...o }` is a new key table; `c.a = 9` after
+ * it must not reach `o`, and does not. That is the half of this family that
+ * must not move — a binding that NAMES a value links, a spread that COPIES one
+ * copies, and the two answers come from different rules on purpose. */
+  export function lowerDynSpreadObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression): IrExpr {
+    const loc = locOf(expr);
+    let acc: IrExpr | null = null;
+    let run: ts.ObjectLiteralElementLike[] = [];
+    const emptyObj = (): IrExpr => ({ kind: "dynObjLit", fields: [], type: DYN, loc });
+    const fold = (next: IrExpr): void => {
+      const cur = acc;
+      acc = cur === null ? next : { kind: "libCall", fn: "dyn.assign", args: [cur, next], type: DYN, loc };
+    };
+    const flushRun = (): void => {
+      if (run.length === 0) return;
+      const props = run;
+      run = [];
+      fold({ kind: "dynObjLit", fields: dynObjLitFields(L, expr, props), type: DYN, loc });
+    };
+    for (const prop of expr.properties) {
+      if (!ts.isSpreadAssignment(prop)) {
+        run.push(prop);
+        continue;
+      }
+      flushRun();
+      const src = L.coerceToExpected(L.lowerExpr(prop.expression), DYN);
+      if (src.type.kind !== "dyn") {
+        // A source that cannot enter the checked-dynamic tree beside one that
+        // already has: refuse LOUDLY rather than copy its declared fields into
+        // a table the run-time keys of the other spread also land in — two
+        // different copy rules in one literal is how a wrong answer gets quiet.
+        L.unsupported(
+          "SC1090",
+          prop,
+          `object spread of '${L.fmt(src.type)}' sources beside a checked-dynamic spread in the same literal`,
+        );
+      }
+      // The FIRST contributor still needs a table of its own to copy onto:
+      // dyn.assign writes into its target, and the target must not be the
+      // source (that would alias the very object a spread exists to copy).
+      if (acc === null) fold(emptyObj());
+      fold(src);
+    }
+    flushRun();
+    return acc ?? emptyObj();
   }
 
 /** Spreading a source whose shape carries accessor slots: Node's copy
@@ -8661,6 +8744,28 @@ function lowerPairedArmUnionSpread(
   };
 }
 
+/** A read whose value is the same on a second lowering and whose evaluation
+ * is nothing: an identifier, or a chain of non-optional member reads at
+ * compile-time keys over one. That is the whole population the dyn-spread
+ * question may be ASKED of, because asking it means lowering the source once
+ * to look at its type and once for real. */
+function pureMemberChain(e: ts.Expression): boolean {
+  let x: ts.Expression = e;
+  for (;;) {
+    if (ts.isParenthesizedExpression(x)) { x = x.expression; continue; }
+    if (ts.isPropertyAccessExpression(x) && x.questionDotToken === undefined) { x = x.expression; continue; }
+    if (
+      ts.isElementAccessExpression(x) && x.questionDotToken === undefined &&
+      ts.isStringLiteralLike(x.argumentExpression)
+    ) {
+      x = x.expression;
+      continue;
+    }
+    break;
+  }
+  return ts.isIdentifier(x);
+}
+
 export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression): IrExpr {
     const loc = locOf(expr);
     // A literal the LOWERING marked as a dyn object (the property-
@@ -8685,6 +8790,29 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       )
     ) {
       return lowerDynObjectLiteral(L, expr);
+    }
+    // A SPREAD whose source is CHECKED-DYNAMIC (JS): the record desugar below
+    // would copy the source's declared fields one at a time and drop every key
+    // it grew at run time — silently, because that desugar reads an IDENTIFIER
+    // source's type off the checker instead of off the lowering. The whole
+    // literal builds as a dyn object instead; see lowerDynSpreadObjectLiteral.
+    //
+    // The probe is restricted to a MEMBER CHAIN over an identifier, which is
+    // pure and re-lowers to the same value: a call source would be lowered
+    // twice to ask the question, and the desugar below already fences those
+    // loudly rather than answering them wrong.
+    // TypeScript keeps the record world — there the source's record type is an
+    // annotation the author wrote, not inference residue over a value that was
+    // never a struct.
+    if (
+      isJsSourceFile(expr.getSourceFile()) &&
+      expr.properties.some(
+        (p) =>
+          ts.isSpreadAssignment(p) && conditionalSpreadOf(p.expression) === null &&
+          pureMemberChain(p.expression) && probeLower(L, p.expression)?.type.kind === "dyn",
+      )
+    ) {
+      return lowerDynSpreadObjectLiteral(L, expr);
     }
     // Syntax fence FIRST: unsupported member forms get their specific
     // message even when they also make the literal's type unmappable
