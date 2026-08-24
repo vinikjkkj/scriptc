@@ -601,8 +601,7 @@ SCR_DYNCEN_FN void scr_dyncen_report(void) {
               scr_dyncen_pool_mismatch);
       fprintf(f, "DYNCEN-KORIGIN");
       for (c = 0; c < SCR_DYNCEN_KORIGINS; c++) fprintf(f, " %lld", scr_dyncen_korigin[c]);
-      fprintf(f, "
-");
+      fputc(0x0a, f);
     }
     for (long long i = 0; i < scr_dyncen_ncurve; i++)
       fprintf(f, "DYNCEN-CURVE %lld %lld %lld %lld\n", i, scr_dyncen_curve[i][0],
