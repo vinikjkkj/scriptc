@@ -7392,7 +7392,7 @@ long scr_net_live_count(void);
  * whether decrypted bytes sit buffered inside the transport (the sweep
  * drains them — the poller can't see bytes that already left the kernel);
  * `shutdown_write` sends the close_notify before the FIN. The ops table
- * is static storage in the transport unit; tctx is freed via `free`
+ * is static storage in the transport unit; tctx is freed via `free_fn`
  * when the socket handle dies. */
 typedef struct ScrNetTransportOps {
   ssize_t (*xread)(void *tctx, char *buf, size_t n);
@@ -7401,7 +7401,14 @@ typedef struct ScrNetTransportOps {
   void (*on_established)(void *tctx);
   bool (*pending)(void *tctx);
   void (*shutdown_write)(void *tctx);
-  void (*free)(void *tctx);
+  /* NAMED free_fn, NOT free, and the reason is mechanical rather than
+   * stylistic: tests/perf/prof/scr_prof.h interposes the allocator with
+   * `#define free(p) ...`, and the C preprocessor cannot tell a member
+   * access from a call - so `ops->free(ctx)` expanded to
+   * `ops->scr_prof_free(ctx, "file:line")` and scr_net.c did not compile
+   * under any profiling lane. This was the only such collision in the
+   * runtime, and ScrCycHdr already spells the same idea free_fn. */
+  void (*free_fn)(void *tctx);
 } ScrNetTransportOps;
 void scr_net_sock_set_transport(ScrNetSocket *s, const ScrNetTransportOps *ops, void *tctx);
 int scr_net_sock_fd(ScrNetSocket *s);
