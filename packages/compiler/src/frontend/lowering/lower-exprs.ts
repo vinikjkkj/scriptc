@@ -11,7 +11,7 @@ import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBi
 import { lowerAbortProperty } from "./lower-abort.js";
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
 import { builtinFnValueOf } from "./lower-fnvalue.js";
-import { requireFnValueOf } from "./lower-builtins.js";
+import { requireFnValueOf, requireMemberFence } from "./lower-builtins.js";
 import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
@@ -1937,6 +1937,17 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (isRequireMainFilename(L, expr)) {
         return { kind: "strLit", value: L.entry.fileName, type: STRING, loc };
       }
+      // The four properties Node defines on the CommonJS `require`
+      // function, taken as VALUES: require.main, require.cache,
+      // require.extensions and require.resolve. Every one of them
+      // answered `undefined` on BOTH backends at exit 0 with no
+      // diagnostic, where Node has an object or a function — so
+      // `require.main === module`, the canonical CommonJS entry-point
+      // test, took the WRONG BRANCH. They refuse now; lower-builtins.ts
+      // carries the measurement and the per-name reason. AFTER the
+      // require.main.filename fold above, which claims that chain whole
+      // and is the one spelling of the four with an exact answer.
+      requireMemberFence(L, expr);
       // `process?.versions?.node` — the runtime-detection probe, written
       // with optional links (zapo's transport asks it of a `process`
       // snapshot the ambient types made optional). Claimed here for the
