@@ -4194,6 +4194,32 @@ function dynAliasRootOf(L: Lowerer, e: ts.Expression, depth: number): ts.Identif
   ) {
     return dynAliasRootOf(L, x.arguments[0]!, depth + 1);
   }
+  // `Object.assign(target, ...sources)` — the third spelling of the same
+  // width question, and the only one of the three that ALIASES: it mutates
+  // the target and answers it, which is why a dyn TARGET carries straight
+  // through. A FRESH literal target answers a new object instead, and takes
+  // the dyn width from whichever source has it.
+  //
+  // A target that is neither is deliberately out: `Object.assign(staticRec,
+  // dynSrc)` answers staticRec, a slot the value has no dyn representation
+  // of, and predicting dyn there would replace an alias with a boxed copy —
+  // a silent wrong answer traded for the silent wrong answer above it.
+  if (
+    ts.isCallExpression(x) && ts.isPropertyAccessExpression(x.expression) &&
+    x.expression.name.text === "assign" && L.isStdlibGlobal(x.expression.expression, "Object") &&
+    x.arguments.length >= 1 && !x.arguments.some((z) => ts.isSpreadElement(z))
+  ) {
+    const fromTarget = dynAliasRootOf(L, x.arguments[0]!, depth + 1);
+    if (fromTarget !== null) return fromTarget;
+    let t: ts.Expression = x.arguments[0]!;
+    while (ts.isParenthesizedExpression(t)) t = t.expression;
+    if (!ts.isObjectLiteralExpression(t)) return null;
+    for (const arg of x.arguments.slice(1)) {
+      const r = dynAliasRootOf(L, arg, depth + 1);
+      if (r !== null) return r;
+    }
+    return null;
+  }
   return null;
 }
 
