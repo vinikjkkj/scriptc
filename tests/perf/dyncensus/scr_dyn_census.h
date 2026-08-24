@@ -192,6 +192,9 @@ typedef struct {
   /* OBJ only. */
   long long has_proto, has_cname, has_hidden, has_slots, has_any_extra;
   long long key_n, key_bytes, key_max;
+  /* keys whose bytes are a compiler-emitted literal, stored by pointer:
+   * no block at all, so they cost nothing in key_bytes or phys_key. */
+  long long key_static;
   long long key_le7, key_le15, key_le23, key_le31;
   /* cap cross-tabbed against len, per capacity class: how many objects,
    * how much capacity they hold between them, and how many members are
@@ -416,6 +419,35 @@ SCR_DYNCEN_FN void scr_dyncen_key_note(ScrDynCenKeyTab *t, const char *k, long l
   t->full++;
 }
 
+/* ── where a key COMES FROM ──────────────────────
+ * The key table says most of the live names are a name already stored.
+ * It does not say whether the program could have known them at BUILD
+ * time, and that is the whole question behind storing a compiler-emitted
+ * literal by POINTER instead of copying it. One counter per call path
+ * that can create a key, so the answer is a measurement:
+ *
+ *   SET     scr_dyn_obj_set, the public COPY entry -- 8,972 of the 8,975
+ *           call sites the emitter writes for zapo pass a string LITERAL
+ *   KEYSET  scr_dyn_key_set's own route into it, whose key is an ScrStr
+ *           and is therefore a run-time value; SET counts these too, so
+ *           the literal-capable population is SET minus KEYSET minus COPY
+ *   PARSE   JSON.parse's two key sites: run-time bytes off the wire
+ *   HIDDEN  the non-enumerable / accessor table
+ *   COPY    spread, Object.assign, structuredClone and the record
+ *           walkers -- a key read out of one table and written into
+ *           another, which a literal cannot serve
+ */
+#define SCR_DYNCEN_KORIGINS 8
+#define SCR_DYNCEN_KO_SET 0
+#define SCR_DYNCEN_KO_KEYSET 1
+#define SCR_DYNCEN_KO_PARSE 2
+#define SCR_DYNCEN_KO_HIDDEN 3
+#define SCR_DYNCEN_KO_COPY 4
+SCR_DYNCEN_SHARED long long scr_dyncen_korigin[SCR_DYNCEN_KORIGINS] = {0};
+SCR_DYNCEN_FN void scr_dyncen_note_korigin(int which) {
+  if (which >= 0 && which < SCR_DYNCEN_KORIGINS) scr_dyncen_korigin[which]++;
+}
+
 /* ── the growth policy, as it actually runs ───────────────────────────
  * One counter per capacity class at each of the two growth sites, so
  * "the policy doubles from 4" becomes a measured request histogram
@@ -478,7 +510,7 @@ SCR_DYNCEN_FN void scr_dyncen_report(void) {
                   "DYNCEN-%s %u n=%lld rcSum=%lld rcMax=%lld fBuf=%lld fNullProto=%lld "
                   "fStaticCopy=%lld lenSum=%lld capSum=%lld lenMax=%lld capMax=%lld "
                   "side=%lld emptyBuf=%lld proto=%lld cname=%lld hidden=%lld slots=%lld "
-                  "anyExtra=%lld keyN=%lld keyBytes=%lld keyMax=%lld keyLe7=%lld "
+                  "anyExtra=%lld keyN=%lld keyBytes=%lld keyMax=%lld keyStatic=%lld keyLe7=%lld "
                   "keyLe15=%lld keyLe23=%lld keyLe31=%lld strLenSum=%lld strLenMax=%lld "
                   "strPhys=%lld strLe7=%lld strLe15=%lld strLe23=%lld strLe31=%lld "
                   "fnSig=%lld fnName=%lld fnSrc=%lld fnArityMax=%lld aux=%lld\n",
@@ -486,6 +518,7 @@ SCR_DYNCEN_FN void scr_dyncen_report(void) {
                   r->f_staticcopy, r->len_sum, r->cap_sum, r->len_max, r->cap_max,
                   r->side_bytes, r->n_empty_buf, r->has_proto, r->has_cname, r->has_hidden,
                   r->has_slots, r->has_any_extra, r->key_n, r->key_bytes, r->key_max,
+                  r->key_static,
                   r->key_le7, r->key_le15, r->key_le23, r->key_le31, r->str_len_sum,
                   r->str_len_max, r->str_phys, r->str_le7, r->str_le15, r->str_le23,
                   r->str_le31, r->fn_sig, r->fn_name, r->fn_src, r->fn_arity_max,
@@ -566,6 +599,10 @@ SCR_DYNCEN_FN void scr_dyncen_report(void) {
               scr_dyncen_grow_arr_phys);
       fprintf(f, "DYNCEN-SHRINK %lld poolMismatch=%lld\n", scr_dyncen_shrinks,
               scr_dyncen_pool_mismatch);
+      fprintf(f, "DYNCEN-KORIGIN");
+      for (c = 0; c < SCR_DYNCEN_KORIGINS; c++) fprintf(f, " %lld", scr_dyncen_korigin[c]);
+      fprintf(f, "
+");
     }
     for (long long i = 0; i < scr_dyncen_ncurve; i++)
       fprintf(f, "DYNCEN-CURVE %lld %lld %lld %lld\n", i, scr_dyncen_curve[i][0],

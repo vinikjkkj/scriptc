@@ -607,9 +607,13 @@ static void scr_dyn_gcfree(void *o) {
     scr_bytes_release(d->v.bytes);
     break;
   case SCR_DYN_OBJ:
-    /* keys only — the values are traced */
+    /* keys only — the values are traced. A STATIC key is a literal in
+     * this image and was never allocated, so there is nothing to hand
+     * back — and handing one to the pool would put a .rdata address on a
+     * freelist that the next take() returns as writable memory. */
     for (size_t i = 0; i < d->v.obj.len; i++)
-      scr_json_key_free(d->v.obj.entries[i].key, d->v.obj.entries[i].key_len);
+      if (!d->v.obj.entries[i].key_static)
+        scr_json_key_free(d->v.obj.entries[i].key, d->v.obj.entries[i].key_len);
     /* …and the ext BLOCK, whose three dyn children the trace has already
      * accounted for. Releasing them here would be a double free; leaving
      * the block would leak 32 bytes per object that had one. */
@@ -687,7 +691,8 @@ void scr_dyn_release(ScrDyn *d) {
     break;
   case SCR_DYN_OBJ:
     for (size_t i = 0; i < d->v.obj.len; i++) {
-      scr_json_key_free(d->v.obj.entries[i].key, d->v.obj.entries[i].key_len);
+      if (!d->v.obj.entries[i].key_static)
+        scr_json_key_free(d->v.obj.entries[i].key, d->v.obj.entries[i].key_len);
       scr_dyn_release(d->v.obj.entries[i].value);
     }
     /* The [[Prototype]] link, the NON-ENUMERABLE table and the slot
@@ -1260,7 +1265,14 @@ void scr_dyn_arr_push(ScrDyn *arr, ScrDyn *item) {
      * that is already on this line instead of adding a second abort call
      * site: 2^31 elements is a 17 GB items buffer, so "out of memory" is
      * both the truthful answer and the one that already exists. */
-    size_t cap = arr->v.arr.cap ? (size_t)arr->v.arr.cap * 2 : 4;
+    /* EXACT first allocation, then double -- scr_dyn_obj_put's reason,
+     * measured on this table too: 3,722 of the 6,695 live arrays at
+     * zapo's peak sat in the cap-4 class holding 4,523 elements, so
+     * 69.6% of that class was capacity nothing filled, and the element
+     * histogram says why -- 2,920 arrays hold exactly ONE element and
+     * 800 hold two. `new Array(n)` still reserves exactly n in one
+     * shot (scr_dyn_new_arr_len); this is the doubling push path. */
+    size_t cap = arr->v.arr.cap ? (size_t)arr->v.arr.cap * 2 : 1;
     ScrDyn **items =
         cap > SCR_DYN_LEN_MAX ? NULL : realloc(arr->v.arr.items, cap * sizeof *items);
     if (!items) scr_json_oom();
@@ -1426,7 +1438,8 @@ ScrDyn *scr_dyn_arr_at(const ScrDyn *d, double i) {
 /* Takes ownership of key (malloc'd) and value. Duplicate keys: the LATER
  * value wins (like JS JSON.parse) — the old value is released and the new
  * key buffer freed (the surviving entry keeps its original, equal key). */
-static void scr_dyn_obj_put(ScrDyn *obj, char *key, size_t key_len, ScrDyn *value) {
+static void scr_dyn_obj_put_k(ScrDyn *obj, char *key, size_t key_len, ScrDyn *value,
+                              uint32_t key_static) {
 #ifdef SCR_DYNCEN_ON
   /* tests/perf/dyncensus: EVERY key store, before the duplicate scan, so
    * an overwrite -- which allocated a key buffer and is about to free it
@@ -1444,15 +1457,36 @@ static void scr_dyn_obj_put(ScrDyn *obj, char *key, size_t key_len, ScrDyn *valu
        * that they are nodes. */
       ScrDyn *old = e->value;
       e->value = value;
-      scr_json_key_free(key, key_len);
+      /* the surviving entry keeps its own, equal key; the loser's bytes
+       * go back only if this call owned them */
+      if (!key_static) scr_json_key_free(key, key_len);
       scr_dyn_release(old);
       return;
     }
   }
   if (obj->v.obj.len == obj->v.obj.cap) {
-    /* the members' half of the same uint32 ceiling; 2^31 entries is a
+    /* FIRST allocation is EXACT, then double. The four-slot floor was
+     * the single largest term in this table's spare capacity: at zapo's
+     * peak, 7,168 of the 10,104 live objects sat in the cap-4 class
+     * holding 14,805 members between them, so 13,867 of their 28,672
+     * slots -- 48.4% of that class, and 82.3% of ALL the spare capacity
+     * in this table -- were slots nothing had ever written. The member
+     * histogram is why: 3,238 objects hold exactly ONE member and 417
+     * hold two, and every one of them paid for four.
+     *
+     * Nothing shrinks a dyn buffer, ever (measured, not read off the
+     * source: tests/perf/dyncensus counts a capacity that ever went DOWN
+     * and the count is zero), so a slot this policy over-allocates is
+     * resident for the life of the object rather than transient.
+     *
+     * The cost is reallocs on the way up -- an object that reaches three
+     * members now grows 1, 2, 4 instead of straight to 4. It is bounded
+     * by the same doubling as before: capacity is still under 2x the
+     * members it holds, with the constant floor removed.
+     *
+     * The members' half of the same uint32 ceiling; 2^31 entries is a
      * 51 GB table. */
-    size_t cap = obj->v.obj.cap ? (size_t)obj->v.obj.cap * 2 : 4;
+    size_t cap = obj->v.obj.cap ? (size_t)obj->v.obj.cap * 2 : 1;
     ScrDynEntry *entries =
         cap > SCR_DYN_LEN_MAX ? NULL : realloc(obj->v.obj.entries, cap * sizeof *entries);
     if (!entries) scr_json_oom();
@@ -1465,8 +1499,14 @@ static void scr_dyn_obj_put(ScrDyn *obj, char *key, size_t key_len, ScrDyn *valu
   }
   ScrDynEntry *e = &obj->v.obj.entries[obj->v.obj.len++];
   e->key = key;
-  e->key_len = key_len;
+  e->key_len = (uint32_t)key_len;
+  e->key_static = key_static;
   e->value = value;
+}
+
+/* The copying put, unchanged for every caller that had one. */
+static void scr_dyn_obj_put(ScrDyn *obj, char *key, size_t key_len, ScrDyn *value) {
+  scr_dyn_obj_put_k(obj, key, key_len, value, 0);
 }
 
 /* ── dyn construction (compiler-emitted converters & overflow reads) ───── */
@@ -2624,10 +2664,38 @@ static void scr_dyn_handle_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
 /* Public obj insertion: COPIES the key bytes (the internal put takes a
  * malloc'd buffer), owns the value, later duplicate keys win. */
 void scr_dyn_obj_set(ScrDyn *obj, const char *key, size_t key_len, ScrDyn *value) {
+#ifdef SCR_DYNCEN_ON
+  scr_dyncen_note_korigin(SCR_DYNCEN_KO_SET);
+#endif
+  /* `key_len` is a uint32 in the entry now. The ceiling is ENFORCED here
+   * rather than assumed from the measured maximum of 62, and it rides the
+   * allocation that is already on this line instead of adding an abort
+   * call site: a 4 GB property name is out of memory, which is both the
+   * truthful answer and the one this path already had. */
+  if (key_len > SCR_DYN_KEY_MAX) scr_json_oom();
   char *copy = scr_json_key_alloc(key_len);
   memcpy(copy, key, key_len);
   copy[key_len] = '\0';
   scr_dyn_obj_put(obj, copy, key_len, value);
+}
+
+/* The same store for a key the COMPILER already put in the image: the
+ * bytes are pointed at, not copied, and no free site will ever hand them
+ * back. scr_runtime.h states what `key` must outlive. */
+void scr_dyn_obj_set_lit(ScrDyn *obj, const char *key, size_t key_len, ScrDyn *value) {
+  if (key_len > SCR_DYN_KEY_MAX) scr_json_oom();
+  scr_dyn_obj_put_k(obj, (char *)key, key_len, value, 1);
+}
+
+/* scr_dyn_obj_set_present's literal twin: the same presence gate, and the
+ * same spelled-out skip of the release on the immortal undefined. */
+void scr_dyn_obj_set_present_lit(ScrDyn *obj, const char *key, size_t key_len,
+                                 ScrDyn *value) {
+  if (value != NULL && value->kind == SCR_DYN_UNDEF) {
+    scr_dyn_release(value);
+    return;
+  }
+  scr_dyn_obj_set_lit(obj, key, key_len, value);
 }
 
 /* The PRESENCE-GATED member store: the same set, except that an UNDEFINED
@@ -4782,7 +4850,7 @@ static void scr_dyn_obj_unset(ScrDyn *obj, const char *key, size_t key_len) {
       /* unlink before release: the entry must be out of the table before
        * the value's release can trigger a collection */
       ScrDyn *old = e->value;
-      scr_json_key_free(e->key, e->key_len);
+      if (!e->key_static) scr_json_key_free(e->key, e->key_len);
       memmove(&obj->v.obj.entries[i], &obj->v.obj.entries[i + 1],
               (obj->v.obj.len - i - 1) * sizeof *obj->v.obj.entries);
       obj->v.obj.len--;
@@ -4800,6 +4868,9 @@ static void scr_dyn_obj_put_hidden(ScrDyn *recv, const char *key, size_t key_len
                                    bool is_data, ScrDyn *a, ScrDyn *b, bool configurable,
                                    bool enumerable) {
   if (recv->kind != SCR_DYN_OBJ) return;
+#ifdef SCR_DYNCEN_ON
+  scr_dyncen_note_korigin(SCR_DYNCEN_KO_HIDDEN);
+#endif
   if (scr_dyn_ext(recv)->hidden == NULL) scr_dyn_ext_w(recv)->hidden = scr_dyn_new_obj();
   /* RETAIN BEFORE DROP, and the order is not cosmetic. `a` may BE the
    * member table's current value for this key — that is what a
@@ -5217,6 +5288,9 @@ void scr_dyn_static_copy_refuse(const char *what) {
 }
 
 void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
+#ifdef SCR_DYNCEN_ON
+  scr_dyncen_note_korigin(SCR_DYNCEN_KO_KEYSET);
+#endif
   if (recv->static_copy) {
     scr_dyn_static_copy_refuse("assigning a property");
     return;
@@ -6149,6 +6223,9 @@ static ScrDyn *scr_json_object(ScrJsonP *p) {
         return NULL;
       }
       if (r > 0) {
+#ifdef SCR_DYNCEN_ON
+        scr_dyncen_note_korigin(SCR_DYNCEN_KO_PARSE);
+#endif
         key = scr_json_key_alloc(span_len);
         memcpy(key, span, span_len);
         key[span_len] = '\0';
@@ -6159,6 +6236,9 @@ static ScrDyn *scr_json_object(ScrJsonP *p) {
           scr_dyn_release(obj);
           return NULL;
         }
+#ifdef SCR_DYNCEN_ON
+        scr_dyncen_note_korigin(SCR_DYNCEN_KO_PARSE);
+#endif
         key = scr_json_key_alloc(ks->len);
         memcpy(key, ks->data, ks->len + 1);
         key_len = ks->len;
@@ -8024,6 +8104,9 @@ static ScrDyn *scr_sc_clone(const ScrDyn *v, const ScrScParent *up) {
         scr_dyn_release(out);
         return NULL;
       }
+#ifdef SCR_DYNCEN_ON
+      scr_dyncen_note_korigin(SCR_DYNCEN_KO_COPY);
+#endif
       scr_dyn_obj_set(out, k->data, k->len, c); /* ownership moves */
       scr_str_release(k);
     }
@@ -8380,6 +8463,9 @@ static void scr_dyn_assign_from(ScrDyn *target, const ScrDyn *src) {
         if (sl_skip) continue;
         return; /* the getter threw; the pending exception unwinds */
       }
+#ifdef SCR_DYNCEN_ON
+      scr_dyncen_note_korigin(SCR_DYNCEN_KO_COPY);
+#endif
       scr_dyn_obj_set(target, k->data, k->len, mv); /* ownership moves */
       scr_str_release(k);
     }
@@ -8402,6 +8488,9 @@ static void scr_dyn_assign_from(ScrDyn *target, const ScrDyn *src) {
       if (pair->kind != SCR_DYN_ARR || pair->v.arr.len != 2) continue;
       const ScrDyn *k = pair->v.arr.items[0];
       if (k->kind != SCR_DYN_STR) continue;
+#ifdef SCR_DYNCEN_ON
+      scr_dyncen_note_korigin(SCR_DYNCEN_KO_COPY);
+#endif
       scr_dyn_obj_set(target, k->v.str->data, k->v.str->len,
                       scr_dyn_retain(pair->v.arr.items[1]));
     }
@@ -8438,6 +8527,9 @@ ScrDyn *scr_dyn_assign(ScrDyn *target, const ScrDyn *src) {
       for (size_t i = 0; i < entries->v.arr.len; i++) {
         const ScrDyn *pair = entries->v.arr.items[i];
         const ScrDyn *k = pair->v.arr.items[0];
+#ifdef SCR_DYNCEN_ON
+        scr_dyncen_note_korigin(SCR_DYNCEN_KO_COPY);
+#endif
         scr_dyn_obj_set(target, k->v.str->data, k->v.str->len,
                         scr_dyn_retain(pair->v.arr.items[1]));
       }

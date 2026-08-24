@@ -91,6 +91,20 @@ static void scr_dyncen_walk(ScrDynCenKind *rows) {
       for (i = 0; d->v.obj.entries && i < d->v.obj.len; i++) {
         long long kl = (long long)d->v.obj.entries[i].key_len;
         r->key_n++;
+        /* A literal key is not a block: it is bytes the image already
+         * carried, so it must NOT be added to key_bytes or phys_key --
+         * counting it there would report the change as having saved
+         * nothing while the process had stopped allocating it. */
+        if (d->v.obj.entries[i].key_static) {
+          r->key_static++;
+          if (kl > r->key_max) r->key_max = kl;
+          if (kl <= 7) r->key_le7++;
+          if (kl <= 15) r->key_le15++;
+          if (kl <= 23) r->key_le23++;
+          if (kl <= 31) r->key_le31++;
+          if (kt) scr_dyncen_key_note(kt, d->v.obj.entries[i].key, kl);
+          continue;
+        }
         /* the POOLED size, which is what the key really costs: every key
          * allocation in scr_json.c goes through scr_json_key_alloc, which
          * rounds key_len+1 up to SCR_POOL_GRAIN. */
