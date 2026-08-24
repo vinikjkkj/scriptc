@@ -64,6 +64,9 @@ FNS[(k + '') as K]('x', 'y');
 FNS[key()]('x', 'y');
 OPT[k as K]('x');
 console.log(OBJS[k as K].m());
+ROWS[k as K].v = 'Z';
+[ROWS[k as K].v] = ['Z'];
+delete (ROWS as unknown as Record<string, Record<string, string>>)[k].v;
 export {};
 `;
 

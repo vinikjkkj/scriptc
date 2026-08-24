@@ -4336,6 +4336,51 @@ function armCarryableReadWidth(t: IrType): boolean {
   );
 }
 
+/** The member-access contexts whose Node message is NOT the read message —
+ * every one measured against v25.9.0 rather than inferred:
+ *
+ *     ROWS[k].v = "Z"    Cannot SET properties of undefined (setting 'v')
+ *     delete ROWS[k].v   Cannot convert undefined or null to object
+ *     for (ROWS[k].v of…) the set message, for the same reason
+ *
+ * while the ones that DO read first keep the read message and stay in:
+ *
+ *     ROWS[k].v          Cannot read properties of undefined (reading 'v')
+ *     ROWS[k].v += "Z"   the same — a compound assignment reads first
+ *     ROWS[k].n++        the same
+ *
+ * The climb crosses the destructuring layers (`[ROWS[k].v] = arr`) exactly
+ * as isWriteTarget's does, because an assignment target can sit under an
+ * array or object literal and the message there is the SET one too.
+ *
+ * This is not a decline for tidiness. The first TU emitted without it put
+ * the READ message on the write, which is a WRONG ANSWER standing where a
+ * loud abort used to be — the precise trade this whole family exists to
+ * refuse. The write shapes keep today's abort until someone gives them
+ * their own message. */
+function memberMessageIsNotRead(p: ts.Node): boolean {
+  let n: ts.Node = p;
+  for (;;) {
+    const up: ts.Node | undefined = n.parent;
+    if (!up) return false;
+    if (ts.isDeleteExpression(up)) return up.expression === n;
+    if (ts.isBinaryExpression(up)) {
+      return up.left === n && up.operatorToken.kind === ts.SyntaxKind.EqualsToken;
+    }
+    if (ts.isForOfStatement(up) || ts.isForInStatement(up)) return up.initializer === n;
+    if (
+      ts.isParenthesizedExpression(up) || ts.isArrayLiteralExpression(up) ||
+      ts.isSpreadElement(up) || ts.isSpreadAssignment(up) ||
+      ts.isShorthandPropertyAssignment(up) || ts.isObjectLiteralExpression(up) ||
+      (ts.isPropertyAssignment(up) && up.initializer === n)
+    ) {
+      n = up;
+      continue;
+    }
+    return false;
+  }
+}
+
 /** THE MEMBER-RECEIVER DESTINATION for `recordKeyReadAtUndefinedArm`, asked
  * of the READ ITSELF rather than of a local that stored one.
  *
@@ -4407,6 +4452,7 @@ export function keyedReadAtMemberReceiver(L: Lowerer, node: ts.Expression, read:
   }
   if (prop === null) return null;
   if (p.parent && ts.isCallExpression(p.parent) && p.parent.expression === p) return null;
+  if (memberMessageIsNotRead(p)) return null;
   const armedT = L.withUndefinedArm(declared);
   if (armedT.kind !== "union") return null;
   const armed = L.recordKeyReadAtUndefinedArm(read, armedT);
