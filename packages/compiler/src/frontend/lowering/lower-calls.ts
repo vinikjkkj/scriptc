@@ -19,7 +19,7 @@ import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerBytesStaticFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerObjectIterOverIndexShape, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
 import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDiffieHellmanCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
-import { classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
+import { classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
@@ -5265,6 +5265,15 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // a non-func IR type was already rejected while lowering the callee.
     // HYBRID (function-with-properties) values call through their %call slot.
     let callee = L.lowerExpr(expr.expression);
+    // THE CALL-CALLEE DESTINATION for recordKeyReadAtUndefinedArm
+    // (keyedCalleeAtUndefinedArm, lower-exprs.ts): a table read whose
+    // value is CALLED answers a miss with Node's own catchable
+    // "<callee> is not a function" TypeError instead of aborting the
+    // process past the program's own catch. Declines keep this path.
+    {
+      const atCallee = keyedCalleeAtUndefinedArm(L, expr, callee, loc);
+      if (atCallee !== null) return atCallee;
+    }
     if (callee.type.kind === "record") callee = L.hybridCallUnwrap(callee);
     // A CHECKED-DYNAMIC callee — `fn(a, b)` where fn is an implicit-any
     // JS binding (the mustCall body's `fn(...args)`), a dyn capture, or a
