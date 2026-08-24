@@ -4132,16 +4132,19 @@ export function keyedReadGlobalIsDyn(L: Lowerer, decl: ts.VariableDeclaration): 
  * `bindingHoldsItsInitializer` is the same proof both adoption arms rest on:
  * a `let` reassigned later could name an unrelated value. */
 export function dynAliasBindingName(L: Lowerer, decl: ts.VariableDeclaration): ts.Identifier | null {
+  // The SYNTAX first, then the checker, then the file walk: this runs at
+  // every declaration of every JS source in the program, and
+  // bindingHoldsItsInitializer scans the declaring file for writes.
   if (decl.initializer === undefined || decl.type !== undefined) return null;
   if (!ts.isIdentifier(decl.name)) return null;
+  let init: ts.Expression = decl.initializer;
+  while (ts.isParenthesizedExpression(init)) init = init.expression;
+  if (!ts.isIdentifier(init)) return null;
   if (!isJsSourceFile(decl.getSourceFile())) return null;
-  if (!bindingHoldsItsInitializer(L, decl)) return null;
   // Only where the slot would otherwise COPY. A binding the checker already
   // types `any` is dyn by the ordinary fallback and nothing here fires.
   if (L.mapTypeOf(L.typeOf(decl.name))?.kind !== "record") return null;
-  let init: ts.Expression = decl.initializer;
-  while (ts.isParenthesizedExpression(init)) init = init.expression;
-  return ts.isIdentifier(init) ? init : null;
+  return bindingHoldsItsInitializer(L, decl) ? init : null;
 }
 
 /** The FILE-SCOPE half, which has to PREDICT: collectGlobals runs before any
