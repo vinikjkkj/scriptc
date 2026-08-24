@@ -8934,6 +8934,41 @@ export function moduleUsesSymbol(mod: IrModule): boolean {
   return found;
 }
 
+/** True when the module contains the module.requireVerdict libCall — the
+ * link switch that pulls scr_require.c into the binary.
+ *
+ * Only the RUN-TIME-specifier `require` emits it: a written specifier is
+ * answered at build time, by the module edge, the builtin alias, Node's
+ * argument error or a compile-time MODULE_NOT_FOUND, and none of those
+ * calls into the unit. So a program with no run-time-specifier require
+ * links none of the resolution machinery.
+ *
+ * There is no TYPE half here, unlike moduleUsesSymbol and moduleUsesUrl:
+ * the verdict answers a plain bool and leaves no typed local behind, so
+ * a fenced statement cannot strand a release call that needs the unit.
+ *
+ * This gate exists because tests/harness/size-class.ts caught the cost.
+ * The machinery started in scr_json.c, which is always linked, and the
+ * static hello-world grew 6,144 bytes for a call it can never make. */
+export function moduleUsesRequireVerdict(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && node.fn === "module.requireVerdict") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 /** True when the module uses the WHATWG URL surface — url.* libCalls or a
  * url-kind type anywhere on the IR (a fenced statement can leave a typed
  * local whose release call still needs scr_url_release linked, the
