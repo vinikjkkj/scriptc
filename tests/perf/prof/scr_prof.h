@@ -90,6 +90,24 @@
 #include <stdlib.h>
 
 #ifdef _WIN32
+/* windows.h pulls in <winsock.h> unless something suppresses it, and this
+ * header is -include'd BEFORE every translation unit - so winsock's
+ * `typedef struct fd_set {...} fd_set;` arrives before the runtime's own
+ * `static void fd_set(ScrDyn *, const char *, ScrDyn *)` in
+ * scr_fetch_dispatch.c and the TU does not compile. Measured on zapo:
+ * "error: redefinition of 'fd_set' as different kind of symbol", then 300
+ * cascading errors and -ferror-limit. It never showed up on a bench because
+ * scr_fetch_dispatch.c is link-gated out of a program that cannot reach
+ * fetch, so EVERY lane in this header was unusable on the one program it
+ * was written for - the same shape of blind spot as the _Exit one below.
+ *
+ * _WINSOCKAPI_ is winsock.h's own include guard, so defining it here makes
+ * that ONE header a no-op and leaves the rest of windows.h intact
+ * (WIN32_LEAN_AND_MEAN would also drop cderr/dde/rpc/shellapi/winperf). A
+ * TU that wants sockets includes <winsock2.h> itself, which is unaffected. */
+#ifndef _WINSOCKAPI_
+#define _WINSOCKAPI_
+#endif
 #include <windows.h>
 #endif
 
