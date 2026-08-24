@@ -207,6 +207,172 @@ console.log(JSON.stringify(Object.keys(o)));
 console.log(JSON.stringify(o));
 console.log(o.a.nested[2].deep, o["10"], o.s.length);
 ` },
+  /* ── the key's OWNER and the buffer's GROWTH ───────────────────────
+   * Two representation facts these programs exist to hold still.
+   *
+   * A member key is either a compiler-emitted LITERAL, stored by pointer
+   * and never freed, or a malloc'd copy. Four sites free a key -- the
+   * collector's teardown, the refcount teardown, a duplicate store and a
+   * delete -- and each must skip a literal. A literal handed to the key
+   * pool is a .rdata address on a freelist that the next take() returns
+   * as writable memory, and the symptom of that is not a crash at the
+   * mistake: it is a wrong ANSWER several properties later. So every
+   * program below deletes, overwrites or re-adds a key that the emitter
+   * wrote as a literal, and then reads the whole table back.
+   *
+   * The entries/items buffer's FIRST allocation is now exact rather than
+   * four slots, so an object crosses a reallocation at one, two, four and
+   * eight members instead of only at four. Two programs walk every step
+   * and read the table at each, because a growth that copies the entries
+   * one slot short is invisible until something reads the last one. */
+  { name: "delete a literal key, then re-add it", src: `"use strict";
+const o = { alpha: 1, beta: 2, gamma: 3 };
+const kb = "be" + "ta";
+delete o[kb];
+o.beta = 22;
+console.log(JSON.stringify(Object.keys(o)), JSON.stringify(o));
+` },
+  { name: "delete every literal key, then refill the same table", src: `"use strict";
+const o = { a: 1, b: 2, c: 3, d: 4, e: 5 };
+for (const k of Object.keys(o)) delete o[k];
+console.log(JSON.stringify(Object.keys(o)), JSON.stringify(o));
+o.z = 9; o.y = 8;
+console.log(JSON.stringify(Object.keys(o)), JSON.stringify(o));
+` },
+  { name: "overwrite a literal key a thousand times", src: `"use strict";
+const o = { hit: 0, other: "x" };
+for (let i = 0; i < 1000; i++) o.hit = i;
+console.log(JSON.stringify(Object.keys(o)), o.hit, o.other);
+` },
+  { name: "a literal key and a runtime key of the same name", src: `"use strict";
+const o = { shared: 1 };
+const k = "sha" + "red";
+o[k] = 2;
+o["fresh" + ""] = 3;
+console.log(JSON.stringify(Object.keys(o)), JSON.stringify(o));
+delete o[k];
+console.log(JSON.stringify(Object.keys(o)), JSON.stringify(o));
+` },
+  { name: "a runtime key deleted, a literal key of the same name added", src: `"use strict";
+const o = {};
+o["na" + "me"] = 1;
+const kn = "na" + "me";
+delete o[kn];
+const lit = { name: 2 };
+console.log(JSON.stringify(Object.keys(o)), JSON.stringify(Object.keys(lit)), lit.name);
+` },
+  /* The empty key is STORED and READ here and not deleted, and that is a
+   * finding rather than a preference: `delete o[k]` refuses at compile
+   * time (SC0001, "the operand of a 'delete' operator must be optional")
+   * whenever the checker can resolve the key to a declared property, and
+   * it resolves a const-folded one. The delete surface is covered by the
+   * computed-key programs above, whose receivers really are dynamic. */
+  { name: "the empty-string key stores and reads", src: `"use strict";
+const o = { "": 1, a: 2 };
+console.log(JSON.stringify(Object.keys(o)), JSON.stringify(o), o[""], "" in o);
+` },
+  { name: "a non-ASCII key survives the store and the delete", src: `"use strict";
+const o = { "caf\u00e9": 1, "\u65e5\u672c\u8a9e": 2, plain: 3 };
+console.log(JSON.stringify(Object.keys(o)), JSON.stringify(o));
+const kc = "caf" + "\u00e9";
+delete o[kc];
+console.log(JSON.stringify(Object.keys(o)), JSON.stringify(o));
+` },
+  { name: "spread copies a literal-keyed table into a fresh one", src: `"use strict";
+const src = { one: 1, two: 2, three: 3 };
+const copy = { ...src, four: 4 };
+const k2 = "t" + "wo";
+delete copy[k2];
+console.log(JSON.stringify(Object.keys(copy)), JSON.stringify(copy), JSON.stringify(src));
+` },
+  { name: "Object.assign onto a literal-keyed target", src: `"use strict";
+const target = { keep: 0, over: 1 };
+Object.assign(target, { over: 2, added: 3 });
+const ko = "ov" + "er";
+delete target[ko];
+console.log(JSON.stringify(Object.keys(target)), JSON.stringify(target));
+` },
+  { name: "structuredClone of a literal-keyed object", src: `"use strict";
+const o = { a: 1, nested: { b: 2 }, arr: [1, 2, 3] };
+const c = structuredClone(o);
+const ka = "a" + "";
+delete c[ka];
+console.log(JSON.stringify(Object.keys(c)), JSON.stringify(c), JSON.stringify(o));
+` },
+  { name: "an object read back at every entries growth step", src: `"use strict";
+const o = {};
+const out = [];
+for (let i = 0; i < 9; i++) {
+  o["k" + i] = i * 2;
+  let sum = 0;
+  const keys = Object.keys(o);
+  for (const k of keys) sum += o[k];
+  out.push(keys.length + ":" + sum + ":" + keys.join(","));
+}
+console.log(out.join("|"));
+` },
+  { name: "an array read back at every items growth step", src: `"use strict";
+const a = [];
+const out = [];
+for (let i = 0; i < 9; i++) {
+  a.push(i * 3);
+  out.push(a.length + ":" + a.join(",") + ":" + a[a.length - 1] + ":" + a[0]);
+}
+console.log(out.join("|"));
+` },
+  { name: "an array grown, drained and grown again", src: `"use strict";
+const a = [];
+for (let i = 0; i < 12; i++) a.push(i);
+while (a.length > 0) a.pop();
+for (let i = 0; i < 3; i++) a.push(100 + i);
+console.log(a.length, JSON.stringify(a));
+` },
+  { name: "a one-member object made and dropped many times", src: `"use strict";
+let last = "";
+for (let i = 0; i < 3000; i++) {
+  const o = { only: i };
+  last = JSON.stringify(Object.keys(o)) + ":" + o.only;
+}
+console.log(last);
+` },
+  { name: "a wide object shrunk to one member, then regrown", src: `"use strict";
+const o = {};
+for (let i = 0; i < 40; i++) o["f" + i] = i;
+for (let i = 0; i < 39; i++) delete o["f" + i];
+console.log(JSON.stringify(Object.keys(o)), o.f39);
+for (let i = 0; i < 5; i++) o["g" + i] = i;
+console.log(JSON.stringify(Object.keys(o)), JSON.stringify(o));
+` },
+  { name: "JSON.parse duplicate keys: the later value wins", src: `"use strict";
+const o = JSON.parse('{"a":1,"b":2,"a":3,"b":4,"c":5}');
+console.log(JSON.stringify(Object.keys(o)), JSON.stringify(o));
+delete o.a;
+console.log(JSON.stringify(Object.keys(o)), JSON.stringify(o));
+` },
+  /* The accessor CONVERSION, without the key order — and the omission is
+   * a finding, not a convenience. Converting an existing enumerable data
+   * property to an enumerable accessor drops the member and re-adds a
+   * slot, so the name moves to the END of Object.keys: node answers
+   * ["conv","other"] for the object below and both backends answer
+   * ["other","conv"]. That is main's answer at 27343f6f, on both lanes,
+   * with nothing of this branch applied, and it is written down here
+   * rather than shipped as a red cell. What this program does guard is
+   * the part the key representation owns: the drop-and-re-add really
+   * runs, and the value still reads and writes through the accessor. */
+  { name: "defineProperty converts a data property to an accessor", src: `"use strict";
+const o = { conv: 1, other: 2 };
+let backing = 10;
+Object.defineProperty(o, "conv", { get() { return backing; }, set(v) { backing = v * 2; }, enumerable: true, configurable: true });
+o.conv = 5;
+console.log(o.conv, o.other, Object.keys(o).length, Object.keys(o).slice().sort().join(","));
+` },
+  { name: "a 300-member table past every doubling, then read every member", src: `"use strict";
+const o = {};
+for (let i = 0; i < 300; i++) o["m" + i] = i;
+let sum = 0;
+for (const k of Object.keys(o)) sum += o[k];
+console.log(Object.keys(o).length, sum, o.m0, o.m299, JSON.stringify(Object.keys(o).slice(0, 3)));
+` },
   { name: "many objects made and dropped: the freelist recycles", src: `"use strict";
 let last = "";
 for (let i = 0; i < 2000; i++) {

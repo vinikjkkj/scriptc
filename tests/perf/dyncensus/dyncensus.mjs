@@ -25,7 +25,7 @@ export function parse(text) {
     layout: null, arm: new Map(), counts: new Map(),
     peak: new Map(), exit: new Map(), curve: [], total: null,
     keytab: new Map(), keytop: new Map(), grow: new Map(),
-    shrinks: null, poolMismatch: null,
+    shrinks: null, poolMismatch: null, korigin: null,
   };
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
@@ -90,6 +90,7 @@ export function parse(text) {
       r.grow.set(sp[1], { hist: sp.slice(2, 2 + CAPS).map(Number), ...kvs });
       continue;
     }
+    if (tag === "DYNCEN-KORIGIN") { r.korigin = sp.slice(1).map(Number); continue; }
     if (tag === "DYNCEN-SHRINK") {
       r.shrinks = +sp[1];
       r.poolMismatch = Number((sp[2] ?? "poolMismatch=0").split("=")[1]);
@@ -248,6 +249,10 @@ export function check(r) {
         bad.push(`${tag} ${name(k)}: physSide ${row.physSide} < requested side ${row.side}`);
       if (row.physKey !== undefined && row.physKey < row.keyBytes)
         bad.push(`${tag} ${name(k)}: physKey ${row.physKey} < pooled keyBytes ${row.keyBytes}`);
+      // 7d. a literal key costs no block, so it must be excluded from the
+      //     byte columns AND it can never outnumber the keys themselves.
+      if (row.keyStatic > row.keyN)
+        bad.push(`${tag} ${name(k)}: keyStatic ${row.keyStatic} > keyN ${row.keyN}`);
     }
   }
 
@@ -394,8 +399,22 @@ export function render(r) {
     out.push(`   blocks: ${n(t.occPhys)} B as stored, ${n(t.distPhys)} B if one block per distinct name — ` +
       `${n(t.occPhys - t.distPhys)} B (${pct(t.occPhys - t.distPhys, t.occPhys)}) is duplication` +
       (t.trunc ? `; ${n(t.trunc)} names stored TRUNCATED past ${48} bytes` : ""));
+    if (tag !== "RUN") {
+      let kn = 0, ks = 0;
+      const rows = tag === "PEAK" ? r.peak : r.exit;
+      for (const [k, row] of rows) { if (k === ARM_ROW) continue; kn += row.keyN ?? 0; ks += row.keyStatic ?? 0; }
+      if (ks) out.push(`   ${n(ks)} of the ${n(kn)} (${pct(ks, kn)}) are compiler LITERALS stored by pointer: no block at all`);
+    }
     const top = r.keytop.get(tag);
     if (top) out.push(`   commonest: ` + top.slice(0, 12).map((x) => `${x.key}:${n(x.n)}`).join("  "));
+    out.push("");
+  }
+
+  if (r.korigin) {
+    const [set, keyset, parse, hidden, copy] = r.korigin;
+    const lit = set - keyset - copy;
+    out.push(`KEY ORIGIN over the run: scr_dyn_obj_set ${n(set)} (of which key_set ${n(keyset)} and copy ${n(copy)} carry a RUN-TIME key, ` +
+      `so ${n(lit)} could be a literal), JSON.parse ${n(parse)}, hidden table ${n(hidden)}`);
     out.push("");
   }
 
@@ -435,7 +454,7 @@ function base() {
     const d = {
       n: 0, rcSum: 0, rcMax: 0, fBuf: 0, fNullProto: 0, fStaticCopy: 0, lenSum: 0, capSum: 0,
       lenMax: 0, capMax: 0, side: 0, emptyBuf: 0, proto: 0, cname: 0, hidden: 0, slots: 0,
-      anyExtra: 0, keyN: 0, keyBytes: 0, keyMax: 0, keyLe7: 0, keyLe15: 0, keyLe23: 0,
+      anyExtra: 0, keyN: 0, keyBytes: 0, keyMax: 0, keyStatic: 0, keyLe7: 0, keyLe15: 0, keyLe23: 0,
       keyLe31: 0, strLenSum: 0, strLenMax: 0, strPhys: 0, strLe7: 0, strLe15: 0, strLe23: 0,
       strLe31: 0, fnSig: 0, fnName: 0, fnSrc: 0, fnArityMax: 0, aux: 0, ...o,
     };
@@ -489,6 +508,7 @@ function base() {
   lines.push("DYNCEN-GROW obj 0 0 0 0 52 0 0 0 0 0 0 0 0 0 bytes=4992 phys=5824");
   lines.push("DYNCEN-GROW arr 0 0 0 0 0 0 0 0 0 0 0 0 0 0 bytes=0 phys=0");
   lines.push("DYNCEN-SHRINK 0 poolMismatch=0");
+  lines.push("DYNCEN-KORIGIN 104 4 0 0 0 0 0 0");
   lines.push("DYNCEN-CURVE 0 500 60 0");
   lines.push("DYNCEN-TOTAL allocs=154 deaths=52 liveN=102 livePeak=104 snapN=104 snapOrd=140 snapT=1 snaps=3 snapBand=256 walks=3 walkReads=300 lost=0 ptrLost=0 deadUnknown=0 armN=32 pslots=262144 tableBytes=2097152");
   return lines.join("\n");
@@ -508,6 +528,7 @@ function selfTest() {
   ok(render(g).includes("SPARE CAPACITY"), "render prices the unfilled capacity");
   ok(render(g).includes("GROWTH REQUESTS"), "render prints the growth histogram");
   ok(render(g).includes("KEYS RUN"), "render prints the run-long key duplication");
+  ok(render(g).includes("KEY ORIGIN"), "render prints where the keys came from");
   ok(/96\.15%|96\.2/.test(render(g)) || render(g).includes("a name already stored"),
     "render states the duplication rate");
 
@@ -559,6 +580,8 @@ function selfTest() {
       (s) => s.replace("52/208/104", "52/208/77"), /cross-tab len sum 77/],
     ["physical bytes BELOW the bytes actually requested",
       (s) => s.replace("DYNCEN-PEAK-PHYS 5 side=5824", "DYNCEN-PEAK-PHYS 5 side=10"), /physSide 10 </],
+    ["more literal keys than keys",
+      (s) => s.replace("keyMax=6 keyStatic=0 keyLe7=104", "keyMax=6 keyStatic=999 keyLe7=104"), /keyStatic 999 > keyN/],
     ["a key block figure below the pooled figure it is charged on top of",
       (s) => s.replace("DYNCEN-PEAK-PHYS 5 side=5824 key=1664", "DYNCEN-PEAK-PHYS 5 side=5824 key=3"), /physKey 3 </],
   ];

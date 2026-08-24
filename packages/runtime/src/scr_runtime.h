@@ -3802,12 +3802,31 @@ void scr_fn_names_install(const ScrFnName *tbl, size_t n);
 /* NULL when this program never named that entry point. */
 const char *scr_fn_name_of(const void *fn);
 
-/* Object member. Keys are malloc'd UTF-8 bytes (NUL-terminated for
- * convenience; key_len excludes the NUL) — duplicate keys were already
- * collapsed at parse time (later wins, like JS JSON.parse). */
+/* Object member. `key` is UTF-8 bytes, NUL-terminated for convenience,
+ * and `key_len` excludes the NUL — duplicate keys were already collapsed
+ * at parse time (later wins, like JS JSON.parse).
+ *
+ * `key_static` says WHO OWNS THE BYTES, and it exists because almost
+ * every key in a compiled program is a literal the compiler already
+ * put in .rdata: 8,972 of the 8,975 member-store call sites the emitter
+ * writes for zapo pass a string literal, and at that program's peak
+ * 70.9% of the live keys are a name some other object already stored.
+ * A static key is stored BY POINTER — no malloc, no memcpy, no free, and
+ * no resident block at all — and scr_json.c's four key-free sites skip
+ * it. Anything else is a malloc'd copy through scr_json_key_alloc, as
+ * every key was before.
+ *
+ * `key_len` is 32 bits so the flag is free: the struct was 24 bytes
+ * with an 8-byte length and is 24 bytes with a 4-byte length and a
+ * 4-byte flag, and `key` at +0 and `value` at +16 do not move (the
+ * LLVM backend hardcodes all three). The ceiling is ENFORCED at the
+ * two store sites rather than inferred from the measured maximum of
+ * 62: a 4 GB property name is out of memory, which is both the
+ * truthful answer and the one that already existed there. */
 typedef struct {
   char *key;
-  size_t key_len;
+  uint32_t key_len;
+  uint32_t key_static; /* the bytes are a compiler-emitted literal: never freed */
   ScrDyn *value; /* owned */
 } ScrDynEntry;
 
@@ -4127,6 +4146,13 @@ const char *scr_dyn_fn_src_of(const ScrDyn *d);
  * has 96 GB of entry table, so the honest answer there is a refusal and
  * not a silent wrap. */
 #define SCR_DYN_LEN_MAX 0x7fffffffu
+
+/* The same argument for a member NAME. `ScrDynEntry.key_len` is 32 bits
+ * so that the ownership flag beside it is free; the longest key this
+ * compiler has ever seen live is 62 bytes, and a program that really
+ * reaches a four-gigabyte property name is out of memory, which is what
+ * the two store sites answer. */
+#define SCR_DYN_KEY_MAX 0xffffffffu
 
 
 /* ScrDyn's trace entry point, for containers and emitted shapes that hold
@@ -4810,6 +4836,20 @@ void scr_dyn_obj_set(ScrDyn *obj, const char *key, size_t key_len, ScrDyn *value
  * that fact lives — see the definition in scr_json.c for why this is not a
  * rule about undefined values in general. MOVES the value. */
 void scr_dyn_obj_set_present(ScrDyn *obj, const char *key, size_t key_len, ScrDyn *value);
+
+/* The two above, for a key the COMPILER already put in the image.
+ *
+ * Identical in every observable way — same ordering, same duplicate rule,
+ * same ownership of the value — except that the key bytes are stored BY
+ * POINTER instead of copied, and are never freed. `key` must therefore
+ * outlive every object it is stored in, which a string literal in .rdata
+ * does by construction and a malloc'd buffer does not. The emitter calls
+ * these exactly where it writes a literal, which for zapo is 8,972 of
+ * 8,975 member-store call sites; everything whose key is a run-time value
+ * — scr_dyn_key_set, JSON.parse, spread, Object.assign — keeps the
+ * copying entry above. */
+void scr_dyn_obj_set_lit(ScrDyn *obj, const char *key, size_t key_len, ScrDyn *value);
+void scr_dyn_obj_set_present_lit(ScrDyn *obj, const char *key, size_t key_len, ScrDyn *value);
 /* The checked-dynamic keyed WRITE (`h.k = v` on a dyn receiver): OBJ sets
  * the member (JS: later writes win, insertion order); undefined/null and
  * non-object kinds throw Node's catchable TypeErrors (strict-mode
