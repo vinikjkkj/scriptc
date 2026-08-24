@@ -4154,7 +4154,8 @@ ScrDyn *scr_dyn_obj_key_get(ScrDyn *recv, const char *key, size_t key_len);
 bool scr_dyn_obj_key_present(const ScrDyn *d, const char *key, size_t key_len);
 bool scr_dyn_obj_has_own_prop(const ScrDyn *d, const char *key, size_t key_len);
 void scr_dyn_obj_define_accessor(ScrDyn *recv, const char *key, size_t key_len,
-                                 ScrDyn *getter, ScrDyn *setter, bool configurable);
+                                 ScrDyn *getter, ScrDyn *setter, bool configurable,
+                                 bool enumerable);
 void scr_dyn_obj_define_hidden_data(ScrDyn *recv, const char *key, size_t key_len,
                                     ScrDyn *value, bool writable, bool configurable);
 bool scr_dyn_obj_hidden_sealed(const ScrDyn *recv, const char *key, size_t key_len);
@@ -4163,9 +4164,86 @@ bool scr_dyn_obj_hidden_sealed(const ScrDyn *recv, const char *key, size_t key_l
  * redefinition OMITS keeps the CURRENT property's value rather than
  * defaulting to false. Any out-pointer may be NULL. */
 bool scr_dyn_obj_hidden_attrs(const ScrDyn *recv, const char *key, size_t key_len,
-                              bool *is_data, bool *writable, bool *configurable);
+                              bool *is_data, bool *writable, bool *configurable,
+                              bool *enumerable);
 /* …and drops one, for the redefinition back to an ENUMERABLE member. */
 void scr_dyn_obj_drop_hidden(ScrDyn *recv, const char *key, size_t key_len);
+
+/* ── the ENUMERABLE accessor, and the SLOT that makes it one ───────────
+ *
+ * An accessor property that is ENUMERABLE has to be two things at once,
+ * and the two tables above each hold one of them. `hidden` holds the
+ * descriptor — getter, setter, `configurable`, and now `enumerable` as a
+ * fifth element — and records no creation order, which is the reason
+ * scr_dyn_own_names_fence refuses in its own message. `entries` IS the
+ * creation order, and holds no attributes and no getter.
+ *
+ * So such a property lives in BOTH: the descriptor in `hidden`, and a
+ * SLOT in `entries` that carries the key and NOTHING else.
+ * scr_dyn_acc_slot is that slot — one immortal node, told apart by
+ * POINTER and by nothing else, so no program value can forge one.
+ *
+ * What the split buys: scr_dyn_obj_key_order, the ONE own-key projection
+ * every enumeration surface in this runtime shares, needs no change at
+ * all. The key is already in the table it walks, in the position JS puts
+ * it in, so index-keys-first-then-insertion-order stays one
+ * implementation rather than two that can drift.
+ *
+ * What the split costs: `entries` stops being "a table of values". Two
+ * rules contain that, and both are load-bearing.
+ *
+ *   scr_dyn_obj_get answers NULL for a slot. A slot is not a member, so
+ *   the honest answer is the one a missing key gets — which is what makes
+ *   scr_dyn_obj_resolve fall through to the descriptor, and with it
+ *   [[Get]], [[Set]], [[Delete]] and `in`, unchanged. Every builtin that
+ *   reads an option out of a bag through that function keeps behaving
+ *   exactly as it did when an accessor could only be non-enumerable.
+ *
+ *   A slot SURVIVES the property going non-enumerable, as a position
+ *   TOMBSTONE. ES redefines a property where it is — Object.keys does not
+ *   move a name because its `enumerable` flipped — and the slot is the
+ *   only record of where that is. `hidden`'s fifth element is the live
+ *   answer; the slot only says WHERE.
+ *
+ * scr_dyn_obj_entry_read is what an ENUMERATION surface calls per entry.
+ * Three outcomes, and a caller that collapses two of them is a wrong
+ * answer waiting:
+ *   +1 value, *skip = false   an ordinary member (retained), or an
+ *                             enumerable accessor whose getter has just
+ *                             RUN — `this` bound to the receiver, once
+ *                             per read, never cached
+ *   NULL, *skip = true        a tombstone: not an own enumerable key,
+ *                             step over it
+ *   NULL, *skip = false       the getter threw; unwind
+ *
+ * scr_dyn_obj_entry_listed is the same question with nothing run, which
+ * is what Object.keys and `for…in` need: Node lists an accessor's name
+ * without calling its getter, and calling one there would be an
+ * observable side effect JS does not have.
+ *
+ * scr_dyn_obj_acc_fence is for a surface that walks `entries` and has
+ * NOT been taught the slot. Reading a slot as a value answers
+ * `undefined` — a key silently missing from a JSON document, a header
+ * quietly unset — and a silent wrong answer ranks below a refusal here
+ * every time. scr_dyn_obj_has_enum_acc is the cheap predicate behind it:
+ * an object with no hidden table answers on one NULL test. */
+ScrDyn *scr_dyn_acc_slot(void);
+bool scr_dyn_obj_entry_is_slot(const ScrDyn *d, const char *key, size_t key_len);
+bool scr_dyn_obj_has_enum_acc(const ScrDyn *d);
+void scr_dyn_obj_acc_fence(const ScrDyn *d, const char *surface);
+ScrDyn *scr_dyn_obj_entry_read(ScrDyn *recv, const ScrDynEntry *e, bool *skip);
+bool scr_dyn_obj_entry_listed(const ScrDyn *recv, const ScrDynEntry *e);
+/* Own ENUMERABLE string keys: `entries` length minus its TOMBSTONES.
+ * Anything that compares two objects by key count has to ask this rather
+ * than read `len`, or an object that once carried an enumerable getter
+ * compares unequal to one that never did. */
+size_t scr_dyn_obj_enum_key_count(const ScrDyn *d);
+/* The own ENUMERABLE property named `key`, READ — the getter runs. NULL
+ * when there is no such own enumerable property, and NULL with a pending
+ * exception when the getter threw (scr_exc_pending tells them apart).
+ * Own-only and enumerable-only on purpose: this is the other half of an
+ * own-key WALK, not a [[Get]] — scr_dyn_obj_key_get is that. +1. */
+ScrDyn *scr_dyn_obj_own_enum_read(ScrDyn *recv, const char *key, size_t key_len);
 
 /* ── the per-instance property table of a COMPILED class instance ─────
  *

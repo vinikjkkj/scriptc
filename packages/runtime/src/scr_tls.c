@@ -1392,6 +1392,12 @@ bool scr_tls_srv_opts_walk(const ScrDyn *opts, const char *api, ScrBytes **cert_
     return false;
   }
   if (!scr_tls_opts_validate(opts)) return false; /* Node's typed errors first */
+  /* No getter path in this walk: an option provided by an ENUMERABLE
+   * ACCESSOR would read as the SLOT's undefined and be taken for absent,
+   * which on a TLS options bag means a security setting silently
+   * ignored. Loud. */
+  scr_dyn_obj_acc_fence(opts, "a tls options object");
+  if (scr_exc_pending()) return false;
   bool ok = true;
   for (size_t i = 0; ok && i < opts->v.obj.len; i++) {
     const ScrDynEntry *e = &opts->v.obj.entries[i];
@@ -1556,6 +1562,11 @@ ScrNetSocket *scr_tls_connect_dyn(double port, ScrStr *host /*borrowed, nullable
     if (opts->kind != SCR_DYN_OBJ) {
       scr_dyn_arg_type_fail("options", "of type object", opts);
       ok = false;
+    }
+    if (ok) {
+      /* See the connect-options walk above: no getter path here either. */
+      scr_dyn_obj_acc_fence(opts, "a tls options object");
+      if (scr_exc_pending()) ok = false;
     }
     for (size_t i = 0; ok && i < opts->v.obj.len; i++) {
       const ScrDynEntry *e = &opts->v.obj.entries[i];
