@@ -6,9 +6,11 @@
  * to add a source file to a build (the cached-object lane compiles each TU
  * with -c, so an extra .c on the command line is an error), so both the
  * interposition AND its implementation have to travel in a header.
- * Everything defined here is __attribute__((weak)): every TU carries a
- * copy, the linker keeps exactly one, and the counters are single
- * instances.
+ * Its shared state is __attribute__((selectany)) and its functions are
+ * static: every TU carries a copy of the CODE and they all operate on ONE
+ * instance of the DATA. It used to say `weak` for both, which is ELF's rule
+ * and not this target's - see the LINKAGE note below, which is there because
+ * a zapo link is what disproved it.
  *
  * Three independent instruments, each behind its own -D:
  *
@@ -112,6 +114,43 @@
 #endif
 
 #define SCR_PROF_NI __attribute__((no_instrument_function))
+
+/* ---- LINKAGE, and why it is not `weak` -----------------------------
+ * This header used to say: "Everything defined here is
+ * __attribute__((weak)): every TU carries a copy, the linker keeps exactly
+ * one, and the counters are single instances." That is ELF's rule. It is
+ * NOT true for x86_64-windows-gnu, and a zapo link says so:
+ *
+ *   lld-link: error: duplicate symbol: .weak.scr_prof_tsc.default
+ *   >>> defined at ...\scr_loop_kqueue.obj
+ *   >>> defined at ...\scr_loop_epoll.obj
+ *
+ * Reproduced here in three files (a.c uses it, b.c and c.c only include the
+ * header) and confirmed to have no linker escape on this toolchain -
+ * --allow-multiple-definition, /force:multiple, -force:multiple and
+ * /FORCE:MULTIPLE are all "error: unsupported linker arg", joining the eight
+ * routes already listed at the top of this file. -ffunction-sections and
+ * -fno-common do not help either; both were tried.
+ *
+ * What DOES work on COFF, measured on the same three files:
+ *   DATA      __attribute__((selectany)) with an explicit initializer. It
+ *             emits a COMDAT with "any" selection, so duplicates MERGE
+ *             instead of colliding, and the counter stays a SINGLE instance
+ *             (the reproducer prints 2 after two bumps from two TUs, not 1).
+ *             An all-zero initializer still lands in .bss: a 4 MB table
+ *             produced a byte-identical 780,800-byte exe either way, so this
+ *             costs nothing on disk.
+ *   FUNCTIONS `static`. Per-TU copies of the CODE are harmless because they
+ *             all operate on the shared selectany DATA above.
+ *
+ * The one thing neither covers is a function whose NAME must be external
+ * because the compiler emits calls to it: __cyg_profile_func_enter and
+ * __cyg_profile_func_exit. Those stay weak, and the CPU lanes therefore
+ * still cannot link a program with this many translation units. See the
+ * note above them. */
+#define SCR_PROF_SHARED __attribute__((selectany))
+#define SCR_PROF_FN SCR_PROF_NI static __attribute__((unused))
+/* kept only for the two hooks that must carry an external name */
 #define SCR_PROF_WEAK __attribute__((weak))
 
 /* One open-addressed table. 64k rows is far more than the number of
@@ -156,29 +195,29 @@ typedef struct {
 #define SCR_PROF_STR1(x) SCR_PROF_STR2(x)
 #define SCR_PROF_SITE (__FILE__ ":" SCR_PROF_STR1(__LINE__))
 
-SCR_PROF_WEAK ScrProfRow scr_prof_tbl[SCR_PROF_SLOTS];
-SCR_PROF_WEAK long long scr_prof_lost;
-SCR_PROF_WEAK int scr_prof_installed;
-SCR_PROF_WEAK int scr_prof_reentrant;
+SCR_PROF_SHARED ScrProfRow scr_prof_tbl[SCR_PROF_SLOTS] = {{0}};
+SCR_PROF_SHARED long long scr_prof_lost = 0;
+SCR_PROF_SHARED int scr_prof_installed = 0;
+SCR_PROF_SHARED int scr_prof_reentrant = 0;
 
 /* The DENOMINATOR. A per-function cycle count means nothing without the
  * run it is a fraction OF, so the install hook stamps the cycle counter
  * and the reporter stamps it again. Both stay 0 unless a timing lane is
  * compiled in. */
-SCR_PROF_WEAK long long scr_prof_t0;
-SCR_PROF_WEAK long long scr_prof_t1;
-SCR_PROF_WEAK long long scr_prof_frames_lost;
-SCR_PROF_WEAK long long scr_prof_resyncs;
+SCR_PROF_SHARED long long scr_prof_t0 = 0;
+SCR_PROF_SHARED long long scr_prof_t1 = 0;
+SCR_PROF_SHARED long long scr_prof_frames_lost = 0;
+SCR_PROF_SHARED long long scr_prof_resyncs = 0;
 
 /* rdtsc through the clang builtin - no intrinsic header, no inline asm,
  * and it compiles to a single RDTSC on this target. It is a CYCLE
  * counter, not a clock: the report converts nothing to seconds and every
  * figure derived from it is a RATIO within one run. */
-SCR_PROF_NI SCR_PROF_WEAK long long scr_prof_tsc(void) {
+SCR_PROF_FN long long scr_prof_tsc(void) {
   return (long long)__builtin_readcyclecounter();
 }
 
-SCR_PROF_NI SCR_PROF_WEAK unsigned scr_prof_hash(const void *p) {
+SCR_PROF_FN unsigned scr_prof_hash(const void *p) {
   unsigned long long x = (unsigned long long)(size_t)p;
   x ^= x >> 33;
   x *= 0xff51afd7ed558ccdULL;
@@ -186,7 +225,7 @@ SCR_PROF_NI SCR_PROF_WEAK unsigned scr_prof_hash(const void *p) {
   return (unsigned)(x & (SCR_PROF_SLOTS - 1u));
 }
 
-SCR_PROF_NI SCR_PROF_WEAK ScrProfRow *scr_prof_row2(const void *key, const void *key2,
+SCR_PROF_FN ScrProfRow *scr_prof_row2(const void *key, const void *key2,
                                                      const char *name) {
   unsigned h = scr_prof_hash(key) ^ (scr_prof_hash(key2) * 2654435761u);
   h &= (SCR_PROF_SLOTS - 1u);
@@ -204,7 +243,7 @@ SCR_PROF_NI SCR_PROF_WEAK ScrProfRow *scr_prof_row2(const void *key, const void 
   return NULL;
 }
 
-SCR_PROF_NI SCR_PROF_WEAK ScrProfRow *scr_prof_row(const void *key, const char *name) {
+SCR_PROF_FN ScrProfRow *scr_prof_row(const void *key, const char *name) {
   unsigned h = scr_prof_hash(key);
   for (unsigned i = 0; i < SCR_PROF_SLOTS; i++) {
     unsigned j = (h + i) & (SCR_PROF_SLOTS - 1u);
@@ -246,7 +285,7 @@ typedef struct {
 typedef BOOL(WINAPI *ScrProfGetMemFn)(HANDLE, ScrProfWinMem *, DWORD);
 #endif
 
-SCR_PROF_NI SCR_PROF_WEAK long long scr_prof_peak_rss(void) {
+SCR_PROF_FN long long scr_prof_peak_rss(void) {
 #ifdef _WIN32
   HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
   ScrProfGetMemFn fn =
@@ -262,7 +301,7 @@ SCR_PROF_NI SCR_PROF_WEAK long long scr_prof_peak_rss(void) {
 #endif
 }
 
-SCR_PROF_NI SCR_PROF_WEAK size_t scr_prof_base(void) {
+SCR_PROF_FN size_t scr_prof_base(void) {
 #ifdef _WIN32
   static size_t b = 0;
   if (b == 0) b = (size_t)GetModuleHandleW(NULL);
@@ -325,7 +364,7 @@ typedef struct {
   ScrProfRow *row;
 } ScrProfPtr;
 
-SCR_PROF_WEAK ScrProfPtr scr_prof_ptbl[SCR_PROF_PSLOTS];
+SCR_PROF_SHARED ScrProfPtr scr_prof_ptbl[SCR_PROF_PSLOTS] = {{0}};
 
 /* NOT scr_prof_hash: that one folds its result with (SCR_PROF_SLOTS - 1),
  * i.e. into 65,536 buckets, because the row table is that size. Reusing it
@@ -335,7 +374,7 @@ SCR_PROF_WEAK ScrProfPtr scr_prof_ptbl[SCR_PROF_PSLOTS];
  * identical fixed work. That is the whole reason this second hash exists,
  * written down because the symptom (a slow profiler) looks nothing like
  * the cause (a mask from the wrong table). */
-SCR_PROF_NI SCR_PROF_WEAK unsigned scr_prof_phash(const void *p) {
+SCR_PROF_FN unsigned scr_prof_phash(const void *p) {
   unsigned long long x = (unsigned long long)(size_t)p;
   x ^= x >> 33;
   x *= 0xff51afd7ed558ccdULL;
@@ -344,14 +383,14 @@ SCR_PROF_NI SCR_PROF_WEAK unsigned scr_prof_phash(const void *p) {
   x ^= x >> 32;
   return (unsigned)(x & (SCR_PROF_PSLOTS - 1u));
 }
-SCR_PROF_WEAK long long scr_prof_live;
-SCR_PROF_WEAK long long scr_prof_live_peak;
-SCR_PROF_WEAK long long scr_prof_live_snap_at;
-SCR_PROF_WEAK long long scr_prof_ptr_lost;
-SCR_PROF_WEAK long long scr_prof_free_unknown;
-SCR_PROF_WEAK long long scr_prof_snaps;
-SCR_PROF_WEAK long long scr_prof_ptr_live;
-SCR_PROF_WEAK long long scr_prof_ptr_live_peak;
+SCR_PROF_SHARED long long scr_prof_live = 0;
+SCR_PROF_SHARED long long scr_prof_live_peak = 0;
+SCR_PROF_SHARED long long scr_prof_live_snap_at = 0;
+SCR_PROF_SHARED long long scr_prof_ptr_lost = 0;
+SCR_PROF_SHARED long long scr_prof_free_unknown = 0;
+SCR_PROF_SHARED long long scr_prof_snaps = 0;
+SCR_PROF_SHARED long long scr_prof_ptr_live = 0;
+SCR_PROF_SHARED long long scr_prof_ptr_live_peak = 0;
 
 /* A snapshot walks all 65,536 rows, so it must not run on every byte the
  * peak grows by. It runs when the live total exceeds the last snapshot by
@@ -366,13 +405,13 @@ SCR_PROF_WEAK long long scr_prof_ptr_live_peak;
 #define SCR_PROF_SNAP_MIN 65536
 #endif
 
-SCR_PROF_NI SCR_PROF_WEAK void scr_prof_snapshot(void) {
+SCR_PROF_FN void scr_prof_snapshot(void) {
   scr_prof_snaps++;
   scr_prof_live_snap_at = scr_prof_live;
   for (unsigned i = 0; i < SCR_PROF_SLOTS; i++) scr_prof_tbl[i].snap = scr_prof_tbl[i].live;
 }
 
-SCR_PROF_NI SCR_PROF_WEAK void scr_prof_live_add(const void *p, size_t n, ScrProfRow *row) {
+SCR_PROF_FN void scr_prof_live_add(const void *p, size_t n, ScrProfRow *row) {
   if (p == NULL) return;
   unsigned h = scr_prof_phash(p);
   for (unsigned i = 0; i < SCR_PROF_PSLOTS; i++) {
@@ -413,7 +452,7 @@ SCR_PROF_NI SCR_PROF_WEAK void scr_prof_live_add(const void *p, size_t n, ScrPro
  * so a lookup still stops at the first empty slot and the table degrades
  * only with real occupancy. An element may only be moved into the hole if
  * its ideal slot is NOT cyclically inside (hole, here]. */
-SCR_PROF_NI SCR_PROF_WEAK void scr_prof_live_del(const void *p) {
+SCR_PROF_FN void scr_prof_live_del(const void *p) {
   if (p == NULL) return;
   unsigned mask = SCR_PROF_PSLOTS - 1u;
   unsigned h = scr_prof_phash(p);
@@ -452,9 +491,9 @@ SCR_PROF_NI SCR_PROF_WEAK void scr_prof_live_del(const void *p) {
 }
 #endif /* SCR_PROF_LIVE */
 
-SCR_PROF_WEAK int scr_prof_reported;
+SCR_PROF_SHARED int scr_prof_reported = 0;
 
-SCR_PROF_NI SCR_PROF_WEAK void scr_prof_report(void) {
+SCR_PROF_FN void scr_prof_report(void) {
   /* Two producers now reach this (atexit and the _Exit interposer below),
    * and a second report would truncate the first. */
   if (scr_prof_reported) return;
@@ -526,7 +565,7 @@ SCR_PROF_NI SCR_PROF_WEAK void scr_prof_report(void) {
   fclose(f);
 }
 
-SCR_PROF_NI SCR_PROF_WEAK void scr_prof_install(void) {
+SCR_PROF_FN void scr_prof_install(void) {
   if (scr_prof_installed) return;
   scr_prof_installed = 1;
   scr_prof_t0 = scr_prof_tsc();
@@ -559,7 +598,7 @@ SCR_PROF_NI SCR_PROF_WEAK void scr_prof_install(void) {
 /* ---- the allocation lane ------------------------------------------- */
 #ifdef SCR_PROF_ALLOC
 
-SCR_PROF_NI SCR_PROF_WEAK void *scr_prof_malloc(size_t n, const char *site) {
+SCR_PROF_FN void *scr_prof_malloc(size_t n, const char *site) {
   scr_prof_install();
   void *p = malloc(n);
   ScrProfRow *r = scr_prof_row((const void *)site, site);
@@ -573,7 +612,7 @@ SCR_PROF_NI SCR_PROF_WEAK void *scr_prof_malloc(size_t n, const char *site) {
   return p;
 }
 
-SCR_PROF_NI SCR_PROF_WEAK void *scr_prof_calloc(size_t a, size_t b, const char *site) {
+SCR_PROF_FN void *scr_prof_calloc(size_t a, size_t b, const char *site) {
   scr_prof_install();
   void *p = calloc(a, b);
   ScrProfRow *r = scr_prof_row((const void *)site, site);
@@ -587,7 +626,7 @@ SCR_PROF_NI SCR_PROF_WEAK void *scr_prof_calloc(size_t a, size_t b, const char *
   return p;
 }
 
-SCR_PROF_NI SCR_PROF_WEAK void *scr_prof_realloc(void *q, size_t n, const char *site) {
+SCR_PROF_FN void *scr_prof_realloc(void *q, size_t n, const char *site) {
   scr_prof_install();
 #ifdef SCR_PROF_LIVE
   /* The old block is retired BEFORE the call: realloc may return the same
@@ -608,7 +647,7 @@ SCR_PROF_NI SCR_PROF_WEAK void *scr_prof_realloc(void *q, size_t n, const char *
   return p;
 }
 
-SCR_PROF_NI SCR_PROF_WEAK void scr_prof_free(void *p, const char *site) {
+SCR_PROF_FN void scr_prof_free(void *p, const char *site) {
   if (p != NULL) {
     ScrProfRow *r = scr_prof_row((const void *)site, site);
     if (r) r->freed++;
@@ -640,7 +679,7 @@ SCR_PROF_NI SCR_PROF_WEAK void scr_prof_free(void *p, const char *site) {
  * The plant deliberately uses the SAME macro path as everything else, so it
  * tests the instrument rather than a private back door. */
 #ifdef SCR_PROF_ARM
-SCR_PROF_NI SCR_PROF_WEAK void scr_prof_arm(void) {
+SCR_PROF_FN void scr_prof_arm(void) {
   for (long i = 0; i < (long)(SCR_PROF_ARM); i++) {
     void *p = malloc(1234); /* THE PLANTED SITE */
     if (p == NULL) return;
@@ -654,8 +693,8 @@ SCR_PROF_NI SCR_PROF_WEAK void scr_prof_arm(void) {
  * `weak` collapses the SYMBOL to a single definition. That is precisely the
  * kind of silent multiplier an arming test exists to catch, and it is the
  * reason to trust the numbers this instrument prints now. */
-SCR_PROF_WEAK int scr_prof_armed;
-__attribute__((constructor)) SCR_PROF_NI SCR_PROF_WEAK void scr_prof_arm_ctor(void) {
+SCR_PROF_SHARED int scr_prof_armed = 0;
+__attribute__((constructor)) SCR_PROF_NI static void scr_prof_arm_ctor(void) {
   if (scr_prof_armed) return;
   scr_prof_armed = 1;
   scr_prof_arm();
@@ -684,15 +723,15 @@ __attribute__((constructor)) SCR_PROF_NI SCR_PROF_WEAK void scr_prof_arm_ctor(vo
 #ifndef SCR_PROF_LIVE
 #error "SCR_PROF_LIVE_ARM needs -DSCR_PROF_LIVE"
 #endif
-SCR_PROF_WEAK void *scr_prof_live_arm_keep[64];
-SCR_PROF_WEAK int scr_prof_live_armed;
-SCR_PROF_NI SCR_PROF_WEAK void scr_prof_live_arm(void) {
+SCR_PROF_SHARED void *scr_prof_live_arm_keep[64] = {0};
+SCR_PROF_SHARED int scr_prof_live_armed = 0;
+SCR_PROF_FN void scr_prof_live_arm(void) {
   long n = (long)(SCR_PROF_LIVE_ARM);
   if (n > 64) n = 64;
   for (long i = 0; i < n; i++) scr_prof_live_arm_keep[i] = malloc(4096); /* ALLOC LINE */
   for (long i = 0; i < n / 2; i++) free(scr_prof_live_arm_keep[i]);      /* FREE LINE */
 }
-__attribute__((constructor)) SCR_PROF_NI SCR_PROF_WEAK void scr_prof_live_arm_ctor(void) {
+__attribute__((constructor)) SCR_PROF_NI static void scr_prof_live_arm_ctor(void) {
   if (scr_prof_live_armed) return;
   scr_prof_live_armed = 1;
   scr_prof_live_arm();
@@ -747,8 +786,8 @@ typedef struct {
   long long t0;
   long long child;
 } ScrProfFrame;
-SCR_PROF_WEAK ScrProfFrame scr_prof_stk[SCR_PROF_STACK];
-SCR_PROF_WEAK int scr_prof_sp;
+SCR_PROF_SHARED ScrProfFrame scr_prof_stk[SCR_PROF_STACK] = {{0}};
+SCR_PROF_SHARED int scr_prof_sp = 0;
 #endif
 
 /* These MUST carry no_instrument_function. Without it the hooks instrument
@@ -838,12 +877,12 @@ SCR_PROF_NI SCR_PROF_WEAK void __cyg_profile_func_exit(void *this_fn, void *call
 #endif
 /* NOT no_instrument_function: this one MUST be instrumented, it is the
  * thing being measured. */
-SCR_PROF_WEAK void scr_prof_burn(void) {
+__attribute__((unused)) static void scr_prof_burn(void) {
   long long stop = scr_prof_tsc() + (long long)(SCR_PROF_TIME_BURN);
   while (scr_prof_tsc() < stop) { }
 }
-SCR_PROF_WEAK int scr_prof_time_armed;
-__attribute__((constructor)) SCR_PROF_NI SCR_PROF_WEAK void scr_prof_time_arm_ctor(void) {
+SCR_PROF_SHARED int scr_prof_time_armed = 0;
+__attribute__((constructor)) SCR_PROF_NI static void scr_prof_time_arm_ctor(void) {
   /* run-once guard: a constructor is emitted in EVERY TU (21 of them in a
    * bench build) even though weak collapses the symbol - measured by
    * block/perf as a 21x inflation of a planted count. */
