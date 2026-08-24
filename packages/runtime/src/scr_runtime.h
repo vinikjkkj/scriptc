@@ -1285,10 +1285,15 @@ void scr_regex_dyn_install(void);
 typedef enum { SCR_MAP_KEY_F64, SCR_MAP_KEY_STR, SCR_MAP_KEY_REF } ScrMapKeyKind;
 typedef enum { SCR_MAP_VAL_F64, SCR_MAP_VAL_BOOL, SCR_MAP_VAL_REF } ScrMapValKind;
 
+/* Exactly two 8-byte slots and NO padding. The liveness bit used to sit
+ * here as a `bool`, which alignment rounded to a third slot: 24 bytes to
+ * carry 16 of payload and one bit. It lives in ScrMap::live below, a
+ * parallel byte array indexed the same way, so the dense array a lookup
+ * walks is a third smaller and the cache lines it touches carry a third
+ * more entries. */
 typedef struct {
   uint64_t key; /* double bits (normalized), ScrStr* (owned), or ref ptr (owned) */
   uint64_t val; /* double bits, bool, or owned pointer */
-  bool live;    /* false = tombstone (key/val already released) */
 } ScrMapEntry;
 
 typedef struct ScrMap {
@@ -1313,8 +1318,20 @@ typedef struct ScrMap {
   size_t nlive;    /* live entries (Map.size) */
   size_t ecap;     /* entries capacity */
   ScrMapEntry *entries;
+  /* Liveness, one byte per entry slot, allocated and grown with
+   * `entries` and indexed by the same dense index. 0 = tombstone (key
+   * and value already released). Split out of ScrMapEntry so that
+   * struct is exactly 16 bytes; see the note there. */
+  uint8_t *live;
   size_t nbuckets;  /* power of two; >= 2 * ecap so probes terminate */
-  size_t *buckets;  /* entry indices; SIZE_MAX = empty */
+  /* Entry indices, SCR_MAP_BUCKET_EMPTY = empty. uint32_t, not size_t:
+   * this is the LARGEST allocation a big map owns (nbuckets is at least
+   * twice ecap, so it outnumbers the entries two to one) and half of
+   * every size_t slot was zero. The index it holds is bounded by
+   * nentries, which scr_map_reserve_append caps below UINT32_MAX -- a
+   * map that many entries deep needs tens of gigabytes of keys and
+   * values before the index type is what stops it. */
+  uint32_t *buckets;
   size_t iter_depth; /* > 0: an iteration is active — no compaction */
 } ScrMap;
 

@@ -29,6 +29,16 @@ long scr_map_live_count(void) { return scr_live_maps; }
 #endif
 
 #define SCR_MAP_EMPTY SIZE_MAX
+/* The empty marker INSIDE the bucket array, which is uint32_t (see the
+ * note on ScrMap::buckets). SCR_MAP_EMPTY stays size_t and stays the
+ * "no such entry" answer scr_map_find returns; the two are deliberately
+ * separate names because they are separate widths. */
+#define SCR_MAP_BUCKET_EMPTY UINT32_MAX
+/* A dense entry index has to fit a bucket slot. Reaching this needs ~4
+ * billion entries, i.e. 64 GB of ScrMapEntry alone before a single key
+ * or value is counted, so it is an out-of-memory condition reported as
+ * one rather than a silent truncation. */
+#define SCR_MAP_MAX_ENTRIES ((size_t)UINT32_MAX - 1)
 
 static void scr_map_oom(void) {
   scr_trap("scriptc: out of memory\n");
@@ -95,30 +105,30 @@ static size_t scr_map_find(const ScrMap *m, uint64_t hash, uint64_t key) {
   if (m->nbuckets == 0) return SCR_MAP_EMPTY;
   size_t mask = m->nbuckets - 1;
   for (size_t i = hash & mask;; i = (i + 1) & mask) {
-    size_t b = m->buckets[i];
-    if (b == SCR_MAP_EMPTY) return SCR_MAP_EMPTY;
-    if (m->entries[b].live && scr_map_key_eq(m, m->entries[b].key, key)) return b;
+    uint32_t b = m->buckets[i];
+    if (b == SCR_MAP_BUCKET_EMPTY) return SCR_MAP_EMPTY;
+    if (m->live[b] && scr_map_key_eq(m, m->entries[b].key, key)) return b;
   }
 }
 
 /* Rebuild the bucket table (size must be a power of two >= 2 * nentries):
  * only live entries are inserted, in dense order — dead markers vanish. */
 static void scr_map_rebuild_buckets(ScrMap *m, size_t nbuckets) {
-  size_t *buckets = malloc(nbuckets * sizeof *buckets);
+  uint32_t *buckets = malloc(nbuckets * sizeof *buckets);
   if (!buckets) scr_map_oom();
-  for (size_t i = 0; i < nbuckets; i++) buckets[i] = SCR_MAP_EMPTY;
+  for (size_t i = 0; i < nbuckets; i++) buckets[i] = SCR_MAP_BUCKET_EMPTY;
   free(m->buckets);
   m->buckets = buckets;
   m->nbuckets = nbuckets;
   size_t mask = nbuckets - 1;
   for (size_t e = 0; e < m->nentries; e++) {
-    if (!m->entries[e].live) continue;
+    if (!m->live[e]) continue;
     uint64_t hash = m->key_kind != SCR_MAP_KEY_STR
                         ? scr_map_fnv1a((const unsigned char *)&m->entries[e].key, 8)
                         : scr_map_hash_str((ScrStr *)scr_map_slot_to_ptr(m->entries[e].key));
     size_t i = hash & mask;
-    while (buckets[i] != SCR_MAP_EMPTY) i = (i + 1) & mask;
-    buckets[i] = e;
+    while (buckets[i] != SCR_MAP_BUCKET_EMPTY) i = (i + 1) & mask;
+    buckets[i] = (uint32_t)e;
   }
 }
 
@@ -127,7 +137,10 @@ static void scr_map_rebuild_buckets(ScrMap *m, size_t nbuckets) {
 static void scr_map_compact(ScrMap *m) {
   size_t w = 0;
   for (size_t r = 0; r < m->nentries; r++) {
-    if (m->entries[r].live) m->entries[w++] = m->entries[r];
+    if (!m->live[r]) continue;
+    m->entries[w] = m->entries[r];
+    m->live[w] = 1;
+    w++;
   }
   m->nentries = w;
   if (m->nbuckets > 0) scr_map_rebuild_buckets(m, m->nbuckets);
@@ -141,6 +154,7 @@ static void scr_map_reserve_append(ScrMap *m) {
   if (m->iter_depth == 0 && m->nlive <= m->nentries / 2 && m->nentries > 0) {
     scr_map_compact(m);
   }
+  if (m->nentries >= SCR_MAP_MAX_ENTRIES) scr_map_oom();
   if (m->nentries == m->ecap) {
     size_t cap = m->ecap ? m->ecap : 8;
     while (cap < m->nentries + 1) {
@@ -150,12 +164,19 @@ static void scr_map_reserve_append(ScrMap *m) {
     ScrMapEntry *entries = realloc(m->entries, cap * sizeof *entries);
     if (!entries) scr_map_oom();
     m->entries = entries;
+    /* The liveness bytes carry the same dense index, so they grow in
+     * lockstep. Only slots below nentries are ever read and
+     * scr_map_insert writes the byte for the slot it appends, so the
+     * fresh tail needs no initialization. */
+    uint8_t *live = realloc(m->live, cap * sizeof *live);
+    if (!live) scr_map_oom();
+    m->live = live;
     m->ecap = cap;
   }
   if (m->nbuckets < 2 * (m->nentries + 1)) {
     size_t nbuckets = m->nbuckets ? m->nbuckets : 16;
     while (nbuckets < 2 * (m->nentries + 1)) {
-      if (nbuckets > SIZE_MAX / 2 / sizeof(size_t)) scr_map_oom();
+      if (nbuckets > SIZE_MAX / 2 / sizeof(uint32_t)) scr_map_oom();
       nbuckets *= 2;
     }
     scr_map_rebuild_buckets(m, nbuckets);
@@ -188,7 +209,7 @@ static inline bool scr_map_headered(const ScrMap *m) {
 static void scr_map_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrMap *m = (ScrMap *)o;
   for (size_t e = 0; e < m->nentries; e++) {
-    if (!m->entries[e].live) continue;
+    if (!m->live[e]) continue;
     /* Values only when the VALUE side is cycle-capable: a set's values are
      * bools, and slot_to_ptr over one is not a pointer. */
     if (m->val_trace) visit(scr_map_slot_to_ptr(m->entries[e].val), ctx);
@@ -205,10 +226,11 @@ static void scr_map_gcfree(void *o) {
   ScrMap *m = (ScrMap *)o;
   if (!m->key_trace) {
     for (size_t e = 0; e < m->nentries; e++) {
-      if (m->entries[e].live) scr_map_release_key(m, m->entries[e].key);
+      if (m->live[e]) scr_map_release_key(m, m->entries[e].key);
     }
   }
   free(m->entries);
+  free(m->live);
   free(m->buckets);
 #ifdef SCR_RC_AUDIT
   scr_live_maps--;
@@ -252,11 +274,12 @@ void scr_map_release(ScrMap *m) {
   if (--m->rc == 0) {
     if (scr_map_headered(m)) scr_cyc_on_dead(m);
     for (size_t e = 0; e < m->nentries; e++) {
-      if (!m->entries[e].live) continue;
+      if (!m->live[e]) continue;
       scr_map_release_key(m, m->entries[e].key);
       scr_map_release_val(m, m->entries[e].val);
     }
     free(m->entries);
+    free(m->live);
     free(m->buckets);
 #ifdef SCR_RC_AUDIT
     scr_live_maps--;
@@ -278,8 +301,8 @@ double scr_map_size(const ScrMap *m) { return (double)m->nlive; }
 
 void scr_map_clear(ScrMap *m) {
   for (size_t e = 0; e < m->nentries; e++) {
-    if (!m->entries[e].live) continue;
-    m->entries[e].live = false;
+    if (!m->live[e]) continue;
+    m->live[e] = 0;
     scr_map_release_key(m, m->entries[e].key);
     scr_map_release_val(m, m->entries[e].val);
   }
@@ -290,7 +313,7 @@ void scr_map_clear(ScrMap *m) {
      * after the clear append past them and ARE visited (Node-exact). */
     m->nentries = 0;
   }
-  for (size_t i = 0; i < m->nbuckets; i++) m->buckets[i] = SCR_MAP_EMPTY;
+  for (size_t i = 0; i < m->nbuckets; i++) m->buckets[i] = SCR_MAP_BUCKET_EMPTY;
 }
 
 /* ── has / delete ──────────────────────────────────────────────────────── */
@@ -307,7 +330,7 @@ bool scr_map_has_str(const ScrMap *m, const ScrStr *key) {
 
 static bool scr_map_delete_found(ScrMap *m, size_t e) {
   if (e == SCR_MAP_EMPTY) return false;
-  m->entries[e].live = false; /* bucket slot stays: probe chains intact */
+  m->live[e] = 0; /* bucket slot stays: probe chains intact */
   m->nlive--;
   scr_map_release_key(m, m->entries[e].key);
   scr_map_release_val(m, m->entries[e].val);
@@ -357,7 +380,7 @@ static void scr_map_set(ScrMap *m, uint64_t hash, uint64_t key, uint64_t val) {
   size_t idx = m->nentries++;
   m->entries[idx].key = key;
   m->entries[idx].val = val;
-  m->entries[idx].live = true;
+  m->live[idx] = 1;
   m->nlive++;
   if (m->key_kind == SCR_MAP_KEY_STR) {
     scr_str_retain((ScrStr *)scr_map_slot_to_ptr(key)); /* key is borrowed */
@@ -366,8 +389,8 @@ static void scr_map_set(ScrMap *m, uint64_t hash, uint64_t key, uint64_t val) {
   }
   size_t mask = m->nbuckets - 1;
   size_t i = hash & mask;
-  while (m->buckets[i] != SCR_MAP_EMPTY) i = (i + 1) & mask;
-  m->buckets[i] = idx;
+  while (m->buckets[i] != SCR_MAP_BUCKET_EMPTY) i = (i + 1) & mask;
+  m->buckets[i] = (uint32_t)idx;
 }
 
 static void scr_map_set_f64_key(ScrMap *m, double key, uint64_t val) {
@@ -536,11 +559,11 @@ double scr_map_iter_count(const ScrMap *m) { return (double)m->nentries; }
 
 bool scr_map_iter_live(const ScrMap *m, double i) {
   if (!(i >= 0) || i >= (double)m->nentries) return false;
-  return m->entries[(size_t)i].live;
+  return m->live[(size_t)i];
 }
 
 static const ScrMapEntry *scr_map_iter_at(const ScrMap *m, double i) {
-  if (!(i >= 0) || i >= (double)m->nentries || !m->entries[(size_t)i].live) {
+  if (!(i >= 0) || i >= (double)m->nentries || !m->live[(size_t)i]) {
     scr_trap("scriptc: internal error: map iteration index out of range\n");
   }
   return &m->entries[(size_t)i];
@@ -638,7 +661,7 @@ ScrArr *scr_map_keys_js_order(const ScrMap *m) {
   size_t nidx = 0;
   struct { uint32_t v; ScrStr *k; } *idx = NULL;
   for (size_t i = 0; i < n; i++) {
-    if (!m->entries[i].live) continue;
+    if (!m->live[i]) continue;
     ScrStr *k = (ScrStr *)scr_map_slot_to_ptr(m->entries[i].key);
     uint32_t v;
     if (!scr_map_key_array_index(k, &v)) continue;
@@ -659,7 +682,7 @@ ScrArr *scr_map_keys_js_order(const ScrMap *m) {
   }
   free(idx);
   for (size_t i = 0; i < n; i++) {
-    if (!m->entries[i].live) continue;
+    if (!m->live[i]) continue;
     ScrStr *k = (ScrStr *)scr_map_slot_to_ptr(m->entries[i].key);
     uint32_t v;
     if (scr_map_key_array_index(k, &v)) continue;
@@ -683,7 +706,7 @@ ScrArr *scr_map_slots_js_order(const ScrMap *m) {
   size_t nidx = 0;
   struct { uint32_t v; size_t i; } *idx = NULL;
   for (size_t i = 0; i < n; i++) {
-    if (!m->entries[i].live) continue;
+    if (!m->live[i]) continue;
     ScrStr *k = (ScrStr *)scr_map_slot_to_ptr(m->entries[i].key);
     uint32_t v;
     if (!scr_map_key_array_index(k, &v)) continue;
@@ -704,7 +727,7 @@ ScrArr *scr_map_slots_js_order(const ScrMap *m) {
   }
   free(idx);
   for (size_t i = 0; i < n; i++) {
-    if (!m->entries[i].live) continue;
+    if (!m->live[i]) continue;
     ScrStr *k = (ScrStr *)scr_map_slot_to_ptr(m->entries[i].key);
     uint32_t v;
     if (scr_map_key_array_index(k, &v)) continue;

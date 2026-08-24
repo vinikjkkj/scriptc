@@ -9430,6 +9430,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/6240-map-growth-tombstones-and-iteration.ts": {
+   "order": [
+    "<repo>/tests/corpus/6240-map-growth-tombstones-and-iteration.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/700-classes-basic.ts": {
    "order": [
     "<repo>/tests/corpus/700-classes-basic.ts"
