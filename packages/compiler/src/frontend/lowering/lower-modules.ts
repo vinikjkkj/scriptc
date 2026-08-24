@@ -16,7 +16,7 @@ import { BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrLocal, IrRecordS
 import { ENTRY_NAME, PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, newFnCtx, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, isPromisifyCall, requireFnValueDeclType } from "./lower-builtins.js";
 import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestSlotType, nullishGenericBindingUnitOf } from "./lower-calls.js";
-import { isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalArmedType, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
+import { dynAliasBindingIsDyn, isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalArmedType, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
 import { diffieHellmanFnValueDeclType, objectStaticFnValueDeclType, stdlibGlobalAliasDecl } from "./surfaces.js";
 import { builtinFnValueDeclType } from "./lower-fnvalue.js";
@@ -1893,6 +1893,23 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
                   if (!letOff) type = { kind: "object", className: adopted };
                 }
               }
+            }
+            // ...and the DYN face of the same rule, for the value one
+            // representation over: `const a = ns` where `ns` is the JS
+            // file-scope object literal that already holds the dyn object
+            // (the object-literal branch above exists so the literal keeps
+            // JS's identity — this is where that identity was lost again,
+            // one declaration along). A record slot COPIES at the
+            // assignment, so `a === ns` was false and neither side saw the
+            // other's writes. See dynAliasBindingIsDyn.
+            if (
+              type.kind === "record" && ts.isIdentifier(decl.name) && nameNode === decl.name &&
+              dynAliasBindingIsDyn(L, decl)
+            ) {
+              if (process.env["SCRIPTC_ADOPT_WHY"] !== undefined) {
+                console.error(`[adoptwhy-dynalias] ${locOf(nameNode).file}:${locOf(nameNode).start} ${nameNode.text}: record -> dyn`);
+              }
+              type = DYN;
             }
             // A file-scope PATTERN over an ISLAND-bound source (`export
             // let { toString } = 1;` — the engine reads the wrapper's
