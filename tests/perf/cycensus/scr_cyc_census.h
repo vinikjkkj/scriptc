@@ -64,11 +64,21 @@
 #define SCR_CYCEN_SHARED __attribute__((selectany))
 #define SCR_CYCEN_FN static __attribute__((unused)) __attribute__((no_instrument_function))
 
-/* Kinds, not sites: a compiled program has ~16 distinct ScrCycFreeFn values
- * and 512 rows is two orders of margin. An overflow bumps scr_cycen_lost,
- * which the report prints, so it can never read as a zero. */
+/* Kinds, not sites — and there are FAR more kinds than the runtime has.
+ * estado-ramcpu says scr_cyc_alloc "serves roughly sixteen object kinds":
+ * that is the RUNTIME's count, 17 call sites in packages/runtime/src. The
+ * EMITTED program has its own. zapo's TU calls scr_cyc_alloc 1,434 times
+ * with 1,434 DISTINCT free_fn values, one per cycle-graded shape
+ * (`sc_gcfree__x25_m185_WaMessageClient` and 1,433 siblings), so the real
+ * key space is ~1,452 and a 512-row table would have overflowed on the
+ * first run. That is also why the emitted program's cycle objects have
+ * never been counted as the emitted program's: a line-keyed lane charges
+ * every one of them to scr_cycle.c.
+ *
+ * An overflow bumps scr_cycen_lost, which the report prints and the reader
+ * refuses on, so it can never read as a zero. */
 #ifndef SCR_CYCEN_SLOTS
-#define SCR_CYCEN_SLOTS 512u
+#define SCR_CYCEN_SLOTS 8192u
 #endif
 
 /* A hard ceiling on SIMULTANEOUSLY LIVE cycle objects, not on the number
@@ -84,6 +94,11 @@
  * 500 is 176 samples. It answers "when in the run is the peak reached",
  * which for this workload is the whole question — 85% of peak RSS is
  * reached before the first stanza. */
+/* the per-kind snapshot band; the peak itself is never banded. */
+#ifndef SCR_CYCEN_SNAP_MIN
+#define SCR_CYCEN_SNAP_MIN 4096
+#endif
+
 #ifndef SCR_CYCEN_CURVE_EVERY
 #define SCR_CYCEN_CURVE_EVERY 500u
 #endif
@@ -112,8 +127,9 @@ typedef struct {
 SCR_CYCEN_SHARED ScrCyCenRow scr_cycen_tbl[SCR_CYCEN_SLOTS] = {{0}};
 SCR_CYCEN_SHARED ScrCyCenPtr scr_cycen_ptbl[SCR_CYCEN_PSLOTS] = {{0}};
 /* The occupied rows in insertion order, so a snapshot is O(kinds) and can
- * therefore run on EVERY new peak instead of being sampled inside a band.
- * The per-kind breakdown here is exact, not within 1% of the peak. */
+ * therefore be far cheaper than a walk of all SCR_CYCEN_SLOTS rows. It is
+ * still banded (see the snapshot trigger): 1,452 occupied rows times
+ * 78,000 growth steps is 113 million stores. */
 SCR_CYCEN_SHARED unsigned scr_cycen_order[SCR_CYCEN_SLOTS] = {0};
 SCR_CYCEN_SHARED long long scr_cycen_rows = 0;
 SCR_CYCEN_SHARED long long scr_cycen_lost = 0;
@@ -127,6 +143,7 @@ SCR_CYCEN_SHARED long long scr_cycen_os_peak = 0, scr_cycen_os_peak_n = 0;
 SCR_CYCEN_SHARED long long scr_cycen_live_peak = 0, scr_cycen_pool_peak = 0;
 SCR_CYCEN_SHARED long long scr_cycen_live_at_peak = 0, scr_cycen_pool_at_peak = 0;
 SCR_CYCEN_SHARED long long scr_cycen_snaps = 0, scr_cycen_snap_ord = 0;
+SCR_CYCEN_SHARED long long scr_cycen_snap_os = 0;
 SCR_CYCEN_SHARED long long scr_cycen_alloc_total = 0, scr_cycen_free_total = 0;
 SCR_CYCEN_SHARED long long scr_cycen_ptr_live = 0, scr_cycen_ptr_live_peak = 0;
 SCR_CYCEN_SHARED long long scr_cycen_arm_phys = 0;
@@ -212,12 +229,12 @@ SCR_CYCEN_FN unsigned scr_cycen_row_of(const void *key) {
 SCR_CYCEN_FN void scr_cycen_snapshot(void) {
   scr_cycen_snaps++;
   scr_cycen_snap_ord = scr_cycen_alloc_total;
+  scr_cycen_snap_os = scr_cycen_live_phys + scr_cycen_pool_phys;
   scr_cycen_live_at_peak = scr_cycen_live_phys;
   scr_cycen_pool_at_peak = scr_cycen_pool_phys;
   scr_cycen_park_at_peak = scr_cycen_park_phys;
   scr_cycen_park_n_at_peak = scr_cycen_park_n;
   scr_cycen_park_side_at_peak = scr_cycen_park_side;
-  scr_cycen_os_peak_n = scr_cycen_live_n + scr_cycen_pool_n;
   for (long long i = 0; i < scr_cycen_rows; i++) {
     ScrCyCenRow *r = &scr_cycen_tbl[scr_cycen_order[i]];
     r->snap_n = r->live_n;
@@ -278,10 +295,21 @@ SCR_CYCEN_FN void scr_cycen_note_alloc(const void *obj, size_t phys, size_t size
   }
   if (scr_cycen_live_phys > scr_cycen_live_peak) scr_cycen_live_peak = scr_cycen_live_phys;
   {
+    /* The PEAK itself is exact and unconditional. Only the per-kind
+     * breakdown is sampled, because a snapshot walks every occupied row
+     * and there are ~1,452 of them: taken on all 78,000 growth steps that
+     * is 113 million stores, an instrument slow enough to change the
+     * protocol timings it runs under. It is taken when the peak has grown
+     * past the last snapshot by more than SCR_CYCEN_SNAP_MIN or a
+     * thousandth, whichever is larger, so the breakdown is within that
+     * band of the true peak and the band is printed. */
     long long os = scr_cycen_live_phys + scr_cycen_pool_phys;
     if (os > scr_cycen_os_peak) {
       scr_cycen_os_peak = os;
-      scr_cycen_snapshot();
+      scr_cycen_os_peak_n = scr_cycen_live_n + scr_cycen_pool_n;
+      long long band = scr_cycen_snap_os / 1024;
+      if (band < SCR_CYCEN_SNAP_MIN) band = SCR_CYCEN_SNAP_MIN;
+      if (os > scr_cycen_snap_os + band) scr_cycen_snapshot();
     }
   }
   if (scr_cycen_alloc_total % SCR_CYCEN_CURVE_EVERY == 0 &&
@@ -444,7 +472,7 @@ SCR_CYCEN_FN void scr_cycen_report(void) {
             "CYCEN-TOTAL rows=%lld allocs=%lld frees=%lld liveN=%lld livePhys=%lld "
             "livePayload=%lld poolN=%lld poolPhys=%lld osPeak=%lld osPeakN=%lld "
             "livePeak=%lld poolPeak=%lld liveAtPeak=%lld poolAtPeak=%lld snapOrd=%lld "
-            "snaps=%lld lost=%lld ptrLost=%lld freeUnknown=%lld ptrLive=%lld "
+            "snapOs=%lld snapBand=%lld snaps=%lld lost=%lld ptrLost=%lld freeUnknown=%lld ptrLive=%lld "
             "ptrLivePeak=%lld pslots=%u cycLive=%lld armPhys=%lld parkN=%lld "
             "parkPhys=%lld parkSide=%lld parkPeak=%lld parkAtPeak=%lld "
             "parkNAtPeak=%lld parkSideAtPeak=%lld parkUnknown=%lld tableBytes=%lld\n",
@@ -452,7 +480,8 @@ SCR_CYCEN_FN void scr_cycen_report(void) {
             scr_cycen_live_phys, scr_cycen_live_payload, scr_cycen_pool_n,
             scr_cycen_pool_phys, scr_cycen_os_peak, scr_cycen_os_peak_n,
             scr_cycen_live_peak, scr_cycen_pool_peak, scr_cycen_live_at_peak,
-            scr_cycen_pool_at_peak, scr_cycen_snap_ord, scr_cycen_snaps, scr_cycen_lost,
+            scr_cycen_pool_at_peak, scr_cycen_snap_ord, scr_cycen_snap_os,
+            (long long)SCR_CYCEN_SNAP_MIN, scr_cycen_snaps, scr_cycen_lost,
             scr_cycen_ptr_lost, scr_cycen_free_unknown, scr_cycen_ptr_live,
             scr_cycen_ptr_live_peak, (unsigned)SCR_CYCEN_PSLOTS, scr_cycen_seen_live,
             scr_cycen_arm_phys, scr_cycen_park_n, scr_cycen_park_phys,
