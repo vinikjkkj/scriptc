@@ -1264,6 +1264,10 @@ void scr_dyn_arr_push(ScrDyn *arr, ScrDyn *item) {
     ScrDyn **items =
         cap > SCR_DYN_LEN_MAX ? NULL : realloc(arr->v.arr.items, cap * sizeof *items);
     if (!items) scr_json_oom();
+#ifdef SCR_DYNCEN_ON
+    scr_dyncen_note_grow(0, (long long)arr->v.arr.cap, (long long)cap,
+                         (long long)sizeof *items);
+#endif
     arr->v.arr.items = items;
     arr->v.arr.cap = (uint32_t)cap;
   }
@@ -1423,6 +1427,12 @@ ScrDyn *scr_dyn_arr_at(const ScrDyn *d, double i) {
  * value wins (like JS JSON.parse) — the old value is released and the new
  * key buffer freed (the surviving entry keeps its original, equal key). */
 static void scr_dyn_obj_put(ScrDyn *obj, char *key, size_t key_len, ScrDyn *value) {
+#ifdef SCR_DYNCEN_ON
+  /* tests/perf/dyncensus: EVERY key store, before the duplicate scan, so
+   * an overwrite -- which allocated a key buffer and is about to free it
+   * again -- is counted like any other allocation of that name. */
+  scr_dyncen_key_note(&scr_dyncen_keyrun, key, (long long)key_len);
+#endif
   for (size_t i = 0; i < obj->v.obj.len; i++) {
     ScrDynEntry *e = &obj->v.obj.entries[i];
     if (e->key_len == key_len && memcmp(e->key, key, key_len) == 0) {
@@ -1446,6 +1456,10 @@ static void scr_dyn_obj_put(ScrDyn *obj, char *key, size_t key_len, ScrDyn *valu
     ScrDynEntry *entries =
         cap > SCR_DYN_LEN_MAX ? NULL : realloc(obj->v.obj.entries, cap * sizeof *entries);
     if (!entries) scr_json_oom();
+#ifdef SCR_DYNCEN_ON
+    scr_dyncen_note_grow(1, (long long)obj->v.obj.cap, (long long)cap,
+                         (long long)sizeof *entries);
+#endif
     obj->v.obj.entries = entries;
     obj->v.obj.cap = (uint32_t)cap;
   }
@@ -1557,6 +1571,10 @@ ScrDyn *scr_dyn_new_arr_len(double n) {
     ScrDyn **items =
         len > SCR_DYN_LEN_MAX ? NULL : realloc(d->v.arr.items, len * sizeof *items);
     if (!items) scr_json_oom();
+#ifdef SCR_DYNCEN_ON
+    scr_dyncen_note_grow(0, (long long)d->v.arr.cap, (long long)len,
+                         (long long)sizeof *items);
+#endif
     d->v.arr.items = items;
     d->v.arr.cap = (uint32_t)len;
   }
