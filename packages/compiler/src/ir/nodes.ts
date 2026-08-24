@@ -2655,9 +2655,17 @@ export type IrLibFn =
    * static-module` emits one per proto3 `optional` field). An OBJ target
    * takes `{get,set}` as a real accessor property — reads call the
    * getter and writes the setter with `this` bound to the receiver, and
-   * the key stays off Object.keys because a non-enumerable accessor is
-   * not an own enumerable key. A FUNC target, and any `enumerable: true`
-   * accessor, keep a loud runtime refusal. In the may-throw seed set. */
+   * a NON-enumerable one stays off Object.keys because it is not an own
+   * enumerable key.
+   *
+   * An ENUMERABLE accessor lands too, and did not use to: the descriptor
+   * goes to the OBJ node's `hidden` table as before and the property
+   * ALSO takes a SLOT in the member table, which is what gives it a
+   * creation position and therefore a place in Object.keys' order
+   * (scr_dyn_acc_slot's header comment carries the representation). A
+   * FUNC target keeps a loud runtime refusal — a function's own
+   * properties live in its closure's table, which the accessor walk does
+   * not reach. In the may-throw seed set. */
   | "dyn.defineProp"
   /** The per-instance property table a COMPILED class instance carries
    * as its one extra `%props` field — the receiver row of
@@ -4672,7 +4680,16 @@ export type IrLibFn =
    * A short list is the silent kind of wrong, so the receiver is
    * TESTED: no hidden properties, no cost and no change; any hidden
    * property, and the walk refuses by name instead of answering. Never
-   * throws for any other kind. */
+   * throws for any other kind.
+   *
+   * TWO hidden properties are exempt, and only because BOTH halves of
+   * that argument fail for each. A minted prototype's `constructor` is
+   * put back by dyn.ownNamesCtor and is born at position 0. And an
+   * ENUMERABLE ACCESSOR is not missing from the keys walk at all — it
+   * holds a SLOT in the member table, which is both its membership and
+   * its recorded creation order. A TOMBSTONE (an accessor that once was
+   * enumerable and is not now) still refuses: its position is known but
+   * the keys walk skips it, so the list would be short by it. */
   | "dyn.ownNamesFence"
   /** The own-names walk's OTHER half (scr_json.c): put back the one own
    * property the keys walk cannot see because nothing STORES it. A
@@ -7544,13 +7561,18 @@ export function canConvertToDyn(
     // undefined arm and said nothing). The docstring on accessorSlotProp
     // already states the rule — "accessor-carrying shapes are never
     // JSON-safe or dyn-convertible" — and this is the line that makes it
-    // true again. Not fixable at the converter: Node's own answer needs
-    // an ENUMERABLE accessor, which the dyn object model has no
-    // representation for (scr_dyn_obj_define_accessor installs the
-    // non-enumerable Object.defineProperty family), and materializing
-    // the getter's VALUE instead would trade these silent wrong answers
-    // for a different set — key order, util.inspect's `[Getter]`, and
-    // the getter's call count and timing.
+    // true again.
+    //
+    // The reason recorded here used to be "the dyn object model has no
+    // representation for an ENUMERABLE accessor". That is no longer the
+    // blocker: it has one (scr_dyn_acc_slot). What stands now is
+    // narrower and is in the CONVERTER, not the model — the record-to-dyn
+    // walk would have to install a real accessor whose getter CALLS the
+    // shape's `%get:x` closure slot with the crossing object as `this`,
+    // and nothing in that walk builds a closure. Materializing the
+    // getter's VALUE instead is still the wrong trade, for the reasons
+    // below it: key order, util.inspect's `[Getter]`, and the getter's
+    // call count and timing.
     if (shapeHasAccessorSlots(shape)) return false;
     if (visiting.has(t.shapeId)) return true;
     visiting.add(t.shapeId);
@@ -7930,10 +7952,11 @@ export function canDynCheckTo(
       // ACCESSOR SLOTS, refused for the SYMMETRY this file argues for
       // three times above: canConvertToDyn refuses an accessor-carrying
       // shape IN (its `%get:x`/`%set:x` closure slots have no dyn
-      // representation — the dyn object's accessor table is the
-      // NON-enumerable Object.defineProperty family), so admitting one
-      // OUT would validate a target no value can ever legitimately
-      // satisfy. The func-leaf rule above admits `%get:a` by accident,
+      // representation — not because the dyn object cannot hold an
+      // ENUMERABLE accessor, which it now can via scr_dyn_acc_slot, but
+      // because the converter builds no closure to put behind one), so
+      // admitting one OUT would validate a target no value can ever
+      // legitimately satisfy. The func-leaf rule above admits `%get:a` by accident,
       // exactly as canConvertToDyn's did: the slot's type is `func`. The
       // observable difference is where the failure lands — today every
       // such cast reaches the walker and throws

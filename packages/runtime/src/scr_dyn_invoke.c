@@ -1789,7 +1789,18 @@ static bool dyn_define_accessor_desc(ScrDyn *target, const char *key, size_t key
 static bool dyn_define_data_desc(ScrDyn *target, const char *key, size_t key_len,
                                  ScrDyn *desc, const char *api) {
   ScrDyn *value = scr_dyn_obj_get(desc, "value", 5);
-  if (!value) value = scr_dyn_undefined();
+  if (!value) {
+    /* A descriptor that OMITS `value` over an EXISTING data property
+     * keeps the current one — ES defaults an omitted field to `undefined`
+     * only on CREATION, exactly as it defaults the flags to false only
+     * on creation, and the flags half of that rule is already computed
+     * below. Taking `undefined` here made
+     * `Object.defineProperty(o, "k", { writable: false })` over `o.k = 1`
+     * answer `undefined` where Node answers 1: a value silently
+     * destroyed by a call that named only an attribute. */
+    value = target->kind == SCR_DYN_OBJ ? scr_dyn_obj_own_data(target, key, key_len) : NULL;
+    if (!value) value = scr_dyn_undefined();
+  }
   DynAttrs at = dyn_effective_attrs(target, key, key_len, desc);
   bool enumerable = at.enumerable, writable = at.writable, configurable = at.configurable;
   if (target->kind != SCR_DYN_OBJ) {
@@ -1846,6 +1857,22 @@ static bool dyn_define_data_desc(ScrDyn *target, const char *key, size_t key_len
  * disagree about what a descriptor means. Borrows everything; returns
  * false with a pending catchable throw. */
 static bool dyn_redefine_refused(ScrDyn *target, const char *key, size_t key_len);
+
+/* A GENERIC descriptor over an EXISTING own ACCESSOR: keep the get/set
+ * pair exactly as it is and re-apply only the flags. The pair is
+ * BORROWED out of the entry that is about to be replaced, which is safe
+ * because scr_dyn_obj_define_accessor retains both halves into the new
+ * entry BEFORE the old one is released. */
+static bool dyn_redefine_accessor_flags(ScrDyn *target, const char *key, size_t key_len,
+                                        ScrDyn *desc) {
+  ScrDyn *ent = scr_dyn_obj_get(target->v.obj.hidden, key, key_len);
+  if (ent == NULL || ent->kind != SCR_DYN_ARR || ent->v.arr.len < 4) return false;
+  DynAttrs at = dyn_effective_attrs(target, key, key_len, desc);
+  scr_dyn_obj_define_accessor(target, key, key_len, ent->v.arr.items[1], ent->v.arr.items[2],
+                              at.configurable, at.enumerable);
+  return true;
+}
+
 static bool dyn_define_one(ScrDyn *target, const char *key, size_t key_len,
                            ScrDyn *desc, const char *api) {
   if (desc->kind != SCR_DYN_OBJ) {
@@ -1863,6 +1890,23 @@ static bool dyn_define_one(ScrDyn *target, const char *key, size_t key_len,
   ScrDyn *setter = scr_dyn_obj_get(desc, "set", 3);
   if (getter != NULL || setter != NULL) {
     return dyn_define_accessor_desc(target, key, key_len, desc, getter, setter, api);
+  }
+  /* A GENERIC descriptor — no `get`, no `set` and no `value`, only flags.
+   * ES does not convert the property: it applies the flags the
+   * descriptor names and KEEPS everything else, so a generic descriptor
+   * over an existing ACCESSOR leaves an accessor. Routing it to the data
+   * half instead installed a data property whose value was `undefined`,
+   * which turned `Object.defineProperty(o, k, { enumerable: false })`
+   * over a getter into a silent loss of the getter. Only reachable at
+   * all since an accessor could be enumerable — `{ enumerable: false }`
+   * over a NON-enumerable accessor changes nothing and was never
+   * spelled — which is why it lands in this block's change. */
+  if (scr_dyn_obj_get(desc, "value", 5) == NULL && target->kind == SCR_DYN_OBJ) {
+    bool is_data = false;
+    if (scr_dyn_obj_hidden_attrs(target, key, key_len, &is_data, NULL, NULL, NULL) &&
+        !is_data) {
+      return dyn_redefine_accessor_flags(target, key, key_len, desc);
+    }
   }
   return dyn_define_data_desc(target, key, key_len, desc, api);
 }
