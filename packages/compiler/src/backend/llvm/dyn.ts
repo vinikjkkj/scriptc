@@ -13,9 +13,16 @@
  *   ScrDyn   { size_t rc; ScrDynKind kind; bool buffer; union v; }
  *            kind at +8 (i32), buffer at +12 (i8), v at +16.
  *            v.num double | v.b i8 | v.str/v.bytes ptr at +16;
- *            v.arr { len +16, cap +24, items +32 };
- *            v.obj { len +16, cap +24, entries +32 };
- *            v.fn  { clo +16, thunk +24, sig +32, name +40, arity +48 }.
+ *            v.arr { len +16 (i32), cap +20 (i32), items +24 };
+ *            v.obj { len +16 (i32), cap +20 (i32), entries +24, ext +32 };
+ *            v.fn  { clo +16, thunk +24, sig/name/src at +32/+36/+40 as
+ *                    32-bit offsets from an anchor, arity +44 }.
+ *            len and cap are uint32 and the three FUNC literals are
+ *            offsets because the payload union is 32 bytes wide instead
+ *            of 56 for it. The three literals are NOT read here: they go
+ *            through @scr_dyn_fn_sig_of and its siblings, because a
+ *            hardcoded copy of a layout this file does not own is what
+ *            made the 16-byte cycle header three bugs instead of one.
  *   ScrDynEntry { char *key; size_t key_len; ScrDyn *value; } — 24 bytes.
  *   ScrDynKind: NULL=0 BOOL=1 NUM=2 STR=3 ARR=4 OBJ=5 UNDEF=6 BYTES=7
  *               FUNC=8 HANDLE=9.
@@ -197,15 +204,18 @@ export class LlDyn {
     const p = B.tmp();
     const n = B.tmp();
     B.line(`${p} = getelementptr inbounds i8, ptr ${d}, i64 16 ; ->v.arr.len`);
-    B.line(`${n} = load i64, ptr ${p}`);
+    const w = B.tmp();
+    B.line(`${w} = load i32, ptr ${p}`);
+    B.line(`${n} = zext i32 ${w} to i64`);
     return n;
   }
 
-  /** Loads v.arr.items / v.obj.entries (ptr at +32). */
+  /** Loads v.arr.items / v.obj.entries (ptr at +24 — len and cap are
+   * uint32 now, so the buffer sits one word earlier than it did). */
   private itemsOf(B: BlockBuilder, d: string): string {
     const p = B.tmp();
     const it = B.tmp();
-    B.line(`${p} = getelementptr inbounds i8, ptr ${d}, i64 32 ; ->v.arr.items`);
+    B.line(`${p} = getelementptr inbounds i8, ptr ${d}, i64 24 ; ->v.arr.items`);
     B.line(`${it} = load ptr, ptr ${p}`);
     return it;
   }
@@ -713,12 +723,11 @@ export class LlDyn {
         B.condBr(isFn, l0, fail);
         B.startBlock(l0);
         this.host.declare(`declare i32 @strcmp(ptr, ptr)`);
-        const sigp = B.tmp();
         const sig = B.tmp();
         const cmp = B.tmp();
         const same = B.tmp();
-        B.line(`${sigp} = getelementptr inbounds i8, ptr %d, i64 32 ; ->v.fn.sig`);
-        B.line(`${sig} = load ptr, ptr ${sigp}`);
+        this.host.declare(`declare ptr @scr_dyn_fn_sig_of(ptr)`);
+        B.line(`${sig} = call ptr @scr_dyn_fn_sig_of(ptr %d) ; ->v.fn.sig`);
         B.line(`${cmp} = call i32 @strcmp(ptr ${sig}, ptr ${this.host.cstr(key)})`);
         B.line(`${same} = icmp eq i32 ${cmp}, 0`);
         B.terminate(`ret i1 ${same}`);
@@ -1902,10 +1911,9 @@ export class LlDyn {
         const sigLit = host.cstr(key);
         requireKind(DK.FUNC, "dcf");
         host.declare(`declare i32 @strcmp(ptr, ptr)`);
-        const sigp = B.tmp();
         const sig = B.tmp();
-        B.line(`${sigp} = getelementptr inbounds i8, ptr %d, i64 32 ; ->v.fn.sig`);
-        B.line(`${sig} = load ptr, ptr ${sigp}`);
+        host.declare(`declare ptr @scr_dyn_fn_sig_of(ptr)`);
+        B.line(`${sig} = call ptr @scr_dyn_fn_sig_of(ptr %d) ; ->v.fn.sig`);
         const cmp = B.tmp();
         const same = B.tmp();
         B.line(`${cmp} = call i32 @strcmp(ptr ${sig}, ptr ${sigLit})`);

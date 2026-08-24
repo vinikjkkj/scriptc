@@ -795,7 +795,7 @@ void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth, bool
  * spelling (ir/nodes.ts, slotStorageKey), and the two halves are one
  * rule stated twice on purpose. */
 static size_t insp_slot_count(const ScrDyn *d) {
-  const ScrDyn *s = d->v.obj.slots;
+  const ScrDyn *s = scr_dyn_ext(d)->slots;
   if (s == NULL || s->kind != SCR_DYN_OBJ) return 0;
   size_t n = 0;
   for (size_t i = 0; i < s->v.obj.len; i++) {
@@ -809,7 +809,7 @@ static size_t insp_slot_count(const ScrDyn *d) {
  * frame scr_insp_begin opened. Insertion order, which is the converter's
  * field order and therefore Node's. */
 static void insp_emit_slots(const ScrDyn *d, double recurse, double depth) {
-  const ScrDyn *s = d->v.obj.slots;
+  const ScrDyn *s = scr_dyn_ext(d)->slots;
   if (s == NULL || s->kind != SCR_DYN_OBJ) return;
   for (size_t i = 0; i < s->v.obj.len; i++) {
     const ScrDynEntry *e = &s->v.obj.entries[i];
@@ -913,7 +913,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
        * through, which is why the cname on the MINTED prototype is what
        * has to go and not the field. Measured on v25.9.0, three
        * spellings, before this line was written. */
-      const char *cn = scr_dyn_is_minted_proto(d) ? NULL : d->v.obj.cname;
+      const char *cn = scr_dyn_is_minted_proto(d) ? NULL : scr_dyn_ext(d)->cname;
       /* Node lists own enumerable SYMBOL keys after the string keys, and
        * an INTERNAL SLOT is exactly what this tier keeps where Node keeps
        * a symbol: `Dirent { name: 'a.txt', parentPath: 'kd',
@@ -967,8 +967,8 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
          * compiled class instance, deliberately: one shape, one string.
          * A tombstone is not an own enumerable key and shows nothing. */
         if (ent->value == scr_dyn_acc_slot()) {
-          const ScrDyn *q = d->v.obj.hidden != NULL
-                                ? scr_dyn_obj_get(d->v.obj.hidden, ent->key, ent->key_len)
+          const ScrDyn *q = scr_dyn_ext(d)->hidden != NULL
+                                ? scr_dyn_obj_get(scr_dyn_ext(d)->hidden, ent->key, ent->key_len)
                                 : NULL;
           if (q == NULL || q->kind != SCR_DYN_ARR || q->v.arr.len < 5 ||
               !scr_dyn_truthy(q->v.arr.items[4])) {
@@ -1010,7 +1010,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       /* Node's function rendering: [Function: name] / [Function
        * (anonymous)]. The boxed name is the compiler's best-effort static
        * spelling (SEMANTICS.md — reference-site naming). */
-      const char *name = d->v.fn.name;
+      const char *name = scr_dyn_fn_name(d);
       InspBuf out = {0};
       if (name && name[0]) {
         ib_cstr(&out, "[Function: ");

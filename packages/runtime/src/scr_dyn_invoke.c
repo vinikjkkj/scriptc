@@ -1865,7 +1865,7 @@ static bool dyn_redefine_refused(ScrDyn *target, const char *key, size_t key_len
  * entry BEFORE the old one is released. */
 static bool dyn_redefine_accessor_flags(ScrDyn *target, const char *key, size_t key_len,
                                         ScrDyn *desc) {
-  ScrDyn *ent = scr_dyn_obj_get(target->v.obj.hidden, key, key_len);
+  ScrDyn *ent = scr_dyn_obj_get(scr_dyn_ext(target)->hidden, key, key_len);
   if (ent == NULL || ent->kind != SCR_DYN_ARR || ent->v.arr.len < 4) return false;
   DynAttrs at = dyn_effective_attrs(target, key, key_len, desc);
   scr_dyn_obj_define_accessor(target, key, key_len, ent->v.arr.items[1], ent->v.arr.items[2],

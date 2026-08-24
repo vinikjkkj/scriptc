@@ -601,7 +601,7 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
        * throws even though the own members match, and two instances of
        * two different constructors never compare equal. Identity on the
        * prototype object is exactly that test (one object per closure). */
-      if (a->v.obj.proto != b->v.obj.proto) return false;
+      if (scr_dyn_ext(a)->proto != scr_dyn_ext(b)->proto) return false;
       /* scriptc's INTERNAL SLOTS stand in for exactly the own SYMBOL
        * properties a builtin keeps its state under (fs.Dirent's
        * Symbol(type), StringDecoder's Symbol(kNativeDecoder)), and node's
@@ -613,7 +613,7 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
        * which is the %error branch above, one namespace over, and the
        * same silent PASS on an assertion that must fail. */
       {
-        const ScrDyn *sa = a->v.obj.slots, *sb = b->v.obj.slots;
+        const ScrDyn *sa = scr_dyn_ext(a)->slots, *sb = scr_dyn_ext(b)->slots;
         size_t na = sa != NULL ? sa->v.obj.len : 0;
         size_t nb = sb != NULL ? sb->v.obj.len : 0;
         if (na != nb) return false;
@@ -742,7 +742,7 @@ static void scr_assert_cf_value(ScrAssertBuf *b, const ScrDyn *d, size_t indent,
       return;
     }
     case SCR_DYN_FUNC: {
-      const char *name = d->v.fn.name;
+      const char *name = scr_dyn_fn_name(d);
       if (name && name[0]) {
         ab_cstr(b, "[Function: ");
         ab_cstr(b, name);
@@ -908,8 +908,8 @@ static void scr_assert_cf_value(ScrAssertBuf *b, const ScrDyn *d, size_t indent,
          * for. Node's own diff prints `[Getter]` here too. A tombstone
          * is not an own enumerable key and prints nothing. */
         if (ent->value == scr_dyn_acc_slot()) {
-          const ScrDyn *q = d->v.obj.hidden != NULL
-                                ? scr_dyn_obj_get(d->v.obj.hidden, ent->key, ent->key_len)
+          const ScrDyn *q = scr_dyn_ext(d)->hidden != NULL
+                                ? scr_dyn_obj_get(scr_dyn_ext(d)->hidden, ent->key, ent->key_len)
                                 : NULL;
           if (q == NULL || q->kind != SCR_DYN_ARR || q->v.arr.len < 5 ||
               !scr_dyn_truthy(q->v.arr.items[4])) {

@@ -3709,6 +3709,50 @@ typedef struct {
   ScrDyn *value; /* owned */
 } ScrDynEntry;
 
+/* A STATIC pointer stored as a signed 32-bit offset from scr_cyc_base().
+ *
+ * The cycle header already does this for its two function pointers and
+ * says why: code lives within 2 GB of the image base on every target
+ * scriptc emits for, the anchor is a function in this image's own .text,
+ * and because scr_rva_of and scr_rva_ptr both call scr_cyc_base() THE
+ * BASE CANCELS -- it does not matter what the address resolves to, only
+ * that it is the same value throughout one process.
+ *
+ * The same argument covers a static string literal: .rdata and .text are
+ * sections of ONE image and a literal is no further from the anchor than
+ * a function is. It does NOT cover a malloc'd string, and the one place
+ * that stores these checks the round trip before it stores (see
+ * scr_dyn_new_func_src) rather than trusting the contract.
+ *
+ * SCR_RVA_NULL is INT32_MIN, which is not a reachable offset: it would
+ * name an address 2 GB below the anchor, and the check above refuses
+ * anything at all past +/-2 GB. */
+typedef int32_t ScrRva;
+#define SCR_RVA_NULL INT32_MIN
+
+/* The OBJ arm's four RARE members, behind one pointer.
+ *
+ * The census (tests/perf/dyncensus) walked zapo's 10,104 live OBJ dyn
+ * values at the peak: proto is non-NULL on 2.33% of them, cname on
+ * 6.62%, hidden on 6.07%, slots on 0.00%, and ANY of the four on 8.73%.
+ * Inline they cost 32 bytes in the payload union, which every ScrDyn in
+ * the program pays whatever kind it is, because a union is as wide as
+ * its widest arm and OBJ was it. Behind a pointer they cost 8 bytes
+ * there and 32 more on the 8.73%.
+ *
+ * Read through scr_dyn_ext(), which answers a shared all-NULL instance
+ * for an object that has none, so a reader never tests the pointer.
+ * Write through scr_dyn_ext_w(), which allocates one. */
+typedef struct ScrDynObjExt {
+  ScrDyn *proto;     /* owned; the [[Prototype]] link */
+  const char *cname; /* static literal, never owned */
+  ScrDyn *hidden;    /* owned; the own NON-ENUMERABLE / accessor table */
+  ScrDyn *slots;     /* owned; scriptc's internal-slot table */
+} ScrDynObjExt;
+
+/* The all-NULL instance every read of an absent ext answers from. */
+extern const ScrDynObjExt scr_dyn_obj_ext_none;
+
 struct ScrDyn {
   size_t rc; /* SIZE_MAX = immortal (unused for dyn; kept per convention) */
   ScrDynKind kind;
@@ -3747,7 +3791,12 @@ struct ScrDyn {
                       * representation, two kinds; the ARRBUF payload's
                       * `elem` is always SCR_BYTES_BUF and its `len`
                       * counts BYTES) */
-    struct { size_t len; size_t cap; ScrDyn **items; } arr;      /* owned */
+    /* len and cap are uint32 rather than size_t, which takes this arm
+      * from 24 bytes to 16. The census (tests/perf/dyncensus) measured
+      * zapo's live maxima at 800 elements and 1,024 of capacity; the
+      * ceiling is enforced rather than assumed, at the two growth sites
+      * in scr_json.c, which refuse loudly past SCR_DYN_LEN_MAX. */
+    struct { uint32_t len; uint32_t cap; ScrDyn **items; } arr;   /* owned */
     /* SCR_DYN_OBJ: the own DATA members (owned), plus the three fields
      * that make the object a member of a PROTOTYPE CHAIN and a carrier of
      * ACCESSOR properties.
@@ -3825,8 +3874,14 @@ struct ScrDyn {
      * node never inherits a chain, a stale hidden table or a stale slot
      * table. */
     struct {
-      size_t len; size_t cap; ScrDynEntry *entries;
-      ScrDyn *proto; const char *cname; ScrDyn *hidden; ScrDyn *slots;
+      uint32_t len; uint32_t cap; ScrDynEntry *entries;
+      /* proto/cname/hidden/slots, behind one pointer. NULL until an
+       * object needs any of them, which the census says is 8.73% of the
+       * live OBJ population: proto 2.33%, cname 6.62%, hidden 6.07% and
+       * slots 0.00%. Four inline pointers cost 32 bytes on EVERY ScrDyn
+       * in the program, because the union is as wide as its widest arm;
+       * one pointer costs 8 here and 32 more only on the 8.73%. */
+      ScrDynObjExt *ext;
     } obj; /* owned */
     /* SCR_DYN_FUNC: the boxed closure (owned) + its call descriptor. `sig`,
      * `name` and `src` are static compiler-emitted literals (never freed);
@@ -3853,7 +3908,15 @@ struct ScrDyn {
      *   - NULL: a compiled user function whose text this build did not
      *     carry. There is no honest string for it, so the renderers REFUSE
      *     loudly instead of claiming native code. */
-    struct { ScrClosure *clo; ScrDynThunk thunk; const char *sig; const char *name; const char *src; uint32_t arity; } fn;
+    /* sig/name/src are STATIC compiler-emitted literals, so each is
+      * stored as a signed 32-bit offset from the same anchor the cycle
+      * header uses (scr_cyc_base, whose value cancels). Three pointers
+      * became three words and the arm went from 48 bytes to 32 with
+      * `clo` and `thunk` left exactly where they were -- which is why
+      * neither the C emitter's `d->v.fn.clo` / `d->v.fn.thunk` nor the
+      * LLVM backend's +16 / +24 moves. Read them through
+      * scr_dyn_fn_sig/_name/_src, never directly. */
+    struct { ScrClosure *clo; ScrDynThunk thunk; ScrRva sig; ScrRva name; ScrRva src; uint32_t arity; } fn;
     /* SCR_DYN_HANDLE: the retained native handle + its type tag. The
      * dyn→handle edge is NOT visible to the cycle collector (the dyn→
      * closure stance): handles drop their listener lists at settlement,
@@ -3901,6 +3964,68 @@ static inline ScrDyn *scr_dyn_retain(ScrDyn *d) {
 }
 
 void scr_dyn_release(ScrDyn *d); /* releases the tree recursively; NULL-tolerant */
+
+/* ── reading a narrowed ScrDyn ─────────────────────────────────────────
+ * The three places the payload union stopped being a plain field, behind
+ * inlines so no reader spells the representation out. Every one of them
+ * is a load and an add against a value the compiler hoists; the union
+ * they buy is 32 bytes wide instead of 56, and every ScrDyn in the
+ * program is 24 bytes smaller for it.
+ */
+
+/* The OBJ arm's rare members. An object with none answers from ONE
+ * shared all-NULL instance, so a reader is `scr_dyn_ext(d)->proto` with
+ * no NULL test of its own and reads exactly as it did when the four were
+ * inline fields. Never write through this pointer -- it is const, and it
+ * is shared by every object that has no ext. */
+static inline const ScrDynObjExt *scr_dyn_ext(const ScrDyn *d) {
+  return d->v.obj.ext != NULL ? d->v.obj.ext : &scr_dyn_obj_ext_none;
+}
+/* …and the writer, which allocates one on first use. Aborts on OOM, like
+ * every other allocation in this runtime. */
+ScrDynObjExt *scr_dyn_ext_w(ScrDyn *d);
+/* Releases the ext's owned children and frees the block (the REFCOUNT
+ * teardown), or frees the block leaving them alone (the COLLECTOR's
+ * teardown, which has already accounted for every traced child). Both
+ * leave `ext` NULL, so a recycled node never inherits a previous life's
+ * chain, hidden table or slot table. */
+void scr_dyn_ext_drop(ScrDyn *d, bool release);
+
+/* A static pointer as an offset from the cycle anchor, and back. */
+static inline ScrRva scr_rva_of(const void *p) {
+  return p == NULL ? SCR_RVA_NULL : (ScrRva)((const char *)p - scr_cyc_base());
+}
+static inline const char *scr_rva_str(ScrRva r) {
+  return r == SCR_RVA_NULL ? NULL : (const char *)(scr_cyc_base() + r);
+}
+/* True when `p` round-trips through an ScrRva. The only storer checks
+ * this before it stores, so a pointer that is NOT a static literal in
+ * this image is a loud refusal at the mint rather than a wild read at
+ * the first Function.prototype.toString. */
+static inline bool scr_rva_fits(const void *p) {
+  return p == NULL || (const char *)p == scr_cyc_base() + scr_rva_of(p);
+}
+
+/* The SCR_DYN_FUNC box's three static literals. */
+static inline const char *scr_dyn_fn_sig(const ScrDyn *d) { return scr_rva_str(d->v.fn.sig); }
+static inline const char *scr_dyn_fn_name(const ScrDyn *d) { return scr_rva_str(d->v.fn.name); }
+static inline const char *scr_dyn_fn_src(const ScrDyn *d) { return scr_rva_str(d->v.fn.src); }
+/* The same three as callable symbols: the LLVM backend emits calls, not
+ * C, so it cannot reach a static inline -- and it used to read `sig` as
+ * a plain pointer load at +32, which is the kind of hardcoded layout
+ * copy that made the 16-byte cycle header three bugs instead of one. */
+const char *scr_dyn_fn_sig_of(const ScrDyn *d);
+const char *scr_dyn_fn_name_of(const ScrDyn *d);
+const char *scr_dyn_fn_src_of(const ScrDyn *d);
+
+/* The ceiling `uint32_t len` / `uint32_t cap` put on a dyn array's
+ * elements and a dyn object's members. It is enforced at the growth
+ * sites, not assumed: zapo's measured live maxima are 800 elements and
+ * 264 members, and a program that really reaches four billion members
+ * has 96 GB of entry table, so the honest answer there is a refusal and
+ * not a silent wrap. */
+#define SCR_DYN_LEN_MAX 0x7fffffffu
+
 
 /* ScrDyn's trace entry point, for containers and emitted shapes that hold
  * a dyn-typed field/element/value (the `_v` shape every collector-visible
