@@ -74,6 +74,8 @@ function mk(): Narrow {
 
 Only *optional* members complete this way — a required one has no `undefined` to complete to, and the cast is refused at compile time instead.
 
+**In a JavaScript source this does not apply to a binding that simply NAMES an object.** `const ns = { v: 1 }` at a JS file's scope holds a dynamic object — JS object identity is the literal's contract — and `const a = ns` keeps it rather than materialising a record from it, so `a === ns` is true and a write through either is seen by both, exactly as in Node. The width copy above is TypeScript's stance, where the narrower shape is an annotation the author wrote.
+
 **`Object.keys`/`values`/`entries` and `JSON.stringify` report a record's declaration order**, not per-object insertion order. Identical to Node whenever objects are built in declaration order (the overwhelmingly common case).
 
 **Strings are stored as UTF-8.** Invisible through `.length` and the string methods (which compute UTF-16 semantics) — except relational comparison (`<`, `>`), which uses code-point order, and surrogate-splitting operations, which produce U+FFFD.
