@@ -1,8 +1,8 @@
-fetch-typed-option-member.ts:57:5 - error SC2020: 'RequestInit.dispatcher' is part of the standard library types but has no scriptc lowering yet
+fetch-typed-option-member.ts:78:3 - error SC2020: 'RequestInit.dispatcher' is part of the standard library types but has no scriptc lowering yet
 
-  56 |   if (dispatcher) {
-  57 |     (init as { dispatcher?: unknown }).dispatcher = dispatcher;
-     |     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  58 |   }
+  77 |   const init: RequestInit = { method: "GET" };
+  78 |   (init as { dispatcher?: unknown }).dispatcher = opaqueProxy;
+     |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  79 |   return (await fetch(url, init)).status;
 
-  hint: undici's dispatcher is an engine object driving a callback protocol (dispatch(opts, handler)), and Node really does call it — there is no static representation for one; this build's fetch dials the origin directly and has no proxy path, environment-configured or otherwise
+  hint: undici's dispatcher must be a record with a dispatch(...args: unknown[]) or dispatch(opts: unknown, handler: unknown) method for this build to call it; a value whose shape does not prove that carries no proof it has a dispatch at all, and this build's fetch has no proxy path of any other kind

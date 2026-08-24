@@ -401,6 +401,20 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // arm sets vary per program: `null` is "any type", and the backends
   // read the arms off the union definition (headers.get's rule).
   "fetch.goValue": { argTypes: [null, null], result: { kind: "promise", inner: RESPONSE_T } },
+  // The one WRITE in the fetch surface. Arg 1 is the program's own
+  // `dispatch` closure -- a `func` whose exact IrType is per program, so
+  // `null` ("any type") and the shape is proved by dispatcherCallPlan at
+  // the lowering instead. Args 2 and 3 are that proof, as constants.
+  // It ANSWERS the init (+1) rather than nothing, so the same row serves
+  // both spellings: the literal chains it onto the value it just built,
+  // and the statement `init.dispatcher = d` discards the answer. An
+  // OPTIONAL dispatcher needs no row of its own -- the lowering wraps this
+  // one in a ternary over the union's TAG, which is why there is no
+  // truthiness test anywhere on this path.
+  "fetch.initDispatch": {
+    argTypes: [REQUESTINIT_T, null, F64, F64],
+    result: REQUESTINIT_T,
+  },
   "fetch.headersNorm": { argTypes: [arrayOf(STRING)], result: arrayOf(STRING) },
   "fetch.headersFromDyn": { argTypes: [DYN], result: arrayOf(STRING) },
   "resp.ok": { argTypes: [RESPONSE_T], result: BOOL },

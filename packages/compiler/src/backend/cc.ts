@@ -48,6 +48,9 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   // scr_abort_signal_* AND scr_http_client_signal (which lives in
   // scr_abort_http.c), plus scr_fetch_abort_seam.
   "scr_fetch_abort.c": ["scr_abort.c", "scr_abort_http.c", "scr_fetch_static.c"],
+  // The delegation is dyn objects and dyn closures over the fetch
+  // transfer, and nothing else -- no socket, no parser, no stream.
+  "scr_fetch_dispatch.c": ["scr_fetch_static.c"],
   "scr_cipher_key.c": ["scr_asym.c", "scr_cipher_value.c"],
   "scr_cipher_value.c": ["scr_cipher.c"],
   "scr_dc.c": ["scr_async_dyn.c"],
@@ -414,6 +417,13 @@ export interface CcOptions {
    * which matters more here than for any other unit in this table,
    * because linking it pulls in mbedTLS. */
   fetchStatic?: boolean;
+  /** The program WRITES a dispatcher onto a RequestInit
+   * (moduleUsesFetchDispatch on the IR): compiles scr_fetch_dispatch.c.
+   * Apart from `fetchStatic` exactly as `wsDispatch` is apart from
+   * `wsGlobal` -- the delegation drags the whole checked-dynamic object
+   * surface (a dyn object per request, ten dyn closures per hop), and a
+   * fetch program with no proxy must not pay for any of it. */
+  fetchDispatch?: boolean;
 }
 
 /** Structured compiler-driver failure. Most callers still let this surface
@@ -1452,6 +1462,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // scr_http_client_signal, which lives behind the abortHttp gate.
   const fetchStatic = (opts.fetchStatic ?? false) && !dynamic;
   const fetchAbort = fetchStatic && (opts.abortSignal ?? false);
+  const fetchDispatch = (opts.fetchDispatch ?? false) && fetchStatic;
   const abortHttp = (opts.abortHttp ?? false) || fetchAbort;
   const tls = (opts.tls ?? false) || http2 || nativeFetch || netIsland || wsGlobal || fetchStatic;
   /* The body view implies BOTH halves it bridges, for the abortHttp
@@ -1635,6 +1646,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // exactly then.
     ...(fetchStatic ? [rt(join(rtDir, "scr_fetch_static.c"))] : []),
     ...(fetchAbort ? [rt(join(rtDir, "scr_fetch_abort.c"))] : []),
+    ...(fetchDispatch ? [rt(join(rtDir, "scr_fetch_dispatch.c"))] : []),
     ...(stream ? [rt(join(rtDir, "scr_stream.c"))] : []),
     // The readiness-poller backends (scr_platform.h): kqueue on macOS/BSD,
     // epoll on Linux, WSAPoll on Windows — each TU is empty off its

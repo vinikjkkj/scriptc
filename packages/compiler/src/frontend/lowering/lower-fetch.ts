@@ -84,6 +84,7 @@ import {
   F64,
   HEADERS_T,
   IrExpr,
+  IrStmt,
   IrType,
   NULL_T,
   REQUESTINIT_T,
@@ -91,6 +92,7 @@ import {
   SrcLoc,
   STRING,
 } from "../../ir/nodes.js";
+import { dispatcherCallPlan } from "../../ir/nodes.js";
 import { fenceOrDropOptionKey } from "./surfaces.js";
 
 const RESPONSE_HINT =
@@ -130,12 +132,100 @@ const INIT_POINTED_HINTS: Record<string, string | undefined> = {
   // header already states one line further down about CONNECT. Pointing
   // at an environment variable that changes nothing is worse than saying
   // there is no proxy support, so it says that.
+  // A dispatcher this compiler can PROVE callable is now honoured
+  // (dispatcherPlanFor / scr_fetch_dispatch.c). This hint is what is left
+  // when the proof fails, and it says what the proof wanted: a record
+  // with a `dispatch` method whose parameters are `unknown`. A
+  // `dispatcher: unknown` or `: object` carries no proof it even HAS a
+  // `dispatch`, and delegating through a guess is the one thing worse
+  // than refusing — a closure called through the wrong C signature is
+  // undefined behaviour, not a diagnosable failure.
   dispatcher:
-    "undici's dispatcher is an engine object driving a callback protocol " +
-    "(dispatch(opts, handler)), and Node really does call it — there is no static " +
-    "representation for one; this build's fetch dials the origin directly and has " +
-    "no proxy path, environment-configured or otherwise",
+    "undici's dispatcher must be a record with a dispatch(...args: unknown[]) or " +
+    "dispatch(opts: unknown, handler: unknown) method for this build to call it; a " +
+    "value whose shape does not prove that carries no proof it has a dispatch at all, " +
+    "and this build's fetch has no proxy path of any other kind",
 };
+
+/** The dispatcher a program is writing onto a RequestInit, or null when
+ * nothing about the value proves it is one.
+ *
+ * TWO shapes are accepted and they are told apart by TAG, never by
+ * truthiness. That distinction is the whole point of this function and it
+ * is MEASURED, not assumed: on Node v25.9.0 `fetch(url, { dispatcher:
+ * undefined })` dials DIRECT, while `null`, `0`, `false`, `''` and `NaN`
+ * every one of them REJECT (an AssertionError out of undici's own
+ * `assert(dispatcher)`). A truthiness test would dial direct on all five —
+ * a proxy silently bypassed, which is exactly the failure a fence on this
+ * key exists to prevent, and exactly the failure a block found on the
+ * WebSocket side of the same option.
+ *
+ *   a plain record        → delegate unconditionally.
+ *   `record | undefined`  → delegate when the tag says present, dial
+ *                           direct on the undefined arm.
+ *
+ * Everything else keeps its refusal, INCLUDING a union carrying a `null`
+ * arm: Node's answer there is an assertion failure, and minting it would
+ * mean reproducing an internal Node assert's text. Refusing is loud and
+ * cannot be mistaken for either behaviour. */
+interface DispatcherUse {
+  /** The dispatcher RECORD value. */
+  value: IrExpr;
+  /** The record shape carrying `dispatch`. */
+  recShapeId: string;
+  /** `dispatch`'s own IrType, so the recordGet reads the right slot. */
+  fnType: IrType;
+  callKind: 0 | 1;
+  retKind: 0 | 1 | 2;
+}
+
+function dispatcherPlanFor(
+  L: Lowerer,
+  t: IrType | null,
+): Omit<DispatcherUse, "value"> | null {
+  if (t === null || t.kind !== "record") return null;
+  const getRecord = (id: string) => L.shapes.get(id);
+  const call = dispatcherCallPlan(t, getRecord);
+  if (call === null) return null;
+  const fnType = getRecord(t.shapeId)?.fields.find((f) => f.name === "dispatch")?.type;
+  if (fnType === undefined) return null;
+  return { ...call, recShapeId: t.shapeId, fnType };
+}
+
+/** `init` with the dispatcher written onto it. Answers a fresh init
+ * expression, so the literal path chains it onto the value it just built
+ * and the statement path discards the answer.
+ *
+ * THERE IS NO TRUTHINESS TEST ANYWHERE ON THIS PATH, and that is the
+ * point. Measured on Node v25.9.0: an `undefined` dispatcher dials DIRECT
+ * while every other falsy one — `null`, `0`, `false`, `''`, `NaN` — REJECTS,
+ * out of undici's own `assert(dispatcher)`. A truthiness test would dial
+ * direct on all five: a proxy silently bypassed, which is the exact
+ * failure a block found on the WebSocket side of this same option. None of
+ * the six can reach here, because dispatcherPlanFor accepts only a
+ * non-nullable RECORD whose `dispatch` shape is proved. Everything else,
+ * `D | undefined` included, keeps its refusal and is told to narrow —
+ * loud, and it cannot be mistaken for either of Node's two answers. */
+function dispatchWrap(
+  L: Lowerer,
+  d: DispatcherUse,
+  make: () => IrExpr,
+  loc: SrcLoc,
+): IrExpr {
+  const set = (recv: IrExpr): IrExpr => ({
+    kind: "libCall",
+    fn: "fetch.initDispatch",
+    args: [
+      make(),
+      { kind: "recordGet", obj: recv, shapeId: d.recShapeId, field: "dispatch", type: d.fnType, loc },
+      { kind: "numLit", value: d.callKind, type: F64, loc },
+      { kind: "numLit", value: d.retKind, type: F64, loc },
+    ],
+    type: REQUESTINIT_T,
+    loc,
+  });
+  return set(d.value);
+}
 
 /** The URL argument. `string` passes through; a `URL` value serializes
  * through url.href, which is exactly what fetch does with one. */
@@ -160,6 +250,13 @@ interface Init {
   headerDyn: IrExpr | null;
   body: IrExpr | null;
   signal: IrExpr | null;
+  /** undici's `dispatcher`: the program's own dispatcher RECORD (or the
+   * union carrying it), plus the C signature the compiler PROVED for its
+   * `dispatch` member and the `undefined` arm's tag when the slot is
+   * optional. Unlike every other key this one is not folded into the
+   * request head — the init HOLDS it and the transfer delegates instead of
+   * dialling. */
+  dispatcher: DispatcherUse | null;
 }
 
 /** The `headers` value. Two shapes reach the wire:
@@ -220,7 +317,7 @@ function headersValue(L: Lowerer, node: ts.Expression, into: Init, loc: SrcLoc):
 
 /** The init OBJECT LITERAL, walked key by key. */
 function initLiteral(L: Lowerer, node: ts.Expression, loc: SrcLoc): Init {
-  const into: Init = { method: null, bodyText: false, headerPairs: null, headerDyn: null, body: null, signal: null };
+  const into: Init = { method: null, bodyText: false, headerPairs: null, headerDyn: null, body: null, signal: null, dispatcher: null };
   if (!ts.isObjectLiteralExpression(node)) {
     L.noLowering("fetch with a computed init argument", node,
       "an object literal is the lowered form: the request has one fixed shape and " +
@@ -286,6 +383,14 @@ function applyKey(
       into.signal = v;
       return;
     }
+    case "dispatcher": {
+      const plan = dispatcherPlanFor(L, L.mapTypeOf(L.typeOf(value)));
+      if (plan !== null) {
+        into.dispatcher = { ...plan, value: L.lowerExpr(value) };
+        return;
+      }
+      break; // the refusal below, naming what the proof wanted
+    }
     default:
       fenceOrDropOptionKey(L, prop, key, "fetch init", FETCH_INIT_DOCUMENTED_OPTIONS, INIT_HINT, INIT_POINTED_HINTS);
   }
@@ -315,21 +420,24 @@ function initHead(init: Init, loc: SrcLoc): { method: IrExpr; headers: IrExpr } 
  * four-way presence split that keeps an omitted body from becoming an
  * empty one. Shared by the literal-in-a-slot path and the union-input
  * call, so both build the identical handle. */
-function initValueExpr(init: Init, loc: SrcLoc): IrExpr {
-  const { method, headers } = initHead(init, loc);
-  const hasBody = init.body !== null;
-  const hasSignal = init.signal !== null;
-  const fn = hasBody
-    ? hasSignal
-      ? "fetch.initNewBodySignal"
-      : "fetch.initNewBody"
-    : hasSignal
-      ? "fetch.initNewSignal"
-      : "fetch.initNew";
-  const args: IrExpr[] = [method, headers];
-  if (hasBody) args.push(init.body!, { kind: "boolLit", value: init.bodyText, type: BOOL, loc });
-  if (hasSignal) args.push(init.signal!);
-  return { kind: "libCall", fn, args, type: REQUESTINIT_T, loc };
+function initValueExpr(L: Lowerer, init: Init, loc: SrcLoc): IrExpr {
+  const bare = (): IrExpr => {
+    const { method, headers } = initHead(init, loc);
+    const hasBody = init.body !== null;
+    const hasSignal = init.signal !== null;
+    const fn = hasBody
+      ? hasSignal
+        ? "fetch.initNewBodySignal"
+        : "fetch.initNewBody"
+      : hasSignal
+        ? "fetch.initNewSignal"
+        : "fetch.initNew";
+    const args: IrExpr[] = [method, headers];
+    if (hasBody) args.push(init.body!, { kind: "boolLit", value: init.bodyText, type: BOOL, loc });
+    if (hasSignal) args.push(init.signal!);
+    return { kind: "libCall", fn, args, type: REQUESTINIT_T, loc };
+  };
+  return init.dispatcher === null ? bare() : dispatchWrap(L, init.dispatcher, bare, loc);
 }
 
 /** Is `t` exactly `RequestInit | undefined` — the slot an optional init
@@ -385,21 +493,7 @@ export function lowerRequestInitLiteral(
       (L.unions.get(mapped.unionId)?.arms ?? []).some((a) => a.kind === "requestInit"));
   if (!isInit) return null;
   const loc = locOf(expr);
-  const init = initLiteral(L, expr, loc);
-  const { method, headers } = initHead(init, loc);
-  const hasBody = init.body !== null;
-  const hasSignal = init.signal !== null;
-  const fn = hasBody
-    ? hasSignal
-      ? "fetch.initNewBodySignal"
-      : "fetch.initNewBody"
-    : hasSignal
-      ? "fetch.initNewSignal"
-      : "fetch.initNew";
-  const args: IrExpr[] = [method, headers];
-  if (hasBody) args.push(init.body!, { kind: "boolLit", value: init.bodyText, type: BOOL, loc });
-  if (hasSignal) args.push(init.signal!);
-  return { kind: "libCall", fn, args, type: REQUESTINIT_T, loc };
+  return initValueExpr(L, initLiteral(L, expr, loc), loc);
 }
 
 /** Every member of a `RequestInit` value is a refusal, and this is the
@@ -444,8 +538,9 @@ export function requestInitMemberFence(L: Lowerer, node: ts.Node, name: string):
  * path. */
 export function requestInitWriteFence(
   L: Lowerer,
+  assign: ts.BinaryExpression,
   target: ts.PropertyAccessExpression,
-): null {
+): IrStmt | null {
   let recv: ts.Expression = target.expression;
   for (;;) {
     if (ts.isParenthesizedExpression(recv)) { recv = recv.expression; continue; }
@@ -453,6 +548,25 @@ export function requestInitWriteFence(
     break;
   }
   if (L.mapTypeOf(L.typeOf(recv))?.kind !== "requestInit") return null;
+  // `dispatcher` is the one member that is WRITTEN rather than read, and
+  // it is now honoured when the value's shape PROVES a callable dispatch.
+  // Everything else about a RequestInit still refuses, including a
+  // dispatcher whose shape proves nothing: a closure called through the
+  // wrong C signature is undefined behaviour rather than a diagnosable
+  // failure, so declining is the loud direction.
+  if (target.name.text === "dispatcher") {
+    const plan = dispatcherPlanFor(L, L.mapTypeOf(L.typeOf(assign.right)));
+    if (plan !== null) {
+      const loc = locOf(assign);
+      const use: DispatcherUse = { ...plan, value: L.lowerExpr(assign.right) };
+      const initExpr = L.lowerExpr(recv);
+      return {
+        kind: "exprStmt",
+        expr: dispatchWrap(L, use, () => initExpr, loc),
+        loc,
+      };
+    }
+  }
   requestInitMemberFence(L, target, target.name.text);
 }
 
@@ -516,7 +630,7 @@ export function lowerStaticFetchCall(L: Lowerer, call: ts.CallExpression): IrExp
     return {
       kind: "libCall",
       fn: "fetch.goUnionInit",
-      args: [unionInput, initValueExpr(lit, loc)],
+      args: [unionInput, initValueExpr(L, lit, loc)],
       type: promiseT,
       loc,
     };
@@ -555,8 +669,21 @@ export function lowerStaticFetchCall(L: Lowerer, call: ts.CallExpression): IrExp
   const init =
     call.arguments.length === 2
       ? initLiteral(L, call.arguments[1]!, loc)
-      : { method: null, bodyText: false, headerPairs: null, headerDyn: null, body: null, signal: null };
+      : { method: null, bodyText: false, headerPairs: null, headerDyn: null, body: null, signal: null, dispatcher: null };
 
+  // A dispatcher was written at the call site. The four go* entries take a
+  // folded head and no dispatcher, so this builds the init as a VALUE
+  // through the SAME key walk and hands it to goInit — one transfer path,
+  // and the two spellings cannot describe different requests.
+  if (init.dispatcher !== null) {
+    return {
+      kind: "libCall",
+      fn: "fetch.goInit",
+      args: [url, initValueExpr(L, init, loc)],
+      type: { kind: "promise", inner: RESPONSE_T },
+      loc,
+    };
+  }
   const { method, headers } = initHead(init, loc);
   // Four entry points rather than sentinel arguments, the abort.abort /
   // abort.abortReason precedent: an omitted body is not an empty one (a

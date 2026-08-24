@@ -120,41 +120,6 @@ const PLANTS: readonly {
   src: string;
 }[] = [
   {
-    name: "the-undici-dispatcher-written-onto-a-fetch-init",
-    ext: "ts",
-    zapoSite:
-      "src/transport/wa-version-fetcher.ts:133 -- " +
-      "(init as { dispatcher?: unknown }).dispatcher = dispatcher",
-    accept: [{ code: "SC2020", fragment: "'RequestInit.dispatcher'" }],
-    // THE ROW THAT REPLACED THE RECORD, one statement instead of a whole
-    // declaration -- and it is a different KIND of refusal, which is why
-    // it is planted rather than described. The record's blocker was a
-    // missing type; this is a missing CAPABILITY, measured against the
-    // oracle rather than assumed: Node v25.9.0's `fetch(url, {
-    // dispatcher })` really does call a plain object's
-    // `dispatch(opts, handler)` and wait for the handler's callbacks. So
-    // there is nothing here to drop quietly, and dropping it would be a
-    // proxy silently ignored.
-    //
-    // It used to answer SC1090 "assignment to non-variables", which named
-    // neither the value nor the reason, and which is why the row was
-    // filed under the assignment-target family for three blocks running.
-    // The fragment below is the whole correction: the refusal names the
-    // member.
-    src: [
-      "declare const dispatcher: { dispatch: (a: unknown, b: unknown) => unknown } | undefined",
-      "export async function go(url: string): Promise<number> {",
-      "  const init: RequestInit = { method: 'GET' }",
-      "  if (dispatcher) {",
-      "    ;(init as { dispatcher?: unknown }).dispatcher = dispatcher",
-      "  }",
-      "  return (await fetch(url, init)).status",
-      "}",
-      "void go('http://127.0.0.1:1/x').catch(() => console.log('caught'))",
-      "",
-    ].join("\n"),
-  },
-  {
     name: "require-with-a-computed-specifier",
     ext: "cjs",
     zapoSite: "spec/proto/index.js:1 -- protobufjs inquire()'s require(moduleName)",
@@ -208,6 +173,46 @@ const CLOSED: readonly {
   provedBy: string;
   src: string;
 }[] = [
+  {
+    name: "the-undici-dispatcher-written-onto-a-fetch-init",
+    ext: "ts",
+    zapoSite:
+      "src/transport/wa-version-fetcher.ts:133 -- " +
+      "(init as { dispatcher?: unknown }).dispatcher = dispatcher",
+    provedBy:
+      "tests/harness/fetch-dispatcher.test.ts (20 cells against Node on both backends -- the " +
+      "opts record key for key, the ten-member handler, a redirect re-dispatched, a proxy's " +
+      "gzip decoded, both `dispatch` signatures, the throw/onError/silent/abandoned failures " +
+      "and the abort -- plus the oracle rows that pin why the remaining shapes still refuse, " +
+      "and an RC audit with an abandoned-fiber control)",
+    // THE LAST FETCH REFUSAL ZAPO CARRIED. It was a missing CAPABILITY
+    // rather than a missing type, which is why it outlived the record it
+    // was hiding behind: undici's dispatcher drives a callback protocol,
+    // and Node v25.9.0 really does call a plain object's
+    // `dispatch(opts, handler)` -- measured, so dropping the key would
+    // have been a proxy silently bypassed.
+    //
+    // The narrowing is the point of the shape below. `dispatcher` is
+    // `D | undefined` and the `if` narrows it to a non-nullable record,
+    // which is the ONLY spelling this build delegates through: measured
+    // on the oracle, an `undefined` dispatcher dials direct while `null`,
+    // `0`, `false`, `''` and `NaN` all reject, so a truthiness test would
+    // silently bypass a proxy on five values. Nothing here tests
+    // truthiness; the shape is proved by type and every other spelling
+    // keeps its refusal.
+    src: [
+      "declare const dispatcher: { dispatch: (a: unknown, b: unknown) => unknown } | undefined",
+      "export async function go(url: string): Promise<number> {",
+      "  const init: RequestInit = { method: 'GET' }",
+      "  if (dispatcher) {",
+      "    ;(init as { dispatcher?: unknown }).dispatcher = dispatcher",
+      "  }",
+      "  return (await fetch(url, init)).status",
+      "}",
+      "void go('http://127.0.0.1:1/x').catch(() => console.log('caught'))",
+      "",
+    ].join("\n"),
+  },
   {
     name: "an-options-record-carrying-typeof-fetch",
     ext: "ts",
