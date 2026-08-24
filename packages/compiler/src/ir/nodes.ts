@@ -5499,6 +5499,17 @@ export type IrLibFn =
   | "fetch.goUnion"
   | "fetch.goUnionInit"
   | "fetch.goValue"
+  /** `init.dispatcher = d` — undici's proxy engine written onto a
+   * RequestInit VALUE. The only WRITE in the whole fetch surface, and the
+   * arguments are the init, the program's own `dispatch` closure (or the
+   * UNION carrying it, when the slot is optional) and the two integers
+   * that are its proved C signature. `Opt` is the `Dispatcher | undefined`
+   * spelling: the undefined arm CLEARS the dispatcher and dials direct,
+   * which is where Node puts an `undefined` dispatcher — and the arm is
+   * chosen by TAG, never by truthiness, because `null`/`0`/`false`/`''`/`NaN`
+   * are all errors in the oracle and a truthiness test would dial DIRECT
+   * on every one of them. */
+  | "fetch.initDispatch"
   /** Response reads. `status` is a double because every numeric IR value
    * is; `headers` answers the Headers VIEW with the response's own
    * identity, so two reads compare equal the way Node's getter does. */
@@ -8205,6 +8216,32 @@ export function moduleUsesFetchStatic(mod: IrModule): boolean {
   return found;
 }
 
+/** True when the module WRITES a dispatcher onto a RequestInit — the link
+ * switch for scr_fetch_dispatch.c.
+ *
+ * Apart from `moduleUsesFetchStatic`, exactly as `moduleUsesWsDispatch` is
+ * apart from `wsGlobal`: the delegation drags the whole checked-dynamic
+ * object surface (a dyn object per request, ten dyn closures per hop), and
+ * a fetch program with no proxy must not pay for any of it. */
+export function moduleUsesFetchDispatch(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const rec = v as { kind?: unknown; fn?: unknown };
+    if (rec.kind === "libCall" && rec.fn === "fetch.initDispatch") {
+      found = true;
+      return;
+    }
+    for (const x of Object.values(v as Record<string, unknown>)) visit(x);
+  };
+  visit(mod);
+  return found;
+}
+
 /** True when the module contains any regex construct — a regexLit /
  * regexIntrinsic node or a regex-typed slot anywhere. This is the link
  * switch that pulls scr_regex.c + the vendored libregexp into the binary
@@ -9740,6 +9777,38 @@ function wsDispatcherPlan(
   absentTag: number,
   getRecord: (shapeId: string) => IrRecordShape | undefined,
 ): WsInitDispatcher | null {
+  const call = dispatcherCallPlan(value, getRecord);
+  if (call === null || value.kind !== "record") return null;
+  return {
+    name,
+    absentTag,
+    recShapeId: value.shapeId,
+    method: "dispatch",
+    callKind: call.callKind,
+    retKind: call.retKind,
+  };
+}
+
+/** The C SIGNATURE of a program's `dispatch`, proved rather than guessed.
+ *
+ * Shared by the WebSocket init bag (wsDispatcherPlan) and by fetch's
+ * `RequestInit.dispatcher` (lower-fetch.ts), because it is the same undici
+ * dispatcher record in both places — zapo's is literally the one
+ * `WaProxyDispatcher` interface, reached from `WaSocketConfig.dispatcher`
+ * on one path and from `toProxyDispatcher(options.proxy)` on the other.
+ * Two copies of this proof would be two chances for one of them to accept
+ * a shape the runtime calls through the wrong C signature, which is
+ * undefined behaviour rather than a diagnosable failure.
+ *
+ * Anything narrower than `unknown` in a parameter is DECLINED rather than
+ * coerced: `opts` and the handler are dyn objects the runtime builds, and
+ * a program that declared a record parameter would be handed a value of a
+ * shape it never had. Null keeps the caller's refusal — declining is the
+ * loud direction. */
+export function dispatcherCallPlan(
+  value: IrType,
+  getRecord: (shapeId: string) => IrRecordShape | undefined,
+): { callKind: 0 | 1; retKind: 0 | 1 | 2 } | null {
   if (value.kind !== "record") return null;
   const shape = getRecord(value.shapeId);
   if (!shape || shape.tuple || shape.indexValue !== undefined || shapeHasAccessorSlots(shape)) {
@@ -9751,7 +9820,7 @@ function wsDispatcherPlan(
   let callKind: 0 | 1;
   // The island rest ABI packs into a JSValue, and the UNSPELLED dyn rest
   // (`rest`) is a slot no direct call fills — both are different calls
-  // entirely from the one this unit builds arguments for.
+  // entirely from the one these units build arguments for.
   if (fn.rest === true || fn.restAbi !== undefined) return null;
   if (fn.restIn === true) {
     if (fn.params.length !== 1 || fn.params[0]!.kind !== "dyn") return null;
@@ -9770,7 +9839,7 @@ function wsDispatcherPlan(
           ? 2
           : null;
   if (retKind === null) return null;
-  return { name, absentTag, recShapeId: value.shapeId, method: "dispatch", callKind, retKind };
+  return { callKind, retKind };
 }
 
 /** The WS deferred refusal's text, TAGGED. Both backends build the same

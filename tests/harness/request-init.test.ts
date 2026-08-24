@@ -449,27 +449,55 @@ describe("the boundary a RequestInit value stops at", () => {
   );
 
   test(
-    "the undici dispatcher written through an assertion refuses BY NAME",
+    "the undici dispatcher is HONOURED where its shape proves a callable dispatch, and refused where it does not",
     async () => {
-      // zapo's own line, and the one refusal left in that file. MEASURED
-      // against Node v25.9.0 rather than assumed: `fetch(url, {
-      // dispatcher })` calls a plain object's `dispatch(opts, handler)`
-      // and waits for the handler's callbacks, so the key is honoured
-      // there and dropping it here would be a proxy silently ignored.
-      const dir = stage(
+      // THIS ROW HAS CHANGED SIDES, and the pair below is why it is not
+      // simply deleted. zapo's own line used to be the one refusal left in
+      // this file; it is implemented now (scr_fetch_dispatch.c, and
+      // tests/harness/fetch-dispatcher.test.ts proves the behaviour
+      // against Node on both backends). What this file still owns is the
+      // BOUNDARY: exactly which shapes reach that implementation.
+      //
+      // zapo's spelling, narrowed by an `if`, must COMPILE.
+      const okDir = stage(
         "dispatcher-write",
         "declare const d: { dispatch: (a: unknown, b: unknown) => unknown } | undefined\n" +
           "const i: RequestInit = { method: 'GET' }\n" +
           "if (d) { ;(i as { dispatcher?: unknown }).dispatcher = d }\n" +
           "console.log('x')\n",
       );
-      const built = await compile(join(dir, "main.ts"), {
-        outPath: join(dir, exeName("program")),
-        outDir: dir,
+      const ok = await compile(join(okDir, "main.ts"), {
+        outPath: join(okDir, exeName("program")),
+        outDir: okDir,
         backend: "c",
       });
-      expect(built.ok, "the dispatcher write must refuse").toBe(false);
-      const diags = built.diagnostics ?? [];
+      expect(
+        ok.ok,
+        "zapo's own dispatcher write must compile:\n" +
+          (ok.diagnostics ?? []).map((d) => `${d.code}: ${d.message}`).join("\n"),
+      ).toBe(true);
+
+      // And an UNPROVED shape must still refuse BY NAME. The proof is not
+      // a formality: `opts` and the handler are dyn objects the runtime
+      // builds, the C signature the program's `dispatch` is called through
+      // comes from its declared shape, and a closure called through the
+      // wrong signature is undefined behaviour rather than a diagnosable
+      // failure. A value typed `unknown` carries no proof it has a
+      // `dispatch` at all.
+      const badDir = stage(
+        "dispatcher-write-unproved",
+        "declare const d: unknown\n" +
+          "const i: RequestInit = { method: 'GET' }\n" +
+          ";(i as { dispatcher?: unknown }).dispatcher = d\n" +
+          "console.log('x')\n",
+      );
+      const bad = await compile(join(badDir, "main.ts"), {
+        outPath: join(badDir, exeName("program")),
+        outDir: badDir,
+        backend: "c",
+      });
+      expect(bad.ok, "an unproved dispatcher must refuse").toBe(false);
+      const diags = bad.diagnostics ?? [];
       // The CODE alone is not the assertion. It used to answer SC1090
       // "assignment to non-variables", which named neither the value nor
       // the cause — and that message is why the row was filed under the
@@ -481,6 +509,9 @@ describe("the boundary a RequestInit value stops at", () => {
       // And it must not send the reader to NODE_USE_ENV_PROXY: the island
       // fetch reads that variable, this one has no proxy path at all.
       expect(diags.map((d) => String(d.hint ?? "")).join(" ")).not.toContain("NODE_USE_ENV_PROXY");
+      // The hint must say what the proof WANTED, which is the whole
+      // difference between a fence and a dead end.
+      expect(diags.map((d) => String(d.hint ?? "")).join(" ")).toContain("dispatch(");
     },
     900_000,
   );

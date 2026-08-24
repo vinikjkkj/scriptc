@@ -422,9 +422,45 @@ typedef struct FsTransfer {
   bool responded;
   bool done;
   bool inflating;
+  /* The hop is DELEGATED: nothing was dialled and no client exists, so
+   * every byte and every failure arrives through the handler this transfer
+   * handed the program (scr_fetch_dispatch.c). */
+  bool delegated;
+  /* The dispatcher unit's own per-hop state, OPAQUE and refcounted by that
+   * unit. It exists here for exactly one thing: an abort has to reach the
+   * `abort` the dispatcher handed us through onConnect, and the signal
+   * listener has only the transfer. */
+  void *disp_hop;
+  void (*disp_hop_release)(void *);
+  ScrClosure *dispatch; /* owned, or NULL — undici's `dispatcher.dispatch` */
+  int call_kind;
+  int ret_kind;
   z_stream zs;
   struct FsTransfer *next;
 } FsTransfer;
+
+/* ── the dispatcher SEAM ─────────────────────────────────────────────
+ * scr_fetch_dispatch.c builds undici's request-options record and its
+ * ten-member handler as checked-dynamic values and calls the program's
+ * `dispatch`. It is gated separately (cc.ts's `fetchDispatch`) for exactly
+ * the reason scr_ws_dispatch.c is: the delegation drags the whole
+ * checked-dynamic object surface, and a fetch program with no dispatcher
+ * must not pay for it. Unset, no program can reach it — the compiler emits
+ * scr_fetch_init_set_dispatch only when the gate is on. */
+static void (*fs_disp_hop)(FsTransfer *t, ScrStr *origin, ScrStr *path, ScrStr *method,
+                           ScrArr *header_pairs, ScrClosure *dispatch, int call_kind,
+                           int ret_kind) = NULL;
+
+/* The other direction: telling the DISPATCHER to stop. undici hands fetch
+ * an `abort` through `handler.onConnect(abort)` and calls it when the
+ * signal fires; this forwards that. NULL until the dispatcher unit links,
+ * and a hop that never saw onConnect has nothing to call either way. */
+static void (*fs_disp_abort)(void *hop) = NULL;
+
+void scr_fetch_dispatch_seam(void (*hop)(FsTransfer *, ScrStr *, ScrStr *, ScrStr *, ScrArr *,
+                                         ScrClosure *, int, int)) {
+  fs_disp_hop = hop;
+}
 
 static FsTransfer *fs_live = NULL;
 static size_t fs_nlive = 0;
@@ -441,15 +477,27 @@ static void (*fs_signal_release)(void *) = NULL;
 static void (*fs_signal_attach)(void *sig, ScrHttpClientReq *c) = NULL;
 static bool (*fs_signal_aborted)(void *sig) = NULL;
 static ScrError *(*fs_signal_error)(void *sig) = NULL;
+/* The NATIVE listener pair, for a hop with no client to tear down. The
+ * dialled path never needs it — scr_http_client_signal owns the whole
+ * teardown — but a DELEGATED hop has no socket and no client, so without
+ * a listener an aborted fetch would simply hang where Node rejects. That
+ * is a divergence a poll cannot close: nothing polls while the dispatcher
+ * is thinking. */
+static void (*fs_signal_on)(void *sig, void (*fn)(void *), void *ctx) = NULL;
+static void (*fs_signal_off)(void *sig, void (*fn)(void *), void *ctx) = NULL;
 
 void scr_fetch_abort_seam(void *(*retain)(void *), void (*release)(void *),
                           void (*attach)(void *, ScrHttpClientReq *),
-                          bool (*aborted)(void *), ScrError *(*error)(void *)) {
+                          bool (*aborted)(void *), ScrError *(*error)(void *),
+                          void (*on)(void *, void (*)(void *), void *),
+                          void (*off)(void *, void (*)(void *), void *)) {
   fs_signal_retain = retain;
   fs_signal_release = release;
   fs_signal_attach = attach;
   fs_signal_aborted = aborted;
   fs_signal_error = error;
+  fs_signal_on = on;
+  fs_signal_off = off;
 }
 
 /* ── RequestInit, held as a VALUE ────────────────────────────────────
@@ -479,11 +527,26 @@ struct ScrFetchInit {
   ScrBytes *body;  /* owned, or NULL — an omitted body is not an empty one */
   bool body_text;
   void *signal; /* owned through the seam, or NULL */
+  /* undici's `dispatcher`, OWNED, or NULL for the direct dial. It is the
+   * program's own `dispatch` closure rather than the dispatcher record:
+   * the compiler reads the member and proves the C signature
+   * (fetchDispatcherPlan), because a closure called through the wrong
+   * signature is undefined behaviour rather than a diagnosable failure. */
+  ScrClosure *dispatch;
+  int call_kind;
+  int ret_kind;
 };
 
+/* The traced edges. The SIGNAL was always one; the DISPATCH closure is the
+ * second and it is not optional: a dispatcher is a program object that
+ * outlives the call, its closure can capture the record that holds this
+ * init, and an untraced edge into a node trial deletion is walking leaves
+ * an un-decremented reference and an uncollectable ring. Measured on this
+ * repo once already, at 1,015 live objects. */
 static void fs_init_trace(void *obj, ScrTraceVisit visit, void *ctx) {
   ScrFetchInit *i = (ScrFetchInit *)obj;
   if (i->signal != NULL) visit(i->signal, ctx);
+  if (i->dispatch != NULL) visit(i->dispatch, ctx);
 }
 
 /* The collector's teardown: the complement of the trace. The signal edge
@@ -494,6 +557,8 @@ static void fs_init_gcfree(void *obj) {
   scr_str_release(i->method);
   scr_arr_release(i->headers);
   if (i->body != NULL) scr_bytes_release(i->body);
+  /* NOT the signal and NOT the dispatch closure: both are traced, so
+   * markGray already accounted for them. */
   scr_cyc_free(i);
 }
 
@@ -508,7 +573,40 @@ ScrFetchInit *scr_fetch_init_new(ScrStr *method /*borrowed, nullable*/,
   i->body = body != NULL ? scr_bytes_retain(body) : NULL;
   i->body_text = body_text;
   i->signal = signal != NULL && fs_signal_retain != NULL ? fs_signal_retain(signal) : NULL;
+  i->dispatch = NULL;
+  i->call_kind = 0;
+  i->ret_kind = 0;
   return i;
+}
+
+/* `init.dispatcher = d` — the one member of a RequestInit that is written
+ * rather than read, and the only one a program can set after the literal
+ * was walked. A NULL closure CLEARS it, which is the `undefined` arm of a
+ * `Dispatcher | undefined` slot: that arm is an ABSENT dispatcher and Node
+ * agrees (measured — `fetch(url, { dispatcher: undefined })` dials
+ * direct). It is never a truthiness test: every other falsy dispatcher is
+ * an error in Node, and the compiler refuses those arms by tag rather than
+ * dialling direct on them. */
+void scr_fetch_init_set_dispatch(ScrFetchInit *i, ScrClosure *dispatch /*borrowed, nullable*/,
+                                 int call_kind, int ret_kind) {
+  if (i == NULL) return;
+  ScrClosure *old = i->dispatch;
+  i->dispatch = dispatch != NULL ? scr_closure_retain(dispatch) : NULL;
+  i->call_kind = call_kind;
+  i->ret_kind = ret_kind;
+  if (old != NULL) scr_closure_release(old);
+  if (i->dispatch != NULL) scr_cyc_mark_live(i);
+}
+
+/* The lowering's one WRITE, answering the init so the same row serves both
+ * spellings: `const i: RequestInit = { ..., dispatcher: d }` chains it onto
+ * the value it just built, and `(i as { dispatcher?: unknown }).dispatcher
+ * = d` discards the answer. Borrowed in, +1 out. */
+ScrFetchInit *scr_fetch_init_with_dispatch(ScrFetchInit *i /*borrowed*/,
+                                           ScrClosure *dispatch /*borrowed, nullable*/,
+                                           int call_kind, int ret_kind) {
+  scr_fetch_init_set_dispatch(i, dispatch, call_kind, ret_kind);
+  return scr_fetch_init_retain(i);
 }
 
 ScrFetchInit *scr_fetch_init_retain(ScrFetchInit *i) {
@@ -527,6 +625,7 @@ void scr_fetch_init_release(ScrFetchInit *i) {
     scr_arr_release(i->headers);
     if (i->body != NULL) scr_bytes_release(i->body);
     if (i->signal != NULL && fs_signal_release != NULL) fs_signal_release(i->signal);
+    if (i->dispatch != NULL) scr_closure_release(i->dispatch);
     scr_cyc_free(i);
   } else {
     scr_cyc_on_release(i);
@@ -579,6 +678,8 @@ static void fs_release(FsTransfer *t) {
   if (t->promise != NULL) scr_promise_release(t->promise);
   if (t->resp != NULL) scr_response_release(t->resp);
   if (t->signal != NULL && fs_signal_release != NULL) fs_signal_release(t->signal);
+  if (t->dispatch != NULL) scr_closure_release(t->dispatch);
+  if (t->disp_hop != NULL && t->disp_hop_release != NULL) t->disp_hop_release(t->disp_hop);
   if (t->inflating) inflateEnd(&t->zs);
   free(t);
 }
@@ -588,9 +689,21 @@ static void fs_release_v(void *p) { fs_release((FsTransfer *)p); }
 
 /* The transfer is over. Idempotent; leaves the registry, which drops the
  * registry's +1 and with it (usually) the last reference. */
+static void fs_disp_abort_cb(void *p);
+
 static void fs_settle(FsTransfer *t) {
   if (t->done) return;
   t->done = true;
+  if (t->delegated && t->signal != NULL && fs_signal_off != NULL) {
+    fs_signal_off(t->signal, &fs_disp_abort_cb, t);
+  }
+  if (t->disp_hop != NULL) {
+    void *hop = t->disp_hop;
+    void (*rel)(void *) = t->disp_hop_release;
+    t->disp_hop = NULL;
+    t->disp_hop_release = NULL;
+    if (rel != NULL) rel(hop);
+  }
   if (t->client != NULL) {
     scr_http_client_release(t->client);
     t->client = NULL;
@@ -799,10 +912,19 @@ static void fs_start_hop(FsTransfer *t) {
   int default_port = https ? 443 : 80;
   int port = fs_url_port(u, default_port);
 
-  /* undici's request head, in undici's order. */
+  /* undici's request head, in undici's order.
+   *
+   * A DELEGATED hop omits `host` and `connection`: they are the dialled
+   * connection's own fields, and undici's `opts.headers` carries neither
+   * (measured against Node v25.9.0 — the dispatcher is handed the user
+   * headers followed by accept, accept-language, sec-fetch-mode,
+   * user-agent and accept-encoding, and nothing else). The origin is a
+   * separate key, so a dispatcher that needs a Host builds it from there
+   * exactly as undici's ProxyAgent does. */
+  bool deleg = t->dispatch != NULL && fs_disp_hop != NULL;
   size_t nuser = (size_t)scr_arr_len(t->headers);
   ScrArr *pairs = scr_arr_new(SCR_ELEM_STR, nuser + 16);
-  if (!fs_pairs_have(t->headers, "host")) {
+  if (!deleg && !fs_pairs_have(t->headers, "host")) {
     char authority[300];
     int alen;
     if (port != default_port) {
@@ -813,7 +935,9 @@ static void fs_start_hop(FsTransfer *t) {
     if (alen < 0) alen = 0;
     fs_pairs_push(pairs, "host", authority, (size_t)alen);
   }
-  if (!fs_pairs_have(t->headers, "connection")) fs_pairs_push(pairs, "connection", "keep-alive", 10);
+  if (!deleg && !fs_pairs_have(t->headers, "connection")) {
+    fs_pairs_push(pairs, "connection", "keep-alive", 10);
+  }
   for (size_t i = 0; i + 1 < nuser; i += 2) {
     scr_arr_push_ref(pairs, scr_arr_get_ref(t->headers, (double)i));
     scr_arr_push_ref(pairs, scr_arr_get_ref(t->headers, (double)(i + 1)));
@@ -828,6 +952,18 @@ static void fs_start_hop(FsTransfer *t) {
   }
   if (!fs_pairs_have(t->headers, "accept")) fs_pairs_push(pairs, "accept", "*/*", 3);
   if (!fs_pairs_have(t->headers, "accept-language")) fs_pairs_push(pairs, "accept-language", "*", 1);
+  /* WHATWG fetch step: "if request's body is null and request's method is
+   * POST or PUT, append `Content-Length: 0`". The DIALLED path never had to
+   * spell it -- scr_http computes a content-length from the body it is
+   * handed -- but a delegated hop's `opts.headers` IS the header list, and
+   * a dispatcher that never sees it sends a bodyless POST with no length
+   * at all. MEASURED on Node v25.9.0 across seven methods: POST and PUT
+   * carry it and GET, HEAD, DELETE, PATCH and OPTIONS do not, and it sits
+   * exactly here, between accept-language and sec-fetch-mode. */
+  if (deleg && t->body == NULL && !fs_pairs_have(t->headers, "content-length") &&
+      (fs_str_is(t->method, "POST") || fs_str_is(t->method, "PUT"))) {
+    fs_pairs_push(pairs, "content-length", "0", 1);
+  }
   if (!fs_pairs_have(t->headers, "sec-fetch-mode")) fs_pairs_push(pairs, "sec-fetch-mode", "cors", 4);
   if (!fs_pairs_have(t->headers, "user-agent")) fs_pairs_push(pairs, "user-agent", "node", 4);
   if (!fs_pairs_have(t->headers, "accept-encoding")) {
@@ -853,6 +989,33 @@ static void fs_start_hop(FsTransfer *t) {
   } else {
     path = u->path->len > 0 ? scr_str_retain(u->path) : scr_str_new("/", 1);
   }
+  if (deleg) {
+    /* `origin` is scheme://host[:port] with the scheme's DEFAULT port
+     * dropped — undici's own rule, measured. */
+    char origin[400];
+    int on = snprintf(origin, sizeof origin, "%s://%.*s", https ? "https" : "http",
+                      (int)u->host->len, u->host->data);
+    if (on > 0 && port != default_port) {
+      int more = snprintf(origin + on, sizeof origin - (size_t)on, ":%d", port);
+      if (more > 0) on += more;
+    }
+    ScrStr *org = scr_str_new(origin, on > 0 ? (size_t)on : 0);
+    t->delegated = true;
+    /* The abort LISTENER, registered per hop the way the dialled path
+     * attaches the signal to each hop's client. Without it an aborted
+     * delegated fetch hangs: there is no socket whose teardown could
+     * surface the abort. */
+    if (t->signal != NULL && fs_signal_on != NULL && fs_signal_aborted != NULL &&
+        !fs_signal_aborted(t->signal)) {
+      fs_signal_on(t->signal, &fs_disp_abort_cb, t);
+    }
+    fs_disp_hop(t, org, path, t->method, pairs, t->dispatch, t->call_kind, t->ret_kind);
+    scr_str_release(org);
+    scr_str_release(path);
+    scr_arr_release(pairs);
+    return;
+  }
+
   ScrStr *dial = fs_bare_host(u->host);
 
   ScrHttpClientReq *c;
@@ -947,20 +1110,19 @@ static void fs_push_chunk(FsTransfer *t, const uint8_t *data, size_t len) {
   scr_arr_push_ref(t->resp->chunks, b);
 }
 
-static void fs_on_data(ScrClosure *cb, ScrBytes *chunk /*borrowed*/) {
-  FsTransfer *t = fs_from(cb);
-  if (t == NULL) return;
-  if (t->done || !t->responded) {
-    fs_release(t);
-    return;
-  }
+/* One arrival of body bytes, from EITHER delivery end. Factored so a
+ * delegated hop's content-encoding is decoded by the same inflate as a
+ * dialled one's: two decoders would be two chances to diverge, and the
+ * oracle decompresses a proxy's gzip exactly as it decompresses an
+ * origin's (measured). */
+static void fs_feed(FsTransfer *t, const uint8_t *data, size_t len) {
+  if (t->done || !t->responded) return;
   if (!t->inflating) {
-    fs_push_chunk(t, chunk->data, chunk->len);
-    fs_release(t);
+    fs_push_chunk(t, data, len);
     return;
   }
-  t->zs.next_in = (Bytef *)chunk->data;
-  t->zs.avail_in = (uInt)chunk->len;
+  t->zs.next_in = (Bytef *)data;
+  t->zs.avail_in = (uInt)len;
   unsigned char out[16384];
   while (t->zs.avail_in > 0 && !t->done) {
     t->zs.next_out = out;
@@ -979,21 +1141,98 @@ static void fs_on_data(ScrClosure *cb, ScrBytes *chunk /*borrowed*/) {
     }
     if (rc == Z_BUF_ERROR && produced == 0) break;
   }
+}
+
+static void fs_on_data(ScrClosure *cb, ScrBytes *chunk /*borrowed*/) {
+  FsTransfer *t = fs_from(cb);
+  if (t == NULL) return;
+  fs_feed(t, chunk->data, chunk->len);
   fs_release(t);
 }
 
-static void fs_on_end(ScrClosure *cb) {
-  FsTransfer *t = fs_from(cb);
-  if (t == NULL) return;
-  if (t->done) {
-    fs_release(t);
-    return;
+/* THE HEAD, from either delivery end: a dialled hop's parsed response or
+ * a dispatcher's `onHeaders(status, headers, resume, statusText)`. Both
+ * MOVE their two arguments in (a +1 status text, nullable, and a +1 flat
+ * wire-cased [name, value, ...] array), because the two callers build them
+ * from different sources and neither wants the release threaded back out.
+ *
+ * Factored rather than duplicated because every rule here is a fetch
+ * SEMANTIC that must not fork: the content-encoding decision, the
+ * lowercasing of header names, `response.url` being the hop's own URL
+ * without its fragment, `redirected`, and the promise taking its OWN
+ * reference. A second copy is how the delegated lane and the dialled lane
+ * start answering different Responses for the same bytes. */
+static void fs_head(FsTransfer *t, int status, ScrStr *status_text /*+1, nullable*/,
+                    ScrArr *raw /*+1*/) {
+  t->responded = true;
+
+  for (size_t i = 0; i + 1 < (size_t)scr_arr_len(raw); i += 2) {
+    ScrStr *nm = (ScrStr *)scr_arr_get_ref(raw, (double)i);
+    bool is_ce = fs_lit_ci(nm->data, nm->len, "content-encoding");
+    scr_str_release(nm);
+    if (!is_ce) continue;
+    ScrStr *ce = (ScrStr *)scr_arr_get_ref(raw, (double)(i + 1));
+    if (fs_str_is(ce, "gzip") || fs_str_is(ce, "x-gzip") || fs_str_is(ce, "deflate")) {
+      memset(&t->zs, 0, sizeof t->zs);
+      if (inflateInit2(&t->zs, 15 + 32) == Z_OK) t->inflating = true;
+    }
+    scr_str_release(ce);
+    break;
   }
+
+  ScrResponse *r = fs_response_new();
+  r->status = status;
+  if (status_text != NULL) {
+    scr_str_release(r->status_text);
+    r->status_text = status_text;
+  }
+  scr_str_release(r->url);
+  r->url = fs_url_serialize(t->url);
+  r->redirected = t->redirected;
+  {
+    /* Header names arrive in wire case; the Headers object stores them
+     * lowercased so `.get('Content-Type')` and `.get('content-type')`
+     * cannot disagree. */
+    size_t nraw = (size_t)scr_arr_len(raw);
+    ScrArr *pairs = scr_arr_new(SCR_ELEM_STR, nraw);
+    for (size_t i = 0; i + 1 < nraw; i += 2) {
+      ScrStr *nm = (ScrStr *)scr_arr_get_ref(raw, (double)i);
+      ScrStr *lo = fs_lower(nm);
+      scr_str_release(nm);
+      scr_arr_push_ref(pairs, lo);
+      scr_arr_push_ref(pairs, scr_arr_get_ref(raw, (double)(i + 1)));
+    }
+    r->headers = fs_headers_new_owned(pairs);
+  }
+  scr_arr_release(raw);
+
+  t->resp = r; /* the constructor's +1 */
+  ScrPromise *p = t->promise;
+  t->promise = NULL;
+  if (p != NULL) {
+    /* The promise gets its OWN reference: fulfill_ref MOVES a +1 in, and
+     * `t->resp` keeps the constructor's. Handing the constructor's +1 to
+     * both was a use-after-free at teardown — the transfer released a
+     * Response the program had already dropped to zero. */
+    scr_promise_fulfill_ref(p, scr_response_retain(r), &scr_response_retain_v,
+                            &scr_response_release_v, &scr_response_trace_v);
+    scr_promise_release(p);
+  }
+}
+
+static void fs_end(FsTransfer *t) {
+  if (t->done) return;
   if (t->resp != NULL) {
     t->resp->ended = true;
     fs_wake_waiter(t->resp);
   }
   fs_settle(t);
+}
+
+static void fs_on_end(ScrClosure *cb) {
+  FsTransfer *t = fs_from(cb);
+  if (t == NULL) return;
+  fs_end(t);
   fs_release(t);
 }
 
@@ -1044,63 +1283,7 @@ static void fs_on_response(ScrClosure *cb, ScrHttpReq *res /*+1*/) {
      * which is what Node answers. Fall through. */
   }
 
-  t->responded = true;
-
-  {
-    ScrStr *cename = scr_str_new("content-encoding", 16);
-    ScrStr *ce = scr_http_req_header(res, cename);
-    scr_str_release(cename);
-    if (ce != NULL) {
-      if (fs_str_is(ce, "gzip") || fs_str_is(ce, "x-gzip") || fs_str_is(ce, "deflate")) {
-        memset(&t->zs, 0, sizeof t->zs);
-        if (inflateInit2(&t->zs, 15 + 32) == Z_OK) t->inflating = true;
-      }
-      scr_str_release(ce);
-    }
-  }
-
-  ScrResponse *r = fs_response_new();
-  r->status = status;
-  {
-    ScrStr *stext = scr_http_req_status_message(res);
-    if (stext != NULL) {
-      scr_str_release(r->status_text);
-      r->status_text = stext;
-    }
-  }
-  scr_str_release(r->url);
-  r->url = fs_url_serialize(t->url);
-  r->redirected = t->redirected;
-  {
-    /* Header names arrive in wire case; the Headers object stores them
-     * lowercased so `.get('Content-Type')` and `.get('content-type')`
-     * cannot disagree. */
-    ScrArr *raw = scr_http_req_raw_headers(res);
-    size_t nraw = (size_t)scr_arr_len(raw);
-    ScrArr *pairs = scr_arr_new(SCR_ELEM_STR, nraw);
-    for (size_t i = 0; i + 1 < nraw; i += 2) {
-      ScrStr *nm = (ScrStr *)scr_arr_get_ref(raw, (double)i);
-      ScrStr *lo = fs_lower(nm);
-      scr_str_release(nm);
-      scr_arr_push_ref(pairs, lo);
-      scr_arr_push_ref(pairs, scr_arr_get_ref(raw, (double)(i + 1)));
-    }
-    scr_arr_release(raw);
-    r->headers = fs_headers_new_owned(pairs);
-  }
-
-  t->resp = r; /* the constructor's +1 */
-  ScrPromise *p = t->promise;
-  t->promise = NULL;
-  if (p != NULL) {
-    /* The promise gets its OWN reference: fulfill_ref MOVES a +1 in, and
-     * `t->resp` keeps the constructor's. Handing the constructor's +1 to
-     * both was a use-after-free at teardown — the transfer released a
-     * Response the program had already dropped to zero. */
-    scr_promise_fulfill_ref(p, scr_response_retain(r), &scr_response_retain_v,
-                            &scr_response_release_v, &scr_response_trace_v);
-    scr_promise_release(p);
-  }
+  fs_head(t, status, scr_http_req_status_message(res), scr_http_req_raw_headers(res));
 
   scr_http_req_on_data(res, fs_closure(t, (void *)&fs_on_data), &fs_on_data, false);
   scr_http_req_on_end(res, fs_closure(t, (void *)&fs_on_end), false);
@@ -1152,10 +1335,42 @@ static void fs_on_client_error(ScrClosure *cb, ScrStr *msg /*borrowed*/) {
  * signal all answer an already-REJECTED promise rather than throwing:
  * that is where Node puts every one of them (fetch never throws
  * synchronously). */
+static ScrPromise *fs_start_full(ScrStr *url, ScrStr *method, ScrArr *header_pairs, ScrBytes *body,
+                                 bool body_text, void *signal, ScrClosure *dispatch, int call_kind,
+                                 int ret_kind);
+
 ScrPromise *scr_fetch_start(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*/,
                             ScrArr *header_pairs /*borrowed*/, ScrBytes *body /*borrowed, nullable*/,
                             bool body_text, void *signal /*borrowed, nullable*/) {
+  return fs_start_full(url, method, header_pairs, body, body_text, signal, NULL, 0, 0);
+}
+
+static ScrPromise *fs_start_full(ScrStr *url, ScrStr *method, ScrArr *header_pairs, ScrBytes *body,
+                                 bool body_text, void *signal, ScrClosure *dispatch, int call_kind,
+                                 int ret_kind) {
   ScrPromise *p = scr_promise_new();
+
+  /* A REQUEST BODY THROUGH A DISPATCHER, refused LOUDLY rather than sent
+   * in a shape the dispatcher cannot read.
+   *
+   * Measured on Node v25.9.0: `opts.body` is `null` for a bodyless request
+   * and an ASYNC GENERATOR for every other kind — not a string, not a
+   * Buffer. This runtime has no dyn async iterable to put there, and every
+   * substitute is a silent corruption rather than a missing feature: hand
+   * a dispatcher a Uint8Array where it expects an async iterable and
+   * `for await` yields the bytes one NUMBER at a time, so the request goes
+   * out with a body of decimal digits and nobody is told. So the request
+   * is refused, at the call, naming what is missing. zapo's version fetch
+   * is a GET and is unaffected. */
+  if (dispatch != NULL && body != NULL) {
+    static const char msg[] =
+        "fetch with both a body and a dispatcher is not supported yet: undici hands the "
+        "dispatcher an async-iterable opts.body and this runtime has no value of that shape, "
+        "and handing it anything else would send a body the dispatcher misreads";
+    scr_throw_error_msg_code(SCR_ERR_TYPE, msg, sizeof msg - 1, "SC2020");
+    scr_promise_reject_pending(p);
+    return p;
+  }
 
   if (signal != NULL && fs_signal_aborted != NULL && fs_signal_aborted(signal)) {
     scr_throw_obj(fs_signal_error(signal), &scr_error_retain_v, &scr_error_release_v,
@@ -1183,6 +1398,9 @@ ScrPromise *scr_fetch_start(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*
   t->body_text = body_text;
   t->url = u;
   t->signal = signal != NULL && fs_signal_retain != NULL ? fs_signal_retain(signal) : NULL;
+  t->dispatch = dispatch != NULL ? scr_closure_retain(dispatch) : NULL;
+  t->call_kind = call_kind;
+  t->ret_kind = ret_kind;
   t->next = fs_live;
   fs_live = t;
   fs_nlive++;
@@ -1201,8 +1419,8 @@ ScrPromise *scr_fetch_start(ScrStr *url /*borrowed*/, ScrStr *method /*borrowed*
 ScrPromise *scr_fetch_start_init(ScrStr *url /*borrowed*/,
                                  ScrFetchInit *init /*borrowed, nullable*/) {
   if (init != NULL) {
-    return scr_fetch_start(url, init->method, init->headers, init->body, init->body_text,
-                           init->signal);
+    return fs_start_full(url, init->method, init->headers, init->body, init->body_text,
+                         init->signal, init->dispatch, init->call_kind, init->ret_kind);
   }
   ScrArr *empty = scr_arr_new(SCR_ELEM_STR, 0);
   ScrPromise *p = scr_fetch_start(url, NULL, empty, NULL, false, NULL);
@@ -1273,6 +1491,162 @@ ScrPromise *scr_fetch_start_value(ScrUnion *input, int str_tag, int url_tag,
 /* Build the wire header list from a checked-dynamic record/object: every
  * own key, lowercased, with its value stringified. NULL is an empty list.
  * Non-object values are the caller's fence, not ours. */
+/* ── the DELEGATED hop's delivery end ────────────────────────────────
+ * scr_fetch_dispatch.c drives a whole HTTP response back through these
+ * four entries, which are the same three internal steps a dialled hop
+ * takes (fs_head / fs_feed / fs_end) plus its failure. The transfer is
+ * opaque to that unit and its lifetime is refcounted here, because the
+ * handler this runtime hands the program can outlive everything: a
+ * dispatcher is free to keep it and answer three turns later. */
+
+/* The dispatcher unit hands its per-hop state over so an abort can reach
+ * it. MOVES a reference in and drops whatever the previous hop left — a
+ * redirect starts a new hop and the old one can no longer be aborted. */
+void scr_fetch_xfer_set_hop(ScrFetchXfer *t, void *hop, void (*release)(void *)) {
+  if (t == NULL) {
+    if (hop != NULL && release != NULL) release(hop);
+    return;
+  }
+  void *old = t->disp_hop;
+  void (*oldrel)(void *) = t->disp_hop_release;
+  t->disp_hop = hop;
+  t->disp_hop_release = release;
+  if (old != NULL && oldrel != NULL) oldrel(old);
+}
+
+ScrFetchXfer *scr_fetch_xfer_retain(ScrFetchXfer *t) {
+  if (t != NULL) fs_retain(t);
+  return t;
+}
+
+void scr_fetch_xfer_release(ScrFetchXfer *t) {
+  if (t != NULL) fs_release(t);
+}
+
+bool scr_fetch_xfer_live(const ScrFetchXfer *t) { return t != NULL && !t->done; }
+
+bool scr_fetch_xfer_responded(const ScrFetchXfer *t) { return t != NULL && t->responded; }
+
+/* `onHeaders(statusCode, headers, resume, statusText)`. `raw` is a +1 flat
+ * [name, value, ...] array in WIRE case and `status_text` a +1 string or
+ * NULL — both move in.
+ *
+ * A 3xx WITH a Location is a redirect and fetch follows it ITSELF, through
+ * the dispatcher again: measured on Node v25.9.0, a dispatcher answering
+ * 302 is called a second time with the resolved path and the same headers,
+ * and a chain of them ends in "redirect count exceeded" at the 20th hop.
+ * So this takes fs_redirect's decision exactly as the dialled path does
+ * and re-enters fs_start_hop, which re-delegates because t->dispatch is
+ * still set. */
+void scr_fetch_xfer_head(ScrFetchXfer *t, int status, ScrStr *status_text /*+1, nullable*/,
+                         ScrArr *raw /*+1*/) {
+  if (t == NULL) return;
+  if (t->done || t->responded) {
+    scr_str_release(status_text);
+    scr_arr_release(raw);
+    return;
+  }
+  if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {
+    ScrStr *loc = NULL;
+    for (size_t i = 0; i + 1 < (size_t)scr_arr_len(raw); i += 2) {
+      ScrStr *nm = (ScrStr *)scr_arr_get_ref(raw, (double)i);
+      bool is_loc = fs_lit_ci(nm->data, nm->len, "location");
+      scr_str_release(nm);
+      if (!is_loc) continue;
+      loc = (ScrStr *)scr_arr_get_ref(raw, (double)(i + 1));
+      break;
+    }
+    if (loc != NULL) {
+      /* The listener belongs to the hop that is ending; the next hop
+       * registers its own. */
+      if (t->signal != NULL && fs_signal_off != NULL) {
+        fs_signal_off(t->signal, &fs_disp_abort_cb, t);
+      }
+      bool go = fs_redirect(t, status, loc);
+      scr_str_release(loc);
+      scr_str_release(status_text);
+      scr_arr_release(raw);
+      if (go) fs_start_hop(t);
+      return;
+    }
+    /* a 3xx with no Location is a FINAL response carrying its own body,
+     * which is what Node answers. Fall through. */
+  }
+  fs_head(t, status, status_text, raw);
+}
+
+void scr_fetch_xfer_data(ScrFetchXfer *t, const uint8_t *data, size_t len) {
+  if (t != NULL) fs_feed(t, data, len);
+}
+
+void scr_fetch_xfer_end(ScrFetchXfer *t) {
+  if (t != NULL) fs_end(t);
+}
+
+/* `onError(err)`, a throw out of `dispatch` itself, and the abort. Node's
+ * shape for all three is the network-failure shape — a TypeError whose
+ * message is exactly "fetch failed" — measured against v25.9.0 for a
+ * dispatcher that throws and for one that calls onError. The thrown
+ * error rides Node's `cause`, which no ScrError slot can hold; that is the
+ * divergence this whole unit already documents for a dialled failure. */
+void scr_fetch_xfer_fail(ScrFetchXfer *t, const char *code) {
+  if (t != NULL) fs_error(t, code);
+}
+
+/* NOBODY CAN ANSWER ANY MORE. The program released every handler member
+ * without settling, so no onHeaders, onComplete or onError can arrive.
+ *
+ * Node's answer, measured: the fetch promise NEVER settles and the process
+ * exits 0 anyway — a delegated request keeps nothing alive, and undici
+ * fires nothing. So this leaves the registry silently rather than
+ * inventing a rejection the oracle does not produce. The alternative is
+ * worse in both directions: keeping the transfer would leave an object the
+ * RC audit counts at exit and a rejection would be an answer Node never
+ * gives. */
+bool scr_fetch_xfer_orphan(ScrFetchXfer *t) {
+  if (t == NULL || t->done || t->responded) return false;
+  /* A SIGNAL IS A SECOND WAY TO ANSWER, and forgetting that turned this
+   * function from a leak fix into a hang.
+   *
+   * "The program dropped every handler member" is only "nobody can
+   * answer" when the handler was the ONLY channel. A transfer with an
+   * un-aborted signal attached can still be settled -- by the abort --
+   * and the oracle settles it there too: a dispatcher that drops the
+   * handler and never answers still gives the AbortError when the signal
+   * fires, measured. Orphaning here instead removed the abort listener
+   * (fs_settle does) and the fetch then never settled at all: the
+   * differential's `abort` cell stopped running, on both lanes, and the
+   * RC fixture stopped at the cell before it.
+   *
+   * So a live signal keeps the transfer. If the program drops its
+   * controller as well the transfer does outlive the request -- which is
+   * what Node does too, since its promise never settles either. */
+  if (t->signal != NULL && fs_signal_aborted != NULL && !fs_signal_aborted(t->signal)) {
+    return false;
+  }
+  if (t->promise != NULL) {
+    scr_promise_release(t->promise);
+    t->promise = NULL;
+  }
+  fs_settle(t);
+  return true;
+}
+
+/* The signal fired on a hop with no client. The dispatcher unit's own
+ * listener (registered through this ctx) calls the `abort` the program
+ * handed us through onConnect, then fails the transfer; this is the
+ * fetch-side half, and it runs whether or not the dispatcher ever called
+ * onConnect. fs_error asks the signal and produces the AbortError rather
+ * than "fetch failed", exactly as it does for a dialled hop. */
+static void fs_disp_abort_cb(void *p) {
+  FsTransfer *t = (FsTransfer *)p;
+  if (t == NULL || t->done) return;
+  if (t->disp_hop != NULL && fs_disp_abort != NULL) fs_disp_abort(t->disp_hop);
+  fs_error(t, NULL);
+}
+
+void scr_fetch_dispatch_abort_seam(void (*abort)(void *hop)) { fs_disp_abort = abort; }
+
 ScrArr *scr_fetch_headers_from_dyn(const ScrDyn *d /*borrowed, nullable*/) {
   ScrArr *out = scr_arr_new(SCR_ELEM_STR, 8);
   if (d == NULL) return out;
