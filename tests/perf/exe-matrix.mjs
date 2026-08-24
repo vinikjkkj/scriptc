@@ -32,6 +32,7 @@
  *
  * Run:
  *   node tests/perf/exe-matrix.mjs --build --runs 5 --json out.json
+ *   node tests/perf/exe-matrix.mjs --build --backend llvm --batches 800 --runs 7
  */
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, writeFileSync, existsSync, readdirSync, statSync, rmSync } from 'node:fs'
@@ -62,7 +63,31 @@ const WARMUP = Number.parseInt(flag('warmup', '1'), 10)
 // checkout's parent directory.
 const OUTDIR = flag('exe-dir', path.join(tmpdir(), 'scriptc-perf-exe'))
 const JSONOUT = flag('json', null)
-const MINMS = flag('min-ms', '2000')
+// Which code generator built the exe lane. `llvm` is the compiler's DEFAULT
+// and the output it ships; this driver asked for `c` unconditionally from the
+// day it was written, so every cross-runtime number this repo has ever quoted
+// is about the backend the compiler does NOT default to. Both are worth
+// running and they are not the same binary (same source, same output path:
+// 715,264 bytes each, different SHA-256).
+const BACKEND = flag('backend', 'c')
+if (BACKEND !== 'c' && BACKEND !== 'llvm') {
+  console.error(`unknown backend '${BACKEND}' (supported: c, llvm)`)
+  process.exit(2)
+}
+/* --batches pins the WORK instead of the TIME, and fixed work is the only
+ * shape in which peak RSS compares across lanes: a time-boxed run of the
+ * faster lane executes MORE messages and allocates MORE for them, so the
+ * memory column of a time-boxed matrix ranks the lanes by speed, not by
+ * footprint. Measured here on messaging/SEND 1:1 at BENCH_MIN_MS=200: the
+ * exe ran 269 batches to Node's 82 - a 3.3x difference in work standing
+ * behind a single RSS pair.
+ *
+ * _bench.ts stops on `elapsed < minMs && batches < maxBatches`, so passing
+ * --batches while min-ms keeps its 2000 default leaves the TIME bound in
+ * force and the work is not fixed after all (ab-strpool.mjs hit exactly
+ * this). When --batches is given and --min-ms is not, the time bound goes. */
+const BATCHES = flag('batches', null)
+const MINMS = flag('min-ms', BATCHES ? '86400000' : '2000')
 
 const ALL = readdirSync(BENCH_DIR)
   .filter((f) => f.endsWith('.bench.ts'))
@@ -118,7 +143,7 @@ function build(bench, extraArgs = []) {
   const t = process.hrtime.bigint()
   const res = spawnSync(
     process.execPath,
-    [CLI, 'build', bench + '.bench.ts', '--backend', 'c', ...extraArgs, '-o', out],
+    [CLI, 'build', bench + '.bench.ts', '--backend', BACKEND, ...extraArgs, '-o', out],
     { cwd: BENCH_DIR, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }
   )
   const ms = Number(process.hrtime.bigint() - t) / 1e6
@@ -153,7 +178,10 @@ function runOnce(bench, lane, env) {
     cwd: BENCH_DIR,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
-    env: { ...process.env, ...env, BENCH_LANE: lane, BENCH_MIN_MS: MINMS }
+    env: {
+      ...process.env, ...env, BENCH_LANE: lane, BENCH_MIN_MS: MINMS,
+      ...(BATCHES ? { BENCH_MAX_BATCHES: BATCHES } : {})
+    }
   })
   const wallMs = Number(process.hrtime.bigint() - t0) / 1e6
 
@@ -173,6 +201,18 @@ function runOnce(bench, lane, env) {
   }
   if (scenarios.length === 0 && bench !== 'startup') {
     throw new Error(`${lane}/${bench} produced no SCBENCH lines`)
+  }
+  // The fixed-work claim, CHECKED rather than asserted in a comment: if any
+  // scenario stopped on the clock instead of the batch bound, the lanes did
+  // different amounts of work and the RSS column below is not a comparison.
+  if (BATCHES) {
+    for (const s of scenarios) {
+      if (s.batches !== Number(BATCHES)) {
+        throw new Error(
+          `${lane}/${bench}/${s.name}: ran ${s.batches} batches, asked for ${BATCHES} - ` +
+          `work is NOT fixed, so peak RSS across lanes means nothing`)
+      }
+    }
   }
   return { wallMs, scenarios, end, checksum }
 }
@@ -202,6 +242,7 @@ async function main() {
   console.log('cross-runtime bench matrix - exe vs Node, per scenario')
   console.log(`benches: ${BENCHES.join(', ')}   lanes: ${LANES.join(', ')}`)
   console.log(`${WARMUP} warmup + ${RUNS} measured runs per (bench, lane); BENCH_MIN_MS=${MINMS}`)
+  console.log(`exe backend: ${BACKEND}   work: ${BATCHES ? BATCHES + ' batches (FIXED)' : 'time-boxed - peak RSS is NOT comparable across lanes'}`)
   console.log(toolchainLine(tc))
   console.log(`machine before: cpu ${before.cpuLoadPercent}%  procs ${before.processCount}  node ${before.nodeProcesses}  zig ${before.zigProcesses}  free ${before.freeMemMiB} MiB`)
   console.log('')
@@ -222,7 +263,7 @@ async function main() {
     startedAt: new Date().toISOString(),
     toolchain: tc,
     machine: { before },
-    config: { benches: BENCHES, lanes: LANES, runs: RUNS, warmup: WARMUP, minMs: MINMS },
+    config: { benches: BENCHES, lanes: LANES, runs: RUNS, warmup: WARMUP, minMs: MINMS, backend: BACKEND, batches: BATCHES },
     builds,
     data: {}
   }
