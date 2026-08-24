@@ -232,6 +232,34 @@ describe("SC9003: the keyed-read abort names its source site", () => {
     expect(declaredKeysHelper).toBeTruthy();
   });
 
+  test("two programs at the SAME path in one process do not share a line index", async () => {
+    // The line index behind `srcSite` is a module-level Map keyed by
+    // absolute path. `compile()` is a library entry point and this repo's
+    // tests call it dozens of times in one worker, so a cache with no
+    // invalidation gives the SECOND program at a path the FIRST one's line
+    // numbers — a site that names the wrong line, which is worse than no
+    // site at all. The reset happens per emission; this is what says so.
+    const d = await mkdtemp(join(tmpdir(), "scriptc-rkgsite-reuse-"));
+    const path = join(d, "same.ts");
+    const emitAt = async (text: string, tag: string): Promise<string> => {
+      await writeFile(path, text, "utf8");
+      const res = await compile(path, { outPath: join(d, tag), outDir: d, backend: "c", emitOnly: true });
+      if (!res.ok) throw new Error(`${tag}: ${res.diagnostics[0]?.message ?? "?"}`);
+      return await readFile(res.cPath, "utf8");
+    };
+    const table = `const T: Readonly<Record<'a' | 'b', number>> = { a: 1, b: 2 };\n`;
+    const tail = `console.log(String(pick(process.argv[2] === 'a' ? 'a' : 'b')));\nexport {};\n`;
+    // The SAME read, deliberately at different lines in the two programs.
+    const short = `${table}function pick(k: 'a' | 'b'): number {\n  return T[k];\n}\n${tail}`;
+    const padded = `${table}// pad\n// pad\n// pad\n// pad\nfunction pick(k: 'a' | 'b'): number {\n  return T[k];\n}\n${tail}`;
+    const shortTu = await emitAt(short, "s1");
+    const paddedTu = await emitAt(padded, "s2");
+    const site = (tu: string): string | null => callSites(tu)[0]?.site ?? null;
+    const p = path.replace(/\\/g, "/");
+    expect(site(shortTu)).toBe(`${p}:3:10`);
+    expect(site(paddedTu)).toBe(`${p}:7:10`);
+  }, 600_000);
+
   test("the LLVM lane names the same site, through the same one shared helper", async () => {
     const ll = await llTu();
     expect(ll).toContain("define internal void @sc_bad_key(ptr %site, ptr %why)");
