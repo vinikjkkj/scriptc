@@ -29,6 +29,7 @@
  *            PRIVATE, i.e. it is a copy, not a share)
  */
 import { readFileSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 
 const PAGE = 4096
 
@@ -227,16 +228,23 @@ function selfTest() {
 }
 
 // ------------------------------------------------------------------------ cli
+// Guarded, so the pure parts above can be imported by another script - which
+// is how the by-symbol-family rollup in estado-ramcpu.md was produced - without
+// the CLI running and exiting 2 on the importer's argv.
+const IS_MAIN = import.meta.url === pathToFileURL(process.argv[1] ?? '').href
 const argv = process.argv.slice(2)
 const flag = (n, d = null) => {
   const i = argv.indexOf('--' + n)
   return i < 0 ? d : argv[i + 1]
 }
 
-if (argv.includes('--self-test')) {
+if (IS_MAIN && argv.includes('--self-test')) {
   process.exit(selfTest() ? 0 : 1)
 }
 
+if (!IS_MAIN) {
+  // imported as a library; nothing below runs
+} else {
 const WS = flag('ws')
 const SYMS = flag('syms')
 const EXE = flag('exe')
@@ -289,3 +297,4 @@ for (const a of top.slice(0, TOP)) {
 }
 console.log('  top ' + Math.min(TOP, top.length) + ' = ' + ((cum / residentImage) * 100).toFixed(1) +
   '% of resident image bytes; ' + fmt(top.length) + ' symbols own at least one resident page')
+}
