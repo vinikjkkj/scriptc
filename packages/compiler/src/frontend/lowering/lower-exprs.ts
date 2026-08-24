@@ -10,7 +10,7 @@ import type { Lowerer, WidthLift } from "./lowerer.js";
 import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
-import { builtinFnValueOf } from "./lower-fnvalue.js";
+import { builtinFnValueOf, builtinMemberFnValueOf } from "./lower-fnvalue.js";
 import { requireFnValueOf, requireMemberFence } from "./lower-builtins.js";
 import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
@@ -1342,6 +1342,16 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           // signatures -- and it was not: the fence is on the BINDING's type,
           // not on the reference. Removed so the next reader measures instead
           // of patching a function with no callers.)
+          // A member of a builtin module taken as a VALUE: the same
+          // interned zero-capture closure the plain function globals get,
+          // for the members whose table row is the whole truth about
+          // their call and whose signature the checker maps to exactly
+          // that row (lower-fnvalue.ts). Everything else falls through to
+          // the SC1090 below and keeps it.
+          {
+            const mv = builtinMemberFnValueOf(L, expr, bi, expr.text, loc);
+            if (mv) return mv;
+          }
           if (builtinModuleFnOf(L, bi.module, bi.member)) {
             L.unsupported(
               "SC1090",

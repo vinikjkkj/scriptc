@@ -108,6 +108,7 @@ import { builtinImportOf, createRequireBindingDecl, createRequireNamespaceDecl, 
 import { isIslandExpr, islandFuncValueFence, islandRegexpOf, jsvalIn, requireDynamicApi, islandGlobalFnOf, lowerDynamicImportCall, lowerFetchCall, lowerIslandMethodCall, lowerMathProperty, npmPackageOf, npmMemberFence, npmPackageOfSymbol } from "./lower-island.js";
 import { lowerHttpHeadersElement, lowerNetModuleCall, lowerServerMethodCall, lowerServerProperty, lowerTlsRootCertificates } from "./lower-server.js";
 import { lowerNamespaceConditionalCall, namespaceOverrideOf } from "./lower-nsvalue.js";
+import { builtinMemberFnValueOf } from "./lower-fnvalue.js";
 import { lowerStaticFetchCall } from "./lower-fetch.js";
 import { lowerDgramDnsModuleCall, lowerDgramMethodCall } from "./lower-dgram.js";
 import { lowerNodeTestModuleCall, lowerTestDirectCall, lowerTestMethodCall, lowerTestCtxProperty } from "./lower-test.js";
@@ -12706,6 +12707,14 @@ export class Lowerer {
     if (bi.member === "constants" && bi.module === "fs") {
       // A bare `fs.constants` read (not one of the baked bits above).
       this.noLowering(`fs.constants`, expr, "F_OK, R_OK, W_OK, and X_OK are the lowered constants");
+    }
+    // `path.dirname` through the NAMESPACE binding, the same value the
+    // named-import spelling gets — one lift keyed on the row's libFn, so
+    // the two spellings in one program are the SAME pointer and compare
+    // equal, which is what Node does.
+    {
+      const mv = builtinMemberFnValueOf(this, expr, bi, expr.getText(), loc);
+      if (mv) return mv;
     }
     if (builtinModuleFnOf(this, bi.module, bi.member)) {
       this.unsupported(
