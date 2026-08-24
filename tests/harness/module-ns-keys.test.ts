@@ -234,6 +234,50 @@ describe("a compiled module's namespace: the key set", () => {
   }
 });
 
+/* --------------------------------------- the SAME omission, the other path */
+
+/* The dynamic-import namespace is built by the same enumeration, and on
+ * main it dropped starred names SILENTLY: `ns.starred` read `undefined`
+ * where Node answers the value, at exit 0, with no diagnostic. That is a
+ * different surface from Object.keys (an engine-marshalled object, only
+ * under --dynamic) reached through the same one-line mistake, so it gets
+ * its own row rather than trusting that one fix covered both. */
+describe("a dynamic-import namespace carries its export-star names too", () => {
+  const DYN_FIXTURE: Record<string, string> = {
+    "a.ts": `export const starred = "S";\n`,
+    "m.ts": `export * from "./a.ts";\nexport const local = 1;\n`,
+    "main.ts": [
+      `// @dynamic`,
+      `import { local } from "./m.ts";`,
+      `const MOD = "./m.ts";`,
+      `const ns = await import(MOD);`,
+      `console.log("static", local);`,
+      `console.log("starred", (ns as Record<string, unknown>)["starred"]);`,
+      `console.log("local", (ns as Record<string, unknown>)["local"]);`,
+      ``,
+    ].join("\n"),
+  };
+
+  test("c: the starred binding is the value, not undefined", async () => {
+    const dir = stage(workDir, "dynstar", DYN_FIXTURE);
+    const nodeSide = await run(process.execPath, [join(dir, "main.ts")], dir);
+    expect(nodeSide.stdout).toContain("starred S");
+    const exe = join(dir, exeName("dynstar"));
+    const built = await compile(join(dir, "main.ts"), {
+      outPath: exe,
+      outDir: dir,
+      backend: "c",
+      dynamic: true,
+    });
+    expect(
+      built.ok,
+      `compile refused:\n${(built.diagnostics ?? []).map((d) => `${d.code} ${d.message}`).join("\n")}`,
+    ).toBe(true);
+    const got = await run(exe, [], dir);
+    compareCells("c", nodeSide, got);
+  }, 900_000);
+});
+
 /* ------------------------------------------------------------- boundaries */
 
 describe("the OBJECT still refuses, and the refusal says what is missing", () => {

@@ -11,6 +11,7 @@ import { canonicalBuiltinModule, dynamicImportSpecOf, isCjsJsFile, isJsSourceFil
 import { isRelativeSpecifier } from "../shared.js";
 import { dynamicImportProgramTargetOf } from "./lower-modules.js";
 import { pureReemittable } from "./lower-exprs.js";
+import { moduleNsStarExports } from "./lower-namespaces.js";
 import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
 
 /** True iff the checker's type for this node maps to jsval ('any') —
@@ -521,12 +522,29 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
       }
       // Node sorts module-namespace keys (code-unit order); tsc erases
       // type-only exports, so only VALUE exports appear.
+      //
+      // getExports() is the module's OWN table and does NOT carry `export
+      // *` re-exports — the checker resolves those lazily, per member
+      // access. Reading the namespace off it alone answered `undefined`
+      // for a star-re-exported binding where Node answers its value, at
+      // exit 0, with no diagnostic (measured on main at 27343f6f).
+      // moduleNsStarExports walks the chain by Node's own rules.
       const entries: [string, ts.Symbol][] = [];
       const modSym = L.checker.getSymbolAtLocation(dep);
       modSym?.getExports().forEach((sym: ts.Symbol, key: ts.__String) => {
         const n = String(key);
         if (!n.startsWith("__") && n !== "export=") entries.push([n, sym]);
       });
+      const star = moduleNsStarExports(L, dep);
+      if (star.unresolved !== null) {
+        L.unsupported(
+          "SC1090",
+          dep,
+          `a namespace of a module whose \`export * from "${star.unresolved}"\` names a module the build did not compile`,
+          "the namespace would silently omit every name that star contributes, which is worse than refusing to build it",
+        );
+      }
+      for (const pair of star.entries) entries.push(pair);
       entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
       const args: IrExpr[] = [];
       for (const [exportName, sym] of entries) {
@@ -696,6 +714,21 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
         }
         if (!n.startsWith("__")) entries.push([n, sym]);
       });
+      // getExports() carries the module's OWN table only — `export *`
+      // re-exports are not in it, and a namespace built without them
+      // answers `undefined` for a name Node answers, silently. Walked.
+      const star = moduleNsStarExports(L, dep);
+      if (star.unresolved !== null) {
+        L.unsupported(
+          "SC1090",
+          dep,
+          `a namespace of a module whose \`export * from "${star.unresolved}"\` names a module the build did not compile`,
+          "the namespace would silently omit every name that star contributes, which is worse than refusing to build it",
+        );
+      }
+      for (const pair of star.entries) {
+        if (!entries.some(([k]) => k === pair[0])) entries.push(pair);
+      }
       entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
       const fields: { key: IrExpr; value: IrExpr }[] = [];
       for (const [exportName, sym] of entries) {
