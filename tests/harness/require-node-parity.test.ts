@@ -237,6 +237,18 @@ const RUNS: readonly Program[] = [
     exit: 0,
   },
   {
+    // The program the NODE_PATH control below re-runs with NODE_PATH set.
+    // Here, with it unset, its answer is Node's own — which is the half
+    // of that control that keeps "fence whenever anything is uncertain"
+    // from passing it.
+    name: "the bare specifier the NODE_PATH control reuses",
+    src:
+      "function g(s) { try { require(s); return 'GOT' } catch (e) { return e.code } }\n" +
+      "console.log(g('np-only-xyz'));\n",
+    stdout: "MODULE_NOT_FOUND\n",
+    exit: 0,
+  },
+  {
     // A genuine RUN-TIME specifier — the zapo row's own shape. The build
     // cannot know the string, so the verdict is decided at run time
     // against the set of bare specifier roots the build could resolve.
@@ -659,9 +671,16 @@ async function build(name: string, p: { src: string; ext?: string; pkg?: string 
   };
 }
 
-function run(binary: string): { stdout: string; stderr: string; status: number | null } {
+function run(
+  binary: string,
+  extraEnv?: Record<string, string>,
+): { stdout: string; stderr: string; status: number | null } {
+  // `extraEnv` exists for one thing and it is not a convenience: NODE_PATH
+  // changes what Node's own require RESOLVES, so it is the only way to
+  // reach the resolution road the build cannot see.
+  const env = extraEnv === undefined ? process.env : { ...process.env, ...extraEnv };
   try {
-    const stdout = execFileSync(binary, [], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const stdout = execFileSync(binary, [], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env });
     return { stdout, stderr: "", status: 0 };
   } catch (e) {
     const err = e as { status?: number; stdout?: string; stderr?: string };
@@ -716,6 +735,54 @@ describe("the ambient CommonJS require, against Node v25.9.0", () => {
           `that is a silent wrong answer where an installed module exists. Saw: ${all.slice(0, 400)}`,
       ).toBe(true);
       expect(r.stdout, `${p.name} (${backend}) stdout`).toBe(p.stdout);
+    }
+  });
+
+  test("NODE_PATH is a resolution road the BUILD cannot see", async () => {
+    // `require("x")` does not stop at the node_modules chain. Module's
+    // globalPaths — every NODE_PATH entry, plus $HOME/.node_modules and
+    // $HOME/.node_libraries — are searched after it, and a NODE_PATH
+    // entry acts as a node_modules directory. Measured against Node
+    // v25.9.0: with NODE_PATH naming a directory that holds the package,
+    // `require` hands the module over from a program whose whole
+    // node_modules chain has never heard of it.
+    //
+    // The BUILD cannot see any of that: NODE_PATH is a RUN-TIME
+    // environment variable. So the arm that compiles "nothing installed
+    // resolves this" to Node's catchable MODULE_NOT_FOUND was answering
+    // MODULE_NOT_FOUND for a module Node hands over — on both backends —
+    // and `try { require(x) } catch` swallowed it. That is the silent
+    // direction, arriving through the front door of the arm built to
+    // remove it.
+    //
+    // TWO halves, and the second is why the first is not enough alone:
+    // with NODE_PATH unset the answer must STILL be Node's
+    // MODULE_NOT_FOUND, or a compiler that refused everything would pass.
+    const root = join(lab, "node-path-ext");
+    const ext = join(root, "np-only-xyz");
+    await mkdir(ext, { recursive: true });
+    await writeFile(join(ext, "package.json"), '{ "name": "np-only-xyz", "main": "index.js" }\n', "utf8");
+    await writeFile(join(ext, "index.js"), "module.exports = { v: 99 };\n", "utf8");
+    for (const backend of LANES) {
+      const b = BUILT.get(`R:the bare specifier the NODE_PATH control reuses:${backend}`)!;
+      const bare = run(b.binaryPath!);
+      expect(
+        bare.stdout,
+        `${backend}: with NODE_PATH unset this must still be Node's MODULE_NOT_FOUND`,
+      ).toBe("MODULE_NOT_FOUND\n");
+      const withPath = run(b.binaryPath!, { NODE_PATH: root });
+      const all = withPath.stdout + withPath.stderr;
+      // The program prints `e.code`, so the refusal arrives as the bare
+      // SCxxxx rather than the bracketed "[SCxxxx at file:line]" tag.
+      expect(
+        /\bSC\d{4}\b/.test(all),
+        `${backend}: NODE_PATH names a directory holding 'np-only-xyz', so Node hands the module over. ` +
+          `The binary must refuse, not answer MODULE_NOT_FOUND. Saw: ${all.slice(0, 300)}`,
+      ).toBe(true);
+      expect(
+        all.includes("MODULE_NOT_FOUND"),
+        `${backend}: answered MODULE_NOT_FOUND for a module Node hands over. Saw: ${all.slice(0, 300)}`,
+      ).toBe(false);
     }
   });
 
