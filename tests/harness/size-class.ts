@@ -201,11 +201,11 @@ const platform = process.platform;
 
 /** A default-built hello-world: no regex, no engine. */
 export const STATIC_CLASS_MAX =
-  platform === "linux" ? 397_632 : platform === "win32" ? 664_064 : 366_632;
+  platform === "linux" ? 397_632 : platform === "win32" ? 672_256 : 366_632;
 
 /** A program that uses regex: libregexp + libunicode, never the engine. */
 export const REGEX_CLASS_MAX =
-  platform === "linux" ? 552_680 : platform === "win32" ? 804_864 : 519_680;
+  platform === "linux" ? 552_680 : platform === "win32" ? 813_056 : 519_680;
 
 /* ── the ARMED half of the guard ───────────────────────────────────────
  *
@@ -625,11 +625,72 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * guarding, and that is twice now that it got there by a recalibration
  * moving one number of the pair.
  */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 655_872 : null;
+/* 2026-08-24 — the ENUMERABLE ACCESSOR (block/dynacc, the accessor SLOT).
+ * `Object.defineProperty(o, k, { get, enumerable: true })` used to refuse;
+ * the property now takes a descriptor in `hidden` and a position SLOT in
+ * the member table, and TEN walks over that table had to learn to ask
+ * about one.
+ *
+ * Measured through this file's own programs, run from the CLI on both
+ * trees in the same shell (G:/blocks/dynacc/lab/size/measure.mjs); the
+ * branch's static figure agrees with island.test.ts's to the byte.
+ *
+ *                       base a9d2c599   this branch     delta
+ *   static hello-world      658,944       664,064      +5,120
+ *   regex program           799,744       804,864      +5,120
+ *
+ * BASE DOES NOT REPRODUCE THE RECORDED ANCHORS, and that is the first
+ * thing to say, exactly as the 2026-08-21 entry below had to say it. The
+ * recorded pair was 655,872 / 796,672; base measures 658,944 / 799,744, so
+ * 3,072 bytes on each class were spent by unrelated merges before this
+ * branch compiled a line. They stayed silent because 3,072 is under one
+ * 4,096-byte page. This branch spent 5,120 of its own on each, and it is
+ * the SUM — 8,192, exactly two pages — that the harness complained about.
+ * So the feature is five eighths of the complaint, not all of it.
+ *
+ * The class DISTANCE is byte-identical across the change: 799,744 -
+ * 658,944 = 140,800 and 804,864 - 664,064 = 140,800. Both classes pay the
+ * same always-linked bytes, which is the available statement that this is
+ * a runtime-core cost and not a library link — and it is also why the
+ * regex-only TU's own growth (scr_assert.c, whose deepStrictEqual walk,
+ * diff renderer and assert.throws shape all learned the slot) did not tip
+ * an extra page of its own.
+ *
+ * WHAT THE FIVE PAGES BOUGHT, in always-linked TUs:
+ *   scr_json.c        the slot singleton and its six readers
+ *                     (scr_dyn_obj_entry_is_slot / _has_enum_acc /
+ *                     _entry_read / _entry_listed / _enum_key_count /
+ *                     _own_enum_read), the slot arm in each of
+ *                     scr_dyn_objwalk, scr_dyn_json_write_raw,
+ *                     scr_jb_put_dyn_raw, scr_sc_clone and
+ *                     scr_dyn_assign_from, the fifth descriptor element,
+ *                     and scr_dyn_obj_acc_fence — whose two message
+ *                     literals are ~700 bytes of the total on their own,
+ *                     which is the price of a refusal that names the
+ *                     property and says which surfaces are exact.
+ *   scr_inspect.c     the `[Getter]`/`[Setter]`/`[Getter/Setter]` arm.
+ *   scr_dyn_invoke.c  dyn_redefine_accessor_flags and the generic-
+ *                     descriptor arm, MINUS the ~450-byte refusal message
+ *                     this branch deleted.
+ *
+ * THE MAX CEILINGS MOVE, by the rule this file adopted on 2026-08-20 and
+ * has twice failed to apply: on win32, CLASS_MAX = CLASS_RECORDED + 2 x
+ * SIZE_DRIFT_PAGE, so a one-page drift always trips the informative
+ * RECORDED pair a full page before the coarse ceiling can say anything.
+ * The ceilings this branch inherited were 664,064 and 804,864 — the
+ * branch's own measurements to the byte, i.e. ZERO headroom, so
+ * `toBeLessThan` would have fired on the very same page as the recorded
+ * check. Applied here rather than restated:
+ *
+ *     672,256 = 664,064 + 8,192      813,056 = 804,864 + 8,192
+ */
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 664_064 : null;
 
 /** The regex program, same run, same tree. Deliberately NOT derived from
- * the static delta: this class moved +1,536 where that one moved +2,048. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 796_672 : null;
+ * the static delta — though on THIS change the two classes moved by the
+ * identical 5,120, which is itself the evidence that the cost is
+ * always-linked core rather than a library link. */
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 804_864 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown
