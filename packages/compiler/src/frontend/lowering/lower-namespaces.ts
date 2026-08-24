@@ -398,6 +398,93 @@ function nsNameSet(
   return out;
 }
 
+
+/** The (name, symbol) pairs an `export *` chain contributes to a module's
+ * namespace — the ones `moduleSymbol.getExports()` does NOT carry.
+ *
+ * `getExports()` answers a module's OWN export table: declarations, named
+ * re-exports and `export * as ns` are in it, star re-exports are not (the
+ * checker resolves those lazily, per member access). Any walk that builds
+ * a namespace off `getExports()` alone therefore SILENTLY OMITS every
+ * starred name — measured on main at `27343f6f`, a dynamic-import
+ * namespace answered `undefined` for a star-re-exported const where Node
+ * answers its value, at exit 0, with no diagnostic.
+ *
+ * Only the STAR contribution is returned, already de-duplicated against
+ * the root's own table, so a caller appends it to its existing walk and
+ * nothing else about that walk changes. Node's rules, each with a case
+ * behind it in tests/harness/module-ns-keys.test.ts: `default` is never
+ * re-exported by a star, a LOCAL export shadows a starred one, a name two
+ * DIFFERENT stars provide is ambiguous and omitted, and a re-export cycle
+ * terminates.
+ *
+ * `unresolved` names an `export *` target the build did not compile. Its
+ * names would come from a .d.ts — a claim about a module this program
+ * does not contain — so a caller must REFUSE rather than answer a short
+ * namespace. */
+export function moduleNsStarExports(
+  L: Lowerer,
+  sf: ts.SourceFile,
+): { entries: [string, ts.Symbol][]; unresolved: string | null } {
+  const own = new Set<string>();
+  L.checker.getSymbolAtLocation(sf)?.getExports().forEach((_s: ts.Symbol, key: ts.__String) => {
+    own.add(String(key));
+  });
+  const found = new Map<string, ts.Symbol>();
+  const owner = new Map<string, ts.SourceFile>();
+  const ambiguous = new Set<string>();
+  const state = { unresolved: null as string | null };
+  collectStarExports(L, sf, new Set<ts.SourceFile>([sf]), own, found, owner, ambiguous, state);
+  for (const n of ambiguous) found.delete(n);
+  return {
+    entries: [...found.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
+    unresolved: state.unresolved,
+  };
+}
+
+function collectStarExports(
+  L: Lowerer,
+  sf: ts.SourceFile,
+  seen: Set<ts.SourceFile>,
+  shadowed: ReadonlySet<string>,
+  found: Map<string, ts.Symbol>,
+  owner: Map<string, ts.SourceFile>,
+  ambiguous: Set<string>,
+  state: { unresolved: string | null },
+): void {
+  for (const stmt of sf.statements) {
+    if (!ts.isExportDeclaration(stmt)) continue;
+    if (stmt.exportClause !== undefined) continue; // named / `* as ns`: the own table has it
+    if (stmt.isTypeOnly) continue;
+    if (stmt.moduleSpecifier === undefined || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+    const spec = stmt.moduleSpecifier.text;
+    const dep = resolveImport(L.program, sf, spec);
+    if (dep === null || dep === undefined || dep.isDeclarationFile || !L.fileTag.has(dep)) {
+      state.unresolved ??= spec;
+      continue;
+    }
+    if (seen.has(dep)) continue; // a re-export cycle contributes nothing further
+    seen.add(dep);
+    const depOwn: [string, ts.Symbol][] = [];
+    L.checker.getSymbolAtLocation(dep)?.getExports().forEach((sym: ts.Symbol, key: ts.__String) => {
+      depOwn.push([String(key), sym]);
+    });
+    for (const [n, sym] of depOwn) {
+      if (n === "default" || n === "export=" || n.startsWith("__")) continue;
+      if (shadowed.has(n)) continue; // the root's own export shadows a starred one
+      const prev = owner.get(n);
+      if (prev !== undefined && prev !== dep) {
+        ambiguous.add(n); // Node omits a name two different stars provide
+        continue;
+      }
+      owner.set(n, dep);
+      found.set(n, sym);
+    }
+    // The far hop, whose names the NEAR hop's own table shadows in turn.
+    const depNames = new Set<string>([...shadowed, ...depOwn.map(([n]) => n)]);
+    collectStarExports(L, dep, seen, depNames, found, owner, ambiguous, state);
+  }
+}
 /** The member identifier of a qualified namespace reference, when `access`
  * reads a member declared in a lowered (or type-only) namespace block —
  * or an EXPORT of a program module read through its namespace-import
