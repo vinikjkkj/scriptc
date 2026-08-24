@@ -221,6 +221,17 @@ async function parseOneHeader(
     const retText = before.slice(boundary + 1).replace(/\s+/g, " ").trim();
     if (retText === "" || !/^[A-Za-z_][A-Za-z0-9_ *]*[ *]$/.test(`${retText} `)) continue;
     if (/\btypedef\b/.test(retText)) continue;
+    // …and a STATEMENT KEYWORD is not a return type. `return scr_f(x);`
+    // inside a `static inline` body matches everything above: the call
+    // ends `);`, the boundary before it is the opening brace, and the one
+    // word left is `return`, which passes the identifier-shape test. The
+    // guard then read the CALL as a prototype and tried to map its
+    // ARGUMENT as a C type — which is how one line of scr_dyn_fn_sig's
+    // body came back as `a C type this guard cannot map: "d->v.fn."`.
+    // No C declaration has any of these as its return type, so nothing
+    // real is lost by skipping them, and a header is free to contain the
+    // statement.
+    if (/^(return|else|do|case|goto|sizeof)$/.test(retText)) continue;
     const argsText = src.slice(m.index + m[0].length, end).replace(/\s+/g, " ").trim();
     const parts = argsText === "" || argsText === "void" ? [] : splitParams(argsText);
     const variadic = parts[parts.length - 1] === "...";
