@@ -90,6 +90,7 @@ import {
 import { DK, LlDyn } from "./dyn.js";
 import { emitNpmEmbeddingLl } from "./island.js";
 import { rcAdapters } from "../emission/emit-types.js";
+import { resetSrcSiteCache, srcSite } from "../emission/emitter.js";
 import { LlvmCensus, llvmCensusEnabled, LlvmUnsupportedError } from "./unsupported.js";
 import { LlWalkers } from "./walkers.js";
 import { wsGlobalCtorFor } from "./ws.js";
@@ -156,6 +157,7 @@ interface LlScopeEntry {
 }
 
 export function emitLlvmModule(mod: IrModule): string {
+  resetSrcSiteCache();
   return new LlEmitter(mod).emit();
 }
 
@@ -2451,10 +2453,26 @@ class LlEmitter {
       // (SEMANTICS.md; the C helper's message additionally interpolates
       // the runtime key — a trap-path debugging nicety, never reachable
       // by a program whose behavior matches Node).
-      msgHelper(
-        "sc_bad_key",
-        "sc_bad_key_msg",
-        "scriptc: TypeError: record has no key (typed slot — no undefined is representable)\n",
+      //
+      // The site and the why arrive as ARGUMENTS, exactly as they do on
+      // the C lane and for the same reason: this helper is shared by
+      // every keyed read in the module, so it cannot name the one that
+      // died. An abort with no code, no file and no line is the worst
+      // diagnostic shape this project has; the two pointers are what
+      // stop this one from having it, and they cost one interned
+      // constant per site.
+      const msg =
+        "scriptc: TypeError: record has no key (typed slot — no undefined is representable) (SC9003 at %s)\n%s\n";
+      const bytes = Buffer.byteLength(msg, "utf8");
+      this.declare(`declare void @scr_trap_fmt(ptr, ...)`);
+      defs.push(
+        `@sc_bad_key_msg = internal constant [${bytes + 1} x i8] c"${llStrBytes(msg)}"`,
+        `define internal void @sc_bad_key(ptr %site, ptr %why) ${FN_ATTRS} {`,
+        `entry:`,
+        `  call void (ptr, ...) @scr_trap_fmt(ptr @sc_bad_key_msg, ptr %site, ptr %why)`,
+        `  unreachable`,
+        `}`,
+        ``,
       );
     }
     if (this.needsRetainBox) {
@@ -11751,7 +11769,21 @@ class LlEmitter {
       }
     }
     this.needsBadKey = true;
-    B.line(`call void @sc_bad_key()`);
+    // Both halves of the name, interned per distinct text: WHERE the read
+    // is written, and WHY the compiler believed the miss impossible. The
+    // why is structural and is the whole classification of this abort
+    // family — a shape with no index signature cannot be read at `r[k]`
+    // unless the checker proved the key is one of its declared ones, so
+    // only an unchecked cast or a dynamic crossing that validated `string`
+    // rather than the literal union can reach it. The C lane bakes the
+    // same sentence into the per-shape helper; here the chain is inlined
+    // per site, so it rides in beside the site.
+    const names = shape.fields.map((f) => f.name);
+    const shown = names.length > 6 ? `${names.slice(0, 6).join(", ")}, ... (${names.length} in all)` : names.join(", ");
+    const why = !shape.indexValue
+      ? `  the shape declares only {${shown}} and has no index signature, so no key outside that set typechecks at this read: an unchecked cast or an unvalidated dynamic crossing reached it`
+      : `  the key is absent from the index signature and the result width has no undefined to answer with`;
+    B.line(`call void @sc_bad_key(ptr ${this.cstr(srcSite(loc))}, ptr ${this.cstr(why)})`);
     B.terminate(`unreachable`);
   }
 

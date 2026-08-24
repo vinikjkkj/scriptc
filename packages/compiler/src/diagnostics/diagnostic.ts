@@ -526,8 +526,16 @@ export const UNSUPPORTED: Record<string, UnsupportedEntry> = {
  * no lowering on either tier. Process-level codes are deliberately absent:
  * preflight gates (SC0001–SC0004), comptime evaluation failures (SC1110),
  * the alternate-backend tier refusal (SC3001), and internal errors
- * (SC9001/SC9002) report problems or engine tiers, not language/stdlib
- * surface. */
+ * (SC9001/SC9002/SC9003) report problems or engine tiers, not
+ * language/stdlib surface.
+ *
+ * SC9003 is the only one of those that never appears at COMPILE time: it
+ * is the emitted keyed-read abort (`r[k]` on a result width with no
+ * `undefined` in it — emit-walkers.ts's recordKeyGetHelper and
+ * llvm/emitter.ts's @sc_bad_key), and it exists so that an abort which
+ * used to name no code, no file and no line names all three. It has no
+ * registry entry here for the same reason SC9001 has none: it reports a
+ * state the program reached, not a surface the compiler declined. */
 export const FENCE_CODES: Record<string, { name: string; status: "unsupported" | "dynamic-only" }> = {
   // SC2001 is the residual type fence: the named type-shape families each
   // carry their own code (SC2005 generic signatures, SC2006 index

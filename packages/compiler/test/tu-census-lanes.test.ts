@@ -396,16 +396,23 @@ describe("the census reads the LLVM lane", () => {
   test("the emitter differences the lanes DO have are the two known ones", () => {
     // (1) the .ll interns its message strings, so the bracket census.mjs
     //     counts is one per DISTINCT message and not one per throw;
-    // (2) the .ll's keyed-read abort is ONE shared sc_bad_key helper carrying
-    //     a fixed message, where the C emitter emits one sc_rkg_N per result
-    //     type whose scr_trap_fmt template names the typed slot.
-    // Both are properties of the emitter. Neither changes what the program can
-    // do, which is what the two tests above assert.
+    // (2) the .ll's keyed-read abort is ONE shared sc_bad_key helper for the
+    //     whole module, where the C emitter emits one sc_rkg_N per result
+    //     type whose message names the typed slot. Since SC9003 both lanes
+    //     hand that helper the SOURCE SITE and the shape's own sentence as
+    //     pointers — so the .ll now calls scr_trap_fmt too, which it never
+    //     used to, and the census's LLVM reader classifies that call shape.
+    //     The difference that remains is how many helpers each lane spells
+    //     the abort with, not what the program can do.
     const ll = readFileSync(TU.get("a4-abort:llvm")!, "latin1");
     const c = readFileSync(TU.get("a4-abort:c")!, "latin1");
-    expect(ll).toContain("define internal void @sc_bad_key()");
-    expect(ll).not.toContain("scr_trap_fmt");
+    expect(ll).toContain("define internal void @sc_bad_key(ptr %site, ptr %why)");
+    expect(ll).toContain("(SC9003 at %s)");
+    expect(ll).toMatch(/call void \(ptr, \.\.\.\) @scr_trap_fmt\(ptr @sc_bad_key_msg,/);
     expect(c).toContain("scr_trap_fmt");
+    expect(c).toContain("(SC9003 at %s)");
+    // ONE shared helper on the .ll against one per result type on the C lane
+    expect((ll.match(/define internal void @sc_bad_key\(/g) ?? []).length).toBe(1);
     // and the tagged plant's message really does ride a pointer on the .ll
     const a1 = readFileSync(TU.get("a1-tagged:llvm")!, "latin1");
     expect(a1).toMatch(/call void @scr_throw_error_msg_code\(i32 -?\d+, ptr @[A-Za-z0-9_.$]+, i64 \d+, ptr @[A-Za-z0-9_.$]+\)/);

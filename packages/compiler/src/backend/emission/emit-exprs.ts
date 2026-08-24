@@ -2156,7 +2156,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // keyed-read helper.  Empty text with the dial off.
         const rkHit = E.rkHitC(helper, e.shapeId, typeKey(e.type));
         if (rkHit !== "") E.line(rkHit.trimEnd());
-        return E.newTemp(e.type, `${helper}(${obj.name}, ${key.name})`);
+        // The SITE, for a helper whose miss path aborts (SC9003); empty
+        // text for one that answers undefined.
+        return E.newTemp(e.type, `${helper}(${obj.name}, ${key.name}${E.rkSiteArgC(helper, e.loc)})`);
       }
       case "recordOvfKeys": {
         // The overflow map's live keys in JS own-key order — a fresh
@@ -2528,7 +2530,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // SCRIPTC_RKG_COUNT: the union-arm call site, in the same ordinal
           // space as the direct one.  Empty text with the dial off.
           const rkHit = E.rkHitC(helper, arm.shapeId, typeKey(e.type));
-          E.line(`case ${i}: ${rkHit}${name} = ${helper}((${cType(arm).trim()})scr_union_peek(${u.name}), ${k.name}); break;`);
+          E.line(`case ${i}: ${rkHit}${name} = ${helper}((${cType(arm).trim()})scr_union_peek(${u.name}), ${k.name}${E.rkSiteArgC(helper, e.loc)}); break;`);
         });
         E.line(`default: ${E.badTagAbortC()};`);
         E.indent--;
