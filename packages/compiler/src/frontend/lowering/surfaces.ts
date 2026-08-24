@@ -952,6 +952,103 @@ export const BUILTIN_MODULE_FN_ALIASES: Record<string, Record<string, readonly I
   },
 };
 
+/** Builtin-module members whose table row is a FAITHFUL description of
+ * what the member's call lowers to -- one libCall, exactly the row's
+ * parameter types, exactly its result, no argument-shape special case
+ * anywhere in the dispatch. These are the members that may also be taken
+ * as a VALUE (lower-fnvalue.ts's builtinMemberFnValueOf); everything else
+ * keeps its SC1090.
+ *
+ * WHY AN ALLOW-LIST AND NOT A PREDICATE. A value form's body is the row's
+ * libCall over the row's parameters, so it is right exactly when the row
+ * is the whole truth about the call. For most of BUILTIN_MODULE_FNS it is
+ * not: lowerBuiltinModuleCall special-cases fs.readFileSync's encoding,
+ * fs.mkdirSync's options object, every zlib member's string input,
+ * child_process's four call completions, querystring's parse/stringify,
+ * readline.createInterface's option literal, timers/promises' arity
+ * completion and diagnostics_channel's whole surface. A value minted from
+ * the ROW for any of those would answer the row's libCall where the call
+ * form answers a different one -- a silent wrong answer manufactured by
+ * the value form, which is strictly worse than the refusal it replaced.
+ * Nothing here is inferred; each name was read against the dispatch.
+ *
+ * WHAT THE SET ACTUALLY BUYS, measured rather than predicted. The set
+ * names 49 members. How many of them get a value form depends on the TYPE
+ * SURFACE the build reads, because the gate compares against the
+ * checker's own mapping: 29 under @types/node 24.13.3, and 47 under this
+ * compiler's own fallback .d.ts (whose signatures are narrower --
+ * `existsSync(path: string)` rather than `PathLike`). Both numbers are
+ * right; a program gets a value exactly where its own types justify one.
+ *
+ * The reach those 49 cover is bounded, and the bound is worth writing
+ * down: over four corpora (zapo's compiled closure, this repo's own
+ * accepted corpus, and two node_modules trees) the 99 tabled members are
+ * named 1409 times in VALUE position, and 649 of those -- 46% -- are
+ * path.join and path.resolve, which no fixed-arity value form can ever be.
+ *
+ * MEMBERSHIP IS NOT SUFFICIENT. The gate in lower-fnvalue.ts still
+ * requires the CHECKER's own mapping of the member's type to equal
+ * `funcOf(row.params, row.result)` exactly, the same gate the global
+ * table applies for the same reason. That is what keeps a row whose
+ * @types/node signature is wider than the row (`fs.existsSync(path:
+ * PathLike)`, `os.platform(): NodeJS.Platform`) or has an optional
+ * parameter (`crypto.randomUUID(options?)`) from being offered: those
+ * would take an ADAPTER, and an adapter is a fresh closure with a
+ * different pointer, so `f === existsSync` would answer false where Node
+ * answers true. A name in this set that does not pass the gate keeps its
+ * SC1090 -- the set widens what MAY be offered, never what is.
+ *
+ * Deliberately absent, and each for a reason that is not "it is hard":
+ *   path.join / path.resolve      variadicPack -- Node's rest parameter,
+ *                                 and the func ABI is fixed-arity, so no
+ *                                 value form can be the same function
+ *   path.basename                 `defaults` completes the omitted suffix;
+ *                                 an exact-arity value would refuse the
+ *                                 one-argument call Node accepts
+ *   every ALIASED member          BUILTIN_MODULE_FN_ALIASES lists the
+ *                                 dispatch's other spellings of the same
+ *                                 member; more than one spelling means the
+ *                                 row is not the whole call */
+export const BUILTIN_MEMBER_FN_VALUES: Record<string, ReadonlySet<string> | undefined> = {
+  // Every fs entry here is a single libCall over scalar parameters with no
+  // arm in lowerBuiltinModuleCall: the option-form members (readFileSync,
+  // writeFileSync, mkdirSync, rmSync, readdirSync, accessSync,
+  // createReadStream, createWriteStream, watch, chmodSync, mkdtempSync)
+  // are all either aliased or special-cased and are absent.
+  fs: new Set([
+    "appendFileSync", "chownSync", "closeSync", "copyFileSync", "existsSync",
+    "lstatSync", "openSync", "readSync", "realpathSync", "rmdirSync",
+    "statSync", "unlinkSync",
+  ]),
+  // fs/promises: readFile (encoding special case + alias), mkdir (options
+  // arm) and open (`defaults`) are absent for those reasons.
+  "fs/promises": new Set(["chmod", "readdir", "rm", "stat", "unlink", "writeFile"]),
+  // The six fixed-arity path members, on all three tables. Each is one
+  // libCall over strings; the platform binding (bare `path` IS win32 on a
+  // win32 target) is the ROW's job and the value form inherits it, so the
+  // same source lowers to the same implementation the call form uses.
+  path: new Set(["dirname", "extname", "isAbsolute", "normalize", "relative", "toNamespacedPath"]),
+  "path/posix": new Set(["dirname", "extname", "isAbsolute", "normalize", "relative", "toNamespacedPath"]),
+  "path/win32": new Set(["dirname", "extname", "isAbsolute", "normalize", "relative", "toNamespacedPath"]),
+  // os: networkInterfaces and userInfo are entirely special-cased (their
+  // results are the call site's mapped shapes) and are absent.
+  os: new Set(["homedir", "platform", "release", "tmpdir", "totalmem", "type"]),
+  // crypto.randomBytes is aliased (the composed randomBytes(n).toString(enc)
+  // lowering) and is absent.
+  crypto: new Set(["randomInt", "randomUUID"]),
+  // url.fileURLToPath picks its libFn by the ARGUMENT's static type, so the
+  // row is not the whole call; pathToFileURL is.
+  url: new Set(["pathToFileURL"]),
+  // querystring: parse/decode/stringify/encode are special-cased; the
+  // escaping pair rides the generic table tail.
+  querystring: new Set(["escape", "unescape"]),
+  // The process-wide happy-eyeballs budget: two plain libCalls.
+  net: new Set([
+    "getDefaultAutoSelectFamilyAttemptTimeout",
+    "setDefaultAutoSelectFamilyAttemptTimeout",
+  ]),
+};
+
 /** Ambient surfaces lowered through DEDICATED code paths (no lowering-table
  * row): the Date compositions, perf_hooks' performance.now, and the process
  * global's ambient reads and authority calls. These are the determinism
@@ -1178,6 +1275,16 @@ function ownEntry<T>(table: Record<string, T | undefined>, key: string): T | und
 export function builtinModuleFnOf(L: Lowerer, module: string, member: string): BuiltinModuleFn | undefined {
   const mod = builtinModuleFnsOf(L, module);
   return mod ? ownEntry(mod, member) : undefined;
+}
+
+/** Is this member allowed to have a VALUE form? Own-property-safe for the
+ * same reason builtinModuleFnOf is: a member named `toString` must not
+ * answer Object.prototype's. Membership only says the row is a faithful
+ * description of the call -- lower-fnvalue.ts's gate still has to agree
+ * with the checker before anything is minted. */
+export function builtinMemberFnValueAllowed(module: string, member: string): boolean {
+  const set = ownEntry(BUILTIN_MEMBER_FN_VALUES, module);
+  return set !== undefined && set.has(member);
 }
 
 /** One member's fence hint, own-property-safe (a collision would print an
