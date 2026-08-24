@@ -35,15 +35,35 @@ import { compile } from "../src/index.js";
 
 /* Keyed reads the emitter must treat differently:
  *   - `a[k]` at `string` in a RETURN slot        ABORTS
- *   - `a[k].length`                              ABORTS (a member receiver)
+ *   - `n[k]` at `number` in a RETURN slot        ABORTS — a SECOND aborting
+ *                                                shape, so the dial still
+ *                                                has two ordinals to keep
+ *                                                dense and unique
+ *   - `a[k].length`                              a MEMBER RECEIVER, and no
+ *                                                longer in ABORT.real: it
+ *                                                takes the undefined arm and
+ *                                                throws Node's own receiver
+ *                                                TypeError rather than
+ *                                                aborting the process past
+ *                                                the program's own catch
+ *                                                (keyedReadAtMemberReceiver,
+ *                                                lower-exprs.ts). It stays in
+ *                                                the fixture as a second
+ *                                                helper that can answer
+ *                                                undefined and must NOT be
+ *                                                counted.
  *   - `b[k]` at `unknown` (dyn)                  ANSWERS undefined — not counted
  * plus a literal-key read that lowers to a plain field access and must never
  * appear here at all. */
 const PROGRAM = [
   `type Attrs = { [k: string]: string };`,
   `type Bag = { [k: string]: unknown };`,
+  `type Nums = { [k: string]: number };`,
   `function pick(a: Attrs, k: string): string {`,
   `  return a[k];`,
+  `}`,
+  `function pickNum(n: Nums, k: string): number {`,
+  `  return n[k];`,
   `}`,
   `function pickLen(a: Attrs, k: string): number {`,
   `  return a[k].length;`,
@@ -58,7 +78,8 @@ const PROGRAM = [
   `function main(): void {`,
   `  const a: Attrs = { x: "1", lit: "2" };`,
   `  const b: Bag = { y: 2 };`,
-  `  console.log(pick(a, "x"), pickLen(a, "x"), pickTwice(a, "x"), loose(b, "y"));`,
+  `  const n: Nums = { z: 3 };`,
+  `  console.log(pick(a, "x"), pickNum(n, "z"), pickLen(a, "x"), pickTwice(a, "x"), loose(b, "y"));`,
   `}`,
   `main();`,
   `export {};`,
