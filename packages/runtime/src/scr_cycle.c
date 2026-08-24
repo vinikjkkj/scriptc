@@ -65,6 +65,12 @@ static ScrPool scr_cyc_blocks;
 void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
   size_t phys = scr_pool_bytes(sizeof(ScrCycHdr) + size);
   ScrCycHdr *h = scr_pool_take(&scr_cyc_blocks, phys);
+#ifdef SCR_CYCEN_ON
+  /* tests/perf/cycensus/scr_cyc_census.h, -include'd. Defined only when
+   * that header is, so an ordinary build has no trace of these four lines
+   * — verified by building both ways and diffing the binary. */
+  const int scr_cycen_pooled = (h != NULL);
+#endif
   if (h) {
     /* calloc's contract, kept, but only where it is observable. Four of
      * the header's six fields are assigned unconditionally below and the
@@ -90,6 +96,11 @@ void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
   h->color = SCR_CYC_BLACK;
   h->blk = phys <= SCR_POOL_MAX ? (uint32_t)(phys / SCR_POOL_GRAIN) : 0u;
   scr_cyc_live++; /* the pacing denominator; see below */
+#ifdef SCR_CYCEN_ON
+  scr_cycen_hdr_bytes = (long long)sizeof(ScrCycHdr);
+  scr_cycen_note_alloc(h, phys, size, (const void *)free_fn, scr_cycen_pooled,
+                       scr_cyc_live);
+#endif
   return h + 1;
 }
 
@@ -98,8 +109,14 @@ void scr_cyc_free(void *obj) {
   ScrCycHdr *h = scr_cyc_hdr(obj);
   if (h->blk != 0 &&
       scr_pool_give(&scr_cyc_blocks, h, (size_t)h->blk * SCR_POOL_GRAIN)) {
+#ifdef SCR_CYCEN_ON
+    scr_cycen_note_free(h, 1, scr_cyc_live);
+#endif
     return;
   }
+#ifdef SCR_CYCEN_ON
+  scr_cycen_note_free(h, 0, scr_cyc_live);
+#endif
   free(h);
 }
 
