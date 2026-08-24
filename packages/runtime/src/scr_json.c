@@ -420,6 +420,14 @@ static size_t scr_dyn_free_count;
 static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx);
 static void scr_dyn_gcfree(void *o);
 
+#ifdef SCR_DYNCEN_ON
+/* tests/perf/dyncensus. The -include'd half cannot see ScrDyn (it is read
+ * before scr_runtime.h); this is the half that can, and it is where the
+ * two hooks below are defined. Absent the -include the symbol is undefined
+ * and this file compiles byte-identically. */
+#include "scr_dyn_census_walk.h"
+#endif
+
 static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
 #ifndef SCR_RC_AUDIT
   ScrDyn **list = kind == SCR_DYN_ARR   ? &scr_dyn_free_arr
@@ -462,12 +470,20 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
     } else {
       memset(&d->v, 0, sizeof d->v);
     }
+#ifdef SCR_DYNCEN_ON
+    scr_dyncen_note_alloc(d); /* the RECYCLED path: a node re-entering the
+                               * live population is an allocation to any
+                               * lane that counts what the program holds */
+#endif
     return d;
   }
 #endif
   ScrDyn *fresh = scr_cyc_alloc(sizeof *fresh, &scr_dyn_trace, &scr_dyn_gcfree);
   fresh->rc = 1;
   fresh->kind = kind;
+#ifdef SCR_DYNCEN_ON
+  scr_dyncen_note_alloc(fresh);
+#endif
 #ifdef SCR_RC_AUDIT
   scr_live_dyns++;
   scr_dyn_live_by_kind[kind]++;
@@ -517,6 +533,10 @@ void scr_dyn_trace_v(void *o, ScrTraceVisit visit, void *ctx) {
  * they are not references at all. */
 static void scr_dyn_gcfree(void *o) {
   ScrDyn *d = (ScrDyn *)o;
+#ifdef SCR_DYNCEN_ON
+  scr_dyncen_note_dead(d); /* the collector's exit from the live set; the
+                            * fields are still intact at this point */
+#endif
   switch (d->kind) {
   case SCR_DYN_STR:
     scr_str_release(d->v.str);
@@ -581,6 +601,14 @@ void scr_dyn_release(ScrDyn *d) {
     return;
   }
   scr_cyc_on_dead(d); /* drop any candidate-buffer entry before teardown */
+#ifdef SCR_DYNCEN_ON
+  scr_dyncen_note_dead(d); /* the refcount's exit from the live set. It runs
+                            * whether the node is then PARKED on a freelist
+                            * or handed to scr_cyc_free: a parked node is
+                            * resident but the program no longer holds it,
+                            * and that distinction is the whole point of a
+                            * lane above scr_json.c rather than below it. */
+#endif
   switch (d->kind) {
   case SCR_DYN_STR:
     scr_str_release(d->v.str);
