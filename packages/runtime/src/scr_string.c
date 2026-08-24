@@ -122,8 +122,15 @@ static ScrStr *scr_str_alloc(size_t len, size_t cap) {
 #ifdef SCR_RC_AUDIT
   scr_live_strings++;
 #endif
+#ifdef SCR_STRCEN_ON
+  scr_strcen_born(s, (long long)len, (long long)cap);
+#endif
   return s;
 }
+
+#ifdef SCR_STRCEN_ON
+#include "scr_str_census_walk.h"
+#endif
 
 ScrStr *scr_str_new(const char *bytes, size_t len) {
   ScrStr *s = scr_str_alloc(len, len);
@@ -151,6 +158,9 @@ static ScrStr *scr_str_take_spare(size_t len) {
     scr_str_spare = NULL;
     s->rc = 1;
     s->len = len; /* keeps its larger cap */
+#ifdef SCR_STRCEN_ON
+    scr_strcen_born(s, (long long)len, (long long)s->cap);
+#endif
     return s;
   }
 #else
@@ -171,9 +181,15 @@ ScrStr *scr_str_alloc_raw(size_t len, size_t cap) {
 
 ScrStr *scr_str_regrow(ScrStr *s, size_t newcap) {
   scr_sidx_purge(s); /* realloc may move; the old address may be recycled */
+#ifdef SCR_STRCEN_ON
+  scr_strcen_died(s, (long long)s->len, (long long)s->cap);
+#endif
   ScrStr *r = realloc(s, scr_pool_bytes(sizeof(ScrStr) + newcap + 1));
   if (!r) scr_oom();
   r->cap = newcap;
+#ifdef SCR_STRCEN_ON
+  scr_strcen_born(r, (long long)r->len, (long long)newcap);
+#endif
   return r;
 }
 
@@ -181,6 +197,9 @@ void scr_str_release(ScrStr *s) {
   if (!s || s->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
   if (--s->rc == 0) {
     scr_sidx_purge(s); /* the address may be recycled by the next malloc */
+#ifdef SCR_STRCEN_ON
+    scr_strcen_died(s, (long long)s->len, (long long)s->cap);
+#endif
 #ifdef SCR_RC_AUDIT
     scr_live_strings--;
 #endif
