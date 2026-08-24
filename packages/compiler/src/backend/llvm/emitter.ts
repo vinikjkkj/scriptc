@@ -90,7 +90,7 @@ import {
 import { DK, LlDyn } from "./dyn.js";
 import { emitNpmEmbeddingLl } from "./island.js";
 import { rcAdapters } from "../emission/emit-types.js";
-import { srcSite } from "../emission/emitter.js";
+import { resetSrcSiteCache, srcSite } from "../emission/emitter.js";
 import { LlvmCensus, llvmCensusEnabled, LlvmUnsupportedError } from "./unsupported.js";
 import { LlWalkers } from "./walkers.js";
 import { wsGlobalCtorFor } from "./ws.js";
@@ -157,6 +157,7 @@ interface LlScopeEntry {
 }
 
 export function emitLlvmModule(mod: IrModule): string {
+  resetSrcSiteCache();
   return new LlEmitter(mod).emit();
 }
 

@@ -76,6 +76,21 @@ export function rcSitesRequested(): boolean {
  * and no SourceFile, so the file is read once and indexed. Only ever called
  * under rcSitesRequested(); an unreadable file degrades to the offset. */
 const rcLineIndex = new Map<string, number[] | null>();
+
+/** Drop the line-index cache. Called at the top of every emission, and it is
+ * not an optimisation detail: the cache is keyed by absolute path with no
+ * invalidation, and `compile()` is a LIBRARY entry point that a single
+ * process calls many times (every test file in this repo does). Two builds
+ * of different content at the same path — a fixture rewritten between
+ * compiles, which is how the tests here work — would otherwise take the
+ * first build's line numbers, and a site that names the wrong line is worse
+ * than no site at all. Within ONE emission the file cannot change, so
+ * clearing per emission keeps every bit of the sharing that matters and
+ * bounds the memory to one program's sources. */
+export function resetSrcSiteCache(): void {
+  rcLineIndex.clear();
+}
+
 function lineStartsOf(file: string): number[] | null {
   let starts = rcLineIndex.get(file);
   if (starts === undefined) {
@@ -114,6 +129,7 @@ export function rcSiteLabel(loc: { file: string; start: number } | undefined, na
 }
 
 export function emitModule(mod: IrModule, sourceText?: string): string {
+  resetSrcSiteCache();
   return new CEmitter(mod, sourceText).emit();
 }
 
