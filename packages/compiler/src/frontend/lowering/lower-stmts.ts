@@ -4122,24 +4122,89 @@ export function keyedReadGlobalIsDyn(L: Lowerer, decl: ts.VariableDeclaration): 
  * global collectGlobals already registered for it. So the question asked is
  * that global's type, and a name with no registered dyn global answers no.
  *
- * JAVASCRIPT sources only, and only where the initializer is a bare
- * identifier: everything past one — a call, a keyed read, a property read —
- * has a lowering of its own whose result this cannot predict, and collect-
- * Globals runs before any body lowers. In TypeScript the record is an
- * ANNOTATION the author wrote, and a checked cast into it is what they
- * asked for; the copy is then the promise, not the defect.
+ * JAVASCRIPT sources only. `dynAliasRootOf` spells the initializers whose
+ * value is provably checked-dynamic, each ending at one ROOT identifier that
+ * answers for the whole expression:
+ *
+ *   - a MEMBER CHAIN over an identifier — `ns`, `root.sub`, `root.mid.leaf`,
+ *     `root["sub"]`. A member read off a checked-dynamic receiver IS
+ *     checked-dynamic, so the chain's value is the object sitting at that key
+ *     when the declaration ran. THIS arm is the aliasing one.
+ *   - `{ ...src }` and `structuredClone(src)` over such a value. These build
+ *     a FRESH object and must keep doing so — what they need the slot for is
+ *     the WIDTH: a shallow or deep copy of a dyn value is a dyn value, and a
+ *     record slot would re-materialise it and drop exactly the run-time keys
+ *     the copy exists to carry.
+ *
+ * Everything else — a call, an element read at a computed key — has a
+ * lowering of its own whose result this cannot predict, and collectGlobals
+ * runs before any body lowers. In TypeScript the record is an ANNOTATION the
+ * author wrote, and a checked cast into it is what they asked for; the copy
+ * is then the promise, not the defect.
+ *
+ * The chain names the object AT the key, not the key: `root.sub = {...}`
+ * after the binding exists REBINDS the key and the binding must keep the
+ * object it named. That falls out of reading the member once, which is what
+ * the declaration already does — a fix that re-read the key instead would
+ * answer the new object where Node answers the old one.
  *
  * `bindingHoldsItsInitializer` is the same proof both adoption arms rest on:
  * a `let` reassigned later could name an unrelated value. */
+function dynAliasRootOf(L: Lowerer, e: ts.Expression, depth: number): ts.Identifier | null {
+  if (depth > 8) return null;
+  let x: ts.Expression = e;
+  for (;;) {
+    if (ts.isParenthesizedExpression(x)) { x = x.expression; continue; }
+    // An OPTIONAL link is out: `root?.sub` yields undefined for a nullish
+    // receiver, and a slot that took the dyn value would have to hold that
+    // undefined too — a different question with a different answer.
+    if (ts.isPropertyAccessExpression(x) && x.questionDotToken === undefined && ts.isIdentifier(x.name)) {
+      x = x.expression;
+      continue;
+    }
+    if (
+      ts.isElementAccessExpression(x) && x.questionDotToken === undefined &&
+      ts.isStringLiteralLike(x.argumentExpression)
+    ) {
+      x = x.expression;
+      continue;
+    }
+    break;
+  }
+  if (ts.isIdentifier(x)) return x;
+  // `{ ...src }` — a FRESH object, and a checked-dynamic one: with a dyn
+  // source the literal builds through lowerDynSpreadObjectLiteral, so the
+  // slot has to take a dyn value or the shallow copy is re-materialised into
+  // a record and loses the run-time keys it just went to the trouble of
+  // copying. The binding does NOT alias here and must not: the aliasing
+  // answer belongs to the identifier arm above.
+  if (ts.isObjectLiteralExpression(x)) {
+    for (const p of x.properties) {
+      if (!ts.isSpreadAssignment(p)) continue;
+      const r = dynAliasRootOf(L, p.expression, depth + 1);
+      if (r !== null) return r;
+    }
+    return null;
+  }
+  // `structuredClone(v)` over a dyn `v` answers a dyn DEEP copy, for the
+  // same reason and with the same non-aliasing.
+  if (
+    ts.isCallExpression(x) && ts.isIdentifier(x.expression) && x.expression.text === "structuredClone" &&
+    x.arguments.length >= 1 && L.isStdlibSymbol(L.resolveValueSymbol(x.expression) ?? undefined)
+  ) {
+    return dynAliasRootOf(L, x.arguments[0]!, depth + 1);
+  }
+  return null;
+}
+
 export function dynAliasBindingName(L: Lowerer, decl: ts.VariableDeclaration): ts.Identifier | null {
   // The SYNTAX first, then the checker, then the file walk: this runs at
   // every declaration of every JS source in the program, and
   // bindingHoldsItsInitializer scans the declaring file for writes.
   if (decl.initializer === undefined || decl.type !== undefined) return null;
   if (!ts.isIdentifier(decl.name)) return null;
-  let init: ts.Expression = decl.initializer;
-  while (ts.isParenthesizedExpression(init)) init = init.expression;
-  if (!ts.isIdentifier(init)) return null;
+  const init = dynAliasRootOf(L, decl.initializer, 0);
+  if (init === null) return null;
   if (!isJsSourceFile(decl.getSourceFile())) return null;
   // Only where the slot would otherwise COPY. A binding the checker already
   // types `any` is dyn by the ordinary fallback and nothing here fires.
@@ -4149,7 +4214,14 @@ export function dynAliasBindingName(L: Lowerer, decl: ts.VariableDeclaration): t
 
 /** The FILE-SCOPE half, which has to PREDICT: collectGlobals runs before any
  * body lowers, so it asks the registered global instead of the lowered
- * value. lowerVarDecl's local rung asks the value itself. */
+ * value. lowerVarDecl's local rung asks the value itself.
+ *
+ * The prediction reaches a whole member CHAIN through the ROOT identifier,
+ * because a member read off a checked-dynamic receiver is checked-dynamic at
+ * every link: if `root` holds the dyn object then so does `root.mid.leaf`.
+ * A false positive costs a dyn box and no answer — keyedReadGlobalIsDyn's
+ * own argument, and the same one here: the declaration then lowers with a
+ * DYN expectation, and coerceToExpected widens or declines. */
 export function dynAliasBindingIsDyn(L: Lowerer, decl: ts.VariableDeclaration): boolean {
   const init = dynAliasBindingName(L, decl);
   if (init === null) return false;
