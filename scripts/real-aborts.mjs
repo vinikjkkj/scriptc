@@ -20,14 +20,29 @@
 //                `sc_f_<name>` host is a SOURCE function and names the
 //                place in the program the abort can happen; `sc_w_`/`sc_fc_`
 //                are closure trampolines and are reported as such.
+//   site         the SOURCE LINE the read was written at, taken from the
+//                trailing `const char *sc_site` argument an aborting helper
+//                takes (SC9003).  Three reports before this one had to join
+//                a separate frontend census on byte offsets to answer that,
+//                in a second file that could drift from the TU; there is
+//                nothing to join now.  `null` on a TU emitted before the
+//                argument existed, and the report says so.
+//   class        DECLARED-KEYS (the shape has no index signature, so
+//                TypeScript admitted only its declared keys at this read
+//                and the miss needs a cast or a dynamic crossing) or
+//                INDEX-MISS (the key really can be absent).  Read off the
+//                helper's own body: `overflow=null` IS the absence of the
+//                index signature.
 //
 // The call-site unit is tu-census.mjs's: a call on an indented line, minus
 // the prototype/definition headers at column 0.  It is reproduced here
 // rather than imported so the two instruments can disagree out loud.
 //
-// SELF-TEST: `--selftest` runs over a planted fixture with two helpers, a
-// known caller set and one caller reached only through a function pointer,
-// and exits non-zero unless every planted fact is recovered.
+// SELF-TEST: `--selftest` runs over a planted fixture with four helpers --
+// one of each abort class plus a record-result one -- a known caller set,
+// one caller reached only through a function pointer, a site behind a cast
+// and a nested call, and a call with NO site argument at all, and exits
+// non-zero unless every planted fact is recovered.
 //
 // usage: node scripts/real-aborts.mjs <tu.c> [--json <out>] [--quiet]
 //        node scripts/real-aborts.mjs --selftest
@@ -200,7 +215,7 @@ const FIXTURE = [
   "  if (scr_str_eq(k, (ScrStr *)&sc_s_3)) { /* debug */",
   "    return r->sc_m_debug;",
   "  }",
-  '  scr_trap_fmt("scriptc: TypeError: record has no key \'%.*s\' (typed \'number\' - no undefined is representable) [SC9003 at %s]\\n", (int)k->len, k->data, sc_site);',
+  '  scr_trap_fmt("scriptc: TypeError: record has no key \'%.*s\' (typed \'number\' - no undefined is representable) (SC9003 at %s)\\n", (int)k->len, k->data, sc_site);',
   "}",
   "static void sc_f_parse(void) {",
   '  double t = sc_rkg_3(tbl, k0, "G:/x/ConsoleLogger.ts:70:13");',
