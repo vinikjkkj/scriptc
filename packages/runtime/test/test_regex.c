@@ -34,8 +34,8 @@ static void check(bool ok, const char *what) {
 
 /* Immortal literals + regexes, exactly the layout the compiler emits. */
 #define LIT(name, s) \
-  static struct { size_t rc; size_t len; size_t cap; char data[sizeof(s)]; } name = \
-      {SIZE_MAX, sizeof(s) - 1, sizeof(s) - 1, s}
+  static SCR_STR_LIT(sizeof(s)) name = \
+      {SCR_STR_IMMORTAL, sizeof(s) - 1, sizeof(s) - 1, s}
 #define RE(name, pat, fl)  \
   LIT(name##_pat, pat);    \
   LIT(name##_fl, fl);      \

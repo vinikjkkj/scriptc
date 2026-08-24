@@ -9436,6 +9436,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/6300-string-representation-under-a-narrowed-header.ts": {
+   "order": [
+    "<repo>/tests/corpus/6300-string-representation-under-a-narrowed-header.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/6301-string-representation-through-the-dyn-island.ts": {
+   "order": [
+    "<repo>/tests/corpus/6301-string-representation-through-the-dyn-island.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/700-classes-basic.ts": {
    "order": [
     "<repo>/tests/corpus/700-classes-basic.ts"

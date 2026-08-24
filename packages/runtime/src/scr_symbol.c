@@ -97,7 +97,7 @@ ScrStr *scr_sym_to_string(ScrSym *s) {
   if (dlen > 0) memcpy(out->data + 7, s->desc->data, dlen);
   out->data[7 + dlen] = ')';
   out->data[len] = '\0';
-  out->len = len;
+  out->len = (uint32_t)len;
   return out;
 }
 

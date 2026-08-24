@@ -3,9 +3,9 @@
 // can be priced before anyone writes the emitter change.
 //
 // WHY IT IS SOUND, in one paragraph. An interned string literal is a
-// static ScrStr with rc == SIZE_MAX. scr_str_retain is
-// `if (o && o->rc != SIZE_MAX) o->rc++` and scr_str_release is
-// `if (!o || o->rc == SIZE_MAX) return; ...` — on an immortal BOTH are
+// static ScrStr with rc == SCR_STR_IMMORTAL. scr_str_retain is
+// `if (o && o->rc != SCR_STR_IMMORTAL) o->rc++` and scr_str_release is
+// `if (!o || o->rc == SCR_STR_IMMORTAL) return; ...` — on an immortal BOTH are
 // exactly no-ops. So for a temp whose ONLY assignment is
 // `scr_str_retain((ScrStr *)&sc_lit_N)`, deleting the retain (keeping the
 // address) and deleting every `scr_str_release(<that temp>);` statement

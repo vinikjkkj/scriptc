@@ -201,11 +201,11 @@ const platform = process.platform;
 
 /** A default-built hello-world: no regex, no engine. */
 export const STATIC_CLASS_MAX =
-  platform === "linux" ? 397_632 : platform === "win32" ? 672_256 : 366_632;
+  platform === "linux" ? 397_632 : platform === "win32" ? 664_576 : 366_632;
 
 /** A program that uses regex: libregexp + libunicode, never the engine. */
 export const REGEX_CLASS_MAX =
-  platform === "linux" ? 552_680 : platform === "win32" ? 813_056 : 519_680;
+  platform === "linux" ? 552_680 : platform === "win32" ? 806_912 : 519_680;
 
 /* ── the ARMED half of the guard ───────────────────────────────────────
  *
@@ -683,14 +683,58 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * check. Applied here rather than restated:
  *
  *     672,256 = 664,064 + 8,192      813,056 = 804,864 + 8,192
+ *
+ * 2026-08-24 - ScrStr's header went from 24 bytes to 12 (three size_t to
+ * three uint32_t), and BOTH CLASSES SHRINK. Measured A/B on two worktrees
+ * at the same commit, same toolchain (x86_64-windows-gnu, zig cc 0.16.0,
+ * -O2), the two class programs built with default options:
+ *
+ *   base a48fd411   664,064 static   805,376 regex
+ *   this change     656,384 static   798,720 regex
+ *                   -7,680           -6,656
+ *
+ * WHAT THE PAGES BOUGHT. Not the emitted literal table, which is the
+ * tempting answer and the wrong one: the messaging bench's TU declares 64
+ * literals, worth 64 x 12 = 768 bytes, and that binary shrank by 7,680 -
+ * the SAME figure as a hello-world with three literals. A shrink identical
+ * across two programs of very different literal counts is a constant of the
+ * ALWAYS-LINKED RUNTIME, not of the program. It is two things:
+ *
+ *   scr_string.c's immortal statics   scr_ascii1 is 128 interned
+ *     one-character strings, and sizeof(ScrChar1) went 32 -> 16 (a 26-byte
+ *     struct aligned to 8, against a 14-byte one aligned to 4), so that
+ *     array alone is -2,048. The other four immortals (empty, U+FFFD,
+ *     "true", "false") are -16 each.
+ *   code                              every s->len and s->cap read in the
+ *     always-linked runtime is now a 32-bit load; the encodings are
+ *     shorter and many lose their REX prefix. This is the larger half and
+ *     it is not itemised here.
+ *
+ * The two figures being EXACTLY equal at 7,680 across two programs is PE
+ * file alignment, not a coincidence worth reading into: 7,680 is 15 x 512,
+ * and two different true deltas round to the same multiple.
+ *
+ * The classes move by DIFFERENT amounts (-7,680 against -6,656), which is
+ * the reason this file says never to derive one from the other. Base drift
+ * since the last calibration: static 0 bytes (664,064 on the nose), regex
+ * +512 - both well inside the page, so the previous figures were honest.
+ *
+ * THE MAX CEILINGS MOVE with them, by the same rule:
+ *
+ *     664,576 = 656,384 + 8,192      806,912 = 798,720 + 8,192
+ *
+ * They come DOWN. A ceiling left 8 KB above a binary that no longer
+ * weighs that much is exactly the loose canary the entries above keep
+ * warning about, and this is the first entry in the file where the
+ * measurement moved in that direction.
  */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 664_064 : null;
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 656_384 : null;
 
 /** The regex program, same run, same tree. Deliberately NOT derived from
- * the static delta — though on THIS change the two classes moved by the
- * identical 5,120, which is itself the evidence that the cost is
- * always-linked core rather than a library link. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 804_864 : null;
+ * the static delta - and the 2026-08-24 entry is why: that change moved the
+ * two classes by -7,680 and -6,656, so deriving either from the other would
+ * have been 1,024 bytes wrong. */
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 798_720 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown
