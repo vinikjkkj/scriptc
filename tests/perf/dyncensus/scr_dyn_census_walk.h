@@ -55,12 +55,20 @@ static void scr_dyncen_walk(ScrDynCenKind *rows) {
       r->len_hist[scr_dyncen_bucket(len)]++;
       if (!d->v.obj.entries) { r->n_empty_buf++; }
       else r->side_bytes += cap * (long long)sizeof(ScrDynEntry);
-      if (d->v.obj.proto) r->has_proto++;
-      if (d->v.obj.cname) r->has_cname++;
-      if (d->v.obj.hidden) r->has_hidden++;
-      if (d->v.obj.slots) r->has_slots++;
-      if (d->v.obj.proto || d->v.obj.cname || d->v.obj.hidden || d->v.obj.slots)
-        r->has_any_extra++;
+      /* Through scr_dyn_ext, never through four fields: they moved
+       * behind one lazily allocated pointer BECAUSE of what this census
+       * measured about them, and a lane that still spelled them inline
+       * would stop compiling — which is the safe direction — or, worse,
+       * read whatever now sits at those offsets. */
+      {
+        const ScrDynObjExt *x = scr_dyn_ext(d);
+        if (x->proto) r->has_proto++;
+        if (x->cname) r->has_cname++;
+        if (x->hidden) r->has_hidden++;
+        if (x->slots) r->has_slots++;
+        if (x->proto || x->cname || x->hidden || x->slots) r->has_any_extra++;
+        if (d->v.obj.ext != NULL) r->side_bytes += (long long)sizeof(ScrDynObjExt);
+      }
       for (i = 0; d->v.obj.entries && i < d->v.obj.len; i++) {
         long long kl = (long long)d->v.obj.entries[i].key_len;
         r->key_n++;
@@ -107,9 +115,13 @@ static void scr_dyncen_walk(ScrDynCenKind *rows) {
     }
     case SCR_DYN_FUNC:
       if (d->v.fn.clo) r->aux_nonnull++;
-      if (d->v.fn.sig) r->fn_sig++;
-      if (d->v.fn.name) r->fn_name++;
-      if (d->v.fn.src) r->fn_src++;
+      /* Through the accessors. The three are 32-bit OFFSETS now and
+       * their absent value is SCR_RVA_NULL, not 0 — `if (d->v.fn.sig)`
+       * would answer true for an absent literal and false for one that
+       * happens to sit at the anchor. */
+      if (scr_dyn_fn_sig(d)) r->fn_sig++;
+      if (scr_dyn_fn_name(d)) r->fn_name++;
+      if (scr_dyn_fn_src(d)) r->fn_src++;
       if ((long long)d->v.fn.arity > r->fn_arity_max)
         r->fn_arity_max = (long long)d->v.fn.arity;
       break;
@@ -209,6 +221,7 @@ __attribute__((constructor)) static void scr_dyncen_stamp(void) {
   scr_dyncen_sizeof_dyn = (long long)sizeof(ScrDyn);
   scr_dyncen_sizeof_hdr = (long long)sizeof(ScrCycHdr);
   scr_dyncen_sizeof_entry = (long long)sizeof(ScrDynEntry);
+  scr_dyncen_sizeof_ext = (long long)sizeof(ScrDynObjExt);
   scr_dyncen_sizeof_str = (long long)sizeof(ScrStr);
   scr_dyncen_off_union = (long long)offsetof(ScrDyn, v);
   scr_dyncen_sizeof_union = (long long)sizeof(probe.v);
