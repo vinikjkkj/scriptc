@@ -56,6 +56,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* The switch scr_cycle.c's two hook lines test. */
 #define SCR_CYCEN_ON 1
@@ -97,6 +98,8 @@ typedef struct {
   long long live_n, live_phys, live_payload;   /* held by the PROGRAM, now */
   long long snap_n, snap_phys, snap_payload;   /* the same, at the os peak */
   long long size_min, size_max, size_sum;      /* the REQUESTED payload size */
+  long long park_n, park_phys, park_side;      /* of live_*, parked on a freelist */
+  long long snap_park_n, snap_park_phys, snap_park_side;
 } ScrCyCenRow;
 
 typedef struct {
@@ -127,7 +130,32 @@ SCR_CYCEN_SHARED long long scr_cycen_snaps = 0, scr_cycen_snap_ord = 0;
 SCR_CYCEN_SHARED long long scr_cycen_alloc_total = 0, scr_cycen_free_total = 0;
 SCR_CYCEN_SHARED long long scr_cycen_ptr_live = 0, scr_cycen_ptr_live_peak = 0;
 SCR_CYCEN_SHARED long long scr_cycen_arm_phys = 0;
-SCR_CYCEN_SHARED long long scr_cycen_curve[SCR_CYCEN_CURVE_MAX][5] = {{0}};
+/* PARKED: a strict SUBSET of live. scr_json.c keeps up to
+ * SCR_DYN_FREE_MAX dyn nodes on per-kind freelists rather than handing
+ * them to scr_cyc_free, and a parked ARR/OBJ node keeps its items/entries
+ * buffer too ("cap/entries preserved from the node's last life"). So a
+ * third retention layer sits ABOVE the size-class pool, and to every lane
+ * below it — including this one, without these three counters — a parked
+ * node is indistinguishable from one the program still holds.
+ *
+ * live - parked is what the program actually holds. side is the bytes of
+ * items/entries buffers riding along on parked nodes, which are NOT cycle
+ * allocations and appear in scr_prof.h's rows for scr_json.c's realloc
+ * lines instead. */
+SCR_CYCEN_SHARED long long scr_cycen_park_n = 0, scr_cycen_park_phys = 0;
+SCR_CYCEN_SHARED long long scr_cycen_park_side = 0, scr_cycen_park_peak = 0;
+SCR_CYCEN_SHARED long long scr_cycen_park_at_peak = 0, scr_cycen_park_side_at_peak = 0;
+SCR_CYCEN_SHARED long long scr_cycen_park_n_at_peak = 0;
+SCR_CYCEN_SHARED long long scr_cycen_park_unknown = 0;
+/* [ord, livePhys, poolPhys, liveN, poolN, secondsSinceFirstAlloc].
+ * The clock is only in the CURVE samples, never on the allocation path
+ * itself: a time() per allocation would be an instrument that changes
+ * what it measures. One per SCR_CYCEN_CURVE_EVERY is 176 calls on zapo.
+ * It answers the question estado-ramcpu left open - 85% of peak RSS is
+ * reached before the first stanza, and this says whether the CYCLE heap
+ * peaks there too. */
+SCR_CYCEN_SHARED long long scr_cycen_curve[SCR_CYCEN_CURVE_MAX][6] = {{0}};
+SCR_CYCEN_SHARED long long scr_cycen_t0 = 0;
 SCR_CYCEN_SHARED long long scr_cycen_ncurve = 0;
 SCR_CYCEN_SHARED int scr_cycen_reported = 0;
 SCR_CYCEN_SHARED int scr_cycen_armed = 0;
@@ -186,12 +214,18 @@ SCR_CYCEN_FN void scr_cycen_snapshot(void) {
   scr_cycen_snap_ord = scr_cycen_alloc_total;
   scr_cycen_live_at_peak = scr_cycen_live_phys;
   scr_cycen_pool_at_peak = scr_cycen_pool_phys;
+  scr_cycen_park_at_peak = scr_cycen_park_phys;
+  scr_cycen_park_n_at_peak = scr_cycen_park_n;
+  scr_cycen_park_side_at_peak = scr_cycen_park_side;
   scr_cycen_os_peak_n = scr_cycen_live_n + scr_cycen_pool_n;
   for (long long i = 0; i < scr_cycen_rows; i++) {
     ScrCyCenRow *r = &scr_cycen_tbl[scr_cycen_order[i]];
     r->snap_n = r->live_n;
     r->snap_phys = r->live_phys;
     r->snap_payload = r->live_payload;
+    r->snap_park_n = r->park_n;
+    r->snap_park_phys = r->park_phys;
+    r->snap_park_side = r->park_side;
   }
 }
 
@@ -258,6 +292,11 @@ SCR_CYCEN_FN void scr_cycen_note_alloc(const void *obj, size_t phys, size_t size
     s[2] = scr_cycen_pool_phys;
     s[3] = scr_cycen_live_n;
     s[4] = scr_cycen_pool_n;
+    {
+      long long now = (long long)time(NULL);
+      if (scr_cycen_t0 == 0) scr_cycen_t0 = now;
+      s[5] = now - scr_cycen_t0;
+    }
   }
 }
 
@@ -332,6 +371,50 @@ SCR_CYCEN_FN void scr_cycen_note_free(const void *obj, int pooled, size_t cyc_li
  * against live_phys - live_payload and refuses a mismatch. */
 SCR_CYCEN_SHARED long long scr_cycen_hdr_bytes = 0;
 
+/* PARK / UNPARK: the third retention layer, above the pool.
+ *
+ * scr_json.c's scr_dyn_gcfree does not always reach scr_cyc_free — up to
+ * SCR_DYN_FREE_MAX dyn nodes go onto per-kind freelists instead, and an
+ * ARR/OBJ node parked there keeps its items/entries buffer for its next
+ * life. Nothing below this point can tell such a node from one the program
+ * still holds: it was never freed at any level. `side` is those retained
+ * items/entries bytes, which are NOT cycle allocations and would otherwise
+ * be invisible here entirely.
+ *
+ * Parked is a strict SUBSET of live, so live - parked is what the program
+ * actually holds. A park of an object the census never saw allocated bumps
+ * park_unknown, which the report prints. */
+SCR_CYCEN_FN void scr_cycen_park_delta(const void *obj, long long side, int dir) {
+  unsigned h = scr_cycen_phash(obj);
+  for (unsigned i = 0; i < SCR_CYCEN_PSLOTS; i++) {
+    unsigned j = (h + i) & (SCR_CYCEN_PSLOTS - 1u);
+    if (scr_cycen_ptbl[j].p == NULL) break;
+    if (scr_cycen_ptbl[j].p == obj) {
+      long long phys = (long long)scr_cycen_ptbl[j].phys;
+      unsigned ri = scr_cycen_ptbl[j].row;
+      scr_cycen_park_n += dir;
+      scr_cycen_park_phys += dir * phys;
+      scr_cycen_park_side += dir * side;
+      if (scr_cycen_park_phys + scr_cycen_park_side > scr_cycen_park_peak)
+        scr_cycen_park_peak = scr_cycen_park_phys + scr_cycen_park_side;
+      if (ri < SCR_CYCEN_SLOTS) {
+        ScrCyCenRow *r = &scr_cycen_tbl[ri];
+        r->park_n += dir;
+        r->park_phys += dir * phys;
+        r->park_side += dir * side;
+      }
+      return;
+    }
+  }
+  scr_cycen_park_unknown++;
+}
+SCR_CYCEN_FN void scr_cycen_note_park(const void *obj, long long side) {
+  scr_cycen_park_delta(obj, side, 1);
+}
+SCR_CYCEN_FN void scr_cycen_note_unpark(const void *obj, long long side) {
+  scr_cycen_park_delta(obj, side, -1);
+}
+
 SCR_CYCEN_FN void scr_cycen_report(void) {
   if (scr_cycen_reported) return;
   scr_cycen_reported = 1;
@@ -344,23 +427,27 @@ SCR_CYCEN_FN void scr_cycen_report(void) {
     for (long long i = 0; i < scr_cycen_rows; i++) {
       ScrCyCenRow *r = &scr_cycen_tbl[scr_cycen_order[i]];
       fprintf(f,
-              "CYCEN %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %llx\n",
+              "CYCEN %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld "
+              "%lld %lld %lld %lld %lld %lld %llx\n",
               r->n_alloc, r->n_free, r->n_pool_hit, r->n_pool_give, r->bytes_ever,
               r->live_n, r->live_phys, r->live_payload, r->snap_n, r->snap_phys,
               r->snap_payload, r->size_min, r->size_max, r->size_sum,
-              (unsigned long long)(size_t)r->key);
+              r->park_n, r->park_phys, r->park_side, r->snap_park_n, r->snap_park_phys,
+              r->snap_park_side, (unsigned long long)(size_t)r->key);
     }
     for (long long i = 0; i < scr_cycen_ncurve; i++) {
-      fprintf(f, "CYCEN-CURVE %lld %lld %lld %lld %lld %lld\n", i, scr_cycen_curve[i][0],
+      fprintf(f, "CYCEN-CURVE %lld %lld %lld %lld %lld %lld %lld\n", i, scr_cycen_curve[i][0],
               scr_cycen_curve[i][1], scr_cycen_curve[i][2], scr_cycen_curve[i][3],
-              scr_cycen_curve[i][4]);
+              scr_cycen_curve[i][4], scr_cycen_curve[i][5]);
     }
     fprintf(f,
             "CYCEN-TOTAL rows=%lld allocs=%lld frees=%lld liveN=%lld livePhys=%lld "
             "livePayload=%lld poolN=%lld poolPhys=%lld osPeak=%lld osPeakN=%lld "
             "livePeak=%lld poolPeak=%lld liveAtPeak=%lld poolAtPeak=%lld snapOrd=%lld "
             "snaps=%lld lost=%lld ptrLost=%lld freeUnknown=%lld ptrLive=%lld "
-            "ptrLivePeak=%lld pslots=%u cycLive=%lld armPhys=%lld tableBytes=%lld\n",
+            "ptrLivePeak=%lld pslots=%u cycLive=%lld armPhys=%lld parkN=%lld "
+            "parkPhys=%lld parkSide=%lld parkPeak=%lld parkAtPeak=%lld "
+            "parkNAtPeak=%lld parkSideAtPeak=%lld parkUnknown=%lld tableBytes=%lld\n",
             scr_cycen_rows, scr_cycen_alloc_total, scr_cycen_free_total, scr_cycen_live_n,
             scr_cycen_live_phys, scr_cycen_live_payload, scr_cycen_pool_n,
             scr_cycen_pool_phys, scr_cycen_os_peak, scr_cycen_os_peak_n,
@@ -368,7 +455,10 @@ SCR_CYCEN_FN void scr_cycen_report(void) {
             scr_cycen_pool_at_peak, scr_cycen_snap_ord, scr_cycen_snaps, scr_cycen_lost,
             scr_cycen_ptr_lost, scr_cycen_free_unknown, scr_cycen_ptr_live,
             scr_cycen_ptr_live_peak, (unsigned)SCR_CYCEN_PSLOTS, scr_cycen_seen_live,
-            scr_cycen_arm_phys,
+            scr_cycen_arm_phys, scr_cycen_park_n, scr_cycen_park_phys,
+            scr_cycen_park_side, scr_cycen_park_peak, scr_cycen_park_at_peak,
+            scr_cycen_park_n_at_peak, scr_cycen_park_side_at_peak,
+            scr_cycen_park_unknown,
             (long long)(sizeof scr_cycen_tbl + sizeof scr_cycen_ptbl +
                         sizeof scr_cycen_curve));
     fclose(f);

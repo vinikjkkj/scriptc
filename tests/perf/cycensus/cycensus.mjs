@@ -55,6 +55,7 @@ export function parseCensus(text) {
       curve.push({
         i: Number(f[1]), ord: Number(f[2]), livePhys: Number(f[3]),
         poolPhys: Number(f[4]), liveN: Number(f[5]), poolN: Number(f[6]),
+        sec: Number(f[7]),
       })
     } else if (line.startsWith('CYCEN-TOTAL ')) {
       total = {}
@@ -64,14 +65,16 @@ export function parseCensus(text) {
       }
     } else if (line.startsWith('CYCEN ')) {
       const f = line.split(' ')
-      if (f.length !== 16) throw new Error(`CYCEN row has ${f.length - 1} fields, want 15`)
+      if (f.length !== 22) throw new Error(`CYCEN row has ${f.length - 1} fields, want 21`)
       rows.push({
         nAlloc: Number(f[1]), nFree: Number(f[2]), nPoolHit: Number(f[3]),
         nPoolGive: Number(f[4]), bytesEver: Number(f[5]),
         liveN: Number(f[6]), livePhys: Number(f[7]), livePayload: Number(f[8]),
         snapN: Number(f[9]), snapPhys: Number(f[10]), snapPayload: Number(f[11]),
         sizeMin: Number(f[12]), sizeMax: Number(f[13]), sizeSum: Number(f[14]),
-        key: BigInt(`0x${f[15]}`),
+        parkN: Number(f[15]), parkPhys: Number(f[16]), parkSide: Number(f[17]),
+        snapParkN: Number(f[18]), snapParkPhys: Number(f[19]), snapParkSide: Number(f[20]),
+        key: BigInt(`0x${f[21]}`),
       })
     }
   }
@@ -113,6 +116,10 @@ export function auditCensus(c, { armAllocs = ARM_ALLOCS } = {}) {
   if (sum('snapPhys') !== t.liveAtPeak) problems.push(`rows sum snapPhys=${sum('snapPhys')} != liveAtPeak=${t.liveAtPeak}`)
   if (t.livePhys + t.poolPhys > t.osPeak) problems.push(`os held now (${t.livePhys + t.poolPhys}) exceeds osPeak=${t.osPeak}`)
   if (t.allocs - t.frees !== t.liveN) problems.push(`allocs-frees=${t.allocs - t.frees} != liveN=${t.liveN}`)
+  if (t.parkUnknown !== 0) problems.push(`parkUnknown=${t.parkUnknown}: a freelist park named an object the census never saw allocated`)
+  if (sum('parkPhys') !== t.parkPhys) problems.push(`rows sum parkPhys=${sum('parkPhys')} != parkPhys=${t.parkPhys}`)
+  if (t.parkPhys > t.livePhys) problems.push(`parked (${t.parkPhys}) exceeds live (${t.livePhys}): parked must be a SUBSET of live`)
+  if (sum('snapParkPhys') !== t.parkAtPeak) problems.push(`rows sum snapParkPhys=${sum('snapParkPhys')} != parkAtPeak=${t.parkAtPeak}`)
 
   // The header cross-check: physical bytes minus requested payload must be
   // liveN headers plus at most SCR_POOL_GRAIN-1 of rounding per object.
@@ -187,13 +194,15 @@ function main(argv) {
   // FIRST ones the census ever sees and the real ordinal is offset by
   // exactly the arm's count - a known constant, not an estimate.
   console.log(`                     reached at allocation ${fmt(Math.max(0, t.snapOrd - ARM_ALLOCS))} of ${fmt(t.allocs - ARM_ALLOCS)}`)
+  console.log(`   of that live half:   program ${fmt(snapTot - t.parkAtPeak)} + parked on the dyn freelist ${fmt(t.parkAtPeak)} (+${fmt(t.parkSideAtPeak)} B of items/entries riding along)`)
   console.log(`AT EXIT              os ${fmt(t.livePhys + t.poolPhys - armLive)} B = live ${fmt(liveTot)} + pool ${fmt(t.poolPhys)}`)
+  console.log(`   of that live half:   program ${fmt(liveTot - t.parkPhys)} + parked ${fmt(t.parkPhys)} (+${fmt(t.parkSide)} B side)`)
   console.log(`EVER                 ${fmt(everTot)} B over ${fmt(t.allocs - ARM_ALLOCS)} allocations, ${fmt(t.frees - ARM_ALLOCS / 2)} frees`)
   console.log(`POOL                 hit ${fmt(real.reduce((a, r) => a + r.nPoolHit, 0))} / gave ${fmt(real.reduce((a, r) => a + r.nPoolGive, 0))}, peak held ${fmt(t.poolPeak)} B`)
   console.log('')
   console.log('kind, by live bytes AT THE PEAK. hdr = liveN * sizeof(ScrCycHdr).')
   console.log('')
-  console.log('      atPeak   %peak   objects  B/obj      hdr B  %hdr     atExit  held%   allocs   size    kind')
+  console.log('      atPeak   %peak   objects  B/obj      hdr B  %hdr     parked  side B     atExit  held%   allocs   size    kind')
   const ranked = real.slice().sort((a, b) => b.snapPhys - a.snapPhys)
   for (const r of ranked) {
     if (r.snapPhys === 0 && r.livePhys === 0 && r.bytesEver === 0) continue
@@ -203,7 +212,7 @@ function main(argv) {
     console.log(
       `${fmt(r.snapPhys).padStart(12)} ${pct(r.snapPhys, snapTot).padStart(7)} ` +
       `${fmt(r.snapN).padStart(9)} ${bpo.padStart(6)} ${fmt(hdrB).padStart(10)} ` +
-      `${pct(hdrB, r.snapPhys).padStart(6)} ${fmt(r.livePhys).padStart(10)} ` +
+      `${pct(hdrB, r.snapPhys).padStart(6)} ${fmt(r.snapParkPhys).padStart(10)} ${fmt(r.snapParkSide).padStart(7)} ${fmt(r.livePhys).padStart(10)} ` +
       `${pct(r.livePhys, r.snapPhys).padStart(6)} ${fmt(r.nAlloc).padStart(8)} ` +
       `${size.padStart(8)}    ${nameOf(r.key)}`)
   }
@@ -213,8 +222,8 @@ function main(argv) {
 
   if (argv.includes('--curve')) {
     console.log('')
-    console.log('growth curve: allocation ordinal, live bytes, pool bytes, live objects')
-    for (const s of c.curve) console.log(`CURVE ${s.ord} ${s.livePhys} ${s.poolPhys} ${s.liveN} ${s.poolN}`)
+    console.log('growth curve: ordinal, live bytes, pool bytes, live objects, pooled objects, seconds')
+    for (const s of c.curve) console.log(`CURVE ${s.ord} ${s.livePhys} ${s.poolPhys} ${s.liveN} ${s.poolN} ${s.sec}`)
   }
   const jsonOut = arg('--json', null)
   if (jsonOut) {
@@ -248,20 +257,23 @@ function selfTest() {
   const build = (rows, tot) => {
     const L = ['CYCEN-KIND cycle hdr=32 anchor=140001000']
     for (const r of rows) L.push(`CYCEN ${r.join(' ')}`)
-    L.push('CYCEN-CURVE 0 500 1024 0 8 0')
-    L.push('CYCEN-CURVE 1 1000 4096 64 32 1')
+    L.push('CYCEN-CURVE 0 500 1024 0 8 0 0')
+    L.push('CYCEN-CURVE 1 1000 4096 64 32 1 3')
     L.push(`CYCEN-TOTAL ${Object.entries(tot).map(([k, v]) => `${k}=${v}`).join(' ')}`)
     return L.join('\n')
   }
   //            nA nF pH pG ever  lN  lPhys lPay  sN  sPhys sPay  min  max  sum  key
-  const armRow = [64, 32, 0, 0, 262144, 32, 131072, 130048, 32, 131072, 130048, 4064, 4064, 260096, '140002000']
-  const bigRow = [1000, 400, 100, 200, 80000, 600, 48000, 28800, 700, 56000, 33600, 48, 48, 48000, '140003000']
+  //            nA nF pH pG   ever  lN  lPhys  lPay  sN  sPhys  sPay  min  max   sum  pN pPhys pSide spN spPhys spSide key
+  const armRow = [64, 32, 0, 0, 262144, 32, 131072, 130048, 32, 131072, 130048, 4064, 4064, 260096, 0, 0, 0, 0, 0, 0, '140002000']
+  const bigRow = [1000, 400, 100, 200, 80000, 600, 48000, 28800, 700, 56000, 33600, 48, 48, 48000, 150, 12000, 9600, 200, 16000, 12800, '140003000']
   const total = {
     rows: 2, allocs: 1064, frees: 432, liveN: 632, livePhys: 179072, livePayload: 158848,
     poolN: 200, poolPhys: 16000, osPeak: 195072, osPeakN: 732, livePeak: 187072,
     poolPeak: 16000, liveAtPeak: 187072, poolAtPeak: 8000, snapOrd: 900, snaps: 700,
     lost: 0, ptrLost: 0, freeUnknown: 0, ptrLive: 632, ptrLivePeak: 732,
-    pslots: 262144, cycLive: 632, armPhys: 131072, tableBytes: 6516736,
+    pslots: 262144, cycLive: 632, armPhys: 131072, parkN: 150, parkPhys: 12000,
+    parkSide: 9600, parkPeak: 28800, parkAtPeak: 16000, parkNAtPeak: 200,
+    parkSideAtPeak: 12800, parkUnknown: 0, tableBytes: 6516736,
   }
   const good = build([armRow, bigRow], total)
   const c = parseCensus(good)
@@ -269,7 +281,7 @@ function selfTest() {
   ok(c.anchor === 0x140001000n, 'anchor parsed')
   ok(c.rows.length === 2, 'two rows parsed')
   ok(c.curve.length === 2, 'two curve samples parsed')
-  ok(c.curve[1].ord === 1000 && c.curve[1].livePhys === 4096 && c.curve[1].poolN === 1, 'curve fields in order')
+  ok(c.curve[1].ord === 1000 && c.curve[1].livePhys === 4096 && c.curve[1].poolN === 1 && c.curve[1].sec === 3, 'curve fields in order, seconds included')
   ok(c.rows[1].bytesEver === 80000 && c.rows[1].snapPhys === 56000, 'row fields in order')
   ok(c.rows[1].sizeMin === 48 && c.rows[1].sizeMax === 48 && c.rows[1].key === 0x140003000n, 'size columns and key in order')
   ok(c.total.osPeak === 195072, 'totals parsed')
@@ -296,12 +308,22 @@ function selfTest() {
   // NEGATIVE 4: a row with frees and no allocations - what a lane that keys
   // frees by where they HAPPEN would produce. This is the control the whole
   // instrument exists to pass.
-  const strayRow = [0, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, '140004000']
+  const strayRow = [0, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, '140004000']
   const stray = build([armRow, bigRow, strayRow], { ...total, rows: 3, frees: 482 })
   ok(auditCensus(parseCensus(stray)).some((s) => s.includes('frees but no allocations')),
     'a free-keyed row is refused')
 
-  // NEGATIVE 5: a header size that does not reconcile with the payload.
+  // NEGATIVE 5: parked bytes that exceed live bytes. Parked is a strict
+  // SUBSET of live (a parked node was never freed at any level), so this
+  // can only mean the park and unpark hooks are unbalanced.
+  const overPark = build([armRow, bigRow], { ...total, parkPhys: 200000 })
+  ok(auditCensus(parseCensus(overPark)).some((s) => s.includes('SUBSET of live')),
+    'parked bytes exceeding live bytes are refused')
+  const unkPark = build([armRow, bigRow], { ...total, parkUnknown: 3 })
+  ok(auditCensus(parseCensus(unkPark)).some((s) => s.includes('parkUnknown=3')),
+    'a park of an object never seen allocated is refused')
+
+  // NEGATIVE 6: a header size that does not reconcile with the payload.
   const badHdr = good.replace('hdr=32', 'hdr=200')
   ok(auditCensus(parseCensus(badHdr)).some((s) => s.includes('outside')),
     'a header size that cannot explain livePhys-livePayload is refused')
@@ -312,6 +334,9 @@ function selfTest() {
   ok(b.snapPhys - b.snapPayload === 22400, 'phys - payload is exactly 700 headers')
   ok(Math.round((b.snapPhys / b.snapN) * 10) / 10 === 80, 'bytes per object')
   ok(b.nPoolHit === 100 && b.nPoolGive === 200, 'pool hits and gives are separate columns')
+  ok(b.parkN === 150 && b.parkPhys === 12000 && b.parkSide === 9600, 'park columns parsed')
+  ok(b.snapParkN === 200 && b.snapParkPhys === 16000 && b.snapParkSide === 12800, 'park-at-peak columns parsed')
+  ok(b.snapPhys - b.snapParkPhys === 40000, 'live minus parked is what the program holds at the peak')
 
   // A truncated report must throw, not summarise half of one.
   let threw = false

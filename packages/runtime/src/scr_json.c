@@ -427,6 +427,16 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
                                         : &scr_dyn_free_misc;
   ScrDyn *d = *list;
   if (d) {
+#ifdef SCR_CYCEN_ON
+    /* tests/perf/cycensus/scr_cyc_census.h. Read BEFORE the link word is
+     * consumed: the link overlays v.arr.len, not cap. */
+    scr_cycen_note_unpark(scr_cyc_hdr(d),
+                          kind == SCR_DYN_ARR
+                              ? (long long)(d->v.arr.cap * sizeof(ScrDyn *))
+                          : kind == SCR_DYN_OBJ
+                              ? (long long)(d->v.obj.cap * sizeof(ScrDynEntry))
+                              : 0);
+#endif
     *list = (ScrDyn *)d->v.str; /* freelist link */
     scr_dyn_free_count--;
     /* A recycled node re-enters the graph BLACK. Its `buffered` flag was
@@ -648,6 +658,17 @@ void scr_dyn_release(ScrDyn *d) {
     ScrDyn **list = d->kind == SCR_DYN_ARR   ? &scr_dyn_free_arr
                     : d->kind == SCR_DYN_OBJ ? &scr_dyn_free_obj
                                              : &scr_dyn_free_misc;
+#ifdef SCR_CYCEN_ON
+    /* Before the link word overwrites v.arr.len. The node is NOT freed at
+     * any level from here: it and its items/entries buffer stay resident
+     * until the freelist is full. */
+    scr_cycen_note_park(scr_cyc_hdr(d),
+                        d->kind == SCR_DYN_ARR
+                            ? (long long)(d->v.arr.cap * sizeof(ScrDyn *))
+                        : d->kind == SCR_DYN_OBJ
+                            ? (long long)(d->v.obj.cap * sizeof(ScrDynEntry))
+                            : 0);
+#endif
     d->v.str = (ScrStr *)*list; /* overlays arr/obj len; buffer survives */
     *list = d;
     scr_dyn_free_count++;
