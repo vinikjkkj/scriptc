@@ -3971,9 +3971,14 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       if (expr.arguments.length > 2) {
         L.noLowering(`structuredClone with ${expr.arguments.length} arguments`, expr);
       }
-      const toDynArg = (a: ts.Expression | undefined): IrExpr => {
+      // Whether the VALUE argument was ALREADY checked-dynamic before the
+      // conversion — the question the result check below has to ask, and one
+      // the converted expression can no longer answer.
+      let valueWasDyn = false;
+      const toDynArg = (a: ts.Expression | undefined, isValue = false): IrExpr => {
         if (!a) return dynUndefinedExpr(loc);
         const v = L.lowerExpr(a);
+        if (isValue) valueWasDyn = v.type.kind === "dyn";
         const conv = L.coerceToExpected(v, DYN);
         if (conv.type.kind !== "dyn") {
           L.noLowering(
@@ -4017,8 +4022,19 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           loc,
         };
       }
-      const value = toDynArg(valueNode);
+      const value = toDynArg(valueNode, true);
       const cloned: IrExpr = { kind: "libCall", fn: "dyn.structuredClone", args: [value, optsArg], type: DYN, loc };
+      // A dyn ARGUMENT in a JAVASCRIPT source: the result's declared type is
+      // the checker's INFERENCE over a value that was never a struct, and
+      // checking the clone back into it drops every key the source grew at run
+      // time — `structuredClone(o)` answered `{"a":1}` where Node answers
+      // `{"a":1,"b":3}`, undoing the deep copy scr_structured_clone had just
+      // made correctly. The clone is a FRESH object either way, so nothing
+      // starts aliasing; only the width of what it carries changes.
+      //
+      // TypeScript keeps the check: there the result type is the generic's T
+      // over an ANNOTATED value, and the width copy is the documented stance.
+      if (valueWasDyn && isJsSourceFile(expr.getSourceFile())) return cloned;
       // The declared result is the value's own type (the generic's T):
       // validate the dyn copy back into it when the type can be checked;
       // dyn-typed and unmappable results stay dyn values (JS files).
