@@ -28,7 +28,16 @@ async function main(): Promise<void> {
   const path = process.argv[2] as string;
 
   const ns = await import("better-sqlite3");
+  // The namespace OBJECT itself, before anything is constructed from it.
+  // Node builds these keys by lexing the package's CommonJS entry; the
+  // static lane has no package to lex, so every one of these cells is a
+  // way the compiler's stand-in could be silently wrong. An empty object
+  // passes the first and third and fails the second and fourth.
   show("ns.typeof", typeof ns);
+  show("ns.keys", Object.keys(ns).join(","));
+  show("ns.json", JSON.stringify(ns));
+  show("ns.hasDefault", String("default" in ns));
+  show("ns.hasInherited", String("toString" in ns));
 
   const db = new ns.default(path);
   show("open", String(db.open));

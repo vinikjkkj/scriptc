@@ -153,9 +153,16 @@ describe("better-sqlite3 through a dynamic import", () => {
     // Without this, a comparison that is structurally inert reads exactly
     // like a comparison that passed.
     const nonEmpty = golden.filter((l) => l !== "");
-    expect(nonEmpty.length).toBeGreaterThanOrEqual(18);
+    expect(nonEmpty.length).toBeGreaterThanOrEqual(24);
     expect(nonEmpty.at(-1)).toBe("END done");
     expect(nonEmpty[0]).toBe("ns.typeof object");
+    // The four namespace-object cells specifically: they are the ones an
+    // empty stand-in passes half of, so a fixture edited down to the
+    // driver would look green while the seam went unmeasured.
+    expect(nonEmpty).toContain("ns.keys SqliteError,default,module.exports");
+    expect(nonEmpty).toContain("ns.json {}");
+    expect(nonEmpty).toContain("ns.hasDefault true");
+    expect(nonEmpty).toContain("ns.hasInherited false");
     // ...and armed: the same comparison, against one mutated cell.
     const mutated = [...golden];
     mutated[0] = "ns.typeof function";
