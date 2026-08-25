@@ -2962,6 +2962,39 @@ ScrStr *scr_crypto_random_string(double n, ScrStr *enc) {
  * implementation; the differential corpus pins it against Node's own
  * digests. */
 
+/* Big-endian word access, in ONE place.
+ *
+ * FIPS 180-4 messages and digests are big-endian byte strings. The
+ * shift-and-or form these replace was endian-NEUTRAL, so a bare
+ * __builtin_bswap would have been a silent correctness regression on a
+ * big-endian target rather than a speed-up: the byte order is therefore a
+ * compile-time branch, and on every target this project builds for it
+ * compiles to one `movbe`-class instruction. */
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#define SCR_HOST_BIG_ENDIAN 1
+#else
+#define SCR_HOST_BIG_ENDIAN 0
+#endif
+
+static uint32_t scr_be32_load(const unsigned char *p) {
+  uint32_t v;
+  memcpy(&v, p, 4);
+  return SCR_HOST_BIG_ENDIAN ? v : __builtin_bswap32(v);
+}
+static void scr_be32_store(unsigned char *p, uint32_t v) {
+  uint32_t o = SCR_HOST_BIG_ENDIAN ? v : __builtin_bswap32(v);
+  memcpy(p, &o, 4);
+}
+static uint64_t scr_be64_load(const unsigned char *p) {
+  uint64_t v;
+  memcpy(&v, p, 8);
+  return SCR_HOST_BIG_ENDIAN ? v : __builtin_bswap64(v);
+}
+static void scr_be64_store(unsigned char *p, uint64_t v) {
+  uint64_t o = SCR_HOST_BIG_ENDIAN ? v : __builtin_bswap64(v);
+  memcpy(p, &o, 8);
+}
+
 static const uint32_t scr_sha256_k[64] = {
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
     0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
@@ -2981,10 +3014,10 @@ static uint32_t scr_sha256_rotr(uint32_t x, unsigned n) {
 
 static void scr_sha256_block(uint32_t h[8], const unsigned char *p) {
   uint32_t w[64];
-  for (int i = 0; i < 16; i++) {
-    w[i] = ((uint32_t)p[i * 4] << 24) | ((uint32_t)p[i * 4 + 1] << 16) |
-           ((uint32_t)p[i * 4 + 2] << 8) | (uint32_t)p[i * 4 + 3];
-  }
+  /* One unaligned load and one byte swap per word. The shift-and-or form
+   * this replaces is four byte loads, three shifts and three ors, and
+   * isa.mjs prices it at 2.22% of this function on the lane that runs it. */
+  for (int i = 0; i < 16; i++) w[i] = scr_be32_load(p + i * 4);
   for (int i = 16; i < 64; i++) {
     uint32_t s0 = scr_sha256_rotr(w[i - 15], 7) ^ scr_sha256_rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
     uint32_t s1 = scr_sha256_rotr(w[i - 2], 17) ^ scr_sha256_rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
@@ -3278,6 +3311,15 @@ scr_sha256_ni_blocks(uint32_t state[8], const unsigned char *data, size_t nblk) 
 /* nblk consecutive 64-byte blocks. The ONE place the two arms meet; with
  * SCR_SHA256_NI=0 this is the plain loop the digest used to inline. */
 static void scr_sha256_blocks(uint32_t h[8], const unsigned char *p, size_t nblk) {
+#ifdef SCR_SHACEN_ON
+  /* the arm is read from the dispatch's OWN memo, not from the build flags:
+   * "SHA-NI is compiled in" and "SHA-NI ran" are different claims. */
+#if SCR_SHA256_NI
+  scr_shacen_note_blocks((long long)nblk, scr_sha256_have_ni());
+#else
+  scr_shacen_note_blocks((long long)nblk, -1);
+#endif
+#endif
 #if SCR_SHA256_NI
   if (scr_sha256_have_ni()) {
     scr_sha256_ni_blocks(h, p, nblk);
@@ -3290,6 +3332,12 @@ static void scr_sha256_blocks(uint32_t h[8], const unsigned char *p, size_t nblk
 /* Final block(s) shared shape: the 0x80 terminator, zero padding, 64-bit
  * big-endian bit length (FIPS 180-4 — SHA-1 and SHA-256 pad alike). */
 static size_t scr_sha256_digest(const unsigned char *data, size_t len, unsigned char out[32]) {
+#ifdef SCR_SHACEN_ON
+  /* tests/perf/shacensus/scr_sha_census.h. Inert — the switch is undefined —
+   * unless that header is -include'd, which is the only way to answer "what
+   * does the REAL program hash, and how big". */
+  scr_shacen_note(SCR_SHACEN_SHA256, (long long)len);
+#endif
   uint32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
                    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
   size_t nblk = len / 64;
@@ -3297,18 +3345,42 @@ static size_t scr_sha256_digest(const unsigned char *data, size_t len, unsigned 
   size_t i = nblk * 64;
   unsigned char tail[128];
   size_t rem = len - i;
+  size_t pad = (rem + 1 + 8 <= 64) ? 64 : 128;
+  /* Clear the WHOLE tail at a size the compiler knows, then copy over it.
+   * The gap between the terminator and the length field is a run-time
+   * length, so `memset(tail + rem + 1, 0, ...)` is a call into libc; 64 or
+   * 128 constant zero bytes is four or eight stores emitted inline. It
+   * costs rem bytes written twice, which are stores that were happening
+   * anyway. This mattered nothing when the compression was 4,300
+   * instructions a block and matters now that it is ~110 cycles. */
+  if (pad == 64) memset(tail, 0, 64);
+  else memset(tail, 0, 128);
   memcpy(tail, data + i, rem);
   tail[rem] = 0x80;
-  size_t pad = (rem + 1 + 8 <= 64) ? 64 : 128;
-  memset(tail + rem + 1, 0, pad - rem - 1 - 8);
-  uint64_t bits = (uint64_t)len * 8;
-  for (int b = 0; b < 8; b++) tail[pad - 1 - b] = (unsigned char)(bits >> (8 * b));
+  scr_be64_store(tail + pad - 8, (uint64_t)len * 8);
   scr_sha256_blocks(h, tail, pad / 64);
-  for (int j = 0; j < 8; j++) {
-    for (int b = 0; b < 4; b++) out[j * 4 + b] = (unsigned char)(h[j] >> (24 - 8 * b));
-  }
+  /* The digest is eight big-endian words: one store each, in place of 32
+   * shift-and-store steps. */
+  for (int j = 0; j < 8; j++) scr_be32_store(out + j * 4, h[j]);
   return 32;
 }
+
+#ifdef SCR_SHACEN_ON
+/* The census's POSITIVE CONTROL lives here and not in the header, because
+ * scr_sha256_digest is static to this file. SCR_SHACEN_ARM=<n> hashes n
+ * copies of a fixed 137-byte message before main runs; the report's sha256
+ * row 137 must then read exactly n. Without it a report of zero digests and
+ * a census that never compiled in look the same. */
+__attribute__((constructor)) static void scr_shacen_plant_ctor(void) {
+  const char *v = getenv("SCR_SHACEN_ARM");
+  long n = (v && *v) ? strtol(v, 0, 10) : 0;
+  unsigned char msg[137], out[32];
+  long i;
+  memset(msg, 0xa7, sizeof msg);
+  for (i = 0; i < n; i++) scr_sha256_digest(msg, sizeof msg, out);
+  scr_shacen_planted = (int)n;
+}
+#endif
 
 /* ── SHA-1 (FIPS 180-4) — the RFC 6455 Sec-WebSocket-Accept hash ────── */
 
@@ -3336,6 +3408,9 @@ static void scr_sha1_block(uint32_t h[5], const unsigned char *p) {
 }
 
 static size_t scr_sha1_digest(const unsigned char *data, size_t len, unsigned char out[32]) {
+#ifdef SCR_SHACEN_ON
+  scr_shacen_note(SCR_SHACEN_SHA1, (long long)len);
+#endif
   uint32_t h[5] = {0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0};
   size_t i = 0;
   for (; i + 64 <= len; i += 64) scr_sha1_block(h, data + i);
@@ -3396,10 +3471,10 @@ static uint64_t scr_sha512_rotr(uint64_t x, unsigned n) {
 
 static void scr_sha512_block(uint64_t h[8], const unsigned char *p) {
   uint64_t w[80];
-  for (int i = 0; i < 16; i++) {
-    w[i] = 0;
-    for (int b = 0; b < 8; b++) w[i] = (w[i] << 8) | (uint64_t)p[i * 8 + b];
-  }
+  /* Eight byte loads and eight shift-or steps per word became one load and
+   * one swap. SHA-512 has no hardware on this host, so unlike SHA-256 it is
+   * still the scalar code that ships here. */
+  for (int i = 0; i < 16; i++) w[i] = scr_be64_load(p + i * 8);
   for (int i = 16; i < 80; i++) {
     uint64_t s0 = scr_sha512_rotr(w[i - 15], 1) ^ scr_sha512_rotr(w[i - 15], 8) ^ (w[i - 15] >> 7);
     uint64_t s1 = scr_sha512_rotr(w[i - 2], 19) ^ scr_sha512_rotr(w[i - 2], 61) ^ (w[i - 2] >> 6);
@@ -3422,6 +3497,9 @@ static void scr_sha512_block(uint64_t h[8], const unsigned char *p) {
 }
 
 static size_t scr_sha512_digest(const unsigned char *data, size_t len, unsigned char out[64]) {
+#ifdef SCR_SHACEN_ON
+  scr_shacen_note(SCR_SHACEN_SHA512, (long long)len);
+#endif
   uint64_t h[8] = {0x6a09e667f3bcc908ULL, 0xbb67ae8584caa73bULL, 0x3c6ef372fe94f82bULL,
                    0xa54ff53a5f1d36f1ULL, 0x510e527fade682d1ULL, 0x9b05688c2b3e6c1fULL,
                    0x1f83d9abfb41bd6bULL, 0x5be0cd19137e2179ULL};
@@ -3429,17 +3507,15 @@ static size_t scr_sha512_digest(const unsigned char *data, size_t len, unsigned 
   for (; i + 128 <= len; i += 128) scr_sha512_block(h, data + i);
   unsigned char tail[256];
   size_t rem = len - i;
+  size_t pad = (rem + 1 + 16 <= 128) ? 128 : 256;
+  if (pad == 128) memset(tail, 0, 128); /* see scr_sha256_digest */
+  else memset(tail, 0, 256);
   memcpy(tail, data + i, rem);
   tail[rem] = 0x80;
-  size_t pad = (rem + 1 + 16 <= 128) ? 128 : 256;
-  memset(tail + rem + 1, 0, pad - rem - 1);
-  uint64_t bits = (uint64_t)len * 8;
-  for (int b = 0; b < 8; b++) tail[pad - 1 - b] = (unsigned char)(bits >> (8 * b));
+  scr_be64_store(tail + pad - 8, (uint64_t)len * 8);
   scr_sha512_block(h, tail);
   if (pad == 256) scr_sha512_block(h, tail + 128);
-  for (int j = 0; j < 8; j++) {
-    for (int b = 0; b < 8; b++) out[j * 8 + b] = (unsigned char)(h[j] >> (56 - 8 * b));
-  }
+  for (int j = 0; j < 8; j++) scr_be64_store(out + j * 8, h[j]);
   return 64;
 }
 
@@ -3448,6 +3524,15 @@ static ScrStr *scr_digest_encode(const unsigned char *d, size_t n, const ScrStr 
   if (enc->len == 3 && memcmp(enc->data, "hex", 3) == 0) {
     static const char hex[] = "0123456789abcdef";
     char buf[128]; /* the widest digest is SHA-512's 64 bytes */
+    /* Two byte stores per digest byte, and it is left alone DELIBERATELY.
+     * Building the pair as one 16-bit word and storing that reads like the
+     * obvious win and measures 0.93-1.03x here — nothing, or slightly worse
+     * (lab/shalab/hexship.c, proved equal over all 256 byte values first).
+     * The version that IS faster, 1.8x, is a 256-entry uint16 table; it is
+     * not here because the only caller that reaches it is `.digest("hex")`,
+     * which zapo never calls — every zapo digest goes through `.digest()`
+     * to a Buffer — and 25 ticks on the messaging bench is under that
+     * lane's code-layout floor. */
     for (size_t i = 0; i < n; i++) {
       buf[i * 2] = hex[d[i] >> 4];
       buf[i * 2 + 1] = hex[d[i] & 0x0f];
@@ -3516,6 +3601,9 @@ static void scr_md5_block(uint32_t h[4], const unsigned char *p) {
 }
 
 static size_t scr_md5_digest(const unsigned char *data, size_t len, unsigned char out[32]) {
+#ifdef SCR_SHACEN_ON
+  scr_shacen_note(SCR_SHACEN_MD5, (long long)len);
+#endif
   uint32_t h[4] = {0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476};
   size_t i = 0;
   for (; i + 64 <= len; i += 64) scr_md5_block(h, data + i);
@@ -3546,11 +3634,24 @@ size_t scr_crypto_digest_raw(const char *alg, const unsigned char *data, size_t 
   return 0;
 }
 
+/* How much of `ipad || message` an HMAC builds on the stack before it asks
+ * the heap. 512 bytes covers a 128-byte SHA-512 block plus a 384-byte
+ * message. Sized from a measured distribution rather than guessed: in a full
+ * paired zapo session (tests/perf/shacensus) all 276 HMAC messages are 333
+ * bytes or shorter, 87% are 57 or shorter, and the single commonest length
+ * is ONE byte. The heap arm is not dead code — a longer message takes it,
+ * and tests/corpus/6481 hashes messages on both sides of this bound. */
+#define SCR_HMAC_INNER_STACK 512
+
 /* HMAC (RFC 2104) over the same digests — block size 64 for all three. */
 size_t scr_crypto_hmac_raw(const char *alg, const unsigned char *key, size_t keylen,
                            const unsigned char *data, size_t len, unsigned char out[32]) {
   unsigned char kblock[64];
   unsigned char kd[32];
+#ifdef SCR_SHACEN_ON
+  scr_shacen_note(SCR_SHACEN_HMAC, (long long)len);
+  scr_shacen_note(SCR_SHACEN_HMACKEY, (long long)keylen);
+#endif
   if (keylen > 64) {
     size_t kn = scr_crypto_digest_raw(alg, key, keylen, kd);
     if (kn == 0) return 0;
@@ -3560,13 +3661,19 @@ size_t scr_crypto_hmac_raw(const char *alg, const unsigned char *key, size_t key
     memset(kblock, 0, 64);
     memcpy(kblock, key, keylen);
   }
-  unsigned char *inner = malloc(64 + len);
-  if (!inner) return 0;
+  unsigned char istack[SCR_HMAC_INNER_STACK];
+  unsigned char *iheap = NULL;
+  unsigned char *inner = istack;
+  if (64 + len > sizeof istack) {
+    iheap = malloc(64 + len);
+    if (!iheap) return 0;
+    inner = iheap;
+  }
   for (int i = 0; i < 64; i++) inner[i] = kblock[i] ^ 0x36;
   memcpy(inner + 64, data, len);
   unsigned char ih[32];
   size_t in = scr_crypto_digest_raw(alg, inner, 64 + len, ih);
-  free(inner);
+  free(iheap);
   if (in == 0) return 0;
   unsigned char outer[96];
   for (int i = 0; i < 64; i++) outer[i] = kblock[i] ^ 0x5c;
@@ -3799,6 +3906,10 @@ ScrHmac *scr_hmac_update_bytes(ScrHmac *h, ScrBytes *data) {
 
 static size_t scr_hmac_finish(ScrHmac *h, unsigned char out[64]) {
   const size_t block = h->alg == SCR_HASH_SHA512 ? 128u : 64u;
+#ifdef SCR_SHACEN_ON
+  scr_shacen_note(SCR_SHACEN_HMAC, (long long)h->len);
+  scr_shacen_note(SCR_SHACEN_HMACKEY, (long long)h->keylen);
+#endif
   unsigned char k0[128];
   memset(k0, 0, block);
   if (h->keylen > block) {
@@ -3809,13 +3920,23 @@ static size_t scr_hmac_finish(ScrHmac *h, unsigned char out[64]) {
   } else if (h->keylen > 0) {
     memcpy(k0, h->key, h->keylen);
   }
-  unsigned char *inner = malloc(block + h->len);
+  /* ipad || message. This was a malloc and a free on EVERY hmac, which on
+   * this host is ~115 cycles against ~550 for the two digests themselves —
+   * a sixth of an HMAC, spent on a buffer that is almost always tiny. See
+   * SCR_HMAC_INNER_STACK for the measured distribution it is sized from. */
+  unsigned char istack[SCR_HMAC_INNER_STACK];
+  unsigned char *iheap = NULL;
+  unsigned char *inner = istack;
+  if (block + h->len > sizeof istack) {
+    iheap = (unsigned char *)malloc(block + h->len);
+    inner = iheap;
+  }
   if (!inner) scr_trap("scriptc: out of memory\n");
   for (size_t i = 0; i < block; i++) inner[i] = (unsigned char)(k0[i] ^ 0x36);
   if (h->len > 0) memcpy(inner + block, h->msg, h->len);
   unsigned char ih[64];
   size_t in = scr_digest_by_id(h->alg, inner, block + h->len, ih);
-  free(inner);
+  free(iheap); /* NULL when the stack arm was taken; never `inner` */
   unsigned char outer[128 + 64];
   for (size_t i = 0; i < block; i++) outer[i] = (unsigned char)(k0[i] ^ 0x5c);
   memcpy(outer + block, ih, in);
