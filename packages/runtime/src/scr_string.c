@@ -604,6 +604,25 @@ static const char *scr_byte_find(const char *hay, size_t hay_len,
 }
 
 double scr_str_utf16_len(ScrStr *s) {
+#ifdef SCR_U16CEN_ON
+  /* tests/perf/u16census/scr_u16_census.h. Inert -- the symbol is
+   * undefined -- unless that header is -include'd, which is the only way
+   * to answer "how often does the REAL program ask, and on what". */
+  {
+    int hit = 0, ascii = 1, i;
+    size_t k;
+    for (i = 0; i < SCR_SIDX_N; i++) {
+      if (scr_sidx_tab[i].s == s && scr_sidx_tab[i].u16len != SCR_U16_UNKNOWN) {
+        hit = 1;
+        break;
+      }
+    }
+    for (k = 0; k < s->len; k++) {
+      if ((unsigned char)s->data[k] & 0x80u) { ascii = 0; break; }
+    }
+    scr_u16cen_call((long long)s->len, ascii, hit);
+  }
+#endif
   return (double)scr_sidx_len(s, scr_sidx(s));
 }
 
