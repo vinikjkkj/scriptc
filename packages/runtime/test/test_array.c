@@ -7,6 +7,21 @@
  *   --crash-set-oob    write past len (holes)   → RangeError + abort()
  *   --crash-pop-empty  pop an empty array       → RangeError + abort()
  *
+ * and the index minefield, one mode per ARM of scr_arr_check_index, because
+ * the two arms accept the same set only if every edge of the window between
+ * them is walked (test_index_window below walks the accepting side):
+ *
+ *   --crash-get-nan      NaN                    → fails `i >= 0`
+ *   --crash-get-neg      -1                     → fails `i >= 0`
+ *   --crash-get-inf      +Infinity              → above the window
+ *   --crash-get-neginf   -Infinity              → fails `i >= 0`
+ *   --crash-get-2p53     2^53 exactly           → the window's own edge
+ *   --crash-get-2p32     2^32                   → in the window, past len
+ *   --crash-get-at-len   i == len exactly       → the read/append boundary
+ *   --crash-get-empty    any read of []         → limit 0 accepts nothing
+ *   --crash-get-ulp      1 + 1ulp               → the smallest non-integer
+ *   --crash-set-neg      write at -1            → the write arm, allow_append
+ *
  * The RC-recursion cases (array of strings, array of arrays of strings)
  * assert live counts directly: releasing the outer array must release
  * every reachable element exactly once.
@@ -61,6 +76,51 @@ static void test_f64_basics(void) {
   check_f64(scr_arr_len(a), 1003, "1000 pushes grow");
   check_f64(scr_arr_get_f64(a, 1002), 999, "last survives growth");
   check_f64(scr_arr_get_f64(a, 0), 7, "first survives growth");
+  scr_arr_release(a);
+}
+
+/* THE ACCEPTING SIDE OF THE INDEX WINDOW.
+ *
+ * scr_arr_check_index has two arms: a fast one for 0 <= i < 2^53 that tests
+ * integrality with an int64 round trip, and the original double expression
+ * for everything else. They agree only if both accept exactly the same
+ * doubles, and the interesting ones are all at an edge. The refusing side is
+ * one --crash-* mode per arm (see the header); this is every value that must
+ * still be READ, including the two that look like refusals and are not:
+ * -0.0 is index 0 (JS: `a[-0]` is `a[0]`), and an index carried in a double
+ * that arrived from arithmetic is integral even though it is not an int. */
+static void test_index_window(void) {
+  ScrArr *a = scr_arr_new(SCR_ELEM_F64, 0);
+  for (double i = 0; i < 8; i++) scr_arr_push_f64(a, i * 10);
+
+  check_f64(scr_arr_get_f64(a, -0.0), 0, "index -0 reads element 0");
+  check(signbit(-0.0), "the -0 literal really is negative zero");
+  check_f64(scr_arr_get_f64(a, 0.0), 0, "index +0 reads element 0");
+  check_f64(scr_arr_get_f64(a, 7), 70, "index len-1 reads the last element");
+  check_f64(scr_arr_get_f64(a, 3.0), 30, "an integral double is an index");
+  check_f64(scr_arr_get_f64(a, 6.0 / 2.0), 30, "so is one computed by division");
+  check_f64(scr_arr_get_f64(a, 2.0 + 2.0), 40, "so is one computed by addition");
+  check_f64(scr_arr_get_f64(a, floor(4.9)), 40, "so is floor()'s answer");
+  /* The write arm's limit is len + 1: i == len APPENDS rather than trapping,
+   * which is the one place the two arms are asked a different question. */
+  scr_arr_set_f64(a, 8, 80);
+  check_f64(scr_arr_len(a), 9, "set at i == len appends");
+  check_f64(scr_arr_get_f64(a, 8), 80, "and the appended element reads back");
+  /* An index at the far end of an array big enough to have one: 2^20 slots
+   * is still an ordinary array, and 1048575 is a long way past 2^32's worth
+   * of mantissa games. */
+  ScrArr *big = scr_arr_new(SCR_ELEM_F64, 0);
+  for (double i = 0; i < 1048576; i++) scr_arr_push_f64(big, i);
+  check_f64(scr_arr_get_f64(big, 1048575), 1048575, "index 2^20-1 reads back");
+  check_f64(scr_arr_get_f64(big, 1048575.0), 1048575, "and as a double literal");
+  scr_arr_release(big);
+
+  /* Reads of a bool array take the same path with a different accessor. */
+  ScrArr *bs = scr_arr_new(SCR_ELEM_BOOL, 0);
+  scr_arr_push_bool(bs, true);
+  check(scr_arr_get_bool(bs, -0.0) == true, "index -0 on a bool array");
+  scr_arr_release(bs);
+
   scr_arr_release(a);
 }
 
@@ -566,6 +626,27 @@ int main(int argc, char **argv) {
     } else if (strcmp(argv[1], "--crash-pop-empty") == 0) {
       scr_arr_pop_f64(a);
       scr_arr_pop_f64(a); /* now empty */
+    } else if (strcmp(argv[1], "--crash-get-nan") == 0) {
+      scr_arr_get_f64(a, 0.0 / 0.0);
+    } else if (strcmp(argv[1], "--crash-get-neg") == 0) {
+      scr_arr_get_f64(a, -1);
+    } else if (strcmp(argv[1], "--crash-get-inf") == 0) {
+      scr_arr_get_f64(a, 1.0 / 0.0);
+    } else if (strcmp(argv[1], "--crash-get-neginf") == 0) {
+      scr_arr_get_f64(a, -1.0 / 0.0);
+    } else if (strcmp(argv[1], "--crash-get-2p53") == 0) {
+      scr_arr_get_f64(a, 9007199254740992.0); /* the fast window's own edge */
+    } else if (strcmp(argv[1], "--crash-get-2p32") == 0) {
+      scr_arr_get_f64(a, 4294967296.0); /* inside the window, past len */
+    } else if (strcmp(argv[1], "--crash-get-at-len") == 0) {
+      scr_arr_get_f64(a, 1); /* len is 1: reads stop one short of writes */
+    } else if (strcmp(argv[1], "--crash-get-empty") == 0) {
+      scr_arr_pop_f64(a);
+      scr_arr_get_f64(a, 0); /* limit 0 accepts nothing, not even 0 */
+    } else if (strcmp(argv[1], "--crash-get-ulp") == 0) {
+      scr_arr_get_f64(a, nextafter(1.0, 2.0)); /* the smallest non-integer > 1 */
+    } else if (strcmp(argv[1], "--crash-set-neg") == 0) {
+      scr_arr_set_f64(a, -1, 9); /* the write arm, whose limit is len + 1 */
     } else {
       fprintf(stderr, "unknown mode %s\n", argv[1]);
       return 2;
@@ -575,6 +656,7 @@ int main(int argc, char **argv) {
   }
 
   test_f64_basics();
+  test_index_window();
   test_bool();
   test_str_rc();
   test_nested_rc();
